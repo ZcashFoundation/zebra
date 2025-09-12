@@ -36,7 +36,7 @@ on:
         required: false
         type: string
       no_cache:
-        description: "Disable the Docker cache for this build"
+        description: Disable the Docker cache for this build
         required: false
         type: boolean
         default: false
@@ -49,7 +49,7 @@ on:
 
     outputs:
       image_digest:
-        description: "The image digest to be used on a caller workflow"
+        description: The image digest to be used on a caller workflow
         value: ${{ jobs.build.outputs.image_digest }}
 
 permissions:
@@ -71,8 +71,8 @@ jobs:
       image_digest: ${{ steps.docker_build.outputs.digest }}
       image_name: ${{ fromJSON(steps.docker_build.outputs.metadata)['image.name'] }}
     permissions:
-      contents: "read"
-      id-token: "write"
+      contents: read
+      id-token: write
       pull-requests: write # for `docker-scout` to be able to write the comment
     env:
       DOCKER_BUILD_SUMMARY: ${{ vars.DOCKER_BUILD_SUMMARY }}
@@ -124,7 +124,7 @@ jobs:
         with:
           workload_identity_provider: "${{ vars.GCP_WIF }}"
           service_account: "${{ vars.GCP_ARTIFACTS_SA }}"
-          token_format: "access_token"
+          token_format: access_token
           # Some builds might take over an hour, and Google's default lifetime duration for
           # an access token is 1 hour (3600s). We increase this to 3 hours (10800s)
           # as some builds take over an hour.
@@ -148,9 +148,9 @@ jobs:
         id: buildx
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 #v3.11.1
         with:
-          version: "lab:latest"
+          version: lab:latest
           driver: ${{ vars.DOCKER_BUILDER || 'docker' }}
-          endpoint: "zfnd/zebra"
+          endpoint: zfnd/zebra
 
       # Build and push image to Google Artifact Registry, and possibly DockerHub
       - name: Build & push

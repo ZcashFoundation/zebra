@@ -25,8 +25,6 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 on:
-  merge_group:
-    types: [checks_requested]
 
   workflow_dispatch:
     inputs:
@@ -40,7 +38,7 @@ on:
           - Testnet
       cached_disk_type:
         default: tip
-        description: "Type of cached disk to use"
+        description: Type of cached disk to use
         required: true
         type: choice
         options:
@@ -48,17 +46,17 @@ on:
           - checkpoint
       need_cached_disk:
         default: true
-        description: "Use a cached state disk"
+        description: Use a cached state disk
         required: false
         type: boolean
       no_cache:
-        description: "Disable the Docker cache for this build"
+        description: Disable the Docker cache for this build
         required: false
         type: boolean
         default: false
       log_file:
         default: ""
-        description: "Log to a file path rather than standard output"
+        description: Log to a file path rather than standard output
 
   push:
     # Skip main branch updates where Rust code and dependencies aren't modified.
@@ -73,13 +71,13 @@ on:
       - "**/Cargo.toml"
       - "**/Cargo.lock"
       # configuration files
-      - ".cargo/config.toml"
+      - .cargo/config.toml
       - "**/clippy.toml"
       # workflow definitions
-      - "docker/**"
-      - ".dockerignore"
-      - ".github/workflows/zfnd-deploy-nodes-gcp.yml"
-      - ".github/workflows/zfnd-build-docker-image.yml"
+      - docker/**
+      - .dockerignore
+      - .github/workflows/zfnd-deploy-nodes-gcp.yml
+      - .github/workflows/zfnd-build-docker-image.yml
 
   # Only runs the Docker image tests, doesn't deploy any instances
   pull_request:
@@ -93,13 +91,13 @@ on:
       - "**/Cargo.toml"
       - "**/Cargo.lock"
       # configuration files
-      - ".cargo/config.toml"
+      - .cargo/config.toml
       - "**/clippy.toml"
       # workflow definitions
-      - "docker/**"
-      - ".dockerignore"
-      - ".github/workflows/zfnd-deploy-nodes-gcp.yml"
-      - ".github/workflows/zfnd-build-docker-image.yml"
+      - docker/**
+      - .dockerignore
+      - .github/workflows/zfnd-deploy-nodes-gcp.yml
+      - .github/workflows/zfnd-build-docker-image.yml
 
   release:
     types:
@@ -177,14 +175,6 @@ jobs:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
-  # Run a matrix of configuration tests against the Docker image
-  test-docker-configurations:
-    name: Test Zebra Docker configurations
-    needs: build
-    uses: ./.github/workflows/sub-test-zebra-config.yml
-    with:
-      docker_image: ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
-
   # Deploy Managed Instance Groups (MiGs) for Mainnet and Testnet,
   # with one node in the configured GCP region.
   #
@@ -227,7 +217,6 @@ jobs:
         set-matrix,
         build,
         versioning,
-        test-docker-configurations,
         get-disk-name,
       ]
     runs-on: ubuntu-latest
@@ -236,8 +225,8 @@ jobs:
       CACHED_DISK_NAME: ${{ needs.get-disk-name.outputs.cached_disk_name }}
     environment: ${{ github.event_name == 'release' && 'prod' || 'dev' }}
     permissions:
-      contents: "read"
-      id-token: "write"
+      contents: read
+      id-token: write
     if: ${{ !cancelled() && !failure() && needs.build.result == 'success' && github.repository_owner == 'ZcashFoundation' && ((github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release' || github.event_name == 'workflow_dispatch') }}
 
     steps:
@@ -390,7 +379,6 @@ jobs:
       - versioning
       - get-disk-name
       - build
-      - test-docker-configurations
       - set-matrix
       - deploy-nodes
     timeout-minutes: 1

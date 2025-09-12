@@ -40,8 +40,8 @@ jobs:
     if: github.repository_owner == 'ZcashFoundation'
     runs-on: ubuntu-latest
     permissions:
-      contents: 'read'
-      id-token: 'write'
+      contents: read
+      id-token: write
     strategy:
       matrix:
         environment: [dev, prod]
@@ -112,8 +112,8 @@ jobs:
     if: github.repository_owner == 'ZcashFoundation'
     runs-on: ubuntu-latest
     permissions:
-      contents: 'read'
-      id-token: 'write'
+      contents: read
+      id-token: write
     strategy:
       matrix:
         environment: [dev, prod]
@@ -130,7 +130,7 @@ jobs:
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
-          token_format: 'access_token'
+          token_format: access_token
 
       - name: Login to Google Artifact Registry
         uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 #v3.5.0
@@ -140,7 +140,7 @@ jobs:
           password: ${{ steps.auth.outputs.access_token }}
 
       # Deletes all images older than $DELETE_IMAGE_HOURS days.
-      - uses: 'docker://us-docker.pkg.dev/gcr-cleaner/gcr-cleaner/gcr-cleaner-cli'
+      - uses: docker://us-docker.pkg.dev/gcr-cleaner/gcr-cleaner/gcr-cleaner-cli
         continue-on-error: true # TODO: remove after fixing https://github.com/ZcashFoundation/zebra/issues/5933
         # Refer to the official documentation to understand available arguments:
         # https://github.com/GoogleCloudPlatform/gcr-cleaner
