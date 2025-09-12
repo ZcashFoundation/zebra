@@ -1228,11 +1228,11 @@ async fn rpc_getaddresstxids_invalid_arguments() {
 
     // call the method with an invalid address string
     let rpc_rsp = rpc
-        .get_address_tx_ids(GetAddressTxIdsRequest {
+        .get_address_tx_ids(GetAddressTxIdsParams::Object(GetAddressTxIdsRequest {
             addresses: vec!["t1invalidaddress".to_owned()],
             start: Some(1),
             end: Some(2),
-        })
+        }))
         .await
         .unwrap_err();
 
@@ -1248,11 +1248,11 @@ async fn rpc_getaddresstxids_invalid_arguments() {
     let start: Option<u32> = Some(2);
     let end: Option<u32> = Some(1);
     let error = rpc
-        .get_address_tx_ids(GetAddressTxIdsRequest {
+        .get_address_tx_ids(GetAddressTxIdsParams::Object(GetAddressTxIdsRequest {
             addresses: addresses.clone(),
             start,
             end,
-        })
+        }))
         .await
         .unwrap_err();
     assert_eq!(
@@ -1419,11 +1419,11 @@ async fn rpc_getaddresstxids_response_with(
     // call the method with valid arguments
     let addresses = vec![address.to_string()];
     let response = rpc
-        .get_address_tx_ids(GetAddressTxIdsRequest {
+        .get_address_tx_ids(GetAddressTxIdsParams::Object(GetAddressTxIdsRequest {
             addresses,
             start,
             end,
-        })
+        }))
         .await
         .expect("arguments are valid so no error can happen here");
 
@@ -1448,6 +1448,72 @@ async fn rpc_getaddresstxids_response_with(
                 .unwrap_err()
                 .is_cancelled()
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn getaddresstxids_single_equals_object_full_range() {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+
+    let blocks: Vec<Arc<Block>> = network
+        .blockchain_map()
+        .values()
+        .map(|block_bytes| block_bytes.zcash_deserialize_into().unwrap())
+        .collect();
+
+    let first_block_first_tx = &blocks[1].transactions[0];
+    let address = first_block_first_tx.outputs()[1]
+        .address(&network)
+        .expect("should get address from coinbase output");
+
+    let (_, read_state, tip, _) = zebra_state::populated_state(blocks.clone(), &network).await;
+
+    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+
+    let (rpc, queue) = RpcImpl::new(
+        network,
+        Default::default(),
+        false,
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        state,
+        Buffer::new(read_state, 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        tip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    let addr_str = address.to_string();
+
+    let object_response = rpc
+        .get_address_tx_ids(GetAddressTxIdsParams::Object(GetAddressTxIdsRequest {
+            addresses: vec![addr_str.clone()],
+            start: None,
+            end: None,
+        }))
+        .await
+        .expect("Object variant should succeed");
+
+    let single_response = rpc
+        .get_address_tx_ids(GetAddressTxIdsParams::Single(addr_str))
+        .await
+        .expect("Single variant should succeed");
+
+    assert_eq!(
+        single_response, object_response,
+        "Single(String) must return the same result as Object with full range"
+    );
+
+    mempool.expect_no_requests().await;
+    queue.abort();
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -10,7 +10,10 @@ use tracing::instrument;
 
 use zebra_chain::{block, transparent};
 
-use crate::{BoxError, CheckpointVerifiedBlock, NonFinalizedState, SemanticallyVerifiedBlock};
+use crate::{
+    BoxError, CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, NonFinalizedState,
+    SemanticallyVerifiedBlock, ValidateContextError,
+};
 
 #[cfg(test)]
 mod tests;
@@ -24,7 +27,7 @@ pub type QueuedCheckpointVerified = (
 /// A queued semantically verified block, and its corresponding [`Result`] channel.
 pub type QueuedSemanticallyVerified = (
     SemanticallyVerifiedBlock,
-    oneshot::Sender<Result<block::Hash, BoxError>>,
+    oneshot::Sender<Result<block::Hash, CommitSemanticallyVerifiedError>>,
 );
 
 /// A queue of blocks, awaiting the arrival of parent blocks.
@@ -142,9 +145,11 @@ impl QueuedBlocks {
             let parent_hash = &expired_block.block.header.previous_block_hash;
 
             // we don't care if the receiver was dropped
-            let _ = expired_sender.send(Err(
-                "pruned block at or below the finalized tip height".into()
-            ));
+            let _ = expired_sender.send(Err(CommitSemanticallyVerifiedError::from(
+                ValidateContextError::PrunedBelowFinalizedTip {
+                    block_height: expired_block.height,
+                },
+            )));
 
             // TODO: only remove UTXOs if there are no queued blocks with that UTXO
             //       (known_utxos is best-effort, so this is ok for now)

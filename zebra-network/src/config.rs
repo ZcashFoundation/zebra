@@ -757,6 +757,7 @@ impl<'de> Deserialize<'de> for Config {
                              post_nu6_funding_streams,
                              funding_streams,
                              checkpoints,
+                             lockbox_disbursements,
                              ..
                          }| {
                             let mut funding_streams_vec = funding_streams.unwrap_or_default();
@@ -770,6 +771,7 @@ impl<'de> Deserialize<'de> for Config {
                                 activation_heights: activation_heights.unwrap_or_default(),
                                 funding_streams: Some(funding_streams_vec),
                                 checkpoints: Some(checkpoints),
+                                lockbox_disbursements,
                             }
                         },
                     )

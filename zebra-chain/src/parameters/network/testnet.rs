@@ -836,6 +836,8 @@ pub struct RegtestParameters {
     pub funding_streams: Option<Vec<ConfiguredFundingStreams>>,
     /// Configured checkpointed block heights and hashes.
     pub checkpoints: Option<ConfiguredCheckpoints>,
+    /// Expected one-time lockbox disbursement outputs in NU6.1 activation block coinbase for Regtest
+    pub lockbox_disbursements: Option<Vec<ConfiguredLockboxDisbursement>>,
 }
 
 impl From<ConfiguredActivationHeights> for RegtestParameters {
@@ -905,6 +907,7 @@ impl Parameters {
             activation_heights,
             funding_streams,
             checkpoints,
+            lockbox_disbursements,
         }: RegtestParameters,
     ) -> Self {
         let parameters = Self::build()
@@ -919,8 +922,8 @@ impl Parameters {
             .with_activation_heights(activation_heights.for_regtest())
             .with_halving_interval(PRE_BLOSSOM_REGTEST_HALVING_INTERVAL)
             .with_funding_streams(funding_streams.unwrap_or_default())
-            .with_lockbox_disbursements(Vec::new())
-            .with_checkpoints(checkpoints.unwrap_or_default());
+            .with_checkpoints(checkpoints.unwrap_or_default())
+            .with_lockbox_disbursements(lockbox_disbursements.unwrap_or_default());
 
         Self {
             network_name: "Regtest".to_string(),
@@ -955,8 +958,8 @@ impl Parameters {
             should_allow_unshielded_coinbase_spends,
             pre_blossom_halving_interval,
             post_blossom_halving_interval,
-            lockbox_disbursements,
             checkpoints: _,
+            lockbox_disbursements: _,
         } = Self::new_regtest(Default::default());
 
         self.network_name == network_name
@@ -969,7 +972,6 @@ impl Parameters {
                 == should_allow_unshielded_coinbase_spends
             && self.pre_blossom_halving_interval == pre_blossom_halving_interval
             && self.post_blossom_halving_interval == post_blossom_halving_interval
-            && self.lockbox_disbursements == lockbox_disbursements
     }
 
     /// Returns the network name
