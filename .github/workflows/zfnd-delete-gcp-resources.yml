@@ -140,8 +140,7 @@ jobs:
           password: ${{ steps.auth.outputs.access_token }}
 
       # Deletes all images older than $DELETE_IMAGE_HOURS days.
-      - uses: docker://us-docker.pkg.dev/gcr-cleaner/gcr-cleaner/gcr-cleaner-cli
-        continue-on-error: true # TODO: remove after fixing https://github.com/ZcashFoundation/zebra/issues/5933
+      - uses: docker://us-docker.pkg.dev/gcr-cleaner/gcr-cleaner/gcr-cleaner-cli@sha256:333a4d0617b19a86b55f9aaae10e49294b4469590166f3b4a1c4f7bbd20eb6c2
         # Refer to the official documentation to understand available arguments:
         # https://github.com/GoogleCloudPlatform/gcr-cleaner
         with:
