@@ -285,3 +285,11 @@ panic = "abort"
 #     - add "-flto=thin" to all C/C++ code builds
 #     - see https://doc.rust-lang.org/rustc/linker-plugin-lto.html#cc-code-as-a-dependency-in-rust
 lto = "thin"
+
+
+[workspace.lints.rust]
+# The linter should ignore these expected config flags/values
+unexpected_cfgs = { level = "warn", check-cfg = [
+    'cfg(tokio_unstable)', # Used by tokio-console
+    'cfg(zcash_unstable, values("zfuture", "nu6.1", "nu7"))' # Used in Zebra and librustzcash
+] }
