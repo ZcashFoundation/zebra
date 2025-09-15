@@ -131,6 +131,9 @@ The Zcash Foundation maintains the following resources documenting Zebra:
   - [User Documentation](https://zebra.zfnd.org/user.html),
   - [Developer Documentation](https://zebra.zfnd.org/dev.html).
 
+  - User guides of note:
+    - [Zebra Health Endpoints](https://zebra.zfnd.org/user/health.html) — liveness/readiness checks for Kubernetes and load balancers
+
 - The [documentation of the public
   APIs](https://docs.rs/zebrad/latest/zebrad/#zebra-crates) for the latest
   releases of the individual Zebra crates.
