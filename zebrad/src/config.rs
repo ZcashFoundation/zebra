@@ -77,6 +77,12 @@ pub struct ZebradConfig {
 
     /// Mining configuration
     pub mining: zebra_rpc::config::mining::Config,
+
+    /// Health check HTTP server configuration.
+    ///
+    /// See the Zebra Book for details and examples:
+    /// https://zebra.zfnd.org/user/health.html
+    pub health: crate::components::health::Config,
 }
 
 impl ZebradConfig {
