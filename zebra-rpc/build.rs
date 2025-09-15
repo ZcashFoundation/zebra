@@ -1,7 +1,7 @@
 //! Compile proto files
 use std::{env, fs, path::PathBuf, process::Command};
 
-const ZALLET_COMMIT: Option<&str> = None;
+const ZALLET_COMMIT: Option<&str> = Some("de70e46e37f903de4e182c5a823551b90a5bf80b");
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let out_dir = env::var("OUT_DIR").map(PathBuf::from);
