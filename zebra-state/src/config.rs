@@ -87,6 +87,10 @@ pub struct Config {
     /// Set to `true` by default. If this is set to `false`, Zebra will irrecoverably drop
     /// non-finalized blocks when the process exits and will have to re-download them from
     /// the network when it restarts, if those blocks are still available in the network.
+    ///
+    /// Note: The non-finalized state will be written to a backup cache once per 5 seconds at most.
+    ///       If blocks are added to the non-finalized state more frequently, the backup may not reflect
+    ///       Zebra's last non-finalized state before it shut down.
     pub should_backup_non_finalized_state: bool,
 
     /// Whether to delete the old database directories when present.
