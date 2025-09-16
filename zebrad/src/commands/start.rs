@@ -136,14 +136,14 @@ impl StartCmd {
         info!("opening database, this may take a few minutes");
 
         let (state_service, read_only_state_service, latest_chain_tip, chain_tip_change) =
-            zebra_state::spawn_init(
+            zebra_state::init(
                 config.state.clone(),
                 &config.network.network,
                 max_checkpoint_height,
                 config.sync.checkpoint_verify_concurrency_limit
                     * (VERIFICATION_PIPELINE_SCALING_MULTIPLIER + 1),
             )
-            .await?;
+            .await;
 
         info!("logging database metrics on startup");
         read_only_state_service.log_db_metrics();

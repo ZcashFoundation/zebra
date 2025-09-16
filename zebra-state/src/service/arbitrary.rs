@@ -218,7 +218,7 @@ pub async fn populated_state(
     // TODO: write a test that checks the finalized to non-finalized transition with UTXOs,
     //       and set max_checkpoint_height and checkpoint_verify_concurrency_limit correctly.
     let (state, read_state, latest_chain_tip, mut chain_tip_change) =
-        StateService::new(Config::ephemeral(), network, Height::MAX, 0);
+        StateService::new(Config::ephemeral(), network, Height::MAX, 0).await;
     let mut state = Buffer::new(BoxService::new(state), 1);
 
     let mut responses = FuturesUnordered::new();
