@@ -3255,7 +3255,7 @@ pub type AddressStrings = GetAddressBalanceRequest;
 
 /// Given a list of addresses as strings:
 /// - check if provided list have all valid transparent addresses.
-/// - return valid addresses as a set of `Address`.
+/// - return valid addresses as a set of [`Address`].
 fn validate_addresses(addresses: &[String]) -> Result<HashSet<Address>> {
     // Reference for the legacy error code:
     // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/misc.cpp#L783-L784>
