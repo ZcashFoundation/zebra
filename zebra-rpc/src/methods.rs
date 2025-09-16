@@ -3311,13 +3311,13 @@ pub struct GetAddressBalanceResponse {
 #[deprecated(note = "Use `GetAddressBalanceResponse` instead.")]
 pub use self::GetAddressBalanceResponse as AddressBalance;
 
-/// A struct to use as parameter of `getaddressutxos`.
+/// Parameters of [`RpcServer::get_address_utxos`] RPC method.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize, Getters, new)]
 #[serde(from = "DGetAddressUtxosRequest")]
 pub struct GetAddressUtxosRequest {
-    // A list of addresses to get transactions from.
+    /// A list of addresses to get transactions from.
     addresses: Vec<String>,
-    // The height to start looking for transactions.
+    /// The height to start looking for transactions.
     #[serde(default)]
     #[serde(rename = "chainInfo")]
     chain_info: bool,
@@ -3349,9 +3349,9 @@ enum DGetAddressUtxosRequest {
     Single(String),
     /// A full request object with address list and chainInfo flag.
     Object {
-        // A list of addresses to get transactions from.
+        /// A list of addresses to get transactions from.
         addresses: Vec<String>,
-        // The height to start looking for transactions.
+        /// The height to start looking for transactions.
         #[serde(default)]
         #[serde(rename = "chainInfo")]
         chain_info: bool,
@@ -3986,13 +3986,14 @@ impl Utxo {
     }
 }
 
-/// A struct to use as parameter of `getaddresstxids`
+/// Parameters of [`RpcServer::get_address_tx_ids`] RPC method.
 ///
-/// See the notes for the [`Rpc::get_address_tx_ids` method].
+/// See [`RpcServer::get_address_tx_ids`] for more details.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize, Getters, new)]
 #[serde(from = "DGetAddressTxIdsRequest")]
 pub struct GetAddressTxIdsRequest {
-    // A list of addresses to get transactions from.
+    /// A list of addresses. The RPC method will get transactions IDs that sent or received 
+    /// funds to or from these addresses.
     addresses: Vec<String>,
     // The height to start looking for transactions.
     start: Option<u32>,
@@ -4050,11 +4051,11 @@ enum DGetAddressTxIdsRequest {
     Single(String),
     /// A full request object with address list and optional height range.
     Object {
-        // A list of addresses to get transactions from.
+        /// A list of addresses to get transactions from.
         addresses: Vec<String>,
-        // The height to start looking for transactions.
+        /// The height to start looking for transactions.
         start: Option<u32>,
-        // The height to end looking for transactions.
+        /// The height to end looking for transactions.
         end: Option<u32>,
     },
 }
