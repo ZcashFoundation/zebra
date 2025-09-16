@@ -1,0 +1,35 @@
+---
+source: zebra-rpc/src/methods/tests/snapshot.rs
+expression: get_network_info
+---
+{
+  "version": 100,
+  "subversion": "RPC test",
+  "protocolversion": 170130,
+  "localservices": "0000000000000001",
+  "timeoffset": 0,
+  "connections": 1,
+  "networks": [
+    {
+      "name": "ipv4",
+      "limited": false,
+      "reachable": true,
+      "proxy": ""
+    },
+    {
+      "name": "ipv6",
+      "limited": false,
+      "reachable": true,
+      "proxy": ""
+    },
+    {
+      "name": "onion",
+      "limited": false,
+      "reachable": false,
+      "proxy": ""
+    }
+  ],
+  "relayfee": 0.000001,
+  "localaddresses": [],
+  "warnings": ""
+}
