@@ -371,7 +371,7 @@ pub enum ReadResponse {
     AddressesTransactionIds(BTreeMap<TransactionLocation, transaction::Hash>),
 
     /// Response to [`ReadRequest::UtxosByAddresses`] with found utxos and transaction data.
-    AddressUtxos(AddressUtxos),
+    AddressUtxos((AddressUtxos, Option<(block::Height, block::Hash)>)),
 
     /// Response to [`ReadRequest::CheckBestChainTipNullifiersAndAnchors`].
     ///

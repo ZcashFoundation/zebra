@@ -2040,7 +2040,7 @@ where
             .and_then(|service| service.call(request))
             .await
             .map_misc_error()?;
-        let utxos = match response {
+        let (utxos, last_height_and_hash) = match response {
             zebra_state::ReadResponse::AddressUtxos(utxos) => utxos,
             _ => unreachable!("unmatched response to a UtxosByAddresses request"),
         };
@@ -2080,10 +2080,7 @@ where
         if !utxos_request.chain_info {
             Ok(GetAddressUtxosResponse::Utxos(response_utxos))
         } else {
-            let (height, hash) = self
-                .latest_chain_tip
-                .best_tip_height_and_hash()
-                .ok_or_misc_error("No blocks in state")?;
+            let (height, hash) = last_height_and_hash.ok_or_misc_error("No blocks in state")?;
 
             Ok(GetAddressUtxosResponse::UtxosAndChainInfo(
                 GetAddressUtxosResponseObject {

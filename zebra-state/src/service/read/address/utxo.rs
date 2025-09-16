@@ -99,7 +99,7 @@ pub fn address_utxos<C>(
     chain: Option<C>,
     db: &ZebraDb,
     addresses: HashSet<transparent::Address>,
-) -> Result<AddressUtxos, BoxError>
+) -> Result<(AddressUtxos, Option<(Height, zebra_chain::block::Hash)>), BoxError>
 where
     C: AsRef<Chain>,
 {
@@ -129,7 +129,7 @@ where
 
         // If the UTXOs are valid, return them, otherwise, retry or return an error.
         match chain_utxo_changes {
-            Ok((created_chain_utxos, spent_chain_utxos)) => {
+            Ok((created_chain_utxos, spent_chain_utxos, last_height)) => {
                 debug!(
                     chain_utxo_count = ?created_chain_utxos.len(),
                     chain_utxo_spent = ?spent_chain_utxos.len(),
@@ -140,7 +140,7 @@ where
 
                 let utxos =
                     apply_utxo_changes(finalized_utxos, created_chain_utxos, spent_chain_utxos);
-                let tx_ids = lookup_tx_ids_for_utxos(chain, db, &addresses, &utxos);
+                let tx_ids = lookup_tx_ids_for_utxos(chain.as_ref(), db, &addresses, &utxos);
 
                 debug!(
                     full_utxo_count = ?utxos.len(),
@@ -150,7 +150,18 @@ where
                     "full address UTXO response",
                 );
 
-                return Ok(AddressUtxos::new(network, utxos, tx_ids));
+                let last_height_and_hash = last_height.and_then(|height| {
+                    chain
+                        .as_ref()
+                        .and_then(|c| c.as_ref().hash_by_height(height))
+                        .or_else(|| db.hash(height))
+                        .map(|hash| (height, hash))
+                });
+
+                return Ok((
+                    AddressUtxos::new(network, utxos, tx_ids),
+                    last_height_and_hash,
+                ));
             }
 
             Err(chain_utxo_error) => {
@@ -219,6 +230,7 @@ fn chain_transparent_utxo_changes<C>(
     (
         BTreeMap<OutputLocation, transparent::Output>,
         BTreeSet<OutputLocation>,
+        Option<Height>,
     ),
     BoxError,
 >
@@ -265,7 +277,7 @@ where
     };
 
     if chain.is_none() {
-        if finalized_tip_status.is_ok() {
+        if let Ok(finalized_tip_height) = finalized_tip_status {
             debug!(
                 ?finalized_tip_status,
                 ?required_min_non_finalized_root,
@@ -275,7 +287,11 @@ where
                  finalized chain is consistent, and non-finalized chain is empty",
             );
 
-            return Ok(Default::default());
+            return Ok((
+                Default::default(),
+                Default::default(),
+                Some(finalized_tip_height),
+            ));
         } else {
             // We can't compensate for inconsistent database queries,
             // because the non-finalized chain is empty.
@@ -320,7 +336,11 @@ where
                      non-finalized blocks have all been finalized, no new UTXO changes",
                 );
 
-                return Ok(Default::default());
+                return Ok((
+                    Default::default(),
+                    Default::default(),
+                    Some(finalized_tip_height),
+                ));
             }
         }
 
@@ -355,8 +375,8 @@ where
             );
         }
     }
-
-    Ok(chain.partial_transparent_utxo_changes(addresses))
+    let (created, spent) = chain.partial_transparent_utxo_changes(addresses);
+    Ok((created, spent, Some(non_finalized_tip)))
 }
 
 /// Combines the supplied finalized and non-finalized UTXOs,
