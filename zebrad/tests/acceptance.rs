@@ -3979,6 +3979,7 @@ async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
     let mut child = test_dir
         .with_config(&mut config)?
         .spawn_child(args!["start"])?;
+    let test_dir = child.dir.take().expect("should have test directory");
     let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
     // Wait for Zebra to load its state cache
     tokio::time::sleep(Duration::from_secs(5)).await;
@@ -4001,6 +4002,34 @@ async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
         result?
     }
 
+    // Commit some blocks to check that Zebra's state will still commit blocks, and generate enough blocks
+    // for Zebra's finalized tip to pass the max checkpoint height.
+
+    rpc_client
+        .generate(200)
+        .await
+        .expect("should successfully commit more blocks to the state");
+
+    child.kill(true)?;
+
+    // Check that Zebra will can commit blocks to its state when its finalized tip is past the max checkpoint height
+    // and the non-finalized backup cache is disabled or empty.
+
+    tracing::info!(
+        "restarting Zebra to check that blocks are committed when the non-finalized state \
+         is initially empty and the finalized tip is past the max checkpoint height"
+    );
+    config.state.should_backup_non_finalized_state = false;
+    let mut child = test_dir
+        .with_config(&mut config)?
+        .spawn_child(args!["start"])?;
+    let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
+    let rpc_client = RpcRequestClient::new(rpc_address);
+
+    // Wait for Zebra to load its state cache
+    tokio::time::sleep(Duration::from_secs(5)).await;
+
+    tracing::info!("checking that Zebra commits blocks with empty non-finalized state");
     rpc_client
         .generate(10)
         .await
