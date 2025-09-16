@@ -48,11 +48,6 @@ class WalletTest (BitcoinTestFramework):
             print("Ignoring stopping wallet error: ", e)
         time.sleep(1)
 
-        # Hack for https://github.com/ZcashFoundation/zebra/issues/9708
-        # We Stop the wallet which has 1 block, generate 100 blocks in zebra,
-        # so when restarting Zebra it will have 1 block, just as the wallet.
-        self.nodes[0].generate(100)
-
         # Stop the node
         self.nodes[0].stop()
         time.sleep(1)
