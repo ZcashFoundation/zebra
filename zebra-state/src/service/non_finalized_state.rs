@@ -184,6 +184,18 @@ impl NonFinalizedState {
 
         tokio::spawn(backup::run_backup_task(receiver.clone(), backup_dir_path));
 
+        if !non_finalized_state.is_chain_set_empty() {
+            let num_blocks_restored = non_finalized_state
+                .best_chain()
+                .expect("must have best chain if chain set is not empty")
+                .len();
+
+            tracing::info!(
+                ?num_blocks_restored,
+                "restored blocks from non-finalized backup cache"
+            );
+        }
+
         (non_finalized_state, sender, receiver)
     }
 

@@ -363,13 +363,14 @@ impl StateService {
             ChainTipSender::new(initial_tip, network);
 
         let finalized_state_for_writing = finalized_state.clone();
+        let should_use_finalized_block_write_sender = non_finalized_state.is_chain_set_empty();
         let (block_write_sender, invalid_block_write_reset_receiver, block_write_task) =
             write::BlockWriteSender::spawn(
                 finalized_state_for_writing,
                 non_finalized_state,
                 chain_tip_sender,
                 non_finalized_state_sender,
-                !is_finalized_tip_past_max_checkpoint,
+                should_use_finalized_block_write_sender,
             );
 
         let read_service = ReadStateService::new(
