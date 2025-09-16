@@ -21,8 +21,8 @@ class BackupNonFinalized(BitcoinTestFramework):
 
     def run_test(self):
         self.nodes[0].generate(10)
-        # Wait for `MIN_DURATION_BETWEEN_BACKUP_UPDATES`, 5 secs in zebra
-        time.sleep(5)
+        # Wait for 5 seconds (`MIN_DURATION_BETWEEN_BACKUP_UPDATES`) plus 1 second for I/O
+        time.sleep(6)
 
         blocks = self.nodes[0].getblockchaininfo()['blocks']
         assert_equal(blocks, 10)
@@ -39,13 +39,11 @@ class BackupNonFinalized(BitcoinTestFramework):
 
         # Generate more blocks and make sure the blockchain is still working
         self.nodes[0].generate(1)
-        time.sleep(5)
 
         blocks = self.nodes[0].getblockchaininfo()['blocks']
         assert_equal(blocks, 11)
 
         self.nodes[0].generate(10)
-        time.sleep(5)
 
         blocks = self.nodes[0].getblockchaininfo()['blocks']
         assert_equal(blocks, 21)
