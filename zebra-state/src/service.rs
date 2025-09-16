@@ -411,8 +411,12 @@ impl StateService {
         let timer = CodeTimer::start();
 
         if let (Some(tip), Some(nu5_activation_height)) = (
-            // TODO: put this in a spawn_blocking
-            state.best_tip(),
+            {
+                let read_state = state.read_service.clone();
+                tokio::task::spawn_blocking(move || read_state.best_tip())
+                    .await
+                    .expect("task should not panic")
+            },
             NetworkUpgrade::Nu5.activation_height(network),
         ) {
             if let Err(error) = check::legacy_chain(
