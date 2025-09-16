@@ -146,6 +146,7 @@ impl std::fmt::Debug for Network {
                 .debug_struct("Regtest")
                 .field("activation_heights", params.activation_heights())
                 .field("funding_streams", params.funding_streams())
+                .field("lockbox_disbursements", &params.lockbox_disbursements())
                 .field("checkpoints", &params.checkpoints())
                 .finish(),
             Self::Testnet(params) if params.is_default_testnet() => {
