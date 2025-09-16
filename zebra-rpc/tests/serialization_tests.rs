@@ -908,7 +908,7 @@ fn test_get_address_utxos_chain_info_false() -> Result<(), Box<dyn std::error::E
 "#;
     let obj: GetAddressUtxosResponse = serde_json::from_str(json)?;
 
-    let GetAddressUtxosResponse::ChainInfoFalse(obj) = &obj else {
+    let GetAddressUtxosResponse::Utxos(obj) = &obj else {
         panic!("Expected ChainInfoFalse variant");
     };
 
@@ -962,7 +962,7 @@ fn test_get_address_utxos_chain_info_true() -> Result<(), Box<dyn std::error::Er
 "#;
     let obj: GetAddressUtxosResponse = serde_json::from_str(json)?;
 
-    let GetAddressUtxosResponse::ChainInfoTrue(obj) = &obj else {
+    let GetAddressUtxosResponse::UtxosAndChainInfo(obj) = &obj else {
         panic!("Expected ChainInfoTrue variant");
     };
 

@@ -1611,7 +1611,7 @@ async fn rpc_getaddressutxos_response() {
         .expect("address is valid so no error can happen here");
 
     // there are 10 outputs for provided address
-    let GetAddressUtxosResponse::ChainInfoFalse(response) = response else {
+    let GetAddressUtxosResponse::Utxos(response) = response else {
         panic!("expected GetAddressUtxosResponse::ChainInfoFalse variant");
     };
     assert_eq!(response.len(), 10);
@@ -1625,7 +1625,7 @@ async fn rpc_getaddressutxos_response() {
         .expect("address is valid so no error can happen here");
 
     // there are 10 outputs for provided address
-    let GetAddressUtxosResponse::ChainInfoFalse(response) = response else {
+    let GetAddressUtxosResponse::Utxos(response) = response else {
         panic!("expected GetAddressUtxosResponse::ChainInfoFalse variant");
     };
     assert_eq!(response.len(), 10);
@@ -1640,7 +1640,7 @@ async fn rpc_getaddressutxos_response() {
         .expect("address is valid so no error can happen here");
 
     // there are 10 outputs for provided address
-    let GetAddressUtxosResponse::ChainInfoTrue(response) = response else {
+    let GetAddressUtxosResponse::UtxosAndChainInfo(response) = response else {
         panic!("expected GetAddressUtxosResponse::ChainInfoTrue variant");
     };
     assert_eq!(response.utxos().len(), 10);

@@ -363,7 +363,7 @@ pub trait Rpc {
     ///
     /// # Parameters
     ///
-    /// - `params`: (required) Either:
+    /// - `request`: (required) Either:
     ///     - A single address string (e.g., `"tmYXBYJj1K7vhejSec5osXK2QsGa5MTisUQ"`), or
     ///     - An object with the following named fields:
     ///         - `addresses`: (array of strings, required) The addresses to get transactions from.
@@ -395,7 +395,11 @@ pub trait Rpc {
     ///
     /// # Parameters
     ///
-    /// - `addresses`: (array, required, example={\"addresses\": [\"tmYXBYJj1K7vhejSec5osXK2QsGa5MTisUQ\"]}) The addresses to get outputs from.
+    /// - `request`: (required) Either:
+    ///     - A single address string (e.g., `"tmYXBYJj1K7vhejSec5osXK2QsGa5MTisUQ"`), or
+    ///     - An object with the following named fields:
+    ///         - `addresses`: (array, required, example=[\"tmYXBYJj1K7vhejSec5osXK2QsGa5MTisUQ\"]) The addresses to get outputs from.
+    ///         - `chaininfo`: (boolean, optional, default=false) Include chain info with results
     ///
     /// # Notes
     ///
@@ -2074,14 +2078,14 @@ where
         }
 
         if !utxos_request.chain_info {
-            Ok(GetAddressUtxosResponse::ChainInfoFalse(response_utxos))
+            Ok(GetAddressUtxosResponse::Utxos(response_utxos))
         } else {
             let (height, hash) = self
                 .latest_chain_tip
                 .best_tip_height_and_hash()
                 .ok_or_misc_error("No blocks in state")?;
 
-            Ok(GetAddressUtxosResponse::ChainInfoTrue(
+            Ok(GetAddressUtxosResponse::UtxosAndChainInfo(
                 GetAddressUtxosResponseObject {
                     utxos: response_utxos,
                     hash,
@@ -3215,10 +3219,7 @@ impl GetBlockchainInfoResponse {
     }
 }
 
-/// A wrapper type with a list of transparent address strings.
-///
-/// This is used for the input parameter of [`RpcServer::get_address_balance`],
-/// [`RpcServer::get_address_tx_ids`] and [`RpcServer::get_address_utxos`].
+/// A request for [`RpcServer::get_address_balance`].
 #[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Deserialize, serde::Serialize)]
 #[serde(from = "DGetAddressBalanceRequest")]
 pub struct GetAddressBalanceRequest {
@@ -3876,9 +3877,9 @@ impl Default for GetRawTransactionResponse {
 #[serde(untagged)]
 pub enum GetAddressUtxosResponse {
     /// Response when `chainInfo` is false or not provided.
-    ChainInfoFalse(Vec<Utxo>),
+    Utxos(Vec<Utxo>),
     /// Response when `chainInfo` is true.
-    ChainInfoTrue(GetAddressUtxosResponseObject),
+    UtxosAndChainInfo(GetAddressUtxosResponseObject),
 }
 
 /// Response to a `getaddressutxos` RPC request, when `chainInfo` is true.
@@ -3992,7 +3993,7 @@ impl Utxo {
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize, Getters, new)]
 #[serde(from = "DGetAddressTxIdsRequest")]
 pub struct GetAddressTxIdsRequest {
-    /// A list of addresses. The RPC method will get transactions IDs that sent or received 
+    /// A list of addresses. The RPC method will get transactions IDs that sent or received
     /// funds to or from these addresses.
     addresses: Vec<String>,
     // The height to start looking for transactions.

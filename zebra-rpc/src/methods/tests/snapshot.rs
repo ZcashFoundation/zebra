@@ -575,7 +575,7 @@ async fn test_rpc_response_data_for_network(network: &Network) {
         .get_address_utxos(GetAddressUtxosRequest::new(addresses, false))
         .await
         .expect("We should have a vector of strings");
-    let GetAddressUtxosResponse::ChainInfoFalse(addresses) = get_address_utxos else {
+    let GetAddressUtxosResponse::Utxos(addresses) = get_address_utxos else {
         panic!("We should have a GetAddressUtxosResponse::ChainInfoFalse struct");
     };
     snapshot_rpc_getaddressutxos(addresses, &settings);
