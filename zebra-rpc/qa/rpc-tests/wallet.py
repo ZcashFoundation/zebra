@@ -9,6 +9,7 @@ import time
 
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import assert_equal, start_nodes, start_wallets
+from test_framework.config import ZebraExtraArgs
 
 # Test that we can create a wallet and use an address from it to mine blocks.
 class WalletTest (BitcoinTestFramework):
@@ -19,7 +20,7 @@ class WalletTest (BitcoinTestFramework):
         self.num_nodes = 1
 
     def setup_network(self, split=False):
-        args = [[False, "tmSRd1r8gs77Ja67Fw1JcdoXytxsyrLTPJm"]]
+        args = [None]
         self.nodes = start_nodes(self.num_nodes, self.options.tmpdir, args)
 
         # Zallet needs a block to start
@@ -47,17 +48,12 @@ class WalletTest (BitcoinTestFramework):
             print("Ignoring stopping wallet error: ", e)
         time.sleep(1)
 
-        # Hack for https://github.com/ZcashFoundation/zebra/issues/9708
-        # We Stop the wallet which has 1 block, generate 100 blocks in zebra,
-        # so when restarting Zebra it will have 1 block, just as the wallet.
-        self.nodes[0].generate(100)
-
         # Stop the node
         self.nodes[0].stop()
         time.sleep(1)
 
         # Restart the node with the generated address as the miner address
-        args = [[False, transparent_address]]
+        args = [ZebraExtraArgs(miner_address=transparent_address)]
         self.nodes = start_nodes(self.num_nodes, self.options.tmpdir, args)
 
         # Restart the wallet

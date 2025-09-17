@@ -17,7 +17,7 @@ use zebra_chain::{
     common::atomic_write,
     parameters::{
         testnet::{
-            self, ConfiguredActivationHeights, ConfiguredFundingStreams,
+            self, ConfiguredActivationHeights, ConfiguredCheckpoints, ConfiguredFundingStreams,
             ConfiguredLockboxDisbursement, RegtestParameters,
         },
         Magic, Network, NetworkKind,
@@ -603,6 +603,8 @@ struct DTestnetParameters {
     funding_streams: Option<Vec<ConfiguredFundingStreams>>,
     pre_blossom_halving_interval: Option<u32>,
     lockbox_disbursements: Option<Vec<ConfiguredLockboxDisbursement>>,
+    #[serde(default)]
+    checkpoints: ConfiguredCheckpoints,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -665,6 +667,11 @@ impl From<Arc<testnet::Parameters>> for DTestnetParameters {
                     .map(Into::into)
                     .collect(),
             ),
+            checkpoints: if params.checkpoints() == testnet::Parameters::default().checkpoints() {
+                ConfiguredCheckpoints::Default(true)
+            } else {
+                params.checkpoints().into()
+            },
         }
     }
 }
@@ -749,6 +756,8 @@ impl<'de> Deserialize<'de> for Config {
                              pre_nu6_funding_streams,
                              post_nu6_funding_streams,
                              funding_streams,
+                             lockbox_disbursements,
+                             checkpoints,
                              ..
                          }| {
                             let mut funding_streams_vec = funding_streams.unwrap_or_default();
@@ -761,6 +770,8 @@ impl<'de> Deserialize<'de> for Config {
                             RegtestParameters {
                                 activation_heights: activation_heights.unwrap_or_default(),
                                 funding_streams: Some(funding_streams_vec),
+                                lockbox_disbursements,
+                                checkpoints: Some(checkpoints),
                             }
                         },
                     )
@@ -783,6 +794,7 @@ impl<'de> Deserialize<'de> for Config {
                     funding_streams,
                     pre_blossom_halving_interval,
                     lockbox_disbursements,
+                    checkpoints,
                 }),
             ) => {
                 let mut params_builder = testnet::Parameters::build();
@@ -837,12 +849,16 @@ impl<'de> Deserialize<'de> for Config {
                     funding_streams_vec.insert(0, funding_streams);
                 }
 
-                params_builder = params_builder.with_funding_streams(funding_streams_vec);
+                if !funding_streams_vec.is_empty() {
+                    params_builder = params_builder.with_funding_streams(funding_streams_vec);
+                }
 
                 if let Some(lockbox_disbursements) = lockbox_disbursements {
                     params_builder =
                         params_builder.with_lockbox_disbursements(lockbox_disbursements);
                 }
+
+                params_builder = params_builder.with_checkpoints(checkpoints);
 
                 // Return an error if the initial testnet peers includes any of the default initial Mainnet or Testnet
                 // peers and the configured network parameters are incompatible with the default public Testnet.

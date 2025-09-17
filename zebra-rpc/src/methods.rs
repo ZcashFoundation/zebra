@@ -81,7 +81,7 @@ use zebra_chain::{
         equihash::Solution,
     },
 };
-use zebra_consensus::{funding_stream_address, ParameterCheckpoint, RouterError};
+use zebra_consensus::{funding_stream_address, RouterError};
 use zebra_network::{address_book_peers::AddressBookPeers, PeerSocketAddr};
 use zebra_node_services::mempool;
 use zebra_state::{HashOrHeight, OutputLocation, ReadRequest, ReadResponse, TransactionLocation};
@@ -114,6 +114,7 @@ use types::{
         GetBlockTemplateParameters, GetBlockTemplateResponse,
     },
     get_blockchain_info::GetBlockchainInfoBalance,
+    get_mempool_info::GetMempoolInfoResponse,
     get_mining_info::GetMiningInfoResponse,
     get_raw_mempool::{self, GetRawMempoolResponse},
     long_poll::LongPollInput,
@@ -278,6 +279,12 @@ pub trait Rpc {
     /// tags: blockchain
     #[method(name = "getbestblockheightandhash")]
     fn get_best_block_height_and_hash(&self) -> Result<GetBlockHeightAndHashResponse>;
+
+    /// Returns details on the active state of the TX memory pool.
+    ///
+    /// zcash reference: [`getmempoolinfo`](https://zcash.github.io/rpc/getmempoolinfo.html)
+    #[method(name = "getmempoolinfo")]
+    async fn get_mempool_info(&self) -> Result<GetMempoolInfoResponse>;
 
     /// Returns all transaction ids in the memory pool, as a JSON array.
     ///
@@ -1597,6 +1604,33 @@ where
             .ok_or_misc_error("No blocks in state")
     }
 
+    async fn get_mempool_info(&self) -> Result<GetMempoolInfoResponse> {
+        let mut mempool = self.mempool.clone();
+
+        let response = mempool
+            .ready()
+            .and_then(|service| service.call(mempool::Request::QueueStats))
+            .await
+            .map_misc_error()?;
+
+        if let mempool::Response::QueueStats {
+            size,
+            bytes,
+            usage,
+            fully_notified,
+        } = response
+        {
+            Ok(GetMempoolInfoResponse {
+                size,
+                bytes,
+                usage,
+                fully_notified,
+            })
+        } else {
+            unreachable!("unexpected response to QueueStats request")
+        }
+    }
+
     async fn get_raw_mempool(&self, verbose: Option<bool>) -> Result<GetRawMempoolResponse> {
         #[allow(unused)]
         let verbose = verbose.unwrap_or(false);
@@ -1930,7 +1964,7 @@ where
             let subtrees = subtrees
                 .values()
                 .map(|subtree| SubtreeRpcData {
-                    root: subtree.root.encode_hex(),
+                    root: subtree.root.to_bytes().encode_hex(),
                     end_height: subtree.end_height,
                 })
                 .collect();

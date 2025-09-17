@@ -21,7 +21,7 @@ use crate::{
         finalized_state::{FinalizedState, ZebraDb},
         non_finalized_state::NonFinalizedState,
         queued_blocks::{QueuedCheckpointVerified, QueuedSemanticallyVerified},
-        BoxError, ChainTipBlock, ChainTipSender, CloneError,
+        BoxError, ChainTipBlock, ChainTipSender,
     },
     CommitSemanticallyVerifiedError, SemanticallyVerifiedBlock,
 };
@@ -57,7 +57,9 @@ pub(crate) fn validate_and_commit_non_finalized(
     check::initial_contextual_validity(finalized_state, non_finalized_state, &prepared)?;
     let parent_hash = prepared.block.header.previous_block_hash;
 
-    if finalized_state.finalized_tip_hash() == parent_hash {
+    if !non_finalized_state.any_chain_contains(&parent_hash)
+        && finalized_state.finalized_tip_hash() == parent_hash
+    {
         non_finalized_state.commit_new_chain(prepared, finalized_state)?;
     } else {
         non_finalized_state.commit_block(prepared, finalized_state)?;
@@ -181,6 +183,7 @@ impl BlockWriteSender {
         non_finalized_state: NonFinalizedState,
         chain_tip_sender: ChainTipSender,
         non_finalized_state_sender: watch::Sender<NonFinalizedState>,
+        should_use_finalized_block_write_sender: bool,
     ) -> (
         Self,
         tokio::sync::mpsc::UnboundedReceiver<block::Hash>,
@@ -214,7 +217,8 @@ impl BlockWriteSender {
         (
             Self {
                 non_finalized: Some(non_finalized_block_write_sender),
-                finalized: Some(finalized_block_write_sender),
+                finalized: Some(finalized_block_write_sender)
+                    .filter(|_| should_use_finalized_block_write_sender),
             },
             invalid_block_write_reset_receiver,
             Some(Arc::new(task)),
@@ -329,7 +333,8 @@ impl WriteBlockWorkerTask {
         }
 
         // Save any errors to propagate down to queued child blocks
-        let mut parent_error_map: IndexMap<block::Hash, CloneError> = IndexMap::new();
+        let mut parent_error_map: IndexMap<block::Hash, CommitSemanticallyVerifiedError> =
+            IndexMap::new();
 
         while let Some(msg) = non_finalized_block_write_receiver.blocking_recv() {
             let queued_child_and_rsp_tx = match msg {
@@ -372,11 +377,6 @@ impl WriteBlockWorkerTask {
             // are invalid, because we checked all the consensus rules before
             // committing the failing ancestor block to the non-finalized state.
             if let Some(parent_error) = parent_error {
-                tracing::trace!(
-                    ?child_hash,
-                    ?parent_error,
-                    "rejecting queued child due to parent error"
-                );
                 result = Err(parent_error.clone());
             } else {
                 tracing::trace!(?child_hash, "validating queued child");
@@ -385,7 +385,6 @@ impl WriteBlockWorkerTask {
                     non_finalized_state,
                     queued_child,
                 )
-                .map_err(CloneError::from);
             }
 
             // TODO: fix the test timing bugs that require the result to be sent
@@ -394,7 +393,7 @@ impl WriteBlockWorkerTask {
 
             if let Err(ref error) = result {
                 // Update the caller with the error.
-                let _ = rsp_tx.send(result.clone().map(|()| child_hash).map_err(BoxError::from));
+                let _ = rsp_tx.send(result.clone().map(|()| child_hash));
 
                 // If the block is invalid, mark any descendant blocks as rejected.
                 parent_error_map.insert(child_hash, error.clone());
@@ -423,7 +422,7 @@ impl WriteBlockWorkerTask {
             );
 
             // Update the caller with the result.
-            let _ = rsp_tx.send(result.clone().map(|()| child_hash).map_err(BoxError::from));
+            let _ = rsp_tx.send(result.clone().map(|()| child_hash));
 
             while non_finalized_state
                 .best_chain_len()

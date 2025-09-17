@@ -26,7 +26,6 @@ use zebra_chain::{
     transparent,
     value_balance::ValueBalance,
 };
-use zebra_consensus::ParameterCheckpoint;
 use zebra_network::address_book_peers::MockAddressBookPeers;
 use zebra_node_services::mempool;
 use zebra_state::{BoxError, GetBlockTemplateChainInfo};

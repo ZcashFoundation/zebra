@@ -23,7 +23,7 @@ class ReindexTest(BitcoinTestFramework):
     def setup_network(self):
         self.nodes = []
         self.is_network_split = False
-        args = [[False, "tmSRd1r8gs77Ja67Fw1JcdoXytxsyrLTPJm"]]
+        args = None
 
         self.nodes.append(start_node(0, self.options.tmpdir, args))
 

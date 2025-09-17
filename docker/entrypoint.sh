@@ -8,6 +8,11 @@
 
 set -eo pipefail
 
+# Default cache directories for Zebra components.
+# These use the config-rs ZEBRA_SECTION__KEY format and will be picked up
+# by zebrad's configuration system automatically.
+: "${ZEBRA_STATE__CACHE_DIR:=${HOME}/.cache/zebra}"
+: "${ZEBRA_RPC__COOKIE_DIR:=${HOME}/.cache/zebra}"
 
 # Use gosu to drop privileges and execute the given command as the specified UID:GID
 exec_as_user() {
@@ -44,6 +49,11 @@ create_owned_directory() {
     chown "${UID}:${GID}" "${parent_dir}"
   fi
 }
+
+# Create and own cache and config directories based on ZEBRA_* environment variables
+[[ -n ${ZEBRA_STATE__CACHE_DIR} ]] && create_owned_directory "${ZEBRA_STATE__CACHE_DIR}"
+[[ -n ${ZEBRA_RPC__COOKIE_DIR} ]] && create_owned_directory "${ZEBRA_RPC__COOKIE_DIR}"
+[[ -n ${ZEBRA_TRACING__LOG_FILE} ]] && create_owned_directory "$(dirname "${ZEBRA_TRACING__LOG_FILE}")"
 
 # --- Optional config file support ---
 # If provided, pass a config file path through to zebrad via CONFIG_FILE_PATH.

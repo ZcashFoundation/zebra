@@ -1,15 +1,60 @@
 //! Compile proto files
-use std::{env, fs, path::PathBuf, process::Command};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
-const ZALLET_COMMIT: Option<&str> = None;
+const ZALLET_COMMIT: Option<&str> = Some("de70e46e37f903de4e182c5a823551b90a5bf80b");
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let out_dir = env::var("OUT_DIR").map(PathBuf::from);
-    tonic_prost_build::configure()
-        .type_attribute(".", "#[derive(serde::Deserialize, serde::Serialize)]")
-        .file_descriptor_set_path(out_dir.unwrap().join("indexer_descriptor.bin"))
-        .compile_protos(&["proto/indexer.proto"], &[""])?;
+    build_or_copy_proto()?;
+    build_zallet_for_qa_tests();
 
+    Ok(())
+}
+
+fn build_or_copy_proto() -> Result<(), Box<dyn std::error::Error>> {
+    const PROTO_FILE_PATH: &str = "proto/indexer.proto";
+
+    let out_dir = env::var("OUT_DIR")
+        .map(PathBuf::from)
+        .expect("requires OUT_DIR environment variable definition");
+    let file_names = ["indexer_descriptor.bin", "zebra.indexer.rpc.rs"];
+
+    let is_proto_file_available = Path::new(PROTO_FILE_PATH).exists();
+    let is_protoc_available = env::var_os("PROTOC")
+        .map(PathBuf::from)
+        .or_else(|| which::which("protoc").ok())
+        .is_some();
+
+    if is_proto_file_available && is_protoc_available {
+        tonic_prost_build::configure()
+            .type_attribute(".", "#[derive(serde::Deserialize, serde::Serialize)]")
+            .file_descriptor_set_path(out_dir.join("indexer_descriptor.bin"))
+            .compile_protos(&[PROTO_FILE_PATH], &[""])?;
+
+        for file_name in file_names {
+            let out_path = out_dir.join(file_name);
+            let generated_path = format!("proto/__generated__/{file_name}");
+            if fs::read_to_string(&out_path).ok() != fs::read_to_string(&generated_path).ok() {
+                fs::copy(out_path, generated_path)?;
+            }
+        }
+    } else {
+        for file_name in file_names {
+            let out_path = out_dir.join(file_name);
+            let generated_path = format!("proto/__generated__/{file_name}");
+            if fs::read_to_string(&out_path).ok() != fs::read_to_string(&generated_path).ok() {
+                fs::copy(generated_path, out_path)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn build_zallet_for_qa_tests() {
     if env::var_os("ZALLET").is_some() {
         // The following code will clone the zallet repo and build the binary,
         // then copy the binary to the project target directory.
@@ -65,6 +110,4 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             )
         });
     }
-
-    Ok(())
 }

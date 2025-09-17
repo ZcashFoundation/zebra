@@ -489,6 +489,7 @@ fn check_configured_funding_stream_regtest() {
             configured_pre_nu6_funding_streams.clone(),
             configured_post_nu6_funding_streams.clone(),
         ]),
+        ..Default::default()
     });
 
     let expected_pre_nu6_funding_streams =

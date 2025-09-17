@@ -13,32 +13,27 @@ use vectors::{
     GET_BLOCK_TEMPLATE_RESPONSE_TEMPLATE, GET_RAW_TRANSACTION_RESPONSE_TRUE,
 };
 
+use zebra_rpc::client::zebra_chain::{
+    sapling::ValueCommitment,
+    serialization::{ZcashDeserialize, ZcashSerialize},
+    subtree::NoteCommitmentSubtreeIndex,
+    transparent::{OutputIndex, Script},
+    work::difficulty::{CompactDifficulty, ExpandedDifficulty},
+};
 use zebra_rpc::client::{
     BlockHeaderObject, BlockObject, BlockTemplateResponse, Commitments, DefaultRoots,
     FundingStream, GetAddressBalanceRequest, GetAddressBalanceResponse, GetAddressTxIdsRequest,
-    GetAddressUtxosResponse, GetBlockHashResponse, GetBlockHeaderResponse,
-    GetBlockHeightAndHashResponse, GetBlockResponse, GetBlockSubsidyResponse,
-    GetBlockTemplateParameters, GetBlockTemplateRequestMode, GetBlockTemplateResponse,
-    GetBlockTransaction, GetBlockTrees, GetBlockchainInfoResponse, GetInfoResponse,
-    GetMiningInfoResponse, GetPeerInfoResponse, GetRawMempoolResponse, GetRawTransactionResponse,
-    GetSubtreesByIndexResponse, GetTreestateResponse, Hash, Input, MempoolObject, Orchard,
-    OrchardAction, Output, PeerInfo, ScriptPubKey, ScriptSig, SendRawTransactionResponse,
+    GetAddressUtxosResponse, GetAddressUtxosResponseObject, GetBlockHashResponse,
+    GetBlockHeaderResponse, GetBlockHeightAndHashResponse, GetBlockResponse,
+    GetBlockSubsidyResponse, GetBlockTemplateParameters, GetBlockTemplateRequestMode,
+    GetBlockTemplateResponse, GetBlockTransaction, GetBlockTrees, GetBlockchainInfoBalance,
+    GetBlockchainInfoResponse, GetInfoResponse, GetMiningInfoResponse, GetPeerInfoResponse,
+    GetRawMempoolResponse, GetRawTransactionResponse, GetSubtreesByIndexResponse,
+    GetTreestateResponse, Hash, Input, JoinSplit, MempoolObject, Orchard, OrchardAction,
+    OrchardFlags, Output, PeerInfo, ScriptPubKey, ScriptSig, SendRawTransactionResponse,
     ShieldedOutput, ShieldedSpend, SubmitBlockErrorResponse, SubmitBlockResponse, SubtreeRpcData,
     TransactionObject, TransactionTemplate, Treestate, Utxo, ValidateAddressResponse,
     ZListUnifiedReceiversResponse, ZValidateAddressResponse,
-};
-use zebra_rpc::{
-    client::{
-        zebra_chain::{
-            sapling::NotSmallOrderValueCommitment,
-            serialization::{ZcashDeserialize, ZcashSerialize},
-            subtree::NoteCommitmentSubtreeIndex,
-            transparent::{OutputIndex, Script},
-            work::difficulty::{CompactDifficulty, ExpandedDifficulty},
-        },
-        GetBlockchainInfoBalance, JoinSplit, OrchardFlags,
-    },
-    methods::GetAddressUtxosResponseObject,
 };
 
 #[test]
@@ -752,8 +747,7 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
             let proof = spend.proof();
             let spend_auth_sig = spend.spend_auth_sig();
             ShieldedSpend::new(
-                NotSmallOrderValueCommitment::zcash_deserialize(Cursor::new(cv))
-                    .expect("was just serialized"),
+                ValueCommitment::zcash_deserialize(Cursor::new(cv)).expect("was just serialized"),
                 anchor,
                 nullifier,
                 rk,
@@ -773,8 +767,7 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
             let out_ciphertext = output.out_ciphertext();
             let proof = output.proof();
             ShieldedOutput::new(
-                NotSmallOrderValueCommitment::zcash_deserialize(Cursor::new(cv))
-                    .expect("was just serialized"),
+                ValueCommitment::zcash_deserialize(Cursor::new(cv)).expect("was just serialized"),
                 cm_u,
                 ephemeral_key,
                 enc_ciphertext,

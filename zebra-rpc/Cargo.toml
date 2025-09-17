@@ -19,6 +19,9 @@ categories = [
     "network-programming",
 ]
 
+# Exclude proto files so crates.io consumers don't need protoc.
+exclude = ["*.proto"]
+
 [features]
 
 # Production features that activate extra dependencies, or extra features in
@@ -83,6 +86,8 @@ zcash_primitives = { workspace = true, features = ["transparent-inputs"] }
 zcash_protocol = { workspace = true }
 zcash_transparent = { workspace = true }
 
+sapling-crypto = { workspace = true }
+
 # Test-only feature proptest-impl
 proptest = { workspace = true, optional = true }
 
@@ -99,6 +104,7 @@ zebra-state = { path = "../zebra-state", version = "2.0.0" }
 
 [build-dependencies]
 tonic-prost-build = { workspace = true }
+which = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true, features = ["redactions", "json", "ron"] }
@@ -122,3 +128,6 @@ zebra-state = { path = "../zebra-state", version = "2.0.0", features = [
 ] }
 
 zebra-test = { path = "../zebra-test", version = "1.0.1" }
+
+[lints]
+workspace = true

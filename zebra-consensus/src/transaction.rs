@@ -920,6 +920,9 @@ where
             | NetworkUpgrade::Nu6
             | NetworkUpgrade::Nu6_1 => Ok(()),
 
+            #[cfg(zcash_unstable = "zfuture")]
+            NetworkUpgrade::ZFuture => Ok(()),
+
             // Does not support V4 transactions
             NetworkUpgrade::Genesis
             | NetworkUpgrade::BeforeOverwinter
@@ -1000,6 +1003,9 @@ where
             | NetworkUpgrade::Nu6
             | NetworkUpgrade::Nu6_1
             | NetworkUpgrade::Nu7 => Ok(()),
+
+            #[cfg(zcash_unstable = "zfuture")]
+            NetworkUpgrade::ZFuture => Ok(()),
 
             // Does not support V5 transactions
             NetworkUpgrade::Genesis
