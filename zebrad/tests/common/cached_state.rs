@@ -73,6 +73,7 @@ pub fn wait_for_state_version_message<T>(zebrad: &mut TestChild<T>) -> Result<St
 
 /// Waits for the `required_version` state upgrade to complete, if needed.
 /// If `extra_required_log_regexes` are supplied, also waits for those logs before returning.
+/// Those extra regexes are also checked even if a state upgrade does not happen.
 ///
 /// This function should be called with the output of [`wait_for_state_version_message()`].
 #[tracing::instrument(skip(zebrad))]
@@ -82,15 +83,15 @@ pub fn wait_for_state_version_upgrade<T>(
     required_version: Version,
     extra_required_log_regexes: impl IntoIterator<Item = String> + std::fmt::Debug,
 ) -> Result<()> {
-    if state_version_message.contains("launching upgrade task") {
-        tracing::info!(
-            zebrad = ?zebrad.cmd,
-            %state_version_message,
-            %required_version,
-            ?extra_required_log_regexes,
-            "waiting for zebrad state upgrade..."
-        );
+    tracing::info!(
+        zebrad = ?zebrad.cmd,
+        %state_version_message,
+        %required_version,
+        ?extra_required_log_regexes,
+        "waiting for zebrad state upgrade..."
+    );
 
+    if state_version_message.contains("launching upgrade task") {
         let upgrade_pattern = format!(
             "marked database format as upgraded.*format_upgrade_version.*=.*{required_version}"
         );
@@ -108,6 +109,17 @@ pub fn wait_for_state_version_upgrade<T>(
             ?required_logs,
             ?upgrade_messages,
             "zebrad state has been upgraded"
+        );
+    } else {
+        let required_logs: Vec<String> = extra_required_log_regexes.into_iter().collect();
+        let upgrade_messages = zebrad.expect_stdout_line_matches_all_unordered(&required_logs)?;
+        tracing::info!(
+            zebrad = ?zebrad.cmd,
+            %state_version_message,
+            %required_version,
+            ?required_logs,
+            ?upgrade_messages,
+            "no zebrad upgrade needed"
         );
     }
 
