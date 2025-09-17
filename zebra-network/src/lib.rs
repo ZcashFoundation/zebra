@@ -40,7 +40,7 @@
 //!
 //! ## `zebra-network` Structure
 //!
-//! [`zebra-network::init`] is the main entry point for `zebra-network`.
+//! [`crate::init`] is the main entry point for `zebra-network`.
 //! It uses the following services, tasks, and endpoints:
 //!
 //! ### Low-Level Network Connections
@@ -99,7 +99,7 @@
 //!    * handles each message as a [`Request`] to the local node
 //!    * sends the [`Response`] to the [`peer::Connection`]
 //!
-//! Note: the inbound service is implemented by the [`zebra-network::init`] caller.
+//! Note: the inbound service is implemented by the [`crate::init`] caller.
 //!
 //! Peer Inventory Service:
 //!  * tracks gossiped `inv` advertisements for each peer
