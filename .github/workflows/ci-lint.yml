@@ -37,14 +37,14 @@ jobs:
       rust: ${{ steps.changed-files-rust.outputs.any_changed == 'true' }}
       workflows: ${{ steps.changed-files-workflows.outputs.any_changed == 'true' }}
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v5.0.0
         with:
           persist-credentials: false
           fetch-depth: 0
 
       - name: Rust files
         id: changed-files-rust
-        uses: tj-actions/changed-files@v46.0.5
+        uses: tj-actions/changed-files@v47.0.0
         with:
           files: |
             **/*.rs
@@ -56,7 +56,7 @@ jobs:
 
       - name: Workflow files
         id: changed-files-workflows
-        uses: tj-actions/changed-files@v46.0.5
+        uses: tj-actions/changed-files@v47.0.0
         with:
           files: |
             .github/workflows/*.yml
@@ -69,7 +69,7 @@ jobs:
     if: ${{ needs.changed-files.outputs.rust == 'true' }}
 
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v5.0.0
         with:
           persist-credentials: false
 
@@ -93,7 +93,7 @@ jobs:
         run: |
           rustup toolchain install stable --profile default
 
-      - uses: Swatinem/rust-cache@v2.7.8
+      - uses: Swatinem/rust-cache@v2.8.0
         with:
           shared-key: "clippy-cargo-lock"
 
@@ -119,7 +119,7 @@ jobs:
     if: ${{ needs.changed-files.outputs.rust == 'true' }}
 
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v5.0.0
         with:
           persist-credentials: false
       - uses: r7kamura/rust-problem-matchers@v1.5.0
@@ -138,7 +138,7 @@ jobs:
 
       # We don't cache `fmt` outputs because the job is quick,
       # and we want to use the limited GitHub actions cache space for slower jobs.
-      #- uses: Swatinem/rust-cache@v2.7.8
+      #- uses: Swatinem/rust-cache@v2.8.0
 
       - run: |
           cargo fmt --all -- --check
@@ -149,7 +149,7 @@ jobs:
     needs: changed-files
     if: ${{ needs.changed-files.outputs.workflows == 'true' }}
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v5.0.0
       - name: actionlint
         uses: reviewdog/action-actionlint@v1.48.0
         with:
@@ -166,7 +166,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: changed-files
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v5.0.0
       - uses: codespell-project/actions-codespell@v2.1
         with:
           only_warn: 1
