@@ -16,7 +16,12 @@ use std::{
     ops::RangeInclusive,
 };
 
-use zebra_chain::{block::Height, parameters::Network, transaction, transparent};
+use derive_getters::Getters;
+use zebra_chain::{
+    block::{self, Height},
+    parameters::Network,
+    transaction, transparent,
+};
 
 use crate::{
     service::{
@@ -33,16 +38,23 @@ pub const ADDRESS_HEIGHTS_FULL_RANGE: RangeInclusive<Height> = Height(1)..=Heigh
 
 /// A convenience wrapper that efficiently stores unspent transparent outputs,
 /// and the corresponding transaction IDs.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Getters)]
 pub struct AddressUtxos {
     /// A set of unspent transparent outputs.
+    #[getter(skip)]
     utxos: BTreeMap<OutputLocation, transparent::Output>,
 
     /// The transaction IDs for each [`OutputLocation`] in `utxos`.
+    #[getter(skip)]
     tx_ids: BTreeMap<TransactionLocation, transaction::Hash>,
 
     /// The configured network for this state.
+    #[getter(skip)]
     network: Network,
+
+    /// The last height and hash that was queried to produce these UTXOs, if any.
+    /// It will be None if the state is empty.
+    last_height_and_hash: Option<(block::Height, block::Hash)>,
 }
 
 impl AddressUtxos {
@@ -51,11 +63,13 @@ impl AddressUtxos {
         network: &Network,
         utxos: BTreeMap<OutputLocation, transparent::Output>,
         tx_ids: BTreeMap<TransactionLocation, transaction::Hash>,
+        last_height_and_hash: Option<(block::Height, block::Hash)>,
     ) -> Self {
         Self {
             utxos,
             tx_ids,
             network: network.clone(),
+            last_height_and_hash,
         }
     }
 
@@ -99,7 +113,7 @@ pub fn address_utxos<C>(
     chain: Option<C>,
     db: &ZebraDb,
     addresses: HashSet<transparent::Address>,
-) -> Result<(AddressUtxos, Option<(Height, zebra_chain::block::Hash)>), BoxError>
+) -> Result<AddressUtxos, BoxError>
 where
     C: AsRef<Chain>,
 {
@@ -150,6 +164,7 @@ where
                     "full address UTXO response",
                 );
 
+                // Get the matching hash for the given height, if any
                 let last_height_and_hash = last_height.and_then(|height| {
                     chain
                         .as_ref()
@@ -158,8 +173,10 @@ where
                         .map(|hash| (height, hash))
                 });
 
-                return Ok((
-                    AddressUtxos::new(network, utxos, tx_ids),
+                return Ok(AddressUtxos::new(
+                    network,
+                    utxos,
+                    tx_ids,
                     last_height_and_hash,
                 ));
             }
@@ -216,10 +233,13 @@ fn finalized_address_utxos(
     (finalized_utxos, finalized_tip_range)
 }
 
-/// Returns the UTXO changes for `addresses` in the non-finalized chain,
-/// matching or overlapping the UTXOs for the `finalized_tip_range`.
+/// Returns the UTXO changes (created and spent) for `addresses` in the
+/// non-finalized chain, matching or overlapping the UTXOs for the
+/// `finalized_tip_range`. Also returns the height of the last block in which
+/// the changes were located, or None if the state is empty.
 ///
-/// If the addresses do not exist in the non-finalized `chain`, returns an empty list.
+/// If the addresses do not exist in the non-finalized `chain`, returns an empty
+/// list.
 //
 // TODO: turn the return type into a struct?
 fn chain_transparent_utxo_changes<C>(

@@ -6922,6 +6922,7 @@ dependencies = [
  "chrono",
  "color-eyre",
  "crossbeam-channel",
+ "derive-getters",
  "dirs",
  "elasticsearch",
  "futures",
