@@ -1151,7 +1151,7 @@ where
         &self,
         address_strings: GetAddressBalanceRequest,
     ) -> Result<GetAddressBalanceResponse> {
-        let valid_addresses = validate_addresses(&address_strings.addresses)?;
+        let valid_addresses = address_strings.valid_addresses()?;
 
         let request = zebra_state::ReadRequest::AddressBalance(valid_addresses);
         let response = self
@@ -1985,7 +1985,7 @@ where
             best_chain_tip_height(&latest_chain_tip)?,
         )?;
 
-        let valid_addresses = validate_addresses(request.addresses())?;
+        let valid_addresses = request.valid_addresses()?;
 
         let request = zebra_state::ReadRequest::TransactionIdsByAddresses {
             addresses: valid_addresses,
@@ -2031,7 +2031,7 @@ where
         let mut read_state = self.read_state.clone();
         let mut response_utxos = vec![];
 
-        let valid_addresses = validate_addresses(utxos_request.addresses())?;
+        let valid_addresses = utxos_request.valid_addresses()?;
 
         // get utxos data for addresses
         let request = zebra_state::ReadRequest::UtxosByAddresses(valid_addresses);
@@ -3253,22 +3253,34 @@ enum DGetAddressBalanceRequest {
 #[deprecated(note = "Use `GetAddressBalanceRequest` instead.")]
 pub type AddressStrings = GetAddressBalanceRequest;
 
-/// Given a list of addresses as strings:
-/// - check if provided list have all valid transparent addresses.
-/// - return valid addresses as a set of [`Address`].
-fn validate_addresses(addresses: &[String]) -> Result<HashSet<Address>> {
-    // Reference for the legacy error code:
-    // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/misc.cpp#L783-L784>
-    let valid_addresses: HashSet<Address> = addresses
-        .iter()
-        .map(|address| {
-            address
-                .parse()
-                .map_error(server::error::LegacyCode::InvalidAddressOrKey)
-        })
-        .collect::<Result<_>>()?;
+trait ValidateAddresses {
+    /// Given a list of addresses as strings:
+    /// - check if provided list have all valid transparent addresses.
+    /// - return valid addresses as a set of `Address`.
+    fn valid_addresses(&self) -> Result<HashSet<Address>> {
+        // Reference for the legacy error code:
+        // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/misc.cpp#L783-L784>
+        let valid_addresses: HashSet<Address> = self
+            .addresses()
+            .iter()
+            .map(|address| {
+                address
+                    .parse()
+                    .map_error(server::error::LegacyCode::InvalidAddressOrKey)
+            })
+            .collect::<Result<_>>()?;
 
-    Ok(valid_addresses)
+        Ok(valid_addresses)
+    }
+
+    /// Returns string-encoded Zcash addresses in the type implementing this trait.
+    fn addresses(&self) -> &[String];
+}
+
+impl ValidateAddresses for GetAddressBalanceRequest {
+    fn addresses(&self) -> &[String] {
+        &self.addresses
+    }
 }
 
 impl GetAddressBalanceRequest {
@@ -3282,8 +3294,9 @@ impl GetAddressBalanceRequest {
         note = "Use `AddressStrings::new` instead. Validity will be checked by the server."
     )]
     pub fn new_valid(addresses: Vec<String>) -> Result<GetAddressBalanceRequest> {
-        validate_addresses(&addresses)?;
-        Ok(Self { addresses })
+        let req = Self { addresses };
+        req.valid_addresses()?;
+        Ok(req)
     }
 }
 
@@ -3356,6 +3369,12 @@ enum DGetAddressUtxosRequest {
         #[serde(rename = "chainInfo")]
         chain_info: bool,
     },
+}
+
+impl ValidateAddresses for GetAddressUtxosRequest {
+    fn addresses(&self) -> &[String] {
+        &self.addresses
+    }
 }
 
 /// A hex-encoded [`ConsensusBranchId`] string.
@@ -4058,6 +4077,12 @@ enum DGetAddressTxIdsRequest {
         /// The height to end looking for transactions.
         end: Option<u32>,
     },
+}
+
+impl ValidateAddresses for GetAddressTxIdsRequest {
+    fn addresses(&self) -> &[String] {
+        &self.addresses
+    }
 }
 
 /// Information about the sapling and orchard note commitment trees if any.
