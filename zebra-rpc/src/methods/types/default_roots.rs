@@ -7,7 +7,7 @@ use zebra_chain::block::{
     ChainHistoryBlockTxAuthCommitmentHash, ChainHistoryMmrRootHash,
 };
 
-/// The block header roots for [`GetBlockTemplate.transactions`].
+/// The block header roots for [`crate::client::BlockTemplateResponse::transactions`].
 ///
 /// If the transactions in the block template are modified, these roots must be recalculated
 /// [according to the specification](https://zcash.github.io/rpc/getblocktemplate.html).
