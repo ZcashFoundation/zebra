@@ -86,9 +86,6 @@ jobs:
       - uses: taiki-e/install-action@3ee5d63d29478156148c0b53e9f3447829b47bc2 #v2.58.23
         with:
           tool: cargo-hack
-      - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3.0.0
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - run: cargo hack check --workspace
 
   msrv:
@@ -111,9 +108,6 @@ jobs:
         with:
           toolchain: 1.89 # MSRV
           cache-on-failure: true
-      - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3.0.0
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - run: cargo build --bin "${{ matrix.binary }}" --workspace
 
   docs:
@@ -131,9 +125,6 @@ jobs:
         with:
           toolchain: nightly
           cache-on-failure: true
-      - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3.0.0
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - run: cargo doc --no-deps --workspace --all-features --document-private-items --target-dir "$(pwd)"/target/internal
         env:
           # Keep in sync with ./book.yml:jobs.build
@@ -173,9 +164,6 @@ jobs:
         with:
           toolchain: nightly
           cache-on-failure: true
-      - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3.0.0
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: taiki-e/install-action@3ee5d63d29478156148c0b53e9f3447829b47bc2 #v2.58.23
         with:
           tool: cargo-udeps
@@ -213,9 +201,6 @@ jobs:
         with:
           toolchain: nightly
           cache-on-failure: true
-      - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3.0.0
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: cargo install cargo-hack
         uses: taiki-e/install-action@3ee5d63d29478156148c0b53e9f3447829b47bc2 #v2.58.23
         with:

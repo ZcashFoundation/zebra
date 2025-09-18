@@ -49,10 +49,6 @@ jobs:
       - uses: taiki-e/install-action@3ee5d63d29478156148c0b53e9f3447829b47bc2 #v2.58.23
         with:
           tool: cargo-llvm-cov,nextest
-      - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3.0.0
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Run coverage tests
         run: |
           cargo llvm-cov --no-report nextest
