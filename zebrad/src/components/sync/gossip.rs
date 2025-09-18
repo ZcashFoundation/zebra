@@ -87,29 +87,35 @@ where
         }
         .in_current_span();
 
-        let ((hash, height), log_msg, updated_chain_state) = if let Some(mined_block_receiver) =
+        let (((hash, height), log_msg, updated_chain_state), is_block_submission) = if let Some(
+            mined_block_receiver,
+        ) =
             mined_block_receiver.as_mut()
         {
             tokio::select! {
                 tip_change_close_to_network_tip = tip_change_close_to_network_tip_fut => {
                     mined_block_receiver.mark_unchanged();
-                    tip_change_close_to_network_tip?
+                    (tip_change_close_to_network_tip?, false)
                 },
 
                 Ok(_) = mined_block_receiver.changed() => {
                     // we have a new block to broadcast from the `submitblock `RPC method, get block data and release the channel.
-                   (*mined_block_receiver.borrow_and_update(), "sending mined block broadcast", chain_state)
+                   ((*mined_block_receiver.borrow_and_update(), "sending mined block broadcast", chain_state), true)
                 }
             }
         } else {
-            tip_change_close_to_network_tip_fut.await?
+            (tip_change_close_to_network_tip_fut.await?, false)
         };
 
         chain_state = updated_chain_state;
 
         // block broadcasts inform other nodes about new blocks,
         // so our internal Grow or Reset state doesn't matter to them
-        let request = zn::Request::AdvertiseBlock(hash);
+        let request = if is_block_submission {
+            zn::Request::AdvertiseBlockToAll(hash)
+        } else {
+            zn::Request::AdvertiseBlock(hash)
+        };
 
         info!(?height, ?request, log_msg);
         // broadcast requests don't return errors, and we'd just want to ignore them anyway
