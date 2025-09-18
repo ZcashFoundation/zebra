@@ -963,16 +963,26 @@ where
             "requests can only be routed to ready peers"
         );
 
-        // # Security
-        //
-        // We choose peers randomly, ignoring load.
-        // This avoids favouring malicious peers, because peers can influence their own load.
-        //
-        // The order of peers isn't completely random,
-        // but peer request order is not security-sensitive.
+        let selected_peers = self.select_random_ready_peers(max_peers);
+        self.send_multiple(req, selected_peers)
+    }
 
+    /// Sends the same request to the provided ready peers, ignoring return values.
+    ///
+    /// # Security
+    ///
+    /// Callers should choose peers randomly, ignoring load.
+    /// This avoids favouring malicious peers, because peers can influence their own load.
+    ///
+    /// The order of peers isn't completely random,
+    /// but peer request order is not security-sensitive.
+    fn send_multiple(
+        &mut self,
+        req: Request,
+        peers: Vec<D::Key>,
+    ) -> <Self as tower::Service<Request>>::Future {
         let futs = FuturesUnordered::new();
-        for key in self.select_random_ready_peers(max_peers) {
+        for key in peers {
             let mut svc = self
                 .take_ready_service(&key)
                 .expect("selected peers are ready");
@@ -996,6 +1006,13 @@ where
     fn route_broadcast(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
         // Broadcasts ignore the response
         self.route_multiple(req, self.number_of_peers_to_broadcast())
+    }
+
+    /// Broadcasts the same request to all ready peers, ignoring return values.
+    fn broadcast_all(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
+        // Broadcasts ignore the response
+        let all_ready_peers = self.ready_services.keys().copied().collect();
+        self.send_multiple(req, all_ready_peers)
     }
 
     /// Given a number of ready peers calculate to how many of them Zebra will
@@ -1225,6 +1242,7 @@ where
             // Broadcast advertisements to lots of peers
             Request::AdvertiseTransactionIds(_) => self.route_broadcast(req),
             Request::AdvertiseBlock(_) => self.route_broadcast(req),
+            Request::AdvertiseBlockToAll(_) => self.broadcast_all(req),
 
             // Choose a random less-loaded peer for all other requests
             _ => self.route_p2c(req),
