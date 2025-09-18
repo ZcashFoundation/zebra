@@ -13,26 +13,24 @@ use vectors::{
     GET_BLOCK_TEMPLATE_RESPONSE_TEMPLATE, GET_RAW_TRANSACTION_RESPONSE_TRUE,
 };
 
-use zebra_rpc::client::{
-    zebra_chain::{
-        sapling::ValueCommitment,
-        serialization::{ZcashDeserialize, ZcashSerialize},
-        subtree::NoteCommitmentSubtreeIndex,
-        transparent::{OutputIndex, Script},
-        work::difficulty::{CompactDifficulty, ExpandedDifficulty},
-    },
-    GetBlockchainInfoBalance, JoinSplit, OrchardFlags,
+use zebra_rpc::client::zebra_chain::{
+    sapling::ValueCommitment,
+    serialization::{ZcashDeserialize, ZcashSerialize},
+    subtree::NoteCommitmentSubtreeIndex,
+    transparent::{OutputIndex, Script},
+    work::difficulty::{CompactDifficulty, ExpandedDifficulty},
 };
 use zebra_rpc::client::{
     BlockHeaderObject, BlockObject, BlockTemplateResponse, Commitments, DefaultRoots,
     FundingStream, GetAddressBalanceRequest, GetAddressBalanceResponse, GetAddressTxIdsRequest,
-    GetAddressUtxosResponse, GetBlockHashResponse, GetBlockHeaderResponse,
-    GetBlockHeightAndHashResponse, GetBlockResponse, GetBlockSubsidyResponse,
-    GetBlockTemplateParameters, GetBlockTemplateRequestMode, GetBlockTemplateResponse,
-    GetBlockTransaction, GetBlockTrees, GetBlockchainInfoResponse, GetInfoResponse,
-    GetMiningInfoResponse, GetPeerInfoResponse, GetRawMempoolResponse, GetRawTransactionResponse,
-    GetSubtreesByIndexResponse, GetTreestateResponse, Hash, Input, MempoolObject, Orchard,
-    OrchardAction, Output, PeerInfo, ScriptPubKey, ScriptSig, SendRawTransactionResponse,
+    GetAddressUtxosResponse, GetAddressUtxosResponseObject, GetBlockHashResponse,
+    GetBlockHeaderResponse, GetBlockHeightAndHashResponse, GetBlockResponse,
+    GetBlockSubsidyResponse, GetBlockTemplateParameters, GetBlockTemplateRequestMode,
+    GetBlockTemplateResponse, GetBlockTransaction, GetBlockTrees, GetBlockchainInfoBalance,
+    GetBlockchainInfoResponse, GetInfoResponse, GetMiningInfoResponse, GetPeerInfoResponse,
+    GetRawMempoolResponse, GetRawTransactionResponse, GetSubtreesByIndexResponse,
+    GetTreestateResponse, Hash, Input, JoinSplit, MempoolObject, Orchard, OrchardAction,
+    OrchardFlags, Output, PeerInfo, ScriptPubKey, ScriptSig, SendRawTransactionResponse,
     ShieldedOutput, ShieldedSpend, SubmitBlockErrorResponse, SubmitBlockResponse, SubtreeRpcData,
     TransactionObject, TransactionTemplate, Treestate, Utxo, ValidateAddressResponse,
     ZListUnifiedReceiversResponse, ZValidateAddressResponse,
@@ -888,7 +886,7 @@ fn test_get_address_tx_ids() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
-fn test_get_address_utxos() -> Result<(), Box<dyn std::error::Error>> {
+fn test_get_address_utxos_chain_info_false() -> Result<(), Box<dyn std::error::Error>> {
     let json = r#"
 [
   {
@@ -902,6 +900,10 @@ fn test_get_address_utxos() -> Result<(), Box<dyn std::error::Error>> {
 ]
 "#;
     let obj: GetAddressUtxosResponse = serde_json::from_str(json)?;
+
+    let GetAddressUtxosResponse::Utxos(obj) = &obj else {
+        panic!("Expected ChainInfoFalse variant");
+    };
 
     let new_obj = obj
         .iter()
@@ -928,7 +930,68 @@ fn test_get_address_utxos() -> Result<(), Box<dyn std::error::Error>> {
         })
         .collect::<Vec<_>>();
 
-    assert_eq!(obj, new_obj);
+    assert_eq!(obj.clone(), new_obj);
+
+    Ok(())
+}
+
+#[test]
+fn test_get_address_utxos_chain_info_true() -> Result<(), Box<dyn std::error::Error>> {
+    let json = r#"
+{
+    "utxos": [
+        {
+            "address": "t1at7nVNsv6taLRrNRvnQdtfLNRDfsGc3Ak",
+            "txid": "6ee3e8a86dfeca629aeaf794aacb714db1cf1868bc9fe487de443e6197d8764a",
+            "outputIndex": 0,
+            "script": "76a914ba92ff06081d5ff6542af8d3b2d209d29ba6337c88ac",
+            "satoshis": 125000000,
+            "height": 2931856
+        }
+    ],
+    "hash": "000000000079a1a696c9d2073ec4cd8729d2a59bbb26999263cbaab992e09280",
+    "height": 3053274
+}
+"#;
+    let obj: GetAddressUtxosResponse = serde_json::from_str(json)?;
+
+    let GetAddressUtxosResponse::UtxosAndChainInfo(obj) = &obj else {
+        panic!("Expected ChainInfoTrue variant");
+    };
+
+    let hash = obj.hash();
+    let height = obj.height();
+
+    let new_obj = GetAddressUtxosResponseObject::new(
+        obj.utxos()
+            .iter()
+            .map(|utxo| {
+                // Address extractability was checked manually
+                let address = utxo.address().clone();
+                // Hash extractability was checked in other test
+                let txid = utxo.txid();
+                let output_index = utxo.output_index().index();
+                // Script extractability was checked in other test
+                let script = utxo.script().clone();
+                let satoshis = utxo.satoshis();
+                // Height extractability was checked in other test
+                let height = utxo.height();
+
+                Utxo::new(
+                    address,
+                    txid,
+                    OutputIndex::from_index(output_index),
+                    script,
+                    satoshis,
+                    height,
+                )
+            })
+            .collect::<Vec<_>>(),
+        hash,
+        height,
+    );
+
+    assert_eq!(obj.clone(), new_obj);
 
     Ok(())
 }

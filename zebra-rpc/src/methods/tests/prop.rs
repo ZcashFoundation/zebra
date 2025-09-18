@@ -40,7 +40,7 @@ use crate::methods::{
 };
 
 use super::super::{
-    AddressStrings, GetAddressBalanceResponse, NetworkUpgradeStatus, RpcImpl, RpcServer,
+    GetAddressBalanceRequest, GetAddressBalanceResponse, NetworkUpgradeStatus, RpcImpl, RpcServer,
     SendRawTransactionResponse,
 };
 
@@ -629,7 +629,7 @@ proptest! {
         tokio::time::pause();
 
         // Prepare the list of addresses.
-        let address_strings = AddressStrings {
+        let address_strings = GetAddressBalanceRequest {
             addresses: addresses
                 .iter()
                 .map(|address| address.to_string())
@@ -691,7 +691,7 @@ proptest! {
 
         runtime.block_on(async move {
 
-            let address_strings = AddressStrings {
+            let address_strings = GetAddressBalanceRequest {
                 addresses: at_least_one_invalid_address,
             };
 

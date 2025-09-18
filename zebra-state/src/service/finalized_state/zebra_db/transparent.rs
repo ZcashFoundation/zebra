@@ -199,7 +199,7 @@ impl ZebraDb {
         // Ignore any outputs spent by blocks committed during this query
         output_locations
             .iter()
-            .flat_map(|&addr_out_loc| {
+            .filter_map(|&addr_out_loc| {
                 Some((
                     addr_out_loc.unspent_output_location(),
                     self.utxo_by_location(addr_out_loc.unspent_output_location())?
