@@ -53,7 +53,10 @@ jobs:
         features: [default-release-binaries]
         exclude:
           # Exclude macOS beta due to limited runner capacity and slower performance
+          # Exclude Windows beta to reduce the amount of minutes cost per workflow run
           - os: macos-latest
+            rust-version: beta
+          - os: windows-latest
             rust-version: beta
 
     steps:
