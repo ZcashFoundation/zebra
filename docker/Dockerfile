@@ -196,8 +196,8 @@ ARG HOME
 ENV HOME=${HOME}
 
 # Install curl for healtchecks
-RUN apt-get -qq update && \
-    apt-get -qq install -y --no-install-recommends \
+RUN apt-get -q update && \
+    apt-get -q install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/* /tmp/*
 
