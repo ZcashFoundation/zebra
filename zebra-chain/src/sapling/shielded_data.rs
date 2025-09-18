@@ -23,7 +23,7 @@ use crate::{
     },
     sapling::{
         output::OutputPrefixInTransactionV5, spend::SpendPrefixInTransactionV5, tree, Nullifier,
-        Output, Spend, ValueCommitment,
+        Output, Spend,
     },
     serialization::{AtLeastOne, TrustedPreallocate},
 };
@@ -251,7 +251,9 @@ where
 
     /// Collect the cm_u's for this transaction, if it contains [`Output`]s,
     /// in the order they appear in the transaction.
-    pub fn note_commitments(&self) -> impl Iterator<Item = &jubjub::Fq> {
+    pub fn note_commitments(
+        &self,
+    ) -> impl Iterator<Item = &sapling_crypto::note::ExtractedNoteCommitment> {
         self.outputs().map(|output| &output.cm_u)
     }
 
@@ -278,14 +280,14 @@ where
     ///
     /// <https://zips.z.cash/protocol/protocol.pdf#saplingbalance>
     pub fn binding_verification_key(&self) -> redjubjub::VerificationKeyBytes<Binding> {
-        let cv_old: ValueCommitment = self.spends().map(|spend| spend.cv.into()).sum();
-        let cv_new: ValueCommitment = self.outputs().map(|output| output.cv.into()).sum();
-        let cv_balance: ValueCommitment =
-            ValueCommitment::new(jubjub::Fr::zero(), self.value_balance);
+        let cv_old: sapling_crypto::value::CommitmentSum =
+            self.spends().map(|spend| spend.cv.0.clone()).sum();
+        let cv_new: sapling_crypto::value::CommitmentSum =
+            self.outputs().map(|output| output.cv.0.clone()).sum();
 
-        let key_bytes: [u8; 32] = (cv_old - cv_new - cv_balance).into();
-
-        key_bytes.into()
+        (cv_old - cv_new)
+            .into_bvk(self.value_balance.zatoshis())
+            .into()
     }
 }
 

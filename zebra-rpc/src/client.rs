@@ -9,6 +9,7 @@
 
 pub use zebra_chain;
 
+#[allow(deprecated)]
 pub use crate::methods::{
     hex_data::HexData,
     trees::{
@@ -35,8 +36,9 @@ pub use crate::methods::{
         validate_address::ValidateAddressResponse,
         z_validate_address::{ZValidateAddressResponse, ZValidateAddressType},
     },
-    BlockHeaderObject, BlockObject, GetAddressBalanceRequest, GetAddressBalanceResponse,
-    GetAddressTxIdsRequest, GetAddressUtxosResponse, GetBlockHashResponse, GetBlockHeaderResponse,
+    AddressStrings, BlockHeaderObject, BlockObject, GetAddressBalanceRequest,
+    GetAddressBalanceResponse, GetAddressTxIdsRequest, GetAddressUtxosResponse,
+    GetAddressUtxosResponseObject, GetBlockHashResponse, GetBlockHeaderResponse,
     GetBlockHeightAndHashResponse, GetBlockResponse, GetBlockTransaction, GetBlockTrees,
     GetBlockchainInfoResponse, GetInfoResponse, GetRawTransactionResponse, Hash,
     SendRawTransactionResponse, Utxo,

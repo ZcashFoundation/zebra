@@ -14,11 +14,22 @@
 # documented here:
 # https://docs.rs/zebrad/latest/zebrad/config/struct.ZebradConfig.html
 #
-# zebrad attempts to load configs in the following order:
+# CONFIGURATION SOURCES (in order of precedence, highest to lowest):
 #
-# 1. The -c flag on the command line, e.g., `zebrad -c myconfig.toml start`;
-# 2. The file `zebrad.toml` in the users's preference directory (platform-dependent);
-# 3. The default config.
+# 1. Environment variables with ZEBRA_ prefix (highest precedence)
+#    - Format: ZEBRA_SECTION__KEY (double underscore for nested keys)
+#    - Examples:
+#      - ZEBRA_NETWORK__NETWORK=Testnet
+#      - ZEBRA_RPC__LISTEN_ADDR=127.0.0.1:8232
+#      - ZEBRA_STATE__CACHE_DIR=/path/to/cache
+#      - ZEBRA_TRACING__FILTER=debug
+#      - ZEBRA_METRICS__ENDPOINT_ADDR=0.0.0.0:9999
+#
+# 2. Configuration file (TOML format)
+#    - At the path specified via -c flag, e.g. `zebrad -c myconfig.toml start`, or
+#    - At the default path in the user's preference directory (platform-dependent, see below)
+#
+# 3. Hard-coded defaults (lowest precedence)
 #
 # The user's preference directory and the default path to the `zebrad` config are platform dependent,
 # based on `dirs::preference_dir`, see https://docs.rs/dirs/latest/dirs/fn.preference_dir.html :
@@ -39,6 +50,7 @@ tx_cost_limit = 80000000
 [metrics]
 
 [mining]
+internal_miner = false
 
 [network]
 cache_dir = true
@@ -49,37 +61,27 @@ initial_mainnet_peers = [
     "mainnet.seeder.zfnd.org:8233",
     "mainnet.is.yolo.money:8233",
 ]
-initial_testnet_peers = []
-listen_addr = "0.0.0.0:8233"
+initial_testnet_peers = [
+    "dnsseed.testnet.z.cash:18233",
+    "testnet.seeder.zfnd.org:18233",
+    "testnet.is.yolo.money:18233",
+]
+listen_addr = "[::]:8233"
 max_connections_per_ip = 1
-network = "Testnet"
+network = "Mainnet"
 peerset_initial_target_size = 25
 
-[network.testnet_parameters]
-network_name = "ConfiguredTestnet_1"
-network_magic = [0, 0, 0, 0]
-slow_start_interval = 0
-target_difficulty_limit = "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
-disable_pow = true
-genesis_hash = "00040fe8ec8471911baa1db1266ea15dd06b4a8a5c453883c000b031973dce08"
-
-[network.testnet_parameters.activation_heights]
-BeforeOverwinter = 1
-Overwinter = 1
-Sapling = 1
-Blossom = 1
-Heartwood = 1
-Canopy = 1
-NU5 = 1_842_420
-
 [rpc]
+cookie_dir = "cache_dir"
 debug_force_finished_sync = false
+enable_cookie_auth = true
 parallel_cpu_threads = 0
 
 [state]
 cache_dir = "cache_dir"
 delete_old_database = true
 ephemeral = false
+should_backup_non_finalized_state = true
 
 [sync]
 checkpoint_verify_concurrency_limit = 1000

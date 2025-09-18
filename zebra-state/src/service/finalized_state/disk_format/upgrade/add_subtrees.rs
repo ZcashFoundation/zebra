@@ -220,17 +220,17 @@ pub fn subtree_format_calculation_pre_checks(db: &ZebraDb) -> Result<(), String>
 }
 
 /// A quick test vector that allows us to fail an incorrect upgrade within a few seconds.
-fn first_sapling_mainnet_subtree() -> NoteCommitmentSubtree<sapling::tree::Node> {
+fn first_sapling_mainnet_subtree() -> NoteCommitmentSubtree<sapling_crypto::Node> {
     // This test vector was generated using the command:
     // ```sh
     // zcash-cli z_getsubtreesbyindex sapling 0 1
     // ```
     NoteCommitmentSubtree {
         index: 0.into(),
-        root: hex!("754bb593ea42d231a7ddf367640f09bbf59dc00f2c1d2003cc340e0c016b5b13")
-            .as_slice()
-            .try_into()
-            .expect("test vector is valid"),
+        root: sapling_crypto::Node::from_bytes(hex!(
+            "754bb593ea42d231a7ddf367640f09bbf59dc00f2c1d2003cc340e0c016b5b13"
+        ))
+        .expect("test vector is valid"),
         end_height: Height(558822),
     }
 }
@@ -638,7 +638,7 @@ fn calculate_sapling_subtree(
     prev_tree: Arc<sapling::tree::NoteCommitmentTree>,
     end_height: Height,
     tree: Arc<sapling::tree::NoteCommitmentTree>,
-) -> NoteCommitmentSubtree<sapling::tree::Node> {
+) -> NoteCommitmentSubtree<sapling_crypto::Node> {
     // If a subtree is completed by a note commitment in the block at `end_height`,
     // then that subtree can be completed in two different ways:
     if let Some((index, node)) = tree.completed_subtree_index_and_root() {
@@ -872,7 +872,7 @@ fn calculate_orchard_subtree(
 /// Writes a Sapling note commitment subtree to `upgrade_db`.
 fn write_sapling_subtree(
     upgrade_db: &ZebraDb,
-    subtree: NoteCommitmentSubtree<sapling::tree::Node>,
+    subtree: NoteCommitmentSubtree<sapling_crypto::Node>,
 ) {
     let mut batch = DiskWriteBatch::new();
 

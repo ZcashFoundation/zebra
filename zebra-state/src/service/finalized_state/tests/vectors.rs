@@ -16,7 +16,7 @@ use zebra_chain::{
         tree::NoteCommitmentTree as OrchardNoteCommitmentTree,
     },
     sapling::{
-        self, tree::legacy::LegacyNoteCommitmentTree as LegacySaplingNoteCommitmentTree,
+        tree::legacy::LegacyNoteCommitmentTree as LegacySaplingNoteCommitmentTree,
         tree::NoteCommitmentTree as SaplingNoteCommitmentTree,
     },
     sprout::{
@@ -158,7 +158,7 @@ fn sapling_note_commitment_tree_serialization() {
     for (idx, cm_u_hex) in hex_commitments.iter().enumerate() {
         let bytes = <[u8; 32]>::from_hex(cm_u_hex).unwrap();
 
-        let cm_u = jubjub::Fq::from_bytes(&bytes).unwrap();
+        let cm_u = sapling_crypto::note::ExtractedNoteCommitment::from_bytes(&bytes).unwrap();
         incremental_tree.append(cm_u).unwrap();
         if random() {
             info!(?idx, "randomly caching root for note commitment tree index");
@@ -197,7 +197,7 @@ fn sapling_note_commitment_tree_serialization_one() {
     for (idx, cm_u_hex) in hex_commitments.iter().enumerate() {
         let bytes = <[u8; 32]>::from_hex(cm_u_hex).unwrap();
 
-        let cm_u = jubjub::Fq::from_bytes(&bytes).unwrap();
+        let cm_u = sapling_crypto::note::ExtractedNoteCommitment::from_bytes(&bytes).unwrap();
         incremental_tree.append(cm_u).unwrap();
         if random() {
             info!(?idx, "randomly caching root for note commitment tree index");
@@ -249,7 +249,7 @@ fn sapling_note_commitment_tree_serialization_pow2() {
     for (idx, cm_u_hex) in hex_commitments.iter().enumerate() {
         let bytes = <[u8; 32]>::from_hex(cm_u_hex).unwrap();
 
-        let cm_u = jubjub::Fq::from_bytes(&bytes).unwrap();
+        let cm_u = sapling_crypto::note::ExtractedNoteCommitment::from_bytes(&bytes).unwrap();
         incremental_tree.append(cm_u).unwrap();
         if random() {
             info!(?idx, "randomly caching root for note commitment tree index");
@@ -528,7 +528,7 @@ fn sapling_checks(
 
     let subtree = NoteCommitmentSubtreeData::new(
         Height(100000),
-        sapling::tree::Node::from_bytes(incremental_tree.hash()),
+        sapling_crypto::Node::from_bytes(incremental_tree.hash()).unwrap(),
     );
 
     let serialized_subtree = subtree.as_bytes();
@@ -539,7 +539,7 @@ fn sapling_checks(
     );
 
     let deserialized_subtree =
-        NoteCommitmentSubtreeData::<sapling::tree::Node>::from_bytes(&serialized_subtree);
+        NoteCommitmentSubtreeData::<sapling_crypto::Node>::from_bytes(&serialized_subtree);
 
     assert_eq!(
         subtree, deserialized_subtree,

@@ -33,11 +33,11 @@ use zebra_chain::{
 /// The inbound and outbound connection limits are calculated from:
 ///
 /// The inbound limit is:
-/// `Config.peerset_initial_target_size * INBOUND_PEER_LIMIT_MULTIPLIER`.
+/// `crate::Config::peerset_initial_target_size * INBOUND_PEER_LIMIT_MULTIPLIER`.
 /// (This is similar to `zcashd`'s default inbound limit.)
 ///
 /// The outbound limit is:
-/// `Config.peerset_initial_target_size * OUTBOUND_PEER_LIMIT_MULTIPLIER`.
+/// `crate::Config::peerset_initial_target_size * OUTBOUND_PEER_LIMIT_MULTIPLIER`.
 /// (This is a bit larger than `zcashd`'s default outbound limit.)
 ///
 /// # Security

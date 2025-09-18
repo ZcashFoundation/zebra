@@ -2,8 +2,8 @@
 
 Zebra validates [settled network upgrades](https://zips.z.cash/protocol/protocol.pdf#blockchain) using a list of `Mainnet` and `Testnet` block hash checkpoints:
 
-- [Mainnet checkpoints](https://github.com/ZcashFoundation/zebra/blob/main/zebra-consensus/src/checkpoint/main-checkpoints.txt)
-- [Testnet checkpoints](https://github.com/ZcashFoundation/zebra/blob/main/zebra-consensus/src/checkpoint/test-checkpoints.txt)
+- [Mainnet checkpoints](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/parameters/checkpoint/main-checkpoints.txt)
+- [Testnet checkpoints](https://github.com/ZcashFoundation/zebra/blob/main/zebra-chain/src/parameters/checkpoint/test-checkpoints.txt)
 
 Using these checkpoints increases Zebra's security against some attacks.
 

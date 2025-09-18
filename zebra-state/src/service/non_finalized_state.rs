@@ -5,10 +5,12 @@
 use std::{
     collections::{BTreeSet, HashMap},
     mem,
+    path::PathBuf,
     sync::Arc,
 };
 
 use indexmap::IndexMap;
+use tokio::sync::watch;
 use zebra_chain::{
     block::{self, Block, Hash, Height},
     parameters::Network,
@@ -21,10 +23,14 @@ use crate::{
     error::ReconsiderError,
     request::{ContextuallyVerifiedBlock, FinalizableBlock},
     service::{check, finalized_state::ZebraDb},
-    BoxError, SemanticallyVerifiedBlock, ValidateContextError,
+    BoxError, SemanticallyVerifiedBlock, ValidateContextError, WatchReceiver,
 };
 
+mod backup;
 mod chain;
+
+#[cfg(test)]
+pub(crate) use backup::MIN_DURATION_BETWEEN_BACKUP_UPDATES;
 
 #[cfg(test)]
 mod tests;
@@ -121,6 +127,76 @@ impl NonFinalizedState {
             #[cfg(feature = "progress-bar")]
             chain_fork_length_bars: Vec::new(),
         }
+    }
+
+    /// Accepts an optional path to the non-finalized state backup directory and a handle to the database.
+    ///
+    /// If a backup directory path is provided:
+    /// - Creates a new backup directory at the provided path if none exists,
+    /// - Restores non-finalized blocks from the backup directory, if any, and
+    /// - Spawns a task that updates the non-finalized backup cache with
+    ///   the latest non-finalized state sent to the returned watch channel.
+    ///
+    /// Returns the non-finalized state with a watch channel sender and receiver.
+    pub async fn with_backup(
+        self,
+        backup_dir_path: Option<PathBuf>,
+        finalized_state: &ZebraDb,
+        should_restore_backup: bool,
+    ) -> (
+        Self,
+        watch::Sender<NonFinalizedState>,
+        WatchReceiver<NonFinalizedState>,
+    ) {
+        let with_watch_channel = |non_finalized_state: NonFinalizedState| {
+            let (sender, receiver) = watch::channel(non_finalized_state.clone());
+            (non_finalized_state, sender, WatchReceiver::new(receiver))
+        };
+
+        let Some(backup_dir_path) = backup_dir_path else {
+            return with_watch_channel(self);
+        };
+
+        tracing::info!(
+            ?backup_dir_path,
+            "restoring non-finalized blocks from backup and spawning backup task"
+        );
+
+        let non_finalized_state = {
+            let backup_dir_path = backup_dir_path.clone();
+            let finalized_state = finalized_state.clone();
+            tokio::task::spawn_blocking(move || {
+                // Create a new backup directory if none exists
+                std::fs::create_dir_all(&backup_dir_path)
+                    .expect("failed to create non-finalized state backup directory");
+
+                if should_restore_backup {
+                    backup::restore_backup(self, &backup_dir_path, &finalized_state)
+                } else {
+                    self
+                }
+            })
+            .await
+            .expect("failed to join blocking task")
+        };
+
+        let (non_finalized_state, sender, receiver) = with_watch_channel(non_finalized_state);
+
+        tokio::spawn(backup::run_backup_task(receiver.clone(), backup_dir_path));
+
+        if !non_finalized_state.is_chain_set_empty() {
+            let num_blocks_restored = non_finalized_state
+                .best_chain()
+                .expect("must have best chain if chain set is not empty")
+                .len();
+
+            tracing::info!(
+                ?num_blocks_restored,
+                "restored blocks from non-finalized backup cache"
+            );
+        }
+
+        (non_finalized_state, sender, receiver)
     }
 
     /// Is the internal state of `self` the same as `other`?
@@ -733,6 +809,11 @@ impl NonFinalizedState {
     /// Return the number of chains.
     pub fn chain_count(&self) -> usize {
         self.chain_set.len()
+    }
+
+    /// Returns true if this [`NonFinalizedState`] contains no chains.
+    pub fn is_chain_set_empty(&self) -> bool {
+        self.chain_count() == 0
     }
 
     /// Return the invalidated blocks.
