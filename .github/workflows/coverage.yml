@@ -41,12 +41,12 @@ jobs:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@ab6845274e2ff01cd4462007e1a9d9df1ab49f42 #v1.14.0
+      - uses: actions-rust-lang/setup-rust-toolchain@2fcdc490d667999e01ddbbf0f2823181beef6b39 #v1.15.0
         with:
           toolchain: stable
           components: llvm-tools-preview
           cache-on-failure: true
-      - uses: taiki-e/install-action@3ee5d63d29478156148c0b53e9f3447829b47bc2 #v2.58.23
+      - uses: taiki-e/install-action@056c0cf25f54702ec6dde8b9c8a0387b857627ab #v2.61.11
         with:
           tool: cargo-llvm-cov,nextest
       - name: Run coverage tests
@@ -63,7 +63,7 @@ jobs:
           PROPTEST_MAX_SHRINK_ITERS: 0
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@fdcc8476540edceab3de004e990f80d881c6cc00 #v5.5.0
+        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 #v5.5.1
         with:
           files: lcov.info
 
