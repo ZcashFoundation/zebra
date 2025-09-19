@@ -27,7 +27,7 @@ To find the latest checkpoints on the `main` branch:
 2. From the list on the left, go to the `Integration tests` and find the `Run checkpoints-mainnet test`, then click in the
    `Result of checkpoints-mainnet` step.
 3. Scroll down until you see the list of checkpoints.
-4. Add those checkpoints to the end of `zebra-consensus/src/checkpoint/main-checkpoints.txt`
+4. Add those checkpoints to the end of `zebra-chain/src/parameters/checkpoint/main-checkpoints.txt`
 5. Repeat steps 2 to 4 for `Generate checkpoints testnet`
 6. Open a pull request at https://github.com/ZcashFoundation/zebra/pulls
 
@@ -54,8 +54,8 @@ cargo install --locked --features zebra-checkpoints --git https://github.com/Zca
 
 You can update the checkpoints using these commands:
 ```sh
-zebra-checkpoints --last-checkpoint $(tail -1 zebra-consensus/src/checkpoint/main-checkpoints.txt | cut -d" " -f1) | tee --append zebra-consensus/src/checkpoint/main-checkpoints.txt &
-zebra-checkpoints --last-checkpoint $(tail -1 zebra-consensus/src/checkpoint/test-checkpoints.txt | cut -d" " -f1) -- -testnet | tee --append zebra-consensus/src/checkpoint/test-checkpoints.txt &
+zebra-checkpoints --last-checkpoint $(tail -1 zebra-chain/src/parameters/checkpoint/main-checkpoints.txt | cut -d" " -f1) | tee --append zebra-chain/src/parameters/checkpoint/main-checkpoints.txt &
+zebra-checkpoints --last-checkpoint $(tail -1 zebra-chain/src/parameters/checkpoint/test-checkpoints.txt | cut -d" " -f1) -- -testnet | tee --append zebra-chain/src/parameters/checkpoint/test-checkpoints.txt &
 wait
 ```
 
@@ -74,7 +74,7 @@ You can see all the `zebra-checkpoints` options using:
 target/release/zebra-checkpoints --help
 ```
 
-For more details about checkpoint lists, see the [`zebra-checkpoints` README.](https://github.com/ZcashFoundation/zebra/tree/main/zebra-consensus/src/checkpoint/README.md)
+For more details about checkpoint lists, see the [`zebra-checkpoints` README.](https://github.com/ZcashFoundation/zebra/tree/main/zebra-chain/src/parameters/checkpoint/README.md)
 
 #### Checkpoint Generation for Testnet
 

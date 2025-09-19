@@ -43,13 +43,6 @@
 [consensus]
 checkpoint_sync = true
 
-[health]
-enforce_on_test_networks = false
-min_connected_peers = 1
-min_request_interval = "100ms"
-ready_max_blocks_behind = 2
-ready_max_tip_age = "5m"
-
 [mempool]
 eviction_memory_time = "1h"
 tx_cost_limit = 80000000
@@ -73,10 +66,13 @@ initial_testnet_peers = [
     "testnet.seeder.zfnd.org:18233",
     "testnet.is.yolo.money:18233",
 ]
-listen_addr = "[::]:8233"
+listen_addr = "[::]:18233"
 max_connections_per_ip = 1
-network = "Mainnet"
+network = "Testnet"
 peerset_initial_target_size = 25
+
+[network.testnet_parameters]
+checkpoints = true
 
 [rpc]
 cookie_dir = "cache_dir"

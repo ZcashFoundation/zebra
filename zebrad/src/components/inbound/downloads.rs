@@ -64,7 +64,7 @@ pub enum DownloadAction {
     /// The queue is at capacity, so this request was ignored.
     ///
     /// The sync service should discover this block later, when we are closer
-    /// to the tip. The queue's capacity is [`Downloads.full_verify_concurrency_limit`].
+    /// to the tip. The queue's capacity is [`Downloads::full_verify_concurrency_limit`].
     FullQueue,
 }
 

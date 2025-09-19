@@ -6,7 +6,6 @@ use zebra_chain::{
     block::{Block, Height},
     orchard,
     parameters::Network::*,
-    sapling,
     serialization::ZcashDeserializeInto,
     subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
     transaction,
@@ -37,7 +36,8 @@ async fn empty_read_state_still_responds_to_requests() -> Result<()> {
     let transcript = Transcript::from(empty_state_test_cases());
 
     let network = Mainnet;
-    let (_state, read_state, _latest_chain_tip, _chain_tip_change) = init_test_services(&network);
+    let (_state, read_state, _latest_chain_tip, _chain_tip_change) =
+        init_test_services(&network).await;
 
     transcript.check(read_state).await?;
 
@@ -112,7 +112,7 @@ async fn test_read_subtrees() -> Result<()> {
         NoteCommitmentSubtree::new(
             u16::try_from(index).expect("should fit in u16"),
             Height(height),
-            sapling::tree::Node::default(),
+            sapling_crypto::Node::from_bytes([0; 32]).unwrap(),
         )
     };
 
@@ -205,7 +205,7 @@ async fn test_read_subtrees() -> Result<()> {
 /// non-finalized states correctly.
 #[tokio::test]
 async fn test_sapling_subtrees() -> Result<()> {
-    let dummy_subtree_root = sapling::tree::Node::default();
+    let dummy_subtree_root = sapling_crypto::Node::from_bytes([0; 32]).unwrap();
 
     // Prepare the finalized state.
     let db_subtree = NoteCommitmentSubtree::new(0, Height(1), dummy_subtree_root);

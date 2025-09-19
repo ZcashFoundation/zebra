@@ -139,6 +139,7 @@ use std::{
     collections::HashSet,
     env, fs, panic,
     path::PathBuf,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -146,6 +147,7 @@ use color_eyre::{
     eyre::{eyre, WrapErr},
     Help,
 };
+use futures::{stream::FuturesUnordered, StreamExt};
 use semver::Version;
 use serde_json::Value;
 use tower::ServiceExt;
@@ -155,12 +157,11 @@ use zcash_keys::address::Address;
 use zebra_chain::{
     block::{self, genesis::regtest_genesis_block, ChainHistoryBlockTxAuthCommitmentHash, Height},
     parameters::{
-        testnet::ConfiguredActivationHeights,
+        testnet::{ConfiguredActivationHeights, ConfiguredCheckpoints, RegtestParameters},
         Network::{self, *},
         NetworkUpgrade,
     },
 };
-use zebra_consensus::ParameterCheckpoint;
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::{
     client::{
@@ -208,6 +209,8 @@ use common::{
     },
     test_type::TestType::{self, *},
 };
+
+use crate::common::regtest::MiningRpcMethods;
 
 /// The maximum amount of time that we allow the creation of a future to block the `tokio` executor.
 ///
@@ -385,12 +388,18 @@ async fn db_init_outside_future_executor() -> Result<()> {
     let start = Instant::now();
 
     // This test doesn't need UTXOs to be verified efficiently, because it uses an empty state.
-    let db_init_handle = zebra_state::spawn_init(
-        config.state.clone(),
-        &config.network.network,
-        Height::MAX,
-        0,
-    );
+    let db_init_handle = {
+        let config = config.clone();
+        tokio::spawn(async move {
+            zebra_state::init(
+                config.state.clone(),
+                &config.network.network,
+                Height::MAX,
+                0,
+            )
+            .await
+        })
+    };
 
     // it's faster to panic if it takes longer than expected, since the executor
     // will wait indefinitely for blocking operation to finish once started
@@ -2924,7 +2933,7 @@ async fn validate_regtest_genesis_block() {
     let _init_guard = zebra_test::init();
 
     let network = Network::new_regtest(Default::default());
-    let state = zebra_state::init_test(&network);
+    let state = zebra_state::init_test(&network).await;
     let (
         block_verifier_router,
         _transaction_verifier,
@@ -3301,6 +3310,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     let base_network_params = testnet::Parameters::build()
         // Regtest genesis hash
         .with_genesis_hash("029f11d80ef9765602235e1bc9727e3eb6ba20839319f761fee920d63401e327")
+        .with_checkpoints(false)
         .with_target_difficulty_limit(U256::from_big_endian(&[0x0f; 32]))
         .with_disable_pow(true)
         .with_slow_start_interval(Height::MIN)
@@ -3333,7 +3343,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     .expect("configured mining address should be valid");
 
     let (state, read_state, latest_chain_tip, _chain_tip_change) =
-        zebra_state::init_test_services(&network);
+        zebra_state::init_test_services(&network).await;
 
     let (
         block_verifier_router,
@@ -3868,6 +3878,164 @@ fn check_no_git_dependencies() {
     if cargo_lock_contents.contains(r#"source = "git+"#) {
         panic!("Cargo.lock includes git sources")
     }
+}
+
+#[tokio::test]
+async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
+    let network = Network::new_regtest(Default::default());
+
+    let mut config = os_assigned_rpc_port_config(false, &network)?;
+    config.state.ephemeral = false;
+    let test_dir = testdir()?.with_config(&mut config)?;
+
+    // Start Zebra and generate some blocks.
+
+    tracing::info!("starting Zebra and generating some blocks");
+    let mut child = test_dir.spawn_child(args!["start"])?;
+    // Avoid dropping the test directory and cleanup of the state cache needed by the next zebrad instance.
+    let test_dir = child.dir.take().expect("should have test directory");
+    let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
+    // Wait for Zebra to load its state cache
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    let rpc_client = RpcRequestClient::new(rpc_address);
+    let generated_block_hashes = rpc_client.generate(50).await?;
+    // Wait for non-finalized backup task to make a second write to the backup cache
+    tokio::time::sleep(Duration::from_secs(6)).await;
+
+    child.kill(true)?;
+    // Wait for Zebra to shut down.
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    // Prepare checkpoint heights/hashes
+    let last_hash = *generated_block_hashes
+        .last()
+        .expect("should have at least one block hash");
+    let configured_checkpoints = ConfiguredCheckpoints::HeightsAndHashes(vec![
+        (Height(0), network.genesis_hash()),
+        (Height(50), last_hash),
+    ]);
+
+    // Check that Zebra will restore its non-finalized state from backup when the finalized tip is past the
+    // max checkpoint height and that it can still commit more blocks to its state.
+
+    tracing::info!("restarting Zebra to check that non-finalized state is restored");
+    let mut child = test_dir.spawn_child(args!["start"])?;
+    let test_dir = child.dir.take().expect("should have test directory");
+    let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
+    let rpc_client = RpcRequestClient::new(rpc_address);
+
+    // Wait for Zebra to load its state cache
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    let blockchain_info = rpc_client.blockchain_info().await?;
+    tracing::info!(
+        ?blockchain_info,
+        "got blockchain info after restarting Zebra"
+    );
+
+    assert_eq!(
+        blockchain_info.best_block_hash(),
+        last_hash,
+        "tip block hash should match tip hash of previous zebrad instance"
+    );
+
+    tracing::info!("checking that Zebra can commit blocks after restoring non-finalized state");
+    rpc_client
+        .generate(10)
+        .await
+        .expect("should successfully commit more blocks to the state");
+
+    tracing::info!("retrieving blocks to be used with configured checkpoints");
+    let checkpointed_blocks = {
+        let mut blocks = Vec::new();
+        for height in 1..=50 {
+            blocks.push(
+                rpc_client
+                    .get_block(height)
+                    .await
+                    .map_err(|err| eyre!(err))?
+                    .expect("should have block at height"),
+            )
+        }
+        blocks
+    };
+
+    tracing::info!(
+        "restarting Zebra to check that non-finalized state is _not_ restored when \
+         the finalized tip is below the max checkpoint height"
+    );
+    child.kill(true)?;
+    // Wait for Zebra to shut down.
+    tokio::time::sleep(Duration::from_secs(3)).await;
+
+    // Check that the non-finalized state is not restored from backup when the finalized tip height is below the
+    // max checkpoint height and that it can still commit more blocks to its state
+
+    tracing::info!("restarting Zebra with configured checkpoints to check that non-finalized state is not restored");
+    let network = Network::new_regtest(RegtestParameters {
+        checkpoints: Some(configured_checkpoints),
+        ..Default::default()
+    });
+    let mut config = os_assigned_rpc_port_config(false, &network)?;
+    config.state.ephemeral = false;
+    let mut child = test_dir
+        .with_config(&mut config)?
+        .spawn_child(args!["start"])?;
+    let test_dir = child.dir.take().expect("should have test directory");
+    let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
+    // Wait for Zebra to load its state cache
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    let rpc_client = RpcRequestClient::new(rpc_address);
+
+    assert_eq!(
+        rpc_client.blockchain_info().await?.best_block_hash(),
+        network.genesis_hash(),
+        "Zebra should not restore blocks from non-finalized backup if \
+         its finalized tip is below the max checkpoint height"
+    );
+
+    let mut submit_block_futs: FuturesUnordered<_> = checkpointed_blocks
+        .into_iter()
+        .map(Arc::unwrap_or_clone)
+        .map(|block| rpc_client.submit_block(block))
+        .collect();
+
+    while let Some(result) = submit_block_futs.next().await {
+        result?
+    }
+
+    // Commit some blocks to check that Zebra's state will still commit blocks, and generate enough blocks
+    // for Zebra's finalized tip to pass the max checkpoint height.
+
+    rpc_client
+        .generate(200)
+        .await
+        .expect("should successfully commit more blocks to the state");
+
+    child.kill(true)?;
+
+    // Check that Zebra will can commit blocks to its state when its finalized tip is past the max checkpoint height
+    // and the non-finalized backup cache is disabled or empty.
+
+    tracing::info!(
+        "restarting Zebra to check that blocks are committed when the non-finalized state \
+         is initially empty and the finalized tip is past the max checkpoint height"
+    );
+    config.state.should_backup_non_finalized_state = false;
+    let mut child = test_dir
+        .with_config(&mut config)?
+        .spawn_child(args!["start"])?;
+    let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
+    let rpc_client = RpcRequestClient::new(rpc_address);
+
+    // Wait for Zebra to load its state cache
+    tokio::time::sleep(Duration::from_secs(5)).await;
+
+    tracing::info!("checking that Zebra commits blocks with empty non-finalized state");
+    rpc_client
+        .generate(10)
+        .await
+        .expect("should successfully commit more blocks to the state");
+
+    child.kill(true)
 }
 
 // /// Check that Zebra will disconnect from misbehaving peers.

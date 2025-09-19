@@ -31,7 +31,6 @@ use zebra_chain::{
         Network::{self, Mainnet},
         NetworkKind, NetworkUpgrade,
     },
-    sapling,
     serialization::{DateTime32, ZcashDeserializeInto},
     subtree::NoteCommitmentSubtreeData,
     transaction::Transaction,
@@ -292,7 +291,7 @@ async fn test_rpc_response_data_for_network(network: &Network) {
 
     // `getaddressbalance`
     let get_address_balance = rpc
-        .get_address_balance(AddressStrings {
+        .get_address_balance(GetAddressBalanceRequest {
             addresses: addresses.clone(),
         })
         .await
@@ -545,60 +544,63 @@ async fn test_rpc_response_data_for_network(network: &Network) {
 
     // `getaddresstxids`
     let get_address_tx_ids = rpc
-        .get_address_tx_ids(GetAddressTxIdsParams::Object(GetAddressTxIdsRequest {
+        .get_address_tx_ids(GetAddressTxIdsRequest {
             addresses: addresses.clone(),
             start: Some(1),
             end: Some(10),
-        }))
+        })
         .await
         .expect("We should have a vector of strings");
     snapshot_rpc_getaddresstxids_valid("multi_block", get_address_tx_ids, &settings);
 
     let get_address_tx_ids = rpc
-        .get_address_tx_ids(GetAddressTxIdsParams::Object(GetAddressTxIdsRequest {
+        .get_address_tx_ids(GetAddressTxIdsRequest {
             addresses: addresses.clone(),
             start: Some(2),
             end: Some(2),
-        }))
+        })
         .await
         .expect("We should have a vector of strings");
     snapshot_rpc_getaddresstxids_valid("single_block", get_address_tx_ids, &settings);
 
     let get_address_tx_ids = rpc
-        .get_address_tx_ids(GetAddressTxIdsParams::Object(GetAddressTxIdsRequest {
+        .get_address_tx_ids(GetAddressTxIdsRequest {
             addresses: addresses.clone(),
             start: Some(3),
             end: Some(EXCESSIVE_BLOCK_HEIGHT),
-        }))
+        })
         .await
         .expect("We should have a vector of strings");
     snapshot_rpc_getaddresstxids_valid("excessive_end", get_address_tx_ids, &settings);
 
     let get_address_tx_ids = rpc
-        .get_address_tx_ids(GetAddressTxIdsParams::Object(GetAddressTxIdsRequest {
+        .get_address_tx_ids(GetAddressTxIdsRequest {
             addresses: addresses.clone(),
             start: Some(EXCESSIVE_BLOCK_HEIGHT),
             end: Some(EXCESSIVE_BLOCK_HEIGHT + 1),
-        }))
+        })
         .await
         .expect("We should have a vector of strings");
     snapshot_rpc_getaddresstxids_valid("excessive_start", get_address_tx_ids, &settings);
 
     let get_address_tx_ids = rpc
-        .get_address_tx_ids(GetAddressTxIdsParams::Object(GetAddressTxIdsRequest {
+        .get_address_tx_ids(GetAddressTxIdsRequest {
             addresses: addresses.clone(),
             start: Some(2),
             end: Some(1),
-        }))
+        })
         .await;
     snapshot_rpc_getaddresstxids_invalid("end_greater_start", get_address_tx_ids, &settings);
 
     // `getaddressutxos`
     let get_address_utxos = rpc
-        .get_address_utxos(AddressStrings { addresses })
+        .get_address_utxos(GetAddressUtxosRequest::new(addresses, false))
         .await
         .expect("We should have a vector of strings");
-    snapshot_rpc_getaddressutxos(get_address_utxos, &settings);
+    let GetAddressUtxosResponse::Utxos(addresses) = get_address_utxos else {
+        panic!("We should have a GetAddressUtxosResponse::ChainInfoFalse struct");
+    };
+    snapshot_rpc_getaddressutxos(addresses, &settings);
 }
 
 async fn test_mocked_rpc_response_data_for_network(network: &Network) {
@@ -633,7 +635,7 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
 
     // Mock the data for the response.
     let mut subtrees = BTreeMap::new();
-    let subtree_root = sapling::tree::Node::default();
+    let subtree_root = sapling_crypto::Node::from_bytes([0; 32]).unwrap();
 
     for i in 0..2u16 {
         let subtree = NoteCommitmentSubtreeData::new(Height(i.into()), subtree_root);

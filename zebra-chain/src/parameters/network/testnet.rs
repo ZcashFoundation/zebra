@@ -5,6 +5,7 @@ use crate::{
     amount::{Amount, NonNegative},
     block::{self, Height, HeightDiff},
     parameters::{
+        checkpoint::list::{CheckpointList, TESTNET_CHECKPOINTS},
         constants::{magics, SLOW_START_INTERVAL, SLOW_START_SHIFT},
         network_upgrade::TESTNET_ACTIVATION_HEIGHTS,
         subsidy::{
@@ -375,6 +376,37 @@ impl ConfiguredActivationHeights {
     }
 }
 
+/// Configurable checkpoints, either a path to a checkpoints file, a "default" keyword to indicate
+/// that Zebra should use the default Testnet checkpoints, or a list of block heights and hashes.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+pub enum ConfiguredCheckpoints {
+    /// A boolean indicating whether Zebra should use the default Testnet checkpoints.
+    Default(bool),
+    /// A path to a checkpoints file to be used as Zebra's checkpoints.
+    Path(std::path::PathBuf),
+    /// Directly configured block heights and hashes to be used as Zebra's checkpoints.
+    HeightsAndHashes(Vec<(block::Height, block::Hash)>),
+}
+
+impl Default for ConfiguredCheckpoints {
+    fn default() -> Self {
+        Self::Default(false)
+    }
+}
+
+impl From<Arc<CheckpointList>> for ConfiguredCheckpoints {
+    fn from(value: Arc<CheckpointList>) -> Self {
+        Self::HeightsAndHashes(value.iter_cloned().collect())
+    }
+}
+
+impl From<bool> for ConfiguredCheckpoints {
+    fn from(value: bool) -> Self {
+        Self::Default(value)
+    }
+}
+
 /// Builder for the [`Parameters`] struct.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParametersBuilder {
@@ -406,6 +438,8 @@ pub struct ParametersBuilder {
     post_blossom_halving_interval: HeightDiff,
     /// Expected one-time lockbox disbursement outputs in NU6.1 activation block coinbase for this network
     lockbox_disbursements: Vec<(String, Amount<NonNegative>)>,
+    /// Checkpointed block hashes and heights for this network.
+    checkpoints: Arc<CheckpointList>,
 }
 
 impl Default for ParametersBuilder {
@@ -441,6 +475,10 @@ impl Default for ParametersBuilder {
                 .iter()
                 .map(|(addr, amount)| (addr.to_string(), *amount))
                 .collect(),
+            checkpoints: TESTNET_CHECKPOINTS
+                .parse()
+                .map(Arc::new)
+                .expect("must be able to parse checkpoints"),
         }
     }
 }
@@ -681,6 +719,33 @@ impl ParametersBuilder {
         self
     }
 
+    /// Sets the checkpoints for the network as the provided [`ConfiguredCheckpoints`].
+    pub fn with_checkpoints(mut self, checkpoints: impl Into<ConfiguredCheckpoints>) -> Self {
+        self.checkpoints = Arc::new(match checkpoints.into() {
+            ConfiguredCheckpoints::Default(true) => TESTNET_CHECKPOINTS
+                .parse()
+                .expect("checkpoints file format must be valid"),
+            ConfiguredCheckpoints::Default(false) => {
+                CheckpointList::from_list([(block::Height(0), self.genesis_hash)])
+                    .expect("must parse checkpoints")
+            }
+            ConfiguredCheckpoints::Path(path_buf) => {
+                let Ok(raw_checkpoints_str) = std::fs::read_to_string(&path_buf) else {
+                    panic!("could not read file at configured checkpoints file path: {path_buf:?}");
+                };
+
+                raw_checkpoints_str.parse().unwrap_or_else(|err| {
+                    panic!("could not parse checkpoints at the provided path: {path_buf:?}, err: {err}")
+                })
+            }
+            ConfiguredCheckpoints::HeightsAndHashes(items) => {
+                CheckpointList::from_list(items).expect("configured checkpoints must be valid")
+            }
+        });
+
+        self
+    }
+
     /// Converts the builder to a [`Parameters`] struct
     fn finish(self) -> Parameters {
         let Self {
@@ -697,6 +762,7 @@ impl ParametersBuilder {
             pre_blossom_halving_interval,
             post_blossom_halving_interval,
             lockbox_disbursements,
+            checkpoints,
         } = self;
         Parameters {
             network_name,
@@ -712,6 +778,7 @@ impl ParametersBuilder {
             pre_blossom_halving_interval,
             post_blossom_halving_interval,
             lockbox_disbursements,
+            checkpoints,
         }
     }
 
@@ -729,6 +796,17 @@ impl ParametersBuilder {
             // Check that the funding streams are valid for the configured Testnet parameters.
             check_funding_stream_address_period(fs, &network);
         }
+
+        // Final check that the configured checkpoints are valid for this network.
+        assert_eq!(
+            network.checkpoint_list().hash(Height(0)),
+            Some(network.genesis_hash()),
+            "first checkpoint hash must match genesis hash"
+        );
+        assert!(
+            network.checkpoint_list().max_height() >= network.mandatory_checkpoint_height(),
+            "checkpoints must be provided for block heights below the mandatory checkpoint height"
+        );
 
         network
     }
@@ -749,6 +827,7 @@ impl ParametersBuilder {
             pre_blossom_halving_interval,
             post_blossom_halving_interval,
             lockbox_disbursements,
+            checkpoints: _,
         } = Self::default();
 
         self.activation_heights == activation_heights
@@ -775,6 +854,8 @@ pub struct RegtestParameters {
     pub funding_streams: Option<Vec<ConfiguredFundingStreams>>,
     /// Expected one-time lockbox disbursement outputs in NU6.1 activation block coinbase for Regtest
     pub lockbox_disbursements: Option<Vec<ConfiguredLockboxDisbursement>>,
+    /// Configured checkpointed block heights and hashes.
+    pub checkpoints: Option<ConfiguredCheckpoints>,
 }
 
 impl From<ConfiguredActivationHeights> for RegtestParameters {
@@ -816,6 +897,8 @@ pub struct Parameters {
     post_blossom_halving_interval: HeightDiff,
     /// Expected one-time lockbox disbursement outputs in NU6.1 activation block coinbase for this network
     lockbox_disbursements: Vec<(String, Amount<NonNegative>)>,
+    /// List of checkpointed block heights and hashes
+    checkpoints: Arc<CheckpointList>,
 }
 
 impl Default for Parameters {
@@ -842,6 +925,7 @@ impl Parameters {
             activation_heights,
             funding_streams,
             lockbox_disbursements,
+            checkpoints,
         }: RegtestParameters,
     ) -> Self {
         let parameters = Self::build()
@@ -856,7 +940,8 @@ impl Parameters {
             .with_activation_heights(activation_heights.for_regtest())
             .with_halving_interval(PRE_BLOSSOM_REGTEST_HALVING_INTERVAL)
             .with_funding_streams(funding_streams.unwrap_or_default())
-            .with_lockbox_disbursements(lockbox_disbursements.unwrap_or_default());
+            .with_lockbox_disbursements(lockbox_disbursements.unwrap_or_default())
+            .with_checkpoints(checkpoints.unwrap_or_default());
 
         Self {
             network_name: "Regtest".to_string(),
@@ -892,6 +977,7 @@ impl Parameters {
             pre_blossom_halving_interval,
             post_blossom_halving_interval,
             lockbox_disbursements: _,
+            checkpoints: _,
         } = Self::new_regtest(Default::default());
 
         self.network_name == network_name
@@ -987,6 +1073,11 @@ impl Parameters {
                 )
             })
             .collect()
+    }
+
+    /// Returns the checkpoints for this network.
+    pub fn checkpoints(&self) -> Arc<CheckpointList> {
+        self.checkpoints.clone()
     }
 }
 

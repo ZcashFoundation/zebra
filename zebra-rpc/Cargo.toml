@@ -86,6 +86,8 @@ zcash_primitives = { workspace = true, features = ["transparent-inputs"] }
 zcash_protocol = { workspace = true }
 zcash_transparent = { workspace = true }
 
+sapling-crypto = { workspace = true }
+
 # Test-only feature proptest-impl
 proptest = { workspace = true, optional = true }
 

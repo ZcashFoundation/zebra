@@ -286,7 +286,7 @@ pub enum ValidateContextError {
         transaction_hash: transaction::Hash,
     },
 
-    #[error("block hash {block_hash} has already been sent to be commited to the state")]
+    #[error("block hash {block_hash} has already been sent to be committed to the state")]
     #[non_exhaustive]
     DuplicateCommitRequest { block_hash: block::Hash },
 

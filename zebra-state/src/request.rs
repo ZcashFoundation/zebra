@@ -331,7 +331,7 @@ impl Treestate {
         sprout: Arc<sprout::tree::NoteCommitmentTree>,
         sapling: Arc<sapling::tree::NoteCommitmentTree>,
         orchard: Arc<orchard::tree::NoteCommitmentTree>,
-        sapling_subtree: Option<NoteCommitmentSubtree<sapling::tree::Node>>,
+        sapling_subtree: Option<NoteCommitmentSubtree<sapling_crypto::Node>>,
         orchard_subtree: Option<NoteCommitmentSubtree<orchard::tree::Node>>,
         history_tree: Arc<HistoryTree>,
     ) -> Self {
