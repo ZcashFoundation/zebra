@@ -44,6 +44,10 @@ jobs:
           mdbook-version: ~0.4
           use-linkcheck: true
           use-mermaid: true
+      - name: Install last version of Protoc
+        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3.0.0
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions-rust-lang/setup-rust-toolchain@ab6845274e2ff01cd4462007e1a9d9df1ab49f42 #v1.14.0
         with:
           toolchain: nightly

@@ -16,6 +16,8 @@ on:
 
 permissions:
   contents: read
+  id-token: write
+  pull-requests: write
 
 jobs:
   # The image will be named `zebra:<semver>`

@@ -105,7 +105,9 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
+  pull-requests: write
+  id-token: write
+  statuses: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -128,9 +130,6 @@ jobs:
     name: Build CI Docker
     # Skip PRs from external repositories, let them pass, and then GitHub's Merge Queue will check them
     if: ${{ (!startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork) && (github.event_name != 'pull_request' || github.event.label.name == 'run-stateful-tests') }}
-    permissions:
-      id-token: write
-      statuses: write
     uses: ./.github/workflows/zfnd-build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile
