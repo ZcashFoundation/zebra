@@ -84,7 +84,9 @@ use zebra_chain::{
 use zebra_consensus::{funding_stream_address, RouterError};
 use zebra_network::{address_book_peers::AddressBookPeers, PeerSocketAddr};
 use zebra_node_services::mempool;
-use zebra_state::{HashOrHeight, OutputLocation, ReadRequest, ReadResponse, TransactionLocation};
+use zebra_state::{
+    AnyTx, HashOrHeight, OutputLocation, ReadRequest, ReadResponse, TransactionLocation,
+};
 
 use crate::{
     client::Treestate,
@@ -1769,31 +1771,33 @@ where
             };
         }
 
-        // TODO: this should work for blocks in side chains
         let txid = if let Some(block_hash) = block_hash {
             let block_hash = block::Hash::from_hex(block_hash)
                 .map_error(server::error::LegacyCode::InvalidAddressOrKey)?;
             match self
                 .read_state
                 .clone()
-                .oneshot(zebra_state::ReadRequest::TransactionIdsForBlock(
+                .oneshot(zebra_state::ReadRequest::AnyChainTransactionIdsForBlock(
                     block_hash.into(),
                 ))
                 .await
                 .map_misc_error()?
             {
-                zebra_state::ReadResponse::TransactionIdsForBlock(tx_ids) => *tx_ids
+                zebra_state::ReadResponse::AnyChainTransactionIdsForBlock(tx_ids) => *tx_ids
                     .ok_or_error(
                         server::error::LegacyCode::InvalidAddressOrKey,
                         "block not found",
                     )?
+                    .0
                     .iter()
                     .find(|id| **id == txid)
                     .ok_or_error(
                         server::error::LegacyCode::InvalidAddressOrKey,
                         "txid not found",
                     )?,
-                _ => unreachable!("unmatched response to a `TransactionsByMinedId` request"),
+                _ => {
+                    unreachable!("unmatched response to a `AnyChainTransactionIdsForBlock` request")
+                }
             }
         } else {
             txid
@@ -1803,40 +1807,63 @@ where
         match self
             .read_state
             .clone()
-            .oneshot(zebra_state::ReadRequest::Transaction(txid))
+            .oneshot(zebra_state::ReadRequest::AnyChainTransaction(txid))
             .await
             .map_misc_error()?
         {
-            zebra_state::ReadResponse::Transaction(Some(tx)) => Ok(if verbose {
-                let block_hash = match self
-                    .read_state
-                    .clone()
-                    .oneshot(zebra_state::ReadRequest::BestChainBlockHash(tx.height))
-                    .await
-                    .map_misc_error()?
-                {
-                    zebra_state::ReadResponse::BlockHash(block_hash) => block_hash,
-                    _ => unreachable!("unmatched response to a `TransactionsByMinedId` request"),
-                };
+            zebra_state::ReadResponse::AnyChainTransaction(Some(tx)) => Ok(if verbose {
+                match tx {
+                    AnyTx::Mined(tx) => {
+                        let block_hash = match self
+                            .read_state
+                            .clone()
+                            .oneshot(zebra_state::ReadRequest::BestChainBlockHash(tx.height))
+                            .await
+                            .map_misc_error()?
+                        {
+                            zebra_state::ReadResponse::BlockHash(block_hash) => block_hash,
+                            _ => unreachable!(
+                                "unmatched response to a `AnyChainTransaction` request"
+                            ),
+                        };
 
-                GetRawTransactionResponse::Object(Box::new(TransactionObject::from_transaction(
-                    tx.tx.clone(),
-                    Some(tx.height),
-                    Some(tx.confirmations),
-                    &self.network,
-                    // TODO: Performance gain:
-                    // https://github.com/ZcashFoundation/zebra/pull/9458#discussion_r2059352752
-                    Some(tx.block_time),
-                    block_hash,
-                    Some(true),
-                    txid,
-                )))
+                        GetRawTransactionResponse::Object(Box::new(
+                            TransactionObject::from_transaction(
+                                tx.tx.clone(),
+                                Some(tx.height),
+                                Some(tx.confirmations),
+                                &self.network,
+                                // TODO: Performance gain:
+                                // https://github.com/ZcashFoundation/zebra/pull/9458#discussion_r2059352752
+                                Some(tx.block_time),
+                                block_hash,
+                                Some(true),
+                                txid,
+                            ),
+                        ))
+                    }
+                    AnyTx::Side(tx) => GetRawTransactionResponse::Object(Box::new(
+                        TransactionObject::from_transaction(
+                            tx.clone(),
+                            None,
+                            None,
+                            &self.network,
+                            None,
+                            None,
+                            Some(false),
+                            txid,
+                        ),
+                    )),
+                }
             } else {
-                let hex = tx.tx.into();
+                let hex = match tx {
+                    AnyTx::Mined(mined_tx) => mined_tx.tx.into(),
+                    AnyTx::Side(transaction) => transaction.into(),
+                };
                 GetRawTransactionResponse::Raw(hex)
             }),
 
-            zebra_state::ReadResponse::Transaction(None) => {
+            zebra_state::ReadResponse::AnyChainTransaction(None) => {
                 Err("No such mempool or main chain transaction")
                     .map_error(server::error::LegacyCode::InvalidAddressOrKey)
             }

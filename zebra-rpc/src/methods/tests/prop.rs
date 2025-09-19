@@ -345,8 +345,8 @@ proptest! {
                 .map_ok(|r| r.respond(mempool::Response::Transactions(vec![])));
 
             let state_query = state
-                .expect_request(zebra_state::ReadRequest::Transaction(unknown_txid))
-                .map_ok(|r| r.respond(zebra_state::ReadResponse::Transaction(None)));
+                .expect_request(zebra_state::ReadRequest::AnyChainTransaction(unknown_txid))
+                .map_ok(|r| r.respond(zebra_state::ReadResponse::AnyChainTransaction(None)));
 
             let rpc_query = rpc.get_raw_transaction(unknown_txid.encode_hex(), Some(1), None);
 
