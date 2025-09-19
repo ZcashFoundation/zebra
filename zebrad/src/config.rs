@@ -81,7 +81,7 @@ pub struct ZebradConfig {
     /// Health check HTTP server configuration.
     ///
     /// See the Zebra Book for details and examples:
-    /// https://zebra.zfnd.org/user/health.html
+    /// <https://zebra.zfnd.org/user/health.html>
     pub health: crate::components::health::Config,
 }
 
