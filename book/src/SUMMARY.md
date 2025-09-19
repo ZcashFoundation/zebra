@@ -11,6 +11,7 @@
   - [Zebra with Docker](user/docker.md)
   - [Tracing Zebra](user/tracing.md)
   - [Zebra Metrics](user/metrics.md)
+  - [Zebra Health Endpoints](user/health.md)
   - [Lightwalletd](user/lightwalletd.md)
   - [zk-SNARK Parameters](user/parameters.md)
   - [Mining](user/mining.md)

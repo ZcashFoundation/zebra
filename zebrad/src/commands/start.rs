@@ -89,6 +89,7 @@ use zebra_rpc::{methods::RpcImpl, server::RpcServer, SubmitBlockChannel};
 use crate::{
     application::{build_version, user_agent, LAST_WARN_ERROR_LOG_SENDER},
     components::{
+        health,
         inbound::{self, InboundSetupData, MAX_INBOUND_RESPONSE_TIME},
         mempool::{self, Mempool},
         sync::{self, show_block_chain_progress, VERIFICATION_PIPELINE_SCALING_MULTIPLIER},
@@ -181,6 +182,8 @@ impl StartCmd {
         )
         .await;
 
+        // Start health server if configured (after sync_status is available)
+
         info!("initializing verifiers");
         let (tx_verifier_setup_tx, tx_verifier_setup_rx) = oneshot::channel();
         let (block_verifier_router, tx_verifier, consensus_task_handles, max_checkpoint_height) =
@@ -202,6 +205,17 @@ impl StartCmd {
             latest_chain_tip.clone(),
             misbehavior_sender.clone(),
         );
+
+        // Start health server if configured
+        info!("initializing health endpoints");
+        let (health_task_handle, _health_addr) = health::init(
+            config.health.clone(),
+            config.network.network.clone(),
+            latest_chain_tip.clone(),
+            sync_status.clone(),
+            address_book.clone(),
+        )
+        .await;
 
         info!("initializing mempool");
         let (mempool, mempool_transaction_subscriber) = Mempool::new(
@@ -522,6 +536,7 @@ impl StartCmd {
         // ongoing tasks
         rpc_task_handle.abort();
         rpc_tx_queue_handle.abort();
+        health_task_handle.abort();
         syncer_task_handle.abort();
         block_gossip_task_handle.abort();
         mempool_crawler_task_handle.abort();
