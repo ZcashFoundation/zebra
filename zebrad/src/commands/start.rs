@@ -89,6 +89,7 @@ use zebra_rpc::{methods::RpcImpl, server::RpcServer, SubmitBlockChannel};
 use crate::{
     application::{build_version, user_agent, LAST_WARN_ERROR_LOG_SENDER},
     components::{
+        health,
         inbound::{self, InboundSetupData, MAX_INBOUND_RESPONSE_TIME},
         mempool::{self, Mempool},
         sync::{self, show_block_chain_progress, VERIFICATION_PIPELINE_SCALING_MULTIPLIER},
@@ -207,7 +208,7 @@ impl StartCmd {
 
         // Start health server if configured
         info!("initializing health endpoints");
-        let (health_task_handle, _health_addr) = crate::components::health::init(
+        let (health_task_handle, _health_addr) = health::init(
             config.health.clone(),
             config.network.network.clone(),
             latest_chain_tip.clone(),
