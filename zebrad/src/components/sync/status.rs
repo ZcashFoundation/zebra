@@ -65,6 +65,13 @@ impl ChainSyncStatus for SyncStatus {
             .iter()
             .fold(0usize, |sum, rhs| sum.saturating_add(*rhs));
 
+        // If every recent batch is empty, Zebra has likely lost every peer and is
+        // no longer making progress. Treat this the same as "still syncing" so we
+        // don't falsely advertise readiness after a network outage (issue #4649).
+        if sum == 0 {
+            return false;
+        }
+
         // Compute the average sync length.
         // This value effectively represents a simple moving average.
         let avg = sum / sync_lengths.len();
