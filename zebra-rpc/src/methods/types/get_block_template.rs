@@ -118,7 +118,7 @@ pub struct BlockTemplateResponse {
     #[getter(copy)]
     pub(crate) final_sapling_root_hash: ChainHistoryBlockTxAuthCommitmentHash,
 
-    /// The block header roots for [`BlockTemplateResponse::transactions`].
+    /// The block header roots for the transactions in the block template.
     ///
     /// If the transactions in the block template are modified, these roots must be recalculated
     /// [according to the specification](https://zcash.github.io/rpc/getblocktemplate.html).

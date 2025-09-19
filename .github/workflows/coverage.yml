@@ -1,0 +1,80 @@
+name: Coverage
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/*.rs"
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - .config/nextest.toml
+      - codecov.yml
+      - .github/workflows/coverage.yml
+
+# Ensures that only one workflow task will run at a time. Previous builds, if
+# already in process, will get cancelled. Only the latest commit will be allowed
+# to run, cancelling any workflows in between
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  RUST_LIB_BACKTRACE: 1
+  RUST_LOG: info
+  COLORBT_SHOW_HIDDEN: 1
+
+jobs:
+  coverage:
+    permissions:
+      id-token: write
+      statuses: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+        with:
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@ab6845274e2ff01cd4462007e1a9d9df1ab49f42 #v1.14.0
+        with:
+          toolchain: stable
+          components: llvm-tools-preview
+          cache-on-failure: true
+      - uses: taiki-e/install-action@3ee5d63d29478156148c0b53e9f3447829b47bc2 #v2.58.23
+        with:
+          tool: cargo-llvm-cov,nextest
+      - name: Run coverage tests
+        run: |
+          cargo llvm-cov --no-report nextest
+          # TODO: Do we need --locked --release --features "default-release-binaries" here?
+          cargo llvm-cov report --lcov --output-path lcov.info
+        env:
+          TEST_LARGE_CHECKPOINTS: 1
+          # We set cases to 1, because some tests already run 1 case by default.
+          # We set maximum shrink iterations to 0, because we don't expect failures in coverage tests.
+          # Coverage tests are much slower than other tests, particularly in hot loops.
+          PROPTEST_CASES: 1
+          PROPTEST_MAX_SHRINK_ITERS: 0
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@fdcc8476540edceab3de004e990f80d881c6cc00 #v5.5.0
+        with:
+          files: lcov.info
+
+  coverage-success:
+    name: coverage success
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - coverage
+    steps:
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe #v1.2.2
+        with:
+          jobs: ${{ toJSON(needs) }}

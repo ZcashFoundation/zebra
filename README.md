@@ -2,16 +2,19 @@
 
 ---
 
-[![Integration Tests](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-tests.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-tests.yml)
-[![CI OSes](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-unit-tests-os.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-unit-tests-os.yml)
-[![Continuous Delivery](https://github.com/ZcashFoundation/zebra/actions/workflows/cd-deploy-nodes-gcp.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/cd-deploy-nodes-gcp.yml)
+[![Unit Tests](https://github.com/ZcashFoundation/zebra/actions/workflows/tests-unit.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/tests-unit.yml)
+[![Lint](https://github.com/ZcashFoundation/zebra/actions/workflows/lint.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/lint.yml)
+[![Integration Tests (GCP)](https://github.com/ZcashFoundation/zebra/actions/workflows/zfnd-ci-integration-tests-gcp.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/zfnd-ci-integration-tests-gcp.yml)
 [![codecov](https://codecov.io/gh/ZcashFoundation/zebra/branch/main/graph/badge.svg)](https://codecov.io/gh/ZcashFoundation/zebra)
-[![Build docs](https://github.com/ZcashFoundation/zebra/actions/workflows/docs-deploy-firebase.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/docs-deploy-firebase.yml)
+[![Build docs](https://github.com/ZcashFoundation/zebra/actions/workflows/book.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/book.yml)
+[![Deploy Nodes (GCP)](https://github.com/ZcashFoundation/zebra/actions/workflows/zfnd-deploy-nodes-gcp.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/zfnd-deploy-nodes-gcp.yml)
 ![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)
 
 - [Getting Started](#getting-started)
   - [Docker](#docker)
   - [Manual Build](#manual-build)
+    - [General instructions for installing dependencies](#general-instructions-for-installing-dependencies)
+    - [Dependencies on Arch](#dependencies-on-arch)
 - [CI/CD Architecture](#cicd-architecture)
 - [Documentation](#documentation)
 - [User support](#user-support)

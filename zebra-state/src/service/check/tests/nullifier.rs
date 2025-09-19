@@ -165,10 +165,10 @@ proptest! {
         // we might need to just check `is_err()` here
         prop_assert_eq!(
             commit_result,
-            Err(DuplicateSproutNullifier {
+            Err(Box::new(DuplicateSproutNullifier {
                 nullifier: duplicate_nullifier,
                 in_finalized_state: false,
-            }
+            })
             .into())
         );
         // block was rejected
@@ -224,10 +224,10 @@ proptest! {
 
         prop_assert_eq!(
             commit_result,
-            Err(DuplicateSproutNullifier {
+            Err(Box::new(DuplicateSproutNullifier {
                 nullifier: duplicate_nullifier,
                 in_finalized_state: false,
-            }
+            })
             .into())
         );
         prop_assert_eq!(Some((Height(0), genesis.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
@@ -285,10 +285,10 @@ proptest! {
 
         prop_assert_eq!(
             commit_result,
-            Err(DuplicateSproutNullifier {
+            Err(Box::new(DuplicateSproutNullifier {
                 nullifier: duplicate_nullifier,
                 in_finalized_state: false,
-            }
+            })
             .into())
         );
         prop_assert_eq!(Some((Height(0), genesis.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
@@ -392,10 +392,10 @@ proptest! {
 
         prop_assert_eq!(
             commit_result,
-            Err(DuplicateSproutNullifier {
+            Err(Box::new(DuplicateSproutNullifier {
                 nullifier: duplicate_nullifier,
                 in_finalized_state: duplicate_in_finalized_state,
-            }
+            })
             .into())
         );
 
@@ -517,10 +517,10 @@ proptest! {
 
         prop_assert_eq!(
             commit_result,
-            Err(DuplicateSaplingNullifier {
+            Err(Box::new(DuplicateSaplingNullifier {
                 nullifier: duplicate_nullifier,
                 in_finalized_state: false,
-            }
+            })
             .into())
         );
         prop_assert_eq!(Some((Height(0), genesis.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
@@ -573,10 +573,10 @@ proptest! {
 
         prop_assert_eq!(
             commit_result,
-            Err(DuplicateSaplingNullifier {
+            Err(Box::new(DuplicateSaplingNullifier {
                 nullifier: duplicate_nullifier,
                 in_finalized_state: false,
-            }
+            })
             .into())
         );
         prop_assert_eq!(Some((Height(0), genesis.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
@@ -670,10 +670,10 @@ proptest! {
 
         prop_assert_eq!(
             commit_result,
-            Err(DuplicateSaplingNullifier {
+            Err(Box::new(DuplicateSaplingNullifier {
                 nullifier: duplicate_nullifier,
                 in_finalized_state: duplicate_in_finalized_state,
-            }
+            })
             .into())
         );
 
@@ -798,10 +798,10 @@ proptest! {
 
         prop_assert_eq!(
             commit_result,
-            Err(DuplicateOrchardNullifier {
+            Err(Box::new(DuplicateOrchardNullifier {
                 nullifier: duplicate_nullifier,
                 in_finalized_state: false,
-            }
+            })
             .into())
         );
         prop_assert_eq!(Some((Height(0), genesis.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
@@ -858,10 +858,10 @@ proptest! {
 
         prop_assert_eq!(
             commit_result,
-            Err(DuplicateOrchardNullifier {
+            Err(Box::new(DuplicateOrchardNullifier {
                 nullifier: duplicate_nullifier,
                 in_finalized_state: false,
-            }
+            })
             .into())
         );
         prop_assert_eq!(Some((Height(0), genesis.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
@@ -958,10 +958,10 @@ proptest! {
 
         prop_assert_eq!(
             commit_result,
-            Err(DuplicateOrchardNullifier {
+            Err(Box::new(DuplicateOrchardNullifier {
                 nullifier: duplicate_nullifier,
                 in_finalized_state: duplicate_in_finalized_state,
-            }
+            })
             .into())
         );
 

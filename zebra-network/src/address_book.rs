@@ -700,7 +700,7 @@ impl AddressBook {
     ///
     /// # Correctness
     ///
-    /// Use [`AddressBook::address_metrics_watcher().borrow()`] in production code,
+    /// Use [`AddressBook::address_metrics_watcher`] in production code,
     /// to avoid deadlocks.
     #[cfg(test)]
     pub fn address_metrics(&self, now: chrono::DateTime<Utc>) -> AddressMetrics {
@@ -711,7 +711,7 @@ impl AddressBook {
     ///
     /// # Correctness
     ///
-    /// External callers should use [`AddressBook::address_metrics_watcher()`]`.borrow()`
+    /// External callers should use [`AddressBook::address_metrics_watcher`]
     /// in production code, to avoid deadlocks.
     /// (Using the watch channel receiver does not lock the address book mutex.)
     fn address_metrics_internal(&self, now: chrono::DateTime<Utc>) -> AddressMetrics {
