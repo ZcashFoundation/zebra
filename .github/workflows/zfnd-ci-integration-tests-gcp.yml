@@ -105,9 +105,6 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
-  id-token: write
-  statuses: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -130,6 +127,11 @@ jobs:
     name: Build CI Docker
     # Skip PRs from external repositories, let them pass, and then GitHub's Merge Queue will check them
     if: ${{ (!startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork) && (github.event_name != 'pull_request' || github.event.label.name == 'run-stateful-tests') }}
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+      statuses: write
     uses: ./.github/workflows/zfnd-build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile
@@ -154,6 +156,9 @@ jobs:
     name: Check if cached state disks exist for ${{ inputs.network || vars.ZCASH_NETWORK }}
     # Skip PRs from external repositories, let them pass, and then GitHub's Merge Queue will check them
     if: ${{ (!startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork) && (github.event_name != 'pull_request' || github.event.label.name == 'run-stateful-tests') }}
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/zfnd-find-cached-disks.yml
     with:
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}
@@ -165,6 +170,9 @@ jobs:
   get-available-disks-testnet:
     name: Check if cached state disks exist for testnet
     if: ${{ (!startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork) && (github.event_name != 'pull_request' || github.event.label.name == 'run-stateful-tests') }}
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/zfnd-find-cached-disks.yml
     with:
       network: Testnet
@@ -181,6 +189,9 @@ jobs:
   sync-to-mandatory-checkpoint:
     name: Zebra checkpoint
     needs: [build, get-available-disks]
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/zfnd-deploy-integration-tests-gcp.yml
     if: ${{ !fromJSON(needs.get-available-disks.outputs.zebra_checkpoint_disk) || github.event.inputs.regenerate-disks == 'true' }}
     concurrency:
@@ -207,6 +218,9 @@ jobs:
   sync-past-mandatory-checkpoint:
     name: Zebra checkpoint update
     needs: [sync-to-mandatory-checkpoint, get-available-disks]
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/zfnd-deploy-integration-tests-gcp.yml
     if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_checkpoint_disk) || needs.sync-to-mandatory-checkpoint.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
@@ -234,6 +248,9 @@ jobs:
   sync-full-mainnet:
     name: Zebra tip
     needs: [build, get-available-disks]
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/zfnd-deploy-integration-tests-gcp.yml
     if: ${{ github.event_name == 'schedule' || !fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || (github.event.inputs.run-full-sync == 'true' && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet') }}
     concurrency:
@@ -264,6 +281,9 @@ jobs:
   sync-update-mainnet:
     name: Zebra tip update
     needs: [sync-full-mainnet, get-available-disks]
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/zfnd-deploy-integration-tests-gcp.yml
     if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.sync-full-mainnet.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
@@ -293,6 +313,9 @@ jobs:
   generate-checkpoints-mainnet:
     name: Generate checkpoints mainnet
     needs: [sync-full-mainnet, get-available-disks]
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/zfnd-deploy-integration-tests-gcp.yml
     if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.sync-full-mainnet.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
@@ -324,6 +347,9 @@ jobs:
   sync-full-testnet:
     name: Zebra tip on testnet
     needs: [build, get-available-disks-testnet]
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/zfnd-deploy-integration-tests-gcp.yml
     if: ${{ !fromJSON(needs.get-available-disks-testnet.outputs.zebra_tip_disk) || (github.event.inputs.run-full-sync == 'true' && (inputs.network || vars.ZCASH_NETWORK) == 'Testnet') }}
     concurrency:
@@ -357,6 +383,9 @@ jobs:
   generate-checkpoints-testnet:
     name: Generate checkpoints testnet
     needs: [sync-full-testnet, get-available-disks-testnet]
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/zfnd-deploy-integration-tests-gcp.yml
     if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks-testnet.outputs.zebra_tip_disk) || needs.sync-full-testnet.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
@@ -386,6 +415,9 @@ jobs:
   lwd-sync-full:
     name: lightwalletd tip
     needs: [sync-full-mainnet, get-available-disks]
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/zfnd-deploy-integration-tests-gcp.yml
     # Currently the lightwalletd tests only work on Mainnet
     if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.sync-full-mainnet.result == 'success') && (github.event_name == 'schedule' || !fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) || github.event.inputs.run-lwd-sync == 'true' ) }}
@@ -416,6 +448,9 @@ jobs:
   lwd-sync-update:
     name: lightwalletd tip update
     needs: [lwd-sync-full, get-available-disks]
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/zfnd-deploy-integration-tests-gcp.yml
     if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && (fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) || needs.lwd-sync-full.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
@@ -443,6 +478,9 @@ jobs:
   lwd-rpc-test:
     name: Zebra tip JSON-RPC
     needs: [sync-full-mainnet, get-available-disks]
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/zfnd-deploy-integration-tests-gcp.yml
     if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.sync-full-mainnet.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
@@ -464,6 +502,9 @@ jobs:
   lwd-rpc-send-tx:
     name: Lightwalletd send transactions
     needs: [lwd-sync-full, get-available-disks]
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/zfnd-deploy-integration-tests-gcp.yml
     if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && (fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) || needs.lwd-sync-full.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
@@ -486,6 +527,9 @@ jobs:
   lwd-grpc-wallet:
     name: lightwalletd GRPC tests
     needs: [lwd-sync-full, get-available-disks]
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/zfnd-deploy-integration-tests-gcp.yml
     if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && (fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) || needs.lwd-sync-full.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
@@ -512,6 +556,9 @@ jobs:
   rpc-get-block-template:
     name: get block template
     needs: [sync-full-mainnet, get-available-disks]
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/zfnd-deploy-integration-tests-gcp.yml
     if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.sync-full-mainnet.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
@@ -534,6 +581,9 @@ jobs:
   rpc-submit-block:
     name: submit block
     needs: [sync-full-mainnet, get-available-disks]
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/zfnd-deploy-integration-tests-gcp.yml
     if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.sync-full-mainnet.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:

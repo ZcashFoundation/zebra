@@ -105,8 +105,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
-  pull-requests: write
 
 jobs:
   # If a release was made we want to extract the first part of the semver from the
@@ -145,6 +143,9 @@ jobs:
   # PRs from forked repositories are skipped.
   get-disk-name:
     name: Get disk name
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/zfnd-find-cached-disks.yml
     if: ${{ !(github.event.pull_request.head.repo.fork) && (github.event_name != 'workflow_dispatch' || inputs.need_cached_disk) }}
     with:
@@ -158,6 +159,10 @@ jobs:
   # The image will be commonly named `zebrad:<short-hash | github-ref | semver>`
   build:
     name: Build CD Docker
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
     uses: ./.github/workflows/zfnd-build-docker-image.yml
     if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
     with:
