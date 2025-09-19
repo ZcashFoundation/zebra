@@ -21,6 +21,10 @@ jobs:
   # The image will be named `zebra:<semver>`
   build:
     name: Build Release Docker
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
     uses: ./.github/workflows/zfnd-build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile
