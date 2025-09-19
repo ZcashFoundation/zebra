@@ -62,6 +62,9 @@ const PEER_METRICS_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 // cost of recomputing the set with the need to avoid serving very out-of-date
 // liveness data (implementation-plan item #1).
 const PEER_METRICS_STALE_MULTIPLIER: i32 = 3;
+// TODO(#4649): We still read connectivity from the address book snapshot. If we
+// choose to broadcast active connection counts from the peer set in future work
+// (per arya2's review), this module should switch to the shared watch channel.
 const TOO_MANY_REQUESTS: &str = "too many requests";
 const METHOD_NOT_ALLOWED: &str = "method not allowed";
 const NOT_FOUND: &str = "not found";
@@ -265,9 +268,19 @@ where
     }
 
     if metrics.live_peers >= ctx.config.min_connected_peers {
-        simple_response(StatusCode::OK, "ok")
+        // Include peer count for operator visibility
+        simple_response(
+            StatusCode::OK,
+            &format!("ok (peers={})", metrics.live_peers),
+        )
     } else {
-        simple_response(StatusCode::SERVICE_UNAVAILABLE, "no peers")
+        simple_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            &format!(
+                "insufficient peers: {} < {}",
+                metrics.live_peers, ctx.config.min_connected_peers
+            ),
+        )
     }
 }
 
@@ -279,8 +292,13 @@ where
     Tip: ChainTip + Clone + Send + Sync + 'static,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
+    // Special case for Regtest - always return ready since no peers are expected
+    if ctx.network.is_regtest() {
+        return simple_response(StatusCode::OK, "ok (regtest)");
+    }
+
     if !ctx.config.enforce_on_test_networks && ctx.network.is_a_test_network() {
-        return simple_response(StatusCode::OK, "ok");
+        return simple_response(StatusCode::OK, "ok (testnet)");
     }
 
     let metrics = (*ctx.peer_metrics_rx.borrow()).clone();
@@ -289,12 +307,18 @@ where
         return simple_response(StatusCode::SERVICE_UNAVAILABLE, "stale peer metrics");
     }
 
+    // Check peer connectivity first to address issue #4649
     if metrics.live_peers < ctx.config.min_connected_peers {
-        return simple_response(StatusCode::SERVICE_UNAVAILABLE, "no peers");
+        return simple_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            &format!(
+                "insufficient peers: {} < {}",
+                metrics.live_peers, ctx.config.min_connected_peers
+            ),
+        );
     }
 
-    // Keep the historical sync-gate but feed it with the richer readiness
-    // checks so we respect the plan's "ensure recent block commits" item.
+    // Check sync status (which now also validates non-zero sync lengths)
     if !ctx.sync_status.is_close_to_tip() {
         return simple_response(StatusCode::SERVICE_UNAVAILABLE, "syncing");
     }
@@ -327,11 +351,18 @@ where
         Some((distance, _local_tip)) => {
             let behind = std::cmp::max(0, distance);
             if behind <= ctx.config.ready_max_blocks_behind {
-                simple_response(StatusCode::OK, "ok")
+                // Include peer count in success response for visibility
+                simple_response(
+                    StatusCode::OK,
+                    &format!("ok (peers={})", metrics.live_peers),
+                )
             } else {
                 simple_response(
                     StatusCode::SERVICE_UNAVAILABLE,
-                    &format!("lag={} blocks", behind),
+                    &format!(
+                        "lag={} blocks (max={})",
+                        behind, ctx.config.ready_max_blocks_behind
+                    ),
                 )
             }
         }

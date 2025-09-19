@@ -149,16 +149,17 @@ fn empty_sync_lengths() {
     assert!(!status.is_close_to_tip());
 }
 
-/// Test if sync lengths array with all zeroes is near tip.
+/// Test if sync lengths array with all zeroes indicates network disconnect, not near tip.
+/// This prevents false positives when Zebra loses all peers (issue #4649).
 #[test]
-fn zero_sync_lengths() {
+fn zero_sync_lengths_means_disconnected() {
     let (status, mut recent_sync_lengths) = SyncStatus::new();
 
     for _ in 0..RecentSyncLengths::MAX_RECENT_LENGTHS {
         recent_sync_lengths.push_extend_tips_length(0);
     }
 
-    assert!(status.is_close_to_tip());
+    assert!(!status.is_close_to_tip());
 }
 
 /// Test if sync lengths array with high values is not near tip.
@@ -173,4 +174,33 @@ fn high_sync_lengths() {
     }
 
     assert!(!status.is_close_to_tip());
+}
+
+/// Test if sync lengths with mixed small values (including zeros) is near tip.
+/// This represents normal operation at the chain tip with occasional new blocks.
+#[test]
+fn mixed_small_sync_lengths_near_tip() {
+    let (status, mut recent_sync_lengths) = SyncStatus::new();
+
+    // Simulate being at tip with occasional new blocks
+    recent_sync_lengths.push_extend_tips_length(0);
+    recent_sync_lengths.push_extend_tips_length(2);
+    recent_sync_lengths.push_extend_tips_length(1);
+
+    // Average is (0 + 2 + 1) / 3 = 1, which is < MIN_DIST_FROM_TIP (20)
+    assert!(status.is_close_to_tip());
+}
+
+/// Test if sync lengths with a mix including some progress is near tip.
+#[test]
+fn small_nonzero_sync_lengths_near_tip() {
+    let (status, mut recent_sync_lengths) = SyncStatus::new();
+
+    // Small sync batches when near tip
+    recent_sync_lengths.push_extend_tips_length(5);
+    recent_sync_lengths.push_extend_tips_length(3);
+    recent_sync_lengths.push_extend_tips_length(4);
+
+    // Average is 4, which is < MIN_DIST_FROM_TIP (20)
+    assert!(status.is_close_to_tip());
 }
