@@ -68,19 +68,3 @@ readinessProbe:
 - Adjust thresholds based on your SLA and desired routing behavior.
 
 [health_config]: https://docs.rs/zebrad/latest/zebrad/components/health/struct.Config.html
-
-## Recent Improvements
-
-### Network Disconnect Detection (Issue #4649)
-
-The health endpoints now properly detect when Zebra loses network connectivity:
-
-- When all sync lengths are zero (indicating no block downloads), the node is
-  considered not ready, preventing false positives during network outages.
-- Response bodies now include diagnostic information:
-  - Peer counts are shown in success responses: `ok (peers=N)`
-  - Failure reasons are specific: `insufficient peers: X < Y`, `lag=N blocks (max=M)`
-- Regtest network always returns ready since no peers are expected: `ok (regtest)`
-
-This prevents load balancers from routing traffic to disconnected nodes and
-prevents the mempool from activating prematurely when peers are lost.
