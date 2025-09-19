@@ -556,6 +556,8 @@ impl Service<zn::Request> for Inbound {
             zn::Request::Ping(_) => {
                 unreachable!("ping requests are handled internally");
             }
+
+            zn::Request::AdvertiseBlockToAll(_) => unreachable!("should always be decoded as `AdvertiseBlock` request")
         }
     }
 }

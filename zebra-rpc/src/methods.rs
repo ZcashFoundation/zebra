@@ -2559,7 +2559,11 @@ where
 
                 self.gbt
                     .advertise_mined_block(hash, height)
-                    .map_error_with_prefix(0, "failed to send mined block")?;
+                    .map_error_with_prefix(
+                        0,
+                        "failed to send mined block to gossip task, \
+                         mined block channel is closed, block gossip task may have unexpectedly exited",
+                    )?;
 
                 return Ok(SubmitBlockResponse::Accepted);
             }
