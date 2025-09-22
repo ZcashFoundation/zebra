@@ -375,8 +375,12 @@ jobs:
   deploy-nodes-success:
     name: Deploy nodes success
     runs-on: ubuntu-latest
-    # Always run this job to check the status of dependent jobs
-    if: always()
+    # Only run when the deployment job actually executed
+    if: >-
+      ${{
+        always() &&
+        needs.deploy-nodes.result != 'skipped'
+      }}
     needs:
       - versioning
       - get-disk-name
@@ -389,6 +393,7 @@ jobs:
         uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe #v1.2.2
         with:
           jobs: ${{ toJSON(needs) }}
+          allowed-skips: versioning
 
   failure-issue:
     name: Open or update issues for release failures

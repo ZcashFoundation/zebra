@@ -633,7 +633,12 @@ jobs:
   integration-tests-success:
     name: integration tests success
     runs-on: ubuntu-latest
-    if: ${{ always() && (github.event_name != 'pull_request' || github.event.label.name == 'run-stateful-tests') }}
+    if: >-
+      ${{
+        always() &&
+        (!startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork) &&
+        (github.event_name != 'pull_request' || github.event.label.name == 'run-stateful-tests')
+      }}
     needs:
       - build
       - sync-to-mandatory-checkpoint
