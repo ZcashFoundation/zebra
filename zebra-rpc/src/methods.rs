@@ -554,7 +554,7 @@ pub trait Rpc {
     /// method: post
     /// tags: network
     #[method(name = "getnetworkinfo")]
-    async fn get_network_info(&self) -> Result<NetworkInfo>;
+    async fn get_network_info(&self) -> Result<GetNetworkInfoResponse>;
 
     /// Returns data about each connected network node.
     ///
@@ -2698,7 +2698,7 @@ where
             .expect("per-second solution rate always fits in u64"))
     }
 
-    async fn get_network_info(&self) -> Result<NetworkInfo> {
+    async fn get_network_info(&self) -> Result<GetNetworkInfoResponse> {
         let version = GetInfoResponse::version_from_string(&self.build_version)
             .expect("invalid version string");
 
@@ -2716,9 +2716,9 @@ where
 
         // TODO: make `limited`, `reachable`, and `proxy` dynamic if Zebra supports network filtering
         let networks = vec![
-            GetNetworkInfoResponse::new("ipv4".to_string(), false, true, "".to_string(), false),
-            GetNetworkInfoResponse::new("ipv6".to_string(), false, true, "".to_string(), false),
-            GetNetworkInfoResponse::new("onion".to_string(), false, false, "".to_string(), false),
+            NetworkInfo::new("ipv4".to_string(), false, true, "".to_string(), false),
+            NetworkInfo::new("ipv6".to_string(), false, true, "".to_string(), false),
+            NetworkInfo::new("onion".to_string(), false, false, "".to_string(), false),
         ];
 
         let relay_fee = zebra_chain::transaction::zip317::MIN_MEMPOOL_TX_FEE_RATE as f64
@@ -2730,7 +2730,7 @@ where
         // TODO: return network-level warnings, if Zebra supports them in the future
         let warnings = "".to_string();
 
-        let response = NetworkInfo {
+        let response = GetNetworkInfoResponse {
             version,
             subversion,
             protocol_version,

@@ -27,10 +27,10 @@ use zebra_rpc::client::{
     GetBlockHeaderResponse, GetBlockHeightAndHashResponse, GetBlockResponse,
     GetBlockSubsidyResponse, GetBlockTemplateParameters, GetBlockTemplateRequestMode,
     GetBlockTemplateResponse, GetBlockTransaction, GetBlockTrees, GetBlockchainInfoBalance,
-    GetBlockchainInfoResponse, GetInfoResponse, GetMiningInfoResponse, GetPeerInfoResponse,
-    GetRawMempoolResponse, GetRawTransactionResponse, GetSubtreesByIndexResponse,
-    GetTreestateResponse, Hash, Input, JoinSplit, MempoolObject, NetworkInfo, Orchard,
-    OrchardAction, OrchardFlags, Output, PeerInfo, ScriptPubKey, ScriptSig,
+    GetBlockchainInfoResponse, GetInfoResponse, GetMiningInfoResponse, GetNetworkInfoResponse,
+    GetPeerInfoResponse, GetRawMempoolResponse, GetRawTransactionResponse,
+    GetSubtreesByIndexResponse, GetTreestateResponse, Hash, Input, JoinSplit, MempoolObject,
+    Orchard, OrchardAction, OrchardFlags, Output, PeerInfo, ScriptPubKey, ScriptSig,
     SendRawTransactionResponse, ShieldedOutput, ShieldedSpend, SubmitBlockErrorResponse,
     SubmitBlockResponse, SubtreeRpcData, TransactionObject, TransactionTemplate, Treestate, Utxo,
     ValidateAddressResponse, ZListUnifiedReceiversResponse, ZValidateAddressResponse,
@@ -1211,7 +1211,7 @@ fn test_get_network_info() -> Result<(), Box<dyn std::error::Error>> {
 }
 "#;
 
-    let obj: NetworkInfo = serde_json::from_str(json)?;
+    let obj: GetNetworkInfoResponse = serde_json::from_str(json)?;
 
     let version = obj.version;
     let subversion = obj.subversion.clone();
@@ -1224,7 +1224,7 @@ fn test_get_network_info() -> Result<(), Box<dyn std::error::Error>> {
     let local_addresses = obj.local_addresses.clone();
     let warnings = obj.warnings.clone();
 
-    let new_obj = NetworkInfo {
+    let new_obj = GetNetworkInfoResponse {
         version,
         subversion,
         protocol_version,

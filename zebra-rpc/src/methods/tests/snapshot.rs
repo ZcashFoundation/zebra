@@ -893,7 +893,10 @@ fn snapshot_rpc_getblocksubsidy(
 }
 
 /// Snapshot `getnetworkinfo` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getnetworkinfo(get_network_info: NetworkInfo, settings: &insta::Settings) {
+fn snapshot_rpc_getnetworkinfo(
+    get_network_info: GetNetworkInfoResponse,
+    settings: &insta::Settings,
+) {
     settings.bind(|| insta::assert_json_snapshot!("get_network_info", get_network_info));
 }
 

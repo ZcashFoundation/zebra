@@ -6,7 +6,7 @@ use derive_new::new;
 ///
 /// See the notes for [`Rpc::get_network_info` method]
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct NetworkInfo {
+pub struct GetNetworkInfoResponse {
     /// The server version
     pub version: u64,
 
@@ -28,7 +28,7 @@ pub struct NetworkInfo {
     pub connections: usize,
 
     /// Information per network
-    pub networks: Vec<GetNetworkInfoResponse>,
+    pub networks: Vec<NetworkInfo>,
 
     /// Minimum relay fee rate for transactions in ZEC per 1000 bytes
     #[serde(rename = "relayfee")]
@@ -44,7 +44,7 @@ pub struct NetworkInfo {
 
 /// Information about a specific network (ipv4, ipv6, onion).
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, new)]
-pub struct GetNetworkInfoResponse {
+pub struct NetworkInfo {
     /// Network (ipv4, ipv6 or onion)
     pub name: String,
 
