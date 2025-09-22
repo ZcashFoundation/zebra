@@ -14,7 +14,7 @@ on:
   # Run daily, when most devs aren't working
   # 0700 UTC is after AEST working hours but before ET working hours
   schedule:
-    - cron: "0 7 * * *"
+    - cron: 0 7 * * *
   workflow_dispatch:
 
 env:
@@ -31,33 +31,36 @@ env:
   # We keep this long enough for PRs that are still on the same commit can re-run with the same image.
   DELETE_IMAGE_HOURS: 504h # 21 days
 
+permissions:
+  contents: read
+
 jobs:
   delete-resources:
     name: Delete old GCP resources
     if: github.repository_owner == 'ZcashFoundation'
     runs-on: ubuntu-latest
     permissions:
-      contents: 'read'
-      id-token: 'write'
+      contents: read
+      id-token: write
     strategy:
       matrix:
         environment: [dev, prod]
     environment: ${{ matrix.environment }}
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v4.2.2
         with:
           persist-credentials: false
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.10
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 #v3.0.0
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2.1.4
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db #v3.0.1
 
       # Deletes all mainnet and testnet instances older than $DELETE_INSTANCE_DAYS days.
       #
@@ -109,36 +112,35 @@ jobs:
     if: github.repository_owner == 'ZcashFoundation'
     runs-on: ubuntu-latest
     permissions:
-      contents: 'read'
-      id-token: 'write'
+      contents: read
+      id-token: write
     strategy:
       matrix:
         environment: [dev, prod]
     environment: ${{ matrix.environment }}
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v4.2.2
         with:
           persist-credentials: false
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.10
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 #v3.0.0
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
-          token_format: 'access_token'
+          token_format: access_token
 
       - name: Login to Google Artifact Registry
-        uses: docker/login-action@v3.4.0
+        uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 #v3.5.0
         with:
           registry: us-docker.pkg.dev
           username: oauth2accesstoken
           password: ${{ steps.auth.outputs.access_token }}
 
       # Deletes all images older than $DELETE_IMAGE_HOURS days.
-      - uses: 'docker://us-docker.pkg.dev/gcr-cleaner/gcr-cleaner/gcr-cleaner-cli'
-        continue-on-error: true # TODO: remove after fixing https://github.com/ZcashFoundation/zebra/issues/5933
+      - uses: docker://us-docker.pkg.dev/gcr-cleaner/gcr-cleaner/gcr-cleaner-cli@sha256:333a4d0617b19a86b55f9aaae10e49294b4469590166f3b4a1c4f7bbd20eb6c2
         # Refer to the official documentation to understand available arguments:
         # https://github.com/GoogleCloudPlatform/gcr-cleaner
         with:
@@ -146,3 +148,18 @@ jobs:
             -repo=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/zebrad-test
             -grace=${{ env.DELETE_IMAGE_HOURS }}
             -keep=${{ env.KEEP_LATEST_IMAGE_COUNT }}
+
+  delete-resources-success:
+    name: Delete GCP resources success
+    runs-on: ubuntu-latest
+    # Always run this job to check the status of dependent jobs
+    if: always()
+    needs:
+      - delete-resources
+      - clean-registries
+    timeout-minutes: 1
+    steps:
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe #v1.2.2
+        with:
+          jobs: ${{ toJSON(needs) }}

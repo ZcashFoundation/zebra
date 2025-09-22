@@ -139,9 +139,6 @@ criterion = { workspace = true, features = ["html_reports"] }
 
 # Error Handling & Formatting
 color-eyre = { workspace = true }
-# This is a transitive dependency via color-eyre.
-# Enable a feature that makes tinyvec compile much faster.
-tinyvec = { workspace = true, features = ["rustc_1_55"] }
 spandoc = { workspace = true }
 tracing = { workspace = true }
 

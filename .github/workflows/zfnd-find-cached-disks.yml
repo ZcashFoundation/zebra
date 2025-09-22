@@ -11,7 +11,7 @@ on:
   workflow_call:
     inputs:
       network:
-        description: 'The Zcash network used to look up the disks'
+        description: The Zcash network used to look up the disks
         required: true
         type: string
       disk_prefix:
@@ -21,25 +21,28 @@ on:
         required: false
         type: string
       test_id:
-        description: 'The test ID requiring the cached state disks'
+        description: The test ID requiring the cached state disks
         required: false
         type: string
     outputs:
       state_version:
-        description: 'The version of the cached state disks'
+        description: The version of the cached state disks
         value: ${{ jobs.get-cached-disks.outputs.state_version }}
       cached_disk_name:
-        description: 'The name of the cached state disk'
+        description: The name of the cached state disk
         value: ${{ jobs.get-cached-disks.outputs.cached_disk_name }}
       lwd_tip_disk:
-        description: 'true if there is a lightwalletd and Zebra cached state disk, synced near the chain tip'
+        description: true if there is a lightwalletd and Zebra cached state disk, synced near the chain tip
         value: ${{ jobs.get-cached-disks.outputs.lwd_tip_disk }}
       zebra_tip_disk:
-        description: 'true if there is a Zebra cached state disk synced near the chain tip'
+        description: true if there is a Zebra cached state disk synced near the chain tip
         value: ${{ jobs.get-cached-disks.outputs.zebra_tip_disk }}
       zebra_checkpoint_disk:
-        description: 'true if there is a Zebra cached state disk synced to the mandatory Zebra checkpoint'
+        description: true if there is a Zebra cached state disk synced to the mandatory Zebra checkpoint
         value: ${{ jobs.get-cached-disks.outputs.zebra_checkpoint_disk }}
+
+permissions:
+  contents: read
 
 jobs:
   get-cached-disks:
@@ -53,28 +56,28 @@ jobs:
       zebra_tip_disk: ${{ steps.get-available-disks.outputs.zebra_tip_disk || steps.set-release-defaults.outputs.zebra_tip_disk }}
       zebra_checkpoint_disk: ${{ steps.get-available-disks.outputs.zebra_checkpoint_disk || steps.set-release-defaults.outputs.zebra_checkpoint_disk }}
     permissions:
-      contents: 'read'
-      id-token: 'write'
+      contents: read
+      id-token: write
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v4.2.2
         with:
           persist-credentials: false
           fetch-depth: 0
       - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v5
+        uses: rlespinasse/github-slug-action@c33ff65466c58d57e4d796f88bb1ae0ff26ee453 #v5.2.0
         with:
           short-length: 7
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.10
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 #v3.0.0
         with:
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
+          workload_identity_provider: "${{ vars.GCP_WIF }}"
+          service_account: "${{ vars.GCP_DEPLOYMENTS_SA }}"
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2.1.4
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db #v3.0.1
 
       # Performs formatting on disk name components.
       #
@@ -83,7 +86,7 @@ jobs:
       #
       # Disk image names in GCP are limited to 63 characters, so we need to limit
       # branch names to 12 characters.
-      # Check the `create-state-image` in `sub-deploy-integration-tests-gcp.yml` for more details in image names.
+      # Check the `create-state-image` in `zfnd-deploy-integration-tests-gcp.yml` for more details in image names.
       # More info: https://cloud.google.com/compute/docs/naming-resources#resource-name-format
       #
       # Passes ${{ inputs.network }} to subsequent steps using $NETWORK env variable.
