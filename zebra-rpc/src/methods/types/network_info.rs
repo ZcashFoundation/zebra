@@ -28,7 +28,7 @@ pub struct NetworkInfo {
     pub connections: usize,
 
     /// Information per network
-    pub networks: Vec<Network>,
+    pub networks: Vec<GetNetworkInfoResponse>,
 
     /// Minimum relay fee rate for transactions in ZEC per 1000 bytes
     #[serde(rename = "relayfee")]
@@ -44,7 +44,7 @@ pub struct NetworkInfo {
 
 /// Information about a specific network (ipv4, ipv6, onion).
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, new)]
-pub struct Network {
+pub struct GetNetworkInfoResponse {
     /// Network (ipv4, ipv6 or onion)
     pub name: String,
 
@@ -56,6 +56,9 @@ pub struct Network {
 
     /// The proxy that is used for this network, or empty if none
     pub proxy: String,
+
+    /// Whether to randomize credentials for the proxy (present in zcashd, undocumented)
+    pub proxy_randomize_credentials: bool,
 }
 
 /// Local address info.

@@ -118,7 +118,7 @@ use types::{
     get_mining_info::GetMiningInfoResponse,
     get_raw_mempool::{self, GetRawMempoolResponse},
     long_poll::LongPollInput,
-    network_info::{Network as NetworkInfoNetwork, NetworkInfo},
+    network_info::{GetNetworkInfoResponse, NetworkInfo},
     peer_info::PeerInfo,
     submit_block::{SubmitBlockErrorResponse, SubmitBlockParameters, SubmitBlockResponse},
     subsidy::GetBlockSubsidyResponse,
@@ -2716,9 +2716,9 @@ where
 
         // TODO: make `limited`, `reachable`, and `proxy` dynamic if Zebra supports network filtering
         let networks = vec![
-            NetworkInfoNetwork::new("ipv4".to_string(), false, true, "".to_string()),
-            NetworkInfoNetwork::new("ipv6".to_string(), false, true, "".to_string()),
-            NetworkInfoNetwork::new("onion".to_string(), false, false, "".to_string()),
+            GetNetworkInfoResponse::new("ipv4".to_string(), false, true, "".to_string(), false),
+            GetNetworkInfoResponse::new("ipv6".to_string(), false, true, "".to_string(), false),
+            GetNetworkInfoResponse::new("onion".to_string(), false, false, "".to_string(), false),
         ];
 
         let relay_fee = zebra_chain::transaction::zip317::MIN_MEMPOOL_TX_FEE_RATE as f64

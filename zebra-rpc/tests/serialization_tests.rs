@@ -29,11 +29,11 @@ use zebra_rpc::client::{
     GetBlockTemplateResponse, GetBlockTransaction, GetBlockTrees, GetBlockchainInfoBalance,
     GetBlockchainInfoResponse, GetInfoResponse, GetMiningInfoResponse, GetPeerInfoResponse,
     GetRawMempoolResponse, GetRawTransactionResponse, GetSubtreesByIndexResponse,
-    GetTreestateResponse, Hash, Input, JoinSplit, MempoolObject, NetworkInfo, Orchard, OrchardAction,
-    OrchardFlags, Output, PeerInfo, ScriptPubKey, ScriptSig, SendRawTransactionResponse,
-    ShieldedOutput, ShieldedSpend, SubmitBlockErrorResponse, SubmitBlockResponse, SubtreeRpcData,
-    TransactionObject, TransactionTemplate, Treestate, Utxo, ValidateAddressResponse,
-    ZListUnifiedReceiversResponse, ZValidateAddressResponse,
+    GetTreestateResponse, Hash, Input, JoinSplit, MempoolObject, NetworkInfo, Orchard,
+    OrchardAction, OrchardFlags, Output, PeerInfo, ScriptPubKey, ScriptSig,
+    SendRawTransactionResponse, ShieldedOutput, ShieldedSpend, SubmitBlockErrorResponse,
+    SubmitBlockResponse, SubtreeRpcData, TransactionObject, TransactionTemplate, Treestate, Utxo,
+    ValidateAddressResponse, ZListUnifiedReceiversResponse, ZValidateAddressResponse,
 };
 
 #[test]
@@ -1187,19 +1187,22 @@ fn test_get_network_info() -> Result<(), Box<dyn std::error::Error>> {
     "name": "ipv4",
     "limited": false,
     "reachable": true,
-    "proxy": ""
+    "proxy": "",
+    "proxy_randomize_credentials": false
   },
   {
     "name": "ipv6",
     "limited": false,
     "reachable": true,
-    "proxy": ""
+    "proxy": "",
+    "proxy_randomize_credentials": false
   },
   {
     "name": "onion",
     "limited": false,
     "reachable": false,
-    "proxy": ""
+    "proxy": "",
+    "proxy_randomize_credentials": false
   }
   ],
   "relayfee": 1e-6,
