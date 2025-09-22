@@ -115,6 +115,9 @@ jobs:
   #
   get-disk-name:
     name: Get disk name
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/zfnd-find-cached-disks.yml
     if: ${{ (inputs.needs_zebra_state || inputs.needs_lwd_state) || (inputs.saves_to_disk || inputs.force_save_to_disk) }}
     with:
