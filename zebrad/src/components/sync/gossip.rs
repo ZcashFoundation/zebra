@@ -4,7 +4,7 @@
 
 use futures::TryFutureExt;
 use thiserror::Error;
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
 use tower::{timeout::Timeout, Service, ServiceExt};
 use tracing::Instrument;
 
@@ -49,7 +49,7 @@ pub async fn gossip_best_tip_block_hashes<ZN>(
     sync_status: SyncStatus,
     mut chain_state: ChainTipChange,
     broadcast_network: ZN,
-    mut mined_block_receiver: Option<watch::Receiver<(block::Hash, block::Height)>>,
+    mut mined_block_receiver: Option<mpsc::Receiver<(block::Hash, block::Height)>>,
 ) -> Result<(), BlockGossipError>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
@@ -65,6 +65,12 @@ where
         let mut sync_status = sync_status.clone();
         let mut chain_tip = chain_state.clone();
         let tip_change_close_to_network_tip_fut = async move {
+            // wait for at least the network timeout between gossips
+            //
+            // in practice, we expect blocks to arrive approximately every 75 seconds,
+            // so waiting 6 seconds won't make much difference
+            tokio::time::sleep(PEER_GOSSIP_DELAY).await;
+
             // wait for at least one tip change, to make sure we have a new block hash to broadcast
             let tip_action = chain_tip.wait_for_tip_change().await.map_err(TipChange)?;
 
@@ -87,25 +93,21 @@ where
         }
         .in_current_span();
 
-        let (((hash, height), log_msg, updated_chain_state), is_block_submission) = if let Some(
-            mined_block_receiver,
-        ) =
-            mined_block_receiver.as_mut()
-        {
-            tokio::select! {
-                tip_change_close_to_network_tip = tip_change_close_to_network_tip_fut => {
-                    mined_block_receiver.mark_unchanged();
-                    (tip_change_close_to_network_tip?, false)
-                },
+        let (((hash, height), log_msg, updated_chain_state), is_block_submission) =
+            if let Some(mined_block_receiver) = mined_block_receiver.as_mut() {
+                tokio::select! {
+                    tip_change_close_to_network_tip = tip_change_close_to_network_tip_fut => {
+                        (tip_change_close_to_network_tip?, false)
+                    },
 
-                Ok(_) = mined_block_receiver.changed() => {
-                    // we have a new block to broadcast from the `submitblock `RPC method, get block data and release the channel.
-                   ((*mined_block_receiver.borrow_and_update(), "sending mined block broadcast", chain_state), true)
+                    Some(tip_change) = mined_block_receiver.recv() => {
+                        // we have a new block to broadcast from the `submitblock `RPC method, get block data and release the channel.
+                       ((tip_change, "sending mined block broadcast", chain_state), true)
+                    }
                 }
-            }
-        } else {
-            (tip_change_close_to_network_tip_fut.await?, false)
-        };
+            } else {
+                (tip_change_close_to_network_tip_fut.await?, false)
+            };
 
         chain_state = updated_chain_state;
 
@@ -125,11 +127,5 @@ where
             .map_err(PeerSetReadiness)?
             .call(request)
             .await;
-
-        // wait for at least the network timeout between gossips
-        //
-        // in practice, we expect blocks to arrive approximately every 75 seconds,
-        // so waiting 6 seconds won't make much difference
-        tokio::time::sleep(PEER_GOSSIP_DELAY).await;
     }
 }
