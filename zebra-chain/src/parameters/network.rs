@@ -58,9 +58,9 @@ impl NetworkKind {
     /// pay-to-public-key-hash payment addresses for the network.
     pub fn b58_pubkey_address_prefix(self) -> [u8; 2] {
         match self {
-            Self::Mainnet => zcash_primitives::constants::mainnet::B58_PUBKEY_ADDRESS_PREFIX,
+            Self::Mainnet => zcash_protocol::constants::mainnet::B58_PUBKEY_ADDRESS_PREFIX,
             Self::Testnet | Self::Regtest => {
-                zcash_primitives::constants::testnet::B58_PUBKEY_ADDRESS_PREFIX
+                zcash_protocol::constants::testnet::B58_PUBKEY_ADDRESS_PREFIX
             }
         }
     }
@@ -69,9 +69,9 @@ impl NetworkKind {
     /// payment addresses for the network.
     pub fn b58_script_address_prefix(self) -> [u8; 2] {
         match self {
-            Self::Mainnet => zcash_primitives::constants::mainnet::B58_SCRIPT_ADDRESS_PREFIX,
+            Self::Mainnet => zcash_protocol::constants::mainnet::B58_SCRIPT_ADDRESS_PREFIX,
             Self::Testnet | Self::Regtest => {
-                zcash_primitives::constants::testnet::B58_SCRIPT_ADDRESS_PREFIX
+                zcash_protocol::constants::testnet::B58_SCRIPT_ADDRESS_PREFIX
             }
         }
     }
@@ -279,7 +279,7 @@ impl FromStr for Network {
 pub struct InvalidNetworkError(String);
 
 impl zcash_protocol::consensus::Parameters for Network {
-    fn network_type(&self) -> zcash_address::Network {
+    fn network_type(&self) -> zcash_protocol::consensus::NetworkType {
         self.kind().into()
     }
 

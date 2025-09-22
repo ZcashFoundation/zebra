@@ -8,20 +8,20 @@ mod orchard_note_encryption;
 mod orchard_shielded_data;
 
 #[cfg(feature = "tx_v6")]
-mod orchard_shielded_data_zsa;
+mod orchard_zsa_shielded_data;
 
 #[cfg(feature = "tx_v6")]
-mod orchard_workflow_blocks_zsa;
+mod orchard_zsa_workflow_blocks;
 
 pub use block::*;
 pub use orchard_note_encryption::*;
 pub use orchard_shielded_data::*;
 
 #[cfg(feature = "tx_v6")]
-pub use orchard_shielded_data_zsa::*;
+pub use orchard_zsa_shielded_data::*;
 
 #[cfg(feature = "tx_v6")]
-pub use orchard_workflow_blocks_zsa::*;
+pub use orchard_zsa_workflow_blocks::*;
 
 /// A testnet transaction test vector
 ///

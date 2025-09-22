@@ -7,7 +7,7 @@ rustflags = [
     "--cfg", 'feature="tx_v6"',
 
     # TODO: Consider removing this line later (it's needed for the ZSA version of librustzcash crates)
-    "--cfg", "zcash_unstable=\"nu6\"",
+    "--cfg", "zcash_unstable=\"nu7\"",
 
     # Zebra standard lints for Rust 1.65+
 
@@ -92,7 +92,7 @@ rustdocflags = [
     "--cfg", 'feature="tx_v6"',
 
     # TODO: Consider removing this line later (it's needed for the ZSA version of librustzcash crates)
-    "--cfg", "zcash_unstable=\"nu6\"",
+    "--cfg", "zcash_unstable=\"nu7\"",
 
     # The -A and -W settings must be the same as the `RUSTDOCFLAGS` in:
     # https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/docs-deploy-firebase.yml#L68
