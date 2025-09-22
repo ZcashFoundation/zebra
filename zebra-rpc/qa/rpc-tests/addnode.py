@@ -70,13 +70,9 @@ class AddNodeTest (BitcoinTestFramework):
         for i in range(0, len(self.nodes)):
             assert_equal(self.nodes[i].getbestblockheightandhash()['height'], 4)
 
-        # TODO: We can't do generate(x | x > 1) because the Zebra `submitblock` RPC
-        # will broadcast only the last block to the network.
-        # Instead, we can mine 10 blocks in a loop
         # Mine 10 blocks from node0
-        for n in range(1, 11):
-            self.nodes[0].generate(1)
-            self.sync_all(False)
+        self.nodes[0].generate(10)
+        self.sync_all(False)
 
         for i in range(0, len(self.nodes)):
             assert_equal(self.nodes[i].getbestblockheightandhash()['height'], 14)

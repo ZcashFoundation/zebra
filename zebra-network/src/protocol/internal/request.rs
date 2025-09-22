@@ -178,7 +178,8 @@ pub enum Request {
     /// [`init`](crate::init).
     ///
     /// The peer set routes this request specially, sending it to *a fraction of*
-    /// the available peers. See [`PeerSet::number_of_peers_to_broadcast`] for more details.
+    /// the available peers. See [`number_of_peers_to_broadcast()`](crate::PeerSet::number_of_peers_to_broadcast)
+    /// for more details.
     ///
     /// # Returns
     ///

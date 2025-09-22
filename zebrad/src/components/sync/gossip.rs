@@ -2,13 +2,15 @@
 //!
 //! [`block::Hash`]: zebra_chain::block::Hash
 
+use std::time::Duration;
+
 use futures::TryFutureExt;
 use thiserror::Error;
 use tokio::sync::{mpsc, watch};
 use tower::{timeout::Timeout, Service, ServiceExt};
 use tracing::Instrument;
 
-use zebra_chain::block;
+use zebra_chain::{block, chain_tip::ChainTip};
 use zebra_network as zn;
 use zebra_state::ChainTipChange;
 
@@ -65,6 +67,8 @@ where
         let mut sync_status = sync_status.clone();
         let mut chain_tip = chain_state.clone();
         let tip_change_close_to_network_tip_fut = async move {
+            const WAIT_FOR_BLOCK_SUBMISSION_DELAY: Duration = Duration::from_micros(100);
+
             // wait for at least the network timeout between gossips
             //
             // in practice, we expect blocks to arrive approximately every 75 seconds,
@@ -73,6 +77,10 @@ where
 
             // wait for at least one tip change, to make sure we have a new block hash to broadcast
             let tip_action = chain_tip.wait_for_tip_change().await.map_err(TipChange)?;
+
+            // wait for block submissions to be received through the `mined_block_receiver` if the tip
+            // change is from a block submission.
+            tokio::time::sleep(WAIT_FOR_BLOCK_SUBMISSION_DELAY).await;
 
             // wait until we're close to the tip, because broadcasts are only useful for nodes near the tip
             // (if they're a long way from the tip, they use the syncer and block locators), unless a mined block
@@ -101,7 +109,6 @@ where
                     },
 
                     Some(tip_change) = mined_block_receiver.recv() => {
-                        // we have a new block to broadcast from the `submitblock `RPC method, get block data and release the channel.
                        ((tip_change, "sending mined block broadcast", chain_state), true)
                     }
                 }
@@ -127,5 +134,16 @@ where
             .map_err(PeerSetReadiness)?
             .call(request)
             .await;
+
+        // Mark the last change hash of `chain_state` as the last block submission hash to avoid
+        // advertising a block hash to some peers twice.
+        if is_block_submission
+            && mined_block_receiver
+                .as_ref()
+                .is_some_and(|rx| rx.is_empty())
+            && chain_state.latest_chain_tip().best_tip_hash() == Some(hash)
+        {
+            chain_state.mark_last_change_hash(hash);
+        }
     }
 }

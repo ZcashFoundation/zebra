@@ -1011,6 +1011,7 @@ where
     /// Broadcasts the same request to all ready peers, ignoring return values.
     fn broadcast_all(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
         // Broadcasts ignore the response
+        // TODO: If there are some unready peers, queue the request to be sent to the current list of unready peers when they become ready.
         let all_ready_peers = self.ready_services.keys().copied().collect();
         self.send_multiple(req, all_ready_peers)
     }
