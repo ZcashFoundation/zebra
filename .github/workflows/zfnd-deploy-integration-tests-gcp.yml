@@ -78,6 +78,9 @@ on:
         type: string
         default: zebra
         description: Application name, used to work out when a job is an update job
+    secrets:
+      GCP_SSH_PRIVATE_KEY:
+        required: true
 
 env:
   RUST_LOG: ${{ vars.RUST_LOG }}
