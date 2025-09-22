@@ -469,7 +469,7 @@ impl Application for ZebradApp {
                 info!("No config file provided, using default configuration");
             }
 
-            info!("{config:?}");
+            debug!("{config:?}");
 
             // Explicitly log the configured miner address so CI can assert env override
             if let Some(miner_address) = &config.mining.miner_address {
