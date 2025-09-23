@@ -4048,7 +4048,7 @@ async fn disconnects_from_misbehaving_peers() -> Result<()> {
 
     use common::regtest::MiningRpcMethods;
     use zebra_chain::parameters::testnet::{self, ConfiguredActivationHeights};
-    use zebra_rpc::methods::get_block_template_rpcs::types::peer_info::PeerInfo;
+    use zebra_rpc::PeerInfo;
 
     let _init_guard = zebra_test::init();
     let network = testnet::Parameters::build()
