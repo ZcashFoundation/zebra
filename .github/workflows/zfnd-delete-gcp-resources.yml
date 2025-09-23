@@ -152,8 +152,12 @@ jobs:
   delete-resources-success:
     name: Delete GCP resources success
     runs-on: ubuntu-latest
-    # Always run this job to check the status of dependent jobs
-    if: always()
+    # Only run when the owner-specific cleanup jobs were eligible to execute
+    if: >-
+      ${{
+        always() &&
+        github.repository_owner == 'ZcashFoundation'
+      }}
     needs:
       - delete-resources
       - clean-registries
