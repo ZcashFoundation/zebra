@@ -639,7 +639,7 @@ pub trait Rpc {
     /// - `block_hash`: (hex-encoded block hash, required) The block hash to invalidate.
     // TODO: Invalidate block hashes even if they're not present in the non-finalized state (#9553).
     #[method(name = "invalidateblock")]
-    async fn invalidate_block(&self, block_hash: block::Hash) -> Result<()>;
+    async fn invalidate_block(&self, block_hash: String) -> Result<()>;
 
     /// Reconsiders a previously invalidated block if it exists in the cache of previously invalidated blocks.
     ///
@@ -647,7 +647,7 @@ pub trait Rpc {
     ///
     /// - `block_hash`: (hex-encoded block hash, required) The block hash to reconsider.
     #[method(name = "reconsiderblock")]
-    async fn reconsider_block(&self, block_hash: block::Hash) -> Result<Vec<block::Hash>>;
+    async fn reconsider_block(&self, block_hash: String) -> Result<Vec<block::Hash>>;
 
     #[method(name = "generate")]
     /// Mine blocks immediately. Returns the block hashes of the generated blocks.
@@ -2869,7 +2869,11 @@ where
         ))
     }
 
-    async fn invalidate_block(&self, block_hash: block::Hash) -> Result<()> {
+    async fn invalidate_block(&self, block_hash: String) -> Result<()> {
+        let block_hash = block_hash
+            .parse()
+            .map_error(server::error::LegacyCode::InvalidParameter)?;
+
         self.state
             .clone()
             .oneshot(zebra_state::Request::InvalidateBlock(block_hash))
@@ -2878,7 +2882,11 @@ where
             .map_misc_error()
     }
 
-    async fn reconsider_block(&self, block_hash: block::Hash) -> Result<Vec<block::Hash>> {
+    async fn reconsider_block(&self, block_hash: String) -> Result<Vec<block::Hash>> {
+        let block_hash = block_hash
+            .parse()
+            .map_error(server::error::LegacyCode::InvalidParameter)?;
+
         self.state
             .clone()
             .oneshot(zebra_state::Request::ReconsiderBlock(block_hash))
