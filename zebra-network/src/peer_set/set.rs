@@ -446,6 +446,28 @@ where
         }
     }
 
+    /// Checks for newly ready, disconnects from outdated peers, and polls ready peer errors.
+    fn poll_peers(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
+        // Check for newly ready peers, including newly added peers (which are added as unready).
+        // So it needs to run after `poll_discover()`. Registers a wakeup if there are any unready
+        // peers.
+        //
+        // Each connected peer should become ready within a few minutes, or timeout, close the
+        // connection, and release its connection slot.
+        //
+        // TODO: drop peers that overload us with inbound messages and never become ready (#7822)
+        let _poll_pending_or_ready: Poll<Option<()>> = self.poll_unready(cx)?;
+
+        // Cleanup
+
+        // Only checks the versions of ready peers, so it needs to run after `poll_unready()`.
+        self.disconnect_from_outdated_peers();
+
+        // Check for failures in ready peers, removing newly errored or disconnected peers.
+        // So it needs to run after `poll_unready()`.
+        self.poll_ready_peer_errors(cx).map(Ok)
+    }
+
     /// Check busy peer services for request completion or errors.
     ///
     /// Move newly ready services to the ready list if they are for peers with supported protocol
@@ -1227,28 +1249,11 @@ where
         let _poll_pending: Poll<()> = self.poll_background_errors(cx)?;
         let _poll_pending_or_ready: Poll<()> = self.inventory_registry.poll_inventory(cx)?;
 
-        // Check for newly ready peers, including newly added peers (which are added as unready).
-        // So it needs to run after `poll_discover()`. Registers a wakeup if there are any unready
-        // peers.
-        //
-        // Each connected peer should become ready within a few minutes, or timeout, close the
-        // connection, and release its connection slot.
-        //
-        // TODO: drop peers that overload us with inbound messages and never become ready (#7822)
-        let _poll_pending_or_ready: Poll<Option<()>> = self.poll_unready(cx)?;
-
-        // Cleanup and metrics.
-
-        // Only checks the versions of ready peers, so it needs to run after `poll_unready()`.
-        self.disconnect_from_outdated_peers();
+        let ready_peers = self.poll_peers(cx)?;
 
         // These metrics should run last, to report the most up-to-date information.
         self.log_peer_set_size();
         self.update_metrics();
-
-        // Check for failures in ready peers, removing newly errored or disconnected peers.
-        // So it needs to run after `poll_unready()`.
-        let ready_peers: Poll<()> = self.poll_ready_peer_errors(cx);
 
         if ready_peers.is_pending() {
             // # Correctness
@@ -1271,10 +1276,14 @@ where
             // To avoid peers blocking on a full peer status/error channel:
             // - `poll_background_errors` schedules this task for wakeup when the peer status
             //   update task exits.
-            Poll::Pending
-        } else {
-            self.broadcast_all_queued();
+            return Poll::Pending;
+        }
 
+        self.broadcast_all_queued();
+
+        if self.ready_services.is_empty() {
+            self.poll_peers(cx)
+        } else {
             Poll::Ready(Ok(()))
         }
     }
