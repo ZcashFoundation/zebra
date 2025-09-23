@@ -127,13 +127,16 @@ where
         };
 
         info!(?height, ?request, log_msg);
-        // broadcast requests don't return errors, and we'd just want to ignore them anyway
-        let _ = broadcast_network
+        let broadcast_fut = broadcast_network
             .ready()
             .await
             .map_err(PeerSetReadiness)?
-            .call(request)
-            .await;
+            .call(request);
+
+        // Await the broadcast future in a spawned task to avoid waiting on
+        // `AdvertiseBlockToAll` requests when there are unready peers.
+        // Broadcast requests don't return errors, and we'd just want to ignore them anyway.
+        tokio::spawn(broadcast_fut);
 
         // Mark the last change hash of `chain_state` as the last block submission hash to avoid
         // advertising a block hash to some peers twice.
