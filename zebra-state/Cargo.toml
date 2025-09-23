@@ -90,9 +90,6 @@ derive-getters.workspace = true
 
 [dev-dependencies]
 color-eyre = { workspace = true }
-# This is a transitive dependency via color-eyre.
-# Enable a feature that makes tinyvec compile much faster.
-tinyvec = { workspace = true, features = ["rustc_1_55"] }
 
 once_cell = { workspace = true }
 spandoc = { workspace = true }

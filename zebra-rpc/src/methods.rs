@@ -1089,6 +1089,12 @@ where
             // TODO: Add a `genesis_block_time()` method on `Network` to use here.
             .unwrap_or((Height::MIN, 0.0));
 
+        let verification_progress = if network.is_regtest() {
+            1.0
+        } else {
+            verification_progress
+        };
+
         // `upgrades` object
         //
         // Get the network upgrades in height order, like `zcashd`.

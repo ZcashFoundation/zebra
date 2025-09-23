@@ -7,77 +7,80 @@ on:
       test_id:
         required: true
         type: string
-        description: 'Unique identifier for the test'
+        description: Unique identifier for the test
       test_description:
         required: true
         type: string
-        description: 'Explains what the test does'
+        description: Explains what the test does
       height_grep_text:
         required: false
         type: string
-        description: 'Regular expression to find the tip height in test logs, and add it to newly created cached state image metadata'
+        description: Regular expression to find the tip height in test logs, and add it to newly created cached state image metadata
 
       # Test selection and parameters
       test_variables:
         required: true
         type: string
-        description: 'Environmental variables used to select and configure the test'
+        description: Environmental variables used to select and configure the test
       network:
         required: false
         type: string
         default: Mainnet
-        description: 'Zcash network to test against'
+        description: Zcash network to test against
       is_long_test:
         required: false
         type: boolean
         default: false
-        description: 'Does this test need multiple run jobs? (Does it run longer than 6 hours?)'
+        description: Does this test need multiple run jobs? (Does it run longer than 6 hours?)
 
       # Cached state
       #
       zebra_state_dir:
         required: false
         type: string
-        default: '/home/zebra/.cache/zebra'
-        description: 'Zebra cached state directory and input image prefix to search in GCP'
+        default: /home/zebra/.cache/zebra
+        description: Zebra cached state directory and input image prefix to search in GCP
       lwd_state_dir:
         required: false
         type: string
-        default: '/home/zebra/.cache/lwd'
-        description: 'Lightwalletd cached state directory and input image prefix to search in GCP'
+        default: /home/zebra/.cache/lwd
+        description: Lightwalletd cached state directory and input image prefix to search in GCP
       disk_prefix:
         required: false
         type: string
-        default: 'zebrad-cache'
-        description: 'Image name prefix, and `zebra_state_dir` name for newly created cached states'
+        default: zebrad-cache
+        description: Image name prefix, and `zebra_state_dir` name for newly created cached states
       disk_suffix:
         required: false
         type: string
-        default: 'tip'
-        description: 'Image name suffix'
+        default: tip
+        description: Image name suffix
       needs_zebra_state:
         required: true
         type: boolean
-        description: 'Does the test use Zebra cached state?'
+        description: Does the test use Zebra cached state?
       needs_lwd_state:
         required: false
         type: boolean
-        description: 'Does the test use Lightwalletd and Zebra cached state?'
+        description: Does the test use Lightwalletd and Zebra cached state?
       # main branch states can be outdated and slower, but they can also be more reliable
       saves_to_disk:
         required: true
         type: boolean
-        description: 'Can this test create new or updated cached state disks?'
+        description: Can this test create new or updated cached state disks?
       force_save_to_disk:
         required: false
         type: boolean
         default: false
-        description: 'Force this test to create a new or updated cached state disk'
+        description: Force this test to create a new or updated cached state disk
       app_name:
         required: false
         type: string
-        default: 'zebra'
-        description: 'Application name, used to work out when a job is an update job'
+        default: zebra
+        description: Application name, used to work out when a job is an update job
+    secrets:
+      GCP_SSH_PRIVATE_KEY:
+        required: true
 
 env:
   RUST_LOG: ${{ vars.RUST_LOG }}
@@ -95,6 +98,10 @@ env:
   # How many blocks to wait before creating an updated cached state image.
   # 1 day is approximately 1152 blocks.
   CACHED_STATE_UPDATE_LIMIT: 576
+
+permissions:
+  contents: read
+
 jobs:
   # Find a cached state disk for ${{ inputs.test_id }}, matching all of:
   # - disk cached state prefix -> zebrad-cache or lwd-cache
@@ -111,7 +118,10 @@ jobs:
   #
   get-disk-name:
     name: Get disk name
-    uses: ./.github/workflows/sub-find-cached-disks.yml
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/zfnd-find-cached-disks.yml
     if: ${{ (inputs.needs_zebra_state || inputs.needs_lwd_state) || (inputs.saves_to_disk || inputs.force_save_to_disk) }}
     with:
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}
@@ -136,17 +146,16 @@ jobs:
     env:
       CACHED_DISK_NAME: ${{ (inputs.needs_zebra_state || inputs.needs_lwd_state) && needs.get-disk-name.outputs.cached_disk_name || '' }}
     permissions:
-      contents: 'read'
-      id-token: 'write'
+      contents: read
+      id-token: write
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v4.2.2
         with:
           persist-credentials: false
           fetch-depth: '2'
-      - uses: r7kamura/rust-problem-matchers@v1.5.0
 
       - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v5
+        uses: rlespinasse/github-slug-action@c33ff65466c58d57e4d796f88bb1ae0ff26ee453 #v5.2.0
         with:
           short-length: 7
 
@@ -157,7 +166,7 @@ jobs:
 
       # Install our SSH secret
       - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.7.0
+        uses: shimataro/ssh-key-action@d4fffb50872869abe2d9a9098a6d9c5aa7d16be4 #v2.7.0
         with:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           name: google_compute_engine
@@ -171,13 +180,13 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.10
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 #v3.0.0
         with:
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
+          workload_identity_provider: "${{ vars.GCP_WIF }}"
+          service_account: "${{ vars.GCP_DEPLOYMENTS_SA }}"
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2.1.4
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db #v3.0.1
 
       # Disk Mounting Logic Explanation:
       #
@@ -220,47 +229,11 @@ jobs:
             DISK_ATTACH_PARAMS="--create-disk=${DISK_PARAMS}"
           fi
 
-          # Mount the disk(s) to the container
-          # This partition=1 logic differentiates between disk types:
-          # - Only Zebra tip disks (from full sync) have partitions and need partition=1
-          # - LWD disks never have partitions
-          # - Checkpoint disks don't have partitions
-          # TODO: Consider removing this logic once all cached disk images use consistent partitioning.
-
-          # Determine if we should use partition=1 based on specific test requirements
-          # Default to safe approach: no partitions unless explicitly whitelisted
-          USE_PARTITION="false"
-          if [ -n "${{ env.CACHED_DISK_NAME }}" ]; then
-            # All tests that use Zebra tip disks (which have partitions)
-            if [[ "${{ inputs.test_id }}" == "sync-update-mainnet" ]] || \
-               [[ "${{ inputs.test_id }}" == "sync-full-mainnet" ]] || \
-               [[ "${{ inputs.test_id }}" == "generate-checkpoints-mainnet" ]] || \
-               [[ "${{ inputs.test_id }}" == "lwd-rpc-test" ]] || \
-               [[ "${{ inputs.test_id }}" == "rpc-get-block-template" ]] || \
-               [[ "${{ inputs.test_id }}" == "rpc-submit-block" ]]; then
-              USE_PARTITION="true"
-              echo "Using Zebra tip disk with partition=1: ${{ env.CACHED_DISK_NAME }}"
-            # All other tests default to no partition for safety
-            else
-              USE_PARTITION="false"
-              echo "Using cached disk without partition (safe default): ${{ env.CACHED_DISK_NAME }}"
-            fi
-          fi
-
-          # Mount zebra state directory
-          if [[ "$USE_PARTITION" == "true" ]]; then
-            CONTAINER_MOUNT_DISKS="--container-mount-disk=mount-path=${{ inputs.zebra_state_dir }},name=${NAME},mode=rw,partition=1"
-          else
-            CONTAINER_MOUNT_DISKS="--container-mount-disk=mount-path=${{ inputs.zebra_state_dir }},name=${NAME},mode=rw"
-          fi
+          CONTAINER_MOUNT_DISKS="--container-mount-disk=mount-path=${{ inputs.zebra_state_dir }},name=${NAME},mode=rw"
 
           # Mount the same disk to the lwd path if needed
           if [[ "${{ inputs.needs_lwd_state }}" == "true" || "${{ inputs.test_id }}" == "lwd-sync-full" ]]; then
-            if [[ "$USE_PARTITION" == "true" ]]; then
-              CONTAINER_MOUNT_DISKS+=" --container-mount-disk=mount-path=${{ inputs.lwd_state_dir }},name=${NAME},mode=rw,partition=1"
-            else
-              CONTAINER_MOUNT_DISKS+=" --container-mount-disk=mount-path=${{ inputs.lwd_state_dir }},name=${NAME},mode=rw"
-            fi
+            CONTAINER_MOUNT_DISKS+=" --container-mount-disk=mount-path=${{ inputs.lwd_state_dir }},name=${NAME},mode=rw"
           fi
 
           # Environment variables for the container
@@ -387,17 +360,16 @@ jobs:
       STATE_VERSION: ${{ needs.test-result.outputs.state_version }}
       CACHED_DISK_NAME: ${{ needs.test-result.outputs.cached_disk_name }}
     permissions:
-      contents: 'read'
-      id-token: 'write'
+      contents: read
+      id-token: write
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v4.2.2
         with:
           persist-credentials: false
           fetch-depth: '2'
-      - uses: r7kamura/rust-problem-matchers@v1.5.0
 
       - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v5
+        uses: rlespinasse/github-slug-action@c33ff65466c58d57e4d796f88bb1ae0ff26ee453 #v5.2.0
         with:
           short-length: 7
 
@@ -420,7 +392,7 @@ jobs:
 
       # Install our SSH secret
       - name: Install private SSH key
-        uses: shimataro/ssh-key-action@v2.7.0
+        uses: shimataro/ssh-key-action@d4fffb50872869abe2d9a9098a6d9c5aa7d16be4 #v2.7.0
         with:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           name: google_compute_engine
@@ -434,13 +406,13 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.10
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 #v3.0.0
         with:
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
+          workload_identity_provider: "${{ vars.GCP_WIF }}"
+          service_account: "${{ vars.GCP_DEPLOYMENTS_SA }}"
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2.1.4
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db #v3.0.1
 
       # Sets the $UPDATE_SUFFIX env var to "-u" if updating a previous cached state,
       # and the empty string otherwise.
@@ -718,30 +690,29 @@ jobs:
     if: always()
     continue-on-error: true
     permissions:
-      contents: 'read'
-      id-token: 'write'
+      contents: read
+      id-token: write
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v4.2.2
         with:
           persist-credentials: false
           fetch-depth: '2'
-      - uses: r7kamura/rust-problem-matchers@v1.5.0
 
       - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v5
+        uses: rlespinasse/github-slug-action@c33ff65466c58d57e4d796f88bb1ae0ff26ee453 #v5.2.0
         with:
           short-length: 7
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.10
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 #v3.0.0
         with:
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
+          workload_identity_provider: "${{ vars.GCP_WIF }}"
+          service_account: "${{ vars.GCP_DEPLOYMENTS_SA }}"
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2.1.4
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db #v3.0.1
 
       # Deletes the instances that has been recently deployed in the actual commit after all
       # previous jobs have run, no matter the outcome of the job.
@@ -754,3 +725,21 @@ jobs:
           else
             gcloud compute instances delete "${INSTANCE}" --zone "${{ vars.GCP_ZONE }}" --delete-disks all --quiet
           fi
+
+  deployment-success:
+    name: Integration test deployment success
+    runs-on: ubuntu-latest
+    # Always run this job to check the status of dependent jobs
+    if: always()
+    needs:
+      - get-disk-name
+      - test-result
+      - create-state-image
+      - delete-instance
+    timeout-minutes: 1
+    steps:
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe #v1.2.2
+        with:
+          jobs: ${{ toJSON(needs) }}
+          allowed-skips: ${{ (inputs.saves_to_disk || inputs.force_save_to_disk) && '' || 'create-state-image' }}

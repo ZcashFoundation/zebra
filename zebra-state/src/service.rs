@@ -234,9 +234,9 @@ impl Drop for StateService {
         self.clear_finalized_block_queue(
             "dropping the state: dropped unused finalized state queue block",
         );
-        self.clear_non_finalized_block_queue(CommitSemanticallyVerifiedError::from(
+        self.clear_non_finalized_block_queue(CommitSemanticallyVerifiedError::from(Box::new(
             ValidateContextError::DroppedUnusedBlock,
-        ));
+        )));
 
         // Log database metrics before shutting down
         info!("dropping the state: logging database metrics");
@@ -647,11 +647,11 @@ impl StateService {
             .contains(&semantically_verrified.hash)
         {
             let (rsp_tx, rsp_rx) = oneshot::channel();
-            let _ = rsp_tx.send(Err(CommitSemanticallyVerifiedError::from(
+            let _ = rsp_tx.send(Err(CommitSemanticallyVerifiedError::from(Box::new(
                 ValidateContextError::DuplicateCommitRequest {
                     block_hash: semantically_verrified.hash,
                 },
-            )));
+            ))));
             return rsp_rx;
         }
 
@@ -661,11 +661,11 @@ impl StateService {
             .contains_height(semantically_verrified.height)
         {
             let (rsp_tx, rsp_rx) = oneshot::channel();
-            let _ = rsp_tx.send(Err(CommitSemanticallyVerifiedError::from(
+            let _ = rsp_tx.send(Err(CommitSemanticallyVerifiedError::from(Box::new(
                 ValidateContextError::AlreadyFinalized {
                     block_height: semantically_verrified.height,
                 },
-            )));
+            ))));
             return rsp_rx;
         }
 
@@ -679,11 +679,11 @@ impl StateService {
             tracing::debug!("replacing older queued request with new request");
             let (mut rsp_tx, rsp_rx) = oneshot::channel();
             std::mem::swap(old_rsp_tx, &mut rsp_tx);
-            let _ = rsp_tx.send(Err(CommitSemanticallyVerifiedError::from(
+            let _ = rsp_tx.send(Err(CommitSemanticallyVerifiedError::from(Box::new(
                 ValidateContextError::ReplacedByNewerRequest {
                     block_hash: semantically_verrified.hash,
                 },
-            )));
+            ))));
             rsp_rx
         } else {
             let (rsp_tx, rsp_rx) = oneshot::channel();
@@ -784,15 +784,15 @@ impl StateService {
                         // If Zebra is shutting down, drop blocks and return an error.
                         Self::send_semantically_verified_block_error(
                             queued,
-                            CommitSemanticallyVerifiedError::from(
+                            CommitSemanticallyVerifiedError::from(Box::new(
                                 ValidateContextError::CommitTaskExited,
-                            ),
+                            )),
                         );
 
                         self.clear_non_finalized_block_queue(
-                            CommitSemanticallyVerifiedError::from(
+                            CommitSemanticallyVerifiedError::from(Box::new(
                                 ValidateContextError::CommitTaskExited,
-                            ),
+                            )),
                         );
 
                         return;
@@ -1017,9 +1017,9 @@ impl Service<Request> for StateService {
                     rsp_rx
                         .await
                         .map_err(|_recv_error| {
-                            BoxError::from(CommitSemanticallyVerifiedError::from(
+                            BoxError::from(CommitSemanticallyVerifiedError::from(Box::new(
                                 ValidateContextError::NotReadyToBeCommitted,
-                            ))
+                            )))
                         })
                         // TODO: replace with Result::flatten once it stabilises
                         // https://github.com/rust-lang/rust/issues/70142
