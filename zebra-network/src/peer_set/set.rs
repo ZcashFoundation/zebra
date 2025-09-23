@@ -201,6 +201,15 @@ where
     /// Used to route inventory requests to peers that are likely to have it.
     inventory_registry: InventoryRegistry,
 
+    /// Stores requests that should be routed to peers once they are ready.
+    queued_broadcast_all_request: Option<(
+        Request,
+        tokio::sync::mpsc::Sender<
+            Pin<Box<dyn Future<Output = Result<Response, BoxError>> + Send + 'static>>,
+        >,
+        HashSet<D::Key>,
+    )>,
+
     // Peer Tracking: Busy Peers
     //
     /// Connected peers that are handling a Zebra request,
@@ -316,6 +325,7 @@ where
             ready_services: HashMap::new(),
             // Request Routing
             inventory_registry: InventoryRegistry::new(inv_stream),
+            queued_broadcast_all_request: None,
 
             // Busy peers
             unready_services: FuturesUnordered::new(),
@@ -1011,9 +1021,48 @@ where
     /// Broadcasts the same request to all ready peers, ignoring return values.
     fn broadcast_all(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
         // Broadcasts ignore the response
-        // TODO: If there are some unready peers, queue the request to be sent to the current list of unready peers when they become ready.
         let all_ready_peers = self.ready_services.keys().copied().collect();
-        self.send_multiple(req, all_ready_peers)
+        let all_unready_peers: HashSet<_> = self.cancel_handles.keys().cloned().collect();
+        if all_unready_peers.is_empty() {
+            self.send_multiple(req, all_ready_peers)
+        } else {
+            const QUEUED_BROADCAST_FUTS_CHANNEL_SIZE: usize = 3;
+            let (sender, mut receiver) =
+                tokio::sync::mpsc::channel(QUEUED_BROADCAST_FUTS_CHANNEL_SIZE);
+            // Drop the existing queued broadcast all request, if any.
+            self.queued_broadcast_all_request = Some((req.clone(), sender, all_unready_peers));
+            let send_multiple_fut = self.send_multiple(req, all_ready_peers);
+            async move {
+                let _ = send_multiple_fut.await?;
+                while receiver.recv().await.is_some() {}
+                Ok(Response::Nil)
+            }
+            .boxed()
+        }
+    }
+
+    /// Broadcasts the same requests to all ready peers which were unready when
+    /// [`PeerSet::broadcast_all()`] was last called, ignoring return values.
+    fn broadcast_all_queued(&mut self) {
+        if let Some((req, sender, mut remaining_peers)) = self.queued_broadcast_all_request.take() {
+            let Ok(reserved_send_slot) = sender.try_reserve() else {
+                self.queued_broadcast_all_request = Some((req, sender, remaining_peers));
+                return;
+            };
+
+            let peers: Vec<_> = self
+                .ready_services
+                .keys()
+                .filter(|ready_peer| remaining_peers.remove(ready_peer))
+                .copied()
+                .collect();
+
+            reserved_send_slot.send(self.send_multiple(req.clone(), peers).boxed());
+
+            if !remaining_peers.is_empty() {
+                self.queued_broadcast_all_request = Some((req, sender, remaining_peers));
+            }
+        }
     }
 
     /// Given a number of ready peers calculate to how many of them Zebra will
@@ -1224,6 +1273,8 @@ where
             //   update task exits.
             Poll::Pending
         } else {
+            self.broadcast_all_queued();
+
             Poll::Ready(Ok(()))
         }
     }
