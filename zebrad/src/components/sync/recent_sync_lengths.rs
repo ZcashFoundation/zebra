@@ -1,5 +1,7 @@
 //! A channel which holds a list of recent syncer response lengths.
 
+use std::sync::Arc;
+
 use tokio::sync::watch;
 
 #[cfg(test)]
@@ -12,7 +14,6 @@ mod tests;
 /// Old lengths are dropped if the list is longer than `MAX_RECENT_LENGTHS`.
 //
 // TODO: disable the mempool if obtain or extend tips return errors?
-#[derive(Debug)]
 pub struct RecentSyncLengths {
     /// A sender for an array of recent sync lengths.
     sender: watch::Sender<Vec<usize>>,
@@ -20,6 +21,12 @@ pub struct RecentSyncLengths {
     /// A local copy of the contents of `sender`.
     // TODO: Replace with calls to `watch::Sender::borrow` once Tokio is updated to 1.0.0 (#2573)
     recent_lengths: Vec<usize>,
+
+    /// Optional callback invoked when a non-zero batch is observed.
+    ///
+    /// The sync status uses this to track when meaningful progress happened,
+    /// so readiness can tolerate quiet periods without losing peer signals.
+    progress_callback: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
 impl RecentSyncLengths {
@@ -35,13 +42,16 @@ impl RecentSyncLengths {
 
     /// Create a new instance of [`RecentSyncLengths`]
     /// and a [`watch::Receiver`] endpoint for receiving recent sync lengths.
-    pub fn new() -> (Self, watch::Receiver<Vec<usize>>) {
+    pub fn new(
+        progress_callback: Option<Arc<dyn Fn() + Send + Sync>>,
+    ) -> (Self, watch::Receiver<Vec<usize>>) {
         let (sender, receiver) = watch::channel(Vec::new());
 
         (
             RecentSyncLengths {
                 sender,
                 recent_lengths: Vec::with_capacity(Self::MAX_RECENT_LENGTHS),
+                progress_callback,
             },
             receiver,
         )
@@ -89,5 +99,11 @@ impl RecentSyncLengths {
 
         // ignore dropped receivers
         let _ = self.sender.send(self.recent_lengths.clone());
+
+        if sync_length > 0 {
+            if let Some(callback) = &self.progress_callback {
+                callback();
+            }
+        }
     }
 }

@@ -25,7 +25,7 @@ use crate::{
     address_book::AddressMetrics,
     constants::DEFAULT_MAX_CONNS_PER_IP,
     peer::{ClientTestHarness, LoadTrackedClient, MinimumPeerVersion},
-    peer_set::{set::MorePeers, InventoryChange, PeerSet},
+    peer_set::{set::MorePeers, InventoryChange, PeerSet, PeerSetStatus},
     protocol::external::types::Version,
     AddressBook, Config, PeerSocketAddr,
 };
@@ -213,6 +213,8 @@ where
         let address_metrics = guard.prepare_address_book(self.address_book);
         let (_bans_sender, bans_receiver) = tokio::sync::watch::channel(Default::default());
 
+        let (peer_status_tx, _peer_status_rx) = watch::channel(PeerSetStatus::default());
+
         let peer_set = PeerSet::new(
             &config,
             discover,
@@ -221,6 +223,7 @@ where
             inv_stream,
             bans_receiver,
             address_metrics,
+            peer_status_tx,
             minimum_peer_version,
             max_conns_per_ip,
         );

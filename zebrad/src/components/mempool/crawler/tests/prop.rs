@@ -1,17 +1,23 @@
 //! Randomised property tests for the mempool crawler.
 
-use std::{collections::HashSet, time::Duration};
+use std::{
+    collections::HashSet,
+    time::{Duration, Duration as StdDuration},
+};
 
 use proptest::{
     collection::{hash_set, vec},
     prelude::*,
 };
-use tokio::{sync::oneshot, time};
+use tokio::{
+    sync::{oneshot, watch},
+    time,
+};
 
 use zebra_chain::{
     chain_sync_status::ChainSyncStatus, parameters::Network, transaction::UnminedTxId,
 };
-use zebra_network as zn;
+use zebra_network::{self as zn, PeerSetStatus};
 use zebra_node_services::mempool::Gossip;
 use zebra_state::ChainTipSender;
 use zebra_test::mock_service::{MockService, PropTestAssertion};
@@ -233,11 +239,20 @@ fn setup_crawler() -> (
 ) {
     let peer_set = MockService::build().for_prop_tests();
     let mempool = MockService::build().for_prop_tests();
-    let (sync_status, recent_sync_lengths) = SyncStatus::new();
 
     // the network should be irrelevant here
-    let (chain_tip_sender, _latest_chain_tip, chain_tip_change) =
+    let (chain_tip_sender, latest_chain_tip, chain_tip_change) =
         ChainTipSender::new(None, &Network::Mainnet);
+
+    let (peer_status_tx, peer_status_rx) = watch::channel(PeerSetStatus::default());
+    let _ = peer_status_tx.send(PeerSetStatus::new(1, 1));
+
+    let (sync_status, recent_sync_lengths) = SyncStatus::new(
+        peer_status_rx,
+        latest_chain_tip,
+        1,
+        StdDuration::from_secs(5 * 60),
+    );
 
     Crawler::spawn(
         &Config::default(),

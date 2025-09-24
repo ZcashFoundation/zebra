@@ -20,7 +20,7 @@ proptest! {
     fn max_recent_lengths(
         sync_updates in any::<Vec<SyncLengthUpdate>>(),
     ) {
-        let (mut recent_sync_lengths, receiver) = RecentSyncLengths::new();
+        let (mut recent_sync_lengths, receiver) = RecentSyncLengths::new(None);
 
         for (count, update) in sync_updates.into_iter().enumerate() {
             match update {
@@ -41,7 +41,7 @@ proptest! {
     fn latest_first(
         sync_updates in any::<Vec<SyncLengthUpdate>>(),
     ) {
-        let (mut recent_sync_lengths, receiver) = RecentSyncLengths::new();
+        let (mut recent_sync_lengths, receiver) = RecentSyncLengths::new(None);
 
         for update in sync_updates {
             let latest_sync_length = match update {

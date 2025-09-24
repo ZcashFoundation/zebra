@@ -1,6 +1,6 @@
 //! Inbound service tests with a real peer set.
 
-use std::{iter, net::SocketAddr};
+use std::{iter, net::SocketAddr, time::Duration as StdDuration};
 
 use futures::FutureExt;
 use indexmap::IndexSet;
@@ -659,7 +659,7 @@ async fn setup(
 
         ..NetworkConfig::default()
     };
-    let (mut peer_set, address_book, _) = zebra_network::init(
+    let (mut peer_set, address_book, _, peer_status_rx) = zebra_network::init(
         network_config,
         inbound_service.clone(),
         latest_chain_tip.clone(),
@@ -682,7 +682,12 @@ async fn setup(
     );
 
     // Fake syncer
-    let (sync_status, mut recent_syncs) = SyncStatus::new();
+    let (sync_status, mut recent_syncs) = SyncStatus::new(
+        peer_status_rx.clone(),
+        latest_chain_tip.clone(),
+        0,
+        StdDuration::from_secs(5 * 60),
+    );
 
     // Fake verifiers
     let mock_block_verifier = MockService::build().for_unit_tests();
@@ -833,8 +838,6 @@ mod submitblock_test {
 
         let _guard = tracing::subscriber::set_default(subscriber);
 
-        let (sync_status, _recent_syncs) = SyncStatus::new();
-
         // State
         let state_config = StateConfig::ephemeral();
         let (_state_service, _read_only_state_service, latest_chain_tip, chain_tip_change) =
@@ -863,13 +866,20 @@ mod submitblock_test {
             .buffer(10)
             .service(BoxService::new(inbound_service));
 
-        let (peer_set, _address_book, _misbehavior_tx) = zebra_network::init(
+        let (peer_set, _address_book, _misbehavior_tx, peer_status_rx) = zebra_network::init(
             network_config,
             inbound_service.clone(),
             latest_chain_tip.clone(),
             "Zebra user agent".to_string(),
         )
         .await;
+
+        let (sync_status, _recent_syncs) = SyncStatus::new(
+            peer_status_rx,
+            latest_chain_tip.clone(),
+            0,
+            StdDuration::from_secs(5 * 60),
+        );
 
         // Start the block gossip task with a SubmitBlockChannel
         let submitblock_channel = SubmitBlockChannel::new();

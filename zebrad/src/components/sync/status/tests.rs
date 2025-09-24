@@ -4,8 +4,17 @@ use std::{env, sync::Arc, time::Duration};
 
 use futures::{select, FutureExt};
 use proptest::prelude::*;
-use tokio::{sync::Semaphore, time::timeout};
-use zebra_chain::chain_sync_status::ChainSyncStatus;
+use tokio::{
+    sync::{watch, Semaphore},
+    time::timeout,
+};
+use zebra_chain::{
+    block::Block, chain_sync_status::ChainSyncStatus, parameters::Network,
+    serialization::ZcashDeserializeInto,
+};
+use zebra_network::PeerSetStatus;
+use zebra_state::{ChainTipBlock, ChainTipSender, CheckpointVerifiedBlock};
+use zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES;
 
 use super::{super::RecentSyncLengths, SyncStatus};
 
@@ -21,6 +30,36 @@ const MAX_TEST_EXECUTION: Duration = Duration::from_secs(10);
 ///
 /// If an event is not received in this time, it is considered that it will never be received.
 const EVENT_TIMEOUT: Duration = Duration::from_millis(5);
+
+fn build_sync_status(
+    min_ready_peers: usize,
+    progress_grace: Duration,
+) -> (
+    SyncStatus,
+    RecentSyncLengths,
+    watch::Sender<PeerSetStatus>,
+    ChainTipSender,
+) {
+    let (peer_status_tx, peer_status_rx) = watch::channel(PeerSetStatus::default());
+    let (tip_sender, latest_chain_tip, _change) =
+        ChainTipSender::new(None::<ChainTipBlock>, &Network::Mainnet);
+    let (status, recent_sync_lengths) = SyncStatus::new(
+        peer_status_rx,
+        latest_chain_tip,
+        min_ready_peers,
+        progress_grace,
+    );
+
+    (status, recent_sync_lengths, peer_status_tx, tip_sender)
+}
+
+fn genesis_tip() -> ChainTipBlock {
+    BLOCK_MAINNET_GENESIS_BYTES
+        .zcash_deserialize_into::<Arc<Block>>()
+        .map(CheckpointVerifiedBlock::from)
+        .map(ChainTipBlock::from)
+        .expect("valid genesis block")
+}
 
 proptest! {
     #![proptest_config(
@@ -48,7 +87,9 @@ proptest! {
             let update_events = Arc::new(Semaphore::new(0));
             let wake_events = Arc::new(Semaphore::new(0));
 
-            let (status, recent_sync_lengths) = SyncStatus::new();
+            let (status, recent_sync_lengths, peer_status_tx, _tip_sender) =
+                build_sync_status(1, Duration::from_secs(5 * 60));
+            let _ = peer_status_tx.send(PeerSetStatus::new(1, 1));
 
             let mut wait_task_handle = tokio::spawn(wait_task(
                 status.clone(),
@@ -144,7 +185,9 @@ proptest! {
 /// Test if totally empty sync lengths array is not near tip.
 #[test]
 fn empty_sync_lengths() {
-    let (status, _recent_sync_lengths) = SyncStatus::new();
+    let (status, _recent_sync_lengths, peer_status_tx, _tip_sender) =
+        build_sync_status(1, Duration::from_secs(5 * 60));
+    let _ = peer_status_tx.send(PeerSetStatus::new(1, 1));
 
     assert!(!status.is_close_to_tip());
 }
@@ -153,7 +196,9 @@ fn empty_sync_lengths() {
 /// This prevents false positives when Zebra loses all peers (issue #4649).
 #[test]
 fn zero_sync_lengths_means_disconnected() {
-    let (status, mut recent_sync_lengths) = SyncStatus::new();
+    let (status, mut recent_sync_lengths, peer_status_tx, _tip_sender) =
+        build_sync_status(1, Duration::from_secs(5 * 60));
+    let _ = peer_status_tx.send(PeerSetStatus::new(1, 1));
 
     for _ in 0..RecentSyncLengths::MAX_RECENT_LENGTHS {
         recent_sync_lengths.push_extend_tips_length(0);
@@ -165,7 +210,9 @@ fn zero_sync_lengths_means_disconnected() {
 /// Test if sync lengths array with high values is not near tip.
 #[test]
 fn high_sync_lengths() {
-    let (status, mut recent_sync_lengths) = SyncStatus::new();
+    let (status, mut recent_sync_lengths, peer_status_tx, _tip_sender) =
+        build_sync_status(1, Duration::from_secs(5 * 60));
+    let _ = peer_status_tx.send(PeerSetStatus::new(1, 1));
 
     // The value 500 is based on the fact that sync lengths are around 500
     // blocks long when Zebra is syncing.
@@ -180,7 +227,9 @@ fn high_sync_lengths() {
 /// This represents normal operation at the chain tip with occasional new blocks.
 #[test]
 fn mixed_small_sync_lengths_near_tip() {
-    let (status, mut recent_sync_lengths) = SyncStatus::new();
+    let (status, mut recent_sync_lengths, peer_status_tx, _tip_sender) =
+        build_sync_status(1, Duration::from_secs(5 * 60));
+    let _ = peer_status_tx.send(PeerSetStatus::new(1, 1));
 
     // Simulate being at tip with occasional new blocks
     recent_sync_lengths.push_extend_tips_length(0);
@@ -191,10 +240,49 @@ fn mixed_small_sync_lengths_near_tip() {
     assert!(status.is_close_to_tip());
 }
 
+/// Tip changes should count as recent activity even when sync batches are zero.
+#[test]
+fn tip_updates_count_as_activity() {
+    let (status, mut recent_sync_lengths, peer_status_tx, mut tip_sender) =
+        build_sync_status(1, Duration::from_secs(5 * 60));
+    let _ = peer_status_tx.send(PeerSetStatus::new(1, 1));
+
+    // Three zero batches without activity should look like "still syncing".
+    for _ in 0..RecentSyncLengths::MAX_RECENT_LENGTHS {
+        recent_sync_lengths.push_extend_tips_length(0);
+    }
+    assert!(!status.is_close_to_tip());
+
+    // Advancing the finalized tip should register as progress even though batches are zero.
+    tip_sender.set_finalized_tip(genesis_tip());
+    assert!(status.is_close_to_tip());
+}
+
+/// If no activity happens within the grace window, readiness should eventually flip to false.
+#[test]
+fn activity_expires_after_grace() {
+    let grace = Duration::from_millis(200);
+    let (status, mut recent_sync_lengths, peer_status_tx, mut tip_sender) =
+        build_sync_status(1, grace);
+    let _ = peer_status_tx.send(PeerSetStatus::new(1, 1));
+
+    // Tip update marks activity.
+    tip_sender.set_finalized_tip(genesis_tip());
+    recent_sync_lengths.push_extend_tips_length(0);
+    assert!(status.is_close_to_tip());
+
+    // After the grace period elapses, zero batches should make us report syncing again.
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    recent_sync_lengths.push_extend_tips_length(0);
+    assert!(!status.is_close_to_tip());
+}
+
 /// Test if sync lengths with a mix including some progress is near tip.
 #[test]
 fn small_nonzero_sync_lengths_near_tip() {
-    let (status, mut recent_sync_lengths) = SyncStatus::new();
+    let (status, mut recent_sync_lengths, peer_status_tx, _tip_sender) =
+        build_sync_status(1, Duration::from_secs(5 * 60));
+    let _ = peer_status_tx.send(PeerSetStatus::new(1, 1));
 
     // Small sync batches when near tip
     recent_sync_lengths.push_extend_tips_length(5);
@@ -202,5 +290,31 @@ fn small_nonzero_sync_lengths_near_tip() {
     recent_sync_lengths.push_extend_tips_length(4);
 
     // Average is 4, which is < MIN_DIST_FROM_TIP (20)
+    assert!(status.is_close_to_tip());
+}
+
+/// Test that lack of ready peers blocks the near-tip signal.
+#[test]
+fn zero_ready_peers_prevent_tip_flag() {
+    let (status, mut recent_sync_lengths, _peer_status_tx, _tip_sender) =
+        build_sync_status(1, Duration::from_secs(5 * 60));
+
+    recent_sync_lengths.push_extend_tips_length(2);
+    recent_sync_lengths.push_extend_tips_length(1);
+    recent_sync_lengths.push_extend_tips_length(3);
+
+    assert!(!status.is_close_to_tip());
+}
+
+/// Ensure min_ready_peers=0 (regtest) still reports near tip.
+#[test]
+fn regtest_allows_zero_peers() {
+    let (status, mut recent_sync_lengths, _peer_status_tx, _tip_sender) =
+        build_sync_status(0, Duration::from_secs(5 * 60));
+
+    recent_sync_lengths.push_extend_tips_length(1);
+    recent_sync_lengths.push_extend_tips_length(1);
+    recent_sync_lengths.push_extend_tips_length(1);
+
     assert!(status.is_close_to_tip());
 }

@@ -3,7 +3,11 @@
 use std::{collections::HashSet, iter, net::SocketAddr, str::FromStr, sync::Arc, time::Duration};
 
 use futures::FutureExt;
-use tokio::{sync::oneshot, task::JoinHandle, time::timeout};
+use tokio::{
+    sync::{oneshot, watch},
+    task::JoinHandle,
+    time::timeout,
+};
 use tower::{buffer::Buffer, builder::ServiceBuilder, util::BoxService, Service, ServiceExt};
 use tracing::{Instrument, Span};
 
@@ -21,7 +25,7 @@ use zebra_network::{
         ADDR_RESPONSE_LIMIT_DENOMINATOR, DEFAULT_MAX_CONNS_PER_IP, MAX_ADDRS_IN_ADDRESS_BOOK,
     },
     types::{MetaAddr, PeerServices},
-    AddressBook, InventoryResponse, Request, Response,
+    AddressBook, InventoryResponse, PeerSetStatus, Request, Response,
 };
 use zebra_node_services::mempool;
 use zebra_rpc::SubmitBlockChannel;
@@ -889,11 +893,19 @@ async fn setup(
         Span::none(),
     );
     let address_book = Arc::new(std::sync::Mutex::new(address_book));
-    let (sync_status, mut recent_syncs) = SyncStatus::new();
-
     // UTXO verification doesn't matter for these tests.
     let (state, _read_only_state_service, latest_chain_tip, mut chain_tip_change) =
         zebra_state::init(state_config.clone(), &network, Height::MAX, 0).await;
+
+    let (peer_status_tx, peer_status_rx) = watch::channel(PeerSetStatus::default());
+    drop(peer_status_tx);
+
+    let (sync_status, mut recent_syncs) = SyncStatus::new(
+        peer_status_rx,
+        latest_chain_tip.clone(),
+        0,
+        Duration::from_secs(5 * 60),
+    );
 
     let mut state_service = ServiceBuilder::new().buffer(1).service(state);
 

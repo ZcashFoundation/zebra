@@ -174,7 +174,7 @@ impl StartCmd {
                 setup_rx,
             ));
 
-        let (peer_set, address_book, misbehavior_sender) = zebra_network::init(
+        let (peer_set, address_book, misbehavior_sender, peer_status_rx) = zebra_network::init(
             config.network.clone(),
             inbound,
             latest_chain_tip.clone(),
@@ -204,6 +204,8 @@ impl StartCmd {
             state.clone(),
             latest_chain_tip.clone(),
             misbehavior_sender.clone(),
+            peer_status_rx.clone(),
+            latest_chain_tip.clone(),
         );
 
         // Start health server if configured

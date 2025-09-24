@@ -43,7 +43,10 @@ use crate::{
         OutboundConnectorRequest, PeerPreference,
     },
     peer_cache_updater::peer_cache_updater,
-    peer_set::{set::MorePeers, ActiveConnectionCounter, CandidateSet, ConnectionTracker, PeerSet},
+    peer_set::{
+        set::MorePeers, ActiveConnectionCounter, CandidateSet, ConnectionTracker, PeerSet,
+        PeerSetStatus,
+    },
     AddressBook, BoxError, Config, PeerSocketAddr, Request, Response,
 };
 
@@ -103,6 +106,7 @@ pub async fn init<S, C>(
     Buffer<BoxService<Request, Response, BoxError>, Request>,
     Arc<std::sync::Mutex<AddressBook>>,
     mpsc::Sender<(PeerSocketAddr, u32)>,
+    watch::Receiver<PeerSetStatus>,
 )
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + Sync + 'static,
@@ -173,6 +177,9 @@ where
     // (The block syncer and mempool crawler handle bulk fetches of blocks and transactions.)
     let (inv_sender, inv_receiver) = broadcast::channel(config.peerset_total_connection_limit());
 
+    // Expose a lightweight view of peer readiness for components like `SyncStatus`.
+    let (peer_status_tx, peer_status_rx) = watch::channel(PeerSetStatus::default());
+
     // Construct services that handle inbound handshakes and perform outbound
     // handshakes. These use the same handshake service internally to detect
     // self-connection attempts. Both are decorated with a tower TimeoutLayer to
@@ -227,6 +234,7 @@ where
         inv_receiver,
         bans_receiver.clone(),
         address_metrics,
+        peer_status_tx,
         MinimumPeerVersion::new(latest_chain_tip, &config.network),
         None,
     );
@@ -312,7 +320,7 @@ where
         ])
         .unwrap();
 
-    (peer_set, address_book, misbehavior_tx)
+    (peer_set, address_book, misbehavior_tx, peer_status_rx)
 }
 
 /// Use the provided `outbound_connector` to connect to the configured DNS seeder and
