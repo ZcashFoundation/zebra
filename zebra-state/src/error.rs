@@ -59,6 +59,15 @@ pub enum ReconsiderError {
     #[error("Invalidated blocks list is empty when it should contain at least one block")]
     InvalidatedBlocksEmpty,
 
+    #[error("cannot reconsider blocks while still committing checkpointed blocks")]
+    CheckpointCommitInProgress,
+
+    #[error("failed to send reconsider block request to block write task")]
+    ReconsiderSendFailed,
+
+    #[error("reconsider block request was unexpectedly dropped")]
+    ReconsiderResponseDropped,
+
     #[error("{0}")]
     ValidationError(#[from] Box<ValidateContextError>),
 }
