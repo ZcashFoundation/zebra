@@ -1,12 +1,12 @@
 //! Randomised property tests for the mempool.
 
-use std::{env, fmt, sync::Arc};
+use std::{env, fmt, sync::Arc, time::Duration as StdDuration};
 
 use proptest::{collection::vec, prelude::*};
 use proptest_derive::Arbitrary;
 
 use chrono::Duration;
-use tokio::time;
+use tokio::{sync::watch, time};
 use tower::{buffer::Buffer, util::BoxService};
 
 use zebra_chain::{
@@ -17,7 +17,7 @@ use zebra_chain::{
     transaction::VerifiedUnminedTx,
 };
 use zebra_consensus::{error::TransactionError, transaction as tx};
-use zebra_network as zn;
+use zebra_network::{self as zn, PeerSetStatus};
 use zebra_state::{self as zs, ChainTipBlock, ChainTipSender};
 use zebra_test::mock_service::{MockService, PropTestAssertion};
 use zs::CheckpointVerifiedBlock;
@@ -267,9 +267,21 @@ fn setup(
     let state_service = MockService::build().for_prop_tests();
     let tx_verifier = MockService::build().for_prop_tests();
 
-    let (sync_status, recent_syncs) = SyncStatus::new();
     let (mut chain_tip_sender, latest_chain_tip, chain_tip_change) =
         ChainTipSender::new(None, network);
+
+    let (peer_status_tx, peer_status_rx) = watch::channel(PeerSetStatus::default());
+    let min_ready_peers = if network.is_regtest() { 0 } else { 1 };
+    if min_ready_peers > 0 {
+        let _ = peer_status_tx.send(PeerSetStatus::new(min_ready_peers, min_ready_peers));
+    }
+
+    let (sync_status, recent_syncs) = SyncStatus::new(
+        peer_status_rx,
+        latest_chain_tip.clone(),
+        min_ready_peers,
+        StdDuration::from_secs(5 * 60),
+    );
 
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
     let (mempool, mempool_transaction_subscriber) = Mempool::new(

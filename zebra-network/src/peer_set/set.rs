@@ -132,6 +132,7 @@ use crate::{
     constants::MIN_PEER_SET_LOG_INTERVAL,
     peer::{LoadTrackedClient, MinimumPeerVersion},
     peer_set::{
+        status::PeerSetStatus,
         unready_service::{Error as UnreadyError, UnreadyService},
         InventoryChange, InventoryRegistry,
     },
@@ -244,6 +245,10 @@ where
     /// Used for logging diagnostics.
     address_metrics: watch::Receiver<AddressMetrics>,
 
+    /// Publishes lightweight connectivity status snapshots for other components
+    /// that need to react immediately to peer availability changes.
+    peer_status_tx: watch::Sender<PeerSetStatus>,
+
     /// The last time we logged a message about the peer set size
     last_peer_log: Option<Instant>,
 
@@ -302,6 +307,7 @@ where
         inv_stream: broadcast::Receiver<InventoryChange>,
         bans_receiver: watch::Receiver<Arc<IndexMap<IpAddr, std::time::Instant>>>,
         address_metrics: watch::Receiver<AddressMetrics>,
+        peer_status_tx: watch::Sender<PeerSetStatus>,
         minimum_peer_version: MinimumPeerVersion<C>,
         max_conns_per_ip: Option<usize>,
     ) -> Self {
@@ -332,6 +338,7 @@ where
             // Metrics
             last_peer_log: None,
             address_metrics,
+            peer_status_tx,
 
             max_conns_per_ip: max_conns_per_ip.unwrap_or(config.max_connections_per_ip),
 
@@ -1117,6 +1124,9 @@ where
         metrics::gauge!("pool.num_ready").set(num_ready as f64);
         metrics::gauge!("pool.num_unready").set(num_unready as f64);
         metrics::gauge!("zcash.net.peers").set(num_peers as f64);
+
+        let status = PeerSetStatus::new(num_ready, num_peers);
+        let _ = self.peer_status_tx.send(status);
 
         // Security: make sure we haven't exceeded the connection limit
         if num_peers > self.peerset_total_connection_limit {

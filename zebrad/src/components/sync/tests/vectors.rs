@@ -4,15 +4,17 @@ use std::{collections::HashMap, iter, sync::Arc, time::Duration};
 
 use color_eyre::Report;
 use futures::{Future, FutureExt};
+use tokio::sync::watch;
 
 use zebra_chain::{
     block::{self, Block, Height},
     chain_tip::mock::{MockChainTip, MockChainTipSender},
+    parameters::Network,
     serialization::ZcashDeserializeInto,
 };
 use zebra_consensus::Config as ConsensusConfig;
-use zebra_network::InventoryResponse;
-use zebra_state::Config as StateConfig;
+use zebra_network::{InventoryResponse, PeerSetStatus};
+use zebra_state::{ChainTipSender, Config as StateConfig};
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use zebra_network as zn;
@@ -1023,8 +1025,13 @@ fn setup() -> (
         .for_unit_tests();
 
     let (mock_chain_tip, mock_chain_tip_sender) = MockChainTip::new();
+    let (status_tip_sender, status_latest_chain_tip, _status_change) =
+        ChainTipSender::new(None, &Network::Mainnet);
+    drop(status_tip_sender);
 
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
+    let (peer_status_tx, peer_status_rx) = watch::channel(PeerSetStatus::default());
+    let _ = peer_status_tx.send(PeerSetStatus::new(1, 1));
     let (chain_sync, sync_status) = ChainSync::new(
         &config,
         Height(0),
@@ -1033,6 +1040,8 @@ fn setup() -> (
         state_service.clone(),
         mock_chain_tip,
         misbehavior_tx,
+        peer_status_rx,
+        status_latest_chain_tip,
     );
 
     let chain_sync_future = chain_sync.sync();

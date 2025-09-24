@@ -84,10 +84,10 @@ async fn http_get(addr: SocketAddr, path: &str) -> (u16, String) {
     (status, text)
 }
 
+/// Happy-path coverage: peers, sync status, lag, and tip age are all within
+/// thresholds, so both endpoints return 200.
 #[tokio::test]
 async fn healthy_and_ready_ok() {
-    // Happy-path coverage: peers, sync status, lag, and tip age are all within
-    // thresholds, so both endpoints return 200.
     let cfg = config_for(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0));
     let mut sync_status = MockSyncStatus::default();
     sync_status.set_is_close_to_tip(true);
@@ -113,6 +113,8 @@ async fn healthy_and_ready_ok() {
     task.abort();
 }
 
+/// Losing sync progress or falling too far behind should stop readiness even
+/// if Zebra still has peers.
 #[tokio::test]
 async fn not_ready_when_syncing_or_lagging() {
     let cfg = config_for(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0));
@@ -153,10 +155,10 @@ async fn not_ready_when_syncing_or_lagging() {
     task_lagging.abort();
 }
 
+/// A stale block time must cause readiness to fail even if everything else
+/// looks healthy, preventing long-lived false positives.
 #[tokio::test]
 async fn not_ready_when_tip_is_too_old() {
-    // A stale block time must cause readiness to fail even if everything else
-    // looks healthy, preventing long-lived false positives.
     let mut cfg = config_for(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0));
     cfg.ready_max_tip_age = Duration::from_secs(1);
 
@@ -182,10 +184,10 @@ async fn not_ready_when_tip_is_too_old() {
     task.abort();
 }
 
+/// With a sleep shorter than the configured interval we should only be able
+/// to observe one successful request before the limiter responds with 429.
 #[tokio::test]
 async fn rate_limiting_drops_bursts() {
-    // With a sleep shorter than the configured interval we should only be able
-    // to observe one successful request before the limiter responds with 429.
     let mut cfg = config_for(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0));
     cfg.min_request_interval = Duration::from_millis(200);
 
@@ -214,6 +216,96 @@ async fn rate_limiting_drops_bursts() {
 
     let (third_status, third_body) = http_get(addr, "/healthy").await;
     assert_eq!(third_status, 200, "third response: {}", third_body);
+
+    task.abort();
+}
+
+/// Regtest should always return ready regardless of peer count or sync status.
+#[tokio::test]
+async fn ready_always_returns_ok_on_regtest() {
+    let cfg = config_for(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0));
+    let sync_status = MockSyncStatus::default(); // not close to tip
+    let chain_tip = configured_chain_tip(100, ChronoDuration::seconds(3600)); // very old and lagging
+
+    let (task, addr_opt) = init(
+        cfg,
+        Network::new_regtest(Default::default()),
+        chain_tip,
+        sync_status,
+        peers_with_count(0), // no peers
+    )
+    .await;
+    let addr = addr_opt.expect("addr");
+
+    let (status, body) = http_get(addr, "/ready").await;
+    assert_eq!(status, 200, "body: {}", body);
+    assert!(body.contains("ok (regtest)"));
+
+    task.abort();
+}
+
+/// Verify that both healthy and ready endpoints include peer count in response.
+#[tokio::test]
+async fn endpoints_include_peer_count() {
+    let cfg = config_for(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0));
+    let mut sync_status = MockSyncStatus::default();
+    sync_status.set_is_close_to_tip(true);
+    let chain_tip = configured_chain_tip(0, ChronoDuration::zero());
+
+    let (task, addr_opt) = init(
+        cfg,
+        Network::Mainnet,
+        chain_tip,
+        sync_status,
+        peers_with_count(5), // 5 peers
+    )
+    .await;
+    let addr = addr_opt.expect("addr");
+
+    let (status_h, body_h) = http_get(addr, "/healthy").await;
+    assert_eq!(status_h, 200, "healthy response: {}", body_h);
+    assert!(
+        body_h.contains("peers=5"),
+        "healthy body should include peer count"
+    );
+
+    let (status_r, body_r) = http_get(addr, "/ready").await;
+    assert_eq!(status_r, 200, "ready response: {}", body_r);
+    assert!(
+        body_r.contains("peers=5"),
+        "ready body should include peer count"
+    );
+
+    task.abort();
+}
+
+/// Verify error messages include details about peer requirements.
+#[tokio::test]
+async fn insufficient_peers_shows_details() {
+    let mut cfg = config_for(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0));
+    cfg.min_connected_peers = 3; // require 3 peers
+
+    let mut sync_status = MockSyncStatus::default();
+    sync_status.set_is_close_to_tip(true);
+    let chain_tip = configured_chain_tip(0, ChronoDuration::zero());
+
+    let (task, addr_opt) = init(
+        cfg,
+        Network::Mainnet,
+        chain_tip,
+        sync_status,
+        peers_with_count(1), // only 1 peer
+    )
+    .await;
+    let addr = addr_opt.expect("addr");
+
+    let (status_h, body_h) = http_get(addr, "/healthy").await;
+    assert_eq!(status_h, 503, "healthy response: {}", body_h);
+    assert!(body_h.contains("insufficient peers: 1 < 3"));
+
+    let (status_r, body_r) = http_get(addr, "/ready").await;
+    assert_eq!(status_r, 503, "ready response: {}", body_r);
+    assert!(body_r.contains("insufficient peers: 1 < 3"));
 
     task.abort();
 }

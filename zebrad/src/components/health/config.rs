@@ -23,9 +23,15 @@ pub struct Config {
     /// If `false`, `/ready` always returns 200 on regtest and testnets.
     pub enforce_on_test_networks: bool,
     /// Maximum age of the last committed block before readiness fails.
+    /// Keeps `/ready` from returning success after Zebra stops verifying
+    /// blocks, which was a root cause of false-positives in
+    /// [issue #4649](https://github.com/ZcashFoundation/zebra/issues/4649).
     #[serde(with = "humantime_serde")]
     pub ready_max_tip_age: Duration,
     /// Minimum interval between accepted health requests.
+    ///
+    /// Provides a final line of defence against tight probe loops or abuse of
+    /// the unauthenticated health endpoints.
     #[serde(with = "humantime_serde")]
     pub min_request_interval: Duration,
 }

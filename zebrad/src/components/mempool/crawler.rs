@@ -29,8 +29,15 @@
 //! #
 //! # let peer_set_service = MockService::build().for_unit_tests();
 //! # let mempool_service = MockService::build().for_unit_tests();
-//! # let (sync_status, _) = SyncStatus::new();
-//! # let (_, _, chain_tip_change) = ChainTipSender::new(None, &Network::Mainnet);
+//! # let (chain_tip_sender, latest_chain_tip, chain_tip_change) = ChainTipSender::new(None, &Network::Mainnet);
+//! # let (peer_status_tx, peer_status_rx) = tokio::sync::watch::channel(zebra_network::PeerSetStatus::default());
+//! # let (sync_status, _) = SyncStatus::new(
+//! #     peer_status_rx,
+//! #     latest_chain_tip,
+//! #     0,
+//! #     std::time::Duration::from_secs(5 * 60),
+//! # );
+//! # drop(peer_status_tx);
 //!
 //! let crawler_task = mempool::Crawler::spawn(
 //!     &mempool::Config::default(),

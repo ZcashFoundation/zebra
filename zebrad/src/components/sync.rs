@@ -22,7 +22,7 @@ use zebra_chain::{
     block::{self, Height, HeightDiff},
     chain_tip::ChainTip,
 };
-use zebra_network::{self as zn, PeerSocketAddr};
+use zebra_network::{self as zn, PeerSetStatus, PeerSocketAddr};
 use zebra_state as zs;
 
 use crate::{
@@ -420,6 +420,7 @@ where
     ///  - latest_chain_tip: the latest chain tip from `state`
     ///
     /// Also returns a [`SyncStatus`] to check if the syncer has likely reached the chain tip.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: &ZebradConfig,
         max_checkpoint_height: Height,
@@ -428,6 +429,8 @@ where
         state: ZS,
         latest_chain_tip: ZSTip,
         misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
+        peer_status: watch::Receiver<PeerSetStatus>,
+        status_chain_tip: zs::LatestChainTip,
     ) -> (Self, SyncStatus) {
         let mut download_concurrency_limit = config.sync.download_concurrency_limit;
         let mut checkpoint_verify_concurrency_limit =
@@ -487,7 +490,18 @@ where
         // We apply a timeout to the verifier to avoid hangs due to missing earlier blocks.
         let verifier = Timeout::new(verifier, BLOCK_VERIFY_TIMEOUT);
 
-        let (sync_status, recent_syncs) = SyncStatus::new();
+        let min_ready_peers = if config.network.network.is_regtest() {
+            0
+        } else {
+            1
+        };
+
+        let (sync_status, recent_syncs) = SyncStatus::new(
+            peer_status,
+            status_chain_tip,
+            min_ready_peers,
+            config.health.ready_max_tip_age,
+        );
 
         let (past_lookahead_limit_sender, past_lookahead_limit_receiver) = watch::channel(false);
         let past_lookahead_limit_receiver = zs::WatchReceiver::new(past_lookahead_limit_receiver);

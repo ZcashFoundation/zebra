@@ -1,9 +1,12 @@
 //! Fixed test vectors for the mempool.
 
-use std::{sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration as StdDuration};
 
 use color_eyre::Report;
-use tokio::time::{self, timeout};
+use tokio::{
+    sync::watch,
+    time::{self, timeout},
+};
 use tower::{ServiceBuilder, ServiceExt};
 
 use zebra_chain::{
@@ -11,12 +14,13 @@ use zebra_chain::{
     serialization::ZcashDeserializeInto, transaction::VerifiedUnminedTx, transparent::OutPoint,
 };
 use zebra_consensus::transaction as tx;
+use zebra_network::{self as zn, PeerSetStatus};
 use zebra_state::{Config as StateConfig, CHAIN_TIP_UPDATE_WAIT_LIMIT};
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::components::{
     mempool::{self, *},
-    sync::RecentSyncLengths,
+    sync::{RecentSyncLengths, SyncStatus},
 };
 
 /// A [`MockService`] representing the network service.
@@ -590,10 +594,13 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
         "queued tx should fail to download and verify due to chain tip change"
     );
 
-    let mempool_change = timeout(Duration::from_secs(3), mempool_transaction_receiver.recv())
-        .await
-        .expect("should not timeout")
-        .expect("recv should return Ok");
+    let mempool_change = timeout(
+        StdDuration::from_secs(3),
+        mempool_transaction_receiver.recv(),
+    )
+    .await
+    .expect("should not timeout")
+    .expect("recv should return Ok");
 
     assert_eq!(
         mempool_change,
@@ -770,10 +777,13 @@ async fn mempool_failed_verification_is_rejected() -> Result<(), Report> {
         MempoolError::StorageExactTip(ExactTipRejectionError::FailedVerification(_))
     ));
 
-    let mempool_change = timeout(Duration::from_secs(3), mempool_transaction_receiver.recv())
-        .await
-        .expect("should not timeout")
-        .expect("recv should return Ok");
+    let mempool_change = timeout(
+        StdDuration::from_secs(3),
+        mempool_transaction_receiver.recv(),
+    )
+    .await
+    .expect("should not timeout")
+    .expect("recv should return Ok");
 
     assert_eq!(
         mempool_change,
@@ -856,10 +866,13 @@ async fn mempool_failed_download_is_not_rejected() -> Result<(), Report> {
     assert_eq!(queued_responses.len(), 1);
     assert!(queued_responses[0].is_ok());
 
-    let mempool_change = timeout(Duration::from_secs(3), mempool_transaction_receiver.recv())
-        .await
-        .expect("should not timeout")
-        .expect("recv should return Ok");
+    let mempool_change = timeout(
+        StdDuration::from_secs(3),
+        mempool_transaction_receiver.recv(),
+    )
+    .await
+    .expect("should not timeout")
+    .expect("recv should return Ok");
 
     assert_eq!(
         mempool_change,
@@ -1099,7 +1112,7 @@ async fn mempool_responds_to_await_output() -> Result<(), Report> {
     assert!(results.is_empty(), "should have 1 result for 1 queued tx");
 
     // Wait for post-verification steps in mempool's Downloads
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    tokio::time::sleep(StdDuration::from_secs(1)).await;
 
     // Note: Buffered services shouldn't be polled without being called.
     //       See `mempool::Request::CheckForVerifiedTransactions` for more details.
@@ -1108,7 +1121,7 @@ async fn mempool_responds_to_await_output() -> Result<(), Report> {
         .await
         .expect("polling mempool should succeed");
 
-    tokio::time::timeout(Duration::from_secs(10), result_rx)
+    tokio::time::timeout(StdDuration::from_secs(10), result_rx)
         .await
         .expect("should not time out")
         .expect("mempool tx verification result channel should not be closed")
@@ -1128,7 +1141,7 @@ async fn mempool_responds_to_await_output() -> Result<(), Report> {
 
     // Check that the AwaitOutput request has been responded to after the relevant tx was added to the verified set
 
-    let response_fut = tokio::time::timeout(Duration::from_secs(30), await_output_response_fut);
+    let response_fut = tokio::time::timeout(StdDuration::from_secs(30), await_output_response_fut);
     let response = response_fut
         .await
         .expect("should not time out")
@@ -1147,7 +1160,7 @@ async fn mempool_responds_to_await_output() -> Result<(), Report> {
 
     let request = Request::AwaitOutput(outpoint);
     let await_output_response_fut = mempool.ready().await.unwrap().call(request);
-    let response_fut = tokio::time::timeout(Duration::from_secs(30), await_output_response_fut);
+    let response_fut = tokio::time::timeout(StdDuration::from_secs(30), await_output_response_fut);
     let response = response_fut
         .await
         .expect("should not time out")
@@ -1162,10 +1175,13 @@ async fn mempool_responds_to_await_output() -> Result<(), Report> {
         "AwaitOutput response should match expected output"
     );
 
-    let mempool_change = timeout(Duration::from_secs(3), mempool_transaction_receiver.recv())
-        .await
-        .expect("should not timeout")
-        .expect("recv should return Ok");
+    let mempool_change = timeout(
+        StdDuration::from_secs(3),
+        mempool_transaction_receiver.recv(),
+    )
+    .await
+    .expect("should not timeout")
+    .expect("recv should return Ok");
 
     assert_eq!(
         mempool_change,
@@ -1199,7 +1215,18 @@ async fn setup(
 
     let tx_verifier = MockService::build().for_unit_tests();
 
-    let (sync_status, recent_syncs) = SyncStatus::new();
+    let (peer_status_tx, peer_status_rx) = watch::channel(PeerSetStatus::default());
+    let min_ready_peers = if network.is_regtest() { 0 } else { 1 };
+    if min_ready_peers > 0 {
+        let _ = peer_status_tx.send(PeerSetStatus::new(min_ready_peers, min_ready_peers));
+    }
+
+    let (sync_status, recent_syncs) = SyncStatus::new(
+        peer_status_rx,
+        latest_chain_tip.clone(),
+        min_ready_peers,
+        StdDuration::from_secs(5 * 60),
+    );
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
     let (mempool, mempool_transaction_subscriber) = Mempool::new(
         &mempool::Config {
