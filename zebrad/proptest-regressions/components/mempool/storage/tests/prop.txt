@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc b258d507c0b2aef6c2793bdb3fc29e6367e62fba9df378ea6797e9bc97fd2780 # shrinks to input = RemoveSameEffects { transactions: alloc::vec::Vec<zebra_chain::transaction::unmined::UnminedTx><zebra_chain::transaction::unmined::UnminedTx>, len=2, mined_ids_to_remove: std::collections::hash::set::HashSet<zebra_chain::transaction::hash::Hash><zebra_chain::transaction::hash::Hash>, len=2 }
+cc 4616d813ba54e7b7475a1adb880905dfb05a63b59a18dc079893bf963ae92097 # shrinks to rejection_error = SameEffectsChain(Expired), mut rejection_template = Witnessed(WtxId { id: transaction::Hash("0000000000000000000000000000000000000000000000000000000000000000"), auth_digest: AuthDigest("353b92c552d72e06b512c81f909991b291ca0fec5251d6696755091100000000") })
