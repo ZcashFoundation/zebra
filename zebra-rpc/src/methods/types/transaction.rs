@@ -158,7 +158,7 @@ pub struct TransactionObject {
     /// The raw transaction, encoded as hex bytes.
     #[serde(with = "hex")]
     pub(crate) hex: SerializedTransaction,
-    /// The height of the block in the best chain that contains the tx, -1 is
+    /// The height of the block in the best chain that contains the tx, -1 if
     /// it's in a side chain block, or `None` if the tx is in the mempool.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
