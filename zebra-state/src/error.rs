@@ -106,6 +106,22 @@ impl<E: std::error::Error + 'static> From<BoxError> for LayeredStateError<E> {
     }
 }
 
+/// An error describing the reason a block could not be invalidated.
+#[derive(Debug, Error)]
+pub enum InvalidateError {
+    #[error("cannot invalidate blocks while still committing checkpointed blocks")]
+    CannotInvalidateWhileCheckpointing,
+
+    #[error("failed to send invalidate block request to block write task")]
+    SendInvalidateRequestFailed,
+
+    #[error("invalidate block request was unexpectedly dropped")]
+    InvalidateRequestDropped,
+
+    #[error("{0}")]
+    ValidationError(#[from] Box<ValidateContextError>),
+}
+
 /// An error describing the reason a block or its descendants could not be reconsidered after
 /// potentially being invalidated from the chain_set.
 #[derive(Debug, Error)]
@@ -354,6 +370,10 @@ pub enum ValidateContextError {
         tx_index_in_block: Option<usize>,
         transaction_hash: transaction::Hash,
     },
+
+    #[error("block hash {block_hash} not found in any non-finalized chain")]
+    #[non_exhaustive]
+    BlockNotFound { block_hash: block::Hash },
 }
 
 /// Trait for creating the corresponding duplicate nullifier error from a nullifier.

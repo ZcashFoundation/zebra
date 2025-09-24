@@ -22,8 +22,8 @@ use crate::{
     constants::{MAX_INVALIDATED_BLOCKS, MAX_NON_FINALIZED_CHAIN_FORKS},
     error::ReconsiderError,
     request::{ContextuallyVerifiedBlock, FinalizableBlock},
-    service::{check, finalized_state::ZebraDb},
-    BoxError, SemanticallyVerifiedBlock, ValidateContextError, WatchReceiver,
+    service::{check, finalized_state::ZebraDb, InvalidateError},
+    SemanticallyVerifiedBlock, ValidateContextError, WatchReceiver,
 };
 
 mod backup;
@@ -349,9 +349,11 @@ impl NonFinalizedState {
     /// Invalidate block with hash `block_hash` and all descendants from the non-finalized state. Insert
     /// the new chain into the chain_set and discard the previous.
     #[allow(clippy::unwrap_in_result)]
-    pub fn invalidate_block(&mut self, block_hash: Hash) -> Result<block::Hash, BoxError> {
+    pub fn invalidate_block(&mut self, block_hash: Hash) -> Result<block::Hash, InvalidateError> {
         let Some(chain) = self.find_chain(|chain| chain.contains_block_hash(block_hash)) else {
-            return Err("block hash not found in any non-finalized chain".into());
+            return Err(InvalidateError::ValidationError(Box::new(
+                ValidateContextError::BlockNotFound { block_hash },
+            )));
         };
 
         let invalidated_blocks = if chain.non_finalized_root_hash() == block_hash {
