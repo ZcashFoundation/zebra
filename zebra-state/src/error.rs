@@ -46,6 +46,22 @@ pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 #[error("block is not contextually valid: {}", .0)]
 pub struct CommitSemanticallyVerifiedError(#[from] Box<ValidateContextError>);
 
+/// An error describing the reason a block could not be invalidated.
+#[derive(Debug, Error)]
+pub enum InvalidateError {
+    #[error("cannot invalidate blocks while still committing checkpointed blocks")]
+    CannotInvalidateWhileCheckpointing,
+
+    #[error("failed to send invalidate block request to block write task")]
+    SendInvalidateRequestFailed,
+
+    #[error("invalidate block request was unexpectedly dropped")]
+    InvalidateRequestDropped,
+
+    #[error("{0}")]
+    ValidationError(#[from] Box<ValidateContextError>),
+}
+
 /// An error describing the reason a block or its descendants could not be reconsidered after
 /// potentially being invalidated from the chain_set.
 #[derive(Debug, Error)]
@@ -313,6 +329,10 @@ pub enum ValidateContextError {
     #[error("dropping the state: dropped unused non-finalized state queue block")]
     #[non_exhaustive]
     DroppedUnusedBlock,
+
+    #[error("block hash {block_hash} not found in any non-finalized chain")]
+    #[non_exhaustive]
+    BlockNotFound { block_hash: block::Hash },
 }
 
 /// Trait for creating the corresponding duplicate nullifier error from a nullifier.

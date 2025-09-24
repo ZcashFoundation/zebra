@@ -21,7 +21,7 @@ use crate::{
         finalized_state::{FinalizedState, ZebraDb},
         non_finalized_state::NonFinalizedState,
         queued_blocks::{QueuedCheckpointVerified, QueuedSemanticallyVerified},
-        BoxError, ChainTipBlock, ChainTipSender,
+        BoxError, ChainTipBlock, ChainTipSender, InvalidateError,
     },
     CommitSemanticallyVerifiedError, SemanticallyVerifiedBlock,
 };
@@ -139,7 +139,7 @@ pub enum NonFinalizedWriteMessage {
     /// the non-finalized state, if present.
     Invalidate {
         hash: block::Hash,
-        rsp_tx: oneshot::Sender<Result<block::Hash, BoxError>>,
+        rsp_tx: oneshot::Sender<Result<block::Hash, InvalidateError>>,
     },
     /// The hash of a block that was previously invalidated but should be
     /// reconsidered and reinserted into the non-finalized state.
