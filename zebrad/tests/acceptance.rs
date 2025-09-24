@@ -4041,6 +4041,12 @@ async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
 }
 
 /// Check that Zebra will disconnect from misbehaving peers.
+///
+/// In order to simulate a misbehaviour peer we start two zebrad instances:
+/// - The first one is started with a custom Testnet where PoW is disabled.
+/// - The second one is started with the default Testnet where PoW is enabled.
+/// The second zebrad instance will connect to the first one, and when the first one mines
+/// blocks with invalid PoW the second one should disconnect from it.
 #[tokio::test]
 #[cfg(not(target_os = "windows"))]
 async fn disconnects_from_misbehaving_peers() -> Result<()> {
@@ -4051,7 +4057,7 @@ async fn disconnects_from_misbehaving_peers() -> Result<()> {
     use zebra_rpc::PeerInfo;
 
     let _init_guard = zebra_test::init();
-    let network = testnet::Parameters::build()
+    let network1 = testnet::Parameters::build()
         .with_activation_heights(ConfiguredActivationHeights {
             canopy: Some(1),
             nu5: Some(2),
@@ -4060,6 +4066,8 @@ async fn disconnects_from_misbehaving_peers() -> Result<()> {
         })
         .with_slow_start_interval(Height::MIN)
         .with_disable_pow(true)
+        .clear_checkpoints()
+        .with_network_name("PoWDisabledTestnet")
         .to_network();
 
     let test_type = LaunchWithEmptyState {
@@ -4074,11 +4082,14 @@ async fn disconnects_from_misbehaving_peers() -> Result<()> {
 
     // Get the zebrad config
     let mut config = test_type
-        .zebrad_config(test_name, false, None, &network)
+        .zebrad_config(test_name, false, None, &network1)
         .expect("already checked config")?;
 
     config.network.cache_dir = false.into();
     config.network.listen_addr = format!("127.0.0.1:{}", random_known_port()).parse()?;
+    config.state.ephemeral = true;
+    config.network.initial_testnet_peers = [].into();
+    config.network.crawl_new_peer_interval = Duration::from_secs(5);
 
     let rpc_listen_addr = config.rpc.listen_addr.unwrap();
     let rpc_client_1 = RpcRequestClient::new(rpc_listen_addr);
@@ -4111,10 +4122,25 @@ async fn disconnects_from_misbehaving_peers() -> Result<()> {
         });
     }
 
+    let network2 = testnet::Parameters::build()
+        .with_activation_heights(ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(2),
+            nu6: Some(3),
+            ..Default::default()
+        })
+        .with_slow_start_interval(Height::MIN)
+        .clear_checkpoints()
+        .with_network_name("PoWEnabledTestnet")
+        .to_network();
+
+    config.network.network = network2;
     config.network.initial_testnet_peers = [config.network.listen_addr.to_string()].into();
-    config.network.network = Network::new_default_testnet();
     config.network.listen_addr = "127.0.0.1:0".parse()?;
     config.rpc.listen_addr = Some(format!("127.0.0.1:{}", random_known_port()).parse()?);
+    config.network.crawl_new_peer_interval = Duration::from_secs(5);
+    config.network.cache_dir = false.into();
+    config.state.ephemeral = true;
 
     let rpc_listen_addr = config.rpc.listen_addr.unwrap();
     let rpc_client_2 = RpcRequestClient::new(rpc_listen_addr);
@@ -4165,7 +4191,7 @@ async fn disconnects_from_misbehaving_peers() -> Result<()> {
         "found peer connection, committing genesis block"
     );
 
-    let genesis_block = network.block_parsed_iter().next().unwrap();
+    let genesis_block = network1.block_parsed_iter().next().unwrap();
     rpc_client_1.submit_block(genesis_block.clone()).await?;
     rpc_client_2.submit_block(genesis_block).await?;
 

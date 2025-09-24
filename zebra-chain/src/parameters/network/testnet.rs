@@ -746,6 +746,16 @@ impl ParametersBuilder {
         self
     }
 
+    /// Clears checkpoints from the [`Parameters`] being built,
+    /// keep only the genesis checkpoint.
+    pub fn clear_checkpoints(mut self) -> Self {
+        self.checkpoints = Arc::new(
+            CheckpointList::from_list([(block::Height(0), self.genesis_hash)])
+                .expect("must parse checkpoints"),
+        );
+        self
+    }
+
     /// Converts the builder to a [`Parameters`] struct
     fn finish(self) -> Parameters {
         let Self {
