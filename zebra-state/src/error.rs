@@ -87,6 +87,23 @@ pub enum CommitSemanticallyVerifiedError {
     WriteTaskExited,
 }
 
+#[derive(Debug, Error)]
+pub enum LayeredStateError<E: std::error::Error + std::fmt::Display> {
+    #[error("{0}")]
+    State(E),
+    #[error("{0}")]
+    Layer(BoxError),
+}
+
+impl<E: std::error::Error + 'static> From<BoxError> for LayeredStateError<E> {
+    fn from(err: BoxError) -> Self {
+        match err.downcast::<E>() {
+            Ok(state_err) => Self::State(*state_err),
+            Err(layer_error) => Self::Layer(layer_error),
+        }
+    }
+}
+
 /// An error describing the reason a block or its descendants could not be reconsidered after
 /// potentially being invalidated from the chain_set.
 #[derive(Debug, Error)]
