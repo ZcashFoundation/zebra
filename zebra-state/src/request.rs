@@ -640,8 +640,8 @@ pub enum Request {
     /// until its parent is ready.
     ///
     /// Returns [`Response::Committed`] with the hash of the block when it is
-    /// committed to the state, or an error if the block fails contextual
-    /// validation or has already been committed to the state.
+    /// committed to the state, or a [`CommitSemanticallyVerifiedBlockError`] if
+    /// the block fails contextual validation or otherwise could not be committed.
     ///
     /// This request cannot be cancelled once submitted; dropping the response
     /// future will have no effect on whether it is eventually processed. A
