@@ -1,24 +1,14 @@
 #!/usr/bin/env python3
-# Copyright (c) 2022-2024 The Zcash developers
+# Copyright (c) 2025 The Zcash developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or https://www.opensource.org/licenses/mit-license.php .
 
 #
-# Test the effect of reorgs on the Orchard commitment tree.
+# Test getrawtransaction on side chains
 #
 
 from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import (
-    BLOSSOM_BRANCH_ID,
-    HEARTWOOD_BRANCH_ID,
-    CANOPY_BRANCH_ID,
-    NU5_BRANCH_ID,
-    assert_equal,
-    get_coinbase_address,
-    nuparams,
-    start_nodes,
-    wait_and_assert_operationid_status,
-)
+from test_framework.util import start_nodes
 
 
 class GetRawTransactionSideChainTest(BitcoinTestFramework):
