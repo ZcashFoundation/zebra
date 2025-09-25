@@ -83,7 +83,7 @@ use zebra_chain::{
     },
 };
 use zebra_consensus::{funding_stream_address, RouterError};
-use zebra_network::{address_book_peers::AddressBookPeers, PeerSocketAddr};
+use zebra_network::{address_book_peers::AddressBookPeers, types::PeerServices, PeerSocketAddr};
 use zebra_node_services::mempool;
 use zebra_state::{
     AnyTx, HashOrHeight, OutputLocation, ReadRequest, ReadResponse, TransactionLocation,
@@ -121,6 +121,7 @@ use types::{
     get_mining_info::GetMiningInfoResponse,
     get_raw_mempool::{self, GetRawMempoolResponse},
     long_poll::LongPollInput,
+    network_info::{GetNetworkInfoResponse, NetworkInfo},
     peer_info::PeerInfo,
     submit_block::{SubmitBlockErrorResponse, SubmitBlockParameters, SubmitBlockResponse},
     subsidy::GetBlockSubsidyResponse,
@@ -549,6 +550,14 @@ pub trait Rpc {
     ) -> Result<u64> {
         self.get_network_sol_ps(num_blocks, height).await
     }
+
+    /// Returns an object containing various state info regarding P2P networking.
+    ///
+    /// zcashd reference: [`getnetworkinfo`](https://zcash.github.io/rpc/getnetworkinfo.html)
+    /// method: post
+    /// tags: network
+    #[method(name = "getnetworkinfo")]
+    async fn get_network_info(&self) -> Result<GetNetworkInfoResponse>;
 
     /// Returns data about each connected network node.
     ///
@@ -2715,6 +2724,54 @@ where
         Ok(solution_rate
             .try_into()
             .expect("per-second solution rate always fits in u64"))
+    }
+
+    async fn get_network_info(&self) -> Result<GetNetworkInfoResponse> {
+        let version = GetInfoResponse::version_from_string(&self.build_version)
+            .expect("invalid version string");
+
+        let subversion = self.user_agent.clone();
+
+        let protocol_version = zebra_network::constants::CURRENT_NETWORK_PROTOCOL_VERSION.0;
+
+        // TODO: return actual supported local services when Zebra exposes them
+        let local_services = format!("{:016x}", PeerServices::NODE_NETWORK);
+
+        // Deprecated: zcashd always returns 0.
+        let timeoffset = 0;
+
+        let connections = self.address_book.recently_live_peers(Utc::now()).len();
+
+        // TODO: make `limited`, `reachable`, and `proxy` dynamic if Zebra supports network filtering
+        let networks = vec![
+            NetworkInfo::new("ipv4".to_string(), false, true, "".to_string(), false),
+            NetworkInfo::new("ipv6".to_string(), false, true, "".to_string(), false),
+            NetworkInfo::new("onion".to_string(), false, false, "".to_string(), false),
+        ];
+
+        let relay_fee = zebra_chain::transaction::zip317::MIN_MEMPOOL_TX_FEE_RATE as f64
+            / (zebra_chain::amount::COIN as f64);
+
+        // TODO: populate local addresses when Zebra supports exposing bound or advertised addresses
+        let local_addresses = vec![];
+
+        // TODO: return network-level warnings, if Zebra supports them in the future
+        let warnings = "".to_string();
+
+        let response = GetNetworkInfoResponse {
+            version,
+            subversion,
+            protocol_version,
+            local_services,
+            timeoffset,
+            connections,
+            networks,
+            relay_fee,
+            local_addresses,
+            warnings,
+        };
+
+        Ok(response)
     }
 
     async fn get_peer_info(&self) -> Result<Vec<PeerInfo>> {

@@ -21,7 +21,7 @@ use crate::{
         finalized_state::{FinalizedState, ZebraDb},
         non_finalized_state::NonFinalizedState,
         queued_blocks::{QueuedCheckpointVerified, QueuedSemanticallyVerified},
-        BoxError, ChainTipBlock, ChainTipSender,
+        BoxError, ChainTipBlock, ChainTipSender, ReconsiderError,
     },
     CommitSemanticallyVerifiedError, SemanticallyVerifiedBlock,
 };
@@ -145,7 +145,7 @@ pub enum NonFinalizedWriteMessage {
     /// reconsidered and reinserted into the non-finalized state.
     Reconsider {
         hash: block::Hash,
-        rsp_tx: oneshot::Sender<Result<Vec<block::Hash>, BoxError>>,
+        rsp_tx: oneshot::Sender<Result<Vec<block::Hash>, ReconsiderError>>,
     },
 }
 
@@ -349,11 +349,8 @@ impl WriteBlockWorkerTask {
                 }
                 NonFinalizedWriteMessage::Reconsider { hash, rsp_tx } => {
                     tracing::info!(?hash, "reconsidering a block in the non-finalized state");
-                    let _ = rsp_tx.send(
-                        non_finalized_state
-                            .reconsider_block(hash, &finalized_state.db)
-                            .map_err(BoxError::from),
-                    );
+                    let _ = rsp_tx
+                        .send(non_finalized_state.reconsider_block(hash, &finalized_state.db));
                     None
                 }
             };
