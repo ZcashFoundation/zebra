@@ -1760,6 +1760,15 @@ fn non_blocking_logger() -> Result<()> {
         // Create an http client
         let client = RpcRequestClient::new(rpc_address);
 
+        // Make the call to the `gethealthinfo` RPC method.
+        let res = client.call("gethealthinfo", "[]".to_string()).await?;
+        assert!(res.status().is_success());
+
+        let body = res.bytes().await?;
+        let parsed: Value = serde_json::from_slice(&body)?;
+        let status = parsed["result"]["status"].as_str().unwrap();
+        assert_eq!(status, "healthy");
+
         // Most of Zebra's lines are 100-200 characters long, so 500 requests should print enough to fill the unix pipe,
         // fill the channel that tracing logs are queued onto, and drop logs rather than block execution.
         for _ in 0..500 {
