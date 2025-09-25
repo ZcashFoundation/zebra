@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Added
 
-- Add `gethealthinfo` RPC method that returns node health status and build metadata. Also expose it as `GET /health` HTTP endpoint for simple health checks ([#TBD](https://github.com/ZcashFoundation/zebra/pull/TBD)).
+- Add `gethealthinfo` RPC method that returns node health status and build metadata. Exposes it as `GET /health` HTTP endpoint for simple health checks ([#TBD](https://github.com/ZcashFoundation/zebra/pull/9925)).
 
 ### Breaking Changes
 
