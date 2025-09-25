@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## Unreleased
 
+### Added
+
+- Add `gethealthinfo` RPC method that returns node health status and build metadata. Also expose it as `GET /health` HTTP endpoint for simple health checks ([#TBD](https://github.com/ZcashFoundation/zebra/pull/TBD)).
+
 ### Breaking Changes
 
 - Migrate `zebrad` to a layered configuration using config-rs. Environment variables must use the
