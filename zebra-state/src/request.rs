@@ -633,7 +633,7 @@ impl DerefMut for CheckpointVerifiedBlock {
     }
 }
 
-/// Helper trait for using the state service with concrete request, response, and error types.
+/// Helper trait for convenient access to expected response and error types.
 pub trait MappedRequest: Sized + Send + 'static {
     /// Expected response type for this state request.
     type MappedResponse;
