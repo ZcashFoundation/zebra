@@ -162,26 +162,31 @@ pub fn any_transaction<'a>(
     // It is ok to do this lookup in multiple different calls. Finalized state updates
     // can only add overlapping blocks, and hashes are unique.
     let mut best_chain = None;
-    let (tx, height, time, in_best_chain) = chains
+    let (tx, height, time, in_best_chain, containing_chain) = chains
         .enumerate()
         .find_map(|(i, chain)| {
             chain.as_ref().transaction(hash).map(|(tx, height, time)| {
                 if i == 0 {
                     best_chain = Some(chain);
                 }
-                (tx.clone(), height, time, i == 0)
+                (tx.clone(), height, time, i == 0, Some(chain))
             })
         })
         .or_else(|| {
             db.transaction(hash)
-                .map(|(tx, height, time)| (tx.clone(), height, time, true))
+                .map(|(tx, height, time)| (tx.clone(), height, time, true, None))
         })?;
 
     if in_best_chain {
         let confirmations = 1 + tip_height(best_chain, db)?.0 - height.0;
         Some(AnyTx::Mined(MinedTx::new(tx, height, confirmations, time)))
     } else {
-        Some(AnyTx::Side(tx))
+        let block_hash = containing_chain
+            .expect("if not in best chain, then it must be in a side chain")
+            .block(height.into())
+            .expect("must exist since tx is in chain")
+            .hash;
+        Some(AnyTx::Side((tx, block_hash)))
     }
 }
 

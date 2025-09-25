@@ -49,6 +49,7 @@ use indexmap::IndexMap;
 use jsonrpsee::core::{async_trait, RpcResult as Result};
 use jsonrpsee_proc_macros::rpc;
 use jsonrpsee_types::{ErrorCode, ErrorObject};
+use rand::{rngs::OsRng, RngCore};
 use tokio::{
     sync::{broadcast, watch},
     task::JoinHandle,
@@ -1842,14 +1843,14 @@ where
                             ),
                         ))
                     }
-                    AnyTx::Side(tx) => GetRawTransactionResponse::Object(Box::new(
+                    AnyTx::Side((tx, block_hash)) => GetRawTransactionResponse::Object(Box::new(
                         TransactionObject::from_transaction(
                             tx.clone(),
                             None,
                             None,
                             &self.network,
                             None,
-                            None,
+                            Some(block_hash),
                             Some(false),
                             txid,
                         ),
@@ -1858,7 +1859,7 @@ where
             } else {
                 let hex = match tx {
                     AnyTx::Mined(mined_tx) => mined_tx.tx.into(),
-                    AnyTx::Side(transaction) => transaction.into(),
+                    AnyTx::Side((transaction, _block_hash)) => transaction.into(),
                 };
                 GetRawTransactionResponse::Raw(hex)
             }),
@@ -2899,7 +2900,7 @@ where
     }
 
     async fn generate(&self, num_blocks: u32) -> Result<Vec<Hash>> {
-        let rpc = self.clone();
+        let mut rpc = self.clone();
         let network = self.network.clone();
 
         if !network.disable_pow() {
@@ -2912,6 +2913,15 @@ where
 
         let mut block_hashes = Vec::new();
         for _ in 0..num_blocks {
+            // Use random coinbase data in order to ensure the coinbase
+            // transaction is unique. This is useful for tests that exercise
+            // forks, since otherwise the coinbase txs of blocks with the same
+            // height across different forks would be identical.
+            let mut extra_coinbase_data = [0u8; 32];
+            OsRng.fill_bytes(&mut extra_coinbase_data);
+            rpc.gbt
+                .set_extra_coinbase_data(extra_coinbase_data.to_vec());
+
             let block_template = rpc
                 .get_block_template(None)
                 .await
@@ -2938,9 +2948,20 @@ where
                     .map_error(server::error::LegacyCode::default())?,
             );
 
-            rpc.submit_block(hex_proposal_block, None)
+            let r = rpc
+                .submit_block(hex_proposal_block, None)
                 .await
                 .map_error(server::error::LegacyCode::default())?;
+            match r {
+                SubmitBlockResponse::Accepted => { /* pass */ }
+                SubmitBlockResponse::ErrorResponse(response) => {
+                    return Err(ErrorObject::owned(
+                        server::error::LegacyCode::Misc.into(),
+                        format!("block was rejected: {:?}", response),
+                        None::<()>,
+                    ));
+                }
+            }
 
             block_hashes.push(GetBlockHashResponse(proposal_block.hash()));
         }

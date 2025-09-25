@@ -129,8 +129,8 @@ pub enum KnownBlock {
 pub enum AnyTx {
     /// A transaction in the best chain.
     Mined(MinedTx),
-    /// A transaction in a side chain.
-    Side(Arc<Transaction>),
+    /// A transaction in a side chain, and the hash of the block it is in.
+    Side((Arc<Transaction>, block::Hash)),
 }
 
 /// Information about a transaction in the best chain

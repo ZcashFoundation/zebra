@@ -628,13 +628,21 @@ impl TransactionObject {
             hex: tx.clone().into(),
             height: if in_active_chain.unwrap_or_default() {
                 height.map(|height| height.0 as i32)
-            } else {
+            } else if block_hash.is_some() {
+                // Side chain
                 Some(-1)
+            } else {
+                // Mempool
+                None
             },
             confirmations: if in_active_chain.unwrap_or_default() {
                 confirmations
-            } else {
+            } else if block_hash.is_some() {
+                // Side chain
                 Some(0)
+            } else {
+                // Mempool
+                None
             },
             inputs: tx
                 .inputs()
