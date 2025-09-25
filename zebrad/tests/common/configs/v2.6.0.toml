@@ -46,7 +46,6 @@ checkpoint_sync = true
 [health]
 enforce_on_test_networks = false
 min_connected_peers = 1
-min_request_interval = "100ms"
 ready_max_blocks_behind = 2
 ready_max_tip_age = "5m"
 

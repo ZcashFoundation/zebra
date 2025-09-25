@@ -32,11 +32,13 @@ mod config;
 mod tests;
 
 pub use config::Config;
+use derive_new::new;
 
+use std::time::Instant;
 use std::{convert::Infallible, net::SocketAddr, sync::Arc, time::Duration};
 
 use bytes::Bytes;
-use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use chrono::Utc;
 use http_body_util::Full;
 use hyper::header::{CONTENT_LENGTH, CONTENT_TYPE};
 use hyper::server::conn::http1;
@@ -46,98 +48,55 @@ use hyper::{
 };
 use hyper_util::rt::TokioIo;
 use tokio::{
-    sync::{watch, Semaphore},
+    sync::watch,
     task::JoinHandle,
     time::{self, MissedTickBehavior},
 };
 use tracing::{debug, info, warn};
 
-use zebra_chain::{chain_sync_status::ChainSyncStatus, chain_tip::ChainTip, parameters::Network};
+use zebra_chain::{chain_sync_status::ChainSyncStatus, parameters::Network};
 use zebra_network::AddressBookPeers;
 
 // Refresh peers on a short cadence so the cached snapshot tracks live network
 // conditions closely without hitting the address book mutex on every request.
 const PEER_METRICS_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
-// Mark a snapshot as stale when it is several intervals old – this balances the
-// cost of recomputing the set with the need to avoid serving very out-of-date
-// liveness data (implementation-plan item #1).
-const PEER_METRICS_STALE_MULTIPLIER: i32 = 3;
-const TOO_MANY_REQUESTS: &str = "too many requests";
-const METHOD_NOT_ALLOWED: &str = "method not allowed";
-const NOT_FOUND: &str = "not found";
 
-/// Cached view of recently live peers shared via `watch`.
-#[derive(Clone, Debug)]
-struct PeerMetrics {
-    last_updated: DateTime<Utc>,
-    live_peers: usize,
-}
+const METHOD_NOT_ALLOWED_MSG: &str = "method not allowed";
+const NOT_FOUND_MSG: &str = "not found";
 
-impl Default for PeerMetrics {
-    fn default() -> Self {
-        Self {
-            last_updated: Utc::now(),
-            live_peers: 0,
-        }
-    }
-}
-
-/// Lightweight, process-wide rate limiter for the health endpoints.
-///
-/// Zebra typically applies rate limits at the network edge, but the health
-/// handlers need a final guard to avoid becoming accidental hot paths. When the
-/// configured interval is zero we disable throttling entirely, matching
-/// existing component behaviour where `Duration::ZERO` means "off".
-#[derive(Clone)]
-struct RateLimiter {
-    permits: Option<Arc<Semaphore>>,
-    interval: Duration,
-}
-
-impl RateLimiter {
-    fn new(interval: Duration) -> Self {
-        let permits = if interval.is_zero() {
-            None
-        } else {
-            Some(Arc::new(Semaphore::new(1)))
-        };
-
-        Self { permits, interval }
-    }
-
-    fn allow(&self) -> bool {
-        let Some(permits) = &self.permits else {
-            return true;
-        };
-
-        match permits.clone().try_acquire_owned() {
-            Ok(permit) => {
-                let interval = self.interval;
-                tokio::spawn(async move {
-                    // Release the single permit after the configured cool-down so
-                    // the next request can proceed.
-                    time::sleep(interval).await;
-                    drop(permit);
-                });
-                true
-            }
-            Err(_) => false,
-        }
-    }
-}
+/// The maximum number of requests that will be handled in a given time interval before requests are dropped.
+const MAX_RECENT_REQUESTS: usize = 10_000;
+const RECENT_REQUEST_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Clone)]
-struct HealthCtx<Tip, SyncStatus>
+struct HealthCtx<SyncStatus>
 where
-    Tip: ChainTip + Clone + Send + Sync + 'static,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
     config: Config,
     network: Network,
-    latest_chain_tip: Tip,
+    chain_tip_metrics_receiver: watch::Receiver<ChainTipMetrics>,
     sync_status: SyncStatus,
-    peer_metrics_rx: watch::Receiver<PeerMetrics>,
-    rate_limiter: RateLimiter,
+    num_live_peer_receiver: watch::Receiver<usize>,
+}
+
+/// Metrics tracking how long it's been since
+#[derive(Debug, Clone, PartialEq, Eq, new)]
+pub struct ChainTipMetrics {
+    /// Last time the chain tip height increased.
+    pub last_chain_tip_grow_time: Instant,
+    /// Estimated distance between Zebra's chain tip and the network chain tip.
+    pub remaining_sync_blocks: Option<i64>,
+}
+
+impl ChainTipMetrics {
+    /// Creates a new watch channel for reporting [`ChainTipMetrics`].
+    pub fn channel() -> (watch::Sender<Self>, watch::Receiver<Self>) {
+        watch::channel(Self {
+            last_chain_tip_grow_time: Instant::now(),
+            remaining_sync_blocks: None,
+        })
+    }
 }
 
 /// Starts the health server if `listen_addr` is configured.
@@ -148,78 +107,79 @@ where
 /// The server accepts HTTP/1.1 requests on a dedicated TCP listener and serves
 /// two endpoints: `/healthy` and `/ready`.
 ///
-/// Panics
+/// # Panics
 ///
 /// - If the configured `listen_addr` cannot be bound.
-pub async fn init<A, Tip, SyncStatus>(
+pub async fn init<AddressBook, SyncStatus>(
     config: Config,
     network: Network,
-    latest_chain_tip: Tip,
+    chain_tip_metrics_receiver: watch::Receiver<ChainTipMetrics>,
     sync_status: SyncStatus,
-    address_book: A,
+    address_book: AddressBook,
 ) -> (JoinHandle<()>, Option<SocketAddr>)
 where
-    A: AddressBookPeers + Clone + Send + Sync + 'static,
-    Tip: ChainTip + Clone + Send + Sync + 'static,
+    AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
-    if let Some(listen_addr) = config.listen_addr {
-        info!("Trying to open health endpoint at {}...", listen_addr);
+    let Some(listen_addr) = config.listen_addr else {
+        return (tokio::spawn(std::future::pending()), None);
+    };
 
-        let listener = tokio::net::TcpListener::bind(listen_addr)
+    info!("opening health endpoint at {listen_addr}...",);
+
+    let listener = tokio::net::TcpListener::bind(listen_addr)
             .await
             .unwrap_or_else(|e| panic!("Opening health endpoint listener {listen_addr:?} failed: {e:?}. Hint: Check if another zebrad is running, or change the health listen_addr in the config."));
 
-        let local = listener.local_addr().unwrap_or(listen_addr);
-        info!("Opened health endpoint at {}", local);
+    let local = listener.local_addr().unwrap_or_else(|err| {
+        tracing::warn!(?err, "failed to read local addr from TcpListener");
+        listen_addr
+    });
 
-        let (peer_metrics_tx, peer_metrics_rx) = watch::channel(PeerMetrics::default());
+    info!("opened health endpoint at {}", local);
 
-        // Seed the watch channel with the first snapshot so early requests see
-        // a consistent view even before the refresher loop has ticked.
-        if let Some(metrics) = measure_peer_metrics(&address_book).await {
-            let _ = peer_metrics_tx.send(metrics);
-        }
+    let (num_live_peer_sender, num_live_peer_receiver) = watch::channel(0);
 
-        // Refresh metrics in the background using a watch channel so request
-        // handlers can read the latest snapshot without taking locks.
-        let metrics_task = tokio::spawn(peer_metrics_refresh_task(
-            address_book.clone(),
-            peer_metrics_tx,
-        ));
-
-        let shared = Arc::new(HealthCtx {
-            rate_limiter: RateLimiter::new(config.min_request_interval),
-            config,
-            network,
-            latest_chain_tip,
-            sync_status,
-            peer_metrics_rx,
-        });
-
-        let server_task = tokio::spawn(run_health_server(listener, shared));
-
-        // Keep both async tasks tied to a single JoinHandle so shutdown and
-        // abort semantics mirror other components.
-        let task = tokio::spawn(async move {
-            tokio::select! {
-                _ = metrics_task => {},
-                _ = server_task => {},
-            }
-        });
-
-        (task, Some(local))
-    } else {
-        (tokio::spawn(std::future::pending()), None)
+    // Seed the watch channel with the first snapshot so early requests see
+    // a consistent view even before the refresher loop has ticked.
+    if let Some(metrics) = num_live_peers(&address_book).await {
+        let _ = num_live_peer_sender.send(metrics);
     }
+
+    // Refresh metrics in the background using a watch channel so request
+    // handlers can read the latest snapshot without taking locks.
+    let metrics_task = tokio::spawn(peer_metrics_refresh_task(
+        address_book.clone(),
+        num_live_peer_sender,
+    ));
+
+    let shared = Arc::new(HealthCtx {
+        config,
+        network,
+        chain_tip_metrics_receiver,
+        sync_status,
+        num_live_peer_receiver,
+    });
+
+    let server_task = tokio::spawn(run_health_server(listener, shared));
+
+    // Keep both async tasks tied to a single JoinHandle so shutdown and
+    // abort semantics mirror other components.
+    let task = tokio::spawn(async move {
+        tokio::select! {
+            _ = metrics_task => {},
+            _ = server_task => {},
+        }
+    });
+
+    (task, Some(local))
 }
 
-async fn handle_request<Tip, SyncStatus>(
+async fn handle_request<SyncStatus>(
     req: Request<Incoming>,
-    ctx: Arc<HealthCtx<Tip, SyncStatus>>,
+    ctx: Arc<HealthCtx<SyncStatus>>,
 ) -> Result<Response<Full<Bytes>>, Infallible>
 where
-    Tip: ChainTip + Clone + Send + Sync + 'static,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
     // Hyper is already lightweight, but we still fence non-GET methods to keep
@@ -227,14 +187,7 @@ where
     if req.method() != Method::GET {
         return Ok(simple_response(
             StatusCode::METHOD_NOT_ALLOWED,
-            METHOD_NOT_ALLOWED,
-        ));
-    }
-
-    if !ctx.rate_limiter.allow() {
-        return Ok(simple_response(
-            StatusCode::TOO_MANY_REQUESTS,
-            TOO_MANY_REQUESTS,
+            METHOD_NOT_ALLOWED_MSG,
         ));
     }
 
@@ -242,7 +195,7 @@ where
     let response = match path {
         "/healthy" => healthy(&ctx).await,
         "/ready" => ready(&ctx).await,
-        _ => simple_response(StatusCode::NOT_FOUND, NOT_FOUND),
+        _ => simple_response(StatusCode::NOT_FOUND, NOT_FOUND_MSG),
     };
 
     Ok(response)
@@ -251,46 +204,30 @@ where
 // Liveness: ensure we still have the configured minimum of recently live peers,
 // matching historical behaviour but fed from the cached snapshot to avoid
 // mutex contention.
-async fn healthy<Tip, SyncStatus>(ctx: &HealthCtx<Tip, SyncStatus>) -> Response<Full<Bytes>>
+async fn healthy<SyncStatus>(ctx: &HealthCtx<SyncStatus>) -> Response<Full<Bytes>>
 where
-    Tip: ChainTip + Clone + Send + Sync + 'static,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
-    let metrics = (*ctx.peer_metrics_rx.borrow()).clone();
-
-    // Refuse to serve responses when the peer view is older than our refresh
-    // cadence; this prevents the snapshot from masking outages.
-    if peer_metrics_are_stale(&metrics) {
-        return simple_response(StatusCode::SERVICE_UNAVAILABLE, "stale peer metrics");
-    }
-
-    if metrics.live_peers >= ctx.config.min_connected_peers {
+    if *ctx.num_live_peer_receiver.borrow() >= ctx.config.min_connected_peers {
         simple_response(StatusCode::OK, "ok")
     } else {
-        simple_response(StatusCode::SERVICE_UNAVAILABLE, "no peers")
+        simple_response(StatusCode::SERVICE_UNAVAILABLE, "insufficient peers")
     }
 }
 
 // Readiness: combine peer availability, sync progress, estimated lag, and tip
 // freshness to avoid the false positives called out in issue #4649 and the
 // implementation plan.
-async fn ready<Tip, SyncStatus>(ctx: &HealthCtx<Tip, SyncStatus>) -> Response<Full<Bytes>>
+async fn ready<SyncStatus>(ctx: &HealthCtx<SyncStatus>) -> Response<Full<Bytes>>
 where
-    Tip: ChainTip + Clone + Send + Sync + 'static,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
     if !ctx.config.enforce_on_test_networks && ctx.network.is_a_test_network() {
         return simple_response(StatusCode::OK, "ok");
     }
 
-    let metrics = (*ctx.peer_metrics_rx.borrow()).clone();
-
-    if peer_metrics_are_stale(&metrics) {
-        return simple_response(StatusCode::SERVICE_UNAVAILABLE, "stale peer metrics");
-    }
-
-    if metrics.live_peers < ctx.config.min_connected_peers {
-        return simple_response(StatusCode::SERVICE_UNAVAILABLE, "no peers");
+    if *ctx.num_live_peer_receiver.borrow() < ctx.config.min_connected_peers {
+        return simple_response(StatusCode::SERVICE_UNAVAILABLE, "insufficient peers");
     }
 
     // Keep the historical sync-gate but feed it with the richer readiness
@@ -299,86 +236,50 @@ where
         return simple_response(StatusCode::SERVICE_UNAVAILABLE, "syncing");
     }
 
-    let tip_time = match ctx.latest_chain_tip.best_tip_block_time() {
-        Some(time) => time,
-        None => return simple_response(StatusCode::SERVICE_UNAVAILABLE, "no tip"),
+    let ChainTipMetrics {
+        last_chain_tip_grow_time,
+        remaining_sync_blocks,
+    } = ctx.chain_tip_metrics_receiver.borrow().clone();
+
+    let Some(remaining_sync_blocks) = remaining_sync_blocks else {
+        tracing::warn!("syncer is getting block hashes from peers, but state is empty");
+        return simple_response(StatusCode::SERVICE_UNAVAILABLE, "no tip");
     };
 
-    let mut tip_age = Utc::now().signed_duration_since(tip_time);
-    if tip_age < ChronoDuration::zero() {
-        tip_age = ChronoDuration::zero();
-    }
-
-    let Ok(max_age) = ChronoDuration::from_std(ctx.config.ready_max_tip_age) else {
-        return simple_response(StatusCode::SERVICE_UNAVAILABLE, "invalid tip age limit");
-    };
-
-    if tip_age > max_age {
+    let tip_age = last_chain_tip_grow_time.elapsed();
+    if tip_age > ctx.config.ready_max_tip_age {
         return simple_response(
             StatusCode::SERVICE_UNAVAILABLE,
-            &format!("tip_age={}s", tip_age.num_seconds()),
+            &format!("tip_age={}s", tip_age.as_secs()),
         );
     }
 
-    match ctx
-        .latest_chain_tip
-        .estimate_distance_to_network_chain_tip(&ctx.network)
-    {
-        Some((distance, _local_tip)) => {
-            let behind = std::cmp::max(0, distance);
-            if behind <= ctx.config.ready_max_blocks_behind {
-                simple_response(StatusCode::OK, "ok")
-            } else {
-                simple_response(
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    &format!("lag={} blocks", behind),
-                )
-            }
-        }
-        None => simple_response(StatusCode::SERVICE_UNAVAILABLE, "no tip"),
-    }
-}
-
-fn peer_metrics_are_stale(metrics: &PeerMetrics) -> bool {
-    let age = Utc::now().signed_duration_since(metrics.last_updated);
-    if age <= ChronoDuration::zero() {
-        return false;
-    }
-
-    match ChronoDuration::from_std(PEER_METRICS_REFRESH_INTERVAL) {
-        Ok(refresh) => age > refresh * PEER_METRICS_STALE_MULTIPLIER,
-        Err(_) => false,
+    if remaining_sync_blocks <= ctx.config.ready_max_blocks_behind {
+        simple_response(StatusCode::OK, "ok")
+    } else {
+        simple_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            &format!("lag={remaining_sync_blocks} blocks"),
+        )
     }
 }
 
 // Measure peers on a blocking thread, mirroring the previous synchronous
 // implementation but without holding the mutex on the request path.
-async fn measure_peer_metrics<A>(address_book: &A) -> Option<PeerMetrics>
+async fn num_live_peers<A>(address_book: &A) -> Option<usize>
 where
     A: AddressBookPeers + Clone + Send + Sync + 'static,
 {
     let address_book = address_book.clone();
-    match tokio::task::spawn_blocking(move || {
-        let now = Utc::now();
-        let live_peers = address_book.recently_live_peers(now).len();
-        PeerMetrics {
-            last_updated: now,
-            live_peers,
-        }
-    })
-    .await
-    {
-        Ok(metrics) => Some(metrics),
-        Err(err) => {
-            warn!(?err, "failed to refresh peer metrics");
-            None
-        }
-    }
+    tokio::task::spawn_blocking(move || address_book.recently_live_peers(Utc::now()).len())
+        .await
+        .inspect_err(|err| warn!(?err, "failed to refresh peer metrics"))
+        .ok()
 }
 
 // Periodically update the cached peer metrics for all handlers that hold a
 // receiver. If receivers disappear we exit quietly so shutdown can proceed.
-async fn peer_metrics_refresh_task<A>(address_book: A, peer_metrics_tx: watch::Sender<PeerMetrics>)
+async fn peer_metrics_refresh_task<A>(address_book: A, num_live_peer_sender: watch::Sender<usize>)
 where
     A: AddressBookPeers + Clone + Send + Sync + 'static,
 {
@@ -386,30 +287,44 @@ where
     interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
     loop {
-        interval.tick().await;
-
         // Updates are best-effort: if the snapshot fails or all receivers are
         // dropped we exit quietly, letting the caller terminate the health task.
-        if let Some(metrics) = measure_peer_metrics(&address_book).await {
-            if peer_metrics_tx.send(metrics).is_err() {
+        if let Some(metrics) = num_live_peers(&address_book).await {
+            if let Err(err) = num_live_peer_sender.send(metrics) {
+                tracing::warn!(?err, "failed to send to peer metrics channel");
                 break;
             }
         }
+
+        interval.tick().await;
     }
 }
 
-async fn run_health_server<Tip, SyncStatus>(
+async fn run_health_server<SyncStatus>(
     listener: tokio::net::TcpListener,
-    shared: Arc<HealthCtx<Tip, SyncStatus>>,
+    shared: Arc<HealthCtx<SyncStatus>>,
 ) where
-    Tip: ChainTip + Clone + Send + Sync + 'static,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
+    let mut num_recent_requests: usize = 0;
+    let mut last_request_count_reset_time = Instant::now();
+
     // Dedicated accept loop to keep request handling small and predictable; we
     // still spawn per-connection tasks but share the context clone.
+
     loop {
         match listener.accept().await {
-            Ok((stream, _peer)) => {
+            Ok((stream, _)) => {
+                if num_recent_requests < MAX_RECENT_REQUESTS {
+                    num_recent_requests += 1;
+                } else if last_request_count_reset_time.elapsed() > RECENT_REQUEST_INTERVAL {
+                    num_recent_requests = 0;
+                    last_request_count_reset_time = Instant::now();
+                } else {
+                    // Drop the request if there have been too many recent requests
+                    continue;
+                }
+
                 let io = TokioIo::new(stream);
                 let svc_ctx = shared.clone();
                 let service =

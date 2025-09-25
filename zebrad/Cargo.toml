@@ -248,6 +248,8 @@ proptest-derive = { workspace = true, optional = true }
 # test feature tokio-console
 console-subscriber = { workspace = true, optional = true }
 
+derive-new.workspace = true
+
 [build-dependencies]
 vergen-git2 = { workspace = true, features = ["cargo", "rustc"] }
 
