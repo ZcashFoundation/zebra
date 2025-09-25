@@ -18,6 +18,7 @@ use tokio::sync::watch::{self, error::SendError};
 use tower::{Service, ServiceExt};
 use zcash_keys::address::Address;
 use zcash_protocol::PoolType;
+use zcash_script::script::Evaluable;
 
 use zebra_chain::{
     amount::{self, Amount, NegativeOrZero, NonNegative},
@@ -881,11 +882,13 @@ pub fn standard_coinbase_outputs(
             .map(|(address, amount)| (*amount, address.script()))
             .collect();
 
-    let script = miner_address
-        .to_transparent_address()
-        .expect("address must have a transparent component")
-        .script()
-        .into();
+    let script = transparent::Script::new(
+        &miner_address
+            .to_transparent_address()
+            .expect("address must have a transparent component")
+            .script()
+            .to_bytes(),
+    );
 
     // The HashMap returns funding streams in an arbitrary order,
     // but Zebra's snapshot tests expect the same order every time.

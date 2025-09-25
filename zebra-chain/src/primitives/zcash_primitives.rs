@@ -5,6 +5,7 @@ use std::{io, ops::Deref, sync::Arc};
 
 use zcash_primitives::transaction::{self as zp_tx, TxDigests};
 use zcash_protocol::value::{BalanceError, ZatBalance, Zatoshis};
+use zcash_script::script;
 
 use crate::{
     amount::{Amount, NonNegative},
@@ -47,7 +48,9 @@ impl zcash_transparent::sighash::TransparentAuthorizingContext for TransparentAu
         self.all_prev_outputs
             .iter()
             .map(|prevout| {
-                zcash_primitives::legacy::Script(prevout.lock_script.as_raw_bytes().into())
+                zcash_primitives::legacy::Script(script::Code(
+                    prevout.lock_script.as_raw_bytes().into(),
+                ))
             })
             .collect()
     }
@@ -191,7 +194,7 @@ impl TryFrom<Amount> for ZatBalance {
 /// Convert a Zebra Script into a librustzcash one.
 impl From<&Script> for zcash_primitives::legacy::Script {
     fn from(script: &Script) -> Self {
-        zcash_primitives::legacy::Script(script.as_raw_bytes().to_vec())
+        zcash_primitives::legacy::Script(script::Code(script.as_raw_bytes().to_vec()))
     }
 }
 
@@ -312,7 +315,7 @@ pub(crate) fn sighash(
         Some((input_index, script_code)) => {
             let output = &precomputed_tx_data.all_previous_outputs[input_index];
             lock_script = output.lock_script.clone().into();
-            unlock_script = zcash_primitives::legacy::Script(script_code);
+            unlock_script = zcash_primitives::legacy::Script(script::Code(script_code));
             zp_tx::sighash::SignableInput::Transparent(
                 zcash_transparent::sighash::SignableInput::from_parts(
                     hash_type.try_into().expect("hash type should be ALL"),
