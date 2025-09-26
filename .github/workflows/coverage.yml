@@ -45,12 +45,12 @@ jobs:
         uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3.0.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions-rust-lang/setup-rust-toolchain@ab6845274e2ff01cd4462007e1a9d9df1ab49f42 #v1.14.0
+      - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 #v1.15.1
         with:
           toolchain: stable
           components: llvm-tools-preview
           cache-on-failure: true
-      - uses: taiki-e/install-action@3ee5d63d29478156148c0b53e9f3447829b47bc2 #v2.58.23
+      - uses: taiki-e/install-action@71d339ebf191fcbc3d49cd04b9484a4261f29975 #v2.62.9
         with:
           tool: cargo-llvm-cov,nextest
       - name: Run coverage tests
@@ -67,7 +67,7 @@ jobs:
           PROPTEST_MAX_SHRINK_ITERS: 0
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@fdcc8476540edceab3de004e990f80d881c6cc00 #v5.5.0
+        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 #v5.5.1
         with:
           files: lcov.info
 
