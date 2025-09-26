@@ -58,7 +58,6 @@ docker build \
 
 See [Building Zebra](https://github.com/ZcashFoundation/zebra#manual-build) for more information.
 
-
 ### Building with Custom Features
 
 Zebra supports various features that can be enabled during build time using the `FEATURES` build argument:
@@ -119,6 +118,39 @@ By default, Zebra uses cookie-based authentication for RPC requests (`enable_coo
   * If using **environment variables**, set `ZEBRA_RPC__ENABLE_COOKIE_AUTH=false`.
 
 Remember that Zebra only generates the cookie file if the RPC server is enabled *and* `enable_cookie_auth` is set to `true` (or omitted, as `true` is the default).
+
+Environment variable examples for health endpoints:
+
+* `ZEBRA_HEALTH__LISTEN_ADDR=0.0.0.0:8080`
+* `ZEBRA_HEALTH__MIN_CONNECTED_PEERS=1`
+* `ZEBRA_HEALTH__READY_MAX_BLOCKS_BEHIND=2`
+* `ZEBRA_HEALTH__ENFORCE_ON_TEST_NETWORKS=false`
+
+### Health Endpoints
+
+Zebra can expose two lightweight HTTP endpoints for liveness and readiness:
+
+* `GET /healthy`: returns `200 OK` when the process is up and has at least the configured number of recently live peers; otherwise `503`.
+* `GET /ready`: returns `200 OK` when the node is near the tip and within the configured lag threshold; otherwise `503`.
+
+Enable the endpoints by adding a `[health]` section to your config (see the default Docker config at `docker/default-zebra-config.toml`):
+
+```toml
+[health]
+listen_addr = "0.0.0.0:8080"
+min_connected_peers = 1
+ready_max_blocks_behind = 2
+enforce_on_test_networks = false
+```
+
+If you want to expose the endpoints to the host, add a port mapping to your compose file:
+
+```yaml
+ports:
+  - "8080:8080"   # Health endpoints (/healthy, /ready)
+```
+
+For Kubernetes, configure liveness and readiness probes against `/healthy` and `/ready` respectively. See the [Health Endpoints](./health.md) page for details.
 
 ## Examples
 

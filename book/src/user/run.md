@@ -17,6 +17,8 @@ You can run Zebra as a:
 - [mining backend](https://zebra.zfnd.org/user/mining.html), or
 - experimental [Sapling shielded transaction scanner](https://zebra.zfnd.org/user/shielded-scan.html).
 
+For Kubernetes and load balancer integrations, Zebra provides simple HTTP health endpoints. See [Zebra Health Endpoints](./health.md).
+
 ## Supported versions
 
 Always run a supported version of Zebra, and upgrade it regularly, so it doesn't become unsupported and halt. [More information](../dev/release-process.md#supported-releases).

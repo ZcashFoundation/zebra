@@ -89,6 +89,7 @@ use zebra_rpc::{methods::RpcImpl, server::RpcServer, SubmitBlockChannel};
 use crate::{
     application::{build_version, user_agent, LAST_WARN_ERROR_LOG_SENDER},
     components::{
+        health,
         inbound::{self, InboundSetupData, MAX_INBOUND_RESPONSE_TIME},
         mempool::{self, Mempool},
         sync::{self, show_block_chain_progress, VERIFICATION_PIPELINE_SCALING_MULTIPLIER},
@@ -180,6 +181,8 @@ impl StartCmd {
             user_agent(),
         )
         .await;
+
+        // Start health server if configured (after sync_status is available)
 
         info!("initializing verifiers");
         let (tx_verifier_setup_tx, tx_verifier_setup_rx) = oneshot::channel();
@@ -321,14 +324,28 @@ impl StartCmd {
         );
 
         info!("spawning progress logging task");
+        let (chain_tip_metrics_sender, chain_tip_metrics_receiver) =
+            health::ChainTipMetrics::channel();
         let progress_task_handle = tokio::spawn(
             show_block_chain_progress(
                 config.network.network.clone(),
                 latest_chain_tip.clone(),
                 sync_status.clone(),
+                chain_tip_metrics_sender,
             )
             .in_current_span(),
         );
+
+        // Start health server if configured
+        info!("initializing health endpoints");
+        let (health_task_handle, _) = health::init(
+            config.health.clone(),
+            config.network.network.clone(),
+            chain_tip_metrics_receiver,
+            sync_status.clone(),
+            address_book.clone(),
+        )
+        .await;
 
         // Spawn never ending end of support task.
         info!("spawning end of support checking task");
@@ -522,6 +539,7 @@ impl StartCmd {
         // ongoing tasks
         rpc_task_handle.abort();
         rpc_tx_queue_handle.abort();
+        health_task_handle.abort();
         syncer_task_handle.abort();
         block_gossip_task_handle.abort();
         mempool_crawler_task_handle.abort();
