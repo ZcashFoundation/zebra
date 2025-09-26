@@ -8,7 +8,7 @@ use tonic::{Response, Status};
 use tower::{util::ServiceExt, BoxError};
 
 use tracing::Span;
-use zebra_chain::chain_tip::ChainTip;
+use zebra_chain::{chain_tip::ChainTip, serialization::BytesInDisplayOrder};
 use zebra_node_services::mempool::MempoolChangeKind;
 use zebra_state::{ReadRequest, ReadResponse};
 
