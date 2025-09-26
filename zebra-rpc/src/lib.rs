@@ -20,6 +20,5 @@ pub use methods::types::{
         fetch_state_tip_and_local_time, generate_coinbase_and_roots,
         proposal::proposal_block_from_template,
     },
-    peer_info::PeerInfo, // Used by `disconnects_from_misbehaving_peers` acceptance test.
     submit_block::SubmitBlockChannel,
 };
