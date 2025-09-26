@@ -9,7 +9,7 @@ on:
       - "**/Cargo.lock"
       - .cargo/config.toml
       - "**/clippy.toml"
-      - .github/workflows/test-crate-build.yml
+      - .github/workflows/test-crates.yml
 
   push:
     branches: [main]
@@ -19,7 +19,7 @@ on:
       - "**/Cargo.lock"
       - .cargo/config.toml
       - "**/clippy.toml"
-      - .github/workflows/test-crate-build.yml
+      - .github/workflows/test-crates.yml
 
   workflow_dispatch:
 
