@@ -746,6 +746,11 @@ impl ParametersBuilder {
         self
     }
 
+    /// Clears checkpoints from the [`Parameters`] being built, keeping the genesis checkpoint.
+    pub fn clear_checkpoints(self) -> Self {
+        self.with_checkpoints(ConfiguredCheckpoints::Default(false))
+    }
+
     /// Converts the builder to a [`Parameters`] struct
     fn finish(self) -> Parameters {
         let Self {
