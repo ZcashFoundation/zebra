@@ -6,6 +6,7 @@ use std::{
     sync::Arc,
 };
 
+use tower::{BoxError, Service, ServiceExt};
 use zebra_chain::{
     amount::{DeferredPoolBalanceChange, NegativeAllowed},
     block::{self, Block, HeightDiff},
@@ -28,6 +29,7 @@ use crate::{
     constants::{MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS},
     ReadResponse, Response,
 };
+use crate::{error::LayeredStateError, CommitSemanticallyVerifiedError};
 
 /// Identify a spend by a transparent outpoint or revealed nullifier.
 ///
@@ -327,7 +329,8 @@ pub struct Treestate {
 }
 
 impl Treestate {
-    pub fn new(
+    #[allow(missing_docs)]
+    pub(crate) fn new(
         sprout: Arc<sprout::tree::NoteCommitmentTree>,
         sapling: Arc<sapling::tree::NoteCommitmentTree>,
         orchard: Arc<orchard::tree::NoteCommitmentTree>,
@@ -352,6 +355,7 @@ impl Treestate {
 ///
 /// Zebra's state service passes this `enum` over to the finalized state
 /// when committing a block.
+#[allow(missing_docs)]
 pub enum FinalizableBlock {
     Checkpoint {
         checkpoint_verified: CheckpointVerifiedBlock,
@@ -629,6 +633,60 @@ impl DerefMut for CheckpointVerifiedBlock {
     }
 }
 
+/// Helper trait for convenient access to expected response and error types.
+pub trait MappedRequest: Sized + Send + 'static {
+    /// Expected response type for this state request.
+    type MappedResponse;
+    /// Expected error type for this state request.
+    type Error: std::error::Error + std::fmt::Display + 'static;
+
+    /// Maps the request type to a [`Request`].
+    fn map_request(self) -> Request;
+
+    /// Maps the expected [`Response`] variant for this request to the mapped response type.
+    fn map_response(response: Response) -> Self::MappedResponse;
+
+    /// Accepts a state service to call, maps this request to a [`Request`], waits for the state to be ready,
+    /// calls the state with the mapped request, then maps the success or error response to the expected response
+    /// or error type for this request.
+    ///
+    /// Returns a [`Result<MappedResponse, LayeredServicesError<RequestError>>`].
+    #[allow(async_fn_in_trait)]
+    async fn mapped_oneshot<State>(
+        self,
+        state: &mut State,
+    ) -> Result<Self::MappedResponse, LayeredStateError<Self::Error>>
+    where
+        State: Service<Request, Response = Response, Error = BoxError>,
+        State::Future: Send,
+    {
+        let response = state.ready().await?.call(self.map_request()).await?;
+        Ok(Self::map_response(response))
+    }
+}
+
+/// Performs contextual validation of the given semantically verified block,
+/// committing it to the state if successful.
+///
+/// See the [`crate`] documentation and [`Request::CommitSemanticallyVerifiedBlock`] for details.
+pub struct CommitSemanticallyVerifiedBlockRequest(pub SemanticallyVerifiedBlock);
+
+impl MappedRequest for CommitSemanticallyVerifiedBlockRequest {
+    type MappedResponse = block::Hash;
+    type Error = CommitSemanticallyVerifiedError;
+
+    fn map_request(self) -> Request {
+        Request::CommitSemanticallyVerifiedBlock(self.0)
+    }
+
+    fn map_response(response: Response) -> Self::MappedResponse {
+        match response {
+            Response::Committed(hash) => hash,
+            _ => unreachable!("wrong response variant for request"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A query about or modification to the chain state, via the
 /// [`StateService`](crate::service::StateService).
@@ -640,8 +698,8 @@ pub enum Request {
     /// until its parent is ready.
     ///
     /// Returns [`Response::Committed`] with the hash of the block when it is
-    /// committed to the state, or an error if the block fails contextual
-    /// validation or has already been committed to the state.
+    /// committed to the state, or a [`CommitSemanticallyVerifiedBlockError`][0] if
+    /// the block fails contextual validation or otherwise could not be committed.
     ///
     /// This request cannot be cancelled once submitted; dropping the response
     /// future will have no effect on whether it is eventually processed. A
@@ -653,6 +711,8 @@ pub enum Request {
     /// Block commit requests should be wrapped in a timeout, so that
     /// out-of-order and invalid requests do not hang indefinitely. See the [`crate`]
     /// documentation for details.
+    ///
+    /// [0]: (crate::error::CommitSemanticallyVerifiedBlockError)
     CommitSemanticallyVerifiedBlock(SemanticallyVerifiedBlock),
 
     /// Commit a checkpointed block to the state, skipping most but not all

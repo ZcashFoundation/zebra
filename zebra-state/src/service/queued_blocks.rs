@@ -11,8 +11,8 @@ use tracing::instrument;
 use zebra_chain::{block, transparent};
 
 use crate::{
-    BoxError, CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, NonFinalizedState,
-    SemanticallyVerifiedBlock, ValidateContextError,
+    error::QueueAndCommitError, BoxError, CheckpointVerifiedBlock, CommitSemanticallyVerifiedError,
+    NonFinalizedState, SemanticallyVerifiedBlock,
 };
 
 #[cfg(test)]
@@ -145,11 +145,9 @@ impl QueuedBlocks {
             let parent_hash = &expired_block.block.header.previous_block_hash;
 
             // we don't care if the receiver was dropped
-            let _ = expired_sender.send(Err(CommitSemanticallyVerifiedError::from(Box::new(
-                ValidateContextError::PrunedBelowFinalizedTip {
-                    block_height: expired_block.height,
-                },
-            ))));
+            let _ = expired_sender.send(Err(
+                QueueAndCommitError::new_pruned(expired_block.height).into()
+            ));
 
             // TODO: only remove UTXOs if there are no queued blocks with that UTXO
             //       (known_utxos is best-effort, so this is ok for now)

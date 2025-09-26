@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2025-XX-XX
+
+### Breaking Changes
+
+- Updated error messages in response to failed `CommitSemanticallyVerifiedBlock` state requests ([#9923](https://github.com/ZcashFoundation/zebra/pull/9923))
+
+## Added
+
+- Added `MappedRequest` trait and `CommitSemanticallyVerifiedBlockRequest` for convenient state response and error type conversions ([#9923](https://github.com/ZcashFoundation/zebra/pull/9923))
+
+## Fixed
+
+- Replaced boxed-string errors in response to failed `CommitSemanticallyVerifiedBlock` and `ReconsiderBlock` state requests with concrete error type ([#9848](https://github.com/ZcashFoundation/zebra/pull/9848), [#9923](https://github.com/ZcashFoundation/zebra/pull/9923), [#9919](https://github.com/ZcashFoundation/zebra/pull/9919))
+
 ## [2.0.0] - 2025-08-07
 
 ### Breaking Changes

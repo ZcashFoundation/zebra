@@ -6974,6 +6974,7 @@ dependencies = [
  "color-eyre",
  "crossbeam-channel",
  "derive-getters",
+ "derive-new",
  "dirs",
  "elasticsearch",
  "futures",
