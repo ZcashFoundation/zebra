@@ -8,7 +8,7 @@ use std::{
 use orchard::issuance::IssueAction;
 pub use orchard::note::AssetBase;
 
-use crate::{serialization::ZcashSerialize, transaction::Transaction};
+use crate::{block::Block, serialization::ZcashSerialize, transaction::Transaction};
 
 use super::BurnItem;
 
@@ -25,18 +25,18 @@ pub struct AssetState {
 /// A change to apply to the issued assets map.
 // TODO: Reference ZIP
 #[derive(Copy, Clone, Default, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct AssetStateChange {
+struct AssetStateChange {
     /// Whether the asset should be finalized such that no more of it can be issued.
-    pub should_finalize: bool,
+    should_finalize: bool,
     /// Whether the asset has been issued in this change.
-    pub includes_issuance: bool,
+    includes_issuance: bool,
     /// The change in supply from newly issued assets or burned assets, if any.
-    pub supply_change: SupplyChange,
+    supply_change: SupplyChange,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 /// An asset supply change to apply to the issued assets map.
-pub enum SupplyChange {
+enum SupplyChange {
     /// An issuance that should increase the total supply of an asset
     Issuance(u64),
 
@@ -94,7 +94,7 @@ impl SupplyChange {
     }
 
     /// Returns true if this [`SupplyChange`] is an issuance.
-    pub fn is_issuance(&self) -> bool {
+    fn is_issuance(&self) -> bool {
         matches!(self, SupplyChange::Issuance(_))
     }
 }
@@ -113,7 +113,7 @@ impl std::ops::Neg for SupplyChange {
 impl AssetState {
     /// Updates and returns self with the provided [`AssetStateChange`] if
     /// the change is valid, or returns None otherwise.
-    pub fn apply_change(self, change: AssetStateChange) -> Option<Self> {
+    fn apply_change(self, change: AssetStateChange) -> Option<Self> {
         self.apply_finalization(change)?.apply_supply_change(change)
     }
 
@@ -245,7 +245,7 @@ impl AssetStateChange {
 
     /// Updates and returns self with the provided [`AssetStateChange`] if
     /// the change is valid, or returns None otherwise.
-    pub fn apply_change(&mut self, change: AssetStateChange) -> bool {
+    fn apply_change(&mut self, change: AssetStateChange) -> bool {
         if self.should_finalize && change.includes_issuance {
             return false;
         }
@@ -255,6 +255,15 @@ impl AssetStateChange {
     }
 }
 
+// FIXME: reuse orhcard errors?
+/// FIXME: add doc
+pub enum AssetStateError {
+    /// FIXME: add doc
+    InvalidIssuance,
+    /// FIXME: add doc
+    InvalidBurn,
+}
+
 /// An map of issued asset states by asset base.
 // TODO: Reference ZIP
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -262,7 +271,7 @@ pub struct IssuedAssets(HashMap<AssetBase, AssetState>);
 
 impl IssuedAssets {
     /// Creates a new [`IssuedAssets`].
-    pub fn new() -> Self {
+    fn new() -> Self {
         Self(HashMap::new())
     }
 
@@ -274,6 +283,76 @@ impl IssuedAssets {
     /// Extends inner [`HashMap`] with updated asset states from the provided iterator
     fn extend<'a>(&mut self, issued_assets: impl Iterator<Item = (AssetBase, AssetState)> + 'a) {
         self.0.extend(issued_assets);
+    }
+
+    /// FIXME: add doc
+    pub fn from_transactions(
+        transactions: &[Arc<Transaction>],
+        get_asset_state: impl Fn(&AssetBase) -> Option<AssetState>,
+    ) -> Option<Self> {
+        transactions
+            .iter()
+            .map(IssuedAssetsChange::from_transaction)
+            .try_fold(IssuedAssetsChange::default(), |a, b| Some(a + b?))
+            .map(|issued_assets_change| {
+                issued_assets_change
+                    .apply_with(|asset_base| get_asset_state(&asset_base).unwrap_or_default())
+            })
+    }
+
+    /// FIXME: add doc
+    pub fn validated_from_transactions(
+        transactions: &[Arc<Transaction>],
+        get_asset_state: impl Fn(&AssetBase) -> Option<AssetState>,
+    ) -> Result<Self, AssetStateError> {
+        let mut issued_assets = HashMap::new();
+
+        // Burns need to be checked and asset state changes need to be applied per tranaction, in case
+        // the asset being burned was also issued in an earlier transaction in the same block.
+        for transaction in transactions.iter() {
+            let issued_assets_change = IssuedAssetsChange::from_transaction(transaction)
+                .ok_or(AssetStateError::InvalidIssuance)?;
+
+            // Check that no burn item attempts to burn more than the issued supply for an asset
+            for burn in transaction.orchard_burns() {
+                let asset_base = burn.asset();
+                let asset_state = issued_assets
+                    .get(&asset_base)
+                    .copied()
+                    .or_else(|| get_asset_state(&asset_base))
+                    // The asset being burned should have been issued by a previous transaction, and
+                    // any assets issued in previous transactions should be present in the issued assets map.
+                    .ok_or(AssetStateError::InvalidBurn)?;
+
+                if asset_state.total_supply < burn.raw_amount() {
+                    return Err(AssetStateError::InvalidBurn);
+                } else {
+                    // Any burned asset bases in the transaction will also be present in the issued assets change,
+                    // adding a copy of initial asset state to `issued_assets` avoids duplicate disk reads.
+                    issued_assets.insert(asset_base, asset_state);
+                }
+            }
+
+            // TODO: Remove the `issued_assets_change` field from `SemanticallyVerifiedBlock` and get the changes
+            //       directly from transactions here and when writing blocks to disk.
+            for (asset_base, change) in issued_assets_change.iter() {
+                let asset_state = issued_assets
+                    .get(&asset_base)
+                    .copied()
+                    .or_else(|| get_asset_state(&asset_base))
+                    .unwrap_or_default();
+
+                let updated_asset_state = asset_state
+                    .apply_change(change)
+                    .ok_or(AssetStateError::InvalidIssuance)?;
+
+                // TODO: Update `Burn` to `HashMap<AssetBase, NoteValue>)` and return an error during deserialization if
+                //       any asset base is burned twice in the same transaction
+                issued_assets.insert(asset_base, updated_asset_state);
+            }
+        }
+
+        Ok(issued_assets.into())
     }
 }
 
@@ -315,7 +394,7 @@ impl IssuedAssetsChange {
     ///
     /// Returns an [`IssuedAssetsChange`] representing all of the changes to the issued assets
     /// map that should be applied for the provided transaction, or `None` if the change would be invalid.
-    pub fn from_transaction(transaction: &Arc<Transaction>) -> Option<Self> {
+    fn from_transaction(transaction: &Arc<Transaction>) -> Option<Self> {
         let mut issued_assets_change = Self::new();
 
         if !issued_assets_change.update(AssetStateChange::from_transaction(transaction)) {
@@ -329,7 +408,7 @@ impl IssuedAssetsChange {
     ///
     /// Returns an [`IssuedAssetsChange`] representing all of the changes to the issued assets
     /// map that should be applied for the provided transactions.
-    pub fn from_transactions(transactions: &[Arc<Transaction>]) -> Option<Arc<[Self]>> {
+    pub fn from_transactions(transactions: &[Arc<Transaction>]) -> Option<Vec<Self>> {
         transactions.iter().map(Self::from_transaction).collect()
     }
 
@@ -338,7 +417,7 @@ impl IssuedAssetsChange {
     /// Applies changes in self to the previous asset state.
     ///
     /// Returns an [`IssuedAssets`] with the updated asset states.
-    pub fn apply_with(self, f: impl Fn(AssetBase) -> AssetState) -> IssuedAssets {
+    fn apply_with(self, f: impl Fn(AssetBase) -> AssetState) -> IssuedAssets {
         let mut issued_assets = IssuedAssets::new();
 
         issued_assets.extend(self.0.into_iter().map(|(asset_base, change)| {
@@ -373,18 +452,9 @@ impl std::ops::Add for IssuedAssetsChange {
     }
 }
 
-impl From<Arc<[IssuedAssetsChange]>> for IssuedAssetsChange {
-    fn from(change: Arc<[IssuedAssetsChange]>) -> Self {
-        change
-            .iter()
-            .cloned()
-            .reduce(|a, b| a + b)
-            .unwrap_or_default()
-    }
-}
-
 /// Used in snapshot test for `getassetstate` RPC method.
 // TODO: Replace with `AssetBase::random()` or a known value.
+#[cfg(test)]
 pub trait RandomAssetBase {
     /// Generates a ZSA random asset.
     ///
@@ -392,6 +462,7 @@ pub trait RandomAssetBase {
     fn random_serialized() -> String;
 }
 
+#[cfg(test)]
 impl RandomAssetBase for AssetBase {
     fn random_serialized() -> String {
         let isk = orchard::keys::IssuanceAuthorizingKey::from_bytes(

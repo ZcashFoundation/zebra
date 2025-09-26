@@ -19,4 +19,4 @@ pub(crate) use issuance::IssueData;
 pub use burn::BurnItem;
 
 // FIXME: should asset_state mod be pub and these structs be pub as well?
-pub use asset_state::{AssetBase, AssetState, AssetStateChange, IssuedAssets, IssuedAssetsChange};
+pub use asset_state::{AssetBase, AssetState, AssetStateError, IssuedAssets, IssuedAssetsChange};

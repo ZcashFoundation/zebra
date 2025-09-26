@@ -11,7 +11,7 @@ use zebra_chain::{
     block::{self, Block},
     history_tree::HistoryTree,
     orchard,
-    orchard_zsa::{AssetBase, IssuedAssets, IssuedAssetsChange},
+    orchard_zsa::{AssetBase, IssuedAssets},
     parallel::tree::NoteCommitmentTrees,
     sapling,
     serialization::SerializationError,
@@ -225,6 +225,7 @@ pub struct ContextuallyVerifiedBlock {
     /// The sum of the chain value pool changes of all transactions in this block.
     pub(crate) chain_value_pool_change: ValueBalance<NegativeAllowed>,
 
+    // FIXME: what is the difference between IssuedAssetsChange?
     /// A partial map of `issued_assets` with entries for asset states that were updated in
     /// this block.
     pub(crate) issued_assets: IssuedAssets,
@@ -303,6 +304,7 @@ pub struct FinalizedBlock {
     pub issued_assets: Option<IssuedAssets>,
 }
 
+/* FIXME: remove this
 /// Either changes to be applied to the previous `issued_assets` map for the finalized tip, or
 /// updates asset states to be inserted into the finalized state, replacing the previous
 /// asset states for those asset bases.
@@ -320,6 +322,7 @@ impl From<IssuedAssets> for IssuedAssetsOrChange {
         Self::Updated(updated_issued_assets)
     }
 }
+*/
 
 impl FinalizedBlock {
     /// Constructs [`FinalizedBlock`] from [`CheckpointVerifiedBlock`] and its [`Treestate`].

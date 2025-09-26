@@ -20,7 +20,7 @@ use std::{
 use zebra_chain::{
     block::Height,
     orchard::{self},
-    orchard_zsa::{AssetBase, AssetState, IssuedAssetsChange},
+    orchard_zsa::{AssetBase, AssetState, IssuedAssets},
     parallel::tree::NoteCommitmentTrees,
     sapling, sprout,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
@@ -524,11 +524,10 @@ impl DiskWriteBatch {
             if let Some(updated_issued_assets) = finalized.issued_assets.as_ref() {
                 updated_issued_assets
             } else {
-                &IssuedAssetsChange::from(
-                    IssuedAssetsChange::from_transactions(&finalized.block.transactions)
-                        .ok_or(BoxError::from("invalid issued assets changes"))?,
-                )
-                .apply_with(|asset_base| zebra_db.issued_asset(&asset_base).unwrap_or_default())
+                &IssuedAssets::from_transactions(&finalized.block.transactions, |asset_base| {
+                    zebra_db.issued_asset(asset_base)
+                })
+                .ok_or(BoxError::from("invalid issued assets changes"))?
             };
 
         for (asset_base, updated_issued_asset_state) in updated_issued_assets.iter() {
