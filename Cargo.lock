@@ -7068,6 +7068,7 @@ dependencies = [
  "color-eyre",
  "config",
  "console-subscriber",
+ "derive-new",
  "dirs",
  "futures",
  "hex",

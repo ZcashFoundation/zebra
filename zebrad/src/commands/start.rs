@@ -206,17 +206,6 @@ impl StartCmd {
             misbehavior_sender.clone(),
         );
 
-        // Start health server if configured
-        info!("initializing health endpoints");
-        let (health_task_handle, _health_addr) = health::init(
-            config.health.clone(),
-            config.network.network.clone(),
-            latest_chain_tip.clone(),
-            sync_status.clone(),
-            address_book.clone(),
-        )
-        .await;
-
         info!("initializing mempool");
         let (mempool, mempool_transaction_subscriber) = Mempool::new(
             &config.mempool,
@@ -335,14 +324,28 @@ impl StartCmd {
         );
 
         info!("spawning progress logging task");
+        let (chain_tip_metrics_sender, chain_tip_metrics_receiver) =
+            health::ChainTipMetrics::channel();
         let progress_task_handle = tokio::spawn(
             show_block_chain_progress(
                 config.network.network.clone(),
                 latest_chain_tip.clone(),
                 sync_status.clone(),
+                chain_tip_metrics_sender,
             )
             .in_current_span(),
         );
+
+        // Start health server if configured
+        info!("initializing health endpoints");
+        let (health_task_handle, _) = health::init(
+            config.health.clone(),
+            config.network.network.clone(),
+            chain_tip_metrics_receiver,
+            sync_status.clone(),
+            address_book.clone(),
+        )
+        .await;
 
         // Spawn never ending end of support task.
         info!("spawning end of support checking task");
