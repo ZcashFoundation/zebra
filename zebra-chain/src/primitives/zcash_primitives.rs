@@ -26,7 +26,7 @@ struct TransparentAuth {
 }
 
 impl zcash_transparent::bundle::Authorization for TransparentAuth {
-    type ScriptSig = zcash_primitives::legacy::Script;
+    type ScriptSig = zcash_transparent::address::Script;
 }
 
 // In this block we convert our Output to a librustzcash to TxOut.
@@ -44,11 +44,11 @@ impl zcash_transparent::sighash::TransparentAuthorizingContext for TransparentAu
             .collect()
     }
 
-    fn input_scriptpubkeys(&self) -> Vec<zcash_primitives::legacy::Script> {
+    fn input_scriptpubkeys(&self) -> Vec<zcash_transparent::address::Script> {
         self.all_prev_outputs
             .iter()
             .map(|prevout| {
-                zcash_primitives::legacy::Script(script::Code(
+                zcash_transparent::address::Script(script::Code(
                     prevout.lock_script.as_raw_bytes().into(),
                 ))
             })
@@ -192,14 +192,14 @@ impl TryFrom<Amount> for ZatBalance {
 }
 
 /// Convert a Zebra Script into a librustzcash one.
-impl From<&Script> for zcash_primitives::legacy::Script {
+impl From<&Script> for zcash_transparent::address::Script {
     fn from(script: &Script) -> Self {
-        zcash_primitives::legacy::Script(script::Code(script.as_raw_bytes().to_vec()))
+        zcash_transparent::address::Script(script::Code(script.as_raw_bytes().to_vec()))
     }
 }
 
 /// Convert a Zebra Script into a librustzcash one.
-impl From<Script> for zcash_primitives::legacy::Script {
+impl From<Script> for zcash_transparent::address::Script {
     // The borrow is actually needed to use From<&Script>
     #[allow(clippy::needless_borrow)]
     fn from(script: Script) -> Self {
@@ -309,13 +309,13 @@ pub(crate) fn sighash(
     hash_type: HashType,
     input_index_script_code: Option<(usize, Vec<u8>)>,
 ) -> SigHash {
-    let lock_script: zcash_primitives::legacy::Script;
-    let unlock_script: zcash_primitives::legacy::Script;
+    let lock_script: zcash_transparent::address::Script;
+    let unlock_script: zcash_transparent::address::Script;
     let signable_input = match input_index_script_code {
         Some((input_index, script_code)) => {
             let output = &precomputed_tx_data.all_previous_outputs[input_index];
             lock_script = output.lock_script.clone().into();
-            unlock_script = zcash_primitives::legacy::Script(script::Code(script_code));
+            unlock_script = zcash_transparent::address::Script(script::Code(script_code));
             zp_tx::sighash::SignableInput::Transparent(
                 zcash_transparent::sighash::SignableInput::from_parts(
                     hash_type.try_into().expect("hash type should be ALL"),
