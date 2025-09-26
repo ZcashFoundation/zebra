@@ -25,9 +25,6 @@ pub struct Config {
     /// Maximum age of the last committed block before readiness fails.
     #[serde(with = "humantime_serde")]
     pub ready_max_tip_age: Duration,
-    /// Minimum interval between accepted health requests.
-    #[serde(with = "humantime_serde")]
-    pub min_request_interval: Duration,
 }
 
 impl Default for Config {
@@ -37,16 +34,9 @@ impl Default for Config {
             min_connected_peers: 1,
             ready_max_blocks_behind: 2,
             enforce_on_test_networks: false,
-            ready_max_tip_age: default_ready_max_tip_age(),
-            min_request_interval: default_min_request_interval(),
+            ready_max_tip_age: DEFAULT_READY_MAX_TIP_AGE,
         }
     }
 }
 
-pub(crate) fn default_ready_max_tip_age() -> Duration {
-    Duration::from_secs(5 * 60)
-}
-
-pub(crate) fn default_min_request_interval() -> Duration {
-    Duration::from_millis(100)
-}
+const DEFAULT_READY_MAX_TIP_AGE: Duration = Duration::from_secs(5 * 60);
