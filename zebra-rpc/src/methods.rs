@@ -419,6 +419,20 @@ pub trait Rpc {
         request: GetAddressUtxosRequest,
     ) -> Result<GetAddressUtxosResponse>;
 
+    /// Returns node health and build metadata, as a [`GetHealthInfo`] JSON struct.
+    ///
+    /// zcashd reference: none
+    /// method: post
+    /// tags: control
+    ///
+    /// # Notes
+    ///
+    /// - This method provides a simple liveness/readiness signal and basic build info.
+    /// - When the HTTP health endpoint is enabled in HTTP middleware,
+    ///   it is also available as `GET /health` (no parameters).
+    #[method(name = "gethealthinfo")]
+    fn get_health_info(&self) -> Result<GetHealthInfo>;
+
     /// Stop the running zebrad process.
     ///
     /// # Notes
@@ -2143,6 +2157,10 @@ where
         }
     }
 
+    fn get_health_info(&self) -> Result<GetHealthInfo> {
+        Ok(GetHealthInfo::new())
+    }
+
     fn stop(&self) -> Result<String> {
         #[cfg(not(target_os = "windows"))]
         if self.network.is_regtest() {
@@ -3011,6 +3029,43 @@ where
     latest_chain_tip
         .best_tip_height()
         .ok_or_misc_error("No blocks in state")
+}
+
+/// Response to a `gethealthinfo` RPC request.
+///
+/// See the notes for the [`Rpc::get_health_info` method].
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct GetHealthInfo {
+    /// Static health status string.
+    status: String,
+    /// Zebra package version
+    version: String,
+    /// Build Git tag (if available).
+    git_tag: String,
+    /// Full Git commit hash (if available).
+    git_commit: String,
+    /// Server timestamp in RFC 3339 format.
+    timestamp: String,
+}
+
+impl Default for GetHealthInfo {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GetHealthInfo {
+    /// Creates a new health info instance with current node status and build metadata.
+    #[inline]
+    pub fn new() -> Self {
+        Self {
+            status: "healthy".into(),
+            version: env!("CARGO_PKG_VERSION").into(),
+            git_tag: option_env!("GIT_TAG").unwrap_or("unknown").into(),
+            git_commit: option_env!("GIT_COMMIT_FULL").unwrap_or("unknown").into(),
+            timestamp: Utc::now().to_rfc3339(),
+        }
+    }
 }
 
 /// Response to a `getinfo` RPC request.
