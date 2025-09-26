@@ -201,6 +201,15 @@ where
     /// Used to route inventory requests to peers that are likely to have it.
     inventory_registry: InventoryRegistry,
 
+    /// Stores requests that should be routed to peers once they are ready.
+    queued_broadcast_all_request: Option<(
+        Request,
+        tokio::sync::mpsc::Sender<
+            Pin<Box<dyn Future<Output = Result<Response, BoxError>> + Send + 'static>>,
+        >,
+        HashSet<D::Key>,
+    )>,
+
     // Peer Tracking: Busy Peers
     //
     /// Connected peers that are handling a Zebra request,
@@ -316,6 +325,7 @@ where
             ready_services: HashMap::new(),
             // Request Routing
             inventory_registry: InventoryRegistry::new(inv_stream),
+            queued_broadcast_all_request: None,
 
             // Busy peers
             unready_services: FuturesUnordered::new(),
@@ -434,6 +444,28 @@ where
         for guard in self.guards.iter() {
             guard.abort();
         }
+    }
+
+    /// Checks for newly ready, disconnects from outdated peers, and polls ready peer errors.
+    fn poll_peers(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
+        // Check for newly ready peers, including newly added peers (which are added as unready).
+        // So it needs to run after `poll_discover()`. Registers a wakeup if there are any unready
+        // peers.
+        //
+        // Each connected peer should become ready within a few minutes, or timeout, close the
+        // connection, and release its connection slot.
+        //
+        // TODO: drop peers that overload us with inbound messages and never become ready (#7822)
+        let _poll_pending_or_ready: Poll<Option<()>> = self.poll_unready(cx)?;
+
+        // Cleanup
+
+        // Only checks the versions of ready peers, so it needs to run after `poll_unready()`.
+        self.disconnect_from_outdated_peers();
+
+        // Check for failures in ready peers, removing newly errored or disconnected peers.
+        // So it needs to run after `poll_unready()`.
+        self.poll_ready_peer_errors(cx).map(Ok)
     }
 
     /// Check busy peer services for request completion or errors.
@@ -963,16 +995,26 @@ where
             "requests can only be routed to ready peers"
         );
 
-        // # Security
-        //
-        // We choose peers randomly, ignoring load.
-        // This avoids favouring malicious peers, because peers can influence their own load.
-        //
-        // The order of peers isn't completely random,
-        // but peer request order is not security-sensitive.
+        let selected_peers = self.select_random_ready_peers(max_peers);
+        self.send_multiple(req, selected_peers)
+    }
 
+    /// Sends the same request to the provided ready peers, ignoring return values.
+    ///
+    /// # Security
+    ///
+    /// Callers should choose peers randomly, ignoring load.
+    /// This avoids favouring malicious peers, because peers can influence their own load.
+    ///
+    /// The order of peers isn't completely random,
+    /// but peer request order is not security-sensitive.
+    fn send_multiple(
+        &mut self,
+        req: Request,
+        peers: Vec<D::Key>,
+    ) -> <Self as tower::Service<Request>>::Future {
         let futs = FuturesUnordered::new();
-        for key in self.select_random_ready_peers(max_peers) {
+        for key in peers {
             let mut svc = self
                 .take_ready_service(&key)
                 .expect("selected peers are ready");
@@ -996,6 +1038,53 @@ where
     fn route_broadcast(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
         // Broadcasts ignore the response
         self.route_multiple(req, self.number_of_peers_to_broadcast())
+    }
+
+    /// Broadcasts the same request to all ready peers, ignoring return values.
+    fn broadcast_all(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
+        // Broadcasts ignore the response
+        let all_ready_peers = self.ready_services.keys().copied().collect();
+        let all_unready_peers: HashSet<_> = self.cancel_handles.keys().cloned().collect();
+        if all_unready_peers.is_empty() {
+            self.send_multiple(req, all_ready_peers)
+        } else {
+            const QUEUED_BROADCAST_FUTS_CHANNEL_SIZE: usize = 3;
+            let (sender, mut receiver) =
+                tokio::sync::mpsc::channel(QUEUED_BROADCAST_FUTS_CHANNEL_SIZE);
+            // Drop the existing queued broadcast all request, if any.
+            self.queued_broadcast_all_request = Some((req.clone(), sender, all_unready_peers));
+            let send_multiple_fut = self.send_multiple(req, all_ready_peers);
+            async move {
+                let _ = send_multiple_fut.await?;
+                while receiver.recv().await.is_some() {}
+                Ok(Response::Nil)
+            }
+            .boxed()
+        }
+    }
+
+    /// Broadcasts the same requests to all ready peers which were unready when
+    /// [`PeerSet::broadcast_all()`] was last called, ignoring return values.
+    fn broadcast_all_queued(&mut self) {
+        if let Some((req, sender, mut remaining_peers)) = self.queued_broadcast_all_request.take() {
+            let Ok(reserved_send_slot) = sender.try_reserve() else {
+                self.queued_broadcast_all_request = Some((req, sender, remaining_peers));
+                return;
+            };
+
+            let peers: Vec<_> = self
+                .ready_services
+                .keys()
+                .filter(|ready_peer| remaining_peers.remove(ready_peer))
+                .copied()
+                .collect();
+
+            reserved_send_slot.send(self.send_multiple(req.clone(), peers).boxed());
+
+            if !remaining_peers.is_empty() {
+                self.queued_broadcast_all_request = Some((req, sender, remaining_peers));
+            }
+        }
     }
 
     /// Given a number of ready peers calculate to how many of them Zebra will
@@ -1160,28 +1249,11 @@ where
         let _poll_pending: Poll<()> = self.poll_background_errors(cx)?;
         let _poll_pending_or_ready: Poll<()> = self.inventory_registry.poll_inventory(cx)?;
 
-        // Check for newly ready peers, including newly added peers (which are added as unready).
-        // So it needs to run after `poll_discover()`. Registers a wakeup if there are any unready
-        // peers.
-        //
-        // Each connected peer should become ready within a few minutes, or timeout, close the
-        // connection, and release its connection slot.
-        //
-        // TODO: drop peers that overload us with inbound messages and never become ready (#7822)
-        let _poll_pending_or_ready: Poll<Option<()>> = self.poll_unready(cx)?;
-
-        // Cleanup and metrics.
-
-        // Only checks the versions of ready peers, so it needs to run after `poll_unready()`.
-        self.disconnect_from_outdated_peers();
+        let ready_peers = self.poll_peers(cx)?;
 
         // These metrics should run last, to report the most up-to-date information.
         self.log_peer_set_size();
         self.update_metrics();
-
-        // Check for failures in ready peers, removing newly errored or disconnected peers.
-        // So it needs to run after `poll_unready()`.
-        let ready_peers: Poll<()> = self.poll_ready_peer_errors(cx);
 
         if ready_peers.is_pending() {
             // # Correctness
@@ -1204,7 +1276,13 @@ where
             // To avoid peers blocking on a full peer status/error channel:
             // - `poll_background_errors` schedules this task for wakeup when the peer status
             //   update task exits.
-            Poll::Pending
+            return Poll::Pending;
+        }
+
+        self.broadcast_all_queued();
+
+        if self.ready_services.is_empty() {
+            self.poll_peers(cx)
         } else {
             Poll::Ready(Ok(()))
         }
@@ -1225,6 +1303,7 @@ where
             // Broadcast advertisements to lots of peers
             Request::AdvertiseTransactionIds(_) => self.route_broadcast(req),
             Request::AdvertiseBlock(_) => self.route_broadcast(req),
+            Request::AdvertiseBlockToAll(_) => self.broadcast_all(req),
 
             // Choose a random less-loaded peer for all other requests
             _ => self.route_p2c(req),

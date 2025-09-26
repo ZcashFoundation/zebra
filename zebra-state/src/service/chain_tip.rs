@@ -554,6 +554,11 @@ impl ChainTipChange {
         Some(tip_action)
     }
 
+    /// Sets the `last_change_hash` as the provided hash.
+    pub fn mark_last_change_hash(&mut self, hash: block::Hash) {
+        self.last_change_hash = Some(hash);
+    }
+
     /// Return an action based on `block` and the last change we returned.
     fn action(&self, block: ChainTipBlock) -> TipAction {
         // check for an edge case that's dealt with by other code
