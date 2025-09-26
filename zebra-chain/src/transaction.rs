@@ -380,7 +380,7 @@ impl Transaction {
             Transaction::V4 { .. } => 4,
             Transaction::V5 { .. } => 5,
             #[cfg(feature = "tx-v6")]
-            Transaction::V6 { .. } => 6,
+            Transaction::V6 { .. } => if self.network_upgrade().unwrap() == NetworkUpgrade::Swap { 8 } else { 6 } // TODO clean this up or introduce V8
         }
     }
 

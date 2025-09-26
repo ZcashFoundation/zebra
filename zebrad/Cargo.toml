@@ -52,7 +52,7 @@ features = [
 
 [features]
 # In release builds, don't compile debug logging code, to improve performance.
-default = ["release_max_level_info", "progress-bar", "getblocktemplate-rpcs"]
+default = ["release_max_level_info", "progress-bar", "getblocktemplate-rpcs", "tx-v6", "zsa-swap"]
 
 # Default features for official ZF binary release builds
 default-release-binaries = ["default", "sentry"]
@@ -113,8 +113,8 @@ release_max_level_warn = ["tracing/release_max_level_warn"]
 release_max_level_info = ["tracing/release_max_level_info", "log/release_max_level_info"]
 release_max_level_debug = ["tracing/release_max_level_debug"]
 
-max_level_warn = ["tracing/max_level_warn"]
-max_level_info = ["tracing/max_level_info"]
+#max_level_warn = ["tracing/max_level_warn"]
+#max_level_info = ["tracing/max_level_info"]
 max_level_debug = ["tracing/max_level_debug", "log/max_level_debug"]
 
 # Testing features that activate extra dependencies

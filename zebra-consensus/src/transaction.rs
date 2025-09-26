@@ -519,7 +519,7 @@ impl OrchardTransaction for orchard::OrchardVanilla {
 
 #[cfg(feature = "tx-v6")]
 impl OrchardTransaction for orchard::OrchardZSA {
-    const SUPPORTED_NETWORK_UPGRADES: &'static [NetworkUpgrade] = &[NetworkUpgrade::Nu7];
+    const SUPPORTED_NETWORK_UPGRADES: &'static [NetworkUpgrade] = &[NetworkUpgrade::Nu7, #[cfg(feature = "zsa-swap")] NetworkUpgrade::Swap];
 }
 
 impl<ZS> Verifier<ZS>
@@ -1068,7 +1068,7 @@ where
     fn verify_orchard_shielded_data<V: primitives::halo2::OrchardVerifier>(
         orchard_shielded_data: &Option<orchard::ShieldedData<V>>,
         shielded_sighash: &SigHash,
-        action_group_sighashes: Vec<SigHash>,
+        _action_group_sighashes: Vec<SigHash>,
     ) -> Result<AsyncChecks, TransactionError> {
         let mut async_checks = AsyncChecks::new();
 
@@ -1085,7 +1085,7 @@ where
             // aggregated Halo2 proof per transaction, even with multiple
             // Actions in one transaction. So we queue it for verification
             // only once instead of queuing it up for every Action description.
-            for (index, action_group) in orchard_shielded_data.action_groups.iter().enumerate() {
+            for (_index, action_group) in orchard_shielded_data.action_groups.iter().enumerate() {
                 async_checks.push(
                     V::get_verifier()
                         .clone()
@@ -1094,10 +1094,10 @@ where
 
                 // FIXME implement a more graceful decision making which sighash we sign
                 #[cfg(feature = "zsa-swap")]
-                let action_group_sighash = action_group_sighashes.get(index).unwrap();
+                let action_group_sighash = _action_group_sighashes.get(_index).unwrap();
                 #[cfg(feature = "zsa-swap")]
                 for authorized_action in action_group.actions.clone() {
-                    // In case of multiple action group we sign action group sighash insead of
+                    // In case of multiple action group we sign action group sighash instead of
                     // sighash of the transaction or the Orchard bundle
 
                     let (action, spend_auth_sig) = authorized_action.into_parts();
@@ -1145,7 +1145,6 @@ where
                     ),
                 ));
             }
-
 
             let bvk = orchard_shielded_data.binding_verification_key();
 

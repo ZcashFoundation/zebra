@@ -26,6 +26,9 @@ use crate::{
     serialization::CompactSizeMessage,
 };
 
+#[cfg(feature = "zsa-swap")]
+use crate::{ parameters::TX_SWAP_VERSION_GROUP_ID};
+
 use super::*;
 use crate::sapling;
 
@@ -874,7 +877,12 @@ impl ZcashSerialize for Transaction {
                 orchard_zsa_issue_data,
             } => {
                 // Denoted as `nVersionGroupId` in the spec.
-                writer.write_u32::<LittleEndian>(TX_V6_VERSION_GROUP_ID)?;
+                // TODO clean up or extract V8
+                if *network_upgrade == NetworkUpgrade::Swap {
+                    writer.write_u32::<LittleEndian>(TX_SWAP_VERSION_GROUP_ID)?;
+                } else {
+                    writer.write_u32::<LittleEndian>(TX_V6_VERSION_GROUP_ID)?;
+                }
 
                 // Denoted as `nConsensusBranchId` in the spec.
                 writer.write_u32::<LittleEndian>(u32::from(
@@ -1222,7 +1230,61 @@ impl ZcashDeserialize for Transaction {
                     orchard_shielded_data,
                     orchard_zsa_issue_data,
                 })
-            }
+            },
+            #[cfg(feature = "zsa-swap")]
+            (8, true) => {
+                // Denoted as `nVersionGroupId` in the spec.
+                let id = limited_reader.read_u32::<LittleEndian>()?;
+                if id != TX_SWAP_VERSION_GROUP_ID {
+                    return Err(SerializationError::Parse("expected TX_V8_VERSION_GROUP_ID"));
+                }
+                // Denoted as `nConsensusBranchId` in the spec.
+                // Convert it to a NetworkUpgrade
+                let network_upgrade =
+                    NetworkUpgrade::from_branch_id(limited_reader.read_u32::<LittleEndian>()?)
+                        .ok_or_else(|| {
+                            SerializationError::Parse(
+                                "expected a valid network upgrade from the consensus branch id",
+                            )
+                        })?;
+
+                // Denoted as `lock_time` in the spec.
+                let lock_time = LockTime::zcash_deserialize(&mut limited_reader)?;
+
+                // Denoted as `nExpiryHeight` in the spec.
+                let expiry_height = block::Height(limited_reader.read_u32::<LittleEndian>()?);
+
+                // Denoted as `tx_in_count` and `tx_in` in the spec.
+                let inputs = Vec::zcash_deserialize(&mut limited_reader)?;
+
+                // Denoted as `tx_out_count` and `tx_out` in the spec.
+                let outputs = Vec::zcash_deserialize(&mut limited_reader)?;
+
+                // A bundle of fields denoted in the spec as `nSpendsSapling`, `vSpendsSapling`,
+                // `nOutputsSapling`,`vOutputsSapling`, `valueBalanceSapling`, `anchorSapling`,
+                // `vSpendProofsSapling`, `vSpendAuthSigsSapling`, `vOutputProofsSapling` and
+                // `bindingSigSapling`.
+                let sapling_shielded_data = (&mut limited_reader).zcash_deserialize_into()?;
+
+                // A bundle of fields denoted in the spec as `nActionsOrchard`, `vActionsOrchard`,
+                // `flagsOrchard`,`valueBalanceOrchard`, `anchorOrchard`, `sizeProofsOrchard`,
+                // `proofsOrchard`, `vSpendAuthSigsOrchard`, and `bindingSigOrchard`.
+                let orchard_shielded_data = (&mut limited_reader).zcash_deserialize_into()?;
+
+                // OrchardZSA Issuance Fields.
+                let orchard_zsa_issue_data = (&mut limited_reader).zcash_deserialize_into()?;
+
+                Ok(Transaction::V6 {
+                    network_upgrade,
+                    lock_time,
+                    expiry_height,
+                    inputs,
+                    outputs,
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                    orchard_zsa_issue_data,
+                })
+            },
             (_, _) => Err(SerializationError::Parse("bad tx header")),
         }
     }

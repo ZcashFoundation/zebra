@@ -19,3 +19,6 @@ pub const TX_V5_VERSION_GROUP_ID: u32 = 0x26A7_270A;
 // TODO: FIXME: use a proper value!
 #[cfg(feature = "tx-v6")]
 pub const TX_V6_VERSION_GROUP_ID: u32 = 0x7777_7777;
+
+#[cfg(feature = "zsa-swap")]
+pub const TX_SWAP_VERSION_GROUP_ID: u32 = 0x0888_8888;
