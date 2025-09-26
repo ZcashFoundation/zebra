@@ -528,7 +528,11 @@ impl NonFinalizedState {
         prepared: SemanticallyVerifiedBlock,
         finalized_state: &ZebraDb,
     ) -> Result<Arc<Chain>, ValidateContextError> {
-        if self.invalidated_blocks.contains_key(&prepared.height) {
+        if self
+            .invalidated_blocks
+            .values()
+            .any(|blocks| blocks.iter().any(|block| block.hash == prepared.hash))
+        {
             return Err(ValidateContextError::BlockPreviouslyInvalidated {
                 block_hash: prepared.hash,
             });
