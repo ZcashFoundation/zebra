@@ -258,7 +258,7 @@ macro_rules! at_least_one {
     ($element:expr; $count:expr) => (
         {
             <Vec<_> as std::convert::TryInto<$crate::serialization::AtLeastOne<_>>>::try_into(
-                vec![$element; $expr],
+                vec![$element; $count],
             ).expect("at least one element in `AtLeastOne<_>`")
         }
     );
@@ -270,4 +270,18 @@ macro_rules! at_least_one {
             ).expect("at least one element in `AtLeastOne<_>`")
         }
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AtLeastOne;
+
+    #[test]
+    fn at_least_one_count_form_works() {
+        let v: AtLeastOne<i32> = at_least_one![42; 1];
+        assert_eq!(v.as_slice(), [42]);
+
+        let v2: AtLeastOne<u8> = at_least_one![5; 2];
+        assert_eq!(v2.as_slice(), [5, 5]);
+    }
 }

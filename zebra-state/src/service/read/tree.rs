@@ -58,7 +58,7 @@ pub fn sapling_subtrees<C>(
     chain: Option<C>,
     db: &ZebraDb,
     range: impl std::ops::RangeBounds<NoteCommitmentSubtreeIndex> + Clone,
-) -> BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<sapling::tree::Node>>
+) -> BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<sapling_crypto::Node>>
 where
     C: AsRef<Chain>,
 {

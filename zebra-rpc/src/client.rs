@@ -9,6 +9,7 @@
 
 pub use zebra_chain;
 
+#[allow(deprecated)]
 pub use crate::methods::{
     hex_data::HexData,
     trees::{
@@ -24,19 +25,21 @@ pub use crate::methods::{
         get_blockchain_info::GetBlockchainInfoBalance,
         get_mining_info::GetMiningInfoResponse,
         get_raw_mempool::{GetRawMempoolResponse, MempoolObject},
+        network_info::GetNetworkInfoResponse,
         peer_info::{GetPeerInfoResponse, PeerInfo},
         submit_block::{SubmitBlockErrorResponse, SubmitBlockResponse},
         subsidy::{BlockSubsidy, FundingStream, GetBlockSubsidyResponse},
         transaction::{
-            Input, Orchard, OrchardAction, Output, ScriptPubKey, ScriptSig, ShieldedOutput,
-            ShieldedSpend, TransactionObject, TransactionTemplate,
+            Input, JoinSplit, Orchard, OrchardAction, OrchardFlags, Output, ScriptPubKey,
+            ScriptSig, ShieldedOutput, ShieldedSpend, TransactionObject, TransactionTemplate,
         },
         unified_address::ZListUnifiedReceiversResponse,
         validate_address::ValidateAddressResponse,
         z_validate_address::{ZValidateAddressResponse, ZValidateAddressType},
     },
-    BlockHeaderObject, BlockObject, GetAddressBalanceRequest, GetAddressBalanceResponse,
-    GetAddressTxIdsRequest, GetAddressUtxosResponse, GetBlockHashResponse, GetBlockHeaderResponse,
+    AddressStrings, BlockHeaderObject, BlockObject, GetAddressBalanceRequest,
+    GetAddressBalanceResponse, GetAddressTxIdsRequest, GetAddressUtxosResponse,
+    GetAddressUtxosResponseObject, GetBlockHashResponse, GetBlockHeaderResponse,
     GetBlockHeightAndHashResponse, GetBlockResponse, GetBlockTransaction, GetBlockTrees,
     GetBlockchainInfoResponse, GetInfoResponse, GetRawTransactionResponse, Hash,
     SendRawTransactionResponse, Utxo,

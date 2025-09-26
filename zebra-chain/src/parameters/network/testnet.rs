@@ -5,6 +5,7 @@ use crate::{
     amount::{Amount, NonNegative},
     block::{self, Height, HeightDiff},
     parameters::{
+        checkpoint::list::{CheckpointList, TESTNET_CHECKPOINTS},
         constants::{magics, SLOW_START_INTERVAL, SLOW_START_SHIFT},
         network_upgrade::TESTNET_ACTIVATION_HEIGHTS,
         subsidy::{
@@ -134,7 +135,7 @@ impl From<&BTreeMap<Height, NetworkUpgrade>> for ConfiguredActivationHeights {
     fn from(activation_heights: &BTreeMap<Height, NetworkUpgrade>) -> Self {
         let mut configured_activation_heights = ConfiguredActivationHeights::default();
 
-        for (height, network_upgrade) in activation_heights.iter() {
+        for (height, network_upgrade) in activation_heights {
             let field = match network_upgrade {
                 NetworkUpgrade::BeforeOverwinter => {
                     &mut configured_activation_heights.before_overwinter
@@ -148,9 +149,9 @@ impl From<&BTreeMap<Height, NetworkUpgrade>> for ConfiguredActivationHeights {
                 NetworkUpgrade::Nu6 => &mut configured_activation_heights.nu6,
                 NetworkUpgrade::Nu6_1 => &mut configured_activation_heights.nu6_1,
                 NetworkUpgrade::Nu7 => &mut configured_activation_heights.nu7,
-                NetworkUpgrade::Genesis => {
-                    continue;
-                }
+                #[cfg(zcash_unstable = "zfuture")]
+                NetworkUpgrade::ZFuture => &mut configured_activation_heights.zfuture,
+                NetworkUpgrade::Genesis => continue,
             };
 
             *field = Some(height.0)
@@ -204,7 +205,7 @@ impl ConfiguredFundingStreams {
             });
 
         assert!(
-            height_range.start < height_range.end,
+            height_range.start <= height_range.end,
             "funding stream end height must be above start height"
         );
 
@@ -228,23 +229,52 @@ impl ConfiguredFundingStreams {
 
         funding_streams
     }
+
+    /// Converts the [`ConfiguredFundingStreams`] to a [`FundingStreams`].
+    ///
+    /// # Panics
+    ///
+    /// If `height_range` is None.
+    pub fn into_funding_streams_unchecked(self) -> FundingStreams {
+        let height_range = self.height_range.expect("must have height range");
+        let recipients = self
+            .recipients
+            .into_iter()
+            .flat_map(|recipients| {
+                recipients
+                    .into_iter()
+                    .map(ConfiguredFundingStreamRecipient::into_recipient)
+            })
+            .collect();
+
+        FundingStreams::new(height_range, recipients)
+    }
+}
+
+/// Returns the number of funding stream address periods there are for the provided network and height range.
+fn num_funding_stream_addresses_required_for_height_range(
+    height_range: &std::ops::Range<Height>,
+    network: &Network,
+) -> usize {
+    1u32.checked_add(funding_stream_address_period(
+        height_range
+            .end
+            .previous()
+            .expect("end height must be above start height and genesis height"),
+        network,
+    ))
+    .expect("no overflow should happen in this sum")
+    .checked_sub(funding_stream_address_period(height_range.start, network))
+    .expect("no overflow should happen in this sub") as usize
 }
 
 /// Checks that the provided [`FundingStreams`] has sufficient recipient addresses for the
 /// funding stream address period of the provided [`Network`].
 fn check_funding_stream_address_period(funding_streams: &FundingStreams, network: &Network) {
-    let height_range = funding_streams.height_range();
-    let expected_min_num_addresses =
-        1u32.checked_add(funding_stream_address_period(
-            height_range
-                .end
-                .previous()
-                .expect("end height must be above start height and genesis height"),
-            network,
-        ))
-        .expect("no overflow should happen in this sum")
-        .checked_sub(funding_stream_address_period(height_range.start, network))
-        .expect("no overflow should happen in this sub") as usize;
+    let expected_min_num_addresses = num_funding_stream_addresses_required_for_height_range(
+        funding_streams.height_range(),
+        network,
+    );
 
     for (&receiver, recipient) in funding_streams.recipients() {
         if receiver == FundingStreamReceiver::Deferred {
@@ -252,11 +282,12 @@ fn check_funding_stream_address_period(funding_streams: &FundingStreams, network
             continue;
         }
 
+        let num_addresses = recipient.addresses().len();
         assert!(
-            recipient.addresses().len() >= expected_min_num_addresses,
+            num_addresses >= expected_min_num_addresses,
             "recipients must have a sufficient number of addresses for height range, \
-         minimum num addresses required: {expected_min_num_addresses}, given: {}",
-            recipient.addresses().len()
+             minimum num addresses required: {expected_min_num_addresses}, only {num_addresses} were provided.\
+             receiver: {receiver:?}, recipient: {recipient:?}"
         );
 
         for address in recipient.addresses() {
@@ -297,6 +328,83 @@ pub struct ConfiguredActivationHeights {
     /// Activation height for `NU7` network upgrade.
     #[serde(rename = "NU7")]
     pub nu7: Option<u32>,
+    /// Activation height for `ZFuture` network upgrade.
+    #[serde(rename = "ZFuture")]
+    #[cfg(zcash_unstable = "zfuture")]
+    pub zfuture: Option<u32>,
+}
+
+impl ConfiguredActivationHeights {
+    /// Converts a [`ConfiguredActivationHeights`] to one that uses the default values for Regtest where
+    /// no activation heights are specified.
+    fn for_regtest(self) -> Self {
+        let Self {
+            before_overwinter,
+            overwinter,
+            sapling,
+            blossom,
+            heartwood,
+            canopy,
+            nu5,
+            nu6,
+            nu6_1,
+            nu7,
+            #[cfg(zcash_unstable = "zfuture")]
+            zfuture,
+        } = self;
+
+        let overwinter = overwinter.or(before_overwinter).or(Some(1));
+        let sapling = sapling.or(overwinter);
+        let blossom = blossom.or(sapling);
+        let heartwood = heartwood.or(blossom);
+        let canopy = canopy.or(heartwood);
+
+        Self {
+            before_overwinter,
+            overwinter,
+            sapling,
+            blossom,
+            heartwood,
+            canopy,
+            nu5,
+            nu6,
+            nu6_1,
+            nu7,
+            #[cfg(zcash_unstable = "zfuture")]
+            zfuture,
+        }
+    }
+}
+
+/// Configurable checkpoints, either a path to a checkpoints file, a "default" keyword to indicate
+/// that Zebra should use the default Testnet checkpoints, or a list of block heights and hashes.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+pub enum ConfiguredCheckpoints {
+    /// A boolean indicating whether Zebra should use the default Testnet checkpoints.
+    Default(bool),
+    /// A path to a checkpoints file to be used as Zebra's checkpoints.
+    Path(std::path::PathBuf),
+    /// Directly configured block heights and hashes to be used as Zebra's checkpoints.
+    HeightsAndHashes(Vec<(block::Height, block::Hash)>),
+}
+
+impl Default for ConfiguredCheckpoints {
+    fn default() -> Self {
+        Self::Default(false)
+    }
+}
+
+impl From<Arc<CheckpointList>> for ConfiguredCheckpoints {
+    fn from(value: Arc<CheckpointList>) -> Self {
+        Self::HeightsAndHashes(value.iter_cloned().collect())
+    }
+}
+
+impl From<bool> for ConfiguredCheckpoints {
+    fn from(value: bool) -> Self {
+        Self::Default(value)
+    }
 }
 
 /// Builder for the [`Parameters`] struct.
@@ -330,6 +438,8 @@ pub struct ParametersBuilder {
     post_blossom_halving_interval: HeightDiff,
     /// Expected one-time lockbox disbursement outputs in NU6.1 activation block coinbase for this network
     lockbox_disbursements: Vec<(String, Amount<NonNegative>)>,
+    /// Checkpointed block hashes and heights for this network.
+    checkpoints: Arc<CheckpointList>,
 }
 
 impl Default for ParametersBuilder {
@@ -349,12 +459,8 @@ impl Default for ParametersBuilder {
             // Testnet PoWLimit is defined as `2^251 - 1` on page 73 of the protocol specification:
             // <https://zips.z.cash/protocol/protocol.pdf>
             //
-            // `zcashd` converts the PoWLimit into a compact representation before
-            // using it to perform difficulty filter checks.
-            //
-            // The Zcash specification converts to compact for the default difficulty
-            // filter, but not for testnet minimum difficulty blocks. (ZIP 205 and
-            // ZIP 208 don't specify this conversion either.) See #1277 for details.
+            // The PoWLimit must be converted into a compact representation before using it
+            // to perform difficulty filter checks (see https://github.com/zcash/zips/pull/417).
             target_difficulty_limit: ExpandedDifficulty::from((U256::one() << 251) - 1)
                 .to_compact()
                 .to_expanded()
@@ -369,6 +475,10 @@ impl Default for ParametersBuilder {
                 .iter()
                 .map(|(addr, amount)| (addr.to_string(), *amount))
                 .collect(),
+            checkpoints: TESTNET_CHECKPOINTS
+                .parse()
+                .map(Arc::new)
+                .expect("must be able to parse checkpoints"),
         }
     }
 }
@@ -436,6 +546,8 @@ impl ParametersBuilder {
             nu6,
             nu6_1,
             nu7,
+            #[cfg(zcash_unstable = "zfuture")]
+            zfuture,
         }: ConfiguredActivationHeights,
     ) -> Self {
         use NetworkUpgrade::*;
@@ -448,20 +560,28 @@ impl ParametersBuilder {
         //
         // These must be in order so that later network upgrades overwrite prior ones
         // if multiple network upgrades are configured with the same activation height.
-        let activation_heights: BTreeMap<_, _> = before_overwinter
-            .into_iter()
-            .map(|h| (h, BeforeOverwinter))
-            .chain(overwinter.into_iter().map(|h| (h, Overwinter)))
-            .chain(sapling.into_iter().map(|h| (h, Sapling)))
-            .chain(blossom.into_iter().map(|h| (h, Blossom)))
-            .chain(heartwood.into_iter().map(|h| (h, Heartwood)))
-            .chain(canopy.into_iter().map(|h| (h, Canopy)))
-            .chain(nu5.into_iter().map(|h| (h, Nu5)))
-            .chain(nu6.into_iter().map(|h| (h, Nu6)))
-            .chain(nu6_1.into_iter().map(|h| (h, Nu6_1)))
-            .chain(nu7.into_iter().map(|h| (h, Nu7)))
-            .map(|(h, nu)| (h.try_into().expect("activation height must be valid"), nu))
-            .collect();
+        let activation_heights: BTreeMap<_, _> = {
+            let activation_heights = before_overwinter
+                .into_iter()
+                .map(|h| (h, BeforeOverwinter))
+                .chain(overwinter.into_iter().map(|h| (h, Overwinter)))
+                .chain(sapling.into_iter().map(|h| (h, Sapling)))
+                .chain(blossom.into_iter().map(|h| (h, Blossom)))
+                .chain(heartwood.into_iter().map(|h| (h, Heartwood)))
+                .chain(canopy.into_iter().map(|h| (h, Canopy)))
+                .chain(nu5.into_iter().map(|h| (h, Nu5)))
+                .chain(nu6.into_iter().map(|h| (h, Nu6)))
+                .chain(nu6_1.into_iter().map(|h| (h, Nu6_1)))
+                .chain(nu7.into_iter().map(|h| (h, Nu7)));
+
+            #[cfg(zcash_unstable = "zfuture")]
+            let activation_heights =
+                activation_heights.chain(zfuture.into_iter().map(|h| (h, ZFuture)));
+
+            activation_heights
+                .map(|(h, nu)| (h.try_into().expect("activation height must be valid"), nu))
+                .collect()
+        };
 
         let network_upgrades: Vec<_> = activation_heights.iter().map(|(_h, &nu)| nu).collect();
 
@@ -518,6 +638,34 @@ impl ParametersBuilder {
         self
     }
 
+    /// Clears funding streams from the [`Parameters`] being built.
+    pub fn clear_funding_streams(mut self) -> Self {
+        self.funding_streams = vec![];
+        self
+    }
+
+    /// Extends the configured funding streams to have as many recipients as are required for their
+    /// height ranges by repeating the recipients that have been configured.
+    ///
+    /// This should be called after configuring the desired network upgrade activation heights.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn extend_funding_streams(mut self) -> Self {
+        // self.funding_streams.extend(FUNDING_STREAMS_TESTNET);
+
+        let network = self.to_network_unchecked();
+
+        for funding_streams in &mut self.funding_streams {
+            funding_streams.extend_recipient_addresses(
+                num_funding_stream_addresses_required_for_height_range(
+                    funding_streams.height_range(),
+                    &network,
+                ),
+            );
+        }
+
+        self
+    }
+
     /// Sets the target difficulty limit to be used in the [`Parameters`] being built.
     // TODO: Accept a hex-encoded String instead?
     pub fn with_target_difficulty_limit(
@@ -571,6 +719,33 @@ impl ParametersBuilder {
         self
     }
 
+    /// Sets the checkpoints for the network as the provided [`ConfiguredCheckpoints`].
+    pub fn with_checkpoints(mut self, checkpoints: impl Into<ConfiguredCheckpoints>) -> Self {
+        self.checkpoints = Arc::new(match checkpoints.into() {
+            ConfiguredCheckpoints::Default(true) => TESTNET_CHECKPOINTS
+                .parse()
+                .expect("checkpoints file format must be valid"),
+            ConfiguredCheckpoints::Default(false) => {
+                CheckpointList::from_list([(block::Height(0), self.genesis_hash)])
+                    .expect("must parse checkpoints")
+            }
+            ConfiguredCheckpoints::Path(path_buf) => {
+                let Ok(raw_checkpoints_str) = std::fs::read_to_string(&path_buf) else {
+                    panic!("could not read file at configured checkpoints file path: {path_buf:?}");
+                };
+
+                raw_checkpoints_str.parse().unwrap_or_else(|err| {
+                    panic!("could not parse checkpoints at the provided path: {path_buf:?}, err: {err}")
+                })
+            }
+            ConfiguredCheckpoints::HeightsAndHashes(items) => {
+                CheckpointList::from_list(items).expect("configured checkpoints must be valid")
+            }
+        });
+
+        self
+    }
+
     /// Converts the builder to a [`Parameters`] struct
     fn finish(self) -> Parameters {
         let Self {
@@ -587,6 +762,7 @@ impl ParametersBuilder {
             pre_blossom_halving_interval,
             post_blossom_halving_interval,
             lockbox_disbursements,
+            checkpoints,
         } = self;
         Parameters {
             network_name,
@@ -602,6 +778,7 @@ impl ParametersBuilder {
             pre_blossom_halving_interval,
             post_blossom_halving_interval,
             lockbox_disbursements,
+            checkpoints,
         }
     }
 
@@ -615,14 +792,21 @@ impl ParametersBuilder {
         let network = self.to_network_unchecked();
 
         // Final check that the configured funding streams will be valid for these Testnet parameters.
-        // TODO: Always check funding stream address period once the testnet parameters are being serialized (#8920).
-        #[cfg(not(any(test, feature = "proptest-impl")))]
-        {
-            for fs in self.funding_streams.iter() {
-                // Check that the funding streams are valid for the configured Testnet parameters.
-                check_funding_stream_address_period(fs, &network);
-            }
+        for fs in &self.funding_streams {
+            // Check that the funding streams are valid for the configured Testnet parameters.
+            check_funding_stream_address_period(fs, &network);
         }
+
+        // Final check that the configured checkpoints are valid for this network.
+        assert_eq!(
+            network.checkpoint_list().hash(Height(0)),
+            Some(network.genesis_hash()),
+            "first checkpoint hash must match genesis hash"
+        );
+        assert!(
+            network.checkpoint_list().max_height() >= network.mandatory_checkpoint_height(),
+            "checkpoints must be provided for block heights below the mandatory checkpoint height"
+        );
 
         network
     }
@@ -643,6 +827,7 @@ impl ParametersBuilder {
             pre_blossom_halving_interval,
             post_blossom_halving_interval,
             lockbox_disbursements,
+            checkpoints: _,
         } = Self::default();
 
         self.activation_heights == activation_heights
@@ -660,6 +845,28 @@ impl ParametersBuilder {
     }
 }
 
+/// A struct of parameters for configuring Regtest in Zebra.
+#[derive(Debug, Default, Clone)]
+pub struct RegtestParameters {
+    /// The configured network upgrade activation heights to use on Regtest
+    pub activation_heights: ConfiguredActivationHeights,
+    /// Configured funding streams
+    pub funding_streams: Option<Vec<ConfiguredFundingStreams>>,
+    /// Expected one-time lockbox disbursement outputs in NU6.1 activation block coinbase for Regtest
+    pub lockbox_disbursements: Option<Vec<ConfiguredLockboxDisbursement>>,
+    /// Configured checkpointed block heights and hashes.
+    pub checkpoints: Option<ConfiguredCheckpoints>,
+}
+
+impl From<ConfiguredActivationHeights> for RegtestParameters {
+    fn from(value: ConfiguredActivationHeights) -> Self {
+        Self {
+            activation_heights: value,
+            ..Default::default()
+        }
+    }
+}
+
 /// Network consensus parameters for test networks such as Regtest and the default Testnet.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Parameters {
@@ -670,10 +877,6 @@ pub struct Parameters {
     /// The genesis block hash
     genesis_hash: block::Hash,
     /// The network upgrade activation heights for this network.
-    ///
-    /// Note: This value is ignored by `Network::activation_list()` when `zebra-chain` is
-    ///       compiled with the `zebra-test` feature flag AND the `TEST_FAKE_ACTIVATION_HEIGHTS`
-    ///       environment variable is set.
     activation_heights: BTreeMap<Height, NetworkUpgrade>,
     /// Slow start interval for this network
     slow_start_interval: Height,
@@ -694,6 +897,8 @@ pub struct Parameters {
     post_blossom_halving_interval: HeightDiff,
     /// Expected one-time lockbox disbursement outputs in NU6.1 activation block coinbase for this network
     lockbox_disbursements: Vec<(String, Amount<NonNegative>)>,
+    /// List of checkpointed block heights and hashes
+    checkpoints: Arc<CheckpointList>,
 }
 
 impl Default for Parameters {
@@ -716,11 +921,13 @@ impl Parameters {
     ///
     /// Creates an instance of [`Parameters`] with `Regtest` values.
     pub fn new_regtest(
-        ConfiguredActivationHeights { nu5, nu6, nu7, .. }: ConfiguredActivationHeights,
+        RegtestParameters {
+            activation_heights,
+            funding_streams,
+            lockbox_disbursements,
+            checkpoints,
+        }: RegtestParameters,
     ) -> Self {
-        #[cfg(any(test, feature = "proptest-impl"))]
-        let nu5 = nu5.or(Some(100));
-
         let parameters = Self::build()
             .with_genesis_hash(REGTEST_GENESIS_HASH)
             // This value is chosen to match zcashd, see: <https://github.com/zcash/zcash/blob/master/src/chainparams.cpp#L654>
@@ -730,19 +937,11 @@ impl Parameters {
             .with_slow_start_interval(Height::MIN)
             // Removes default Testnet activation heights if not configured,
             // most network upgrades are disabled by default for Regtest in zcashd
-            .with_activation_heights(ConfiguredActivationHeights {
-                canopy: Some(1),
-                nu5,
-                nu6,
-                nu7,
-                ..Default::default()
-            })
+            .with_activation_heights(activation_heights.for_regtest())
             .with_halving_interval(PRE_BLOSSOM_REGTEST_HALVING_INTERVAL)
-            .with_lockbox_disbursements(Vec::new());
-
-        // TODO: Always clear funding streams on Regtest once the testnet parameters are being serialized (#8920).
-        // #[cfg(not(any(test, feature = "proptest-impl")))]
-        let parameters = parameters.with_funding_streams(Default::default());
+            .with_funding_streams(funding_streams.unwrap_or_default())
+            .with_lockbox_disbursements(lockbox_disbursements.unwrap_or_default())
+            .with_checkpoints(checkpoints.unwrap_or_default());
 
         Self {
             network_name: "Regtest".to_string(),
@@ -771,27 +970,26 @@ impl Parameters {
             activation_heights: _,
             slow_start_interval,
             slow_start_shift,
-            funding_streams,
+            funding_streams: _,
             target_difficulty_limit,
             disable_pow,
             should_allow_unshielded_coinbase_spends,
             pre_blossom_halving_interval,
             post_blossom_halving_interval,
-            lockbox_disbursements,
+            lockbox_disbursements: _,
+            checkpoints: _,
         } = Self::new_regtest(Default::default());
 
         self.network_name == network_name
             && self.genesis_hash == genesis_hash
             && self.slow_start_interval == slow_start_interval
             && self.slow_start_shift == slow_start_shift
-            && self.funding_streams == funding_streams
             && self.target_difficulty_limit == target_difficulty_limit
             && self.disable_pow == disable_pow
             && self.should_allow_unshielded_coinbase_spends
                 == should_allow_unshielded_coinbase_spends
             && self.pre_blossom_halving_interval == pre_blossom_halving_interval
             && self.post_blossom_halving_interval == post_blossom_halving_interval
-            && self.lockbox_disbursements == lockbox_disbursements
     }
 
     /// Returns the network name
@@ -875,6 +1073,11 @@ impl Parameters {
                 )
             })
             .collect()
+    }
+
+    /// Returns the checkpoints for this network.
+    pub fn checkpoints(&self) -> Arc<CheckpointList> {
+        self.checkpoints.clone()
     }
 }
 

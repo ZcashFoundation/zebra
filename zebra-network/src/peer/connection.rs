@@ -664,7 +664,7 @@ where
     /// Consume this `Connection` to form a spawnable future containing its event loop.
     ///
     /// `peer_rx` is a channel for receiving Zcash [`Message`]s from the connected peer.
-    /// The corresponding peer message receiver is [`Connection.peer_tx`].
+    /// The corresponding peer message receiver is [`Connection::peer_tx`].
     pub async fn run<Rx>(mut self, mut peer_rx: Rx)
     where
         Rx: Stream<Item = Result<Message, SerializationError>> + Unpin,

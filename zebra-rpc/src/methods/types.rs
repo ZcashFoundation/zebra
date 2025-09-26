@@ -3,9 +3,11 @@
 pub mod default_roots;
 pub mod get_block_template;
 pub mod get_blockchain_info;
+pub mod get_mempool_info;
 pub mod get_mining_info;
 pub mod get_raw_mempool;
 pub mod long_poll;
+pub mod network_info;
 pub mod peer_info;
 pub mod submit_block;
 pub mod subsidy;

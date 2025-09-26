@@ -34,10 +34,6 @@ tracing-futures = { workspace = true }
 
 [dev-dependencies]
 color-eyre = { workspace = true }
-# This is a transitive dependency via color-eyre.
-# Enable a feature that makes tinyvec compile much faster.
-tinyvec = { workspace = true, features = ["rustc_1_55"] }
-
 ed25519-zebra = { workspace = true }
 rand = { workspace = true }
 
@@ -48,5 +44,5 @@ tower-test = { workspace = true }
 
 zebra-test = { path = "../zebra-test/", version = "1.0.1" }
 
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tokio_unstable)'] }
+[lints]
+workspace = true

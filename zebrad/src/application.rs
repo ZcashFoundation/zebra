@@ -243,17 +243,25 @@ impl Application for ZebradApp {
 
         // Load config *after* framework components so that we can
         // report an error to the terminal if it occurs (unless used with a command that doesn't need the config).
-        let config = match command.config_path() {
-            Some(path) => match self.load_config(&path) {
-                Ok(config) => config,
-                // Ignore errors loading the config for some commands.
-                Err(_e) if command.cmd().should_ignore_load_config_error() => Default::default(),
-                Err(e) => {
-                    status_err!("Zebra could not parse the provided config file. This might mean you are using a deprecated format of the file. You can generate a valid config by running \"zebrad generate\", and diff it against yours to examine any format inconsistencies.");
-                    return Err(e);
-                }
-            },
-            None => ZebradConfig::default(),
+        let config = match ZebradConfig::load(command.config_path()) {
+            Ok(config) => config,
+            // Ignore errors loading the config for some commands.
+            Err(_e) if command.cmd().should_ignore_load_config_error() => Default::default(),
+            Err(e) => {
+                status_err!(
+                    "Zebra could not load the provided configuration file and/or environment variables.\
+                     This might mean you are using a deprecated format of the file, or are attempting to
+                     configure deprecated or unknown fields via environment variables.\
+                     You can generate a valid config by running \"zebrad generate\", \
+                     and diff it against yours to examine any format inconsistencies."
+                );
+                // Convert config::ConfigError to FrameworkError using a generic IO error
+                let io_error = std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("Configuration error: {}", e),
+                );
+                return Err(FrameworkError::from(io_error));
+            }
         };
 
         let config = command.process_config(config)?;
@@ -461,7 +469,12 @@ impl Application for ZebradApp {
                 info!("No config file provided, using default configuration");
             }
 
-            info!("{config:?}")
+            info!("{config:?}");
+
+            // Explicitly log the configured miner address so CI can assert env override
+            if let Some(miner_address) = &config.mining.miner_address {
+                info!(%miner_address, "configured miner address");
+            }
         }
 
         // Activate the global span, so it's visible when we load the other

@@ -166,7 +166,7 @@ The end of support height is calculated from the current blockchain height:
 
 - [ ] Wait until the Docker binaries have been built on `main`, and the quick tests have passed:
     - [ ] [ci-tests.yml](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-tests.yml?query=branch%3Amain)
-- [ ] Wait until the [pre-release deployment machines have successfully launched](https://github.com/ZcashFoundation/zebra/actions/workflows/cd-deploy-nodes-gcp.yml?query=event%3Arelease)
+- [ ] Wait until the [pre-release deployment machines have successfully launched](https://github.com/ZcashFoundation/zebra/actions/workflows/zfnd-deploy-nodes-gcp.yml?query=event%3Arelease)
 
 ## Publish Release
 

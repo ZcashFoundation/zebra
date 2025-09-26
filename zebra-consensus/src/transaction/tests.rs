@@ -11,6 +11,7 @@ use chrono::{DateTime, TimeZone, Utc};
 use color_eyre::eyre::Report;
 use futures::{FutureExt, TryFutureExt};
 use halo2::pasta::{group::ff::PrimeField, pallas};
+use tokio::time::timeout;
 use tower::{buffer::Buffer, service_fn, ServiceExt};
 
 use zebra_chain::{
@@ -42,6 +43,18 @@ use super::{check, Request, Verifier};
 
 #[cfg(test)]
 mod prop;
+
+/// Returns the timeout duration for tests, extended when running under coverage
+/// instrumentation to account for the performance overhead.
+fn test_timeout() -> std::time::Duration {
+    // Check if we're running under cargo-llvm-cov by looking for its environment variables
+    if std::env::var("LLVM_COV_FLAGS").is_ok() || std::env::var("CARGO_LLVM_COV").is_ok() {
+        // Use a 5x longer timeout when running with coverage (150 seconds)
+        std::time::Duration::from_secs(150)
+    } else {
+        std::time::Duration::from_secs(30)
+    }
+}
 
 #[test]
 fn v5_transactions_basic_check() -> Result<(), Report> {
@@ -999,10 +1012,15 @@ async fn mempool_request_with_immature_spend_is_rejected() {
 async fn mempool_request_with_transparent_coinbase_spend_is_accepted_on_regtest() {
     let _init_guard = zebra_test::init();
 
-    let network = Network::new_regtest(ConfiguredActivationHeights {
-        nu6: Some(1_000),
-        ..Default::default()
-    });
+    let network = Network::new_regtest(
+        ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(100),
+            nu6: Some(1_000),
+            ..Default::default()
+        }
+        .into(),
+    );
     let mut state: MockService<_, _, _, _> = MockService::build().for_unit_tests();
     let verifier = Verifier::new_for_tests(&network, state.clone());
 
@@ -2505,8 +2523,10 @@ async fn v4_with_joinsplit_is_rejected_for_modification(
 
     let (height, mut transaction) = test_transactions(&network)
         .rev()
-        .filter(|(_, transaction)| !transaction.is_coinbase() && transaction.inputs().is_empty())
-        .find(|(_, transaction)| transaction.sprout_groth16_joinsplits().next().is_some())
+        .filter(|(_, tx)| {
+            !tx.is_coinbase() && tx.inputs().is_empty() && !tx.has_sapling_shielded_data()
+        })
+        .find(|(_, tx)| tx.sprout_groth16_joinsplits().next().is_some())
         .expect("There should be a tx with Groth16 JoinSplits.");
 
     let expected_error = Err(expected_error);
@@ -2585,16 +2605,19 @@ fn v4_with_sapling_spends() {
         let verifier = Verifier::new_for_tests(&network, state_service);
 
         // Test the transaction verifier
-        let result = verifier
-            .oneshot(Request::Block {
+        let result = timeout(
+            test_timeout(),
+            verifier.oneshot(Request::Block {
                 transaction_hash: transaction.hash(),
                 transaction,
                 known_utxos: Arc::new(HashMap::new()),
                 known_outpoint_hashes: Arc::new(HashSet::new()),
                 height,
                 time: DateTime::<Utc>::MAX_UTC,
-            })
-            .await;
+            }),
+        )
+        .await
+        .expect("timeout expired");
 
         assert_eq!(
             result.expect("unexpected error response").tx_id(),
@@ -2717,8 +2740,9 @@ async fn v5_with_sapling_spends() {
         );
 
         assert_eq!(
-            verifier
-                .oneshot(Request::Block {
+            timeout(
+                test_timeout(),
+                verifier.oneshot(Request::Block {
                     transaction_hash: tx.hash(),
                     transaction: Arc::new(tx),
                     known_utxos: Arc::new(HashMap::new()),
@@ -2726,9 +2750,11 @@ async fn v5_with_sapling_spends() {
                     height,
                     time: DateTime::<Utc>::MAX_UTC,
                 })
-                .await
-                .expect("unexpected error response")
-                .tx_id(),
+            )
+            .await
+            .expect("timeout expired")
+            .expect("unexpected error response")
+            .tx_id(),
             expected_hash
         );
     }

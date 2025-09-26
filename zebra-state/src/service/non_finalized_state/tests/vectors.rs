@@ -1,6 +1,6 @@
 //! Fixed test vectors for the non-finalized state.
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use zebra_chain::{
     amount::NonNegative,
@@ -16,7 +16,7 @@ use crate::{
     arbitrary::Prepare,
     service::{
         finalized_state::FinalizedState,
-        non_finalized_state::{Chain, NonFinalizedState},
+        non_finalized_state::{Chain, NonFinalizedState, MIN_DURATION_BETWEEN_BACKUP_UPDATES},
     },
     tests::FakeChainHelper,
     Config,
@@ -761,4 +761,62 @@ fn commitment_is_validated_for_network_upgrade(network: Network, network_upgrade
     state
         .commit_block(next_block.prepare(), &finalized_state)
         .unwrap();
+}
+
+#[tokio::test]
+async fn non_finalized_state_writes_blocks_to_and_restores_blocks_from_backup_cache() {
+    let network = Network::Mainnet;
+
+    let finalized_state = FinalizedState::new(
+        &Config::ephemeral(),
+        &network,
+        #[cfg(feature = "elasticsearch")]
+        false,
+    );
+
+    let backup_dir_path = tempfile::Builder::new()
+        .prefix("zebra-non-finalized-state-backup-cache")
+        .tempdir()
+        .expect("temporary directory is created successfully")
+        .keep();
+
+    let (mut non_finalized_state, non_finalized_state_sender, _receiver) =
+        NonFinalizedState::new(&network)
+            .with_backup(Some(backup_dir_path.clone()), &finalized_state.db, false)
+            .await;
+
+    let blocks = network.block_map();
+    let height = NetworkUpgrade::Heartwood
+        .activation_height(&network)
+        .unwrap()
+        .0;
+    let block = Arc::new(
+        blocks
+            .get(&(height - 1))
+            .expect("test vector exists")
+            .zcash_deserialize_into::<Block>()
+            .expect("block is structurally valid"),
+    );
+
+    non_finalized_state
+        .commit_new_chain(block.into(), &finalized_state.db)
+        .expect("committing test block should succeed");
+
+    non_finalized_state_sender
+        .send(non_finalized_state.clone())
+        .expect("backup task should have a receiver, channel should be open");
+
+    // Wait for the minimum update time
+    tokio::time::sleep(Duration::from_secs(1) + MIN_DURATION_BETWEEN_BACKUP_UPDATES).await;
+
+    let (non_finalized_state, _sender, _receiver) = NonFinalizedState::new(&network)
+        .with_backup(Some(backup_dir_path), &finalized_state.db, true)
+        .await;
+
+    assert_eq!(
+        non_finalized_state.best_chain_len(),
+        Some(1),
+        "non-finalized state should have restored the block committed \
+        to the previous non-finalized state"
+    );
 }

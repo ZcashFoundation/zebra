@@ -96,7 +96,7 @@ pub struct BlockTemplateResponse {
 
     /// The block commitment for the new block's header.
     ///
-    /// Same as [`DefaultRoots.block_commitments_hash`], see that field for details.
+    /// Same as [`DefaultRoots::block_commitments_hash`], see that field for details.
     #[serde(rename = "blockcommitmentshash")]
     #[serde(with = "hex")]
     #[getter(copy)]
@@ -104,7 +104,7 @@ pub struct BlockTemplateResponse {
 
     /// Legacy backwards-compatibility header root field.
     ///
-    /// Same as [`DefaultRoots.block_commitments_hash`], see that field for details.
+    /// Same as [`DefaultRoots::block_commitments_hash`], see that field for details.
     #[serde(rename = "lightclientroothash")]
     #[serde(with = "hex")]
     #[getter(copy)]
@@ -112,13 +112,13 @@ pub struct BlockTemplateResponse {
 
     /// Legacy backwards-compatibility header root field.
     ///
-    /// Same as [`DefaultRoots.block_commitments_hash`], see that field for details.
+    /// Same as [`DefaultRoots::block_commitments_hash`], see that field for details.
     #[serde(rename = "finalsaplingroothash")]
     #[serde(with = "hex")]
     #[getter(copy)]
     pub(crate) final_sapling_root_hash: ChainHistoryBlockTxAuthCommitmentHash,
 
-    /// The block header roots for [`GetBlockTemplate.transactions`].
+    /// The block header roots for the transactions in the block template.
     ///
     /// If the transactions in the block template are modified, these roots must be recalculated
     /// [according to the specification](https://zcash.github.io/rpc/getblocktemplate.html).
@@ -469,9 +469,9 @@ where
         mined_block_sender: Option<watch::Sender<(block::Hash, block::Height)>>,
     ) -> Self {
         // Check that the configured miner address is valid.
-        let miner_address = conf.miner_address.map(|zaddr| {
-            if zaddr.can_receive_as(PoolType::Transparent) {
-                Address::try_from_zcash_address(net, zaddr)
+        let miner_address = conf.miner_address.map(|addr| {
+            if addr.can_receive_as(PoolType::Transparent) {
+                Address::try_from_zcash_address(net, addr)
                     .expect("miner_address must be a valid Zcash address")
             } else {
                 // TODO: Remove this panic once we support mining to shielded addresses.
