@@ -28,9 +28,10 @@ use crate::{
     },
     meta_addr::MetaAddr,
     peer::{
-        connection::peer_tx::PeerTx, error::AlreadyErrored, ClientRequest, ClientRequestReceiver,
-        ConnectionInfo, ErrorSlot, InProgressClientRequest, MustUseClientResponseSender, PeerError,
-        SharedPeerError,
+        connection::{peer_latency::PeerLatency, peer_tx::PeerTx},
+        error::AlreadyErrored,
+        ClientRequest, ClientRequestReceiver, ConnectionInfo, ErrorSlot, InProgressClientRequest,
+        MustUseClientResponseSender, PeerError, SharedPeerError,
     },
     peer_set::ConnectionTracker,
     protocol::{
@@ -42,6 +43,7 @@ use crate::{
 
 use InventoryResponse::*;
 
+mod peer_latency;
 mod peer_tx;
 
 #[cfg(test)]
@@ -601,6 +603,11 @@ where
     /// service to a request from this connection,
     /// or None if this connection hasn't yet received an overload error.
     last_overload_time: Option<Instant>,
+
+    /// Tracks latency info for `ping`/`pong` messages with the peer.
+    ///
+    /// Used to measure round-trip time and manage ping state.
+    ping_metrics: PeerLatency,
 }
 
 impl<S, Tx> fmt::Debug for Connection<S, Tx>
@@ -651,6 +658,7 @@ where
             metrics_label,
             last_metrics_state: None,
             last_overload_time: None,
+            ping_metrics: PeerLatency::default(),
         }
     }
 }
@@ -1034,11 +1042,17 @@ where
                 .await
                 .map(|()| Handler::Peers),
 
-            (AwaitingRequest, Ping(nonce)) => self
-                .peer_tx
-                .send(Message::Ping(nonce))
-                .await
-                .map(|()| Handler::Ping(nonce)),
+            (AwaitingRequest, Ping(nonce)) => {
+                self.ping_metrics.ping_sent_at = Some(std::time::Instant::now());
+                self.ping_metrics.is_waiting_for_pong = true;
+                self.ping_metrics.last_ping_rtt = None;
+                self.ping_metrics.waiting_nonce = Some(nonce);
+                self
+                    .peer_tx
+                    .send(Message::Ping(nonce))
+                    .await
+                    .map(|()| Handler::Ping(nonce))
+            }
 
             (AwaitingRequest, BlocksByHash(hashes)) => {
                 self
@@ -1205,9 +1219,32 @@ where
                 debug!(%msg, "got notfound message unsolicited or from canceled request");
                 Unused
             }
-            Message::Pong(_) => {
-                debug!(%msg, "got pong message unsolicited or from canceled request");
-                Unused
+            Message::Pong(nonce) => {
+                match (
+                    self.ping_metrics.is_waiting_for_pong,
+                    self.ping_metrics.ping_sent_at,
+                    self.ping_metrics.waiting_nonce,
+                ) {
+                    (true, Some(sent_at), Some(expected_nonce)) if expected_nonce == nonce => {
+                        let rtt = sent_at.elapsed();
+                        self.ping_metrics.last_ping_rtt = Some(rtt);
+                        self.ping_metrics.is_waiting_for_pong = false;
+                        self.ping_metrics.waiting_nonce = None;
+
+                        debug!(%msg, ?rtt, "received matching pong, updated latency metrics");
+                    }
+                    (true, Some(_), Some(expected_nonce)) => {
+                        debug!(%msg, ?expected_nonce, "received pong with unexpected nonce, ignoring");
+                    }
+                    (true, _, _) => {
+                        debug!(%msg, "received pong with no matching ping in flight");
+                    }
+                    (false, _, _) => {
+                        debug!(%msg, "received unsolicited pong with no ping in flight");
+                    }
+                }
+
+                Consumed
             }
             Message::Block(_) => {
                 debug!(%msg, "got block message unsolicited or from canceled request");
