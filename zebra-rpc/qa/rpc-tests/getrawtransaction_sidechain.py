@@ -35,6 +35,7 @@ class GetRawTransactionSideChainTest(BitcoinTestFramework):
         txid_a = n.getblock("2", 1)['tx'][0]
         tx_a = n.getrawtransaction(txid_a, 1)
         assert_equal(tx_a['height'], 2)
+        assert_equal(tx_a['blockhash'], block_hash_a)
 
         # Invalidate last block (height 2)
         n.invalidateblock(block_hash_a)

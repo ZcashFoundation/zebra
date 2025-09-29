@@ -1832,9 +1832,9 @@ where
                             .map_misc_error()?
                         {
                             zebra_state::ReadResponse::BlockHash(block_hash) => block_hash,
-                            _ => unreachable!(
-                                "unmatched response to a `BestChainBlockHash` request"
-                            ),
+                            _ => {
+                                unreachable!("unmatched response to a `BestChainBlockHash` request")
+                            }
                         };
 
                         GetRawTransactionResponse::Object(Box::new(
@@ -1866,10 +1866,8 @@ where
                     )),
                 }
             } else {
-                let hex = match tx {
-                    AnyTx::Mined(mined_tx) => mined_tx.tx.into(),
-                    AnyTx::Side((transaction, _block_hash)) => transaction.into(),
-                };
+                let tx: Arc<Transaction> = tx.into();
+                let hex = tx.into();
                 GetRawTransactionResponse::Raw(hex)
             }),
 

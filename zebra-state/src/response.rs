@@ -133,6 +133,15 @@ pub enum AnyTx {
     Side((Arc<Transaction>, block::Hash)),
 }
 
+impl From<AnyTx> for Arc<Transaction> {
+    fn from(any_tx: AnyTx) -> Self {
+        match any_tx {
+            AnyTx::Mined(mined_tx) => mined_tx.tx,
+            AnyTx::Side((tx, _)) => tx,
+        }
+    }
+}
+
 /// Information about a transaction in the best chain
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MinedTx {
