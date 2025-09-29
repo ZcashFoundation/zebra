@@ -1604,7 +1604,6 @@ impl Service<ReadRequest> for ReadStateService {
                 .wait_for_panics()
             }
 
-            // Used by the getblock (verbose) RPC.
             ReadRequest::AnyChainTransactionIdsForBlock(hash_or_height) => {
                 let state = self.clone();
 

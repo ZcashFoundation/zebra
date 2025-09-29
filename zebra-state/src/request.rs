@@ -733,12 +733,14 @@ pub enum Request {
     /// * [`Response::Transaction(None)`](Response::Transaction) otherwise.
     Transaction(transaction::Hash),
 
-    /// Looks up a transaction by hash in the current best chain.
+    /// Looks up a transaction by hash in any chain.
     ///
     /// Returns
     ///
-    /// * [`Response::AnyChainTransaction(Some(Arc<Transaction>))`](Response::AnyChainTransaction) if the transaction is in the best chain;
-    /// * [`Response::AnyChainTransaction(None)`](Response::AnyChainTransaction) otherwise.
+    /// * [`Response::AnyChainTransaction(Some(AnyTx))`](Response::AnyChainTransaction)
+    ///   if the transaction is in any chain;
+    /// * [`Response::AnyChainTransaction(None)`](Response::AnyChainTransaction)
+    ///   otherwise.
     AnyChainTransaction(transaction::Hash),
 
     /// Looks up a UTXO identified by the given [`OutPoint`](transparent::OutPoint),

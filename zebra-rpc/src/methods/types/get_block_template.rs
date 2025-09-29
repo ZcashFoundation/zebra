@@ -519,6 +519,10 @@ where
     }
 
     /// Changes the extra coinbase data.
+    ///
+    /// # Panics
+    ///
+    /// If `extra_coinbase_data` exceeds [`EXTRA_COINBASE_DATA_LIMIT`].
     pub fn set_extra_coinbase_data(&mut self, extra_coinbase_data: Vec<u8>) {
         assert!(
             extra_coinbase_data.len() <= EXTRA_COINBASE_DATA_LIMIT,

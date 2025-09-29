@@ -1833,7 +1833,7 @@ where
                         {
                             zebra_state::ReadResponse::BlockHash(block_hash) => block_hash,
                             _ => unreachable!(
-                                "unmatched response to a `AnyChainTransaction` request"
+                                "unmatched response to a `BestChainBlockHash` request"
                             ),
                         };
 
