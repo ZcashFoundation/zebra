@@ -56,8 +56,12 @@ jobs:
   release-binaries-success:
     name: Release binaries success
     runs-on: ubuntu-latest
-    # Always run this job to check the status of dependent jobs
-    if: always()
+    # Only run when the Docker Hub update job is allowed to execute
+    if: >-
+      ${{
+        always() &&
+        github.repository_owner == 'ZcashFoundation'
+      }}
     needs:
       - build
       - dockerhub-description

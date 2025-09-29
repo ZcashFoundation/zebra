@@ -6,6 +6,9 @@ listen_addr = "127.0.0.1:0"
 network = "Regtest"
 max_connections_per_ip = 10
 cache_dir = false
+crawl_new_peer_interval = "5 seconds"
+initial_mainnet_peers = []
+initial_testnet_peers = []
 
 [rpc]
 listen_addr = "127.0.0.1:0"

@@ -193,10 +193,12 @@ jobs:
       contents: read
       id-token: write
     uses: ./.github/workflows/zfnd-deploy-integration-tests-gcp.yml
-    if: ${{ !fromJSON(needs.get-available-disks.outputs.zebra_checkpoint_disk) || github.event.inputs.regenerate-disks == 'true' }}
+    if: ${{ (needs.get-available-disks.result == 'success' && !fromJSON(needs.get-available-disks.outputs.zebra_checkpoint_disk)) || github.event.inputs.regenerate-disks == 'true' }}
     concurrency:
       group: ${{ github.event_name == 'workflow_dispatch' && format('manual-{0}-sync-to-mandatory-checkpoint', github.run_id) || 'sync-to-mandatory-checkpoint' }}
       cancel-in-progress: false
+    secrets:
+      GCP_SSH_PRIVATE_KEY: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
     with:
       app_name: zebrad
       test_id: sync-to-mandatory-checkpoint
@@ -222,7 +224,9 @@ jobs:
       contents: read
       id-token: write
     uses: ./.github/workflows/zfnd-deploy-integration-tests-gcp.yml
-    if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_checkpoint_disk) || needs.sync-to-mandatory-checkpoint.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    if: ${{ !cancelled() && !failure() && ((needs.get-available-disks.result == 'success' && fromJSON(needs.get-available-disks.outputs.zebra_checkpoint_disk)) || needs.sync-to-mandatory-checkpoint.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    secrets:
+      GCP_SSH_PRIVATE_KEY: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
     with:
       app_name: zebrad
       test_id: sync-past-mandatory-checkpoint
@@ -252,10 +256,12 @@ jobs:
       contents: read
       id-token: write
     uses: ./.github/workflows/zfnd-deploy-integration-tests-gcp.yml
-    if: ${{ github.event_name == 'schedule' || !fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || (github.event.inputs.run-full-sync == 'true' && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet') }}
+    if: ${{ github.event_name == 'schedule' || (needs.get-available-disks.result == 'success' && !fromJSON(needs.get-available-disks.outputs.zebra_tip_disk)) || (github.event.inputs.run-full-sync == 'true' && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet') }}
     concurrency:
       group: ${{ github.event_name == 'workflow_dispatch' && format('manual-{0}-sync-full-mainnet', github.run_id) || 'sync-full-mainnet' }}
       cancel-in-progress: false
+    secrets:
+      GCP_SSH_PRIVATE_KEY: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
     with:
       app_name: zebrad
       test_id: sync-full-mainnet
@@ -285,7 +291,9 @@ jobs:
       contents: read
       id-token: write
     uses: ./.github/workflows/zfnd-deploy-integration-tests-gcp.yml
-    if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.sync-full-mainnet.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    if: ${{ !cancelled() && !failure() && ((needs.get-available-disks.result == 'success' && fromJSON(needs.get-available-disks.outputs.zebra_tip_disk)) || needs.sync-full-mainnet.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    secrets:
+      GCP_SSH_PRIVATE_KEY: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
     with:
       app_name: zebrad
       test_id: sync-update-mainnet
@@ -317,7 +325,9 @@ jobs:
       contents: read
       id-token: write
     uses: ./.github/workflows/zfnd-deploy-integration-tests-gcp.yml
-    if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.sync-full-mainnet.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    if: ${{ !cancelled() && !failure() && ((needs.get-available-disks.result == 'success' && fromJSON(needs.get-available-disks.outputs.zebra_tip_disk)) || needs.sync-full-mainnet.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    secrets:
+      GCP_SSH_PRIVATE_KEY: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
     with:
       app_name: zebrad
       test_id: generate-checkpoints-mainnet
@@ -351,10 +361,12 @@ jobs:
       contents: read
       id-token: write
     uses: ./.github/workflows/zfnd-deploy-integration-tests-gcp.yml
-    if: ${{ !fromJSON(needs.get-available-disks-testnet.outputs.zebra_tip_disk) || (github.event.inputs.run-full-sync == 'true' && (inputs.network || vars.ZCASH_NETWORK) == 'Testnet') }}
+    if: ${{ (needs.get-available-disks-testnet.result == 'success' && !fromJSON(needs.get-available-disks-testnet.outputs.zebra_tip_disk)) || (github.event.inputs.run-full-sync == 'true' && (inputs.network || vars.ZCASH_NETWORK) == 'Testnet') }}
     concurrency:
       group: ${{ github.event_name == 'workflow_dispatch' && format('manual-{0}-sync-full-testnet', github.run_id) || 'sync-full-testnet' }}
       cancel-in-progress: false
+    secrets:
+      GCP_SSH_PRIVATE_KEY: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
     with:
       app_name: zebrad
       test_id: sync-full-testnet
@@ -387,7 +399,9 @@ jobs:
       contents: read
       id-token: write
     uses: ./.github/workflows/zfnd-deploy-integration-tests-gcp.yml
-    if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks-testnet.outputs.zebra_tip_disk) || needs.sync-full-testnet.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    if: ${{ !cancelled() && !failure() && ((needs.get-available-disks-testnet.result == 'success' && fromJSON(needs.get-available-disks-testnet.outputs.zebra_tip_disk)) || needs.sync-full-testnet.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    secrets:
+      GCP_SSH_PRIVATE_KEY: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
     with:
       app_name: zebrad
       test_id: generate-checkpoints-testnet
@@ -420,10 +434,12 @@ jobs:
       id-token: write
     uses: ./.github/workflows/zfnd-deploy-integration-tests-gcp.yml
     # Currently the lightwalletd tests only work on Mainnet
-    if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.sync-full-mainnet.result == 'success') && (github.event_name == 'schedule' || !fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) || github.event.inputs.run-lwd-sync == 'true' ) }}
+    if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && ((needs.get-available-disks.result == 'success' && fromJSON(needs.get-available-disks.outputs.zebra_tip_disk)) || needs.sync-full-mainnet.result == 'success') && (github.event_name == 'schedule' || (needs.get-available-disks.result == 'success' && !fromJSON(needs.get-available-disks.outputs.lwd_tip_disk)) || github.event.inputs.run-lwd-sync == 'true' ) }}
     concurrency:
       group: ${{ github.event_name == 'workflow_dispatch' && format('manual-{0}-lwd-sync-full', github.run_id) || 'lwd-sync-full' }}
       cancel-in-progress: false
+    secrets:
+      GCP_SSH_PRIVATE_KEY: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
     with:
       app_name: lightwalletd
       test_id: lwd-sync-full
@@ -452,7 +468,9 @@ jobs:
       contents: read
       id-token: write
     uses: ./.github/workflows/zfnd-deploy-integration-tests-gcp.yml
-    if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && (fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) || needs.lwd-sync-full.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && ((needs.get-available-disks.result == 'success' && fromJSON(needs.get-available-disks.outputs.lwd_tip_disk)) || needs.lwd-sync-full.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    secrets:
+      GCP_SSH_PRIVATE_KEY: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
     with:
       app_name: lightwalletd
       test_id: lwd-sync-update
@@ -482,7 +500,9 @@ jobs:
       contents: read
       id-token: write
     uses: ./.github/workflows/zfnd-deploy-integration-tests-gcp.yml
-    if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.sync-full-mainnet.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && ((needs.get-available-disks.result == 'success' && fromJSON(needs.get-available-disks.outputs.zebra_tip_disk)) || needs.sync-full-mainnet.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    secrets:
+      GCP_SSH_PRIVATE_KEY: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
     with:
       app_name: lightwalletd
       test_id: lwd-rpc-test
@@ -506,7 +526,9 @@ jobs:
       contents: read
       id-token: write
     uses: ./.github/workflows/zfnd-deploy-integration-tests-gcp.yml
-    if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && (fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) || needs.lwd-sync-full.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && ((needs.get-available-disks.result == 'success' && fromJSON(needs.get-available-disks.outputs.lwd_tip_disk)) || needs.lwd-sync-full.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    secrets:
+      GCP_SSH_PRIVATE_KEY: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
     with:
       app_name: lightwalletd
       test_id: lwd-rpc-send-tx
@@ -531,7 +553,9 @@ jobs:
       contents: read
       id-token: write
     uses: ./.github/workflows/zfnd-deploy-integration-tests-gcp.yml
-    if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && (fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) || needs.lwd-sync-full.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && ((needs.get-available-disks.result == 'success' && fromJSON(needs.get-available-disks.outputs.lwd_tip_disk)) || needs.lwd-sync-full.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    secrets:
+      GCP_SSH_PRIVATE_KEY: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
     with:
       app_name: lightwalletd
       test_id: lwd-grpc-wallet
@@ -560,7 +584,9 @@ jobs:
       contents: read
       id-token: write
     uses: ./.github/workflows/zfnd-deploy-integration-tests-gcp.yml
-    if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.sync-full-mainnet.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    if: ${{ !cancelled() && !failure() && ((needs.get-available-disks.result == 'success' && fromJSON(needs.get-available-disks.outputs.zebra_tip_disk)) || needs.sync-full-mainnet.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    secrets:
+      GCP_SSH_PRIVATE_KEY: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
     with:
       app_name: zebrad
       test_id: rpc-get-block-template
@@ -585,7 +611,9 @@ jobs:
       contents: read
       id-token: write
     uses: ./.github/workflows/zfnd-deploy-integration-tests-gcp.yml
-    if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.sync-full-mainnet.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    if: ${{ !cancelled() && !failure() && ((needs.get-available-disks.result == 'success' && fromJSON(needs.get-available-disks.outputs.zebra_tip_disk)) || needs.sync-full-mainnet.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+    secrets:
+      GCP_SSH_PRIVATE_KEY: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
     with:
       app_name: zebrad
       test_id: rpc-submit-block
@@ -633,7 +661,12 @@ jobs:
   integration-tests-success:
     name: integration tests success
     runs-on: ubuntu-latest
-    if: ${{ always() && (github.event_name != 'pull_request' || github.event.label.name == 'run-stateful-tests') }}
+    if: >-
+      ${{
+        always() &&
+        (!startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork) &&
+        (github.event_name != 'pull_request' || github.event.label.name == 'run-stateful-tests')
+      }}
     needs:
       - build
       - sync-to-mandatory-checkpoint
@@ -655,4 +688,5 @@ jobs:
       - name: Decide whether the needed jobs succeeded or failed
         uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe #v1.2.2
         with:
+          allowed-skips: sync-to-mandatory-checkpoint,sync-full-mainnet,lwd-sync-full,sync-past-mandatory-checkpoint,sync-update-mainnet,generate-checkpoints-mainnet,sync-full-testnet,generate-checkpoints-testnet,lwd-sync-update,lwd-rpc-test,lwd-rpc-send-tx,lwd-grpc-wallet,rpc-get-block-template,rpc-submit-block
           jobs: ${{ toJSON(needs) }}
