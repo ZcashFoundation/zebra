@@ -446,6 +446,10 @@ where
     mined_block_sender: watch::Sender<(block::Hash, block::Height)>,
 }
 
+// A limit on the configured extra coinbase data, regardless of the current block height.
+// This is different from the consensus rule, which limits the total height + data.
+const EXTRA_COINBASE_DATA_LIMIT: usize = MAX_COINBASE_DATA_LEN - MAX_COINBASE_HEIGHT_DATA_LEN;
+
 impl<BlockVerifierRouter, SyncStatus> GetBlockTemplateHandler<BlockVerifierRouter, SyncStatus>
 where
     BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
@@ -478,11 +482,6 @@ where
                 panic!("miner_address can't receive transparent funds")
             }
         });
-
-        // A limit on the configured extra coinbase data, regardless of the current block height.
-        // This is different from the consensus rule, which limits the total height + data.
-        const EXTRA_COINBASE_DATA_LIMIT: usize =
-            MAX_COINBASE_DATA_LEN - MAX_COINBASE_HEIGHT_DATA_LEN;
 
         // Hex-decode to bytes if possible, otherwise UTF-8 encode to bytes.
         let extra_coinbase_data = conf
@@ -517,6 +516,21 @@ where
     /// Returns the extra coinbase data.
     pub fn extra_coinbase_data(&self) -> Vec<u8> {
         self.extra_coinbase_data.clone()
+    }
+
+    /// Changes the extra coinbase data.
+    ///
+    /// # Panics
+    ///
+    /// If `extra_coinbase_data` exceeds [`EXTRA_COINBASE_DATA_LIMIT`].
+    pub fn set_extra_coinbase_data(&mut self, extra_coinbase_data: Vec<u8>) {
+        assert!(
+            extra_coinbase_data.len() <= EXTRA_COINBASE_DATA_LIMIT,
+            "extra coinbase data is {} bytes, but Zebra's limit is {}.",
+            extra_coinbase_data.len(),
+            EXTRA_COINBASE_DATA_LIMIT,
+        );
+        self.extra_coinbase_data = extra_coinbase_data;
     }
 
     /// Returns the sync status.
