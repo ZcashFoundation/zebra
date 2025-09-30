@@ -97,7 +97,8 @@ impl Tracing {
         let flame_root = &config.flamegraph;
 
         // Only show the intro for user-focused node server commands like `start`
-        if uses_intro {
+        // Also skip the intro for regtest, since it pollutes the QA test logs
+        if uses_intro && !network.is_regtest() {
             // If it's a terminal and color escaping is enabled: clear screen and
             // print Zebra logo (here `use_color` is being interpreted as
             // "use escape codes")

@@ -3833,7 +3833,11 @@ async fn invalidate_and_reconsider_block() -> Result<()> {
     tracing::info!("invalidating blocks");
 
     // Note: This is the block at height 7, it's the 6th generated block.
-    let block_6_hash = blocks.get(5).expect("should have 50 blocks").hash();
+    let block_6_hash = blocks
+        .get(5)
+        .expect("should have 50 blocks")
+        .hash()
+        .to_string();
     let params = serde_json::to_string(&vec![block_6_hash]).expect("should serialize successfully");
 
     let _: () = rpc_client
