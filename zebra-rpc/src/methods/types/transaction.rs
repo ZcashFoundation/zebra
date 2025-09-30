@@ -8,7 +8,6 @@ use derive_getters::Getters;
 use derive_new::new;
 use hex::ToHex;
 
-use serde_with::serde_as;
 use zebra_chain::{
     amount::{self, Amount, NegativeOrZero, NonNegative},
     block::{self, merkle::AUTH_DIGEST_PLACEHOLDER, Height},
@@ -158,13 +157,14 @@ pub struct TransactionObject {
     /// The raw transaction, encoded as hex bytes.
     #[serde(with = "hex")]
     pub(crate) hex: SerializedTransaction,
-    /// The height of the block in the best chain that contains the tx or `None` if the tx is in
-    /// the mempool.
+    /// The height of the block in the best chain that contains the tx, -1 if
+    /// it's in a side chain block, or `None` if the tx is in the mempool.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
-    pub(crate) height: Option<u32>,
-    /// The height diff between the block containing the tx and the best chain tip + 1 or `None`
-    /// if the tx is in the mempool.
+    pub(crate) height: Option<i32>,
+    /// The height diff between the block containing the tx and the best chain
+    /// tip + 1, 0 if it's in a side chain, or `None` if the tx is in the
+    /// mempool.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
     pub(crate) confirmations: Option<u32>,
@@ -625,8 +625,24 @@ impl TransactionObject {
         let block_time = block_time.map(|bt| bt.timestamp());
         Self {
             hex: tx.clone().into(),
-            height: height.map(|height| height.0),
-            confirmations,
+            height: if in_active_chain.unwrap_or_default() {
+                height.map(|height| height.0 as i32)
+            } else if block_hash.is_some() {
+                // Side chain
+                Some(-1)
+            } else {
+                // Mempool
+                None
+            },
+            confirmations: if in_active_chain.unwrap_or_default() {
+                confirmations
+            } else if block_hash.is_some() {
+                // Side chain
+                Some(0)
+            } else {
+                // Mempool
+                None
+            },
             inputs: tx
                 .inputs()
                 .iter()
