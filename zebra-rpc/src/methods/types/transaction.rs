@@ -8,7 +8,6 @@ use derive_getters::Getters;
 use derive_new::new;
 use hex::ToHex;
 
-use serde_with::serde_as;
 use zebra_chain::{
     amount::{self, Amount, NegativeOrZero, NonNegative},
     block::{self, merkle::AUTH_DIGEST_PLACEHOLDER, Height},
