@@ -261,9 +261,7 @@ def wait_for_bitcoind_start(process, url, i):
     Wait for bitcoind to start. This means that RPC is accessible and fully initialized.
     Raise an exception if bitcoind exits during initialization.
     '''
-    # Zebra can do migration and other stuff at startup, even in regtest mode,
-    # giving 10 seconds for it to complete.
-    time.sleep(10)
+    time.sleep(1) # give the node a moment to start
     while True:
         if process.poll() is not None:
             raise Exception('%s node %d exited with status %i during initialization' % (zcashd_binary(), i, process.returncode))
@@ -639,7 +637,6 @@ def connect_nodes(from_connection, node_num):
 
 def connect_nodes_bi(nodes, a, b):
     connect_nodes(nodes[a], b)
-    connect_nodes(nodes[b], a)
 
 def find_output(node, txid, amount):
     """

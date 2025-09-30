@@ -2983,7 +2983,7 @@ where
                         Ok(())
                     } else {
                         return Err(ErrorObject::owned(
-                            ErrorCode::InvalidParams.code(),
+                            server::error::LegacyCode::ClientNodeAlreadyAdded.into(),
                             format!("peer address was already present in the address book: {addr}"),
                             None::<()>,
                         ));
