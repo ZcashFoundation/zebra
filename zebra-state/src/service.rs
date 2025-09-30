@@ -1219,6 +1219,7 @@ impl Service<Request> for StateService {
             | Request::BestChainBlockHash(_)
             | Request::BlockLocator
             | Request::Transaction(_)
+            | Request::AnyChainTransaction(_)
             | Request::UnspentBestChainUtxo(_)
             | Request::Block(_)
             | Request::BlockAndSize(_)
@@ -1550,6 +1551,30 @@ impl Service<ReadRequest> for ReadStateService {
                 .wait_for_panics()
             }
 
+            ReadRequest::AnyChainTransaction(hash) => {
+                let state = self.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let tx = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::any_transaction(
+                                    non_finalized_state.chain_iter(),
+                                    &state.db,
+                                    hash,
+                                )
+                            },
+                        );
+
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::AnyChainTransaction");
+
+                        Ok(ReadResponse::AnyChainTransaction(tx))
+                    })
+                })
+                .wait_for_panics()
+            }
+
             // Used by the getblock (verbose) RPC.
             ReadRequest::TransactionIdsForBlock(hash_or_height) => {
                 let state = self.clone();
@@ -1574,6 +1599,36 @@ impl Service<ReadRequest> for ReadStateService {
                         );
 
                         Ok(ReadResponse::TransactionIdsForBlock(transaction_ids))
+                    })
+                })
+                .wait_for_panics()
+            }
+
+            ReadRequest::AnyChainTransactionIdsForBlock(hash_or_height) => {
+                let state = self.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let transaction_ids = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::transaction_hashes_for_any_block(
+                                    non_finalized_state.chain_iter(),
+                                    &state.db,
+                                    hash_or_height,
+                                )
+                            },
+                        );
+
+                        // The work is done in the future.
+                        timer.finish(
+                            module_path!(),
+                            line!(),
+                            "ReadRequest::AnyChainTransactionIdsForBlock",
+                        );
+
+                        Ok(ReadResponse::AnyChainTransactionIdsForBlock(
+                            transaction_ids,
+                        ))
                     })
                 })
                 .wait_for_panics()
