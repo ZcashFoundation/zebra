@@ -49,6 +49,7 @@ use indexmap::IndexMap;
 use jsonrpsee::core::{async_trait, RpcResult as Result};
 use jsonrpsee_proc_macros::rpc;
 use jsonrpsee_types::{ErrorCode, ErrorObject};
+use rand::{rngs::OsRng, RngCore};
 use tokio::{
     sync::{broadcast, watch},
     task::JoinHandle,
@@ -82,9 +83,11 @@ use zebra_chain::{
     },
 };
 use zebra_consensus::{funding_stream_address, RouterError};
-use zebra_network::{address_book_peers::AddressBookPeers, PeerSocketAddr};
+use zebra_network::{address_book_peers::AddressBookPeers, types::PeerServices, PeerSocketAddr};
 use zebra_node_services::mempool;
-use zebra_state::{HashOrHeight, OutputLocation, ReadRequest, ReadResponse, TransactionLocation};
+use zebra_state::{
+    AnyTx, HashOrHeight, OutputLocation, ReadRequest, ReadResponse, TransactionLocation,
+};
 
 use crate::{
     client::Treestate,
@@ -118,6 +121,7 @@ use types::{
     get_mining_info::GetMiningInfoResponse,
     get_raw_mempool::{self, GetRawMempoolResponse},
     long_poll::LongPollInput,
+    network_info::{GetNetworkInfoResponse, NetworkInfo},
     peer_info::PeerInfo,
     submit_block::{SubmitBlockErrorResponse, SubmitBlockParameters, SubmitBlockResponse},
     subsidy::GetBlockSubsidyResponse,
@@ -547,6 +551,14 @@ pub trait Rpc {
         self.get_network_sol_ps(num_blocks, height).await
     }
 
+    /// Returns an object containing various state info regarding P2P networking.
+    ///
+    /// zcashd reference: [`getnetworkinfo`](https://zcash.github.io/rpc/getnetworkinfo.html)
+    /// method: post
+    /// tags: network
+    #[method(name = "getnetworkinfo")]
+    async fn get_network_info(&self) -> Result<GetNetworkInfoResponse>;
+
     /// Returns data about each connected network node.
     ///
     /// zcashd reference: [`getpeerinfo`](https://zcash.github.io/rpc/getpeerinfo.html)
@@ -637,7 +649,7 @@ pub trait Rpc {
     /// - `block_hash`: (hex-encoded block hash, required) The block hash to invalidate.
     // TODO: Invalidate block hashes even if they're not present in the non-finalized state (#9553).
     #[method(name = "invalidateblock")]
-    async fn invalidate_block(&self, block_hash: block::Hash) -> Result<()>;
+    async fn invalidate_block(&self, block_hash: String) -> Result<()>;
 
     /// Reconsiders a previously invalidated block if it exists in the cache of previously invalidated blocks.
     ///
@@ -645,7 +657,7 @@ pub trait Rpc {
     ///
     /// - `block_hash`: (hex-encoded block hash, required) The block hash to reconsider.
     #[method(name = "reconsiderblock")]
-    async fn reconsider_block(&self, block_hash: block::Hash) -> Result<Vec<block::Hash>>;
+    async fn reconsider_block(&self, block_hash: String) -> Result<Vec<block::Hash>>;
 
     #[method(name = "generate")]
     /// Mine blocks immediately. Returns the block hashes of the generated blocks.
@@ -1769,31 +1781,33 @@ where
             };
         }
 
-        // TODO: this should work for blocks in side chains
         let txid = if let Some(block_hash) = block_hash {
             let block_hash = block::Hash::from_hex(block_hash)
                 .map_error(server::error::LegacyCode::InvalidAddressOrKey)?;
             match self
                 .read_state
                 .clone()
-                .oneshot(zebra_state::ReadRequest::TransactionIdsForBlock(
+                .oneshot(zebra_state::ReadRequest::AnyChainTransactionIdsForBlock(
                     block_hash.into(),
                 ))
                 .await
                 .map_misc_error()?
             {
-                zebra_state::ReadResponse::TransactionIdsForBlock(tx_ids) => *tx_ids
+                zebra_state::ReadResponse::AnyChainTransactionIdsForBlock(tx_ids) => *tx_ids
                     .ok_or_error(
                         server::error::LegacyCode::InvalidAddressOrKey,
                         "block not found",
                     )?
+                    .0
                     .iter()
                     .find(|id| **id == txid)
                     .ok_or_error(
                         server::error::LegacyCode::InvalidAddressOrKey,
                         "txid not found",
                     )?,
-                _ => unreachable!("unmatched response to a `TransactionsByMinedId` request"),
+                _ => {
+                    unreachable!("unmatched response to a `AnyChainTransactionIdsForBlock` request")
+                }
             }
         } else {
             txid
@@ -1803,40 +1817,61 @@ where
         match self
             .read_state
             .clone()
-            .oneshot(zebra_state::ReadRequest::Transaction(txid))
+            .oneshot(zebra_state::ReadRequest::AnyChainTransaction(txid))
             .await
             .map_misc_error()?
         {
-            zebra_state::ReadResponse::Transaction(Some(tx)) => Ok(if verbose {
-                let block_hash = match self
-                    .read_state
-                    .clone()
-                    .oneshot(zebra_state::ReadRequest::BestChainBlockHash(tx.height))
-                    .await
-                    .map_misc_error()?
-                {
-                    zebra_state::ReadResponse::BlockHash(block_hash) => block_hash,
-                    _ => unreachable!("unmatched response to a `TransactionsByMinedId` request"),
-                };
+            zebra_state::ReadResponse::AnyChainTransaction(Some(tx)) => Ok(if verbose {
+                match tx {
+                    AnyTx::Mined(tx) => {
+                        let block_hash = match self
+                            .read_state
+                            .clone()
+                            .oneshot(zebra_state::ReadRequest::BestChainBlockHash(tx.height))
+                            .await
+                            .map_misc_error()?
+                        {
+                            zebra_state::ReadResponse::BlockHash(block_hash) => block_hash,
+                            _ => {
+                                unreachable!("unmatched response to a `BestChainBlockHash` request")
+                            }
+                        };
 
-                GetRawTransactionResponse::Object(Box::new(TransactionObject::from_transaction(
-                    tx.tx.clone(),
-                    Some(tx.height),
-                    Some(tx.confirmations),
-                    &self.network,
-                    // TODO: Performance gain:
-                    // https://github.com/ZcashFoundation/zebra/pull/9458#discussion_r2059352752
-                    Some(tx.block_time),
-                    block_hash,
-                    Some(true),
-                    txid,
-                )))
+                        GetRawTransactionResponse::Object(Box::new(
+                            TransactionObject::from_transaction(
+                                tx.tx.clone(),
+                                Some(tx.height),
+                                Some(tx.confirmations),
+                                &self.network,
+                                // TODO: Performance gain:
+                                // https://github.com/ZcashFoundation/zebra/pull/9458#discussion_r2059352752
+                                Some(tx.block_time),
+                                block_hash,
+                                Some(true),
+                                txid,
+                            ),
+                        ))
+                    }
+                    AnyTx::Side((tx, block_hash)) => GetRawTransactionResponse::Object(Box::new(
+                        TransactionObject::from_transaction(
+                            tx.clone(),
+                            None,
+                            None,
+                            &self.network,
+                            None,
+                            Some(block_hash),
+                            Some(false),
+                            txid,
+                        ),
+                    )),
+                }
             } else {
-                let hex = tx.tx.into();
+                let tx: Arc<Transaction> = tx.into();
+                let hex = tx.into();
                 GetRawTransactionResponse::Raw(hex)
             }),
 
-            zebra_state::ReadResponse::Transaction(None) => {
+            zebra_state::ReadResponse::AnyChainTransaction(None) => {
                 Err("No such mempool or main chain transaction")
                     .map_error(server::error::LegacyCode::InvalidAddressOrKey)
             }
@@ -2689,6 +2724,54 @@ where
             .expect("per-second solution rate always fits in u64"))
     }
 
+    async fn get_network_info(&self) -> Result<GetNetworkInfoResponse> {
+        let version = GetInfoResponse::version_from_string(&self.build_version)
+            .expect("invalid version string");
+
+        let subversion = self.user_agent.clone();
+
+        let protocol_version = zebra_network::constants::CURRENT_NETWORK_PROTOCOL_VERSION.0;
+
+        // TODO: return actual supported local services when Zebra exposes them
+        let local_services = format!("{:016x}", PeerServices::NODE_NETWORK);
+
+        // Deprecated: zcashd always returns 0.
+        let timeoffset = 0;
+
+        let connections = self.address_book.recently_live_peers(Utc::now()).len();
+
+        // TODO: make `limited`, `reachable`, and `proxy` dynamic if Zebra supports network filtering
+        let networks = vec![
+            NetworkInfo::new("ipv4".to_string(), false, true, "".to_string(), false),
+            NetworkInfo::new("ipv6".to_string(), false, true, "".to_string(), false),
+            NetworkInfo::new("onion".to_string(), false, false, "".to_string(), false),
+        ];
+
+        let relay_fee = zebra_chain::transaction::zip317::MIN_MEMPOOL_TX_FEE_RATE as f64
+            / (zebra_chain::amount::COIN as f64);
+
+        // TODO: populate local addresses when Zebra supports exposing bound or advertised addresses
+        let local_addresses = vec![];
+
+        // TODO: return network-level warnings, if Zebra supports them in the future
+        let warnings = "".to_string();
+
+        let response = GetNetworkInfoResponse {
+            version,
+            subversion,
+            protocol_version,
+            local_services,
+            timeoffset,
+            connections,
+            networks,
+            relay_fee,
+            local_addresses,
+            warnings,
+        };
+
+        Ok(response)
+    }
+
     async fn get_peer_info(&self) -> Result<Vec<PeerInfo>> {
         let address_book = self.address_book.clone();
         Ok(address_book
@@ -2842,7 +2925,11 @@ where
         ))
     }
 
-    async fn invalidate_block(&self, block_hash: block::Hash) -> Result<()> {
+    async fn invalidate_block(&self, block_hash: String) -> Result<()> {
+        let block_hash = block_hash
+            .parse()
+            .map_error(server::error::LegacyCode::InvalidParameter)?;
+
         self.state
             .clone()
             .oneshot(zebra_state::Request::InvalidateBlock(block_hash))
@@ -2851,7 +2938,11 @@ where
             .map_misc_error()
     }
 
-    async fn reconsider_block(&self, block_hash: block::Hash) -> Result<Vec<block::Hash>> {
+    async fn reconsider_block(&self, block_hash: String) -> Result<Vec<block::Hash>> {
+        let block_hash = block_hash
+            .parse()
+            .map_error(server::error::LegacyCode::InvalidParameter)?;
+
         self.state
             .clone()
             .oneshot(zebra_state::Request::ReconsiderBlock(block_hash))
@@ -2864,7 +2955,7 @@ where
     }
 
     async fn generate(&self, num_blocks: u32) -> Result<Vec<Hash>> {
-        let rpc = self.clone();
+        let mut rpc = self.clone();
         let network = self.network.clone();
 
         if !network.disable_pow() {
@@ -2877,6 +2968,15 @@ where
 
         let mut block_hashes = Vec::new();
         for _ in 0..num_blocks {
+            // Use random coinbase data in order to ensure the coinbase
+            // transaction is unique. This is useful for tests that exercise
+            // forks, since otherwise the coinbase txs of blocks with the same
+            // height across different forks would be identical.
+            let mut extra_coinbase_data = [0u8; 32];
+            OsRng.fill_bytes(&mut extra_coinbase_data);
+            rpc.gbt
+                .set_extra_coinbase_data(extra_coinbase_data.to_vec());
+
             let block_template = rpc
                 .get_block_template(None)
                 .await
@@ -2903,9 +3003,20 @@ where
                     .map_error(server::error::LegacyCode::default())?,
             );
 
-            rpc.submit_block(hex_proposal_block, None)
+            let r = rpc
+                .submit_block(hex_proposal_block, None)
                 .await
                 .map_error(server::error::LegacyCode::default())?;
+            match r {
+                SubmitBlockResponse::Accepted => { /* pass */ }
+                SubmitBlockResponse::ErrorResponse(response) => {
+                    return Err(ErrorObject::owned(
+                        server::error::LegacyCode::Misc.into(),
+                        format!("block was rejected: {:?}", response),
+                        None::<()>,
+                    ));
+                }
+            }
 
             block_hashes.push(GetBlockHashResponse(proposal_block.hash()));
         }
@@ -2926,7 +3037,7 @@ where
                         Ok(())
                     } else {
                         return Err(ErrorObject::owned(
-                            ErrorCode::InvalidParams.code(),
+                            server::error::LegacyCode::ClientNodeAlreadyAdded.into(),
                             format!("peer address was already present in the address book: {addr}"),
                             None::<()>,
                         ));

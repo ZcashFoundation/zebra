@@ -45,6 +45,7 @@ use crate::{
     constants::{
         MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS, MAX_LEGACY_CHAIN_BLOCKS,
     },
+    error::ReconsiderError,
     response::NonFinalizedBlocksListener,
     service::{
         block_iter::any_ancestor_blocks,
@@ -842,13 +843,11 @@ impl StateService {
     fn send_reconsider_block(
         &self,
         hash: block::Hash,
-    ) -> oneshot::Receiver<Result<Vec<block::Hash>, BoxError>> {
+    ) -> oneshot::Receiver<Result<Vec<block::Hash>, ReconsiderError>> {
         let (rsp_tx, rsp_rx) = oneshot::channel();
 
         let Some(sender) = &self.block_write_sender.non_finalized else {
-            let _ = rsp_tx.send(Err(
-                "cannot reconsider blocks while still committing checkpointed blocks".into(),
-            ));
+            let _ = rsp_tx.send(Err(ReconsiderError::CheckpointCommitInProgress));
             return rsp_rx;
         };
 
@@ -859,9 +858,7 @@ impl StateService {
                 unreachable!("should return the same Reconsider message could not be sent");
             };
 
-            let _ = rsp_tx.send(Err(
-                "failed to send reconsider block request to block write task".into(),
-            ));
+            let _ = rsp_tx.send(Err(ReconsiderError::ReconsiderSendFailed));
         }
 
         rsp_rx
@@ -1204,11 +1201,11 @@ impl Service<Request> for StateService {
                     rsp_rx
                         .await
                         .map_err(|_recv_error| {
-                            BoxError::from("reconsider block request was unexpectedly dropped")
+                            BoxError::from(ReconsiderError::ReconsiderResponseDropped)
                         })
                         // TODO: replace with Result::flatten once it stabilises
                         // https://github.com/rust-lang/rust/issues/70142
-                        .and_then(convert::identity)
+                        .and_then(|res| res.map_err(BoxError::from))
                         .map(Response::Reconsidered)
                 }
                 .instrument(span)
@@ -1222,6 +1219,7 @@ impl Service<Request> for StateService {
             | Request::BestChainBlockHash(_)
             | Request::BlockLocator
             | Request::Transaction(_)
+            | Request::AnyChainTransaction(_)
             | Request::UnspentBestChainUtxo(_)
             | Request::Block(_)
             | Request::BlockAndSize(_)
@@ -1553,6 +1551,30 @@ impl Service<ReadRequest> for ReadStateService {
                 .wait_for_panics()
             }
 
+            ReadRequest::AnyChainTransaction(hash) => {
+                let state = self.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let tx = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::any_transaction(
+                                    non_finalized_state.chain_iter(),
+                                    &state.db,
+                                    hash,
+                                )
+                            },
+                        );
+
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::AnyChainTransaction");
+
+                        Ok(ReadResponse::AnyChainTransaction(tx))
+                    })
+                })
+                .wait_for_panics()
+            }
+
             // Used by the getblock (verbose) RPC.
             ReadRequest::TransactionIdsForBlock(hash_or_height) => {
                 let state = self.clone();
@@ -1577,6 +1599,36 @@ impl Service<ReadRequest> for ReadStateService {
                         );
 
                         Ok(ReadResponse::TransactionIdsForBlock(transaction_ids))
+                    })
+                })
+                .wait_for_panics()
+            }
+
+            ReadRequest::AnyChainTransactionIdsForBlock(hash_or_height) => {
+                let state = self.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let transaction_ids = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::transaction_hashes_for_any_block(
+                                    non_finalized_state.chain_iter(),
+                                    &state.db,
+                                    hash_or_height,
+                                )
+                            },
+                        );
+
+                        // The work is done in the future.
+                        timer.finish(
+                            module_path!(),
+                            line!(),
+                            "ReadRequest::AnyChainTransactionIdsForBlock",
+                        );
+
+                        Ok(ReadResponse::AnyChainTransactionIdsForBlock(
+                            transaction_ids,
+                        ))
                     })
                 })
                 .wait_for_panics()
