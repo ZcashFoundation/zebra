@@ -281,7 +281,7 @@ So it is better to test with a full sync, and an older cached state.
 [current]: #current
 
 rocksdb provides a persistent, thread-safe `BTreeMap<&[u8], &[u8]>`. Each map is
-a distinct "tree". Keys are sorted using lexographic order (`[u8].sorted()`) on byte strings, so
+a distinct "tree". Keys are sorted using lexicographic order (`[u8].sorted()`) on byte strings, so
 integer values should be stored using big-endian encoding (so that the lex
 order on byte strings is the numeric ordering).
 
