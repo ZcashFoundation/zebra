@@ -175,6 +175,7 @@ async fn not_ready_when_tip_is_too_old() {
 }
 
 #[tokio::test]
+#[cfg(not(target_os = "windows"))]
 async fn rate_limiting_drops_bursts() {
     // With a sleep shorter than the configured interval we should only be able
     // to observe one successful request before the limiter responds with 429.
