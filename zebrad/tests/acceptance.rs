@@ -2987,7 +2987,7 @@ fn external_address() -> Result<()> {
     let mut child = testdir.spawn_child(args!["start"])?;
 
     // Give enough time to start connecting to some peers.
-    std::thread::sleep(Duration::from_secs(10));
+    std::thread::sleep(LAUNCH_DELAY);
 
     child.kill(false)?;
 
