@@ -57,6 +57,7 @@ jobs:
 
       - uses: actions-rust-lang/setup-rust-toolchain@ab6845274e2ff01cd4462007e1a9d9df1ab49f42 #v1.14.0
         with:
+          components: clippy
           toolchain: stable
           cache-on-failure: true
 
@@ -107,6 +108,7 @@ jobs:
 
       - uses: actions-rust-lang/setup-rust-toolchain@ab6845274e2ff01cd4462007e1a9d9df1ab49f42 #v1.14.0
         with:
+          components: clippy
           toolchain: stable
           cache-key: crate-build-${{ matrix.crate }}
           cache-on-failure: true
