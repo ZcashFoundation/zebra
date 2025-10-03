@@ -1,6 +1,6 @@
 [package]
 name = "zebra-rpc"
-version = "2.0.0"
+version = "2.0.1"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "A Zebra JSON Remote Procedure Call (JSON-RPC) interface"
 license = "MIT OR Apache-2.0"

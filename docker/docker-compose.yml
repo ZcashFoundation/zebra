@@ -31,6 +31,7 @@ services:
     #   - "18233:18233" # peer connections on Testnet
     #   - "9999:9999"   # Metrics
     #   - "3000:3000"   # Tracing
+    #   - "8080:8080"   # Health endpoints (/healthy, /ready)
 
 configs:
   zebra-config:

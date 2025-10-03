@@ -9,7 +9,7 @@ on:
       - "**/Cargo.lock"
       - .cargo/config.toml
       - "**/clippy.toml"
-      - .github/workflows/test-crate-build.yml
+      - .github/workflows/test-crates.yml
 
   push:
     branches: [main]
@@ -19,7 +19,7 @@ on:
       - "**/Cargo.lock"
       - .cargo/config.toml
       - "**/clippy.toml"
-      - .github/workflows/test-crate-build.yml
+      - .github/workflows/test-crates.yml
 
   workflow_dispatch:
 
@@ -55,9 +55,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions-rust-lang/setup-rust-toolchain@ab6845274e2ff01cd4462007e1a9d9df1ab49f42 #v1.14.0
+      - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 #v1.15.1
         with:
           toolchain: stable
+          components: clippy
           cache-on-failure: true
 
       # This step dynamically creates a JSON containing the values of each crate
@@ -105,9 +106,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions-rust-lang/setup-rust-toolchain@ab6845274e2ff01cd4462007e1a9d9df1ab49f42 #v1.14.0
+      - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 #v1.15.1
         with:
           toolchain: stable
+          components: clippy
           cache-key: crate-build-${{ matrix.crate }}
           cache-on-failure: true
 

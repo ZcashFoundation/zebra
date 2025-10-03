@@ -58,6 +58,16 @@ use_color = true
 
 # endpoint_addr = "0.0.0.0:9999" # Prometheus
 
+[health]
+# Health endpoints are disabled by default. To enable them, uncomment the
+# listen_addr below. These endpoints are intended for Kubernetes probes and
+# load balancers.
+
+# listen_addr = "0.0.0.0:8080" # /healthy and /ready
+# min_connected_peers = 1
+# ready_max_blocks_behind = 2
+# enforce_on_test_networks = false
+
 [mining]
 # If you are going to use Zebra as a backend for a mining pool, set your mining
 # address.

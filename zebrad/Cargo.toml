@@ -83,7 +83,7 @@ elasticsearch = [
 # Tracing and monitoring
 sentry = ["dep:sentry"]
 journald = ["tracing-journald"]
-filter-reload = ["hyper", "http-body-util", "hyper-util", "bytes"]
+filter-reload = []
 
 progress-bar = [
     "howudoin",
@@ -198,6 +198,11 @@ metrics = { workspace = true }
 dirs = { workspace = true }
 atty = { workspace = true }
 
+# Health check server dependencies
+hyper = { workspace = true, features = ["server", "http1"] }
+http-body-util = { workspace = true }
+hyper-util = { workspace = true, features = ["service", "server", "tokio"] }
+
 # Configuration management
 config = { workspace = true }
 
@@ -218,10 +223,7 @@ inferno = { workspace = true, optional = true }
 tracing-journald = { workspace = true, optional = true }
 
 # prod feature filter-reload
-hyper = { workspace = true, features = ["http1", "http2", "server"], optional = true }
-http-body-util = { workspace = true, optional = true }
-hyper-util = { workspace = true, optional = true }
-bytes = { workspace = true, optional = true }
+bytes = { workspace = true }
 
 # prod feature prometheus
 metrics-exporter-prometheus = { workspace = true, features = ["http-listener"], optional = true }
@@ -242,6 +244,8 @@ proptest-derive = { workspace = true, optional = true }
 
 # test feature tokio-console
 console-subscriber = { workspace = true, optional = true }
+
+derive-new.workspace = true
 
 [build-dependencies]
 vergen-git2 = { workspace = true, features = ["cargo", "rustc"] }
