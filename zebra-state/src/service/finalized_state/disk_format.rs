@@ -200,7 +200,7 @@ pub fn expand_zero_be_bytes<const MEM_SIZE: usize>(disk_bytes: &[u8]) -> [u8; ME
         .expect("unexpected `disk_bytes` length: must not exceed `MEM_SIZE`");
 
     let mut expanded = [0; MEM_SIZE];
-    (&mut expanded[extra_bytes..])
+    let _ = (&mut expanded[extra_bytes..])
         .write(disk_bytes)
         .expect("should fit");
 
