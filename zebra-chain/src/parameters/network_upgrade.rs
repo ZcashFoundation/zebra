@@ -104,23 +104,20 @@ impl fmt::Display for NetworkUpgrade {
 /// Don't use this directly; use NetworkUpgrade::activation_list() so that
 /// we can switch to fake activation heights for some tests.
 #[allow(unused)]
-pub(super) const MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
-    (block::Height(0), Genesis),
-    (block::Height(1), BeforeOverwinter),
-    (block::Height(347_500), Overwinter),
-    (block::Height(419_200), Sapling),
-    (block::Height(653_600), Blossom),
-    (block::Height(903_000), Heartwood),
-    (block::Height(1_046_400), Canopy),
-    (block::Height(1_687_104), Nu5),
-    (block::Height(2_726_400), Nu6),
-];
-
-/// The block height at which NU6.1 activates on the default Testnet.
-// See NU6.1 Testnet activation height in zcashd:
-// <https://github.com/zcash/zcash/blob/b65b008a7b334a2f7c2eaae1b028e011f2e21dd1/src/chainparams.cpp#L472>
-pub const NU6_1_ACTIVATION_HEIGHT_TESTNET: block::Height = block::Height(3_536_500);
-
+pub(super) const MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = {
+    use super::constants::activation_heights::mainnet::*;
+    &[
+        (block::Height(0), Genesis),
+        (BEFORE_OVERWINTER, BeforeOverwinter),
+        (OVERWINTER, Overwinter),
+        (SAPLING, Sapling),
+        (BLOSSOM, Blossom),
+        (HEARTWOOD, Heartwood),
+        (CANOPY, Canopy),
+        (NU5, Nu5),
+        (NU6, Nu6),
+    ]
+};
 /// Testnet network upgrade activation heights.
 ///
 /// This is actually a bijective map, but it is const, so we use a vector, and
@@ -131,18 +128,21 @@ pub const NU6_1_ACTIVATION_HEIGHT_TESTNET: block::Height = block::Height(3_536_5
 /// Don't use this directly; use NetworkUpgrade::activation_list() so that
 /// we can switch to fake activation heights for some tests.
 #[allow(unused)]
-pub(super) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
-    (block::Height(0), Genesis),
-    (block::Height(1), BeforeOverwinter),
-    (block::Height(207_500), Overwinter),
-    (block::Height(280_000), Sapling),
-    (block::Height(584_000), Blossom),
-    (block::Height(903_800), Heartwood),
-    (block::Height(1_028_500), Canopy),
-    (block::Height(1_842_420), Nu5),
-    (block::Height(2_976_000), Nu6),
-    (NU6_1_ACTIVATION_HEIGHT_TESTNET, Nu6_1),
-];
+pub(super) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = {
+    use super::constants::activation_heights::testnet::*;
+    &[
+        (block::Height(0), Genesis),
+        (BEFORE_OVERWINTER, BeforeOverwinter),
+        (OVERWINTER, Overwinter),
+        (SAPLING, Sapling),
+        (BLOSSOM, Blossom),
+        (HEARTWOOD, Heartwood),
+        (CANOPY, Canopy),
+        (NU5, Nu5),
+        (NU6, Nu6),
+        (NU6_1, Nu6_1),
+    ]
+};
 
 /// The Consensus Branch Id, used to bind transactions and blocks to a
 /// particular network upgrade.
