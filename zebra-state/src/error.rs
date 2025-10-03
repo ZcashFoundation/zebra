@@ -42,8 +42,8 @@ impl From<BoxError> for CloneError {
 /// A boxed [`std::error::Error`].
 pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
+/// An error describing why a block could not be queued to be committed to the state.
 #[derive(Debug, Error, Clone, PartialEq, Eq, new)]
-#[allow(missing_docs)]
 pub enum QueueAndCommitError {
     #[error("block hash {block_hash} has already been sent to be committed to the state")]
     #[non_exhaustive]
@@ -77,12 +77,14 @@ pub enum QueueAndCommitError {
 /// An error describing why a `CommitSemanticallyVerified` request failed.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-#[allow(missing_docs)]
 pub enum CommitSemanticallyVerifiedError {
+    /// Queuing/commit step failed.
     #[error("could not queue and commit semantically verified block")]
     QueueAndCommitError(#[from] QueueAndCommitError),
+    /// Contextual validation failed.
     #[error("could not contextually validate semantically verified block")]
     ValidateContextError(#[from] ValidateContextError),
+    /// The write task exited (likely during shutdown).
     #[error("block write task has exited. Is Zebra shutting down?")]
     WriteTaskExited,
 }
