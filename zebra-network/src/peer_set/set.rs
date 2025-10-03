@@ -1066,24 +1066,27 @@ where
     /// Broadcasts the same requests to all ready peers which were unready when
     /// [`PeerSet::broadcast_all()`] was last called, ignoring return values.
     fn broadcast_all_queued(&mut self) {
-        if let Some((req, sender, mut remaining_peers)) = self.queued_broadcast_all_request.take() {
-            let Ok(reserved_send_slot) = sender.try_reserve() else {
-                self.queued_broadcast_all_request = Some((req, sender, remaining_peers));
-                return;
-            };
+        let Some((req, sender, mut remaining_peers)) = self.queued_broadcast_all_request.take()
+        else {
+            return;
+        };
 
-            let peers: Vec<_> = self
-                .ready_services
-                .keys()
-                .filter(|ready_peer| remaining_peers.remove(ready_peer))
-                .copied()
-                .collect();
+        let Ok(reserved_send_slot) = sender.try_reserve() else {
+            self.queued_broadcast_all_request = Some((req, sender, remaining_peers));
+            return;
+        };
 
-            reserved_send_slot.send(self.send_multiple(req.clone(), peers).boxed());
+        let peers: Vec<_> = self
+            .ready_services
+            .keys()
+            .filter(|ready_peer| remaining_peers.remove(ready_peer))
+            .copied()
+            .collect();
 
-            if !remaining_peers.is_empty() {
-                self.queued_broadcast_all_request = Some((req, sender, remaining_peers));
-            }
+        reserved_send_slot.send(self.send_multiple(req.clone(), peers).boxed());
+
+        if !remaining_peers.is_empty() {
+            self.queued_broadcast_all_request = Some((req, sender, remaining_peers));
         }
     }
 

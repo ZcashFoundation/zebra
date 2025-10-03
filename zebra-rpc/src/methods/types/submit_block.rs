@@ -80,7 +80,15 @@ pub struct SubmitBlockChannel {
 impl SubmitBlockChannel {
     /// Creates a new submit block channel
     pub fn new() -> Self {
-        let (sender, receiver) = mpsc::channel(10_000);
+        /// How many unread messages the submit block channel should buffer before rejecting sends.
+        ///
+        /// This should be large enough to usually avoid rejecting sends. This channel is used by
+        /// the block hash gossip task, which waits for a ready peer in the peer set while
+        /// processing messages from this channel and could be much slower to gossip block hashes
+        /// than it is to commit blocks and produce new block templates.
+        const SUBMIT_BLOCK_CHANNEL_CAPACITY: usize = 10_000;
+
+        let (sender, receiver) = mpsc::channel(SUBMIT_BLOCK_CHANNEL_CAPACITY);
         Self { sender, receiver }
     }
 

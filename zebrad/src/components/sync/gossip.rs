@@ -64,9 +64,14 @@ where
     let mut broadcast_network = Timeout::new(broadcast_network, TIPS_RESPONSE_TIMEOUT);
 
     loop {
+        // TODO: Refactor this into a struct and move the contents of this loop into its own method.
         let mut sync_status = sync_status.clone();
         let mut chain_tip = chain_state.clone();
+
+        // TODO: Move the contents of this async block to its own method
         let tip_change_close_to_network_tip_fut = async move {
+            /// A brief duration to wait after a tip change for a new message in the mined block channel.
+            // TODO: Add a test to check that Zebra does not advertise mined blocks to peers twice.
             const WAIT_FOR_BLOCK_SUBMISSION_DELAY: Duration = Duration::from_micros(100);
 
             // wait for at least the network timeout between gossips
@@ -101,6 +106,7 @@ where
         }
         .in_current_span();
 
+        // TODO: Move this logic for selecting the first ready future and updating `chain_state` to its own method.
         let (((hash, height), log_msg, updated_chain_state), is_block_submission) =
             if let Some(mined_block_receiver) = mined_block_receiver.as_mut() {
                 tokio::select! {
@@ -117,6 +123,8 @@ where
             };
 
         chain_state = updated_chain_state;
+
+        // TODO: Move logic for calling the peer set to its own method.
 
         // block broadcasts inform other nodes about new blocks,
         // so our internal Grow or Reset state doesn't matter to them
@@ -137,6 +145,8 @@ where
         // `AdvertiseBlockToAll` requests when there are unready peers.
         // Broadcast requests don't return errors, and we'd just want to ignore them anyway.
         tokio::spawn(broadcast_fut);
+
+        // TODO: Move this logic for marking the last change hash as seen to its own method.
 
         // Mark the last change hash of `chain_state` as the last block submission hash to avoid
         // advertising a block hash to some peers twice.

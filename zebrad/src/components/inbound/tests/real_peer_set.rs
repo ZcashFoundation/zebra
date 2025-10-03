@@ -873,7 +873,7 @@ mod submitblock_test {
 
         // Start the block gossip task with a SubmitBlockChannel
         let submitblock_channel = SubmitBlockChannel::new();
-        // Send a block top the channel
+        // Send a block to the channel
         submitblock_channel
             .sender()
             .send((block::Hash([1; 32]), block::Height(1)))
