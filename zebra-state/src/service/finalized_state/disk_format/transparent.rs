@@ -682,11 +682,9 @@ impl IntoDisk for OutputIndex {
 
 impl FromDisk for OutputIndex {
     fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
-        let mem_len = u32::BITS / 8;
-        let mem_len = mem_len.try_into().unwrap();
+        const MEM_LEN: usize = size_of::<u32>();
 
-        let mem_bytes = expand_zero_be_bytes(disk_bytes.as_ref(), mem_len);
-        let mem_bytes = mem_bytes.try_into().unwrap();
+        let mem_bytes = expand_zero_be_bytes::<MEM_LEN>(disk_bytes.as_ref());
         OutputIndex::from_index(u32::from_be_bytes(mem_bytes))
     }
 }
