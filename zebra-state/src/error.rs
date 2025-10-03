@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use derive_new::new;
 use thiserror::Error;
 
 use zebra_chain::{
@@ -41,10 +42,69 @@ impl From<BoxError> for CloneError {
 /// A boxed [`std::error::Error`].
 pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
-/// An error describing the reason a semantically verified block could not be committed to the state.
-#[derive(Debug, Clone, Error, PartialEq, Eq)]
-#[error("block is not contextually valid: {}", .0)]
-pub struct CommitSemanticallyVerifiedError(#[from] Box<ValidateContextError>);
+/// An error describing why a block could not be queued to be committed to the state.
+#[derive(Debug, Error, Clone, PartialEq, Eq, new)]
+pub enum QueueAndCommitError {
+    #[error("block hash {block_hash} has already been sent to be committed to the state")]
+    #[non_exhaustive]
+    Duplicate { block_hash: block::Hash },
+
+    #[error("block height {block_height:?} is already committed in the finalized state")]
+    #[non_exhaustive]
+    AlreadyFinalized { block_height: block::Height },
+
+    #[error("block hash {block_hash} was replaced by a newer commit request")]
+    #[non_exhaustive]
+    Replaced { block_hash: block::Hash },
+
+    #[error("pruned block at or below the finalized tip height: {block_height:?}")]
+    #[non_exhaustive]
+    Pruned { block_height: block::Height },
+
+    #[error("block {block_hash} was dropped from the queue of non-finalized blocks")]
+    #[non_exhaustive]
+    Dropped { block_hash: block::Hash },
+
+    #[error("block commit task exited. Is Zebra shutting down?")]
+    #[non_exhaustive]
+    CommitTaskExited,
+
+    #[error("dropping the state: dropped unused non-finalized state queue block")]
+    #[non_exhaustive]
+    DroppedUnusedBlock,
+}
+
+/// An error describing why a `CommitSemanticallyVerified` request failed.
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CommitSemanticallyVerifiedError {
+    /// Queuing/commit step failed.
+    #[error("could not queue and commit semantically verified block")]
+    QueueAndCommitError(#[from] QueueAndCommitError),
+    /// Contextual validation failed.
+    #[error("could not contextually validate semantically verified block")]
+    ValidateContextError(#[from] ValidateContextError),
+    /// The write task exited (likely during shutdown).
+    #[error("block write task has exited. Is Zebra shutting down?")]
+    WriteTaskExited,
+}
+
+#[derive(Debug, Error)]
+pub enum LayeredStateError<E: std::error::Error + std::fmt::Display> {
+    #[error("{0}")]
+    State(E),
+    #[error("{0}")]
+    Layer(BoxError),
+}
+
+impl<E: std::error::Error + 'static> From<BoxError> for LayeredStateError<E> {
+    fn from(err: BoxError) -> Self {
+        match err.downcast::<E>() {
+            Ok(state_err) => Self::State(*state_err),
+            Err(layer_error) => Self::Layer(layer_error),
+        }
+    }
+}
 
 /// An error describing the reason a block or its descendants could not be reconsidered after
 /// potentially being invalidated from the chain_set.
@@ -294,34 +354,6 @@ pub enum ValidateContextError {
         tx_index_in_block: Option<usize>,
         transaction_hash: transaction::Hash,
     },
-
-    #[error("block hash {block_hash} has already been sent to be committed to the state")]
-    #[non_exhaustive]
-    DuplicateCommitRequest { block_hash: block::Hash },
-
-    #[error("block height {block_height:?} is already committed in the finalized state")]
-    #[non_exhaustive]
-    AlreadyFinalized { block_height: block::Height },
-
-    #[error("block hash {block_hash} was replaced by a newer commit request")]
-    #[non_exhaustive]
-    ReplacedByNewerRequest { block_hash: block::Hash },
-
-    #[error("pruned block at or below the finalized tip height: {block_height:?}")]
-    #[non_exhaustive]
-    PrunedBelowFinalizedTip { block_height: block::Height },
-
-    #[error("block {block_hash} was dropped from the queue of non-finalized blocks")]
-    #[non_exhaustive]
-    DroppedCommitRequest { block_hash: block::Hash },
-
-    #[error("block commit task exited. Is Zebra shutting down?")]
-    #[non_exhaustive]
-    CommitTaskExited,
-
-    #[error("dropping the state: dropped unused non-finalized state queue block")]
-    #[non_exhaustive]
-    DroppedUnusedBlock,
 }
 
 /// Trait for creating the corresponding duplicate nullifier error from a nullifier.
