@@ -160,6 +160,8 @@ pub struct MorePeers;
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct CancelClientWork;
 
+type ResponseFuture = Pin<Box<dyn Future<Output = Result<Response, BoxError>> + Send + 'static>>;
+
 /// A [`tower::Service`] that abstractly represents "the rest of the network".
 ///
 /// # Security
@@ -202,11 +204,9 @@ where
     inventory_registry: InventoryRegistry,
 
     /// Stores requests that should be routed to peers once they are ready.
-    queued_broadcast_all_request: Option<(
+    queued_broadcast_all: Option<(
         Request,
-        tokio::sync::mpsc::Sender<
-            Pin<Box<dyn Future<Output = Result<Response, BoxError>> + Send + 'static>>,
-        >,
+        tokio::sync::mpsc::Sender<ResponseFuture>,
         HashSet<D::Key>,
     )>,
 
@@ -325,7 +325,7 @@ where
             ready_services: HashMap::new(),
             // Request Routing
             inventory_registry: InventoryRegistry::new(inv_stream),
-            queued_broadcast_all_request: None,
+            queued_broadcast_all: None,
 
             // Busy peers
             unready_services: FuturesUnordered::new(),
@@ -1042,37 +1042,54 @@ where
 
     /// Broadcasts the same request to all ready peers, ignoring return values.
     fn broadcast_all(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
-        // Broadcasts ignore the response
-        let all_ready_peers = self.ready_services.keys().copied().collect();
-        let all_unready_peers: HashSet<_> = self.cancel_handles.keys().cloned().collect();
-        if all_unready_peers.is_empty() {
-            self.send_multiple(req, all_ready_peers)
-        } else {
+        let ready_peers = self.ready_services.keys().copied().collect();
+        let send_multiple_fut = self.send_multiple(req.clone(), ready_peers);
+        let Some(mut queued_broadcast_fut_receiver) = self.queue_broadcast_all_unready(&req) else {
+            return send_multiple_fut;
+        };
+
+        async move {
+            let _ = send_multiple_fut.await?;
+            while queued_broadcast_fut_receiver.recv().await.is_some() {}
+            Ok(Response::Nil)
+        }
+        .boxed()
+    }
+
+    /// If there are unready peers, queues a request to be broadcasted to them and
+    /// returns a channel receiver for callers to await the broadcast_all() futures, or
+    /// returns None if there are no unready peers.
+    fn queue_broadcast_all_unready(
+        &mut self,
+        req: &Request,
+    ) -> Option<tokio::sync::mpsc::Receiver<ResponseFuture>> {
+        if !self.cancel_handles.is_empty() {
+            /// How many broadcast all futures to send to the channel until the peer set should wait for the channel consumer
+            /// to read a message before continuing to send the queued broadcast request to peers that were originally unready.
             const QUEUED_BROADCAST_FUTS_CHANNEL_SIZE: usize = 3;
-            let (sender, mut receiver) =
-                tokio::sync::mpsc::channel(QUEUED_BROADCAST_FUTS_CHANNEL_SIZE);
+
+            let (sender, receiver) = tokio::sync::mpsc::channel(QUEUED_BROADCAST_FUTS_CHANNEL_SIZE);
+            let unready_peers: HashSet<_> = self.cancel_handles.keys().cloned().collect();
+            let queued = (req.clone(), sender, unready_peers);
+
             // Drop the existing queued broadcast all request, if any.
-            self.queued_broadcast_all_request = Some((req.clone(), sender, all_unready_peers));
-            let send_multiple_fut = self.send_multiple(req, all_ready_peers);
-            async move {
-                let _ = send_multiple_fut.await?;
-                while receiver.recv().await.is_some() {}
-                Ok(Response::Nil)
-            }
-            .boxed()
+            self.queued_broadcast_all = Some(queued);
+
+            Some(receiver)
+        } else {
+            None
         }
     }
 
     /// Broadcasts the same requests to all ready peers which were unready when
     /// [`PeerSet::broadcast_all()`] was last called, ignoring return values.
     fn broadcast_all_queued(&mut self) {
-        let Some((req, sender, mut remaining_peers)) = self.queued_broadcast_all_request.take()
-        else {
+        let Some((req, sender, mut remaining_peers)) = self.queued_broadcast_all.take() else {
             return;
         };
 
         let Ok(reserved_send_slot) = sender.try_reserve() else {
-            self.queued_broadcast_all_request = Some((req, sender, remaining_peers));
+            self.queued_broadcast_all = Some((req, sender, remaining_peers));
             return;
         };
 
@@ -1086,7 +1103,7 @@ where
         reserved_send_slot.send(self.send_multiple(req.clone(), peers).boxed());
 
         if !remaining_peers.is_empty() {
-            self.queued_broadcast_all_request = Some((req, sender, remaining_peers));
+            self.queued_broadcast_all = Some((req, sender, remaining_peers));
         }
     }
 
