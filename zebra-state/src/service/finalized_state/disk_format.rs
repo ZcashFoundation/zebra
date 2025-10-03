@@ -5,7 +5,7 @@
 //! [`crate::constants::state_database_format_version_in_code()`] must be incremented
 //! each time the database format (column, serialization, etc) changes.
 
-use std::sync::Arc;
+use std::{io::Write, sync::Arc};
 
 pub mod block;
 pub mod chain;
@@ -182,25 +182,27 @@ pub fn truncate_zero_be_bytes(mem_bytes: &[u8], disk_len: usize) -> Option<&[u8]
     Some(truncated)
 }
 
-/// Expands `disk_bytes` to `mem_len`, by adding zero bytes at the start of the slice.
+/// Expands `disk_bytes` to `MEM_SIZE`, by adding zero bytes at the start of the slice.
 /// Used to zero-fill bytes that were discarded during serialization.
 ///
 /// # Panics
 ///
 /// - if `disk_bytes` is longer than `mem_len`
-pub fn expand_zero_be_bytes(disk_bytes: &[u8], mem_len: usize) -> Vec<u8> {
-    let extra_bytes = mem_len
-        .checked_sub(disk_bytes.len())
-        .expect("unexpected `disk_bytes` length: must not exceed `mem_len`");
-
-    if extra_bytes == 0 {
-        return disk_bytes.to_vec();
+#[inline]
+pub fn expand_zero_be_bytes<const MEM_SIZE: usize>(disk_bytes: &[u8]) -> [u8; MEM_SIZE] {
+    // Return early if disk_bytes is already the expected length
+    if let Ok(disk_bytes_array) = disk_bytes.try_into() {
+        return disk_bytes_array;
     }
 
-    let mut expanded = vec![0; extra_bytes];
-    expanded.extend(disk_bytes);
+    let extra_bytes = MEM_SIZE
+        .checked_sub(disk_bytes.len())
+        .expect("unexpected `disk_bytes` length: must not exceed `MEM_SIZE`");
 
-    assert_eq!(expanded.len(), mem_len);
+    let mut expanded = [0; MEM_SIZE];
+    let _ = (&mut expanded[extra_bytes..])
+        .write(disk_bytes)
+        .expect("should fit");
 
     expanded
 }
