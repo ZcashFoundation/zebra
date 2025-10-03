@@ -13,8 +13,9 @@ use std::sync::Arc;
 
 use thiserror::Error;
 
-use zcash_script::ZcashScript;
+use libzcash_script::ZcashScript;
 
+use zcash_script::script;
 use zebra_chain::{
     parameters::NetworkUpgrade,
     transaction::{HashType, SigHasher},
@@ -32,7 +33,7 @@ pub enum Error {
     /// tx is a coinbase transaction and should not be verified
     TxCoinbase,
     /// unknown error from zcash_script: {0}
-    Unknown(zcash_script::Error),
+    Unknown(libzcash_script::Error),
     /// transaction is invalid according to zebra_chain (not a zcash_script error)
     TxInvalid(#[from] zebra_chain::Error),
 }
@@ -51,27 +52,23 @@ impl fmt::Display for Error {
     }
 }
 
-impl From<zcash_script::Error> for Error {
+impl From<libzcash_script::Error> for Error {
     #[allow(non_upper_case_globals)]
-    fn from(err_code: zcash_script::Error) -> Error {
-        match err_code {
-            zcash_script::Error::Ok(_) => Error::ScriptInvalid,
-            unknown => Error::Unknown(unknown),
-        }
+    fn from(err_code: libzcash_script::Error) -> Error {
+        Error::Unknown(err_code)
     }
 }
 
 /// Get the interpreter according to the feature flag
 fn get_interpreter(
-    sighash: zcash_script::SighashCalculator<'_>,
+    sighash: zcash_script::interpreter::SighashCalculator<'_>,
     lock_time: u32,
     is_final: bool,
-    #[allow(unused)] flags: zcash_script::VerificationFlags,
 ) -> impl ZcashScript + use<'_> {
     #[cfg(feature = "comparison-interpreter")]
-    return zcash_script::cxx_rust_comparison_interpreter(sighash, lock_time, is_final, flags);
+    return libzcash_script::cxx_rust_comparison_interpreter(sighash, lock_time, is_final);
     #[cfg(not(feature = "comparison-interpreter"))]
-    zcash_script::CxxInterpreter {
+    libzcash_script::CxxInterpreter {
         sighash,
         lock_time,
         is_final,
@@ -143,8 +140,8 @@ impl CachedFfiTransaction {
         } = previous_output;
         let script_pub_key: &[u8] = lock_script.as_raw_bytes();
 
-        let flags = zcash_script::VerificationFlags::P2SH
-            | zcash_script::VerificationFlags::CHECKLOCKTIMEVERIFY;
+        let flags = zcash_script::interpreter::Flags::P2SH
+            | zcash_script::interpreter::Flags::CHECKLOCKTIMEVERIFY;
 
         let lock_time = self.transaction.raw_lock_time();
         let is_final = self.transaction.inputs()[input_index].sequence() == u32::MAX;
@@ -157,26 +154,37 @@ impl CachedFfiTransaction {
             transparent::Input::Coinbase { .. } => Err(Error::TxCoinbase)?,
         };
 
-        let calculate_sighash = |script_code: &[u8], hash_type: zcash_script::HashType| {
-            let script_code_vec = script_code.to_vec();
-            let mut our_hash_type = match hash_type.signed_outputs {
-                zcash_script::SignedOutputs::All => HashType::ALL,
-                zcash_script::SignedOutputs::Single => HashType::SINGLE,
-                zcash_script::SignedOutputs::None => HashType::NONE,
+        let script =
+            script::Raw::from_raw_parts(signature_script.to_vec(), script_pub_key.to_vec());
+
+        let calculate_sighash =
+            |script_code: &script::Code, hash_type: &zcash_script::signature::HashType| {
+                let script_code_vec = script_code.0.clone();
+                let mut our_hash_type = match hash_type.signed_outputs() {
+                    zcash_script::signature::SignedOutputs::All => HashType::ALL,
+                    zcash_script::signature::SignedOutputs::Single => HashType::SINGLE,
+                    zcash_script::signature::SignedOutputs::None => HashType::NONE,
+                };
+                if hash_type.anyone_can_pay() {
+                    our_hash_type |= HashType::ANYONECANPAY;
+                }
+                Some(
+                    self.sighasher()
+                        .sighash(our_hash_type, Some((input_index, script_code_vec)))
+                        .0,
+                )
             };
-            if hash_type.anyone_can_pay {
-                our_hash_type |= HashType::ANYONECANPAY;
-            }
-            Some(
-                self.sighasher()
-                    .sighash(our_hash_type, Some((input_index, script_code_vec)))
-                    .0,
-            )
-        };
-        let interpreter = get_interpreter(&calculate_sighash, lock_time, is_final, flags);
+        let interpreter = get_interpreter(&calculate_sighash, lock_time, is_final);
         interpreter
-            .verify_callback(script_pub_key, signature_script, flags)
-            .map_err(Error::from)
+            .verify_callback(&script, flags)
+            .map_err(|(_, e)| Error::from(e))
+            .and_then(|res| {
+                if res {
+                    Ok(())
+                } else {
+                    Err(Error::ScriptInvalid)
+                }
+            })
     }
 }
 
@@ -185,19 +193,14 @@ impl CachedFfiTransaction {
 pub trait Sigops {
     /// Returns the number of transparent signature operations in the
     /// transparent inputs and outputs of the given transaction.
-    fn sigops(&self) -> Result<u32, zcash_script::Error> {
-        // We use dummy values for args that don't influence sigops counting.
-        let interpreter = get_interpreter(
-            &|_, _| None,
-            0,
-            true,
-            zcash_script::VerificationFlags::P2SH
-                | zcash_script::VerificationFlags::CHECKLOCKTIMEVERIFY,
-        );
+    fn sigops(&self) -> Result<u32, libzcash_script::Error> {
+        let interpreter = get_interpreter(&|_, _| None, 0, true);
 
-        self.scripts().try_fold(0, |acc, s| {
-            interpreter.legacy_sigop_count_script(s).map(|n| acc + n)
-        })
+        Ok(self.scripts().try_fold(0, |acc, s| {
+            interpreter
+                .legacy_sigop_count_script(&script::Code(s.to_vec()))
+                .map(|n| acc + n)
+        })?)
     }
 
     /// Returns an iterator over the input and output scripts in the transaction.
@@ -236,10 +239,15 @@ impl Sigops for zcash_primitives::transaction::Transaction {
     fn scripts(&self) -> impl Iterator<Item = &[u8]> {
         self.transparent_bundle().into_iter().flat_map(|bundle| {
             (!bundle.is_coinbase())
-                .then(|| bundle.vin.iter().map(|i| i.script_sig.0.as_slice()))
+                .then(|| bundle.vin.iter().map(|i| i.script_sig().0 .0.as_slice()))
                 .into_iter()
                 .flatten()
-                .chain(bundle.vout.iter().map(|o| o.script_pubkey.0.as_slice()))
+                .chain(
+                    bundle
+                        .vout
+                        .iter()
+                        .map(|o| o.script_pubkey().0 .0.as_slice()),
+                )
         })
     }
 }
