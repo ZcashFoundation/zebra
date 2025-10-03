@@ -30,8 +30,8 @@ use crate::{service::read::AddressUtxos, NonFinalizedState, TransactionLocation,
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A response to a [`StateService`](crate::service::StateService) [`Request`].
 pub enum Response {
-    /// Response to [`Request::CommitSemanticallyVerifiedBlock`] indicating that a block was
-    /// successfully committed to the state.
+    /// Response to [`Request::CommitSemanticallyVerifiedBlock`] and [`Request::CommitCheckpointVerifiedBlock`]
+    /// indicating that a block was successfully committed to the state.
     Committed(block::Hash),
 
     /// Response to [`Request::InvalidateBlock`] indicating that a block was found and
