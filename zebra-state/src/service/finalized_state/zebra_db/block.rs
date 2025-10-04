@@ -459,10 +459,8 @@ impl ZebraDb {
 
         // TODO:
         // - Look up spent UTXOs `OutputLocation`s in advance, after getting the treestate from the non-finalized state
-        //   and before calling `commit_finalized_direct()`, i.e. add another thread to process finalizable blocks and
-        //   query the database for the output locations of spent UTXOs and any other data needed to write blocks.
-        //   processing contextually
-        //   (check the non-finalized state for the UTXOs too).
+        //   and before calling `commit_finalized_direct()`, i.e. add another thread to process finalizable blocks by
+        //   querying the database for the output locations of spent UTXOs and any other data needed to write blocks.
         // - Re-use the `OrderedUtxo`s from the `spent_outputs` field on `ContextuallyVerifiedBlock`
 
         // Get a list of the spent UTXOs, before we delete any from the database
