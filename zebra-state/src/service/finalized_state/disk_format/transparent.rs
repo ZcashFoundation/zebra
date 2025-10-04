@@ -334,6 +334,38 @@ impl AddressBalanceLocation {
     pub fn into_new_change(self) -> AddressBalanceLocationChange {
         AddressBalanceLocationChange::new(self.location)
     }
+
+    /// Updates the current balance by adding the supplied output's value.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn receive_output(
+        &mut self,
+        unspent_output: &transparent::Output,
+    ) -> Result<(), amount::Error> {
+        self.balance = (self
+            .balance
+            .zatoshis()
+            .checked_add(unspent_output.value().zatoshis()))
+        .expect("adding two Amounts is always within an i64")
+        .try_into()?;
+        self.received = self.received.saturating_add(unspent_output.value().into());
+        Ok(())
+    }
+
+    /// Updates the current balance by subtracting the supplied output's value.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn spend_output(
+        &mut self,
+        spent_output: &transparent::Output,
+    ) -> Result<(), amount::Error> {
+        self.balance = (self
+            .balance
+            .zatoshis()
+            .checked_sub(spent_output.value().zatoshis()))
+        .expect("subtracting two Amounts is always within an i64")
+        .try_into()?;
+
+        Ok(())
+    }
 }
 
 impl std::ops::Deref for AddressBalanceLocation {
