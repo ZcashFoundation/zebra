@@ -4,6 +4,7 @@ use NetworkUpgrade::*;
 
 use crate::block;
 use crate::parameters::{Network, Network::*};
+use crate::serialization::BytesInDisplayOrder;
 
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
@@ -149,13 +150,13 @@ pub(super) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
 #[derive(Copy, Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct ConsensusBranchId(pub(crate) u32);
 
-impl ConsensusBranchId {
-    /// Return the hash bytes in big-endian byte-order suitable for printing out byte by byte.
-    ///
-    /// Zebra displays consensus branch IDs in big-endian byte-order,
-    /// following the convention set by zcashd.
-    fn bytes_in_display_order(&self) -> [u8; 4] {
+impl BytesInDisplayOrder<false, 4> for ConsensusBranchId {
+    fn bytes_in_serialized_order(&self) -> [u8; 4] {
         self.0.to_be_bytes()
+    }
+
+    fn from_bytes_in_serialized_order(bytes: [u8; 4]) -> Self {
+        ConsensusBranchId(u32::from_be_bytes(bytes))
     }
 }
 
