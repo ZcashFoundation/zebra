@@ -269,6 +269,9 @@ impl BlockWriteSender {
                         )
                         .unwrap();
 
+                    // TODO: The success response could be sent when the latest chain tip channel is updated instead of here.
+                    //       It could improve sync time as it could respond to requests originating from the `ChainSync` component
+                    //       more quickly to free up slots for the syncer to request more blocks from the network.
                     if let Some(rsp_tx) = rsp_tx {
                         let _ = rsp_tx.send(Ok(hash));
                     }
