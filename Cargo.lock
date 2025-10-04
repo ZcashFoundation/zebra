@@ -7069,6 +7069,7 @@ dependencies = [
  "indicatif",
  "inferno",
  "insta",
+ "itertools 0.14.0",
  "jsonrpsee-types",
  "lazy_static",
  "log",

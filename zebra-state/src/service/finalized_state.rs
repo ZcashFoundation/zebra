@@ -330,7 +330,7 @@ impl FinalizedState {
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
         source: &str,
     ) -> Result<(block::Hash, NoteCommitmentTrees), BoxError> {
-        let (height, hash, finalized, prev_note_commitment_trees) = match finalizable_block {
+        let (height, finalized, prev_note_commitment_trees) = match finalizable_block {
             FinalizableBlock::Checkpoint {
                 checkpoint_verified,
             } => {
@@ -392,7 +392,6 @@ impl FinalizedState {
 
                 (
                     checkpoint_verified.height,
-                    checkpoint_verified.hash,
                     FinalizedBlock::from_checkpoint_verified(checkpoint_verified, treestate),
                     Some(prev_note_commitment_trees),
                 )
@@ -402,7 +401,6 @@ impl FinalizedState {
                 treestate,
             } => (
                 contextually_verified.height,
-                contextually_verified.hash,
                 FinalizedBlock::from_contextually_verified(contextually_verified, treestate),
                 prev_note_commitment_trees,
             ),
@@ -446,7 +444,7 @@ impl FinalizedState {
             source,
         );
 
-        if result.is_ok() {
+        if let Ok(hash) = result {
             // Save blocks to elasticsearch if the feature is enabled.
             #[cfg(feature = "elasticsearch")]
             self.elasticsearch(&finalized_inner_block);

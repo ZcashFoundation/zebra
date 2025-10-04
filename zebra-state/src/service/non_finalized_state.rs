@@ -23,7 +23,8 @@ use crate::{
     error::ReconsiderError,
     request::{ContextuallyVerifiedBlock, FinalizableBlock},
     service::{check, finalized_state::ZebraDb},
-    BoxError, SemanticallyVerifiedBlock, ValidateContextError, WatchReceiver,
+    BoxError, ChainTipBlock, CheckpointVerifiedBlock, SemanticallyVerifiedBlock,
+    ValidateContextError, WatchReceiver,
 };
 
 mod backup;
@@ -346,6 +347,64 @@ impl NonFinalizedState {
         Ok(())
     }
 
+    /// Commit block to the non-finalized state, on top of:
+    /// - an existing chain's tip, or
+    /// - a newly forked chain.
+    #[tracing::instrument(level = "debug", skip(self, finalized_state, prepared))]
+    pub fn commit_block_unchecked(
+        &mut self,
+        prepared: SemanticallyVerifiedBlock,
+        finalized_state: &ZebraDb,
+    ) -> Result<(), ValidateContextError> {
+        let parent_hash = prepared.block.header.previous_block_hash;
+        let (height, hash) = (prepared.height, prepared.hash);
+
+        let parent_chain = self.parent_chain(parent_hash)?;
+
+        // If the block is invalid, return the error,
+        // and drop the cloned parent Arc, or newly created chain fork.
+        let modified_chain =
+            self.validate_and_commit_unchecked(parent_chain, prepared, finalized_state)?;
+
+        // If the block is valid:
+        // - add the new chain fork or updated chain to the set of recent chains
+        // - remove the parent chain, if it was in the chain set
+        //   (if it was a newly created fork, it won't be in the chain set)
+        self.insert_with(modified_chain, |chain_set| {
+            chain_set.retain(|chain| chain.non_finalized_tip_hash() != parent_hash)
+        });
+
+        self.update_metrics_for_committed_block(height, hash);
+
+        Ok(())
+    }
+
+    /// Commit a checkpoint-verified block to the non-finalized state.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn commit_checkpoint_block(
+        &mut self,
+        checkpoint_block: CheckpointVerifiedBlock,
+        finalized_state: &ZebraDb,
+    ) -> Result<(FinalizableBlock, ChainTipBlock), BoxError> {
+        // TODO: Skip as many checks as possible when committing blocks to the non-finalized state through this method.
+
+        let CheckpointVerifiedBlock(prepared) = checkpoint_block;
+        let result = if self.is_chain_set_empty() {
+            self.commit_new_chain(prepared.clone(), finalized_state)
+        } else {
+            self.commit_block_unchecked(prepared.clone(), finalized_state)
+        };
+
+        result
+            .map(|()| {
+                self.best_chain()
+                    .expect("non-finalized state must have blocks")
+                    .finalizable_block(prepared.height)
+            })
+            .map(|finalizable_block| (finalizable_block, ChainTipBlock::from(prepared)))
+            .map_err(BoxError::from)
+    }
+
     /// Invalidate block with hash `block_hash` and all descendants from the non-finalized state. Insert
     /// the new chain into the chain_set and discard the previous.
     #[allow(clippy::unwrap_in_result)]
@@ -522,6 +581,44 @@ impl NonFinalizedState {
     /// `new_chain` should start as a clone of the parent chain fork,
     /// or the finalized tip.
     #[tracing::instrument(level = "debug", skip(self, finalized_state, new_chain))]
+    fn validate_and_commit_unchecked(
+        &self,
+        new_chain: Arc<Chain>,
+        prepared: SemanticallyVerifiedBlock,
+        finalized_state: &ZebraDb,
+    ) -> Result<Arc<Chain>, ValidateContextError> {
+        // Reads from disk
+        let spent_utxos = check::utxo::transparent_spend(
+            &prepared,
+            &new_chain.unspent_utxos(),
+            &new_chain.spent_utxos,
+            finalized_state,
+        )?;
+
+        // Quick check that doesn't read from disk
+        let contextual = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
+            prepared.clone(),
+            spent_utxos.clone(),
+        )
+        .map_err(|value_balance_error| {
+            ValidateContextError::CalculateBlockChainValueChange {
+                value_balance_error,
+                height: prepared.height,
+                block_hash: prepared.hash,
+                transaction_count: prepared.block.transactions.len(),
+                spent_utxo_count: spent_utxos.len(),
+            }
+        })?;
+
+        Self::validate_and_update_parallel_unchecked(new_chain, contextual)
+    }
+
+    /// Contextually validate `prepared` using `finalized_state`.
+    /// If validation succeeds, push `prepared` onto `new_chain`.
+    ///
+    /// `new_chain` should start as a clone of the parent chain fork,
+    /// or the finalized tip.
+    #[tracing::instrument(level = "debug", skip(self, finalized_state, new_chain))]
     fn validate_and_commit(
         &self,
         new_chain: Arc<Chain>,
@@ -637,6 +734,47 @@ impl NonFinalizedState {
         // Don't return the updated Chain unless all the parallel results were Ok
         block_commitment_result.expect("scope has finished")?;
         sprout_anchor_result.expect("scope has finished")?;
+
+        chain_push_result.expect("scope has finished")
+    }
+
+    /// Validate `contextual` and update `new_chain`, doing CPU-intensive work in parallel batches.
+    #[allow(clippy::unwrap_in_result)]
+    #[tracing::instrument(skip(new_chain))]
+    fn validate_and_update_parallel_unchecked(
+        new_chain: Arc<Chain>,
+        contextual: ContextuallyVerifiedBlock,
+    ) -> Result<Arc<Chain>, ValidateContextError> {
+        let mut block_commitment_result = None;
+        let mut chain_push_result = None;
+
+        // Clone function arguments for different threads
+        let block = contextual.block.clone();
+        let network = new_chain.network();
+        let history_tree = new_chain.history_block_commitment_tree();
+
+        rayon::in_place_scope_fifo(|scope| {
+            scope.spawn_fifo(|_scope| {
+                block_commitment_result = Some(check::block_commitment_is_valid_for_chain_history(
+                    block,
+                    &network,
+                    &history_tree,
+                ));
+            });
+
+            // We're pretty sure the new block is valid,
+            // so clone the inner chain if needed, then add the new block.
+            //
+            // Pushing a block onto a Chain can launch additional parallel batches.
+            // TODO: should we pass _scope into Chain::push()?
+            scope.spawn_fifo(|_scope| {
+                let new_chain = Arc::unwrap_or_clone(new_chain);
+                chain_push_result = Some(new_chain.push(contextual).map(Arc::new));
+            });
+        });
+
+        // Don't return the updated Chain unless all the parallel results were Ok
+        block_commitment_result.expect("scope has finished")?;
 
         chain_push_result.expect("scope has finished")
     }

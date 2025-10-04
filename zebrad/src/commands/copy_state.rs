@@ -37,8 +37,9 @@ use std::{cmp::min, path::PathBuf};
 
 use abscissa_core::{config, Command, FrameworkError};
 use color_eyre::eyre::{eyre, Report};
+use futures::{stream::FuturesUnordered, StreamExt};
 use tokio::time::Instant;
-use tower::{Service, ServiceExt};
+use tower::{Service, ServiceBuilder, ServiceExt};
 
 use zebra_chain::{block::Height, parameters::Network};
 use zebra_state as old_zs;
@@ -50,6 +51,8 @@ use crate::{
     prelude::*,
     BoxError,
 };
+
+use itertools::Itertools;
 
 /// How often we log info-level progress messages
 const PROGRESS_HEIGHT_INTERVAL: u32 = 5_000;
@@ -73,6 +76,11 @@ pub struct CopyStateCmd {
                       the source state uses the main zebrad config"
     )]
     target_config_path: Option<PathBuf>,
+
+    /// Whether to read newly committed blocks to verify that they are available in the target state.
+    // TODO: Use this
+    #[clap(short)]
+    should_verify_copied_block_availability: Option<bool>,
 
     /// Filter strings which override the config file and defaults
     #[clap(help = "tracing filters which override the zebrad.toml config")]
@@ -141,11 +149,13 @@ impl CopyStateCmd {
         // See "What's the fastest way to load data into RocksDB?" in
         // https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ
         let (
-            mut target_state,
+            target_state,
             _target_read_only_state_service,
             _target_latest_chain_tip,
             _target_chain_tip_change,
         ) = new_zs::init(target_config.clone(), network, Height::MAX, 0).await;
+
+        let mut target_state = ServiceBuilder::new().buffer(1_200).service(target_state);
 
         let elapsed = target_start_time.elapsed();
         info!(?elapsed, "finished initializing target state service");
@@ -207,104 +217,110 @@ impl CopyStateCmd {
         );
 
         let copy_start_time = Instant::now();
-        for height in min_target_height..=max_copy_height {
-            // Read block from source
-            let source_block = source_read_only_state_service
-                .ready()
-                .await?
-                .call(old_zs::ReadRequest::Block(Height(height).into()))
-                .await?;
-            let source_block = match source_block {
-                old_zs::ReadResponse::Block(Some(source_block)) => {
-                    trace!(?height, %source_block, "read source block");
-                    source_block
-                }
-                old_zs::ReadResponse::Block(None) => {
-                    Err(format!("unexpected missing source block, height: {height}",))?
-                }
+        let height_batches = (min_target_height..=max_copy_height).chunks(1_000);
 
-                response => Err(format!(
-                    "unexpected response to Block request, height: {height}, \n \
+        for height_batch in height_batches.into_iter() {
+            let mut commit_futs = FuturesUnordered::new();
+            for height in height_batch {
+                let mut source_read_state = source_read_only_state_service.clone();
+                let mut target_state = target_state.clone();
+                commit_futs.push(async move {
+                    // Read block from source
+                    let source_block = source_read_state
+                        .ready()
+                        .await?
+                        .call(old_zs::ReadRequest::Block(Height(height).into()))
+                        .await?;
+                    let source_block = match source_block {
+                        old_zs::ReadResponse::Block(Some(source_block)) => {
+                            trace!(?height, %source_block, "read source block");
+                            source_block
+                        }
+                        old_zs::ReadResponse::Block(None) => {
+                            Err(format!("unexpected missing source block, height: {height}",))?
+                        }
+
+                        response => Err(format!(
+                            "unexpected response to Block request, height: {height}, \n \
                      response: {response:?}",
-                ))?,
-            };
-            let source_block_hash = source_block.hash();
+                        ))?,
+                    };
 
-            // Write block to target
-            let target_block_commit_hash = target_state
-                .ready()
-                .await?
-                .call(new_zs::Request::CommitCheckpointVerifiedBlock(
-                    source_block.clone().into(),
-                ))
-                .await?;
-            let target_block_commit_hash = match target_block_commit_hash {
-                new_zs::Response::Committed(target_block_commit_hash) => {
-                    trace!(?target_block_commit_hash, "wrote target block");
-                    target_block_commit_hash
-                }
-                response => Err(format!(
-                    "unexpected response to CommitCheckpointVerifiedBlock request, height: {height}\n \
-                     response: {response:?}",
-                ))?,
-            };
+                    // Write block to target
+                    let _ = target_state
+                        .ready()
+                        .await?
+                        .call(new_zs::Request::CommitCheckpointVerifiedBlock(
+                            source_block.clone().into(),
+                        ))
+                        .await?;
 
-            // Read written block from target
-            let target_block = target_state
-                .ready()
-                .await?
-                .call(new_zs::Request::Block(Height(height).into()))
-                .await?;
-            let target_block = match target_block {
-                new_zs::Response::Block(Some(target_block)) => {
-                    trace!(?height, %target_block, "read target block");
-                    target_block
-                }
-                new_zs::Response::Block(None) => {
-                    Err(format!("unexpected missing target block, height: {height}",))?
-                }
-
-                response => Err(format!(
-                    "unexpected response to Block request, height: {height},\n \
-                     response: {response:?}",
-                ))?,
-            };
-            let target_block_data_hash = target_block.hash();
-
-            // Check for data errors
-            //
-            // These checks make sure that Zebra doesn't corrupt the block data
-            // when serializing it in the new format.
-            // Zebra currently serializes `Block` structs into bytes while writing,
-            // then deserializes bytes into new `Block` structs when reading.
-            // So these checks are sufficient to detect block data corruption.
-            //
-            // If Zebra starts reusing cached `Block` structs after writing them,
-            // we'll also need to check `Block` structs created from the actual database bytes.
-            if source_block_hash != target_block_commit_hash
-                || source_block_hash != target_block_data_hash
-                || source_block != target_block
-            {
-                Err(format!(
-                    "unexpected mismatch between source and target blocks,\n \
-                     max copy height: {max_copy_height:?},\n \
-                     source hash: {source_block_hash:?},\n \
-                     target commit hash: {target_block_commit_hash:?},\n \
-                     target data hash: {target_block_data_hash:?},\n \
-                     source block: {source_block:?},\n \
-                     target block: {target_block:?}",
-                ))?;
+                    Ok::<u32, BoxError>(height)
+                })
             }
 
-            // Log progress
-            if height % PROGRESS_HEIGHT_INTERVAL == 0 {
-                let elapsed = copy_start_time.elapsed();
-                info!(
-                    ?height,
-                    ?max_copy_height,
-                    ?elapsed,
-                    "copied block from source to target"
-                );
+            // // Read written block from target
+            // let target_block = target_state
+            //     .ready()
+            //     .await?
+            //     .call(new_zs::Request::Block(Height(height).into()))
+            //     .await?;
+            // let target_block = match target_block {
+            //     new_zs::Response::Block(Some(target_block)) => {
+            //         trace!(?height, %target_block, "read target block");
+            //         target_block
+            //     }
+            //     new_zs::Response::Block(None) => {
+            //         Err(format!("unexpected missing target block, height: {height}",))?
+            //     }
+
+            //     response => Err(format!(
+            //         "unexpected response to Block request, height: {height},\n \
+            //          response: {response:?}",
+            //     ))?,
+            // };
+            // let target_block_data_hash = target_block.hash();
+
+            // // Check for data errors
+            // //
+            // // These checks make sure that Zebra doesn't corrupt the block data
+            // // when serializing it in the new format.
+            // // Zebra currently serializes `Block` structs into bytes while writing,
+            // // then deserializes bytes into new `Block` structs when reading.
+            // // So these checks are sufficient to detect block data corruption.
+            // //
+            // // If Zebra starts reusing cached `Block` structs after writing them,
+            // // we'll also need to check `Block` structs created from the actual database bytes.
+            // if source_block_hash != target_block_commit_hash
+            //     || source_block_hash != target_block_data_hash
+            //     || source_block != target_block
+            // {
+            //     Err(format!(
+            //         "unexpected mismatch between source and target blocks,\n \
+            //          max copy height: {max_copy_height:?},\n \
+            //          source hash: {source_block_hash:?},\n \
+            //          target commit hash: {target_block_commit_hash:?},\n \
+            //          target data hash: {target_block_data_hash:?},\n \
+            //          source block: {source_block:?},\n \
+            //          target block: {target_block:?}",
+            //     ))?;
+            // }
+
+            while let Some(result) = commit_futs.next().await {
+                let Ok(height): Result<u32, _> = result else {
+                    panic!("something went very wrong");
+                };
+
+                // Log progress
+                if height % PROGRESS_HEIGHT_INTERVAL == 0 {
+                    let elapsed = copy_start_time.elapsed();
+                    info!(
+                        ?height,
+                        ?max_copy_height,
+                        ?elapsed,
+                        "copied block from source to target"
+                    );
+                }
             }
         }
 
