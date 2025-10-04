@@ -200,6 +200,8 @@ fn read_non_finalized_blocks_from_backup<'a>(
     backup_dir_path: &PathBuf,
     finalized_state: &'a ZebraDb,
 ) -> impl Iterator<Item = SemanticallyVerifiedBlock> + 'a {
+    // TODO: Update this function or this module to work with the latest changes in the non-finalized state.
+
     list_backup_dir_entries(backup_dir_path)
         // It's okay to leave the file here, the backup task will delete it as long as
         // the block is not added to the non-finalized state.

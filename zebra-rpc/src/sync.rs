@@ -216,6 +216,8 @@ impl TrustedChainSync {
         &mut self,
         block: SemanticallyVerifiedBlock,
     ) -> Result<(), ValidateContextError> {
+        // TODO: Update this function or this module to work with the latest changes in the non-finalized state.
+
         self.try_catch_up_with_primary().await;
 
         if self.db.finalized_tip_hash() == block.block.header.previous_block_hash {
