@@ -16,6 +16,7 @@ use zebra_chain::{
 
 use crate::{
     constants::MAX_BLOCK_REORG_HEIGHT,
+    request::FinalizableBlock,
     service::{
         check,
         finalized_state::{FinalizedState, ZebraDb},
@@ -58,6 +59,38 @@ pub(crate) fn validate_and_commit_non_finalized(
     let parent_hash = prepared.block.header.previous_block_hash;
 
     if finalized_state.finalized_tip_hash() == parent_hash {
+        non_finalized_state.commit_new_chain(prepared, finalized_state)?;
+    } else {
+        non_finalized_state.commit_block(prepared, finalized_state)?;
+    }
+
+    Ok(())
+}
+
+/// Run contextual validation on the prepared block and add it to the
+/// non-finalized state if it is contextually valid.
+// TODO: Update validate_and_commit_non_finalized instead.
+#[tracing::instrument(
+    level = "debug",
+    skip(finalized_state, non_finalized_state, prepared),
+    fields(
+        height = ?prepared.height,
+        hash = %prepared.hash,
+        chains = non_finalized_state.chain_count()
+    )
+)]
+pub(crate) fn validate_and_commit_non_finalized2(
+    finalized_state: &ZebraDb,
+    last_sent_finalizable_hash: block::Hash,
+    non_finalized_state: &mut NonFinalizedState,
+    prepared: SemanticallyVerifiedBlock,
+) -> Result<(), ValidateContextError> {
+    check::initial_contextual_validity(finalized_state, non_finalized_state, &prepared)?;
+    let parent_hash = prepared.block.header.previous_block_hash;
+
+    if last_sent_finalizable_hash == parent_hash
+        && !non_finalized_state.any_chain_contains(&parent_hash)
+    {
         non_finalized_state.commit_new_chain(prepared, finalized_state)?;
     } else {
         non_finalized_state.commit_block(prepared, finalized_state)?;
@@ -115,10 +148,14 @@ fn update_latest_chain_channels(
 
 /// A worker task that reads, validates, and writes blocks to the
 /// `finalized_state` or `non_finalized_state`.
-struct WriteBlockWorkerTask {
+struct NonFinalizedWriteBlockWorkerTask {
     finalized_block_write_receiver: UnboundedReceiver<QueuedCheckpointVerified>,
     non_finalized_block_write_receiver: UnboundedReceiver<NonFinalizedWriteMessage>,
     finalized_state: FinalizedState,
+    finalizable_block_sender: UnboundedSender<(
+        FinalizableBlock,
+        Option<oneshot::Sender<Result<block::Hash, BoxError>>>,
+    )>,
     non_finalized_state: NonFinalizedState,
     invalid_block_reset_sender: UnboundedSender<block::Hash>,
     chain_tip_sender: ChainTipSender,
@@ -177,7 +214,7 @@ impl BlockWriteSender {
         )
     )]
     pub fn spawn(
-        finalized_state: FinalizedState,
+        mut finalized_state: FinalizedState,
         non_finalized_state: NonFinalizedState,
         chain_tip_sender: ChainTipSender,
         non_finalized_state_sender: watch::Sender<NonFinalizedState>,
@@ -195,20 +232,47 @@ impl BlockWriteSender {
             tokio::sync::mpsc::unbounded_channel();
         let (invalid_block_reset_sender, invalid_block_write_reset_receiver) =
             tokio::sync::mpsc::unbounded_channel();
+        let (finalizable_block_sender, mut finalizable_block_receiver) =
+            tokio::sync::mpsc::unbounded_channel();
 
         let span = Span::current();
-        let task = std::thread::spawn(move || {
+        let non_finalized_task = {
+            let finalized_state = finalized_state.clone();
+            std::thread::spawn(move || {
+                span.in_scope(|| {
+                    NonFinalizedWriteBlockWorkerTask {
+                        finalized_block_write_receiver,
+                        non_finalized_block_write_receiver,
+                        finalized_state,
+                        finalizable_block_sender,
+                        non_finalized_state,
+                        invalid_block_reset_sender,
+                        chain_tip_sender,
+                        non_finalized_state_sender,
+                    }
+                    .run()
+                })
+            })
+        };
+
+        let span = Span::current();
+        let _finalized_task = std::thread::spawn(move || {
             span.in_scope(|| {
-                WriteBlockWorkerTask {
-                    finalized_block_write_receiver,
-                    non_finalized_block_write_receiver,
-                    finalized_state,
-                    non_finalized_state,
-                    invalid_block_reset_sender,
-                    chain_tip_sender,
-                    non_finalized_state_sender,
+                while let Some((finalizable_block, rsp_tx)) =
+                    finalizable_block_receiver.blocking_recv()
+                {
+                    let (hash, _) = finalized_state
+                        .commit_finalized_direct(
+                            finalizable_block,
+                            None,
+                            "commit contextually-verified request",
+                        )
+                        .unwrap();
+
+                    if let Some(rsp_tx) = rsp_tx {
+                        let _ = rsp_tx.send(Ok(hash));
+                    }
                 }
-                .run()
             })
         });
 
@@ -219,12 +283,12 @@ impl BlockWriteSender {
                     .filter(|_| should_use_finalized_block_write_sender),
             },
             invalid_block_write_reset_receiver,
-            Some(Arc::new(task)),
+            Some(Arc::new(non_finalized_task)),
         )
     }
 }
 
-impl WriteBlockWorkerTask {
+impl NonFinalizedWriteBlockWorkerTask {
     /// Reads blocks from the channels, writes them to the `finalized_state` or `non_finalized_state`,
     /// sends any errors on the `invalid_block_reset_sender`, then updates the `chain_tip_sender` and
     /// `non_finalized_state_sender`.
@@ -240,6 +304,7 @@ impl WriteBlockWorkerTask {
             finalized_block_write_receiver,
             non_finalized_block_write_receiver,
             finalized_state,
+            finalizable_block_sender,
             non_finalized_state,
             invalid_block_reset_sender,
             chain_tip_sender,
@@ -247,11 +312,87 @@ impl WriteBlockWorkerTask {
         } = &mut self;
 
         let mut last_zebra_mined_log_height = None;
-        let mut prev_finalized_note_commitment_trees = None;
+        let mut last_sent_finalizable_block_hash = finalized_state.db.finalized_tip_hash();
+        let mut last_sent_finalizable_block_height = if let Some(finalized_tip_height) =
+            finalized_state.db.finalized_tip_height()
+        {
+            finalized_tip_height
+        } else {
+            while let Some(ordered_block) = finalized_block_write_receiver.blocking_recv() {
+                if invalid_block_reset_sender.is_closed() {
+                    info!("StateService closed the block reset channel. Is Zebra shutting down?");
+                    return;
+                }
+
+                // Discard any children of invalid blocks in the channel
+                //
+                // `commit_finalized()` requires blocks in height order.
+                // So if there has been a block commit error,
+                // we need to drop all the descendants of that block,
+                // until we receive a block at the required next height.
+                let next_valid_height = finalized_state
+                    .db
+                    .finalized_tip_height()
+                    .map(|height| (height + 1).expect("committed heights are valid"))
+                    .unwrap_or(Height(0));
+
+                if ordered_block.0.height != next_valid_height {
+                    debug!(
+                        ?next_valid_height,
+                        invalid_height = ?ordered_block.0.height,
+                        invalid_hash = ?ordered_block.0.hash,
+                        "got a block that was the wrong height. \
+                         Assuming a parent block failed, and dropping this block",
+                    );
+
+                    // We don't want to send a reset here, because it could overwrite a valid sent hash
+                    std::mem::drop(ordered_block);
+                    continue;
+                }
+
+                match finalized_state.commit_finalized(ordered_block, None) {
+                    Ok((finalized, _)) => {
+                        let tip_block = ChainTipBlock::from(finalized);
+
+                        log_if_mined_by_zebra(&tip_block, &mut last_zebra_mined_log_height);
+
+                        last_sent_finalizable_block_hash = tip_block.hash;
+                        chain_tip_sender.set_finalized_tip(tip_block);
+                        break;
+                    }
+                    Err(error) => {
+                        // TODO: Move the body of this match arm to a function to deduplicate it.
+                        let finalized_tip = finalized_state.db.tip();
+
+                        // The last block in the queue failed, so we can't commit the next block.
+                        // Instead, we need to reset the state queue,
+                        // and discard any children of the invalid block in the channel.
+                        info!(
+                            ?error,
+                            last_valid_height = ?finalized_tip.map(|tip| tip.0),
+                            last_valid_hash = ?finalized_tip.map(|tip| tip.1),
+                            "committing a block to the finalized state failed, resetting state queue",
+                        );
+
+                        let send_result = invalid_block_reset_sender
+                            .send(finalized_state.db.finalized_tip_hash());
+
+                        if send_result.is_err() {
+                            info!(
+                            "StateService closed the block reset channel. Is Zebra shutting down?"
+                        );
+                            return;
+                        }
+                    }
+                }
+            }
+
+            Height(0)
+        };
 
         // Write all the finalized blocks sent by the state,
         // until the state closes the finalized block channel's sender.
-        while let Some(ordered_block) = finalized_block_write_receiver.blocking_recv() {
+        while let Some((ordered_block, rsp_tx)) = finalized_block_write_receiver.blocking_recv() {
             // TODO: split these checks into separate functions
 
             if invalid_block_reset_sender.is_closed() {
@@ -265,13 +406,12 @@ impl WriteBlockWorkerTask {
             // So if there has been a block commit error,
             // we need to drop all the descendants of that block,
             // until we receive a block at the required next height.
-            let next_valid_height = finalized_state
-                .db
-                .finalized_tip_height()
-                .map(|height| (height + 1).expect("committed heights are valid"))
-                .unwrap_or(Height(0));
+            let next_valid_height = last_sent_finalizable_block_height
+                .next()
+                .expect("committed heights are valid");
+            let height = ordered_block.0.height;
 
-            if ordered_block.0.height != next_valid_height {
+            if height != next_valid_height {
                 debug!(
                     ?next_valid_height,
                     invalid_height = ?ordered_block.0.height,
@@ -286,15 +426,33 @@ impl WriteBlockWorkerTask {
             }
 
             // Try committing the block
-            match finalized_state
-                .commit_finalized(ordered_block, prev_finalized_note_commitment_trees.take())
-            {
-                Ok((finalized, note_commitment_trees)) => {
-                    let tip_block = ChainTipBlock::from(finalized);
-                    prev_finalized_note_commitment_trees = Some(note_commitment_trees);
+            match non_finalized_state.commit_checkpoint_block(ordered_block, &finalized_state.db) {
+                Ok((finalizable_block, tip_block)) => {
+                    // get the finalized tip height before sending the finalizable block to ensure that this won't pop the non-finalized root
+                    let finalized_tip_height = finalized_state.db.finalized_tip_height();
+                    if let Err(err) =
+                        finalizable_block_sender.send((finalizable_block, Some(rsp_tx)))
+                    {
+                        tracing::warn!(?err, "failed to send finalizable block");
+                        return;
+                    };
+
+                    last_sent_finalizable_block_height = height;
+                    last_sent_finalizable_block_hash = tip_block.hash;
+
+                    if let Some(finalized_tip_height) = finalized_tip_height {
+                        while finalized_tip_height
+                            > non_finalized_state
+                                .root_height()
+                                .expect("successfully committed a block")
+                        {
+                            non_finalized_state.finalize();
+                        }
+                    };
+
+                    let _ = non_finalized_state_sender.send(non_finalized_state.clone());
 
                     log_if_mined_by_zebra(&tip_block, &mut last_zebra_mined_log_height);
-
                     chain_tip_sender.set_finalized_tip(tip_block);
                 }
                 Err(error) => {
@@ -309,9 +467,10 @@ impl WriteBlockWorkerTask {
                         last_valid_hash = ?finalized_tip.map(|tip| tip.1),
                         "committing a block to the finalized state failed, resetting state queue",
                     );
+                    let _ = rsp_tx.send(Err(error));
 
                     let send_result =
-                        invalid_block_reset_sender.send(finalized_state.db.finalized_tip_hash());
+                        invalid_block_reset_sender.send(last_sent_finalizable_block_hash);
 
                     if send_result.is_err() {
                         info!(
@@ -332,6 +491,10 @@ impl WriteBlockWorkerTask {
 
         // Save any errors to propagate down to queued child blocks
         let mut parent_error_map: IndexMap<block::Hash, ValidateContextError> = IndexMap::new();
+        let mut last_sent_finalizable_block_height = finalized_state
+            .db
+            .finalized_tip_height()
+            .expect("must have blocks");
 
         while let Some(msg) = non_finalized_block_write_receiver.blocking_recv() {
             let queued_child_and_rsp_tx = match msg {
@@ -372,8 +535,9 @@ impl WriteBlockWorkerTask {
                 Err(parent_error.clone())
             } else {
                 tracing::trace!(?child_hash, "validating queued child");
-                validate_and_commit_non_finalized(
+                validate_and_commit_non_finalized2(
                     &finalized_state.db,
+                    last_sent_finalizable_block_hash,
                     non_finalized_state,
                     queued_child,
                 )
@@ -400,6 +564,16 @@ impl WriteBlockWorkerTask {
                 continue;
             }
 
+            if let Some(finalized_tip_height) = finalized_state.db.finalized_tip_height() {
+                while finalized_tip_height
+                    > non_finalized_state
+                        .root_height()
+                        .expect("successfully committed a block")
+                {
+                    non_finalized_state.finalize();
+                }
+            };
+
             // Committing blocks to the finalized state keeps the same chain,
             // so we can update the chain seen by the rest of the application now.
             //
@@ -416,18 +590,24 @@ impl WriteBlockWorkerTask {
             // Update the caller with the result.
             let _ = rsp_tx.send(result.clone().map(|()| child_hash).map_err(Into::into));
 
-            while non_finalized_state
-                .best_chain_len()
-                .expect("just successfully inserted a non-finalized block above")
-                > MAX_BLOCK_REORG_HEIGHT
+            let non_finalized_tip_height = non_finalized_state.best_tip().unwrap().0;
+            while non_finalized_tip_height.0
+                > (last_sent_finalizable_block_height.0 + MAX_BLOCK_REORG_HEIGHT)
             {
-                tracing::trace!("finalizing block past the reorg limit");
-                let contextually_verified_with_trees = non_finalized_state.finalize();
-                prev_finalized_note_commitment_trees = finalized_state
-                            .commit_finalized_direct(contextually_verified_with_trees, prev_finalized_note_commitment_trees.take(), "commit contextually-verified request")
-                            .expect(
-                                "unexpected finalized block commit error: note commitment and history trees were already checked by the non-finalized state",
-                            ).1.into();
+                let finalizable = non_finalized_state
+                    .best_chain()
+                    .unwrap()
+                    .finalizable_block(last_sent_finalizable_block_height.next().unwrap());
+
+                let (finalizable_hash, finalizable_height) = finalizable.hash_and_height();
+
+                if let Err(err) = finalizable_block_sender.send((finalizable, None)) {
+                    tracing::warn!(?err, "failed to send finalizable block");
+                    return;
+                };
+
+                last_sent_finalizable_block_hash = finalizable_hash;
+                last_sent_finalizable_block_height = finalizable_height;
             }
 
             // Update the metrics if semantic and contextual validation passes

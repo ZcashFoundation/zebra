@@ -516,7 +516,7 @@ proptest! {
             let result_receiver = state_service.queue_and_commit_to_finalized_state(block);
             let result = result_receiver.blocking_recv();
 
-            prop_assert!(result.is_ok(), "unexpected failed finalized block commit: {:?}", result);
+            prop_assert!(result.as_ref().is_ok_and(|result| result.is_ok()), "unexpected failed finalized block commit: {:?}", result);
 
             // Wait for the channels to be updated by the block commit task.
             // TODO: add a blocking method on ChainTipChange
@@ -539,7 +539,7 @@ proptest! {
             let result_receiver = state_service.queue_and_commit_to_non_finalized_state(block);
             let result = result_receiver.blocking_recv();
 
-            prop_assert!(result.is_ok(), "unexpected failed non-finalized block commit: {:?}", result);
+            prop_assert!(result.as_ref().is_ok_and(|result| result.is_ok()), "unexpected failed non-finalized block commit: {:?}", result);
 
             // Wait for the channels to be updated by the block commit task.
             // TODO: add a blocking method on ChainTipChange

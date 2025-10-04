@@ -23,7 +23,8 @@ use crate::{
     error::ReconsiderError,
     request::{ContextuallyVerifiedBlock, FinalizableBlock},
     service::{check, finalized_state::ZebraDb},
-    BoxError, SemanticallyVerifiedBlock, ValidateContextError, WatchReceiver,
+    BoxError, ChainTipBlock, CheckpointVerifiedBlock, SemanticallyVerifiedBlock,
+    ValidateContextError, WatchReceiver,
 };
 
 mod backup;
@@ -344,6 +345,32 @@ impl NonFinalizedState {
         self.update_metrics_for_committed_block(height, hash);
 
         Ok(())
+    }
+
+    /// Commit a checkpoint-verified block to the non-finalized state.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn commit_checkpoint_block(
+        &mut self,
+        checkpoint_block: CheckpointVerifiedBlock,
+        finalized_state: &ZebraDb,
+    ) -> Result<(FinalizableBlock, ChainTipBlock), BoxError> {
+        // TODO: Skip as many checks as possible when committing blocks to the non-finalized state through this method.
+
+        let CheckpointVerifiedBlock(prepared) = checkpoint_block;
+        let result = if self.is_chain_set_empty() {
+            self.commit_new_chain(prepared.clone(), finalized_state)
+        } else {
+            self.commit_block(prepared.clone(), finalized_state)
+        };
+
+        result
+            .map(|()| {
+                self.best_chain()
+                    .expect("non-finalized state must have blocks")
+                    .finalizable_block(prepared.height)
+            })
+            .map(|finalizable_block| (finalizable_block, ChainTipBlock::from(prepared)))
+            .map_err(BoxError::from)
     }
 
     /// Invalidate block with hash `block_hash` and all descendants from the non-finalized state. Insert

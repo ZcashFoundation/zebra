@@ -20,7 +20,7 @@ use zebra_chain::{
     orchard,
     parallel::tree::NoteCommitmentTrees,
     parameters::Network,
-    primitives::Groth16Proof,
+    primitives::{Bctv14Proof, Groth16Proof},
     sapling,
     serialization::ZcashSerialize as _,
     sprout,
@@ -35,8 +35,10 @@ use zebra_chain::{
 };
 
 use crate::{
-    request::Treestate, service::check, ContextuallyVerifiedBlock, HashOrHeight, OutputLocation,
-    TransactionLocation, ValidateContextError,
+    request::{FinalizableBlock, Treestate},
+    service::check,
+    ContextuallyVerifiedBlock, HashOrHeight, OutputLocation, TransactionLocation,
+    ValidateContextError,
 };
 
 #[cfg(feature = "indexer")]
@@ -334,6 +336,23 @@ impl Chain {
         self.blocks.insert(block.height, block);
 
         Ok(self)
+    }
+
+    /// Gets the contextually-validated block of the non-finalized portion of a chain at
+    /// the provided height and its associated treestate to return a [`FinalizableBlock`].
+    pub(crate) fn finalizable_block(&self, block_height: Height) -> FinalizableBlock {
+        // Obtain the treestate associated with the block being finalized.
+        let treestate = self
+            .treestate(block_height.into())
+            .expect("The treestate must be present for the root height.");
+
+        // Remove the lowest height block from `self.blocks`.
+        let block = self
+            .blocks
+            .get(&block_height)
+            .expect("only called while blocks is populated");
+
+        FinalizableBlock::new(block.clone(), treestate)
     }
 
     /// Pops the lowest height block of the non-finalized portion of a chain,
@@ -1558,18 +1577,42 @@ impl Chain {
             let (
                 inputs,
                 outputs,
-                joinsplit_data,
+                joinsplit_data_bct,
+                joinsplit_data_groth,
                 sapling_shielded_data_per_spend_anchor,
                 sapling_shielded_data_shared_anchor,
                 orchard_shielded_data,
             ) = match transaction.deref() {
+                V1 {
+                    inputs, outputs, ..
+                } => (inputs, outputs, &None, &None, &None, &None, &None),
+                V2 {
+                    inputs,
+                    outputs,
+                    joinsplit_data,
+                    ..
+                } => (inputs, outputs, joinsplit_data, &None, &None, &None, &None),
+                V3 {
+                    inputs,
+                    outputs,
+                    joinsplit_data,
+                    ..
+                } => (inputs, outputs, joinsplit_data, &None, &None, &None, &None),
                 V4 {
                     inputs,
                     outputs,
                     joinsplit_data,
                     sapling_shielded_data,
                     ..
-                } => (inputs, outputs, joinsplit_data, sapling_shielded_data, &None, &None),
+                } => (
+                    inputs,
+                    outputs,
+                    &None,
+                    joinsplit_data,
+                    sapling_shielded_data,
+                    &None,
+                    &None,
+                ),
                 V5 {
                     inputs,
                     outputs,
@@ -1581,10 +1624,11 @@ impl Chain {
                     outputs,
                     &None,
                     &None,
+                    &None,
                     sapling_shielded_data,
                     orchard_shielded_data,
                 ),
-                #[cfg(feature="tx_v6")]
+                #[cfg(feature = "tx_v6")]
                 V6 {
                     inputs,
                     outputs,
@@ -1596,12 +1640,9 @@ impl Chain {
                     outputs,
                     &None,
                     &None,
+                    &None,
                     sapling_shielded_data,
                     orchard_shielded_data,
-                ),
-
-                V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
-                    "older transaction versions only exist in finalized blocks, because of the mandatory canopy checkpoint",
                 ),
             };
 
@@ -1625,7 +1666,8 @@ impl Chain {
             #[cfg(not(feature = "indexer"))]
             let transaction_hash = ();
 
-            self.update_chain_tip_with(&(joinsplit_data, &transaction_hash))?;
+            self.update_chain_tip_with(&(joinsplit_data_bct, &transaction_hash))?;
+            self.update_chain_tip_with(&(joinsplit_data_groth, &transaction_hash))?;
             self.update_chain_tip_with(&(
                 sapling_shielded_data_per_spend_anchor,
                 &transaction_hash,
@@ -1743,18 +1785,43 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
             let (
                 inputs,
                 outputs,
-                joinsplit_data,
+                joinsplit_data_bct,
+                joinsplit_data_groth,
                 sapling_shielded_data_per_spend_anchor,
                 sapling_shielded_data_shared_anchor,
                 orchard_shielded_data,
             ) = match transaction.deref() {
+                V1 {
+                    inputs, outputs, ..
+                } => (inputs, outputs, &None, &None, &None, &None, &None),
+                V2 {
+                    inputs,
+                    outputs,
+                    joinsplit_data,
+                    ..
+                } => (inputs, outputs, joinsplit_data, &None, &None, &None, &None),
+                V3 {
+                    inputs,
+                    outputs,
+                    joinsplit_data,
+                    ..
+                } => (inputs, outputs, joinsplit_data, &None, &None, &None, &None),
+
                 V4 {
                     inputs,
                     outputs,
                     joinsplit_data,
                     sapling_shielded_data,
                     ..
-                } => (inputs, outputs, joinsplit_data, sapling_shielded_data, &None, &None),
+                } => (
+                    inputs,
+                    outputs,
+                    &None,
+                    joinsplit_data,
+                    sapling_shielded_data,
+                    &None,
+                    &None,
+                ),
                 V5 {
                     inputs,
                     outputs,
@@ -1766,10 +1833,11 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                     outputs,
                     &None,
                     &None,
+                    &None,
                     sapling_shielded_data,
                     orchard_shielded_data,
                 ),
-                #[cfg(feature="tx_v6")]
+                #[cfg(feature = "tx_v6")]
                 V6 {
                     inputs,
                     outputs,
@@ -1781,12 +1849,9 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                     outputs,
                     &None,
                     &None,
+                    &None,
                     sapling_shielded_data,
                     orchard_shielded_data,
-                ),
-
-                V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
-                    "older transaction versions only exist in finalized blocks, because of the mandatory canopy checkpoint",
                 ),
             };
 
@@ -1807,7 +1872,8 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
             #[cfg(not(feature = "indexer"))]
             let transaction_hash = &();
 
-            self.revert_chain_with(&(joinsplit_data, transaction_hash), position);
+            self.revert_chain_with(&(joinsplit_data_bct, transaction_hash), position);
+            self.revert_chain_with(&(joinsplit_data_groth, transaction_hash), position);
             self.revert_chain_with(
                 &(sapling_shielded_data_per_spend_anchor, transaction_hash),
                 position,
@@ -2090,6 +2156,59 @@ impl
         &mut self,
         &(joinsplit_data, _revealing_tx_id): &(
             &Option<transaction::JoinSplitData<Groth16Proof>>,
+            &SpendingTransactionId,
+        ),
+        _position: RevertPosition,
+    ) {
+        if let Some(joinsplit_data) = joinsplit_data {
+            // Note commitments are removed from the Chain during a fork,
+            // by removing trees above the fork height from the note commitment index.
+            // This happens when reverting the block itself.
+
+            check::nullifier::remove_from_non_finalized_chain(
+                &mut self.sprout_nullifiers,
+                joinsplit_data.nullifiers(),
+            );
+        }
+    }
+}
+
+impl
+    UpdateWith<(
+        &Option<transaction::JoinSplitData<Bctv14Proof>>,
+        &SpendingTransactionId,
+    )> for Chain
+{
+    #[instrument(skip(self, joinsplit_data))]
+    fn update_chain_tip_with(
+        &mut self,
+        &(joinsplit_data, revealing_tx_id): &(
+            &Option<transaction::JoinSplitData<Bctv14Proof>>,
+            &SpendingTransactionId,
+        ),
+    ) -> Result<(), ValidateContextError> {
+        if let Some(joinsplit_data) = joinsplit_data {
+            // We do note commitment tree updates in parallel rayon threads.
+
+            check::nullifier::add_to_non_finalized_chain_unique(
+                &mut self.sprout_nullifiers,
+                joinsplit_data.nullifiers(),
+                *revealing_tx_id,
+            )?;
+        }
+        Ok(())
+    }
+
+    /// # Panics
+    ///
+    /// Panics if any nullifier is missing from the chain when we try to remove it.
+    ///
+    /// See [`check::nullifier::remove_from_non_finalized_chain`] for details.
+    #[instrument(skip(self, joinsplit_data))]
+    fn revert_chain_with(
+        &mut self,
+        &(joinsplit_data, _revealing_tx_id): &(
+            &Option<transaction::JoinSplitData<Bctv14Proof>>,
             &SpendingTransactionId,
         ),
         _position: RevertPosition,

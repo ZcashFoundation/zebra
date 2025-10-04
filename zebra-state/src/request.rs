@@ -426,6 +426,19 @@ impl FinalizableBlock {
         }
     }
 
+    /// Returns the hash and height of the inner block.
+    pub fn hash_and_height(&self) -> (block::Hash, block::Height) {
+        match self {
+            FinalizableBlock::Checkpoint {
+                checkpoint_verified,
+            } => (checkpoint_verified.hash, checkpoint_verified.height),
+            FinalizableBlock::Contextual {
+                contextually_verified,
+                ..
+            } => (contextually_verified.hash, contextually_verified.height),
+        }
+    }
+
     #[cfg(test)]
     /// Extract a [`Block`] from a [`FinalizableBlock`] variant.
     pub fn inner_block(&self) -> Arc<Block> {
