@@ -601,6 +601,12 @@ async fn test_rpc_response_data_for_network(network: &Network) {
         panic!("We should have a GetAddressUtxosResponse::ChainInfoFalse struct");
     };
     snapshot_rpc_getaddressutxos(addresses, &settings);
+
+    // `gethealthinfo`
+    let get_health_info = rpc
+        .get_health_info()
+        .expect("We should have a GetHealthInfo struct");
+    snapshot_rpc_gethealthinfo(get_health_info, &settings);
 }
 
 async fn test_mocked_rpc_response_data_for_network(network: &Network) {
@@ -822,6 +828,15 @@ fn snapshot_rpc_getaddresstxids_invalid(
 /// Snapshot `getaddressutxos` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getaddressutxos(utxos: Vec<Utxo>, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_address_utxos", utxos));
+}
+
+/// Snapshot `gethealthinfo` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_gethealthinfo(info: GetHealthInfo, settings: &insta::Settings) {
+    // Snapshot only the `status` field since other fields vary per build/run.
+    let status_only = serde_json::json!({ "status": info.status });
+    settings.bind(|| {
+        insta::assert_json_snapshot!("get_health_info_status", status_only);
+    });
 }
 
 /// Snapshot `getblockcount` response, using `cargo insta` and JSON serialization.

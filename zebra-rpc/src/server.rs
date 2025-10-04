@@ -10,7 +10,10 @@
 use std::{fmt, panic};
 
 use cookie::Cookie;
-use jsonrpsee::server::{middleware::rpc::RpcServiceBuilder, Server, ServerHandle};
+use jsonrpsee::server::{
+    middleware::{http::ProxyGetRequestLayer, rpc::RpcServiceBuilder},
+    Server, ServerHandle,
+};
 use tokio::task::JoinHandle;
 use tower::Service;
 use tracing::*;
@@ -147,16 +150,26 @@ impl RpcServer {
             .listen_addr
             .expect("caller should make sure listen_addr is set");
 
-        let http_middleware_layer = if conf.enable_cookie_auth {
-            let cookie = Cookie::default();
-            cookie::write_to_disk(&cookie, &conf.cookie_dir)
-                .expect("Zebra must be able to write the auth cookie to the disk");
-            HttpRequestMiddlewareLayer::new(Some(cookie))
-        } else {
-            HttpRequestMiddlewareLayer::new(None)
+        let http_middleware_layer = match conf.enable_cookie_auth {
+            true => {
+                let cookie = Cookie::default();
+                match cookie::write_to_disk(&cookie, &conf.cookie_dir) {
+                    Ok(_) => HttpRequestMiddlewareLayer::new(Some(cookie)),
+                    Err(err) => {
+                        error!(?err, "Failed to write auth cookie to disk");
+                        return Err(err.into());
+                    }
+                }
+            }
+            false => HttpRequestMiddlewareLayer::new(None),
         };
 
-        let http_middleware = tower::ServiceBuilder::new().layer(http_middleware_layer);
+        let health_proxy_layer = ProxyGetRequestLayer::new("/health", "gethealthinfo")
+            .map_err(|e| -> tower::BoxError { e.into() })?;
+
+        let http_middleware = tower::ServiceBuilder::new()
+            .layer(health_proxy_layer)
+            .layer(http_middleware_layer);
 
         let rpc_middleware = RpcServiceBuilder::new()
             .rpc_logger(1024)

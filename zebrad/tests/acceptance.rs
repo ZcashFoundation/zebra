@@ -1662,6 +1662,20 @@ async fn rpc_endpoint_client_content_type() -> Result<()> {
     // Create an http client
     let client = RpcRequestClient::new(rpc_address);
 
+    // Just test with plain content type, similar to getinfo.
+    let res = client
+        .call_with_content_type(
+            "gethealthinfo",
+            "[]".to_string(),
+            "application/json".to_string(),
+        )
+        .await?;
+    assert!(res.status().is_success());
+
+    let body = res.bytes().await?;
+    let parsed: Value = serde_json::from_slice(&body)?;
+    assert_eq!(parsed["result"]["status"], "healthy");
+
     // Call to `getinfo` RPC method with a no content type.
     let res = client
         .call_with_no_content_type("getinfo", "[]".to_string())
@@ -1745,6 +1759,15 @@ fn non_blocking_logger() -> Result<()> {
 
         // Create an http client
         let client = RpcRequestClient::new(rpc_address);
+
+        // Make the call to the `gethealthinfo` RPC method.
+        let res = client.call("gethealthinfo", "[]".to_string()).await?;
+        assert!(res.status().is_success());
+
+        let body = res.bytes().await?;
+        let parsed: Value = serde_json::from_slice(&body)?;
+        let status = parsed["result"]["status"].as_str().unwrap();
+        assert_eq!(status, "healthy");
 
         // Most of Zebra's lines are 100-200 characters long, so 500 requests should print enough to fill the unix pipe,
         // fill the channel that tracing logs are queued onto, and drop logs rather than block execution.
@@ -2964,7 +2987,7 @@ fn external_address() -> Result<()> {
     let mut child = testdir.spawn_child(args!["start"])?;
 
     // Give enough time to start connecting to some peers.
-    std::thread::sleep(Duration::from_secs(10));
+    std::thread::sleep(LAUNCH_DELAY);
 
     child.kill(false)?;
 
