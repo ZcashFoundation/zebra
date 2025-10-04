@@ -1002,6 +1002,8 @@ async fn setup(
     //
     // (The genesis block gets skipped, because block 1 is committed before the task is spawned.)
     for block in committed_blocks.iter().skip(1) {
+        tokio::time::sleep(PEER_GOSSIP_DELAY).await;
+
         peer_set
             .expect_request(Request::AdvertiseBlock(block.hash()))
             .await

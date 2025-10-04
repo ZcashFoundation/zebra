@@ -163,6 +163,9 @@ mod peer_set;
 mod policies;
 mod protocol;
 
+#[allow(unused)]
+pub(crate) use peer_set::PeerSet;
+
 // Wait until `arti-client`'s dependency `x25519-dalek v1.2.0` is updated to a higher version. (#5492)
 // #[cfg(feature = "tor")]
 // pub use crate::isolated::tor::connect_isolated_tor;
