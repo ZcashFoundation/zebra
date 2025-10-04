@@ -400,7 +400,7 @@ fn check_configured_funding_stream_constraints() {
             assert_eq!(
                 network_funding_streams.recipients().clone(),
                 expected_recipients,
-                "should use default start height when unconfigured"
+                "should use default recipients when unconfigured"
             );
         }
     }
@@ -551,7 +551,7 @@ fn sum_of_one_time_lockbox_disbursements_is_correct() {
         assert_eq!(
             expected_total_lockbox_disbursement_value,
             network.lockbox_disbursement_total_amount(nu6_1_activation_height),
-            "sum of lockbox disbursement output values should match expected total"
+            "total lockbox disbursement value should match expected total"
         );
     }
 }
