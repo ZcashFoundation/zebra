@@ -52,7 +52,10 @@ pub(super) enum Handler {
     /// Indicates that the handler has finished processing the request.
     /// An error here is scoped to the request.
     Finished(Result<Response, PeerError>),
-    Ping(Nonce),
+    Ping {
+        nonce: Nonce,
+        ping_sent_at: Instant,
+    },
     Peers,
     FindBlocks,
     FindHeaders,
@@ -73,7 +76,7 @@ impl fmt::Display for Handler {
             Handler::Finished(Ok(response)) => format!("Finished({response})"),
             Handler::Finished(Err(error)) => format!("Finished({error})"),
 
-            Handler::Ping(_) => "Ping".to_string(),
+            Handler::Ping { .. } => "Ping".to_string(),
             Handler::Peers => "Peers".to_string(),
 
             Handler::FindBlocks => "FindBlocks".to_string(),
@@ -107,7 +110,7 @@ impl Handler {
             Handler::Finished(Ok(response)) => format!("Finished({})", response.command()).into(),
             Handler::Finished(Err(error)) => format!("Finished({})", error.kind()).into(),
 
-            Handler::Ping(_) => "Ping".into(),
+            Handler::Ping { .. } => "Ping".into(),
             Handler::Peers => "Peers".into(),
 
             Handler::FindBlocks => "FindBlocks".into(),
@@ -149,11 +152,21 @@ impl Handler {
         debug!(handler = %tmp_state, %msg, "received peer response to Zebra request");
 
         *self = match (tmp_state, msg) {
-            (Handler::Ping(req_nonce), Message::Pong(rsp_nonce)) => {
-                if req_nonce == rsp_nonce {
-                    Handler::Finished(Ok(Response::Nil))
+            (
+                Handler::Ping {
+                    nonce,
+                    ping_sent_at,
+                },
+                Message::Pong(rsp_nonce),
+            ) => {
+                if nonce == rsp_nonce {
+                    let duration = ping_sent_at.elapsed();
+                    Handler::Finished(Ok(Response::Pong(duration)))
                 } else {
-                    Handler::Ping(req_nonce)
+                    Handler::Ping {
+                        nonce,
+                        ping_sent_at,
+                    }
                 }
             }
 
@@ -900,7 +913,7 @@ where
                             self.state = match std::mem::replace(&mut self.state, State::Failed) {
                                 // Special case: ping timeouts fail the connection.
                                 State::AwaitingResponse {
-                                    handler: Handler::Ping(_),
+                                    handler: Handler::Ping { .. },
                                     tx,
                                     ..
                                 } => {
@@ -1034,11 +1047,15 @@ where
                 .await
                 .map(|()| Handler::Peers),
 
-            (AwaitingRequest, Ping(nonce)) => self
-                .peer_tx
-                .send(Message::Ping(nonce))
-                .await
-                .map(|()| Handler::Ping(nonce)),
+            (AwaitingRequest, Ping(nonce)) => {
+                let ping_sent_at = Instant::now();
+
+                self
+                    .peer_tx
+                    .send(Message::Ping(nonce))
+                    .await
+                    .map(|()| Handler::Ping { nonce, ping_sent_at })
+            }
 
             (AwaitingRequest, BlocksByHash(hashes)) => {
                 self
@@ -1447,6 +1464,9 @@ where
                 if let Err(e) = self.peer_tx.send(Message::Addr(addrs)).await {
                     self.fail_with(e).await;
                 }
+            }
+            Response::Pong(duration) => {
+                debug!(?duration, "responding to Ping with Pong RTT");
             }
             Response::Transactions(transactions) => {
                 // Generate one tx message per transaction,
