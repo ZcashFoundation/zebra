@@ -130,6 +130,8 @@ pub async fn show_block_chain_progress(
     #[cfg(feature = "progress-bar")]
     let block_bar = howudoin::new().label("Blocks");
 
+    let mut is_chain_metrics_chan_closed = false;
+
     loop {
         let now = Utc::now();
         let instant_now = Instant::now();
@@ -173,13 +175,15 @@ pub async fn show_block_chain_progress(
                 last_state_change_instant = instant_now;
             }
 
-            if let Err(err) = chain_tip_metrics_sender.send(ChainTipMetrics::new(
-                last_state_change_instant,
-                Some(remaining_sync_blocks),
-            )) {
-                tracing::warn!(?err, "chain tip metrics channel closed");
-            };
-
+            if !is_chain_metrics_chan_closed {
+                if let Err(err) = chain_tip_metrics_sender.send(ChainTipMetrics::new(
+                    last_state_change_instant,
+                    Some(remaining_sync_blocks),
+                )) {
+                    tracing::warn!(?err, "chain tip metrics channel closed");
+                    is_chain_metrics_chan_closed = true
+                };
+            }
             // Skip logging and status updates if it isn't time for them yet.
             let elapsed_since_log = instant_now.saturating_duration_since(last_log_time);
             if elapsed_since_log < LOG_INTERVAL {
