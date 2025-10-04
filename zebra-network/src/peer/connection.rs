@@ -28,10 +28,9 @@ use crate::{
     },
     meta_addr::MetaAddr,
     peer::{
-        connection::{peer_latency::PeerLatency, peer_tx::PeerTx},
-        error::AlreadyErrored,
-        ClientRequest, ClientRequestReceiver, ConnectionInfo, ErrorSlot, InProgressClientRequest,
-        MustUseClientResponseSender, PeerError, SharedPeerError,
+        connection::peer_tx::PeerTx, error::AlreadyErrored, ClientRequest, ClientRequestReceiver,
+        ConnectionInfo, ErrorSlot, InProgressClientRequest, MustUseClientResponseSender, PeerError,
+        SharedPeerError,
     },
     peer_set::ConnectionTracker,
     protocol::{
@@ -43,7 +42,6 @@ use crate::{
 
 use InventoryResponse::*;
 
-mod peer_latency;
 mod peer_tx;
 
 #[cfg(test)]
@@ -54,7 +52,10 @@ pub(super) enum Handler {
     /// Indicates that the handler has finished processing the request.
     /// An error here is scoped to the request.
     Finished(Result<Response, PeerError>),
-    Ping(Nonce),
+    Ping {
+        nonce: Nonce,
+        ping_sent_at: Instant,
+    },
     Peers,
     FindBlocks,
     FindHeaders,
@@ -75,7 +76,7 @@ impl fmt::Display for Handler {
             Handler::Finished(Ok(response)) => format!("Finished({response})"),
             Handler::Finished(Err(error)) => format!("Finished({error})"),
 
-            Handler::Ping(_) => "Ping".to_string(),
+            Handler::Ping { .. } => "Ping".to_string(),
             Handler::Peers => "Peers".to_string(),
 
             Handler::FindBlocks => "FindBlocks".to_string(),
@@ -109,7 +110,7 @@ impl Handler {
             Handler::Finished(Ok(response)) => format!("Finished({})", response.command()).into(),
             Handler::Finished(Err(error)) => format!("Finished({})", error.kind()).into(),
 
-            Handler::Ping(_) => "Ping".into(),
+            Handler::Ping { .. } => "Ping".into(),
             Handler::Peers => "Peers".into(),
 
             Handler::FindBlocks => "FindBlocks".into(),
@@ -151,11 +152,21 @@ impl Handler {
         debug!(handler = %tmp_state, %msg, "received peer response to Zebra request");
 
         *self = match (tmp_state, msg) {
-            (Handler::Ping(req_nonce), Message::Pong(rsp_nonce)) => {
-                if req_nonce == rsp_nonce {
-                    Handler::Finished(Ok(Response::Nil))
+            (
+                Handler::Ping {
+                    nonce,
+                    ping_sent_at,
+                },
+                Message::Pong(rsp_nonce),
+            ) => {
+                if nonce == rsp_nonce {
+                    let duration = ping_sent_at.elapsed();
+                    Handler::Finished(Ok(Response::Pong(duration)))
                 } else {
-                    Handler::Ping(req_nonce)
+                    Handler::Ping {
+                        nonce,
+                        ping_sent_at,
+                    }
                 }
             }
 
@@ -603,11 +614,6 @@ where
     /// service to a request from this connection,
     /// or None if this connection hasn't yet received an overload error.
     last_overload_time: Option<Instant>,
-
-    /// Tracks latency info for `ping`/`pong` messages with the peer.
-    ///
-    /// Used to measure round-trip time and manage ping state.
-    ping_metrics: PeerLatency,
 }
 
 impl<S, Tx> fmt::Debug for Connection<S, Tx>
@@ -658,7 +664,6 @@ where
             metrics_label,
             last_metrics_state: None,
             last_overload_time: None,
-            ping_metrics: PeerLatency::default(),
         }
     }
 }
@@ -908,7 +913,7 @@ where
                             self.state = match std::mem::replace(&mut self.state, State::Failed) {
                                 // Special case: ping timeouts fail the connection.
                                 State::AwaitingResponse {
-                                    handler: Handler::Ping(_),
+                                    handler: Handler::Ping { .. },
                                     tx,
                                     ..
                                 } => {
@@ -1043,15 +1048,13 @@ where
                 .map(|()| Handler::Peers),
 
             (AwaitingRequest, Ping(nonce)) => {
-                self.ping_metrics.ping_sent_at = Some(std::time::Instant::now());
-                self.ping_metrics.is_waiting_for_pong = true;
-                self.ping_metrics.last_ping_rtt = None;
-                self.ping_metrics.waiting_nonce = Some(nonce);
+                let ping_sent_at = Instant::now();
+
                 self
                     .peer_tx
                     .send(Message::Ping(nonce))
                     .await
-                    .map(|()| Handler::Ping(nonce))
+                    .map(|()| Handler::Ping { nonce, ping_sent_at })
             }
 
             (AwaitingRequest, BlocksByHash(hashes)) => {
@@ -1219,32 +1222,9 @@ where
                 debug!(%msg, "got notfound message unsolicited or from canceled request");
                 Unused
             }
-            Message::Pong(nonce) => {
-                match (
-                    self.ping_metrics.is_waiting_for_pong,
-                    self.ping_metrics.ping_sent_at,
-                    self.ping_metrics.waiting_nonce,
-                ) {
-                    (true, Some(sent_at), Some(expected_nonce)) if expected_nonce == nonce => {
-                        let rtt = sent_at.elapsed();
-                        self.ping_metrics.last_ping_rtt = Some(rtt);
-                        self.ping_metrics.is_waiting_for_pong = false;
-                        self.ping_metrics.waiting_nonce = None;
-
-                        debug!(%msg, ?rtt, "received matching pong, updated latency metrics");
-                    }
-                    (true, Some(_), Some(expected_nonce)) => {
-                        debug!(%msg, ?expected_nonce, "received pong with unexpected nonce, ignoring");
-                    }
-                    (true, _, _) => {
-                        debug!(%msg, "received pong with no matching ping in flight");
-                    }
-                    (false, _, _) => {
-                        debug!(%msg, "received unsolicited pong with no ping in flight");
-                    }
-                }
-
-                Consumed
+            Message::Pong(_) => {
+                debug!(%msg, "got pong message unsolicited or from canceled request");
+                Unused
             }
             Message::Block(_) => {
                 debug!(%msg, "got block message unsolicited or from canceled request");
@@ -1484,6 +1464,9 @@ where
                 if let Err(e) = self.peer_tx.send(Message::Addr(addrs)).await {
                     self.fail_with(e).await;
                 }
+            }
+            Response::Pong(duration) => {
+                debug!(?duration, "responding to Ping with Pong RTT");
             }
             Response::Transactions(transactions) => {
                 // Generate one tx message per transaction,
