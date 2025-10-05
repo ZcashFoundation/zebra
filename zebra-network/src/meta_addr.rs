@@ -192,8 +192,7 @@ pub struct MetaAddr {
     /// The last measured round-trip time (RTT) for this peer, if available.
     ///
     /// This value is updated when the peer responds to a ping (Pong).
-    #[allow(dead_code)]
-    pub(crate) rtt: Option<Duration>,
+    rtt: Option<Duration>,
 
     /// The last time we tried to open an outbound connection to this peer.
     ///
@@ -457,6 +456,13 @@ impl MetaAddr {
     /// Returns whether the address is from an inbound peer connection
     pub fn is_inbound(&self) -> bool {
         self.is_inbound
+    }
+
+    /// Returns the round-trip time (RTT) for this peer, if available,
+    /// as the number of seconds (f64). This value is updated when the peer
+    /// responds to a ping (Pong).
+    pub fn rtt(&self) -> Option<f64> {
+        self.rtt.map(|duration| duration.as_secs_f64())
     }
 
     /// Returns the unverified "last seen time" gossiped by the remote peer that

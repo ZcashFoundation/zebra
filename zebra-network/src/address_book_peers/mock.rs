@@ -7,14 +7,11 @@ use std::{
 
 use crate::{meta_addr::MetaAddr, AddressBookPeers, PeerSocketAddr};
 
-const DEFAULT_RTT: Duration = Duration::from_millis(100);
-
 /// A mock [`AddressBookPeers`] implementation that's always empty.
 #[derive(Debug, Default, Clone)]
 pub struct MockAddressBookPeers {
     /// Return value for mock `recently_live_peers` method.
     recently_live_peers: Vec<MetaAddr>,
-    default_rtt: Duration,
 }
 
 impl MockAddressBookPeers {
@@ -22,15 +19,15 @@ impl MockAddressBookPeers {
     pub fn new(recently_live_peers: Vec<MetaAddr>) -> Self {
         Self {
             recently_live_peers,
-            default_rtt: DEFAULT_RTT,
         }
     }
 
     /// Adds a peer to the mock address book.
     pub fn add_peer(&mut self, peer: PeerSocketAddr) -> bool {
         // The real add peer will use `MetaAddr::new_initial_peer` but we just want to get a `MetaAddr` for the mock.
+        let rtt = Duration::from_millis(100);
         self.recently_live_peers.push(
-            MetaAddr::new_responded(peer, self.default_rtt).into_new_meta_addr(
+            MetaAddr::new_responded(peer, rtt).into_new_meta_addr(
                 Instant::now(),
                 chrono::Utc::now()
                     .try_into()
