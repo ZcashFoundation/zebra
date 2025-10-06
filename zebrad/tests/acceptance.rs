@@ -161,6 +161,7 @@ use zebra_chain::{
         Network::{self, *},
         NetworkUpgrade,
     },
+    serialization::BytesInDisplayOrder,
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::{
