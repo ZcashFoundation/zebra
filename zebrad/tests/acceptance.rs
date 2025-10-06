@@ -3454,7 +3454,8 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     );
 
     // Check that the submitblock channel received the submitted block
-    let submit_block_channel_data = *submitblock_channel.receiver().borrow_and_update();
+    let mut submit_block_receiver = submitblock_channel.receiver();
+    let submit_block_channel_data = submit_block_receiver.recv().await.expect("channel is open");
     assert_eq!(
         submit_block_channel_data,
         (
