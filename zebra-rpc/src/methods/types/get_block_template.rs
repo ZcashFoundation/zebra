@@ -39,6 +39,10 @@ use zebra_chain::{
     },
     work::difficulty::{CompactDifficulty, ExpandedDifficulty},
 };
+// Required for trait method `.bytes_in_display_order()` used indirectly in Debug impl
+#[allow(unused_imports)]
+use zebra_chain::serialization::BytesInDisplayOrder;
+
 use zebra_consensus::{funding_stream_address, MAX_BLOCK_SIGOPS};
 use zebra_node_services::mempool::{self, TransactionDependencies};
 use zebra_state::GetBlockTemplateChainInfo;

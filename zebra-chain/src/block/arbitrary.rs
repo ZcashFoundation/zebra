@@ -8,7 +8,7 @@ use crate::{
     fmt::{HexDebug, SummaryDebug},
     history_tree::HistoryTree,
     parameters::{NetworkUpgrade::*, GENESIS_PREVIOUS_BLOCK_HASH},
-    serialization,
+    serialization::{self, BytesInDisplayOrder},
     transaction::arbitrary::MAX_ARBITRARY_ITEMS,
     transparent::{
         new_transaction_ordered_outputs, CoinbaseSpendRestriction,
