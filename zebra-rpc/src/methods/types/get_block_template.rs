@@ -14,7 +14,7 @@ use derive_getters::Getters;
 use derive_new::new;
 use jsonrpsee::core::RpcResult;
 use jsonrpsee_types::{ErrorCode, ErrorObject};
-use tokio::sync::watch::{self, error::SendError};
+use tokio::sync::mpsc::{self, error::TrySendError};
 use tower::{Service, ServiceExt};
 use zcash_keys::address::Address;
 use zcash_protocol::PoolType;
@@ -448,7 +448,7 @@ where
 
     /// A channel to send successful block submissions to the block gossip task,
     /// so they can be advertised to peers.
-    mined_block_sender: watch::Sender<(block::Hash, block::Height)>,
+    mined_block_sender: mpsc::Sender<(block::Hash, block::Height)>,
 }
 
 // A limit on the configured extra coinbase data, regardless of the current block height.
@@ -475,7 +475,7 @@ where
         conf: config::mining::Config,
         block_verifier_router: BlockVerifierRouter,
         sync_status: SyncStatus,
-        mined_block_sender: Option<watch::Sender<(block::Hash, block::Height)>>,
+        mined_block_sender: Option<mpsc::Sender<(block::Hash, block::Height)>>,
     ) -> Self {
         // Check that the configured miner address is valid.
         let miner_address = conf.miner_address.map(|addr| {
@@ -553,8 +553,8 @@ where
         &self,
         block: block::Hash,
         height: block::Height,
-    ) -> Result<(), SendError<(block::Hash, block::Height)>> {
-        self.mined_block_sender.send((block, height))
+    ) -> Result<(), TrySendError<(block::Hash, block::Height)>> {
+        self.mined_block_sender.try_send((block, height))
     }
 }
 

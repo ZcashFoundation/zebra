@@ -51,7 +51,7 @@ use jsonrpsee_proc_macros::rpc;
 use jsonrpsee_types::{ErrorCode, ErrorObject};
 use rand::{rngs::OsRng, RngCore};
 use tokio::{
-    sync::{broadcast, watch},
+    sync::{broadcast, mpsc, watch},
     task::JoinHandle,
 };
 use tower::{Service, ServiceExt};
@@ -892,7 +892,7 @@ where
         latest_chain_tip: Tip,
         address_book: AddressBook,
         last_warn_error_log_rx: LoggedLastEvent,
-        mined_block_sender: Option<watch::Sender<(block::Hash, block::Height)>>,
+        mined_block_sender: Option<mpsc::Sender<(block::Hash, block::Height)>>,
     ) -> (Self, JoinHandle<()>)
     where
         VersionString: ToString + Clone + Send + 'static,
@@ -2594,7 +2594,7 @@ where
 
                 self.gbt
                     .advertise_mined_block(hash, height)
-                    .map_error_with_prefix(0, "failed to send mined block")?;
+                    .map_error_with_prefix(0, "failed to send mined block to gossip task")?;
 
                 return Ok(SubmitBlockResponse::Accepted);
             }
