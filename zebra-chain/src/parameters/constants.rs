@@ -28,10 +28,11 @@ pub mod magics {
     pub const REGTEST: Magic = Magic([0xaa, 0xe8, 0x3f, 0x5f]);
 }
 
+/// The block heights at which network upgrades activate.
 pub mod activation_heights {
+    /// Network upgrade activation heights for Testnet.
     pub mod testnet {
-        #[allow(unused_imports)]
-        use crate::{block::Height, parameters::NetworkUpgrade::*};
+        use crate::block::Height;
 
         /// The block height at which [`BeforeOverwinter`] activates on Testnet.
         pub const BEFORE_OVERWINTER: Height = Height(1);
@@ -53,9 +54,9 @@ pub mod activation_heights {
         pub const NU6_1: Height = Height(3_536_500);
     }
 
+    /// Network upgrade activation heights for Mainnet.
     pub mod mainnet {
-        #[allow(unused_imports)]
-        use crate::{block::Height, parameters::NetworkUpgrade::*};
+        use crate::block::Height;
 
         /// The block height at which [`BeforeOverwinter`] activates on Mainnet.
         pub const BEFORE_OVERWINTER: Height = Height(1);
