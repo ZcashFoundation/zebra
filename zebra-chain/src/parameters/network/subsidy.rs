@@ -19,7 +19,7 @@ use lazy_static::lazy_static;
 use crate::{
     amount::{self, Amount, NonNegative, COIN},
     block::{Height, HeightDiff},
-    parameters::{Network, NetworkUpgrade, NU6_1_ACTIVATION_HEIGHT_TESTNET},
+    parameters::{constants::activation_heights, Network, NetworkUpgrade},
     transparent,
 };
 
@@ -338,7 +338,7 @@ lazy_static! {
             .collect(),
         },
         FundingStreams {
-            height_range: NU6_1_ACTIVATION_HEIGHT_TESTNET..Height(4_476_000),
+            height_range: activation_heights::testnet::NU6_1..Height(4_476_000),
             recipients: [
                 (
                     FundingStreamReceiver::Deferred,
@@ -631,6 +631,9 @@ pub const POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES_TESTNET: usize = 13;
 /// Number of addresses for each post-NU6 funding stream in the Testnet.
 /// In the spec ([protocol specification §7.10][7.10]) this is defined as: `fs.addressindex(fs.endheight - 1)`
 /// however we know this value beforehand so we prefer to make it a constant instead.
+///
+/// There are 27 funding stream periods across the 939,500 blocks for which the post-NU6.1 funding streams are
+/// active. See Testnet funding streams in revision 2 of <https://zips.z.cash/zip-0214#funding-streams>.
 ///
 /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
 pub const POST_NU6_1_FUNDING_STREAMS_NUM_ADDRESSES_TESTNET: usize = 27;
