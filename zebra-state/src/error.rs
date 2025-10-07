@@ -127,30 +127,37 @@ pub enum InvalidateError {
     ValidationError(#[from] ValidateContextError),
 }
 
-/// An error describing the reason a block or its descendants could not be reconsidered after
-/// potentially being invalidated from the chain_set.
+/// An error describing why a `ReconsiderBlock` request failed.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum ReconsiderError {
     #[error("Block with hash {0} was not previously invalidated")]
+    /// The block is not found in the list of invalidated blocks.
     MissingInvalidatedBlock(block::Hash),
 
     #[error("Parent chain not found for block {0}")]
+    /// The block's parent is missing from the non-finalized state.
     ParentChainNotFound(block::Hash),
 
     #[error("Invalidated blocks list is empty when it should contain at least one block")]
+    /// There were no invalidated blocks when at least one was expected.
     InvalidatedBlocksEmpty,
 
     #[error("cannot reconsider blocks while still committing checkpointed blocks")]
+    /// The state is currently checkpointing blocks and cannot accept reconsider requests.
     CheckpointCommitInProgress,
 
     #[error("failed to send reconsider block request to block write task")]
+    /// Sending the reconsider request to the block write task failed.
     ReconsiderSendFailed,
 
     #[error("reconsider block request was unexpectedly dropped")]
+    /// The reconsider request was dropped before processing.
     ReconsiderResponseDropped,
 
-    #[error("{0}")]
-    ValidationError(#[from] Box<ValidateContextError>),
+    #[error("contextual validation of the block failed")]
+    /// The block failed contextual validation during reconsideration.
+    ValidationError(#[from] ValidateContextError),
 }
 
 /// An error describing why a block failed contextual validation.

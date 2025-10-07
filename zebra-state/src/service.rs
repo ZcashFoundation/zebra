@@ -1182,12 +1182,9 @@ impl Service<Request> for StateService {
                 async move {
                     rsp_rx
                         .await
-                        .map_err(|_recv_error| {
-                            BoxError::from(ReconsiderError::ReconsiderResponseDropped)
-                        })
-                        // TODO: replace with Result::flatten once it stabilises
-                        // https://github.com/rust-lang/rust/issues/70142
-                        .and_then(|res| res.map_err(BoxError::from))
+                        .map_err(|_recv_error| ReconsiderError::ReconsiderResponseDropped)
+                        .flatten()
+                        .map_err(BoxError::from)
                         .map(Response::Reconsidered)
                 }
                 .instrument(span)
