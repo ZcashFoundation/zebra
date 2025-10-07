@@ -106,20 +106,25 @@ impl<E: std::error::Error + 'static> From<BoxError> for LayeredStateError<E> {
     }
 }
 
-/// An error describing the reason a block could not be invalidated.
+/// An error describing why a `InvalidateBlock` request failed.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum InvalidateError {
     #[error("cannot invalidate blocks while still committing checkpointed blocks")]
+    /// The state is currently checkpointing blocks and cannot accept invalidation requests.
     CannotInvalidateWhileCheckpointing,
 
     #[error("failed to send invalidate block request to block write task")]
+    /// Sending the invalidate request to the block write task failed.
     SendInvalidateRequestFailed,
 
     #[error("invalidate block request was unexpectedly dropped")]
+    /// The invalidate request was dropped before processing.
     InvalidateRequestDropped,
 
-    #[error("{0}")]
-    ValidationError(#[from] Box<ValidateContextError>),
+    #[error("contextual validation of the block failed")]
+    /// The block failed contextual validation during invalidation.
+    ValidationError(#[from] ValidateContextError),
 }
 
 /// An error describing the reason a block or its descendants could not be reconsidered after
