@@ -24,6 +24,14 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   `ZEBRA_COOKIE_DIR`, `NETWORK`, `ENABLE_COOKIE_AUTH`, or `MINER_ADDRESS` must switch to the
   config-rs equivalents shown above ([#9768](https://github.com/ZcashFoundation/zebra/pull/9768)).
 
+- Fully removed the `getblocktemplate-rpcs` feature flag from `zebrad/Cargo.toml`.
+  All functionality previously guarded by this flag has already been made the default.
+  As a result, the following build command is no longer supported:
+  ```
+  cargo build --features getblocktemplate-rpcs
+  ```
+  ([#9964](https://github.com/ZcashFoundation/zebra/pull/9964))
+
 ### Changed
 
 - `zebrad` now loads configuration from defaults, an optional TOML file, and environment variables,
