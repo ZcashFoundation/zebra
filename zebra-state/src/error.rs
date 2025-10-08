@@ -154,9 +154,6 @@ pub enum ReconsiderError {
     /// The reconsider request was dropped before processing.
     ReconsiderResponseDropped,
 
-    #[error("contextual validation of the block failed")]
-    /// The block failed contextual validation during reconsideration.
-    ValidationError(#[from] ValidateContextError),
 }
 
 /// An error describing why a block failed contextual validation.
