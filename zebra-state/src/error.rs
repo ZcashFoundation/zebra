@@ -106,30 +106,54 @@ impl<E: std::error::Error + 'static> From<BoxError> for LayeredStateError<E> {
     }
 }
 
-/// An error describing the reason a block or its descendants could not be reconsidered after
-/// potentially being invalidated from the chain_set.
+/// An error describing why a `InvalidateBlock` request failed.
 #[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum InvalidateError {
+    /// The state is currently checkpointing blocks and cannot accept invalidation requests.
+    #[error("cannot invalidate blocks while still committing checkpointed blocks")]
+    ProcessingCheckpointedBlocks,
+
+    /// Sending the invalidate request to the block write task failed.
+    #[error("failed to send invalidate block request to block write task")]
+    SendInvalidateRequestFailed,
+
+    /// The invalidate request was dropped before processing.
+    #[error("invalidate block request was unexpectedly dropped")]
+    InvalidateRequestDropped,
+
+    /// The block hash was not found in any non-finalized chain.
+    #[error("block hash {0} not found in any non-finalized chain")]
+    BlockNotFound(block::Hash),
+}
+
+/// An error describing why a `ReconsiderBlock` request failed.
+#[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum ReconsiderError {
+    /// The block is not found in the list of invalidated blocks.
     #[error("Block with hash {0} was not previously invalidated")]
     MissingInvalidatedBlock(block::Hash),
 
+    /// The block's parent is missing from the non-finalized state.
     #[error("Parent chain not found for block {0}")]
     ParentChainNotFound(block::Hash),
 
+    /// There were no invalidated blocks when at least one was expected.
     #[error("Invalidated blocks list is empty when it should contain at least one block")]
     InvalidatedBlocksEmpty,
 
+    /// The state is currently checkpointing blocks and cannot accept reconsider requests.
     #[error("cannot reconsider blocks while still committing checkpointed blocks")]
     CheckpointCommitInProgress,
 
+    /// Sending the reconsider request to the block write task failed.
     #[error("failed to send reconsider block request to block write task")]
     ReconsiderSendFailed,
 
+    /// The reconsider request was dropped before processing.
     #[error("reconsider block request was unexpectedly dropped")]
     ReconsiderResponseDropped,
-
-    #[error("{0}")]
-    ValidationError(#[from] Box<ValidateContextError>),
 }
 
 /// An error describing why a block failed contextual validation.
