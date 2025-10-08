@@ -351,9 +351,7 @@ impl NonFinalizedState {
     #[allow(clippy::unwrap_in_result)]
     pub fn invalidate_block(&mut self, block_hash: Hash) -> Result<block::Hash, InvalidateError> {
         let Some(chain) = self.find_chain(|chain| chain.contains_block_hash(block_hash)) else {
-            return Err(InvalidateError::ValidationError(
-                ValidateContextError::BlockNotFound { block_hash },
-            ));
+            return Err(InvalidateError::BlockNotFound(block_hash));
         };
 
         let invalidated_blocks = if chain.non_finalized_root_hash() == block_hash {
