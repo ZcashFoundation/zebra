@@ -378,10 +378,6 @@ pub enum ValidateContextError {
         tx_index_in_block: Option<usize>,
         transaction_hash: transaction::Hash,
     },
-
-    #[error("block hash {block_hash} not found in any non-finalized chain")]
-    #[non_exhaustive]
-    BlockNotFound { block_hash: block::Hash },
 }
 
 /// Trait for creating the corresponding duplicate nullifier error from a nullifier.
