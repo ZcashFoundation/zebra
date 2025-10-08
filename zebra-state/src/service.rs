@@ -1155,11 +1155,15 @@ impl Service<Request> for StateService {
                 .boxed()
             }
 
+            // The expected error type for this request is `InvalidateError`
             Request::InvalidateBlock(block_hash) => {
                 let rsp_rx = tokio::task::block_in_place(move || {
                     span.in_scope(|| self.send_invalidate_block(block_hash))
                 });
 
+                // Await the channel response, flatten the result, map receive errors to
+                // `InvalidateError::InvalidateRequestDropped`.
+                // Then flatten the nested Result and convert any errors to a BoxError.
                 let span = Span::current();
                 async move {
                     rsp_rx
@@ -1173,11 +1177,15 @@ impl Service<Request> for StateService {
                 .boxed()
             }
 
+            // The expected error type for this request is `ReconsiderError`
             Request::ReconsiderBlock(block_hash) => {
                 let rsp_rx = tokio::task::block_in_place(move || {
                     span.in_scope(|| self.send_reconsider_block(block_hash))
                 });
 
+                // Await the channel response, flatten the result, map receive errors to
+                // `ReconsiderError::ReconsiderResponseDropped`.
+                // Then flatten the nested Result and convert any errors to a BoxError.
                 let span = Span::current();
                 async move {
                     rsp_rx

@@ -122,6 +122,7 @@ pub enum InvalidateError {
     #[error("invalidate block request was unexpectedly dropped")]
     InvalidateRequestDropped,
 
+    /// The block hash was not found in any non-finalized chain.
     #[error("block hash {0} not found in any non-finalized chain")]
     BlockNotFound(block::Hash),
 }
@@ -130,30 +131,29 @@ pub enum InvalidateError {
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum ReconsiderError {
-    #[error("Block with hash {0} was not previously invalidated")]
     /// The block is not found in the list of invalidated blocks.
+    #[error("Block with hash {0} was not previously invalidated")]
     MissingInvalidatedBlock(block::Hash),
 
-    #[error("Parent chain not found for block {0}")]
     /// The block's parent is missing from the non-finalized state.
+    #[error("Parent chain not found for block {0}")]
     ParentChainNotFound(block::Hash),
 
-    #[error("Invalidated blocks list is empty when it should contain at least one block")]
     /// There were no invalidated blocks when at least one was expected.
+    #[error("Invalidated blocks list is empty when it should contain at least one block")]
     InvalidatedBlocksEmpty,
 
-    #[error("cannot reconsider blocks while still committing checkpointed blocks")]
     /// The state is currently checkpointing blocks and cannot accept reconsider requests.
+    #[error("cannot reconsider blocks while still committing checkpointed blocks")]
     CheckpointCommitInProgress,
 
-    #[error("failed to send reconsider block request to block write task")]
     /// Sending the reconsider request to the block write task failed.
+    #[error("failed to send reconsider block request to block write task")]
     ReconsiderSendFailed,
 
-    #[error("reconsider block request was unexpectedly dropped")]
     /// The reconsider request was dropped before processing.
+    #[error("reconsider block request was unexpectedly dropped")]
     ReconsiderResponseDropped,
-
 }
 
 /// An error describing why a block failed contextual validation.

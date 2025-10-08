@@ -394,6 +394,7 @@ impl NonFinalizedState {
     /// Reconsiders a previously invalidated block and its descendants into the non-finalized state
     /// based on a block_hash. Reconsidered blocks are inserted into the previous chain and re-inserted
     /// into the chain_set.
+    #[allow(clippy::unwrap_in_result)]
     pub fn reconsider_block(
         &mut self,
         block_hash: block::Hash,
