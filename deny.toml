@@ -82,8 +82,7 @@ skip-tree = [
     # wait for structopt-derive to update heck
     { name = "heck", version = "=0.3.3" },
 
-    # wait for librocksdb-sys to update bindgen to one that uses newer itertools
-    { name = "itertools", version = "=0.12.1" },
+    # wait for librocksdb-sys to update bindgen
     { name = "bindgen", version = "=0.69.5" },
 
     # wait for halo2_gadgets and primitive-types to update uint
@@ -99,9 +98,6 @@ skip-tree = [
     # wait for all librustzcash crates to update sha2, secp256k1, and ripemd
     { name = "sha2", version = "=0.10.9" },
     { name = "ripemd", version = "=0.1.3" },
-
-    # wait for zcash_script to update itertools
-    { name = "itertools", version = "=0.13.0" },
 
     # wait for abscissa_core to update synstructure
     { name = "synstructure", version = "=0.12.6" },
@@ -125,7 +121,10 @@ skip-tree = [
     { name = "rand_chacha", version = "0.3" },
 
     # TODO: Remove once https://github.com/zcash/librustzcash/pull/1893 merges.
-    { name = "equihash", version = "0.2" }
+    { name = "equihash", version = "0.2" },
+
+    # wait for derive_builder to update
+    { name = "darling", version = "0.20.11" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
