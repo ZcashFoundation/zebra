@@ -810,7 +810,7 @@ impl StateService {
         let (rsp_tx, rsp_rx) = oneshot::channel();
 
         let Some(sender) = &self.block_write_sender.non_finalized else {
-            let _ = rsp_tx.send(Err(InvalidateError::CannotInvalidateWhileCheckpointing));
+            let _ = rsp_tx.send(Err(InvalidateError::ProcessingCheckpointedBlocks));
             return rsp_rx;
         };
 
