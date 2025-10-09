@@ -27,6 +27,7 @@ use zebra_db::{
 
 use crate::{
     constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
+    error::CommitCheckpointVerifiedError,
     request::{FinalizableBlock, FinalizedBlock, Treestate},
     service::{check, QueuedCheckpointVerified},
     BoxError, CheckpointVerifiedBlock, CloneError, Config,
@@ -274,7 +275,7 @@ impl FinalizedState {
         &mut self,
         ordered_block: QueuedCheckpointVerified,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
-    ) -> Result<(CheckpointVerifiedBlock, NoteCommitmentTrees), BoxError> {
+    ) -> Result<(CheckpointVerifiedBlock, NoteCommitmentTrees), CommitCheckpointVerifiedError> {
         let (checkpoint_verified, rsp_tx) = ordered_block;
         let result = self.commit_finalized_direct(
             checkpoint_verified.clone().into(),
@@ -303,11 +304,16 @@ impl FinalizedState {
         // and the block write task.
         let result = result.map_err(CloneError::from);
 
-        let _ = rsp_tx.send(result.clone().map(|(hash, _)| hash).map_err(BoxError::from));
+        let _ = rsp_tx.send(
+            result
+                .clone()
+                .map(|(hash, _)| hash)
+                .map_err(CommitCheckpointVerifiedError::from),
+        );
 
         result
             .map(|(_hash, note_commitment_trees)| (checkpoint_verified, note_commitment_trees))
-            .map_err(BoxError::from)
+            .map_err(CommitCheckpointVerifiedError::from)
     }
 
     /// Immediately commit a `finalized` block to the finalized state.

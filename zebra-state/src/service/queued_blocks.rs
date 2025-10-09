@@ -11,8 +11,9 @@ use tracing::instrument;
 use zebra_chain::{block, transparent};
 
 use crate::{
-    error::QueueAndCommitError, BoxError, CheckpointVerifiedBlock, CommitSemanticallyVerifiedError,
-    NonFinalizedState, SemanticallyVerifiedBlock,
+    error::{CommitCheckpointVerifiedError, QueueAndCommitError},
+    CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, NonFinalizedState,
+    SemanticallyVerifiedBlock,
 };
 
 #[cfg(test)]
@@ -21,7 +22,7 @@ mod tests;
 /// A queued checkpoint verified block, and its corresponding [`Result`] channel.
 pub type QueuedCheckpointVerified = (
     CheckpointVerifiedBlock,
-    oneshot::Sender<Result<block::Hash, BoxError>>,
+    oneshot::Sender<Result<block::Hash, CommitCheckpointVerifiedError>>,
 );
 
 /// A queued semantically verified block, and its corresponding [`Result`] channel.

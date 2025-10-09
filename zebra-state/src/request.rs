@@ -30,7 +30,7 @@ use crate::{
     ReadResponse, Response,
 };
 use crate::{
-    error::{InvalidateError, LayeredStateError, ReconsiderError},
+    error::{CommitCheckpointVerifiedError, InvalidateError, LayeredStateError, ReconsiderError},
     CommitSemanticallyVerifiedError,
 };
 
@@ -690,6 +690,28 @@ impl MappedRequest for CommitSemanticallyVerifiedBlockRequest {
     }
 }
 
+/// Commit a checkpointed block to the state
+///
+/// See the [`crate`] documentation and [`Request::CommitCheckpointVerifiedBlock`] for details.
+#[allow(dead_code)]
+pub struct CommitCheckpointVerifiedBlockRequest(pub CheckpointVerifiedBlock);
+
+impl MappedRequest for CommitCheckpointVerifiedBlockRequest {
+    type MappedResponse = block::Hash;
+    type Error = CommitCheckpointVerifiedError;
+
+    fn map_request(self) -> Request {
+        Request::CommitCheckpointVerifiedBlock(self.0)
+    }
+
+    fn map_response(response: Response) -> Self::MappedResponse {
+        match response {
+            Response::Committed(hash) => hash,
+            _ => unreachable!("wrong response variant for request"),
+        }
+    }
+}
+
 /// Request to invalidate a block in the state.
 ///
 /// See the [`crate`] documentation and [`Request::InvalidateBlock`] for details.
@@ -770,7 +792,8 @@ pub enum Request {
     /// it until its parent is ready.
     ///
     /// Returns [`Response::Committed`] with the hash of the newly committed
-    /// block, or an error.
+    /// block, or a [`CommitCheckpointVerifiedError`] if the block could not be
+    /// committed to the state.
     ///
     /// This request cannot be cancelled once submitted; dropping the response
     /// future will have no effect on whether it is eventually processed.

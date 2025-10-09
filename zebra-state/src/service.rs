@@ -16,7 +16,6 @@
 
 use std::{
     collections::HashMap,
-    convert,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -45,7 +44,7 @@ use crate::{
     constants::{
         MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS, MAX_LEGACY_CHAIN_BLOCKS,
     },
-    error::{InvalidateError, QueueAndCommitError, ReconsiderError},
+    error::{CommitCheckpointVerifiedError, InvalidateError, QueueAndCommitError, ReconsiderError},
     response::NonFinalizedBlocksListener,
     service::{
         block_iter::any_ancestor_blocks,
@@ -232,9 +231,7 @@ impl Drop for StateService {
         std::mem::drop(self.block_write_sender.finalized.take());
         std::mem::drop(self.block_write_sender.non_finalized.take());
 
-        self.clear_finalized_block_queue(
-            "dropping the state: dropped unused finalized state queue block",
-        );
+        self.clear_finalized_block_queue(CommitCheckpointVerifiedError::WriteTaskExited);
         self.clear_non_finalized_block_queue(CommitSemanticallyVerifiedError::WriteTaskExited);
 
         // Log database metrics before shutting down
@@ -458,7 +455,7 @@ impl StateService {
     fn queue_and_commit_to_finalized_state(
         &mut self,
         checkpoint_verified: CheckpointVerifiedBlock,
-    ) -> oneshot::Receiver<Result<block::Hash, BoxError>> {
+    ) -> oneshot::Receiver<Result<block::Hash, CommitCheckpointVerifiedError>> {
         // # Correctness & Performance
         //
         // This method must not block, access the database, or perform CPU-intensive tasks,
@@ -485,7 +482,7 @@ impl StateService {
             {
                 Self::send_checkpoint_verified_block_error(
                     duplicate_queued,
-                    "dropping older checkpoint verified block: got newer duplicate block",
+                    CommitCheckpointVerifiedError::ReplacedByNewer,
                 );
             }
 
@@ -498,13 +495,11 @@ impl StateService {
             //       every time we send some blocks (like QueuedSemanticallyVerifiedBlocks)
             Self::send_checkpoint_verified_block_error(
                 queued,
-                "already finished committing checkpoint verified blocks: dropped duplicate block, \
-                 block is already committed to the state",
+                CommitCheckpointVerifiedError::DroppedAlreadyCommitted,
             );
 
             self.clear_finalized_block_queue(
-                "already finished committing checkpoint verified blocks: dropped duplicate block, \
-                 block is already committed to the state",
+                CommitCheckpointVerifiedError::DroppedAlreadyCommitted,
             );
         }
 
@@ -572,11 +567,11 @@ impl StateService {
                     // If Zebra is shutting down, drop blocks and return an error.
                     Self::send_checkpoint_verified_block_error(
                         queued,
-                        "block commit task exited. Is Zebra shutting down?",
+                        CommitCheckpointVerifiedError::CommitTaskExited,
                     );
 
                     self.clear_finalized_block_queue(
-                        "block commit task exited. Is Zebra shutting down?",
+                        CommitCheckpointVerifiedError::CommitTaskExited,
                     );
                 } else {
                     metrics::gauge!("state.checkpoint.sent.block.height")
@@ -587,7 +582,7 @@ impl StateService {
     }
 
     /// Drops all finalized state queue blocks, and sends an error on their result channels.
-    fn clear_finalized_block_queue(&mut self, error: impl Into<BoxError> + Clone) {
+    fn clear_finalized_block_queue(&mut self, error: CommitCheckpointVerifiedError) {
         for (_hash, queued) in self.finalized_state_queued_blocks.drain() {
             Self::send_checkpoint_verified_block_error(queued, error.clone());
         }
@@ -596,13 +591,13 @@ impl StateService {
     /// Send an error on a `QueuedCheckpointVerified` block's result channel, and drop the block
     fn send_checkpoint_verified_block_error(
         queued: QueuedCheckpointVerified,
-        error: impl Into<BoxError>,
+        error: CommitCheckpointVerifiedError,
     ) {
         let (finalized, rsp_tx) = queued;
 
         // The block sender might have already given up on this block,
         // so ignore any channel send errors.
-        let _ = rsp_tx.send(Err(error.into()));
+        let _ = rsp_tx.send(Err(error));
         std::mem::drop(finalized);
     }
 
@@ -715,8 +710,7 @@ impl StateService {
             self.send_ready_non_finalized_queued(self.finalized_block_write_last_sent_hash);
             // We've finished committing checkpoint verified blocks to finalized state, so drop any repeated queued blocks.
             self.clear_finalized_block_queue(
-                "already finished committing checkpoint verified blocks: dropped duplicate block, \
-                 block is already committed to the state",
+                CommitCheckpointVerifiedError::DroppedAlreadyCommitted,
             );
         } else if !self.can_fork_chain_at(&parent_hash) {
             tracing::trace!("unready to verify, returning early");
@@ -1014,6 +1008,8 @@ impl Service<Request> for StateService {
 
             // Uses finalized_state_queued_blocks and pending_utxos in the StateService.
             // Accesses shared writeable state in the StateService.
+            //
+            // The expected error type for this request is `CommitCheckpointVerifiedError`.
             Request::CommitCheckpointVerifiedBlock(finalized) => {
                 // # Consensus
                 //
@@ -1044,15 +1040,17 @@ impl Service<Request> for StateService {
                 // The work is all done, the future just waits on a channel for the result
                 timer.finish(module_path!(), line!(), "CommitCheckpointVerifiedBlock");
 
+                // Await the channel response, flatten the result, map receive errors to
+                // `CommitCheckpointVerifiedError::DroppedFromFinalizedQueue`.
+                // Then flatten the nested Result and convert any errors to a BoxError.
                 async move {
                     rsp_rx
                         .await
                         .map_err(|_recv_error| {
-                            BoxError::from("block was dropped from the queue of finalized blocks")
+                            CommitCheckpointVerifiedError::DroppedFromFinalizedQueue
                         })
-                        // TODO: replace with Result::flatten once it stabilises
-                        // https://github.com/rust-lang/rust/issues/70142
-                        .and_then(convert::identity)
+                        .flatten()
+                        .map_err(BoxError::from)
                         .map(Response::Committed)
                 }
                 .instrument(span)
