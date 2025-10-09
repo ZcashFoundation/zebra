@@ -42,7 +42,7 @@ Building Zebra requires [Rust](https://www.rust-lang.org/tools/install),
 [libclang](https://clang.llvm.org/doxygen/group__CINDEX.html), and a C++
 compiler. Below are quick summaries for installing these dependencies.
 
-[//]: # "The empty line in the `summary` tag below are required for correct Markdown rendering."
+[//]: # "The empty lines in the `summary` tag below are required for correct Markdown rendering."
 <details><summary>
 
 #### General Instructions for Installing Dependencies
