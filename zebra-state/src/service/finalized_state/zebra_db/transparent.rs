@@ -19,7 +19,7 @@ use std::{
 
 use rocksdb::ColumnFamily;
 use zebra_chain::{
-    amount::{self, Amount, NonNegative},
+    amount::{self, Amount, Constraint, NonNegative},
     block::Height,
     parameters::Network,
     transaction::{self, Transaction},
@@ -32,8 +32,9 @@ use crate::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
         disk_format::{
             transparent::{
-                AddressBalanceLocation, AddressBalanceLocationChange, AddressLocation,
-                AddressTransaction, AddressUnspentOutput, OutputLocation,
+                AddressBalanceLocation, AddressBalanceLocationChange, AddressBalanceLocationInner,
+                AddressBalanceLocationUpdates, AddressLocation, AddressTransaction,
+                AddressUnspentOutput, OutputLocation,
             },
             TransactionLocation,
         },
@@ -431,7 +432,7 @@ impl DiskWriteBatch {
             transparent::OutPoint,
             OutputLocation,
         >,
-        mut address_balances: HashMap<transparent::Address, AddressBalanceLocationChange>,
+        mut address_balances: AddressBalanceLocationUpdates,
     ) -> Result<(), BoxError> {
         let db = &zebra_db.db;
         let FinalizedBlock { block, height, .. } = finalized;
@@ -489,7 +490,7 @@ impl DiskWriteBatch {
         db: &DiskDb,
         network: &Network,
         new_outputs_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
-        address_balances: &mut HashMap<transparent::Address, AddressBalanceLocationChange>,
+        address_balances: &mut AddressBalanceLocationUpdates,
     ) -> Result<(), BoxError> {
         let utxo_by_out_loc = db.cf_handle("utxo_by_out_loc").unwrap();
         let utxo_loc_by_transparent_addr_loc =
@@ -511,15 +512,45 @@ impl DiskWriteBatch {
                 // - create the balance for the address, if needed.
                 // - create or fetch the link from the address to the AddressLocation
                 //   (the first location of the address in the chain).
-                let address_balance_location = address_balances
-                    .entry(receiving_address)
-                    .or_insert_with(|| AddressBalanceLocationChange::new(*new_output_location));
-                let receiving_address_location = address_balance_location.address_location();
+
+                #[inline]
+                fn update_addr_loc<
+                    C: Constraint + Copy + std::fmt::Debug,
+                    T: std::ops::DerefMut<Target = AddressBalanceLocationInner<C>>
+                        + From<AddressBalanceLocationInner<C>>,
+                >(
+                    addr_locs: &mut HashMap<transparent::Address, T>,
+                    receiving_address: transparent::Address,
+                    new_output_location: &OutputLocation,
+                    unspent_output: &transparent::Output,
+                ) -> AddressLocation {
+                    let addr_loc = addr_locs.entry(receiving_address).or_insert_with(|| {
+                        AddressBalanceLocationInner::new(*new_output_location).into()
+                    });
+
+                    // Update the balance for the address in memory.
+                    addr_loc
+                        .receive_output(unspent_output)
+                        .expect("balance overflow already checked");
+
+                    addr_loc.address_location()
+                }
 
                 // Update the balance for the address in memory.
-                address_balance_location
-                    .receive_output(unspent_output)
-                    .expect("balance overflow already checked");
+                let receiving_address_location = match address_balances {
+                    AddressBalanceLocationUpdates::Merge(balance_changes) => update_addr_loc(
+                        balance_changes,
+                        receiving_address,
+                        new_output_location,
+                        unspent_output,
+                    ),
+                    AddressBalanceLocationUpdates::Insert(balances) => update_addr_loc(
+                        balances,
+                        receiving_address,
+                        new_output_location,
+                        unspent_output,
+                    ),
+                };
 
                 // Create a link from the AddressLocation to the new OutputLocation in the database.
                 let address_unspent_output =
@@ -567,7 +598,7 @@ impl DiskWriteBatch {
         db: &DiskDb,
         network: &Network,
         spent_utxos_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
-        address_balances: &mut HashMap<transparent::Address, AddressBalanceLocationChange>,
+        address_balances: &mut AddressBalanceLocationUpdates,
     ) -> Result<(), BoxError> {
         let utxo_by_out_loc = db.cf_handle("utxo_by_out_loc").unwrap();
         let utxo_loc_by_transparent_addr_loc =
@@ -582,20 +613,41 @@ impl DiskWriteBatch {
 
             // Fetch the balance, and the link from the address to the AddressLocation, from memory.
             if let Some(sending_address) = sending_address {
-                let address_balance_location = address_balances
-                    .get_mut(&sending_address)
-                    .expect("spent outputs must already have an address balance");
+                #[inline]
+                fn update_addr_loc<
+                    C: Constraint + Copy + std::fmt::Debug,
+                    T: std::ops::DerefMut<Target = AddressBalanceLocationInner<C>>
+                        + From<AddressBalanceLocationInner<C>>,
+                >(
+                    addr_locs: &mut HashMap<transparent::Address, T>,
+                    sending_address: transparent::Address,
+                    spent_output: &transparent::Output,
+                ) -> AddressLocation {
+                    let addr_loc = addr_locs
+                        .get_mut(&sending_address)
+                        .expect("spent outputs must already have an address balance");
 
-                // Update the address balance by subtracting this UTXO's value, in memory.
-                address_balance_location
-                    .spend_output(spent_output)
-                    .expect("balance underflow already checked");
+                    // Update the address balance by subtracting this UTXO's value, in memory.
+                    addr_loc
+                        .spend_output(spent_output)
+                        .expect("balance underflow already checked");
+
+                    addr_loc.address_location()
+                }
+
+                let address_location = match address_balances {
+                    AddressBalanceLocationUpdates::Merge(balance_changes) => {
+                        update_addr_loc(balance_changes, sending_address, spent_output)
+                    }
+                    AddressBalanceLocationUpdates::Insert(balances) => {
+                        update_addr_loc(balances, sending_address, spent_output)
+                    }
+                };
 
                 // Delete the link from the AddressLocation to the spent OutputLocation in the database.
-                let address_spent_output = AddressUnspentOutput::new(
-                    address_balance_location.address_location(),
-                    *spent_output_location,
-                );
+                let address_spent_output =
+                    AddressUnspentOutput::new(address_location, *spent_output_location);
+
                 self.zs_delete(&utxo_loc_by_transparent_addr_loc, address_spent_output);
             }
 
@@ -629,7 +681,7 @@ impl DiskWriteBatch {
             transparent::OutPoint,
             OutputLocation,
         >,
-        address_balances: &HashMap<transparent::Address, AddressBalanceLocationChange>,
+        address_balances: &AddressBalanceLocationUpdates,
     ) -> Result<(), BoxError> {
         let db = &zebra_db.db;
         let tx_loc_by_transparent_addr_loc =
@@ -646,10 +698,16 @@ impl DiskWriteBatch {
 
             // Fetch the balance, and the link from the address to the AddressLocation, from memory.
             if let Some(sending_address) = sending_address {
-                let sending_address_location = address_balances
-                    .get(&sending_address)
-                    .expect("spent outputs must already have an address balance")
-                    .address_location();
+                let sending_address_location = match address_balances {
+                    AddressBalanceLocationUpdates::Merge(balance_changes) => balance_changes
+                        .get(&sending_address)
+                        .expect("spent outputs must already have an address balance")
+                        .address_location(),
+                    AddressBalanceLocationUpdates::Insert(balances) => balances
+                        .get(&sending_address)
+                        .expect("spent outputs must already have an address balance")
+                        .address_location(),
+                };
 
                 // Create a link from the AddressLocation to the spent TransactionLocation in the database.
                 // Unlike the OutputLocation link, this will never be deleted.
@@ -689,19 +747,33 @@ impl DiskWriteBatch {
     pub fn prepare_transparent_balances_batch(
         &mut self,
         db: &DiskDb,
-        address_balances: HashMap<transparent::Address, AddressBalanceLocationChange>,
+        address_balances: AddressBalanceLocationUpdates,
     ) -> Result<(), BoxError> {
         let balance_by_transparent_addr = db.cf_handle(BALANCE_BY_TRANSPARENT_ADDR).unwrap();
 
         // Update all the changed address balances in the database.
-        for (address, address_balance_location_change) in address_balances.into_iter() {
-            // Some of these balances are new, and some are updates
-            self.zs_merge(
-                &balance_by_transparent_addr,
-                address,
-                address_balance_location_change,
-            );
-        }
+        // Some of these balances are new, and some are updates
+        match address_balances {
+            AddressBalanceLocationUpdates::Merge(balance_changes) => {
+                for (address, address_balance_location_change) in balance_changes.into_iter() {
+                    self.zs_merge(
+                        &balance_by_transparent_addr,
+                        address,
+                        address_balance_location_change,
+                    );
+                }
+            }
+
+            AddressBalanceLocationUpdates::Insert(balances) => {
+                for (address, address_balance_location_change) in balances.into_iter() {
+                    self.zs_insert(
+                        &balance_by_transparent_addr,
+                        address,
+                        address_balance_location_change,
+                    );
+                }
+            }
+        };
 
         Ok(())
     }
