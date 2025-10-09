@@ -106,6 +106,34 @@ impl<E: std::error::Error + 'static> From<BoxError> for LayeredStateError<E> {
     }
 }
 
+/// An error describing why a `CommitCheckpointVerifiedBlock` request failed.
+#[derive(Debug, Error, Clone)]
+#[non_exhaustive]
+pub enum CommitCheckpointVerifiedError {
+    /// An older checkpoint block was dropped because of a newer duplicate block.
+    #[error("dropping older checkpoint verified block: got newer duplicate block")]
+    ReplacedByNewer,
+
+    /// A checkpoint block was dropped because it was already committed to the finalized state.
+    #[error("already finished committing checkpoint verified blocks: dropped duplicate block, block is already committed to the state")]
+    DroppedAlreadyCommitted,
+
+    /// The block was dropped from the queue of finalized blocks.
+    #[error("block was dropped from the queue of finalized blocks")]
+    DroppedFromFinalizedQueue,
+
+    /// The commit task exited (likely during shutdown).
+    #[error("block commit task exited. Is Zebra shutting down?")]
+    CommitTaskExited,
+
+    /// The write task exited (likely during shutdown).
+    #[error("block write task has exited. Is Zebra shutting down?")]
+    WriteTaskExited,
+
+    #[error("clone error: {0}")]
+    CloneError(#[from] CloneError),
+}
+
 /// An error describing why a `InvalidateBlock` request failed.
 #[derive(Debug, Error)]
 #[non_exhaustive]
