@@ -74,7 +74,7 @@ pub mod activation_heights {
         pub const NU5: Height = Height(1_687_104);
         /// The block height at which `NU6` activates on Mainnet.
         pub const NU6: Height = Height(2_726_400);
-        // /// The block height at which `NU6.1` activates on Mainnet.
-        // pub const NU6_1: Height = Height(3_146_400);
+        /// The block height at which `NU6.1` activates on Mainnet.
+        pub const NU6_1: Height = Height(3_146_400);
     }
 }
