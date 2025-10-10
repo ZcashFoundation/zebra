@@ -814,8 +814,9 @@ pub fn generate_coinbase_and_roots(
 ) -> Result<(TransactionTemplate<NegativeOrZero>, DefaultRoots), &'static str> {
     let miner_fee = calculate_miner_fee(mempool_txs);
     let outputs = standard_coinbase_outputs(network, height, miner_address, miner_fee);
+    let current_nu = NetworkUpgrade::current(network, height);
 
-    let tx = match NetworkUpgrade::current(network, height) {
+    let tx = match current_nu {
         NetworkUpgrade::Canopy => Transaction::new_v4_coinbase(height, outputs, miner_data),
         NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 | NetworkUpgrade::Nu6_1 | NetworkUpgrade::Nu7 => {
             Transaction::new_v5_coinbase(network, height, outputs, miner_data)
@@ -830,13 +831,13 @@ pub fn generate_coinbase_and_roots(
     let chain_history_root = chain_history_root
         .or_else(|| {
             (NetworkUpgrade::Heartwood.activation_height(network) == Some(height))
-                .then_some([0; 32].into())
+                .then_some(block::CHAIN_HISTORY_ACTIVATION_RESERVED.into())
         })
         .expect("history tree can't be empty");
 
     Ok((
         TransactionTemplate::from_coinbase(&tx, miner_fee),
-        calculate_default_root_hashes(&tx, mempool_txs, chain_history_root),
+        calculate_default_root_hashes(current_nu, &tx, mempool_txs, chain_history_root),
     ))
 }
 
@@ -927,6 +928,7 @@ pub fn standard_coinbase_outputs(
 ///
 /// This function runs expensive cryptographic operations.
 pub fn calculate_default_root_hashes(
+    current_nu: NetworkUpgrade,
     coinbase_txn: &UnminedTx,
     mempool_txs: &[VerifiedUnminedTx],
     chain_history_root: ChainHistoryMmrRootHash,
@@ -935,8 +937,10 @@ pub fn calculate_default_root_hashes(
     let merkle_root = block_txs().cloned().collect();
     let auth_data_root = block_txs().cloned().collect();
 
-    let block_commitments_hash = if chain_history_root == [0; 32].into() {
-        [0; 32].into()
+    let block_commitments_hash = if current_nu == NetworkUpgrade::Heartwood
+        && chain_history_root == block::CHAIN_HISTORY_ACTIVATION_RESERVED.into()
+    {
+        block::CHAIN_HISTORY_ACTIVATION_RESERVED.into()
     } else {
         ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
             &chain_history_root,

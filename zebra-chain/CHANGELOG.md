@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `{sapling,orchard}::Root::bytes_in_display_order()`
 - Added `bytes_in_display_order()` for multiple `sprout` types,
   as well for `orchard::tree::Root` and `Halo2Proof`.
+- Added `CHAIN_HISTORY_ACTIVATION_RESERVED` as an export from the `block` module.
 
 ## [2.0.0] - 2025-08-07
 
