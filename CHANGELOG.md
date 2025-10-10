@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   cargo build --features getblocktemplate-rpcs
   ```
   ([#9964](https://github.com/ZcashFoundation/zebra/pull/9964))
+- Expects the block commitment bytes of Heartwood activation blocks to be the `hashBlockCommitments` after NU5 activation
 
 ### Changed
 
