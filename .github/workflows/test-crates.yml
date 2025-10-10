@@ -60,6 +60,7 @@ jobs:
           toolchain: stable
           components: clippy
           cache-on-failure: true
+      - uses: ./.github/actions/setup-zebra-build
 
       # This step dynamically creates a JSON containing the values of each crate
       # available in this repo in the root directory. We use `cargo tree` to accomplish this task.
@@ -116,6 +117,7 @@ jobs:
       - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3.0.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: ./.github/actions/setup-zebra-build
 
       # We could use `features: ['', '--all-features', '--no-default-features']` as a matrix argument,
       # but it's faster to run these commands sequentially, so they can re-use the local cargo cache.

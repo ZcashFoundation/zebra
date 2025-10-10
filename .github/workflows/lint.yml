@@ -68,6 +68,7 @@ jobs:
       - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3.0.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: ./.github/actions/setup-zebra-build
       - name: Run clippy
         run: cargo clippy ${{ matrix.args }} --features "${{ matrix.features }}"
 
@@ -86,6 +87,7 @@ jobs:
       - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3.0.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: ./.github/actions/setup-zebra-build
       - uses: taiki-e/install-action@d6d752794628f1e1fffa3c4d3c8874e06f043d50 #v2.62.15
         with:
           tool: cargo-hack
@@ -113,6 +115,7 @@ jobs:
         with:
           toolchain: 1.89 # MSRV
           cache-on-failure: true
+      - uses: ./.github/actions/setup-zebra-build
       - run: cargo build --bin "${{ matrix.binary }}" --workspace
 
   docs:
@@ -133,6 +136,7 @@ jobs:
         with:
           toolchain: nightly
           cache-on-failure: true
+      - uses: ./.github/actions/setup-zebra-build
       - run: cargo doc --no-deps --workspace --all-features --document-private-items --target-dir "$(pwd)"/target/internal
         env:
           # Keep in sync with ./book.yml:jobs.build
@@ -176,6 +180,7 @@ jobs:
         with:
           toolchain: nightly
           cache-on-failure: true
+      - uses: ./.github/actions/setup-zebra-build
       - uses: taiki-e/install-action@d6d752794628f1e1fffa3c4d3c8874e06f043d50 #v2.62.15
         with:
           tool: cargo-udeps
@@ -216,6 +221,7 @@ jobs:
         with:
           toolchain: nightly
           cache-on-failure: true
+      - uses: ./.github/actions/setup-zebra-build
       - name: cargo install cargo-hack
         uses: taiki-e/install-action@d6d752794628f1e1fffa3c4d3c8874e06f043d50 #v2.62.15
         with:
@@ -241,6 +247,7 @@ jobs:
       - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3.0.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: ./.github/actions/setup-zebra-build
       - run: cargo check --locked --all-features --all-targets
 
   deny:
