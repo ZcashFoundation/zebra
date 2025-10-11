@@ -24,6 +24,15 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   `ZEBRA_COOKIE_DIR`, `NETWORK`, `ENABLE_COOKIE_AUTH`, or `MINER_ADDRESS` must switch to the
   config-rs equivalents shown above ([#9768](https://github.com/ZcashFoundation/zebra/pull/9768)).
 
+- Fully removed the `getblocktemplate-rpcs` feature flag from `zebrad/Cargo.toml`.
+  All functionality previously guarded by this flag has already been made the default.
+  As a result, the following build command is no longer supported:
+  ```
+  cargo build --features getblocktemplate-rpcs
+  ```
+  ([#9964](https://github.com/ZcashFoundation/zebra/pull/9964))
+- Expects the block commitment bytes of Heartwood activation blocks to be the `hashBlockCommitments` after NU5 activation
+
 ### Changed
 
 - `zebrad` now loads configuration from defaults, an optional TOML file, and environment variables,
@@ -3773,3 +3782,15 @@ The goals of this release are to:
 Currently, Zebra does not validate all the Zcash consensus rules.
 It may be unreliable on Testnet, and under less-than-perfect
 network conditions.
+### Added
+
+- zebrad: Optional HTTP health endpoints for cloud-native readiness and liveness checks.
+  When configured, zebrad serves two simple HTTP/1.1 endpoints on a dedicated listener:
+  - GET /healthy: returns 200 when the process is up and has at least the configured number of recently live peers; otherwise 503.
+  - GET /ready: returns 200 when the node is near the chain tip and the estimated block lag is within the configured threshold; otherwise 503.
+  Configure via the new [health] section in zebrad.toml:
+  - health.listen_addr (optional, enables the server when set)
+  - health.min_connected_peers (default 1)
+  - health.ready_max_blocks_behind (default 2)
+  - health.enforce_on_test_networks (default false)
+  See the Zebra Book for examples and Kubernetes probes: https://zebra.zfnd.org/user/health.html

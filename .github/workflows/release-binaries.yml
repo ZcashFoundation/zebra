@@ -46,7 +46,7 @@ jobs:
           persist-credentials: false
 
       - name: Docker Hub Description
-        uses: peter-evans/dockerhub-description@432a30c9e07499fd01da9f8a49f0faf9e0ca5b77 #v4.0.2
+        uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa #v5.0.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
@@ -56,8 +56,12 @@ jobs:
   release-binaries-success:
     name: Release binaries success
     runs-on: ubuntu-latest
-    # Always run this job to check the status of dependent jobs
-    if: always()
+    # Only run when the Docker Hub update job is allowed to execute
+    if: >-
+      ${{
+        always() &&
+        github.repository_owner == 'ZcashFoundation'
+      }}
     needs:
       - build
       - dockerhub-description

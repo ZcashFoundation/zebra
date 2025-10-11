@@ -1,8 +1,8 @@
 //! Parameter and response types for the `submitblock` RPC.
 
-use tokio::sync::watch;
+use tokio::sync::mpsc;
 
-use zebra_chain::{block, parameters::GENESIS_PREVIOUS_BLOCK_HASH};
+use zebra_chain::block;
 
 // Allow doc links to these imports.
 #[allow(unused_imports)]
@@ -72,26 +72,34 @@ impl From<SubmitBlockErrorResponse> for SubmitBlockResponse {
 /// A submit block channel, used to inform the gossip task about mined blocks.
 pub struct SubmitBlockChannel {
     /// The channel sender
-    sender: watch::Sender<(block::Hash, block::Height)>,
+    sender: mpsc::Sender<(block::Hash, block::Height)>,
     /// The channel receiver
-    receiver: watch::Receiver<(block::Hash, block::Height)>,
+    receiver: mpsc::Receiver<(block::Hash, block::Height)>,
 }
 
 impl SubmitBlockChannel {
-    /// Create a new submit block channel
+    /// Creates a new submit block channel
     pub fn new() -> Self {
-        let (sender, receiver) = watch::channel((GENESIS_PREVIOUS_BLOCK_HASH, block::Height::MIN));
+        /// How many unread messages the submit block channel should buffer before rejecting sends.
+        ///
+        /// This should be large enough to usually avoid rejecting sends. This channel is used by
+        /// the block hash gossip task, which waits for a ready peer in the peer set while
+        /// processing messages from this channel and could be much slower to gossip block hashes
+        /// than it is to commit blocks and produce new block templates.
+        const SUBMIT_BLOCK_CHANNEL_CAPACITY: usize = 10_000;
+
+        let (sender, receiver) = mpsc::channel(SUBMIT_BLOCK_CHANNEL_CAPACITY);
         Self { sender, receiver }
     }
 
     /// Get the channel sender
-    pub fn sender(&self) -> watch::Sender<(block::Hash, block::Height)> {
+    pub fn sender(&self) -> mpsc::Sender<(block::Hash, block::Height)> {
         self.sender.clone()
     }
 
     /// Get the channel receiver
-    pub fn receiver(&self) -> watch::Receiver<(block::Hash, block::Height)> {
-        self.receiver.clone()
+    pub fn receiver(self) -> mpsc::Receiver<(block::Hash, block::Height)> {
+        self.receiver
     }
 }
 

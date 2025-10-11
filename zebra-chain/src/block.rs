@@ -35,6 +35,7 @@ pub mod tests;
 
 pub use commitment::{
     ChainHistoryBlockTxAuthCommitmentHash, ChainHistoryMmrRootHash, Commitment, CommitmentError,
+    CHAIN_HISTORY_ACTIVATION_RESERVED,
 };
 pub use hash::Hash;
 pub use header::{BlockTimeError, CountedHeader, Header, ZCASH_BLOCK_VERSION};

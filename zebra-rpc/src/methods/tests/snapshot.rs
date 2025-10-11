@@ -110,15 +110,15 @@ async fn test_z_get_treestate() {
         .with_activation_heights(ConfiguredActivationHeights {
             sapling: Some(SAPLING_ACTIVATION_HEIGHT),
             // We need to set the NU5 activation height higher than the height of the last block for
-            // this test because we currently have only the first 10 blocks from the public Testnet,
+            // this test because we currently have only the first 11 blocks from the public Testnet,
             // none of which are compatible with NU5 due to the following consensus rule:
             //
             // > [NU5 onward] hashBlockCommitments MUST be set to the value of
             // > hashBlockCommitments for this block, as specified in [ZIP-244].
             //
-            // Activating NU5 at a lower height and using the 10 blocks causes a failure in
+            // Activating NU5 at a lower height and using the 11 blocks causes a failure in
             // [`zebra_state::populated_state`].
-            nu5: Some(10),
+            nu5: Some(11),
             ..Default::default()
         })
         .clear_funding_streams()
@@ -892,6 +892,14 @@ fn snapshot_rpc_getblocksubsidy(
     });
 }
 
+/// Snapshot `getnetworkinfo` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_getnetworkinfo(
+    get_network_info: GetNetworkInfoResponse,
+    settings: &insta::Settings,
+) {
+    settings.bind(|| insta::assert_json_snapshot!("get_network_info", get_network_info));
+}
+
 /// Snapshot `getpeerinfo` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getpeerinfo(get_peer_info: Vec<PeerInfo>, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_peer_info", get_peer_info));
@@ -1112,6 +1120,13 @@ pub async fn test_mining_rpcs<State, ReadState>(
         .await
         .expect("We should have a success response");
     snapshot_rpc_getblocksubsidy("excessive_height", get_block_subsidy, &settings);
+
+    // `getnetworkinfo`
+    let get_network_info = rpc
+        .get_network_info()
+        .await
+        .expect("We should have a success response");
+    snapshot_rpc_getnetworkinfo(get_network_info, &settings);
 
     // `getpeerinfo`
     let get_peer_info = rpc

@@ -21,9 +21,9 @@ use crate::{
         finalized_state::{FinalizedState, ZebraDb},
         non_finalized_state::NonFinalizedState,
         queued_blocks::{QueuedCheckpointVerified, QueuedSemanticallyVerified},
-        BoxError, ChainTipBlock, ChainTipSender,
+        ChainTipBlock, ChainTipSender, InvalidateError, ReconsiderError,
     },
-    CommitSemanticallyVerifiedError, SemanticallyVerifiedBlock,
+    SemanticallyVerifiedBlock, ValidateContextError,
 };
 
 // These types are used in doc links
@@ -53,19 +53,14 @@ pub(crate) fn validate_and_commit_non_finalized(
     finalized_state: &ZebraDb,
     non_finalized_state: &mut NonFinalizedState,
     prepared: SemanticallyVerifiedBlock,
-) -> Result<(), CommitSemanticallyVerifiedError> {
-    check::initial_contextual_validity(finalized_state, non_finalized_state, &prepared)
-        .map_err(Box::new)?;
+) -> Result<(), ValidateContextError> {
+    check::initial_contextual_validity(finalized_state, non_finalized_state, &prepared)?;
     let parent_hash = prepared.block.header.previous_block_hash;
 
     if finalized_state.finalized_tip_hash() == parent_hash {
-        non_finalized_state
-            .commit_new_chain(prepared, finalized_state)
-            .map_err(Box::new)?;
+        non_finalized_state.commit_new_chain(prepared, finalized_state)?;
     } else {
-        non_finalized_state
-            .commit_block(prepared, finalized_state)
-            .map_err(Box::new)?;
+        non_finalized_state.commit_block(prepared, finalized_state)?;
     }
 
     Ok(())
@@ -139,13 +134,13 @@ pub enum NonFinalizedWriteMessage {
     /// the non-finalized state, if present.
     Invalidate {
         hash: block::Hash,
-        rsp_tx: oneshot::Sender<Result<block::Hash, BoxError>>,
+        rsp_tx: oneshot::Sender<Result<block::Hash, InvalidateError>>,
     },
     /// The hash of a block that was previously invalidated but should be
     /// reconsidered and reinserted into the non-finalized state.
     Reconsider {
         hash: block::Hash,
-        rsp_tx: oneshot::Sender<Result<Vec<block::Hash>, BoxError>>,
+        rsp_tx: oneshot::Sender<Result<Vec<block::Hash>, ReconsiderError>>,
     },
 }
 
@@ -336,8 +331,7 @@ impl WriteBlockWorkerTask {
         }
 
         // Save any errors to propagate down to queued child blocks
-        let mut parent_error_map: IndexMap<block::Hash, CommitSemanticallyVerifiedError> =
-            IndexMap::new();
+        let mut parent_error_map: IndexMap<block::Hash, ValidateContextError> = IndexMap::new();
 
         while let Some(msg) = non_finalized_block_write_receiver.blocking_recv() {
             let queued_child_and_rsp_tx = match msg {
@@ -349,11 +343,8 @@ impl WriteBlockWorkerTask {
                 }
                 NonFinalizedWriteMessage::Reconsider { hash, rsp_tx } => {
                     tracing::info!(?hash, "reconsidering a block in the non-finalized state");
-                    let _ = rsp_tx.send(
-                        non_finalized_state
-                            .reconsider_block(hash, &finalized_state.db)
-                            .map_err(BoxError::from),
-                    );
+                    let _ = rsp_tx
+                        .send(non_finalized_state.reconsider_block(hash, &finalized_state.db));
                     None
                 }
             };
@@ -372,23 +363,21 @@ impl WriteBlockWorkerTask {
             let parent_hash = queued_child.block.header.previous_block_hash;
             let parent_error = parent_error_map.get(&parent_hash);
 
-            let result;
-
             // If the parent block was marked as rejected, also reject all its children.
             //
             // At this point, we know that all the block's descendants
             // are invalid, because we checked all the consensus rules before
             // committing the failing ancestor block to the non-finalized state.
-            if let Some(parent_error) = parent_error {
-                result = Err(parent_error.clone());
+            let result = if let Some(parent_error) = parent_error {
+                Err(parent_error.clone())
             } else {
                 tracing::trace!(?child_hash, "validating queued child");
-                result = validate_and_commit_non_finalized(
+                validate_and_commit_non_finalized(
                     &finalized_state.db,
                     non_finalized_state,
                     queued_child,
                 )
-            }
+            };
 
             // TODO: fix the test timing bugs that require the result to be sent
             //       after `update_latest_chain_channels()`,
@@ -396,7 +385,7 @@ impl WriteBlockWorkerTask {
 
             if let Err(ref error) = result {
                 // Update the caller with the error.
-                let _ = rsp_tx.send(result.clone().map(|()| child_hash));
+                let _ = rsp_tx.send(result.clone().map(|()| child_hash).map_err(Into::into));
 
                 // If the block is invalid, mark any descendant blocks as rejected.
                 parent_error_map.insert(child_hash, error.clone());
@@ -425,7 +414,7 @@ impl WriteBlockWorkerTask {
             );
 
             // Update the caller with the result.
-            let _ = rsp_tx.send(result.clone().map(|()| child_hash));
+            let _ = rsp_tx.send(result.clone().map(|()| child_hash).map_err(Into::into));
 
             while non_finalized_state
                 .best_chain_len()

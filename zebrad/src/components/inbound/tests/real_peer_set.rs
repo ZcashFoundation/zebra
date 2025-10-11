@@ -873,6 +873,12 @@ mod submitblock_test {
 
         // Start the block gossip task with a SubmitBlockChannel
         let submitblock_channel = SubmitBlockChannel::new();
+        // Send a block to the channel
+        submitblock_channel
+            .sender()
+            .send((block::Hash([1; 32]), block::Height(1)))
+            .await
+            .unwrap();
         let gossip_task_handle = tokio::spawn(
             sync::gossip_best_tip_block_hashes(
                 sync_status.clone(),
@@ -882,12 +888,6 @@ mod submitblock_test {
             )
             .in_current_span(),
         );
-
-        // Send a block top the channel
-        submitblock_channel
-            .sender()
-            .send((block::Hash([1; 32]), block::Height(1)))
-            .unwrap();
 
         // Wait for the block gossip task to process the block
         tokio::time::sleep(PEER_GOSSIP_DELAY).await;

@@ -5,7 +5,7 @@ use std::{fmt, io::Write};
 use hex::{FromHex, ToHex};
 
 use crate::{
-    serialization::sha256d,
+    serialization::{sha256d, BytesInDisplayOrder},
     transaction::{self, Transaction, UnminedTx, UnminedTxId, VerifiedUnminedTx},
 };
 
@@ -91,26 +91,13 @@ impl From<Root> for [u8; 32] {
     }
 }
 
-impl Root {
-    /// Return the hash bytes in big-endian byte-order suitable for printing out byte by byte.
-    ///
-    /// Zebra displays transaction and block hashes in big-endian byte-order,
-    /// following the u256 convention set by Bitcoin and zcashd.
-    pub fn bytes_in_display_order(&self) -> [u8; 32] {
-        let mut reversed_bytes = self.0;
-        reversed_bytes.reverse();
-        reversed_bytes
+impl BytesInDisplayOrder<true> for Root {
+    fn bytes_in_serialized_order(&self) -> [u8; 32] {
+        self.0
     }
 
-    /// Convert bytes in big-endian byte-order into a [`merkle::Root`](crate::block::merkle::Root).
-    ///
-    /// Zebra displays transaction and block hashes in big-endian byte-order,
-    /// following the u256 convention set by Bitcoin and zcashd.
-    pub fn from_bytes_in_display_order(bytes_in_display_order: &[u8; 32]) -> Root {
-        let mut internal_byte_order = *bytes_in_display_order;
-        internal_byte_order.reverse();
-
-        Root(internal_byte_order)
+    fn from_bytes_in_serialized_order(bytes: [u8; 32]) -> Self {
+        Root(bytes)
     }
 }
 
@@ -271,26 +258,13 @@ impl From<AuthDataRoot> for [u8; 32] {
     }
 }
 
-impl AuthDataRoot {
-    /// Return the hash bytes in big-endian byte-order suitable for printing out byte by byte.
-    ///
-    /// Zebra displays transaction and block hashes in big-endian byte-order,
-    /// following the u256 convention set by Bitcoin and zcashd.
-    pub fn bytes_in_display_order(&self) -> [u8; 32] {
-        let mut reversed_bytes = self.0;
-        reversed_bytes.reverse();
-        reversed_bytes
+impl BytesInDisplayOrder<true> for AuthDataRoot {
+    fn bytes_in_serialized_order(&self) -> [u8; 32] {
+        self.0
     }
 
-    /// Convert bytes in big-endian byte-order into a [`merkle::AuthDataRoot`](crate::block::merkle::AuthDataRoot).
-    ///
-    /// Zebra displays transaction and block hashes in big-endian byte-order,
-    /// following the u256 convention set by Bitcoin and zcashd.
-    pub fn from_bytes_in_display_order(bytes_in_display_order: &[u8; 32]) -> AuthDataRoot {
-        let mut internal_byte_order = *bytes_in_display_order;
-        internal_byte_order.reverse();
-
-        AuthDataRoot(internal_byte_order)
+    fn from_bytes_in_serialized_order(bytes: [u8; 32]) -> Self {
+        AuthDataRoot(bytes)
     }
 }
 

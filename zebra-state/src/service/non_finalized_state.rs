@@ -22,8 +22,8 @@ use crate::{
     constants::{MAX_INVALIDATED_BLOCKS, MAX_NON_FINALIZED_CHAIN_FORKS},
     error::ReconsiderError,
     request::{ContextuallyVerifiedBlock, FinalizableBlock},
-    service::{check, finalized_state::ZebraDb},
-    BoxError, SemanticallyVerifiedBlock, ValidateContextError, WatchReceiver,
+    service::{check, finalized_state::ZebraDb, InvalidateError},
+    SemanticallyVerifiedBlock, ValidateContextError, WatchReceiver,
 };
 
 mod backup;
@@ -349,9 +349,9 @@ impl NonFinalizedState {
     /// Invalidate block with hash `block_hash` and all descendants from the non-finalized state. Insert
     /// the new chain into the chain_set and discard the previous.
     #[allow(clippy::unwrap_in_result)]
-    pub fn invalidate_block(&mut self, block_hash: Hash) -> Result<block::Hash, BoxError> {
+    pub fn invalidate_block(&mut self, block_hash: Hash) -> Result<block::Hash, InvalidateError> {
         let Some(chain) = self.find_chain(|chain| chain.contains_block_hash(block_hash)) else {
-            return Err("block hash not found in any non-finalized chain".into());
+            return Err(InvalidateError::BlockNotFound(block_hash));
         };
 
         let invalidated_blocks = if chain.non_finalized_root_hash() == block_hash {
@@ -394,6 +394,7 @@ impl NonFinalizedState {
     /// Reconsiders a previously invalidated block and its descendants into the non-finalized state
     /// based on a block_hash. Reconsidered blocks are inserted into the previous chain and re-inserted
     /// into the chain_set.
+    #[allow(clippy::unwrap_in_result)]
     pub fn reconsider_block(
         &mut self,
         block_hash: block::Hash,
@@ -456,7 +457,9 @@ impl NonFinalizedState {
 
         let mut modified_chain = Arc::unwrap_or_clone(chain_result);
         for block in invalidated_blocks {
-            modified_chain = modified_chain.push(block).map_err(Box::new)?;
+            modified_chain = modified_chain
+                .push(block)
+                .expect("previously invalidated block should be valid for chain");
         }
 
         let (height, hash) = modified_chain.non_finalized_tip();
@@ -528,7 +531,11 @@ impl NonFinalizedState {
         prepared: SemanticallyVerifiedBlock,
         finalized_state: &ZebraDb,
     ) -> Result<Arc<Chain>, ValidateContextError> {
-        if self.invalidated_blocks.contains_key(&prepared.height) {
+        if self
+            .invalidated_blocks
+            .values()
+            .any(|blocks| blocks.iter().any(|block| block.hash == prepared.hash))
+        {
             return Err(ValidateContextError::BlockPreviouslyInvalidated {
                 block_hash: prepared.hash,
             });

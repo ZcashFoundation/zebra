@@ -177,13 +177,20 @@ pub enum Request {
     /// [`Request::BlocksByHash`] against the "inbound" service passed to
     /// [`init`](crate::init).
     ///
-    /// The peer set routes this request specially, sending it to *half of*
-    /// the available peers.
+    /// The peer set routes this request specially, sending it to *a fraction of*
+    /// the available peers. See [`number_of_peers_to_broadcast()`](crate::PeerSet::number_of_peers_to_broadcast)
+    /// for more details.
     ///
     /// # Returns
     ///
     /// Returns [`Response::Nil`](super::Response::Nil).
     AdvertiseBlock(block::Hash),
+
+    /// Advertise a block to all ready peers. This is equivalent to
+    /// [`Request::AdvertiseBlock`] except that the peer set will route
+    /// this request to all available ready peers. Used by the gossip task
+    /// to broadcast mined blocks to all ready peers.
+    AdvertiseBlockToAll(block::Hash),
 
     /// Request the contents of this node's mempool.
     ///
@@ -221,6 +228,7 @@ impl fmt::Display for Request {
             }
 
             Request::AdvertiseBlock(_) => "AdvertiseBlock".to_string(),
+            Request::AdvertiseBlockToAll(_) => "AdvertiseBlockToAll".to_string(),
             Request::MempoolTransactionIds => "MempoolTransactionIds".to_string(),
         })
     }
@@ -242,7 +250,7 @@ impl Request {
             Request::PushTransaction(_) => "PushTransaction",
             Request::AdvertiseTransactionIds(_) => "AdvertiseTransactionIds",
 
-            Request::AdvertiseBlock(_) => "AdvertiseBlock",
+            Request::AdvertiseBlock(_) | Request::AdvertiseBlockToAll(_) => "AdvertiseBlock",
             Request::MempoolTransactionIds => "MempoolTransactionIds",
         }
     }

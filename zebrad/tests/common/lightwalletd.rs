@@ -218,7 +218,23 @@ where
             if !matches!(test_type, TestType::FullSyncFromGenesis { .. }) {
                 let lwd_cache_dir_path = lightwalletd_state_path.join("db/main");
                 let lwd_cache_entries: Vec<_> = std::fs::read_dir(&lwd_cache_dir_path)
-                    .expect("unexpected failure reading lightwalletd cache dir")
+                    .unwrap_or_else(|error| {
+                        if error.kind() == std::io::ErrorKind::NotFound {
+                            panic!(
+                                "missing cached lightwalletd state at {path:?}.\n\
+                                 Populate the directory (for example by running the lwd-sync-full \n\
+                                 nextest profile) or set {env_var} to a populated cache.",
+                                path = lwd_cache_dir_path,
+                                env_var = LWD_CACHE_DIR,
+                            );
+                        }
+
+                        panic!(
+                            "unexpected failure opening lightwalletd cache dir {path:?}: {error:?}",
+                            path = lwd_cache_dir_path,
+                            error = error,
+                        );
+                    })
                     .collect();
 
                 let lwd_cache_dir_size = lwd_cache_entries.iter().fold(0, |acc, entry_result| {

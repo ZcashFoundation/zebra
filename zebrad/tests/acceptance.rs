@@ -161,6 +161,7 @@ use zebra_chain::{
         Network::{self, *},
         NetworkUpgrade,
     },
+    serialization::BytesInDisplayOrder,
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::{
@@ -3453,7 +3454,8 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     );
 
     // Check that the submitblock channel received the submitted block
-    let submit_block_channel_data = *submitblock_channel.receiver().borrow_and_update();
+    let mut submit_block_receiver = submitblock_channel.receiver();
+    let submit_block_channel_data = submit_block_receiver.recv().await.expect("channel is open");
     assert_eq!(
         submit_block_channel_data,
         (
@@ -3649,9 +3651,7 @@ async fn has_spending_transaction_ids() -> Result<()> {
     use std::sync::Arc;
     use tower::Service;
     use zebra_chain::{chain_tip::ChainTip, transparent::Input};
-    use zebra_state::{
-        ReadRequest, ReadResponse, Request, Response, SemanticallyVerifiedBlock, Spend,
-    };
+    use zebra_state::{ReadRequest, ReadResponse, SemanticallyVerifiedBlock, Spend};
 
     use common::cached_state::future_blocks;
 
@@ -3676,18 +3676,14 @@ async fn has_spending_transaction_ids() -> Result<()> {
     tracing::info!("committing blocks to non-finalized state");
 
     for block in non_finalized_blocks {
+        use zebra_state::{CommitSemanticallyVerifiedBlockRequest, MappedRequest};
+
         let expected_hash = block.hash();
         let block = SemanticallyVerifiedBlock::with_hash(Arc::new(block), expected_hash);
-        let Response::Committed(block_hash) = state
-            .ready()
+        let block_hash = CommitSemanticallyVerifiedBlockRequest(block)
+            .mapped_oneshot(&mut state)
             .await
-            .map_err(|err| eyre!(err))?
-            .call(Request::CommitSemanticallyVerifiedBlock(block))
-            .await
-            .map_err(|err| eyre!(err))?
-        else {
-            panic!("unexpected response to Block request");
-        };
+            .map_err(|err| eyre!(err))?;
 
         assert_eq!(
             expected_hash, block_hash,
@@ -3833,7 +3829,11 @@ async fn invalidate_and_reconsider_block() -> Result<()> {
     tracing::info!("invalidating blocks");
 
     // Note: This is the block at height 7, it's the 6th generated block.
-    let block_6_hash = blocks.get(5).expect("should have 50 blocks").hash();
+    let block_6_hash = blocks
+        .get(5)
+        .expect("should have 50 blocks")
+        .hash()
+        .to_string();
     let params = serde_json::to_string(&vec![block_6_hash]).expect("should serialize successfully");
 
     let _: () = rpc_client
@@ -4040,175 +4040,201 @@ async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
     child.kill(true)
 }
 
-// /// Check that Zebra will disconnect from misbehaving peers.
-// #[tokio::test]
-// #[cfg(not(target_os = "windows"))]
-// async fn disconnects_from_misbehaving_peers() -> Result<()> {
-//     use std::sync::{atomic::AtomicBool, Arc};
+/// Check that Zebra will disconnect from misbehaving peers.
+///
+/// In order to simulate a misbehaviour peer we start two zebrad instances:
+/// - The first one is started with a custom Testnet where PoW is disabled.
+/// - The second one is started with the default Testnet where PoW is enabled.
+/// The second zebrad instance will connect to the first one, and when the first one mines
+/// blocks with invalid PoW the second one should disconnect from it.
+#[tokio::test]
+#[cfg(not(target_os = "windows"))]
+async fn disconnects_from_misbehaving_peers() -> Result<()> {
+    use std::sync::{atomic::AtomicBool, Arc};
 
-//     use common::regtest::MiningRpcMethods;
-//     use zebra_chain::parameters::testnet::{self, ConfiguredActivationHeights};
-//     use zebra_rpc::methods::get_block_template_rpcs::types::peer_info::PeerInfo;
+    use common::regtest::MiningRpcMethods;
+    use zebra_chain::parameters::testnet::{self, ConfiguredActivationHeights};
+    use zebra_rpc::client::PeerInfo;
 
-//     let _init_guard = zebra_test::init();
-//     let network = testnet::Parameters::build()
-//         .with_activation_heights(ConfiguredActivationHeights {
-//             canopy: Some(1),
-//             nu5: Some(2),
-//             nu6: Some(3),
-//             ..Default::default()
-//         })
-//         .with_slow_start_interval(Height::MIN)
-//         .with_disable_pow(true)
-//         .to_network();
+    let _init_guard = zebra_test::init();
+    let network1 = testnet::Parameters::build()
+        .with_activation_heights(ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(2),
+            nu6: Some(3),
+            ..Default::default()
+        })
+        .with_slow_start_interval(Height::MIN)
+        .with_disable_pow(true)
+        .clear_checkpoints()
+        .with_network_name("PoWDisabledTestnet")
+        .to_network();
 
-//     let test_type = LaunchWithEmptyState {
-//         launches_lightwalletd: false,
-//     };
-//     let test_name = "disconnects_from_misbehaving_peers_test";
+    let test_type = LaunchWithEmptyState {
+        launches_lightwalletd: false,
+    };
+    let test_name = "disconnects_from_misbehaving_peers_test";
 
-//     if !common::launch::can_spawn_zebrad_for_test_type(test_name, test_type, false) {
-//         tracing::warn!("skipping disconnects_from_misbehaving_peers test");
-//         return Ok(());
-//     }
+    if !common::launch::can_spawn_zebrad_for_test_type(test_name, test_type, false) {
+        tracing::warn!("skipping disconnects_from_misbehaving_peers test");
+        return Ok(());
+    }
 
-//     // Get the zebrad config
-//     let mut config = test_type
-//         .zebrad_config(test_name, false, None, &network)
-//         .expect("already checked config")?;
+    // Get the zebrad config
+    let mut config = test_type
+        .zebrad_config(test_name, false, None, &network1)
+        .expect("already checked config")?;
 
-//     config.network.cache_dir = false.into();
-//     config.network.listen_addr = format!("127.0.0.1:{}", random_known_port()).parse()?;
+    config.network.cache_dir = false.into();
+    config.network.listen_addr = format!("127.0.0.1:{}", random_known_port()).parse()?;
+    config.state.ephemeral = true;
+    config.network.initial_testnet_peers = [].into();
+    config.network.crawl_new_peer_interval = Duration::from_secs(5);
 
-//     let rpc_listen_addr = config.rpc.listen_addr.unwrap();
-//     let rpc_client_1 = RpcRequestClient::new(rpc_listen_addr);
+    let rpc_listen_addr = config.rpc.listen_addr.unwrap();
+    let rpc_client_1 = RpcRequestClient::new(rpc_listen_addr);
 
-//     tracing::info!(
-//         ?rpc_listen_addr,
-//         network_listen_addr = ?config.network.listen_addr,
-//         "starting a zebrad child on incompatible custom Testnet"
-//     );
+    tracing::info!(
+        ?rpc_listen_addr,
+        network_listen_addr = ?config.network.listen_addr,
+        "starting a zebrad child on incompatible custom Testnet"
+    );
 
-//     let is_finished = Arc::new(AtomicBool::new(false));
+    let is_finished = Arc::new(AtomicBool::new(false));
 
-//     {
-//         let is_finished = Arc::clone(&is_finished);
-//         let config = config.clone();
-//         let (zebrad_failure_messages, zebrad_ignore_messages) = test_type.zebrad_failure_messages();
-//         tokio::task::spawn_blocking(move || -> Result<()> {
-//             let mut zebrad_child = testdir()?
-//                 .with_exact_config(&config)?
-//                 .spawn_child(args!["start"])?
-//                 .bypass_test_capture(true)
-//                 .with_timeout(test_type.zebrad_timeout())
-//                 .with_failure_regex_iter(zebrad_failure_messages, zebrad_ignore_messages);
+    {
+        let is_finished = Arc::clone(&is_finished);
+        let config = config.clone();
+        let (zebrad_failure_messages, zebrad_ignore_messages) = test_type.zebrad_failure_messages();
+        tokio::task::spawn_blocking(move || -> Result<()> {
+            let mut zebrad_child = testdir()?
+                .with_exact_config(&config)?
+                .spawn_child(args!["start"])?
+                .bypass_test_capture(true)
+                .with_timeout(test_type.zebrad_timeout())
+                .with_failure_regex_iter(zebrad_failure_messages, zebrad_ignore_messages);
 
-//             while !is_finished.load(std::sync::atomic::Ordering::SeqCst) {
-//                 zebrad_child.wait_for_stdout_line(Some("zebraA1".to_string()));
-//             }
+            while !is_finished.load(std::sync::atomic::Ordering::SeqCst) {
+                zebrad_child.wait_for_stdout_line(Some("zebraA1".to_string()));
+            }
 
-//             Ok(())
-//         });
-//     }
+            Ok(())
+        });
+    }
 
-//     config.network.initial_testnet_peers = [config.network.listen_addr.to_string()].into();
-//     config.network.network = Network::new_default_testnet();
-//     config.network.listen_addr = "127.0.0.1:0".parse()?;
-//     config.rpc.listen_addr = Some(format!("127.0.0.1:{}", random_known_port()).parse()?);
+    let network2 = testnet::Parameters::build()
+        .with_activation_heights(ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(2),
+            nu6: Some(3),
+            ..Default::default()
+        })
+        .with_slow_start_interval(Height::MIN)
+        .clear_checkpoints()
+        .with_network_name("PoWEnabledTestnet")
+        .to_network();
 
-//     let rpc_listen_addr = config.rpc.listen_addr.unwrap();
-//     let rpc_client_2 = RpcRequestClient::new(rpc_listen_addr);
+    config.network.network = network2;
+    config.network.initial_testnet_peers = [config.network.listen_addr.to_string()].into();
+    config.network.listen_addr = "127.0.0.1:0".parse()?;
+    config.rpc.listen_addr = Some(format!("127.0.0.1:{}", random_known_port()).parse()?);
+    config.network.crawl_new_peer_interval = Duration::from_secs(5);
+    config.network.cache_dir = false.into();
+    config.state.ephemeral = true;
 
-//     tracing::info!(
-//         ?rpc_listen_addr,
-//         network_listen_addr = ?config.network.listen_addr,
-//         "starting a zebrad child on the default Testnet"
-//     );
+    let rpc_listen_addr = config.rpc.listen_addr.unwrap();
+    let rpc_client_2 = RpcRequestClient::new(rpc_listen_addr);
 
-//     {
-//         let is_finished = Arc::clone(&is_finished);
-//         tokio::task::spawn_blocking(move || -> Result<()> {
-//             let (zebrad_failure_messages, zebrad_ignore_messages) =
-//                 test_type.zebrad_failure_messages();
-//             let mut zebrad_child = testdir()?
-//                 .with_exact_config(&config)?
-//                 .spawn_child(args!["start"])?
-//                 .bypass_test_capture(true)
-//                 .with_timeout(test_type.zebrad_timeout())
-//                 .with_failure_regex_iter(zebrad_failure_messages, zebrad_ignore_messages);
+    tracing::info!(
+        ?rpc_listen_addr,
+        network_listen_addr = ?config.network.listen_addr,
+        "starting a zebrad child on the default Testnet"
+    );
 
-//             while !is_finished.load(std::sync::atomic::Ordering::SeqCst) {
-//                 zebrad_child.wait_for_stdout_line(Some("zebraB2".to_string()));
-//             }
+    {
+        let is_finished = Arc::clone(&is_finished);
+        tokio::task::spawn_blocking(move || -> Result<()> {
+            let (zebrad_failure_messages, zebrad_ignore_messages) =
+                test_type.zebrad_failure_messages();
+            let mut zebrad_child = testdir()?
+                .with_exact_config(&config)?
+                .spawn_child(args!["start"])?
+                .bypass_test_capture(true)
+                .with_timeout(test_type.zebrad_timeout())
+                .with_failure_regex_iter(zebrad_failure_messages, zebrad_ignore_messages);
 
-//             Ok(())
-//         });
-//     }
+            while !is_finished.load(std::sync::atomic::Ordering::SeqCst) {
+                zebrad_child.wait_for_stdout_line(Some("zebraB2".to_string()));
+            }
 
-//     tracing::info!("waiting for zebrad nodes to connect");
+            Ok(())
+        });
+    }
 
-//     // Wait a few seconds for Zebra to start up and make outbound peer connections
-//     tokio::time::sleep(LAUNCH_DELAY).await;
+    tracing::info!("waiting for zebrad nodes to connect");
 
-//     tracing::info!("checking for peers");
+    // Wait a few seconds for Zebra to start up and make outbound peer connections
+    tokio::time::sleep(LAUNCH_DELAY).await;
 
-//     // Call `getpeerinfo` to check that the zebrad instances have connected
-//     let peer_info: Vec<PeerInfo> = rpc_client_2
-//         .json_result_from_call("getpeerinfo", "[]")
-//         .await
-//         .map_err(|err| eyre!(err))?;
+    tracing::info!("checking for peers");
 
-//     assert!(!peer_info.is_empty(), "should have outbound peer");
+    // Call `getpeerinfo` to check that the zebrad instances have connected
+    let peer_info: Vec<PeerInfo> = rpc_client_2
+        .json_result_from_call("getpeerinfo", "[]")
+        .await
+        .map_err(|err| eyre!(err))?;
 
-//     tracing::info!(
-//         ?peer_info,
-//         "found peer connection, committing genesis block"
-//     );
+    assert!(!peer_info.is_empty(), "should have outbound peer");
 
-//     let genesis_block = network.block_parsed_iter().next().unwrap();
-//     rpc_client_1.submit_block(genesis_block.clone()).await?;
-//     rpc_client_2.submit_block(genesis_block).await?;
+    tracing::info!(
+        ?peer_info,
+        "found peer connection, committing genesis block"
+    );
 
-//     // Call the `generate` method to mine blocks in the zebrad instance where PoW is disabled
-//     tracing::info!("committed genesis block, mining blocks with invalid PoW");
-//     tokio::time::sleep(Duration::from_secs(2)).await;
+    let genesis_block = network1.block_parsed_iter().next().unwrap();
+    rpc_client_1.submit_block(genesis_block.clone()).await?;
+    rpc_client_2.submit_block(genesis_block).await?;
 
-//     rpc_client_1.call("generate", "[500]").await?;
+    // Call the `generate` method to mine blocks in the zebrad instance where PoW is disabled
+    tracing::info!("committed genesis block, mining blocks with invalid PoW");
+    tokio::time::sleep(Duration::from_secs(2)).await;
 
-//     tracing::info!("wait for misbehavior messages to flush into address updater channel");
+    rpc_client_1.call("generate", "[500]").await?;
 
-//     tokio::time::sleep(Duration::from_secs(30)).await;
+    tracing::info!("wait for misbehavior messages to flush into address updater channel");
 
-//     tracing::info!("calling getpeerinfo to confirm Zebra has dropped the peer connection");
+    tokio::time::sleep(Duration::from_secs(30)).await;
 
-//     // Call `getpeerinfo` to check that the zebrad instances have disconnected
-//     for i in 0..600 {
-//         let peer_info: Vec<PeerInfo> = rpc_client_2
-//             .json_result_from_call("getpeerinfo", "[]")
-//             .await
-//             .map_err(|err| eyre!(err))?;
+    tracing::info!("calling getpeerinfo to confirm Zebra has dropped the peer connection");
 
-//         if peer_info.is_empty() {
-//             break;
-//         } else if i % 10 == 0 {
-//             tracing::info!(?peer_info, "has not yet disconnected from misbehaving peer");
-//         }
+    // Call `getpeerinfo` to check that the zebrad instances have disconnected
+    for i in 0..600 {
+        let peer_info: Vec<PeerInfo> = rpc_client_2
+            .json_result_from_call("getpeerinfo", "[]")
+            .await
+            .map_err(|err| eyre!(err))?;
 
-//         rpc_client_1.call("generate", "[1]").await?;
+        if peer_info.is_empty() {
+            break;
+        } else if i % 10 == 0 {
+            tracing::info!(?peer_info, "has not yet disconnected from misbehaving peer");
+        }
 
-//         tokio::time::sleep(Duration::from_secs(1)).await;
-//     }
+        rpc_client_1.call("generate", "[1]").await?;
 
-//     let peer_info: Vec<PeerInfo> = rpc_client_2
-//         .json_result_from_call("getpeerinfo", "[]")
-//         .await
-//         .map_err(|err| eyre!(err))?;
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
 
-//     tracing::info!(?peer_info, "called getpeerinfo");
+    let peer_info: Vec<PeerInfo> = rpc_client_2
+        .json_result_from_call("getpeerinfo", "[]")
+        .await
+        .map_err(|err| eyre!(err))?;
 
-//     assert!(peer_info.is_empty(), "should have no peers");
+    tracing::info!(?peer_info, "called getpeerinfo");
 
-//     is_finished.store(true, std::sync::atomic::Ordering::SeqCst);
+    assert!(peer_info.is_empty(), "should have no peers");
 
-//     Ok(())
-// }
+    is_finished.store(true, std::sync::atomic::Ordering::SeqCst);
+
+    Ok(())
+}

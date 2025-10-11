@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use zebra_chain::{
     block,
-    serialization::{ZcashDeserializeInto, ZcashSerialize},
+    serialization::{BytesInDisplayOrder, ZcashDeserializeInto, ZcashSerialize},
 };
 
 #[cfg(test)]

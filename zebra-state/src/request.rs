@@ -6,6 +6,7 @@ use std::{
     sync::Arc,
 };
 
+use tower::{BoxError, Service, ServiceExt};
 use zebra_chain::{
     amount::{DeferredPoolBalanceChange, NegativeAllowed},
     block::{self, Block, HeightDiff},
@@ -27,6 +28,10 @@ use zebra_chain::{
 use crate::{
     constants::{MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS},
     ReadResponse, Response,
+};
+use crate::{
+    error::{InvalidateError, LayeredStateError, ReconsiderError},
+    CommitSemanticallyVerifiedError,
 };
 
 /// Identify a spend by a transparent outpoint or revealed nullifier.
@@ -327,7 +332,8 @@ pub struct Treestate {
 }
 
 impl Treestate {
-    pub fn new(
+    #[allow(missing_docs)]
+    pub(crate) fn new(
         sprout: Arc<sprout::tree::NoteCommitmentTree>,
         sapling: Arc<sapling::tree::NoteCommitmentTree>,
         orchard: Arc<orchard::tree::NoteCommitmentTree>,
@@ -352,6 +358,7 @@ impl Treestate {
 ///
 /// Zebra's state service passes this `enum` over to the finalized state
 /// when committing a block.
+#[allow(missing_docs)]
 pub enum FinalizableBlock {
     Checkpoint {
         checkpoint_verified: CheckpointVerifiedBlock,
@@ -629,6 +636,104 @@ impl DerefMut for CheckpointVerifiedBlock {
     }
 }
 
+/// Helper trait for convenient access to expected response and error types.
+pub trait MappedRequest: Sized + Send + 'static {
+    /// Expected response type for this state request.
+    type MappedResponse;
+    /// Expected error type for this state request.
+    type Error: std::error::Error + std::fmt::Display + 'static;
+
+    /// Maps the request type to a [`Request`].
+    fn map_request(self) -> Request;
+
+    /// Maps the expected [`Response`] variant for this request to the mapped response type.
+    fn map_response(response: Response) -> Self::MappedResponse;
+
+    /// Accepts a state service to call, maps this request to a [`Request`], waits for the state to be ready,
+    /// calls the state with the mapped request, then maps the success or error response to the expected response
+    /// or error type for this request.
+    ///
+    /// Returns a [`Result<MappedResponse, LayeredServicesError<RequestError>>`].
+    #[allow(async_fn_in_trait)]
+    async fn mapped_oneshot<State>(
+        self,
+        state: &mut State,
+    ) -> Result<Self::MappedResponse, LayeredStateError<Self::Error>>
+    where
+        State: Service<Request, Response = Response, Error = BoxError>,
+        State::Future: Send,
+    {
+        let response = state.ready().await?.call(self.map_request()).await?;
+        Ok(Self::map_response(response))
+    }
+}
+
+/// Performs contextual validation of the given semantically verified block,
+/// committing it to the state if successful.
+///
+/// See the [`crate`] documentation and [`Request::CommitSemanticallyVerifiedBlock`] for details.
+pub struct CommitSemanticallyVerifiedBlockRequest(pub SemanticallyVerifiedBlock);
+
+impl MappedRequest for CommitSemanticallyVerifiedBlockRequest {
+    type MappedResponse = block::Hash;
+    type Error = CommitSemanticallyVerifiedError;
+
+    fn map_request(self) -> Request {
+        Request::CommitSemanticallyVerifiedBlock(self.0)
+    }
+
+    fn map_response(response: Response) -> Self::MappedResponse {
+        match response {
+            Response::Committed(hash) => hash,
+            _ => unreachable!("wrong response variant for request"),
+        }
+    }
+}
+
+/// Request to invalidate a block in the state.
+///
+/// See the [`crate`] documentation and [`Request::InvalidateBlock`] for details.
+#[allow(dead_code)]
+pub struct InvalidateBlockRequest(pub block::Hash);
+
+impl MappedRequest for InvalidateBlockRequest {
+    type MappedResponse = block::Hash;
+    type Error = InvalidateError;
+
+    fn map_request(self) -> Request {
+        Request::InvalidateBlock(self.0)
+    }
+
+    fn map_response(response: Response) -> Self::MappedResponse {
+        match response {
+            Response::Invalidated(hash) => hash,
+            _ => unreachable!("wrong response variant for request"),
+        }
+    }
+}
+
+/// Request to reconsider a previously invalidated block and re-commit it to the state.
+///
+/// See the [`crate`] documentation and [`Request::ReconsiderBlock`] for details.
+#[allow(dead_code)]
+pub struct ReconsiderBlockRequest(pub block::Hash);
+
+impl MappedRequest for ReconsiderBlockRequest {
+    type MappedResponse = Vec<block::Hash>;
+    type Error = ReconsiderError;
+
+    fn map_request(self) -> Request {
+        Request::ReconsiderBlock(self.0)
+    }
+
+    fn map_response(response: Response) -> Self::MappedResponse {
+        match response {
+            Response::Reconsidered(hashes) => hashes,
+            _ => unreachable!("wrong response variant for request"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A query about or modification to the chain state, via the
 /// [`StateService`](crate::service::StateService).
@@ -640,8 +745,8 @@ pub enum Request {
     /// until its parent is ready.
     ///
     /// Returns [`Response::Committed`] with the hash of the block when it is
-    /// committed to the state, or an error if the block fails contextual
-    /// validation or has already been committed to the state.
+    /// committed to the state, or a [`CommitSemanticallyVerifiedBlockError`][0] if
+    /// the block fails contextual validation or otherwise could not be committed.
     ///
     /// This request cannot be cancelled once submitted; dropping the response
     /// future will have no effect on whether it is eventually processed. A
@@ -653,6 +758,8 @@ pub enum Request {
     /// Block commit requests should be wrapped in a timeout, so that
     /// out-of-order and invalid requests do not hang indefinitely. See the [`crate`]
     /// documentation for details.
+    ///
+    /// [0]: (crate::error::CommitSemanticallyVerifiedBlockError)
     CommitSemanticallyVerifiedBlock(SemanticallyVerifiedBlock),
 
     /// Commit a checkpointed block to the state, skipping most but not all
@@ -732,6 +839,16 @@ pub enum Request {
     /// * [`Response::Transaction(Some(Arc<Transaction>))`](Response::Transaction) if the transaction is in the best chain;
     /// * [`Response::Transaction(None)`](Response::Transaction) otherwise.
     Transaction(transaction::Hash),
+
+    /// Looks up a transaction by hash in any chain.
+    ///
+    /// Returns
+    ///
+    /// * [`Response::AnyChainTransaction(Some(AnyTx))`](Response::AnyChainTransaction)
+    ///   if the transaction is in any chain;
+    /// * [`Response::AnyChainTransaction(None)`](Response::AnyChainTransaction)
+    ///   otherwise.
+    AnyChainTransaction(transaction::Hash),
 
     /// Looks up a UTXO identified by the given [`OutPoint`](transparent::OutPoint),
     /// returning `None` immediately if it is unknown.
@@ -884,6 +1001,7 @@ impl Request {
             Request::Tip => "tip",
             Request::BlockLocator => "block_locator",
             Request::Transaction(_) => "transaction",
+            Request::AnyChainTransaction(_) => "any_chain_transaction",
             Request::UnspentBestChainUtxo { .. } => "unspent_best_chain_utxo",
             Request::Block(_) => "block",
             Request::BlockAndSize(_) => "block_and_size",
@@ -980,6 +1098,16 @@ pub enum ReadRequest {
     /// * [`ReadResponse::Transaction(None)`](ReadResponse::Transaction) otherwise.
     Transaction(transaction::Hash),
 
+    /// Looks up a transaction by hash in any chain.
+    ///
+    /// Returns
+    ///
+    /// * [`ReadResponse::AnyChainTransaction(Some(AnyTx))`](ReadResponse::AnyChainTransaction)
+    ///   if the transaction is in any chain;
+    /// * [`ReadResponse::AnyChainTransaction(None)`](ReadResponse::AnyChainTransaction)
+    ///   otherwise.
+    AnyChainTransaction(transaction::Hash),
+
     /// Looks up the transaction IDs for a block, using a block hash or height.
     ///
     /// Returns
@@ -991,6 +1119,20 @@ pub enum ReadRequest {
     ///
     /// Returned txids are in the order they appear in the block.
     TransactionIdsForBlock(HashOrHeight),
+
+    /// Looks up the transaction IDs for a block, using a block hash or height,
+    /// for any chain.
+    ///
+    /// Returns
+    ///
+    /// * An ordered list of transaction hashes and a flag indicating whether
+    ///   the block is in the best chain, or
+    /// * `None` if the block was not found.
+    ///
+    /// Note: Each block has at least one transaction: the coinbase transaction.
+    ///
+    /// Returned txids are in the order they appear in the block.
+    AnyChainTransactionIdsForBlock(HashOrHeight),
 
     /// Looks up a UTXO identified by the given [`OutPoint`](transparent::OutPoint),
     /// returning `None` immediately if it is unknown.
@@ -1213,7 +1355,9 @@ impl ReadRequest {
             ReadRequest::BlockAndSize(_) => "block_and_size",
             ReadRequest::BlockHeader(_) => "block_header",
             ReadRequest::Transaction(_) => "transaction",
+            ReadRequest::AnyChainTransaction(_) => "any_chain_transaction",
             ReadRequest::TransactionIdsForBlock(_) => "transaction_ids_for_block",
+            ReadRequest::AnyChainTransactionIdsForBlock(_) => "any_chain_transaction_ids_for_block",
             ReadRequest::UnspentBestChainUtxo { .. } => "unspent_best_chain_utxo",
             ReadRequest::AnyChainUtxo { .. } => "any_chain_utxo",
             ReadRequest::BlockLocator => "block_locator",
@@ -1269,6 +1413,7 @@ impl TryFrom<Request> for ReadRequest {
             Request::BlockAndSize(hash_or_height) => Ok(ReadRequest::BlockAndSize(hash_or_height)),
             Request::BlockHeader(hash_or_height) => Ok(ReadRequest::BlockHeader(hash_or_height)),
             Request::Transaction(tx_hash) => Ok(ReadRequest::Transaction(tx_hash)),
+            Request::AnyChainTransaction(tx_hash) => Ok(ReadRequest::AnyChainTransaction(tx_hash)),
             Request::UnspentBestChainUtxo(outpoint) => {
                 Ok(ReadRequest::UnspentBestChainUtxo(outpoint))
             }
