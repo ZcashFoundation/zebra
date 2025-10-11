@@ -11,7 +11,7 @@ on:
       - docker/entrypoint.sh
       - docker/**/*.toml
       - zebrad/tests/common/configs/**
-      - .github/workflows/test-docker-config.yml
+      - .github/workflows/test-docker.yml
 
   push:
     branches: [main]
@@ -23,7 +23,7 @@ on:
       - docker/entrypoint.sh
       - docker/**/*.toml
       - zebrad/tests/common/configs/**
-      - .github/workflows/test-docker-config.yml
+      - .github/workflows/test-docker.yml
 
 # Ensures that only one workflow task will run at a time. Previous builds, if
 # already in process, will get cancelled. Only the latest commit will be allowed

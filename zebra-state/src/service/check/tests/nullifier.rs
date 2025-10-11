@@ -165,11 +165,10 @@ proptest! {
         // we might need to just check `is_err()` here
         prop_assert_eq!(
             commit_result,
-            Err(Box::new(DuplicateSproutNullifier {
+            Err(DuplicateSproutNullifier {
                 nullifier: duplicate_nullifier,
                 in_finalized_state: false,
             })
-            .into())
         );
         // block was rejected
         prop_assert_eq!(Some((Height(0), genesis.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
@@ -224,11 +223,10 @@ proptest! {
 
         prop_assert_eq!(
             commit_result,
-            Err(Box::new(DuplicateSproutNullifier {
+            Err(DuplicateSproutNullifier {
                 nullifier: duplicate_nullifier,
                 in_finalized_state: false,
             })
-            .into())
         );
         prop_assert_eq!(Some((Height(0), genesis.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
         prop_assert!(non_finalized_state.eq_internal_state(&previous_mem));
@@ -285,11 +283,10 @@ proptest! {
 
         prop_assert_eq!(
             commit_result,
-            Err(Box::new(DuplicateSproutNullifier {
+            Err(DuplicateSproutNullifier {
                 nullifier: duplicate_nullifier,
                 in_finalized_state: false,
             })
-            .into())
         );
         prop_assert_eq!(Some((Height(0), genesis.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
         prop_assert!(non_finalized_state.eq_internal_state(&previous_mem));
@@ -392,11 +389,10 @@ proptest! {
 
         prop_assert_eq!(
             commit_result,
-            Err(Box::new(DuplicateSproutNullifier {
+            Err(DuplicateSproutNullifier {
                 nullifier: duplicate_nullifier,
                 in_finalized_state: duplicate_in_finalized_state,
             })
-            .into())
         );
 
         let check_tx_no_duplicates_in_chain =
@@ -517,11 +513,10 @@ proptest! {
 
         prop_assert_eq!(
             commit_result,
-            Err(Box::new(DuplicateSaplingNullifier {
+            Err(DuplicateSaplingNullifier {
                 nullifier: duplicate_nullifier,
                 in_finalized_state: false,
             })
-            .into())
         );
         prop_assert_eq!(Some((Height(0), genesis.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
         prop_assert!(non_finalized_state.eq_internal_state(&previous_mem));
@@ -573,11 +568,10 @@ proptest! {
 
         prop_assert_eq!(
             commit_result,
-            Err(Box::new(DuplicateSaplingNullifier {
+            Err(DuplicateSaplingNullifier {
                 nullifier: duplicate_nullifier,
                 in_finalized_state: false,
             })
-            .into())
         );
         prop_assert_eq!(Some((Height(0), genesis.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
         prop_assert!(non_finalized_state.eq_internal_state(&previous_mem));
@@ -670,11 +664,10 @@ proptest! {
 
         prop_assert_eq!(
             commit_result,
-            Err(Box::new(DuplicateSaplingNullifier {
+            Err(DuplicateSaplingNullifier {
                 nullifier: duplicate_nullifier,
                 in_finalized_state: duplicate_in_finalized_state,
             })
-            .into())
         );
 
         let check_tx_no_duplicates_in_chain =
@@ -798,11 +791,10 @@ proptest! {
 
         prop_assert_eq!(
             commit_result,
-            Err(Box::new(DuplicateOrchardNullifier {
+            Err(DuplicateOrchardNullifier {
                 nullifier: duplicate_nullifier,
                 in_finalized_state: false,
             })
-            .into())
         );
         prop_assert_eq!(Some((Height(0), genesis.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
         prop_assert!(non_finalized_state.eq_internal_state(&previous_mem));
@@ -858,11 +850,10 @@ proptest! {
 
         prop_assert_eq!(
             commit_result,
-            Err(Box::new(DuplicateOrchardNullifier {
+            Err(DuplicateOrchardNullifier {
                 nullifier: duplicate_nullifier,
                 in_finalized_state: false,
             })
-            .into())
         );
         prop_assert_eq!(Some((Height(0), genesis.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
         prop_assert!(non_finalized_state.eq_internal_state(&previous_mem));
@@ -958,11 +949,10 @@ proptest! {
 
         prop_assert_eq!(
             commit_result,
-            Err(Box::new(DuplicateOrchardNullifier {
+            Err(DuplicateOrchardNullifier {
                 nullifier: duplicate_nullifier,
                 in_finalized_state: duplicate_in_finalized_state,
             })
-            .into())
         );
 
         let check_tx_no_duplicates_in_chain =

@@ -313,6 +313,18 @@ impl TestType {
                 );
                 None
             }
+        } else if self.can_create_lightwalletd_cached_state() {
+            // Ensure the directory exists so FullSyncFromGenesis can populate it.
+            if let Err(error) = std::fs::create_dir_all(&default_path) {
+                tracing::warn!(
+                    ?default_path,
+                    ?error,
+                    "failed to create default lightwalletd cache directory; using an ephemeral temp dir instead",
+                );
+                None
+            } else {
+                Some(default_path)
+            }
         } else {
             None
         }

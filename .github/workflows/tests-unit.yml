@@ -63,12 +63,12 @@ jobs:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@ab6845274e2ff01cd4462007e1a9d9df1ab49f42 #v1.14.0
+      - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 #v1.15.1
         with:
           toolchain: ${{ matrix.rust-version }}
           cache-key: unit-tests-${{ matrix.os }}-${{ matrix.rust-version }}-${{ matrix.features }}
           cache-on-failure: true
-      - uses: taiki-e/install-action@3ee5d63d29478156148c0b53e9f3447829b47bc2 #v2.58.23
+      - uses: taiki-e/install-action@d6d752794628f1e1fffa3c4d3c8874e06f043d50 #v2.62.15
         with:
           tool: cargo-nextest
       - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3.0.0
@@ -110,11 +110,11 @@ jobs:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@ab6845274e2ff01cd4462007e1a9d9df1ab49f42 #v1.14.0
+      - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 #v1.15.1
         with:
           toolchain: stable
           cache-on-failure: true
-      - uses: taiki-e/install-action@3ee5d63d29478156148c0b53e9f3447829b47bc2 #v2.58.23
+      - uses: taiki-e/install-action@d6d752794628f1e1fffa3c4d3c8874e06f043d50 #v2.62.15
         with:
           tool: cargo-nextest
       - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3.0.0

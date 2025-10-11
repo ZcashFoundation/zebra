@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use derive_new::new;
 use thiserror::Error;
 
 use zebra_chain::{
@@ -41,26 +42,118 @@ impl From<BoxError> for CloneError {
 /// A boxed [`std::error::Error`].
 pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
-/// An error describing the reason a semantically verified block could not be committed to the state.
-#[derive(Debug, Clone, Error, PartialEq, Eq)]
-#[error("block is not contextually valid: {}", .0)]
-pub struct CommitSemanticallyVerifiedError(#[from] Box<ValidateContextError>);
+/// An error describing why a block could not be queued to be committed to the state.
+#[derive(Debug, Error, Clone, PartialEq, Eq, new)]
+pub enum QueueAndCommitError {
+    #[error("block hash {block_hash} has already been sent to be committed to the state")]
+    #[non_exhaustive]
+    Duplicate { block_hash: block::Hash },
 
-/// An error describing the reason a block or its descendants could not be reconsidered after
-/// potentially being invalidated from the chain_set.
+    #[error("block height {block_height:?} is already committed in the finalized state")]
+    #[non_exhaustive]
+    AlreadyFinalized { block_height: block::Height },
+
+    #[error("block hash {block_hash} was replaced by a newer commit request")]
+    #[non_exhaustive]
+    Replaced { block_hash: block::Hash },
+
+    #[error("pruned block at or below the finalized tip height: {block_height:?}")]
+    #[non_exhaustive]
+    Pruned { block_height: block::Height },
+
+    #[error("block {block_hash} was dropped from the queue of non-finalized blocks")]
+    #[non_exhaustive]
+    Dropped { block_hash: block::Hash },
+
+    #[error("block commit task exited. Is Zebra shutting down?")]
+    #[non_exhaustive]
+    CommitTaskExited,
+
+    #[error("dropping the state: dropped unused non-finalized state queue block")]
+    #[non_exhaustive]
+    DroppedUnusedBlock,
+}
+
+/// An error describing why a `CommitSemanticallyVerified` request failed.
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CommitSemanticallyVerifiedError {
+    /// Queuing/commit step failed.
+    #[error("could not queue and commit semantically verified block")]
+    QueueAndCommitError(#[from] QueueAndCommitError),
+    /// Contextual validation failed.
+    #[error("could not contextually validate semantically verified block")]
+    ValidateContextError(#[from] ValidateContextError),
+    /// The write task exited (likely during shutdown).
+    #[error("block write task has exited. Is Zebra shutting down?")]
+    WriteTaskExited,
+}
+
 #[derive(Debug, Error)]
+pub enum LayeredStateError<E: std::error::Error + std::fmt::Display> {
+    #[error("{0}")]
+    State(E),
+    #[error("{0}")]
+    Layer(BoxError),
+}
+
+impl<E: std::error::Error + 'static> From<BoxError> for LayeredStateError<E> {
+    fn from(err: BoxError) -> Self {
+        match err.downcast::<E>() {
+            Ok(state_err) => Self::State(*state_err),
+            Err(layer_error) => Self::Layer(layer_error),
+        }
+    }
+}
+
+/// An error describing why a `InvalidateBlock` request failed.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum InvalidateError {
+    /// The state is currently checkpointing blocks and cannot accept invalidation requests.
+    #[error("cannot invalidate blocks while still committing checkpointed blocks")]
+    ProcessingCheckpointedBlocks,
+
+    /// Sending the invalidate request to the block write task failed.
+    #[error("failed to send invalidate block request to block write task")]
+    SendInvalidateRequestFailed,
+
+    /// The invalidate request was dropped before processing.
+    #[error("invalidate block request was unexpectedly dropped")]
+    InvalidateRequestDropped,
+
+    /// The block hash was not found in any non-finalized chain.
+    #[error("block hash {0} not found in any non-finalized chain")]
+    BlockNotFound(block::Hash),
+}
+
+/// An error describing why a `ReconsiderBlock` request failed.
+#[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum ReconsiderError {
+    /// The block is not found in the list of invalidated blocks.
     #[error("Block with hash {0} was not previously invalidated")]
     MissingInvalidatedBlock(block::Hash),
 
+    /// The block's parent is missing from the non-finalized state.
     #[error("Parent chain not found for block {0}")]
     ParentChainNotFound(block::Hash),
 
+    /// There were no invalidated blocks when at least one was expected.
     #[error("Invalidated blocks list is empty when it should contain at least one block")]
     InvalidatedBlocksEmpty,
 
-    #[error("{0}")]
-    ValidationError(#[from] Box<ValidateContextError>),
+    /// The state is currently checkpointing blocks and cannot accept reconsider requests.
+    #[error("cannot reconsider blocks while still committing checkpointed blocks")]
+    CheckpointCommitInProgress,
+
+    /// Sending the reconsider request to the block write task failed.
+    #[error("failed to send reconsider block request to block write task")]
+    ReconsiderSendFailed,
+
+    /// The reconsider request was dropped before processing.
+    #[error("reconsider block request was unexpectedly dropped")]
+    ReconsiderResponseDropped,
 }
 
 /// An error describing why a block failed contextual validation.
@@ -285,34 +378,6 @@ pub enum ValidateContextError {
         tx_index_in_block: Option<usize>,
         transaction_hash: transaction::Hash,
     },
-
-    #[error("block hash {block_hash} has already been sent to be committed to the state")]
-    #[non_exhaustive]
-    DuplicateCommitRequest { block_hash: block::Hash },
-
-    #[error("block height {block_height:?} is already committed in the finalized state")]
-    #[non_exhaustive]
-    AlreadyFinalized { block_height: block::Height },
-
-    #[error("block hash {block_hash} was replaced by a newer commit request")]
-    #[non_exhaustive]
-    ReplacedByNewerRequest { block_hash: block::Hash },
-
-    #[error("pruned block at or below the finalized tip height: {block_height:?}")]
-    #[non_exhaustive]
-    PrunedBelowFinalizedTip { block_height: block::Height },
-
-    #[error("block {block_hash} was dropped from the queue of non-finalized blocks")]
-    #[non_exhaustive]
-    DroppedCommitRequest { block_hash: block::Hash },
-
-    #[error("block commit task exited. Is Zebra shutting down?")]
-    #[non_exhaustive]
-    CommitTaskExited,
-
-    #[error("dropping the state: dropped unused non-finalized state queue block")]
-    #[non_exhaustive]
-    DroppedUnusedBlock,
 }
 
 /// Trait for creating the corresponding duplicate nullifier error from a nullifier.

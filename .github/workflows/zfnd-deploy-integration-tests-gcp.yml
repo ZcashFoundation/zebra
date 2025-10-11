@@ -78,6 +78,9 @@ on:
         type: string
         default: zebra
         description: Application name, used to work out when a job is an update job
+    secrets:
+      GCP_SSH_PRIVATE_KEY:
+        required: true
 
 env:
   RUST_LOG: ${{ vars.RUST_LOG }}
@@ -115,6 +118,9 @@ jobs:
   #
   get-disk-name:
     name: Get disk name
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/zfnd-find-cached-disks.yml
     if: ${{ (inputs.needs_zebra_state || inputs.needs_lwd_state) || (inputs.saves_to_disk || inputs.force_save_to_disk) }}
     with:
@@ -223,47 +229,11 @@ jobs:
             DISK_ATTACH_PARAMS="--create-disk=${DISK_PARAMS}"
           fi
 
-          # Mount the disk(s) to the container
-          # This partition=1 logic differentiates between disk types:
-          # - Only Zebra tip disks (from full sync) have partitions and need partition=1
-          # - LWD disks never have partitions
-          # - Checkpoint disks don't have partitions
-          # TODO: Consider removing this logic once all cached disk images use consistent partitioning.
-
-          # Determine if we should use partition=1 based on specific test requirements
-          # Default to safe approach: no partitions unless explicitly whitelisted
-          USE_PARTITION="false"
-          if [ -n "${{ env.CACHED_DISK_NAME }}" ]; then
-            # All tests that use Zebra tip disks (which have partitions)
-            if [[ "${{ inputs.test_id }}" == "sync-update-mainnet" ]] || \
-               [[ "${{ inputs.test_id }}" == "sync-full-mainnet" ]] || \
-               [[ "${{ inputs.test_id }}" == "generate-checkpoints-mainnet" ]] || \
-               [[ "${{ inputs.test_id }}" == "lwd-rpc-test" ]] || \
-               [[ "${{ inputs.test_id }}" == "rpc-get-block-template" ]] || \
-               [[ "${{ inputs.test_id }}" == "rpc-submit-block" ]]; then
-              USE_PARTITION="true"
-              echo "Using Zebra tip disk with partition=1: ${{ env.CACHED_DISK_NAME }}"
-            # All other tests default to no partition for safety
-            else
-              USE_PARTITION="false"
-              echo "Using cached disk without partition (safe default): ${{ env.CACHED_DISK_NAME }}"
-            fi
-          fi
-
-          # Mount zebra state directory
-          if [[ "$USE_PARTITION" == "true" ]]; then
-            CONTAINER_MOUNT_DISKS="--container-mount-disk=mount-path=${{ inputs.zebra_state_dir }},name=${NAME},mode=rw,partition=1"
-          else
-            CONTAINER_MOUNT_DISKS="--container-mount-disk=mount-path=${{ inputs.zebra_state_dir }},name=${NAME},mode=rw"
-          fi
+          CONTAINER_MOUNT_DISKS="--container-mount-disk=mount-path=${{ inputs.zebra_state_dir }},name=${NAME},mode=rw"
 
           # Mount the same disk to the lwd path if needed
           if [[ "${{ inputs.needs_lwd_state }}" == "true" || "${{ inputs.test_id }}" == "lwd-sync-full" ]]; then
-            if [[ "$USE_PARTITION" == "true" ]]; then
-              CONTAINER_MOUNT_DISKS+=" --container-mount-disk=mount-path=${{ inputs.lwd_state_dir }},name=${NAME},mode=rw,partition=1"
-            else
-              CONTAINER_MOUNT_DISKS+=" --container-mount-disk=mount-path=${{ inputs.lwd_state_dir }},name=${NAME},mode=rw"
-            fi
+            CONTAINER_MOUNT_DISKS+=" --container-mount-disk=mount-path=${{ inputs.lwd_state_dir }},name=${NAME},mode=rw"
           fi
 
           # Environment variables for the container
@@ -772,3 +742,4 @@ jobs:
         uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe #v1.2.2
         with:
           jobs: ${{ toJSON(needs) }}
+          allowed-skips: ${{ (inputs.saves_to_disk || inputs.force_save_to_disk) && '' || 'create-state-image' }}

@@ -24,7 +24,7 @@ use color_eyre::eyre::{eyre, Result};
 use zebra_chain::{
     block::Block,
     parameters::Network::*,
-    serialization::ZcashSerialize,
+    serialization::{BytesInDisplayOrder, ZcashSerialize},
     transaction::{self, Transaction},
 };
 use zebra_node_services::rpc_client::RpcRequestClient;

@@ -43,6 +43,12 @@
 [consensus]
 checkpoint_sync = true
 
+[health]
+enforce_on_test_networks = false
+min_connected_peers = 1
+ready_max_blocks_behind = 2
+ready_max_tip_age = "5m"
+
 [mempool]
 eviction_memory_time = "1h"
 tx_cost_limit = 80000000
@@ -59,12 +65,10 @@ initial_mainnet_peers = [
     "dnsseed.z.cash:8233",
     "dnsseed.str4d.xyz:8233",
     "mainnet.seeder.zfnd.org:8233",
-    "mainnet.is.yolo.money:8233",
 ]
 initial_testnet_peers = [
     "dnsseed.testnet.z.cash:18233",
     "testnet.seeder.zfnd.org:18233",
-    "testnet.is.yolo.money:18233",
 ]
 listen_addr = "[::]:8233"
 max_connections_per_ip = 1

@@ -2,7 +2,7 @@
 
 use zcash_keys::address::Address;
 
-use zcash_primitives::legacy::TransparentAddress;
+use zcash_transparent::address::TransparentAddress;
 use zebra_chain::{block::Height, parameters::Network, transaction, transparent::OutPoint};
 use zebra_node_services::mempool::TransactionDependencies;
 
