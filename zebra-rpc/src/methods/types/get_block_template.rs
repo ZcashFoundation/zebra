@@ -278,6 +278,7 @@ impl BlockTemplateResponse {
         #[cfg(test)] mempool_txs: Vec<(InBlockTxDependenciesDepth, VerifiedUnminedTx)>,
         submit_old: Option<bool>,
         extra_coinbase_data: Vec<u8>,
+        #[cfg(feature = "tx_v6")] zip233_amount: Option<Amount<NonNegative>>,
     ) -> Self {
         // Calculate the next block height.
         let next_block_height =
@@ -329,6 +330,8 @@ impl BlockTemplateResponse {
             &mempool_txs,
             chain_tip_and_local_time.chain_history_root,
             extra_coinbase_data,
+            #[cfg(feature = "tx_v6")]
+            zip233_amount,
         )
         .expect("coinbase should be valid under the given parameters");
 
@@ -804,6 +807,7 @@ where
 // - Response processing
 
 /// Generates and returns the coinbase transaction and default roots.
+#[allow(clippy::too_many_arguments)]
 pub fn generate_coinbase_and_roots(
     network: &Network,
     height: Height,
@@ -811,6 +815,7 @@ pub fn generate_coinbase_and_roots(
     mempool_txs: &[VerifiedUnminedTx],
     chain_history_root: Option<ChainHistoryMmrRootHash>,
     miner_data: Vec<u8>,
+    #[cfg(feature = "tx_v6")] zip233_amount: Option<Amount<NonNegative>>,
 ) -> Result<(TransactionTemplate<NegativeOrZero>, DefaultRoots), &'static str> {
     let miner_fee = calculate_miner_fee(mempool_txs);
     let outputs = standard_coinbase_outputs(network, height, miner_address, miner_fee);
@@ -818,8 +823,14 @@ pub fn generate_coinbase_and_roots(
 
     let tx = match current_nu {
         NetworkUpgrade::Canopy => Transaction::new_v4_coinbase(height, outputs, miner_data),
-        NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 | NetworkUpgrade::Nu6_1 | NetworkUpgrade::Nu7 => {
+        NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 | NetworkUpgrade::Nu6_1 => {
             Transaction::new_v5_coinbase(network, height, outputs, miner_data)
+        }
+        #[cfg(not(feature = "tx_v6"))]
+        NetworkUpgrade::Nu7 => Transaction::new_v5_coinbase(network, height, outputs, miner_data),
+        #[cfg(feature = "tx_v6")]
+        NetworkUpgrade::Nu7 => {
+            Transaction::new_v6_coinbase(network, height, outputs, miner_data, zip233_amount)
         }
         _ => Err("Zebra does not support generating pre-Canopy coinbase transactions")?,
     }
