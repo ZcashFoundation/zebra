@@ -863,7 +863,7 @@ pub struct RegtestParameters {
     pub checkpoints: Option<ConfiguredCheckpoints>,
     /// Automatically repeats funding stream addresess to fill all required periods
     /// if est to `true`. Only available with `proptest-impl` feature enabled
-    pub extend_funding_stream_addresses_as_required: Option<bool>
+    pub extend_funding_stream_addresses_as_required: Option<bool>,
 }
 
 impl From<ConfiguredActivationHeights> for RegtestParameters {
@@ -935,7 +935,7 @@ impl Parameters {
             lockbox_disbursements,
             checkpoints,
             #[cfg_attr(not(any(test, feature = "proptest-impl")), allow(unused_variables))]
-            extend_funding_stream_addresses_as_required
+            extend_funding_stream_addresses_as_required,
         }: RegtestParameters,
     ) -> Self {
         #[cfg_attr(not(any(test, feature = "proptest-impl")), allow(unused_mut))]
@@ -955,7 +955,9 @@ impl Parameters {
             .with_checkpoints(checkpoints.unwrap_or_default());
 
         #[cfg(any(test, feature = "proptest-impl"))]
-        if let Some(should_extend_funding_stream_addresses) = extend_funding_stream_addresses_as_required {
+        if let Some(should_extend_funding_stream_addresses) =
+            extend_funding_stream_addresses_as_required
+        {
             if should_extend_funding_stream_addresses {
                 parameters = parameters.extend_funding_streams();
             }

@@ -17,7 +17,8 @@ use zebra_chain::{
     common::atomic_write,
     parameters::{
         testnet::{
-            self, ConfiguredActivationHeights, ConfiguredCheckpoints, ConfiguredFundingStreams, ConfiguredLockboxDisbursement, RegtestParameters
+            self, ConfiguredActivationHeights, ConfiguredCheckpoints, ConfiguredFundingStreams,
+            ConfiguredLockboxDisbursement, RegtestParameters,
         },
         Magic, Network, NetworkKind,
     },
@@ -604,7 +605,7 @@ struct DTestnetParameters {
     checkpoints: ConfiguredCheckpoints,
     /// If `true`, automatically repeats configured funding stream addresses to fill
     /// all required periods.
-    extend_funding_stream_addresses_as_required: Option<bool>
+    extend_funding_stream_addresses_as_required: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -672,7 +673,7 @@ impl From<Arc<testnet::Parameters>> for DTestnetParameters {
             } else {
                 params.checkpoints().into()
             },
-            extend_funding_stream_addresses_as_required: None
+            extend_funding_stream_addresses_as_required: None,
         }
     }
 }
@@ -775,7 +776,7 @@ impl<'de> Deserialize<'de> for Config {
                                 funding_streams: Some(funding_streams_vec),
                                 lockbox_disbursements,
                                 checkpoints: Some(checkpoints),
-                                extend_funding_stream_addresses_as_required
+                                extend_funding_stream_addresses_as_required,
                             }
                         },
                     )
@@ -800,7 +801,7 @@ impl<'de> Deserialize<'de> for Config {
                     lockbox_disbursements,
                     checkpoints,
                     #[cfg_attr(not(any(test, feature = "proptest-impl")), allow(unused_variables))]
-                    extend_funding_stream_addresses_as_required
+                    extend_funding_stream_addresses_as_required,
                 }),
             ) => {
                 let mut params_builder = testnet::Parameters::build();
@@ -867,7 +868,9 @@ impl<'de> Deserialize<'de> for Config {
                 params_builder = params_builder.with_checkpoints(checkpoints);
 
                 #[cfg(any(test, feature = "proptest-impl"))]
-                if let Some(should_extend_funding_stream_addresses) = extend_funding_stream_addresses_as_required {
+                if let Some(should_extend_funding_stream_addresses) =
+                    extend_funding_stream_addresses_as_required
+                {
                     if should_extend_funding_stream_addresses {
                         params_builder = params_builder.extend_funding_streams();
                     }
