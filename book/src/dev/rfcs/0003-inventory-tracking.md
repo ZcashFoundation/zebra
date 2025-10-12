@@ -229,7 +229,7 @@ above, if we cloned peer A and dispatched the request to it, we'd have to
 wait for A to become ready, even if the second peer B advertised the same
 inventory just after we dispatched the request to A. However, this is not
 presently possible anyways, because the `peer::Client`s that handle requests
-are not clonable. They could be made clonable (they send messages to the
+are not cloneable. They could be made cloneable (they send messages to the
 connection state machine over a mpsc channel), but we cannot make this change
 without altering our liveness mechanism, which uses bounds on the
 time-since-last-message to determine whether a peer connection is live and to
