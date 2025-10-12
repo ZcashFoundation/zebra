@@ -177,9 +177,7 @@ impl ConfiguredFundingStreams {
     fn convert_with_default(
         self,
         default_funding_streams: Option<FundingStreams>,
-        parameters_builder: &ParametersBuilder,
     ) -> FundingStreams {
-        let network = parameters_builder.to_network_unchecked();
         let height_range = self.height_range.unwrap_or_else(|| {
             default_funding_streams
                 .as_ref()
@@ -210,8 +208,6 @@ impl ConfiguredFundingStreams {
         );
 
         let funding_streams = FundingStreams::new(height_range.clone(), recipients);
-
-        check_funding_stream_address_period(&funding_streams, &network);
 
         // check that sum of receiver numerators is valid.
 
@@ -631,7 +627,7 @@ impl ParametersBuilder {
             .enumerate()
             .map(|(idx, streams)| {
                 let default_streams = FUNDING_STREAMS_TESTNET.get(idx).cloned();
-                streams.convert_with_default(default_streams, &self)
+                streams.convert_with_default(default_streams)
             })
             .collect();
         self.should_lock_funding_stream_address_period = true;
