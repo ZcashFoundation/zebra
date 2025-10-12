@@ -44,7 +44,7 @@ lazy_static::lazy_static! {
 
 /// Returns the `zebrad` version for this build, in SemVer 2.0 format.
 ///
-/// Includes `git describe` build metatata if available:
+/// Includes `git describe` build metadata if available:
 /// - the number of commits since the last version tag, and
 /// - the git commit.
 ///

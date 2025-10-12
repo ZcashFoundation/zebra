@@ -85,7 +85,7 @@ network_magic = [0, 1, 0, 255]
 slow_start_interval = 20_000
 genesis_hash = "00040fe8ec8471911baa1db1266ea15dd06b4a8a5c453883c000b031973dce08"
 
-# Note that setting `disable_pow` to `false` with this target difficultly 
+# Note that setting `disable_pow` to `false` with this target difficulty 
 # limit will make it very difficult to mine valid blocks onto the chain and
 # is not recommended.
 target_difficulty_limit = "0008000000000000000000000000000000000000000000000000000000000000"
