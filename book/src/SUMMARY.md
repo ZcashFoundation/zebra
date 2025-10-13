@@ -6,7 +6,7 @@
   - [System Requirements](user/requirements.md)
   - [Supported Platforms](user/supported-platforms.md)
     - [Platform Tier Policy](user/target-tier-policies.md)
-  - [Installing Zebra](user/install.md)
+  - [Building and Installing Zebra](user/install.md)
   - [Running Zebra](user/run.md)
   - [Zebra with Docker](user/docker.md)
   - [Tracing Zebra](user/tracing.md)

@@ -204,7 +204,7 @@ async fn rate_limiting_drops_bursts() {
     for i in 0..(MAX_RECENT_REQUESTS + 10) {
         if http_get(addr, "/healthy").await.is_none() {
             was_request_dropped = true;
-            println!("got expected status after some reqs: {i}");
+            tracing::info!("got expected status after some reqs: {i}");
             break;
         }
     }

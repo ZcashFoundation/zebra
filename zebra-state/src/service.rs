@@ -45,7 +45,7 @@ use crate::{
     constants::{
         MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS, MAX_LEGACY_CHAIN_BLOCKS,
     },
-    error::{QueueAndCommitError, ReconsiderError},
+    error::{InvalidateError, QueueAndCommitError, ReconsiderError},
     response::NonFinalizedBlocksListener,
     service::{
         block_iter::any_ancestor_blocks,
@@ -806,13 +806,11 @@ impl StateService {
     fn send_invalidate_block(
         &self,
         hash: block::Hash,
-    ) -> oneshot::Receiver<Result<block::Hash, BoxError>> {
+    ) -> oneshot::Receiver<Result<block::Hash, InvalidateError>> {
         let (rsp_tx, rsp_rx) = oneshot::channel();
 
         let Some(sender) = &self.block_write_sender.non_finalized else {
-            let _ = rsp_tx.send(Err(
-                "cannot invalidate blocks while still committing checkpointed blocks".into(),
-            ));
+            let _ = rsp_tx.send(Err(InvalidateError::ProcessingCheckpointedBlocks));
             return rsp_rx;
         };
 
@@ -823,9 +821,7 @@ impl StateService {
                 unreachable!("should return the same Invalidate message could not be sent");
             };
 
-            let _ = rsp_tx.send(Err(
-                "failed to send invalidate block request to block write task".into(),
-            ));
+            let _ = rsp_tx.send(Err(InvalidateError::SendInvalidateRequestFailed));
         }
 
         rsp_rx
@@ -1159,42 +1155,44 @@ impl Service<Request> for StateService {
                 .boxed()
             }
 
+            // The expected error type for this request is `InvalidateError`
             Request::InvalidateBlock(block_hash) => {
                 let rsp_rx = tokio::task::block_in_place(move || {
                     span.in_scope(|| self.send_invalidate_block(block_hash))
                 });
 
+                // Await the channel response, flatten the result, map receive errors to
+                // `InvalidateError::InvalidateRequestDropped`.
+                // Then flatten the nested Result and convert any errors to a BoxError.
                 let span = Span::current();
                 async move {
                     rsp_rx
                         .await
-                        .map_err(|_recv_error| {
-                            BoxError::from("invalidate block request was unexpectedly dropped")
-                        })
-                        // TODO: replace with Result::flatten once it stabilises
-                        // https://github.com/rust-lang/rust/issues/70142
-                        .and_then(convert::identity)
+                        .map_err(|_recv_error| InvalidateError::InvalidateRequestDropped)
+                        .flatten()
+                        .map_err(BoxError::from)
                         .map(Response::Invalidated)
                 }
                 .instrument(span)
                 .boxed()
             }
 
+            // The expected error type for this request is `ReconsiderError`
             Request::ReconsiderBlock(block_hash) => {
                 let rsp_rx = tokio::task::block_in_place(move || {
                     span.in_scope(|| self.send_reconsider_block(block_hash))
                 });
 
+                // Await the channel response, flatten the result, map receive errors to
+                // `ReconsiderError::ReconsiderResponseDropped`.
+                // Then flatten the nested Result and convert any errors to a BoxError.
                 let span = Span::current();
                 async move {
                     rsp_rx
                         .await
-                        .map_err(|_recv_error| {
-                            BoxError::from(ReconsiderError::ReconsiderResponseDropped)
-                        })
-                        // TODO: replace with Result::flatten once it stabilises
-                        // https://github.com/rust-lang/rust/issues/70142
-                        .and_then(|res| res.map_err(BoxError::from))
+                        .map_err(|_recv_error| ReconsiderError::ReconsiderResponseDropped)
+                        .flatten()
+                        .map_err(BoxError::from)
                         .map(Response::Reconsidered)
                 }
                 .instrument(span)

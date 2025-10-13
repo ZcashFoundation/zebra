@@ -29,7 +29,10 @@ use crate::{
     constants::{MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS},
     ReadResponse, Response,
 };
-use crate::{error::LayeredStateError, CommitSemanticallyVerifiedError};
+use crate::{
+    error::{InvalidateError, LayeredStateError, ReconsiderError},
+    CommitSemanticallyVerifiedError,
+};
 
 /// Identify a spend by a transparent outpoint or revealed nullifier.
 ///
@@ -682,6 +685,50 @@ impl MappedRequest for CommitSemanticallyVerifiedBlockRequest {
     fn map_response(response: Response) -> Self::MappedResponse {
         match response {
             Response::Committed(hash) => hash,
+            _ => unreachable!("wrong response variant for request"),
+        }
+    }
+}
+
+/// Request to invalidate a block in the state.
+///
+/// See the [`crate`] documentation and [`Request::InvalidateBlock`] for details.
+#[allow(dead_code)]
+pub struct InvalidateBlockRequest(pub block::Hash);
+
+impl MappedRequest for InvalidateBlockRequest {
+    type MappedResponse = block::Hash;
+    type Error = InvalidateError;
+
+    fn map_request(self) -> Request {
+        Request::InvalidateBlock(self.0)
+    }
+
+    fn map_response(response: Response) -> Self::MappedResponse {
+        match response {
+            Response::Invalidated(hash) => hash,
+            _ => unreachable!("wrong response variant for request"),
+        }
+    }
+}
+
+/// Request to reconsider a previously invalidated block and re-commit it to the state.
+///
+/// See the [`crate`] documentation and [`Request::ReconsiderBlock`] for details.
+#[allow(dead_code)]
+pub struct ReconsiderBlockRequest(pub block::Hash);
+
+impl MappedRequest for ReconsiderBlockRequest {
+    type MappedResponse = Vec<block::Hash>;
+    type Error = ReconsiderError;
+
+    fn map_request(self) -> Request {
+        Request::ReconsiderBlock(self.0)
+    }
+
+    fn map_response(response: Response) -> Self::MappedResponse {
+        match response {
+            Response::Reconsidered(hashes) => hashes,
             _ => unreachable!("wrong response variant for request"),
         }
     }

@@ -5,7 +5,7 @@ expression: get_network_info
 {
   "version": 100,
   "subversion": "RPC test",
-  "protocolversion": 170130,
+  "protocolversion": 170140,
   "localservices": "0000000000000001",
   "timeoffset": 0,
   "connections": 1,
