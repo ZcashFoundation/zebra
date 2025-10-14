@@ -40,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Docker and book documentation updated to describe `CONFIG_FILE_PATH` and `ZEBRA_*` environment
   variable usage; removed references to `ZEBRA_CONF_PATH` and legacy Docker variables
   ([#9768](https://github.com/ZcashFoundation/zebra/pull/9768)).
+- Added deserialization logic to call `extend_funding_streams()` when the flag is true for both configured Testnets and Regtest
 
 ## [Zebra 2.5.0](https://github.com/ZcashFoundation/zebra/releases/tag/v2.5.0) - 2025-08-07
 

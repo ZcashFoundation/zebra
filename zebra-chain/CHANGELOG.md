@@ -15,7 +15,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `CHAIN_HISTORY_ACTIVATION_RESERVED` as an export from the `block` module.
 - Added `extend_funding_stream_addresses_as_required` field to `RegtestParameters` struct
 - Added `extend_funding_stream_addresses_as_required` field to `DTestnetParameters` struct
-- Added deserialization logic to call `extend_funding_streams()` when the flag is true for both configured Testnets and Regtest
 
 ### Removed
 
