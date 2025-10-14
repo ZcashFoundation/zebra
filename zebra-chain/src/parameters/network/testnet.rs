@@ -932,7 +932,6 @@ impl Parameters {
             extend_funding_stream_addresses_as_required,
         }: RegtestParameters,
     ) -> Self {
-        #[cfg_attr(not(feature = "proptest-impl"), allow(unused_mut))]
         let mut parameters = Self::build()
             .with_genesis_hash(REGTEST_GENESIS_HASH)
             // This value is chosen to match zcashd, see: <https://github.com/zcash/zcash/blob/master/src/chainparams.cpp#L654>
