@@ -130,7 +130,7 @@ pub enum CommitCheckpointVerifiedError {
     #[error("block write task has exited. Is Zebra shutting down?")]
     WriteTaskExited,
 
-    #[error("clone error: {0}")]
+    #[error("{0}")]
     CloneError(#[from] CloneError),
 }
 
