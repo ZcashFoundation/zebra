@@ -923,7 +923,6 @@ impl Parameters {
     /// Accepts a [`ConfiguredActivationHeights`].
     ///
     /// Creates an instance of [`Parameters`] with `Regtest` values.
-    #[cfg_attr(not(any(test, feature = "proptest-impl")), allow(unused_variables))]
     pub fn new_regtest(
         RegtestParameters {
             activation_heights,
