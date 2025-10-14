@@ -31,7 +31,23 @@ cargo run --release -- --config /path/to/zebrad-synced.toml
 
 with `/path/to/zebrad-synced.toml` pointing to the config below
 
-<script src="https://gist.github.com/upbqdn/2af242b716df8c7677c46cdc7d0ee132.js"></script>
+```toml
+# Config for a synced Zebra instance in a network-suppressed setup.
+
+[network]
+cache_dir = true
+max_connections_per_ip = 1000
+network = "Mainnet"
+
+[state]
+# cache_dir = "/path/to/.cache/zebra-synced"
+delete_old_database = true
+ephemeral = false
+
+[sync]
+checkpoint_verify_concurrency_limit = 1000
+parallel_cpu_threads = 0
+```
 
 This config makes Zebra, among other things, accept quick reconnections from the
 same IP, which will be localhost. Without this setup, Zebra would quickly start
@@ -52,7 +68,32 @@ time ./target/release/zebrad --config /path/to/zebrad-isolated.toml
 
 with `path/to/zebrad-isolated.toml` pointing to the config below
 
-<script src="https://gist.github.com/upbqdn/88456290aef89c1499f2fdd632b5c2f7.js"></script>
+```toml
+# Config for an isolated Zebra instance in a network-suppressed setup.
+
+[network]
+listen_addr = "127.0.0.1:8234"
+cache_dir = false
+crawl_new_peer_interval = "10d"
+
+initial_mainnet_peers = [
+    "127.0.0.1:8233",
+]
+
+initial_testnet_peers = [
+    "127.0.0.1:8233",
+]
+
+max_connections_per_ip = 1
+network = "Mainnet"
+peerset_initial_target_size = 1
+
+[state]
+# cache_dir = "/path/to/.cache/zebra-isolated"
+delete_old_database = true
+ephemeral = true
+debug_stop_at_height = 10_000
+```
 
 This config makes Zebra:
 
