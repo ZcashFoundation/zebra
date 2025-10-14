@@ -69,12 +69,21 @@ Possible options, which apply to each individual test run:
 If you set the environment variable `PYTHON_DEBUG=1` you will get some debug
 output (example: `PYTHON_DEBUG=1 qa/pull-tester/rpc-tests.py wallet`).
 
+To get real-time output during a test you can run it using the
+`python3` binary such as:
+
+```
+python3 qa/rpc-tests/wallet.py
+```
+
 A 200-block -regtest blockchain and wallets for four nodes
 is created the first time a regression test is run and
-is stored in the cache/ directory.  Each node has the miner
+is stored in the `qa/cache/` directory.  Each node has the miner
 subsidy from 25 mature blocks (25*10=250 ZEC) in its wallet.
 
-After the first run, the cache/ blockchain and wallets are
+TODO: https://github.com/ZcashFoundation/zebra/issues/9726
+
+After the first run, the `qa/cache/` blockchain and wallets are
 copied into a temporary directory and used as the initial
 test state.
 
@@ -82,7 +91,7 @@ If you get into a bad state, you should be able
 to recover with:
 
 ```bash
-rm -rf cache
+rm -rf qa/cache
 killall zebrad
 ```
 

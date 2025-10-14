@@ -28,6 +28,16 @@ use super::{commitment, note, tree};
 )]
 pub struct RandomSeed(HexDebug<[u8; 32]>);
 
+impl RandomSeed {
+    /// Return the bytes in big-endian byte order as required
+    /// by RPCs such as `getrawtransaction`.
+    pub fn bytes_in_display_order(&self) -> [u8; 32] {
+        let mut root: [u8; 32] = self.into();
+        root.reverse();
+        root
+    }
+}
+
 impl From<[u8; 32]> for RandomSeed {
     fn from(bytes: [u8; 32]) -> Self {
         Self(bytes.into())
@@ -76,6 +86,38 @@ pub struct JoinSplit<P: ZkSnarkProof> {
     /// [`Groth16Proof`] or a [`Bctv14Proof`].
     #[serde(bound(serialize = "P: ZkSnarkProof", deserialize = "P: ZkSnarkProof"))]
     pub zkproof: P,
+    /// A ciphertext component for this output note.
+    pub enc_ciphertexts: [note::EncryptedNote; 2],
+}
+
+/// The same as `JoinSplit` but with a serialized proof, so that the type
+/// isn't generic anymore.
+#[derive(PartialEq, Eq, Clone, Serialize, Deserialize)]
+pub struct GenericJoinSplit {
+    /// A value that the JoinSplit transfer removes from the transparent value
+    /// pool.
+    pub vpub_old: Amount<NonNegative>,
+    /// A value that the JoinSplit transfer inserts into the transparent value
+    /// pool.
+    pub vpub_new: Amount<NonNegative>,
+    /// A root of the Sprout note commitment tree at some block height in the
+    /// past, or the root produced by a previous JoinSplit transfer in this
+    /// transaction.
+    pub anchor: tree::Root,
+    /// A nullifier for the input notes.
+    pub nullifiers: [note::Nullifier; 2],
+    /// A note commitment for this output note.
+    pub commitments: [commitment::NoteCommitment; 2],
+    /// An X25519 public key.
+    pub ephemeral_key: x25519::PublicKey,
+    /// A 256-bit seed that must be chosen independently at random for each
+    /// JoinSplit description.
+    pub random_seed: RandomSeed,
+    /// A message authentication tag.
+    pub vmacs: [note::Mac; 2],
+    /// A ZK JoinSplit proof, either a serialized
+    /// [`Groth16Proof`] or a [`Bctv14Proof`].
+    pub zkproof: Option<Vec<u8>>,
     /// A ciphertext component for this output note.
     pub enc_ciphertexts: [note::EncryptedNote; 2],
 }
@@ -236,5 +278,25 @@ impl TrustedPreallocate for JoinSplit<Groth16Proof> {
     // (MAX_BLOCK_BYTES - 1) / GROTH16_JOINSPLIT_SIZE is a loose upper bound on the max allocation
     fn max_allocation() -> u64 {
         (MAX_BLOCK_BYTES - 1) / GROTH16_JOINSPLIT_SIZE
+    }
+}
+
+impl<P> From<JoinSplit<P>> for GenericJoinSplit
+where
+    P: ZkSnarkProof,
+{
+    fn from(val: JoinSplit<P>) -> Self {
+        GenericJoinSplit {
+            vpub_old: val.vpub_old,
+            vpub_new: val.vpub_new,
+            anchor: val.anchor,
+            nullifiers: val.nullifiers,
+            commitments: val.commitments,
+            ephemeral_key: val.ephemeral_key,
+            random_seed: val.random_seed,
+            vmacs: val.vmacs,
+            zkproof: val.zkproof.zcash_serialize_to_vec().ok(),
+            enc_ciphertexts: val.enc_ciphertexts,
+        }
     }
 }

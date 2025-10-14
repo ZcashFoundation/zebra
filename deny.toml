@@ -42,6 +42,18 @@ deny = [
 #
 # Certain crates/versions that will be skipped when doing duplicate detection.
 skip = [
+    # Allow mixed versions pulled in by transitive dev/test deps vs runtime deps
+    # ron 0.7.x is required by insta; 0.8.x is required by config
+    { name = "ron", version = "=0.7.1" },
+
+    # Keep older toml_datetime required via jsonrpsee-proc-macros -> toml_edit 0.22.x
+    # We can't upgrade jsonrpsee yet to 0.25.x (as it introduces breaking changes)
+    { name = "toml_datetime", version = "=0.6.11" },
+    
+    # Multiple windows-sys versions via different dependencies
+    # 0.60.2 via clap/anstream; 0.61.0 via dirs-sys
+    { name = "windows-sys", version = "=0.60.2" }
+
 ]
 
 # Similarly to `skip` allows you to skip certain crates during duplicate
@@ -61,6 +73,8 @@ skip-tree = [
     # wait for console-subscriber and tower to update hdrhistogram.
     # also wait for ron to update insta, and wait for tonic update.
     { name = "base64", version = "=0.13.1" },
+    # Multiple base64 versions through different dependencies
+    { name = "base64", version = "=0.21.7" },
 
     # wait for abscissa_core to update toml
     { name = "toml", version = "=0.5.11" },
@@ -77,7 +91,6 @@ skip-tree = [
 
     # wait for zebra to update tower
     { name = "tower", version = "=0.4.13" },
-    { name = "hashbrown", version = "=0.14.5" },
 
     # wait for zebra to update vergen
     { name = "thiserror", version = "=1.0.69" },
@@ -93,13 +106,26 @@ skip-tree = [
     # wait for abscissa_core to update synstructure
     { name = "synstructure", version = "=0.12.6" },
 
-    { name = "windows-sys", version = "=0.52.0" },
+    # wait for librustzcash to update tonic
+    { name = "tonic", version = "0.12" },
+    { name = "prost-types", version = "0.13" },
 
-    { name = "linux-raw-sys", version = "0.4.15" },
+    { name = "windows-sys", version = "=0.52.0" },
 
     { name = "quick-xml", version = "0.37.5" },
 
-    { name = "rustix", version = "0.38.44" },
+    { name = "indexmap", version = "1.9" },
+
+    { name = "hashbrown", version = "0.12" },
+
+    { name = "getrandom", version = "0.2" },
+
+    { name = "rand", version = "0.8" },
+    { name = "rand_core", version = "0.6" },
+    { name = "rand_chacha", version = "0.3" },
+
+    # TODO: Remove once https://github.com/zcash/librustzcash/pull/1893 merges.
+    { name = "equihash", version = "0.2" }
 ]
 
 # This section is considered when running `cargo deny check sources`.

@@ -9,6 +9,7 @@ pub mod groth16;
 pub mod halo2;
 pub mod redjubjub;
 pub mod redpallas;
+pub mod sapling;
 
 /// The maximum batch size for any of the batch verifiers.
 const MAX_BATCH_SIZE: usize = 64;
@@ -33,12 +34,9 @@ pub async fn spawn_fifo_and_convert<
 }
 
 /// Fires off a task into the Rayon threadpool and awaits the result through a oneshot channel.
-pub async fn spawn_fifo<
-    E: 'static + std::error::Error + Sync + Send,
-    F: 'static + FnOnce() -> Result<(), E> + Send,
->(
+pub async fn spawn_fifo<T: 'static + Send, F: 'static + FnOnce() -> T + Send>(
     f: F,
-) -> Result<Result<(), E>, RecvError> {
+) -> Result<T, RecvError> {
     // Rayon doesn't have a spawn function that returns a value,
     // so we use a oneshot channel instead.
     let (rsp_tx, rsp_rx) = tokio::sync::oneshot::channel();

@@ -25,4 +25,4 @@ A single instance can also be deployed, on an on-demand basis, if required, when
 long-lived instance, with specific changes, is needed to be tested in the Mainnet with
 the same infrastructure used for CI & CD.
 
-Further validations of the actual process can be done on our continuous delivery [workflow file](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/cd-deploy-nodes-gcp.yml).
+Further validations of the actual process can be done on our continuous delivery [workflow file](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/zfnd-deploy-nodes-gcp.yml).

@@ -65,7 +65,7 @@ cargo release commit --verbose --execute --allow-branch '*'
 
 - [ ] Wait until the Docker binaries have been built on the hotfix release branch, and the quick tests have passed:
     - [ ] [ci-tests.yml](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-tests.yml)
-- [ ] Wait until the [pre-release deployment machines have successfully launched](https://github.com/ZcashFoundation/zebra/actions/workflows/cd-deploy-nodes-gcp.yml?query=event%3Arelease)
+- [ ] Wait until the [pre-release deployment machines have successfully launched](https://github.com/ZcashFoundation/zebra/actions/workflows/zfnd-deploy-nodes-gcp.yml?query=event%3Arelease)
 
 ## Publish Release
 

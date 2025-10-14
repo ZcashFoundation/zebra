@@ -1,0 +1,128 @@
+# Check if Cached State Disks Exist Workflow
+# This workflow is designed to check the availability of cached state disks in Google Cloud Platform (GCP) for different types of Zcash applications.
+# - Accepts network type as input to determine which disks to search for.
+# - Checks for the existence of three types of disks: lightwalletd tip, Zebra tip, and Zebra checkpoint.
+# - Uses Google Cloud SDK to query and identify available disks based on network and version.
+# - Outputs the availability of each disk type, which can be utilized in subsequent workflows.
+# The workflow streamlines the process of verifying disk availability, crucial for optimizing and speeding up integration tests and deployments.
+name: Check if cached state disks exist
+
+on:
+  workflow_call:
+    inputs:
+      network:
+        description: The Zcash network used to look up the disks
+        required: true
+        type: string
+      disk_prefix:
+        required: false
+        type: string
+      disk_suffix:
+        required: false
+        type: string
+      test_id:
+        description: The test ID requiring the cached state disks
+        required: false
+        type: string
+    outputs:
+      state_version:
+        description: The version of the cached state disks
+        value: ${{ jobs.get-cached-disks.outputs.state_version }}
+      cached_disk_name:
+        description: The name of the cached state disk
+        value: ${{ jobs.get-cached-disks.outputs.cached_disk_name }}
+      lwd_tip_disk:
+        description: true if there is a lightwalletd and Zebra cached state disk, synced near the chain tip
+        value: ${{ jobs.get-cached-disks.outputs.lwd_tip_disk }}
+      zebra_tip_disk:
+        description: true if there is a Zebra cached state disk synced near the chain tip
+        value: ${{ jobs.get-cached-disks.outputs.zebra_tip_disk }}
+      zebra_checkpoint_disk:
+        description: true if there is a Zebra cached state disk synced to the mandatory Zebra checkpoint
+        value: ${{ jobs.get-cached-disks.outputs.zebra_checkpoint_disk }}
+
+permissions:
+  contents: read
+
+jobs:
+  get-cached-disks:
+    name: Get ${{  inputs.test_id || inputs.network }} cached disk
+    runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'release' && 'prod' || 'dev' }}
+    outputs:
+      state_version: ${{ steps.get-available-disks.outputs.state_version || steps.set-release-defaults.outputs.state_version }}
+      cached_disk_name: ${{ steps.get-available-disks.outputs.cached_disk_name || steps.set-release-defaults.outputs.cached_disk_name }}
+      lwd_tip_disk: ${{ steps.get-available-disks.outputs.lwd_tip_disk || steps.set-release-defaults.outputs.lwd_tip_disk }}
+      zebra_tip_disk: ${{ steps.get-available-disks.outputs.zebra_tip_disk || steps.set-release-defaults.outputs.zebra_tip_disk }}
+      zebra_checkpoint_disk: ${{ steps.get-available-disks.outputs.zebra_checkpoint_disk || steps.set-release-defaults.outputs.zebra_checkpoint_disk }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@c33ff65466c58d57e4d796f88bb1ae0ff26ee453 #v5.2.0
+        with:
+          short-length: 7
+
+      # Setup gcloud CLI
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 #v3.0.0
+        with:
+          workload_identity_provider: "${{ vars.GCP_WIF }}"
+          service_account: "${{ vars.GCP_DEPLOYMENTS_SA }}"
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db #v3.0.1
+
+      # Performs formatting on disk name components.
+      #
+      # Disk images in GCP are required to be in lowercase, but the blockchain network
+      # uses sentence case, so we need to downcase ${{ inputs.network }}.
+      #
+      # Disk image names in GCP are limited to 63 characters, so we need to limit
+      # branch names to 12 characters.
+      # Check the `create-state-image` in `zfnd-deploy-integration-tests-gcp.yml` for more details in image names.
+      # More info: https://cloud.google.com/compute/docs/naming-resources#resource-name-format
+      #
+      # Passes ${{ inputs.network }} to subsequent steps using $NETWORK env variable.
+      # Passes ${{ env.GITHUB_REF_POINT_SLUG_URL }} to subsequent steps using $SHORT_GITHUB_REF env variable.
+      - name: Format network name and branch name for disks
+        run: |
+          NETWORK_CAPS="${{ inputs.network }}"
+          echo "NETWORK=${NETWORK_CAPS,,}" >> "$GITHUB_ENV"
+          LONG_GITHUB_REF="${{ env.GITHUB_REF_POINT_SLUG_URL }}"
+          echo "SHORT_GITHUB_REF=${LONG_GITHUB_REF:0:12}" >> "$GITHUB_ENV"
+
+      # Check if there are cached state disks available for subsequent jobs to use.
+      # Skip disk lookup for releases - they should deploy from scratch or use production disks
+      - name: Check if cached state disks exists
+        id: get-available-disks
+        if: ${{ github.event_name != 'release' }}
+        env:
+          GITHUB_REF: ${{ env.SHORT_GITHUB_REF }}
+          NETWORK: ${{ env.NETWORK }} # use lowercase version from env, not input
+          DISK_PREFIX: ${{ inputs.disk_prefix }}
+          DISK_SUFFIX: ${{ inputs.disk_suffix }}
+        run: |
+          source ./.github/workflows/scripts/gcp-get-cached-disks.sh
+          echo "state_version=${LOCAL_STATE_VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "cached_disk_name=${CACHED_DISK_NAME}" >> "${GITHUB_OUTPUT}"
+          echo "lwd_tip_disk=${LWD_TIP_DISK}" >> "${GITHUB_OUTPUT}"
+          echo "zebra_tip_disk=${ZEBRA_TIP_DISK}" >> "${GITHUB_OUTPUT}"
+          echo "zebra_checkpoint_disk=${ZEBRA_CHECKPOINT_DISK}" >> "${GITHUB_OUTPUT}"
+
+      # For releases, set default outputs indicating no cached disks are available
+      - name: Set default outputs for releases
+        id: set-release-defaults
+        if: ${{ github.event_name == 'release' }}
+        run: |
+          echo "state_version=" >> "${GITHUB_OUTPUT}"
+          echo "cached_disk_name=" >> "${GITHUB_OUTPUT}"
+          echo "lwd_tip_disk=false" >> "${GITHUB_OUTPUT}"
+          echo "zebra_tip_disk=false" >> "${GITHUB_OUTPUT}"
+          echo "zebra_checkpoint_disk=false" >> "${GITHUB_OUTPUT}"

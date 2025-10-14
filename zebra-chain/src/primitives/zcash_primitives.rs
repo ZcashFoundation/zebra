@@ -4,7 +4,7 @@
 use std::{io, ops::Deref, sync::Arc};
 
 use zcash_primitives::transaction::{self as zp_tx, TxDigests};
-use zcash_protocol::value::BalanceError;
+use zcash_protocol::value::{BalanceError, ZatBalance, Zatoshis};
 
 use crate::{
     amount::{Amount, NonNegative},
@@ -31,7 +31,7 @@ impl zcash_transparent::bundle::Authorization for TransparentAuth {
 // In this block we convert our Output to a librustzcash to TxOut.
 // (We could do the serialize/deserialize route but it's simple enough to convert manually)
 impl zcash_transparent::sighash::TransparentAuthorizingContext for TransparentAuth {
-    fn input_amounts(&self) -> Vec<zcash_protocol::value::Zatoshis> {
+    fn input_amounts(&self) -> Vec<Zatoshis> {
         self.all_prev_outputs
             .iter()
             .map(|prevout| {
@@ -139,6 +139,9 @@ impl zp_tx::Authorization for PrecomputedAuth {
     type TransparentAuth = TransparentAuth;
     type SaplingAuth = sapling_crypto::bundle::Authorized;
     type OrchardAuth = orchard::bundle::Authorized;
+
+    #[cfg(zcash_unstable = "zfuture")]
+    type TzeAuth = zp_tx::components::tze::Authorized;
 }
 
 // End of (mostly) copied code
@@ -174,6 +177,14 @@ impl TryFrom<Amount<NonNegative>> for zcash_protocol::value::Zatoshis {
 
     fn try_from(amount: Amount<NonNegative>) -> Result<Self, Self::Error> {
         zcash_protocol::value::Zatoshis::from_nonnegative_i64(amount.into())
+    }
+}
+
+impl TryFrom<Amount> for ZatBalance {
+    type Error = BalanceError;
+
+    fn try_from(amount: Amount) -> Result<Self, Self::Error> {
+        ZatBalance::from_i64(amount.into())
     }
 }
 
@@ -250,15 +261,33 @@ impl PrecomputedTxData {
             },
         };
 
-        let tx_data: zp_tx::TransactionData<PrecomputedAuth> =
-            tx.into_data()
-                .map_authorization(f_transparent, IdentityMap, IdentityMap);
+        let tx_data: zp_tx::TransactionData<PrecomputedAuth> = tx.into_data().map_authorization(
+            f_transparent,
+            IdentityMap,
+            IdentityMap,
+            #[cfg(zcash_unstable = "zfuture")]
+            (),
+        );
 
         Ok(PrecomputedTxData {
             tx_data,
             txid_parts,
             all_previous_outputs,
         })
+    }
+
+    /// Returns the Orchard bundle in `tx_data`.
+    pub fn orchard_bundle(
+        &self,
+    ) -> Option<orchard::bundle::Bundle<orchard::bundle::Authorized, ZatBalance>> {
+        self.tx_data.orchard_bundle().cloned()
+    }
+
+    /// Returns the Sapling bundle in `tx_data`.
+    pub fn sapling_bundle(
+        &self,
+    ) -> Option<sapling_crypto::Bundle<sapling_crypto::bundle::Authorized, ZatBalance>> {
+        self.tx_data.sapling_bundle().cloned()
     }
 }
 

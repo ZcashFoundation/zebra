@@ -66,9 +66,11 @@ tempfile = { workspace = true }
 thiserror = { workspace = true }
 
 rayon = { workspace = true }
-tokio = { workspace = true, features = ["rt-multi-thread", "sync", "tracing"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "sync", "tracing", "macros", "time"] }
 tower = { workspace = true, features = ["buffer", "util"] }
 tracing = { workspace = true }
+
+sapling-crypto = { workspace = true }
 
 # elasticsearch specific dependencies.
 # Security: avoid default dependency on openssl
@@ -84,12 +86,10 @@ howudoin = { workspace = true, optional = true }
 zebra-test = { path = "../zebra-test/", version = "1.0.1", optional = true }
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
+derive-getters.workspace = true
 
 [dev-dependencies]
 color-eyre = { workspace = true }
-# This is a transitive dependency via color-eyre.
-# Enable a feature that makes tinyvec compile much faster.
-tinyvec = { workspace = true, features = ["rustc_1_55"] }
 
 once_cell = { workspace = true }
 spandoc = { workspace = true }
@@ -108,3 +108,6 @@ tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 
 zebra-chain = { path = "../zebra-chain", version = "2.0.0", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/", version = "1.0.1" }
+
+[lints]
+workspace = true

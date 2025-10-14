@@ -5,11 +5,9 @@ use lazy_static::lazy_static;
 
 mod block;
 mod orchard_note_encryption;
-mod orchard_shielded_data;
 
 pub use block::*;
 pub use orchard_note_encryption::*;
-pub use orchard_shielded_data::*;
 
 /// A testnet transaction test vector
 ///

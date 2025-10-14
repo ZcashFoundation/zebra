@@ -5,7 +5,7 @@
 //! Test functions in this file will not be run.
 //! This file is only for test library code.
 
-use std::{env, path::PathBuf, time::Duration};
+use std::{path::PathBuf, time::Duration};
 
 use tempfile::TempDir;
 
@@ -172,7 +172,7 @@ impl MempoolBehavior {
 /// If `check_legacy_chain` is true, make sure the logs contain the legacy chain check.
 ///
 /// If your test environment does not have network access, skip
-/// this test by setting the `ZEBRA_SKIP_NETWORK_TESTS` env var.
+/// this test by setting the `SKIP_NETWORK_TESTS` env var.
 ///
 /// # Test Status
 ///
@@ -326,14 +326,14 @@ pub fn check_sync_logs_until(
     Ok(zebrad)
 }
 
-/// Returns the cache directory for Zebra's state.
+/// Returns the cache directory for Zebra's state, as configured with [`ZebradConfig::load`] with config-rs.
 ///
-/// It checks the `ZEBRA_CACHE_DIR` environment variable and returns its value if set.
-/// Otherwise, it defaults to `"/zebrad-cache"`.
+/// Uses the resolved configuration from [`ZebradConfig::load(None)`](ZebradConfig::load), which
+/// incorporates defaults, optional TOML, and environment overrides.
 fn get_zebra_cached_state_dir() -> PathBuf {
-    env::var("ZEBRA_CACHE_DIR")
-        .unwrap_or_else(|_| "/zebrad-cache".to_string())
-        .into()
+    ZebradConfig::load(None)
+        .map(|c| c.state.cache_dir)
+        .unwrap_or_else(|_| "/zebrad-cache".into())
 }
 
 /// Returns a test config for caching Zebra's state up to the mandatory checkpoint.
@@ -365,7 +365,7 @@ pub fn cached_mandatory_checkpoint_test_config(network: &Network) -> Result<Zebr
 /// Typically this is `STOP_AT_HEIGHT_REGEX`,
 /// with an extra check for checkpoint or full validation.
 ///
-/// This test ignores the `ZEBRA_SKIP_NETWORK_TESTS` env var.
+/// This test ignores the `SKIP_NETWORK_TESTS` env var.
 ///
 /// # Test Status
 ///

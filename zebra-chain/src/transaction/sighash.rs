@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use zcash_protocol::value::ZatBalance;
 use zcash_transparent::sighash::SighashType;
 
 use super::Transaction;
@@ -66,6 +67,12 @@ impl AsRef<[u8]> for SigHash {
     }
 }
 
+impl From<SigHash> for [u8; 32] {
+    fn from(sighash: SigHash) -> Self {
+        sighash.0
+    }
+}
+
 /// A SigHasher context which stores precomputed data that is reused
 /// between sighash computations for the same transaction.
 #[derive(Debug)]
@@ -115,5 +122,19 @@ impl SigHasher {
             hash_type,
             input_index_script_code,
         )
+    }
+
+    /// Returns the Orchard bundle in the precomputed transaction data.
+    pub fn orchard_bundle(
+        &self,
+    ) -> Option<::orchard::bundle::Bundle<::orchard::bundle::Authorized, ZatBalance>> {
+        self.precomputed_tx_data.orchard_bundle()
+    }
+
+    /// Returns the Sapling bundle in the precomputed transaction data.
+    pub fn sapling_bundle(
+        &self,
+    ) -> Option<sapling_crypto::Bundle<sapling_crypto::bundle::Authorized, ZatBalance>> {
+        self.precomputed_tx_data.sapling_bundle()
     }
 }

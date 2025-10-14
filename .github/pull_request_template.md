@@ -39,5 +39,7 @@
 <!-- Check as many boxes as possible. -->
 
 - [ ] The PR name is suitable for the release notes.
+- [ ] The PR follows the [contribution guidelines](https://github.com/ZcashFoundation/zebra/blob/main/CONTRIBUTING.md).
+- [ ] The library crate changelogs are up to date.
 - [ ] The solution is tested.
 - [ ] The documentation is up to date.

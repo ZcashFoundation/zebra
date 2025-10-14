@@ -42,9 +42,9 @@ impl From<BoxError> for CloneError {
 pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 /// An error describing the reason a semantically verified block could not be committed to the state.
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Debug, Clone, Error, PartialEq, Eq)]
 #[error("block is not contextually valid: {}", .0)]
-pub struct CommitSemanticallyVerifiedError(#[from] ValidateContextError);
+pub struct CommitSemanticallyVerifiedError(#[from] Box<ValidateContextError>);
 
 /// An error describing the reason a block or its descendants could not be reconsidered after
 /// potentially being invalidated from the chain_set.
@@ -59,8 +59,17 @@ pub enum ReconsiderError {
     #[error("Invalidated blocks list is empty when it should contain at least one block")]
     InvalidatedBlocksEmpty,
 
+    #[error("cannot reconsider blocks while still committing checkpointed blocks")]
+    CheckpointCommitInProgress,
+
+    #[error("failed to send reconsider block request to block write task")]
+    ReconsiderSendFailed,
+
+    #[error("reconsider block request was unexpectedly dropped")]
+    ReconsiderResponseDropped,
+
     #[error("{0}")]
-    ValidationError(#[from] ValidateContextError),
+    ValidationError(#[from] Box<ValidateContextError>),
 }
 
 /// An error describing why a block failed contextual validation.
@@ -236,8 +245,8 @@ pub enum ValidateContextError {
     #[non_exhaustive]
     AddValuePool {
         value_balance_error: ValueBalanceError,
-        chain_value_pools: ValueBalance<NonNegative>,
-        block_value_pool_change: ValueBalance<NegativeAllowed>,
+        chain_value_pools: Box<ValueBalance<NonNegative>>,
+        block_value_pool_change: Box<ValueBalance<NegativeAllowed>>,
         height: Option<block::Height>,
     },
 
@@ -285,6 +294,34 @@ pub enum ValidateContextError {
         tx_index_in_block: Option<usize>,
         transaction_hash: transaction::Hash,
     },
+
+    #[error("block hash {block_hash} has already been sent to be committed to the state")]
+    #[non_exhaustive]
+    DuplicateCommitRequest { block_hash: block::Hash },
+
+    #[error("block height {block_height:?} is already committed in the finalized state")]
+    #[non_exhaustive]
+    AlreadyFinalized { block_height: block::Height },
+
+    #[error("block hash {block_hash} was replaced by a newer commit request")]
+    #[non_exhaustive]
+    ReplacedByNewerRequest { block_hash: block::Hash },
+
+    #[error("pruned block at or below the finalized tip height: {block_height:?}")]
+    #[non_exhaustive]
+    PrunedBelowFinalizedTip { block_height: block::Height },
+
+    #[error("block {block_hash} was dropped from the queue of non-finalized blocks")]
+    #[non_exhaustive]
+    DroppedCommitRequest { block_hash: block::Hash },
+
+    #[error("block commit task exited. Is Zebra shutting down?")]
+    #[non_exhaustive]
+    CommitTaskExited,
+
+    #[error("dropping the state: dropped unused non-finalized state queue block")]
+    #[non_exhaustive]
+    DroppedUnusedBlock,
 }
 
 /// Trait for creating the corresponding duplicate nullifier error from a nullifier.

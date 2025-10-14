@@ -96,7 +96,7 @@ pub struct CachedFfiTransaction {
 }
 
 impl CachedFfiTransaction {
-    /// Construct a `PrecomputedTransaction` from a `Transaction` and the outputs
+    /// Construct a `CachedFfiTransaction` from a `Transaction` and the outputs
     /// from previous transactions that match each input in the transaction
     /// being verified.
     pub fn new(

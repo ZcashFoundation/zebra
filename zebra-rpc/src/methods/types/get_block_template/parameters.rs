@@ -7,20 +7,15 @@ use crate::methods::{hex_data::HexData, types::long_poll::LongPollId};
 
 /// Defines whether the RPC method should generate a block template or attempt to validate a block
 /// proposal.
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum GetBlockTemplateRequestMode {
     /// Indicates a request for a block template.
+    #[default]
     Template,
 
     /// Indicates a request to validate block data.
     Proposal,
-}
-
-impl Default for GetBlockTemplateRequestMode {
-    fn default() -> Self {
-        Self::Template
-    }
 }
 
 /// Valid `capabilities` values that indicate client-side support.

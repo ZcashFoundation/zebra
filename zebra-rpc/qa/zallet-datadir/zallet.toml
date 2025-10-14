@@ -1,6 +1,8 @@
-network = "regtest"
-wallet_db = "data.sqlite"
+[builder.limits]
+orchard_actions = 250
 
+[consensus]
+network = "regtest"
 regtest_nuparams = [
     "5ba81b19:1",
     "76b809bb:1",
@@ -11,7 +13,17 @@ regtest_nuparams = [
     "c8e71055:291"
 ]
 
-[builder]
+[database]
+wallet = "data.sqlite"
+
+[external]
+
+[features]
+as_of_version = "0.0.0"
+
+[features.deprecated]
+
+[features.experimental]
 
 [indexer]
 validator_address = "127.0.0.1:0"
@@ -20,10 +32,9 @@ validator_password = ".."
 db_path = "zaino"
 
 [keystore]
-identity = "identity.txt"
+encryption_identity = "identity.txt"
 
-[limits]
-orchard_actions = 250
+[note_management]
 
 [rpc]
 bind = ["127.0.0.1:0"]

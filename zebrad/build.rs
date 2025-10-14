@@ -59,13 +59,9 @@ fn main() {
     }
 
     #[cfg(feature = "lightwalletd-grpc-tests")]
-    tonic_build::configure()
+    tonic_prost_build::configure()
         .build_client(true)
         .build_server(false)
-        // The lightwalletd gRPC types don't use floats or complex collections,
-        // so we can derive `Eq` as well as the default generated `PartialEq` derive.
-        // This fixes `clippy::derive_partial_eq_without_eq` warnings.
-        .message_attribute(".", "#[derive(Eq)]")
         .compile_protos(
             &["tests/common/lightwalletd/proto/service.proto"],
             &["tests/common/lightwalletd/proto"],

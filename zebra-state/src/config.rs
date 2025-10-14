@@ -82,6 +82,17 @@ pub struct Config {
     /// [`cache_dir`]: struct.Config.html#structfield.cache_dir
     pub ephemeral: bool,
 
+    /// Whether to cache non-finalized blocks on disk to be restored when Zebra restarts.
+    ///
+    /// Set to `true` by default. If this is set to `false`, Zebra will irrecoverably drop
+    /// non-finalized blocks when the process exits and will have to re-download them from
+    /// the network when it restarts, if those blocks are still available in the network.
+    ///
+    /// Note: The non-finalized state will be written to a backup cache once per 5 seconds at most.
+    ///       If blocks are added to the non-finalized state more frequently, the backup may not reflect
+    ///       Zebra's last non-finalized state before it shut down.
+    pub should_backup_non_finalized_state: bool,
+
     /// Whether to delete the old database directories when present.
     ///
     /// Set to `true` by default. If this is set to `false`,
@@ -148,6 +159,20 @@ impl Config {
         }
     }
 
+    /// Returns the path for the non-finalized state backup directory, based on the network.
+    /// Non-finalized state backup files are encoded in the network protocol format and remain
+    /// valid across db format upgrades.
+    pub fn non_finalized_state_backup_dir(&self, network: &Network) -> Option<PathBuf> {
+        if self.ephemeral || !self.should_backup_non_finalized_state {
+            // Ephemeral databases are intended to be irrecoverable across restarts and don't
+            // require a backup for the non-finalized state.
+            return None;
+        }
+
+        let net_dir = network.lowercase_name();
+        Some(self.cache_dir.join("non_finalized_state").join(net_dir))
+    }
+
     /// Returns the path for the database format minor/patch version file,
     /// based on the kind, major version and network.
     pub fn version_file_path(
@@ -177,6 +202,7 @@ impl Default for Config {
         Self {
             cache_dir: default_cache_dir(),
             ephemeral: false,
+            should_backup_non_finalized_state: true,
             delete_old_database: true,
             debug_stop_at_height: None,
             debug_validity_check_interval: None,

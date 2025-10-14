@@ -26,13 +26,10 @@ use zebra_state::{ChainTipChange, LatestChainTip, MAX_BLOCK_REORG_HEIGHT};
 use zebra_test::command::TestChild;
 
 use crate::common::{
-    launch::spawn_zebrad_for_rpc,
+    launch::spawn_zebrad_for_rpc_with_opts,
     sync::{check_sync_logs_until, MempoolBehavior, SYNC_FINISHED_REGEX},
     test_type::TestType,
 };
-
-/// The environmental variable that holds the path to a directory containing a cached Zebra state.
-pub const ZEBRA_CACHE_DIR: &str = "ZEBRA_CACHE_DIR";
 
 /// In integration tests, the interval between database format checks for newly added blocks.
 ///
@@ -76,6 +73,7 @@ pub fn wait_for_state_version_message<T>(zebrad: &mut TestChild<T>) -> Result<St
 
 /// Waits for the `required_version` state upgrade to complete, if needed.
 /// If `extra_required_log_regexes` are supplied, also waits for those logs before returning.
+/// Those extra regexes are also checked even if a state upgrade does not happen.
 ///
 /// This function should be called with the output of [`wait_for_state_version_message()`].
 #[tracing::instrument(skip(zebrad))]
@@ -85,15 +83,15 @@ pub fn wait_for_state_version_upgrade<T>(
     required_version: Version,
     extra_required_log_regexes: impl IntoIterator<Item = String> + std::fmt::Debug,
 ) -> Result<()> {
-    if state_version_message.contains("launching upgrade task") {
-        tracing::info!(
-            zebrad = ?zebrad.cmd,
-            %state_version_message,
-            %required_version,
-            ?extra_required_log_regexes,
-            "waiting for zebrad state upgrade..."
-        );
+    tracing::info!(
+        zebrad = ?zebrad.cmd,
+        %state_version_message,
+        %required_version,
+        ?extra_required_log_regexes,
+        "waiting for zebrad state upgrade..."
+    );
 
+    if state_version_message.contains("launching upgrade task") {
         let upgrade_pattern = format!(
             "marked database format as upgraded.*format_upgrade_version.*=.*{required_version}"
         );
@@ -111,6 +109,17 @@ pub fn wait_for_state_version_upgrade<T>(
             ?required_logs,
             ?upgrade_messages,
             "zebrad state has been upgraded"
+        );
+    } else {
+        let required_logs: Vec<String> = extra_required_log_regexes.into_iter().collect();
+        let upgrade_messages = zebrad.expect_stdout_line_matches_all_unordered(&required_logs)?;
+        tracing::info!(
+            zebrad = ?zebrad.cmd,
+            %state_version_message,
+            %required_version,
+            ?required_logs,
+            ?upgrade_messages,
+            "no zebrad upgrade needed"
         );
     }
 
@@ -138,7 +147,7 @@ pub async fn start_state_service_with_cache_dir(
     };
 
     // These tests don't need UTXOs to be verified efficiently, because they use cached states.
-    Ok(zebra_state::init(config, network, Height::MAX, 0))
+    Ok(zebra_state::init(config, network, Height::MAX, 0).await)
 }
 
 /// Loads the chain tip height from the state stored in a specified directory.
@@ -216,7 +225,7 @@ pub async fn raw_future_blocks(
 
     let should_sync = true;
     let (zebrad, zebra_rpc_address) =
-        spawn_zebrad_for_rpc(network.clone(), test_name, test_type, should_sync)?
+        spawn_zebrad_for_rpc_with_opts(network.clone(), test_name, test_type, should_sync, false)?
             .ok_or_else(|| eyre!("raw_future_blocks requires a cached state"))?;
     let rpc_address = zebra_rpc_address.expect("test type must have RPC port");
 

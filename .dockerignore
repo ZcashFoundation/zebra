@@ -15,6 +15,7 @@
 # Now un-exclude required files and folders:
 #
 !.cargo
+!.config
 !*.toml
 !*.lock
 !tower-*

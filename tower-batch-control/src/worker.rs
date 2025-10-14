@@ -19,6 +19,8 @@ use tokio_util::sync::PollSemaphore;
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
+use crate::RequestWeight;
+
 use super::{
     error::{Closed, ServiceError},
     message::{self, Message},
@@ -34,7 +36,7 @@ use super::{
 /// implement (only call).
 #[pin_project(PinnedDrop)]
 #[derive(Debug)]
-pub struct Worker<T, Request>
+pub struct Worker<T, Request: RequestWeight>
 where
     T: Service<BatchControl<Request>>,
     T::Future: Send + 'static,
@@ -48,8 +50,8 @@ where
     /// The wrapped service that processes batches.
     service: T,
 
-    /// The number of pending items sent to `service`, since the last batch flush.
-    pending_items: usize,
+    /// The total weight of pending requests sent to `service`, since the last batch flush.
+    pending_items_weight: usize,
 
     /// The timer for the pending batch, if it has any items.
     ///
@@ -75,13 +77,15 @@ where
 
     // Config
     //
-    /// The maximum number of items allowed in a batch.
-    max_items_in_batch: usize,
+    /// The maximum weight of pending items in a batch before it should be flushed and
+    /// pending items should be added to a new batch.
+    max_items_weight_in_batch: usize,
 
     /// The maximum number of batches that are allowed to run concurrently.
     max_concurrent_batches: usize,
 
-    /// The maximum delay before processing a batch with fewer than `max_items_in_batch`.
+    /// The maximum delay before processing a batch with items that have a total weight
+    /// that is less than `max_items_weight_in_batch`.
     max_latency: std::time::Duration,
 }
 
@@ -91,7 +95,7 @@ pub(crate) struct ErrorHandle {
     inner: Arc<Mutex<Option<ServiceError>>>,
 }
 
-impl<T, Request> Worker<T, Request>
+impl<T, Request: RequestWeight> Worker<T, Request>
 where
     T: Service<BatchControl<Request>>,
     T::Future: Send + 'static,
@@ -103,7 +107,7 @@ where
     pub(crate) fn new(
         service: T,
         rx: mpsc::UnboundedReceiver<Message<Request, T::Future>>,
-        max_items_in_batch: usize,
+        max_items_weight_in_batch: usize,
         max_concurrent_batches: usize,
         max_latency: std::time::Duration,
         close: PollSemaphore,
@@ -115,13 +119,13 @@ where
         let worker = Worker {
             rx,
             service,
-            pending_items: 0,
+            pending_items_weight: 0,
             pending_batch_timer: None,
             concurrent_batches: FuturesUnordered::new(),
             failed: None,
             error_handle: error_handle.clone(),
             close,
-            max_items_in_batch,
+            max_items_weight_in_batch,
             max_concurrent_batches,
             max_latency,
         };
@@ -142,10 +146,9 @@ where
 
         match self.service.ready().await {
             Ok(svc) => {
+                self.pending_items_weight += req.request_weight();
                 let rsp = svc.call(req.into());
                 let _ = tx.send(Ok(rsp));
-
-                self.pending_items += 1;
             }
             Err(e) => {
                 self.failed(e.into());
@@ -174,7 +177,7 @@ where
                 self.concurrent_batches.push(flush_future.boxed());
 
                 // Now we have an empty batch.
-                self.pending_items = 0;
+                self.pending_items_weight = 0;
                 self.pending_batch_timer = None;
             }
             Err(error) => {
@@ -204,7 +207,7 @@ where
                 batch_result = self.concurrent_batches.next(), if !self.concurrent_batches.is_empty() => match batch_result.expect("only returns None when empty") {
                     Ok(_response) => {
                         tracing::trace!(
-                            pending_items = self.pending_items,
+                            pending_items_weight = self.pending_items_weight,
                             batch_deadline = ?self.pending_batch_timer.as_ref().map(|sleep| sleep.deadline()),
                             running_batches = self.concurrent_batches.len(),
                             "batch finished executing",
@@ -219,7 +222,7 @@ where
 
                 Some(()) = OptionFuture::from(self.pending_batch_timer.as_mut()), if self.pending_batch_timer.as_ref().is_some() => {
                     tracing::trace!(
-                        pending_items = self.pending_items,
+                        pending_items_weight = self.pending_items_weight,
                         batch_deadline = ?self.pending_batch_timer.as_ref().map(|sleep| sleep.deadline()),
                         running_batches = self.concurrent_batches.len(),
                         "batch timer expired",
@@ -232,13 +235,14 @@ where
                 maybe_msg = self.rx.recv(), if self.can_spawn_new_batches() => match maybe_msg {
                     Some(msg) => {
                         tracing::trace!(
-                            pending_items = self.pending_items,
+                            pending_items_weight = self.pending_items_weight,
                             batch_deadline = ?self.pending_batch_timer.as_ref().map(|sleep| sleep.deadline()),
                             running_batches = self.concurrent_batches.len(),
                             "batch message received",
                         );
 
                         let span = msg.span;
+                        let is_new_batch = self.pending_items_weight == 0;
 
                         self.process_req(msg.request, msg.tx)
                             // Apply the provided span to request processing.
@@ -246,9 +250,9 @@ where
                             .await;
 
                         // Check whether we have too many pending items.
-                        if self.pending_items >= self.max_items_in_batch {
+                        if self.pending_items_weight >= self.max_items_weight_in_batch {
                             tracing::trace!(
-                                pending_items = self.pending_items,
+                                pending_items_weight = self.pending_items_weight,
                                 batch_deadline = ?self.pending_batch_timer.as_ref().map(|sleep| sleep.deadline()),
                                 running_batches = self.concurrent_batches.len(),
                                 "batch is full",
@@ -256,9 +260,9 @@ where
 
                             // TODO: use a batch-specific span to instrument this future.
                             self.flush_service().await;
-                        } else if self.pending_items == 1 {
+                        } else if is_new_batch {
                             tracing::trace!(
-                                pending_items = self.pending_items,
+                                pending_items_weight = self.pending_items_weight,
                                 batch_deadline = ?self.pending_batch_timer.as_ref().map(|sleep| sleep.deadline()),
                                 running_batches = self.concurrent_batches.len(),
                                 "batch is new, starting timer",
@@ -268,7 +272,7 @@ where
                             self.pending_batch_timer = Some(Box::pin(sleep(self.max_latency)));
                         } else {
                             tracing::trace!(
-                                pending_items = self.pending_items,
+                                pending_items_weight = self.pending_items_weight,
                                 batch_deadline = ?self.pending_batch_timer.as_ref().map(|sleep| sleep.deadline()),
                                 running_batches = self.concurrent_batches.len(),
                                 "waiting for full batch or batch timer",
@@ -288,7 +292,7 @@ where
     /// Register an inner service failure.
     ///
     /// The underlying service failed when we called `poll_ready` on it with the given `error`. We
-    /// need to communicate this to all the `Buffer` handles. To do so, we wrap up the error in
+    /// need to communicate this to all the `Batch` handles. To do so, we wrap up the error in
     /// an `Arc`, send that `Arc<E>` to all pending requests, and store it so that subsequent
     /// requests will also fail with the same error.
     fn failed(&mut self, error: crate::BoxError) {
@@ -351,7 +355,7 @@ impl Clone for ErrorHandle {
 }
 
 #[pin_project::pinned_drop]
-impl<T, Request> PinnedDrop for Worker<T, Request>
+impl<T, Request: RequestWeight> PinnedDrop for Worker<T, Request>
 where
     T: Service<BatchControl<Request>>,
     T::Future: Send + 'static,
@@ -359,7 +363,7 @@ where
 {
     fn drop(mut self: Pin<&mut Self>) {
         tracing::trace!(
-            pending_items = self.pending_items,
+            pending_items_weight = self.pending_items_weight,
             batch_deadline = ?self.pending_batch_timer.as_ref().map(|sleep| sleep.deadline()),
             running_batches = self.concurrent_batches.len(),
             error = ?self.failed,

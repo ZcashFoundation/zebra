@@ -30,9 +30,6 @@ tower = { workspace = true, features = ["util"] }
 futures = { workspace = true }
 
 color-eyre = { workspace = true }
-# This is a transitive dependency via color-eyre.
-# Enable a feature that makes tinyvec compile much faster.
-tinyvec = { workspace = true, features = ["rustc_1_55"] }
 
 humantime = { workspace = true }
 owo-colors = { workspace = true }
@@ -45,3 +42,6 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+
+[lints]
+workspace = true

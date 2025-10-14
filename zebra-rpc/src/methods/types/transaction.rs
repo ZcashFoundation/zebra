@@ -8,12 +8,15 @@ use derive_getters::Getters;
 use derive_new::new;
 use hex::ToHex;
 
+use serde_with::serde_as;
 use zebra_chain::{
     amount::{self, Amount, NegativeOrZero, NonNegative},
     block::{self, merkle::AUTH_DIGEST_PLACEHOLDER, Height},
+    orchard,
     parameters::Network,
     primitives::ed25519,
-    sapling::NotSmallOrderValueCommitment,
+    sapling::ValueCommitment,
+    serialization::ZcashSerialize,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx, VerifiedUnminedTx},
     transparent::Script,
 };
@@ -182,6 +185,10 @@ pub struct TransactionObject {
     #[serde(rename = "vShieldedOutput")]
     pub(crate) shielded_outputs: Vec<ShieldedOutput>,
 
+    /// Transparent outputs of the transaction.
+    #[serde(rename = "vjoinsplit")]
+    pub(crate) joinsplits: Vec<JoinSplit>,
+
     /// Sapling binding signature of the transaction.
     #[serde(
         skip_serializing_if = "Option::is_none",
@@ -241,8 +248,6 @@ pub struct TransactionObject {
     #[getter(copy)]
     pub txid: transaction::Hash,
 
-    // TODO: some fields not yet supported
-    //
     /// The transaction's auth digest. For pre-v5 transactions this will be
     /// ffff..ffff
     #[serde(
@@ -378,13 +383,61 @@ pub struct ScriptSig {
     hex: Script,
 }
 
+/// A Sprout JoinSplit of a transaction.
+#[allow(clippy::too_many_arguments)]
+#[serde_with::serde_as]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+pub struct JoinSplit {
+    /// Public input value in ZEC.
+    #[serde(rename = "vpub_old")]
+    old_public_value: f64,
+    /// Public input value in zatoshis.
+    #[serde(rename = "vpub_oldZat")]
+    old_public_value_zat: i64,
+    /// Public input value in ZEC.
+    #[serde(rename = "vpub_new")]
+    new_public_value: f64,
+    /// Public input value in zatoshis.
+    #[serde(rename = "vpub_newZat")]
+    new_public_value_zat: i64,
+    /// Merkle root of the Sprout note commitment tree.
+    #[serde(with = "hex")]
+    #[getter(copy)]
+    anchor: [u8; 32],
+    /// The nullifier of the input notes.
+    #[serde_as(as = "Vec<serde_with::hex::Hex>")]
+    nullifiers: Vec<[u8; 32]>,
+    /// The commitments of the output notes.
+    #[serde_as(as = "Vec<serde_with::hex::Hex>")]
+    commitments: Vec<[u8; 32]>,
+    /// The onetime public key used to encrypt the ciphertexts
+    #[serde(rename = "onetimePubKey")]
+    #[serde(with = "hex")]
+    #[getter(copy)]
+    one_time_pubkey: [u8; 32],
+    /// The random seed
+    #[serde(rename = "randomSeed")]
+    #[serde(with = "hex")]
+    #[getter(copy)]
+    random_seed: [u8; 32],
+    /// The input notes MACs.
+    #[serde_as(as = "Vec<serde_with::hex::Hex>")]
+    macs: Vec<[u8; 32]>,
+    /// A zero-knowledge proof using the Sprout circuit.
+    #[serde(with = "hex")]
+    proof: Vec<u8>,
+    /// The output notes ciphertexts.
+    #[serde_as(as = "Vec<serde_with::hex::Hex>")]
+    ciphertexts: Vec<Vec<u8>>,
+}
+
 /// A Sapling spend of a transaction.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
 pub struct ShieldedSpend {
     /// Value commitment to the input note.
     #[serde(with = "hex")]
-    #[getter(copy)]
-    cv: NotSmallOrderValueCommitment,
+    #[getter(skip)]
+    cv: ValueCommitment,
     /// Merkle root of the Sapling note commitment tree.
     #[serde(with = "hex")]
     #[getter(copy)]
@@ -407,13 +460,21 @@ pub struct ShieldedSpend {
     spend_auth_sig: [u8; 64],
 }
 
+// We can't use `#[getter(copy)]` as upstream `sapling_crypto::note::ValueCommitment` is not `Copy`.
+impl ShieldedSpend {
+    /// The value commitment to the input note.
+    pub fn cv(&self) -> ValueCommitment {
+        self.cv.clone()
+    }
+}
+
 /// A Sapling output of a transaction.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
 pub struct ShieldedOutput {
     /// Value commitment to the input note.
     #[serde(with = "hex")]
-    #[getter(copy)]
-    cv: NotSmallOrderValueCommitment,
+    #[getter(skip)]
+    cv: ValueCommitment,
     /// The u-coordinate of the note commitment for the output note.
     #[serde(rename = "cmu", with = "hex")]
     cm_u: [u8; 32],
@@ -431,7 +492,16 @@ pub struct ShieldedOutput {
     proof: [u8; 192],
 }
 
+// We can't use `#[getter(copy)]` as upstream `sapling_crypto::note::ValueCommitment` is not `Copy`.
+impl ShieldedOutput {
+    /// The value commitment to the output note.
+    pub fn cv(&self) -> ValueCommitment {
+        self.cv.clone()
+    }
+}
+
 /// Object with Orchard-specific information.
+#[serde_with::serde_as]
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
 pub struct Orchard {
     /// Array of Orchard actions.
@@ -442,6 +512,35 @@ pub struct Orchard {
     /// The net value of Orchard Actions in zatoshis.
     #[serde(rename = "valueBalanceZat")]
     value_balance_zat: i64,
+    /// The flags.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    flags: Option<OrchardFlags>,
+    /// A root of the Orchard note commitment tree at some block height in the past
+    #[serde_as(as = "Option<serde_with::hex::Hex>")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[getter(copy)]
+    anchor: Option<[u8; 32]>,
+    /// Encoding of aggregated zk-SNARK proofs for Orchard Actions
+    #[serde_as(as = "Option<serde_with::hex::Hex>")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    proof: Option<Vec<u8>>,
+    /// An Orchard binding signature on the SIGHASH transaction hash
+    #[serde(rename = "bindingSig")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde_as(as = "Option<serde_with::hex::Hex>")]
+    #[getter(copy)]
+    binding_sig: Option<[u8; 64]>,
+}
+
+/// Object with Orchard-specific information.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+pub struct OrchardFlags {
+    /// Whether Orchard outputs are enabled.
+    #[serde(rename = "enableOutputs")]
+    enable_outputs: bool,
+    /// Whether Orchard spends are enabled.
+    #[serde(rename = "enableSpends")]
+    enable_spends: bool,
 }
 
 /// The Orchard action of a transaction.
@@ -486,6 +585,7 @@ impl Default for TransactionObject {
             outputs: Vec::new(),
             shielded_spends: Vec::new(),
             shielded_outputs: Vec::new(),
+            joinsplits: Vec::new(),
             orchard: None,
             binding_sig: None,
             joinsplit_pub_key: None,
@@ -598,7 +698,7 @@ impl TransactionObject {
                     let spend_auth_sig: [u8; 64] = spend.spend_auth_sig.into();
 
                     ShieldedSpend {
-                        cv: spend.cv,
+                        cv: spend.cv.clone(),
                         anchor,
                         nullifier,
                         rk,
@@ -618,7 +718,7 @@ impl TransactionObject {
                     let out_ciphertext: [u8; 80] = output.out_ciphertext.into();
 
                     ShieldedOutput {
-                        cv: output.cv,
+                        cv: output.cv.clone(),
                         cm_u,
                         ephemeral_key,
                         enc_ciphertext,
@@ -627,57 +727,103 @@ impl TransactionObject {
                     }
                 })
                 .collect(),
+            joinsplits: tx
+                .sprout_joinsplits()
+                .map(|joinsplit| {
+                    let mut ephemeral_key_bytes: [u8; 32] = joinsplit.ephemeral_key.to_bytes();
+                    ephemeral_key_bytes.reverse();
+
+                    JoinSplit {
+                        old_public_value: Zec::from(joinsplit.vpub_old).lossy_zec(),
+                        old_public_value_zat: joinsplit.vpub_old.zatoshis(),
+                        new_public_value: Zec::from(joinsplit.vpub_new).lossy_zec(),
+                        new_public_value_zat: joinsplit.vpub_new.zatoshis(),
+                        anchor: joinsplit.anchor.bytes_in_display_order(),
+                        nullifiers: joinsplit
+                            .nullifiers
+                            .iter()
+                            .map(|n| n.bytes_in_display_order())
+                            .collect(),
+                        commitments: joinsplit
+                            .commitments
+                            .iter()
+                            .map(|c| c.bytes_in_display_order())
+                            .collect(),
+                        one_time_pubkey: ephemeral_key_bytes,
+                        random_seed: joinsplit.random_seed.bytes_in_display_order(),
+                        macs: joinsplit
+                            .vmacs
+                            .iter()
+                            .map(|m| m.bytes_in_display_order())
+                            .collect(),
+                        proof: joinsplit.zkproof.unwrap_or_default(),
+                        ciphertexts: joinsplit
+                            .enc_ciphertexts
+                            .iter()
+                            .map(|c| c.zcash_serialize_to_vec().unwrap_or_default())
+                            .collect(),
+                    }
+                })
+                .collect(),
             value_balance: Some(Zec::from(tx.sapling_value_balance().sapling_amount()).lossy_zec()),
             value_balance_zat: Some(tx.sapling_value_balance().sapling_amount().zatoshis()),
-            orchard: if !tx.has_orchard_shielded_data() {
-                None
-            } else {
-                Some(Orchard {
-                    actions: tx
-                        .orchard_actions()
-                        .collect::<Vec<_>>()
-                        .iter()
-                        .map(|action| {
-                            let spend_auth_sig: [u8; 64] = tx
-                                .orchard_shielded_data()
-                                .and_then(|shielded_data| {
-                                    shielded_data
-                                        .actions
-                                        .iter()
-                                        .find(|authorized_action| {
-                                            authorized_action.action == **action
-                                        })
-                                        .map(|authorized_action| {
-                                            authorized_action.spend_auth_sig.into()
-                                        })
-                                })
-                                .unwrap_or([0; 64]);
+            orchard: Some(Orchard {
+                actions: tx
+                    .orchard_actions()
+                    .collect::<Vec<_>>()
+                    .iter()
+                    .map(|action| {
+                        let spend_auth_sig: [u8; 64] = tx
+                            .orchard_shielded_data()
+                            .and_then(|shielded_data| {
+                                shielded_data
+                                    .actions
+                                    .iter()
+                                    .find(|authorized_action| authorized_action.action == **action)
+                                    .map(|authorized_action| {
+                                        authorized_action.spend_auth_sig.into()
+                                    })
+                            })
+                            .unwrap_or([0; 64]);
 
-                            let cv: [u8; 32] = action.cv.into();
-                            let nullifier: [u8; 32] = action.nullifier.into();
-                            let rk: [u8; 32] = action.rk.into();
-                            let cm_x: [u8; 32] = action.cm_x.into();
-                            let ephemeral_key: [u8; 32] = action.ephemeral_key.into();
-                            let enc_ciphertext: [u8; 580] = action.enc_ciphertext.into();
-                            let out_ciphertext: [u8; 80] = action.out_ciphertext.into();
+                        let cv: [u8; 32] = action.cv.into();
+                        let nullifier: [u8; 32] = action.nullifier.into();
+                        let rk: [u8; 32] = action.rk.into();
+                        let cm_x: [u8; 32] = action.cm_x.into();
+                        let ephemeral_key: [u8; 32] = action.ephemeral_key.into();
+                        let enc_ciphertext: [u8; 580] = action.enc_ciphertext.into();
+                        let out_ciphertext: [u8; 80] = action.out_ciphertext.into();
 
-                            OrchardAction {
-                                cv,
-                                nullifier,
-                                rk,
-                                cm_x,
-                                ephemeral_key,
-                                enc_ciphertext,
-                                spend_auth_sig,
-                                out_ciphertext,
-                            }
-                        })
-                        .collect(),
-                    value_balance: Zec::from(tx.orchard_value_balance().orchard_amount())
-                        .lossy_zec(),
-                    value_balance_zat: tx.orchard_value_balance().orchard_amount().zatoshis(),
-                })
-            },
+                        OrchardAction {
+                            cv,
+                            nullifier,
+                            rk,
+                            cm_x,
+                            ephemeral_key,
+                            enc_ciphertext,
+                            spend_auth_sig,
+                            out_ciphertext,
+                        }
+                    })
+                    .collect(),
+                value_balance: Zec::from(tx.orchard_value_balance().orchard_amount()).lossy_zec(),
+                value_balance_zat: tx.orchard_value_balance().orchard_amount().zatoshis(),
+                flags: tx.orchard_shielded_data().map(|data| {
+                    OrchardFlags::new(
+                        data.flags.contains(orchard::Flags::ENABLE_OUTPUTS),
+                        data.flags.contains(orchard::Flags::ENABLE_SPENDS),
+                    )
+                }),
+                anchor: tx
+                    .orchard_shielded_data()
+                    .map(|data| data.shared_anchor.bytes_in_display_order()),
+                proof: tx
+                    .orchard_shielded_data()
+                    .map(|data| data.proof.bytes_in_display_order()),
+                binding_sig: tx
+                    .orchard_shielded_data()
+                    .map(|data| data.binding_sig.into()),
+            }),
             binding_sig: tx.sapling_binding_sig().map(|raw_sig| raw_sig.into()),
             joinsplit_pub_key: tx.joinsplit_pub_key().map(|raw_key| {
                 // Display order is reversed in the RPC output.

@@ -16,7 +16,6 @@ use zebra_chain::{
     fmt::humantime_seconds,
     parameters::{Network, NetworkUpgrade, POST_BLOSSOM_POW_TARGET_SPACING},
 };
-use zebra_consensus::ParameterCheckpoint as _;
 use zebra_state::MAX_BLOCK_REORG_HEIGHT;
 
 use crate::components::sync::SyncStatus;

@@ -5,7 +5,6 @@ use std::time::Duration;
 use color_eyre::eyre::Result;
 
 use zebra_chain::{block::Height, chain_tip::mock::MockChainTip, parameters::Network};
-use zebra_consensus::ParameterCheckpoint as _;
 use zebrad::components::sync::end_of_support::{self, EOS_PANIC_AFTER, ESTIMATED_RELEASE_HEIGHT};
 
 // Estimated blocks per day with the current 75 seconds block spacing.

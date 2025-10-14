@@ -12,8 +12,8 @@ use crate::{
         },
         testnet::{
             self, ConfiguredActivationHeights, ConfiguredFundingStreamRecipient,
-            ConfiguredFundingStreams, ConfiguredLockboxDisbursement, MAX_NETWORK_NAME_LENGTH,
-            RESERVED_NETWORK_NAMES,
+            ConfiguredFundingStreams, ConfiguredLockboxDisbursement, RegtestParameters,
+            MAX_NETWORK_NAME_LENGTH, RESERVED_NETWORK_NAMES,
         },
         Network, NetworkUpgrade, MAINNET_ACTIVATION_HEIGHTS, TESTNET_ACTIVATION_HEIGHTS,
     },
@@ -111,6 +111,7 @@ fn activates_network_upgrades_correctly() {
             nu7: Some(expected_activation_height),
             ..Default::default()
         })
+        .clear_funding_streams()
         .to_network();
 
     let genesis_activation_height = NetworkUpgrade::Genesis
@@ -138,15 +139,20 @@ fn activates_network_upgrades_correctly() {
     let expected_default_regtest_activation_heights = &[
         (Height(0), NetworkUpgrade::Genesis),
         (Height(1), NetworkUpgrade::Canopy),
-        // TODO: Remove this once the testnet parameters are being serialized (#8920).
-        (Height(100), NetworkUpgrade::Nu5),
+        (Height(1), NetworkUpgrade::Nu7),
     ];
 
     for (network, expected_activation_heights) in [
         (Network::Mainnet, MAINNET_ACTIVATION_HEIGHTS),
         (Network::new_default_testnet(), TESTNET_ACTIVATION_HEIGHTS),
         (
-            Network::new_regtest(Default::default()),
+            Network::new_regtest(
+                ConfiguredActivationHeights {
+                    nu7: Some(1),
+                    ..Default::default()
+                }
+                .into(),
+            ),
             expected_default_regtest_activation_heights,
         ),
     ] {
@@ -280,13 +286,16 @@ fn check_network_name() {
 fn check_full_activation_list() {
     let network = testnet::Parameters::build()
         .with_activation_heights(ConfiguredActivationHeights {
-            nu5: Some(1),
+            // Update this to be the latest network upgrade in Zebra, and update
+            // the code below to expect the latest number of network upgrades.
+            nu7: Some(1),
             ..Default::default()
         })
+        .clear_funding_streams()
         .to_network();
 
-    // We expect the first 8 network upgrades to be included, up to and including NU5
-    let expected_network_upgrades = NetworkUpgrade::iter().take(8);
+    // We expect the first 11 network upgrades to be included, up to and including NU7
+    let expected_network_upgrades = NetworkUpgrade::iter().take(11);
     let full_activation_list_network_upgrades: Vec<_> = network
         .full_activation_list()
         .into_iter()
@@ -451,6 +460,51 @@ fn check_configured_funding_stream_constraints() {
     );
     expected_panic_wrong_addr_network
         .expect_err("should panic when recipient addresses are for Mainnet");
+}
+
+/// Check that `new_regtest()` constructs a network with the provided funding streams.
+#[test]
+fn check_configured_funding_stream_regtest() {
+    let default_testnet = Network::new_default_testnet();
+
+    let default_pre_nu6_funding_streams = &default_testnet.all_funding_streams()[0];
+    let mut configured_pre_nu6_funding_streams =
+        ConfiguredFundingStreams::from(default_pre_nu6_funding_streams);
+    configured_pre_nu6_funding_streams.height_range = Some(
+        default_pre_nu6_funding_streams.height_range().start
+            ..(default_pre_nu6_funding_streams.height_range().start + 20).unwrap(),
+    );
+
+    let default_post_nu6_funding_streams = &default_testnet.all_funding_streams()[1];
+    let mut configured_post_nu6_funding_streams =
+        ConfiguredFundingStreams::from(default_post_nu6_funding_streams);
+    configured_post_nu6_funding_streams.height_range = Some(
+        default_post_nu6_funding_streams.height_range().start
+            ..(default_post_nu6_funding_streams.height_range().start + 20).unwrap(),
+    );
+
+    let regtest = Network::new_regtest(RegtestParameters {
+        activation_heights: (&default_testnet.activation_list()).into(),
+        funding_streams: Some(vec![
+            configured_pre_nu6_funding_streams.clone(),
+            configured_post_nu6_funding_streams.clone(),
+        ]),
+        ..Default::default()
+    });
+
+    let expected_pre_nu6_funding_streams =
+        configured_pre_nu6_funding_streams.into_funding_streams_unchecked();
+    let expected_post_nu6_funding_streams =
+        configured_post_nu6_funding_streams.into_funding_streams_unchecked();
+
+    assert_eq!(
+        &expected_pre_nu6_funding_streams,
+        &regtest.all_funding_streams()[0]
+    );
+    assert_eq!(
+        &expected_post_nu6_funding_streams,
+        &regtest.all_funding_streams()[1]
+    );
 }
 
 #[test]

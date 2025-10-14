@@ -19,7 +19,7 @@ edition = "2021"
 
 # Zebra is only supported on the latest stable Rust version. See the README for details.
 # Any Zebra release can break compatibility with older Rust versions.
-rust-version = "1.85.0"
+rust-version = "1.89.0"
 
 # Settings that impact runtime behaviour
 
@@ -53,10 +53,11 @@ features = [
 
 [features]
 # In release builds, don't compile debug logging code, to improve performance.
-default = ["release_max_level_info", "progress-bar", "prometheus"]
+default-release-binaries = ["release_max_level_info", "progress-bar", "prometheus", "sentry"]
+
 
 # Default features for official ZF binary release builds
-default-release-binaries = ["default", "sentry"]
+default = ["default-release-binaries"]
 
 # Production features that activate extra dependencies, or extra features in dependencies
 
@@ -129,7 +130,7 @@ zebra-checkpoints = [
 ]
 
 # The gRPC tests also need an installed lightwalletd binary
-lightwalletd-grpc-tests = ["tonic-build"]
+lightwalletd-grpc-tests = ["tonic-prost-build"]
 
 # tokio-console support
 #
@@ -143,12 +144,6 @@ lightwalletd-grpc-tests = ["tonic-build"]
 # For more details, see:
 # https://github.com/tokio-rs/console/blob/main/console-subscriber/README.md#enabling-tokio-instrumentation
 tokio-console = ["console-subscriber"]
-
-# TODO: replace with environmental variables that skip the tests when not set (part of #2995)
-sync_to_mandatory_checkpoint_mainnet = []
-sync_to_mandatory_checkpoint_testnet = []
-sync_past_mandatory_checkpoint_mainnet = []
-sync_past_mandatory_checkpoint_testnet = []
 
 tx_v6 = ["zebra-chain/tx_v6", "zebra-state/tx_v6", "zebra-consensus/tx_v6"]
 
@@ -189,9 +184,6 @@ tower = { workspace = true, features = ["hedge", "limit"] }
 pin-project = { workspace = true }
 
 color-eyre = { workspace = true, features = ["issue-url"] }
-# This is a transitive dependency via color-eyre.
-# Enable a feature that makes tinyvec compile much faster.
-tinyvec = { workspace = true, features = ["rustc_1_55"] }
 
 thiserror = { workspace = true }
 
@@ -205,6 +197,9 @@ metrics = { workspace = true }
 
 dirs = { workspace = true }
 atty = { workspace = true }
+
+# Configuration management
+config = { workspace = true }
 
 num-integer = { workspace = true }
 rand = { workspace = true }
@@ -252,7 +247,7 @@ console-subscriber = { workspace = true, optional = true }
 vergen-git2 = { workspace = true, features = ["cargo", "rustc"] }
 
 # test feature lightwalletd-grpc-tests
-tonic-build = { workspace = true, optional = true }
+tonic-prost-build = { workspace = true, optional = true }
 
 [dev-dependencies]
 abscissa_core = { workspace = true, features = ["testing"] }
@@ -281,6 +276,7 @@ zcash_keys = { workspace = true }
 # test feature lightwalletd-grpc-tests
 prost = { workspace = true }
 tonic = { workspace = true }
+tonic-prost = { workspace = true }
 
 proptest = { workspace = true }
 proptest-derive = { workspace = true }
@@ -306,5 +302,15 @@ zebra-test = { path = "../zebra-test", version = "1.0.1" }
 # zebra-utils { path = "../zebra-utils", artifact = "bin:zebra-checkpoints" }
 zebra-utils = { path = "../zebra-utils", version = "2.0.0" }
 
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tokio_unstable)'] }
+[package.metadata.cargo-udeps.ignore]
+# These dependencies are false positives - they are actually used
+normal = [
+    "console-subscriber",  # Used behind the tokio-console feature flag
+    "zebra-utils",         # Used for the zebra-checkpoints feature
+]
+development = [
+    "zebra-utils",         # Required workaround to build zebra-checkpoints binary for tests (see zebra-utils/tests/build_utils_for_zebrad_tests.rs)
+]
+
+[lints]
+workspace = true

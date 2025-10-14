@@ -26,7 +26,6 @@ use zebra_chain::{
     transparent,
     value_balance::ValueBalance,
 };
-use zebra_consensus::ParameterCheckpoint;
 use zebra_network::address_book_peers::MockAddressBookPeers;
 use zebra_node_services::mempool;
 use zebra_state::{BoxError, GetBlockTemplateChainInfo};
@@ -41,7 +40,7 @@ use crate::methods::{
 };
 
 use super::super::{
-    AddressStrings, GetAddressBalanceResponse, NetworkUpgradeStatus, RpcImpl, RpcServer,
+    GetAddressBalanceRequest, GetAddressBalanceResponse, NetworkUpgradeStatus, RpcImpl, RpcServer,
     SendRawTransactionResponse,
 };
 
@@ -630,7 +629,7 @@ proptest! {
         tokio::time::pause();
 
         // Prepare the list of addresses.
-        let address_strings = AddressStrings {
+        let address_strings = GetAddressBalanceRequest {
             addresses: addresses
                 .iter()
                 .map(|address| address.to_string())
@@ -692,7 +691,7 @@ proptest! {
 
         runtime.block_on(async move {
 
-            let address_strings = AddressStrings {
+            let address_strings = GetAddressBalanceRequest {
                 addresses: at_least_one_invalid_address,
             };
 
