@@ -409,46 +409,52 @@ fn check_configured_funding_stream_constraints() {
 
     // should panic when there are fewer addresses than the max funding stream address index.
     let expected_panic_num_addresses = std::panic::catch_unwind(|| {
-        testnet::Parameters::build().with_funding_streams(vec![ConfiguredFundingStreams {
-            recipients: Some(vec![ConfiguredFundingStreamRecipient {
-                receiver: FundingStreamReceiver::Ecc,
-                numerator: 10,
-                addresses: Some(vec![]),
-            }]),
-            ..Default::default()
-        }]);
+        testnet::Parameters::build()
+            .with_funding_streams(vec![ConfiguredFundingStreams {
+                recipients: Some(vec![ConfiguredFundingStreamRecipient {
+                    receiver: FundingStreamReceiver::Ecc,
+                    numerator: 10,
+                    addresses: Some(vec![]),
+                }]),
+                ..Default::default()
+            }])
+            .to_network()
     });
 
     // should panic when sum of numerators is greater than funding stream denominator.
     let expected_panic_numerator = std::panic::catch_unwind(|| {
-        testnet::Parameters::build().with_funding_streams(vec![ConfiguredFundingStreams {
-            recipients: Some(vec![ConfiguredFundingStreamRecipient {
-                receiver: FundingStreamReceiver::Ecc,
-                numerator: 101,
-                addresses: Some(
-                    FUNDING_STREAM_ECC_ADDRESSES_TESTNET
-                        .map(Into::into)
-                        .to_vec(),
-                ),
-            }]),
-            ..Default::default()
-        }]);
+        testnet::Parameters::build()
+            .with_funding_streams(vec![ConfiguredFundingStreams {
+                recipients: Some(vec![ConfiguredFundingStreamRecipient {
+                    receiver: FundingStreamReceiver::Ecc,
+                    numerator: 101,
+                    addresses: Some(
+                        FUNDING_STREAM_ECC_ADDRESSES_TESTNET
+                            .map(Into::into)
+                            .to_vec(),
+                    ),
+                }]),
+                ..Default::default()
+            }])
+            .to_network()
     });
 
     // should panic when recipient addresses are for Mainnet.
     let expected_panic_wrong_addr_network = std::panic::catch_unwind(|| {
-        testnet::Parameters::build().with_funding_streams(vec![ConfiguredFundingStreams {
-            recipients: Some(vec![ConfiguredFundingStreamRecipient {
-                receiver: FundingStreamReceiver::Ecc,
-                numerator: 10,
-                addresses: Some(
-                    FUNDING_STREAM_ECC_ADDRESSES_MAINNET
-                        .map(Into::into)
-                        .to_vec(),
-                ),
-            }]),
-            ..Default::default()
-        }]);
+        testnet::Parameters::build()
+            .with_funding_streams(vec![ConfiguredFundingStreams {
+                recipients: Some(vec![ConfiguredFundingStreamRecipient {
+                    receiver: FundingStreamReceiver::Ecc,
+                    numerator: 10,
+                    addresses: Some(
+                        FUNDING_STREAM_ECC_ADDRESSES_MAINNET
+                            .map(Into::into)
+                            .to_vec(),
+                    ),
+                }]),
+                ..Default::default()
+            }])
+            .to_network()
     });
 
     // drop panic hook before expecting errors.

@@ -177,9 +177,7 @@ impl ConfiguredFundingStreams {
     fn convert_with_default(
         self,
         default_funding_streams: Option<FundingStreams>,
-        parameters_builder: &ParametersBuilder,
     ) -> FundingStreams {
-        let network = parameters_builder.to_network_unchecked();
         let height_range = self.height_range.unwrap_or_else(|| {
             default_funding_streams
                 .as_ref()
@@ -210,8 +208,6 @@ impl ConfiguredFundingStreams {
         );
 
         let funding_streams = FundingStreams::new(height_range.clone(), recipients);
-
-        check_funding_stream_address_period(&funding_streams, &network);
 
         // check that sum of receiver numerators is valid.
 
@@ -631,7 +627,7 @@ impl ParametersBuilder {
             .enumerate()
             .map(|(idx, streams)| {
                 let default_streams = FUNDING_STREAMS_TESTNET.get(idx).cloned();
-                streams.convert_with_default(default_streams, &self)
+                streams.convert_with_default(default_streams)
             })
             .collect();
         self.should_lock_funding_stream_address_period = true;
@@ -648,7 +644,6 @@ impl ParametersBuilder {
     /// height ranges by repeating the recipients that have been configured.
     ///
     /// This should be called after configuring the desired network upgrade activation heights.
-    #[cfg(any(test, feature = "proptest-impl"))]
     pub fn extend_funding_streams(mut self) -> Self {
         // self.funding_streams.extend(FUNDING_STREAMS_TESTNET);
 
@@ -861,6 +856,8 @@ pub struct RegtestParameters {
     pub lockbox_disbursements: Option<Vec<ConfiguredLockboxDisbursement>>,
     /// Configured checkpointed block heights and hashes.
     pub checkpoints: Option<ConfiguredCheckpoints>,
+    /// Whether funding stream addresses should be repeated to fill all required funding stream periods.
+    pub extend_funding_stream_addresses_as_required: Option<bool>,
 }
 
 impl From<ConfiguredActivationHeights> for RegtestParameters {
@@ -931,9 +928,10 @@ impl Parameters {
             funding_streams,
             lockbox_disbursements,
             checkpoints,
+            extend_funding_stream_addresses_as_required,
         }: RegtestParameters,
     ) -> Self {
-        let parameters = Self::build()
+        let mut parameters = Self::build()
             .with_genesis_hash(REGTEST_GENESIS_HASH)
             // This value is chosen to match zcashd, see: <https://github.com/zcash/zcash/blob/master/src/chainparams.cpp#L654>
             .with_target_difficulty_limit(U256::from_big_endian(&[0x0f; 32]))
@@ -947,6 +945,10 @@ impl Parameters {
             .with_funding_streams(funding_streams.unwrap_or_default())
             .with_lockbox_disbursements(lockbox_disbursements.unwrap_or_default())
             .with_checkpoints(checkpoints.unwrap_or_default());
+
+        if Some(true) == extend_funding_stream_addresses_as_required {
+            parameters = parameters.extend_funding_streams();
+        }
 
         Self {
             network_name: "Regtest".to_string(),
