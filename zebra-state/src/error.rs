@@ -49,6 +49,10 @@ pub enum QueueAndCommitError {
     #[non_exhaustive]
     Duplicate { block_hash: block::Hash },
 
+    #[error("already finished committing checkpoint verified blocks: dropped duplicate block, block is already committed to the state")]
+    #[non_exhaustive]
+    AlreadyCommitted,
+
     #[error("block height {block_height:?} is already committed in the finalized state")]
     #[non_exhaustive]
     AlreadyFinalized { block_height: block::Height },
@@ -56,6 +60,10 @@ pub enum QueueAndCommitError {
     #[error("block hash {block_hash} was replaced by a newer commit request")]
     #[non_exhaustive]
     Replaced { block_hash: block::Hash },
+
+    #[error("dropping older checkpoint verified block {block_hash}: got newer duplicate block")]
+    #[non_exhaustive]
+    ReplacedByNewer { block_hash: block::Hash },
 
     #[error("pruned block at or below the finalized tip height: {block_height:?}")]
     #[non_exhaustive]
@@ -110,26 +118,19 @@ impl<E: std::error::Error + 'static> From<BoxError> for LayeredStateError<E> {
 #[derive(Debug, Error, Clone)]
 #[non_exhaustive]
 pub enum CommitCheckpointVerifiedError {
-    /// An older checkpoint block was dropped because of a newer duplicate block.
-    #[error("dropping older checkpoint verified block: got newer duplicate block")]
-    ReplacedByNewer,
-
-    /// A checkpoint block was dropped because it was already committed to the finalized state.
-    #[error("already finished committing checkpoint verified blocks: dropped duplicate block, block is already committed to the state")]
-    DroppedAlreadyCommitted,
-
-    /// The block was dropped from the queue of finalized blocks.
-    #[error("block was dropped from the queue of finalized blocks")]
-    DroppedFromFinalizedQueue,
-
-    /// The commit task exited (likely during shutdown).
-    #[error("block commit task exited. Is Zebra shutting down?")]
-    CommitTaskExited,
-
+    /// Queuing/commit step failed.
+    #[error("could not queue and commit semantically verified block")]
+    QueueAndCommitError(#[from] QueueAndCommitError),
+    /// RocksDB write failed
+    /// TODO: Wire it up in `finalized_state.rs`, `commit_finalized`
+    #[error("could not write checkpoint-verified block to RocksDB")]
+    WriteError(#[from] rocksdb::Error),
     /// The write task exited (likely during shutdown).
     #[error("block write task has exited. Is Zebra shutting down?")]
     WriteTaskExited,
 
+    /// Temporary workaround for boxed errors.
+    /// TODO: Replace with `WriteError(#[from] rocksdb::Error)`
     #[error("{0}")]
     CloneError(#[from] CloneError),
 }
