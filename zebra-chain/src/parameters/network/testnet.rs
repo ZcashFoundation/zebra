@@ -857,8 +857,7 @@ pub struct RegtestParameters {
     pub lockbox_disbursements: Option<Vec<ConfiguredLockboxDisbursement>>,
     /// Configured checkpointed block heights and hashes.
     pub checkpoints: Option<ConfiguredCheckpoints>,
-    /// Automatically repeats funding stream addresess to fill all required periods
-    /// if est to `true`. Only available with `proptest-impl` feature enabled
+    /// Whether funding stream addresses should be repeated to fill all required funding stream periods.
     pub extend_funding_stream_addresses_as_required: Option<bool>,
 }
 
