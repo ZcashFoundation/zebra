@@ -482,7 +482,10 @@ impl StateService {
             {
                 Self::send_checkpoint_verified_block_error(
                     duplicate_queued,
-                    CommitCheckpointVerifiedError::ReplacedByNewer,
+                    QueueAndCommitError::ReplacedByNewer {
+                        block_hash: queued_prev_hash,
+                    }
+                    .into(),
                 );
             }
 
@@ -495,12 +498,10 @@ impl StateService {
             //       every time we send some blocks (like QueuedSemanticallyVerifiedBlocks)
             Self::send_checkpoint_verified_block_error(
                 queued,
-                CommitCheckpointVerifiedError::DroppedAlreadyCommitted,
+                QueueAndCommitError::AlreadyCommitted.into(),
             );
 
-            self.clear_finalized_block_queue(
-                CommitCheckpointVerifiedError::DroppedAlreadyCommitted,
-            );
+            self.clear_finalized_block_queue(QueueAndCommitError::AlreadyCommitted.into());
         }
 
         if self.finalized_state_queued_blocks.is_empty() {
@@ -567,12 +568,10 @@ impl StateService {
                     // If Zebra is shutting down, drop blocks and return an error.
                     Self::send_checkpoint_verified_block_error(
                         queued,
-                        CommitCheckpointVerifiedError::CommitTaskExited,
+                        QueueAndCommitError::CommitTaskExited.into(),
                     );
 
-                    self.clear_finalized_block_queue(
-                        CommitCheckpointVerifiedError::CommitTaskExited,
-                    );
+                    self.clear_finalized_block_queue(QueueAndCommitError::CommitTaskExited.into());
                 } else {
                     metrics::gauge!("state.checkpoint.sent.block.height")
                         .set(last_sent_finalized_block_height.0 as f64);
@@ -709,9 +708,7 @@ impl StateService {
             // Send blocks from non-finalized queue
             self.send_ready_non_finalized_queued(self.finalized_block_write_last_sent_hash);
             // We've finished committing checkpoint verified blocks to finalized state, so drop any repeated queued blocks.
-            self.clear_finalized_block_queue(
-                CommitCheckpointVerifiedError::DroppedAlreadyCommitted,
-            );
+            self.clear_finalized_block_queue(QueueAndCommitError::AlreadyCommitted.into());
         } else if !self.can_fork_chain_at(&parent_hash) {
             tracing::trace!("unready to verify, returning early");
         } else if self.block_write_sender.finalized.is_none() {
@@ -1041,14 +1038,12 @@ impl Service<Request> for StateService {
                 timer.finish(module_path!(), line!(), "CommitCheckpointVerifiedBlock");
 
                 // Await the channel response, flatten the result, map receive errors to
-                // `CommitCheckpointVerifiedError::DroppedFromFinalizedQueue`.
+                // `CommitCheckpointVerifiedError::WriteTaskExited`.
                 // Then flatten the nested Result and convert any errors to a BoxError.
                 async move {
                     rsp_rx
                         .await
-                        .map_err(|_recv_error| {
-                            CommitCheckpointVerifiedError::DroppedFromFinalizedQueue
-                        })
+                        .map_err(|_recv_error| CommitCheckpointVerifiedError::WriteTaskExited)
                         .flatten()
                         .map_err(BoxError::from)
                         .map(Response::Committed)
