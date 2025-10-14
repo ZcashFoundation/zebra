@@ -800,7 +800,6 @@ impl<'de> Deserialize<'de> for Config {
                     pre_blossom_halving_interval,
                     lockbox_disbursements,
                     checkpoints,
-                    #[cfg_attr(not(any(test, feature = "proptest-impl")), allow(unused_variables))]
                     extend_funding_stream_addresses_as_required,
                 }),
             ) => {
