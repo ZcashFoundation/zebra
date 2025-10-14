@@ -713,7 +713,6 @@ impl From<Config> for DConfig {
 }
 
 impl<'de> Deserialize<'de> for Config {
-    #[cfg_attr(not(any(test, feature = "proptest-impl")), allow(unused_variables))]
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
