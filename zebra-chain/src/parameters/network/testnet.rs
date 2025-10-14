@@ -949,13 +949,8 @@ impl Parameters {
             .with_lockbox_disbursements(lockbox_disbursements.unwrap_or_default())
             .with_checkpoints(checkpoints.unwrap_or_default());
 
-        #[cfg(any(test, feature = "proptest-impl"))]
-        if let Some(should_extend_funding_stream_addresses) =
-            extend_funding_stream_addresses_as_required
-        {
-            if should_extend_funding_stream_addresses {
-                parameters = parameters.extend_funding_streams();
-            }
+        if Some(true) == extend_funding_stream_addresses_as_required {
+            parameters = parameters.extend_funding_streams();
         }
 
         Self {
