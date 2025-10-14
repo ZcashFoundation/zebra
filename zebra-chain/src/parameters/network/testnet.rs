@@ -930,7 +930,6 @@ impl Parameters {
             funding_streams,
             lockbox_disbursements,
             checkpoints,
-            #[cfg_attr(not(any(test, feature = "proptest-impl")), allow(unused_variables))]
             extend_funding_stream_addresses_as_required,
         }: RegtestParameters,
     ) -> Self {
