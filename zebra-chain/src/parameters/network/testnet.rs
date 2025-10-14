@@ -923,6 +923,7 @@ impl Parameters {
     /// Accepts a [`ConfiguredActivationHeights`].
     ///
     /// Creates an instance of [`Parameters`] with `Regtest` values.
+    #[cfg_attr(not(any(test, feature = "proptest-impl")), allow(unused_variables))]
     pub fn new_regtest(
         RegtestParameters {
             activation_heights,
@@ -932,6 +933,7 @@ impl Parameters {
             extend_funding_stream_addresses_as_required,
         }: RegtestParameters,
     ) -> Self {
+        #[cfg_attr(not(feature = "proptest-impl"), allow(unused_mut))]
         let mut parameters = Self::build()
             .with_genesis_hash(REGTEST_GENESIS_HASH)
             // This value is chosen to match zcashd, see: <https://github.com/zcash/zcash/blob/master/src/chainparams.cpp#L654>
@@ -947,6 +949,7 @@ impl Parameters {
             .with_lockbox_disbursements(lockbox_disbursements.unwrap_or_default())
             .with_checkpoints(checkpoints.unwrap_or_default());
 
+        #[cfg(any(test, feature = "proptest-impl"))]
         if Some(true) == extend_funding_stream_addresses_as_required {
             parameters = parameters.extend_funding_streams();
         }

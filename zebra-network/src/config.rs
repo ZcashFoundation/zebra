@@ -713,6 +713,7 @@ impl From<Config> for DConfig {
 }
 
 impl<'de> Deserialize<'de> for Config {
+    #[cfg_attr(not(any(test, feature = "proptest-impl")), allow(unused_variables))]
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -866,12 +867,9 @@ impl<'de> Deserialize<'de> for Config {
 
                 params_builder = params_builder.with_checkpoints(checkpoints);
 
-                if let Some(should_extend_funding_stream_addresses) =
-                    extend_funding_stream_addresses_as_required
-                {
-                    if should_extend_funding_stream_addresses {
-                        params_builder = params_builder.extend_funding_streams();
-                    }
+                #[cfg(any(test, feature = "proptest-impl"))]
+                if let Some(true) = extend_funding_stream_addresses_as_required {
+                    params_builder = params_builder.extend_funding_streams();
                 }
 
                 // Return an error if the initial testnet peers includes any of the default initial Mainnet or Testnet
