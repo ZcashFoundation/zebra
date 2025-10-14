@@ -867,7 +867,6 @@ impl<'de> Deserialize<'de> for Config {
 
                 params_builder = params_builder.with_checkpoints(checkpoints);
 
-                #[cfg(any(test, feature = "proptest-impl"))]
                 if let Some(should_extend_funding_stream_addresses) =
                     extend_funding_stream_addresses_as_required
                 {
