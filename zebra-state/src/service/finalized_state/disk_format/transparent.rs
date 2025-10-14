@@ -223,7 +223,7 @@ impl<C: Constraint + Copy + std::fmt::Debug> AddressBalanceLocationInner<C> {
             .balance
             .zatoshis()
             .checked_add(unspent_output.value().zatoshis()))
-        .expect("adding two Amounts is always within an i64")
+        .expect("ops handling taddr balances must not overflow")
         .try_into()?;
         self.received = self.received.saturating_add(unspent_output.value().into());
         Ok(())
@@ -239,7 +239,7 @@ impl<C: Constraint + Copy + std::fmt::Debug> AddressBalanceLocationInner<C> {
             .balance
             .zatoshis()
             .checked_sub(spent_output.value().zatoshis()))
-        .expect("subtracting two Amounts is always within an i64")
+        .expect("ops handling taddr balances must not underflow")
         .try_into()?;
 
         Ok(())
