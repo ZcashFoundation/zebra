@@ -171,7 +171,6 @@ impl FundingStreams {
     ///
     /// Extends the addresses for all funding stream recipients by repeating their
     /// existing addresses until reaching the provided target number of addresses.
-    #[cfg(any(test, feature = "proptest-impl"))]
     pub fn extend_recipient_addresses(&mut self, target_len: usize) {
         for (receiver, recipient) in &mut self.recipients {
             if receiver.is_deferred() {
@@ -235,7 +234,6 @@ impl FundingStreamRecipient {
     /// # Panics
     ///
     /// If there are no recipient addresses.
-    #[cfg(any(test, feature = "proptest-impl"))]
     pub fn extend_addresses(&mut self, target_len: usize) {
         assert!(
             !self.addresses.is_empty(),

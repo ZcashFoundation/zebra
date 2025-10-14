@@ -644,7 +644,6 @@ impl ParametersBuilder {
     /// height ranges by repeating the recipients that have been configured.
     ///
     /// This should be called after configuring the desired network upgrade activation heights.
-    #[cfg(any(test, feature = "proptest-impl"))]
     pub fn extend_funding_streams(mut self) -> Self {
         // self.funding_streams.extend(FUNDING_STREAMS_TESTNET);
 
