@@ -179,6 +179,18 @@ impl ZebraDb {
         self.format_change_handle = Some(format_change_handle);
     }
 
+    /// Sets `finished_format_upgrades` to true on the inner [`DiskDb`] to indicate that Zebra has
+    /// finished applying any required db format upgrades.
+    pub fn mark_finished_format_upgrades(&self) {
+        self.db.mark_finished_format_upgrades();
+    }
+
+    /// Returns true if the `finished_format_upgrades` flag has been set to true on the inner [`DiskDb`] to
+    /// indicate that Zebra has finished applying any required db format upgrades.
+    pub fn finished_format_upgrades(&self) -> bool {
+        self.db.finished_format_upgrades()
+    }
+
     /// Returns config for this database.
     pub fn config(&self) -> &Config {
         &self.config

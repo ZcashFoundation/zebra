@@ -5,7 +5,7 @@
 //! [`crate::constants::state_database_format_version_in_code()`] must be incremented
 //! each time the database format (column, serialization, etc) changes.
 
-use std::{cmp::max, fmt::Debug};
+use std::{cmp::max, collections::HashMap, fmt::Debug};
 
 use zebra_chain::{
     amount::{self, Amount, Constraint, NegativeAllowed, NonNegative},
@@ -173,7 +173,7 @@ impl<C: Constraint + Copy + std::fmt::Debug> AddressBalanceLocationInner<C> {
     /// the first [`transparent::Output`] sent to an address.
     ///
     /// The returned value has a zero initial balance and received balance.
-    fn new(first_output: OutputLocation) -> Self {
+    pub(crate) fn new(first_output: OutputLocation) -> Self {
         Self {
             balance: Amount::zero(),
             received: 0,
@@ -212,6 +212,38 @@ impl<C: Constraint + Copy + std::fmt::Debug> AddressBalanceLocationInner<C> {
     pub fn height_mut(&mut self) -> &mut Height {
         &mut self.location.transaction_location.height
     }
+
+    /// Updates the current balance by adding the supplied output's value.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn receive_output(
+        &mut self,
+        unspent_output: &transparent::Output,
+    ) -> Result<(), amount::Error> {
+        self.balance = (self
+            .balance
+            .zatoshis()
+            .checked_add(unspent_output.value().zatoshis()))
+        .expect("ops handling taddr balances must not overflow")
+        .try_into()?;
+        self.received = self.received.saturating_add(unspent_output.value().into());
+        Ok(())
+    }
+
+    /// Updates the current balance by subtracting the supplied output's value.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn spend_output(
+        &mut self,
+        spent_output: &transparent::Output,
+    ) -> Result<(), amount::Error> {
+        self.balance = (self
+            .balance
+            .zatoshis()
+            .checked_sub(spent_output.value().zatoshis()))
+        .expect("ops handling taddr balances must not underflow")
+        .try_into()?;
+
+        Ok(())
+    }
 }
 
 impl<C: Constraint + Copy + std::fmt::Debug> std::ops::Add for AddressBalanceLocationInner<C> {
@@ -238,9 +270,43 @@ impl<C: Constraint + Copy + std::fmt::Debug> std::ops::Add for AddressBalanceLoc
     }
 }
 
+impl From<AddressBalanceLocationInner<NonNegative>> for AddressBalanceLocation {
+    fn from(value: AddressBalanceLocationInner<NonNegative>) -> Self {
+        Self(value)
+    }
+}
+
+impl From<AddressBalanceLocationInner<NegativeAllowed>> for AddressBalanceLocationChange {
+    fn from(value: AddressBalanceLocationInner<NegativeAllowed>) -> Self {
+        Self(value)
+    }
+}
+
 /// Represents a change in the [`AddressBalanceLocation`] of a transparent address
 /// in the finalized state.
 pub struct AddressBalanceLocationChange(AddressBalanceLocationInner<NegativeAllowed>);
+
+/// Represents a set of updates to address balance locations in the database.
+pub enum AddressBalanceLocationUpdates {
+    /// A set of [`AddressBalanceLocationChange`]s that should be merged into the existing values in the database.
+    Merge(HashMap<transparent::Address, AddressBalanceLocationChange>),
+    /// A set of full [`AddressBalanceLocation`]s that should be inserted as the new values in the database.
+    Insert(HashMap<transparent::Address, AddressBalanceLocation>),
+}
+
+impl From<HashMap<transparent::Address, AddressBalanceLocation>> for AddressBalanceLocationUpdates {
+    fn from(value: HashMap<transparent::Address, AddressBalanceLocation>) -> Self {
+        Self::Insert(value)
+    }
+}
+
+impl From<HashMap<transparent::Address, AddressBalanceLocationChange>>
+    for AddressBalanceLocationUpdates
+{
+    fn from(value: HashMap<transparent::Address, AddressBalanceLocationChange>) -> Self {
+        Self::Merge(value)
+    }
+}
 
 impl AddressBalanceLocationChange {
     /// Creates a new [`AddressBalanceLocationChange`].
@@ -248,38 +314,6 @@ impl AddressBalanceLocationChange {
     /// See [`AddressBalanceLocationInner::new`] for more details.
     pub fn new(location: AddressLocation) -> Self {
         Self(AddressBalanceLocationInner::new(location))
-    }
-
-    /// Updates the current balance by adding the supplied output's value.
-    #[allow(clippy::unwrap_in_result)]
-    pub fn receive_output(
-        &mut self,
-        unspent_output: &transparent::Output,
-    ) -> Result<(), amount::Error> {
-        self.balance = (self
-            .balance
-            .zatoshis()
-            .checked_add(unspent_output.value().zatoshis()))
-        .expect("adding two Amounts is always within an i64")
-        .try_into()?;
-        self.received = self.received.saturating_add(unspent_output.value().into());
-        Ok(())
-    }
-
-    /// Updates the current balance by subtracting the supplied output's value.
-    #[allow(clippy::unwrap_in_result)]
-    pub fn spend_output(
-        &mut self,
-        spent_output: &transparent::Output,
-    ) -> Result<(), amount::Error> {
-        self.balance = (self
-            .balance
-            .zatoshis()
-            .checked_sub(spent_output.value().zatoshis()))
-        .expect("subtracting two Amounts is always within an i64")
-        .try_into()?;
-
-        Ok(())
     }
 }
 
