@@ -569,7 +569,9 @@ impl ZebraDb {
 
         // Track batch commit latency for observability
         let batch_start = std::time::Instant::now();
-        self.db.write(batch)?;
+        self.db
+            .write(batch)
+            .expect("unexpected rocksdb error while writing block");
         metrics::histogram!("zebra.state.rocksdb.batch_commit.duration_seconds")
             .record(batch_start.elapsed().as_secs_f64());
 
