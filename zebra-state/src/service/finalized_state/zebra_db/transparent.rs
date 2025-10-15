@@ -513,7 +513,6 @@ impl DiskWriteBatch {
                 // - create or fetch the link from the address to the AddressLocation
                 //   (the first location of the address in the chain).
 
-                #[inline]
                 fn update_addr_loc<
                     C: Constraint + Copy + std::fmt::Debug,
                     T: std::ops::DerefMut<Target = AddressBalanceLocationInner<C>>
@@ -613,7 +612,6 @@ impl DiskWriteBatch {
 
             // Fetch the balance, and the link from the address to the AddressLocation, from memory.
             if let Some(sending_address) = sending_address {
-                #[inline]
                 fn update_addr_loc<
                     C: Constraint + Copy + std::fmt::Debug,
                     T: std::ops::DerefMut<Target = AddressBalanceLocationInner<C>>

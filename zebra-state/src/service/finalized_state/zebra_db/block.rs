@@ -528,6 +528,16 @@ impl ZebraDb {
                 .collect()
         }
 
+        // # Performance
+        //
+        // It's better to update entries in RocksDB with insertions over merge operations when there is no risk that
+        // insertions may overwrite values that are updated concurrently in database format upgrades as inserted values
+        // are quicker to read and require less background compaction.
+        //
+        // Reading entries that have been updated with merge ops often requires reading the latest fully-merged value,
+        // reading all of the pending merge operands (potentially hundreds), and applying pending merge operands to the
+        // fully-merged value such that it's much faster to read entries that have been updated with insertions than it
+        // is to read entries that have been updated with merge operations.
         let address_balances: AddressBalanceLocationUpdates = if self.finished_format_upgrades() {
             AddressBalanceLocationUpdates::Insert(read_addr_locs(changed_addresses, |addr| {
                 self.address_balance_location(addr)
