@@ -114,11 +114,17 @@ pub enum Response {
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// An enum of block stores in the state where a block hash could be found.
 pub enum KnownBlock {
+    /// Block is in the finalized portion of the best chain.
+    Finalized,
+
     /// Block is in the best chain.
     BestChain,
 
     /// Block is in a side chain.
     SideChain,
+
+    /// Block is in a block write channel
+    WriteChannel,
 
     /// Block is queued to be validated and committed, or rejected and dropped.
     Queue,

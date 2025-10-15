@@ -15,7 +15,7 @@ use zebra_chain::{
     work::difficulty::CompactDifficulty,
 };
 
-use crate::constants::MIN_TRANSPARENT_COINBASE_MATURITY;
+use crate::{constants::MIN_TRANSPARENT_COINBASE_MATURITY, HashOrHeight, KnownBlock};
 
 /// A wrapper for type erased errors that is itself clonable and implements the
 /// Error trait
@@ -44,57 +44,32 @@ pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 /// An error describing why a block could not be queued to be committed to the state.
 #[derive(Debug, Error, Clone, PartialEq, Eq, new)]
-pub enum QueueAndCommitError {
-    #[error("block hash {block_hash} has already been sent to be committed to the state")]
+pub enum CommitBlockError {
+    #[error("block hash has already been sent to be committed to the state")]
     #[non_exhaustive]
-    Duplicate { block_hash: block::Hash },
+    Duplicate {
+        hash_or_height: Option<HashOrHeight>,
+        location: KnownBlock,
+    },
 
-    #[error("already finished committing checkpoint verified blocks: dropped duplicate block, block is already committed to the state")]
-    #[non_exhaustive]
-    AlreadyCommitted,
-
-    #[error("block height {block_height:?} is already committed in the finalized state")]
-    #[non_exhaustive]
-    AlreadyFinalized { block_height: block::Height },
-
-    #[error("block hash {block_hash} was replaced by a newer commit request")]
-    #[non_exhaustive]
-    Replaced { block_hash: block::Hash },
-
-    #[error("dropping older checkpoint verified block {block_hash}: got newer duplicate block")]
-    #[non_exhaustive]
-    ReplacedByNewer { block_hash: block::Hash },
-
-    #[error("pruned block at or below the finalized tip height: {block_height:?}")]
-    #[non_exhaustive]
-    Pruned { block_height: block::Height },
-
-    #[error("block {block_hash} was dropped from the queue of non-finalized blocks")]
-    #[non_exhaustive]
-    Dropped { block_hash: block::Hash },
+    /// Contextual validation failed.
+    #[error("could not contextually validate semantically verified block")]
+    ValidateContextError(#[from] ValidateContextError),
 
     #[error("block commit task exited. Is Zebra shutting down?")]
     #[non_exhaustive]
-    CommitTaskExited,
-
-    #[error("dropping the state: dropped unused non-finalized state queue block")]
-    #[non_exhaustive]
-    DroppedUnusedBlock,
+    WriteTaskExited,
 }
 
 /// An error describing why a `CommitSemanticallyVerified` request failed.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum CommitSemanticallyVerifiedError {
-    /// Queuing/commit step failed.
-    #[error("could not queue and commit semantically verified block")]
-    QueueAndCommitError(#[from] QueueAndCommitError),
-    /// Contextual validation failed.
-    #[error("could not contextually validate semantically verified block")]
-    ValidateContextError(#[from] ValidateContextError),
-    /// The write task exited (likely during shutdown).
-    #[error("block write task has exited. Is Zebra shutting down?")]
-    WriteTaskExited,
+#[error("could not commit semantically-verified block")]
+pub struct CommitSemanticallyVerifiedError(#[from] CommitBlockError);
+
+impl From<ValidateContextError> for CommitSemanticallyVerifiedError {
+    fn from(value: ValidateContextError) -> Self {
+        Self(value.into())
+    }
 }
 
 #[derive(Debug, Error)]
@@ -116,23 +91,23 @@ impl<E: std::error::Error + 'static> From<BoxError> for LayeredStateError<E> {
 
 /// An error describing why a `CommitCheckpointVerifiedBlock` request failed.
 #[derive(Debug, Error, Clone)]
-#[non_exhaustive]
 pub enum CommitCheckpointVerifiedError {
-    /// Queuing/commit step failed.
-    #[error("could not queue and commit semantically verified block")]
-    QueueAndCommitError(#[from] QueueAndCommitError),
+    #[error("could not queue and commit checkpoint-verified block")]
+    CommitBlockError(#[from] CommitBlockError),
     /// RocksDB write failed
     /// TODO: Wire it up in `finalized_state.rs`, `commit_finalized`
     #[error("could not write checkpoint-verified block to RocksDB")]
     WriteError(#[from] rocksdb::Error),
-    /// The write task exited (likely during shutdown).
-    #[error("block write task has exited. Is Zebra shutting down?")]
-    WriteTaskExited,
-
     /// Temporary workaround for boxed errors.
-    /// TODO: Replace with `WriteError(#[from] rocksdb::Error)`
+    /// TODO: Replace with `ValidateContextError(#[from] ValidateContextError)`
     #[error("{0}")]
     CloneError(#[from] CloneError),
+}
+
+impl From<ValidateContextError> for CommitCheckpointVerifiedError {
+    fn from(value: ValidateContextError) -> Self {
+        Self::CommitBlockError(value.into())
+    }
 }
 
 /// An error describing why a `InvalidateBlock` request failed.
