@@ -1,6 +1,6 @@
 [package]
 name = "zebra-state"
-version = "2.0.0"
+version = "3.0.0"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "State contextual verification and storage code for Zebra"
 license = "MIT OR Apache-2.0"
