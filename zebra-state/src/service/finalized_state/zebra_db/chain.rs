@@ -29,7 +29,7 @@ use crate::{
         zebra_db::ZebraDb,
         TypedColumnFamily,
     },
-    BoxError, HashOrHeight,
+    HashOrHeight, ValidateContextError,
 };
 
 /// The name of the History Tree column family.
@@ -252,12 +252,32 @@ impl DiskWriteBatch {
         finalized: &FinalizedBlock,
         utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
         value_pool: ValueBalance<NonNegative>,
-    ) -> Result<(), BoxError> {
-        let new_value_pool =
-            value_pool.add_chain_value_pool_change(finalized.block.chain_value_pool_change(
+    ) -> Result<(), ValidateContextError> {
+        let block_value_pool_change = finalized
+            .block
+            .chain_value_pool_change(
                 &utxos_spent_by_block,
                 finalized.deferred_pool_balance_change,
-            )?)?;
+            )
+            .map_err(|value_balance_error| {
+                ValidateContextError::CalculateBlockChainValueChange {
+                    value_balance_error,
+                    height: finalized.height,
+                    block_hash: finalized.hash,
+                    transaction_count: finalized.transaction_hashes.len(),
+                    spent_utxo_count: utxos_spent_by_block.len(),
+                }
+            })?;
+
+        let new_value_pool = value_pool
+            .add_chain_value_pool_change(block_value_pool_change)
+            .map_err(|value_balance_error| ValidateContextError::AddValuePool {
+                value_balance_error,
+                chain_value_pools: Box::new(value_pool),
+                block_value_pool_change: Box::new(block_value_pool_change),
+                height: Some(finalized.height),
+            })?;
+
         let _ = db
             .chain_value_pools_cf()
             .with_batch_for_writing(self)
