@@ -46,7 +46,6 @@ pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 #[derive(Debug, Error, Clone, PartialEq, Eq, new)]
 pub enum CommitBlockError {
     #[error("block hash has already been sent to be committed to the state")]
-    #[non_exhaustive]
     Duplicate {
         hash_or_height: Option<HashOrHeight>,
         location: KnownBlock,
@@ -91,18 +90,12 @@ impl<E: std::error::Error + 'static> From<BoxError> for LayeredStateError<E> {
 
 /// An error describing why a `CommitCheckpointVerifiedBlock` request failed.
 #[derive(Debug, Error, Clone)]
-pub enum CommitCheckpointVerifiedError {
-    #[error("could not queue and commit checkpoint-verified block")]
-    CommitBlockError(#[from] CommitBlockError),
-    /// RocksDB write failed
-    /// TODO: Decide whether to expect that writes will succeed (it's already expecting that there won't be a write error when finalizing non-finalized blocks)
-    #[error("could not write checkpoint-verified block to RocksDB")]
-    WriteError(#[from] rocksdb::Error),
-}
+#[error("could not commit checkpoint-verified block")]
+pub struct CommitCheckpointVerifiedError(#[from] CommitBlockError);
 
 impl From<ValidateContextError> for CommitCheckpointVerifiedError {
     fn from(value: ValidateContextError) -> Self {
-        Self::CommitBlockError(value.into())
+        Self(value.into())
     }
 }
 
