@@ -51,4 +51,5 @@
     - [V5 Transaction](dev/rfcs/0010-v5-transaction.md)
     - [Async Rust in Zebra](dev/rfcs/0011-async-rust-in-zebra.md)
     - [Value Pools](dev/rfcs/0012-value-pools.md)
+  - [Profiling and Benchmarking](dev/profiling-and-benchmarking.md)
 - [API Reference](api.md)

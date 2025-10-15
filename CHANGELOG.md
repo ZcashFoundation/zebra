@@ -69,6 +69,7 @@ Additionally, this version includes significant updates to Zebra's CI processes 
 - Allow configuration of checkpoints on test networks ([#9888](https://github.com/ZcashFoundation/zebra/pull/9888))
 - Added HTTP `/healthy` and `/ready` endpoints ([#9895](https://github.com/ZcashFoundation/zebra/pull/9895), [#9886](https://github.com/ZcashFoundation/zebra/pull/9886))
 - New book page on profiling Zebra ([#9983](https://github.com/ZcashFoundation/zebra/pull/9983))
+- Deserialization logic to call `extend_funding_streams()` when the flag is true for both configured Testnets and Regtest ([#9989](https://github.com/ZcashFoundation/zebra/pull/9989))
 
 ### Fixed
 

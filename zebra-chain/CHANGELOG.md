@@ -25,6 +25,12 @@ These changes break the public API and may require updates in downstream crates.
 - Added `bytes_in_display_order()` for multiple `sprout` types,
   as well for `orchard::tree::Root` and `Halo2Proof`.
 - Added `CHAIN_HISTORY_ACTIVATION_RESERVED` as an export from the `block` module.
+- Added `extend_funding_stream_addresses_as_required` field to `RegtestParameters` struct
+- Added `extend_funding_stream_addresses_as_required` field to `DTestnetParameters` struct
+
+### Removed
+
+- Removed call to `check_funding_stream_address_period` in `convert_with_default()`
 
 ## [2.0.0] - 2025-08-07
 

@@ -22,6 +22,7 @@ Support for NU6.1 testnet activation.
 ### Added
 
 - Added support for a new config field, `funding_streams`
+- Added deserialization logic to call `extend_funding_streams()` when the flag is true for both configured Testnets and Regtest
 
 ### Deprecated
 
