@@ -549,7 +549,9 @@ impl ZebraDb {
             prev_note_commitment_trees,
         )?;
 
-        self.db.write(batch)?;
+        self.db
+            .write(batch)
+            .expect("unexpected rocksdb error while writing block");
 
         tracing::trace!(?source, "committed block from");
 
