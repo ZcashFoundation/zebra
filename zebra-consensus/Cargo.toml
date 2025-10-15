@@ -63,7 +63,7 @@ tower-batch-control = { path = "../tower-batch-control/", version = "0.2.41" }
 
 zebra-script = { path = "../zebra-script", version = "2.0.0" }
 zebra-state = { path = "../zebra-state", version = "2.0.0" }
-zebra-node-services = { path = "../zebra-node-services", version = "1.0.1" }
+zebra-node-services = { path = "../zebra-node-services", version = "2.0.0" }
 zebra-chain = { path = "../zebra-chain", version = "3.0.0" }
 
 zcash_protocol.workspace = true
