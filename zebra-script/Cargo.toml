@@ -32,7 +32,7 @@ thiserror = { workspace = true }
 [dev-dependencies]
 hex = { workspace = true }
 lazy_static = { workspace = true }
-zebra-test = { path = "../zebra-test", version = "1.0.1" }
+zebra-test = { path = "../zebra-test", version = "2.0.0" }
 
 [lints]
 workspace = true

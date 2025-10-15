@@ -42,7 +42,7 @@ tokio-test = { workspace = true }
 tower-fallback = { path = "../tower-fallback/", version = "0.2.41" }
 tower-test = { workspace = true }
 
-zebra-test = { path = "../zebra-test/", version = "1.0.1" }
+zebra-test = { path = "../zebra-test/", version = "2.0.0" }
 
 [lints]
 workspace = true

@@ -290,7 +290,7 @@ zebra-consensus = { path = "../zebra-consensus", version = "3.0.0", features = [
 zebra-network = { path = "../zebra-network", version = "2.0.0", features = ["proptest-impl"] }
 zebra-state = { path = "../zebra-state", version = "3.0.0", features = ["proptest-impl"] }
 
-zebra-test = { path = "../zebra-test", version = "1.0.1" }
+zebra-test = { path = "../zebra-test", version = "2.0.0" }
 
 # Used by the checkpoint generation tests via the zebra-checkpoints feature
 # (the binaries in this crate won't be built unless their features are enabled).
