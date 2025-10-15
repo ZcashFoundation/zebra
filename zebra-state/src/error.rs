@@ -95,13 +95,9 @@ pub enum CommitCheckpointVerifiedError {
     #[error("could not queue and commit checkpoint-verified block")]
     CommitBlockError(#[from] CommitBlockError),
     /// RocksDB write failed
-    /// TODO: Wire it up in `finalized_state.rs`, `commit_finalized`
+    /// TODO: Decide whether to expect that writes will succeed (it's already expecting that there won't be a write error when finalizing non-finalized blocks)
     #[error("could not write checkpoint-verified block to RocksDB")]
     WriteError(#[from] rocksdb::Error),
-    /// Temporary workaround for boxed errors.
-    /// TODO: Replace with `ValidateContextError(#[from] ValidateContextError)`
-    #[error("{0}")]
-    CloneError(#[from] CloneError),
 }
 
 impl From<ValidateContextError> for CommitCheckpointVerifiedError {

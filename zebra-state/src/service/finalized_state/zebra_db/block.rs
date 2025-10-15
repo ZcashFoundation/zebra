@@ -32,6 +32,7 @@ use zebra_chain::{
 };
 
 use crate::{
+    error::CommitCheckpointVerifiedError,
     request::FinalizedBlock,
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
@@ -42,7 +43,7 @@ use crate::{
         zebra_db::{metrics::block_precommit_metrics, ZebraDb},
         FromDisk, RawBytes,
     },
-    BoxError, HashOrHeight,
+    HashOrHeight,
 };
 
 #[cfg(feature = "indexer")]
@@ -425,7 +426,8 @@ impl ZebraDb {
     /// # Errors
     ///
     /// - Propagates any errors from writing to the DB
-    /// - Propagates any errors from updating history and note commitment trees
+    /// - Propagates any errors from computing the block's chain value balance change or
+    ///   from applying the change to the chain value balance
     #[allow(clippy::unwrap_in_result)]
     pub(in super::super) fn write_block(
         &mut self,
@@ -433,7 +435,7 @@ impl ZebraDb {
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
         network: &Network,
         source: &str,
-    ) -> Result<block::Hash, BoxError> {
+    ) -> Result<block::Hash, CommitCheckpointVerifiedError> {
         let tx_hash_indexes: HashMap<transaction::Hash, usize> = finalized
             .transaction_hashes
             .iter()
@@ -610,7 +612,8 @@ impl DiskWriteBatch {
     ///
     /// # Errors
     ///
-    /// - Propagates any errors from updating history tree, note commitment trees, or value pools
+    /// - Propagates any errors from computing the block's chain value balance change or
+    ///   from applying the change to the chain value balance
     #[allow(clippy::too_many_arguments)]
     pub fn prepare_block_batch(
         &mut self,
@@ -627,11 +630,11 @@ impl DiskWriteBatch {
         address_balances: AddressBalanceLocationUpdates,
         value_pool: ValueBalance<NonNegative>,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
-    ) -> Result<(), BoxError> {
+    ) -> Result<(), CommitCheckpointVerifiedError> {
         let db = &zebra_db.db;
 
         // Commit block, transaction, and note commitment tree data.
-        self.prepare_block_header_and_transaction_data_batch(db, finalized)?;
+        self.prepare_block_header_and_transaction_data_batch(db, finalized);
 
         // The consensus rules are silent on shielded transactions in the genesis block,
         // because there aren't any in the mainnet or testnet genesis blocks.
@@ -639,8 +642,8 @@ impl DiskWriteBatch {
         // which is already present from height 1 to the first shielded transaction.
         //
         // In Zebra we include the nullifiers and note commitments in the genesis block because it simplifies our code.
-        self.prepare_shielded_transaction_batch(zebra_db, finalized)?;
-        self.prepare_trees_batch(zebra_db, finalized, prev_note_commitment_trees)?;
+        self.prepare_shielded_transaction_batch(zebra_db, finalized);
+        self.prepare_trees_batch(zebra_db, finalized, prev_note_commitment_trees);
 
         // # Consensus
         //
@@ -664,8 +667,9 @@ impl DiskWriteBatch {
                 #[cfg(feature = "indexer")]
                 &out_loc_by_outpoint,
                 address_balances,
-            )?;
+            );
         }
+
         // Commit UTXOs and value pools
         self.prepare_chain_value_pools_batch(
             zebra_db,
@@ -682,16 +686,12 @@ impl DiskWriteBatch {
 
     /// Prepare a database batch containing the block header and transaction data
     /// from `finalized.block`, and return it (without actually writing anything).
-    ///
-    /// # Errors
-    ///
-    /// - This method does not currently return any errors.
     #[allow(clippy::unwrap_in_result)]
     pub fn prepare_block_header_and_transaction_data_batch(
         &mut self,
         db: &DiskDb,
         finalized: &FinalizedBlock,
-    ) -> Result<(), BoxError> {
+    ) {
         // Blocks
         let block_header_by_height = db.cf_handle("block_header_by_height").unwrap();
         let hash_by_height = db.cf_handle("hash_by_height").unwrap();
@@ -732,7 +732,5 @@ impl DiskWriteBatch {
             self.zs_insert(&hash_by_tx_loc, transaction_location, transaction_hash);
             self.zs_insert(&tx_loc_by_hash, transaction_hash, transaction_location);
         }
-
-        Ok(())
     }
 }
