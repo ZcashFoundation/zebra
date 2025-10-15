@@ -6814,7 +6814,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-consensus"
-version = "2.0.0"
+version = "3.0.0"
 dependencies = [
  "bellman",
  "blake2b_simd",

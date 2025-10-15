@@ -95,7 +95,7 @@ proptest = { workspace = true, optional = true }
 zebra-chain = { path = "../zebra-chain", version = "3.0.0", features = [
     "json-conversion",
 ] }
-zebra-consensus = { path = "../zebra-consensus", version = "2.0.0" }
+zebra-consensus = { path = "../zebra-consensus", version = "3.0.0" }
 zebra-network = { path = "../zebra-network", version = "1.1.0" }
 zebra-node-services = { path = "../zebra-node-services", version = "1.0.1", features = [
     "rpc-client",
@@ -118,7 +118,7 @@ tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 zebra-chain = { path = "../zebra-chain", version = "3.0.0", features = [
     "proptest-impl",
 ] }
-zebra-consensus = { path = "../zebra-consensus", version = "2.0.0", features = [
+zebra-consensus = { path = "../zebra-consensus", version = "3.0.0", features = [
     "proptest-impl",
 ] }
 zebra-network = { path = "../zebra-network", version = "1.1.0", features = [
