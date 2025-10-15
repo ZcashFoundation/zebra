@@ -92,7 +92,7 @@ sapling-crypto = { workspace = true }
 # Test-only feature proptest-impl
 proptest = { workspace = true, optional = true }
 
-zebra-chain = { path = "../zebra-chain", version = "2.0.0", features = [
+zebra-chain = { path = "../zebra-chain", version = "3.0.0", features = [
     "json-conversion",
 ] }
 zebra-consensus = { path = "../zebra-consensus", version = "2.0.0" }
@@ -115,7 +115,7 @@ proptest = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 
-zebra-chain = { path = "../zebra-chain", version = "2.0.0", features = [
+zebra-chain = { path = "../zebra-chain", version = "3.0.0", features = [
     "proptest-impl",
 ] }
 zebra-consensus = { path = "../zebra-consensus", version = "2.0.0", features = [

@@ -149,7 +149,7 @@ tx_v6 = ["zebra-chain/tx_v6", "zebra-state/tx_v6", "zebra-consensus/tx_v6"]
 comparison-interpreter = ["zebra-script/comparison-interpreter"]
 
 [dependencies]
-zebra-chain = { path = "../zebra-chain", version = "2.0.0" }
+zebra-chain = { path = "../zebra-chain", version = "3.0.0" }
 zebra-consensus = { path = "../zebra-consensus", version = "2.0.0" }
 zebra-network = { path = "../zebra-network", version = "1.1.0" }
 zebra-node-services = { path = "../zebra-node-services", version = "1.0.1", features = ["rpc-client"] }
@@ -285,7 +285,7 @@ proptest-derive = { workspace = true }
 # enable span traces and track caller in tests
 color-eyre = { workspace = true }
 
-zebra-chain = { path = "../zebra-chain", version = "2.0.0", features = ["proptest-impl"] }
+zebra-chain = { path = "../zebra-chain", version = "3.0.0", features = ["proptest-impl"] }
 zebra-consensus = { path = "../zebra-consensus", version = "2.0.0", features = ["proptest-impl"] }
 zebra-network = { path = "../zebra-network", version = "1.1.0", features = ["proptest-impl"] }
 zebra-state = { path = "../zebra-state", version = "2.0.0", features = ["proptest-impl"] }

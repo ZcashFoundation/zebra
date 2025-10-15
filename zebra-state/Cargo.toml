@@ -77,7 +77,7 @@ sapling-crypto = { workspace = true }
 elasticsearch = { workspace = true, features = ["rustls-tls"], optional = true }
 serde_json = { workspace = true, optional = true }
 
-zebra-chain = { path = "../zebra-chain", version = "2.0.0", features = ["async-error"] }
+zebra-chain = { path = "../zebra-chain", version = "3.0.0", features = ["async-error"] }
 
 # prod feature progress-bar
 howudoin = { workspace = true, optional = true }
@@ -107,7 +107,7 @@ jubjub = { workspace = true }
 
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 
-zebra-chain = { path = "../zebra-chain", version = "2.0.0", features = ["proptest-impl"] }
+zebra-chain = { path = "../zebra-chain", version = "3.0.0", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/", version = "1.0.1" }
 
 [lints]
