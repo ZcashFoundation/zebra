@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [3.0.0] - 2025-10-15
 
 This release adds new request and response variants for transaction lookups to support new RPC methods, introduces a configuration option for backing up the non-finalized state, and refactors error handling for improved type safety and clarity.
+Additionally, it fixes a regression in Zebra’s sync performance that was introduced when avoiding the use of the RocksDB merge operator.
 
 ### Breaking Changes
 
@@ -27,6 +28,7 @@ This release adds new request and response variants for transaction lookups to s
 
 ## Fixed
 
+- Restore initial sync performance by avoiding RocksDB merge operations when the on-disk database format is up-to-date ([#9973](https://github.com/ZcashFoundation/zebra/pull/9973))
 - Replaced boxed-string errors in response to failed `CommitSemanticallyVerifiedBlock` and `ReconsiderBlock` state requests with concrete error type ([#9848](https://github.com/ZcashFoundation/zebra/pull/9848), [#9923](https://github.com/ZcashFoundation/zebra/pull/9923), [#9919](https://github.com/ZcashFoundation/zebra/pull/9919))
 
 

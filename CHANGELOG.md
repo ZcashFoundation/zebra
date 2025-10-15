@@ -13,6 +13,8 @@ This is a **release candidate**, and support for it is expected to end before th
 
 Additionally, this version includes significant updates to Zebra's CI processes and Docker setup, among other major and minor improvements.
 
+Finally, and just as important, we fixed a regression in Zebra’s sync performance. The latest report shows that a full sync from scratch now completes in **8 hours and 29 minutes** ([Report](https://github.com/ZcashFoundation/zebra/pull/9973#issuecomment-3391954556)).
+
 ### Breaking Changes
 
 - Migrate `zebrad` to a layered configuration using config-rs. Environment variables must use the `ZEBRA_SECTION__KEY` format (double underscore for nesting), for example: `ZEBRA_NETWORK__NETWORK`, `ZEBRA_RPC__LISTEN_ADDR`, `ZEBRA_RPC__ENABLE_COOKIE_AUTH`, `ZEBRA_RPC__COOKIE_DIR` `ZEBRA_TRACING__FILTER` `ZEBRA_STATE__CACHE_DIR`, `ZEBRA_MINING__MINER_ADDRESS`. Legacy `ZEBRA_*` test/path variables and `ZEBRA_RUST_LOG` are no longer honored. Update any scripts, Docker configs, or systemd units that relied on the old names ([#9768](https://github.com/ZcashFoundation/zebra/pull/9768)).
@@ -73,6 +75,7 @@ Additionally, this version includes significant updates to Zebra's CI processes 
 
 ### Fixed
 
+- Restore initial sync performance by avoiding RocksDB merge operations when the on-disk database format is up-to-date ([#9973](https://github.com/ZcashFoundation/zebra/pull/9973))
 - Use `STANDARD` Base64 for RPC auth encoding/decoding ([#9968](https://github.com/ZcashFoundation/zebra/pull/9968))
 - Expects the block commitment bytes of Heartwood activation blocks to be the `hashBlockCommitments` after NU5 activation ([#9982](https://github.com/ZcashFoundation/zebra/pull/9982))
 - Fixed UTXO selection loop to iterate over entries instead of repeating first ([#9826](https://github.com/ZcashFoundation/zebra/pull/9826))
