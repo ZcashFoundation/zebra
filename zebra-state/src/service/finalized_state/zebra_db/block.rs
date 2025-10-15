@@ -37,7 +37,7 @@ use crate::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
         disk_format::{
             block::TransactionLocation,
-            transparent::{AddressBalanceLocationChange, OutputLocation},
+            transparent::{AddressBalanceLocationUpdates, OutputLocation},
         },
         zebra_db::{metrics::block_precommit_metrics, ZebraDb},
         FromDisk, RawBytes,
@@ -517,18 +517,36 @@ impl ZebraDb {
             .collect();
 
         // Get the current address balances, before the transactions in this block
-        let address_balances: HashMap<transparent::Address, AddressBalanceLocationChange> =
+
+        fn read_addr_locs<T, F: Fn(&transparent::Address) -> Option<T>>(
+            changed_addresses: HashSet<transparent::Address>,
+            f: F,
+        ) -> HashMap<transparent::Address, T> {
             changed_addresses
                 .into_iter()
-                .filter_map(|address| {
-                    // # Correctness
-                    //
-                    // Address balances are updated with the `fetch_add_balance_and_received` merge operator, so
-                    // the values must represent the changes to the balance, not the final balance.
-                    let addr_loc = self.address_balance_location(&address)?.into_new_change();
-                    Some((address.clone(), addr_loc))
-                })
-                .collect();
+                .filter_map(|address| Some((address.clone(), f(&address)?)))
+                .collect()
+        }
+
+        // # Performance
+        //
+        // It's better to update entries in RocksDB with insertions over merge operations when there is no risk that
+        // insertions may overwrite values that are updated concurrently in database format upgrades as inserted values
+        // are quicker to read and require less background compaction.
+        //
+        // Reading entries that have been updated with merge ops often requires reading the latest fully-merged value,
+        // reading all of the pending merge operands (potentially hundreds), and applying pending merge operands to the
+        // fully-merged value such that it's much faster to read entries that have been updated with insertions than it
+        // is to read entries that have been updated with merge operations.
+        let address_balances: AddressBalanceLocationUpdates = if self.finished_format_upgrades() {
+            AddressBalanceLocationUpdates::Insert(read_addr_locs(changed_addresses, |addr| {
+                self.address_balance_location(addr)
+            }))
+        } else {
+            AddressBalanceLocationUpdates::Merge(read_addr_locs(changed_addresses, |addr| {
+                Some(self.address_balance_location(addr)?.into_new_change())
+            }))
+        };
 
         let mut batch = DiskWriteBatch::new();
 
@@ -602,7 +620,7 @@ impl DiskWriteBatch {
             transparent::OutPoint,
             OutputLocation,
         >,
-        address_balances: HashMap<transparent::Address, AddressBalanceLocationChange>,
+        address_balances: AddressBalanceLocationUpdates,
         value_pool: ValueBalance<NonNegative>,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
     ) -> Result<(), BoxError> {
