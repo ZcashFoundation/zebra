@@ -44,7 +44,7 @@ use crate::{
     constants::{
         MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS, MAX_LEGACY_CHAIN_BLOCKS,
     },
-    error::{CommitCheckpointVerifiedError, InvalidateError, QueueAndCommitError, ReconsiderError},
+    error::{CommitBlockError, CommitCheckpointVerifiedError, InvalidateError, ReconsiderError},
     response::NonFinalizedBlocksListener,
     service::{
         block_iter::any_ancestor_blocks,
@@ -55,8 +55,8 @@ use crate::{
         queued_blocks::QueuedBlocks,
         watch_receiver::WatchReceiver,
     },
-    BoxError, CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, Config, ReadRequest,
-    ReadResponse, Request, Response, SemanticallyVerifiedBlock,
+    BoxError, CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, Config, KnownBlock,
+    ReadRequest, ReadResponse, Request, Response, SemanticallyVerifiedBlock,
 };
 
 pub mod block_iter;
@@ -234,8 +234,8 @@ impl Drop for StateService {
         std::mem::drop(self.block_write_sender.finalized.take());
         std::mem::drop(self.block_write_sender.non_finalized.take());
 
-        self.clear_finalized_block_queue(CommitCheckpointVerifiedError::WriteTaskExited);
-        self.clear_non_finalized_block_queue(CommitSemanticallyVerifiedError::WriteTaskExited);
+        self.clear_finalized_block_queue(CommitBlockError::WriteTaskExited);
+        self.clear_non_finalized_block_queue(CommitBlockError::WriteTaskExited);
 
         // Log database metrics before shutting down
         info!("dropping the state: logging database metrics");
@@ -495,10 +495,10 @@ impl StateService {
             {
                 Self::send_checkpoint_verified_block_error(
                     duplicate_queued,
-                    QueueAndCommitError::ReplacedByNewer {
-                        block_hash: queued_prev_hash,
-                    }
-                    .into(),
+                    CommitBlockError::new_duplicate(
+                        Some(queued_prev_hash.into()),
+                        KnownBlock::Queue,
+                    ),
                 );
             }
 
@@ -511,10 +511,13 @@ impl StateService {
             //       every time we send some blocks (like QueuedSemanticallyVerifiedBlocks)
             Self::send_checkpoint_verified_block_error(
                 queued,
-                QueueAndCommitError::AlreadyCommitted.into(),
+                CommitBlockError::new_duplicate(None, KnownBlock::Finalized),
             );
 
-            self.clear_finalized_block_queue(QueueAndCommitError::AlreadyCommitted.into());
+            self.clear_finalized_block_queue(CommitBlockError::new_duplicate(
+                None,
+                KnownBlock::Finalized,
+            ));
         }
 
         if self.finalized_state_queued_blocks.is_empty() {
@@ -581,10 +584,10 @@ impl StateService {
                     // If Zebra is shutting down, drop blocks and return an error.
                     Self::send_checkpoint_verified_block_error(
                         queued,
-                        QueueAndCommitError::CommitTaskExited.into(),
+                        CommitBlockError::WriteTaskExited,
                     );
 
-                    self.clear_finalized_block_queue(QueueAndCommitError::CommitTaskExited.into());
+                    self.clear_finalized_block_queue(CommitBlockError::WriteTaskExited);
                 } else {
                     metrics::gauge!("state.checkpoint.sent.block.height")
                         .set(last_sent_finalized_block_height.0 as f64);
@@ -594,7 +597,10 @@ impl StateService {
     }
 
     /// Drops all finalized state queue blocks, and sends an error on their result channels.
-    fn clear_finalized_block_queue(&mut self, error: CommitCheckpointVerifiedError) {
+    fn clear_finalized_block_queue(
+        &mut self,
+        error: impl Into<CommitCheckpointVerifiedError> + Clone,
+    ) {
         for (_hash, queued) in self.finalized_state_queued_blocks.drain() {
             Self::send_checkpoint_verified_block_error(queued, error.clone());
         }
@@ -603,18 +609,21 @@ impl StateService {
     /// Send an error on a `QueuedCheckpointVerified` block's result channel, and drop the block
     fn send_checkpoint_verified_block_error(
         queued: QueuedCheckpointVerified,
-        error: CommitCheckpointVerifiedError,
+        error: impl Into<CommitCheckpointVerifiedError>,
     ) {
         let (finalized, rsp_tx) = queued;
 
         // The block sender might have already given up on this block,
         // so ignore any channel send errors.
-        let _ = rsp_tx.send(Err(error));
+        let _ = rsp_tx.send(Err(error.into()));
         std::mem::drop(finalized);
     }
 
     /// Drops all non-finalized state queue blocks, and sends an error on their result channels.
-    fn clear_non_finalized_block_queue(&mut self, error: CommitSemanticallyVerifiedError) {
+    fn clear_non_finalized_block_queue(
+        &mut self,
+        error: impl Into<CommitSemanticallyVerifiedError> + Clone,
+    ) {
         for (_hash, queued) in self.non_finalized_state_queued_blocks.drain() {
             Self::send_semantically_verified_block_error(queued, error.clone());
         }
@@ -623,13 +632,13 @@ impl StateService {
     /// Send an error on a `QueuedSemanticallyVerified` block's result channel, and drop the block
     fn send_semantically_verified_block_error(
         queued: QueuedSemanticallyVerified,
-        error: CommitSemanticallyVerifiedError,
+        error: impl Into<CommitSemanticallyVerifiedError>,
     ) {
         let (finalized, rsp_tx) = queued;
 
         // The block sender might have already given up on this block,
         // so ignore any channel send errors.
-        let _ = rsp_tx.send(Err(error));
+        let _ = rsp_tx.send(Err(error.into()));
         std::mem::drop(finalized);
     }
 
@@ -653,8 +662,9 @@ impl StateService {
             .contains(&semantically_verified.hash)
         {
             let (rsp_tx, rsp_rx) = oneshot::channel();
-            let _ = rsp_tx.send(Err(QueueAndCommitError::new_duplicate(
-                semantically_verified.hash,
+            let _ = rsp_tx.send(Err(CommitBlockError::new_duplicate(
+                Some(semantically_verified.hash.into()),
+                KnownBlock::WriteChannel,
             )
             .into()));
             return rsp_rx;
@@ -666,8 +676,9 @@ impl StateService {
             .contains_height(semantically_verified.height)
         {
             let (rsp_tx, rsp_rx) = oneshot::channel();
-            let _ = rsp_tx.send(Err(QueueAndCommitError::new_already_finalized(
-                semantically_verified.height,
+            let _ = rsp_tx.send(Err(CommitBlockError::new_duplicate(
+                Some(semantically_verified.height.into()),
+                KnownBlock::Finalized,
             )
             .into()));
             return rsp_rx;
@@ -683,8 +694,9 @@ impl StateService {
             tracing::debug!("replacing older queued request with new request");
             let (mut rsp_tx, rsp_rx) = oneshot::channel();
             std::mem::swap(old_rsp_tx, &mut rsp_tx);
-            let _ = rsp_tx.send(Err(QueueAndCommitError::new_replaced(
-                semantically_verified.hash,
+            let _ = rsp_tx.send(Err(CommitBlockError::new_duplicate(
+                Some(semantically_verified.hash.into()),
+                KnownBlock::Queue,
             )
             .into()));
             rsp_rx
@@ -721,7 +733,10 @@ impl StateService {
             // Send blocks from non-finalized queue
             self.send_ready_non_finalized_queued(self.finalized_block_write_last_sent_hash);
             // We've finished committing checkpoint verified blocks to finalized state, so drop any repeated queued blocks.
-            self.clear_finalized_block_queue(QueueAndCommitError::AlreadyCommitted.into());
+            self.clear_finalized_block_queue(CommitBlockError::new_duplicate(
+                None,
+                KnownBlock::Finalized,
+            ));
         } else if !self.can_fork_chain_at(&parent_hash) {
             tracing::trace!("unready to verify, returning early");
         } else if self.block_write_sender.finalized.is_none() {
@@ -784,12 +799,10 @@ impl StateService {
                         // If Zebra is shutting down, drop blocks and return an error.
                         Self::send_semantically_verified_block_error(
                             queued,
-                            CommitSemanticallyVerifiedError::WriteTaskExited,
+                            CommitBlockError::WriteTaskExited,
                         );
 
-                        self.clear_non_finalized_block_queue(
-                            CommitSemanticallyVerifiedError::WriteTaskExited,
-                        );
+                        self.clear_non_finalized_block_queue(CommitBlockError::WriteTaskExited);
 
                         return;
                     };
@@ -864,6 +877,12 @@ impl StateService {
             blocks, and the canopy activation block, must be committed to the state as finalized \
             blocks"
         );
+    }
+
+    fn known_sent_hash(&self, hash: &block::Hash) -> Option<KnownBlock> {
+        self.non_finalized_block_write_sent_hashes
+            .contains(hash)
+            .then_some(KnownBlock::WriteChannel)
     }
 }
 
@@ -1007,7 +1026,7 @@ impl Service<Request> for StateService {
                 async move {
                     rsp_rx
                         .await
-                        .map_err(|_recv_error| CommitSemanticallyVerifiedError::WriteTaskExited)
+                        .map_err(|_recv_error| CommitBlockError::WriteTaskExited.into())
                         .flatten()
                         .map_err(BoxError::from)
                         .map(Response::Committed)
@@ -1056,7 +1075,7 @@ impl Service<Request> for StateService {
                 async move {
                     rsp_rx
                         .await
-                        .map_err(|_recv_error| CommitCheckpointVerifiedError::WriteTaskExited)
+                        .map_err(|_recv_error| CommitBlockError::WriteTaskExited.into())
                         .flatten()
                         .map_err(BoxError::from)
                         .map(Response::Committed)
@@ -1144,9 +1163,14 @@ impl Service<Request> for StateService {
             Request::KnownBlock(hash) => {
                 let timer = CodeTimer::start();
 
+                let sent_hash_response = self.known_sent_hash(&hash);
                 let read_service = self.read_service.clone();
 
                 async move {
+                    if sent_hash_response.is_some() {
+                        return Ok(Response::KnownBlock(sent_hash_response));
+                    };
+
                     let response = read::non_finalized_state_contains_block_hash(
                         &read_service.latest_non_finalized_state(),
                         hash,
