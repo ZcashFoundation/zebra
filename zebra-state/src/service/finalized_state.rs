@@ -300,16 +300,9 @@ impl FinalizedState {
                 .set(checkpoint_verified.height.0 as f64);
         };
 
-        let _ = rsp_tx.send(
-            result
-                .clone()
-                .map(|(hash, _)| hash)
-                .map_err(CommitCheckpointVerifiedError::from),
-        );
+        let _ = rsp_tx.send(result.clone().map(|(hash, _)| hash));
 
-        result
-            .map(|(_hash, note_commitment_trees)| (checkpoint_verified, note_commitment_trees))
-            .map_err(CommitCheckpointVerifiedError::from)
+        result.map(|(_hash, note_commitment_trees)| (checkpoint_verified, note_commitment_trees))
     }
 
     /// Immediately commit a `finalized` block to the finalized state.
