@@ -5,7 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.1.0] - XXXX-XX-XX
+## [3.0.0] - 2025-10-15
+
+In this release we removed a significant amount of Sapling-related code in favor of upstream implementations.
+These changes break the public API and may require updates in downstream crates. ([#9828](https://github.com/ZcashFoundation/zebra/issues/9828))
+
+### Breaking Changes
+
+- The `ValueCommitment` type no longer derives `Copy`.
+- `zebra-chain::Errors` has new variants.
+- ` ValueCommitment::new` and `ValueCommitment::randomized` methods were removed.
+- Constant `NU6_1_ACTIVATION_HEIGHT_TESTNET` was removed as is now part of `activation_heights` module.
+- Structs `sapling::NoteCommitment`, `sapling::NotSmallOrderValueCommitment` and `sapling::tree::Node` were
+  removed.
 
 ### Added
 

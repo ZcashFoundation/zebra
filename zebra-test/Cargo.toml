@@ -1,6 +1,6 @@
 [package]
 name = "zebra-test"
-version = "1.0.1"
+version = "2.0.0"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "Test harnesses and test vectors for Zebra"
 license = "MIT OR Apache-2.0"
