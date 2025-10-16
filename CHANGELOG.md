@@ -9,11 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 In this release, we add the **Mainnet activation height for Network Upgrade 6.1 (NU6.1)**, which will activate at block **3,146,400**.
 
-This is a **release candidate**, and support for it is expected to end before the activation height. If no issues are found, this candidate will become the final release that passes through the activation.
+This is a **release candidate**. Its support is set to expire before the activation height. If no issues are found, this candidate will become the final release for NU6.1.
 
-Additionally, this version includes significant updates to Zebra's CI processes and Docker setup, among other major and minor improvements.
+This release also includes significant updates to Zebra's CI and Docker setup, as well as performance optimizations.
 
-Finally, and just as important, we fixed a regression in Zebra’s sync performance. The latest report shows that a full sync from scratch now completes in **8 hours and 29 minutes** ([Report](https://github.com/ZcashFoundation/zebra/pull/9973#issuecomment-3391954556)).
 
 ### Breaking Changes
 
