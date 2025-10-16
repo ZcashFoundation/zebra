@@ -16,7 +16,7 @@ use zebra_chain::{
     block::{self, Height},
     history_tree::HistoryTree,
     orchard,
-    orchard_zsa::{AssetBase, AssetState, IssuedAssets, IssuedAssetsChange},
+    orchard_zsa::{AssetBase, AssetState, IssuedAssetChanges},
     parallel::tree::NoteCommitmentTrees,
     parameters::Network,
     primitives::Groth16Proof,
@@ -956,33 +956,27 @@ impl Chain {
     fn revert_issued_assets(
         &mut self,
         position: RevertPosition,
-        issued_assets: &IssuedAssets,
-        transactions: &[Arc<Transaction>],
+        issued_asset_changes: &IssuedAssetChanges,
     ) {
         if position == RevertPosition::Root {
-            trace!(?position, "removing unmodified issued assets");
-            for (asset_base, &asset_state) in issued_assets.iter() {
-                if self
-                    .issued_asset(asset_base)
-                    .expect("issued assets for chain should include those in all blocks")
-                    == asset_state
-                {
+            trace!(?position, "removing issued assets modified by root block");
+            // Remove assets that still have their new state (they haven't been modified by later blocks)
+            for (asset_base, (_old_state, new_state)) in issued_asset_changes.iter() {
+                if self.issued_asset(asset_base) == Some(*new_state) {
                     self.issued_assets.remove(asset_base);
                 }
             }
         } else {
-            trace!(?position, "reverting changes to issued assets");
-            for issued_assets_change in IssuedAssetsChange::from_transactions(transactions)
-                .expect("blocks in chain state must be valid")
-                .iter()
-                .rev()
-            {
-                for (asset_base, change) in issued_assets_change.iter() {
-                    self.issued_assets
-                        .entry(asset_base)
-                        .or_default()
-                        .revert_change(change);
-                }
+            trace!(
+                ?position,
+                "restoring previous issued asset states for tip block"
+            );
+            // Simply restore the old states
+            for (asset_base, (old_state, _new_state)) in issued_asset_changes.iter() {
+                match old_state {
+                    Some(state) => self.issued_assets.insert(*asset_base, *state),
+                    None => self.issued_assets.remove(asset_base),
+                };
             }
         }
     }
@@ -1489,8 +1483,10 @@ impl Chain {
 
         self.add_history_tree(height, history_tree);
 
-        self.issued_assets
-            .extend(contextually_valid.issued_assets.clone());
+        for (asset_base, (_old_state, new_state)) in contextually_valid.issued_asset_changes.iter()
+        {
+            self.issued_assets.insert(*asset_base, *new_state);
+        }
 
         Ok(())
     }
@@ -1720,7 +1716,7 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
             spent_outputs,
             transaction_hashes,
             chain_value_pool_change,
-            issued_assets,
+            issued_asset_changes,
         ) = (
             contextually_valid.block.as_ref(),
             contextually_valid.hash,
@@ -1729,7 +1725,7 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
             &contextually_valid.spent_outputs,
             &contextually_valid.transaction_hashes,
             &contextually_valid.chain_value_pool_change,
-            &contextually_valid.issued_assets,
+            &contextually_valid.issued_asset_changes,
         );
 
         // remove the blocks hash from `height_by_hash`
@@ -1854,8 +1850,8 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
         // TODO: move this to the history tree UpdateWith.revert...()?
         self.remove_history_tree(position, height);
 
-        // revert the issued assets map, if needed
-        self.revert_issued_assets(position, issued_assets, &block.transactions);
+        // In revert_chain_with for ContextuallyVerifiedBlock:
+        self.revert_issued_assets(position, issued_asset_changes);
 
         // revert the chain value pool balances, if needed
         self.revert_chain_with(chain_value_pool_change, position);

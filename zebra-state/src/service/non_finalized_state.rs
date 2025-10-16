@@ -10,6 +10,7 @@ use std::{
 
 use zebra_chain::{
     block::{self, Block},
+    orchard_zsa::{AssetBase, IssuedAssetChanges},
     parameters::Network,
     sprout, transparent,
 };
@@ -17,7 +18,7 @@ use zebra_chain::{
 use crate::{
     constants::MAX_NON_FINALIZED_CHAIN_FORKS,
     request::{ContextuallyVerifiedBlock, FinalizableBlock},
-    service::{check, finalized_state::ZebraDb},
+    service::{check, finalized_state::ZebraDb, read},
     SemanticallyVerifiedBlock, ValidateContextError,
 };
 
@@ -325,8 +326,12 @@ impl NonFinalizedState {
             finalized_state,
         )?;
 
-        let issued_assets =
-            check::issuance::valid_burns_and_issuance(finalized_state, &new_chain, &prepared)?;
+        let issued_assets = IssuedAssetChanges::validate_and_get_changes(
+            &prepared.block.transactions,
+            |asset_base: &AssetBase| {
+                read::asset_state(Some(&new_chain), finalized_state, asset_base)
+            },
+        )?;
 
         // Reads from disk
         check::anchors::block_sapling_orchard_anchors_refer_to_final_treestates(

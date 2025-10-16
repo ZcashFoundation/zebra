@@ -11,7 +11,7 @@ use zebra_chain::{
     block::{self, Block},
     history_tree::HistoryTree,
     orchard,
-    orchard_zsa::{AssetBase, IssuedAssets},
+    orchard_zsa::{AssetBase, IssuedAssetChanges},
     parallel::tree::NoteCommitmentTrees,
     sapling,
     serialization::SerializationError,
@@ -225,10 +225,11 @@ pub struct ContextuallyVerifiedBlock {
     /// The sum of the chain value pool changes of all transactions in this block.
     pub(crate) chain_value_pool_change: ValueBalance<NegativeAllowed>,
 
-    // FIXME: what is the difference between IssuedAssetsChange?
-    /// A partial map of `issued_assets` with entries for asset states that were updated in
-    /// this block.
-    pub(crate) issued_assets: IssuedAssets,
+    /// Asset state changes for assets modified in this block.
+    /// Maps asset_base -> (old_state, new_state) where:
+    /// - old_state: the state before this block was applied
+    /// - new_state: the state after this block was applied
+    pub(crate) issued_asset_changes: IssuedAssetChanges,
 }
 
 /// Wraps note commitment trees and the history tree together.
@@ -299,30 +300,11 @@ pub struct FinalizedBlock {
     pub(super) treestate: Treestate,
     /// This block's contribution to the deferred pool.
     pub(super) deferred_balance: Option<Amount<NonNegative>>,
-    /// Updated asset states to be inserted into the finalized state, replacing the previous
-    /// asset states for those asset bases.
-    pub issued_assets: Option<IssuedAssets>,
+    /// Asset state changes to be applied to the finalized state.
+    /// Contains (old_state, new_state) pairs for assets modified in this block.
+    /// If `None`, the changes will be recalculated from the block's transactions.
+    pub issued_asset_changes: Option<IssuedAssetChanges>,
 }
-
-/* FIXME: remove this
-/// Either changes to be applied to the previous `issued_assets` map for the finalized tip, or
-/// updates asset states to be inserted into the finalized state, replacing the previous
-/// asset states for those asset bases.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum IssuedAssetsOrChange {
-    /// A map of updated issued assets.
-    Updated(IssuedAssets),
-
-    /// A map of changes to apply to the issued assets map.
-    Change(IssuedAssetsChange),
-}
-
-impl From<IssuedAssets> for IssuedAssetsOrChange {
-    fn from(updated_issued_assets: IssuedAssets) -> Self {
-        Self::Updated(updated_issued_assets)
-    }
-}
-*/
 
 impl FinalizedBlock {
     /// Constructs [`FinalizedBlock`] from [`CheckpointVerifiedBlock`] and its [`Treestate`].
@@ -335,11 +317,11 @@ impl FinalizedBlock {
         block: ContextuallyVerifiedBlock,
         treestate: Treestate,
     ) -> Self {
-        let issued_assets = Some(block.issued_assets.clone());
+        let issued_asset_changes = Some(block.issued_asset_changes.clone());
         Self::from_semantically_verified(
             SemanticallyVerifiedBlock::from(block),
             treestate,
-            issued_assets,
+            issued_asset_changes,
         )
     }
 
@@ -347,7 +329,7 @@ impl FinalizedBlock {
     fn from_semantically_verified(
         block: SemanticallyVerifiedBlock,
         treestate: Treestate,
-        issued_assets: Option<IssuedAssets>,
+        issued_asset_changes: Option<IssuedAssetChanges>,
     ) -> Self {
         Self {
             block: block.block,
@@ -357,7 +339,7 @@ impl FinalizedBlock {
             transaction_hashes: block.transaction_hashes,
             treestate,
             deferred_balance: block.deferred_balance,
-            issued_assets,
+            issued_asset_changes,
         }
     }
 }
@@ -423,7 +405,7 @@ impl ContextuallyVerifiedBlock {
     pub fn with_block_and_spent_utxos(
         semantically_verified: SemanticallyVerifiedBlock,
         mut spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
-        issued_assets: IssuedAssets,
+        issued_asset_changes: IssuedAssetChanges,
     ) -> Result<Self, ValueBalanceError> {
         let SemanticallyVerifiedBlock {
             block,
@@ -451,7 +433,7 @@ impl ContextuallyVerifiedBlock {
                 &utxos_from_ordered_utxos(spent_outputs),
                 deferred_balance,
             )?,
-            issued_assets,
+            issued_asset_changes,
         })
     }
 }

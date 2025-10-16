@@ -129,7 +129,7 @@ impl ContextuallyVerifiedBlock {
             spent_outputs: new_outputs,
             transaction_hashes,
             chain_value_pool_change: ValueBalance::zero(),
-            issued_assets: Default::default(),
+            issued_asset_changes: Default::default(),
         }
     }
 }

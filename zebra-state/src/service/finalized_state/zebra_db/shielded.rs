@@ -20,7 +20,7 @@ use std::{
 use zebra_chain::{
     block::Height,
     orchard::{self},
-    orchard_zsa::{AssetBase, AssetState, IssuedAssets},
+    orchard_zsa::{AssetBase, AssetState, IssuedAssetChanges},
     parallel::tree::NoteCommitmentTrees,
     sapling, sprout,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
@@ -511,7 +511,7 @@ impl DiskWriteBatch {
     ///
     /// # Errors
     ///
-    /// - This method doesn't currently return any errors, but it might in future
+    /// - Returns an error if asset state changes cannot be calculated from the block's transactions
     #[allow(clippy::unwrap_in_result)]
     pub fn prepare_issued_assets_batch(
         &mut self,
@@ -520,18 +520,21 @@ impl DiskWriteBatch {
     ) -> Result<(), BoxError> {
         let mut batch = zebra_db.issued_assets_cf().with_batch_for_writing(self);
 
-        let updated_issued_assets =
-            if let Some(updated_issued_assets) = finalized.issued_assets.as_ref() {
-                updated_issued_assets
-            } else {
-                &IssuedAssets::from_transactions(&finalized.block.transactions, |asset_base| {
-                    zebra_db.issued_asset(asset_base)
-                })
-                .ok_or(BoxError::from("invalid issued assets changes"))?
-            };
+        let asset_changes = if let Some(asset_changes) = finalized.issued_asset_changes.as_ref() {
+            asset_changes.clone()
+        } else {
+            // Recalculate changes from transactions if not provided
+            // FIXME: why they can't be provided?
+            IssuedAssetChanges::validate_and_get_changes(
+                &finalized.block.transactions,
+                |asset_base| zebra_db.issued_asset(asset_base),
+            )
+            .map_err(|_| BoxError::from("invalid issued assets changes"))?
+        };
 
-        for (asset_base, updated_issued_asset_state) in updated_issued_assets.iter() {
-            batch = batch.zs_insert(asset_base, updated_issued_asset_state);
+        // Write only the new states to the database
+        for (asset_base, (_old_state, new_state)) in asset_changes.iter() {
+            batch = batch.zs_insert(asset_base, new_state);
         }
 
         Ok(())

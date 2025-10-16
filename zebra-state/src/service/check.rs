@@ -28,7 +28,6 @@ use crate::service::non_finalized_state::Chain;
 
 pub(crate) mod anchors;
 pub(crate) mod difficulty;
-pub(crate) mod issuance;
 pub(crate) mod nullifier;
 pub(crate) mod utxo;
 

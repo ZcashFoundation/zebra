@@ -9,7 +9,7 @@ use zebra_chain::{
     amount::{self, NegativeAllowed, NonNegative},
     block,
     history_tree::HistoryTreeError,
-    orchard, sapling, sprout, transaction, transparent,
+    orchard, orchard_zsa, sapling, sprout, transaction, transparent,
     value_balance::{ValueBalance, ValueBalanceError},
     work::difficulty::CompactDifficulty,
 };
@@ -265,11 +265,8 @@ pub enum ValidateContextError {
         transaction_hash: transaction::Hash,
     },
 
-    #[error("burn amounts must be less than issued asset supply")]
-    InvalidBurn,
-
-    #[error("must not issue finalized assets")]
-    InvalidIssuance,
+    #[error("error updating issued asset state")]
+    InvalidIssuedAsset(#[from] orchard_zsa::AssetStateError),
 }
 
 /// Trait for creating the corresponding duplicate nullifier error from a nullifier.
