@@ -59,7 +59,7 @@ orchard.workspace = true
 zcash_proofs = { workspace = true, features = ["multicore", "bundled-prover"] }
 
 tower-fallback = { path = "../tower-fallback/", version = "0.2.41" }
-tower-batch-control = { path = "../tower-batch-control/", version = "0.2.41" }
+tower-batch-control = { path = "../tower-batch-control/", version = "1.0.0" }
 
 zebra-script = { path = "../zebra-script", version = "2.0.0" }
 zebra-state = { path = "../zebra-state", version = "3.0.0" }

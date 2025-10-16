@@ -5491,7 +5491,7 @@ dependencies = [
 
 [[package]]
 name = "tower-batch-control"
-version = "0.2.41"
+version = "1.0.0"
 dependencies = [
  "color-eyre",
  "ed25519-zebra",
