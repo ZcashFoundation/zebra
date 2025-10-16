@@ -62,8 +62,8 @@ pub fn main() {
                 )
                 .expect("TX fetched via RPC should be deserializable from raw bytes");
 
-                for output in
-                    decrypt_transaction(&zp_network, height, &tx, &ufvks).sapling_outputs()
+                for output in decrypt_transaction(&zp_network, Some(height), None, &tx, &ufvks)
+                    .sapling_outputs()
                 {
                     let memo = memo_bytes_to_string(output.memo().as_array());
 

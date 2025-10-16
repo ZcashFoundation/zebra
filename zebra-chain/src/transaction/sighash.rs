@@ -1,5 +1,7 @@
 //! Signature hashes for Zcash transactions
 
+use zcash_transparent::sighash::SighashType;
+
 use super::Transaction;
 
 use crate::parameters::ConsensusBranchId;
@@ -19,6 +21,32 @@ bitflags::bitflags! {
         const SINGLE = Self::ALL.bits() | Self::NONE.bits();
         /// Anyone can add inputs to this transaction
         const ANYONECANPAY = 0b1000_0000;
+
+        /// Sign all the outputs and Anyone can add inputs to this transaction
+        const ALL_ANYONECANPAY = Self::ALL.bits() | Self::ANYONECANPAY.bits();
+        /// Sign none of the outputs and Anyone can add inputs to this transaction
+        const NONE_ANYONECANPAY = Self::NONE.bits() | Self::ANYONECANPAY.bits();
+        /// Sign one of the outputs and Anyone can add inputs to this transaction
+        const SINGLE_ANYONECANPAY = Self::SINGLE.bits() | Self::ANYONECANPAY.bits();
+    }
+}
+
+// FIXME (for future reviewers): Copied from upstream Zebra v2.4.2 to fix a librustzcash
+// breaking change. Keep the code (or update it accordingly) and remove this note when we
+// merge with upstream Zebra.
+impl TryFrom<HashType> for SighashType {
+    type Error = ();
+
+    fn try_from(hash_type: HashType) -> Result<Self, Self::Error> {
+        Ok(match hash_type {
+            HashType::ALL => Self::ALL,
+            HashType::NONE => Self::NONE,
+            HashType::SINGLE => Self::SINGLE,
+            HashType::ALL_ANYONECANPAY => Self::ALL_ANYONECANPAY,
+            HashType::NONE_ANYONECANPAY => Self::NONE_ANYONECANPAY,
+            HashType::SINGLE_ANYONECANPAY => Self::SINGLE_ANYONECANPAY,
+            _other => return Err(()),
+        })
     }
 }
 

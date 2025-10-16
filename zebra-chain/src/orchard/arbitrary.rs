@@ -10,14 +10,13 @@ use reddsa::{orchard::SpendAuth, Signature, SigningKey, VerificationKey, Verific
 use proptest::{array, collection::vec, prelude::*};
 
 use super::{
-    keys::*, note, tree, Action, AuthorizedAction, Flags, NoteCommitment, OrchardFlavorExt,
+    keys::*, note, tree, Action, AuthorizedAction, Flags, NoteCommitment, ShieldedDataFlavor,
     ValueCommitment,
 };
 
-impl<V: OrchardFlavorExt> Arbitrary for Action<V>
-// FIXME: define the constraint in OrchardFlavorExt?
+impl<Flavor: ShieldedDataFlavor> Arbitrary for Action<Flavor>
 where
-    <V::EncryptedNote as Arbitrary>::Strategy: 'static,
+    <Flavor::EncryptedNote as Arbitrary>::Strategy: 'static,
 {
     type Parameters = ();
 
@@ -25,7 +24,7 @@ where
         (
             any::<note::Nullifier>(),
             any::<SpendAuthVerificationKeyBytes>(),
-            any::<V::EncryptedNote>(),
+            any::<Flavor::EncryptedNote>(),
             any::<note::WrappedNoteKey>(),
         )
             .prop_map(|(nullifier, rk, enc_ciphertext, out_ciphertext)| Self {
@@ -59,15 +58,14 @@ impl Arbitrary for note::Nullifier {
     type Strategy = BoxedStrategy<Self>;
 }
 
-impl<V: OrchardFlavorExt + 'static> Arbitrary for AuthorizedAction<V>
-// FIXME: define the constraint in OrchardFlavorExt?
+impl<Flavor: ShieldedDataFlavor + 'static> Arbitrary for AuthorizedAction<Flavor>
 where
-    <V::EncryptedNote as Arbitrary>::Strategy: 'static,
+    <Flavor::EncryptedNote as Arbitrary>::Strategy: 'static,
 {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (any::<Action<V>>(), any::<SpendAuthSignature>())
+        (any::<Action<Flavor>>(), any::<SpendAuthSignature>())
             .prop_map(|(action, spend_auth_sig)| Self {
                 action,
                 spend_auth_sig: spend_auth_sig.0,

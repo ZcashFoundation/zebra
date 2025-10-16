@@ -8,7 +8,14 @@ use crate::{
     transaction::Transaction,
 };
 
-/// Returns true if all Sapling or Orchard outputs, if any, decrypt successfully with
+use orchard::{
+    bundle::{Authorization, Bundle},
+    domain::OrchardDomainCommon,
+};
+
+use zcash_primitives::transaction::OrchardBundle;
+
+/// Returns true if **all** Sapling or Orchard outputs decrypt successfully with
 /// an all-zeroes outgoing viewing key.
 ///
 /// # Panics
@@ -49,20 +56,31 @@ pub fn decrypts_successfully(transaction: &Transaction, network: &Network, heigh
     }
 
     if let Some(bundle) = alt_tx.orchard_bundle() {
-        for act in bundle.actions() {
-            if zcash_note_encryption::try_output_recovery_with_ovk(
-                &orchard::note_encryption::OrchardDomain::for_action(act),
-                &orchard::keys::OutgoingViewingKey::from([0u8; 32]),
-                act,
-                act.cv_net(),
-                &act.encrypted_note().out_ciphertext,
-            )
-            .is_none()
-            {
-                return false;
-            }
+        let is_decrypted_successfully = match bundle {
+            OrchardBundle::OrchardVanilla(bundle) => orchard_bundle_decrypts_successfully(bundle),
+            OrchardBundle::OrchardZSA(bundle) => orchard_bundle_decrypts_successfully(bundle),
+        };
+
+        if !is_decrypted_successfully {
+            return false;
         }
     }
 
     true
+}
+
+/// Checks if all actions in an Orchard bundle decrypt successfully.
+fn orchard_bundle_decrypts_successfully<A: Authorization, V, D: OrchardDomainCommon>(
+    bundle: &Bundle<A, V, D>,
+) -> bool {
+    bundle.actions().iter().all(|act| {
+        zcash_note_encryption::try_output_recovery_with_ovk(
+            &orchard::domain::OrchardDomain::for_action(act),
+            &orchard::keys::OutgoingViewingKey::from([0u8; 32]),
+            act,
+            act.cv_net(),
+            &act.encrypted_note().out_ciphertext,
+        )
+        .is_some()
+    })
 }

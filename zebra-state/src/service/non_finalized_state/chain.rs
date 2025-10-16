@@ -16,7 +16,6 @@ use zebra_chain::{
     block::{self, Height},
     history_tree::HistoryTree,
     orchard,
-    orchard_zsa::{AssetBase, AssetState, IssuedAssetChanges},
     parallel::tree::NoteCommitmentTrees,
     parameters::Network,
     primitives::Groth16Proof,
@@ -30,6 +29,9 @@ use zebra_chain::{
     value_balance::ValueBalance,
     work::difficulty::PartialCumulativeWork,
 };
+
+#[cfg(feature = "tx-v6")]
+use zebra_chain::orchard_zsa::{AssetBase, AssetState, IssuedAssetChanges};
 
 use crate::{
     request::Treestate, service::check, ContextuallyVerifiedBlock, HashOrHeight, OutputLocation,
@@ -177,6 +179,7 @@ pub struct ChainInner {
     pub(crate) orchard_subtrees:
         BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<orchard::tree::Node>>,
 
+    #[cfg(feature = "tx-v6")]
     /// A partial map of `issued_assets` with entries for asset states that were updated in
     /// this chain.
     // TODO: Add reference to ZIP
@@ -245,6 +248,7 @@ impl Chain {
             orchard_anchors_by_height: Default::default(),
             orchard_trees_by_height: Default::default(),
             orchard_subtrees: Default::default(),
+            #[cfg(feature = "tx-v6")]
             issued_assets: Default::default(),
             sprout_nullifiers: Default::default(),
             sapling_nullifiers: Default::default(),
@@ -946,12 +950,14 @@ impl Chain {
         }
     }
 
+    #[cfg(feature = "tx-v6")]
     /// Returns the Orchard issued asset state if one is present in
     /// the chain for the provided asset base.
     pub fn issued_asset(&self, asset_base: &AssetBase) -> Option<AssetState> {
         self.issued_assets.get(asset_base).cloned()
     }
 
+    #[cfg(feature = "tx-v6")]
     /// Remove the History tree index at `height`.
     fn revert_issued_assets(
         &mut self,
@@ -962,7 +968,14 @@ impl Chain {
             trace!(?position, "removing issued assets modified by root block");
             // Remove assets that still have their new state (they haven't been modified by later blocks)
             for (asset_base, (_old_state, new_state)) in issued_asset_changes.iter() {
-                if self.issued_asset(asset_base) == Some(*new_state) {
+                // FIXME: Purge/evict assets only if they were modified exclusively by the
+                // current root block. Do NOT use value equality; later blocks can issue/burn
+                // back to the same value. Instead, rely on a history marker stored in the
+                // state (e.g., `last_modified_height`) that we persist and restore on tip pops.
+                // On root eviction at H_root, purge only when `last_modified_height == H_root`.
+                // Add debug asserts/tests to enforce that the marker is updated/restored
+                // consistently along all pop/apply paths.
+                if self.issued_assets.get(asset_base) == Some(new_state) {
                     self.issued_assets.remove(asset_base);
                 }
             }
@@ -972,7 +985,13 @@ impl Chain {
                 "restoring previous issued asset states for tip block"
             );
             // Simply restore the old states
-            for (asset_base, (old_state, _new_state)) in issued_asset_changes.iter() {
+            for (asset_base, (old_state, new_state)) in issued_asset_changes.iter() {
+                assert_eq!(
+                    self.issued_assets.get(asset_base),
+                    Some(new_state),
+                    "tip revert: current state differs from recorded new_state for {:?}",
+                    asset_base
+                );
                 match old_state {
                     Some(state) => self.issued_assets.insert(*asset_base, *state),
                     None => self.issued_assets.remove(asset_base),
@@ -1483,9 +1502,35 @@ impl Chain {
 
         self.add_history_tree(height, history_tree);
 
-        for (asset_base, (_old_state, new_state)) in contextually_valid.issued_asset_changes.iter()
+        #[cfg(feature = "tx-v6")]
+        for (asset_base, (old_state_from_block, new_state)) in
+            contextually_valid.issued_asset_changes.iter()
         {
-            self.issued_assets.insert(*asset_base, *new_state);
+            self.issued_assets
+                .entry(*asset_base)
+                .and_modify(|current_state| {
+                    assert_eq!(
+                        old_state_from_block.as_ref(),
+                        Some(&*current_state),
+                        "issued asset state mismatch for {:?}",
+                        asset_base
+                    );
+                    // or apply_seq), set/update it on `*new_state` here before writing.
+                    // FIXME: Once we add a per-asset history marker (e.g., last_modified_height)
+                    // set/update it here in `new_state`. That will let root eviction decide
+                    // purge/evict by history instead of value equality. Until then, revert logic
+                    // must not rely on value comparisons.
+                    *current_state = *new_state;
+                })
+                .or_insert_with(|| {
+                    assert!(
+                        old_state_from_block.is_none(),
+                        "issued asset state mismatch for {:?}",
+                        asset_base
+                    );
+                    // FIXME: Also set the history marker on `*new_state` here.
+                    *new_state
+                });
         }
 
         Ok(())
@@ -1716,7 +1761,6 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
             spent_outputs,
             transaction_hashes,
             chain_value_pool_change,
-            issued_asset_changes,
         ) = (
             contextually_valid.block.as_ref(),
             contextually_valid.hash,
@@ -1725,8 +1769,10 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
             &contextually_valid.spent_outputs,
             &contextually_valid.transaction_hashes,
             &contextually_valid.chain_value_pool_change,
-            &contextually_valid.issued_asset_changes,
         );
+
+        #[cfg(feature = "tx-v6")]
+        let issued_asset_changes = &contextually_valid.issued_asset_changes;
 
         // remove the blocks hash from `height_by_hash`
         assert!(
@@ -1850,6 +1896,7 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
         // TODO: move this to the history tree UpdateWith.revert...()?
         self.remove_history_tree(position, height);
 
+        #[cfg(feature = "tx-v6")]
         // In revert_chain_with for ContextuallyVerifiedBlock:
         self.revert_issued_assets(position, issued_asset_changes);
 
@@ -2156,11 +2203,13 @@ where
     }
 }
 
-impl<V: orchard::OrchardFlavorExt> UpdateWith<Option<orchard::ShieldedData<V>>> for Chain {
+impl<Flavor: orchard::ShieldedDataFlavor> UpdateWith<Option<orchard::ShieldedData<Flavor>>>
+    for Chain
+{
     #[instrument(skip(self, orchard_shielded_data))]
     fn update_chain_tip_with(
         &mut self,
-        orchard_shielded_data: &Option<orchard::ShieldedData<V>>,
+        orchard_shielded_data: &Option<orchard::ShieldedData<Flavor>>,
     ) -> Result<(), ValidateContextError> {
         if let Some(orchard_shielded_data) = orchard_shielded_data {
             // We do note commitment tree updates in parallel rayon threads.
@@ -2181,7 +2230,7 @@ impl<V: orchard::OrchardFlavorExt> UpdateWith<Option<orchard::ShieldedData<V>>> 
     #[instrument(skip(self, orchard_shielded_data))]
     fn revert_chain_with(
         &mut self,
-        orchard_shielded_data: &Option<orchard::ShieldedData<V>>,
+        orchard_shielded_data: &Option<orchard::ShieldedData<Flavor>>,
         _position: RevertPosition,
     ) {
         if let Some(orchard_shielded_data) = orchard_shielded_data {

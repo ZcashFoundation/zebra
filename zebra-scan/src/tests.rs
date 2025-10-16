@@ -20,7 +20,7 @@ use zcash_client_backend::{
 use zcash_note_encryption::Domain;
 use zcash_primitives::{block::BlockHash, consensus::BlockHeight, memo::MemoBytes};
 
-use ::sapling_crypto::{
+use sapling_crypto::{
     constants::SPENDING_KEY_GENERATOR,
     note_encryption::{sapling_note_encryption, SaplingDomain},
     util::generate_random_rseed,
@@ -250,7 +250,7 @@ pub fn random_compact_tx(mut rng: impl RngCore) -> CompactTx {
     };
     let fake_cmu = {
         let fake_cmu = bls12_381::Scalar::random(&mut rng);
-        fake_cmu.to_repr().as_ref().to_owned()
+        fake_cmu.to_repr().to_vec()
     };
     let fake_epk = {
         let mut buffer = [0; 64];

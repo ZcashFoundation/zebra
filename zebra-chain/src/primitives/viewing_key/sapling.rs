@@ -5,7 +5,7 @@ use zcash_client_backend::{
     encoding::decode_extended_full_viewing_key,
     keys::sapling::DiversifiableFullViewingKey as SaplingDfvk,
 };
-use zcash_primitives::constants::*;
+use zcash_protocol::constants::*;
 
 use crate::parameters::Network;
 

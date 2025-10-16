@@ -5,15 +5,16 @@ use std::{collections::BTreeMap, sync::Arc};
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{self, Block},
-    orchard,
-    orchard_zsa::AssetState,
-    sapling,
+    orchard, sapling,
     serialization::DateTime32,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
     transaction::{self, Transaction},
     transparent,
     value_balance::ValueBalance,
 };
+
+#[cfg(feature = "tx-v6")]
+use zebra_chain::orchard_zsa::AssetState;
 
 #[cfg(feature = "getblocktemplate-rpcs")]
 use zebra_chain::work::difficulty::CompactDifficulty;

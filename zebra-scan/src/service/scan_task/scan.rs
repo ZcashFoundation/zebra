@@ -542,7 +542,11 @@ pub fn scanning_keys<'a>(
     dfvks
         .into_iter()
         .enumerate()
-        .map(|(i, dfvk)| Ok((AccountId::try_from(u32::try_from(i)?)?, dfvk_to_ufvk(dfvk)?)))
+        .map(|(i, dfvk)| {
+            let account = AccountId::try_from(u32::try_from(i)?)
+                .map_err(|e| eyre!("Invalid AccountId: {:?}", e))?;
+            Ok((account, dfvk_to_ufvk(dfvk)?))
+        })
         .try_collect::<(_, _), Vec<(_, _)>, _>()
         .map(ScanningKeys::from_account_ufvks)
 }

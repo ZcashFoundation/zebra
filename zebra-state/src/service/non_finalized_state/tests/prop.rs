@@ -52,6 +52,7 @@ fn push_genesis_chain() -> Result<()> {
             ContextuallyVerifiedBlock::with_block_and_spent_utxos(
                     block,
                     only_chain.unspent_utxos(),
+                    #[cfg(feature = "tx-v6")]
                     Default::default(),
                 )
                 .map_err(|e| (e, chain_values.clone()))
@@ -149,6 +150,7 @@ fn forked_equals_pushed_genesis() -> Result<()> {
             let block = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
                 block,
                 partial_chain.unspent_utxos(),
+                #[cfg(feature = "tx-v6")]
                 Default::default()
             )?;
             partial_chain = partial_chain
@@ -168,8 +170,12 @@ fn forked_equals_pushed_genesis() -> Result<()> {
         );
 
         for block in chain.iter().cloned() {
-            let block =
-            ContextuallyVerifiedBlock::with_block_and_spent_utxos(block, full_chain.unspent_utxos(), Default::default())?;
+            let block = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
+                block,
+                full_chain.unspent_utxos(),
+                #[cfg(feature = "tx-v6")]
+                Default::default()
+            )?;
 
             // Check some properties of the genesis block and don't push it to the chain.
             if block.height == block::Height(0) {
@@ -212,7 +218,9 @@ fn forked_equals_pushed_genesis() -> Result<()> {
         // same original full chain.
         for block in chain.iter().skip(fork_at_count).cloned() {
             let block =
-            ContextuallyVerifiedBlock::with_block_and_spent_utxos(block, forked.unspent_utxos(), Default::default())?;
+            ContextuallyVerifiedBlock::with_block_and_spent_utxos(block, forked.unspent_utxos(),
+            #[cfg(feature = "tx-v6")]
+            Default::default())?;
             forked = forked.push(block).expect("forked chain push is valid");
         }
 

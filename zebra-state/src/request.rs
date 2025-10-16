@@ -11,7 +11,6 @@ use zebra_chain::{
     block::{self, Block},
     history_tree::HistoryTree,
     orchard,
-    orchard_zsa::{AssetBase, IssuedAssetChanges},
     parallel::tree::NoteCommitmentTrees,
     sapling,
     serialization::SerializationError,
@@ -21,6 +20,9 @@ use zebra_chain::{
     transparent::{self, utxos_from_ordered_utxos},
     value_balance::{ValueBalance, ValueBalanceError},
 };
+
+#[cfg(feature = "tx-v6")]
+use zebra_chain::orchard_zsa::{AssetBase, IssuedAssetChanges};
 
 /// Allow *only* these unused imports, so that rustdoc link resolution
 /// will work with inline links.
@@ -225,6 +227,7 @@ pub struct ContextuallyVerifiedBlock {
     /// The sum of the chain value pool changes of all transactions in this block.
     pub(crate) chain_value_pool_change: ValueBalance<NegativeAllowed>,
 
+    #[cfg(feature = "tx-v6")]
     /// Asset state changes for assets modified in this block.
     /// Maps asset_base -> (old_state, new_state) where:
     /// - old_state: the state before this block was applied
@@ -300,6 +303,7 @@ pub struct FinalizedBlock {
     pub(super) treestate: Treestate,
     /// This block's contribution to the deferred pool.
     pub(super) deferred_balance: Option<Amount<NonNegative>>,
+    #[cfg(feature = "tx-v6")]
     /// Asset state changes to be applied to the finalized state.
     /// Contains (old_state, new_state) pairs for assets modified in this block.
     /// If `None`, the changes will be recalculated from the block's transactions.
@@ -309,7 +313,12 @@ pub struct FinalizedBlock {
 impl FinalizedBlock {
     /// Constructs [`FinalizedBlock`] from [`CheckpointVerifiedBlock`] and its [`Treestate`].
     pub fn from_checkpoint_verified(block: CheckpointVerifiedBlock, treestate: Treestate) -> Self {
-        Self::from_semantically_verified(SemanticallyVerifiedBlock::from(block), treestate, None)
+        Self::from_semantically_verified(
+            SemanticallyVerifiedBlock::from(block),
+            treestate,
+            #[cfg(feature = "tx-v6")]
+            None,
+        )
     }
 
     /// Constructs [`FinalizedBlock`] from [`ContextuallyVerifiedBlock`] and its [`Treestate`].
@@ -317,10 +326,12 @@ impl FinalizedBlock {
         block: ContextuallyVerifiedBlock,
         treestate: Treestate,
     ) -> Self {
+        #[cfg(feature = "tx-v6")]
         let issued_asset_changes = Some(block.issued_asset_changes.clone());
         Self::from_semantically_verified(
             SemanticallyVerifiedBlock::from(block),
             treestate,
+            #[cfg(feature = "tx-v6")]
             issued_asset_changes,
         )
     }
@@ -329,7 +340,7 @@ impl FinalizedBlock {
     fn from_semantically_verified(
         block: SemanticallyVerifiedBlock,
         treestate: Treestate,
-        issued_asset_changes: Option<IssuedAssetChanges>,
+        #[cfg(feature = "tx-v6")] issued_asset_changes: Option<IssuedAssetChanges>,
     ) -> Self {
         Self {
             block: block.block,
@@ -339,6 +350,7 @@ impl FinalizedBlock {
             transaction_hashes: block.transaction_hashes,
             treestate,
             deferred_balance: block.deferred_balance,
+            #[cfg(feature = "tx-v6")]
             issued_asset_changes,
         }
     }
@@ -405,7 +417,7 @@ impl ContextuallyVerifiedBlock {
     pub fn with_block_and_spent_utxos(
         semantically_verified: SemanticallyVerifiedBlock,
         mut spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
-        issued_asset_changes: IssuedAssetChanges,
+        #[cfg(feature = "tx-v6")] issued_asset_changes: IssuedAssetChanges,
     ) -> Result<Self, ValueBalanceError> {
         let SemanticallyVerifiedBlock {
             block,
@@ -433,6 +445,7 @@ impl ContextuallyVerifiedBlock {
                 &utxos_from_ordered_utxos(spent_outputs),
                 deferred_balance,
             )?,
+            #[cfg(feature = "tx-v6")]
             issued_asset_changes,
         })
     }
