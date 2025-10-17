@@ -45,7 +45,7 @@ pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 /// An error describing why a block could not be queued to be committed to the state.
 #[derive(Debug, Error, Clone, PartialEq, Eq, new)]
 pub enum CommitBlockError {
-    #[error("block hash has already been sent to be committed to the state")]
+    #[error("block hash is a duplicate: already in {location}")]
     Duplicate {
         hash_or_height: Option<HashOrHeight>,
         location: KnownBlock,

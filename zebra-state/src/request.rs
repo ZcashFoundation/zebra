@@ -767,7 +767,7 @@ pub enum Request {
     /// until its parent is ready.
     ///
     /// Returns [`Response::Committed`] with the hash of the block when it is
-    /// committed to the state, or a [`CommitSemanticallyVerifiedBlockError`][0] if
+    /// committed to the state, or a [`CommitSemanticallyVerifiedError`][0] if
     /// the block fails contextual validation or otherwise could not be committed.
     ///
     /// This request cannot be cancelled once submitted; dropping the response
@@ -781,7 +781,7 @@ pub enum Request {
     /// out-of-order and invalid requests do not hang indefinitely. See the [`crate`]
     /// documentation for details.
     ///
-    /// [0]: (crate::error::CommitSemanticallyVerifiedBlockError)
+    /// [0]: (crate::error::CommitSemanticallyVerifiedError)
     CommitSemanticallyVerifiedBlock(SemanticallyVerifiedBlock),
 
     /// Commit a checkpointed block to the state, skipping most but not all
@@ -792,7 +792,7 @@ pub enum Request {
     /// it until its parent is ready.
     ///
     /// Returns [`Response::Committed`] with the hash of the newly committed
-    /// block, or a [`CommitCheckpointVerifiedError`] if the block could not be
+    /// block, or a [`CommitCheckpointVerifiedError`][0] if the block could not be
     /// committed to the state.
     ///
     /// This request cannot be cancelled once submitted; dropping the response
@@ -830,6 +830,8 @@ pub enum Request {
     /// Block commit requests should be wrapped in a timeout, so that
     /// out-of-order and invalid requests do not hang indefinitely. See the [`crate`]
     /// documentation for details.
+    /// 
+    /// [0]: (crate::error::CommitCheckpointVerifiedError)
     CommitCheckpointVerifiedBlock(CheckpointVerifiedBlock),
 
     /// Computes the depth in the current best chain of the block identified by the given hash.
@@ -1001,9 +1003,21 @@ pub enum Request {
 
     /// Invalidates a block in the non-finalized state with the provided hash if one is present, removing it and
     /// its child blocks, and rejecting it during contextual validation if it's resubmitted to the state.
+    /// 
+    /// Returns [`Response::Invalidated`] with the hash of the invalidated block,
+    /// or a [`InvalidateError`][0] if the block was not found, the state is still
+    /// committing checkpointed blocks, or the request could not be processed.
+    /// 
+    /// [0]: (crate::error::InvalidateError)
     InvalidateBlock(block::Hash),
 
     /// Reconsiders a previously invalidated block in the non-finalized state with the provided hash if one is present.
+    /// 
+    /// Returns [`Response::Reconsidered`] with the hash of the reconsidered block,
+    /// or a [`ReconsiderError`][0] if the block was not previously invalidated,
+    /// its parent chain is missing, or the state is not ready to process the request.
+    /// 
+    /// [0]: (crate::error::ReconsiderError)
     ReconsiderBlock(block::Hash),
 
     /// Performs contextual validation of the given block, but does not commit it to the state.
