@@ -1,6 +1,6 @@
 [package]
 name = "zebra-script"
-version = "2.0.0"
+version = "3.0.0"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "Zebra script verification wrapping zcashd's zcash_script library"
 license = "MIT OR Apache-2.0"
