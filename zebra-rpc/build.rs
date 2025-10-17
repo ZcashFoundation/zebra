@@ -45,7 +45,7 @@ fn build_or_copy_proto() -> Result<(), Box<dyn std::error::Error>> {
         for file_name in file_names {
             let out_path = out_dir.join(file_name);
             let generated_path = format!("proto/__generated__/{file_name}");
-            if fs::read_to_string(&out_path).ok() != fs::read_to_string(&generated_path).ok() {
+            if fs::read(&out_path).ok() != Some(fs::read(&generated_path)?) {
                 fs::copy(generated_path, out_path)?;
             }
         }
