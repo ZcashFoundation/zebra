@@ -9,6 +9,7 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
+    time::Duration,
 };
 
 use chrono::{TimeZone, Utc};
@@ -1313,20 +1314,22 @@ async fn send_periodic_heartbeats_run_loop(
         // We've reached another heartbeat interval without
         // shutting down, so do a heartbeat request.
         let heartbeat = send_one_heartbeat(&mut server_tx);
-        heartbeat_timeout(heartbeat, &heartbeat_ts_collector, &connected_addr).await?;
+        let rtt = heartbeat_timeout(heartbeat, &heartbeat_ts_collector, &connected_addr).await?;
 
-        // # Security
-        //
-        // Peer heartbeats are rate-limited because:
-        // - opening connections is rate-limited
-        // - the number of connections is limited
-        // - Zebra initiates each heartbeat using a timer
-        if let Some(book_addr) = connected_addr.get_address_book_addr() {
-            // the collector doesn't depend on network activity,
-            // so this await should not hang
-            let _ = heartbeat_ts_collector
-                .send(MetaAddr::new_responded(book_addr))
-                .await;
+        if let Some(rtt) = rtt {
+            // # Security
+            //
+            // Peer heartbeats are rate-limited because:
+            // - opening connections is rate-limited
+            // - the number of connections is limited
+            // - Zebra initiates each heartbeat using a timer
+            if let Some(book_addr) = connected_addr.get_address_book_addr() {
+                // the collector doesn't depend on network activity,
+                // so this await should not hang
+                let _ = heartbeat_ts_collector
+                    .send(MetaAddr::new_responded(book_addr, rtt))
+                    .await;
+            }
         }
     }
 
@@ -1336,7 +1339,7 @@ async fn send_periodic_heartbeats_run_loop(
 /// Send one heartbeat using `server_tx`.
 async fn send_one_heartbeat(
     server_tx: &mut futures::channel::mpsc::Sender<ClientRequest>,
-) -> Result<(), BoxError> {
+) -> Result<Response, BoxError> {
     // We just reached a heartbeat interval, so start sending
     // a heartbeat.
     let (tx, rx) = oneshot::channel();
@@ -1376,23 +1379,20 @@ async fn send_one_heartbeat(
     // Heartbeats are checked internally to the
     // connection logic, but we need to wait on the
     // response to avoid canceling the request.
-    rx.await??;
-    tracing::trace!("got heartbeat response");
+    let response = rx.await??;
+    tracing::trace!(?response, "got heartbeat response");
 
-    Ok(())
+    Ok(response)
 }
 
 /// Wrap `fut` in a timeout, handing any inner or outer errors using
 /// `handle_heartbeat_error`.
-async fn heartbeat_timeout<F, T>(
-    fut: F,
+async fn heartbeat_timeout(
+    fut: impl Future<Output = Result<Response, BoxError>>,
     address_book_updater: &tokio::sync::mpsc::Sender<MetaAddrChange>,
     connected_addr: &ConnectedAddr,
-) -> Result<T, BoxError>
-where
-    F: Future<Output = Result<T, BoxError>>,
-{
-    let t = match timeout(constants::HEARTBEAT_INTERVAL, fut).await {
+) -> Result<Option<Duration>, BoxError> {
+    let response = match timeout(constants::HEARTBEAT_INTERVAL, fut).await {
         Ok(inner_result) => {
             handle_heartbeat_error(inner_result, address_book_updater, connected_addr).await?
         }
@@ -1401,7 +1401,12 @@ where
         }
     };
 
-    Ok(t)
+    let rtt = match response {
+        Response::Pong(rtt) => Some(rtt),
+        _ => None,
+    };
+
+    Ok(rtt)
 }
 
 /// If `result.is_err()`, mark `connected_addr` as failed using `address_book_updater`.
