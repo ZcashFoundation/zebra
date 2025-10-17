@@ -1,0 +1,30 @@
+name: 'Setup Zebra Build Environment'
+description: 'Install RocksDB as system library and configure'
+runs:
+  using: 'composite'
+  steps:
+    - name: Install librocksdb-dev on Ubuntu
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get -qq update
+        sudo apt-get -qq install -y --no-install-recommends librocksdb-dev
+        echo "ROCKSDB_LIB_DIR=/usr/lib/" >> $GITHUB_ENV
+
+    - name: Install RocksDB on macOS
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        brew install rocksdb
+        # Set ROCKSDB_LIB_DIR for both Intel and Apple Silicon Macs
+        if [ -d "/opt/homebrew/lib" ]; then
+          echo "ROCKSDB_LIB_DIR=/opt/homebrew/lib" >> $GITHUB_ENV
+        else
+          echo "ROCKSDB_LIB_DIR=/usr/local/lib" >> $GITHUB_ENV
+        fi
+
+    - name: Skip RocksDB installation on Windows
+      if: runner.os == 'Windows'
+      shell: bash
+      run: |
+        echo "Skipping RocksDB installation on Windows"
