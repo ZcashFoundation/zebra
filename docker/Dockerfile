@@ -98,10 +98,10 @@ ARG CARGO_TARGET_DIR
 RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends curl && \
     mkdir -p "${CARGO_HOME}/bin" && \
-    case ${BUILDPLATFORM} in \
-        "linux/amd64") ARCH="linux" ;; \
-        "linux/arm64") ARCH="linux-arm" ;; \
-        *) echo "Unsupported architecture: ${BUILDPLATFORM}"; exit 1 ;; \
+    case ${BUILDPLATFORM:-linux/$(uname -m)} in \
+        "linux/amd64"|"linux/x86_64") ARCH="linux" ;; \
+        "linux/arm64"|"linux/aarch64") ARCH="linux-arm" ;; \
+        *) echo "Unsupported architecture: ${BUILDPLATFORM:-linux/$(uname -m)}"; exit 1 ;; \
     esac && \
     curl -LsSf "https://get.nexte.st/latest/${ARCH}" | tar zxf - -C "${CARGO_HOME}/bin" && \
     apt-get -qq remove --purge -y curl && \
