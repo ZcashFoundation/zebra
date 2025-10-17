@@ -116,7 +116,10 @@ COPY --link --chown=${UID}:${GID} ./ ${HOME}
 RUN cargo nextest run --locked --release --no-run --features "${FEATURES}" && \
     # Copy binaries to standard location
     cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin && \
-    cp ${CARGO_TARGET_DIR}/release/zebra-checkpoints /usr/local/bin && \
+    # Only copy zebra-checkpoints if the feature is enabled
+    if echo "${FEATURES}" | grep -q "zebra-checkpoints"; then \
+        cp ${CARGO_TARGET_DIR}/release/zebra-checkpoints /usr/local/bin; \
+    fi && \
     # Set proper ownership
     chown -R ${UID}:${GID} ${CARGO_HOME} && \
     chown -R ${UID}:${GID} ${CARGO_TARGET_DIR}
