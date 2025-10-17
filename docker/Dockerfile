@@ -15,9 +15,7 @@
 
 ARG RUST_VERSION=1.89.0
 
-# Keep in sync with vars.RUST_PROD_FEATURES in GitHub
-# https://github.com/ZcashFoundation/zebra/settings/variables/actions
-ARG FEATURES="default-release-binaries"
+ARG FEATURES
 
 ARG UID=10001
 ARG GID=${UID}
@@ -65,8 +63,7 @@ ENV SHORT_SHA=${SHORT_SHA:-}
 # An entrypoint.sh is only available in this step for easier test handling with variables.
 FROM deps AS tests
 
-# Use minimal feature set - tests are now controlled by environment variables per CI job
-ARG FEATURES="default-release-binaries proptest-impl lightwalletd-grpc-tests zebra-checkpoints"
+ARG FEATURES
 ENV FEATURES=${FEATURES}
 
 # Skip IPv6 tests by default, as some CI environment don't have IPv6 available
@@ -141,6 +138,9 @@ CMD [ "cargo", "test" ]
 # It also adds `cache mounts` as this stage is completely independent from the
 # `test` stage. The resulting zebrad binary is used in the `runtime` stage.
 FROM deps AS release
+
+ARG FEATURES
+ENV FEATURES=${FEATURES}
 
 # Set the working directory for the build.
 ARG HOME
