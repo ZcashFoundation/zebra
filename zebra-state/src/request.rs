@@ -830,7 +830,7 @@ pub enum Request {
     /// Block commit requests should be wrapped in a timeout, so that
     /// out-of-order and invalid requests do not hang indefinitely. See the [`crate`]
     /// documentation for details.
-    /// 
+    ///
     /// [0]: (crate::error::CommitCheckpointVerifiedError)
     CommitCheckpointVerifiedBlock(CheckpointVerifiedBlock),
 
@@ -1003,20 +1003,20 @@ pub enum Request {
 
     /// Invalidates a block in the non-finalized state with the provided hash if one is present, removing it and
     /// its child blocks, and rejecting it during contextual validation if it's resubmitted to the state.
-    /// 
+    ///
     /// Returns [`Response::Invalidated`] with the hash of the invalidated block,
     /// or a [`InvalidateError`][0] if the block was not found, the state is still
     /// committing checkpointed blocks, or the request could not be processed.
-    /// 
+    ///
     /// [0]: (crate::error::InvalidateError)
     InvalidateBlock(block::Hash),
 
     /// Reconsiders a previously invalidated block in the non-finalized state with the provided hash if one is present.
-    /// 
+    ///
     /// Returns [`Response::Reconsidered`] with the hash of the reconsidered block,
     /// or a [`ReconsiderError`][0] if the block was not previously invalidated,
     /// its parent chain is missing, or the state is not ready to process the request.
-    /// 
+    ///
     /// [0]: (crate::error::ReconsiderError)
     ReconsiderBlock(block::Hash),
 
