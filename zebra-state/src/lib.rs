@@ -28,6 +28,7 @@ mod error;
 mod request;
 mod response;
 mod service;
+mod service_traits;
 
 #[cfg(test)]
 mod tests;
@@ -60,6 +61,7 @@ pub use service::{
     watch_receiver::WatchReceiver,
     OutputLocation, TransactionIndex, TransactionLocation,
 };
+pub use service_traits::{ReadStateServiceTrait, StateServiceTrait};
 
 // Allow use in the scanner and external tests
 #[cfg(any(test, feature = "proptest-impl"))]
