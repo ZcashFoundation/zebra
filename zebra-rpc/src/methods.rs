@@ -86,8 +86,8 @@ use zebra_consensus::{funding_stream_address, RouterError};
 use zebra_network::{address_book_peers::AddressBookPeers, types::PeerServices, PeerSocketAddr};
 use zebra_node_services::mempool;
 use zebra_state::{
-    AnyTx, HashOrHeight, OutputLocation, ReadRequest, ReadResponse, ReadStateServiceTrait,
-    StateServiceTrait, TransactionLocation,
+    AnyTx, HashOrHeight, OutputLocation, ReadRequest, ReadResponse, ReadState as ReadStateService,
+    State as StateService, TransactionLocation,
 };
 
 use crate::{
@@ -707,8 +707,8 @@ where
         + Sync
         + 'static,
     Mempool::Future: Send,
-    State: StateServiceTrait,
-    ReadState: ReadStateServiceTrait,
+    State: StateService,
+    ReadState: ReadStateService,
     Tip: ChainTip + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
     BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
@@ -778,8 +778,8 @@ where
         + Sync
         + 'static,
     Mempool::Future: Send,
-    State: StateServiceTrait,
-    ReadState: ReadStateServiceTrait,
+    State: StateService,
+    ReadState: ReadStateService,
     Tip: ChainTip + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
     BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
@@ -814,8 +814,8 @@ where
         + Sync
         + 'static,
     Mempool::Future: Send,
-    State: StateServiceTrait,
-    ReadState: ReadStateServiceTrait,
+    State: StateService,
+    ReadState: ReadStateService,
     Tip: ChainTip + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
     BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
@@ -913,8 +913,8 @@ where
         + Sync
         + 'static,
     Mempool::Future: Send,
-    State: StateServiceTrait,
-    ReadState: ReadStateServiceTrait,
+    State: StateService,
+    ReadState: ReadStateService,
     Tip: ChainTip + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
     BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
@@ -4420,7 +4420,7 @@ pub async fn chain_tip_difficulty<State>(
     should_use_default: bool,
 ) -> Result<f64>
 where
-    State: ReadStateServiceTrait,
+    State: ReadStateService,
 {
     let request = ReadRequest::ChainInfo;
 

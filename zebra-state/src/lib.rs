@@ -28,7 +28,6 @@ mod error;
 mod request;
 mod response;
 mod service;
-mod service_traits;
 
 #[cfg(test)]
 mod tests;
@@ -59,9 +58,8 @@ pub use service::{
     non_finalized_state::NonFinalizedState,
     spawn_init_read_only,
     watch_receiver::WatchReceiver,
-    OutputLocation, TransactionIndex, TransactionLocation,
+    OutputLocation, ReadState, State, TransactionIndex, TransactionLocation,
 };
-pub use service_traits::{ReadStateServiceTrait, StateServiceTrait};
 
 // Allow use in the scanner and external tests
 #[cfg(any(test, feature = "proptest-impl"))]
