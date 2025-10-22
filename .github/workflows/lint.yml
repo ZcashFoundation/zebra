@@ -60,7 +60,7 @@ jobs:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 #v1.15.1
+      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
         with:
           components: clippy
           toolchain: ${{ matrix.rust-version }}
@@ -80,13 +80,13 @@ jobs:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 #v1.15.1
+      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
         with:
           cache-on-failure: true
       - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3.0.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: taiki-e/install-action@d6d752794628f1e1fffa3c4d3c8874e06f043d50 #v2.62.15
+      - uses: taiki-e/install-action@2cdf2d81f4edfc3b41d5ddf56083c70b48ac2475 #v2.62.35
         with:
           tool: cargo-hack
       - run: cargo hack check --workspace
@@ -109,7 +109,7 @@ jobs:
       - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3.0.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 #v1.15.1
+      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
         with:
           toolchain: 1.89 # MSRV
           cache-on-failure: true
@@ -129,7 +129,7 @@ jobs:
         uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3.0.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 #v1.15.1
+      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
         with:
           toolchain: nightly
           cache-on-failure: true
@@ -150,7 +150,7 @@ jobs:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 #v1.15.1
+      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
         with:
           toolchain: nightly
           components: rustfmt
@@ -172,11 +172,11 @@ jobs:
         uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3.0.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 #v1.15.1
+      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
         with:
           toolchain: nightly
           cache-on-failure: true
-      - uses: taiki-e/install-action@d6d752794628f1e1fffa3c4d3c8874e06f043d50 #v2.62.15
+      - uses: taiki-e/install-action@2cdf2d81f4edfc3b41d5ddf56083c70b48ac2475 #v2.62.35
         with:
           tool: cargo-udeps
       - run: cargo udeps --workspace --all-targets --all-features --locked
@@ -189,7 +189,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 #v1.15.1
+      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
         with:
           toolchain: stable
           cache-on-failure: true
@@ -212,12 +212,12 @@ jobs:
         uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3.0.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 #v1.15.1
+      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
         with:
           toolchain: nightly
           cache-on-failure: true
       - name: cargo install cargo-hack
-        uses: taiki-e/install-action@d6d752794628f1e1fffa3c4d3c8874e06f043d50 #v2.62.15
+        uses: taiki-e/install-action@2cdf2d81f4edfc3b41d5ddf56083c70b48ac2475 #v2.62.35
         with:
           tool: cargo-hack
       - run: cargo hack check --all
@@ -234,7 +234,7 @@ jobs:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 #v1.15.1
+      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
         with:
           toolchain: stable
           cache-on-failure: true
@@ -267,7 +267,7 @@ jobs:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 #v1.15.1
+      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
         with:
           cache-on-failure: true
       - name: Check ${{ matrix.checks }} with features ${{ matrix.features }}
