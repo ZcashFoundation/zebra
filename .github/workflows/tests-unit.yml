@@ -121,7 +121,7 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Check no git dependencies
-        run: cargo nextest run --profile check-no-git-dependencies
+        run: cargo nextest run --profile check-no-git-dependencies --locked --run-ignored=only
 
   test-success:
     name: test success
