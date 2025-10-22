@@ -12,28 +12,19 @@ use crate::{BoxError, ReadRequest, ReadResponse, Request, Response};
 use tower::Service;
 
 /// Trait alias for services handling state-modifying requests.
-pub trait StateServiceTrait:
-    Service<Request, Response = Response, Error = BoxError, Future: Send + 'static>
-    + Clone
-    + Send
-    + Sync
-    + 'static
-{
-}
+pub trait State: ZebraService<Request, Response> {}
 
 /// Blanket impl for any matching service.
-impl<T> StateServiceTrait for T where
-    T: Service<Request, Response = Response, Error = BoxError, Future: Send + 'static>
-        + Clone
-        + Send
-        + Sync
-        + 'static
-{
-}
+impl<T> State for T where T: ZebraService<Request, Response> {}
 
 /// Trait alias for services handling read-only state requests.
-pub trait ReadStateServiceTrait:
-    Service<ReadRequest, Response = ReadResponse, Error = BoxError, Future: Send + 'static>
+pub trait ReadState: ZebraService<ReadRequest, ReadResponse> {}
+
+/// Blanket impl for any matching service.
+impl<T> ReadState for T where T: ZebraService<ReadRequest, ReadResponse> {}
+
+pub trait ZebraService<Request, Response, Err = BoxError>:
+    Service<Request, Response = Response, Error = Err, Future: Send + 'static>
     + Clone
     + Send
     + Sync
@@ -41,9 +32,8 @@ pub trait ReadStateServiceTrait:
 {
 }
 
-/// Blanket impl for any matching service.
-impl<T> ReadStateServiceTrait for T where
-    T: Service<ReadRequest, Response = ReadResponse, Error = BoxError, Future: Send + 'static>
+impl<T, Request, Response, Err> ZebraService<Request, Response, Err> for T where
+    T: Service<Request, Response = Response, Error = Err, Future: Send + 'static>
         + Clone
         + Send
         + Sync
