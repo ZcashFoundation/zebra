@@ -125,6 +125,9 @@ skip-tree = [
 
     # wait for derive_builder to update
     { name = "darling", version = "0.20.11" },
+
+    # wait until zcash_primitives, zcash_transparent, etc upgrades
+    { name = "zcash_script", version = "0.4.0" },
 ]
 
 # This section is considered when running `cargo deny check sources`.

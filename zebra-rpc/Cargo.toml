@@ -85,6 +85,8 @@ zcash_keys = { workspace = true }
 zcash_primitives = { workspace = true, features = ["transparent-inputs"] }
 zcash_protocol = { workspace = true }
 zcash_script = { workspace = true }
+# TODO: Remove `zcash_script05` when `zcash_script` get's updated to 0.5 everywhere.
+zcash_script05 = { package = "zcash_script", version =  "0.5.0" }
 zcash_transparent = { workspace = true }
 
 sapling-crypto = { workspace = true }
