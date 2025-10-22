@@ -204,10 +204,7 @@ where
 // Liveness: ensure we still have the configured minimum of recently live peers,
 // matching historical behaviour but fed from the cached snapshot to avoid
 // mutex contention.
-async fn healthy<SyncStatus>(ctx: &HealthCtx<SyncStatus>) -> Response<Full<Bytes>>
-where
-    SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
-{
+async fn healthy<SyncStatus>(ctx: &HealthCtx<SyncStatus>) -> Response<Full<Bytes>> {
     if *ctx.num_live_peer_receiver.borrow() >= ctx.config.min_connected_peers {
         simple_response(StatusCode::OK, "ok")
     } else {
@@ -218,10 +215,7 @@ where
 // Readiness: combine peer availability, sync progress, estimated lag, and tip
 // freshness to avoid the false positives called out in issue #4649 and the
 // implementation plan.
-async fn ready<SyncStatus>(ctx: &HealthCtx<SyncStatus>) -> Response<Full<Bytes>>
-where
-    SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
-{
+async fn ready<SyncStatus>(ctx: &HealthCtx<SyncStatus>) -> Response<Full<Bytes>> {
     if !ctx.config.enforce_on_test_networks && ctx.network.is_a_test_network() {
         return simple_response(StatusCode::OK, "ok");
     }
@@ -268,7 +262,7 @@ where
 // implementation but without holding the mutex on the request path.
 async fn num_live_peers<A>(address_book: &A) -> Option<usize>
 where
-    A: AddressBookPeers + Clone + Send + Sync + 'static,
+    A: AddressBookPeers + Clone + Send + 'static,
 {
     let address_book = address_book.clone();
     tokio::task::spawn_blocking(move || address_book.recently_live_peers(Utc::now()).len())
