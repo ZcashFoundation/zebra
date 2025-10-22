@@ -14,8 +14,6 @@ defaults:
   queue_rule:
     # Allow to update/rebase the original pull request if possible to check its mergeability,
     # and it does not create a draft PR if not needed
-    allow_inplace_checks: True
-    # Wait for about 10% of the time it takes Rust PRs to run CI (~1h)
     batch_max_wait_time: "10 minutes"
     queue_conditions:
       # Mergify automatically applies status check, approval, and conversation rules,
