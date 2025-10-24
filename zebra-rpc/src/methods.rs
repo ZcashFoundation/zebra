@@ -3404,7 +3404,8 @@ enum DGetAddressBalanceRequest {
 #[deprecated(note = "Use `GetAddressBalanceRequest` instead.")]
 pub type AddressStrings = GetAddressBalanceRequest;
 
-trait ValidateAddresses {
+/// A collection of validatable addresses
+pub trait ValidateAddresses {
     /// Given a list of addresses as strings:
     /// - check if provided list have all valid transparent addresses.
     /// - return valid addresses as a set of `Address`.
