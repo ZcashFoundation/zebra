@@ -4,7 +4,10 @@ use derive_getters::Getters;
 use derive_new::new;
 use jsonrpsee::core::RpcResult;
 
-use zebra_chain::{parameters::Network, primitives::Address};
+use zebra_chain::{
+    parameters::{Network, NetworkKind},
+    primitives::Address,
+};
 
 /// `z_validateaddress` response
 #[derive(
@@ -91,7 +94,15 @@ pub fn z_validate_address(
         }
     };
 
-    if address.network() == network.kind() {
+    let is_transparent = matches!(address, Address::Transparent(_));
+
+    // Collapse regtest to testnet. Only applied if address is transparent (P2PKH or P2SH).
+    let expected_kind = match (is_transparent, network.kind()) {
+        (true, NetworkKind::Regtest) => NetworkKind::Testnet,
+        _ => network.kind(),
+    };
+
+    if address.network() == expected_kind {
         Ok(ZValidateAddressResponse {
             is_valid: true,
             address: Some(raw_address),
