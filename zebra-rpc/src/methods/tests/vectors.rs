@@ -2509,7 +2509,10 @@ async fn rpc_validateaddress_regtest() {
 
     let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, _) = RpcImpl::new(
-        Testnet(Arc::new(Parameters::new_regtest(Default::default()))),
+        Testnet(Arc::new(
+            Parameters::new_regtest(Default::default())
+                .expect("failed to build regtest parameters"),
+        )),
         Default::default(),
         Default::default(),
         "0.0.1",
@@ -2879,9 +2882,10 @@ async fn rpc_z_listunifiedreceivers() {
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_addnode() {
     let _init_guard = zebra_test::init();
-    let network = Network::Testnet(Arc::new(testnet::Parameters::new_regtest(
-        Default::default(),
-    )));
+    let network = Network::Testnet(Arc::new(
+        testnet::Parameters::new_regtest(Default::default())
+            .expect("failed to build regtest parameters"),
+    ));
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let (state, read_state, tip, _) = zebra_state::init_test_services(&Mainnet).await;
