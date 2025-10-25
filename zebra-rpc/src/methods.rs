@@ -54,7 +54,7 @@ use tokio::{
     sync::{broadcast, mpsc, watch},
     task::JoinHandle,
 };
-use tower::{Service, ServiceExt};
+use tower::ServiceExt;
 use tracing::Instrument;
 
 use zcash_address::{unified::Encoding, TryFromAddress};
@@ -82,9 +82,11 @@ use zebra_chain::{
         equihash::Solution,
     },
 };
-use zebra_consensus::{funding_stream_address, RouterError};
+use zebra_consensus::{
+    funding_stream_address, router::service_trait::BlockVerifierService, RouterError,
+};
 use zebra_network::{address_book_peers::AddressBookPeers, types::PeerServices, PeerSocketAddr};
-use zebra_node_services::mempool::{self, Mempool as MempoolService};
+use zebra_node_services::mempool::{self, MempoolService};
 use zebra_state::{
     AnyTx, HashOrHeight, OutputLocation, ReadRequest, ReadResponse, ReadState as ReadStateService,
     State as StateService, TransactionLocation,
@@ -703,12 +705,7 @@ where
     ReadState: ReadStateService,
     Tip: ChainTip + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
-    BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
-        + Clone
-        + Send
-        + Sync
-        + 'static,
-    <BlockVerifierRouter as Service<zebra_consensus::Request>>::Future: Send,
+    BlockVerifierRouter: BlockVerifierService,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
     // Configuration
@@ -766,12 +763,7 @@ where
     ReadState: ReadStateService,
     Tip: ChainTip + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
-    BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
-        + Clone
-        + Send
-        + Sync
-        + 'static,
-    <BlockVerifierRouter as Service<zebra_consensus::Request>>::Future: Send,
+    BlockVerifierRouter: BlockVerifierService,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -794,12 +786,7 @@ where
     ReadState: ReadStateService,
     Tip: ChainTip + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
-    BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
-        + Clone
-        + Send
-        + Sync
-        + 'static,
-    <BlockVerifierRouter as Service<zebra_consensus::Request>>::Future: Send,
+    BlockVerifierRouter: BlockVerifierService,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
     /// Create a new instance of the RPC handler.
@@ -885,12 +872,7 @@ where
     ReadState: ReadStateService,
     Tip: ChainTip + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
-    BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
-        + Clone
-        + Send
-        + Sync
-        + 'static,
-    <BlockVerifierRouter as Service<zebra_consensus::Request>>::Future: Send,
+    BlockVerifierRouter: BlockVerifierService,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
     async fn get_info(&self) -> Result<GetInfoResponse> {
