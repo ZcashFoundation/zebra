@@ -84,7 +84,7 @@ use zebra_chain::{
 };
 use zebra_consensus::{funding_stream_address, RouterError};
 use zebra_network::{address_book_peers::AddressBookPeers, types::PeerServices, PeerSocketAddr};
-use zebra_node_services::mempool;
+use zebra_node_services::mempool::{self, Mempool as MempoolService};
 use zebra_state::{
     AnyTx, HashOrHeight, OutputLocation, ReadRequest, ReadResponse, ReadState as ReadStateService,
     State as StateService, TransactionLocation,
@@ -698,15 +698,7 @@ pub trait Rpc {
 #[derive(Clone)]
 pub struct RpcImpl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus>
 where
-    Mempool: Service<
-            mempool::Request,
-            Response = mempool::Response,
-            Error = zebra_node_services::BoxError,
-        > + Clone
-        + Send
-        + Sync
-        + 'static,
-    Mempool::Future: Send,
+    Mempool: MempoolService,
     State: StateService,
     ReadState: ReadStateService,
     Tip: ChainTip + Clone + Send + Sync + 'static,
@@ -769,15 +761,7 @@ pub type LoggedLastEvent = watch::Receiver<Option<(String, tracing::Level, chron
 impl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus> fmt::Debug
     for RpcImpl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus>
 where
-    Mempool: Service<
-            mempool::Request,
-            Response = mempool::Response,
-            Error = zebra_node_services::BoxError,
-        > + Clone
-        + Send
-        + Sync
-        + 'static,
-    Mempool::Future: Send,
+    Mempool: MempoolService,
     State: StateService,
     ReadState: ReadStateService,
     Tip: ChainTip + Clone + Send + Sync + 'static,
@@ -805,15 +789,7 @@ where
 impl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus>
     RpcImpl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus>
 where
-    Mempool: Service<
-            mempool::Request,
-            Response = mempool::Response,
-            Error = zebra_node_services::BoxError,
-        > + Clone
-        + Send
-        + Sync
-        + 'static,
-    Mempool::Future: Send,
+    Mempool: MempoolService,
     State: StateService,
     ReadState: ReadStateService,
     Tip: ChainTip + Clone + Send + Sync + 'static,
@@ -904,15 +880,7 @@ where
 impl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus> RpcServer
     for RpcImpl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus>
 where
-    Mempool: Service<
-            mempool::Request,
-            Response = mempool::Response,
-            Error = zebra_node_services::BoxError,
-        > + Clone
-        + Send
-        + Sync
-        + 'static,
-    Mempool::Future: Send,
+    Mempool: MempoolService,
     State: StateService,
     ReadState: ReadStateService,
     Tip: ChainTip + Clone + Send + Sync + 'static,
