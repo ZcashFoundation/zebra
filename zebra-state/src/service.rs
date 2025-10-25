@@ -71,6 +71,7 @@ pub(crate) mod non_finalized_state;
 mod pending_utxos;
 mod queued_blocks;
 pub(crate) mod read;
+mod traits;
 mod write;
 
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -83,6 +84,8 @@ pub use finalized_state::{OutputLocation, TransactionIndex, TransactionLocation}
 use write::NonFinalizedWriteMessage;
 
 use self::queued_blocks::{QueuedCheckpointVerified, QueuedSemanticallyVerified, SentHashes};
+
+pub use self::traits::{ReadState, State};
 
 /// A read-write service for Zebra's cached blockchain state.
 ///

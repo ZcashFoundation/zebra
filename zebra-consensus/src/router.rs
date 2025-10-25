@@ -41,6 +41,8 @@ use crate::{
     transaction, BoxError, Config,
 };
 
+pub mod service_trait;
+
 #[cfg(test)]
 mod tests;
 

@@ -2,6 +2,7 @@
 
 pub use zebra_chain::parameters::checkpoint::constants;
 pub mod mempool;
+pub mod service_traits;
 
 #[cfg(any(test, feature = "rpc-client"))]
 pub mod rpc_client;
