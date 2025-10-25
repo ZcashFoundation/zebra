@@ -99,7 +99,7 @@ pub enum Commitment {
 }
 
 /// The required value of reserved `Commitment`s.
-pub(crate) const CHAIN_HISTORY_ACTIVATION_RESERVED: [u8; 32] = [0; 32];
+pub const CHAIN_HISTORY_ACTIVATION_RESERVED: [u8; 32] = [0; 32];
 
 impl Commitment {
     /// Returns `bytes` as the Commitment variant for `network` and `height`.
@@ -126,13 +126,12 @@ impl Commitment {
                     Err(InvalidChainHistoryActivationReserved { actual: bytes })
                 }
             }
-            // NetworkUpgrade::current() returns the latest network upgrade that's activated at the provided height, so
-            // on Regtest for heights above height 0, it could return NU6, and it's possible for the current network upgrade
-            // to be NU6 (or Canopy, or any network upgrade above Heartwood) at the Heartwood activation height.
-            (Canopy | Nu5 | Nu6 | Nu6_1 | Nu7, activation_height)
-                if height == activation_height
-                    && Some(height) == Heartwood.activation_height(network) =>
-            {
+            // It's possible for the current network upgrade to be Heartwood or any network upgrade after Heartwood at
+            // the Heartwood activation height on Regtest or configured test networks. The reserved chain history root
+            // activation bytes should still be used pre-NU5.
+            //
+            // See <https://zips.z.cash/zip-0221> and the [protocol specification §7.6](https://zips.z.cash/protocol/protocol.pdf).
+            (Canopy, _) if Some(height) == Heartwood.activation_height(network) => {
                 if bytes == CHAIN_HISTORY_ACTIVATION_RESERVED {
                     Ok(ChainHistoryActivationReserved)
                 } else {

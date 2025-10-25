@@ -191,7 +191,15 @@ pub(crate) fn block_commitment_is_valid_for_chain_history(
             // return the block commitments if it's NU5 onward.
             let history_tree_root = history_tree
                 .hash()
-                .expect("the history tree of the previous block must exist since the current block has a ChainHistoryBlockTxAuthCommitment");
+                .or_else(|| {
+                    (NetworkUpgrade::Heartwood.activation_height(network)
+                        == block.coinbase_height())
+                    .then_some(block::CHAIN_HISTORY_ACTIVATION_RESERVED.into())
+                })
+                .expect(
+                    "the history tree of the previous block must exist \
+                 since the current block has a ChainHistoryBlockTxAuthCommitment",
+                );
             let auth_data_root = block.auth_data_root();
 
             let hash_block_commitments = ChainHistoryBlockTxAuthCommitmentHash::from_commitments(

@@ -117,6 +117,7 @@ pub(super) const MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
         (CANOPY, Canopy),
         (NU5, Nu5),
         (NU6, Nu6),
+        (NU6_1, Nu6_1),
     ]
 };
 /// Testnet network upgrade activation heights.

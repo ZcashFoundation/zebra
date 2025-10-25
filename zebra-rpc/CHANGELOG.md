@@ -5,18 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.0.0] - XXXX-XX-XX
+## [3.0.0] - 2025-10-15
+
+In this release we continue refining the RPC interface as part of the zcashd deprecation
+process and third-party integration improvements.
 
 ### Breaking Changes
 
-TODO: note to whoever is doing the next release: we can remove the breaking
-change below by adding new `new()` methods (e.g. `new_with_sprout()`). But if
-there are other breaking changes we might as well save us the trouble. (Please
-delete this before the release.)
+- Removed the `GetAddressBalanceRequest::valid_address_strings` method.
+- Changed `GetTreestateResponse::new()` to take six parameters instead of five.
+- Changed `Commitments::new()` to take the new `final_root` parameter.
+- Changed `TransactionObject::new()` to take 26 parameters instead of 25.
+- Changed `Orchard::new()` to take seven parameters instead of three.
+- Marked `GetTreestateResponse::{from_parts, into_parts}` as deprecated.
+- The `RpcServer` trait is no longer sealed, allowing external implementations.
 
-- Changed the `GetTreestateResponse::new()` to take an optional Sprout tree state;
-  changed `Commitments::new()` to take the `final_root` parameter.
-- Added new arguments to `Orchard::new()`
+### Changed
+
+- Allow `zebra-rpc` to be compiled without `protoc` ([#9819](https://github.com/ZcashFoundation/zebra/pull/9819))
+
+### Added
+
+- `getmempoolinfo` RPC method ([#9870](https://github.com/ZcashFoundation/zebra/pull/9870))
+- `getnetworkinfo` RPC method ([#9887](https://github.com/ZcashFoundation/zebra/pull/9887))
+- Support for the `chainInfo` field in `getaddressutxos` RPC method ([#9875](https://github.com/ZcashFoundation/zebra/pull/9875))
+- Introduce `BytesInDisplayOrder` trait to standardize byte-reversed encoding in RPC ([#9810](https://github.com/ZcashFoundation/zebra/pull/9810))
+
+### Fixed
+
+- Use `STANDARD` Base64 for RPC auth encoding/decoding ([#9968](https://github.com/ZcashFoundation/zebra/pull/9968))
+
 
 ## [2.0.1] - 2025-08-22
 

@@ -171,7 +171,6 @@ impl FundingStreams {
     ///
     /// Extends the addresses for all funding stream recipients by repeating their
     /// existing addresses until reaching the provided target number of addresses.
-    #[cfg(any(test, feature = "proptest-impl"))]
     pub fn extend_recipient_addresses(&mut self, target_len: usize) {
         for (receiver, recipient) in &mut self.recipients {
             if receiver.is_deferred() {
@@ -235,7 +234,6 @@ impl FundingStreamRecipient {
     /// # Panics
     ///
     /// If there are no recipient addresses.
-    #[cfg(any(test, feature = "proptest-impl"))]
     pub fn extend_addresses(&mut self, target_len: usize) {
         assert!(
             !self.addresses.is_empty(),
@@ -289,6 +287,22 @@ lazy_static! {
                 (
                     FundingStreamReceiver::MajorGrants,
                     FundingStreamRecipient::new(8, POST_NU6_FUNDING_STREAM_FPF_ADDRESSES_MAINNET),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        },
+
+        FundingStreams {
+            height_range: activation_heights::mainnet::NU6_1..Height(4_406_400),
+            recipients: [
+                (
+                    FundingStreamReceiver::Deferred,
+                    FundingStreamRecipient::new::<[&str; 0], &str>(12, []),
+                ),
+                (
+                    FundingStreamReceiver::MajorGrants,
+                    FundingStreamRecipient::new(8, POST_NU6_1_FUNDING_STREAM_FPF_ADDRESSES_MAINNET),
                 ),
             ]
             .into_iter()
@@ -366,7 +380,10 @@ const POST_NU6_FUNDING_STREAM_START_HEIGHT_TESTNET: u32 = 2_976_000;
 /// See:
 /// - <https://zips.z.cash/zip-0271#one-timelockboxdisbursement>
 /// - <https://zips.z.cash/zip-0214#mainnet-recipients-for-revision-2>
-pub const NU6_1_LOCKBOX_DISBURSEMENTS_MAINNET: [(&str, Amount<NonNegative>); 0] = [];
+pub const NU6_1_LOCKBOX_DISBURSEMENTS_MAINNET: [(&str, Amount<NonNegative>); 10] = [(
+    "t3ev37Q2uL1sfTsiJQJiWJoFzQpDhmnUwYo",
+    EXPECTED_NU6_1_LOCKBOX_DISBURSEMENTS_TOTAL_MAINNET.div_exact(10),
+); 10];
 
 /// The one-time lockbox disbursement output addresses and amounts expected in the NU6.1 activation block's
 /// coinbase transaction on Testnet.
@@ -550,6 +567,18 @@ pub const POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES_MAINNET: usize = 12;
 pub const POST_NU6_FUNDING_STREAM_FPF_ADDRESSES_MAINNET: [&str;
     POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES_MAINNET] =
     ["t3cFfPt1Bcvgez9ZbMBFWeZsskxTkPzGCow"; POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES_MAINNET];
+
+/// Number of addresses for each post-NU6.1 funding stream on Mainnet.
+/// In the spec ([protocol specification §7.10][7.10]) this is defined as: `fs.addressindex(fs.endheight - 1)`
+/// however we know this value beforehand so we prefer to make it a constant instead.
+///
+/// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
+pub const POST_NU6_1_FUNDING_STREAMS_NUM_ADDRESSES_MAINNET: usize = 36;
+
+/// List of addresses for the Major Grants post-NU6.1 funding stream on Mainnet administered by the Financial Privacy Fund (FPF).
+pub const POST_NU6_1_FUNDING_STREAM_FPF_ADDRESSES_MAINNET: [&str;
+    POST_NU6_1_FUNDING_STREAMS_NUM_ADDRESSES_MAINNET] =
+    ["t3cFfPt1Bcvgez9ZbMBFWeZsskxTkPzGCow"; POST_NU6_1_FUNDING_STREAMS_NUM_ADDRESSES_MAINNET];
 
 /// Number of addresses for each funding stream in the Testnet.
 /// In the spec ([protocol specification §7.10][7.10]) this is defined as: `fs.addressindex(fs.endheight - 1)`
