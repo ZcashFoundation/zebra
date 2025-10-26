@@ -2,7 +2,9 @@
 //!
 //! It is used when Zebra is a long way behind the current chain tip.
 
-use std::{cmp::max, collections::HashSet, convert, pin::Pin, task::Poll, time::Duration};
+use std::{
+    cmp::max, collections::HashSet, convert, error::Error, pin::Pin, task::Poll, time::Duration,
+};
 
 use color_eyre::eyre::{eyre, Report};
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -1190,9 +1192,40 @@ where
     fn should_restart_sync(e: &BlockDownloadVerifyError) -> bool {
         match e {
             // Structural matches: downcasts
-            BlockDownloadVerifyError::Invalid { error, .. } if error.is_duplicate_request() => {
-                debug!(error = ?e, "block was already verified, possibly from a previous sync run, continuing");
-                false
+            BlockDownloadVerifyError::Invalid { error, .. } => {
+                // Already verified (duplicate request)
+                if error.is_duplicate_request() {
+                    debug!(error = ?e, "block was already verified, possibly from a previous sync run, continuing");
+                    return false;
+                }
+
+                // Already committed (CommitBlockError::Duplicate)
+                if let Some(commit_error) = error
+                    .source()
+                    .and_then(|source| source.downcast_ref::<zs::CommitBlockError>())
+                {
+                    if matches!(commit_error, zs::CommitBlockError::Duplicate { .. }) {
+                        debug!(error = ?e, "block is already committed or pending a commit, continuing");
+                        return false;
+                    }
+                }
+
+                // String matches (fallback)
+                //
+                // We want to match VerifyChainError::Block(VerifyBlockError::Commit(ref source)),
+                // but that type is boxed.
+                // TODO:
+                // - turn this check into a function on VerifyChainError, like is_duplicate_request()
+                let err_str = format!("{error:?}");
+                if err_str.contains("block is already committed to the state")
+                    || err_str.contains("block has already been sent to be committed to the state")
+                {
+                    // TODO: improve this by checking the type (#2908)
+                    debug!(error = ?e, "block is already committed or pending a commit, possibly from a previous sync run, continuing");
+                    return false;
+                }
+
+                true
             }
 
             // Structural matches: direct
@@ -1218,21 +1251,6 @@ where
                 false
             }
 
-            // String matches
-            //
-            // We want to match VerifyChainError::Block(VerifyBlockError::Commit(ref source)),
-            // but that type is boxed.
-            // TODO:
-            // - turn this check into a function on VerifyChainError, like is_duplicate_request()
-            BlockDownloadVerifyError::Invalid { error, .. }
-                if format!("{error:?}").contains("block is already committed to the state")
-                    || format!("{error:?}")
-                        .contains("block has already been sent to be committed to the state") =>
-            {
-                // TODO: improve this by checking the type (#2908)
-                debug!(error = ?e, "block is already committed or pending a commit, possibly from a previous sync run, continuing");
-                false
-            }
             BlockDownloadVerifyError::DownloadFailed { ref error, .. }
                 if format!("{error:?}").contains("NotFound") =>
             {
@@ -1259,8 +1277,6 @@ where
                 let err_str = format!("{e:?}");
                 if err_str.contains("AlreadyVerified")
                     || err_str.contains("AlreadyInChain")
-                    || err_str.contains("block is already committed to the state")
-                    || err_str.contains("block has already been sent to be committed to the state")
                     || err_str.contains("NotFound")
                 {
                     error!(?e,
