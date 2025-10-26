@@ -46,8 +46,11 @@ pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 #[derive(Debug, Error, Clone, PartialEq, Eq, new)]
 pub enum CommitBlockError {
     #[error("block hash is a duplicate: already in {location}")]
+    /// The block is a duplicate: it is already queued or committed in the state.
     Duplicate {
+        /// Hash or height of the duplicated block.
         hash_or_height: Option<HashOrHeight>,
+        /// Location in the state where the block can be found.
         location: KnownBlock,
     },
 
@@ -55,6 +58,7 @@ pub enum CommitBlockError {
     #[error("could not contextually validate semantically verified block")]
     ValidateContextError(#[from] ValidateContextError),
 
+    /// The write task exited (likely during shutdown).
     #[error("block commit task exited. Is Zebra shutting down?")]
     #[non_exhaustive]
     WriteTaskExited,
