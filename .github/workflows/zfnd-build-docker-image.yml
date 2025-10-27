@@ -40,6 +40,11 @@ on:
         required: false
         type: boolean
         default: false
+      publish_to_dockerhub:
+        description: "Whether to publish to Docker Hub. Set to true only in release-binaries.yml to create official production images. Defaults to false to prevent duplicate publishing from deploy-nodes.yml."
+        required: false
+        type: boolean
+        default: false
 
     secrets:
       DOCKERHUB_USERNAME:
@@ -92,11 +97,14 @@ jobs:
         uses: docker/metadata-action@c1e51972afc2121e065aed6d45c65596fe445f3f #v5.8.0
         with:
           # list of Docker images to use as base name for tags
-          # We only publish images to DockerHub if a release is not a pre-release
+          # Docker Hub publishing requires ALL conditions to be true:
+          # - inputs.publish_to_dockerhub must be explicitly set to true (defaults to false)
+          # - Event must be a release (not a pre-release)
+          # This prevents duplicate publishing when both release-binaries.yml and deploy-nodes.yml run
           # Ref: https://github.com/orgs/community/discussions/26281#discussioncomment-3251177
           images: |
             us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }}
-            zfnd/${{ inputs.image_name }},enable=${{ github.event_name == 'release' && !github.event.release.prerelease }}
+            zfnd/${{ inputs.image_name }},enable=${{ inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease }}
           # generate Docker tags based on the following events/attributes
           tags: |
             # These DockerHub release tags support the following use cases:
