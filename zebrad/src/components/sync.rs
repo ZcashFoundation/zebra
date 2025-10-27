@@ -1265,6 +1265,14 @@ where
             }
 
             _ => {
+                if let Some(source) = e.source() {
+                    if let Some(commit_error) = source.downcast_ref::<zs::CommitBlockError>() {
+                        if matches!(commit_error, zs::CommitBlockError::Duplicate { .. }) {
+                            debug!(error = ?e, "block is already committed or pending a commit, continuing");
+                            return false;
+                        }
+                    }
+                }
                 // download_and_verify downcasts errors from the block verifier
                 // into VerifyChainError, and puts the result inside one of the
                 // BlockDownloadVerifyError enumerations. This downcast could
@@ -1276,7 +1284,9 @@ where
                 // https://github.com/ZcashFoundation/zebra/issues/2909
                 let err_str = format!("{e:?}");
                 if err_str.contains("AlreadyVerified")
-                    || err_str.contains("AlreadyInChain")
+                    || err_str.contains("AlreadyInState")
+                    || err_str.contains("block is already committed to the state")
+                    || err_str.contains("block has already been sent to be committed to the state")
                     || err_str.contains("NotFound")
                 {
                     error!(?e,
