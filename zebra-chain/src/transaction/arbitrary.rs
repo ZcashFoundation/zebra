@@ -20,7 +20,7 @@ use crate::{
     LedgerState,
 };
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 use crate::orchard_zsa::IssueData;
 
 use itertools::Itertools;
@@ -229,7 +229,7 @@ impl Transaction {
     }
 
     /// Generate a proptest strategy for V6 Transactions
-    #[cfg(feature = "tx-v6")]
+    #[cfg(feature = "tx_v6")]
     pub fn v6_strategy(ledger_state: LedgerState) -> BoxedStrategy<Transaction> {
         Self::v5_v6_strategy_common::<orchard::OrchardZSA>(ledger_state)
             .prop_flat_map(|common_fields| {
@@ -795,14 +795,14 @@ impl<Flavor: orchard::ShieldedDataFlavor + 'static> Arbitrary for orchard::Shiel
                 1..MAX_ARBITRARY_ITEMS,
             ),
             any::<BindingSignature>(),
-            #[cfg(feature = "tx-v6")]
+            #[cfg(feature = "tx_v6")]
             any::<Flavor::BurnType>(),
         )
             .prop_map(|props| {
-                #[cfg(not(feature = "tx-v6"))]
+                #[cfg(not(feature = "tx_v6"))]
                 let (flags, value_balance, shared_anchor, proof, actions, binding_sig) = props;
 
-                #[cfg(feature = "tx-v6")]
+                #[cfg(feature = "tx_v6")]
                 let (flags, value_balance, shared_anchor, proof, actions, binding_sig, burn) =
                     props;
 
@@ -815,7 +815,7 @@ impl<Flavor: orchard::ShieldedDataFlavor + 'static> Arbitrary for orchard::Shiel
                         .try_into()
                         .expect("arbitrary vector size range produces at least one action"),
                     binding_sig: binding_sig.0,
-                    #[cfg(feature = "tx-v6")]
+                    #[cfg(feature = "tx_v6")]
                     burn,
                 }
             })
@@ -860,7 +860,7 @@ impl Arbitrary for Transaction {
             Some(3) => return Self::v3_strategy(ledger_state),
             Some(4) => return Self::v4_strategy(ledger_state),
             Some(5) => return Self::v5_strategy(ledger_state),
-            #[cfg(feature = "tx-v6")]
+            #[cfg(feature = "tx_v6")]
             Some(6) => return Self::v6_strategy(ledger_state),
             Some(_) => unreachable!("invalid transaction version in override"),
             None => {}
@@ -881,7 +881,7 @@ impl Arbitrary for Transaction {
             ]
             .boxed(),
             NetworkUpgrade::Nu7 => {
-                #[cfg(not(feature = "tx-v6"))]
+                #[cfg(not(feature = "tx_v6"))]
                 {
                     prop_oneof![
                         Self::v4_strategy(ledger_state.clone()),
@@ -889,7 +889,7 @@ impl Arbitrary for Transaction {
                     ]
                     .boxed()
                 }
-                #[cfg(feature = "tx-v6")]
+                #[cfg(feature = "tx_v6")]
                 {
                     prop_oneof![
                         Self::v4_strategy(ledger_state.clone()),
@@ -1034,7 +1034,7 @@ pub fn transaction_to_fake_v5(
             orchard_shielded_data: None,
         },
         v5 @ V5 { .. } => v5.clone(),
-        #[cfg(feature = "tx-v6")]
+        #[cfg(feature = "tx_v6")]
         _ => panic!(" other transaction versions are not supported"),
     }
 }
@@ -1175,7 +1175,7 @@ pub fn insert_fake_orchard_shielded_data(
         proof: Halo2Proof(vec![]),
         actions: at_least_one![dummy_authorized_action],
         binding_sig: Signature::from([0u8; 64]),
-        #[cfg(feature = "tx-v6")]
+        #[cfg(feature = "tx_v6")]
         burn: Default::default(),
     };
 
