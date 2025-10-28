@@ -6925,6 +6925,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tower 0.4.13",
  "zebra-chain",
 ]
 
@@ -7040,6 +7041,7 @@ dependencies = [
  "tower 0.4.13",
  "tracing",
  "zebra-chain",
+ "zebra-node-services",
  "zebra-test",
 ]
 

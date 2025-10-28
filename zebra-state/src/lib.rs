@@ -58,7 +58,7 @@ pub use service::{
     non_finalized_state::NonFinalizedState,
     spawn_init_read_only,
     watch_receiver::WatchReceiver,
-    OutputLocation, TransactionIndex, TransactionLocation,
+    OutputLocation, ReadState, State, TransactionIndex, TransactionLocation,
 };
 
 // Allow use in the scanner and external tests
