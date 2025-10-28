@@ -12,7 +12,7 @@ use orchard::{
     note::ExtractedNoteCommitment,
 };
 
-use zcash_primitives::transaction::components::issuance::{read_v6_bundle, write_v6_bundle};
+use zcash_primitives::transaction::components::issuance::{read_bundle, write_bundle};
 
 use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 
@@ -56,13 +56,13 @@ impl IssueData {
 
 impl ZcashSerialize for Option<IssueData> {
     fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
-        write_v6_bundle(self.as_ref().map(|issue_data| &issue_data.0), writer)
+        write_bundle(self.as_ref().map(|issue_data| &issue_data.0), writer)
     }
 }
 
 impl ZcashDeserialize for Option<IssueData> {
     fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
-        Ok(read_v6_bundle(reader)?.map(IssueData))
+        Ok(read_bundle(reader)?.map(IssueData))
     }
 }
 

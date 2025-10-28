@@ -160,7 +160,7 @@ rand_chacha = { version = "0.3.1", optional = true }
 
 zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.41", optional = true }
 
-k256 = "0.13.3"
+k256 = { version = "0.13.4", default-features = false, features = ["arithmetic", "schnorr"] }
 
 [dev-dependencies]
 # Benchmarks

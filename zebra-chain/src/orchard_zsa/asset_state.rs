@@ -380,13 +380,12 @@ pub trait RandomAssetBase {
 
 impl RandomAssetBase for AssetBase {
     fn random_serialized() -> String {
-        let isk = orchard::keys::IssuanceAuthorizingKey::from_bytes(
+        let isk = orchard::issuance_auth::IssueAuthKey::from_bytes(
             k256::NonZeroScalar::random(&mut rand_core::OsRng)
-                .to_bytes()
-                .into(),
+                .to_bytes().as_slice()
         )
         .unwrap();
-        let ik = orchard::keys::IssuanceValidatingKey::from(&isk);
+        let ik = orchard::issuance_auth::IssueValidatingKey::from(&isk);
         let asset_desc = b"zsa_asset";
         let asset_desc_hash =
             compute_asset_desc_hash(&(asset_desc[0], asset_desc[1..].to_vec()).into());
