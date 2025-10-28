@@ -13,7 +13,7 @@ use zebra_chain::{
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
 };
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 use zebra_chain::orchard_zsa::{AssetBase, AssetState};
 
 use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
@@ -213,7 +213,7 @@ impl<Node: FromDisk> FromDisk for NoteCommitmentSubtreeData<Node> {
 
 // TODO: Replace `.unwrap()`s with `.expect()`s
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 impl IntoDisk for AssetState {
     type Bytes = [u8; 9];
 
@@ -228,7 +228,7 @@ impl IntoDisk for AssetState {
     }
 }
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 impl FromDisk for AssetState {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
         let (&is_finalized_byte, bytes) = bytes.as_ref().split_first().unwrap();
@@ -241,7 +241,7 @@ impl FromDisk for AssetState {
     }
 }
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 impl IntoDisk for AssetBase {
     type Bytes = [u8; 32];
 
@@ -250,7 +250,7 @@ impl IntoDisk for AssetBase {
     }
 }
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 impl FromDisk for AssetBase {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
         let (asset_base_bytes, _) = bytes.as_ref().split_first_chunk().unwrap();

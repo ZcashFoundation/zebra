@@ -13,7 +13,7 @@ use zebra_chain::{
     value_balance::ValueBalance,
 };
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 use zebra_chain::orchard_zsa::AssetState;
 
 #[cfg(feature = "getblocktemplate-rpcs")]
@@ -237,7 +237,7 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::TipBlockSize`]
     TipBlockSize(Option<usize>),
 
-    #[cfg(feature = "tx-v6")]
+    #[cfg(feature = "tx_v6")]
     /// Response to [`ReadRequest::AssetState`]
     AssetState(Option<AssetState>),
 }
@@ -330,7 +330,7 @@ impl TryFrom<ReadResponse> for Response {
                 Err("there is no corresponding Response for this ReadResponse")
             }
 
-            #[cfg(feature = "tx-v6")]
+            #[cfg(feature = "tx_v6")]
             ReadResponse::AssetState(_) => Err("there is no corresponding Response for this ReadResponse"),
         }
     }

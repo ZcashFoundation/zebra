@@ -21,7 +21,7 @@ use zebra_chain::{
     value_balance::{ValueBalance, ValueBalanceError},
 };
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 use zebra_chain::orchard_zsa::{AssetBase, IssuedAssets, IssuedAssetsChange};
 
 /// Allow *only* these unused imports, so that rustdoc link resolution
@@ -227,7 +227,7 @@ pub struct ContextuallyVerifiedBlock {
     /// The sum of the chain value pool changes of all transactions in this block.
     pub(crate) chain_value_pool_change: ValueBalance<NegativeAllowed>,
 
-    #[cfg(feature = "tx-v6")]
+    #[cfg(feature = "tx_v6")]
     /// A partial map of `issued_assets` with entries for asset states that were updated in
     /// this block.
     pub(crate) issued_assets: IssuedAssets,
@@ -302,13 +302,13 @@ pub struct FinalizedBlock {
     /// This block's contribution to the deferred pool.
     pub(super) deferred_balance: Option<Amount<NonNegative>>,
 
-    #[cfg(feature = "tx-v6")]
+    #[cfg(feature = "tx_v6")]
     /// Updated asset states to be inserted into the finalized state, replacing the previous
     /// asset states for those asset bases.
     pub issued_assets: Option<IssuedAssets>,
 }
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 /// Either changes to be applied to the previous `issued_assets` map for the finalized tip, or
 /// updates asset states to be inserted into the finalized state, replacing the previous
 /// asset states for those asset bases.
@@ -321,7 +321,7 @@ pub enum IssuedAssetsOrChange {
     Change(IssuedAssetsChange),
 }
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 impl From<IssuedAssets> for IssuedAssetsOrChange {
     fn from(updated_issued_assets: IssuedAssets) -> Self {
         Self::Updated(updated_issued_assets)
@@ -334,7 +334,7 @@ impl FinalizedBlock {
         Self::from_semantically_verified(
             SemanticallyVerifiedBlock::from(block),
             treestate,
-            #[cfg(feature = "tx-v6")]
+            #[cfg(feature = "tx_v6")]
             None,
         )
     }
@@ -344,12 +344,12 @@ impl FinalizedBlock {
         block: ContextuallyVerifiedBlock,
         treestate: Treestate,
     ) -> Self {
-        #[cfg(feature = "tx-v6")]
+        #[cfg(feature = "tx_v6")]
         let issued_assets = Some(block.issued_assets.clone());
         Self::from_semantically_verified(
             SemanticallyVerifiedBlock::from(block),
             treestate,
-            #[cfg(feature = "tx-v6")]
+            #[cfg(feature = "tx_v6")]
             issued_assets,
         )
     }
@@ -358,7 +358,7 @@ impl FinalizedBlock {
     fn from_semantically_verified(
         block: SemanticallyVerifiedBlock,
         treestate: Treestate,
-        #[cfg(feature = "tx-v6")] issued_assets: Option<IssuedAssets>,
+        #[cfg(feature = "tx_v6")] issued_assets: Option<IssuedAssets>,
     ) -> Self {
         Self {
             block: block.block,
@@ -368,7 +368,7 @@ impl FinalizedBlock {
             transaction_hashes: block.transaction_hashes,
             treestate,
             deferred_balance: block.deferred_balance,
-            #[cfg(feature = "tx-v6")]
+            #[cfg(feature = "tx_v6")]
             issued_assets,
         }
     }
@@ -435,7 +435,7 @@ impl ContextuallyVerifiedBlock {
     pub fn with_block_and_spent_utxos(
         semantically_verified: SemanticallyVerifiedBlock,
         mut spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
-        #[cfg(feature = "tx-v6")] issued_assets: IssuedAssets,
+        #[cfg(feature = "tx_v6")] issued_assets: IssuedAssets,
     ) -> Result<Self, ValueBalanceError> {
         let SemanticallyVerifiedBlock {
             block,
@@ -463,7 +463,7 @@ impl ContextuallyVerifiedBlock {
                 &utxos_from_ordered_utxos(spent_outputs),
                 deferred_balance,
             )?,
-            #[cfg(feature = "tx-v6")]
+            #[cfg(feature = "tx_v6")]
             issued_assets,
         })
     }
@@ -1111,7 +1111,7 @@ pub enum ReadRequest {
     /// with the current best chain tip block size in bytes.
     TipBlockSize,
 
-    #[cfg(feature = "tx-v6")]
+    #[cfg(feature = "tx_v6")]
     /// Returns [`ReadResponse::AssetState`] with an [`AssetState`](zebra_chain::orchard_zsa::AssetState)
     /// of the provided [`AssetBase`] if it exists for the best chain tip or finalized chain tip (depending
     /// on the `include_non_finalized` flag).
@@ -1158,7 +1158,7 @@ impl ReadRequest {
             ReadRequest::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
             #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::TipBlockSize => "tip_block_size",
-            #[cfg(feature = "tx-v6")]
+            #[cfg(feature = "tx_v6")]
             ReadRequest::AssetState { .. } => "asset_state",
         }
     }
