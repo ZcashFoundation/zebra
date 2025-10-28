@@ -121,25 +121,25 @@ impl ZcashDeserialize for Address {
         reader.read_exact(&mut hash_bytes)?;
 
         match version_bytes {
-            zcash_primitives::constants::mainnet::B58_SCRIPT_ADDRESS_PREFIX => {
+            zcash_protocol::constants::mainnet::B58_SCRIPT_ADDRESS_PREFIX => {
                 Ok(Address::PayToScriptHash {
                     network_kind: NetworkKind::Mainnet,
                     script_hash: hash_bytes,
                 })
             }
-            zcash_primitives::constants::testnet::B58_SCRIPT_ADDRESS_PREFIX => {
+            zcash_protocol::constants::testnet::B58_SCRIPT_ADDRESS_PREFIX => {
                 Ok(Address::PayToScriptHash {
                     network_kind: NetworkKind::Testnet,
                     script_hash: hash_bytes,
                 })
             }
-            zcash_primitives::constants::mainnet::B58_PUBKEY_ADDRESS_PREFIX => {
+            zcash_protocol::constants::mainnet::B58_PUBKEY_ADDRESS_PREFIX => {
                 Ok(Address::PayToPublicKeyHash {
                     network_kind: NetworkKind::Mainnet,
                     pub_key_hash: hash_bytes,
                 })
             }
-            zcash_primitives::constants::testnet::B58_PUBKEY_ADDRESS_PREFIX => {
+            zcash_protocol::constants::testnet::B58_PUBKEY_ADDRESS_PREFIX => {
                 Ok(Address::PayToPublicKeyHash {
                     network_kind: NetworkKind::Testnet,
                     pub_key_hash: hash_bytes,

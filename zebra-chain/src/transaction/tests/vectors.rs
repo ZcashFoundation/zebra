@@ -30,6 +30,18 @@ lazy_static! {
         sapling_shielded_data: None,
         orchard_shielded_data: None,
     };
+
+    #[cfg(feature = "tx_v6")]
+    pub static ref EMPTY_V6_TX: Transaction = Transaction::V6 {
+        network_upgrade: NetworkUpgrade::Nu7,
+        lock_time: LockTime::min_lock_time_timestamp(),
+        expiry_height: block::Height(0),
+        inputs: Vec::new(),
+        outputs: Vec::new(),
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+        orchard_zsa_issue_data: None
+    };
 }
 
 /// Build a mock output list for pre-V5 transactions, with (index+1)
@@ -257,17 +269,8 @@ fn deserialize_large_transaction() {
         .expect_err("transaction should not deserialize due to its size");
 }
 
-// Transaction V5 test vectors
-
-/// An empty transaction v5, with no Orchard, Sapling, or Transparent data
-///
-/// empty transaction are invalid, but Zebra only checks this rule in
-/// zebra_consensus::transaction::Verifier
-#[test]
-fn empty_v5_round_trip() {
+fn tx_round_trip(tx: &Transaction) {
     let _init_guard = zebra_test::init();
-
-    let tx: &Transaction = &EMPTY_V5_TX;
 
     let data = tx.zcash_serialize_to_vec().expect("tx should serialize");
     let tx2: &Transaction = &data
@@ -314,16 +317,45 @@ fn empty_v4_round_trip() {
     assert_eq!(data, data2, "data must be equal if structs are equal");
 }
 
-/// Check if an empty V5 transaction can be deserialized by librustzcash too.
+/// An empty transaction v5, with no Orchard, Sapling, or Transparent data
+///
+/// empty transaction are invalid, but Zebra only checks this rule in
+/// zebra_consensus::transaction::Verifier
 #[test]
-fn empty_v5_librustzcash_round_trip() {
+fn empty_v5_round_trip() {
+    tx_round_trip(&EMPTY_V5_TX)
+}
+
+#[cfg(feature = "tx_v6")]
+/// An empty transaction v6, with no Orchard/OrchardZSA, Sapling, or Transparent data
+///
+/// empty transaction are invalid, but Zebra only checks this rule in
+/// zebra_consensus::transaction::Verifier
+#[test]
+fn empty_v6_round_trip() {
+    tx_round_trip(&EMPTY_V6_TX)
+}
+
+fn tx_librustzcash_round_trip(tx: &Transaction) {
     let _init_guard = zebra_test::init();
 
-    let tx: &Transaction = &EMPTY_V5_TX;
     let _alt_tx: zcash_primitives::transaction::Transaction = tx.try_into().expect(
         "librustzcash deserialization might work for empty zebra serialized transactions. \
         Hint: if empty transactions fail, but other transactions work, delete this test",
     );
+}
+
+/// Check if an empty V5 transaction can be deserialized by librustzcash too.
+#[test]
+fn empty_v5_librustzcash_round_trip() {
+    tx_librustzcash_round_trip(&EMPTY_V5_TX);
+}
+
+#[cfg(feature = "tx_v6")]
+/// Check if an empty V6 transaction can be deserialized by librustzcash too.
+#[test]
+fn empty_v6_librustzcash_round_trip() {
+    tx_librustzcash_round_trip(&EMPTY_V6_TX);
 }
 
 /// Do a round-trip test on fake v5 transactions created from v4 transactions
@@ -450,6 +482,54 @@ fn fake_v5_round_trip_for_network(network: Network) {
     }
 }
 
+#[cfg(feature = "tx_v6")]
+/// Do a serialization round-trip on OrchardZSA workflow blocks and their V6
+/// transactions.
+#[test]
+fn v6_round_trip() {
+    use zebra_test::vectors::ORCHARD_ZSA_WORKFLOW_BLOCKS;
+
+    let _init_guard = zebra_test::init();
+
+    for block_bytes in ORCHARD_ZSA_WORKFLOW_BLOCKS.iter() {
+        let block = block_bytes
+            .zcash_deserialize_into::<Block>()
+            .expect("block is structurally valid");
+
+        // test full blocks
+        let block_bytes2 = block
+            .zcash_serialize_to_vec()
+            .expect("vec serialization is infallible");
+
+        assert_eq!(
+            block_bytes, &block_bytes2,
+            "data must be equal if structs are equal"
+        );
+
+        // test each transaction
+        for tx in &block.transactions {
+            let tx_bytes = tx
+                .zcash_serialize_to_vec()
+                .expect("vec serialization is infallible");
+
+            let tx2 = tx_bytes
+                .zcash_deserialize_into::<Transaction>()
+                .expect("tx is structurally valid");
+
+            assert_eq!(tx.as_ref(), &tx2);
+
+            let tx_bytes2 = tx2
+                .zcash_serialize_to_vec()
+                .expect("vec serialization is infallible");
+
+            assert_eq!(
+                tx_bytes, tx_bytes2,
+                "data must be equal if structs are equal"
+            );
+        }
+    }
+}
+
 #[test]
 fn invalid_orchard_nullifier() {
     let _init_guard = zebra_test::init();
@@ -545,6 +625,34 @@ fn fake_v5_librustzcash_round_trip_for_network(network: Network) {
                 .as_ref()
                 .try_into()
                 .expect("librustzcash deserialization must work for zebra serialized transactions");
+        }
+    }
+}
+
+#[cfg(feature = "tx_v6")]
+/// Confirms each V6 transaction in the OrchardZSA test blocks converts to librustzcash’s
+/// transaction type without error.
+#[test]
+fn v6_librustzcash_tx_conversion() {
+    use zebra_test::vectors::ORCHARD_ZSA_WORKFLOW_BLOCKS;
+
+    let _init_guard = zebra_test::init();
+
+    for block_bytes in ORCHARD_ZSA_WORKFLOW_BLOCKS.iter() {
+        let block = block_bytes
+            .zcash_deserialize_into::<Block>()
+            .expect("block is structurally valid");
+
+        // Test each V6 transaction
+        for tx in block
+            .transactions
+            .iter()
+            .filter(|tx| matches!(tx.as_ref(), &Transaction::V6 { .. }))
+        {
+            let _alt_tx: zcash_primitives::transaction::Transaction = tx
+                .as_ref()
+                .try_into()
+                .expect("librustzcash conversion must work for zebra transactions");
         }
     }
 }
@@ -988,7 +1096,28 @@ fn binding_signatures_for_network(network: Network) {
                         .expect("must pass verification");
                     }
                 }
-                tx_v5_and_v6! {
+                Transaction::V5 {
+                    sapling_shielded_data,
+                    ..
+                } => {
+                    if let Some(sapling_shielded_data) = sapling_shielded_data {
+                        let shielded_sighash =
+                            tx.sighash(upgrade.branch_id().unwrap(), HashType::ALL, &[], None);
+
+                        let bvk = redjubjub::VerificationKey::try_from(
+                            sapling_shielded_data.binding_verification_key(),
+                        )
+                        .expect("a valid redjubjub::VerificationKey");
+
+                        bvk.verify(
+                            shielded_sighash.as_ref(),
+                            &sapling_shielded_data.binding_sig,
+                        )
+                        .expect("must pass verification");
+                    }
+                }
+                #[cfg(feature = "tx_v6")]
+                Transaction::V6 {
                     sapling_shielded_data,
                     ..
                 } => {

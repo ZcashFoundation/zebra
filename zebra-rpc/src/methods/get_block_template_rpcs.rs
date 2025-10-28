@@ -1353,7 +1353,7 @@ where
 
         async move {
             let (network, unified_address): (
-                zcash_address::Network,
+                zcash_protocol::consensus::NetworkType,
                 zcash_address::unified::Address,
             ) = zcash_address::unified::Encoding::decode(address.clone().as_str()).map_err(
                 |error| Error {

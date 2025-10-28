@@ -62,7 +62,7 @@ proptest-impl = [
 bench = ["zebra-test"]
 
 # Support for transaction version 6
-tx-v6 = [
+tx_v6 = [
     "nonempty"
 ]
 
@@ -74,15 +74,14 @@ bitflags = "2.5.0"
 bitflags-serde-legacy = "0.1.1"
 blake2b_simd = "1.0.2"
 blake2s_simd = "1.0.2"
-# TODO: Revert to "0.6.0" (or appropriate version) when the ZSA orchard fork is updated.
-bridgetree = "0.4.0"
+bridgetree = "0.7.0"
 bs58 = { version = "0.5.1", features = ["check"] }
 byteorder = "1.5.0"
 
 # TODO: Internal miner feature functionality was removed at https://github.com/ZcashFoundation/zebra/issues/8180
 #       See what was removed at https://github.com/ZcashFoundation/zebra/blob/v1.5.1/zebra-chain/Cargo.toml#L73-L85
 #       Restore support when conditions are met. https://github.com/ZcashFoundation/zebra/issues/8183
-equihash = "0.2.0"
+equihash = "0.2.2"
 
 group = "0.13.0"
 incrementalmerkletree.workspace = true
@@ -110,6 +109,7 @@ zcash_primitives = { workspace = true, features = ["transparent-inputs"] }
 sapling-crypto.workspace = true
 zcash_protocol.workspace = true
 zcash_address.workspace = true
+zcash_transparent.workspace = true
 
 # Used for orchard serialization
 nonempty = { version = "0.7", optional = true }
@@ -192,4 +192,4 @@ name = "redpallas"
 harness = false
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("nu6"))'] }
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("nu7"))'] }

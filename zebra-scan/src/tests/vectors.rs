@@ -12,7 +12,7 @@ use zcash_client_backend::{
     encoding::{decode_extended_full_viewing_key, encode_extended_full_viewing_key},
     proto::compact_formats::ChainMetadata,
 };
-use zcash_primitives::constants::mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY;
+use zcash_protocol::constants::mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY;
 
 use zebra_chain::{
     block::{Block, Height},

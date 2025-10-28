@@ -24,7 +24,6 @@ use zebra_chain::{
 
 use crate::primitives::halo2::*;
 
-// FIXME: Where is this function called from?
 #[allow(dead_code, clippy::print_stdout)]
 fn generate_test_vectors<Flavor: ShieldedDataFlavor>()
 where
@@ -55,6 +54,8 @@ where
             );
 
             for _ in 0..num_recipients {
+                let mut memo: [u8; 512] = [0; 512];
+                memo[0] = 0xF6;
                 builder
                     .add_output(
                         None,
@@ -62,7 +63,7 @@ where
                         NoteValue::from_raw(note_value),
                         // FIXME: Use another AssetBase for OrchardZSA?
                         AssetBase::native(),
-                        None,
+                        memo,
                     )
                     .unwrap();
             }
@@ -109,7 +110,7 @@ where
                     .try_into()
                     .unwrap(),
                 binding_sig: <[u8; 64]>::from(bundle.authorization().binding_signature()).into(),
-                #[cfg(feature = "tx-v6")]
+                #[cfg(feature = "tx_v6")]
                 burn: bundle.burn().as_slice().into(),
             }
         })
@@ -196,10 +197,10 @@ async fn verify_generated_halo2_proofs_vanilla() {
         .await
 }
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 #[tokio::test(flavor = "multi_thread")]
 async fn verify_generated_halo2_proofs_zsa() {
-    verify_generated_halo2_proofs::<OrchardZSA>(&zebra_test::vectors::ORCHARD_SHIELDED_DATA_ZSA)
+    verify_generated_halo2_proofs::<OrchardZSA>(&zebra_test::vectors::ORCHARD_ZSA_SHIELDED_DATA)
         .await
 }
 
@@ -287,11 +288,11 @@ async fn correctly_err_on_invalid_halo2_proofs_vanilla() {
     .await
 }
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 #[tokio::test(flavor = "multi_thread")]
 async fn correctly_err_on_invalid_halo2_proofs_zsa() {
     correctly_err_on_invalid_halo2_proofs::<OrchardZSA>(
-        &zebra_test::vectors::ORCHARD_SHIELDED_DATA_ZSA,
+        &zebra_test::vectors::ORCHARD_ZSA_SHIELDED_DATA,
     )
     .await
 }

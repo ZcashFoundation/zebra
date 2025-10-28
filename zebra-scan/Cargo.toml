@@ -74,6 +74,7 @@ futures = "0.3.31"
 zcash_client_backend.workspace = true
 zcash_keys = { workspace = true, features = ["sapling"] }
 zcash_primitives.workspace = true
+zcash_protocol.workspace = true
 zcash_address.workspace = true
 sapling-crypto.workspace = true
 

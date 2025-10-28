@@ -20,7 +20,10 @@ use crate::{
     },
 };
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
+use crate::orchard_zsa::compute_burn_value_commitment;
+
+#[cfg(feature = "tx_v6")]
 use orchard::{note::AssetBase, value::ValueSum};
 
 use super::{OrchardVanilla, ShieldedDataFlavor};
@@ -28,11 +31,11 @@ use super::{OrchardVanilla, ShieldedDataFlavor};
 /// A bundle of [`Action`] descriptions and signature data.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[cfg_attr(
-    not(feature = "tx-v6"),
+    not(feature = "tx_v6"),
     serde(bound(serialize = "Flavor::EncryptedNote: serde::Serialize"))
 )]
 #[cfg_attr(
-    feature = "tx-v6",
+    feature = "tx_v6",
     serde(bound(
         serialize = "Flavor::EncryptedNote: serde::Serialize, Flavor::BurnType: serde::Serialize",
         deserialize = "Flavor::BurnType: serde::Deserialize<'de>"
@@ -58,7 +61,7 @@ pub struct ShieldedData<Flavor: ShieldedDataFlavor> {
     /// Denoted as `bindingSigOrchard` in the spec.
     pub binding_sig: Signature<Binding>,
 
-    #[cfg(feature = "tx-v6")]
+    #[cfg(feature = "tx_v6")]
     /// Assets intended for burning
     /// Denoted as `vAssetBurn` in the spec (ZIP 230).
     pub burn: Flavor::BurnType,
@@ -85,12 +88,6 @@ impl<Flavor: ShieldedDataFlavor> ShieldedData<Flavor> {
     /// transaction, in the order they appear in it.
     pub fn actions(&self) -> impl Iterator<Item = &Action<Flavor>> {
         self.actions.actions()
-    }
-
-    /// Return an iterator for the [`ActionCommon`] copy of the Actions in this
-    /// transaction, in the order they appear in it.
-    pub fn action_commons(&self) -> impl Iterator<Item = ActionCommon> + '_ {
-        self.actions.actions().map(|action| action.into())
     }
 
     /// Collect the [`Nullifier`]s for this transaction.
@@ -126,13 +123,13 @@ impl<Flavor: ShieldedDataFlavor> ShieldedData<Flavor> {
     pub fn binding_verification_key(&self) -> reddsa::VerificationKeyBytes<Binding> {
         let cv: ValueCommitment = self.actions().map(|action| action.cv).sum();
 
-        #[cfg(not(feature = "tx-v6"))]
+        #[cfg(not(feature = "tx_v6"))]
         let key = {
             let cv_balance = ValueCommitment::new(pallas::Scalar::zero(), self.value_balance);
             cv - cv_balance
         };
 
-        #[cfg(feature = "tx-v6")]
+        #[cfg(feature = "tx_v6")]
         let key = {
             let cv_balance = ValueCommitment::new(
                 pallas::Scalar::zero(),
@@ -142,7 +139,7 @@ impl<Flavor: ShieldedDataFlavor> ShieldedData<Flavor> {
                 (ValueSum::default() + i64::from(self.value_balance)).unwrap(),
                 AssetBase::native(),
             );
-            let burn_value_commitment = self.burn.clone().into();
+            let burn_value_commitment = compute_burn_value_commitment(self.burn.as_ref());
             cv - cv_balance - burn_value_commitment
         };
 
@@ -256,29 +253,6 @@ impl<Flavor: ShieldedDataFlavor> AuthorizedAction<Flavor> {
         AuthorizedAction {
             action,
             spend_auth_sig,
-        }
-    }
-}
-
-/// The common field used both in Vanilla actions and ZSA actions.
-pub struct ActionCommon {
-    /// A value commitment to net value of the input note minus the output note
-    pub cv: ValueCommitment,
-    /// The nullifier of the input note being spent.
-    pub nullifier: super::note::Nullifier,
-    /// The randomized validating key for spendAuthSig,
-    pub rk: reddsa::VerificationKeyBytes<SpendAuth>,
-    /// The x-coordinate of the note commitment for the output note.
-    pub cm_x: pallas::Base,
-}
-
-impl<Flavor: ShieldedDataFlavor> From<&Action<Flavor>> for ActionCommon {
-    fn from(action: &Action<Flavor>) -> Self {
-        Self {
-            cv: action.cv,
-            nullifier: action.nullifier,
-            rk: action.rk,
-            cm_x: action.cm_x,
         }
     }
 }

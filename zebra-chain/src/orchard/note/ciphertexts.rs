@@ -10,21 +10,21 @@ use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize}
 ///
 /// Corresponds to the Orchard 'encCiphertext's
 #[derive(Deserialize, Serialize, Clone, Debug, Eq, PartialEq)]
-pub struct EncryptedNote<const N: usize>(#[serde(with = "BigArray")] pub(crate) [u8; N]);
+pub struct EncryptedNote<const SIZE: usize>(#[serde(with = "BigArray")] pub(crate) [u8; SIZE]);
 
-impl<const N: usize> From<[u8; N]> for EncryptedNote<N> {
-    fn from(bytes: [u8; N]) -> Self {
+impl<const SIZE: usize> From<[u8; SIZE]> for EncryptedNote<SIZE> {
+    fn from(bytes: [u8; SIZE]) -> Self {
         Self(bytes)
     }
 }
 
-impl<const N: usize> From<EncryptedNote<N>> for [u8; N] {
-    fn from(enc_ciphertext: EncryptedNote<N>) -> Self {
+impl<const SIZE: usize> From<EncryptedNote<SIZE>> for [u8; SIZE] {
+    fn from(enc_ciphertext: EncryptedNote<SIZE>) -> Self {
         enc_ciphertext.0
     }
 }
 
-impl<const N: usize> TryFrom<&[u8]> for EncryptedNote<N> {
+impl<const SIZE: usize> TryFrom<&[u8]> for EncryptedNote<SIZE> {
     type Error = std::array::TryFromSliceError;
 
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
@@ -32,16 +32,16 @@ impl<const N: usize> TryFrom<&[u8]> for EncryptedNote<N> {
     }
 }
 
-impl<const N: usize> ZcashSerialize for EncryptedNote<N> {
+impl<const SIZE: usize> ZcashSerialize for EncryptedNote<SIZE> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_all(&self.0[..])?;
         Ok(())
     }
 }
 
-impl<const N: usize> ZcashDeserialize for EncryptedNote<N> {
+impl<const SIZE: usize> ZcashDeserialize for EncryptedNote<SIZE> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let mut bytes = [0; N];
+        let mut bytes = [0; SIZE];
         reader.read_exact(&mut bytes[..])?;
         Ok(Self(bytes))
     }
@@ -113,7 +113,7 @@ mod tests {
         serialization::{ZcashDeserialize, ZcashSerialize},
     };
 
-    #[cfg(feature = "tx-v6")]
+    #[cfg(feature = "tx_v6")]
     use crate::orchard::OrchardZSA;
 
     use proptest::prelude::*;
@@ -138,7 +138,7 @@ mod tests {
         }
 
 
-        #[cfg(feature = "tx-v6")]
+        #[cfg(feature = "tx_v6")]
         #[test]
         fn encrypted_ciphertext_roundtrip_orchard_zsa(ec in any::<<OrchardZSA as ShieldedDataFlavor>::EncryptedNote>()) {
             let _init_guard = zebra_test::init();

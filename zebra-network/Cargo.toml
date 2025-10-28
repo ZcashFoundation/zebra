@@ -97,4 +97,4 @@ zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/" }
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("nu6"))'] }
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("nu7"))'] }

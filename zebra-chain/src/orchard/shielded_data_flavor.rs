@@ -8,16 +8,13 @@ use orchard::{domain::OrchardDomainCommon, orchard_flavor::OrchardFlavor};
 
 pub use orchard::orchard_flavor::OrchardVanilla;
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 pub use orchard::{note::AssetBase, orchard_flavor::OrchardZSA, value::NoteValue};
 
 use crate::serialization::{ZcashDeserialize, ZcashSerialize};
 
-#[cfg(feature = "tx-v6")]
-use crate::{
-    orchard::ValueCommitment,
-    orchard_zsa::{Burn, BurnItem, NoBurn},
-};
+#[cfg(feature = "tx_v6")]
+use crate::orchard_zsa::{Burn, BurnItem, NoBurn};
 
 use super::note;
 
@@ -53,14 +50,11 @@ pub trait ShieldedDataFlavor: OrchardFlavor {
         + test_arbitrary::TestArbitrary;
 
     /// A type representing a burn field for this protocol version.
-    #[cfg(feature = "tx-v6")]
-    // FIXME: try to get rid
+    #[cfg(feature = "tx_v6")]
     type BurnType: Clone
         + Debug
-        + Default
         + ZcashDeserialize
         + ZcashSerialize
-        + Into<ValueCommitment>
         + AsRef<[BurnItem]>
         + for<'a> From<&'a [(AssetBase, NoteValue)]>
         + test_arbitrary::TestArbitrary;
@@ -68,11 +62,11 @@ pub trait ShieldedDataFlavor: OrchardFlavor {
 
 impl ShieldedDataFlavor for OrchardVanilla {
     type EncryptedNote = note::EncryptedNote<{ OrchardVanilla::ENC_CIPHERTEXT_SIZE }>;
-    #[cfg(feature = "tx-v6")]
+    #[cfg(feature = "tx_v6")]
     type BurnType = NoBurn;
 }
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 impl ShieldedDataFlavor for OrchardZSA {
     type EncryptedNote = note::EncryptedNote<{ OrchardZSA::ENC_CIPHERTEXT_SIZE }>;
     type BurnType = Burn;
