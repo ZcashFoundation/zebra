@@ -8,6 +8,7 @@
 //! verification, where it may be accepted or rejected.
 
 use std::{
+    collections::HashMap,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -25,6 +26,7 @@ use zebra_chain::{
     amount::Amount,
     block,
     parameters::{subsidy::FundingStreamReceiver, Network},
+    transaction::{SigHash, UnminedTxId},
     transparent,
     work::equihash,
 };
@@ -253,13 +255,18 @@ where
             let mut legacy_sigop_count = 0;
             let mut block_miner_fees = Ok(Amount::zero());
 
+            // FIXME: add a short comment
+            let mut tx_sighash_by_tx_id: HashMap<UnminedTxId, SigHash> =
+                HashMap::with_capacity(block.transactions.len());
+
             use futures::StreamExt;
             while let Some(result) = async_checks.next().await {
                 tracing::trace!(?result, remaining = async_checks.len());
                 let crate::transaction::Response::Block {
-                    tx_id: _,
+                    tx_id,
                     miner_fee,
                     legacy_sigop_count: tx_legacy_sigop_count,
+                    tx_sighash,
                 } = result
                     .map_err(Into::into)
                     .map_err(VerifyBlockError::Transaction)?
@@ -274,6 +281,9 @@ where
                 if let Some(miner_fee) = miner_fee {
                     block_miner_fees += miner_fee;
                 }
+
+                // FIXME: add a short comment
+                tx_sighash_by_tx_id.insert(tx_id, tx_sighash);
             }
 
             // Check the summed block totals
@@ -316,12 +326,24 @@ where
             let new_outputs = Arc::into_inner(known_utxos)
                 .expect("all verification tasks using known_utxos are complete");
 
+            // FIXME: add a short comment
+            let transaction_sighashes: Arc<[SigHash]> = block
+                .transactions
+                .iter()
+                .map(|tx| {
+                    *tx_sighash_by_tx_id
+                        .get(&tx.unmined_id())
+                        .expect("every verified tx must return a sighash")
+                })
+                .collect();
+
             let prepared_block = zs::SemanticallyVerifiedBlock {
                 block,
                 hash,
                 height,
                 new_outputs,
                 transaction_hashes,
+                transaction_sighashes,
                 deferred_balance: Some(expected_deferred_amount),
             };
 

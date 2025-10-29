@@ -538,6 +538,7 @@ impl DiskWriteBatch {
             // FIXME: Why do we need to re-ferify the changes here?
             IssuedAssetChanges::validate_and_get_changes(
                 &finalized.block.transactions,
+                &finalized.transaction_hashes,
                 |asset_base| zebra_db.issued_asset(asset_base),
             )
             .map_err(|_| BoxError::from("invalid issued assets changes"))?

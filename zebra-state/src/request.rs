@@ -164,6 +164,9 @@ pub struct SemanticallyVerifiedBlock {
     /// A precomputed list of the hashes of the transactions in this block,
     /// in the same order as `block.transactions`.
     pub transaction_hashes: Arc<[transaction::Hash]>,
+    /// A precomputed list of the sighashes of the transactions in this block,
+    /// in the same order as `block.transactions`.
+    pub transaction_sighashes: Arc<[transaction::SigHash]>,
     /// This block's contribution to the deferred pool.
     pub deferred_balance: Option<Amount<NonNegative>>,
 }
@@ -223,6 +226,10 @@ pub struct ContextuallyVerifiedBlock {
     /// A precomputed list of the hashes of the transactions in this block,
     /// in the same order as `block.transactions`.
     pub(crate) transaction_hashes: Arc<[transaction::Hash]>,
+
+    /// A precomputed list of the sighashes of the transactions in this block,
+    /// in the same order as `block.transactions`.
+    pub transaction_sighashes: Arc<[transaction::SigHash]>,
 
     /// The sum of the chain value pool changes of all transactions in this block.
     pub(crate) chain_value_pool_change: ValueBalance<NegativeAllowed>,
@@ -425,6 +432,7 @@ impl ContextuallyVerifiedBlock {
             height,
             new_outputs,
             transaction_hashes,
+            transaction_sighashes,
             deferred_balance,
         } = semantically_verified;
 
@@ -441,6 +449,9 @@ impl ContextuallyVerifiedBlock {
             new_outputs,
             spent_outputs: spent_outputs.clone(),
             transaction_hashes,
+            transaction_sighashes,
+            // FIXME: should we add transaction_sighashes to SemanticallyVerifiedBlock?
+            //transaction_sighashes,
             chain_value_pool_change: block.chain_value_pool_change(
                 &utxos_from_ordered_utxos(spent_outputs),
                 deferred_balance,
@@ -489,6 +500,9 @@ impl SemanticallyVerifiedBlock {
             height,
             new_outputs,
             transaction_hashes,
+            // Not used in checkpoint paths.
+            // FIXME: Is this correct?
+            transaction_sighashes: Arc::from([]),
             deferred_balance: None,
         }
     }
@@ -521,6 +535,9 @@ impl From<Arc<Block>> for SemanticallyVerifiedBlock {
             height,
             new_outputs,
             transaction_hashes,
+            // Not used in checkpoint paths.
+            // FIXME: Is this correct?
+            transaction_sighashes: Arc::from([]),
             deferred_balance: None,
         }
     }
@@ -534,6 +551,7 @@ impl From<ContextuallyVerifiedBlock> for SemanticallyVerifiedBlock {
             height: valid.height,
             new_outputs: valid.new_outputs,
             transaction_hashes: valid.transaction_hashes,
+            transaction_sighashes: valid.transaction_sighashes,
             deferred_balance: Some(
                 valid
                     .chain_value_pool_change

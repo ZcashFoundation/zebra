@@ -115,6 +115,8 @@ impl From<SemanticallyVerifiedBlock> for ChainTipBlock {
             height,
             new_outputs: _,
             transaction_hashes,
+            // FIXME: Is it correct not to use sighashes here? Should we add transaction_sighashes to ChainTipBlock?
+            transaction_sighashes: _,
             deferred_balance: _,
         } = prepared;
 

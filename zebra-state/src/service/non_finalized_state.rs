@@ -329,6 +329,7 @@ impl NonFinalizedState {
         #[cfg(feature = "tx-v6")]
         let issued_assets = IssuedAssetChanges::validate_and_get_changes(
             &prepared.block.transactions,
+            &prepared.transaction_sighashes,
             |asset_base: &AssetBase| {
                 read::asset_state(Some(&new_chain), finalized_state, asset_base)
             },

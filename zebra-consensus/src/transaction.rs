@@ -143,6 +143,9 @@ pub enum Response {
         /// The number of legacy signature operations in this transaction's
         /// transparent inputs and outputs.
         legacy_sigop_count: u64,
+
+        /// Shielded sighash for this transaction.
+        tx_sighash: SigHash,
     },
 
     /// A response to a mempool transaction verification request.
@@ -384,7 +387,7 @@ where
 
             tracing::trace!(?tx_id, "got state UTXOs");
 
-            let mut async_checks = match tx.as_ref() {
+            let (mut async_checks, tx_sighash) = match tx.as_ref() {
                 Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
                     tracing::debug!(?tx, "got transaction with wrong version");
                     return Err(TransactionError::WrongVersion);
@@ -479,6 +482,7 @@ where
                     tx_id,
                     miner_fee,
                     legacy_sigop_count,
+                    tx_sighash
                 },
                 Request::Mempool { transaction, .. } => {
                     let transaction = VerifiedUnminedTx::new(
@@ -655,7 +659,7 @@ where
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
         sapling_shielded_data: &Option<sapling::ShieldedData<sapling::PerSpendAnchor>>,
-    ) -> Result<AsyncChecks, TransactionError> {
+    ) -> Result<(AsyncChecks, SigHash), TransactionError> {
         let tx = request.transaction();
         let upgrade = request.upgrade(network);
 
@@ -670,7 +674,7 @@ where
             None,
         );
 
-        Ok(Self::verify_transparent_inputs_and_outputs(
+        let async_check = Self::verify_transparent_inputs_and_outputs(
             request,
             network,
             script_verifier,
@@ -683,7 +687,9 @@ where
         .and(Self::verify_sapling_shielded_data(
             sapling_shielded_data,
             &shielded_sighash,
-        )?))
+        )?);
+
+        Ok((async_check, shielded_sighash))
     }
 
     /// Verifies if a V4 `transaction` is supported by `network_upgrade`.
@@ -752,7 +758,7 @@ where
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
         sapling_shielded_data: &Option<sapling::ShieldedData<sapling::SharedAnchor>>,
         orchard_shielded_data: &Option<orchard::ShieldedData<V>>,
-    ) -> Result<AsyncChecks, TransactionError> {
+    ) -> Result<(AsyncChecks, SigHash), TransactionError> {
         let transaction = request.transaction();
         let upgrade = request.upgrade(network);
 
@@ -767,7 +773,7 @@ where
             None,
         );
 
-        Ok(Self::verify_transparent_inputs_and_outputs(
+        let async_check = Self::verify_transparent_inputs_and_outputs(
             request,
             network,
             script_verifier,
@@ -780,7 +786,9 @@ where
         .and(Self::verify_orchard_shielded_data(
             orchard_shielded_data,
             &shielded_sighash,
-        )?))
+        )?);
+
+        Ok((async_check, shielded_sighash))
     }
 
     /// Verifies if a V5/V6 `transaction` is supported by `network_upgrade`.

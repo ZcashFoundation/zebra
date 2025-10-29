@@ -37,6 +37,8 @@ impl Prepare for Arc<Block> {
             height,
             new_outputs,
             transaction_hashes,
+            // FIXME: Do we need to (and can we) genereate real arbitrary transaction_sighashes?
+            transaction_sighashes: Arc::from([]),
             deferred_balance: None,
         }
     }
@@ -116,6 +118,7 @@ impl ContextuallyVerifiedBlock {
             height,
             new_outputs,
             transaction_hashes,
+            transaction_sighashes,
             deferred_balance: _,
         } = block.into();
 
@@ -129,6 +132,7 @@ impl ContextuallyVerifiedBlock {
             // TODO: fix the tests, and stop adding unrelated inputs and outputs.
             spent_outputs: new_outputs,
             transaction_hashes,
+            transaction_sighashes,
             chain_value_pool_change: ValueBalance::zero(),
             #[cfg(feature = "tx-v6")]
             issued_asset_changes: Default::default(),
