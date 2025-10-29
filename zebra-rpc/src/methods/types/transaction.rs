@@ -8,7 +8,7 @@ use derive_getters::Getters;
 use derive_new::new;
 use hex::ToHex;
 
-use zcash_script05::script::Asm;
+use zcash_script::script::Asm;
 use zebra_chain::{
     amount::{self, Amount, NegativeOrZero, NonNegative},
     block::{self, merkle::AUTH_DIGEST_PLACEHOLDER, Height},
@@ -659,11 +659,8 @@ impl TransactionObject {
                         txid: outpoint.hash.encode_hex(),
                         vout: outpoint.index,
                         script_sig: ScriptSig {
-                            // TODO: Remove `zcash_script05` when `zcash_script` get's updated to 0.5 everywhere.
-                            asm: zcash_script05::script::Code(
-                                unlock_script.as_raw_bytes().to_vec(),
-                            )
-                            .to_asm(false),
+                            asm: zcash_script::script::Code(unlock_script.as_raw_bytes().to_vec())
+                                .to_asm(false),
                             hex: unlock_script.clone(),
                         },
                         sequence: *sequence,
@@ -690,30 +687,25 @@ impl TransactionObject {
                         value_zat: output.1.value.zatoshis(),
                         n: output.0 as u32,
                         script_pub_key: ScriptPubKey {
-                            // TODO: Remove `zcash_script05` when `zcash_script` get's updated to 0.5 everywhere.
-                            asm: zcash_script05::script::Code(
+                            asm: zcash_script::script::Code(
                                 output.1.lock_script.as_raw_bytes().to_vec(),
                             )
                             .to_asm(false),
                             hex: output.1.lock_script.clone(),
                             req_sigs,
-                            r#type: zcash_script05::script::Code(
+                            r#type: zcash_script::script::Code(
                                 output.1.lock_script.as_raw_bytes().to_vec(),
                             )
                             .to_component()
                             .ok()
                             .and_then(|c| c.refine().ok())
-                            .and_then(|component| zcash_script05::solver::standard(&component))
+                            .and_then(|component| zcash_script::solver::standard(&component))
                             .map(|kind| match kind {
-                                zcash_script05::solver::ScriptKind::PubKeyHash { .. } => {
-                                    "pubkeyhash"
-                                }
-                                zcash_script05::solver::ScriptKind::ScriptHash { .. } => {
-                                    "scripthash"
-                                }
-                                zcash_script05::solver::ScriptKind::MultiSig { .. } => "multisig",
-                                zcash_script05::solver::ScriptKind::NullData { .. } => "nulldata",
-                                zcash_script05::solver::ScriptKind::PubKey { .. } => "pubkey",
+                                zcash_script::solver::ScriptKind::PubKeyHash { .. } => "pubkeyhash",
+                                zcash_script::solver::ScriptKind::ScriptHash { .. } => "scripthash",
+                                zcash_script::solver::ScriptKind::MultiSig { .. } => "multisig",
+                                zcash_script::solver::ScriptKind::NullData { .. } => "nulldata",
+                                zcash_script::solver::ScriptKind::PubKey { .. } => "pubkey",
                             })
                             .unwrap_or("nonstandard")
                             .to_string(),
