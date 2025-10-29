@@ -64,6 +64,14 @@ pub enum CommitBlockError {
     WriteTaskExited,
 }
 
+impl CommitBlockError {
+    /// Returns `true` if this is definitely a duplicate commit request.
+    /// Some duplicate requests might not be detected, and therefore return `false`.
+    pub fn is_duplicate_request(&self) -> bool {
+        matches!(self, CommitBlockError::Duplicate { .. })
+    }
+}
+
 /// An error describing why a `CommitSemanticallyVerified` request failed.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[error("could not commit semantically-verified block")]
