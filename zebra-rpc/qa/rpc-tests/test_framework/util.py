@@ -837,7 +837,7 @@ def start_wallets(num_wallets, dirname, extra_args=None, rpchost=None, binary=No
     try:
         for i in range(num_wallets):
             rpcs.append(start_wallet(i, dirname, extra_args[i], rpchost, binary=binary[i]))
-    except: # If one node failed to start, stop the others
+    except: # If one wallet failed to start, stop the others
         stop_wallets(rpcs)
         raise
     return rpcs
