@@ -159,7 +159,7 @@ pub fn non_finalized_state_contains_block_hash(
 /// Returns the location of the block if present in the finalized state.
 /// Returns None if the block hash is not found in the finalized state.
 pub fn finalized_state_contains_block_hash(db: &ZebraDb, hash: block::Hash) -> Option<KnownBlock> {
-    db.contains_hash(hash).then_some(KnownBlock::BestChain)
+    db.contains_hash(hash).then_some(KnownBlock::Finalized)
 }
 
 /// Return the height for the block at `hash`, if `hash` is in `chain` or `db`.
