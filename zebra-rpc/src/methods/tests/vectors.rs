@@ -3011,6 +3011,9 @@ async fn rpc_addnode() {
         [PeerInfo {
             addr,
             inbound: false,
+            // TODO: Fix this when mock address book provides other values
+            pingtime: Some(0.1f64),
+            pingwait: None,
         }]
     );
 
