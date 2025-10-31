@@ -25,7 +25,7 @@ use color_eyre::eyre::Report;
 use tower::ServiceExt;
 
 use orchard::{
-    asset_record::AssetRecord, issuance::IssueAction, keys::IssuanceValidatingKey, note::AssetBase,
+    issuance::{AssetRecord, IssueAction}, issuance_auth::{ZSASchnorr, IssueValidatingKey}, note::AssetBase,
     value::NoteValue,
 };
 
@@ -84,7 +84,7 @@ fn process_burns<'a, I: Iterator<Item = &'a BurnItem>>(
 /// Processes orchard issue actions, increasing asset supply.
 fn process_issue_actions<'a, I: Iterator<Item = &'a IssueAction>>(
     asset_records: &mut AssetRecords,
-    ik: &IssuanceValidatingKey,
+    ik: &IssueValidatingKey<ZSASchnorr>,
     actions: I,
 ) -> Result<(), AssetRecordsError> {
     for action in actions {

@@ -347,7 +347,7 @@ pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = {
     }
     #[cfg(zcash_unstable = "nu7")]
     {
-        Version(170_140)
+        Version(170_160)
     }
 };
 

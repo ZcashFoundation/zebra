@@ -11,7 +11,7 @@ members = [
         "zebra-test",
         "zebra-utils",
         "zebra-scan",
-	"zebra-grpc",
+	    "zebra-grpc",
         "tower-batch-control",
         "tower-fallback",
 ]
@@ -35,6 +35,7 @@ zcash_primitives = "0.25.0"
 zcash_proofs = "0.25.0"
 zcash_protocol = "0.6.2"
 zcash_transparent = "0.5.0"
+zcash_script = "0.4"
 
 [workspace.metadata.release]
 

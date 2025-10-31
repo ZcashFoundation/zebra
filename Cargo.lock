@@ -6133,6 +6133,7 @@ dependencies = [
  "bitflags 2.10.0",
  "bounded-vec",
  "ripemd 0.1.3",
+ "secp256k1 0.29.1",
  "sha1",
  "sha2 0.10.8",
  "thiserror 2.0.17",
@@ -6235,6 +6236,7 @@ dependencies = [
  "zcash_note_encryption",
  "zcash_primitives",
  "zcash_protocol",
+ "zcash_script 0.4.2",
  "zcash_transparent",
  "zebra-test",
 ]

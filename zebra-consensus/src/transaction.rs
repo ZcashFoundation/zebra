@@ -20,7 +20,10 @@ use zebra_chain::{
     amount::{Amount, NonNegative},
     block, orchard,
     parameters::{Network, NetworkUpgrade},
-    primitives::{Groth16Proof, zcash_primitives::{swap_bundle_sighash, action_group_sighashes}},
+    primitives::{
+        zcash_primitives::{action_group_sighashes, swap_bundle_sighash},
+        Groth16Proof,
+    },
     sapling,
     serialization::DateTime32,
     transaction::{
@@ -519,7 +522,11 @@ impl OrchardTransaction for orchard::OrchardVanilla {
 
 #[cfg(feature = "tx-v6")]
 impl OrchardTransaction for orchard::OrchardZSA {
-    const SUPPORTED_NETWORK_UPGRADES: &'static [NetworkUpgrade] = &[NetworkUpgrade::Nu7, #[cfg(feature = "zsa-swap")] NetworkUpgrade::Swap];
+    const SUPPORTED_NETWORK_UPGRADES: &'static [NetworkUpgrade] = &[
+        NetworkUpgrade::Nu7,
+        #[cfg(feature = "zsa-swap")]
+        NetworkUpgrade::Swap,
+    ];
 }
 
 impl<ZS> Verifier<ZS>
@@ -713,6 +720,7 @@ where
             | NetworkUpgrade::Canopy
             | NetworkUpgrade::Nu5
             | NetworkUpgrade::Nu6
+            | NetworkUpgrade::Nu6_1
             | NetworkUpgrade::Nu7
             | NetworkUpgrade::Swap => Ok(()),
 
@@ -773,14 +781,14 @@ where
             &transaction,
             upgrade
                 .branch_id()
-                .expect("Overwinter-onwards must have branch ID, and we checkpoint on Canopy")
+                .expect("Overwinter-onwards must have branch ID, and we checkpoint on Canopy"),
         );
 
         let action_group_sighashes = action_group_sighashes(
             &transaction,
             upgrade
                 .branch_id()
-                .expect("Overwinter-onwards must have branch ID, and we checkpoint on Canopy")
+                .expect("Overwinter-onwards must have branch ID, and we checkpoint on Canopy"),
         );
 
         Ok(Self::verify_transparent_inputs_and_outputs(
@@ -1112,7 +1120,8 @@ where
                 }
             }
 
-            #[cfg(not(feature = "zsa-swap"))] // FIXME implement a more graceful decision making which sighash we sign
+            #[cfg(not(feature = "zsa-swap"))]
+            // FIXME implement a more graceful decision making which sighash we sign
             for authorized_action in orchard_shielded_data.authorized_actions().cloned() {
                 let (action, spend_auth_sig) = authorized_action.into_parts();
 

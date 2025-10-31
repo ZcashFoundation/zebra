@@ -15,7 +15,7 @@ use hex::{FromHex, ToHex};
 use proptest_derive::Arbitrary;
 
 /// A list of network upgrades in the order that they must be activated.
-pub const NETWORK_UPGRADES_IN_ORDER: [NetworkUpgrade; 11] = [
+pub const NETWORK_UPGRADES_IN_ORDER: [NetworkUpgrade; 12] = [
     Genesis,
     BeforeOverwinter,
     Overwinter,
@@ -25,6 +25,7 @@ pub const NETWORK_UPGRADES_IN_ORDER: [NetworkUpgrade; 11] = [
     Canopy,
     Nu5,
     Nu6,
+    Nu6_1,
     Nu7,
     Swap,
 ];
@@ -63,6 +64,9 @@ pub enum NetworkUpgrade {
     /// The Zcash protocol after the NU6 upgrade.
     #[serde(rename = "NU6")]
     Nu6,
+    /// The Zcash protocol after the NU6.1 upgrade.
+    #[serde(rename = "NU6.1")]
+    Nu6_1,
     /// The Zcash protocol after the NU7 upgrade.
     #[serde(rename = "NU7")]
     Nu7,
@@ -235,6 +239,7 @@ pub(crate) const CONSENSUS_BRANCH_IDS: &[(NetworkUpgrade, ConsensusBranchId)] = 
     (Canopy, ConsensusBranchId(0xe9ff75a6)),
     (Nu5, ConsensusBranchId(0xc2d6d0b4)),
     (Nu6, ConsensusBranchId(0xc8e71055)),
+    (Nu6_1, ConsensusBranchId(0x4dec4df0)),
     // FIXME: TODO: Use a proper value below.
     #[cfg(zcash_unstable = "nu7")]
     (Nu7, ConsensusBranchId(0x77190ad8)),
@@ -355,7 +360,8 @@ impl NetworkUpgrade {
             Heartwood => Some(Canopy),
             Canopy => Some(Nu5),
             Nu5 => Some(Nu6),
-            Nu6 => Some(Nu7),
+            Nu6 => Some(Nu6_1),
+            Nu6_1 => Some(Nu7),
             Nu7 => Some(Swap),
             Swap => None,
         }
@@ -434,7 +440,7 @@ impl NetworkUpgrade {
     pub fn target_spacing(&self) -> Duration {
         let spacing_seconds = match self {
             Genesis | BeforeOverwinter | Overwinter | Sapling => PRE_BLOSSOM_POW_TARGET_SPACING,
-            Blossom | Heartwood | Canopy | Nu5 | Nu6 | Nu7 | Swap => {
+            Blossom | Heartwood | Canopy | Nu5 | Nu6 | Nu6_1 | Nu7 | Swap => {
                 POST_BLOSSOM_POW_TARGET_SPACING.into()
             }
         };
@@ -558,6 +564,7 @@ impl From<zcash_protocol::consensus::NetworkUpgrade> for NetworkUpgrade {
             zcash_protocol::consensus::NetworkUpgrade::Canopy => Self::Canopy,
             zcash_protocol::consensus::NetworkUpgrade::Nu5 => Self::Nu5,
             zcash_protocol::consensus::NetworkUpgrade::Nu6 => Self::Nu6,
+            zcash_protocol::consensus::NetworkUpgrade::Nu6_1 => Self::Nu6_1,
             // TODO: Use a proper value below.
             #[cfg(zcash_unstable = "nu7")]
             zcash_protocol::consensus::NetworkUpgrade::Nu7 => Self::Nu7,
