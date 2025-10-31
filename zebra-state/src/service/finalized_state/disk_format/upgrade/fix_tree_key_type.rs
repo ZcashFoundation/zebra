@@ -87,14 +87,14 @@ pub fn quick_check(db: &ZebraDb) -> Result<(), String> {
         }
 
         // There should only be one tip tree in this column family.
-        if prev_tree.is_some() {
+        if let Some(prev_tree) = prev_tree {
             result = Err(format!(
                 "found duplicate sprout trees after running key format upgrade\n\
                  key: {key:?}, tree: {:?}\n\
                  prev key: {prev_key:?}, prev_tree: {:?}\n\
                  ",
                 tree.root(),
-                prev_tree.unwrap().root(),
+                prev_tree.root(),
             ));
             error!(?result);
         }
@@ -118,14 +118,14 @@ pub fn quick_check(db: &ZebraDb) -> Result<(), String> {
         }
 
         // There should only be one tip tree in this column family.
-        if prev_tree.is_some() {
+        if let Some(prev_tree) = prev_tree {
             result = Err(format!(
                 "found duplicate history trees after running key format upgrade\n\
                  key: {key:?}, tree: {:?}\n\
                  prev key: {prev_key:?}, prev_tree: {:?}\n\
                  ",
                 tree.hash(),
-                prev_tree.unwrap().hash(),
+                prev_tree.hash(),
             ));
             error!(?result);
         }
