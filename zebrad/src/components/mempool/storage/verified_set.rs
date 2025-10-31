@@ -281,17 +281,17 @@ impl VerifiedSet {
             .remove_all(key_to_remove)
             .iter()
             .chain(std::iter::once(key_to_remove))
-            .map(|key_to_remove| {
-                let removed_tx = self
-                    .transactions
-                    .remove(key_to_remove)
-                    .expect("invalid transaction key");
+            .filter_map(|key_to_remove| {
+                let Some(removed_tx) = self.transactions.remove(key_to_remove) else {
+                    tracing::warn!(?key_to_remove, "invalid transaction key");
+                    return None;
+                };
 
                 self.transactions_serialized_size -= removed_tx.transaction.size;
                 self.total_cost -= removed_tx.cost();
                 self.remove_outputs(&removed_tx.transaction);
 
-                removed_tx
+                Some(removed_tx)
             })
             .collect();
 
