@@ -45,7 +45,7 @@ pub use request::{
     CheckpointVerifiedBlock, HashOrHeight, ReadRequest, Request, SemanticallyVerifiedBlock,
 };
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 pub use request::IssuedAssetsOrChange;
 
 pub use response::{KnownBlock, MinedTx, ReadResponse, Response};

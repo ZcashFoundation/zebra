@@ -448,7 +448,7 @@ enum SpendConflictTestInput {
     },
 
     /// Test V6 transactions to include OrchardZSA nullifier conflicts.
-    #[cfg(feature = "tx-v6")]
+    #[cfg(feature = "tx_v6")]
     V6 {
         #[proptest(
             strategy = "Transaction::v6_strategy(LedgerState::default()).prop_map(DisplayToDebug)"
@@ -488,7 +488,7 @@ impl SpendConflictTestInput {
 
                 (first, second)
             }
-            #[cfg(feature = "tx-v6")]
+            #[cfg(feature = "tx_v6")]
             SpendConflictTestInput::V6 {
                 mut first,
                 mut second,
@@ -524,7 +524,7 @@ impl SpendConflictTestInput {
         let (mut first, mut second) = match self {
             SpendConflictTestInput::V4 { first, second, .. } => (first, second),
             SpendConflictTestInput::V5 { first, second, .. } => (first, second),
-            #[cfg(feature = "tx-v6")]
+            #[cfg(feature = "tx_v6")]
             SpendConflictTestInput::V6 { first, second, .. } => (first, second),
         };
 
@@ -599,7 +599,7 @@ impl SpendConflictTestInput {
                 Transaction::V1 { .. } | Transaction::V5 { .. } => {}
 
                 // No JoinSplits
-                #[cfg(feature = "tx-v6")]
+                #[cfg(feature = "tx_v6")]
                 Transaction::V6 { .. } => {}
             }
         }
@@ -671,7 +671,7 @@ impl SpendConflictTestInput {
                     Self::remove_sapling_transfers_with_conflicts(sapling_shielded_data, &conflicts)
                 }
 
-                #[cfg(feature = "tx-v6")]
+                #[cfg(feature = "tx_v6")]
                 Transaction::V6 {
                     sapling_shielded_data,
                     ..
@@ -750,7 +750,7 @@ impl SpendConflictTestInput {
                     ..
                 } => Self::remove_orchard_actions_with_conflicts(orchard_shielded_data, &conflicts),
 
-                #[cfg(feature = "tx-v6")]
+                #[cfg(feature = "tx_v6")]
                 Transaction::V6 {
                     orchard_shielded_data,
                     ..
@@ -807,7 +807,7 @@ enum SpendConflictForTransactionV5 {
 }
 
 /// A spend conflict valid for V6 transactions.
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 #[derive(Arbitrary, Clone, Debug)]
 enum SpendConflictForTransactionV6 {
     Transparent(Box<TransparentSpendConflict>),
@@ -890,7 +890,7 @@ impl SpendConflictForTransactionV5 {
     }
 }
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 impl SpendConflictForTransactionV6 {
     /// Apply a spend conflict to a V6 transaction.
     ///

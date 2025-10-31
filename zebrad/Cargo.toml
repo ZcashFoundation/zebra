@@ -52,7 +52,7 @@ features = [
 
 [features]
 # In release builds, don't compile debug logging code, to improve performance.
-default = ["release_max_level_info", "progress-bar", "getblocktemplate-rpcs", "tx-v6", "zsa-swap"]
+default = ["release_max_level_info", "progress-bar", "getblocktemplate-rpcs", "tx_v6", "zsa-swap"]
 
 # Default features for official ZF binary release builds
 default-release-binaries = ["default", "sentry"]
@@ -157,10 +157,10 @@ test_sync_past_mandatory_checkpoint_mainnet = []
 test_sync_past_mandatory_checkpoint_testnet = []
 
 # Support for transaction version 6
-tx-v6 = [
-    "zebra-consensus/tx-v6",
-    "zebra-state/tx-v6",
-    "zebra-chain/tx-v6"
+tx_v6 = [
+    "zebra-consensus/tx_v6",
+    "zebra-state/tx_v6",
+    "zebra-chain/tx_v6"
 ]
 
 # Support for ZSA asset swaps

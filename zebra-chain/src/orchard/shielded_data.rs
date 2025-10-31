@@ -20,23 +20,23 @@ use crate::{
     },
 };
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 use crate::orchard_zsa::compute_burn_value_commitment;
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 use orchard::{note::AssetBase, value::ValueSum};
 
 use super::{OrchardVanilla, ShieldedDataFlavor};
 
-// FIXME: wrap all ActionGroup usages with tx-v6 feature flag?
+// FIXME: wrap all ActionGroup usages with tx_v6 feature flag?
 /// Action Group description.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[cfg_attr(
-    not(feature = "tx-v6"),
+    not(feature = "tx_v6"),
     serde(bound(serialize = "Flavor::EncryptedNote: serde::Serialize"))
 )]
 #[cfg_attr(
-    feature = "tx-v6",
+    feature = "tx_v6",
     serde(bound(
         serialize = "Flavor::EncryptedNote: serde::Serialize, Flavor::BurnType: serde::Serialize",
         deserialize = "Flavor::BurnType: serde::Deserialize<'de>"
@@ -58,7 +58,7 @@ pub struct ActionGroup<Flavor: ShieldedDataFlavor> {
     /// Denoted as `vActionsOrchard` and `vSpendAuthSigsOrchard` in the spec.
     pub actions: AtLeastOne<AuthorizedAction<Flavor>>,
 
-    #[cfg(feature = "tx-v6")]
+    #[cfg(feature = "tx_v6")]
     /// Assets intended for burning
     /// Denoted as `vAssetBurn` in the spec (ZIP 230).
     pub burn: Flavor::BurnType,
@@ -75,11 +75,11 @@ impl<Flavor: ShieldedDataFlavor> ActionGroup<Flavor> {
 /// A bundle of [`Action`] descriptions and signature data.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[cfg_attr(
-    not(feature = "tx-v6"),
+    not(feature = "tx_v6"),
     serde(bound(serialize = "Flavor::EncryptedNote: serde::Serialize"))
 )]
 #[cfg_attr(
-    feature = "tx-v6",
+    feature = "tx_v6",
     serde(bound(
         serialize = "Flavor::EncryptedNote: serde::Serialize, Flavor::BurnType: serde::Serialize",
         deserialize = "Flavor::BurnType: serde::Deserialize<'de>"
@@ -109,7 +109,7 @@ impl<Flavor: ShieldedDataFlavor> fmt::Display for ActionGroup<Flavor> {
 
         fmter.field("shared_anchor", &self.shared_anchor);
 
-        #[cfg(feature = "tx-v6")]
+        #[cfg(feature = "tx_v6")]
         fmter.field("burn", &self.burn.as_ref().len());
 
         fmter.finish()
@@ -170,13 +170,13 @@ impl<Flavor: ShieldedDataFlavor> ShieldedData<Flavor> {
     pub fn binding_verification_key(&self) -> reddsa::VerificationKeyBytes<Binding> {
         let cv: ValueCommitment = self.actions().map(|action| action.cv).sum();
 
-        #[cfg(not(feature = "tx-v6"))]
+        #[cfg(not(feature = "tx_v6"))]
         let key = {
             let cv_balance = ValueCommitment::new(pallas::Scalar::zero(), self.value_balance);
             cv - cv_balance
         };
 
-        #[cfg(feature = "tx-v6")]
+        #[cfg(feature = "tx_v6")]
         let key = {
             let cv_balance = ValueCommitment::new(
                 pallas::Scalar::zero(),

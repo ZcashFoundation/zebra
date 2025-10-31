@@ -2,7 +2,7 @@
 //! from the transaction.
 use std::io;
 
-use super::{tx_v5_and_v6, Hash, Transaction};
+use super::{Hash, Transaction};
 use crate::serialization::{sha256d, ZcashSerialize};
 
 /// A Transaction ID builder. It computes the transaction ID by hashing
@@ -28,7 +28,9 @@ impl<'a> TxIdBuilder<'a> {
             | Transaction::V2 { .. }
             | Transaction::V3 { .. }
             | Transaction::V4 { .. } => self.txid_v1_to_v4(),
-            tx_v5_and_v6! { .. } => self.txid_v5_to_v6(),
+            Transaction::V5 { .. } => self.txid_v5_to_v6(),
+            #[cfg(feature = "tx_v6")]
+            Transaction::V6 { .. } => self.txid_v5_to_v6(),
         }
     }
 

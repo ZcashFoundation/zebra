@@ -20,14 +20,14 @@ use crate::{
     },
 };
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 use crate::{
     orchard::OrchardZSA, orchard_zsa::NoBurn, parameters::TX_V6_VERSION_GROUP_ID,
     serialization::CompactSizeMessage,
 };
 
 #[cfg(feature = "zsa-swap")]
-use crate::{ parameters::TX_SWAP_VERSION_GROUP_ID};
+use crate::parameters::TX_SWAP_VERSION_GROUP_ID;
 
 use super::*;
 use crate::sapling;
@@ -401,7 +401,7 @@ impl ZcashSerialize for orchard::ShieldedData<OrchardVanilla> {
     }
 }
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 #[allow(clippy::unwrap_in_result)]
 impl ZcashSerialize for orchard::ShieldedData<OrchardZSA> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
@@ -529,7 +529,7 @@ impl ZcashDeserialize for Option<orchard::ShieldedData<OrchardVanilla>> {
                 expiry_height: 0,
                 proof,
                 actions,
-                #[cfg(feature = "tx-v6")]
+                #[cfg(feature = "tx_v6")]
                 burn: NoBurn,
             }),
             value_balance,
@@ -541,7 +541,7 @@ impl ZcashDeserialize for Option<orchard::ShieldedData<OrchardVanilla>> {
 // FIXME: Try to avoid duplication with OrchardVanilla version
 // we can't split ShieldedData out of Option<ShieldedData> deserialization,
 // because the counts are read along with the arrays.
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 impl ZcashDeserialize for Option<orchard::ShieldedData<OrchardZSA>> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         // FIXME: Implement deserialization of multiple action groups (under a feature flag)
@@ -865,7 +865,7 @@ impl ZcashSerialize for Transaction {
                 orchard_shielded_data.zcash_serialize(&mut writer)?;
             }
 
-            #[cfg(feature = "tx-v6")]
+            #[cfg(feature = "tx_v6")]
             Transaction::V6 {
                 network_upgrade,
                 lock_time,
@@ -1174,7 +1174,7 @@ impl ZcashDeserialize for Transaction {
                     orchard_shielded_data,
                 })
             }
-            #[cfg(feature = "tx-v6")]
+            #[cfg(feature = "tx_v6")]
             (6, true) => {
                 // Transaction V6 spec:
                 // https://zips.z.cash/zip-0230#transaction-format
@@ -1230,7 +1230,7 @@ impl ZcashDeserialize for Transaction {
                     orchard_shielded_data,
                     orchard_zsa_issue_data,
                 })
-            },
+            }
             #[cfg(feature = "zsa-swap")]
             (8, true) => {
                 // Denoted as `nVersionGroupId` in the spec.
@@ -1284,7 +1284,7 @@ impl ZcashDeserialize for Transaction {
                     orchard_shielded_data,
                     orchard_zsa_issue_data,
                 })
-            },
+            }
             (_, _) => Err(SerializationError::Parse("bad tx header")),
         }
     }

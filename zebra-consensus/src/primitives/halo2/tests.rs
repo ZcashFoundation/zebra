@@ -118,7 +118,7 @@ where
                         .try_into()
                         .unwrap(),
                     // FIXME: use a proper value when implementing V6
-                    #[cfg(feature = "tx-v6")]
+                    #[cfg(feature = "tx_v6")]
                     burn: bundle.burn().as_slice().into(),
                 }),
                 value_balance: note_value.try_into().unwrap(),
@@ -210,7 +210,7 @@ async fn verify_generated_halo2_proofs_vanilla() {
         .await
 }
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 #[tokio::test(flavor = "multi_thread")]
 async fn verify_generated_halo2_proofs_zsa() {
     verify_generated_halo2_proofs::<OrchardZSA>(&zebra_test::vectors::ORCHARD_ZSA_SHIELDED_DATA)
@@ -303,7 +303,7 @@ async fn correctly_err_on_invalid_halo2_proofs_vanilla() {
     .await
 }
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 #[tokio::test(flavor = "multi_thread")]
 async fn correctly_err_on_invalid_halo2_proofs_zsa() {
     correctly_err_on_invalid_halo2_proofs::<OrchardZSA>(

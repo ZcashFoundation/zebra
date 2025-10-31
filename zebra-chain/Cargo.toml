@@ -62,7 +62,7 @@ proptest-impl = [
 bench = ["zebra-test"]
 
 # Support for transaction version 6
-tx-v6 = [
+tx_v6 = [
     "nonempty"
 ]
 

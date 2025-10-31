@@ -17,7 +17,7 @@ pub const TX_V5_VERSION_GROUP_ID: u32 = 0x26A7_270A;
 /// OrchardZSA transactions must use transaction version 6 and this version
 /// group ID.
 // TODO: FIXME: use a proper value!
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 pub const TX_V6_VERSION_GROUP_ID: u32 = 0x7777_7777;
 
 #[cfg(feature = "zsa-swap")]
