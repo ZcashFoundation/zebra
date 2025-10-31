@@ -46,10 +46,6 @@ skip = [
     # ron 0.7.x is required by insta; 0.8.x is required by config
     { name = "ron", version = "=0.7.1" },
 
-    # Keep older toml_datetime required via jsonrpsee-proc-macros -> toml_edit 0.22.x
-    # We can't upgrade jsonrpsee yet to 0.25.x (as it introduces breaking changes)
-    { name = "toml_datetime", version = "=0.6.11" },
-    
     # Multiple windows-sys versions via different dependencies
     # 0.60.2 via clap/anstream; 0.61.0 via dirs-sys
     { name = "windows-sys", version = "=0.60.2" }
@@ -61,6 +57,9 @@ skip = [
 # dependencies starting at the specified crate, up to a certain depth, which is
 # by default infinite
 skip-tree = [
+    # wait for bindgen to update itertools
+    { name = "itertools", version = "0.13" },
+
     # wait for ordered-map to release a dependency fix
     { name = "ordered-map", version = "=0.4.2" },
 
@@ -112,7 +111,8 @@ skip-tree = [
 
     { name = "indexmap", version = "1.9" },
 
-    { name = "hashbrown", version = "0.12" },
+    # TODO: Bump `hashbrown` to 0.16 in ed25519-zebra.
+    { name = "hashbrown", version = "0.15" },
 
     { name = "getrandom", version = "0.2" },
 

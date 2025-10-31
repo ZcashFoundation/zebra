@@ -1,20 +1,19 @@
 //! Tests for ZIP-317 transaction selection for block template production
 
 use zcash_keys::address::Address;
-
 use zcash_transparent::address::TransparentAddress;
+
 use zebra_chain::{block::Height, parameters::Network, transaction, transparent::OutPoint};
 use zebra_node_services::mempool::TransactionDependencies;
+
+use crate::methods::types::get_block_template::MinerParams;
 
 use super::select_mempool_transactions;
 
 #[test]
 fn excludes_tx_with_unselected_dependencies() {
     let network = Network::Mainnet;
-    let next_block_height = Height(1_000_000);
-    let extra_coinbase_data = Vec::new();
     let mut mempool_tx_deps = TransactionDependencies::default();
-    let miner_address = Address::from(TransparentAddress::PublicKeyHash([0x7e; 20]));
 
     let unmined_tx = network
         .unmined_transactions_in_blocks(..)
@@ -29,11 +28,10 @@ fn excludes_tx_with_unselected_dependencies() {
     assert_eq!(
         select_mempool_transactions(
             &network,
-            next_block_height,
-            &miner_address,
+            Height(1_000_000),
+            &MinerParams::from(Address::from(TransparentAddress::PublicKeyHash([0x7e; 20]))),
             vec![unmined_tx],
             mempool_tx_deps,
-            extra_coinbase_data,
         ),
         vec![],
         "should not select any transactions when dependencies are unavailable"
@@ -43,9 +41,7 @@ fn excludes_tx_with_unselected_dependencies() {
 #[test]
 fn includes_tx_with_selected_dependencies() {
     let network = Network::Mainnet;
-    let next_block_height = Height(1_000_000);
     let unmined_txs: Vec<_> = network.unmined_transactions_in_blocks(..).take(3).collect();
-    let miner_address = Address::from(TransparentAddress::PublicKeyHash([0x7e; 20]));
 
     let dependent_tx1 = unmined_txs.first().expect("should have 3 txns");
     let dependent_tx2 = unmined_txs.get(1).expect("should have 3 txns");
@@ -69,15 +65,12 @@ fn includes_tx_with_selected_dependencies() {
         ],
     );
 
-    let extra_coinbase_data = Vec::new();
-
     let selected_txs = select_mempool_transactions(
         &network,
-        next_block_height,
-        &miner_address,
+        Height(1_000_000),
+        &MinerParams::from(Address::from(TransparentAddress::PublicKeyHash([0x7e; 20]))),
         unmined_txs.clone(),
         mempool_tx_deps.clone(),
-        extra_coinbase_data,
     );
 
     assert_eq!(
