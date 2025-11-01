@@ -114,7 +114,8 @@ impl ZebraDb {
             .expect("column family was created when database was created")
     }
 
-    pub(crate) fn history_node_cf(&self) -> HistoryNodeCf {
+    /// Returns a typed handle to the `history_node` column family.
+    pub(crate) fn history_node_cf(&self) -> HistoryNodeCf<'_> {
         HistoryNodeCf::new(&self.db, HISTORY_NODE)
             .expect("column family was created when database was created")
     }

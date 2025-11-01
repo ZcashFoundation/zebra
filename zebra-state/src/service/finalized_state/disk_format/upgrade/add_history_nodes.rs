@@ -11,6 +11,7 @@ use zebra_chain::{
     history_tree::{HistoryTree, NonEmptyHistoryTree},
     parameters::{Network, NetworkUpgrade},
     primitives::zcash_history::HistoryNodeIndex,
+    serialization::BytesInDisplayOrder,
 };
 
 use crate::{service::finalized_state::ZebraDb, HashOrHeight};
