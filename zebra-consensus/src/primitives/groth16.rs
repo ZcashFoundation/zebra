@@ -22,7 +22,6 @@ use zebra_chain::{
         ed25519::{self, VerificationKeyBytes},
         Groth16Proof,
     },
-    sapling::{Output, PerSpendAnchor, Spend},
     sprout::{JoinSplit, Nullifier, RandomSeed},
 };
 
@@ -109,70 +108,6 @@ pub trait Description {
     fn proof(&self) -> &Groth16Proof;
     /// The primary inputs for this proof, encoded as [`jubjub::Fq`] scalars.
     fn primary_inputs(&self) -> Vec<jubjub::Fq>;
-}
-
-impl Description for Spend<PerSpendAnchor> {
-    /// Encodes the primary input for the Sapling Spend proof statement as 7 Bls12_381 base
-    /// field elements, to match [`bellman::groth16::verify_proof`] (the starting fixed element
-    /// `1` is filled in by [`bellman`].
-    ///
-    /// NB: jubjub::Fq is a type alias for bls12_381::Scalar.
-    ///
-    /// <https://zips.z.cash/protocol/protocol.pdf#cctsaplingspend>
-    fn primary_inputs(&self) -> Vec<jubjub::Fq> {
-        let mut inputs = vec![];
-
-        let rk_affine = jubjub::AffinePoint::from_bytes(self.rk.clone().into()).unwrap();
-        inputs.push(rk_affine.get_u());
-        inputs.push(rk_affine.get_v());
-
-        let cv_affine = jubjub::AffinePoint::from_bytes(self.cv.0.to_bytes()).unwrap();
-        inputs.push(cv_affine.get_u());
-        inputs.push(cv_affine.get_v());
-
-        // TODO: V4 only
-        inputs.push(jubjub::Fq::from_bytes(&self.per_spend_anchor.into()).unwrap());
-
-        let nullifier_limbs: [jubjub::Fq; 2] = self.nullifier.into();
-
-        inputs.push(nullifier_limbs[0]);
-        inputs.push(nullifier_limbs[1]);
-
-        inputs
-    }
-
-    fn proof(&self) -> &Groth16Proof {
-        &self.zkproof
-    }
-}
-
-impl Description for Output {
-    /// Encodes the primary input for the Sapling Output proof statement as 5 Bls12_381 base
-    /// field elements, to match [`bellman::groth16::verify_proof`] (the starting fixed element
-    /// `1` is filled in by [`bellman`].
-    ///
-    /// NB: [`jubjub::Fq`] is a type alias for [`bls12_381::Scalar`].
-    ///
-    /// <https://zips.z.cash/protocol/protocol.pdf#cctsaplingoutput>
-    fn primary_inputs(&self) -> Vec<jubjub::Fq> {
-        let mut inputs = vec![];
-
-        let cv_affine = jubjub::AffinePoint::from_bytes(self.cv.0.to_bytes()).unwrap();
-        inputs.push(cv_affine.get_u());
-        inputs.push(cv_affine.get_v());
-
-        let epk_affine = jubjub::AffinePoint::from_bytes(self.ephemeral_key.into()).unwrap();
-        inputs.push(epk_affine.get_u());
-        inputs.push(epk_affine.get_v());
-
-        inputs.push(jubjub::Fq::from_bytes(&self.cm_u.to_bytes()).unwrap());
-
-        inputs
-    }
-
-    fn proof(&self) -> &Groth16Proof {
-        &self.zkproof
-    }
 }
 
 /// Compute the [h_{Sig} hash function][1] which is used in JoinSplit descriptions.

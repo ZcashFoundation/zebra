@@ -20,7 +20,6 @@ use zebra_chain::{
     transaction::{self, SerializedTransaction, Transaction, UnminedTx, VerifiedUnminedTx},
     transparent::Script,
 };
-use zebra_consensus::groth16::Description;
 use zebra_script::Sigops;
 use zebra_state::IntoDisk;
 
@@ -733,7 +732,7 @@ impl TransactionObject {
                         anchor,
                         nullifier,
                         rk,
-                        proof: spend.proof().0,
+                        proof: spend.zkproof.0,
                         spend_auth_sig,
                     }
                 })
@@ -754,7 +753,7 @@ impl TransactionObject {
                         ephemeral_key,
                         enc_ciphertext,
                         out_ciphertext,
-                        proof: output.proof().0,
+                        proof: output.zkproof.0,
                     }
                 })
                 .collect(),
