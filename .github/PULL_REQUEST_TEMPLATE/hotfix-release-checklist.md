@@ -29,10 +29,8 @@ The release level for a hotfix should always follow semantic versioning as a `pa
 
 ```sh
 # Update everything except for alpha crates and zebrad:
-cargo release version --verbose --execute --allow-branch '*' --workspace --exclude zebrad --exclude zebra-scan --exclude zebra-grpc beta
+cargo release version --verbose --execute --allow-branch '*' --workspace --exclude zebrad beta
 # Due to a bug in cargo-release, we need to pass exact versions for alpha crates:
-cargo release version --verbose --execute --allow-branch '*' --package zebra-scan 0.1.0-alpha.4
-cargo release version --verbose --execute --allow-branch '*' --package zebra-grpc 0.1.0-alpha.2
 # Update zebrad:
 cargo release version --verbose --execute --allow-branch '*' --package zebrad patch
 # Continue with the release process:
@@ -67,7 +65,7 @@ cargo release commit --verbose --execute --allow-branch '*'
 
 - [ ] Wait until the Docker binaries have been built on the hotfix release branch, and the quick tests have passed:
     - [ ] [ci-tests.yml](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-tests.yml)
-- [ ] Wait until the [pre-release deployment machines have successfully launched](https://github.com/ZcashFoundation/zebra/actions/workflows/cd-deploy-nodes-gcp.yml?query=event%3Arelease)
+- [ ] Wait until the [pre-release deployment machines have successfully launched](https://github.com/ZcashFoundation/zebra/actions/workflows/zfnd-deploy-nodes-gcp.yml?query=event%3Arelease)
 
 ## Publish Release
 

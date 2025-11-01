@@ -13,7 +13,7 @@ Tier 1 platforms can be thought of as "guaranteed to work". The Zebra project
 builds official binary releases for each tier 1 platform, and automated testing
 ensures that each tier 1 platform builds and passes tests after each change.
 
-For the full requirements, see [Tier 1 platform policy](platform-tier-policy.md#tier-1-platform-policy) in the Platform Tier Policy.
+For the full requirements, see [Tier 1 platform policy](target-tier-policies.md#tier-1-platform-policy) in the Platform Tier Policy.
 
 | platform | os | notes | rust | artifacts
 | -------|-------|-------|-------|-------
@@ -28,7 +28,7 @@ not guaranteed to produce a working build, and official builds are not available
 but tier 2 platforms often work to quite a good degree and patches are always
 welcome!
 
-For the full requirements, see [Tier 2 platform policy](platform-tier-policy.md#tier-2-platform-policy) in the Platform Tier Policy.
+For the full requirements, see [Tier 2 platform policy](target-tier-policies.md#tier-2-platform-policy) in the Platform Tier Policy.
 
 | platform | os | notes | rust | artifacts
 | -------|-------|-------|-------|-------
@@ -43,7 +43,7 @@ Tier 3 platforms are those which the Zebra codebase has support for, but which
 the Zebra project does not build or test automatically, so they may or may not
 work. Official builds are not available.
 
-For the full requirements, see [Tier 3 platform policy](platform-tier-policy.md#tier-3-platform-policy) in the Platform Tier Policy.
+For the full requirements, see [Tier 3 platform policy](target-tier-policies.md#tier-3-platform-policy) in the Platform Tier Policy.
 
 | platform | os | notes | rust | artifacts
 | -------|-------|-------|-------|-------

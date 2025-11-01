@@ -26,12 +26,11 @@ use zebra_chain::{
     chain_tip::mock::MockChainTip,
     orchard,
     parameters::{
-        subsidy::POST_NU6_FUNDING_STREAMS_TESTNET,
+        subsidy::FUNDING_STREAMS_TESTNET,
         testnet::{self, ConfiguredActivationHeights, Parameters},
         Network::{self, Mainnet},
         NetworkKind, NetworkUpgrade,
     },
-    sapling,
     serialization::{DateTime32, ZcashDeserializeInto},
     subtree::NoteCommitmentSubtreeData,
     transaction::Transaction,
@@ -76,7 +75,7 @@ async fn test_rpc_response_data() {
         .with_network_name("NU6Testnet")
         .with_activation_heights(ConfiguredActivationHeights {
             blossom: Some(584_000),
-            nu6: Some(POST_NU6_FUNDING_STREAMS_TESTNET.height_range().start.0),
+            nu6: Some(FUNDING_STREAMS_TESTNET[1].height_range().start.0),
             ..Default::default()
         })
         .to_network();
@@ -111,17 +110,18 @@ async fn test_z_get_treestate() {
         .with_activation_heights(ConfiguredActivationHeights {
             sapling: Some(SAPLING_ACTIVATION_HEIGHT),
             // We need to set the NU5 activation height higher than the height of the last block for
-            // this test because we currently have only the first 10 blocks from the public Testnet,
+            // this test because we currently have only the first 11 blocks from the public Testnet,
             // none of which are compatible with NU5 due to the following consensus rule:
             //
             // > [NU5 onward] hashBlockCommitments MUST be set to the value of
             // > hashBlockCommitments for this block, as specified in [ZIP-244].
             //
-            // Activating NU5 at a lower height and using the 10 blocks causes a failure in
+            // Activating NU5 at a lower height and using the 11 blocks causes a failure in
             // [`zebra_state::populated_state`].
-            nu5: Some(10),
+            nu5: Some(11),
             ..Default::default()
         })
+        .clear_funding_streams()
         .with_network_name("custom_testnet")
         .to_network();
 
@@ -291,7 +291,7 @@ async fn test_rpc_response_data_for_network(network: &Network) {
 
     // `getaddressbalance`
     let get_address_balance = rpc
-        .get_address_balance(AddressStrings {
+        .get_address_balance(GetAddressBalanceRequest {
             addresses: addresses.clone(),
         })
         .await
@@ -423,6 +423,29 @@ async fn test_rpc_response_data_for_network(network: &Network) {
         .get_best_block_hash()
         .expect("We should have a GetBlockHash struct");
     snapshot_rpc_getbestblockhash(get_best_block_hash, &settings);
+
+    // `getmempoolinfo`
+    //
+    // - this RPC method returns mempool stats like size and bytes
+    // - we simulate a call to the mempool with the `QueueStats` request,
+    //   and respond with mock stats to verify RPC output formatting.
+    let mempool_req = mempool
+        .expect_request_that(|request| matches!(request, mempool::Request::QueueStats))
+        .map(|responder| {
+            responder.respond(mempool::Response::QueueStats {
+                size: 67,
+                bytes: 32_500,
+                usage: 41_000,
+                fully_notified: None,
+            });
+        });
+
+    let (rsp, _) = futures::join!(rpc.get_mempool_info(), mempool_req);
+    if let Ok(inner) = rsp {
+        insta::assert_json_snapshot!("get_mempool_info", inner);
+    } else {
+        panic!("getmempoolinfo RPC must return a valid response");
+    }
 
     // `getrawmempool`
     //
@@ -571,10 +594,13 @@ async fn test_rpc_response_data_for_network(network: &Network) {
 
     // `getaddressutxos`
     let get_address_utxos = rpc
-        .get_address_utxos(AddressStrings { addresses })
+        .get_address_utxos(GetAddressUtxosRequest::new(addresses, false))
         .await
         .expect("We should have a vector of strings");
-    snapshot_rpc_getaddressutxos(get_address_utxos, &settings);
+    let GetAddressUtxosResponse::Utxos(addresses) = get_address_utxos else {
+        panic!("We should have a GetAddressUtxosResponse::ChainInfoFalse struct");
+    };
+    snapshot_rpc_getaddressutxos(addresses, &settings);
 }
 
 async fn test_mocked_rpc_response_data_for_network(network: &Network) {
@@ -609,7 +635,7 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
 
     // Mock the data for the response.
     let mut subtrees = BTreeMap::new();
-    let subtree_root = sapling::tree::Node::default();
+    let subtree_root = sapling_crypto::Node::from_bytes([0; 32]).unwrap();
 
     for i in 0..2u16 {
         let subtree = NoteCommitmentSubtreeData::new(Height(i.into()), subtree_root);
@@ -866,6 +892,14 @@ fn snapshot_rpc_getblocksubsidy(
     });
 }
 
+/// Snapshot `getnetworkinfo` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_getnetworkinfo(
+    get_network_info: GetNetworkInfoResponse,
+    settings: &insta::Settings,
+) {
+    settings.bind(|| insta::assert_json_snapshot!("get_network_info", get_network_info));
+}
+
 /// Snapshot `getpeerinfo` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getpeerinfo(get_peer_info: Vec<PeerInfo>, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_peer_info", get_peer_info));
@@ -1086,6 +1120,13 @@ pub async fn test_mining_rpcs<State, ReadState>(
         .await
         .expect("We should have a success response");
     snapshot_rpc_getblocksubsidy("excessive_height", get_block_subsidy, &settings);
+
+    // `getnetworkinfo`
+    let get_network_info = rpc
+        .get_network_info()
+        .await
+        .expect("We should have a success response");
+    snapshot_rpc_getnetworkinfo(get_network_info, &settings);
 
     // `getpeerinfo`
     let get_peer_info = rpc

@@ -2,7 +2,12 @@
 
 use derive_getters::Getters;
 use derive_new::new;
-use zebra_chain::primitives::Address;
+use jsonrpsee::core::RpcResult;
+
+use zebra_chain::{
+    parameters::{Network, NetworkKind},
+    primitives::Address,
+};
 
 /// `z_validateaddress` response
 #[derive(
@@ -68,5 +73,51 @@ impl From<&Address> for ZValidateAddressType {
             Address::Sapling { .. } => Self::Sapling,
             Address::Unified { .. } => Self::Unified,
         }
+    }
+}
+
+/// Checks if a zcash address of type P2PKH, P2SH, TEX, SAPLING or UNIFIED is valid.
+/// Returns information about the given address if valid.
+pub fn z_validate_address(
+    network: Network,
+    raw_address: String,
+) -> RpcResult<ZValidateAddressResponse> {
+    let Ok(address) = raw_address.parse::<zcash_address::ZcashAddress>() else {
+        return Ok(ZValidateAddressResponse::invalid());
+    };
+
+    let address = match address.convert::<Address>() {
+        Ok(address) => address,
+        Err(err) => {
+            tracing::debug!(?err, "conversion error");
+            return Ok(ZValidateAddressResponse::invalid());
+        }
+    };
+
+    let is_transparent = matches!(address, Address::Transparent(_));
+
+    // Collapse regtest to testnet. Only applied if address is transparent (P2PKH or P2SH).
+    let expected_kind = match (is_transparent, network.kind()) {
+        (true, NetworkKind::Regtest) => NetworkKind::Testnet,
+        _ => network.kind(),
+    };
+
+    if address.network() == expected_kind {
+        Ok(ZValidateAddressResponse {
+            is_valid: true,
+            address: Some(raw_address),
+            address_type: Some(ZValidateAddressType::from(&address)),
+            is_mine: Some(false),
+        })
+    } else {
+        tracing::info!(
+            ?network,
+            address_network = ?address.network(),
+            "invalid address network in z_validateaddress RPC: address is for {:?} but Zebra is on {:?}",
+            address.network(),
+            network
+        );
+
+        Ok(ZValidateAddressResponse::invalid())
     }
 }

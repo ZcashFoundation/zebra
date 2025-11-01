@@ -1,6 +1,6 @@
 [package]
 name = "zebra-state"
-version = "1.0.0-beta.46"
+version = "3.0.0"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "State contextual verification and storage code for Zebra"
 license = "MIT OR Apache-2.0"
@@ -32,9 +32,6 @@ proptest-impl = [
     "zebra-test",
     "zebra-chain/proptest-impl"
 ]
-
-# Experimental shielded blockchain scanning
-shielded-scan = []
 
 # Experimental elasticsearch support
 elasticsearch = [
@@ -69,30 +66,32 @@ tempfile = { workspace = true }
 thiserror = { workspace = true }
 
 rayon = { workspace = true }
-tokio = { workspace = true, features = ["rt-multi-thread", "sync", "tracing"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "sync", "tracing", "macros", "time"] }
 tower = { workspace = true, features = ["buffer", "util"] }
 tracing = { workspace = true }
+
+sapling-crypto = { workspace = true }
 
 # elasticsearch specific dependencies.
 # Security: avoid default dependency on openssl
 elasticsearch = { workspace = true, features = ["rustls-tls"], optional = true }
 serde_json = { workspace = true, optional = true }
 
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.46", features = ["async-error"] }
+zebra-node-services = { path = "../zebra-node-services", version = "2.0.0" }
+zebra-chain = { path = "../zebra-chain", version = "3.0.0", features = ["async-error"] }
 
 # prod feature progress-bar
 howudoin = { workspace = true, optional = true }
 
 # test feature proptest-impl
-zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.46", optional = true }
+zebra-test = { path = "../zebra-test/", version = "2.0.0", optional = true }
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
+derive-getters.workspace = true
+derive-new.workspace = true
 
 [dev-dependencies]
 color-eyre = { workspace = true }
-# This is a transitive dependency via color-eyre.
-# Enable a feature that makes tinyvec compile much faster.
-tinyvec = { workspace = true, features = ["rustc_1_55"] }
 
 once_cell = { workspace = true }
 spandoc = { workspace = true }
@@ -109,5 +108,8 @@ jubjub = { workspace = true }
 
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.46", features = ["proptest-impl"] }
-zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.46" }
+zebra-chain = { path = "../zebra-chain", version = "3.0.0", features = ["proptest-impl"] }
+zebra-test = { path = "../zebra-test/", version = "2.0.0" }
+
+[lints]
+workspace = true

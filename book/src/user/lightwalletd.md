@@ -64,7 +64,7 @@ enable_cookie_auth = false
 ```
 
 **WARNING:** This config allows multiple Zebra instances to share the same RPC port.
-See the [RPC config documentation](https://docs.rs/zebra_rpc/latest/zebra_rpc/config/struct.Config.html) for details.
+See the [RPC config documentation](https://docs.rs/zebra-rpc/latest/zebra_rpc/config/rpc/struct.Config.html) for details.
 
 ## Sync Zebra
 
@@ -160,7 +160,7 @@ To run all the Zebra `lightwalletd` tests:
 2. install `protoc`
 3. build Zebra with `--features=lightwalletd-grpc-tests`
 
-Please refer to [acceptance](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/tests/acceptance.rs) tests documentation in the `Lightwalletd tests` section.
+Please refer to [acceptance](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/tests/acceptance.rs) tests documentation in the `Lightwalletd tests` section. When running tests that use a cached lightwalletd state, the test harness will use a platform default cache directory (for example, `~/.cache/lwd` on Linux) unless overridden via the `LWD_CACHE_DIR` environment variable.
 
 ## Connect a wallet to lightwalletd
 [#connect-wallet-to-lightwalletd]: (#connect-wallet-to-lightwalletd)

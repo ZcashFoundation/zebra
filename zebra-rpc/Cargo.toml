@@ -1,6 +1,6 @@
 [package]
 name = "zebra-rpc"
-version = "1.0.0-beta.46"
+version = "3.0.0"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "A Zebra JSON Remote Procedure Call (JSON-RPC) interface"
 license = "MIT OR Apache-2.0"
@@ -18,6 +18,9 @@ categories = [
     "encoding",
     "network-programming",
 ]
+
+# Exclude proto files so crates.io consumers don't need protoc.
+exclude = ["*.proto"]
 
 [features]
 
@@ -66,6 +69,7 @@ tower = { workspace = true }
 tonic = { workspace = true }
 tonic-reflection = { workspace = true }
 prost = { workspace = true }
+tonic-prost = { workspace = true }
 tokio-stream = { workspace = true }
 
 tracing = { workspace = true }
@@ -80,28 +84,31 @@ zcash_address = { workspace = true }
 zcash_keys = { workspace = true }
 zcash_primitives = { workspace = true, features = ["transparent-inputs"] }
 zcash_protocol = { workspace = true }
+zcash_script = { workspace = true }
 zcash_transparent = { workspace = true }
 
 # For the `gethistorynode` RPC method
 zcash_history.workspace = true
 bytemuck = {version = "1.22", features = ["derive"] }
+sapling-crypto = { workspace = true }
 
 # Test-only feature proptest-impl
 proptest = { workspace = true, optional = true }
 
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.46", features = [
+zebra-chain = { path = "../zebra-chain", version = "3.0.0", features = [
     "json-conversion",
 ] }
-zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.46" }
-zebra-network = { path = "../zebra-network", version = "1.0.0-beta.46" }
-zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.46", features = [
+zebra-consensus = { path = "../zebra-consensus", version = "3.0.0" }
+zebra-network = { path = "../zebra-network", version = "2.0.0" }
+zebra-node-services = { path = "../zebra-node-services", version = "2.0.0", features = [
     "rpc-client",
 ] }
-zebra-script = { path = "../zebra-script", version = "1.0.0-beta.46" }
-zebra-state = { path = "../zebra-state", version = "1.0.0-beta.46" }
+zebra-script = { path = "../zebra-script", version = "3.0.0" }
+zebra-state = { path = "../zebra-state", version = "3.0.0" }
 
 [build-dependencies]
-tonic-build = { workspace = true }
+tonic-prost-build = { workspace = true }
+which = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true, features = ["redactions", "json", "ron"] }
@@ -111,17 +118,20 @@ proptest = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.46", features = [
+zebra-chain = { path = "../zebra-chain", version = "3.0.0", features = [
     "proptest-impl",
 ] }
-zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.46", features = [
+zebra-consensus = { path = "../zebra-consensus", version = "3.0.0", features = [
     "proptest-impl",
 ] }
-zebra-network = { path = "../zebra-network", version = "1.0.0-beta.46", features = [
+zebra-network = { path = "../zebra-network", version = "2.0.0", features = [
     "proptest-impl",
 ] }
-zebra-state = { path = "../zebra-state", version = "1.0.0-beta.46", features = [
+zebra-state = { path = "../zebra-state", version = "3.0.0", features = [
     "proptest-impl",
 ] }
 
-zebra-test = { path = "../zebra-test", version = "1.0.0-beta.46" }
+zebra-test = { path = "../zebra-test", version = "2.0.0" }
+
+[lints]
+workspace = true

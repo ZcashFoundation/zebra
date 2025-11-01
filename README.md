@@ -2,28 +2,29 @@
 
 ---
 
-[![Integration Tests](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-tests.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-tests.yml)
-[![CI OSes](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-unit-tests-os.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-unit-tests-os.yml)
-[![Continuous Delivery](https://github.com/ZcashFoundation/zebra/actions/workflows/cd-deploy-nodes-gcp.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/cd-deploy-nodes-gcp.yml)
+[![Unit Tests](https://github.com/ZcashFoundation/zebra/actions/workflows/tests-unit.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/tests-unit.yml)
+[![Lint](https://github.com/ZcashFoundation/zebra/actions/workflows/lint.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/lint.yml)
+[![Integration Tests (GCP)](https://github.com/ZcashFoundation/zebra/actions/workflows/zfnd-ci-integration-tests-gcp.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/zfnd-ci-integration-tests-gcp.yml)
 [![codecov](https://codecov.io/gh/ZcashFoundation/zebra/branch/main/graph/badge.svg)](https://codecov.io/gh/ZcashFoundation/zebra)
-[![Build docs](https://github.com/ZcashFoundation/zebra/actions/workflows/docs-deploy-firebase.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/docs-deploy-firebase.yml)
+[![Build docs](https://github.com/ZcashFoundation/zebra/actions/workflows/book.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/book.yml)
+[![Deploy Nodes (GCP)](https://github.com/ZcashFoundation/zebra/actions/workflows/zfnd-deploy-nodes-gcp.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/zfnd-deploy-nodes-gcp.yml)
 ![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)
 
 - [Getting Started](#getting-started)
   - [Docker](#docker)
-  - [Manual Build](#manual-build)
+  - [Manual Install](#manual-install)
 - [CI/CD Architecture](#cicd-architecture)
 - [Documentation](#documentation)
 - [User support](#user-support)
 - [Security](#security)
 - [License](#license)
 
-[Zebra](https://zebra.zfnd.org/) is a Zcash full-node written in Rust.
+[Zebra](https://zebra.zfnd.org/) is a Zcash full node written in Rust.
 
 ## Getting Started
 
 You can run Zebra using our [Docker
-image](https://hub.docker.com/r/zfnd/zebra/tags) or you can build it manually.
+image](https://hub.docker.com/r/zfnd/zebra/tags) or you can install it manually.
 
 ### Docker
 
@@ -35,42 +36,33 @@ docker run zfnd/zebra:latest
 
 For more information, read our [Docker documentation](https://zebra.zfnd.org/user/docker.html).
 
-### Manual Build
+### Manual Install
 
 Building Zebra requires [Rust](https://www.rust-lang.org/tools/install),
 [libclang](https://clang.llvm.org/doxygen/group__CINDEX.html), and a C++
-compiler. Below are quick summaries for installing the dependencies.
+compiler. Below are quick summaries for installing these dependencies.
 
-[//]: # "The empty line in the `summary` tag below is required for correct Markdown rendering."
+[//]: # "The empty lines in the `summary` tag below are required for correct Markdown rendering."
 <details><summary>
 
-#### General instructions for installing dependencies
+#### General Instructions for Installing Dependencies
 
 </summary>
 
 1. Install [`cargo` and `rustc`](https://www.rust-lang.org/tools/install).
-
 2. Install Zebra's build dependencies:
-
-   - **libclang** is a library that might have different names depending on your
-     package manager. Typical names are `libclang`, `libclang-dev`, `llvm`, or
-     `llvm-dev`.
-   - **clang** or another C++ compiler: `g++` (all platforms) or `Xcode` (macOS).
-   - **[`protoc`](https://grpc.io/docs/protoc-installation/)**
-
-> [!NOTE]
-> Zebra uses the `--experimental_allow_proto3_optional` flag with `protoc`
-> during compilation. This flag was introduced in [Protocol Buffers
-> v3.12.0](https://github.com/protocolbuffers/protobuf/releases/tag/v3.12.0)
-> released in May 16, 2020, so make sure you're not using a version of `protoc`
-> older than 3.12.
+   - **libclang**, which is a library that comes under various names, typically
+     `libclang`, `libclang-dev`, `llvm`, or `llvm-dev`;
+   - **clang** or another C++ compiler (`g++,` which is for all platforms or
+     `Xcode`, which is for macOS);
+   - **[`protoc`](https://grpc.io/docs/protoc-installation/)**.
 
 </details>
 
-[//]: # "The empty line in the `summary` tag below is required for correct Markdown rendering."
+[//]: # "The empty lines in the `summary` tag below are required for correct Markdown rendering."
 <details><summary>
 
-#### Dependencies on Arch
+#### Dependencies on Arch Linux
 
 </summary>
 
@@ -78,9 +70,8 @@ compiler. Below are quick summaries for installing the dependencies.
 sudo pacman -S rust clang protobuf
 ```
 
-Note that the package `clang` includes `libclang` as well as the C++ compiler.
-
-Recently the GCC version on Arch has broken a build script in the `rocksdb` dependency. A workaround is:
+Note that the package `clang` includes `libclang` as well. The GCC version on
+Arch Linux has a broken build script in a `rocksdb` dependency. A workaround is:
 
 ```sh
 export CXXFLAGS="$CXXFLAGS -include cstdint"
@@ -88,10 +79,16 @@ export CXXFLAGS="$CXXFLAGS -include cstdint"
 
 </details>
 
-Once you have the dependencies in place, you can build and install Zebra with:
+Once you have the dependencies in place, you can install Zebra with:
 
 ```sh
 cargo install --locked zebrad
+```
+
+Alternatively, you can install it from GitHub:
+
+```sh
+cargo install --git https://github.com/ZcashFoundation/zebra --tag v2.5.0 zebrad
 ```
 
 You can start Zebra by running
@@ -100,9 +97,10 @@ You can start Zebra by running
 zebrad start
 ```
 
-Refer to the [Installing Zebra](https://zebra.zfnd.org/user/install.html) and
-[Running Zebra](https://zebra.zfnd.org/user/run.html) sections in the book for
-enabling optional features, detailed configuration and further details.
+Refer to the [Building and Installing
+Zebra](https://zebra.zfnd.org/user/install.html) and [Running
+Zebra](https://zebra.zfnd.org/user/run.html) sections in the book for enabling
+optional features, detailed configuration and further details.
 
 ## CI/CD Architecture
 
@@ -127,6 +125,9 @@ The Zcash Foundation maintains the following resources documenting Zebra:
   - [General Introduction](https://zebra.zfnd.org/index.html),
   - [User Documentation](https://zebra.zfnd.org/user.html),
   - [Developer Documentation](https://zebra.zfnd.org/dev.html).
+
+  - User guides of note:
+    - [Zebra Health Endpoints](https://zebra.zfnd.org/user/health.html) — liveness/readiness checks for Kubernetes and load balancers
 
 - The [documentation of the public
   APIs](https://docs.rs/zebrad/latest/zebrad/#zebra-crates) for the latest

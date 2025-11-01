@@ -27,7 +27,7 @@ To find the latest checkpoints on the `main` branch:
 2. From the list on the left, go to the `Integration tests` and find the `Run checkpoints-mainnet test`, then click in the
    `Result of checkpoints-mainnet` step.
 3. Scroll down until you see the list of checkpoints.
-4. Add those checkpoints to the end of `zebra-consensus/src/checkpoint/main-checkpoints.txt`
+4. Add those checkpoints to the end of `zebra-chain/src/parameters/checkpoint/main-checkpoints.txt`
 5. Repeat steps 2 to 4 for `Generate checkpoints testnet`
 6. Open a pull request at https://github.com/ZcashFoundation/zebra/pulls
 
@@ -54,8 +54,8 @@ cargo install --locked --features zebra-checkpoints --git https://github.com/Zca
 
 You can update the checkpoints using these commands:
 ```sh
-zebra-checkpoints --last-checkpoint $(tail -1 zebra-consensus/src/checkpoint/main-checkpoints.txt | cut -d" " -f1) | tee --append zebra-consensus/src/checkpoint/main-checkpoints.txt &
-zebra-checkpoints --last-checkpoint $(tail -1 zebra-consensus/src/checkpoint/test-checkpoints.txt | cut -d" " -f1) -- -testnet | tee --append zebra-consensus/src/checkpoint/test-checkpoints.txt &
+zebra-checkpoints --last-checkpoint $(tail -1 zebra-chain/src/parameters/checkpoint/main-checkpoints.txt | cut -d" " -f1) | tee --append zebra-chain/src/parameters/checkpoint/main-checkpoints.txt &
+zebra-checkpoints --last-checkpoint $(tail -1 zebra-chain/src/parameters/checkpoint/test-checkpoints.txt | cut -d" " -f1) -- -testnet | tee --append zebra-chain/src/parameters/checkpoint/test-checkpoints.txt &
 wait
 ```
 
@@ -74,14 +74,14 @@ You can see all the `zebra-checkpoints` options using:
 target/release/zebra-checkpoints --help
 ```
 
-For more details about checkpoint lists, see the [`zebra-checkpoints` README.](https://github.com/ZcashFoundation/zebra/tree/main/zebra-consensus/src/checkpoint/README.md)
+For more details about checkpoint lists, see the [`zebra-checkpoints` README.](https://github.com/ZcashFoundation/zebra/tree/main/zebra-chain/src/parameters/checkpoint/README.md)
 
 #### Checkpoint Generation for Testnet
 
 To update the testnet checkpoints, `zebra-checkpoints` needs to connect to a testnet node.
 
 To launch a testnet node, you can either:
-- start `zebrad` [with a `zebrad.toml` with `network.network` set to `Testnet`](https://docs.rs/zebra-network/latest/zebra_network/struct.Config.html#structfield.network), or
+- start `zebrad` [with a `zebrad.toml` with `network.network` set to `Testnet`](https://docs.rs/zebra-network/latest/zebra_network/config/struct.Config.html#structfield.network), or
 - run `zcashd -testnet`.
 
 Then use the commands above to regenerate the checkpoints.
@@ -189,50 +189,6 @@ You can override the binaries the script calls using these environmental variabl
 - `$DIFF`
 - `$JQ`
 
-## Scanning Results Reader
-
-A utility for displaying Zebra's scanning results.
-
-### How It Works
-
-1. Opens Zebra's scanning storage and reads the results containing scanning keys
-   and TXIDs.
-2. Fetches the transactions by their TXIDs from Zebra using the
-   `getrawtransaction` RPC.
-3. Decrypts the tx outputs using the corresponding scanning key.
-4. Prints the memos in the outputs.
-
-### How to Try It
-
-#### Scan the Block Chain with Zebra
-
-1. Follow the [Build & Install](https://zebra.zfnd.org/user/shielded-scan.html#build--install)
-   and [Configuration](https://zebra.zfnd.org/user/shielded-scan.html#configuration)
-   instructions in the Zebra Book.
-
-2. Make sure Zebra runs on Mainnet and listens on the default RPC port by having
-   the following in the config file:
-
-    ``` toml
-    [network]
-    network = 'Mainnet'
-
-    [rpc]
-    listen_addr = "127.0.0.1:8232"
-    ```
-
-3. Run Zebra with your config file. You can follow the
-   [Scanning the Block Chain](https://zebra.zfnd.org/user/shielded-scan.html#scanning-the-block-chain)
-   section in the book for more details.
-
-#### Run the Reader
-
-4. To print the memos in outputs decryptable by the provided scanning keys, run
-   the reader while also running Zebra. For example:
-
-   ``` bash
-   cargo run --release --features shielded-scan --bin scanning-results-reader
-   ```
 
 ## OpenAPI generator
 

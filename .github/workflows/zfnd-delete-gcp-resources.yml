@@ -1,0 +1,169 @@
+# This workflow is designed to delete old Google Cloud Platform (GCP) resources to save on costs.
+#
+# 1. Deletes specific instances in GCP older than a defined number of days.
+# 2. Deletes instance templates older than a set number of days.
+# 3. Deletes older disks not currently in use, with certain ones prefixed by commit hashes or "zebrad-".
+# 4. Deletes cache images from GCP, retaining a specified number of the latest images for certain types like zebrad checkpoint cache, zebrad tip cache, and lightwalletd + zebrad tip cache.
+# 5. Deletes unused artifacts from Google Artifact Registry older than a defined number of hours while retaining the latest few.
+#
+# It uses the gcloud CLI for most of its operations and also leverages specific GitHub Actions like the gcr-cleaner for deleting old images from the Google Artifact Registry.
+# The workflow is scheduled to run daily at 0700 UTC.
+name: Delete GCP resources
+
+on:
+  # Run daily, when most devs aren't working
+  # 0700 UTC is after AEST working hours but before ET working hours
+  schedule:
+    - cron: 0 7 * * *
+  workflow_dispatch:
+
+env:
+  # Delete all resources created before $DELETE_INSTANCE_DAYS days ago.
+  # We keep this short to reduce CPU, RAM, and storage costs.
+  DELETE_INSTANCE_DAYS: 3
+  # Delete all other resources created before $DELETE_AGE_DAYS days ago.
+  # We keep this short to reduce storage costs.
+  DELETE_AGE_DAYS: 2
+  # But keep the latest $KEEP_LATEST_IMAGE_COUNT images of each type.
+  # We keep this small to reduce storage costs.
+  KEEP_LATEST_IMAGE_COUNT: 2
+  # Delete all artifacts in registry created before $DELETE_IMAGE_HOURS hours ago.
+  # We keep this long enough for PRs that are still on the same commit can re-run with the same image.
+  DELETE_IMAGE_HOURS: 504h # 21 days
+
+permissions:
+  contents: read
+
+jobs:
+  delete-resources:
+    name: Delete old GCP resources
+    if: github.repository_owner == 'ZcashFoundation'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      matrix:
+        environment: [dev, prod]
+    environment: ${{ matrix.environment }}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v4.2.2
+        with:
+          persist-credentials: false
+
+      # Setup gcloud CLI
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 #v3.0.0
+        with:
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db #v3.0.1
+
+      # Deletes all mainnet and testnet instances older than $DELETE_INSTANCE_DAYS days.
+      #
+      # We only delete instances that end in 7 or more hex characters,
+      # to avoid deleting managed instance groups and manually created instances.
+      #
+      # ${INSTANCE_AND_ZONE} expands to:
+      # <instance-name> --zone=<zone-name>
+      # so it can't be shell-quoted.
+      - name: Delete old instances
+        run: |
+          ./.github/workflows/scripts/gcp-delete-old-instances.sh
+      # Deletes all the instance templates older than $DELETE_AGE_DAYS days.
+      - name: Delete old instance templates
+        run: |
+          ./.github/workflows/scripts/gcp-delete-old-templates.sh
+
+      # Deletes all mainnet and testnet disks older than $DELETE_AGE_DAYS days.
+      #
+      # Disks that are attached to an instance template can't be deleted, so it is safe to try to delete all disks here.
+      #
+      # ${DISK_AND_LOCATION} expands to:
+      # <disk-name> --[zone|region]=<location-name>
+      # so it can't be shell-quoted.
+      - name: Delete old disks
+        run: |
+          ./.github/workflows/scripts/gcp-delete-old-disks.sh
+
+      # Deletes mainnet and testnet cache images older than $DELETE_AGE_DAYS days.
+      #
+      # Keeps all images younger than $DELETE_AGE_DAYS.
+      # Also keeps $KEEP_LATEST_IMAGE_COUNT older images of each type, for each network:
+      # - zebrad checkpoint cache
+      # - zebrad tip cache
+      # - lightwalletd + zebrad tip cache
+      #
+      # TODO:
+      # - refactor out repeated shell script code
+      - name: Delete old cache images
+        run: |
+          ./.github/workflows/scripts/gcp-delete-old-cache-images.sh
+
+  # We're using a generic approach here, which allows multiple registries to be included,
+  # even those not related to GCP. Enough reason to create a separate job.
+  #
+  # The same artifacts are used for both mainnet and testnet.
+  clean-registries:
+    name: Delete unused artifacts in registry
+    if: github.repository_owner == 'ZcashFoundation'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      matrix:
+        environment: [dev, prod]
+    environment: ${{ matrix.environment }}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v4.2.2
+        with:
+          persist-credentials: false
+
+      # Setup gcloud CLI
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 #v3.0.0
+        with:
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
+          token_format: access_token
+
+      - name: Login to Google Artifact Registry
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef #v3.6.0
+        with:
+          registry: us-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
+
+      # Deletes all images older than $DELETE_IMAGE_HOURS days.
+      - uses: docker://us-docker.pkg.dev/gcr-cleaner/gcr-cleaner/gcr-cleaner-cli@sha256:333a4d0617b19a86b55f9aaae10e49294b4469590166f3b4a1c4f7bbd20eb6c2
+        # Refer to the official documentation to understand available arguments:
+        # https://github.com/GoogleCloudPlatform/gcr-cleaner
+        with:
+          args: >-
+            -repo=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/zebrad-test
+            -grace=${{ env.DELETE_IMAGE_HOURS }}
+            -keep=${{ env.KEEP_LATEST_IMAGE_COUNT }}
+
+  delete-resources-success:
+    name: Delete GCP resources success
+    runs-on: ubuntu-latest
+    # Only run when the owner-specific cleanup jobs were eligible to execute
+    if: >-
+      ${{
+        always() &&
+        github.repository_owner == 'ZcashFoundation'
+      }}
+    needs:
+      - delete-resources
+      - clean-registries
+    timeout-minutes: 1
+    steps:
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe #v1.2.2
+        with:
+          jobs: ${{ toJSON(needs) }}

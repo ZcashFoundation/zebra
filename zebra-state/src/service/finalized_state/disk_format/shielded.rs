@@ -162,11 +162,11 @@ impl FromDisk for orchard::tree::NoteCommitmentTree {
     }
 }
 
-impl IntoDisk for sapling::tree::Node {
+impl IntoDisk for sapling_crypto::Node {
     type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
-        self.as_ref().to_vec()
+        self.to_bytes().to_vec()
     }
 }
 
@@ -186,9 +186,15 @@ impl<Root: IntoDisk<Bytes = Vec<u8>>> IntoDisk for NoteCommitmentSubtreeData<Roo
     }
 }
 
-impl FromDisk for sapling::tree::Node {
+impl FromDisk for sapling_crypto::Node {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        Self::try_from(bytes.as_ref()).expect("trusted data should deserialize successfully")
+        Self::from_bytes(
+            bytes
+                .as_ref()
+                .try_into()
+                .expect("trusted data should be 32 bytes"),
+        )
+        .expect("trusted data should deserialize successfully")
     }
 }
 

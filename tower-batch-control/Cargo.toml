@@ -1,6 +1,6 @@
 [package]
 name = "tower-batch-control"
-version = "0.2.41-beta.22"
+version = "1.0.0"
 authors = ["Zcash Foundation <zebra@zfnd.org>", "Tower Maintainers <team@tower-rs.com>"]
 description = "Tower middleware for batch request processing"
 # # Legal
@@ -34,19 +34,15 @@ tracing-futures = { workspace = true }
 
 [dev-dependencies]
 color-eyre = { workspace = true }
-# This is a transitive dependency via color-eyre.
-# Enable a feature that makes tinyvec compile much faster.
-tinyvec = { workspace = true, features = ["rustc_1_55"] }
-
 ed25519-zebra = { workspace = true }
 rand = { workspace = true }
 
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 tokio-test = { workspace = true }
-tower-fallback = { path = "../tower-fallback/", version = "0.2.41-beta.22" }
+tower-fallback = { path = "../tower-fallback/", version = "0.2.41" }
 tower-test = { workspace = true }
 
-zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.46" }
+zebra-test = { path = "../zebra-test/", version = "2.0.0" }
 
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tokio_unstable)'] }
+[lints]
+workspace = true

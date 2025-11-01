@@ -245,7 +245,7 @@ fn checked_add_transaction_weighted_random(
     selected_txs: &mut Vec<SelectedMempoolTx>,
     mempool_tx_deps: &TransactionDependencies,
     remaining_block_bytes: &mut usize,
-    remaining_block_sigops: &mut u64,
+    remaining_block_sigops: &mut u32,
     remaining_block_unpaid_actions: &mut u32,
 ) -> Option<WeightedIndex<f32>> {
     // > Pick one of those transactions at random with probability in direct proportion
@@ -334,7 +334,7 @@ trait TryUpdateBlockLimits {
     fn try_update_block_template_limits(
         &self,
         remaining_block_bytes: &mut usize,
-        remaining_block_sigops: &mut u64,
+        remaining_block_sigops: &mut u32,
         remaining_block_unpaid_actions: &mut u32,
     ) -> bool;
 }
@@ -343,7 +343,7 @@ impl TryUpdateBlockLimits for VerifiedUnminedTx {
     fn try_update_block_template_limits(
         &self,
         remaining_block_bytes: &mut usize,
-        remaining_block_sigops: &mut u64,
+        remaining_block_sigops: &mut u32,
         remaining_block_unpaid_actions: &mut u32,
     ) -> bool {
         // > If the block template with this transaction included
@@ -354,11 +354,11 @@ impl TryUpdateBlockLimits for VerifiedUnminedTx {
         // Unpaid actions are always zero for transactions that pay the conventional fee,
         // so the unpaid action check always passes for those transactions.
         if self.transaction.size <= *remaining_block_bytes
-            && self.legacy_sigop_count <= *remaining_block_sigops
+            && self.sigops <= *remaining_block_sigops
             && self.unpaid_actions <= *remaining_block_unpaid_actions
         {
             *remaining_block_bytes -= self.transaction.size;
-            *remaining_block_sigops -= self.legacy_sigop_count;
+            *remaining_block_sigops -= self.sigops;
 
             // Unpaid actions are always zero for transactions that pay the conventional fee,
             // so this limit always remains the same after they are added.

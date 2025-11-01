@@ -63,7 +63,14 @@ impl<'a> RpcServiceT<'a> for FixRpcResponseMiddleware {
 
                     return MethodResponse::error(
                         id,
-                        ErrorObject::borrowed(new_error_code, "Invalid params", None),
+                        ErrorObject::borrowed(
+                            new_error_code,
+                            json.get("error")
+                                .and_then(|v| v.get("message"))
+                                .and_then(|m| m.as_str())
+                                .unwrap_or("Invalid params"),
+                            None,
+                        ),
                     );
                 }
             }

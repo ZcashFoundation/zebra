@@ -29,7 +29,7 @@ docker run \
 You can also use `docker compose`, which we recommend. First get the repo:
 
 ```shell
-git clone --depth 1 --branch v2.3.0 https://github.com/ZcashFoundation/zebra.git
+git clone --depth 1 --branch v2.5.0 https://github.com/ZcashFoundation/zebra.git
 cd zebra
 ```
 
@@ -58,7 +58,6 @@ docker build \
 
 See [Building Zebra](https://github.com/ZcashFoundation/zebra#manual-build) for more information.
 
-
 ### Building with Custom Features
 
 Zebra supports various features that can be enabled during build time using the `FEATURES` build argument:
@@ -80,28 +79,26 @@ All available Cargo features are listed at
 
 ## Configuring Zebra
 
-To configure Zebra using Docker, you have a few options, processed in this order:
+Zebra uses [config-rs](https://crates.io/crates/config) to layer configuration from defaults, an optional TOML file, and `ZEBRA_`-prefixed environment variables. When running with Docker, configure Zebra using any of the following (later items override earlier ones):
 
-1. **Provide a specific config file path:** Set the `ZEBRA_CONF_PATH` environment variable to point to your config file within the container.
-2. **Use the default config file:** By default, the `docker-compose.yml` file mounts `./default-zebra-config.toml` to `/home/zebra/.config/zebrad.toml` using the `configs:` mapping. Zebra will use this file if `ZEBRA_CONF_PATH` is not set. To use environment variables instead, you must **comment out** the `configs:` mapping in `docker/docker-compose.yml`.
-3. **Generate config from environment variables:** If neither of the above methods provides a config file (i.e., `ZEBRA_CONF_PATH` is unset *and* the `configs:` mapping in `docker-compose.yml` is commented out), the container's entrypoint script will *automatically generate* a default configuration file at `/home/zebra/.config/zebrad.toml`. This generated file uses specific environment variables (like `NETWORK`, `ZEBRA_RPC_PORT`, `ENABLE_COOKIE_AUTH`, `MINER_ADDRESS`, etc.) to define the settings. Using the `docker/.env` file is the primary way to set these variables for this auto-generation mode.
+1. **Provide a specific config file path:** Set the `CONFIG_FILE_PATH` environment variable to point to your config file within the container. The entrypoint will pass it to `zebrad` via `--config`.
+2. **Use the default config file:** Mount a config file to `/home/zebra/.config/zebrad.toml` (for example using the `configs:` mapping in `docker-compose.yml`). This file is loaded if `CONFIG_FILE_PATH` is not set.
+3. **Use environment variables:** Set `ZEBRA_`-prefixed environment variables to override settings from the config file. Examples: `ZEBRA_NETWORK__NETWORK`, `ZEBRA_RPC__LISTEN_ADDR`, `ZEBRA_RPC__ENABLE_COOKIE_AUTH`, `ZEBRA_RPC__COOKIE_DIR`, `ZEBRA_METRICS__ENDPOINT_ADDR`, `ZEBRA_MINING__MINER_ADDRESS`.
 
-You can see if your config works as intended by looking at Zebra's logs.
-
-Note that if you provide a configuration file using methods 1 or 2, environment variables from `docker/.env` will **not** override the settings within that file. The environment variables are primarily used for the auto-generation scenario (method 3).
+You can verify your configuration by inspecting Zebra's logs at startup.
 
 ### RPC
 
-Zebra's RPC server is disabled by default. To enable it, you need to define the RPC settings in Zebra's configuration. You can achieve this using one of the configuration methods described above:
+Zebra's RPC server is disabled by default. Enable and configure it via the TOML configuration file, or configuration environment variables:
 
-* **Using a config file (methods 1 or 2):** Add or uncomment the `[rpc]` section in your `zebrad.toml` file (like the one provided in `docker/default-zebra-config.toml`). Ensure you set the `listen_addr` (e.g., `"0.0.0.0:8232"` for Mainnet).
-* **Using environment variables (method 3):** Set the `ZEBRA_RPC_PORT` environment variable (e.g., in `docker/.env`). This tells the entrypoint script to include an enabled `[rpc]` section listening on `0.0.0.0:<ZEBRA_RPC_PORT>` in the auto-generated configuration file.
+* **Using a config file:** Add or uncomment the `[rpc]` section in your `zebrad.toml`. Set `listen_addr` (e.g., `"0.0.0.0:8232"` for Mainnet).
+* **Using environment variables:** Set `ZEBRA_RPC__LISTEN_ADDR` (e.g., `0.0.0.0:8232`). To disable cookie auth, set `ZEBRA_RPC__ENABLE_COOKIE_AUTH=false`. To change the cookie directory, set `ZEBRA_RPC__COOKIE_DIR=/path/inside/container`.
 
 **Cookie Authentication:**
 
 By default, Zebra uses cookie-based authentication for RPC requests (`enable_cookie_auth = true`). When enabled, Zebra generates a unique, random cookie file required for client authentication.
 
-* **Cookie Location:** The entrypoint script configures Zebra to store this file at `/home/zebra/.cache/zebra/.cookie` inside the container.
+* **Cookie Location:** By default, the cookie is stored at `<cache_dir>/.cookie`, where `<cache_dir>` is Zebra's cache directory (for the `zebra` user in the container this is typically `/home/zebra/.cache/zebra/.cookie`).
 * **Viewing the Cookie:** If the container is running and RPC is enabled with authentication, you can view the cookie content using:
 
     ```bash
@@ -110,7 +107,7 @@ By default, Zebra uses cookie-based authentication for RPC requests (`enable_coo
 
     (Replace `<container_name>` with your container's name, typically `zebra` if using the default `docker-compose.yml`). Your RPC client will need this value.
 * **Disabling Authentication:** If you need to disable cookie authentication (e.g., for compatibility with tools like `lightwalletd`):
-  * If using a **config file** (methods 1 or 2), set `enable_cookie_auth = false` within the `[rpc]` section:
+  * If using a **config file**, set `enable_cookie_auth = false` within the `[rpc]` section:
 
     ```toml
     [rpc]
@@ -118,9 +115,42 @@ By default, Zebra uses cookie-based authentication for RPC requests (`enable_coo
     enable_cookie_auth = false
     ```
 
-  * If using **environment variables** for auto-generation (method 3), set `ENABLE_COOKIE_AUTH=false` in your `docker/.env` file.
+  * If using **environment variables**, set `ZEBRA_RPC__ENABLE_COOKIE_AUTH=false`.
 
 Remember that Zebra only generates the cookie file if the RPC server is enabled *and* `enable_cookie_auth` is set to `true` (or omitted, as `true` is the default).
+
+Environment variable examples for health endpoints:
+
+* `ZEBRA_HEALTH__LISTEN_ADDR=0.0.0.0:8080`
+* `ZEBRA_HEALTH__MIN_CONNECTED_PEERS=1`
+* `ZEBRA_HEALTH__READY_MAX_BLOCKS_BEHIND=2`
+* `ZEBRA_HEALTH__ENFORCE_ON_TEST_NETWORKS=false`
+
+### Health Endpoints
+
+Zebra can expose two lightweight HTTP endpoints for liveness and readiness:
+
+* `GET /healthy`: returns `200 OK` when the process is up and has at least the configured number of recently live peers; otherwise `503`.
+* `GET /ready`: returns `200 OK` when the node is near the tip and within the configured lag threshold; otherwise `503`.
+
+Enable the endpoints by adding a `[health]` section to your config (see the default Docker config at `docker/default-zebra-config.toml`):
+
+```toml
+[health]
+listen_addr = "0.0.0.0:8080"
+min_connected_peers = 1
+ready_max_blocks_behind = 2
+enforce_on_test_networks = false
+```
+
+If you want to expose the endpoints to the host, add a port mapping to your compose file:
+
+```yaml
+ports:
+  - "8080:8080"   # Health endpoints (/healthy, /ready)
+```
+
+For Kubernetes, configure liveness and readiness probes against `/healthy` and `/ready` respectively. See the [Health Endpoints](./health.md) page for details.
 
 ## Examples
 
@@ -137,11 +167,9 @@ docker compose -f docker/docker-compose.lwd.yml up
 ```
 
 Note that Docker will run Zebra with the RPC server enabled and the cookie
-authentication mechanism disabled since Lightwalletd doesn't support it. Instead
-of configuring Zebra via the recommended config file or `docker/.env` file, we
-configured the RPC server by setting environment variables directly in the
-`docker/docker-compose.lwd.yml` file. This takes advantage of the entrypoint
-script's auto-generation feature (method 3 described above).
+authentication mechanism disabled when running `docker compose -f docker/docker-compose.lwd.yml up`, since Lightwalletd doesn't support cookie authentication. In this
+example, the RPC server is configured by setting `ZEBRA_` environment variables
+directly in `docker/docker-compose.lwd.yml` (or an accompanying `.env` file).
 
 ### Running Zebra with Prometheus and Grafana
 

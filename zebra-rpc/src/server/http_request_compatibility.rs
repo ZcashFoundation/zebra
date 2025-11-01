@@ -19,7 +19,7 @@ use tower::Service;
 
 use super::cookie::Cookie;
 
-use base64::{engine::general_purpose::URL_SAFE, Engine as _};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 
 /// HTTP [`HttpRequestMiddleware`] with compatibility workarounds.
 ///
@@ -71,7 +71,7 @@ impl<S> HttpRequestMiddleware<S> {
                 .get(header::AUTHORIZATION)
                 .and_then(|auth_header| auth_header.to_str().ok())
                 .and_then(|auth_header| auth_header.split_whitespace().nth(1))
-                .and_then(|encoded| URL_SAFE.decode(encoded).ok())
+                .and_then(|encoded| STANDARD.decode(encoded).ok())
                 .and_then(|decoded| String::from_utf8(decoded).ok())
                 .and_then(|request_cookie| request_cookie.split(':').nth(1).map(String::from))
                 .is_some_and(|passwd| internal_cookie.authenticate(passwd))

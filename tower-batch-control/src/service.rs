@@ -19,6 +19,8 @@ use tokio_util::sync::PollSemaphore;
 use tower::Service;
 use tracing::{info_span, Instrument};
 
+use crate::RequestWeight;
+
 use super::{
     future::ResponseFuture,
     message::Message,
@@ -34,7 +36,7 @@ pub const QUEUE_BATCH_LIMIT: usize = 64;
 /// Allows batch processing of requests.
 ///
 /// See the crate documentation for more details.
-pub struct Batch<T, Request>
+pub struct Batch<T, Request: RequestWeight>
 where
     T: Service<BatchControl<Request>>,
 {
@@ -72,7 +74,7 @@ where
     worker_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
-impl<T, Request> fmt::Debug for Batch<T, Request>
+impl<T, Request: RequestWeight> fmt::Debug for Batch<T, Request>
 where
     T: Service<BatchControl<Request>>,
 {
@@ -88,7 +90,7 @@ where
     }
 }
 
-impl<T, Request> Batch<T, Request>
+impl<T, Request: RequestWeight> Batch<T, Request>
 where
     T: Service<BatchControl<Request>>,
     T::Future: Send + 'static,
@@ -99,7 +101,7 @@ where
     /// The wrapper is responsible for telling the inner service when to flush a
     /// batch of requests. These parameters control this policy:
     ///
-    /// * `max_items_in_batch` gives the maximum number of items per batch.
+    /// * `max_items_weight_in_batch` gives the maximum item weight per batch.
     /// * `max_batches` is an upper bound on the number of batches in the queue,
     ///   and the number of concurrently executing batches.
     ///   If this is `None`, we use the current number of [`rayon`] threads.
@@ -110,7 +112,7 @@ where
     /// that this method must be called while on the Tokio runtime.
     pub fn new(
         service: T,
-        max_items_in_batch: usize,
+        max_items_weight_in_batch: usize,
         max_batches: impl Into<Option<usize>>,
         max_latency: std::time::Duration,
     ) -> Self
@@ -121,7 +123,8 @@ where
         T::Error: Send + Sync,
         Request: Send + 'static,
     {
-        let (mut batch, worker) = Self::pair(service, max_items_in_batch, max_batches, max_latency);
+        let (mut batch, worker) =
+            Self::pair(service, max_items_weight_in_batch, max_batches, max_latency);
 
         let span = info_span!("batch worker", kind = std::any::type_name::<T>());
 
@@ -154,7 +157,7 @@ where
     /// `Batch` and the background `Worker` that you can then spawn.
     pub fn pair(
         service: T,
-        max_items_in_batch: usize,
+        max_items_weight_in_batch: usize,
         max_batches: impl Into<Option<usize>>,
         max_latency: std::time::Duration,
     ) -> (Self, Worker<T, Request>)
@@ -166,7 +169,7 @@ where
         let (tx, rx) = mpsc::unbounded_channel();
 
         // Clamp config to sensible values.
-        let max_items_in_batch = max(max_items_in_batch, 1);
+        let max_items_weight_in_batch = max(max_items_weight_in_batch, 1);
         let max_batches = max_batches
             .into()
             .unwrap_or_else(rayon::current_num_threads);
@@ -179,13 +182,16 @@ where
         // We choose a bound that allows callers to check readiness for one batch per rayon CPU thread.
         // This helps keep all CPUs filled with work: there is one batch executing, and another ready to go.
         // Often there is only one verifier running, when that happens we want it to take all the cores.
-        let semaphore = Semaphore::new(max_items_in_batch * max_batches_in_queue);
+        //
+        // Requests with a request weight greater than 1 won't typically exhaust the number of available
+        // permits, but will still be bounded to the maximum possible number of concurrent requests.
+        let semaphore = Semaphore::new(max_items_weight_in_batch * max_batches_in_queue);
         let semaphore = PollSemaphore::new(Arc::new(semaphore));
 
         let (error_handle, worker) = Worker::new(
             service,
             rx,
-            max_items_in_batch,
+            max_items_weight_in_batch,
             max_batches,
             max_latency,
             semaphore.clone(),
@@ -219,7 +225,7 @@ where
     }
 }
 
-impl<T, Request> Service<Request> for Batch<T, Request>
+impl<T, Request: RequestWeight> Service<Request> for Batch<T, Request>
 where
     T: Service<BatchControl<Request>>,
     T::Future: Send + 'static,
@@ -296,7 +302,7 @@ where
     }
 
     fn call(&mut self, request: Request) -> Self::Future {
-        tracing::trace!("sending request to buffer worker");
+        tracing::trace!("sending request to batch worker");
         let _permit = self
             .permit
             .take()
@@ -323,7 +329,7 @@ where
     }
 }
 
-impl<T, Request> Clone for Batch<T, Request>
+impl<T, Request: RequestWeight> Clone for Batch<T, Request>
 where
     T: Service<BatchControl<Request>>,
 {

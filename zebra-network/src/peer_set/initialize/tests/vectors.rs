@@ -8,10 +8,10 @@
 //! ## Failures due to Configured Network Interfaces
 //!
 //! If your test environment does not have any IPv6 interfaces configured, skip IPv6 tests
-//! by setting the `ZEBRA_SKIP_IPV6_TESTS` environmental variable.
+//! by setting the `SKIP_IPV6_TESTS` environmental variable.
 //!
 //! If it does not have any IPv4 interfaces, or IPv4 localhost is not on `127.0.0.1`,
-//! skip all the network tests by setting the `ZEBRA_SKIP_NETWORK_TESTS` environmental variable.
+//! skip all the network tests by setting the `SKIP_NETWORK_TESTS` environmental variable.
 
 use std::{
     net::{Ipv4Addr, SocketAddr},
@@ -1382,7 +1382,7 @@ async fn add_initial_peers_deadlock() {
     // still some extra peers left.
     const PEER_COUNT: usize = 200;
     const PEERSET_INITIAL_TARGET_SIZE: usize = 2;
-    const TIME_LIMIT: Duration = Duration::from_secs(10);
+    const TIME_LIMIT: Duration = Duration::from_secs(20);
 
     let _init_guard = zebra_test::init();
 
@@ -1424,7 +1424,9 @@ async fn add_initial_peers_deadlock() {
         "Test user agent".to_string(),
     );
 
-    assert!(tokio::time::timeout(TIME_LIMIT, init_future).await.is_ok());
+    tokio::time::timeout(TIME_LIMIT, init_future)
+        .await
+        .expect("should not timeout");
 }
 
 /// Open a local listener on `listen_addr` for `network`.

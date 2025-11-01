@@ -13,7 +13,7 @@ use zebra_chain::{
 use crate::application::release_version;
 
 /// The estimated height that this release will be published.
-pub const ESTIMATED_RELEASE_HEIGHT: u32 = 2_914_600;
+pub const ESTIMATED_RELEASE_HEIGHT: u32 = 3_101_600;
 
 /// The maximum number of days after `ESTIMATED_RELEASE_HEIGHT` where a Zebra server will run
 /// without halting.
@@ -22,8 +22,9 @@ pub const ESTIMATED_RELEASE_HEIGHT: u32 = 2_914_600;
 ///
 /// - Zebra will exit with a panic if the current tip height is bigger than the
 ///   `ESTIMATED_RELEASE_HEIGHT` plus this number of days.
-/// - Currently set to 16 weeks.
-pub const EOS_PANIC_AFTER: u32 = 112;
+/// - Currently set to 5 weeks for release candidate.
+/// - TODO: Revert to 15 weeks (105 days) for stable release.
+pub const EOS_PANIC_AFTER: u32 = 35;
 
 /// The number of days before the end of support where Zebra will display warnings.
 pub const EOS_WARN_AFTER: u32 = EOS_PANIC_AFTER - 14;

@@ -14,10 +14,11 @@ use derive_getters::Getters;
 use derive_new::new;
 use jsonrpsee::core::RpcResult;
 use jsonrpsee_types::{ErrorCode, ErrorObject};
-use tokio::sync::watch::{self, error::SendError};
+use tokio::sync::mpsc::{self, error::TrySendError};
 use tower::{Service, ServiceExt};
 use zcash_keys::address::Address;
 use zcash_protocol::PoolType;
+use zcash_script::script::Evaluable;
 
 use zebra_chain::{
     amount::{self, Amount, NegativeOrZero, NonNegative},
@@ -38,6 +39,10 @@ use zebra_chain::{
     },
     work::difficulty::{CompactDifficulty, ExpandedDifficulty},
 };
+// Required for trait method `.bytes_in_display_order()` used indirectly in Debug impl
+#[allow(unused_imports)]
+use zebra_chain::serialization::BytesInDisplayOrder;
+
 use zebra_consensus::{funding_stream_address, MAX_BLOCK_SIGOPS};
 use zebra_node_services::mempool::{self, TransactionDependencies};
 use zebra_state::GetBlockTemplateChainInfo;
@@ -96,7 +101,7 @@ pub struct BlockTemplateResponse {
 
     /// The block commitment for the new block's header.
     ///
-    /// Same as [`DefaultRoots.block_commitments_hash`], see that field for details.
+    /// Same as [`DefaultRoots::block_commitments_hash`], see that field for details.
     #[serde(rename = "blockcommitmentshash")]
     #[serde(with = "hex")]
     #[getter(copy)]
@@ -104,7 +109,7 @@ pub struct BlockTemplateResponse {
 
     /// Legacy backwards-compatibility header root field.
     ///
-    /// Same as [`DefaultRoots.block_commitments_hash`], see that field for details.
+    /// Same as [`DefaultRoots::block_commitments_hash`], see that field for details.
     #[serde(rename = "lightclientroothash")]
     #[serde(with = "hex")]
     #[getter(copy)]
@@ -112,13 +117,13 @@ pub struct BlockTemplateResponse {
 
     /// Legacy backwards-compatibility header root field.
     ///
-    /// Same as [`DefaultRoots.block_commitments_hash`], see that field for details.
+    /// Same as [`DefaultRoots::block_commitments_hash`], see that field for details.
     #[serde(rename = "finalsaplingroothash")]
     #[serde(with = "hex")]
     #[getter(copy)]
     pub(crate) final_sapling_root_hash: ChainHistoryBlockTxAuthCommitmentHash,
 
-    /// The block header roots for [`GetBlockTemplate.transactions`].
+    /// The block header roots for the transactions in the block template.
     ///
     /// If the transactions in the block template are modified, these roots must be recalculated
     /// [according to the specification](https://zcash.github.io/rpc/getblocktemplate.html).
@@ -159,7 +164,7 @@ pub struct BlockTemplateResponse {
 
     /// Max legacy signature operations in the block.
     #[serde(rename = "sigoplimit")]
-    pub(crate) sigop_limit: u64,
+    pub(crate) sigop_limit: u32,
 
     /// Max block size in bytes
     #[serde(rename = "sizelimit")]
@@ -324,7 +329,8 @@ impl BlockTemplateResponse {
             &mempool_txs,
             chain_tip_and_local_time.chain_history_root,
             extra_coinbase_data,
-        );
+        )
+        .expect("coinbase should be valid under the given parameters");
 
         // Convert difficulty
         let target = chain_tip_and_local_time
@@ -442,8 +448,12 @@ where
 
     /// A channel to send successful block submissions to the block gossip task,
     /// so they can be advertised to peers.
-    mined_block_sender: watch::Sender<(block::Hash, block::Height)>,
+    mined_block_sender: mpsc::Sender<(block::Hash, block::Height)>,
 }
+
+// A limit on the configured extra coinbase data, regardless of the current block height.
+// This is different from the consensus rule, which limits the total height + data.
+const EXTRA_COINBASE_DATA_LIMIT: usize = MAX_COINBASE_DATA_LEN - MAX_COINBASE_HEIGHT_DATA_LEN;
 
 impl<BlockVerifierRouter, SyncStatus> GetBlockTemplateHandler<BlockVerifierRouter, SyncStatus>
 where
@@ -465,23 +475,18 @@ where
         conf: config::mining::Config,
         block_verifier_router: BlockVerifierRouter,
         sync_status: SyncStatus,
-        mined_block_sender: Option<watch::Sender<(block::Hash, block::Height)>>,
+        mined_block_sender: Option<mpsc::Sender<(block::Hash, block::Height)>>,
     ) -> Self {
         // Check that the configured miner address is valid.
-        let miner_address = conf.miner_address.map(|zaddr| {
-            if zaddr.can_receive_as(PoolType::Transparent) {
-                Address::try_from_zcash_address(net, zaddr)
+        let miner_address = conf.miner_address.map(|addr| {
+            if addr.can_receive_as(PoolType::Transparent) {
+                Address::try_from_zcash_address(net, addr)
                     .expect("miner_address must be a valid Zcash address")
             } else {
                 // TODO: Remove this panic once we support mining to shielded addresses.
                 panic!("miner_address can't receive transparent funds")
             }
         });
-
-        // A limit on the configured extra coinbase data, regardless of the current block height.
-        // This is different from the consensus rule, which limits the total height + data.
-        const EXTRA_COINBASE_DATA_LIMIT: usize =
-            MAX_COINBASE_DATA_LEN - MAX_COINBASE_HEIGHT_DATA_LEN;
 
         // Hex-decode to bytes if possible, otherwise UTF-8 encode to bytes.
         let extra_coinbase_data = conf
@@ -518,6 +523,21 @@ where
         self.extra_coinbase_data.clone()
     }
 
+    /// Changes the extra coinbase data.
+    ///
+    /// # Panics
+    ///
+    /// If `extra_coinbase_data` exceeds [`EXTRA_COINBASE_DATA_LIMIT`].
+    pub fn set_extra_coinbase_data(&mut self, extra_coinbase_data: Vec<u8>) {
+        assert!(
+            extra_coinbase_data.len() <= EXTRA_COINBASE_DATA_LIMIT,
+            "extra coinbase data is {} bytes, but Zebra's limit is {}.",
+            extra_coinbase_data.len(),
+            EXTRA_COINBASE_DATA_LIMIT,
+        );
+        self.extra_coinbase_data = extra_coinbase_data;
+    }
+
     /// Returns the sync status.
     pub fn sync_status(&self) -> SyncStatus {
         self.sync_status.clone()
@@ -533,8 +553,8 @@ where
         &self,
         block: block::Hash,
         height: block::Height,
-    ) -> Result<(), SendError<(block::Hash, block::Height)>> {
-        self.mined_block_sender.send((block, height))
+    ) -> Result<(), TrySendError<(block::Hash, block::Height)>> {
+        self.mined_block_sender.try_send((block, height))
     }
 }
 
@@ -790,12 +810,20 @@ pub fn generate_coinbase_and_roots(
     miner_address: &Address,
     mempool_txs: &[VerifiedUnminedTx],
     chain_history_root: Option<ChainHistoryMmrRootHash>,
-    extra_coinbase_data: Vec<u8>,
-) -> (TransactionTemplate<NegativeOrZero>, DefaultRoots) {
+    miner_data: Vec<u8>,
+) -> Result<(TransactionTemplate<NegativeOrZero>, DefaultRoots), &'static str> {
     let miner_fee = calculate_miner_fee(mempool_txs);
     let outputs = standard_coinbase_outputs(network, height, miner_address, miner_fee);
-    let coinbase =
-        Transaction::new_v5_coinbase(network, height, outputs, extra_coinbase_data).into();
+    let current_nu = NetworkUpgrade::current(network, height);
+
+    let tx = match current_nu {
+        NetworkUpgrade::Canopy => Transaction::new_v4_coinbase(height, outputs, miner_data),
+        NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 | NetworkUpgrade::Nu6_1 | NetworkUpgrade::Nu7 => {
+            Transaction::new_v5_coinbase(network, height, outputs, miner_data)
+        }
+        _ => Err("Zebra does not support generating pre-Canopy coinbase transactions")?,
+    }
+    .into();
 
     // Calculate block default roots
     //
@@ -803,14 +831,14 @@ pub fn generate_coinbase_and_roots(
     let chain_history_root = chain_history_root
         .or_else(|| {
             (NetworkUpgrade::Heartwood.activation_height(network) == Some(height))
-                .then_some([0; 32].into())
+                .then_some(block::CHAIN_HISTORY_ACTIVATION_RESERVED.into())
         })
         .expect("history tree can't be empty");
 
-    (
-        TransactionTemplate::from_coinbase(&coinbase, miner_fee),
-        calculate_default_root_hashes(&coinbase, mempool_txs, chain_history_root),
-    )
+    Ok((
+        TransactionTemplate::from_coinbase(&tx, miner_fee),
+        calculate_default_root_hashes(current_nu, &tx, mempool_txs, chain_history_root),
+    ))
 }
 
 /// Returns the total miner fee for `mempool_txs`.
@@ -859,24 +887,27 @@ pub fn standard_coinbase_outputs(
         miner_reward.expect("reward calculations are valid for reasonable chain heights");
 
     // Collect all the funding streams and convert them to outputs.
-    let funding_streams_outputs: Vec<(Amount<NonNegative>, &transparent::Address)> =
-        funding_streams
-            .into_iter()
-            .map(|(_receiver, (amount, address))| (amount, address))
-            .collect();
+    let funding_streams_outputs: Vec<(transparent::Address, Amount<NonNegative>)> = funding_streams
+        .into_iter()
+        .map(|(_receiver, (amount, address))| (address.clone(), amount))
+        .collect();
+    let one_time_lockbox_disbursements = network.lockbox_disbursements(height);
 
     // Combine the miner reward and funding streams into a list of coinbase amounts and addresses.
     let mut coinbase_outputs: Vec<(Amount<NonNegative>, transparent::Script)> =
         funding_streams_outputs
             .iter()
-            .map(|(amount, address)| (*amount, address.script()))
+            .chain(&one_time_lockbox_disbursements)
+            .map(|(address, amount)| (*amount, address.script()))
             .collect();
 
-    let script = miner_address
-        .to_transparent_address()
-        .expect("address must have a transparent component")
-        .script()
-        .into();
+    let script = transparent::Script::new(
+        &miner_address
+            .to_transparent_address()
+            .expect("address must have a transparent component")
+            .script()
+            .to_bytes(),
+    );
 
     // The HashMap returns funding streams in an arbitrary order,
     // but Zebra's snapshot tests expect the same order every time.
@@ -897,6 +928,7 @@ pub fn standard_coinbase_outputs(
 ///
 /// This function runs expensive cryptographic operations.
 pub fn calculate_default_root_hashes(
+    current_nu: NetworkUpgrade,
     coinbase_txn: &UnminedTx,
     mempool_txs: &[VerifiedUnminedTx],
     chain_history_root: ChainHistoryMmrRootHash,
@@ -905,8 +937,10 @@ pub fn calculate_default_root_hashes(
     let merkle_root = block_txs().cloned().collect();
     let auth_data_root = block_txs().cloned().collect();
 
-    let block_commitments_hash = if chain_history_root == [0; 32].into() {
-        [0; 32].into()
+    let block_commitments_hash = if current_nu == NetworkUpgrade::Heartwood
+        && chain_history_root == block::CHAIN_HISTORY_ACTIVATION_RESERVED.into()
+    {
+        block::CHAIN_HISTORY_ACTIVATION_RESERVED.into()
     } else {
         ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
             &chain_history_root,

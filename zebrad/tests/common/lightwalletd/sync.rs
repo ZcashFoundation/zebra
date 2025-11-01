@@ -214,6 +214,22 @@ pub fn are_zebrad_and_lightwalletd_tips_synced(
             .as_u64()
             .expect("unexpected block height: doesn't fit in u64");
 
+        if lightwalletd_tip_height != zebrad_tip_height {
+            tracing::info!(
+                lightwalletd_tip_height,
+                zebrad_tip_height,
+                zebra_rpc_address = ?zebra_rpc_address,
+                "lightwalletd tip is behind Zebra tip, waiting for sync",
+            );
+        } else {
+            tracing::debug!(
+                lightwalletd_tip_height,
+                zebrad_tip_height,
+                zebra_rpc_address = ?zebra_rpc_address,
+                "lightwalletd tip matches Zebra tip",
+            );
+        }
+
         Ok(lightwalletd_tip_height == zebrad_tip_height)
     })
 }

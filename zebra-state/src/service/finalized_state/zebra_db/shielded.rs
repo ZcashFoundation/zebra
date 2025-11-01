@@ -273,13 +273,13 @@ impl ZebraDb {
     pub(in super::super) fn sapling_subtree_by_index(
         &self,
         index: impl Into<NoteCommitmentSubtreeIndex> + Copy,
-    ) -> Option<NoteCommitmentSubtree<sapling::tree::Node>> {
+    ) -> Option<NoteCommitmentSubtree<sapling_crypto::Node>> {
         let sapling_subtrees = self
             .db
             .cf_handle("sapling_note_commitment_subtree")
             .unwrap();
 
-        let subtree_data: NoteCommitmentSubtreeData<sapling::tree::Node> =
+        let subtree_data: NoteCommitmentSubtreeData<sapling_crypto::Node> =
             self.db.zs_get(&sapling_subtrees, &index.into())?;
 
         Some(subtree_data.with_index(index))
@@ -290,7 +290,7 @@ impl ZebraDb {
     pub fn sapling_subtree_list_by_index_range(
         &self,
         range: impl std::ops::RangeBounds<NoteCommitmentSubtreeIndex>,
-    ) -> BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<sapling::tree::Node>> {
+    ) -> BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<sapling_crypto::Node>> {
         let sapling_subtrees = self
             .db
             .cf_handle("sapling_note_commitment_subtree")
@@ -303,7 +303,7 @@ impl ZebraDb {
 
     /// Get the sapling note commitment subtress for the finalized tip.
     #[allow(clippy::unwrap_in_result)]
-    fn sapling_subtree_for_tip(&self) -> Option<NoteCommitmentSubtree<sapling::tree::Node>> {
+    fn sapling_subtree_for_tip(&self) -> Option<NoteCommitmentSubtree<sapling_crypto::Node>> {
         let sapling_subtrees = self
             .db
             .cf_handle("sapling_note_commitment_subtree")
@@ -311,7 +311,7 @@ impl ZebraDb {
 
         let (index, subtree_data): (
             NoteCommitmentSubtreeIndex,
-            NoteCommitmentSubtreeData<sapling::tree::Node>,
+            NoteCommitmentSubtreeData<sapling_crypto::Node>,
         ) = self.db.zs_last_key_value(&sapling_subtrees)?;
 
         let tip_height = self.finalized_tip_height()?;
@@ -691,7 +691,7 @@ impl DiskWriteBatch {
     pub fn insert_sapling_subtree(
         &mut self,
         zebra_db: &ZebraDb,
-        subtree: &NoteCommitmentSubtree<sapling::tree::Node>,
+        subtree: &NoteCommitmentSubtree<sapling_crypto::Node>,
     ) {
         let sapling_subtree_cf = zebra_db
             .db

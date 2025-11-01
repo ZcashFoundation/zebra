@@ -179,7 +179,7 @@ pub struct ChainInner {
     pub(crate) sapling_anchors_by_height: BTreeMap<block::Height, sapling::tree::Root>,
     /// A list of Sapling subtrees completed in the non-finalized state
     pub(crate) sapling_subtrees:
-        BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<sapling::tree::Node>>,
+        BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<sapling_crypto::Node>>,
 
     /// The Orchard anchors created by `blocks`.
     ///
@@ -753,7 +753,7 @@ impl Chain {
     pub fn sapling_subtree(
         &self,
         hash_or_height: HashOrHeight,
-    ) -> Option<NoteCommitmentSubtree<sapling::tree::Node>> {
+    ) -> Option<NoteCommitmentSubtree<sapling_crypto::Node>> {
         let height =
             hash_or_height.height_or_else(|hash| self.height_by_hash.get(&hash).cloned())?;
 
@@ -774,7 +774,7 @@ impl Chain {
     pub fn sapling_subtrees_in_range(
         &self,
         range: impl std::ops::RangeBounds<NoteCommitmentSubtreeIndex>,
-    ) -> BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<sapling::tree::Node>> {
+    ) -> BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<sapling_crypto::Node>> {
         self.sapling_subtrees
             .range(range)
             .map(|(index, subtree)| (*index, *subtree))
@@ -782,7 +782,7 @@ impl Chain {
     }
 
     /// Returns the Sapling [`NoteCommitmentSubtree`] if it was completed at the tip height.
-    pub fn sapling_subtree_for_tip(&self) -> Option<NoteCommitmentSubtree<sapling::tree::Node>> {
+    pub fn sapling_subtree_for_tip(&self) -> Option<NoteCommitmentSubtree<sapling_crypto::Node>> {
         if !self.is_empty() {
             let tip = self.non_finalized_tip_height();
             self.sapling_subtree(tip.into())
@@ -2328,8 +2328,8 @@ impl UpdateWith<(ValueBalance<NegativeAllowed>, Height, usize)> for Chain {
             }
             Err(value_balance_error) => Err(ValidateContextError::AddValuePool {
                 value_balance_error,
-                chain_value_pools: self.chain_value_pools,
-                block_value_pool_change: *block_value_pool_change,
+                chain_value_pools: Box::new(self.chain_value_pools),
+                block_value_pool_change: Box::new(*block_value_pool_change),
                 height: Some(*height),
             })?,
         };
@@ -2476,7 +2476,7 @@ impl Chain {
     /// Inserts the supplied Sapling note commitment subtree into the chain.
     pub(crate) fn insert_sapling_subtree(
         &mut self,
-        subtree: NoteCommitmentSubtree<sapling::tree::Node>,
+        subtree: NoteCommitmentSubtree<sapling_crypto::Node>,
     ) {
         self.inner
             .sapling_subtrees

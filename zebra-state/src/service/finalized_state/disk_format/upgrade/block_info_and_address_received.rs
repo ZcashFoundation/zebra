@@ -7,7 +7,7 @@ use crossbeam_channel::TryRecvError;
 use itertools::Itertools;
 use rayon::iter::{IntoParallelIterator, ParallelIterator as _};
 use zebra_chain::{
-    amount::NonNegative,
+    amount::{DeferredPoolBalanceChange, NonNegative},
     block::{Block, Height},
     block_info::BlockInfo,
     parameters::subsidy::{block_subsidy, funding_stream_values, FundingStreamReceiver},
@@ -16,8 +16,9 @@ use zebra_chain::{
 };
 
 use crate::{
-    service::finalized_state::disk_format::transparent::{
-        AddressBalanceLocationChange, AddressLocation,
+    service::finalized_state::{
+        disk_format::transparent::{AddressBalanceLocationChange, AddressLocation},
+        MAX_ON_DISK_HEIGHT,
     },
     DiskWriteBatch, HashOrHeight, TransactionLocation, WriteDisk,
 };
@@ -118,6 +119,13 @@ impl DiskFormatUpgrade for Upgrade {
 
                         for output in tx.outputs() {
                             if let Some(address) = output.address(&network) {
+                                // Note: using `empty()` will set the location
+                                // to a dummy value. This only works because the
+                                // addition operator for
+                                // `AddressBalanceLocationChange` (which reuses
+                                // the `AddressBalanceLocationInner` addition
+                                // operator) will ignore these dummy values when
+                                // adding balances during the merge operator.
                                 *address_balance_changes
                                     .entry(address)
                                     .or_insert_with(AddressBalanceLocationChange::empty)
@@ -149,7 +157,7 @@ impl DiskFormatUpgrade for Upgrade {
         for result in seq_iter {
             let (h, load_result) = result?;
             let height = Height(h);
-            if height.0 % 1000 == 0 {
+            if height.0.is_multiple_of(1000) {
                 tracing::info!(height = ?height, "adding block info for height");
             }
             // Get the data loaded from the parallel iterator
@@ -169,15 +177,22 @@ impl DiskFormatUpgrade for Upgrade {
             };
 
             // Get the deferred amount which is required to update the value pool.
-            let expected_deferred_amount = if height > network.slow_start_interval() {
+            let deferred_pool_balance_change = if height > network.slow_start_interval() {
                 // See [ZIP-1015](https://zips.z.cash/zip-1015).
-                funding_stream_values(
+                let deferred_pool_balance_change = funding_stream_values(
                     height,
                     &network,
                     block_subsidy(height, &network).unwrap_or_default(),
                 )
-                .unwrap_or_default()
+                .expect("should have valid funding stream values")
                 .remove(&FundingStreamReceiver::Deferred)
+                .unwrap_or_default()
+                .checked_sub(network.lockbox_disbursement_total_amount(height));
+
+                Some(
+                    deferred_pool_balance_change
+                        .expect("deferred pool balance change should be valid Amount"),
+                )
             } else {
                 None
             };
@@ -186,7 +201,10 @@ impl DiskFormatUpgrade for Upgrade {
             value_pool = value_pool
                 .add_chain_value_pool_change(
                     block
-                        .chain_value_pool_change(&utxos, expected_deferred_amount)
+                        .chain_value_pool_change(
+                            &utxos,
+                            deferred_pool_balance_change.map(DeferredPoolBalanceChange::new),
+                        )
                         .unwrap_or_default(),
                 )
                 .expect("value pool change should not overflow");
@@ -202,6 +220,8 @@ impl DiskFormatUpgrade for Upgrade {
 
             // Update transparent addresses that received funds in this block.
             for (address, change) in address_balance_changes {
+                // Note that the logic of the merge operator is set up by
+                // calling `set_merge_operator_associative()` in `DiskDb`.
                 batch.zs_merge(balance_by_transparent_addr, address, change);
             }
 
@@ -293,8 +313,13 @@ impl DiskFormatUpgrade for Upgrade {
 }
 
 impl AddressBalanceLocationChange {
-    /// Creates a new [`AddressBalanceLocationChange`] with all zero values and a dummy location.
+    /// Creates a new [`AddressBalanceLocationChange`] with all zero values and
+    /// a dummy (all one bits) location. See `AddressBalanceLocationInner::add()`
+    /// for the rationale for using this dummy value.
     fn empty() -> Self {
-        Self::new(AddressLocation::from_usize(Height(0), 0, 0))
+        Self::new(AddressLocation::from_output_index(
+            TransactionLocation::from_index(MAX_ON_DISK_HEIGHT, u16::MAX),
+            u32::MAX,
+        ))
     }
 }

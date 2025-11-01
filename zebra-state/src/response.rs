@@ -32,8 +32,8 @@ use crate::{service::read::AddressUtxos, NonFinalizedState, TransactionLocation,
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A response to a [`StateService`](crate::service::StateService) [`Request`].
 pub enum Response {
-    /// Response to [`Request::CommitSemanticallyVerifiedBlock`] indicating that a block was
-    /// successfully committed to the state.
+    /// Response to [`Request::CommitSemanticallyVerifiedBlock`] and [`Request::CommitCheckpointVerifiedBlock`]
+    /// indicating that a block was successfully committed to the state.
     Committed(block::Hash),
 
     /// Response to [`Request::InvalidateBlock`] indicating that a block was found and
@@ -59,6 +59,9 @@ pub enum Response {
 
     /// Response to [`Request::Transaction`] with the specified transaction.
     Transaction(Option<Arc<Transaction>>),
+
+    /// Response to [`Request::AnyChainTransaction`] with the specified transaction.
+    AnyChainTransaction(Option<AnyTx>),
 
     /// Response to [`Request::UnspentBestChainUtxo`] with the UTXO
     UnspentBestChainUtxo(Option<transparent::Utxo>),
@@ -121,6 +124,24 @@ pub enum KnownBlock {
 
     /// Block is queued to be validated and committed, or rejected and dropped.
     Queue,
+}
+
+/// Information about a transaction in any chain.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AnyTx {
+    /// A transaction in the best chain.
+    Mined(MinedTx),
+    /// A transaction in a side chain, and the hash of the block it is in.
+    Side((Arc<Transaction>, block::Hash)),
+}
+
+impl From<AnyTx> for Arc<Transaction> {
+    fn from(any_tx: AnyTx) -> Self {
+        match any_tx {
+            AnyTx::Mined(mined_tx) => mined_tx.tx,
+            AnyTx::Side((tx, _)) => tx,
+        }
+    }
 }
 
 /// Information about a transaction in the best chain
@@ -221,7 +242,7 @@ impl NonFinalizedBlocksListener {
 
                 for new_block_with_hash in new_blocks {
                     if sender.send(new_block_with_hash).await.is_err() {
-                        tracing::debug!("non-finalized state change receiver closed, ending task");
+                        tracing::debug!("non-finalized blocks receiver closed, ending task");
                         return;
                     }
                 }
@@ -230,7 +251,10 @@ impl NonFinalizedBlocksListener {
 
                 // Wait for the next update to the non-finalized state
                 if let Err(error) = non_finalized_state_receiver.changed().await {
-                    warn!(?error, "non-finalized state receiver closed, ending task");
+                    warn!(
+                        ?error,
+                        "non-finalized state receiver closed, is Zebra shutting down?"
+                    );
                     break;
                 }
             }
@@ -310,10 +334,18 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::Transaction`] with the specified transaction.
     Transaction(Option<MinedTx>),
 
+    /// Response to [`Request::Transaction`] with the specified transaction.
+    AnyChainTransaction(Option<AnyTx>),
+
     /// Response to [`ReadRequest::TransactionIdsForBlock`],
     /// with an list of transaction hashes in block order,
     /// or `None` if the block was not found.
     TransactionIdsForBlock(Option<Arc<[transaction::Hash]>>),
+
+    /// Response to [`ReadRequest::AnyChainTransactionIdsForBlock`], with an list of
+    /// transaction hashes in block order and a flag indicating if the block is
+    /// in the best chain, or `None` if the block was not found.
+    AnyChainTransactionIdsForBlock(Option<(Arc<[transaction::Hash]>, bool)>),
 
     /// Response to [`ReadRequest::SpendingTransactionId`],
     /// with an list of transaction hashes in block order,
@@ -350,7 +382,7 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::SaplingSubtrees`] with the specified Sapling note commitment
     /// subtrees.
     SaplingSubtrees(
-        BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<sapling::tree::Node>>,
+        BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<sapling_crypto::Node>>,
     ),
 
     /// Response to [`ReadRequest::OrchardSubtrees`] with the specified Orchard note commitment
@@ -485,6 +517,7 @@ impl TryFrom<ReadResponse> for Response {
             ReadResponse::Transaction(tx_info) => {
                 Ok(Response::Transaction(tx_info.map(|tx_info| tx_info.tx)))
             }
+            ReadResponse::AnyChainTransaction(tx) => Ok(Response::AnyChainTransaction(tx)),
             ReadResponse::UnspentBestChainUtxo(utxo) => Ok(Response::UnspentBestChainUtxo(utxo)),
 
 
@@ -501,6 +534,7 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::TipPoolValues { .. }
             | ReadResponse::BlockInfo(_)
             | ReadResponse::TransactionIdsForBlock(_)
+            | ReadResponse::AnyChainTransactionIdsForBlock(_)
             | ReadResponse::SaplingTree(_)
             | ReadResponse::OrchardTree(_)
             | ReadResponse::SaplingSubtrees(_)

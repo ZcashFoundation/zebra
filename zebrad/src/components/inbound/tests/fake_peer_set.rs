@@ -779,7 +779,7 @@ async fn caches_getaddr_response() {
 
         // UTXO verification doesn't matter for these tests.
         let (state, _read_only_state_service, latest_chain_tip, _chain_tip_change) =
-            zebra_state::init(state_config.clone(), &network, Height::MAX, 0);
+            zebra_state::init(state_config.clone(), &network, Height::MAX, 0).await;
 
         let state_service = ServiceBuilder::new().buffer(1).service(state);
 
@@ -893,7 +893,7 @@ async fn setup(
 
     // UTXO verification doesn't matter for these tests.
     let (state, _read_only_state_service, latest_chain_tip, mut chain_tip_change) =
-        zebra_state::init(state_config.clone(), &network, Height::MAX, 0);
+        zebra_state::init(state_config.clone(), &network, Height::MAX, 0).await;
 
     let mut state_service = ServiceBuilder::new().buffer(1).service(state);
 
@@ -1002,6 +1002,8 @@ async fn setup(
     //
     // (The genesis block gets skipped, because block 1 is committed before the task is spawned.)
     for block in committed_blocks.iter().skip(1) {
+        tokio::time::sleep(PEER_GOSSIP_DELAY).await;
+
         peer_set
             .expect_request(Request::AdvertiseBlock(block.hash()))
             .await

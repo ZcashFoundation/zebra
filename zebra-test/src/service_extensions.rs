@@ -9,15 +9,15 @@ use tower::{Service, ServiceExt};
 pub trait IsReady<Request>: Service<Request> {
     /// Poll the [`Service`] once, and return true if it is immediately ready to be called.
     #[allow(clippy::wrong_self_convention)]
-    fn is_ready(&mut self) -> BoxFuture<bool>;
+    fn is_ready(&mut self) -> BoxFuture<'_, bool>;
 
     /// Poll the [`Service`] once, and return true if it is pending.
     #[allow(clippy::wrong_self_convention)]
-    fn is_pending(&mut self) -> BoxFuture<bool>;
+    fn is_pending(&mut self) -> BoxFuture<'_, bool>;
 
     /// Poll the [`Service`] once, and return true if it has failed.
     #[allow(clippy::wrong_self_convention)]
-    fn is_failed(&mut self) -> BoxFuture<bool>;
+    fn is_failed(&mut self) -> BoxFuture<'_, bool>;
 }
 
 impl<S, Request> IsReady<Request> for S
@@ -25,7 +25,7 @@ where
     S: Service<Request> + Send,
     Request: 'static,
 {
-    fn is_ready(&mut self) -> BoxFuture<bool> {
+    fn is_ready(&mut self) -> BoxFuture<'_, bool> {
         async move {
             let ready_result = futures::poll!(self.ready());
             matches!(ready_result, Poll::Ready(Ok(_)))
@@ -33,7 +33,7 @@ where
         .boxed()
     }
 
-    fn is_pending(&mut self) -> BoxFuture<bool> {
+    fn is_pending(&mut self) -> BoxFuture<'_, bool> {
         async move {
             let ready_result = futures::poll!(self.ready());
             ready_result.is_pending()
@@ -41,7 +41,7 @@ where
         .boxed()
     }
 
-    fn is_failed(&mut self) -> BoxFuture<bool> {
+    fn is_failed(&mut self) -> BoxFuture<'_, bool> {
         async move {
             let ready_result = futures::poll!(self.ready());
             matches!(ready_result, Poll::Ready(Err(_)))

@@ -25,7 +25,7 @@ use zebra_chain::{
 };
 
 use crate::{
-    response::MinedTx,
+    response::{AnyTx, MinedTx},
     service::{
         finalized_state::ZebraDb,
         non_finalized_state::{Chain, NonFinalizedState},
@@ -149,6 +149,47 @@ where
     Some(MinedTx::new(tx, height, confirmations, time))
 }
 
+/// Returns a [`AnyTx`] for a [`Transaction`] with [`transaction::Hash`],
+/// if one exists in any chain in `chains` or finalized `db`.
+/// The first chain in `chains` must be the best chain.
+pub fn any_transaction<'a>(
+    chains: impl Iterator<Item = &'a Arc<Chain>>,
+    db: &ZebraDb,
+    hash: transaction::Hash,
+) -> Option<AnyTx> {
+    // # Correctness
+    //
+    // It is ok to do this lookup in multiple different calls. Finalized state updates
+    // can only add overlapping blocks, and hashes are unique.
+    let mut best_chain = None;
+    let (tx, height, time, in_best_chain, containing_chain) = chains
+        .enumerate()
+        .find_map(|(i, chain)| {
+            chain.as_ref().transaction(hash).map(|(tx, height, time)| {
+                if i == 0 {
+                    best_chain = Some(chain);
+                }
+                (tx.clone(), height, time, i == 0, Some(chain))
+            })
+        })
+        .or_else(|| {
+            db.transaction(hash)
+                .map(|(tx, height, time)| (tx.clone(), height, time, true, None))
+        })?;
+
+    if in_best_chain {
+        let confirmations = 1 + tip_height(best_chain, db)?.0 - height.0;
+        Some(AnyTx::Mined(MinedTx::new(tx, height, confirmations, time)))
+    } else {
+        let block_hash = containing_chain
+            .expect("if not in best chain, then it must be in a side chain")
+            .block(height.into())
+            .expect("must exist since tx is in chain")
+            .hash;
+        Some(AnyTx::Side((tx, block_hash)))
+    }
+}
+
 /// Returns the [`transaction::Hash`]es for the block with `hash_or_height`,
 /// if it exists in the non-finalized `chain` or finalized `db`.
 ///
@@ -172,6 +213,37 @@ where
         .as_ref()
         .and_then(|chain| chain.as_ref().transaction_hashes_for_block(hash_or_height))
         .or_else(|| db.transaction_hashes_for_block(hash_or_height))
+}
+
+/// Returns the [`transaction::Hash`]es for the block with `hash_or_height`,
+/// if it exists in any chain in `chains` or finalized `db`.
+/// The first chain in `chains` must be the best chain.
+///
+/// The returned hashes are in block order.
+///
+/// Returns `None` if the block is not found.
+pub fn transaction_hashes_for_any_block<'a>(
+    chains: impl Iterator<Item = &'a Arc<Chain>>,
+    db: &ZebraDb,
+    hash_or_height: HashOrHeight,
+) -> Option<(Arc<[transaction::Hash]>, bool)> {
+    // # Correctness
+    //
+    // Since blocks are the same in the finalized and non-finalized state, we
+    // check the most efficient alternative first. (`chain` is always in memory,
+    // but `db` stores blocks on disk, with a memory cache.)
+    chains
+        .enumerate()
+        .find_map(|(i, chain)| {
+            chain
+                .as_ref()
+                .transaction_hashes_for_block(hash_or_height)
+                .map(|hashes| (hashes.clone(), i == 0))
+        })
+        .or_else(|| {
+            db.transaction_hashes_for_block(hash_or_height)
+                .map(|hashes| (hashes, true))
+        })
 }
 
 /// Returns the [`Utxo`] for [`transparent::OutPoint`], if it exists in the

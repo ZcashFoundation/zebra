@@ -9,14 +9,18 @@ use color_eyre::eyre::{eyre, Context, Result};
 use tower::BoxError;
 
 use zebra_chain::{
-    block::{Block, Height},
-    parameters::Network,
+    block::{self, Block, Height},
+    parameters::{testnet::ConfiguredActivationHeights, Network},
     primitives::byte_array::increment_big_endian,
     serialization::{ZcashDeserializeInto, ZcashSerialize},
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::{
-    client::{BlockTemplateResponse, BlockTemplateTimeSource, HexData, SubmitBlockResponse},
+    client::{
+        BlockTemplateResponse, BlockTemplateTimeSource, GetBlockchainInfoResponse, HexData,
+        SubmitBlockResponse,
+    },
+    methods::GetBlockHash,
     proposal_block_from_template,
     server::{self, OPENED_RPC_ENDPOINT_MSG},
 };
@@ -33,12 +37,13 @@ const NUM_BLOCKS_TO_SUBMIT: usize = 200;
 pub(crate) async fn submit_blocks_test() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let activation_heights = zebra_chain::parameters::testnet::ConfiguredActivationHeights {
-        nu5: Some(1),
-        ..Default::default()
-    };
-
-    let network = Network::new_regtest(activation_heights);
+    let network = Network::new_regtest(
+        ConfiguredActivationHeights {
+            nu5: Some(100),
+            ..Default::default()
+        }
+        .into(),
+    );
     let mut config = os_assigned_rpc_port_config(false, &network)?;
     config.mempool.debug_enable_at_height = Some(0);
 
@@ -53,7 +58,7 @@ pub(crate) async fn submit_blocks_test() -> Result<()> {
     let client = RpcRequestClient::new(rpc_address);
 
     for _ in 1..=NUM_BLOCKS_TO_SUBMIT {
-        let (mut block, height) = client.block_from_template().await?;
+        let (mut block, height) = client.block_from_template(&network).await?;
 
         while !network.disable_pow()
             && zebra_consensus::difficulty_is_valid(&block.header, &network, &height, &block.hash())
@@ -77,20 +82,22 @@ pub(crate) async fn submit_blocks_test() -> Result<()> {
 
 #[allow(dead_code)]
 pub trait MiningRpcMethods {
-    async fn block_from_template(&self) -> Result<(Block, Height)>;
+    async fn block_from_template(&self, net: &Network) -> Result<(Block, Height)>;
     async fn submit_block(&self, block: Block) -> Result<()>;
     async fn get_block(&self, height: i32) -> Result<Option<Arc<Block>>, BoxError>;
+    async fn generate(&self, num_blocks: u32) -> Result<Vec<block::Hash>>;
+    async fn blockchain_info(&self) -> Result<GetBlockchainInfoResponse>;
 }
 
 impl MiningRpcMethods for RpcRequestClient {
-    async fn block_from_template(&self) -> Result<(Block, Height)> {
+    async fn block_from_template(&self, net: &Network) -> Result<(Block, Height)> {
         let block_template: BlockTemplateResponse = self
             .json_result_from_call("getblocktemplate", "[]".to_string())
             .await
             .expect("response should be success output with a serialized `GetBlockTemplate`");
 
         Ok((
-            proposal_block_from_template(&block_template, BlockTemplateTimeSource::default())?,
+            proposal_block_from_template(&block_template, BlockTemplateTimeSource::default(), net)?,
             Height(block_template.height()),
         ))
     }
@@ -132,5 +139,18 @@ impl MiningRpcMethods for RpcRequestClient {
             }
             Err(err) => Err(err),
         }
+    }
+
+    async fn generate(&self, num_blocks: u32) -> Result<Vec<block::Hash>> {
+        self.json_result_from_call("generate", format!("[{num_blocks}]"))
+            .await
+            .map(|response: Vec<GetBlockHash>| response.into_iter().map(|rsp| rsp.hash()).collect())
+            .map_err(|err| eyre!(err))
+    }
+
+    async fn blockchain_info(&self) -> Result<GetBlockchainInfoResponse> {
+        self.json_result_from_call("getblockchaininfo", "[]")
+            .await
+            .map_err(|err| eyre!(err))
     }
 }

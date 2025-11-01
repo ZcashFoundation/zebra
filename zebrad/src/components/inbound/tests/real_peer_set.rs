@@ -644,7 +644,7 @@ async fn setup(
     // UTXO verification doesn't matter for these tests.
     let state_config = StateConfig::ephemeral();
     let (state_service, _read_only_state_service, latest_chain_tip, chain_tip_change) =
-        zebra_state::init(state_config, &network, Height::MAX, 0);
+        zebra_state::init(state_config, &network, Height::MAX, 0).await;
     let state_service = ServiceBuilder::new().buffer(10).service(state_service);
 
     // Network
@@ -838,7 +838,7 @@ mod submitblock_test {
         // State
         let state_config = StateConfig::ephemeral();
         let (_state_service, _read_only_state_service, latest_chain_tip, chain_tip_change) =
-            zebra_state::init(state_config, &Network::Mainnet, Height::MAX, 0);
+            zebra_state::init(state_config, &Network::Mainnet, Height::MAX, 0).await;
 
         let config_listen_addr = "127.0.0.1:0".parse().unwrap();
 
@@ -873,6 +873,12 @@ mod submitblock_test {
 
         // Start the block gossip task with a SubmitBlockChannel
         let submitblock_channel = SubmitBlockChannel::new();
+        // Send a block to the channel
+        submitblock_channel
+            .sender()
+            .send((block::Hash([1; 32]), block::Height(1)))
+            .await
+            .unwrap();
         let gossip_task_handle = tokio::spawn(
             sync::gossip_best_tip_block_hashes(
                 sync_status.clone(),
@@ -882,12 +888,6 @@ mod submitblock_test {
             )
             .in_current_span(),
         );
-
-        // Send a block top the channel
-        submitblock_channel
-            .sender()
-            .send((block::Hash([1; 32]), block::Height(1)))
-            .unwrap();
 
         // Wait for the block gossip task to process the block
         tokio::time::sleep(PEER_GOSSIP_DELAY).await;

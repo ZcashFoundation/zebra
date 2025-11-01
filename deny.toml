@@ -42,10 +42,18 @@ deny = [
 #
 # Certain crates/versions that will be skipped when doing duplicate detection.
 skip = [
-    # wait for other dependencies to match zcash_script
-    # This is not in `skip-tree` because we don't want to allow duplicated
-    # secp256k1-sys crates, where the C code lives
-    { name = "secp256k1", version = "=0.29.1" }
+    # Allow mixed versions pulled in by transitive dev/test deps vs runtime deps
+    # ron 0.7.x is required by insta; 0.8.x is required by config
+    { name = "ron", version = "=0.7.1" },
+
+    # Keep older toml_datetime required via jsonrpsee-proc-macros -> toml_edit 0.22.x
+    # We can't upgrade jsonrpsee yet to 0.25.x (as it introduces breaking changes)
+    { name = "toml_datetime", version = "=0.6.11" },
+    
+    # Multiple windows-sys versions via different dependencies
+    # 0.60.2 via clap/anstream; 0.61.0 via dirs-sys
+    { name = "windows-sys", version = "=0.60.2" }
+
 ]
 
 # Similarly to `skip` allows you to skip certain crates during duplicate
@@ -56,9 +64,6 @@ skip-tree = [
     # wait for ordered-map to release a dependency fix
     { name = "ordered-map", version = "=0.4.2" },
 
-    # wait for `color-eyre` to upgrade
-    { name = "owo-colors", version = "=3.5.0" },
-
     # wait for structopt upgrade (or upgrade to clap 4)
     { name = "clap", version = "=2.34.0" },
 
@@ -68,6 +73,8 @@ skip-tree = [
     # wait for console-subscriber and tower to update hdrhistogram.
     # also wait for ron to update insta, and wait for tonic update.
     { name = "base64", version = "=0.13.1" },
+    # Multiple base64 versions through different dependencies
+    { name = "base64", version = "=0.21.7" },
 
     # wait for abscissa_core to update toml
     { name = "toml", version = "=0.5.11" },
@@ -75,8 +82,7 @@ skip-tree = [
     # wait for structopt-derive to update heck
     { name = "heck", version = "=0.3.3" },
 
-    # wait for librocksdb-sys to update bindgen to one that uses newer itertools
-    { name = "itertools", version = "=0.12.1" },
+    # wait for librocksdb-sys to update bindgen
     { name = "bindgen", version = "=0.69.5" },
 
     # wait for halo2_gadgets and primitive-types to update uint
@@ -84,30 +90,41 @@ skip-tree = [
 
     # wait for zebra to update tower
     { name = "tower", version = "=0.4.13" },
-    { name = "hashbrown", version = "=0.14.5" },
 
     # wait for zebra to update vergen
     { name = "thiserror", version = "=1.0.69" },
     { name = "thiserror-impl", version = "=1.0.69" },
 
     # wait for all librustzcash crates to update sha2, secp256k1, and ripemd
-    { name = "sha2", version = "=0.10.8" },
+    { name = "sha2", version = "=0.10.9" },
     { name = "ripemd", version = "=0.1.3" },
-
-    # wait for zcash_script to update itertools
-    { name = "itertools", version = "=0.13.0" },
 
     # wait for abscissa_core to update synstructure
     { name = "synstructure", version = "=0.12.6" },
 
-    # wait until zcash_client_backend update rustix
-    { name = "rustix", version = "=0.38.44" },
+    # wait for librustzcash to update tonic
+    { name = "tonic", version = "0.12" },
+    { name = "prost-types", version = "0.13" },
 
-    # wait for reqwest to update windows-registry
-    { name = "windows-strings", version = "=0.3.1" },
+    { name = "windows-sys", version = "=0.52.0" },
 
-    # wait for sentry to update windows-core
-    { name = "windows-core", version = "=0.52.0" }
+    { name = "quick-xml", version = "0.37.5" },
+
+    { name = "indexmap", version = "1.9" },
+
+    { name = "hashbrown", version = "0.12" },
+
+    { name = "getrandom", version = "0.2" },
+
+    { name = "rand", version = "0.8" },
+    { name = "rand_core", version = "0.6" },
+    { name = "rand_chacha", version = "0.3" },
+
+    # TODO: Remove once https://github.com/zcash/librustzcash/pull/1893 merges.
+    { name = "equihash", version = "0.2" },
+
+    # wait for derive_builder to update
+    { name = "darling", version = "0.20.11" },
 ]
 
 # This section is considered when running `cargo deny check sources`.

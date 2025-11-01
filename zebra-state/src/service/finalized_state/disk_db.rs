@@ -16,7 +16,10 @@ use std::{
     fs,
     ops::RangeBounds,
     path::Path,
-    sync::Arc,
+    sync::{
+        atomic::{self, AtomicBool},
+        Arc,
+    },
 };
 
 use itertools::Itertools;
@@ -89,6 +92,10 @@ pub struct DiskDb {
     ///
     /// If true, the database files are deleted on drop.
     ephemeral: bool,
+
+    /// A boolean flag indicating whether the db format change task has finished
+    /// applying any format changes that may have been required.
+    finished_format_upgrades: Arc<AtomicBool>,
 
     // Owned State
     //
@@ -623,6 +630,19 @@ impl DiskDb {
         total_size_on_disk
     }
 
+    /// Sets `finished_format_upgrades` to true to indicate that Zebra has
+    /// finished applying any required db format upgrades.
+    pub fn mark_finished_format_upgrades(&self) {
+        self.finished_format_upgrades
+            .store(true, atomic::Ordering::SeqCst);
+    }
+
+    /// Returns true if the `finished_format_upgrades` flag has been set to true to
+    /// indicate that Zebra has finished applying any required db format upgrades.
+    pub fn finished_format_upgrades(&self) -> bool {
+        self.finished_format_upgrades.load(atomic::Ordering::SeqCst)
+    }
+
     /// When called with a secondary DB instance, tries to catch up with the primary DB instance
     pub fn try_catch_up_with_primary(&self) -> Result<(), rocksdb::Error> {
         self.db.try_catch_up_with_primary()
@@ -776,7 +796,7 @@ impl DiskDb {
     ///
     /// RocksDB iterators are ordered by increasing key bytes by default.
     /// Otherwise, if `reverse` is `true`, the iterator is ordered by decreasing key bytes.
-    fn zs_iter_mode<R>(range: &R, reverse: bool) -> rocksdb::IteratorMode
+    fn zs_iter_mode<R>(range: &R, reverse: bool) -> rocksdb::IteratorMode<'_>
     where
         R: RangeBounds<Vec<u8>>,
     {
@@ -932,6 +952,7 @@ impl DiskDb {
                     network: network.clone(),
                     ephemeral: config.ephemeral,
                     db: Arc::new(db),
+                    finished_format_upgrades: Arc::new(AtomicBool::new(false)),
                 };
 
                 db.assert_default_cf_is_empty();

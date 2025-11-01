@@ -383,9 +383,18 @@ impl DbFormatChange {
         initial_tip_height: Option<Height>,
         cancel_receiver: &Receiver<CancelFormatChange>,
     ) -> Result<(), CancelFormatChange> {
+        // Mark the database as having finished applying any format upgrades if there are no
+        // format upgrades that need to be applied.
+        if !self.is_upgrade() {
+            db.mark_finished_format_upgrades();
+        }
+
         match self {
             // Perform any required upgrades, then mark the state as upgraded.
-            Upgrade { .. } => self.apply_format_upgrade(db, initial_tip_height, cancel_receiver)?,
+            Upgrade { .. } => {
+                self.apply_format_upgrade(db, initial_tip_height, cancel_receiver)?;
+                db.mark_finished_format_upgrades();
+            }
 
             NewlyCreated { .. } => {
                 Self::mark_as_newly_created(db);

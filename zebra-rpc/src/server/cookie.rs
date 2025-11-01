@@ -1,6 +1,6 @@
 //! Cookie-based authentication for the RPC server.
 
-use base64::{engine::general_purpose::URL_SAFE, Engine as _};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use color_eyre::Result;
 use rand::RngCore;
 
@@ -29,7 +29,7 @@ impl Default for Cookie {
         let mut bytes = [0u8; 32];
         rand::thread_rng().fill_bytes(&mut bytes);
 
-        Self(URL_SAFE.encode(bytes))
+        Self(STANDARD.encode(bytes))
     }
 }
 

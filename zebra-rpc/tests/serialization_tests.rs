@@ -13,29 +13,27 @@ use vectors::{
     GET_BLOCK_TEMPLATE_RESPONSE_TEMPLATE, GET_RAW_TRANSACTION_RESPONSE_TRUE,
 };
 
-use zebra_rpc::client::{
-    zebra_chain::{
-        sapling::NotSmallOrderValueCommitment,
-        serialization::{ZcashDeserialize, ZcashSerialize},
-        subtree::NoteCommitmentSubtreeIndex,
-        transparent::{OutputIndex, Script},
-        work::difficulty::{CompactDifficulty, ExpandedDifficulty},
-    },
-    GetBlockchainInfoBalance,
+use zebra_rpc::client::zebra_chain::{
+    sapling::ValueCommitment,
+    serialization::{BytesInDisplayOrder, ZcashDeserialize, ZcashSerialize},
+    subtree::NoteCommitmentSubtreeIndex,
+    transparent::{OutputIndex, Script},
+    work::difficulty::{CompactDifficulty, ExpandedDifficulty},
 };
 use zebra_rpc::client::{
     BlockHeaderObject, BlockObject, BlockTemplateResponse, Commitments, DefaultRoots,
     FundingStream, GetAddressBalanceRequest, GetAddressBalanceResponse, GetAddressTxIdsRequest,
-    GetAddressUtxosResponse, GetBlockHashResponse, GetBlockHeaderResponse,
-    GetBlockHeightAndHashResponse, GetBlockResponse, GetBlockSubsidyResponse,
-    GetBlockTemplateParameters, GetBlockTemplateRequestMode, GetBlockTemplateResponse,
-    GetBlockTransaction, GetBlockTrees, GetBlockchainInfoResponse, GetInfoResponse,
-    GetMiningInfoResponse, GetPeerInfoResponse, GetRawMempoolResponse, GetRawTransactionResponse,
-    GetSubtreesByIndexResponse, GetTreestateResponse, Hash, Input, MempoolObject, Orchard,
-    OrchardAction, Output, PeerInfo, ScriptPubKey, ScriptSig, SendRawTransactionResponse,
-    ShieldedOutput, ShieldedSpend, SubmitBlockErrorResponse, SubmitBlockResponse, SubtreeRpcData,
-    TransactionObject, TransactionTemplate, Treestate, Utxo, ValidateAddressResponse,
-    ZListUnifiedReceiversResponse, ZValidateAddressResponse,
+    GetAddressUtxosResponse, GetAddressUtxosResponseObject, GetBlockHashResponse,
+    GetBlockHeaderResponse, GetBlockHeightAndHashResponse, GetBlockResponse,
+    GetBlockSubsidyResponse, GetBlockTemplateParameters, GetBlockTemplateRequestMode,
+    GetBlockTemplateResponse, GetBlockTransaction, GetBlockTrees, GetBlockchainInfoBalance,
+    GetBlockchainInfoResponse, GetInfoResponse, GetMiningInfoResponse, GetNetworkInfoResponse,
+    GetPeerInfoResponse, GetRawMempoolResponse, GetRawTransactionResponse,
+    GetSubtreesByIndexResponse, GetTreestateResponse, Hash, Input, JoinSplit, MempoolObject,
+    Orchard, OrchardAction, OrchardFlags, Output, PeerInfo, ScriptPubKey, ScriptSig,
+    SendRawTransactionResponse, ShieldedOutput, ShieldedSpend, SubmitBlockErrorResponse,
+    SubmitBlockResponse, SubtreeRpcData, TransactionObject, TransactionTemplate, Treestate, Utxo,
+    ValidateAddressResponse, ZListUnifiedReceiversResponse, ZValidateAddressResponse,
 };
 
 #[test]
@@ -550,13 +548,21 @@ fn test_z_get_treestate() -> Result<(), Box<dyn std::error::Error>> {
   "hash": "000000000154f210e2451c45a192c69d12c0db18a427be13be3913e0feecd6f6",
   "height": 2931720,
   "time": 1747837185,
+  "sprout": {
+    "commitments": {
+      "finalRoot": "270f7c6306ab34782291e66d20bac3cf6b10bb4a70cab1e7f765e728ed85b5a1",
+      "finalState": "01bf705e4f4db90e0601d1edbc03980b15175dfcda027088f49678ceafa45a2b35017c7600053e534c0cc66e3dcde3d3db2af483b93a72a8aed4cb42fecb3575a8bb1401a5d40cc13d76211178d5a08d6801804939dae73e6143e7b52564905a0062a4c20001224f0981dab7524f44d69e9b803fb397b06fa763bcb5a488aa62eb45c0e07ecc01e22880ec2a9e74c88e5b544507b7ada146338cf081c8a291bd5b234805e1a811000001d830cbc4112ff48f1140e5f71d76c149df9f3c1044457b0aa58557386c46461c01c857c3aeb98cee13d9db210a27bcd044f27030441e26c3ea5b6a2b1865b45957000001740edee2a8dbf8e3a74ad9ebc3e5dbb23b6e9b38a943dedc5ec07acac38ea2ab0196295a1e8d018c1c59f098e69350c7a206b850c828710fbaeb86d3ef72da3bb6000001806212ff57170f6904d462d24bc5df6112269a0b65defffbd4b78ff9a7859b9d0183a03915c566ab12ba59b130bab08a25b932ce204bf1774fc9e9267e5130f19101465dbb7f98de7f19e22f37c537660e9447fc27e1839238dc75548b047c41d1be01c14d7b1dfae9c25c284218d74c43621b795246a5fb3c238c2ca9d7f91d5aa86000011b1fc3241793d87854115ec7190ea06c64b76faa971c77ccc6316ec716f90f77"
+    }
+  },
   "sapling": {
     "commitments": {
+      "finalRoot": "500e1e3b5805ce5ba6686674ee4afd2c0b82d088789028e143027da1c40f6443",
       "finalState": "01f84e35f84dfd9e53effcd74f98e9271b4df9c15e1681b7dc4f9a971e5c98531e001f0105354e35c5daa8831b957f6f702affaa835bc3758e9bd323aafeead50ddfa561000001157a4438a622a0677ec9d1099bf963614a0a65b1e24ea451c9f55eef64c62b650001a5fc8bf61968a934693b7b9a4abd894c4e4a1bd265525538f4877687504fe50a000193d7f432e23c862bf2f831392861199ab4c70d358d82695b6bf8fa9eb36b6b63000184585eb0d4f116b07b9bd359c461a499716a985a001201c66d1016e489a5672f01aad38587c7f2d5ebd1c2eea08a0660e9a9fd1a104b540767c2884354a48f0a6d01ff10064c6bf9aba73d638878a63c31de662f25aea58dc0033a3ada3d0a695b54000001060af6a6c1415a6eaf780073ffa3d0ab35af7bb391bccc4e6ea65a1230dad83001ab58f1ebb2860e257c50350a3e1b54778b7729bdd11eacaa9213c4b5f4dbb44c00017d1ce2f0839bdbf1bad7ae37f845e7fe2116e0c1197536bfbad549f3876c3c590000013e2598f743726006b8de42476ed56a55a75629a7b82e430c4e7c101a69e9b02a011619f99023a69bb647eab2d2aa1a73c3673c74bb033c3c4930eacda19e6fd93b0000000160272b134ca494b602137d89e528c751c06d3ef4a87a45f33af343c15060cc1e0000000000"
     }
   },
   "orchard": {
     "commitments": {
+      "finalRoot": "328e54865fa1b18a987d920c7e0181a31591d2899ae554ac607a3354e000c309",
       "finalState": "01a110b4b3e1932f4e32e972d34ba5b9128a21b5dec5540dbb50d6f6eabd462237001f01206c514069d4cb68fb0a4d5dfe6eb7a31bcf399bf38a3bd6751ebd4b68cec3130001a73e87cab56a4461a676c7ff01ccbf8d15bbb7d9881b8f991322d721d02ded0a0001bc5a28c4a9014698c66a496bd35aa19c1b5ffe7b511ce8ff26bdcbe6cf0caa0c01ad5ba4f75b9685f7b4e1f47878e83d5bcd888b24359e4a3f2309b738c0211c1e01f12bdfe8eebc656f4f4fefc61ebd8a0b581a10b5cb3c4d8681f26384f907d910000158c6fbe19bb748e830a55b80fc62b414a3763efd461bb1885c10bebf9cee86130101683a742a4b5b3d7e0e802239d70cd480cc56eeaefac844359aa2c32dc41d3700000001756e99d87177e232e3c96f03e412d8bf3547a0fea00434ba153c7dac9990322d016211c99d795da43b33a1397859ae9745bc3e74966fa68b725ce3c90dca2d11300000012d113bc8f6a4f41b3963cfa0717176c2d31ce7bfae4d250a1fff5e061dd9d3250160040850b766b126a2b4843fcdfdffa5d5cab3f53bc860a3bef68958b5f066170001cc2dcaa338b312112db04b435a706d63244dd435238f0aa1e9e1598d35470810012dcc4273c8a0ed2337ecf7879380a07e7d427c7f9d82e538002bd1442978402c01daf63debf5b40df902dae98dadc029f281474d190cddecef1b10653248a234150001e2bca6a8d987d668defba89dc082196a922634ed88e065c669e526bb8815ee1b000000000000"
     }
   }
@@ -567,15 +573,35 @@ fn test_z_get_treestate() -> Result<(), Box<dyn std::error::Error>> {
     let hash = obj.hash();
     let height = obj.height();
     let time = obj.time();
+    let sprout_final_state = obj
+        .sprout()
+        .as_ref()
+        .unwrap()
+        .commitments()
+        .final_state()
+        .clone();
     let sapling_final_state = obj.sapling().commitments().final_state().clone();
     let orchard_final_state = obj.orchard().commitments().final_state().clone();
+    let sprout_final_root = obj
+        .sprout()
+        .as_ref()
+        .unwrap()
+        .commitments()
+        .final_root()
+        .clone();
+    let sapling_final_root = obj.sapling().commitments().final_root().clone();
+    let orchard_final_root = obj.orchard().commitments().final_root().clone();
 
     let new_obj = GetTreestateResponse::new(
         hash,
         height,
         time,
-        Treestate::new(Commitments::new(sapling_final_state)),
-        Treestate::new(Commitments::new(orchard_final_state)),
+        Some(Treestate::new(Commitments::new(
+            sprout_final_root,
+            sprout_final_state,
+        ))),
+        Treestate::new(Commitments::new(sapling_final_root, sapling_final_state)),
+        Treestate::new(Commitments::new(orchard_final_root, orchard_final_state)),
     );
 
     assert_eq!(obj, new_obj);
@@ -684,6 +710,38 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
             )
         })
         .collect::<Vec<_>>();
+    let joinsplits = tx
+        .joinsplits()
+        .iter()
+        .map(|joinsplit| {
+            let old_public_value = joinsplit.old_public_value();
+            let old_public_value_zat = joinsplit.old_public_value_zat();
+            let new_public_value = joinsplit.new_public_value();
+            let new_public_value_zat = joinsplit.new_public_value_zat();
+            let anchor = joinsplit.anchor();
+            let nullifiers = joinsplit.nullifiers().clone();
+            let commitments = joinsplit.commitments().clone();
+            let one_time_pubkey = joinsplit.one_time_pubkey();
+            let random_seed = joinsplit.random_seed();
+            let macs = joinsplit.macs().clone();
+            let proof = joinsplit.proof().clone();
+            let ciphertexts = joinsplit.ciphertexts().clone();
+            JoinSplit::new(
+                old_public_value,
+                old_public_value_zat,
+                new_public_value,
+                new_public_value_zat,
+                anchor,
+                nullifiers,
+                commitments,
+                one_time_pubkey,
+                random_seed,
+                macs,
+                proof,
+                ciphertexts,
+            )
+        })
+        .collect::<Vec<_>>();
     let shielded_spends = tx
         .shielded_spends()
         .iter()
@@ -696,8 +754,7 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
             let proof = spend.proof();
             let spend_auth_sig = spend.spend_auth_sig();
             ShieldedSpend::new(
-                NotSmallOrderValueCommitment::zcash_deserialize(Cursor::new(cv))
-                    .expect("was just serialized"),
+                ValueCommitment::zcash_deserialize(Cursor::new(cv)).expect("was just serialized"),
                 anchor,
                 nullifier,
                 rk,
@@ -717,8 +774,7 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
             let out_ciphertext = output.out_ciphertext();
             let proof = output.proof();
             ShieldedOutput::new(
-                NotSmallOrderValueCommitment::zcash_deserialize(Cursor::new(cv))
-                    .expect("was just serialized"),
+                ValueCommitment::zcash_deserialize(Cursor::new(cv)).expect("was just serialized"),
                 cm_u,
                 ephemeral_key,
                 enc_ciphertext,
@@ -754,7 +810,20 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
             .collect();
         let value_balance = bundle.value_balance();
         let value_balance_zat = bundle.value_balance_zat();
-        Orchard::new(actions, value_balance, value_balance_zat)
+        let spends_flag = bundle.flags().as_ref().map(|f| f.enable_spends());
+        let outputs_flag = bundle.flags().as_ref().map(|f| f.enable_outputs());
+        let anchor = bundle.anchor();
+        let proof = bundle.proof().clone();
+        let binding_sig = bundle.binding_sig();
+        Orchard::new(
+            actions,
+            value_balance,
+            value_balance_zat,
+            spends_flag.map(|_| OrchardFlags::new(spends_flag.unwrap(), outputs_flag.unwrap())),
+            anchor,
+            proof,
+            binding_sig,
+        )
     });
     let binding_sig = tx.binding_sig();
     let joinsplit_pub_key = tx.joinsplit_pub_key();
@@ -783,6 +852,7 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
         outputs,
         shielded_spends,
         shielded_outputs,
+        joinsplits,
         binding_sig,
         joinsplit_pub_key,
         joinsplit_sig,
@@ -823,7 +893,7 @@ fn test_get_address_tx_ids() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
-fn test_get_address_utxos() -> Result<(), Box<dyn std::error::Error>> {
+fn test_get_address_utxos_chain_info_false() -> Result<(), Box<dyn std::error::Error>> {
     let json = r#"
 [
   {
@@ -837,6 +907,10 @@ fn test_get_address_utxos() -> Result<(), Box<dyn std::error::Error>> {
 ]
 "#;
     let obj: GetAddressUtxosResponse = serde_json::from_str(json)?;
+
+    let GetAddressUtxosResponse::Utxos(obj) = &obj else {
+        panic!("Expected ChainInfoFalse variant");
+    };
 
     let new_obj = obj
         .iter()
@@ -863,7 +937,68 @@ fn test_get_address_utxos() -> Result<(), Box<dyn std::error::Error>> {
         })
         .collect::<Vec<_>>();
 
-    assert_eq!(obj, new_obj);
+    assert_eq!(obj.clone(), new_obj);
+
+    Ok(())
+}
+
+#[test]
+fn test_get_address_utxos_chain_info_true() -> Result<(), Box<dyn std::error::Error>> {
+    let json = r#"
+{
+    "utxos": [
+        {
+            "address": "t1at7nVNsv6taLRrNRvnQdtfLNRDfsGc3Ak",
+            "txid": "6ee3e8a86dfeca629aeaf794aacb714db1cf1868bc9fe487de443e6197d8764a",
+            "outputIndex": 0,
+            "script": "76a914ba92ff06081d5ff6542af8d3b2d209d29ba6337c88ac",
+            "satoshis": 125000000,
+            "height": 2931856
+        }
+    ],
+    "hash": "000000000079a1a696c9d2073ec4cd8729d2a59bbb26999263cbaab992e09280",
+    "height": 3053274
+}
+"#;
+    let obj: GetAddressUtxosResponse = serde_json::from_str(json)?;
+
+    let GetAddressUtxosResponse::UtxosAndChainInfo(obj) = &obj else {
+        panic!("Expected ChainInfoTrue variant");
+    };
+
+    let hash = obj.hash();
+    let height = obj.height();
+
+    let new_obj = GetAddressUtxosResponseObject::new(
+        obj.utxos()
+            .iter()
+            .map(|utxo| {
+                // Address extractability was checked manually
+                let address = utxo.address().clone();
+                // Hash extractability was checked in other test
+                let txid = utxo.txid();
+                let output_index = utxo.output_index().index();
+                // Script extractability was checked in other test
+                let script = utxo.script().clone();
+                let satoshis = utxo.satoshis();
+                // Height extractability was checked in other test
+                let height = utxo.height();
+
+                Utxo::new(
+                    address,
+                    txid,
+                    OutputIndex::from_index(output_index),
+                    script,
+                    satoshis,
+                    height,
+                )
+            })
+            .collect::<Vec<_>>(),
+        hash,
+        height,
+    );
+
+    assert_eq!(obj.clone(), new_obj);
 
     Ok(())
 }
@@ -1039,6 +1174,76 @@ fn test_get_mining_info() -> Result<(), Box<dyn std::error::Error>> {
         chain,
         testnet,
     );
+    assert_eq!(obj, new_obj);
+
+    Ok(())
+}
+
+#[test]
+fn test_get_network_info() -> Result<(), Box<dyn std::error::Error>> {
+    let json = r#"
+{
+  "version": 2030010,
+  "subversion": "/Zebra:2.3.0/",
+  "protocolversion": 170120,
+  "localservices": "0000000000000001",
+  "timeoffset": 0,
+  "connections": 75,
+  "networks": [
+  {
+    "name": "ipv4",
+    "limited": false,
+    "reachable": true,
+    "proxy": "",
+    "proxy_randomize_credentials": false
+  },
+  {
+    "name": "ipv6",
+    "limited": false,
+    "reachable": true,
+    "proxy": "",
+    "proxy_randomize_credentials": false
+  },
+  {
+    "name": "onion",
+    "limited": false,
+    "reachable": false,
+    "proxy": "",
+    "proxy_randomize_credentials": false
+  }
+  ],
+  "relayfee": 1e-6,
+  "localaddresses": [],
+  "warnings": ""
+}
+"#;
+
+    let obj: GetNetworkInfoResponse = serde_json::from_str(json)?;
+
+    let version = obj.version;
+    let subversion = obj.subversion.clone();
+    let protocol_version = obj.protocol_version;
+    let local_services = obj.local_services.clone();
+    let timeoffset = obj.timeoffset;
+    let connections = obj.connections;
+    let networks = obj.networks.clone();
+    let relay_fee = obj.relay_fee;
+    let local_addresses = obj.local_addresses.clone();
+    let warnings = obj.warnings.clone();
+
+    let new_obj = GetNetworkInfoResponse {
+        version,
+        subversion,
+        protocol_version,
+        local_services,
+        timeoffset,
+        connections,
+        networks,
+        relay_fee,
+        local_addresses,
+        warnings,
+    };
+
     assert_eq!(obj, new_obj);
 
     Ok(())

@@ -42,33 +42,27 @@ pub use error::{
     ValidateContextError,
 };
 pub use request::{
-    CheckpointVerifiedBlock, HashOrHeight, ReadRequest, Request, SemanticallyVerifiedBlock,
+    CheckpointVerifiedBlock, CommitSemanticallyVerifiedBlockRequest, HashOrHeight, MappedRequest,
+    ReadRequest, Request, SemanticallyVerifiedBlock,
 };
 
 #[cfg(feature = "indexer")]
 pub use request::Spend;
 
-pub use response::{GetBlockTemplateChainInfo, KnownBlock, MinedTx, ReadResponse, Response};
+pub use response::{AnyTx, GetBlockTemplateChainInfo, KnownBlock, MinedTx, ReadResponse, Response};
 pub use service::{
     chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip, TipAction},
     check,
     finalized_state::FinalizedState,
     init, init_read_only,
     non_finalized_state::NonFinalizedState,
-    spawn_init, spawn_init_read_only,
+    spawn_init_read_only,
     watch_receiver::WatchReceiver,
-    OutputLocation, TransactionIndex, TransactionLocation,
-};
-
-// Allow use in the scanner
-#[cfg(feature = "shielded-scan")]
-pub use service::finalized_state::{
-    SaplingScannedDatabaseEntry, SaplingScannedDatabaseIndex, SaplingScannedResult,
-    SaplingScanningKey,
+    OutputLocation, ReadState, State, TransactionIndex, TransactionLocation,
 };
 
 // Allow use in the scanner and external tests
-#[cfg(any(test, feature = "proptest-impl", feature = "shielded-scan"))]
+#[cfg(any(test, feature = "proptest-impl"))]
 pub use service::finalized_state::{ReadDisk, TypedColumnFamily, WriteTypedBatch};
 
 pub use service::{

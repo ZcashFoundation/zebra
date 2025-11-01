@@ -12,14 +12,13 @@ use std::{fmt, panic};
 use cookie::Cookie;
 use jsonrpsee::server::{middleware::rpc::RpcServiceBuilder, Server, ServerHandle};
 use tokio::task::JoinHandle;
-use tower::Service;
 use tracing::*;
 
-use zebra_chain::{
-    block, chain_sync_status::ChainSyncStatus, chain_tip::ChainTip, parameters::Network,
-};
+use zebra_chain::{chain_sync_status::ChainSyncStatus, chain_tip::ChainTip, parameters::Network};
+use zebra_consensus::router::service_trait::BlockVerifierService;
 use zebra_network::AddressBookPeers;
-use zebra_node_services::mempool;
+use zebra_node_services::mempool::MempoolService;
+use zebra_state::{ReadState as ReadStateService, State as StateService};
 
 use crate::{
     config,
@@ -103,44 +102,12 @@ impl RpcServer {
         conf: config::rpc::Config,
     ) -> Result<ServerTask, tower::BoxError>
     where
-        Mempool: tower::Service<
-                mempool::Request,
-                Response = mempool::Response,
-                Error = zebra_node_services::BoxError,
-            > + Clone
-            + Send
-            + Sync
-            + 'static,
-        Mempool::Future: Send,
-        State: Service<
-                zebra_state::Request,
-                Response = zebra_state::Response,
-                Error = zebra_state::BoxError,
-            > + Clone
-            + Send
-            + Sync
-            + 'static,
-        State::Future: Send,
-        ReadState: Service<
-                zebra_state::ReadRequest,
-                Response = zebra_state::ReadResponse,
-                Error = zebra_state::BoxError,
-            > + Clone
-            + Send
-            + Sync
-            + 'static,
-        ReadState::Future: Send,
+        Mempool: MempoolService,
+        State: StateService,
+        ReadState: ReadStateService,
         Tip: ChainTip + Clone + Send + Sync + 'static,
         AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
-        BlockVerifierRouter: Service<
-                zebra_consensus::Request,
-                Response = block::Hash,
-                Error = zebra_consensus::BoxError,
-            > + Clone
-            + Send
-            + Sync
-            + 'static,
-        <BlockVerifierRouter as Service<zebra_consensus::Request>>::Future: Send,
+        BlockVerifierRouter: BlockVerifierService,
         SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
     {
         let listen_addr = conf

@@ -9,6 +9,7 @@ use std::{
 use chrono::Utc;
 use num_integer::div_ceil;
 
+use tokio::sync::watch;
 use zebra_chain::{
     block::{Height, HeightDiff},
     chain_sync_status::ChainSyncStatus,
@@ -16,10 +17,9 @@ use zebra_chain::{
     fmt::humantime_seconds,
     parameters::{Network, NetworkUpgrade, POST_BLOSSOM_POW_TARGET_SPACING},
 };
-use zebra_consensus::ParameterCheckpoint as _;
 use zebra_state::MAX_BLOCK_REORG_HEIGHT;
 
-use crate::components::sync::SyncStatus;
+use crate::components::{health::ChainTipMetrics, sync::SyncStatus};
 
 /// The amount of time between progress logs.
 const LOG_INTERVAL: Duration = Duration::from_secs(60);
@@ -70,6 +70,7 @@ pub async fn show_block_chain_progress(
     network: Network,
     latest_chain_tip: impl ChainTip,
     sync_status: SyncStatus,
+    chain_tip_metrics_sender: watch::Sender<ChainTipMetrics>,
 ) -> ! {
     // The minimum number of extra blocks after the highest checkpoint, based on:
     // - the non-finalized state limit, and
@@ -116,6 +117,7 @@ pub async fn show_block_chain_progress(
     //
     // Initialized to the start time to simplify the code.
     let mut last_state_change_time = Utc::now();
+    let mut last_state_change_instant = Instant::now();
 
     // The state tip height, when we last downloaded and verified at least one block.
     //
@@ -127,6 +129,7 @@ pub async fn show_block_chain_progress(
 
     #[cfg(feature = "progress-bar")]
     let block_bar = howudoin::new().label("Blocks");
+    let mut is_chain_metrics_chan_closed = false;
 
     loop {
         let now = Utc::now();
@@ -156,6 +159,31 @@ pub async fn show_block_chain_progress(
                     .set_len(u64::from(estimated_height.0));
             }
 
+            let mut remaining_sync_blocks = estimated_height - current_height;
+
+            if remaining_sync_blocks < 0 {
+                remaining_sync_blocks = 0;
+            }
+
+            // Work out how long it has been since the state height has increased.
+            //
+            // Non-finalized forks can decrease the height, we only want to track increases.
+            if current_height > last_state_change_height {
+                last_state_change_height = current_height;
+                last_state_change_time = now;
+                last_state_change_instant = instant_now;
+            }
+
+            if !is_chain_metrics_chan_closed {
+                if let Err(err) = chain_tip_metrics_sender.send(ChainTipMetrics::new(
+                    last_state_change_instant,
+                    Some(remaining_sync_blocks),
+                )) {
+                    tracing::warn!(?err, "chain tip metrics channel closed");
+                    is_chain_metrics_chan_closed = true
+                };
+            }
+
             // Skip logging and status updates if it isn't time for them yet.
             let elapsed_since_log = instant_now.saturating_duration_since(last_log_time);
             if elapsed_since_log < LOG_INTERVAL {
@@ -174,19 +202,6 @@ pub async fn show_block_chain_progress(
                 sync_progress * 100.0,
                 frac = SYNC_PERCENT_FRAC_DIGITS,
             );
-
-            let mut remaining_sync_blocks = estimated_height - current_height;
-            if remaining_sync_blocks < 0 {
-                remaining_sync_blocks = 0;
-            }
-
-            // Work out how long it has been since the state height has increased.
-            //
-            // Non-finalized forks can decrease the height, we only want to track increases.
-            if current_height > last_state_change_height {
-                last_state_change_height = current_height;
-                last_state_change_time = now;
-            }
 
             let time_since_last_state_block_chrono =
                 now.signed_duration_since(last_state_change_time);

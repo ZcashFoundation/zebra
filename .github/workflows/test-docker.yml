@@ -1,0 +1,208 @@
+name: Test Docker Config
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "**/*.rs"
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - docker/Dockerfile
+      - docker/entrypoint.sh
+      - docker/**/*.toml
+      - zebrad/tests/common/configs/**
+      - .github/workflows/test-docker.yml
+
+  push:
+    branches: [main]
+    paths:
+      - "**/*.rs"
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - docker/Dockerfile
+      - docker/entrypoint.sh
+      - docker/**/*.toml
+      - zebrad/tests/common/configs/**
+      - .github/workflows/test-docker.yml
+
+# Ensures that only one workflow task will run at a time. Previous builds, if
+# already in process, will get cancelled. Only the latest commit will be allowed
+# to run, cancelling any workflows in between
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  RUST_LIB_BACKTRACE: 1
+  RUST_LOG: info
+  COLORBT_SHOW_HIDDEN: 1
+
+jobs:
+  build-docker-image:
+    name: Build Docker Image
+    permissions:
+      id-token: write
+      statuses: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+        with:
+          persist-credentials: false
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 #v3.11.1
+      - name: Build & push
+        id: docker_build
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 #v6.18.0
+        with:
+          target: tests
+          context: .
+          file: docker/Dockerfile
+          tags: zebrad-test:${{ github.sha }}
+          build-args: |
+            SHORT_SHA=${{ github.sha }}
+            CARGO_INCREMENTAL=1
+          outputs: type=docker,dest=${{ runner.temp }}/zebrad-test.tar
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
+        with:
+          name: zebrad-test
+          path: ${{ runner.temp }}/zebrad-test.tar
+
+  test-configurations:
+    name: Test ${{ matrix.name }}
+    needs: build-docker-image
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Basic network configurations
+          - id: default-conf
+            name: Default config
+            env_vars: ""
+            grep_patterns: -e "net.*=.*Main.*estimated progress to chain tip.*BeforeOverwinter"
+
+          - id: testnet-conf
+            name: Testnet config
+            env_vars: -e ZEBRA_NETWORK__NETWORK=Testnet
+            grep_patterns: -e "net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter"
+
+          # Only runs when using the image is built with the `tests` target, because the `runtime` target
+          # doesn't have the custom config file available in the tests/common/configs directory
+          - id: custom-conf
+            name: Custom config
+            env_vars: -e CONFIG_FILE_PATH=/home/zebra/zebrad/tests/common/configs/custom-conf.toml
+            grep_patterns: -e "extra_coinbase_data:\\sSome\\(\\\"do you even shield\\?\\\"\\)"
+
+          # RPC configuration tests
+          - id: rpc-conf
+            name: RPC config
+            env_vars: -e ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:8232
+            grep_patterns: -e "Opened RPC endpoint at.*0.0.0.0:8232"
+
+          - id: rpc-custom-conf
+            name: RPC with custom port
+            env_vars: -e ZEBRA_RPC__LISTEN_ADDR=127.0.0.1:28232
+            grep_patterns: -e "Opened RPC endpoint at.*127.0.0.1:28232"
+
+          # Custom directory tests
+          - id: rpc-cookie-conf
+            name: RPC with custom cookie dir
+            env_vars: -e ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:8232 -e ZEBRA_RPC__ENABLE_COOKIE_AUTH=true -e ZEBRA_RPC__COOKIE_DIR=/home/zebra/.config/cookie
+            grep_patterns: -e "RPC auth cookie written to disk"
+
+          # Custom directory tests
+          - id: custom-dirs-conf
+            name: Custom cache and cookie directories
+            env_vars: -e ZEBRA_STATE__CACHE_DIR=/tmp/zebra-cache
+            grep_patterns: -e "Opened Zebra state cache at /tmp/zebra-cache"
+
+          # Feature-based configurations
+          - id: prometheus-feature
+            name: Prometheus metrics
+            env_vars: -e FEATURES=prometheus -e ZEBRA_METRICS__ENDPOINT_ADDR=0.0.0.0:9999
+            grep_patterns: -e "0.0.0.0:9999"
+
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Download artifact
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
+        with:
+          name: zebrad-test
+          path: ${{ runner.temp }}
+
+      - name: Load image
+        run: |
+          docker load --input ${{ runner.temp }}/zebrad-test.tar
+          docker image ls -a
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@c33ff65466c58d57e4d796f88bb1ae0ff26ee453 #v5.2.0
+        with:
+          short-length: 7
+
+      - name: Run ${{ matrix.name }} test
+        # Only run custom-conf test if the config file exists in the built image
+        if: ${{ matrix.id != 'custom-conf' || hashFiles('zebrad/tests/common/configs/custom-conf.toml') != '' }}
+        run: |
+          docker run ${{ matrix.env_vars }} --detach --name ${{ matrix.id }} -t zebrad-test:${{ github.sha }} zebrad start
+          # Use a subshell to handle the broken pipe error gracefully
+          (
+            trap "" PIPE;
+            docker logs \
+            --tail all \
+            --follow \
+            ${{ matrix.id }} | \
+            tee --output-error=exit /dev/stderr | \
+            grep --max-count=1 --extended-regexp --color=always \
+            ${{ matrix.grep_patterns }}
+          )
+          LOGS_EXIT_STATUS=$?
+
+          # Display grep status for debugging
+          echo "grep exit status: $LOGS_EXIT_STATUS"
+
+          docker stop ${{ matrix.id }}
+
+          EXIT_STATUS=$(docker wait ${{ matrix.id }} || echo "Error retrieving exit status");
+          echo "docker exit status: $EXIT_STATUS";
+
+          # If grep didn't find the pattern, fail immediately
+          if [ $LOGS_EXIT_STATUS -ne 0 ]; then
+              echo "ERROR: Failed to find the expected pattern in logs. Check grep_patterns.";
+              exit 1;
+          else
+            echo "SUCCESS: Found the expected pattern in logs.";
+            # Exit successfully if grep passed, even if docker stop resulted in SIGKILL (137 or 139)
+            exit 0;
+          fi
+
+  test-docker-config-success:
+    name: Test Docker Config Success
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - build-docker-image
+      - test-configurations
+    timeout-minutes: 30
+    steps:
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe #v1.2.2
+        with:
+          jobs: ${{ toJSON(needs) }}

@@ -22,7 +22,7 @@ pub struct NoteCommitmentTrees {
     pub sapling: Arc<sapling::tree::NoteCommitmentTree>,
 
     /// The sapling note commitment subtree.
-    pub sapling_subtree: Option<NoteCommitmentSubtree<sapling::tree::Node>>,
+    pub sapling_subtree: Option<NoteCommitmentSubtree<sapling_crypto::Node>>,
 
     /// The orchard note commitment tree.
     pub orchard: Arc<orchard::tree::NoteCommitmentTree>,
@@ -156,7 +156,7 @@ impl NoteCommitmentTrees {
     ) -> Result<
         (
             Arc<sapling::tree::NoteCommitmentTree>,
-            Option<(NoteCommitmentSubtreeIndex, sapling::tree::Node)>,
+            Option<(NoteCommitmentSubtreeIndex, sapling_crypto::Node)>,
         ),
         NoteCommitmentTreeError,
     > {

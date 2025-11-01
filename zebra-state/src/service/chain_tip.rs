@@ -115,7 +115,7 @@ impl From<SemanticallyVerifiedBlock> for ChainTipBlock {
             height,
             new_outputs: _,
             transaction_hashes,
-            deferred_balance: _,
+            deferred_pool_balance_change: _,
         } = prepared;
 
         Self {
@@ -552,6 +552,11 @@ impl ChainTipChange {
         self.last_change_hash = Some(block_hash);
 
         Some(tip_action)
+    }
+
+    /// Sets the `last_change_hash` as the provided hash.
+    pub fn mark_last_change_hash(&mut self, hash: block::Hash) {
+        self.last_change_hash = Some(hash);
     }
 
     /// Return an action based on `block` and the last change we returned.

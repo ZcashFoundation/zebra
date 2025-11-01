@@ -23,11 +23,14 @@ import subprocess
 import tarfile
 import tempfile
 import time
+import toml
 import re
 import errno
 
 from . import coverage
 from .proxy import ServiceProxy, JSONRPCException
+
+from test_framework.config import ZebraConfig, ZebraExtraArgs
 
 LEGACY_DEFAULT_FEE = Decimal('0.00001')
 
@@ -198,6 +201,7 @@ def initialize_datadir(dirname, n, clock_offset=0):
     config_rpc_port = rpc_port(n)
     config_p2p_port = p2p_port(n)
 
+    """ TODO: Can create zebrad base_config here, or remove.
     with open(os.path.join(datadir, "zcash.conf"), 'w', encoding='utf8') as f:
         f.write("regtest=1\n")
         f.write("showmetrics=0\n")
@@ -208,22 +212,26 @@ def initialize_datadir(dirname, n, clock_offset=0):
         f.write("listenonion=0\n")
         if clock_offset != 0:
             f.write('clockoffset='+str(clock_offset)+'\n')
+    """
 
-    update_zebrad_conf(datadir, config_rpc_port, config_p2p_port)
+    update_zebrad_conf(datadir, config_rpc_port, config_p2p_port, None)
 
     return datadir
 
-def update_zebrad_conf(datadir, rpc_port, p2p_port):
-    import toml
-
+def update_zebrad_conf(datadir, rpc_port, p2p_port, extra_args=None):
     config_path = zebrad_config(datadir)
 
     with open(config_path, 'r') as f:
         config_file = toml.load(f)
 
-    config_file['rpc']['listen_addr'] = '127.0.0.1:'+str(rpc_port)
-    config_file['network']['listen_addr'] = '127.0.0.1:'+str(p2p_port)
-    config_file['state']['cache_dir'] = datadir
+    zebra_config = ZebraConfig(
+        network_listen_address='127.0.0.1:'+str(p2p_port),
+        rpc_listen_address='127.0.0.1:'+str(rpc_port),
+        data_dir=datadir)
+
+    zebra_config.extra_args = extra_args or ZebraExtraArgs()
+
+    config_file = zebra_config.update(config_file)
 
     with open(config_path, 'w') as f:
         toml.dump(config_file, f)
@@ -253,9 +261,7 @@ def wait_for_bitcoind_start(process, url, i):
     Wait for bitcoind to start. This means that RPC is accessible and fully initialized.
     Raise an exception if bitcoind exits during initialization.
     '''
-    # Zebra can do migration and other stuff at startup, even in regtest mode,
-    # giving 10 seconds for it to complete.
-    time.sleep(10)
+    time.sleep(1) # give the node a moment to start
     while True:
         if process.poll() is not None:
             raise Exception('%s node %d exited with status %i during initialization' % (zcashd_binary(), i, process.returncode))
@@ -529,10 +535,13 @@ def start_node(i, dirname, extra_args=None, rpchost=None, timewait=None, binary=
     if binary is None:
         binary = zcashd_binary()
 
-    config = update_zebrad_conf(datadir, rpc_port(i), p2p_port(i))
+    if extra_args is not None:
+        config = update_zebrad_conf(datadir, rpc_port(i), p2p_port(i), extra_args)
+    else:
+        config = update_zebrad_conf(datadir, rpc_port(i), p2p_port(i))
     args = [ binary, "-c="+config, "start" ]
 
-    if extra_args is not None: args.extend(extra_args)
+    #if extra_args is not None: args.extend(extra_args)
     bitcoind_processes[i] = subprocess.Popen(args, stderr=stderr)
     if os.getenv("PYTHON_DEBUG", ""):
         print("start_node: bitcoind started, waiting for RPC to come up")
@@ -628,7 +637,6 @@ def connect_nodes(from_connection, node_num):
 
 def connect_nodes_bi(nodes, a, b):
     connect_nodes(nodes[a], b)
-    connect_nodes(nodes[b], a)
 
 def find_output(node, txid, amount):
     """
@@ -840,6 +848,12 @@ def start_wallet(i, dirname, extra_args=None, rpchost=None, timewait=None, binar
     """
 
     datadir = os.path.join(dirname, "wallet"+str(i))
+    wallet_datadir = os.path.join(dirname, "wallet_data"+str(i))
+    prepare = False
+    if not os.path.exists(wallet_datadir):
+        prepare = True
+        os.mkdir(wallet_datadir)
+
     if binary is None:
         binary = zallet_binary()
 
@@ -847,7 +861,19 @@ def start_wallet(i, dirname, extra_args=None, rpchost=None, timewait=None, binar
     zallet_port = wallet_rpc_port(i)
 
     config = update_zallet_conf(datadir, validator_port, zallet_port)
-    args = [ binary, "-c="+config, "start" ]
+
+    # We prepare the wallet if it is new
+    if prepare:
+        args = [ binary, "-c="+config, "-d="+wallet_datadir, "init-wallet-encryption" ]
+        process = subprocess.Popen(args, stderr=stderr)
+        process.wait()
+
+        args = [ binary, "-c="+config, "-d="+wallet_datadir, "generate-mnemonic" ]
+        process = subprocess.Popen(args, stderr=stderr)
+        process.wait()
+
+    # Start the wallet
+    args = [ binary, "-c="+config, "-d="+wallet_datadir, "start" ]
 
     if extra_args is not None: args.extend(extra_args)
     zallet_processes[i] = subprocess.Popen(args, stderr=stderr)
@@ -864,8 +890,6 @@ def start_wallet(i, dirname, extra_args=None, rpchost=None, timewait=None, binar
     return proxy
 
 def update_zallet_conf(datadir, validator_port, zallet_port):
-    import toml
-
     config_path = zallet_config(datadir)
 
     with open(config_path, 'r') as f:
@@ -874,9 +898,9 @@ def update_zallet_conf(datadir, validator_port, zallet_port):
     config_file['rpc']['bind'][0] = '127.0.0.1:'+str(zallet_port)
     config_file['indexer']['validator_address'] = '127.0.0.1:'+str(validator_port)
 
-    config_file['wallet_db'] = os.path.join(datadir, 'datadir/data.sqlite')
+    config_file['database']['wallet'] = os.path.join(datadir, 'datadir/data.sqlite')
     config_file['indexer']['db_path'] = os.path.join(datadir, 'datadir/zaino')
-    config_file['keystore']['identity'] = os.path.join(datadir, 'datadir/identity.txt')
+    config_file['keystore']['encryption_identity'] = os.path.join(datadir, 'datadir/identity.txt')
 
     with open(config_path, 'w') as f:
         toml.dump(config_file, f)
@@ -886,7 +910,6 @@ def update_zallet_conf(datadir, validator_port, zallet_port):
 def stop_wallets(wallets):
     for wallet in wallets:
         try:
-            # TODO: Implement `stop` in zallet: https://github.com/zcash/wallet/issues/153
             wallet.stop()
         except http.client.CannotSendRequest as e:
             print("WARN: Unable to stop wallet: " + repr(e))
@@ -895,7 +918,8 @@ def stop_wallets(wallets):
 def zallet_config(datadir):
     base_location = os.path.join('qa', 'zallet-datadir')
     new_location = os.path.join(datadir, "datadir")
-    shutil.copytree(base_location, new_location)
+    if not os.path.exists(new_location):
+        shutil.copytree(base_location, new_location)
     config = new_location + "/zallet.toml"
     return config
 

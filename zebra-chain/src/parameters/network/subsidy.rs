@@ -12,15 +12,14 @@
 //! Typically, consensus parameters are accessed via a function that takes a
 //! `Network` and `block::Height`.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use lazy_static::lazy_static;
 
 use crate::{
     amount::{self, Amount, NonNegative, COIN},
     block::{Height, HeightDiff},
-    parameters::{Network, NetworkUpgrade},
-    transaction::Transaction,
+    parameters::{constants::activation_heights, Network, NetworkUpgrade},
     transparent,
 };
 
@@ -101,6 +100,11 @@ impl FundingStreamReceiver {
             )
         }
     }
+
+    /// Returns true if this [`FundingStreamReceiver`] is [`FundingStreamReceiver::Deferred`].
+    pub fn is_deferred(&self) -> bool {
+        matches!(self, Self::Deferred)
+    }
 }
 
 /// Denominator as described in [protocol specification §7.10.1][7.10.1].
@@ -142,6 +146,11 @@ impl FundingStreams {
         }
     }
 
+    /// Creates a new empty [`FundingStreams`] representing no funding streams.
+    pub fn empty() -> Self {
+        Self::new(Height::MAX..Height::MAX, HashMap::new())
+    }
+
     /// Returns height range where these [`FundingStreams`] should apply.
     pub fn height_range(&self) -> &std::ops::Range<Height> {
         &self.height_range
@@ -155,6 +164,21 @@ impl FundingStreams {
     /// Returns a recipient with the provided receiver.
     pub fn recipient(&self, receiver: FundingStreamReceiver) -> Option<&FundingStreamRecipient> {
         self.recipients.get(&receiver)
+    }
+
+    /// Accepts a target number of addresses that all recipients of this funding stream
+    /// except the [`FundingStreamReceiver::Deferred`] receiver should have.
+    ///
+    /// Extends the addresses for all funding stream recipients by repeating their
+    /// existing addresses until reaching the provided target number of addresses.
+    pub fn extend_recipient_addresses(&mut self, target_len: usize) {
+        for (receiver, recipient) in &mut self.recipients {
+            if receiver.is_deferred() {
+                continue;
+            }
+
+            recipient.extend_addresses(target_len);
+        }
     }
 }
 
@@ -201,86 +225,148 @@ impl FundingStreamRecipient {
     pub fn addresses(&self) -> &[transparent::Address] {
         &self.addresses
     }
+
+    /// Accepts a target number of addresses that this recipient should have.
+    ///
+    /// Extends the addresses for this funding stream recipient by repeating
+    /// existing addresses until reaching the provided target number of addresses.
+    ///
+    /// # Panics
+    ///
+    /// If there are no recipient addresses.
+    pub fn extend_addresses(&mut self, target_len: usize) {
+        assert!(
+            !self.addresses.is_empty(),
+            "cannot extend addresses for empty recipient"
+        );
+
+        self.addresses = self
+            .addresses
+            .iter()
+            .cycle()
+            .take(target_len)
+            .cloned()
+            .collect();
+    }
 }
 
 lazy_static! {
-    /// The pre-NU6 funding streams for Mainnet as described in [protocol specification §7.10.1][7.10.1]
+    /// The funding streams for Mainnet as described in:
+    /// - [protocol specification §7.10.1][7.10.1]
+    /// - [ZIP-1015](https://zips.z.cash/zip-1015)
+    /// - [ZIP-214#funding-streams](https://zips.z.cash/zip-0214#funding-streams)
+    ///
     /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
-    pub static ref PRE_NU6_FUNDING_STREAMS_MAINNET: FundingStreams = FundingStreams {
-        height_range: Height(1_046_400)..Height(2_726_400),
-        recipients: [
-            (
-                FundingStreamReceiver::Ecc,
-                FundingStreamRecipient::new(7, FUNDING_STREAM_ECC_ADDRESSES_MAINNET),
-            ),
-            (
-                FundingStreamReceiver::ZcashFoundation,
-                FundingStreamRecipient::new(5, FUNDING_STREAM_ZF_ADDRESSES_MAINNET),
-            ),
-            (
-                FundingStreamReceiver::MajorGrants,
-                FundingStreamRecipient::new(8, FUNDING_STREAM_MG_ADDRESSES_MAINNET),
-            ),
-        ]
-        .into_iter()
-        .collect(),
-    };
+    pub static ref FUNDING_STREAMS_MAINNET: Vec<FundingStreams> = vec![
+        FundingStreams {
+            height_range: Height(1_046_400)..Height(2_726_400),
+            recipients: [
+                (
+                    FundingStreamReceiver::Ecc,
+                    FundingStreamRecipient::new(7, FUNDING_STREAM_ECC_ADDRESSES_MAINNET),
+                ),
+                (
+                    FundingStreamReceiver::ZcashFoundation,
+                    FundingStreamRecipient::new(5, FUNDING_STREAM_ZF_ADDRESSES_MAINNET),
+                ),
+                (
+                    FundingStreamReceiver::MajorGrants,
+                    FundingStreamRecipient::new(8, FUNDING_STREAM_MG_ADDRESSES_MAINNET),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        },
+        FundingStreams {
+            height_range: POST_NU6_FUNDING_STREAM_START_RANGE_MAINNET,
+            recipients: [
+                (
+                    FundingStreamReceiver::Deferred,
+                    FundingStreamRecipient::new::<[&str; 0], &str>(12, []),
+                ),
+                (
+                    FundingStreamReceiver::MajorGrants,
+                    FundingStreamRecipient::new(8, POST_NU6_FUNDING_STREAM_FPF_ADDRESSES_MAINNET),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        },
 
-    /// The post-NU6 funding streams for Mainnet as described in [ZIP-1015](https://zips.z.cash/zip-1015).
-    pub static ref POST_NU6_FUNDING_STREAMS_MAINNET: FundingStreams = FundingStreams {
-        height_range: POST_NU6_FUNDING_STREAM_START_RANGE_MAINNET,
-        recipients: [
-            (
-                FundingStreamReceiver::Deferred,
-                FundingStreamRecipient::new::<[&str; 0], &str>(12, []),
-            ),
-            (
-                FundingStreamReceiver::MajorGrants,
-                FundingStreamRecipient::new(8, POST_NU6_FUNDING_STREAM_FPF_ADDRESSES_MAINNET),
-            ),
-        ]
-        .into_iter()
-        .collect()
-    };
+        FundingStreams {
+            height_range: activation_heights::mainnet::NU6_1..Height(4_406_400),
+            recipients: [
+                (
+                    FundingStreamReceiver::Deferred,
+                    FundingStreamRecipient::new::<[&str; 0], &str>(12, []),
+                ),
+                (
+                    FundingStreamReceiver::MajorGrants,
+                    FundingStreamRecipient::new(8, POST_NU6_1_FUNDING_STREAM_FPF_ADDRESSES_MAINNET),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        },
+    ];
 
-    /// The pre-NU6 funding streams for Testnet as described in [protocol specification §7.10.1][7.10.1]
+    /// The funding streams for Testnet as described in:
+    /// - [protocol specification §7.10.1][7.10.1]
+    /// - [ZIP-1015](https://zips.z.cash/zip-1015)
+    /// - [ZIP-214#funding-streams](https://zips.z.cash/zip-0214#funding-streams)
+    ///
     /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
-    pub static ref PRE_NU6_FUNDING_STREAMS_TESTNET: FundingStreams = FundingStreams {
-        height_range: Height(1_028_500)..Height(2_796_000),
-        recipients: [
-            (
-                FundingStreamReceiver::Ecc,
-                FundingStreamRecipient::new(7, FUNDING_STREAM_ECC_ADDRESSES_TESTNET),
-            ),
-            (
-                FundingStreamReceiver::ZcashFoundation,
-                FundingStreamRecipient::new(5, FUNDING_STREAM_ZF_ADDRESSES_TESTNET),
-            ),
-            (
-                FundingStreamReceiver::MajorGrants,
-                FundingStreamRecipient::new(8, FUNDING_STREAM_MG_ADDRESSES_TESTNET),
-            ),
-        ]
-        .into_iter()
-        .collect(),
-    };
-
-    /// The post-NU6 funding streams for Testnet as described in [ZIP-1015](https://zips.z.cash/zip-1015).
-    pub static ref POST_NU6_FUNDING_STREAMS_TESTNET: FundingStreams = FundingStreams {
-        height_range: POST_NU6_FUNDING_STREAM_START_RANGE_TESTNET,
-        recipients: [
-            (
-                FundingStreamReceiver::Deferred,
-                FundingStreamRecipient::new::<[&str; 0], &str>(12, []),
-            ),
-            (
-                FundingStreamReceiver::MajorGrants,
-                FundingStreamRecipient::new(8, POST_NU6_FUNDING_STREAM_FPF_ADDRESSES_TESTNET),
-            ),
-        ]
-        .into_iter()
-        .collect()
-    };
+    pub static ref FUNDING_STREAMS_TESTNET: Vec<FundingStreams> = vec![
+        FundingStreams {
+            height_range: Height(1_028_500)..Height(2_796_000),
+            recipients: [
+                (
+                    FundingStreamReceiver::Ecc,
+                    FundingStreamRecipient::new(7, FUNDING_STREAM_ECC_ADDRESSES_TESTNET),
+                ),
+                (
+                    FundingStreamReceiver::ZcashFoundation,
+                    FundingStreamRecipient::new(5, FUNDING_STREAM_ZF_ADDRESSES_TESTNET),
+                ),
+                (
+                    FundingStreamReceiver::MajorGrants,
+                    FundingStreamRecipient::new(8, FUNDING_STREAM_MG_ADDRESSES_TESTNET),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        },
+        FundingStreams {
+            height_range: POST_NU6_FUNDING_STREAM_START_RANGE_TESTNET,
+            recipients: [
+                (
+                    FundingStreamReceiver::Deferred,
+                    FundingStreamRecipient::new::<[&str; 0], &str>(12, []),
+                ),
+                (
+                    FundingStreamReceiver::MajorGrants,
+                    FundingStreamRecipient::new(8, POST_NU6_FUNDING_STREAM_FPF_ADDRESSES_TESTNET),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        },
+        FundingStreams {
+            height_range: activation_heights::testnet::NU6_1..Height(4_476_000),
+            recipients: [
+                (
+                    FundingStreamReceiver::Deferred,
+                    FundingStreamRecipient::new::<[&str; 0], &str>(12, []),
+                ),
+                (
+                    FundingStreamReceiver::MajorGrants,
+                    FundingStreamRecipient::new(8, POST_NU6_1_FUNDING_STREAM_FPF_ADDRESSES_TESTNET),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        },
+    ];
 }
 
 /// The start height of post-NU6 funding streams on Mainnet as described in [ZIP-1015](https://zips.z.cash/zip-1015).
@@ -288,6 +374,36 @@ const POST_NU6_FUNDING_STREAM_START_HEIGHT_MAINNET: u32 = 2_726_400;
 
 /// The start height of post-NU6 funding streams on Testnet as described in [ZIP-1015](https://zips.z.cash/zip-1015).
 const POST_NU6_FUNDING_STREAM_START_HEIGHT_TESTNET: u32 = 2_976_000;
+
+/// The one-time lockbox disbursement output addresses and amounts expected in the NU6.1 activation block's
+/// coinbase transaction on Mainnet.
+/// See:
+/// - <https://zips.z.cash/zip-0271#one-timelockboxdisbursement>
+/// - <https://zips.z.cash/zip-0214#mainnet-recipients-for-revision-2>
+pub const NU6_1_LOCKBOX_DISBURSEMENTS_MAINNET: [(&str, Amount<NonNegative>); 10] = [(
+    "t3ev37Q2uL1sfTsiJQJiWJoFzQpDhmnUwYo",
+    EXPECTED_NU6_1_LOCKBOX_DISBURSEMENTS_TOTAL_MAINNET.div_exact(10),
+); 10];
+
+/// The one-time lockbox disbursement output addresses and amounts expected in the NU6.1 activation block's
+/// coinbase transaction on Testnet.
+/// See:
+/// - <https://zips.z.cash/zip-0271#one-timelockboxdisbursement>
+/// - <https://zips.z.cash/zip-0214#testnet-recipients-for-revision-2>
+pub const NU6_1_LOCKBOX_DISBURSEMENTS_TESTNET: [(&str, Amount<NonNegative>); 10] = [(
+    "t2RnBRiqrN1nW4ecZs1Fj3WWjNdnSs4kiX8",
+    EXPECTED_NU6_1_LOCKBOX_DISBURSEMENTS_TOTAL_TESTNET.div_exact(10),
+); 10];
+
+/// The expected total amount of the one-time lockbox disbursement on Mainnet.
+/// See: <https://zips.z.cash/zip-0271#one-timelockboxdisbursement>.
+pub(crate) const EXPECTED_NU6_1_LOCKBOX_DISBURSEMENTS_TOTAL_MAINNET: Amount<NonNegative> =
+    Amount::new_from_zec(78_750);
+
+/// The expected total amount of the one-time lockbox disbursement on Testnet.
+/// See <https://zips.z.cash/zip-0271#one-timelockboxdisbursement>.
+pub(crate) const EXPECTED_NU6_1_LOCKBOX_DISBURSEMENTS_TOTAL_TESTNET: Amount<NonNegative> =
+    Amount::new_from_zec(78_750);
 
 /// The number of blocks contained in the post-NU6 funding streams height ranges on Mainnet or Testnet, as specified
 /// in [ZIP-1015](https://zips.z.cash/zip-1015).
@@ -452,6 +568,18 @@ pub const POST_NU6_FUNDING_STREAM_FPF_ADDRESSES_MAINNET: [&str;
     POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES_MAINNET] =
     ["t3cFfPt1Bcvgez9ZbMBFWeZsskxTkPzGCow"; POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES_MAINNET];
 
+/// Number of addresses for each post-NU6.1 funding stream on Mainnet.
+/// In the spec ([protocol specification §7.10][7.10]) this is defined as: `fs.addressindex(fs.endheight - 1)`
+/// however we know this value beforehand so we prefer to make it a constant instead.
+///
+/// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
+pub const POST_NU6_1_FUNDING_STREAMS_NUM_ADDRESSES_MAINNET: usize = 36;
+
+/// List of addresses for the Major Grants post-NU6.1 funding stream on Mainnet administered by the Financial Privacy Fund (FPF).
+pub const POST_NU6_1_FUNDING_STREAM_FPF_ADDRESSES_MAINNET: [&str;
+    POST_NU6_1_FUNDING_STREAMS_NUM_ADDRESSES_MAINNET] =
+    ["t3cFfPt1Bcvgez9ZbMBFWeZsskxTkPzGCow"; POST_NU6_1_FUNDING_STREAMS_NUM_ADDRESSES_MAINNET];
+
 /// Number of addresses for each funding stream in the Testnet.
 /// In the spec ([protocol specification §7.10][7.10]) this is defined as: `fs.addressindex(fs.endheight - 1)`
 /// however we know this value beforehand so we prefer to make it a constant instead.
@@ -529,10 +657,25 @@ pub const FUNDING_STREAM_MG_ADDRESSES_TESTNET: [&str; FUNDING_STREAMS_NUM_ADDRES
 /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
 pub const POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES_TESTNET: usize = 13;
 
+/// Number of addresses for each post-NU6 funding stream in the Testnet.
+/// In the spec ([protocol specification §7.10][7.10]) this is defined as: `fs.addressindex(fs.endheight - 1)`
+/// however we know this value beforehand so we prefer to make it a constant instead.
+///
+/// There are 27 funding stream periods across the 939,500 blocks for which the post-NU6.1 funding streams are
+/// active. See Testnet funding streams in revision 2 of <https://zips.z.cash/zip-0214#funding-streams>.
+///
+/// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
+pub const POST_NU6_1_FUNDING_STREAMS_NUM_ADDRESSES_TESTNET: usize = 27;
+
 /// List of addresses for the Major Grants post-NU6 funding stream on Testnet administered by the Financial Privacy Fund (FPF).
 pub const POST_NU6_FUNDING_STREAM_FPF_ADDRESSES_TESTNET: [&str;
     POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES_TESTNET] =
     ["t2HifwjUj9uyxr9bknR8LFuQbc98c3vkXtu"; POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES_TESTNET];
+
+/// List of addresses for the Major Grants post-NU6.1 funding stream on Testnet administered by the Financial Privacy Fund (FPF).
+pub const POST_NU6_1_FUNDING_STREAM_FPF_ADDRESSES_TESTNET: [&str;
+    POST_NU6_1_FUNDING_STREAMS_NUM_ADDRESSES_TESTNET] =
+    ["t2HifwjUj9uyxr9bknR8LFuQbc98c3vkXtu"; POST_NU6_1_FUNDING_STREAMS_NUM_ADDRESSES_TESTNET];
 
 /// Returns the address change period
 /// as described in [protocol specification §7.10][7.10]
@@ -616,7 +759,7 @@ pub fn funding_stream_values(
 
     if height >= canopy_height {
         let funding_streams = network.funding_streams(height);
-        if funding_streams.height_range().contains(&height) {
+        if let Some(funding_streams) = funding_streams {
             for (&receiver, recipient) in funding_streams.recipients() {
                 // - Spec equation: `fs.value = floor(block_subsidy(height)*(fs.numerator/fs.denominator))`:
                 //   https://zips.z.cash/protocol/protocol.pdf#subsidies
@@ -643,6 +786,9 @@ pub enum SubsidyError {
 
     #[error("funding stream expected output not found")]
     FundingStreamNotFound,
+
+    #[error("one-time lockbox disbursement output not found")]
+    OneTimeLockboxDisbursementNotFound,
 
     #[error("miner fees are invalid")]
     InvalidMinerFees,
@@ -750,14 +896,4 @@ pub fn miner_subsidy(
             .sum();
 
     expected_block_subsidy - total_funding_stream_amount?
-}
-
-/// Returns all output amounts in `Transaction`.
-pub fn output_amounts(transaction: &Transaction) -> HashSet<Amount<NonNegative>> {
-    transaction
-        .outputs()
-        .iter()
-        .map(|o| &o.value)
-        .cloned()
-        .collect()
 }

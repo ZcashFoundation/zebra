@@ -8,7 +8,7 @@ use crate::{
     fmt::{HexDebug, SummaryDebug},
     history_tree::HistoryTree,
     parameters::{NetworkUpgrade::*, GENESIS_PREVIOUS_BLOCK_HASH},
-    serialization,
+    serialization::{self, BytesInDisplayOrder},
     transaction::arbitrary::MAX_ARBITRARY_ITEMS,
     transparent::{
         new_transaction_ordered_outputs, CoinbaseSpendRestriction,
@@ -102,8 +102,11 @@ pub struct LedgerState {
 }
 
 /// Overrides for arbitrary [`LedgerState`]s.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct LedgerStateOverride {
+    /// Use the given network instead of Mainnet
+    pub network_override: Option<Network>,
+
     /// Every chain starts at this block. Single blocks have this height.
     pub height_override: Option<Height>,
 
@@ -138,6 +141,7 @@ impl LedgerState {
     /// overrides.
     pub fn no_override_strategy() -> BoxedStrategy<Self> {
         Self::arbitrary_with(LedgerStateOverride {
+            network_override: None,
             height_override: None,
             previous_block_hash_override: None,
             network_upgrade_override: None,
@@ -157,6 +161,7 @@ impl LedgerState {
         transaction_has_valid_network_upgrade: bool,
     ) -> BoxedStrategy<Self> {
         Self::arbitrary_with(LedgerStateOverride {
+            network_override: None,
             height_override: None,
             previous_block_hash_override: None,
             network_upgrade_override: Some(network_upgrade_override),
@@ -176,6 +181,7 @@ impl LedgerState {
         transaction_has_valid_network_upgrade: bool,
     ) -> BoxedStrategy<Self> {
         Self::arbitrary_with(LedgerStateOverride {
+            network_override: None,
             height_override: None,
             previous_block_hash_override: None,
             network_upgrade_override: network_upgrade_override.into(),
@@ -194,11 +200,13 @@ impl LedgerState {
     /// Use the `Genesis` network upgrade to get a random genesis block, with
     /// Zcash genesis features.
     pub fn genesis_strategy(
+        network_override: impl Into<Option<Network>>,
         network_upgrade_override: impl Into<Option<NetworkUpgrade>>,
         transaction_version_override: impl Into<Option<u32>>,
         transaction_has_valid_network_upgrade: bool,
     ) -> BoxedStrategy<Self> {
         Self::arbitrary_with(LedgerStateOverride {
+            network_override: network_override.into(),
             height_override: Some(Height(0)),
             previous_block_hash_override: Some(GENESIS_PREVIOUS_BLOCK_HASH),
             network_upgrade_override: network_upgrade_override.into(),
@@ -219,6 +227,7 @@ impl LedgerState {
         transaction_has_valid_network_upgrade: bool,
     ) -> BoxedStrategy<Self> {
         Self::arbitrary_with(LedgerStateOverride {
+            network_override: None,
             height_override: Some(height),
             previous_block_hash_override: None,
             network_upgrade_override: network_upgrade_override.into(),
@@ -289,6 +298,7 @@ impl Default for LedgerStateOverride {
         };
 
         LedgerStateOverride {
+            network_override: None,
             height_override: None,
             previous_block_hash_override: None,
             network_upgrade_override: nu5_override,
@@ -318,7 +328,11 @@ impl Arbitrary for LedgerState {
                 move |(height, network, transaction_has_valid_network_upgrade, has_coinbase)| {
                     LedgerState {
                         height: ledger_override.height_override.unwrap_or(height),
-                        network,
+                        network: ledger_override
+                            .network_override
+                            .as_ref()
+                            .unwrap_or(&network)
+                            .clone(),
                         network_upgrade_override: ledger_override.network_upgrade_override,
                         previous_block_hash_override: ledger_override.previous_block_hash_override,
                         transaction_version_override: ledger_override.transaction_version_override,
@@ -652,17 +666,9 @@ where
     let has_shielded_outputs = transaction.has_shielded_outputs();
     let delete_transparent_outputs =
         CoinbaseSpendRestriction::CheckCoinbaseMaturity { spend_height };
-    let mut attempts: usize = 0;
-
-    // choose an arbitrary spendable UTXO, in hash set order
-    while let Some((candidate_outpoint, candidate_utxo)) = utxos.iter().next() {
-        attempts += 1;
-
-        // Avoid O(n^2) algorithmic complexity by giving up early,
-        // rather than exhaustively checking the entire UTXO set
-        if attempts > 100 {
-            return None;
-        }
+    // choose an arbitrary spendable UTXO, in hash set order, with a bounded scan
+    for (candidate_outpoint, candidate_utxo) in utxos.iter().take(100) {
+        // Avoid O(n^2) algorithmic complexity by limiting the number of checks
 
         // try the utxo as-is, then try it with deleted transparent outputs
         if check_transparent_coinbase_spend(

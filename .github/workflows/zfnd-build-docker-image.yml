@@ -1,0 +1,215 @@
+# This workflow automates the building and pushing of Docker images based on user-defined inputs. It includes:
+# - Accepting various inputs like image name, Dockerfile path, target, and additional Rust-related parameters.
+# - Authenticates with Google Cloud and logs into Google Artifact Registry and DockerHub.
+# - Uses Docker Buildx for improved build performance and caching.
+# - Builds the Docker image and pushes it to both Google Artifact Registry and potentially DockerHub, depending on release type.
+# - Manages caching strategies to optimize build times across different branches.
+# - Uses Docker Scout to display vulnerabilities and recommendations for the latest built image.
+name: Build docker image
+
+on:
+  workflow_call:
+    inputs:
+      image_name:
+        required: true
+        type: string
+      dockerfile_path:
+        required: true
+        type: string
+      dockerfile_target:
+        required: true
+        type: string
+      short_sha:
+        required: false
+        type: string
+      rust_backtrace:
+        required: false
+        type: string
+      rust_lib_backtrace:
+        required: false
+        type: string
+      # defaults to: vars.RUST_LOG
+      rust_log:
+        required: false
+        type: string
+      features:
+        required: false
+        type: string
+      no_cache:
+        description: Disable the Docker cache for this build
+        required: false
+        type: boolean
+        default: false
+      publish_to_dockerhub:
+        description: "Whether to publish to Docker Hub. Set to true only in release-binaries.yml to create official production images. Defaults to false to prevent duplicate publishing from deploy-nodes.yml."
+        required: false
+        type: boolean
+        default: false
+
+    secrets:
+      DOCKERHUB_USERNAME:
+        required: false
+      DOCKERHUB_TOKEN:
+        required: false
+
+    outputs:
+      image_digest:
+        description: The image digest to be used on a caller workflow
+        value: ${{ jobs.build.outputs.image_digest }}
+
+permissions:
+  contents: read
+
+env:
+  FEATURES: ${{ inputs.features }}
+  RUST_LOG: ${{ inputs.rust_log || vars.RUST_LOG }}
+  CARGO_INCREMENTAL: ${{ vars.CARGO_INCREMENTAL }}
+
+jobs:
+  build:
+    name: Build images
+    if: github.repository_owner == 'ZcashFoundation'
+    timeout-minutes: 210
+    runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'release' && 'prod' || 'dev' }}
+    outputs:
+      image_digest: ${{ steps.docker_build.outputs.digest }}
+      image_name: ${{ fromJSON(steps.docker_build.outputs.metadata)['image.name'] }}
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write # for `docker-scout` to be able to write the comment
+    env:
+      DOCKER_BUILD_SUMMARY: ${{ vars.DOCKER_BUILD_SUMMARY }}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@c33ff65466c58d57e4d796f88bb1ae0ff26ee453 #v5.2.0
+        with:
+          short-length: 7
+
+      # Automatic tag management and OCI Image Format Specification for labels
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@c1e51972afc2121e065aed6d45c65596fe445f3f #v5.8.0
+        with:
+          # list of Docker images to use as base name for tags
+          # Docker Hub publishing requires ALL conditions to be true:
+          # - inputs.publish_to_dockerhub must be explicitly set to true (defaults to false)
+          # - Event must be a release (not a pre-release)
+          # This prevents duplicate publishing when both release-binaries.yml and deploy-nodes.yml run
+          # Ref: https://github.com/orgs/community/discussions/26281#discussioncomment-3251177
+          images: |
+            us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }}
+            zfnd/${{ inputs.image_name }},enable=${{ inputs.publish_to_dockerhub && github.event_name == 'release' && !github.event.release.prerelease }}
+          # generate Docker tags based on the following events/attributes
+          tags: |
+            # These DockerHub release tags support the following use cases:
+            # - `latest`: Automatically points to the most recent Zebra release, ensuring users always get the latest stable version when pulling or updating.
+            # - `1.x.y`: Represents a specific semantic version (e.g., 1.2.3), allowing users to pin to an exact version for stability, preventing automatic upgrades.
+            #
+            type=semver,pattern={{version}}
+            # CI-only tags (not published to DockerHub, only in Google Artifact Registry):
+            # - `pr-xxx`: Tags images with the pull request number for CI tracking during PR workflows.
+            # - `branch-name`: Tags images with the branch name (e.g., `main`, `dev`) for CI builds on branch pushes.
+            # - `edge`: Tags the latest build on the default branch (e.g., `main`), used in CI to represent the cutting-edge version for testing.
+            # - `schedule`: Tags images built during scheduled workflows (e.g., nightly or periodic builds) for CI monitoring and testing.
+            type=ref,event=pr
+            type=ref,event=branch
+            type=edge,enable={{is_default_branch}}
+            type=schedule
+            # - `sha-xxxxxx`: Uses the commit SHA (shortened) to tag images for precise identification.
+            # Applied during pull requests and branch pushes to ensure CI tests use the exact image from the last commit.
+            type=sha,event=pr
+            type=sha,event=branch
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 #v3.0.0
+        with:
+          workload_identity_provider: "${{ vars.GCP_WIF }}"
+          service_account: "${{ vars.GCP_ARTIFACTS_SA }}"
+          token_format: access_token
+          # Some builds might take over an hour, and Google's default lifetime duration for
+          # an access token is 1 hour (3600s). We increase this to 3 hours (10800s)
+          # as some builds take over an hour.
+          access_token_lifetime: 10800s
+
+      - name: Login to Google Artifact Registry
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef #v3.6.0
+        with:
+          registry: us-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
+
+      - name: Login to DockerHub
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef #v3.6.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # Setup Docker Buildx to use Docker Build Cloud
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 #v3.11.1
+        with:
+          version: lab:latest
+          driver: ${{ vars.DOCKER_BUILDER || 'docker' }}
+          endpoint: zfnd/zebra
+
+      # Build and push image to Google Artifact Registry, and possibly DockerHub
+      - name: Build & push
+        id: docker_build
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 #v6.18.0
+        with:
+          target: ${{ inputs.dockerfile_target }}
+          context: .
+          file: ${{ inputs.dockerfile_path }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}
+            RUST_LOG=${{ env.RUST_LOG }}
+            CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}
+            FEATURES=${{ env.FEATURES }}
+          push: true
+          # It's recommended to build images with max-level provenance attestations
+          # https://docs.docker.com/build/ci/github-actions/attestations/
+          # TODO: Uncomment this once we have a better way to turn on/off provenance
+          # provenance: mode=max
+          # sbom: true
+          # Don't read from the cache if the caller disabled it.
+          # https://docs.docker.com/engine/reference/commandline/buildx_build/#options
+          no-cache: ${{ inputs.no_cache }}
+
+        # For the latest built image, display:
+        # - the vulnerabilities (ignoring the base image, and only displaying vulnerabilities with a critical or high security severity)
+        # - the available recommendations
+        # - compare it to the latest image indexed in Docker Hub (only displaying changed packages and vulnerabilities that already have a fix)
+        #
+        # Record the image to Scout environment based on the event type, for example:
+        # - `prod` for a release event
+        # - `stage` for a push event to the main branch
+        # - `dev` for a pull request event
+      - name: Docker Scout
+        id: docker-scout
+        uses: docker/scout-action@f8c776824083494ab0d56b8105ba2ca85c86e4de #v1.18.2
+        # We only run Docker Scout on the `runtime` target, as the other targets are not meant to be released
+        # and are commonly used for testing, and thus are ephemeral.
+        # TODO: Remove the `contains` check once we have a better way to determine if just new vulnerabilities are present.
+        # See: https://github.com/docker/scout-action/issues/56
+        if: ${{ inputs.dockerfile_target == 'runtime' && contains(github.event.pull_request.title, 'Release v') }}
+        with:
+          command: cves,recommendations,compare,environment
+          image: us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }}:${{ steps.meta.outputs.version }}
+          to: zfnd/zebra:latest
+          ignore-base: true
+          ignore-unchanged: true
+          only-fixed: true
+          only-severities: critical,high
+          environment: ${{ (github.event_name == 'release' && !github.event.release.prerelease && 'prod') || (github.event_name == 'push' && github.ref_name == 'main' && 'stage') || (github.event_name == 'pull_request' && 'dev') }}
+          organization: zfnd
+          github-token: ${{ secrets.GITHUB_TOKEN }} # to be able to write the comment

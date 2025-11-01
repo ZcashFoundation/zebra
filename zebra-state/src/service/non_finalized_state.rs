@@ -5,10 +5,12 @@
 use std::{
     collections::{BTreeSet, HashMap},
     mem,
+    path::PathBuf,
     sync::Arc,
 };
 
 use indexmap::IndexMap;
+use tokio::sync::watch;
 use zebra_chain::{
     block::{self, Block, Hash, Height},
     parameters::Network,
@@ -20,11 +22,15 @@ use crate::{
     constants::{MAX_INVALIDATED_BLOCKS, MAX_NON_FINALIZED_CHAIN_FORKS},
     error::ReconsiderError,
     request::{ContextuallyVerifiedBlock, FinalizableBlock},
-    service::{check, finalized_state::ZebraDb},
-    BoxError, SemanticallyVerifiedBlock, ValidateContextError,
+    service::{check, finalized_state::ZebraDb, InvalidateError},
+    SemanticallyVerifiedBlock, ValidateContextError, WatchReceiver,
 };
 
+mod backup;
 mod chain;
+
+#[cfg(test)]
+pub(crate) use backup::MIN_DURATION_BETWEEN_BACKUP_UPDATES;
 
 #[cfg(test)]
 mod tests;
@@ -121,6 +127,76 @@ impl NonFinalizedState {
             #[cfg(feature = "progress-bar")]
             chain_fork_length_bars: Vec::new(),
         }
+    }
+
+    /// Accepts an optional path to the non-finalized state backup directory and a handle to the database.
+    ///
+    /// If a backup directory path is provided:
+    /// - Creates a new backup directory at the provided path if none exists,
+    /// - Restores non-finalized blocks from the backup directory, if any, and
+    /// - Spawns a task that updates the non-finalized backup cache with
+    ///   the latest non-finalized state sent to the returned watch channel.
+    ///
+    /// Returns the non-finalized state with a watch channel sender and receiver.
+    pub async fn with_backup(
+        self,
+        backup_dir_path: Option<PathBuf>,
+        finalized_state: &ZebraDb,
+        should_restore_backup: bool,
+    ) -> (
+        Self,
+        watch::Sender<NonFinalizedState>,
+        WatchReceiver<NonFinalizedState>,
+    ) {
+        let with_watch_channel = |non_finalized_state: NonFinalizedState| {
+            let (sender, receiver) = watch::channel(non_finalized_state.clone());
+            (non_finalized_state, sender, WatchReceiver::new(receiver))
+        };
+
+        let Some(backup_dir_path) = backup_dir_path else {
+            return with_watch_channel(self);
+        };
+
+        tracing::info!(
+            ?backup_dir_path,
+            "restoring non-finalized blocks from backup and spawning backup task"
+        );
+
+        let non_finalized_state = {
+            let backup_dir_path = backup_dir_path.clone();
+            let finalized_state = finalized_state.clone();
+            tokio::task::spawn_blocking(move || {
+                // Create a new backup directory if none exists
+                std::fs::create_dir_all(&backup_dir_path)
+                    .expect("failed to create non-finalized state backup directory");
+
+                if should_restore_backup {
+                    backup::restore_backup(self, &backup_dir_path, &finalized_state)
+                } else {
+                    self
+                }
+            })
+            .await
+            .expect("failed to join blocking task")
+        };
+
+        let (non_finalized_state, sender, receiver) = with_watch_channel(non_finalized_state);
+
+        tokio::spawn(backup::run_backup_task(receiver.clone(), backup_dir_path));
+
+        if !non_finalized_state.is_chain_set_empty() {
+            let num_blocks_restored = non_finalized_state
+                .best_chain()
+                .expect("must have best chain if chain set is not empty")
+                .len();
+
+            tracing::info!(
+                ?num_blocks_restored,
+                "restored blocks from non-finalized backup cache"
+            );
+        }
+
+        (non_finalized_state, sender, receiver)
     }
 
     /// Is the internal state of `self` the same as `other`?
@@ -273,9 +349,9 @@ impl NonFinalizedState {
     /// Invalidate block with hash `block_hash` and all descendants from the non-finalized state. Insert
     /// the new chain into the chain_set and discard the previous.
     #[allow(clippy::unwrap_in_result)]
-    pub fn invalidate_block(&mut self, block_hash: Hash) -> Result<block::Hash, BoxError> {
+    pub fn invalidate_block(&mut self, block_hash: Hash) -> Result<block::Hash, InvalidateError> {
         let Some(chain) = self.find_chain(|chain| chain.contains_block_hash(block_hash)) else {
-            return Err("block hash not found in any non-finalized chain".into());
+            return Err(InvalidateError::BlockNotFound(block_hash));
         };
 
         let invalidated_blocks = if chain.non_finalized_root_hash() == block_hash {
@@ -318,6 +394,7 @@ impl NonFinalizedState {
     /// Reconsiders a previously invalidated block and its descendants into the non-finalized state
     /// based on a block_hash. Reconsidered blocks are inserted into the previous chain and re-inserted
     /// into the chain_set.
+    #[allow(clippy::unwrap_in_result)]
     pub fn reconsider_block(
         &mut self,
         block_hash: block::Hash,
@@ -380,7 +457,9 @@ impl NonFinalizedState {
 
         let mut modified_chain = Arc::unwrap_or_clone(chain_result);
         for block in invalidated_blocks {
-            modified_chain = modified_chain.push(block)?;
+            modified_chain = modified_chain
+                .push(block)
+                .expect("previously invalidated block should be valid for chain");
         }
 
         let (height, hash) = modified_chain.non_finalized_tip();
@@ -452,7 +531,11 @@ impl NonFinalizedState {
         prepared: SemanticallyVerifiedBlock,
         finalized_state: &ZebraDb,
     ) -> Result<Arc<Chain>, ValidateContextError> {
-        if self.invalidated_blocks.contains_key(&prepared.height) {
+        if self
+            .invalidated_blocks
+            .values()
+            .any(|blocks| blocks.iter().any(|block| block.hash == prepared.hash))
+        {
             return Err(ValidateContextError::BlockPreviouslyInvalidated {
                 block_hash: prepared.hash,
             });
@@ -733,6 +816,11 @@ impl NonFinalizedState {
     /// Return the number of chains.
     pub fn chain_count(&self) -> usize {
         self.chain_set.len()
+    }
+
+    /// Returns true if this [`NonFinalizedState`] contains no chains.
+    pub fn is_chain_set_empty(&self) -> bool {
+        self.chain_count() == 0
     }
 
     /// Return the invalidated blocks.
