@@ -401,7 +401,7 @@ pub trait Rpc {
     /// Returns the node of the history tree for the given network upgrade at the specified index.
     ///
     /// method: post
-    /// tags: address
+    /// tags: blockchain
     ///
     /// # Parameters
     ///
@@ -416,6 +416,42 @@ pub trait Rpc {
         index: u32,
         verbose: Option<u8>,
     ) -> Result<GetHistoryNode>;
+
+    /// Returns the auth data root field of the block with the provided hash or height.
+    ///
+    /// method: post
+    /// tags: blockchain
+    ///
+    ///  # Parameters
+    ///
+    /// - `hash_or_height`: (string, required, example="1") The hash or height for the block to be returned.
+    #[method(name = "getauthdataroot")]
+    async fn get_auth_data_root(&self, hash_or_height: String) -> Result<GetAuthDataRoot>;
+
+    /// Returns the cumulative total work from Heartwood activation up to the provided hash or height.
+    ///
+    /// method: post
+    /// tags: blockchain
+    ///
+    ///  # Parameters
+    ///
+    /// - `hash_or_height`: (string, required, example="1") The hash or height for the block to be returned.
+    #[method(name = "gettotalwork")]
+    async fn get_total_work(&self, hash_or_height: String) -> Result<GetTotalWork>;
+
+    /// Returns the hash and height of the first finalized block with cumulative work at least equal to the provided threshold.
+    ///
+    /// method: post
+    /// tags: blockchain
+    ///
+    ///  # Parameters
+    ///
+    /// - `threshold`: (string, required, example="1") The minimum total work the block should have, as a 32-byte hex string in presentation order.
+    #[method(name = "getfirstblockwithtotalwork")]
+    async fn get_first_block_with_total_work(
+        &self,
+        threshold: String,
+    ) -> Result<GetFirstBlockWithTotalWork>;
 
     /// Stop the running zebrad process.
     ///
@@ -2239,6 +2275,115 @@ where
             Err(ErrorObject::owned(
                 server::error::LegacyCode::Misc.into(),
                 "The requested history node was not found.",
+                None::<()>,
+            ))
+        }
+    }
+
+    async fn get_auth_data_root(&self, hash_or_height: String) -> Result<GetAuthDataRoot> {
+        let hash_or_height =
+            HashOrHeight::new(&hash_or_height, self.latest_chain_tip.best_tip_height())
+                .map_error(server::error::LegacyCode::InvalidParameter)?;
+
+        let zebra_state::ReadResponse::AuthDataRoot(auth_data_root) = self
+            .read_state
+            .clone()
+            .oneshot(zebra_state::ReadRequest::AuthDataRoot(hash_or_height))
+            .await
+            .map_misc_error()?
+        else {
+            panic!("unexpected response to HistoryNode request")
+        };
+
+        if let Some(auth_data_root) = auth_data_root {
+            Ok(GetAuthDataRoot {
+                auth_data_root: auth_data_root.bytes_in_display_order(),
+            })
+        } else {
+            Err(ErrorObject::owned(
+                server::error::LegacyCode::Misc.into(),
+                "The requested hash or height does not exist.",
+                None::<()>,
+            ))
+        }
+    }
+
+    async fn get_total_work(&self, hash_or_height: String) -> Result<GetTotalWork> {
+        let hash_or_height =
+            HashOrHeight::new(&hash_or_height, self.latest_chain_tip.best_tip_height())
+                .map_error(server::error::LegacyCode::InvalidParameter)?;
+
+        if let Some(height) = hash_or_height.height() {
+            if let Some(heartwood_activation) =
+                NetworkUpgrade::Heartwood.activation_height(&self.network)
+            {
+                if height <= heartwood_activation {
+                    return Err(ErrorObject::owned(
+                        server::error::LegacyCode::Misc.into(),
+                        "Total work is not defined until after Heartwood activation.",
+                        None::<()>,
+                    ));
+                }
+            } else {
+                return Err(ErrorObject::owned(
+                    server::error::LegacyCode::Misc.into(),
+                    "History trees are not available.",
+                    None::<()>,
+                ));
+            }
+        }
+
+        let zebra_state::ReadResponse::TotalWork(total_work) = self
+            .read_state
+            .clone()
+            .oneshot(zebra_state::ReadRequest::TotalWork(hash_or_height))
+            .await
+            .map_misc_error()?
+        else {
+            panic!("unexpected response to TotalWork request")
+        };
+
+        if let Some(value) = total_work {
+            Ok(GetTotalWork {
+                total_work: value.to_big_endian(),
+            })
+        } else {
+            Err(ErrorObject::owned(
+                server::error::LegacyCode::Misc.into(),
+                "The requested hash or height does not exist.",
+                None::<()>,
+            ))
+        }
+    }
+
+    async fn get_first_block_with_total_work(
+        &self,
+        threshold: String,
+    ) -> Result<GetFirstBlockWithTotalWork> {
+        let total_work = U256::from_str_radix(&threshold, 16)
+            .map_error(server::error::LegacyCode::InvalidParameter)?;
+
+        let zebra_state::ReadResponse::FirstBlockWithTotalWork(block_index) = self
+            .read_state
+            .clone()
+            .oneshot(zebra_state::ReadRequest::FirstBlockWithTotalWork(
+                total_work,
+            ))
+            .await
+            .map_misc_error()?
+        else {
+            panic!("unexpected response to HistoryNode request")
+        };
+
+        if let Some(block_index) = block_index {
+            Ok(GetFirstBlockWithTotalWork {
+                height: block_index.0.as_usize() as u64,
+                hash: block_index.1.bytes_in_display_order(),
+            })
+        } else {
+            Err(ErrorObject::owned(
+                server::error::LegacyCode::Misc.into(),
+                "A block with the requested total work was not found.",
                 None::<()>,
             ))
         }
@@ -4292,6 +4437,38 @@ impl Default for GetHistoryNodeObject {
             orchard_tx: 0,
         }
     }
+}
+
+/// Response to a `getauthdataroot` RPC request.
+///
+/// See the notes for the [`RpcServer::get_auth_data_root`] method.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct GetAuthDataRoot {
+    /// Auth data root of the block.
+    #[serde(with = "hex")]
+    pub auth_data_root: [u8; 32],
+}
+
+/// Response to a `getfirstblockwithtotalwork` RPC request.
+///
+/// See the notes for the [`RpcServer::get_first_block_with_total_work`] method.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct GetFirstBlockWithTotalWork {
+    /// Height of the block.
+    pub height: u64,
+    /// Hash of the block.
+    #[serde(with = "hex")]
+    pub hash: [u8; 32],
+}
+
+/// Response to a `gettotalwork` RPC request.
+///
+/// See the notes for the [`RpcServer::get_total_work`] method.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct GetTotalWork {
+    /// Total work at this block.
+    #[serde(with = "hex")]
+    pub total_work: [u8; 32],
 }
 
 /// Build a valid height range from the given optional start and end numbers.

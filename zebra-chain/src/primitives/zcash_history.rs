@@ -112,7 +112,10 @@ pub struct HistoryNodeIndex {
     pub index: u32,
 }
 
-impl<V: Version> Tree<V> {
+impl<V: Version> Tree<V>
+where
+    V::NodeData: Clone,
+{
     /// Create a MMR tree with the given length from the given cache of nodes.
     ///
     /// The `peaks` are the peaks of the MMR tree to build and their position in the
@@ -230,11 +233,21 @@ impl<V: Version> Tree<V> {
         }
         Ok(new_nodes)
     }
+
+    /// Return the root node of the tree.
+    pub fn root_node_data(&self) -> V::NodeData {
+        self.inner
+            .root_node()
+            .expect("must have root node")
+            .data()
+            .clone()
+    }
+
     /// Return the root hash of the tree, i.e. `hashChainHistoryRoot`.
     pub fn hash(&self) -> ChainHistoryMmrRootHash {
         // Both append_leaf() and truncate_leaf() leave a root node, so it should
         // always exist.
-        V::hash(self.inner.root_node().expect("must have root node").data()).into()
+        V::hash(&self.root_node_data()).into()
     }
 }
 

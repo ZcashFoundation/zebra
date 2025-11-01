@@ -14,7 +14,7 @@ use tracing::instrument;
 
 use zebra_chain::{
     amount::{Amount, NegativeAllowed, NonNegative},
-    block::{self, Height},
+    block::{self, merkle::AuthDataRoot, Height},
     block_info::BlockInfo,
     history_tree::{HistoryTree, NonEmptyHistoryTree},
     orchard,
@@ -1229,6 +1229,15 @@ impl Chain {
         }
 
         Some(result)
+    }
+
+    /// Returns the root of the authorizing Merkle tree for the block at the given hash or height.
+    ///
+    /// Returns `None` if the block does not exist in the chain.
+    pub fn auth_data_root(&self, hash_or_height: HashOrHeight) -> Option<AuthDataRoot> {
+        let contextually_verified_block = self.block(hash_or_height)?;
+
+        Some(contextually_verified_block.block.auth_data_root())
     }
 
     /// Add history nodes for the given block height to this chain.

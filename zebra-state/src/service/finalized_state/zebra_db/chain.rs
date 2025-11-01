@@ -177,29 +177,42 @@ impl ZebraDb {
 
     /// Returns the ZIP-221 history tree at the given height.
     ///
-    /// If history trees had not been activated at that height (pre-Heartwood),
-    /// or the state is empty, returns an empty history tree.
+    /// Returns `None` if history trees had not been activated at that height (pre-Heartwood),
+    /// if the height is larger than the finalized tip height, or if the state is empty.
     pub fn history_tree_by_height(&self, height: Height) -> Option<Arc<HistoryTree>> {
-        // Get network and upgrade from height
-        let network = self.db.network();
-        let upgrade = NetworkUpgrade::current(&network, height);
+        // There is no history tree before heartwood activation
+        let heartwood_activation = NetworkUpgrade::Heartwood.activation_height(&self.network())?;
+        if height <= heartwood_activation || height > self.finalized_tip_height()? {
+            return None;
+        }
 
-        // Create temporary tree from block at height
+        // Get network and upgrade from height.
+        // The upgrade is the previous one if this is an activation height.
+        let network = self.db.network();
+        let mut temp_tree_height = height;
+        let mut upgrade = NetworkUpgrade::current(&network, height);
+        let activation_height = upgrade.activation_height(&self.network())?;
+        if activation_height == height {
+            upgrade = upgrade.previous_upgrade()?;
+            temp_tree_height = (temp_tree_height - 1)?
+        }
+
+        // Create temporary tree from block at height.
+        // Use the previous one if we are at an activation height.
         let block = self.block(HashOrHeight::Height(
-            Height::try_from(height.as_usize() as u32).ok()?,
+            Height::try_from(temp_tree_height.as_usize() as u32).ok()?,
         ))?;
         let sapling_root = self
-            .sapling_tree_by_height(&Height::try_from(height.as_usize() as u32).ok()?)?
+            .sapling_tree_by_height(&Height::try_from(temp_tree_height.as_usize() as u32).ok()?)?
             .root();
         let orchard_root = self
-            .orchard_tree_by_height(&Height::try_from(height.as_usize() as u32).ok()?)?
+            .orchard_tree_by_height(&Height::try_from(temp_tree_height.as_usize() as u32).ok()?)?
             .root();
         let temp_tree =
             HistoryTree::from_block(&network, block, &sapling_root, &orchard_root).ok()?;
 
         // Get the peaks at the last block height covered by the tree,
-        // which is that of the previous block. If this is the activation
-        // block, the history tree is empty and this will return None.
+        // which is that of the previous block.
         let peak_ids = temp_tree.peaks_at((height - 1)?)?;
 
         // Read the peaks and build the inner tree
@@ -213,13 +226,40 @@ impl ZebraDb {
             &network,
             temp_tree.node_count_at(height)?,
             peaks,
-            height,
+            (height - 1)?,
         );
 
         // Return the outer tree
         match inner_tree {
             Ok(tree) => Some(Arc::new(HistoryTree::from(tree))),
             Err(_) => None,
+        }
+    }
+
+    /// Returns the ZIP-221 history tree at the last block of the given network upgrade.
+    ///
+    /// Returns `None` if history trees had not been activated at that height (pre-Heartwood),
+    /// if the update does not exist in this chain, or if the state is empty.
+    pub fn history_tree_by_upgrade(&self, upgrade: NetworkUpgrade) -> Option<Arc<HistoryTree>> {
+        let history_tree_upgrades: Vec<NetworkUpgrade> = NetworkUpgrade::iter()
+            .skip_while(|u| *u != NetworkUpgrade::Heartwood)
+            .take_while(|u| *u != NetworkUpgrade::Nu6)
+            .chain(std::iter::once(NetworkUpgrade::Nu6))
+            .collect();
+
+        if history_tree_upgrades.contains(&upgrade) {
+            // Get the last block height of this upgrade, or the tip height if this is the last upgrade
+            let last_height = upgrade.next_upgrade().map_or_else(
+                || self.finalized_tip_height(),
+                |next| {
+                    next.activation_height(&self.network())
+                        .map_or_else(|| self.finalized_tip_height(), |height| height - 1)
+                },
+            )?;
+
+            self.history_tree_by_height(last_height)
+        } else {
+            None
         }
     }
 

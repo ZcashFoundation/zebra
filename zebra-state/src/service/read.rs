@@ -29,7 +29,7 @@ pub use address::{
     utxo::{address_utxos, AddressUtxos},
 };
 pub use block::{
-    any_utxo, block, block_and_size, block_header, block_info, mined_transaction,
+    any_utxo, auth_data_root, block, block_and_size, block_header, block_info, mined_transaction,
     transaction_hashes_for_block, unspent_utxo,
 };
 
@@ -38,12 +38,13 @@ pub use block::spending_transaction_hash;
 
 pub use find::{
     best_tip, block_locator, depth, finalized_state_contains_block_hash, find_chain_hashes,
-    find_chain_headers, hash_by_height, height_by_hash, next_median_time_past,
-    non_finalized_state_contains_block_hash, tip, tip_height, tip_with_value_balance,
+    find_chain_headers, first_block_with_total_work, hash_by_height, height_by_hash,
+    next_median_time_past, non_finalized_state_contains_block_hash, tip, tip_height,
+    tip_with_value_balance,
 };
 pub use tree::{
     history_node, history_tree_by_height, orchard_subtrees, orchard_tree, sapling_subtrees,
-    sapling_tree,
+    sapling_tree, total_work,
 };
 
 #[cfg(any(test, feature = "proptest-impl"))]

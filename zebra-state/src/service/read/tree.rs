@@ -20,6 +20,7 @@ use zebra_chain::{
     primitives::zcash_history::HistoryNodeIndex,
     sapling,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
+    work::difficulty::U256,
 };
 
 use crate::{
@@ -245,4 +246,33 @@ where
     chain
         .and_then(|chain| chain.as_ref().history_node(upgrade, index))
         .or_else(|| db.history_node(HistoryNodeIndex { upgrade, index }))
+}
+
+/// Get the cumulative total work at the given hash or height.
+pub fn total_work(db: &ZebraDb, hash_or_height: HashOrHeight) -> Option<U256> {
+    let height = match hash_or_height {
+        HashOrHeight::Height(h) => h,
+        HashOrHeight::Hash(hash) => db.height(hash)?,
+    };
+
+    let current_upgrade = NetworkUpgrade::current(&db.network(), height);
+    let previous_upgrades: Vec<NetworkUpgrade> = NetworkUpgrade::iter()
+        .skip_while(|u| *u != NetworkUpgrade::Heartwood)
+        .take_while(|u| *u != current_upgrade)
+        .collect();
+
+    let mut total_work = U256::zero();
+    for upgrade in previous_upgrades {
+        total_work += db
+            .history_tree_by_upgrade(upgrade)?
+            .root_node()?
+            .subtree_total_work();
+    }
+
+    total_work += db
+        .history_tree_by_height(height)?
+        .root_node()?
+        .subtree_total_work();
+
+    Some(total_work)
 }

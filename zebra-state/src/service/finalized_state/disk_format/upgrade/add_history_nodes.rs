@@ -419,8 +419,7 @@ fn compare_hashes(
             // Compare the hashes
             if expected_hash != new_hash {
                 Err(format!(
-                    "History tree hash mismatch for {} with last block at height {:?}\nExpected: {:?}\nCalculated: {:?}",
-                    upgrade, height, expected_hash, new_hash
+                    "History tree hash mismatch for {upgrade} with last block at height {height:?}\nExpected: {expected_hash:?}\nCalculated: {new_hash:?}"
                 )
                 .to_string())
             } else {

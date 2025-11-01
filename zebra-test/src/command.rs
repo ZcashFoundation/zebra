@@ -1610,7 +1610,7 @@ impl ContextFrom<&ExitStatus> for Report {
 
         #[cfg(not(unix))]
         self.with_section(|| {
-            format!("command exited {} without a status code or signal", how).header("Exit Status:")
+            format!("command exited {how} without a status code or signal").header("Exit Status:")
         })
     }
 }
