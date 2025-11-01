@@ -9,6 +9,7 @@ expression: empty_column_families
   "hash_by_height: no entries",
   "hash_by_tx_loc: no entries",
   "height_by_hash: no entries",
+  "history_node: no entries",
   "history_tree: no entries",
   "orchard_anchors: no entries",
   "orchard_note_commitment_subtree: no entries",
