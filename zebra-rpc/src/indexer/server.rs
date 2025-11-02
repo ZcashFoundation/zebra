@@ -7,6 +7,7 @@ use tonic::transport::{server::TcpIncoming, Server};
 use tower::BoxError;
 use zebra_chain::chain_tip::ChainTip;
 use zebra_node_services::mempool::MempoolTxSubscriber;
+use zebra_state::ReadState;
 
 use crate::{indexer::indexer_server::IndexerServer, server::OPENED_RPC_ENDPOINT_MSG};
 
@@ -15,15 +16,7 @@ type ServerTask = JoinHandle<Result<(), BoxError>>;
 /// Indexer RPC service.
 pub struct IndexerRPC<ReadStateService, Tip>
 where
-    ReadStateService: tower::Service<
-            zebra_state::ReadRequest,
-            Response = zebra_state::ReadResponse,
-            Error = BoxError,
-        > + Clone
-        + Send
-        + Sync
-        + 'static,
-    <ReadStateService as tower::Service<zebra_state::ReadRequest>>::Future: Send,
+    ReadStateService: ReadState,
     Tip: ChainTip + Clone + Send + Sync + 'static,
 {
     pub(super) read_state: ReadStateService,
@@ -40,15 +33,7 @@ pub async fn init<ReadStateService, Tip>(
     mempool_change: MempoolTxSubscriber,
 ) -> Result<(ServerTask, SocketAddr), BoxError>
 where
-    ReadStateService: tower::Service<
-            zebra_state::ReadRequest,
-            Response = zebra_state::ReadResponse,
-            Error = BoxError,
-        > + Clone
-        + Send
-        + Sync
-        + 'static,
-    <ReadStateService as tower::Service<zebra_state::ReadRequest>>::Future: Send,
+    ReadStateService: ReadState,
     Tip: ChainTip + Clone + Send + Sync + 'static,
 {
     let indexer_service = IndexerRPC {
