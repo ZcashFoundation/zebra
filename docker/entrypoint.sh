@@ -21,11 +21,11 @@ set -eo pipefail
 : "${LWD_CACHE_DIR:=${HOME}/.cache/lwd}"
 : "${ZEBRA_COOKIE_DIR:=${HOME}/.cache/zebra}"
 
-# Use gosu to drop privileges and execute the given command as the specified UID:GID
+# Use chroot to drop privileges and execute the given command as the specified UID:GID
 exec_as_user() {
   user=$(id -u)
   if [[ ${user} == '0' ]]; then
-    exec gosu "${UID}:${GID}" "$@"
+    exec chroot --userspec=${UID}:${GID} / "$@"
   else
     exec "$@"
   fi
