@@ -26,11 +26,11 @@ class WalletTest (BitcoinTestFramework):
         # Zallet needs a block to start
         self.nodes[0].generate(1)
 
-        # Wait for the non-finalized state to be populated in the node
-        # before starting the wallet
-        time.sleep(2)
-
         self.wallets = start_wallets(self.num_nodes, self.options.tmpdir)
+
+        # TODO: Use `getwalletstatus` in all sync issues
+        # https://github.com/zcash/wallet/issues/316
+        time.sleep(2)
 
     def run_test(self):
         # Generate a new account
