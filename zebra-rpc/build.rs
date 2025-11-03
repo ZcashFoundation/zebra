@@ -5,7 +5,8 @@ use std::{
     process::Command,
 };
 
-const ZALLET_COMMIT: Option<&str> = Some("baf860eb1160b0ab34f2c73b379e7bf7325003e2");
+// 0.1.0-alpha.2
+const ZALLET_COMMIT: Option<&str> = Some("027e5e2139b2ca8f0317edb9d802b03a46e9aa4c");
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     build_or_copy_proto()?;
