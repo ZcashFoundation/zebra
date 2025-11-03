@@ -96,8 +96,13 @@ impl ContextuallyVerifiedBlock {
             .map(|outpoint| (outpoint, zero_utxo.clone()))
             .collect();
 
-        ContextuallyVerifiedBlock::with_block_and_spent_utxos(block, zero_spent_utxos)
-            .expect("all UTXOs are provided with zero values")
+        ContextuallyVerifiedBlock::with_block_and_spent_utxos(
+            block,
+            zero_spent_utxos,
+            #[cfg(feature = "tx_v6")]
+            Default::default(),
+        )
+        .expect("all UTXOs are provided with zero values")
     }
 
     /// Create a [`ContextuallyVerifiedBlock`] from a [`Block`] or [`SemanticallyVerifiedBlock`],
@@ -125,6 +130,8 @@ impl ContextuallyVerifiedBlock {
             spent_outputs: new_outputs,
             transaction_hashes,
             chain_value_pool_change: ValueBalance::zero(),
+            #[cfg(feature = "tx_v6")]
+            issued_assets: Default::default(),
         }
     }
 }

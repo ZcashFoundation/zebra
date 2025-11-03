@@ -21,6 +21,9 @@ use zebra_chain::{
     value_balance::{ValueBalance, ValueBalanceError},
 };
 
+#[cfg(feature = "tx_v6")]
+use zebra_chain::orchard_zsa::{AssetBase, IssuedAssets, IssuedAssetsChange};
+
 /// Allow *only* these unused imports, so that rustdoc link resolution
 /// will work with inline links.
 #[allow(unused_imports)]
@@ -223,6 +226,11 @@ pub struct ContextuallyVerifiedBlock {
 
     /// The sum of the chain value pool changes of all transactions in this block.
     pub(crate) chain_value_pool_change: ValueBalance<NegativeAllowed>,
+
+    #[cfg(feature = "tx_v6")]
+    /// A partial map of `issued_assets` with entries for asset states that were updated in
+    /// this block.
+    pub(crate) issued_assets: IssuedAssets,
 }
 
 /// Wraps note commitment trees and the history tree together.
@@ -293,12 +301,42 @@ pub struct FinalizedBlock {
     pub(super) treestate: Treestate,
     /// This block's contribution to the deferred pool.
     pub(super) deferred_balance: Option<Amount<NonNegative>>,
+
+    #[cfg(feature = "tx_v6")]
+    /// Updated asset states to be inserted into the finalized state, replacing the previous
+    /// asset states for those asset bases.
+    pub issued_assets: Option<IssuedAssets>,
+}
+
+#[cfg(feature = "tx_v6")]
+/// Either changes to be applied to the previous `issued_assets` map for the finalized tip, or
+/// updates asset states to be inserted into the finalized state, replacing the previous
+/// asset states for those asset bases.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum IssuedAssetsOrChange {
+    /// A map of updated issued assets.
+    Updated(IssuedAssets),
+
+    /// A map of changes to apply to the issued assets map.
+    Change(IssuedAssetsChange),
+}
+
+#[cfg(feature = "tx_v6")]
+impl From<IssuedAssets> for IssuedAssetsOrChange {
+    fn from(updated_issued_assets: IssuedAssets) -> Self {
+        Self::Updated(updated_issued_assets)
+    }
 }
 
 impl FinalizedBlock {
     /// Constructs [`FinalizedBlock`] from [`CheckpointVerifiedBlock`] and its [`Treestate`].
     pub fn from_checkpoint_verified(block: CheckpointVerifiedBlock, treestate: Treestate) -> Self {
-        Self::from_semantically_verified(SemanticallyVerifiedBlock::from(block), treestate)
+        Self::from_semantically_verified(
+            SemanticallyVerifiedBlock::from(block),
+            treestate,
+            #[cfg(feature = "tx_v6")]
+            None,
+        )
     }
 
     /// Constructs [`FinalizedBlock`] from [`ContextuallyVerifiedBlock`] and its [`Treestate`].
@@ -306,11 +344,22 @@ impl FinalizedBlock {
         block: ContextuallyVerifiedBlock,
         treestate: Treestate,
     ) -> Self {
-        Self::from_semantically_verified(SemanticallyVerifiedBlock::from(block), treestate)
+        #[cfg(feature = "tx_v6")]
+        let issued_assets = Some(block.issued_assets.clone());
+        Self::from_semantically_verified(
+            SemanticallyVerifiedBlock::from(block),
+            treestate,
+            #[cfg(feature = "tx_v6")]
+            issued_assets,
+        )
     }
 
     /// Constructs [`FinalizedBlock`] from [`SemanticallyVerifiedBlock`] and its [`Treestate`].
-    fn from_semantically_verified(block: SemanticallyVerifiedBlock, treestate: Treestate) -> Self {
+    fn from_semantically_verified(
+        block: SemanticallyVerifiedBlock,
+        treestate: Treestate,
+        #[cfg(feature = "tx_v6")] issued_assets: Option<IssuedAssets>,
+    ) -> Self {
         Self {
             block: block.block,
             hash: block.hash,
@@ -319,6 +368,8 @@ impl FinalizedBlock {
             transaction_hashes: block.transaction_hashes,
             treestate,
             deferred_balance: block.deferred_balance,
+            #[cfg(feature = "tx_v6")]
+            issued_assets,
         }
     }
 }
@@ -384,6 +435,7 @@ impl ContextuallyVerifiedBlock {
     pub fn with_block_and_spent_utxos(
         semantically_verified: SemanticallyVerifiedBlock,
         mut spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+        #[cfg(feature = "tx_v6")] issued_assets: IssuedAssets,
     ) -> Result<Self, ValueBalanceError> {
         let SemanticallyVerifiedBlock {
             block,
@@ -411,6 +463,8 @@ impl ContextuallyVerifiedBlock {
                 &utxos_from_ordered_utxos(spent_outputs),
                 deferred_balance,
             )?,
+            #[cfg(feature = "tx_v6")]
+            issued_assets,
         })
     }
 }
@@ -427,6 +481,7 @@ impl CheckpointVerifiedBlock {
         block.deferred_balance = deferred_balance;
         block
     }
+
     /// Creates a block that's ready to be committed to the finalized state,
     /// using a precalculated [`block::Hash`].
     ///
@@ -465,7 +520,7 @@ impl SemanticallyVerifiedBlock {
 
 impl From<Arc<Block>> for CheckpointVerifiedBlock {
     fn from(block: Arc<Block>) -> Self {
-        CheckpointVerifiedBlock(SemanticallyVerifiedBlock::from(block))
+        Self(SemanticallyVerifiedBlock::from(block))
     }
 }
 
@@ -504,19 +559,6 @@ impl From<ContextuallyVerifiedBlock> for SemanticallyVerifiedBlock {
                     .constrain::<NonNegative>()
                     .expect("deferred balance in a block must me non-negative"),
             ),
-        }
-    }
-}
-
-impl From<FinalizedBlock> for SemanticallyVerifiedBlock {
-    fn from(finalized: FinalizedBlock) -> Self {
-        Self {
-            block: finalized.block,
-            hash: finalized.hash,
-            height: finalized.height,
-            new_outputs: finalized.new_outputs,
-            transaction_hashes: finalized.transaction_hashes,
-            deferred_balance: finalized.deferred_balance,
         }
     }
 }
@@ -1068,6 +1110,17 @@ pub enum ReadRequest {
     /// Returns [`ReadResponse::TipBlockSize(usize)`](ReadResponse::TipBlockSize)
     /// with the current best chain tip block size in bytes.
     TipBlockSize,
+
+    #[cfg(feature = "tx_v6")]
+    /// Returns [`ReadResponse::AssetState`] with an [`AssetState`](zebra_chain::orchard_zsa::AssetState)
+    /// of the provided [`AssetBase`] if it exists for the best chain tip or finalized chain tip (depending
+    /// on the `include_non_finalized` flag).
+    AssetState {
+        /// The [`AssetBase`] to return the asset state for.
+        asset_base: AssetBase,
+        /// Whether to include the issued asset state changes in the non-finalized state.
+        include_non_finalized: bool,
+    },
 }
 
 impl ReadRequest {
@@ -1105,6 +1158,8 @@ impl ReadRequest {
             ReadRequest::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
             #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::TipBlockSize => "tip_block_size",
+            #[cfg(feature = "tx_v6")]
+            ReadRequest::AssetState { .. } => "asset_state",
         }
     }
 

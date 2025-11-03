@@ -31,6 +31,9 @@ pub(crate) mod difficulty;
 pub(crate) mod nullifier;
 pub(crate) mod utxo;
 
+#[cfg(feature = "tx_v6")]
+pub(crate) mod issuance;
+
 pub use utxo::transparent_coinbase_spend;
 
 #[cfg(test)]

@@ -14,6 +14,7 @@ use zebra_chain::{
     block::Block,
     chain_tip::mock::MockChainTip,
     orchard,
+    orchard_zsa::{asset_state::RandomAssetBase, AssetBase, AssetState},
     parameters::{
         subsidy::POST_NU6_FUNDING_STREAMS_TESTNET,
         testnet::{self, ConfiguredActivationHeights, Parameters},
@@ -536,6 +537,41 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
     settings.bind(|| {
         insta::assert_json_snapshot!(format!("z_get_subtrees_by_index_for_orchard"), subtrees)
     });
+
+    // Test the response format from `getassetstate`.
+
+    // Prepare the state response and make the RPC request.
+    let rsp = state
+        .expect_request_that(|req| matches!(req, ReadRequest::AssetState { .. }))
+        .map(|responder| responder.respond(ReadResponse::AssetState(None)));
+    let req = rpc.get_asset_state(AssetBase::random_serialized(), None);
+
+    // Get the RPC error response.
+    let (asset_state_rsp, ..) = tokio::join!(req, rsp);
+    let asset_state = asset_state_rsp.expect_err("The RPC response should be an error");
+
+    // Check the error response.
+    settings
+        .bind(|| insta::assert_json_snapshot!(format!("get_asset_state_not_found"), asset_state));
+
+    // Prepare the state response and make the RPC request.
+    let rsp = state
+        .expect_request_that(|req| matches!(req, ReadRequest::AssetState { .. }))
+        .map(|responder| {
+            responder.respond(ReadResponse::AssetState(Some(AssetState {
+                is_finalized: true,
+                total_supply: 1000,
+            })))
+        });
+    let req = rpc.get_asset_state(AssetBase::random_serialized(), None);
+
+    // Get the RPC response.
+    let (asset_state_rsp, ..) = tokio::join!(req, rsp);
+    let asset_state =
+        asset_state_rsp.expect("The RPC response should contain a `AssetState` struct.");
+
+    // Check the response.
+    settings.bind(|| insta::assert_json_snapshot!(format!("get_asset_state"), asset_state));
 }
 
 /// Snapshot `getinfo` response, using `cargo insta` and JSON serialization.

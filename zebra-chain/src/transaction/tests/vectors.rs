@@ -491,8 +491,9 @@ fn v6_round_trip() {
 
     let _init_guard = zebra_test::init();
 
-    for block_bytes in ORCHARD_ZSA_WORKFLOW_BLOCKS.iter() {
-        let block = block_bytes
+    for workflow_block in ORCHARD_ZSA_WORKFLOW_BLOCKS.iter() {
+        let block = workflow_block
+            .bytes
             .zcash_deserialize_into::<Block>()
             .expect("block is structurally valid");
 
@@ -502,7 +503,7 @@ fn v6_round_trip() {
             .expect("vec serialization is infallible");
 
         assert_eq!(
-            block_bytes, &block_bytes2,
+            workflow_block.bytes, block_bytes2,
             "data must be equal if structs are equal"
         );
 
@@ -638,8 +639,9 @@ fn v6_librustzcash_tx_conversion() {
 
     let _init_guard = zebra_test::init();
 
-    for block_bytes in ORCHARD_ZSA_WORKFLOW_BLOCKS.iter() {
-        let block = block_bytes
+    for workflow_block in ORCHARD_ZSA_WORKFLOW_BLOCKS.iter() {
+        let block = workflow_block
+            .bytes
             .zcash_deserialize_into::<Block>()
             .expect("block is structurally valid");
 

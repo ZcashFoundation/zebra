@@ -11,6 +11,7 @@ expression: empty_column_families
   "height_by_hash: no entries",
   "history_tree: no entries",
   "orchard_anchors: no entries",
+  "orchard_issued_assets: no entries",
   "orchard_note_commitment_subtree: no entries",
   "orchard_note_commitment_tree: no entries",
   "orchard_nullifiers: no entries",

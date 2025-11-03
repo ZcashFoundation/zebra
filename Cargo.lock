@@ -441,7 +441,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "143f5327f23168716be068f8e1014ba2ea16a6c91e8777bc8927da7b51e1df1f"
 dependencies = [
  "bs58",
- "hmac",
+ "hmac 0.13.0-pre.4",
  "rand_core 0.6.4",
  "ripemd 0.2.0-pre.4",
  "secp256k1 0.29.1",
@@ -1238,6 +1238,7 @@ dependencies = [
  "block-buffer 0.10.4",
  "const-oid",
  "crypto-common 0.1.6",
+ "subtle",
 ]
 
 [[package]]
@@ -1296,7 +1297,9 @@ dependencies = [
  "der",
  "digest 0.10.7",
  "elliptic-curve",
+ "rfc6979",
  "signature",
+ "spki",
 ]
 
 [[package]]
@@ -1364,6 +1367,7 @@ dependencies = [
  "ff",
  "generic-array",
  "group",
+ "pkcs8",
  "rand_core 0.6.4",
  "sec1",
  "subtle",
@@ -1928,6 +1932,15 @@ checksum = "6fe2267d4ed49bc07b63801559be28c718ea06c4738b7a03c94df7386d2cde46"
 
 [[package]]
 name = "hmac"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e"
+dependencies = [
+ "digest 0.10.7",
+]
+
+[[package]]
+name = "hmac"
 version = "0.13.0-pre.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e4b1fb14e4df79f9406b434b60acef9f45c26c50062cccf1346c6103b8c47d58"
@@ -2485,6 +2498,7 @@ dependencies = [
  "cfg-if 1.0.0",
  "ecdsa",
  "elliptic-curve",
+ "once_cell",
  "sha2 0.10.8",
  "signature",
 ]
@@ -3795,6 +3809,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rfc6979"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8dd2a808d456c4a54e300a23e9f5a67e122c3024119acbfd73e3bf664491cb2"
+dependencies = [
+ "hmac 0.12.1",
+ "subtle",
+]
+
+[[package]]
 name = "rgb"
 version = "0.8.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4049,6 +4073,7 @@ dependencies = [
  "base16ct",
  "der",
  "generic-array",
+ "pkcs8",
  "subtle",
  "zeroize",
 ]
@@ -6147,6 +6172,7 @@ dependencies = [
  "incrementalmerkletree",
  "itertools 0.13.0",
  "jubjub",
+ "k256",
  "lazy_static",
  "nonempty 0.7.0",
  "num-integer",

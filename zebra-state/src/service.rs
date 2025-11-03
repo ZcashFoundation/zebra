@@ -1947,6 +1947,30 @@ impl Service<ReadRequest> for ReadStateService {
                 })
                 .wait_for_panics()
             }
+
+            #[cfg(feature = "tx_v6")]
+            ReadRequest::AssetState {
+                asset_base,
+                include_non_finalized,
+            } => {
+                let state = self.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let best_chain = include_non_finalized
+                            .then(|| state.latest_best_chain())
+                            .flatten();
+
+                        let response = read::asset_state(best_chain, &state.db, &asset_base);
+
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::AssetState");
+
+                        Ok(ReadResponse::AssetState(response))
+                    })
+                })
+                .wait_for_panics()
+            }
         }
     }
 }

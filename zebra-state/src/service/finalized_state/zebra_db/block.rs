@@ -463,7 +463,7 @@ impl DiskWriteBatch {
         // which is already present from height 1 to the first shielded transaction.
         //
         // In Zebra we include the nullifiers and note commitments in the genesis block because it simplifies our code.
-        self.prepare_shielded_transaction_batch(db, finalized)?;
+        self.prepare_shielded_transaction_batch(zebra_db, finalized)?;
         self.prepare_trees_batch(zebra_db, finalized, prev_note_commitment_trees)?;
 
         // # Consensus

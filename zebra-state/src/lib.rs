@@ -44,6 +44,10 @@ pub use error::{
 pub use request::{
     CheckpointVerifiedBlock, HashOrHeight, ReadRequest, Request, SemanticallyVerifiedBlock,
 };
+
+#[cfg(feature = "tx_v6")]
+pub use request::IssuedAssetsOrChange;
+
 pub use response::{KnownBlock, MinedTx, ReadResponse, Response};
 pub use service::{
     chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip, TipAction},

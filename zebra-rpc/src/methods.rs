@@ -23,7 +23,7 @@ use zebra_chain::{
     block::{self, Height, SerializedBlock},
     chain_tip::{ChainTip, NetworkChainTipHeightEstimator},
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
-    serialization::ZcashDeserialize,
+    serialization::{ZcashDeserialize, ZcashDeserializeInto},
     subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx},
     transparent::{self, Address},
@@ -301,6 +301,17 @@ pub trait Rpc {
         &self,
         address_strings: AddressStrings,
     ) -> BoxFuture<Result<Vec<GetAddressUtxos>>>;
+
+    /// Returns the asset state of the provided asset base at the best chain tip or finalized chain tip.
+    ///
+    /// method: post
+    /// tags: blockchain
+    #[rpc(name = "getassetstate")]
+    fn get_asset_state(
+        &self,
+        asset_base: String,
+        include_non_finalized: Option<bool>,
+    ) -> BoxFuture<Result<zebra_chain::orchard_zsa::AssetState>>;
 
     /// Stop the running zebrad process.
     ///
@@ -1354,6 +1365,36 @@ where
             }
 
             Ok(response_utxos)
+        }
+        .boxed()
+    }
+
+    fn get_asset_state(
+        &self,
+        asset_base: String,
+        include_non_finalized: Option<bool>,
+    ) -> BoxFuture<Result<zebra_chain::orchard_zsa::AssetState>> {
+        let state = self.state.clone();
+        let include_non_finalized = include_non_finalized.unwrap_or(true);
+
+        async move {
+            let asset_base = hex::decode(asset_base)
+                .map_server_error()?
+                .zcash_deserialize_into()
+                .map_server_error()?;
+
+            let request = zebra_state::ReadRequest::AssetState {
+                asset_base,
+                include_non_finalized,
+            };
+
+            let zebra_state::ReadResponse::AssetState(asset_state) =
+                state.oneshot(request).await.map_server_error()?
+            else {
+                unreachable!("unexpected response from state service");
+            };
+
+            asset_state.ok_or_server_error("asset base not found")
         }
         .boxed()
     }

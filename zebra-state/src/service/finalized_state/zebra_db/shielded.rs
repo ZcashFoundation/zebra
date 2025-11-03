@@ -19,12 +19,15 @@ use std::{
 
 use zebra_chain::{
     block::Height,
-    orchard,
+    orchard::{self},
     parallel::tree::NoteCommitmentTrees,
     sapling, sprout,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
     transaction::Transaction,
 };
+
+#[cfg(feature = "tx_v6")]
+use zebra_chain::orchard_zsa::{AssetBase, AssetState, IssuedAssetsChange};
 
 use crate::{
     request::{FinalizedBlock, Treestate},
@@ -36,11 +39,34 @@ use crate::{
     BoxError,
 };
 
+#[cfg(feature = "tx_v6")]
+use crate::service::finalized_state::TypedColumnFamily;
+
 // Doc-only items
 #[allow(unused_imports)]
 use zebra_chain::subtree::NoteCommitmentSubtree;
 
+#[cfg(feature = "tx_v6")]
+/// The name of the chain value pools column family.
+///
+/// This constant should be used so the compiler can detect typos.
+pub const ISSUED_ASSETS: &str = "orchard_issued_assets";
+
+#[cfg(feature = "tx_v6")]
+/// The type for reading value pools from the database.
+///
+/// This constant should be used so the compiler can detect incorrectly typed accesses to the
+/// column family.
+pub type IssuedAssetsCf<'cf> = TypedColumnFamily<'cf, AssetBase, AssetState>;
+
 impl ZebraDb {
+    #[cfg(feature = "tx_v6")]
+    /// Returns a typed handle to the `history_tree` column family.
+    pub(crate) fn issued_assets_cf(&self) -> IssuedAssetsCf {
+        IssuedAssetsCf::new(&self.db, ISSUED_ASSETS)
+            .expect("column family was created when database was created")
+    }
+
     // Read shielded methods
 
     /// Returns `true` if the finalized state contains `sprout_nullifier`.
@@ -410,6 +436,12 @@ impl ZebraDb {
         Some(subtree_data.with_index(index))
     }
 
+    #[cfg(feature = "tx_v6")]
+    /// Get the orchard issued asset state for the finalized tip.
+    pub fn issued_asset(&self, asset_base: &AssetBase) -> Option<AssetState> {
+        self.issued_assets_cf().zs_get(asset_base)
+    }
+
     /// Returns the shielded note commitment trees of the finalized tip
     /// or the empty trees if the state is empty.
     /// Additionally, returns the sapling and orchard subtrees for the finalized tip if
@@ -437,15 +469,18 @@ impl DiskWriteBatch {
     /// - Propagates any errors from updating note commitment trees
     pub fn prepare_shielded_transaction_batch(
         &mut self,
-        db: &DiskDb,
+        zebra_db: &ZebraDb,
         finalized: &FinalizedBlock,
     ) -> Result<(), BoxError> {
         let FinalizedBlock { block, .. } = finalized;
 
         // Index each transaction's shielded data
         for transaction in &block.transactions {
-            self.prepare_nullifier_batch(db, transaction)?;
+            self.prepare_nullifier_batch(&zebra_db.db, transaction)?;
         }
+
+        #[cfg(feature = "tx_v6")]
+        self.prepare_issued_assets_batch(zebra_db, finalized)?;
 
         Ok(())
     }
@@ -475,6 +510,39 @@ impl DiskWriteBatch {
         }
         for orchard_nullifier in transaction.orchard_nullifiers() {
             self.zs_insert(&orchard_nullifiers, orchard_nullifier, ());
+        }
+
+        Ok(())
+    }
+
+    #[cfg(feature = "tx_v6")]
+    /// Prepare a database batch containing `finalized.block`'s asset issuance
+    /// and return it (without actually writing anything).
+    ///
+    /// # Errors
+    ///
+    /// - This method doesn't currently return any errors, but it might in future
+    #[allow(clippy::unwrap_in_result)]
+    pub fn prepare_issued_assets_batch(
+        &mut self,
+        zebra_db: &ZebraDb,
+        finalized: &FinalizedBlock,
+    ) -> Result<(), BoxError> {
+        let mut batch = zebra_db.issued_assets_cf().with_batch_for_writing(self);
+
+        let updated_issued_assets =
+            if let Some(updated_issued_assets) = finalized.issued_assets.as_ref() {
+                updated_issued_assets
+            } else {
+                &IssuedAssetsChange::from(
+                    IssuedAssetsChange::from_transactions(&finalized.block.transactions)
+                        .ok_or(BoxError::from("invalid issued assets changes"))?,
+                )
+                .apply_with(|asset_base| zebra_db.issued_asset(&asset_base).unwrap_or_default())
+            };
+
+        for (asset_base, updated_issued_asset_state) in updated_issued_assets.iter() {
+            batch = batch.zs_insert(asset_base, updated_issued_asset_state);
         }
 
         Ok(())

@@ -38,6 +38,10 @@ pub use find::{
     find_chain_headers, hash_by_height, height_by_hash, next_median_time_past,
     non_finalized_state_contains_block_hash, tip, tip_height, tip_with_value_balance,
 };
+
+#[cfg(feature = "tx_v6")]
+pub use find::asset_state;
+
 pub use tree::{orchard_subtrees, orchard_tree, sapling_subtrees, sapling_tree};
 
 #[cfg(any(test, feature = "proptest-impl"))]

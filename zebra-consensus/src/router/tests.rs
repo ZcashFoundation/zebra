@@ -270,3 +270,54 @@ async fn verify_fail_add_block_checkpoint() -> Result<(), Report> {
 
     Ok(())
 }
+
+// FIXME: Consider removing this test. The more comprehensive `check_orchard_zsa_workflow`
+// in `zebra-consensus/src/orchard_zsa/tests.rs` already verifies everything this test
+// covers (and more).
+// FIXME: This test is commented out because it fails when running in CI (locally, it passes)
+// - This situation needs to be figured out, as it may reflect an error in the main code.
+/*
+#[tokio::test(flavor = "multi_thread")]
+async fn verify_issuance_blocks_test() -> Result<(), Report> {
+    use block::genesis::regtest_genesis_block;
+
+    use zebra_test::vectors::{OrchardWorkflowBlock, ORCHARD_ZSA_WORKFLOW_BLOCKS};
+
+    let _init_guard = zebra_test::init();
+
+    let network = Network::new_regtest(Some(1), None, Some(1));
+    let (block_verifier_router, _state_service) = verifiers_from_network(network.clone()).await;
+
+    let block_verifier_router =
+        TimeoutLayer::new(Duration::from_secs(VERIFY_TIMEOUT_SECONDS)).layer(block_verifier_router);
+
+    let commit_genesis = [(
+        Request::Commit(regtest_genesis_block()),
+        Ok(network.genesis_hash()),
+    )];
+
+    let commit_issuance_blocks =
+        ORCHARD_ZSA_WORKFLOW_BLOCKS
+            .iter()
+            .map(|OrchardWorkflowBlock { bytes, is_valid }| {
+                let block = Arc::new(
+                    Block::zcash_deserialize(&bytes[..]).expect("block should deserialize"),
+                );
+                (
+                    Request::Commit(block.clone()),
+                    if *is_valid {
+                        Ok(block.hash())
+                    } else {
+                        Err(ExpectedTranscriptError::Any)
+                    },
+                )
+            });
+
+    Transcript::from(commit_genesis.into_iter().chain(commit_issuance_blocks))
+        .check(block_verifier_router.clone())
+        .await
+        .unwrap();
+
+    Ok(())
+}
+*/

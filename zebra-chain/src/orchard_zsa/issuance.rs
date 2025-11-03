@@ -8,7 +8,7 @@ use group::ff::PrimeField;
 use halo2::pasta::pallas;
 
 use orchard::{
-    issuance::{IssueBundle, Signed},
+    issuance::{IssueAction, IssueBundle, Signed},
     note::ExtractedNoteCommitment,
 };
 
@@ -46,6 +46,11 @@ impl IssueData {
                     .unwrap()
             })
         })
+    }
+
+    /// Returns issuance actions
+    pub fn actions(&self) -> impl Iterator<Item = &IssueAction> {
+        self.0.actions().iter()
     }
 }
 

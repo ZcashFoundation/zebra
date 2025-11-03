@@ -256,20 +256,22 @@ where
             use futures::StreamExt;
             while let Some(result) = async_checks.next().await {
                 tracing::trace!(?result, remaining = async_checks.len());
-                let response = result
+                let crate::transaction::Response::Block {
+                    tx_id: _,
+                    miner_fee,
+                    legacy_sigop_count: tx_legacy_sigop_count,
+                } = result
                     .map_err(Into::into)
-                    .map_err(VerifyBlockError::Transaction)?;
+                    .map_err(VerifyBlockError::Transaction)?
+                else {
+                    panic!("unexpected response from transaction verifier");
+                };
 
-                assert!(
-                    matches!(response, tx::Response::Block { .. }),
-                    "unexpected response from transaction verifier: {response:?}"
-                );
-
-                legacy_sigop_count += response.legacy_sigop_count();
+                legacy_sigop_count += tx_legacy_sigop_count;
 
                 // Coinbase transactions consume the miner fee,
                 // so they don't add any value to the block's total miner fee.
-                if let Some(miner_fee) = response.miner_fee() {
+                if let Some(miner_fee) = miner_fee {
                     block_miner_fees += miner_fee;
                 }
             }

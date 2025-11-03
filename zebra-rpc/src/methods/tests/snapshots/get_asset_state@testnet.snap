@@ -1,0 +1,8 @@
+---
+source: zebra-rpc/src/methods/tests/snapshot.rs
+expression: asset_state
+---
+{
+  "is_finalized": true,
+  "total_supply": 1000
+}
