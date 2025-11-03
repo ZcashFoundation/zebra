@@ -1,5 +1,7 @@
 //! Test batching using ed25519 verification.
 
+#![allow(clippy::unwrap_in_result)]
+
 use std::{
     mem,
     pin::Pin,

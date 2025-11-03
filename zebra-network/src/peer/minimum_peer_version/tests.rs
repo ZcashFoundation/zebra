@@ -1,5 +1,7 @@
 //! Test utilities and tests for minimum network peer version requirements.
 
+#![allow(clippy::unwrap_in_result)]
+
 #![cfg_attr(feature = "proptest-impl", allow(dead_code))]
 
 use zebra_chain::{

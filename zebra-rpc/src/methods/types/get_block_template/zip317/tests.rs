@@ -1,5 +1,7 @@
 //! Tests for ZIP-317 transaction selection for block template production
 
+#![allow(clippy::unwrap_in_result)]
+
 use zcash_keys::address::Address;
 
 use zcash_transparent::address::TransparentAddress;

@@ -1,5 +1,7 @@
 //! Tests for the inventory registry.
 
+#![allow(clippy::unwrap_in_result)]
+
 use tokio::sync::broadcast;
 
 use crate::peer_set::inventory_registry::{InventoryChange, InventoryRegistry};

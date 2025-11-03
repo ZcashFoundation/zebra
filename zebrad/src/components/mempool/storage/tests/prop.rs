@@ -1,5 +1,7 @@
 //! Randomised property tests for mempool storage.
 
+#![allow(clippy::unwrap_in_result)]
+
 use std::{collections::HashSet, env, fmt::Debug, thread, time::Duration};
 
 use proptest::{collection::vec, prelude::*};

@@ -132,6 +132,8 @@
 //! export TMPDIR=/path/to/disk/directory
 //! ```
 
+#![allow(clippy::unwrap_in_result)]
+
 mod common;
 
 use std::{

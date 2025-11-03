@@ -1,5 +1,7 @@
 //! Tests for CheckpointList
 
+#![allow(clippy::unwrap_in_result)]
+
 use std::sync::Arc;
 
 use num_integer::div_ceil;
