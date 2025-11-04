@@ -111,7 +111,7 @@ use proptest_derive::Arbitrary;
 /// let bytes = Cursor::new(b"\xff\xfd\xaa\xbb\xcc\x22\x00\x00\x00");
 /// assert!(CompactSizeMessage::zcash_deserialize(bytes).is_err());
 /// ```
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Default)]
 pub struct CompactSizeMessage(
     /// The number of items in a Zcash message.
     ///
