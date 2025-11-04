@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use zebra_chain::{
     amount,
-    transparent::{self, utxos_from_ordered_utxos, CoinbaseSpendRestriction::*},
+    transparent::{self, CoinbaseSpendRestriction::*},
 };
 
 use crate::{
@@ -239,8 +239,12 @@ pub fn remaining_transaction_value(
             continue;
         }
 
+        // Build a temporary UTXO map (OutPoint -> Utxo) from the provided
+        // OrderedUtxo references, avoiding cloning the entire map.
+        let utxos_map: HashMap<_, _> = utxos.iter().map(|(k, v)| (*k, v.utxo.clone())).collect();
+
         // Check the remaining transparent value pool for this transaction
-        let value_balance = transaction.value_balance(&utxos_from_ordered_utxos(utxos.clone()));
+        let value_balance = transaction.value_balance(&utxos_map);
         match value_balance {
             Ok(vb) => match vb.remaining_transaction_value() {
                 Ok(_) => Ok(()),
