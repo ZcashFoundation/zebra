@@ -137,7 +137,7 @@ where
 
 /// Process entry point for `zebra-checkpoints`
 #[tokio::main]
-#[allow(clippy::print_stdout, clippy::print_stderr)]
+#[allow(clippy::print_stdout, clippy::print_stderr, clippy::unwrap_in_result)]
 async fn main() -> Result<()> {
     eprintln!("zebra-checkpoints launched");
 

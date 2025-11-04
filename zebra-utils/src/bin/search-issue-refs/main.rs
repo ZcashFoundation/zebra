@@ -139,7 +139,7 @@ impl PossibleIssueRef {
 type IssueId = String;
 
 /// Process entry point for `search-issue-refs`
-#[allow(clippy::print_stdout, clippy::print_stderr)]
+#[allow(clippy::print_stdout, clippy::print_stderr, clippy::unwrap_in_result)]
 #[tokio::main]
 async fn main() -> Result<()> {
     init_tracing();
