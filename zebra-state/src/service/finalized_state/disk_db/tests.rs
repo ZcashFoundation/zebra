@@ -1,7 +1,6 @@
 //! Tests and test methods for low-level RocksDB access.
 
 #![allow(clippy::unwrap_in_result)]
-
 #![allow(dead_code)]
 
 use std::ops::Deref;

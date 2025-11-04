@@ -214,13 +214,14 @@ async fn main() -> Result<()> {
                     .as_str()
                     .ok_or_else(|| eyre!("hash: unexpected missing field or field type"))?
                     .parse()?;
-                let response_height: Height = get_block["height"]
-                    .try_into_height()
-                    .map_err(|_| eyre!("height: unexpected invalid value, missing field, or field type"))?;
+                let response_height: Height =
+                    get_block["height"].try_into_height().map_err(|_| {
+                        eyre!("height: unexpected invalid value, missing field, or field type")
+                    })?;
 
-                let size = get_block["size"]
-                    .as_u64()
-                    .ok_or_else(|| eyre!("size: unexpected invalid value, missing field, or field type"))?;
+                let size = get_block["size"].as_u64().ok_or_else(|| {
+                    eyre!("size: unexpected invalid value, missing field, or field type")
+                })?;
 
                 (hash, response_height, size)
             }

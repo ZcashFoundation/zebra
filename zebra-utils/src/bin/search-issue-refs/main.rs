@@ -175,8 +175,9 @@ async fn main() -> Result<()> {
                         .start()
                         + 1;
 
-                    let potential_issue_ref =
-                        captures.get(2).ok_or_else(|| eyre!("matches should have 2 captures"))?;
+                    let potential_issue_ref = captures
+                        .get(2)
+                        .ok_or_else(|| eyre!("matches should have 2 captures"))?;
                     let matching_text = potential_issue_ref.as_str();
 
                     let id = matching_text[matching_text.len().checked_sub(4).unwrap_or(1)..]

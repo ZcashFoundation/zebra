@@ -50,10 +50,7 @@ fn main() -> Result<()> {
 
     // parse string to generic json
     let mut template: Value = serde_json::from_str(&template)?;
-    eprintln!(
-        "{}",
-        serde_json::to_string_pretty(&template)?
-    );
+    eprintln!("{}", serde_json::to_string_pretty(&template)?);
 
     let template_obj = template
         .as_object_mut()
@@ -79,9 +76,7 @@ fn main() -> Result<()> {
 
     // the maxtime field is used by this tool
     // if it is missing, substitute a valid value
-    let current_time: DateTime32 = template_obj["curtime"]
-        .to_string()
-        .parse()?;
+    let current_time: DateTime32 = template_obj["curtime"].to_string().parse()?;
 
     template_obj.entry("maxtime").or_insert_with(|| {
         if time_source.uses_max_time() {
