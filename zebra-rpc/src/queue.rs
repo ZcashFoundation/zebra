@@ -203,7 +203,7 @@ impl Runner {
                     self.remove_committed(in_state);
 
                     // retry what is left in the queue
-                    let _retried = Self::retry(mempool.clone(), self.transactions_as_vec()).await;
+                    Self::retry(mempool.clone(), self.transactions_as_vec()).await;
                 }
             }
         }
