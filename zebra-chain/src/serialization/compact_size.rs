@@ -241,7 +241,7 @@ impl TryFrom<usize> for CompactSizeMessage {
         let size: u32 = size.try_into()?;
 
         // # Security
-        // Defence-in-depth for memory DoS via preallocation.
+        // Defense-in-depth for memory DoS via preallocation.
         if size
             > MAX_PROTOCOL_MESSAGE_LEN
                 .try_into()
