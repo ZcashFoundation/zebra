@@ -8,7 +8,6 @@ use derive_getters::Getters;
 use derive_new::new;
 use hex::ToHex;
 use rand::rngs::OsRng;
-use serde_with::serde_as;
 use zcash_script::script::Asm;
 
 use zcash_keys::address::Address;
