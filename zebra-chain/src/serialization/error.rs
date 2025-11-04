@@ -77,6 +77,7 @@ impl From<SerializationError> for io::Error {
                 io::ErrorKind::InvalidData,
                 "bad transaction balance: non-zero with no Sapling shielded spends or outputs",
             ),
+            SerializationError::Coinbase(e) => io::Error::new(io::ErrorKind::InvalidData, e),
         }
     }
 }
