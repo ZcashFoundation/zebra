@@ -480,7 +480,7 @@ impl ContextuallyVerifiedBlock {
     /// [`Chain::push()`](crate::service::non_finalized_state::Chain::push) returns success.
     pub fn with_block_and_spent_utxos(
         semantically_verified: SemanticallyVerifiedBlock,
-        mut spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+        spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     ) -> Result<Self, ValueBalanceError> {
         let SemanticallyVerifiedBlock {
             block,
@@ -491,23 +491,21 @@ impl ContextuallyVerifiedBlock {
             deferred_pool_balance_change,
         } = semantically_verified;
 
-        // This is redundant for the non-finalized state,
-        // but useful to make some tests pass more easily.
-        //
-        // TODO: fix the tests, and stop adding unrelated outputs.
-        spent_outputs.extend(new_outputs.clone());
+        let mut utxos =
+            std::collections::HashMap::with_capacity(spent_outputs.len() + new_outputs.len());
+        utxos.extend(spent_outputs.iter().map(|(k, v)| (*k, v.utxo.clone())));
+        utxos.extend(new_outputs.iter().map(|(k, v)| (*k, v.utxo.clone())));
+        let chain_value_pool_change =
+            block.chain_value_pool_change(&utxos, deferred_pool_balance_change)?;
 
         Ok(Self {
-            block: block.clone(),
+            block,
             hash,
             height,
             new_outputs,
-            spent_outputs: spent_outputs.clone(),
+            spent_outputs,
             transaction_hashes,
-            chain_value_pool_change: block.chain_value_pool_change(
-                &utxos_from_ordered_utxos(spent_outputs),
-                deferred_pool_balance_change,
-            )?,
+            chain_value_pool_change,
         })
     }
 }
