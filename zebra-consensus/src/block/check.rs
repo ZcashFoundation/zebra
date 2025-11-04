@@ -212,7 +212,7 @@ pub fn subsidy_is_valid(
             .remove(&FundingStreamReceiver::Deferred)
             .unwrap_or_default()
             .constrain::<NegativeAllowed>()
-            .expect("should be valid Amount");
+            .map_err(|e| BlockError::Other(format!("invalid deferred pool amount: {e}")))?;
 
         // Checks the one-time lockbox disbursements in the NU6.1 activation block's coinbase transaction
         // See [ZIP-271](https://zips.z.cash/zip-0271) and [ZIP-1016](https://zips.z.cash/zip-1016) for more details.
@@ -275,7 +275,7 @@ pub fn miner_fees_are_valid(
         .sum::<Result<Amount<NonNegative>, AmountError>>()
         .map_err(|_| SubsidyError::SumOverflow)?
         .constrain()
-        .expect("positive value always fit in `NegativeAllowed`");
+        .map_err(|e| BlockError::Other(format!("invalid transparent value balance: {e}")))?;
     let sapling_value_balance = coinbase_tx.sapling_value_balance().sapling_amount();
     let orchard_value_balance = coinbase_tx.orchard_value_balance().orchard_amount();
 

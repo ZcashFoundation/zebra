@@ -17,9 +17,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn build_or_copy_proto() -> Result<(), Box<dyn std::error::Error>> {
     const PROTO_FILE_PATH: &str = "proto/indexer.proto";
 
-    let out_dir = env::var("OUT_DIR")
-        .map(PathBuf::from)
-        .expect("requires OUT_DIR environment variable definition");
+    let out_dir = env::var("OUT_DIR").map(PathBuf::from)?;
     let file_names = ["indexer_descriptor.bin", "zebra.indexer.rpc.rs"];
 
     let is_proto_file_available = Path::new(PROTO_FILE_PATH).exists();

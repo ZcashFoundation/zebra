@@ -212,15 +212,15 @@ async fn main() -> Result<()> {
                 // get the values we are interested in
                 let hash: block::Hash = get_block["hash"]
                     .as_str()
-                    .expect("hash: unexpected missing field or field type")
+                    .ok_or_else(|| eyre!("hash: unexpected missing field or field type"))?
                     .parse()?;
                 let response_height: Height = get_block["height"]
                     .try_into_height()
-                    .expect("height: unexpected invalid value, missing field, or field type");
+                    .map_err(|_| eyre!("height: unexpected invalid value, missing field, or field type"))?;
 
                 let size = get_block["size"]
                     .as_u64()
-                    .expect("size: unexpected invalid value, missing field, or field type");
+                    .ok_or_else(|| eyre!("size: unexpected invalid value, missing field, or field type"))?;
 
                 (hash, response_height, size)
             }
@@ -234,7 +234,7 @@ async fn main() -> Result<()> {
                 .await?;
                 let block_bytes = block_bytes
                     .as_str()
-                    .expect("block bytes: unexpected missing field or field type");
+                    .ok_or_else(|| eyre!("block bytes: unexpected missing field or field type"))?;
 
                 let block_bytes: Vec<u8> = hex::decode(block_bytes)?;
 

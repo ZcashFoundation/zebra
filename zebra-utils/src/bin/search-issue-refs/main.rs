@@ -41,7 +41,7 @@ use std::{
     path::PathBuf,
 };
 
-use color_eyre::eyre::Result;
+use color_eyre::eyre::{eyre, Result};
 use regex::Regex;
 use reqwest::{
     header::{self, HeaderMap, HeaderValue},
@@ -150,7 +150,7 @@ async fn main() -> Result<()> {
 
         // Zebra's github issue numbers could be up to 4 digits
         let issue_regex =
-            Regex::new(r"(https://github.com/ZcashFoundation/zebra/issues/|#)(\d{1,4})").unwrap();
+            Regex::new(r"(https://github.com/ZcashFoundation/zebra/issues/|#)(\d{1,4})")?;
 
         let mut possible_issue_refs: HashMap<IssueId, Vec<PossibleIssueRef>> = HashMap::new();
         let mut num_possible_issue_refs = 0;
@@ -166,17 +166,17 @@ async fn main() -> Result<()> {
                 for captures in issue_regex.captures_iter(&line) {
                     let file_path = file_path
                         .to_str()
-                        .expect("paths from read_dir should be valid unicode")
+                        .ok_or_else(|| eyre!("paths from read_dir should be valid unicode"))?
                         .to_string();
 
                     let column = captures
                         .get(1)
-                        .expect("matches should have 2 captures")
+                        .ok_or_else(|| eyre!("matches should have 2 captures"))?
                         .start()
                         + 1;
 
                     let potential_issue_ref =
-                        captures.get(2).expect("matches should have 2 captures");
+                        captures.get(2).ok_or_else(|| eyre!("matches should have 2 captures"))?;
                     let matching_text = potential_issue_ref.as_str();
 
                     let id = matching_text[matching_text.len().checked_sub(4).unwrap_or(1)..]
@@ -268,12 +268,11 @@ to create a github token."
             .await?
             .text()
             .await?,
-    )
-    .expect("response text should be json");
+    )?;
 
     let latest_commit_sha = latest_commit_json["object"]["sha"]
         .as_str()
-        .expect("response.object.sha should be a string");
+        .ok_or_else(|| eyre!("response.object.sha should be a string"))?;
 
     let mut github_api_requests = JoinSet::new();
 
