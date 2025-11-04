@@ -211,7 +211,6 @@ fn test_get_block_1() -> Result<(), Box<dyn std::error::Error>> {
     let tx = block
         .tx()
         .iter()
-        .cloned()
         .map(|tx| {
             let GetBlockTransaction::Hash(h) = tx else {
                 panic!("Expected GetBlockTransaction::Hash")
