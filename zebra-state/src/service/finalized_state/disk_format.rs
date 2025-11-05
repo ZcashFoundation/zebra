@@ -162,7 +162,11 @@ impl FromDisk for RawBytes {
 ///
 /// - if `mem_bytes` is shorter than `disk_len`.
 pub fn truncate_zero_be_bytes(mem_bytes: &[u8], disk_len: usize) -> Option<&[u8]> {
-    let discarded_bytes = mem_bytes.len().checked_sub(disk_len)?;
+    #![allow(clippy::unwrap_in_result)]
+    let discarded_bytes = mem_bytes
+        .len()
+        .checked_sub(disk_len)
+        .expect("unexpected `mem_bytes` length: must be at least `disk_len`");
 
     if discarded_bytes == 0 {
         return Some(mem_bytes);
