@@ -7,6 +7,7 @@ use derive_new::new;
 use zebra_chain::{
     amount::NegativeOrZero,
     block::{
+        self,
         merkle::{self, AuthDataRoot, AUTH_DIGEST_PLACEHOLDER},
         ChainHistoryBlockTxAuthCommitmentHash, ChainHistoryMmrRootHash, Height,
     },
@@ -64,7 +65,7 @@ impl DefaultRoots {
         let chain_history_root = chain_history_root
             .or_else(|| {
                 (NetworkUpgrade::Heartwood.activation_height(net) == Some(height))
-                    .then_some([0; 32].into())
+                    .then_some(block::CHAIN_HISTORY_ACTIVATION_RESERVED.into())
             })
             .ok_or("chain history root is required")?;
 
@@ -87,8 +88,11 @@ impl DefaultRoots {
                 .collect(),
             chain_history_root,
             auth_data_root,
-            block_commitments_hash: if chain_history_root == [0; 32].into() {
-                [0; 32].into()
+            block_commitments_hash: if NetworkUpgrade::current(net, height)
+                == NetworkUpgrade::Heartwood
+                && chain_history_root == block::CHAIN_HISTORY_ACTIVATION_RESERVED.into()
+            {
+                block::CHAIN_HISTORY_ACTIVATION_RESERVED.into()
             } else {
                 ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
                     &chain_history_root,
