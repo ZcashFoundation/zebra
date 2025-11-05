@@ -161,6 +161,8 @@ pub enum Transaction {
         lock_time: LockTime,
         /// The latest block height that this transaction can be added to the chain.
         expiry_height: block::Height,
+        /// The burn amount for this transaction, if any.
+        zip233_amount: Amount<NonNegative>,
         /// The transparent inputs to the transaction.
         inputs: Vec<transparent::Input>,
         /// The transparent outputs from the transaction.
@@ -169,7 +171,6 @@ pub enum Transaction {
         sapling_shielded_data: Option<sapling::ShieldedData<sapling::SharedAnchor>>,
         /// The orchard data for this transaction, if any.
         orchard_shielded_data: Option<orchard::ShieldedData>,
-        // TODO: Add the rest of the v6 fields.
     },
 }
 
@@ -190,6 +191,8 @@ impl fmt::Display for Transaction {
         if let Some(expiry_height) = self.expiry_height() {
             fmter.field("expiry_height", &expiry_height);
         }
+        #[cfg(feature = "tx_v6")]
+        fmter.field("zip233_amount", &self.zip233_amount());
 
         fmter.field("transparent_inputs", &self.inputs().len());
         fmter.field("transparent_outputs", &self.outputs().len());
@@ -321,6 +324,11 @@ impl Transaction {
                     .contains(orchard::Flags::ENABLE_SPENDS))
     }
 
+    /// Does this transaction have zip233_amount output?
+    #[cfg(feature = "tx_v6")]
+    pub fn has_zip233_amount(&self) -> bool {
+        self.zip233_amount() > Amount::<NonNegative>::zero()
+    }
     /// Does this transaction have shielded outputs?
     ///
     /// See [`Self::has_transparent_or_shielded_outputs`] for details.
@@ -1535,6 +1543,19 @@ impl Transaction {
             Transaction::V5 { .. } => Some(TX_V5_VERSION_GROUP_ID),
             #[cfg(feature = "tx_v6")]
             Transaction::V6 { .. } => Some(TX_V6_VERSION_GROUP_ID),
+        }
+    }
+
+    /// Access the zip233 amount field of this transaction, regardless of version.
+    pub fn zip233_amount(&self) -> Amount<NonNegative> {
+        match self {
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { .. }
+            | Transaction::V5 { .. } => Amount::zero(),
+            #[cfg(feature = "tx_v6")]
+            Transaction::V6 { zip233_amount, .. } => *zip233_amount,
         }
     }
 }
