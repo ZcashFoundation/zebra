@@ -36,7 +36,7 @@ fn excludes_tx_with_unselected_dependencies() {
             vec![unmined_tx],
             mempool_tx_deps,
             extra_coinbase_data,
-            #[cfg(feature = "tx_v6")]
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             None,
         ),
         vec![],
@@ -82,7 +82,7 @@ fn includes_tx_with_selected_dependencies() {
         unmined_txs.clone(),
         mempool_tx_deps.clone(),
         extra_coinbase_data,
-        #[cfg(feature = "tx_v6")]
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         None,
     );
 

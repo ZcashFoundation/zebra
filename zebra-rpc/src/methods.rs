@@ -2413,7 +2413,7 @@ where
             mempool_txs,
             mempool_tx_deps,
             extra_coinbase_data.clone(),
-            #[cfg(feature = "tx_v6")]
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             None,
         );
 
@@ -2435,7 +2435,7 @@ where
             mempool_txs,
             submit_old,
             extra_coinbase_data,
-            #[cfg(feature = "tx_v6")]
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             None,
         );
 

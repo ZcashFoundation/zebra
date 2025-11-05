@@ -3521,7 +3521,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         &[],
         chain_history_root,
         vec![],
-        #[cfg(feature = "tx_v6")]
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         None,
     )
     .expect("coinbase transaction should be valid under the given parameters");
@@ -3581,7 +3581,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         &[],
         chain_history_root,
         vec![],
-        #[cfg(feature = "tx_v6")]
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         None,
     )
     .expect("coinbase transaction should be valid under the given parameters");
@@ -3645,9 +3645,9 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 /// Test successful block template submission as a block proposal.
 ///
 /// This test can be run locally with:
-/// `cargo test --package zebrad --test acceptance --features tx_v6 -- nu7_nsm_transactions --exact --show-output`
+/// `RUSTFLAGS='--cfg zcash_unstable="nu7"' cargo test --package zebrad --test acceptance --features tx_v6 -- nu7_nsm_transactions --exact --show-output`
 #[tokio::test(flavor = "multi_thread")]
-#[cfg(feature = "tx_v6")]
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
 async fn nu7_nsm_transactions() -> Result<()> {
     use zebra_chain::{
         chain_sync_status::MockSyncStatus,
