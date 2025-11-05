@@ -27,7 +27,7 @@ pub mod arbitrary;
 pub mod tests;
 
 pub use compact_size::{CompactSize64, CompactSizeMessage};
-pub use constraint::AtLeastOne;
+pub use constraint::{AtLeastOne, Bounded};
 pub use date_time::{DateTime32, Duration32};
 pub use display_order::BytesInDisplayOrder;
 pub use error::SerializationError;

@@ -5,18 +5,15 @@
 //!  * the Testnet minimum difficulty adjustment from ZIPs 205 and 208, and
 //!  * `median-time-past`.
 
-use std::{cmp::max, cmp::min};
+use std::cmp::{max, min};
 
 use chrono::{DateTime, Duration, Utc};
 
 use zebra_chain::{
-    block,
-    block::Block,
-    parameters::Network,
-    parameters::NetworkUpgrade,
-    parameters::POW_AVERAGING_WINDOW,
-    work::difficulty::{CompactDifficulty, U256},
-    work::difficulty::{ExpandedDifficulty, ParameterDifficulty as _},
+    block::{self, Block},
+    parameters::{Network, NetworkUpgrade, POW_AVERAGING_WINDOW},
+    serialization::Bounded,
+    work::difficulty::{CompactDifficulty, ExpandedDifficulty, ParameterDifficulty as _, U256},
 };
 
 /// The median block span for time median calculations.
@@ -65,14 +62,14 @@ pub(crate) struct AdjustedDifficulty {
     /// The `header.difficulty_threshold`s from the previous
     /// `PoWAveragingWindow + PoWMedianBlockSpan` (28) blocks, in reverse height
     /// order.
-    relevant_difficulty_thresholds: Vec<CompactDifficulty>,
+    relevant_difficulty_thresholds: Bounded<CompactDifficulty, POW_ADJUSTMENT_BLOCK_SPAN>,
     /// The `header.time`s from the previous
     /// `PoWAveragingWindow + PoWMedianBlockSpan` (28) blocks, in reverse height
     /// order.
     ///
     /// Only the first and last `PoWMedianBlockSpan` times are used. Times
     /// `11..=16` are ignored.
-    relevant_times: Vec<DateTime<Utc>>,
+    relevant_times: Bounded<DateTime<Utc>, POW_ADJUSTMENT_BLOCK_SPAN>,
 }
 
 impl AdjustedDifficulty {
@@ -134,10 +131,18 @@ impl AdjustedDifficulty {
     {
         let candidate_height = (previous_block_height + 1).expect("next block height is valid");
 
-        let (relevant_difficulty_thresholds, relevant_times) = context
+        let (thresholds, times) = context
             .into_iter()
             .take(POW_ADJUSTMENT_BLOCK_SPAN)
             .unzip::<_, _, Vec<_>, Vec<_>>();
+
+        let relevant_difficulty_thresholds: Bounded<CompactDifficulty, POW_ADJUSTMENT_BLOCK_SPAN> =
+            thresholds
+                .try_into()
+                .expect("context must provide a bounded number of difficulty thresholds");
+        let relevant_times: Bounded<DateTime<Utc>, POW_ADJUSTMENT_BLOCK_SPAN> = times
+            .try_into()
+            .expect("context must provide a bounded number of block times");
 
         AdjustedDifficulty {
             candidate_time: candidate_header_time,
