@@ -1,5 +1,7 @@
 //! Inbound service tests with a real peer set.
 
+#![allow(clippy::unwrap_in_result)]
+
 use std::{iter, net::SocketAddr};
 
 use futures::FutureExt;

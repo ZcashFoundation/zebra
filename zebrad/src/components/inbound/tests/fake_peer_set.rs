@@ -1,5 +1,7 @@
 //! Inbound service tests with a fake peer set.
 
+#![allow(clippy::unwrap_in_result)]
+
 use std::{collections::HashSet, iter, net::SocketAddr, str::FromStr, sync::Arc, time::Duration};
 
 use futures::FutureExt;

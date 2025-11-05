@@ -52,6 +52,30 @@ pub enum SerializationError {
     BadTransactionBalance,
 }
 
+impl From<SerializationError> for io::Error {
+    fn from(e: SerializationError) -> Self {
+        match e {
+            SerializationError::Io(e) => {
+                Arc::try_unwrap(e).unwrap_or_else(|e| io::Error::new(e.kind(), e.to_string()))
+            }
+            SerializationError::Parse(msg) => io::Error::new(io::ErrorKind::InvalidData, msg),
+            SerializationError::Utf8Error(e) => io::Error::new(io::ErrorKind::InvalidData, e),
+            SerializationError::TryFromSliceError(e) => {
+                io::Error::new(io::ErrorKind::InvalidData, e)
+            }
+            SerializationError::TryFromIntError(e) => io::Error::new(io::ErrorKind::InvalidData, e),
+            SerializationError::FromHexError(e) => io::Error::new(io::ErrorKind::InvalidData, e),
+            SerializationError::Amount { source } => {
+                io::Error::new(io::ErrorKind::InvalidData, source)
+            }
+            SerializationError::BadTransactionBalance => io::Error::new(
+                io::ErrorKind::InvalidData,
+                "bad transaction balance: non-zero with no Sapling shielded spends or outputs",
+            ),
+        }
+    }
+}
+
 impl From<crate::Error> for SerializationError {
     fn from(e: crate::Error) -> Self {
         match e {

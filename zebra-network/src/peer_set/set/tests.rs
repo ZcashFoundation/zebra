@@ -1,5 +1,7 @@
 //! Peer set unit tests, and test setup code.
 
+#![allow(clippy::unwrap_in_result)]
+
 use std::{net::SocketAddr, sync::Arc};
 
 use futures::{channel::mpsc, stream, Stream, StreamExt};

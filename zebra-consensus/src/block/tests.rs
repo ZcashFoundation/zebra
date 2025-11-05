@@ -1,5 +1,7 @@
 //! Tests for block verification
 
+#![allow(clippy::unwrap_in_result)]
+
 use color_eyre::eyre::{eyre, Report};
 use once_cell::sync::Lazy;
 use tower::{buffer::Buffer, util::BoxService};

@@ -712,34 +712,22 @@ pub fn height_for_halving(halving: u32, network: &Network) -> Option<Height> {
     }
 
     let slow_start_shift = i64::from(network.slow_start_shift().0);
-    let blossom_height = i64::from(
-        NetworkUpgrade::Blossom
-            .activation_height(network)
-            .expect("blossom activation height should be available")
-            .0,
-    );
+    let blossom_height = i64::from(NetworkUpgrade::Blossom.activation_height(network)?.0);
     let pre_blossom_halving_interval = network.pre_blossom_halving_interval();
     let halving_index = i64::from(halving);
 
-    let unscaled_height = halving_index
-        .checked_mul(pre_blossom_halving_interval)
-        .expect("Multiplication overflow: consider reducing the halving interval");
+    let unscaled_height = halving_index.checked_mul(pre_blossom_halving_interval)?;
 
     let pre_blossom_height = unscaled_height
         .min(blossom_height)
-        .checked_add(slow_start_shift)
-        .expect("Addition overflow: consider reducing the halving interval");
+        .checked_add(slow_start_shift)?;
 
     let post_blossom_height = 0
         .max(unscaled_height - blossom_height)
-        .checked_mul(i64::from(BLOSSOM_POW_TARGET_SPACING_RATIO))
-        .expect("Multiplication overflow: consider reducing the halving interval")
-        .checked_add(slow_start_shift)
-        .expect("Addition overflow: consider reducing the halving interval");
+        .checked_mul(i64::from(BLOSSOM_POW_TARGET_SPACING_RATIO))?
+        .checked_add(slow_start_shift)?;
 
-    let height = pre_blossom_height
-        .checked_add(post_blossom_height)
-        .expect("Addition overflow: consider reducing the halving interval");
+    let height = pre_blossom_height.checked_add(post_blossom_height)?;
 
     let height = u32::try_from(height).ok()?;
     height.try_into().ok()
