@@ -1,5 +1,7 @@
 //! Tests for Ed25519 signature verification
 
+#![allow(clippy::unwrap_in_result)]
+
 use std::time::Duration;
 
 use color_eyre::eyre::{eyre, Report, Result};

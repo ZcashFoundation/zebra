@@ -1,5 +1,7 @@
 //! Tests for the Zebra state service.
 
+#![allow(clippy::unwrap_in_result)]
+
 use std::{mem, sync::Arc};
 
 use zebra_chain::{

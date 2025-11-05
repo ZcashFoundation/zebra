@@ -293,9 +293,7 @@ fn sprout_anchors_refer_to_treestates(
 
         // Add new anchors to the interstitial note commitment tree.
         for cm in joinsplit.commitments {
-            input_tree_inner
-                .append(cm)
-                .expect("note commitment should be appendable to the tree");
+            input_tree_inner.append(cm)?;
         }
 
         interstitial_trees.insert(input_tree.root(), input_tree);

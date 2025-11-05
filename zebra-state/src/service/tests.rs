@@ -1,6 +1,8 @@
 //! StateService test vectors.
-//!
-//! TODO: move these tests into tests::vectors and tests::prop modules.
+
+#![allow(clippy::unwrap_in_result)]
+
+// TODO: move these tests into tests::vectors and tests::prop modules.
 
 use std::{env, sync::Arc, time::Duration};
 

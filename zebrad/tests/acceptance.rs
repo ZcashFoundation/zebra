@@ -132,6 +132,8 @@
 //! export TMPDIR=/path/to/disk/directory
 //! ```
 
+#![allow(clippy::unwrap_in_result)]
+
 mod common;
 
 use std::{
@@ -410,7 +412,7 @@ async fn db_init_outside_future_executor() -> Result<()> {
         "futures executor was blocked longer than expected ({block_duration:?})",
     );
 
-    db_init_handle.await?;
+    db_init_handle.await.map_err(|e| eyre!(e))?;
 
     Ok(())
 }

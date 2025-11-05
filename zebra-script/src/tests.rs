@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_in_result)]
+
 use hex::FromHex;
 use std::sync::Arc;
 use zebra_chain::{

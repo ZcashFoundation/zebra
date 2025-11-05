@@ -187,7 +187,7 @@ pub fn coinbase_tx_no_prevout_joinsplit_spend(tx: &Transaction) -> Result<(), Tr
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc>
 pub fn joinsplit_has_vpub_zero(tx: &Transaction) -> Result<(), TransactionError> {
-    let zero = Amount::<NonNegative>::try_from(0).expect("an amount of 0 is always valid");
+    let zero = Amount::<NonNegative>::zero();
 
     let vpub_pairs = tx
         .output_values_to_sprout()
@@ -226,7 +226,7 @@ pub fn disabled_add_to_sprout_pool(
     //
     // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
     if height >= canopy_activation_height {
-        let zero = Amount::<NonNegative>::try_from(0).expect("an amount of 0 is always valid");
+        let zero = Amount::<NonNegative>::zero();
 
         let tx_sprout_pool = tx.output_values_to_sprout();
         for vpub_old in tx_sprout_pool {
