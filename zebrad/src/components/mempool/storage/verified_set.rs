@@ -256,6 +256,11 @@ impl VerifiedSet {
         let mut removed_transactions = HashSet::new();
 
         for key_to_remove in keys_to_remove {
+            if !self.transactions.contains_key(&key_to_remove) {
+                // Skip any keys that may have already been removed as their dependencies were removed.
+                continue;
+            }
+
             removed_transactions.extend(
                 self.remove(&key_to_remove)
                     .into_iter()
