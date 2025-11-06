@@ -153,7 +153,8 @@ class AuthServiceProxy():
                 'code': -342, 'message': 'missing HTTP response from server'})
         
         content_type = http_response.getheader('Content-Type')
-        if content_type != 'application/json':
+        # Zallet uses 'application/json; charset=utf-8'` while zcashd uses 'application/json'
+        if content_type != 'application/json; charset=utf-8':
             raise JSONRPCException({
                 'code': -342, 'message': 'non-JSON HTTP response with \'%i %s\' from server' % (http_response.status, http_response.reason)})
 
