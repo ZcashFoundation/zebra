@@ -62,14 +62,14 @@ pub(crate) struct AdjustedDifficulty {
     /// The `header.difficulty_threshold`s from the previous
     /// `PoWAveragingWindow + PoWMedianBlockSpan` (28) blocks, in reverse height
     /// order.
-    relevant_difficulty_thresholds: Bounded<CompactDifficulty, POW_ADJUSTMENT_BLOCK_SPAN>,
+    relevant_difficulty_thresholds: Bounded<CompactDifficulty, 1, POW_ADJUSTMENT_BLOCK_SPAN>,
     /// The `header.time`s from the previous
     /// `PoWAveragingWindow + PoWMedianBlockSpan` (28) blocks, in reverse height
     /// order.
     ///
     /// Only the first and last `PoWMedianBlockSpan` times are used. Times
     /// `11..=16` are ignored.
-    relevant_times: Bounded<DateTime<Utc>, POW_ADJUSTMENT_BLOCK_SPAN>,
+    relevant_times: Bounded<DateTime<Utc>, 1, POW_ADJUSTMENT_BLOCK_SPAN>,
 }
 
 impl AdjustedDifficulty {
@@ -86,7 +86,10 @@ impl AdjustedDifficulty {
     ///
     /// # Panics
     ///
-    /// If the `context` contains fewer than 28 items.
+    /// This function may panic in the following cases:
+    /// - The `candidate_block` has no coinbase height (should never happen for valid blocks).
+    /// - The `candidate_block` is the genesis block, so `previous_block_height` cannot be computed.
+    /// - `AdjustedDifficulty::new_from_header_time` panics.
     pub fn new_from_block<C>(
         candidate_block: &Block,
         network: &Network,
@@ -119,7 +122,11 @@ impl AdjustedDifficulty {
     ///
     /// # Panics
     ///
-    /// If the context contains fewer than 28 items.
+    /// This function may panic in the following cases:
+    /// - The next block height is invalid.
+    /// - The `context` iterator is empty, because at least one difficulty threshold
+    ///   and block time are required to construct the `Bounded` vectors.
+    /// - The context iterator is empty, because at least one difficulty threshold and block time are required.
     pub fn new_from_header_time<C>(
         candidate_header_time: DateTime<Utc>,
         previous_block_height: block::Height,
@@ -136,11 +143,14 @@ impl AdjustedDifficulty {
             .take(POW_ADJUSTMENT_BLOCK_SPAN)
             .unzip::<_, _, Vec<_>, Vec<_>>();
 
-        let relevant_difficulty_thresholds: Bounded<CompactDifficulty, POW_ADJUSTMENT_BLOCK_SPAN> =
-            thresholds
-                .try_into()
-                .expect("context must provide a bounded number of difficulty thresholds");
-        let relevant_times: Bounded<DateTime<Utc>, POW_ADJUSTMENT_BLOCK_SPAN> = times
+        let relevant_difficulty_thresholds: Bounded<
+            CompactDifficulty,
+            1,
+            POW_ADJUSTMENT_BLOCK_SPAN,
+        > = thresholds
+            .try_into()
+            .expect("context must provide a bounded number of difficulty thresholds");
+        let relevant_times: Bounded<DateTime<Utc>, 1, POW_ADJUSTMENT_BLOCK_SPAN> = times
             .try_into()
             .expect("context must provide a bounded number of block times");
 
