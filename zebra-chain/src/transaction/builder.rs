@@ -11,7 +11,7 @@ use crate::{
 impl Transaction {
     /// Returns a new version 6 coinbase transaction for `network` and `height`,
     /// which contains the specified `outputs`.
-    #[cfg(feature = "tx_v6")]
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
     pub fn new_v6_coinbase(
         network: &Network,
         height: Height,

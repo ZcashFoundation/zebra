@@ -517,7 +517,7 @@ where
                     script_verifier,
                     cached_ffi_transaction.clone(),
                 )?,
-                #[cfg(feature="tx_v6")]
+                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
                 Transaction::V6 {
                     ..
                 } => Self::verify_v6_transaction(
@@ -556,7 +556,7 @@ where
             let value_balance = tx.value_balance(&spent_utxos);
 
             let zip233_amount = match *tx {
-            	#[cfg(feature="tx_v6")]
+            	#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
                 Transaction::V6{ .. } => tx.zip233_amount(),
                 _ => Amount::zero()
             };
@@ -1031,7 +1031,7 @@ where
     }
 
     /// Passthrough to verify_v5_transaction, but for V6 transactions.
-    #[cfg(feature = "tx_v6")]
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
     fn verify_v6_transaction(
         request: &Request,
         network: &Network,

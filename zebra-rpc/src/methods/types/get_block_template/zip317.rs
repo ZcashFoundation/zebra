@@ -26,10 +26,10 @@ use zebra_node_services::mempool::TransactionDependencies;
 
 use crate::methods::types::transaction::TransactionTemplate;
 
-#[cfg(feature = "tx_v6")]
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
 use crate::methods::{Amount, NonNegative};
 
-#[cfg(feature = "tx_v6")]
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
 use zebra_chain::parameters::NetworkUpgrade;
 
 #[cfg(test)]
@@ -66,7 +66,9 @@ pub fn select_mempool_transactions(
     mempool_txs: Vec<VerifiedUnminedTx>,
     mempool_tx_deps: TransactionDependencies,
     extra_coinbase_data: Vec<u8>,
-    #[cfg(feature = "tx_v6")] zip233_amount: Option<Amount<NonNegative>>,
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))] zip233_amount: Option<
+        Amount<NonNegative>,
+    >,
 ) -> Vec<SelectedMempoolTx> {
     // Use a fake coinbase transaction to break the dependency between transaction
     // selection, the miner fee, and the fee payment in the coinbase transaction.
@@ -75,7 +77,7 @@ pub fn select_mempool_transactions(
         next_block_height,
         miner_address,
         extra_coinbase_data,
-        #[cfg(feature = "tx_v6")]
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         zip233_amount,
     );
 
@@ -152,7 +154,9 @@ pub fn fake_coinbase_transaction(
     height: Height,
     miner_address: &Address,
     extra_coinbase_data: Vec<u8>,
-    #[cfg(feature = "tx_v6")] zip233_amount: Option<Amount<NonNegative>>,
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))] zip233_amount: Option<
+        Amount<NonNegative>,
+    >,
 ) -> TransactionTemplate<NegativeOrZero> {
     // Block heights are encoded as variable-length (script) and `u32` (lock time, expiry height).
     // They can also change the `u32` consensus branch id.
@@ -166,10 +170,10 @@ pub fn fake_coinbase_transaction(
     let miner_fee = 1.try_into().expect("amount is valid and non-negative");
     let outputs = standard_coinbase_outputs(net, height, miner_address, miner_fee);
 
-    #[cfg(not(feature = "tx_v6"))]
+    #[cfg(not(all(zcash_unstable = "nu7", feature = "tx_v6")))]
     let coinbase = Transaction::new_v5_coinbase(net, height, outputs, extra_coinbase_data).into();
 
-    #[cfg(feature = "tx_v6")]
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
     let coinbase = {
         let network_upgrade = NetworkUpgrade::current(net, height);
         if network_upgrade < NetworkUpgrade::Nu7 {
