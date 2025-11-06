@@ -47,7 +47,7 @@ use crate::serialization::SerializationError;
 /// let vec: Vec<u32> = v.into_vec();
 /// # assert_eq!(vec, vec![2, 3, 5, 7, 11]);
 /// ```
-/// 
+///
 /// `Bounded` also re-implements some slice methods with different return
 /// types, to avoid redundant unwraps:
 /// ```
@@ -62,16 +62,6 @@ use crate::serialization::SerializationError;
 /// let (first, rest) = v.split_first();
 /// assert_eq!(*first, 7);
 /// assert_eq!(rest, &[8, 9]);
-/// ```
-///
-/// **Push behavior:**  
-/// `push` returns an error if it would exceed `MAX` length:
-/// ```
-/// # use zebra_chain::serialization::{Bounded, SerializationError};
-/// #
-/// # let mut v: Bounded<u32, 1, 2> = vec![1].try_into().unwrap();
-/// assert!(v.push(2).is_ok());
-/// assert!(v.push(3).is_err());
 /// ```
 ///
 /// Unlike `Vec`, `first()` and `split_first()` never panic because the
@@ -234,17 +224,6 @@ impl<T, const MIN: usize, const MAX: usize> Bounded<T, MIN, MAX> {
         &mut self.inner[0]
     }
 
-    /// Attempts to append an element to the back of the collection.
-    ///
-    /// Returns an error if appending the element would exceed the maximum length `MAX`.
-    pub fn push(&mut self, element: T) -> Result<(), SerializationError> {
-        if self.inner.len() >= MAX {
-            return Err(SerializationError::Parse("too many elements"));
-        }
-        self.inner.push(element);
-        Ok(())
-    }
-
     /// Returns the first and all the rest of the elements of the vector.
     ///
     /// Unlike `Vec` or slice, `Bounded` always has a first element.
@@ -253,188 +232,38 @@ impl<T, const MIN: usize, const MAX: usize> Bounded<T, MIN, MAX> {
     }
 }
 
-/// A `Vec<T>` wrapper that ensures there is at least one `T` in the vector.
+/// A `Vec<T>` wrapper that guarantees there is **at least one element** in the vector.
 ///
-/// You can initialize `AtLeastOne` using:
+/// This is a specialized version of `Bounded<T, 1, usize::MAX>`, and can be used exactly like `Bounded`.
+/// In addition to the functionality of `Bounded`, it provides four convenience methods: `push`, `append`, `extend`, and `from_one`.
+///
+/// You can initialize and use `AtLeastOne` just like a `Bounded<T, 1, usize::MAX>`:
 /// ```
 /// # use zebra_chain::serialization::{AtLeastOne, SerializationError};
 /// # use std::convert::{TryFrom, TryInto};
 /// #
+/// // Initialize with one element
 /// let v: AtLeastOne<u32> = vec![42].try_into()?;
-/// assert_eq!(v.as_slice(), [42]);
+/// assert_eq!(v.as_slice(), &[42]);
 ///
-/// let v: AtLeastOne<u32> = vec![42].as_slice().try_into()?;
-/// assert_eq!(v.as_slice(), [42]);
+/// // Add elements using `push`, `append`, and `extend`
+/// let mut v: AtLeastOne<u32> = vec![42].try_into()?;
+/// v.push(43);
+/// assert_eq!(v.as_slice(), &[42, 43]);
 ///
-/// let v: AtLeastOne<u32> = [42].try_into()?;
-/// assert_eq!(v.as_slice(), [42]);
+/// let mut other = vec![44, 45];
+/// v.append(&mut other);
+/// assert_eq!(v.as_slice(), &[42, 43, 44, 45]);
 ///
-/// let v = AtLeastOne::<u32>::try_from(&[42])?;
-/// assert_eq!(v.as_slice(), [42]);
-/// #
+/// v.extend(vec![46, 47]);
+/// assert_eq!(v.as_slice(), &[42, 43, 44, 45, 46, 47]);
+///
+/// // Initialize using `from_one`:
+/// let v: AtLeastOne<u32> = AtLeastOne::from_one(42);
+/// assert_eq!(v.as_slice(), &[42]);
 /// # Ok::<(), SerializationError>(())
 /// ```
-///
-/// And access the inner vector via [deref coercion](https://doc.rust-lang.org/std/ops/trait.Deref.html#more-on-deref-coercion),
-/// an explicit conversion, or as a slice:
-/// ```
-/// # use zebra_chain::serialization::AtLeastOne;
-/// # use std::convert::TryInto;
-/// #
-/// # let v: AtLeastOne<u32> = vec![42].try_into().unwrap();
-/// #
-/// let first = v.iter().next().expect("AtLeastOne always has a first element");
-/// assert_eq!(*first, 42);
-///
-/// let s = v.as_slice();
-/// #
-/// # assert_eq!(s, [42]);
-///
-/// let mut m = v.into_vec();
-/// #
-/// # assert_eq!(m.as_slice(), [42]);
-///
-/// ```
-///
-/// `AtLeastOne` also re-implements some slice methods with different return
-/// types, to avoid redundant unwraps:
-/// ```
-/// # use zebra_chain::serialization::AtLeastOne;
-/// # use std::convert::TryInto;
-/// #
-/// # let v: AtLeastOne<u32> = vec![42].try_into().unwrap();
-/// #
-/// let first = v.first();
-/// assert_eq!(*first, 42);
-///
-/// let (first, rest) = v.split_first();
-/// assert_eq!(*first, 42);
-/// assert!(rest.is_empty());
-/// ```
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct AtLeastOne<T> {
-    /// The inner vector, which must have at least one element.
-    ///
-    /// `inner` is private, so that it can't be modified in ways that break the
-    /// type constraint.
-    inner: Vec<T>,
-}
-
-// CORRECTNESS
-//
-// All conversions to `AtLeastOne<T>` must go through `TryFrom<Vec<T>>`,
-// so that the type constraint is satisfied.
-
-impl<T> TryFrom<Vec<T>> for AtLeastOne<T> {
-    type Error = SerializationError;
-
-    fn try_from(vec: Vec<T>) -> Result<Self, Self::Error> {
-        if vec.is_empty() {
-            Err(SerializationError::Parse("expected at least one item"))
-        } else {
-            Ok(AtLeastOne { inner: vec })
-        }
-    }
-}
-
-impl<T> TryFrom<&Vec<T>> for AtLeastOne<T>
-where
-    T: Clone,
-{
-    type Error = SerializationError;
-
-    fn try_from(vec: &Vec<T>) -> Result<Self, Self::Error> {
-        if vec.is_empty() {
-            Err(SerializationError::Parse("expected at least one item"))
-        } else {
-            Ok(AtLeastOne {
-                inner: vec.to_vec(),
-            })
-        }
-    }
-}
-
-impl<T> TryFrom<&[T]> for AtLeastOne<T>
-where
-    T: Clone,
-{
-    type Error = SerializationError;
-
-    fn try_from(slice: &[T]) -> Result<Self, Self::Error> {
-        slice.to_vec().try_into()
-    }
-}
-
-// TODO:
-// - reject [T; 0] at compile time and impl From instead?
-impl<T, const N: usize> TryFrom<[T; N]> for AtLeastOne<T>
-where
-    T: Clone,
-{
-    type Error = SerializationError;
-
-    fn try_from(slice: [T; N]) -> Result<Self, Self::Error> {
-        slice.to_vec().try_into()
-    }
-}
-
-// TODO:
-// - reject [T; 0] at compile time and impl From instead?
-// - remove when std is updated so that `TryFrom<&U>` is always implemented when
-//   `TryFrom<U>`
-impl<T, const N: usize> TryFrom<&[T; N]> for AtLeastOne<T>
-where
-    T: Clone,
-{
-    type Error = SerializationError;
-
-    fn try_from(slice: &[T; N]) -> Result<Self, Self::Error> {
-        slice.to_vec().try_into()
-    }
-}
-
-// Deref and AsRef (but not DerefMut or AsMut, because that could break the constraint)
-
-impl<T> Deref for AtLeastOne<T> {
-    type Target = Vec<T>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl<T> AsRef<[T]> for AtLeastOne<T> {
-    fn as_ref(&self) -> &[T] {
-        self.inner.as_ref()
-    }
-}
-
-// Extracting one or more items
-
-impl<T> From<AtLeastOne<T>> for Vec<T> {
-    fn from(vec1: AtLeastOne<T>) -> Self {
-        vec1.inner
-    }
-}
-
-// `IntoIterator` for `T` and `&mut T`, because iterators can't remove items
-
-impl<T> IntoIterator for AtLeastOne<T> {
-    type Item = T;
-
-    type IntoIter = std::vec::IntoIter<T>;
-
-    fn into_iter(self) -> std::vec::IntoIter<T> {
-        self.inner.into_iter()
-    }
-}
-
-impl<T> AtLeastOne<T> {
-    /// Returns an iterator that allows modifying each value.
-    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, T> {
-        self.inner.iter_mut()
-    }
-}
+pub type AtLeastOne<T> = Bounded<T, 1, { usize::MAX }>;
 
 impl<T> AtLeastOne<T> {
     /// Returns a new `AtLeastOne`, containing a single `item`.
@@ -446,47 +275,30 @@ impl<T> AtLeastOne<T> {
         AtLeastOne { inner: vec![item] }
     }
 
-    /// Returns a reference to the inner vector.
-    pub fn as_vec(&self) -> &Vec<T> {
-        &self.inner
-    }
-
-    /// Converts `self` into a vector without clones or allocation.
-    ///
-    /// The resulting vector can be converted back into `AtLeastOne` via `try_into`.
-    pub fn into_vec(self) -> Vec<T> {
-        self.inner
-    }
-
-    /// Returns the first element.
-    ///
-    /// Unlike `Vec` or slice, `AtLeastOne` always has a first element.
-    pub fn first(&self) -> &T {
-        &self.inner[0]
-    }
-
-    /// Returns a mutable reference to the first element.
-    ///
-    /// Unlike `Vec` or slice, `AtLeastOne` always has a first element.
-    pub fn first_mut(&mut self) -> &mut T {
-        &mut self.inner[0]
-    }
-
     /// Appends an element to the back of the collection.
+    ///
+    /// This does not violate the `AtLeastOne` constraint since the collection
+    /// always has at least one element.
     pub fn push(&mut self, element: T) {
         self.inner.push(element);
     }
 
-    /// Returns the first and all the rest of the elements of the vector.
+    /// Appends the elements of another collection.
     ///
-    /// Unlike `Vec` or slice, `AtLeastOne` always has a first element.
-    pub fn split_first(&self) -> (&T, &[T]) {
-        (&self.inner[0], &self.inner[1..])
+    /// This does not violate the `AtLeastOne` constraint since the collection
+    /// always has at least one element.
+    pub fn append(&mut self, other: &mut Vec<T>) {
+        self.inner.append(other);
+    }
+
+    /// Extends the collection with the elements of an iterator.
+    ///
+    /// This does not violate the `AtLeastOne` constraint since the collection
+    /// always has at least one element.
+    pub fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+        self.inner.extend(iter);
     }
 }
-
-// TODO: consider implementing `push`, `append`, and `Extend`,
-// because adding elements can't break the constraint.
 
 /// Create an initialized [`AtLeastOne`] instance.
 ///
