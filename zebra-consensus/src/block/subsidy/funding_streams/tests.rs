@@ -1,5 +1,7 @@
 //! Tests for funding streams.
 
+#![allow(clippy::unwrap_in_result)]
+
 use std::collections::HashMap;
 
 use color_eyre::Report;

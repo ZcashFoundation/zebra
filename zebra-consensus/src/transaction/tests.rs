@@ -1,4 +1,7 @@
 //! Tests for Zcash transaction consensus checks.
+
+#![allow(clippy::unwrap_in_result)]
+
 //
 // TODO: split fixed test vectors into a `vectors` module?
 

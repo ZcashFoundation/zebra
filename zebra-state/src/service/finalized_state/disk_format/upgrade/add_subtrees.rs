@@ -412,10 +412,11 @@ fn check_sapling_subtrees(
         }
         // Check that the final note has a greater subtree index if it didn't complete a subtree.
         else {
-            let prev_height = subtree
-                .end_height
-                .previous()
-                .expect("Note commitment subtrees should not end at the minimal height.");
+            let Ok(prev_height) = subtree.end_height.previous() else {
+                result = Err("Note commitment subtrees should not end at the minimal height");
+                error!(?result, ?subtree.end_height);
+                continue;
+            };
 
             let Some(prev_tree) = db.sapling_tree_by_height(&prev_height) else {
                 result = Err("missing note commitment tree below subtree completion height");
@@ -542,10 +543,11 @@ fn check_orchard_subtrees(
         }
         // Check that the final note has a greater subtree index if it didn't complete a subtree.
         else {
-            let prev_height = subtree
-                .end_height
-                .previous()
-                .expect("Note commitment subtrees should not end at the minimal height.");
+            let Ok(prev_height) = subtree.end_height.previous() else {
+                result = Err("Note commitment subtrees should not end at the minimal height");
+                error!(?result, ?subtree.end_height);
+                continue;
+            };
 
             let Some(prev_tree) = db.orchard_tree_by_height(&prev_height) else {
                 result = Err("missing note commitment tree below subtree completion height");
