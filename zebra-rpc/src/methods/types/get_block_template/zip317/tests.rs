@@ -46,7 +46,6 @@ fn excludes_tx_with_unselected_dependencies() {
 fn includes_tx_with_selected_dependencies() {
     let network = Network::Mainnet;
     let unmined_txs: Vec<_> = network.unmined_transactions_in_blocks(..).take(3).collect();
-    let miner_addr = Address::from(TransparentAddress::PublicKeyHash([0x7e; 20]));
 
     let dependent_tx1 = unmined_txs.first().expect("should have 3 txns");
     let dependent_tx2 = unmined_txs.get(1).expect("should have 3 txns");
