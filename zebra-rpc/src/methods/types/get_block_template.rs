@@ -24,6 +24,8 @@ use zcash_keys::address::Address;
 use zcash_protocol::memo::MemoBytes;
 use zcash_transparent::coinbase::MinerData;
 
+#[cfg(feature = "tx_v6")]
+use zebra_chain::amount::{Amount, NonNegative};
 use zebra_chain::{
     amount::{self, NegativeOrZero},
     block::{
