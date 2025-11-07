@@ -3693,7 +3693,7 @@ async fn nu7_nsm_transactions() -> Result<()> {
 
     tracing::info!("built configured Testnet, starting state service and block verifier");
 
-    let default_test_config = default_test_config(&network)?;
+    let default_test_config = default_test_config(&network);
     let mining_config = default_test_config.mining;
 
     let (state, read_state, latest_chain_tip, _chain_tip_change) =
