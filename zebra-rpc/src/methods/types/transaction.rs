@@ -30,6 +30,7 @@ use zebra_chain::{
     transaction::{self, SerializedTransaction, Transaction, VerifiedUnminedTx},
     transparent::Script,
 };
+use zebra_consensus::{error::TransactionError, funding_stream_address, groth16};
 use zebra_script::Sigops;
 use zebra_state::IntoDisk;
 
@@ -126,7 +127,9 @@ impl TransactionTemplate<NegativeOrZero> {
         height: Height,
         miner_params: &MinerParams,
         mempool_txs: &[VerifiedUnminedTx],
-        #[cfg(feature = "tx_v6")] zip233_amount: Option<Amount<NonNegative>>,
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))] zip233_amount: Option<
+            Amount<NonNegative>,
+        >,
     ) -> Result<Self, TransactionError> {
         let block_subsidy = block_subsidy(height, net)?;
 
@@ -157,7 +160,7 @@ impl TransactionTemplate<NegativeOrZero> {
             };
         }
 
-        #[cfg(feature = "tx_v6")]
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         if let Some(zip233_amount) = zip233_amount {
             builder.set_zip233_amount(Zatoshis::try_from(zip233_amount)?);
         }
