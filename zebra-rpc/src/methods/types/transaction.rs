@@ -157,6 +157,11 @@ impl TransactionTemplate<NegativeOrZero> {
             };
         }
 
+        #[cfg(feature = "tx_v6")]
+        if let Some(zip233_amount) = zip233_amount {
+            builder.set_zip233_amount(Zatoshis::try_from(zip233_amount)?);
+        }
+
         let add_orchard_reward = |builder: &mut Builder<'_, _, _>, addr: &_| {
             trace_err!(
                 builder.add_orchard_output::<String>(

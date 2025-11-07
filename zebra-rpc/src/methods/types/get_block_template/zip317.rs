@@ -26,9 +26,6 @@ use crate::methods::types::transaction::TransactionTemplate;
 #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
 use crate::methods::{Amount, NonNegative};
 
-#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-use zebra_chain::parameters::NetworkUpgrade;
-
 #[cfg(test)]
 mod tests;
 
