@@ -24,7 +24,7 @@ use zcash_keys::address::Address;
 use zcash_protocol::memo::MemoBytes;
 use zcash_transparent::coinbase::MinerData;
 
-#[cfg(feature = "tx_v6")]
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
 use zebra_chain::amount::{Amount, NonNegative};
 use zebra_chain::{
     amount::{self, NegativeOrZero},
@@ -44,7 +44,7 @@ use zebra_chain::{
 #[allow(unused_imports)]
 use zebra_chain::serialization::BytesInDisplayOrder;
 
-use zebra_consensus::MAX_BLOCK_SIGOPS;
+use zebra_consensus::{router::service_trait::BlockVerifierService, MAX_BLOCK_SIGOPS};
 use zebra_node_services::mempool::{self, TransactionDependencies};
 use zebra_state::GetBlockTemplateChainInfo;
 
@@ -333,7 +333,6 @@ impl BlockTemplateResponse {
             miner_params,
             &mempool_txs,
             chain_tip_and_local_time.chain_history_root,
-            extra_coinbase_data,
             #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             zip233_amount,
         )
