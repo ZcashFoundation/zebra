@@ -23,7 +23,7 @@ categories = [
 exclude = ["*.proto"]
 
 [features]
-tx_v6 = ["zebra-chain/tx_v6", "zebra-state/tx_v6", "zebra-consensus/tx_v6"]
+tx_v6 = ["zebra-chain/tx_v6", "zebra-state/tx_v6", "zebra-consensus/tx_v6", "zcash_primitives/zip-233"]
 
 # Production features that activate extra dependencies, or extra features in
 # dependencies
