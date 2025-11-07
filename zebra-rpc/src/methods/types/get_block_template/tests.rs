@@ -115,7 +115,7 @@ fn coinbase() -> anyhow::Result<()> {
                                 .ok_or(anyhow!("hard-coded addr must be valid"))?,
                         ),
                         &[],
-                        #[cfg(feature = "tx_v6")]
+                        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
                         None,
                     )?
                     .data()
