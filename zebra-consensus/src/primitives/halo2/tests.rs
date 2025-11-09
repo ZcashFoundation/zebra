@@ -103,13 +103,14 @@ where
                         };
                         zebra_chain::orchard::shielded_data::AuthorizedAction {
                             action,
-                            spend_auth_sig: <[u8; 64]>::from(a.authorization()).into(),
+                            spend_auth_sig: <[u8; 64]>::from(a.authorization().sig()).into(),
                         }
                     })
                     .collect::<Vec<_>>()
                     .try_into()
                     .unwrap(),
-                binding_sig: <[u8; 64]>::from(bundle.authorization().binding_signature()).into(),
+                binding_sig: <[u8; 64]>::from(bundle.authorization().binding_signature().sig())
+                    .into(),
                 #[cfg(feature = "tx_v6")]
                 burn: bundle.burn().as_slice().into(),
             }
