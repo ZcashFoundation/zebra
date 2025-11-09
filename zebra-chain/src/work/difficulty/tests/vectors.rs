@@ -181,7 +181,7 @@ fn compact_extremes() {
     // value. Therefore, a block can never pass with this threshold.
     //
     // zcashd rejects these blocks without comparing the hash.
-    let difficulty_max = CompactDifficulty(u32::MAX & !SIGN_BIT);
+    let difficulty_max = CompactDifficulty(!SIGN_BIT);
     assert_eq!(difficulty_max.to_expanded(), None);
     assert_eq!(difficulty_max.to_work(), None);
 

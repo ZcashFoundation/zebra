@@ -206,9 +206,8 @@ def run_tests(test_handler, test_list, src_dir, build_dir, exeext, jobs=1, enabl
     else:
         coverage = None
 
-    if len(test_list) > 1 and jobs > 1:
-        # Populate cache
-        subprocess.check_output([tests_dir + 'create_cache.py'] + flags)
+    # TODO: Restore cache functionality if needed:
+    # https://github.com/ZcashFoundation/zebra/blob/v3.0.0-rc.0/zebra-rpc/qa/pull-tester/rpc-tests.py#L209-L211
 
     #Run Tests
     time_sum = 0

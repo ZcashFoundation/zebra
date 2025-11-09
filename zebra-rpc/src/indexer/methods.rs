@@ -5,12 +5,12 @@ use std::pin::Pin;
 use futures::Stream;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Response, Status};
-use tower::{util::ServiceExt, BoxError};
+use tower::util::ServiceExt;
 
 use tracing::Span;
 use zebra_chain::{chain_tip::ChainTip, serialization::BytesInDisplayOrder};
 use zebra_node_services::mempool::MempoolChangeKind;
-use zebra_state::{ReadRequest, ReadResponse};
+use zebra_state::{ReadRequest, ReadResponse, ReadState};
 
 use super::{
     indexer_server::Indexer, server::IndexerRPC, BlockAndHash, BlockHashAndHeight, Empty,
@@ -23,15 +23,7 @@ const RESPONSE_BUFFER_SIZE: usize = 4_000;
 #[tonic::async_trait]
 impl<ReadStateService, Tip> Indexer for IndexerRPC<ReadStateService, Tip>
 where
-    ReadStateService: tower::Service<
-            zebra_state::ReadRequest,
-            Response = zebra_state::ReadResponse,
-            Error = BoxError,
-        > + Clone
-        + Send
-        + Sync
-        + 'static,
-    <ReadStateService as tower::Service<zebra_state::ReadRequest>>::Future: Send,
+    ReadStateService: ReadState,
     Tip: ChainTip + Clone + Send + Sync + 'static,
 {
     type ChainTipChangeStream =

@@ -5,7 +5,8 @@ use std::{
     process::Command,
 };
 
-const ZALLET_COMMIT: Option<&str> = Some("de70e46e37f903de4e182c5a823551b90a5bf80b");
+// 0.1.0-alpha.2
+const ZALLET_COMMIT: Option<&str> = Some("027e5e2139b2ca8f0317edb9d802b03a46e9aa4c");
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     build_or_copy_proto()?;
@@ -17,9 +18,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn build_or_copy_proto() -> Result<(), Box<dyn std::error::Error>> {
     const PROTO_FILE_PATH: &str = "proto/indexer.proto";
 
-    let out_dir = env::var("OUT_DIR")
-        .map(PathBuf::from)
-        .expect("requires OUT_DIR environment variable definition");
+    let out_dir = env::var("OUT_DIR").map(PathBuf::from)?;
     let file_names = ["indexer_descriptor.bin", "zebra.indexer.rpc.rs"];
 
     let is_proto_file_available = Path::new(PROTO_FILE_PATH).exists();

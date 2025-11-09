@@ -1,5 +1,7 @@
 //! Fixed test vectors for the syncer.
 
+#![allow(clippy::unwrap_in_result)]
+
 use std::{collections::HashMap, iter, sync::Arc, time::Duration};
 
 use color_eyre::Report;

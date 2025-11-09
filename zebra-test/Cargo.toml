@@ -43,5 +43,8 @@ tracing = { workspace = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 
+[features]
+tx_v6 = []
+
 [lints]
 workspace = true

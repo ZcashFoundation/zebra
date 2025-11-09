@@ -29,6 +29,7 @@ import errno
 
 from . import coverage
 from .proxy import ServiceProxy, JSONRPCException
+from .authproxy import AuthServiceProxy
 
 from test_framework.config import ZebraConfig, ZebraExtraArgs
 
@@ -86,7 +87,7 @@ def get_rpc_proxy(url, node_number, timeout=None):
         timeout (int): HTTP timeout in seconds
 
     Returns:
-        AuthServiceProxy. convenience object for making RPC calls.
+        ServiceProxy. convenience object for making RPC calls.
 
     """
     proxy_kwargs = {}
@@ -827,6 +828,34 @@ def tarfile_extractall(tarfile, path):
 
 zallet_processes = {}
 
+ZALLET_RPC_DEFAULT_USERNAME = "zebra"
+ZALLET_RPC_DEFAULT_PASSWORD = "zebra"
+
+def get_rpc_auth_proxy(url, node_number, timeout=None):
+    """
+    Args:
+        url (str): URL of the RPC server to call
+        node_number (int): the node number (or id) that this calls to
+
+    Kwargs:
+        timeout (int): HTTP timeout in seconds
+
+    Returns:
+        AuthServiceProxy. convenience object for making RPC calls.
+
+    """
+    proxy_kwargs = {}
+    if timeout is not None:
+        proxy_kwargs['timeout'] = timeout
+
+    proxy = AuthServiceProxy(url, **proxy_kwargs)
+    proxy.url = url  # store URL on proxy for info
+
+    coverage_logfile = coverage.get_filename(
+        COVERAGE_DIR, node_number) if COVERAGE_DIR else None
+
+    return coverage.AuthServiceProxyWrapper(proxy, coverage_logfile)
+
 def start_wallets(num_wallets, dirname, extra_args=None, rpchost=None, binary=None):
     """
     Start multiple wallets, return RPC connections to them
@@ -837,7 +866,7 @@ def start_wallets(num_wallets, dirname, extra_args=None, rpchost=None, binary=No
     try:
         for i in range(num_wallets):
             rpcs.append(start_wallet(i, dirname, extra_args[i], rpchost, binary=binary[i]))
-    except: # If one node failed to start, stop the others
+    except: # If one wallet failed to start, stop the others
         stop_wallets(rpcs)
         raise
     return rpcs
@@ -883,7 +912,7 @@ def start_wallet(i, dirname, extra_args=None, rpchost=None, timewait=None, binar
     wait_for_wallet_start(zallet_processes[i], url, i)
     if os.getenv("PYTHON_DEBUG", ""):
         print("start_wallet: RPC successfully started for wallet {} with pid {}".format(i, zallet_processes[i].pid))
-    proxy = get_rpc_proxy(url, i, timeout=timewait)
+    proxy = get_rpc_auth_proxy(url, i, timeout=timewait)
     if COVERAGE_DIR:
         coverage.write_all_rpc_commands(COVERAGE_DIR, proxy)
 
@@ -933,7 +962,7 @@ def wait_for_wallet_start(process, url, i):
         if process.poll() is not None:
             raise Exception('%s wallet %d exited with status %i during initialization' % (zallet_binary(), i, process.returncode))
         try:
-            rpc = get_rpc_proxy(url, i)
+            rpc = get_rpc_auth_proxy(url, i)
             rpc.getwalletinfo()
             break # break out of loop on success
         except IOError as e:
@@ -953,5 +982,4 @@ def rpc_url_wallet(i, rpchost=None):
             host, port = parts
         else:
             host = rpchost
-    # For zallet, we just use a non-authenticated endpoint.
-    return "http://%s:%d" % (host, int(port))
+    return "http://%s:%s@%s:%d" % (ZALLET_RPC_DEFAULT_USERNAME, ZALLET_RPC_DEFAULT_PASSWORD, host, int(port))

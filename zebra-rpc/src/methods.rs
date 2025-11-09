@@ -2749,6 +2749,8 @@ where
             mempool_txs,
             mempool_tx_deps,
             extra_coinbase_data.clone(),
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            None,
         );
 
         tracing::debug!(
@@ -2769,6 +2771,8 @@ where
             mempool_txs,
             submit_old,
             extra_coinbase_data,
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            None,
         );
 
         Ok(response.into())
@@ -4696,10 +4700,15 @@ fn build_height_range(
 /// <https://github.com/zcash/zcash/blob/c267c3ee26510a974554f227d40a89e3ceb5bb4d/src/rpc/blockchain.cpp#L589-L618>
 //
 // TODO: also use this function in `get_block` and `z_get_treestate`
-#[allow(dead_code)]
 pub fn height_from_signed_int(index: i32, tip_height: Height) -> Result<Height> {
     if index >= 0 {
-        let height = index.try_into().expect("Positive i32 always fits in u32");
+        let height = index.try_into().map_err(|_| {
+            ErrorObject::borrowed(
+                ErrorCode::InvalidParams.code(),
+                "Index conversion failed",
+                None,
+            )
+        })?;
         if height > tip_height.0 {
             return Err(ErrorObject::borrowed(
                 ErrorCode::InvalidParams.code(),
@@ -4711,7 +4720,13 @@ pub fn height_from_signed_int(index: i32, tip_height: Height) -> Result<Height> 
     } else {
         // `index + 1` can't overflow, because `index` is always negative here.
         let height = i32::try_from(tip_height.0)
-            .expect("tip height fits in i32, because Height::MAX fits in i32")
+            .map_err(|_| {
+                ErrorObject::borrowed(
+                    ErrorCode::InvalidParams.code(),
+                    "Tip height conversion failed",
+                    None,
+                )
+            })?
             .checked_add(index + 1);
 
         let sanitized_height = match height {
@@ -4730,7 +4745,13 @@ pub fn height_from_signed_int(index: i32, tip_height: Height) -> Result<Height> 
                         None,
                     ));
                 }
-                let h: u32 = h.try_into().expect("Positive i32 always fits in u32");
+                let h: u32 = h.try_into().map_err(|_| {
+                    ErrorObject::borrowed(
+                        ErrorCode::InvalidParams.code(),
+                        "Height conversion failed",
+                        None,
+                    )
+                })?;
                 if h > tip_height.0 {
                     return Err(ErrorObject::borrowed(
                         ErrorCode::InvalidParams.code(),

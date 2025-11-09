@@ -28,13 +28,11 @@ fn funding_stream_address_index(
     let num_addresses = funding_streams.recipient(receiver)?.addresses().len();
 
     let index = 1u32
-        .checked_add(funding_stream_address_period(height, network))
-        .expect("no overflow should happen in this sum")
+        .checked_add(funding_stream_address_period(height, network))?
         .checked_sub(funding_stream_address_period(
             funding_streams.height_range().start,
             network,
-        ))
-        .expect("no overflow should happen in this sub") as usize;
+        ))? as usize;
 
     assert!(index > 0 && index <= num_addresses);
     // spec formula will output an index starting at 1 but

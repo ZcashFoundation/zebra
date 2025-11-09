@@ -8,7 +8,7 @@ from decimal import Decimal
 import time
 
 from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import assert_equal, start_nodes, start_wallets
+from test_framework.util import assert_equal, assert_true, start_nodes, start_wallets
 from test_framework.config import ZebraExtraArgs
 
 # Test that we can create a wallet and use an address from it to mine blocks.
@@ -27,6 +27,10 @@ class WalletTest (BitcoinTestFramework):
         self.nodes[0].generate(1)
 
         self.wallets = start_wallets(self.num_nodes, self.options.tmpdir)
+
+        # TODO: Use `getwalletstatus` in all sync issues
+        # https://github.com/zcash/wallet/issues/316
+        time.sleep(2)
 
     def run_test(self):
         # Generate a new account
@@ -81,9 +85,23 @@ class WalletTest (BitcoinTestFramework):
         node_balance = self.nodes[0].getaddressbalance(transparent_address)
         assert_equal(node_balance['balance'], 625000000)
 
-        # Balance for the address increases in the wallet
+        # Mine another block
+        self.nodes[0].generate(1)
+
+        # Wait for the wallet to sync
+        time.sleep(1)
+
+        node_balance = self.nodes[0].getaddressbalance(transparent_address)
+        assert_equal(node_balance['balance'], 1250000000)
+
+        # There are 2 transactions in the wallet
+        assert_equal(len(self.wallets[0].z_listtransactions()), 2)
+
+        # Confirmed balance in the wallet is either 6.25 or 12.5 ZEC
         wallet_balance = self.wallets[0].z_gettotalbalance(1, True)
-        assert_equal(wallet_balance['transparent'], '6.25000000')
+        assert_true(
+            wallet_balance['transparent'] == '6.25000000' or
+            wallet_balance['transparent'] == '12.50000000')
 
 if __name__ == '__main__':
     WalletTest ().main ()

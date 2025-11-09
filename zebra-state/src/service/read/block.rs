@@ -181,11 +181,7 @@ pub fn any_transaction<'a>(
         let confirmations = 1 + tip_height(best_chain, db)?.0 - height.0;
         Some(AnyTx::Mined(MinedTx::new(tx, height, confirmations, time)))
     } else {
-        let block_hash = containing_chain
-            .expect("if not in best chain, then it must be in a side chain")
-            .block(height.into())
-            .expect("must exist since tx is in chain")
-            .hash;
+        let block_hash = containing_chain?.block(height.into())?.hash;
         Some(AnyTx::Side((tx, block_hash)))
     }
 }

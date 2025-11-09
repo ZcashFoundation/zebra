@@ -517,7 +517,7 @@ where
                     script_verifier,
                     cached_ffi_transaction.clone(),
                 )?,
-                #[cfg(feature="tx_v6")]
+                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
                 Transaction::V6 {
                     ..
                 } => Self::verify_v6_transaction(
@@ -555,13 +555,22 @@ where
             // Get the `value_balance` to calculate the transaction fee.
             let value_balance = tx.value_balance(&spent_utxos);
 
+            let zip233_amount = match *tx {
+            	#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+                Transaction::V6{ .. } => tx.zip233_amount(),
+                _ => Amount::zero()
+            };
+
             // Calculate the fee only for non-coinbase transactions.
             let mut miner_fee = None;
             if !tx.is_coinbase() {
                 // TODO: deduplicate this code with remaining_transaction_value()?
                 miner_fee = match value_balance {
                     Ok(vb) => match vb.remaining_transaction_value() {
-                        Ok(tx_rtv) => Some(tx_rtv),
+                        Ok(tx_rtv) => match tx_rtv - zip233_amount {
+                            Ok(fee) => Some(fee),
+                            Err(_) => return Err(TransactionError::IncorrectFee),
+                        }
                         Err(_) => return Err(TransactionError::IncorrectFee),
                     },
                     Err(_) => return Err(TransactionError::IncorrectFee),
@@ -1022,7 +1031,7 @@ where
     }
 
     /// Passthrough to verify_v5_transaction, but for V6 transactions.
-    #[cfg(feature = "tx_v6")]
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
     fn verify_v6_transaction(
         request: &Request,
         network: &Network,

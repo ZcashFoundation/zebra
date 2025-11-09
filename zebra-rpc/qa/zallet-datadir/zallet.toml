@@ -38,3 +38,7 @@ encryption_identity = "identity.txt"
 
 [rpc]
 bind = ["127.0.0.1:0"]
+
+[[rpc.auth]]
+user = "zebra"
+pwhash = "eaa27c81df81f655e69bbe84026e733a$bb9f70d53decfeca863cb114f7b0fd5ae050c7ef885c3d5fa73d5bace6c14fea"

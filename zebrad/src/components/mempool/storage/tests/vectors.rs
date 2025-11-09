@@ -1,5 +1,7 @@
 //! Fixed test vectors for mempool storage.
 
+#![allow(clippy::unwrap_in_result)]
+
 use std::iter;
 
 use color_eyre::eyre::Result;

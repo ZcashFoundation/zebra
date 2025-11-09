@@ -76,24 +76,16 @@ To get real-time output during a test you can run it using the
 python3 qa/rpc-tests/wallet.py
 ```
 
-A 200-block -regtest blockchain and wallets for four nodes
-is created the first time a regression test is run and
-is stored in the `qa/cache/` directory.  Each node has the miner
-subsidy from 25 mature blocks (25*10=250 ZEC) in its wallet.
-
-TODO: https://github.com/ZcashFoundation/zebra/issues/9726
-
-After the first run, the `qa/cache/` blockchain and wallets are
-copied into a temporary directory and used as the initial
-test state.
-
-If you get into a bad state, you should be able
-to recover with:
+If a test gets stuck, you can stop the underlying binaries with:
 
 ```bash
-rm -rf qa/cache
 killall zebrad
+killall zallet
 ```
+
+Zcashd's test framework includes a [cache mechanism](https://github.com/zcash/zcash/blob/v6.10.0/qa/README.md?plain=1#L73-L88)
+to speed up certain tests.
+This version of the framework currently has that functionality disabled.
 
 Writing tests
 =============

@@ -43,7 +43,9 @@ use zebra_chain::{
 #[allow(unused_imports)]
 use zebra_chain::serialization::BytesInDisplayOrder;
 
-use zebra_consensus::{funding_stream_address, MAX_BLOCK_SIGOPS};
+use zebra_consensus::{
+    funding_stream_address, router::service_trait::BlockVerifierService, MAX_BLOCK_SIGOPS,
+};
 use zebra_node_services::mempool::{self, TransactionDependencies};
 use zebra_state::GetBlockTemplateChainInfo;
 
@@ -278,6 +280,9 @@ impl BlockTemplateResponse {
         #[cfg(test)] mempool_txs: Vec<(InBlockTxDependenciesDepth, VerifiedUnminedTx)>,
         submit_old: Option<bool>,
         extra_coinbase_data: Vec<u8>,
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))] zip233_amount: Option<
+            Amount<NonNegative>,
+        >,
     ) -> Self {
         // Calculate the next block height.
         let next_block_height =
@@ -329,6 +334,8 @@ impl BlockTemplateResponse {
             &mempool_txs,
             chain_tip_and_local_time.chain_history_root,
             extra_coinbase_data,
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            zip233_amount,
         )
         .expect("coinbase should be valid under the given parameters");
 
@@ -425,12 +432,7 @@ impl GetBlockTemplateResponse {
 #[derive(Clone)]
 pub struct GetBlockTemplateHandler<BlockVerifierRouter, SyncStatus>
 where
-    BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
-        + Clone
-        + Send
-        + Sync
-        + 'static,
-    <BlockVerifierRouter as Service<zebra_consensus::Request>>::Future: Send,
+    BlockVerifierRouter: BlockVerifierService,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
     /// Address for receiving miner subsidy and tx fees.
@@ -457,12 +459,7 @@ const EXTRA_COINBASE_DATA_LIMIT: usize = MAX_COINBASE_DATA_LEN - MAX_COINBASE_HE
 
 impl<BlockVerifierRouter, SyncStatus> GetBlockTemplateHandler<BlockVerifierRouter, SyncStatus>
 where
-    BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
-        + Clone
-        + Send
-        + Sync
-        + 'static,
-    <BlockVerifierRouter as Service<zebra_consensus::Request>>::Future: Send,
+    BlockVerifierRouter: BlockVerifierService,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
     /// Creates a new [`GetBlockTemplateHandler`].
@@ -561,12 +558,7 @@ where
 impl<BlockVerifierRouter, SyncStatus> fmt::Debug
     for GetBlockTemplateHandler<BlockVerifierRouter, SyncStatus>
 where
-    BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
-        + Clone
-        + Send
-        + Sync
-        + 'static,
-    <BlockVerifierRouter as Service<zebra_consensus::Request>>::Future: Send,
+    BlockVerifierRouter: BlockVerifierService,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -804,6 +796,7 @@ where
 // - Response processing
 
 /// Generates and returns the coinbase transaction and default roots.
+#[allow(clippy::too_many_arguments)]
 pub fn generate_coinbase_and_roots(
     network: &Network,
     height: Height,
@@ -811,6 +804,9 @@ pub fn generate_coinbase_and_roots(
     mempool_txs: &[VerifiedUnminedTx],
     chain_history_root: Option<ChainHistoryMmrRootHash>,
     miner_data: Vec<u8>,
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))] zip233_amount: Option<
+        Amount<NonNegative>,
+    >,
 ) -> Result<(TransactionTemplate<NegativeOrZero>, DefaultRoots), &'static str> {
     let miner_fee = calculate_miner_fee(mempool_txs);
     let outputs = standard_coinbase_outputs(network, height, miner_address, miner_fee);
@@ -818,8 +814,14 @@ pub fn generate_coinbase_and_roots(
 
     let tx = match current_nu {
         NetworkUpgrade::Canopy => Transaction::new_v4_coinbase(height, outputs, miner_data),
-        NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 | NetworkUpgrade::Nu6_1 | NetworkUpgrade::Nu7 => {
+        NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 | NetworkUpgrade::Nu6_1 => {
             Transaction::new_v5_coinbase(network, height, outputs, miner_data)
+        }
+        #[cfg(not(all(zcash_unstable = "nu7", feature = "tx_v6")))]
+        NetworkUpgrade::Nu7 => Transaction::new_v5_coinbase(network, height, outputs, miner_data),
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+        NetworkUpgrade::Nu7 => {
+            Transaction::new_v6_coinbase(network, height, outputs, miner_data, zip233_amount)
         }
         _ => Err("Zebra does not support generating pre-Canopy coinbase transactions")?,
     }
