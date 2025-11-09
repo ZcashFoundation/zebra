@@ -2152,6 +2152,7 @@ where
             ("canopy", NetworkUpgrade::Canopy),
             ("nu5", NetworkUpgrade::Nu5),
             ("nu6", NetworkUpgrade::Nu6),
+            ("nu6.1", NetworkUpgrade::Nu6_1),
         ];
 
         let network = self.network.clone();

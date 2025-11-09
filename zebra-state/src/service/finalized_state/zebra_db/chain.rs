@@ -242,10 +242,11 @@ impl ZebraDb {
     /// Returns `None` if history trees had not been activated at that height (pre-Heartwood),
     /// if the update does not exist in this chain, or if the state is empty.
     pub fn history_tree_by_upgrade(&self, upgrade: NetworkUpgrade) -> Option<Arc<HistoryTree>> {
+        let current_upgrade = NetworkUpgrade::current(&self.network(), self.tip()?.0);
         let history_tree_upgrades: Vec<NetworkUpgrade> = NetworkUpgrade::iter()
             .skip_while(|u| *u != NetworkUpgrade::Heartwood)
-            .take_while(|u| *u != NetworkUpgrade::Nu6)
-            .chain(std::iter::once(NetworkUpgrade::Nu6))
+            .take_while(|u| *u != current_upgrade)
+            .chain(std::iter::once(current_upgrade))
             .collect();
 
         if history_tree_upgrades.contains(&upgrade) {
