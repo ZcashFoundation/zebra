@@ -398,6 +398,7 @@ jobs:
 
       # Stateful policy preserves disks across updates (auto-delete on MIG deletion)
       - name: Configure stateful disk policy
+        if: steps.does-group-exist.outcome == 'failure'
         run: |
           gcloud compute instance-groups managed update "${MIG_NAME}" \
             --stateful-disk "device-name=${DISK_NAME},auto-delete=on-permanent-instance-deletion" \
