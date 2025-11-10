@@ -1106,7 +1106,7 @@ impl Transaction {
 
     /// Access the Orchard issue data in this transaction, if any,
     /// regardless of version.
-    #[cfg(feature = "tx-v6")]
+    #[cfg(feature = "tx_v6")]
     pub fn orchard_issue_data(&self) -> &Option<orchard_zsa::IssueData> {
         match self {
             Transaction::V1 { .. }
@@ -1124,7 +1124,7 @@ impl Transaction {
 
     /// Access the Orchard asset burns in this transaction, if there are any,
     /// regardless of version.
-    #[cfg(feature = "tx-v6")]
+    #[cfg(feature = "tx_v6")]
     pub fn orchard_burns(&self) -> Box<dyn Iterator<Item = &orchard_zsa::BurnItem> + '_> {
         match self {
             Transaction::V1 { .. }
@@ -1133,7 +1133,6 @@ impl Transaction {
             | Transaction::V4 { .. }
             | Transaction::V5 { .. } => Box::new(std::iter::empty()),
 
-            #[cfg(feature = "tx-v6")]
             Transaction::V6 {
                 orchard_shielded_data,
                 ..

@@ -30,7 +30,7 @@ use zebra_chain::{
     work::difficulty::PartialCumulativeWork,
 };
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 use zebra_chain::orchard_zsa::{AssetBase, AssetState, IssuedAssetChanges};
 
 use crate::{
@@ -179,7 +179,7 @@ pub struct ChainInner {
     pub(crate) orchard_subtrees:
         BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<orchard::tree::Node>>,
 
-    #[cfg(feature = "tx-v6")]
+    #[cfg(feature = "tx_v6")]
     /// A partial map of `issued_assets` with entries for asset states that were updated in
     /// this chain.
     // TODO: Add reference to ZIP
@@ -248,7 +248,7 @@ impl Chain {
             orchard_anchors_by_height: Default::default(),
             orchard_trees_by_height: Default::default(),
             orchard_subtrees: Default::default(),
-            #[cfg(feature = "tx-v6")]
+            #[cfg(feature = "tx_v6")]
             issued_assets: Default::default(),
             sprout_nullifiers: Default::default(),
             sapling_nullifiers: Default::default(),
@@ -950,14 +950,14 @@ impl Chain {
         }
     }
 
-    #[cfg(feature = "tx-v6")]
+    #[cfg(feature = "tx_v6")]
     /// Returns the Orchard issued asset state if one is present in
     /// the chain for the provided asset base.
     pub fn issued_asset(&self, asset_base: &AssetBase) -> Option<AssetState> {
         self.issued_assets.get(asset_base).cloned()
     }
 
-    #[cfg(feature = "tx-v6")]
+    #[cfg(feature = "tx_v6")]
     /// Remove the History tree index at `height`.
     fn revert_issued_assets(
         &mut self,
@@ -1502,7 +1502,7 @@ impl Chain {
 
         self.add_history_tree(height, history_tree);
 
-        #[cfg(feature = "tx-v6")]
+        #[cfg(feature = "tx_v6")]
         for (asset_base, (old_state_from_block, new_state)) in
             contextually_valid.issued_asset_changes.iter()
         {
@@ -1771,7 +1771,7 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
             &contextually_valid.chain_value_pool_change,
         );
 
-        #[cfg(feature = "tx-v6")]
+        #[cfg(feature = "tx_v6")]
         let issued_asset_changes = &contextually_valid.issued_asset_changes;
 
         // remove the blocks hash from `height_by_hash`
@@ -1807,7 +1807,7 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                     sapling_shielded_data,
                     &None,
                     &None,
-                    #[cfg(feature = "tx-v6")]
+                    #[cfg(feature = "tx_v6")]
                     &None),
                 V5 {
                     inputs,
@@ -1822,7 +1822,7 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                     &None,
                     sapling_shielded_data,
                     orchard_shielded_data,
-                    #[cfg(feature = "tx-v6")]
+                    #[cfg(feature = "tx_v6")]
                     &None,
                 ),
                 #[cfg(feature = "tx_v6")]
@@ -1846,7 +1846,7 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                 ),
             };
 
-            #[cfg(not(feature = "tx-v6"))]
+            #[cfg(not(feature = "tx_v6"))]
             let (
                 inputs,
                 outputs,
@@ -1856,7 +1856,7 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                 orchard_shielded_data_vanilla,
             ) = transaction_data;
 
-            #[cfg(feature = "tx-v6")]
+            #[cfg(feature = "tx_v6")]
             let (
                 inputs,
                 outputs,
@@ -1884,7 +1884,7 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
             self.revert_chain_with(sapling_shielded_data_per_spend_anchor, position);
             self.revert_chain_with(sapling_shielded_data_shared_anchor, position);
             self.revert_chain_with(orchard_shielded_data_vanilla, position);
-            #[cfg(feature = "tx-v6")]
+            #[cfg(feature = "tx_v6")]
             self.revert_chain_with(orchard_shielded_data_zsa, position);
         }
 
@@ -1896,7 +1896,7 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
         // TODO: move this to the history tree UpdateWith.revert...()?
         self.remove_history_tree(position, height);
 
-        #[cfg(feature = "tx-v6")]
+        #[cfg(feature = "tx_v6")]
         // In revert_chain_with for ContextuallyVerifiedBlock:
         self.revert_issued_assets(position, issued_asset_changes);
 

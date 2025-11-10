@@ -25,7 +25,7 @@ use zebra_chain::{
     value_balance::ValueBalance,
 };
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 use zebra_chain::orchard_zsa::{AssetBase, AssetState};
 
 use crate::{
@@ -683,7 +683,7 @@ pub(crate) fn calculate_median_time_past(relevant_chain: Vec<Arc<Block>>) -> Dat
     DateTime32::try_from(median_time_past).expect("valid blocks have in-range times")
 }
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 /// Return the [`AssetState`] for the provided [`AssetBase`], if it exists in the provided chain.
 pub fn asset_state<C>(chain: Option<C>, db: &ZebraDb, asset_base: &AssetBase) -> Option<AssetState>
 where

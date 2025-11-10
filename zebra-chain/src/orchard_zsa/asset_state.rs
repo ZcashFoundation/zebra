@@ -4,18 +4,16 @@ use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
 
 use orchard::issuance::IssueAction;
-use orchard::keys::IssuanceValidatingKey;
+use orchard::issuance_auth::{IssueValidatingKey, ZSASchnorr};
 pub use orchard::note::AssetBase;
 
-use super::{BurnItem, IssueData};
+use super::BurnItem;
 use crate::transaction::{SigHash, Transaction};
 
-#[cfg(test)]
+#[cfg(any(test, feature = "proptest-impl"))]
 use crate::serialization::ZcashSerialize;
-#[cfg(test)]
-use orchard::issuance::compute_asset_desc_hash;
-#[cfg(test)]
-use rand_core::OsRng;
+#[cfg(any(test, feature = "proptest-impl"))]
+use orchard::{issuance::compute_asset_desc_hash, issuance_auth::IssueAuthKey};
 
 /// The circulating supply and whether that supply has been finalized.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
@@ -79,7 +77,7 @@ impl AssetStateChange {
 
     /// Build from an issuance action: may include zero-amount finalization or per-note issuances.
     fn from_issue_action(
-        ik: &orchard::keys::IssuanceValidatingKey,
+        ik: &IssueValidatingKey<ZSASchnorr>,
         action: &IssueAction,
     ) -> Vec<(AssetBase, Self)> {
         let mut changes = Vec::new();
@@ -174,7 +172,7 @@ impl IssuedAssetChanges {
                 let bundle = issue_data.inner();
                 bundle
                     .ik()
-                    .verify(sighash.as_ref(), bundle.authorization().signature())
+                    .verify(sighash.as_ref(), bundle.authorization().signature().sig())
                     .map_err(|_| AssetStateError::InvalidIssueBundleSig)?;
             }
 
@@ -211,22 +209,17 @@ impl IssuedAssetChanges {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "proptest-impl"))]
 pub trait RandomAssetBase {
     /// Generates a random serialized asset base for testing.
     fn random_serialized() -> String;
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "proptest-impl"))]
 impl RandomAssetBase for AssetBase {
     fn random_serialized() -> String {
-        let isk = orchard::keys::IssuanceAuthorizingKey::from_bytes(
-            k256::NonZeroScalar::random(&mut rand_core::OsRng)
-                .to_bytes()
-                .into(),
-        )
-        .unwrap();
-        let ik = orchard::keys::IssuanceValidatingKey::from(&isk);
+        let isk = IssueAuthKey::<ZSASchnorr>::random(&mut rand_core::OsRng);
+        let ik = IssueValidatingKey::<ZSASchnorr>::from(&isk);
         let desc = b"zsa_asset";
         let hash = compute_asset_desc_hash(&(desc[0], desc[1..].to_vec()).into());
         AssetBase::derive(&ik, &hash)

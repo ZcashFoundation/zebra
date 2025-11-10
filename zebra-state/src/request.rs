@@ -21,7 +21,7 @@ use zebra_chain::{
     value_balance::{ValueBalance, ValueBalanceError},
 };
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 use zebra_chain::orchard_zsa::{AssetBase, IssuedAssetChanges};
 
 /// Allow *only* these unused imports, so that rustdoc link resolution
@@ -234,7 +234,7 @@ pub struct ContextuallyVerifiedBlock {
     /// The sum of the chain value pool changes of all transactions in this block.
     pub(crate) chain_value_pool_change: ValueBalance<NegativeAllowed>,
 
-    #[cfg(feature = "tx-v6")]
+    #[cfg(feature = "tx_v6")]
     /// Asset state changes for assets modified in this block.
     /// Maps asset_base -> (old_state, new_state) where:
     /// - old_state: the state before this block was applied
@@ -310,7 +310,7 @@ pub struct FinalizedBlock {
     pub(super) treestate: Treestate,
     /// This block's contribution to the deferred pool.
     pub(super) deferred_balance: Option<Amount<NonNegative>>,
-    #[cfg(feature = "tx-v6")]
+    #[cfg(feature = "tx_v6")]
     /// Asset state changes to be applied to the finalized state.
     /// Contains (old_state, new_state) pairs for assets modified in this block.
     /// If `None`, the changes will be recalculated from the block's transactions.
@@ -323,7 +323,7 @@ impl FinalizedBlock {
         Self::from_semantically_verified(
             SemanticallyVerifiedBlock::from(block),
             treestate,
-            #[cfg(feature = "tx-v6")]
+            #[cfg(feature = "tx_v6")]
             None,
         )
     }
@@ -333,12 +333,12 @@ impl FinalizedBlock {
         block: ContextuallyVerifiedBlock,
         treestate: Treestate,
     ) -> Self {
-        #[cfg(feature = "tx-v6")]
+        #[cfg(feature = "tx_v6")]
         let issued_asset_changes = Some(block.issued_asset_changes.clone());
         Self::from_semantically_verified(
             SemanticallyVerifiedBlock::from(block),
             treestate,
-            #[cfg(feature = "tx-v6")]
+            #[cfg(feature = "tx_v6")]
             issued_asset_changes,
         )
     }
@@ -347,7 +347,7 @@ impl FinalizedBlock {
     fn from_semantically_verified(
         block: SemanticallyVerifiedBlock,
         treestate: Treestate,
-        #[cfg(feature = "tx-v6")] issued_asset_changes: Option<IssuedAssetChanges>,
+        #[cfg(feature = "tx_v6")] issued_asset_changes: Option<IssuedAssetChanges>,
     ) -> Self {
         Self {
             block: block.block,
@@ -357,7 +357,7 @@ impl FinalizedBlock {
             transaction_hashes: block.transaction_hashes,
             treestate,
             deferred_balance: block.deferred_balance,
-            #[cfg(feature = "tx-v6")]
+            #[cfg(feature = "tx_v6")]
             issued_asset_changes,
         }
     }
@@ -424,7 +424,7 @@ impl ContextuallyVerifiedBlock {
     pub fn with_block_and_spent_utxos(
         semantically_verified: SemanticallyVerifiedBlock,
         mut spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
-        #[cfg(feature = "tx-v6")] issued_asset_changes: IssuedAssetChanges,
+        #[cfg(feature = "tx_v6")] issued_asset_changes: IssuedAssetChanges,
     ) -> Result<Self, ValueBalanceError> {
         let SemanticallyVerifiedBlock {
             block,
@@ -456,7 +456,7 @@ impl ContextuallyVerifiedBlock {
                 &utxos_from_ordered_utxos(spent_outputs),
                 deferred_balance,
             )?,
-            #[cfg(feature = "tx-v6")]
+            #[cfg(feature = "tx_v6")]
             issued_asset_changes,
         })
     }
@@ -1111,7 +1111,7 @@ pub enum ReadRequest {
     /// with the current best chain tip block size in bytes.
     TipBlockSize,
 
-    #[cfg(feature = "tx-v6")]
+    #[cfg(feature = "tx_v6")]
     /// Returns [`ReadResponse::AssetState`] with an [`AssetState`](zebra_chain::orchard_zsa::AssetState)
     /// of the provided [`AssetBase`] if it exists for the best chain tip or finalized chain tip (depending
     /// on the `include_non_finalized` flag).
@@ -1158,7 +1158,7 @@ impl ReadRequest {
             ReadRequest::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
             #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::TipBlockSize => "tip_block_size",
-            #[cfg(feature = "tx-v6")]
+            #[cfg(feature = "tx_v6")]
             ReadRequest::AssetState { .. } => "asset_state",
         }
     }

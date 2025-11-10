@@ -326,7 +326,7 @@ impl NonFinalizedState {
             finalized_state,
         )?;
 
-        #[cfg(feature = "tx-v6")]
+        #[cfg(feature = "tx_v6")]
         let issued_assets = IssuedAssetChanges::validate_and_get_changes(
             &prepared.block.transactions,
             &prepared.transaction_sighashes,
@@ -354,7 +354,7 @@ impl NonFinalizedState {
             prepared.clone(),
             spent_utxos.clone(),
             // TODO: Refactor this into repeated `With::with()` calls, see http_request_compatibility module.
-            #[cfg(feature = "tx-v6")]
+            #[cfg(feature = "tx_v6")]
             issued_assets,
         )
         .map_err(|value_balance_error| {

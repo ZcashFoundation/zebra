@@ -1948,7 +1948,7 @@ impl Service<ReadRequest> for ReadStateService {
                 .wait_for_panics()
             }
 
-            #[cfg(feature = "tx-v6")]
+            #[cfg(feature = "tx_v6")]
             ReadRequest::AssetState {
                 asset_base,
                 include_non_finalized,
