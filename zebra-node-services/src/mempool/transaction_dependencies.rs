@@ -1,6 +1,6 @@
 //! Representation of mempool transactions' dependencies on other transactions in the mempool.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use zebra_chain::{transaction, transparent};
 
@@ -73,7 +73,7 @@ impl TransactionDependencies {
                 };
 
                 // TODO: Move this struct to zebra-chain and log a warning here if the dependency was not found.
-                let _ = dependencies.remove(&dependent_id);
+                let _ = dependencies.remove(mined_tx_id);
             }
         }
     }
@@ -84,20 +84,36 @@ impl TransactionDependencies {
     ///
     /// Returns a list of transaction hashes that were being tracked as dependents of the
     /// provided transaction hash.
+    ///
+    /// # Invariant
+    ///
+    /// Every hash in the returned set is guaranteed to have been present in
+    /// [`Self::dependents`] at the time of removal. Removing a child transaction
+    /// also erases it from each parent's dependents list, so callers can safely
+    /// assume the IDs are still present in their own transaction maps.
     pub fn remove_all(&mut self, &tx_hash: &transaction::Hash) -> HashSet<transaction::Hash> {
         let mut all_dependents = HashSet::new();
-        let mut current_level_dependents: HashSet<_> = [tx_hash].into();
+        let mut queue: VecDeque<_> = VecDeque::from([tx_hash]);
 
-        while !current_level_dependents.is_empty() {
-            current_level_dependents = current_level_dependents
-                .iter()
-                .flat_map(|dep| {
-                    self.dependencies.remove(dep);
-                    self.dependents.remove(dep).unwrap_or_default()
-                })
-                .collect();
+        while let Some(removed) = queue.pop_front() {
+            if let Some(parents) = self.dependencies.remove(&removed) {
+                for parent in parents {
+                    if let Some(children) = self.dependents.get_mut(&parent) {
+                        children.remove(&removed);
 
-            all_dependents.extend(&current_level_dependents);
+                        if children.is_empty() {
+                            self.dependents.remove(&parent);
+                        }
+                    }
+                }
+            }
+
+            let dependents = self.dependents.remove(&removed).unwrap_or_default();
+            for dependent in dependents {
+                if all_dependents.insert(dependent) {
+                    queue.push_back(dependent);
+                }
+            }
         }
 
         all_dependents
@@ -129,3 +145,6 @@ impl TransactionDependencies {
         &self.dependents
     }
 }
+
+#[cfg(test)]
+mod tests;

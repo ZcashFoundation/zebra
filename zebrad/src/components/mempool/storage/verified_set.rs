@@ -463,3 +463,6 @@ impl VerifiedSet {
         metrics::gauge!("zcash.mempool.cost.bytes").set(self.total_cost as f64);
     }
 }
+
+#[cfg(test)]
+mod tests;
