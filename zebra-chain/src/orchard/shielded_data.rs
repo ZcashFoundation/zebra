@@ -20,10 +20,10 @@ use crate::{
     },
 };
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 use crate::orchard_zsa::compute_burn_value_commitment;
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 use orchard::{note::AssetBase, value::ValueSum};
 
 use super::{OrchardVanilla, ShieldedDataFlavor};
@@ -31,11 +31,11 @@ use super::{OrchardVanilla, ShieldedDataFlavor};
 /// A bundle of [`Action`] descriptions and signature data.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[cfg_attr(
-    not(feature = "tx-v6"),
+    not(feature = "tx_v6"),
     serde(bound(serialize = "Flavor::EncryptedNote: serde::Serialize"))
 )]
 #[cfg_attr(
-    feature = "tx-v6",
+    feature = "tx_v6",
     serde(bound(
         serialize = "Flavor::EncryptedNote: serde::Serialize, Flavor::BurnType: serde::Serialize",
         deserialize = "Flavor::BurnType: serde::Deserialize<'de>"
@@ -61,7 +61,7 @@ pub struct ShieldedData<Flavor: ShieldedDataFlavor> {
     /// Denoted as `bindingSigOrchard` in the spec.
     pub binding_sig: Signature<Binding>,
 
-    #[cfg(feature = "tx-v6")]
+    #[cfg(feature = "tx_v6")]
     /// Assets intended for burning
     /// Denoted as `vAssetBurn` in the spec (ZIP 230).
     pub burn: Flavor::BurnType,
@@ -123,13 +123,13 @@ impl<Flavor: ShieldedDataFlavor> ShieldedData<Flavor> {
     pub fn binding_verification_key(&self) -> reddsa::VerificationKeyBytes<Binding> {
         let cv: ValueCommitment = self.actions().map(|action| action.cv).sum();
 
-        #[cfg(not(feature = "tx-v6"))]
+        #[cfg(not(feature = "tx_v6"))]
         let key = {
             let cv_balance = ValueCommitment::new(pallas::Scalar::zero(), self.value_balance);
             cv - cv_balance
         };
 
-        #[cfg(feature = "tx-v6")]
+        #[cfg(feature = "tx_v6")]
         let key = {
             let cv_balance = ValueCommitment::new(
                 pallas::Scalar::zero(),

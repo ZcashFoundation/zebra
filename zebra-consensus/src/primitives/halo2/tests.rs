@@ -103,14 +103,15 @@ where
                         };
                         zebra_chain::orchard::shielded_data::AuthorizedAction {
                             action,
-                            spend_auth_sig: <[u8; 64]>::from(a.authorization()).into(),
+                            spend_auth_sig: <[u8; 64]>::from(a.authorization().sig()).into(),
                         }
                     })
                     .collect::<Vec<_>>()
                     .try_into()
                     .unwrap(),
-                binding_sig: <[u8; 64]>::from(bundle.authorization().binding_signature()).into(),
-                #[cfg(feature = "tx-v6")]
+                binding_sig: <[u8; 64]>::from(bundle.authorization().binding_signature().sig())
+                    .into(),
+                #[cfg(feature = "tx_v6")]
                 burn: bundle.burn().as_slice().into(),
             }
         })
@@ -197,7 +198,7 @@ async fn verify_generated_halo2_proofs_vanilla() {
         .await
 }
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 #[tokio::test(flavor = "multi_thread")]
 async fn verify_generated_halo2_proofs_zsa() {
     verify_generated_halo2_proofs::<OrchardZSA>(&zebra_test::vectors::ORCHARD_ZSA_SHIELDED_DATA)
@@ -288,7 +289,7 @@ async fn correctly_err_on_invalid_halo2_proofs_vanilla() {
     .await
 }
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 #[tokio::test(flavor = "multi_thread")]
 async fn correctly_err_on_invalid_halo2_proofs_zsa() {
     correctly_err_on_invalid_halo2_proofs::<OrchardZSA>(

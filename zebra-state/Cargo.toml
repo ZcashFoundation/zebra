@@ -47,8 +47,8 @@ elasticsearch = [
 ]
 
 # Support for transaction version 6
-tx-v6 = [
-    "zebra-chain/tx-v6"
+tx_v6 = [
+    "zebra-chain/tx_v6"
 ]
 
 [dependencies]

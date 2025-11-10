@@ -417,7 +417,7 @@ where
                     sapling_shielded_data,
                     orchard_shielded_data,
                 )?,
-                #[cfg(feature = "tx-v6")]
+                #[cfg(feature = "tx_v6")]
                 Transaction::V6 {
                     sapling_shielded_data,
                     orchard_shielded_data,
@@ -430,7 +430,6 @@ where
                     sapling_shielded_data,
                     orchard_shielded_data,
                 )?,
-
             };
 
             if let Some(unmined_tx) = req.mempool_transaction() {
@@ -516,12 +515,13 @@ impl OrchardTransaction for orchard::OrchardVanilla {
     const SUPPORTED_NETWORK_UPGRADES: &'static [NetworkUpgrade] = &[
         NetworkUpgrade::Nu5,
         NetworkUpgrade::Nu6,
-        #[cfg(feature = "tx-v6")]
+        NetworkUpgrade::Nu6_1,
+        #[cfg(feature = "tx_v6")]
         NetworkUpgrade::Nu7,
     ];
 }
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 impl OrchardTransaction for orchard::OrchardZSA {
     const SUPPORTED_NETWORK_UPGRADES: &'static [NetworkUpgrade] = &[NetworkUpgrade::Nu7];
 }
@@ -719,6 +719,7 @@ where
             | NetworkUpgrade::Canopy
             | NetworkUpgrade::Nu5
             | NetworkUpgrade::Nu6
+            | NetworkUpgrade::Nu6_1
             | NetworkUpgrade::Nu7 => Ok(()),
 
             // Does not support V4 transactions

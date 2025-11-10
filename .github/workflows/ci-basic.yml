@@ -5,11 +5,7 @@ on: [push]
 
 jobs:
   test:
-    name: Test on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-24.04]
+    runs-on: ubuntu-latest
 
     env:
       # Use system-installed RocksDB library instead of building from scratch
@@ -19,18 +15,36 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+      - name: Show system resource summary (before cleanup)
+        run: |
+          df -h
+          free -h
+          lscpu | egrep 'Model name|Socket|Thread|Core|CPU\(s\)'
+
+      - name: Free disk space (safe cleanup for Rust CI)
+        run: |
+          # Remove heavy preinstalled SDKs and toolchains
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY" || true  # preinstalled tool caches
+          df -h
+
       - name: Install dependencies on Ubuntu
         #run: sudo apt-get update && sudo apt-get install -y protobuf-compiler build-essential librocksdb-dev
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler librocksdb-dev
       - name: Install formatting & linting tools
         run: rustup component add rustfmt clippy
       - name: Run tests
-        run: cargo test --verbose
+        run: cargo test --verbose --locked
       - name: Verify working directory is clean
         run: git diff --exit-code
       - name: Run doc check
-        run: cargo doc --all-features --document-private-items
+        run: cargo doc --workspace --no-deps --all-features --document-private-items --locked
       - name: Run format check
         run: cargo fmt -- --check
       - name: Run clippy
-        run: cargo clippy --workspace --all-features --all-targets -- -D warnings
+        run: cargo clippy --workspace --no-deps --all-features --all-targets --locked -- -D warnings
+      - name: Show system resource summary
+        run: |
+          df -h
+          free -h
+          lscpu | egrep 'Model name|Socket|Thread|Core|CPU\(s\)'

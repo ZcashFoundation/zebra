@@ -21,7 +21,7 @@ use crate::{
     amount::{Amount, NonNegative},
     serialization::ZcashSerialize,
     transaction::{
-        tx_v5_and_v6, AuthDigest, Hash,
+        AuthDigest, Hash,
         Transaction::{self, *},
         WtxId,
     },
@@ -140,7 +140,9 @@ impl From<&Transaction> for UnminedTxId {
     fn from(transaction: &Transaction) -> Self {
         match transaction {
             V1 { .. } | V2 { .. } | V3 { .. } | V4 { .. } => Legacy(transaction.into()),
-            tx_v5_and_v6! { .. } => Witnessed(transaction.into()),
+            V5 { .. } => Witnessed(transaction.into()),
+            #[cfg(feature = "tx_v6")]
+            V6 { .. } => Witnessed(transaction.into()),
         }
     }
 }

@@ -35,9 +35,9 @@ getblocktemplate-rpcs = [
 proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl", "zebra-state/proptest-impl"]
 
 # Support for transaction version 6
-tx-v6 = [
-    "zebra-state/tx-v6",
-    "zebra-chain/tx-v6"
+tx_v6 = [
+    "zebra-state/tx_v6",
+    "zebra-chain/tx_v6"
 ]
 
 [dependencies]

@@ -31,7 +31,7 @@ lazy_static! {
         orchard_shielded_data: None,
     };
 
-    #[cfg(feature = "tx-v6")]
+    #[cfg(feature = "tx_v6")]
     pub static ref EMPTY_V6_TX: Transaction = Transaction::V6 {
         network_upgrade: NetworkUpgrade::Nu7,
         lock_time: LockTime::min_lock_time_timestamp(),
@@ -326,7 +326,7 @@ fn empty_v5_round_trip() {
     tx_round_trip(&EMPTY_V5_TX)
 }
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 /// An empty transaction v6, with no Orchard/OrchardZSA, Sapling, or Transparent data
 ///
 /// empty transaction are invalid, but Zebra only checks this rule in
@@ -351,7 +351,7 @@ fn empty_v5_librustzcash_round_trip() {
     tx_librustzcash_round_trip(&EMPTY_V5_TX);
 }
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 /// Check if an empty V6 transaction can be deserialized by librustzcash too.
 #[test]
 fn empty_v6_librustzcash_round_trip() {
@@ -482,7 +482,7 @@ fn fake_v5_round_trip_for_network(network: Network) {
     }
 }
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 /// Do a serialization round-trip on OrchardZSA workflow blocks and their V6
 /// transactions.
 #[test]
@@ -630,7 +630,7 @@ fn fake_v5_librustzcash_round_trip_for_network(network: Network) {
     }
 }
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 /// Confirms each V6 transaction in the OrchardZSA test blocks converts to librustzcash’s
 /// transaction type without error.
 #[test]
@@ -1098,7 +1098,28 @@ fn binding_signatures_for_network(network: Network) {
                         .expect("must pass verification");
                     }
                 }
-                tx_v5_and_v6! {
+                Transaction::V5 {
+                    sapling_shielded_data,
+                    ..
+                } => {
+                    if let Some(sapling_shielded_data) = sapling_shielded_data {
+                        let shielded_sighash =
+                            tx.sighash(upgrade.branch_id().unwrap(), HashType::ALL, &[], None);
+
+                        let bvk = redjubjub::VerificationKey::try_from(
+                            sapling_shielded_data.binding_verification_key(),
+                        )
+                        .expect("a valid redjubjub::VerificationKey");
+
+                        bvk.verify(
+                            shielded_sighash.as_ref(),
+                            &sapling_shielded_data.binding_sig,
+                        )
+                        .expect("must pass verification");
+                    }
+                }
+                #[cfg(feature = "tx_v6")]
+                Transaction::V6 {
                     sapling_shielded_data,
                     ..
                 } => {

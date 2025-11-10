@@ -113,7 +113,7 @@ mod tests {
         serialization::{ZcashDeserialize, ZcashSerialize},
     };
 
-    #[cfg(feature = "tx-v6")]
+    #[cfg(feature = "tx_v6")]
     use crate::orchard::OrchardZSA;
 
     use proptest::prelude::*;
@@ -138,7 +138,7 @@ mod tests {
         }
 
 
-        #[cfg(feature = "tx-v6")]
+        #[cfg(feature = "tx_v6")]
         #[test]
         fn encrypted_ciphertext_roundtrip_orchard_zsa(ec in any::<<OrchardZSA as ShieldedDataFlavor>::EncryptedNote>()) {
             let _init_guard = zebra_test::init();

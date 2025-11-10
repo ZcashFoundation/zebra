@@ -277,6 +277,7 @@ impl Version for zcash_history::V1 {
             | NetworkUpgrade::Canopy
             | NetworkUpgrade::Nu5
             | NetworkUpgrade::Nu6
+            | NetworkUpgrade::Nu6_1
             | NetworkUpgrade::Nu7 => zcash_history::NodeData {
                 consensus_branch_id: branch_id.into(),
                 subtree_commitment: block_hash,

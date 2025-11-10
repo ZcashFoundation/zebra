@@ -1600,7 +1600,7 @@ impl Chain {
                     sapling_shielded_data,
                     &None,
                     &None,
-                    #[cfg(feature ="tx-v6")]
+                    #[cfg(feature ="tx_v6")]
                     &None
                     ),
                 V5 {
@@ -1616,10 +1616,10 @@ impl Chain {
                     &None,
                     sapling_shielded_data,
                     orchard_shielded_data,
-                    #[cfg(feature ="tx-v6")]
+                    #[cfg(feature ="tx_v6")]
                     &None,
                 ),
-                #[cfg(feature ="tx-v6")]
+                #[cfg(feature ="tx_v6")]
                 V6 {
                     inputs,
                     outputs,
@@ -1640,7 +1640,7 @@ impl Chain {
                 ),
             };
 
-            #[cfg(not(feature = "tx-v6"))]
+            #[cfg(not(feature = "tx_v6"))]
             let (
                 inputs,
                 outputs,
@@ -1650,7 +1650,7 @@ impl Chain {
                 orchard_shielded_data_vanilla,
             ) = transaction_data;
 
-            #[cfg(feature = "tx-v6")]
+            #[cfg(feature = "tx_v6")]
             let (
                 inputs,
                 outputs,
@@ -1681,7 +1681,7 @@ impl Chain {
             self.update_chain_tip_with(sapling_shielded_data_per_spend_anchor)?;
             self.update_chain_tip_with(sapling_shielded_data_shared_anchor)?;
             self.update_chain_tip_with(orchard_shielded_data_vanilla)?;
-            #[cfg(feature = "tx-v6")]
+            #[cfg(feature = "tx_v6")]
             self.update_chain_tip_with(orchard_shielded_data_zsa)?;
         }
 
@@ -1825,7 +1825,7 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                     #[cfg(feature = "tx-v6")]
                     &None,
                 ),
-                #[cfg(feature = "tx-v6")]
+                #[cfg(feature = "tx_v6")]
                 V6 {
                     inputs,
                     outputs,
