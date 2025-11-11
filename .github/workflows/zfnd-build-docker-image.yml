@@ -78,8 +78,8 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ github.event_name == 'release' && 'prod' || inputs.environment || 'dev' }}
     outputs:
-      image_digest: ${{ steps.docker_build.outputs.digest }}
-      image_name: ${{ fromJSON(steps.docker_build.outputs.metadata)['image.name'] }}
+      image_digest: ${{ steps.docker_build.outputs.digest || steps.docker_build_no_attestations.outputs.digest }}
+      image_name: ${{ fromJSON(steps.docker_build.outputs.metadata || steps.docker_build_no_attestations.outputs.metadata)['image.name'] }}
     permissions:
       contents: read
       id-token: write
@@ -166,8 +166,10 @@ jobs:
           endpoint: zfnd/zebra
 
       # Build and push image to Google Artifact Registry, and possibly DockerHub
-      - name: Build & push
+      # With provenance and SBOM (ZcashFoundation repository only)
+      - name: Build & push (with attestations)
         id: docker_build
+        if: github.repository_owner == 'ZcashFoundation'
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 #v6.18.0
         with:
           target: ${{ inputs.dockerfile_target }}
@@ -183,9 +185,29 @@ jobs:
           push: true
           # It's recommended to build images with max-level provenance attestations
           # https://docs.docker.com/build/ci/github-actions/attestations/
-          # TODO: Uncomment this once we have a better way to turn on/off provenance
-          # provenance: mode=max
-          # sbom: true
+          provenance: mode=max
+          sbom: true
+          # Don't read from the cache if the caller disabled it.
+          # https://docs.docker.com/engine/reference/commandline/buildx_build/#options
+          no-cache: ${{ inputs.no_cache }}
+
+      # Build and push image without attestations (contributor forks)
+      - name: Build & push (without attestations)
+        id: docker_build_no_attestations
+        if: github.repository_owner != 'ZcashFoundation'
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 #v6.18.0
+        with:
+          target: ${{ inputs.dockerfile_target }}
+          context: .
+          file: ${{ inputs.dockerfile_path }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}
+            RUST_LOG=${{ env.RUST_LOG }}
+            CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}
+            FEATURES=${{ env.FEATURES }}
+          push: true
           # Don't read from the cache if the caller disabled it.
           # https://docs.docker.com/engine/reference/commandline/buildx_build/#options
           no-cache: ${{ inputs.no_cache }}
