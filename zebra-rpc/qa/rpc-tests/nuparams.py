@@ -42,7 +42,6 @@ class NuparamsTest(BitcoinTestFramework):
         node = self.nodes[0]
         # No blocks have been created, only the genesis block exists (height 0)
         bci = node.getblockchaininfo()
-        print(bci)
         assert_equal(bci['blocks'], 0)
         upgrades = bci['upgrades']
 
