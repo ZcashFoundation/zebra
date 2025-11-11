@@ -73,7 +73,7 @@ impl TransactionDependencies {
                 };
 
                 // TODO: Move this struct to zebra-chain and log a warning here if the dependency was not found.
-                dependencies.remove(&mined_tx_id);
+                dependencies.remove(mined_tx_id);
             }
         }
     }
