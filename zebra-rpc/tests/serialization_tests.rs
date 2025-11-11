@@ -53,7 +53,7 @@ fn test_get_info() -> Result<(), Box<dyn std::error::Error>> {
   "paytxfee": 0.0,
   "relayfee": 1e-6,
   "errors": "no errors",
-  "errorstimestamp": "2025-05-20 19:33:53.395307694 UTC"
+  "errorstimestamp": 1762881920
 }"#;
     let obj: GetInfoResponse = serde_json::from_str(json)?;
 
@@ -84,7 +84,7 @@ fn test_get_info() -> Result<(), Box<dyn std::error::Error>> {
         pay_tx_fee,
         relay_fee,
         errors.clone(),
-        errors_timestamp.clone(),
+        errors_timestamp,
     );
 
     assert_eq!(obj, new_obj);
