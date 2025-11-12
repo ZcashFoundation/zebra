@@ -42,7 +42,6 @@ pub const ZEBRA_FAILURE_MESSAGES: &[&str] = &[
     "Method not found",
     // Logs related to end of support halting feature.
     zebrad::components::sync::end_of_support::EOS_PANIC_MESSAGE_HEADER,
-    zebrad::components::sync::end_of_support::EOS_WARN_MESSAGE_HEADER,
 ];
 
 /// Failure log messages from lightwalletd.
