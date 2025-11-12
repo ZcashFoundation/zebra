@@ -12,8 +12,8 @@ use chrono::{DateTime, Duration, Utc};
 use zebra_chain::{
     block::{self, Block},
     parameters::{Network, NetworkUpgrade, POW_AVERAGING_WINDOW},
-    serialization::Bounded,
     work::difficulty::{CompactDifficulty, ExpandedDifficulty, ParameterDifficulty as _, U256},
+    BoundedVec,
 };
 
 /// The median block span for time median calculations.
@@ -62,14 +62,14 @@ pub(crate) struct AdjustedDifficulty {
     /// The `header.difficulty_threshold`s from the previous
     /// `PoWAveragingWindow + PoWMedianBlockSpan` (28) blocks, in reverse height
     /// order.
-    relevant_difficulty_thresholds: Bounded<CompactDifficulty, 1, POW_ADJUSTMENT_BLOCK_SPAN>,
+    relevant_difficulty_thresholds: BoundedVec<CompactDifficulty, 1, POW_ADJUSTMENT_BLOCK_SPAN>,
     /// The `header.time`s from the previous
     /// `PoWAveragingWindow + PoWMedianBlockSpan` (28) blocks, in reverse height
     /// order.
     ///
     /// Only the first and last `PoWMedianBlockSpan` times are used. Times
     /// `11..=16` are ignored.
-    relevant_times: Bounded<DateTime<Utc>, 1, POW_ADJUSTMENT_BLOCK_SPAN>,
+    relevant_times: BoundedVec<DateTime<Utc>, 1, POW_ADJUSTMENT_BLOCK_SPAN>,
 }
 
 impl AdjustedDifficulty {
@@ -143,14 +143,14 @@ impl AdjustedDifficulty {
             .take(POW_ADJUSTMENT_BLOCK_SPAN)
             .unzip::<_, _, Vec<_>, Vec<_>>();
 
-        let relevant_difficulty_thresholds: Bounded<
+        let relevant_difficulty_thresholds: BoundedVec<
             CompactDifficulty,
             1,
             POW_ADJUSTMENT_BLOCK_SPAN,
         > = thresholds
             .try_into()
             .expect("context must provide a bounded number of difficulty thresholds");
-        let relevant_times: Bounded<DateTime<Utc>, 1, POW_ADJUSTMENT_BLOCK_SPAN> = times
+        let relevant_times: BoundedVec<DateTime<Utc>, 1, POW_ADJUSTMENT_BLOCK_SPAN> = times
             .try_into()
             .expect("context must provide a bounded number of block times");
 
@@ -190,7 +190,7 @@ impl AdjustedDifficulty {
             &self.network,
             self.candidate_height,
             self.candidate_time,
-            self.relevant_times[0],
+            *self.relevant_times.first(),
         ) {
             assert!(
                 self.network.is_a_test_network(),
@@ -236,7 +236,7 @@ impl AdjustedDifficulty {
 
         let averaging_window_thresholds =
             if self.relevant_difficulty_thresholds.len() >= POW_AVERAGING_WINDOW {
-                &self.relevant_difficulty_thresholds[0..POW_AVERAGING_WINDOW]
+                &self.relevant_difficulty_thresholds.as_slice()[0..POW_AVERAGING_WINDOW]
             } else {
                 return self.network.target_difficulty_limit();
             };
@@ -322,10 +322,7 @@ impl AdjustedDifficulty {
 
             AdjustedDifficulty::median_time(older_times)
         } else {
-            self.relevant_times
-                .last()
-                .cloned()
-                .expect("there must be a Genesis block")
+            *self.relevant_times.last()
         };
 
         // `ActualTimespan` in the Zcash specification
