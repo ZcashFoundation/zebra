@@ -126,19 +126,13 @@ impl TransactionTemplate<NegativeOrZero> {
         net: &Network,
         height: Height,
         miner_params: &MinerParams,
-        mempool_txs: &[VerifiedUnminedTx],
+        txs_fee: Amount<NonNegative>,
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))] zip233_amount: Option<
             Amount<NonNegative>,
         >,
     ) -> Result<Self, TransactionError> {
         let block_subsidy = block_subsidy(height, net)?;
-
-        let miner_fee = mempool_txs
-            .iter()
-            .map(|tx| tx.miner_fee)
-            .sum::<amount::Result<Amount<NonNegative>>>()?;
-
-        let miner_reward = miner_subsidy(height, net, block_subsidy)? + miner_fee;
+        let miner_reward = miner_subsidy(height, net, block_subsidy)? + txs_fee;
         let miner_reward = Zatoshis::try_from(miner_reward?)?;
 
         let mut builder = Builder::new(
@@ -150,8 +144,8 @@ impl TransactionTemplate<NegativeOrZero> {
             },
         );
 
-        let empty_memo = MemoBytes::empty();
-        let memo = miner_params.memo().unwrap_or(&empty_memo);
+        let default_memo = MemoBytes::empty();
+        let memo = miner_params.memo().unwrap_or(&default_memo);
 
         macro_rules! trace_err {
             ($res:expr, $type:expr) => {
@@ -258,7 +252,7 @@ impl TransactionTemplate<NegativeOrZero> {
             hash: tx.txid().as_ref().into(),
             auth_digest: tx.auth_commitment().as_ref().try_into()?,
             depends: Vec::new(),
-            fee: (-miner_fee).constrain()?,
+            fee: (-txs_fee).constrain()?,
             sigops: tx.sigops()?,
             required: true,
         })

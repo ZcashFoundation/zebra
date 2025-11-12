@@ -14,6 +14,7 @@ use rand::{
 };
 
 use zebra_chain::{
+    amount::Amount,
     block::{Height, MAX_BLOCK_BYTES},
     parameters::Network,
     transaction::{self, zip317::BLOCK_UNPAID_ACTION_LIMIT, VerifiedUnminedTx},
@@ -69,7 +70,7 @@ pub fn select_mempool_transactions(
         net,
         height,
         miner_params,
-        &[],
+        Amount::zero(),
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         zip233_amount,
     )
