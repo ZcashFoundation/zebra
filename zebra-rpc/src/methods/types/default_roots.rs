@@ -61,13 +61,13 @@ impl DefaultRoots {
         coinbase: &TransactionTemplate<NegativeOrZero>,
         chain_history_root: Option<ChainHistoryMmrRootHash>,
         mempool_txs: &[VerifiedUnminedTx],
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+    ) -> Self {
         let chain_history_root = chain_history_root
             .or_else(|| {
                 (NetworkUpgrade::Heartwood.activation_height(net) == Some(height))
                     .then_some(block::CHAIN_HISTORY_ACTIVATION_RESERVED.into())
             })
-            .ok_or("chain history root is required")?;
+            .expect("history root is required for block templates");
 
         // TODO:
         // Computing `auth_data_root` and `merkle_root` gets more expensive as `mempool_txs` grows.
@@ -82,7 +82,7 @@ impl DefaultRoots {
             }))
             .collect();
 
-        Ok(Self {
+        Self {
             merkle_root: iter::once(coinbase.hash)
                 .chain(mempool_txs.iter().map(|tx| tx.transaction.id.mined_id()))
                 .collect(),
@@ -99,6 +99,6 @@ impl DefaultRoots {
                     &auth_data_root,
                 )
             },
-        })
+        }
     }
 }
