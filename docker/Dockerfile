@@ -15,8 +15,6 @@
 
 ARG RUST_VERSION=1.89.0
 
-# Keep in sync with vars.RUST_PROD_FEATURES in GitHub
-# https://github.com/ZcashFoundation/zebra/settings/variables/actions
 ARG FEATURES="default-release-binaries"
 
 ARG UID=10001
@@ -50,9 +48,6 @@ ENV CARGO_HOME=${CARGO_HOME}
 ARG CARGO_TARGET_DIR
 ENV CARGO_TARGET_DIR=${CARGO_TARGET_DIR}
 
-ARG FEATURES
-ENV FEATURES=${FEATURES}
-
 # If this is not set, it must be an empty string, so Zebra can try an
 # alternative git commit source:
 # https://github.com/ZcashFoundation/zebra/blob/9ebd56092bcdfc1a09062e15a0574c94af37f389/zebrad/src/application.rs#L179-L182
@@ -65,8 +60,7 @@ ENV SHORT_SHA=${SHORT_SHA:-}
 # An entrypoint.sh is only available in this step for easier test handling with variables.
 FROM deps AS tests
 
-# Use minimal feature set - tests are now controlled by environment variables per CI job
-ARG FEATURES="default-release-binaries proptest-impl lightwalletd-grpc-tests zebra-checkpoints"
+ARG FEATURES
 ENV FEATURES=${FEATURES}
 
 # Skip IPv6 tests by default, as some CI environment don't have IPv6 available
@@ -142,6 +136,9 @@ CMD [ "cargo", "test" ]
 # `test` stage. The resulting zebrad binary is used in the `runtime` stage.
 FROM deps AS release
 
+ARG FEATURES
+ENV FEATURES=${FEATURES}
+
 # Set the working directory for the build.
 ARG HOME
 WORKDIR ${HOME}
@@ -165,7 +162,7 @@ RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     --mount=type=bind,source=Cargo.lock,target=Cargo.lock \
     --mount=type=cache,target=${CARGO_TARGET_DIR} \
     --mount=type=cache,target=${CARGO_HOME} \
-    cargo build --locked --release --package zebrad --bin zebrad && \
+    cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad && \
     cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin
 
 # This stage starts from scratch using Debian and copies the built zebrad binary
