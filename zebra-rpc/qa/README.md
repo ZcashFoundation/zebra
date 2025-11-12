@@ -1,10 +1,6 @@
 The [pull-tester](/pull-tester/) folder contains a script to call
 multiple tests from the [rpc-tests](/rpc-tests/) folder.
 
-Every pull request to the zebra repository is built and run through
-the regression test suite. You can also run all or only individual
-tests locally.
-
 Test dependencies
 =================
 

@@ -15,8 +15,6 @@
 
 ARG RUST_VERSION=1.89.0
 
-# Keep in sync with vars.RUST_PROD_FEATURES in GitHub
-# https://github.com/ZcashFoundation/zebra/settings/variables/actions
 ARG FEATURES="default-release-binaries"
 
 ARG UID=10001
@@ -50,9 +48,6 @@ ENV CARGO_HOME=${CARGO_HOME}
 ARG CARGO_TARGET_DIR
 ENV CARGO_TARGET_DIR=${CARGO_TARGET_DIR}
 
-ARG FEATURES
-ENV FEATURES=${FEATURES}
-
 # If this is not set, it must be an empty string, so Zebra can try an
 # alternative git commit source:
 # https://github.com/ZcashFoundation/zebra/blob/9ebd56092bcdfc1a09062e15a0574c94af37f389/zebrad/src/application.rs#L179-L182
@@ -65,8 +60,7 @@ ENV SHORT_SHA=${SHORT_SHA:-}
 # An entrypoint.sh is only available in this step for easier test handling with variables.
 FROM deps AS tests
 
-# Use minimal feature set - tests are now controlled by environment variables per CI job
-ARG FEATURES="default-release-binaries proptest-impl lightwalletd-grpc-tests zebra-checkpoints"
+ARG FEATURES
 ENV FEATURES=${FEATURES}
 
 # Skip IPv6 tests by default, as some CI environment don't have IPv6 available
@@ -98,10 +92,10 @@ ARG CARGO_TARGET_DIR
 RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends curl && \
     mkdir -p "${CARGO_HOME}/bin" && \
-    case ${BUILDPLATFORM} in \
-        "linux/amd64") ARCH="linux" ;; \
-        "linux/arm64") ARCH="linux-arm" ;; \
-        *) echo "Unsupported architecture: ${BUILDPLATFORM}"; exit 1 ;; \
+    case ${BUILDPLATFORM:-linux/$(uname -m)} in \
+        "linux/amd64"|"linux/x86_64") ARCH="linux" ;; \
+        "linux/arm64"|"linux/aarch64") ARCH="linux-arm" ;; \
+        *) echo "Unsupported architecture: ${BUILDPLATFORM:-linux/$(uname -m)}"; exit 1 ;; \
     esac && \
     curl -LsSf "https://get.nexte.st/latest/${ARCH}" | tar zxf - -C "${CARGO_HOME}/bin" && \
     apt-get -qq remove --purge -y curl && \
@@ -116,7 +110,10 @@ COPY --link --chown=${UID}:${GID} ./ ${HOME}
 RUN cargo nextest run --locked --release --no-run --features "${FEATURES}" && \
     # Copy binaries to standard location
     cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin && \
-    cp ${CARGO_TARGET_DIR}/release/zebra-checkpoints /usr/local/bin && \
+    # Only copy zebra-checkpoints if the feature is enabled
+    if echo "${FEATURES}" | grep -q "zebra-checkpoints"; then \
+        cp ${CARGO_TARGET_DIR}/release/zebra-checkpoints /usr/local/bin; \
+    fi && \
     # Set proper ownership
     chown -R ${UID}:${GID} ${CARGO_HOME} && \
     chown -R ${UID}:${GID} ${CARGO_TARGET_DIR}
@@ -138,6 +135,9 @@ CMD [ "cargo", "test" ]
 # It also adds `cache mounts` as this stage is completely independent from the
 # `test` stage. The resulting zebrad binary is used in the `runtime` stage.
 FROM deps AS release
+
+ARG FEATURES
+ENV FEATURES=${FEATURES}
 
 # Set the working directory for the build.
 ARG HOME
@@ -162,7 +162,7 @@ RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     --mount=type=bind,source=Cargo.lock,target=Cargo.lock \
     --mount=type=cache,target=${CARGO_TARGET_DIR} \
     --mount=type=cache,target=${CARGO_HOME} \
-    cargo build --locked --release --package zebrad --bin zebrad && \
+    cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad && \
     cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin
 
 # This stage starts from scratch using Debian and copies the built zebrad binary

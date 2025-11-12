@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) 2014-2016 The Bitcoin Core developers
-# Copyright (c) 2016-2022 The Zcash developers
+# Copyright (c) 2016-2024 The Zcash developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or https://www.opensource.org/licenses/mit-license.php .
 
@@ -32,8 +32,6 @@ from .proxy import ServiceProxy, JSONRPCException
 from .authproxy import AuthServiceProxy
 
 from test_framework.config import ZebraConfig, ZebraExtraArgs
-
-LEGACY_DEFAULT_FEE = Decimal('0.00001')
 
 COVERAGE_DIR = None
 PRE_BLOSSOM_BLOCK_TARGET_SPACING = 150
@@ -147,19 +145,6 @@ def sync_blocks(rpc_connections, wait=0.125, timeout=60, allow_different_tips=Fa
             break
         time.sleep(wait)
         timeout -= wait
-
-    """ Zebra does not support the `fullyNotified` field in the `blockchaininfo` RPC
-    # Now that the block counts are in sync, wait for the internal
-    # notifications to finish
-    while timeout > 0:
-        notified = [ x.getblockchaininfo()['fullyNotified'] for x in rpc_connections ]
-        if notified == [ True ] * len(notified):
-            return True
-        time.sleep(wait)
-        timeout -= wait
-
-    raise AssertionError("Block sync failed")
-    """
     return True
 
 def sync_mempools(rpc_connections, wait=0.5, timeout=60):
@@ -177,19 +162,6 @@ def sync_mempools(rpc_connections, wait=0.5, timeout=60):
             break
         time.sleep(wait)
         timeout -= wait
-
-    """ Zebra does not support the `fullyNotified` field in the `getmempoolinfo` RPC
-    # Now that the mempools are in sync, wait for the internal
-    # notifications to finish
-    while timeout > 0:
-        notified = [ x.getmempoolinfo()['fullyNotified'] for x in rpc_connections ]
-        if notified == [ True ] * len(notified):
-            return True
-        time.sleep(wait)
-        timeout -= wait
-
-    raise AssertionError("Mempool sync failed")
-    """
     return True
 
 bitcoind_processes = {}
@@ -201,19 +173,6 @@ def initialize_datadir(dirname, n, clock_offset=0):
     rpc_u, rpc_p = rpc_auth_pair(n)
     config_rpc_port = rpc_port(n)
     config_p2p_port = p2p_port(n)
-
-    """ TODO: Can create zebrad base_config here, or remove.
-    with open(os.path.join(datadir, "zcash.conf"), 'w', encoding='utf8') as f:
-        f.write("regtest=1\n")
-        f.write("showmetrics=0\n")
-        f.write("rpcuser=" + rpc_u + "\n")
-        f.write("rpcpassword=" + rpc_p + "\n")
-        f.write("port="+str(config_p2p_port)+"\n")
-        f.write("rpcport="+str(config_rpc_port)+"\n")
-        f.write("listenonion=0\n")
-        if clock_offset != 0:
-            f.write('clockoffset='+str(clock_offset)+'\n')
-    """
 
     update_zebrad_conf(datadir, config_rpc_port, config_p2p_port, None)
 
@@ -243,7 +202,6 @@ def rpc_auth_pair(n):
     return 'rpcuser💻' + str(n), 'rpcpass🔑' + str(n)
 
 def rpc_url(i, rpchost=None):
-    rpc_u, rpc_p = rpc_auth_pair(i)
     host = '127.0.0.1'
     port = rpc_port(i)
     if rpchost:
@@ -254,15 +212,12 @@ def rpc_url(i, rpchost=None):
             host = rpchost
     # For zebra, we just use a non-authenticated endpoint.
     return "http://%s:%d" % (host, int(port))
-    # We might want to get back to authenticated endpoints after #8864:
-    #return "http://%s:%s@%s:%d" % (rpc_u, rpc_p, host, int(port))
 
 def wait_for_bitcoind_start(process, url, i):
     '''
     Wait for bitcoind to start. This means that RPC is accessible and fully initialized.
     Raise an exception if bitcoind exits during initialization.
     '''
-    time.sleep(1) # give the node a moment to start
     while True:
         if process.poll() is not None:
             raise Exception('%s node %d exited with status %i during initialization' % (zcashd_binary(), i, process.returncode))
@@ -274,7 +229,7 @@ def wait_for_bitcoind_start(process, url, i):
             if e.errno != errno.ECONNREFUSED: # Port not yet open?
                 raise # unknown IO error
         except JSONRPCException as e: # Initialization phase
-            if e.error['code'] != -28: # RPC in warmup?
+            if e.error['code'] != -343: # RPC in warmup?
                 raise # unknown JSON RPC exception
         time.sleep(0.25)
 
@@ -342,8 +297,6 @@ def initialize_chain(test_dir, num_nodes, cachedir, cache_behavior='current'):
         for i in range(2):
             for peer in range(4):
                 for j in range(25):
-                    # Removed because zebrad does not has this RPC method:
-                    #set_node_times(rpcs, block_time)
                     rpcs[peer].generate(1)
                     block_time += PRE_BLOSSOM_BLOCK_TARGET_SPACING
                 # Must sync before next peer starts generating blocks
@@ -354,7 +307,6 @@ def initialize_chain(test_dir, num_nodes, cachedir, cache_behavior='current'):
         # Shut them down, and clean up cache directories:
         stop_nodes(rpcs)
         wait_bitcoinds()
-
         for i in range(MAX_NODES):
             # record the system time at which the cache was regenerated
             with open(node_file(cachedir, i, 'cache_config.json'), "w", encoding="utf8") as cache_conf_file:
@@ -362,18 +314,12 @@ def initialize_chain(test_dir, num_nodes, cachedir, cache_behavior='current'):
                 cache_conf_json = json.dumps(cache_config, indent=4)
                 cache_conf_file.write(cache_conf_json)
 
-            # Removed as zebrad do not created these files:
-            #os.remove(node_file(cachedir, i, "debug.log"))
-            #os.remove(node_file(cachedir, i, "db.log"))
-            #os.remove(node_file(cachedir, i, "peers.dat"))
-
-
     def init_from_cache():
         for i in range(num_nodes):
             from_dir = os.path.join(cachedir, "node"+str(i))
             to_dir = os.path.join(test_dir,  "node"+str(i))
             shutil.copytree(from_dir, to_dir)
-            with open(os.path.join(to_dir, 'cache_config.json'), "r", encoding="utf8") as cache_conf_file:
+            with open(os.path.join(to_dir, 'regtest', 'cache_config.json'), "r", encoding="utf8") as cache_conf_file:
                 cache_conf = json.load(cache_conf_file)
                 # obtain the clock offset as a negative number of seconds
                 offset = round(cache_conf['cache_time']) - round(time.time())
@@ -467,7 +413,7 @@ def persist_node_caches(tmpdir, cache_behavior, num_nodes):
     os.mkdir(cache_path)
 
     for i in range(num_nodes):
-        node_path = os.path.join(tmpdir, 'node' + str(i))
+        node_path = os.path.join(tmpdir, 'node' + str(i), 'regtest')
 
         # Clean up the files that we don't want to persist
         os.remove(os.path.join(node_path, 'debug.log'))
@@ -531,7 +477,6 @@ def start_node(i, dirname, extra_args=None, rpchost=None, timewait=None, binary=
     """
     Start a bitcoind and return RPC connection to it
     """
-
     datadir = os.path.join(dirname, "node"+str(i))
     if binary is None:
         binary = zcashd_binary()
@@ -542,7 +487,6 @@ def start_node(i, dirname, extra_args=None, rpchost=None, timewait=None, binary=
         config = update_zebrad_conf(datadir, rpc_port(i), p2p_port(i))
     args = [ binary, "-c="+config, "start" ]
 
-    #if extra_args is not None: args.extend(extra_args)
     bitcoind_processes[i] = subprocess.Popen(args, stderr=stderr)
     if os.getenv("PYTHON_DEBUG", ""):
         print("start_node: bitcoind started, waiting for RPC to come up")
@@ -592,7 +536,7 @@ def start_nodes(num_nodes, dirname, extra_args=None, rpchost=None, binary=None):
     return rpcs
 
 def node_file(dirname, n_node, filename):
-    return os.path.join(dirname, "node"+str(n_node), filename)
+    return os.path.join(dirname, "node"+str(n_node), "regtest", filename)
 
 def check_node(i):
     bitcoind_processes[i].poll()
@@ -957,7 +901,6 @@ def wait_for_wallet_start(process, url, i):
     Wait for the wallet to start. This means that RPC is accessible and fully initialized.
     Raise an exception if zallet exits during initialization.
     '''
-    time.sleep(1) # give the wallet a moment to start
     while True:
         if process.poll() is not None:
             raise Exception('%s wallet %d exited with status %i during initialization' % (zallet_binary(), i, process.returncode))
