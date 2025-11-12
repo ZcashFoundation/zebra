@@ -155,6 +155,7 @@ use serde_json::Value;
 use tower::ServiceExt;
 
 use zebra_chain::{
+    amount::Amount,
     block::{self, genesis::regtest_genesis_block, ChainHistoryBlockTxAuthCommitmentHash, Height},
     parameters::{
         testnet::{ConfiguredActivationHeights, ConfiguredCheckpoints, RegtestParameters},
@@ -166,12 +167,13 @@ use zebra_chain::{
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::{
     client::{
-        BlockTemplateResponse, GetBlockTemplateParameters, GetBlockTemplateRequestMode,
-        GetBlockTemplateResponse, SubmitBlockErrorResponse, SubmitBlockResponse,
+        BlockTemplateResponse, DefaultRoots, GetBlockTemplateParameters,
+        GetBlockTemplateRequestMode, GetBlockTemplateResponse, SubmitBlockErrorResponse,
+        SubmitBlockResponse, TransactionTemplate,
     },
-    fetch_state_tip_and_local_time,
+    fetch_chain_info,
     methods::{RpcImpl, RpcServer},
-    new_coinbase_with_roots, proposal_block_from_template,
+    proposal_block_from_template,
     server::OPENED_RPC_ENDPOINT_MSG,
     MinerParams, SubmitBlockChannel,
 };
@@ -3512,9 +3514,9 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 
     let zebra_state::GetBlockTemplateChainInfo {
         chain_history_root, ..
-    } = fetch_state_tip_and_local_time(read_state.clone()).await?;
+    } = fetch_chain_info(read_state.clone()).await?;
 
-    let network = base_network_params
+    let net = base_network_params
         .clone()
         .with_funding_streams(vec![ConfiguredFundingStreams {
             height_range: Some(Height(1)..Height(100)),
@@ -3522,16 +3524,23 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         }])
         .to_network();
 
-    let (coinbase_txn, default_roots) = new_coinbase_with_roots(
-        &network,
+    let coinbase_txn = TransactionTemplate::new_coinbase(
+        &net,
         Height(block_template.height()),
         &miner_params,
-        &[],
-        chain_history_root,
+        Amount::zero(),
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         None,
     )
     .expect("coinbase transaction should be valid under the given parameters");
+
+    let default_roots = DefaultRoots::from_coinbase(
+        &net,
+        Height(block_template.height()),
+        &coinbase_txn,
+        chain_history_root,
+        &[],
+    );
 
     let block_template = BlockTemplateResponse::new(
         block_template.capabilities().clone(),
@@ -3557,7 +3566,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         block_template.submit_old(),
     );
 
-    let proposal_block = proposal_block_from_template(&block_template, None, &network)?;
+    let proposal_block = proposal_block_from_template(&block_template, None, &net)?;
 
     // Submit the invalid block with an excessive coinbase output value
     let submit_block_response = rpc
@@ -3573,7 +3582,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     );
 
     // Use an invalid coinbase transaction (with an output value less than the `block_subsidy + miner_fees - expected_lockbox_funding_stream`)
-    let network = base_network_params
+    let net = base_network_params
         .clone()
         .with_funding_streams(vec![ConfiguredFundingStreams {
             height_range: Some(Height(1)..Height(100)),
@@ -3581,16 +3590,23 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         }])
         .to_network();
 
-    let (coinbase_txn, default_roots) = new_coinbase_with_roots(
-        &network,
+    let coinbase_txn = TransactionTemplate::new_coinbase(
+        &net,
         Height(block_template.height()),
         &miner_params,
-        &[],
-        chain_history_root,
+        Amount::zero(),
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         None,
     )
     .expect("coinbase transaction should be valid under the given parameters");
+
+    let default_roots = DefaultRoots::from_coinbase(
+        &net,
+        Height(block_template.height()),
+        &coinbase_txn,
+        chain_history_root,
+        &[],
+    );
 
     let block_template = BlockTemplateResponse::new(
         block_template.capabilities().clone(),
@@ -3616,7 +3632,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         block_template.submit_old(),
     );
 
-    let proposal_block = proposal_block_from_template(&block_template, None, &network)?;
+    let proposal_block = proposal_block_from_template(&block_template, None, &net)?;
 
     // Submit the invalid block with an excessive coinbase input value
     let submit_block_response = rpc
@@ -3632,8 +3648,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     );
 
     // Check that the original block template can be submitted successfully
-    let proposal_block =
-        proposal_block_from_template(&valid_original_block_template, None, &network)?;
+    let proposal_block = proposal_block_from_template(&valid_original_block_template, None, &net)?;
 
     let submit_block_response = rpc
         .submit_block(HexData(proposal_block.zcash_serialize_to_vec()?), None)
