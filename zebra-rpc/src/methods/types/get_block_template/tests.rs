@@ -2,6 +2,7 @@
 
 use anyhow::anyhow;
 use std::iter;
+use zebra_chain::amount::Amount;
 
 use strum::IntoEnumIterator;
 use zcash_keys::address::Address;
@@ -79,7 +80,7 @@ fn coinbase() -> anyhow::Result<()> {
                             Address::decode(&net, MINER_ADDRESS[&net.kind()][&addr_type])
                                 .ok_or(anyhow!("hard-coded addr must be valid"))?,
                         ),
-                        &[],
+                        Amount::zero(),
                         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
                         None,
                     )?

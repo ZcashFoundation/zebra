@@ -30,10 +30,9 @@ use zcash_script::{
 #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
 use zebra_chain::amount::{Amount, NonNegative};
 use zebra_chain::{
-    amount::{self, NegativeOrZero},
+    amount::{self, Amount, NonNegative},
     block::{
-        self, Block, ChainHistoryBlockTxAuthCommitmentHash, ChainHistoryMmrRootHash, Height,
-        MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION,
+        self, Block, ChainHistoryBlockTxAuthCommitmentHash, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION,
     },
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
@@ -274,9 +273,10 @@ impl BlockTemplateResponse {
     /// The result of this method only depends on the supplied arguments and constants.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_internal(
-        network: &Network,
+        net: &Network,
+        precomputed_coinbase: Option<TransactionTemplate<amount::NegativeOrZero>>,
         miner_params: &MinerParams,
-        chain_tip_and_local_time: &GetBlockTemplateChainInfo,
+        chain_info: &GetBlockTemplateChainInfo,
         long_poll_id: LongPollId,
         #[cfg(not(test))] mempool_txs: Vec<VerifiedUnminedTx>,
         #[cfg(test)] mempool_txs: Vec<(InBlockTxDependenciesDepth, VerifiedUnminedTx)>,
@@ -286,7 +286,7 @@ impl BlockTemplateResponse {
         >,
     ) -> Self {
         // Determine the next block height.
-        let height = chain_tip_and_local_time
+        let height = chain_info
             .tip_height
             .next()
             .expect("chain tip must be below Height::MAX");
@@ -327,22 +327,34 @@ impl BlockTemplateResponse {
                 .unzip()
         };
 
-        // Generate the coinbase transaction and default roots
-        //
-        // TODO: move expensive root, hash, and tree cryptography to a rayon thread?
-        let (coinbase_txn, default_roots) = new_coinbase_with_roots(
-            network,
+        let txs_fee = mempool_txs
+            .iter()
+            .map(|tx| tx.miner_fee)
+            .sum::<amount::Result<Amount<NonNegative>>>()
+            .expect("mempool tx fees must be non-negative");
+
+        let coinbase_txn = precomputed_coinbase.unwrap_or(
+            TransactionTemplate::new_coinbase(
+                net,
+                height,
+                miner_params,
+                txs_fee,
+                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+                zip233_amount,
+            )
+            .expect("valid coinbase tx"),
+        );
+
+        let default_roots = DefaultRoots::from_coinbase(
+            net,
             height,
-            miner_params,
+            &coinbase_txn,
+            chain_info.chain_history_root,
             &mempool_txs,
-            chain_tip_and_local_time.chain_history_root,
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            zip233_amount,
-        )
-        .expect("coinbase should be valid under the given parameters");
+        );
 
         // Convert difficulty
-        let target = chain_tip_and_local_time
+        let target = chain_info
             .expected_difficulty
             .to_expanded()
             .expect("state always returns a valid difficulty value");
@@ -364,7 +376,7 @@ impl BlockTemplateResponse {
 
             version: ZCASH_BLOCK_VERSION,
 
-            previous_block_hash: chain_tip_and_local_time.tip_hash,
+            previous_block_hash: chain_info.tip_hash,
             block_commitments_hash: default_roots.block_commitments_hash,
             light_client_root_hash: default_roots.block_commitments_hash,
             final_sapling_root_hash: default_roots.block_commitments_hash,
@@ -378,7 +390,7 @@ impl BlockTemplateResponse {
 
             target,
 
-            min_time: chain_tip_and_local_time.min_time,
+            min_time: chain_info.min_time,
 
             mutable,
 
@@ -388,13 +400,13 @@ impl BlockTemplateResponse {
 
             size_limit: MAX_BLOCK_BYTES,
 
-            cur_time: chain_tip_and_local_time.cur_time,
+            cur_time: chain_info.cur_time,
 
-            bits: chain_tip_and_local_time.expected_difficulty,
+            bits: chain_info.expected_difficulty,
 
             height: height.0,
 
-            max_time: chain_tip_and_local_time.max_time,
+            max_time: chain_info.max_time,
 
             submit_old,
         }
@@ -772,9 +784,7 @@ where
 ///
 /// You should call `check_synced_to_tip()` before calling this function.
 /// If the state does not have enough blocks, returns an error.
-pub async fn fetch_state_tip_and_local_time<State>(
-    state: State,
-) -> RpcResult<GetBlockTemplateChainInfo>
+pub async fn fetch_chain_info<State>(state: State) -> RpcResult<GetBlockTemplateChainInfo>
 where
     State: Service<
             zebra_state::ReadRequest,
@@ -834,30 +844,4 @@ where
 
     // Check that the mempool and state were in sync when we made the requests
     Ok((last_seen_tip_hash == chain_tip_hash).then_some((transactions, transaction_dependencies)))
-}
-
-// - Response processing
-
-/// Generates and returns the coinbase transaction and default roots.
-pub fn new_coinbase_with_roots(
-    net: &Network,
-    height: Height,
-    miner_params: &MinerParams,
-    mempool_txs: &[VerifiedUnminedTx],
-    chain_history_root: Option<ChainHistoryMmrRootHash>,
-    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))] zip233_amount: Option<
-        Amount<NonNegative>,
-    >,
-) -> Result<(TransactionTemplate<NegativeOrZero>, DefaultRoots), Box<dyn std::error::Error>> {
-    let tx = TransactionTemplate::new_coinbase(
-        net,
-        height,
-        miner_params,
-        mempool_txs,
-        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-        zip233_amount,
-    )?;
-    let roots = DefaultRoots::from_coinbase(net, height, &tx, chain_history_root, mempool_txs)?;
-
-    Ok((tx, roots))
 }
