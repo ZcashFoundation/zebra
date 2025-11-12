@@ -14,7 +14,7 @@ use crate::{
     parameters::{OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID, TX_V5_VERSION_GROUP_ID},
     primitives::{Halo2Proof, ZkSnarkProof},
     serialization::{
-        zcash_deserialize_external_count, zcash_serialize_empty_list,
+        zcash_deserialize_external_count, zcash_serialize_bytes, zcash_serialize_empty_list,
         zcash_serialize_external_count, AtLeastOne, ReadZcashExt, SerializationError,
         TrustedPreallocate, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
     },
@@ -28,6 +28,10 @@ use crate::{
 
 use super::*;
 use crate::sapling;
+
+#[cfg(feature = "tx_v6")]
+/// TransparentSighashInfo V0 bytes used in V6.
+const TRANSPARENT_SIGHASH_INFO_V0: [u8; 1] = [0];
 
 impl ZcashDeserialize for jubjub::Fq {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
@@ -850,6 +854,12 @@ impl ZcashSerialize for Transaction {
                 // Denoted as `tx_out_count` and `tx_out` in the spec.
                 outputs.zcash_serialize(&mut writer)?;
 
+                // Denoted as `vSighashInfo` in the spec.
+                // There is one sighash info per transparent input. For now, only V0 is supported.
+                for _ in 0..inputs.len() {
+                    zcash_serialize_bytes(&TRANSPARENT_SIGHASH_INFO_V0.to_vec(), &mut writer)?;
+                }
+
                 // A bundle of fields denoted in the spec as `nSpendsSapling`, `vSpendsSapling`,
                 // `nOutputsSapling`,`vOutputsSapling`, `valueBalanceSapling`, `anchorSapling`,
                 // `vSpendProofsSapling`, `vSpendAuthSigsSapling`, `vOutputProofsSapling` and
@@ -1152,6 +1162,18 @@ impl ZcashDeserialize for Transaction {
 
                 // Denoted as `tx_out_count` and `tx_out` in the spec.
                 let outputs = Vec::zcash_deserialize(&mut limited_reader)?;
+
+                // Denoted as `vSighashInfo` in the spec (ZIP-230).
+                // There is one `TransparentSighashInfo` per transparent input (tx_in_count entries).
+                // For now, only V0 is supported, which must decode to a Vector<u8> == [0x00].
+                for _ in 0..inputs.len() {
+                    let sighash_info_bytes = Vec::<u8>::zcash_deserialize(&mut limited_reader)?;
+                    if sighash_info_bytes.as_slice() != TRANSPARENT_SIGHASH_INFO_V0 {
+                        return Err(SerializationError::Parse(
+                            "unsupported TransparentSighashInfo (expected V0 = [0])",
+                        ));
+                    }
+                }
 
                 // A bundle of fields denoted in the spec as `nSpendsSapling`, `vSpendsSapling`,
                 // `nOutputsSapling`,`vOutputsSapling`, `valueBalanceSapling`, `anchorSapling`,
