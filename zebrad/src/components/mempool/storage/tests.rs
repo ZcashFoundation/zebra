@@ -2,3 +2,4 @@
 
 mod prop;
 mod vectors;
+mod verified_set;
