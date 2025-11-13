@@ -33,7 +33,7 @@ impl From<MetaAddr> for PeerInfo {
             inbound: meta_addr.is_inbound(),
             // TODO: Fill in pingtime and pingwait once live ping tracking is implemented.
             pingtime: meta_addr.rtt(),
-            pingwait: None,
+            pingwait: meta_addr.ping_sent_at(),
         }
     }
 }

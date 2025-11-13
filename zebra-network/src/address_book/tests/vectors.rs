@@ -1,6 +1,6 @@
 //! Fixed test vectors for the address book.
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use chrono::Utc;
 use tracing::Span;
@@ -129,7 +129,7 @@ fn reconnection_peers_skips_recently_updated_ip() {
     // tests that reconnection_peers() skips addresses where there's a connection at that IP with a recent:
     // - `last_response`
     test_reconnection_peers_skips_recently_updated_ip(true, |addr| {
-        MetaAddr::new_responded(addr, Duration::ZERO)
+        MetaAddr::new_responded(addr, None, None)
     });
 
     // tests that reconnection_peers() *does not* skip addresses where there's a connection at that IP with a recent:

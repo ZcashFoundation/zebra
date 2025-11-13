@@ -1313,21 +1313,35 @@ async fn send_periodic_heartbeats_run_loop(
     while let Some(_instant) = interval_stream.next().await {
         // We've reached another heartbeat interval without
         // shutting down, so do a heartbeat request.
+        let ping_sent_at = Instant::now();
+
         let heartbeat = send_one_heartbeat(&mut server_tx);
         let rtt = heartbeat_timeout(heartbeat, &heartbeat_ts_collector, &connected_addr).await?;
 
-        if let Some(rtt) = rtt {
-            // # Security
-            //
-            // Peer heartbeats are rate-limited because:
-            // - opening connections is rate-limited
-            // - the number of connections is limited
-            // - Zebra initiates each heartbeat using a timer
-            if let Some(book_addr) = connected_addr.get_address_book_addr() {
+        // # Security
+        //
+        // Peer heartbeats are rate-limited because:
+        // - opening connections is rate-limited
+        // - the number of connections is limited
+        // - Zebra initiates each heartbeat using a timer
+        if let Some(book_addr) = connected_addr.get_address_book_addr() {
+            if let Some(rtt) = rtt {
                 // the collector doesn't depend on network activity,
                 // so this await should not hang
                 let _ = heartbeat_ts_collector
-                    .send(MetaAddr::new_responded(book_addr, rtt))
+                    .send(MetaAddr::new_responded(
+                        book_addr,
+                        Some(rtt),
+                        Some(ping_sent_at.into()),
+                    ))
+                    .await;
+            } else {
+                let _ = heartbeat_ts_collector
+                    .send(MetaAddr::new_responded(
+                        book_addr,
+                        None,
+                        Some(ping_sent_at.into()),
+                    ))
                     .await;
             }
         }

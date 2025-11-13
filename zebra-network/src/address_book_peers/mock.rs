@@ -27,7 +27,7 @@ impl MockAddressBookPeers {
         // The real add peer will use `MetaAddr::new_initial_peer` but we just want to get a `MetaAddr` for the mock.
         let rtt = Duration::from_millis(100);
         self.recently_live_peers.push(
-            MetaAddr::new_responded(peer, rtt).into_new_meta_addr(
+            MetaAddr::new_responded(peer, Some(rtt), None).into_new_meta_addr(
                 Instant::now(),
                 chrono::Utc::now()
                     .try_into()
