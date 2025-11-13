@@ -49,7 +49,7 @@ impl TransactionDependencies {
                 .insert(dependent);
         }
 
-        // Only add an entries to `dependencies` for transactions that spend unmined outputs so it
+        // Only add entries to `dependencies` for transactions that spend unmined outputs so it
         // can be used to handle transactions with dependencies differently during block production.
         if !spent_mempool_outpoints.is_empty() {
             self.dependencies.insert(
@@ -74,6 +74,9 @@ impl TransactionDependencies {
 
                 // TODO: Move this struct to zebra-chain and log a warning here if the dependency was not found.
                 dependencies.remove(mined_tx_id);
+                if dependencies.is_empty() {
+                    self.dependencies.remove(&dependent_id);
+                }
             }
         }
     }
@@ -91,9 +94,20 @@ impl TransactionDependencies {
         while !current_level_dependents.is_empty() {
             current_level_dependents = current_level_dependents
                 .iter()
-                .flat_map(|dep| {
-                    self.dependencies.remove(dep);
-                    self.dependents.remove(dep).unwrap_or_default()
+                .flat_map(|dependent| {
+                    for dependency in self.dependencies.remove(dependent).unwrap_or_default() {
+                        let Some(dependents_of_dependency) = self.dependents.get_mut(&dependency)
+                        else {
+                            continue;
+                        };
+
+                        dependents_of_dependency.remove(dependent);
+                        if dependents_of_dependency.is_empty() {
+                            self.dependents.remove(&dependency);
+                        }
+                    }
+
+                    self.dependents.remove(dependent).unwrap_or_default()
                 })
                 .collect();
 
