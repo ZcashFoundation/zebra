@@ -74,7 +74,8 @@ jobs:
       - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3.0.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      
+      - uses: ./.github/actions/setup-zebra-build
+
       # Windows-specific setup
       - name: Install LLVM on Windows
         if: matrix.os == 'windows-latest'
@@ -120,6 +121,7 @@ jobs:
       - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3.0.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: ./.github/actions/setup-zebra-build
       - name: Check no git dependencies
         run: cargo nextest run --profile check-no-git-dependencies --locked --run-ignored=only
 
