@@ -1,6 +1,6 @@
 [package]
 name = "zebra-chain"
-version = "3.0.0"
+version = "3.0.1"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "Core Zcash data structures"
 license = "MIT OR Apache-2.0"
@@ -132,7 +132,7 @@ proptest-derive = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
 rand_chacha = { workspace = true, optional = true }
 
-zebra-test = { path = "../zebra-test/", version = "2.0.0", optional = true }
+zebra-test = { path = "../zebra-test/", version = "2.0.1", optional = true }
 
 [dev-dependencies]
 # Benchmarks
@@ -152,7 +152,7 @@ rand_chacha = { workspace = true }
 
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 
-zebra-test = { path = "../zebra-test/", version = "2.0.0" }
+zebra-test = { path = "../zebra-test/", version = "2.0.1" }
 
 [[bench]]
 name = "block"
