@@ -1,6 +1,6 @@
 [package]
 name = "tower-batch-control"
-version = "1.0.0"
+version = "1.0.1"
 authors = ["Zcash Foundation <zebra@zfnd.org>", "Tower Maintainers <team@tower-rs.com>"]
 description = "Tower middleware for batch request processing"
 # # Legal
@@ -42,7 +42,7 @@ tokio-test = { workspace = true }
 tower-fallback = { path = "../tower-fallback/", version = "0.2.41" }
 tower-test = { workspace = true }
 
-zebra-test = { path = "../zebra-test/", version = "2.0.0" }
+zebra-test = { path = "../zebra-test/", version = "2.0.1" }
 
 [lints]
 workspace = true
