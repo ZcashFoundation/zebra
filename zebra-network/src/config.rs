@@ -806,15 +806,21 @@ impl<'de> Deserialize<'de> for Config {
                 let mut params_builder = testnet::Parameters::build();
 
                 if let Some(network_name) = network_name.clone() {
-                    params_builder = params_builder.with_network_name(network_name)
+                    params_builder = params_builder
+                        .with_network_name(network_name)
+                        .map_err(de::Error::custom)?
                 }
 
                 if let Some(network_magic) = network_magic {
-                    params_builder = params_builder.with_network_magic(Magic(network_magic));
+                    params_builder = params_builder
+                        .with_network_magic(Magic(network_magic))
+                        .map_err(de::Error::custom)?;
                 }
 
                 if let Some(genesis_hash) = genesis_hash {
-                    params_builder = params_builder.with_genesis_hash(genesis_hash);
+                    params_builder = params_builder
+                        .with_genesis_hash(genesis_hash)
+                        .map_err(de::Error::custom)?;
                 }
 
                 if let Some(slow_start_interval) = slow_start_interval {
@@ -824,11 +830,13 @@ impl<'de> Deserialize<'de> for Config {
                 }
 
                 if let Some(target_difficulty_limit) = target_difficulty_limit.clone() {
-                    params_builder = params_builder.with_target_difficulty_limit(
-                        target_difficulty_limit
-                            .parse::<U256>()
-                            .map_err(de::Error::custom)?,
-                    );
+                    params_builder = params_builder
+                        .with_target_difficulty_limit(
+                            target_difficulty_limit
+                                .parse::<U256>()
+                                .map_err(de::Error::custom)?,
+                        )
+                        .map_err(de::Error::custom)?;
                 }
 
                 if let Some(disable_pow) = disable_pow {
@@ -837,11 +845,15 @@ impl<'de> Deserialize<'de> for Config {
 
                 // Retain default Testnet activation heights unless there's an empty [testnet_parameters.activation_heights] section.
                 if let Some(activation_heights) = activation_heights {
-                    params_builder = params_builder.with_activation_heights(activation_heights)
+                    params_builder = params_builder
+                        .with_activation_heights(activation_heights)
+                        .map_err(de::Error::custom)?
                 }
 
                 if let Some(halving_interval) = pre_blossom_halving_interval {
-                    params_builder = params_builder.with_halving_interval(halving_interval.into())
+                    params_builder = params_builder
+                        .with_halving_interval(halving_interval.into())
+                        .map_err(de::Error::custom)?
                 }
 
                 // Set configured funding streams after setting any parameters that affect the funding stream address period.
@@ -864,7 +876,9 @@ impl<'de> Deserialize<'de> for Config {
                         params_builder.with_lockbox_disbursements(lockbox_disbursements);
                 }
 
-                params_builder = params_builder.with_checkpoints(checkpoints);
+                params_builder = params_builder
+                    .with_checkpoints(checkpoints)
+                    .map_err(de::Error::custom)?;
 
                 if let Some(true) = extend_funding_stream_addresses_as_required {
                     params_builder = params_builder.extend_funding_streams();
@@ -884,7 +898,7 @@ impl<'de> Deserialize<'de> for Config {
                 if network_name.is_none() && params_builder == testnet::Parameters::build() {
                     Network::new_default_testnet()
                 } else {
-                    params_builder.to_network()
+                    params_builder.to_network().map_err(de::Error::custom)?
                 }
             }
         };
