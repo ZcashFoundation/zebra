@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 This release is a stable version of the release candidate deploying NU6.1 on Mainnet. It fixes some issues that were found after
 the release candidate was published but otherwise mostly includes technical improvements and cleanup with relatively few user-visible changes.
 
-### Breaking Changes
+### Changed
 
 - Gated code behind the `tx_v6` feature flag behind the `zcash_unstable=nu7` config flag too ([#10060](https://github.com/ZcashFoundation/zebra/pull/10060))
 
@@ -18,10 +18,12 @@ the release candidate was published but otherwise mostly includes technical impr
 
 - Added ZIP 233 (Network Sustainability Mechanism) implementation  ([#8930](https://github.com/ZcashFoundation/zebra/pull/8930))
 - Populated `asm` field returned by Zebra's RPC methods with code in script outputs as well as script types ([#10019](https://github.com/ZcashFoundation/zebra/pull/10019))
+- Added a [CHANGELOG](https://github.com/ZcashFoundation/zebra/blob/main/zebra-rpc/qa/CHANGELOG.md) file to track changes in the python QA framework ([#10076](https://github.com/ZcashFoundation/zebra/pull/10076))
 
 ### Fixed
 
 - Updated Dockerfile to accept Cargo features for release builds ([#10075](https://github.com/ZcashFoundation/zebra/pull/10075))
+- Fixed the `docker build` command ([#10007](https://github.com/ZcashFoundation/zebra/pull/10007))
 - Fixed a bug in `z_validateaddress` around parsing Testnet transparent addresses on Regtest ([#10022](https://github.com/ZcashFoundation/zebra/pull/10022))
 - Re-enabled Docker provenance and SBOM attestations ([#10071](https://github.com/ZcashFoundation/zebra/pull/10071))
 - Fixed an issue where Zebra would panic in some edge cases around mempool transactions depending on other mempool transactions ([#10049](https://github.com/ZcashFoundation/zebra/pull/10049))
