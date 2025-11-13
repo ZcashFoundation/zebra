@@ -513,7 +513,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
     // Make sure the command was killed
     output.assert_was_killed()?;
 
-    let expected_run_dir_file_names = match cache_dir_check {
+    let (expected_run_dir_file_names, optional_run_dir_file_names) = match cache_dir_check {
         // we created the state directory, so it should still exist
         EphemeralCheck::ExistingDirectory => {
             assert_with_context!(
@@ -528,8 +528,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
                 cache_dir_check,
                 ignored_cache_dir.read_dir().unwrap().collect::<Vec<_>>()
             );
-
-            ["state", "network", "zebrad.toml"].iter()
+            (["state", "zebrad.toml"].iter(), ["network"].iter())
         }
 
         // we didn't create the state directory, so it should not exist
@@ -547,11 +546,16 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
                 ignored_cache_dir.read_dir().unwrap().collect::<Vec<_>>()
             );
 
-            ["network", "zebrad.toml"].iter()
+            (["zebrad.toml"].iter(), ["network"].iter())
         }
     };
 
-    let expected_run_dir_file_names = expected_run_dir_file_names.map(Into::into).collect();
+    let expected_run_dir_file_names: HashSet<std::ffi::OsString> =
+        expected_run_dir_file_names.map(Into::into).collect();
+
+    let optional_run_dir_file_names: HashSet<std::ffi::OsString> =
+        optional_run_dir_file_names.map(Into::into).collect();
+
     let run_dir_file_names = run_dir
         .path()
         .read_dir()
@@ -560,8 +564,17 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
         // ignore directory list order, because it can vary based on the OS and filesystem
         .collect::<HashSet<_>>();
 
+    let has_expected_file_paths = expected_run_dir_file_names
+        .iter()
+        .all(|expected_file_name| run_dir_file_names.contains(expected_file_name));
+
+    let has_only_allowed_file_paths = run_dir_file_names.iter().all(|file_name| {
+        optional_run_dir_file_names.contains(file_name)
+            || expected_run_dir_file_names.contains(file_name)
+    });
+
     assert_with_context!(
-        run_dir_file_names == expected_run_dir_file_names,
+        has_expected_file_paths && has_only_allowed_file_paths,
         &output,
         "run_dir not empty for ephemeral {:?} {:?}: expected {:?}, actual: {:?}",
         cache_dir_config,
