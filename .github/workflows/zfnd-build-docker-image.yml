@@ -71,12 +71,34 @@ env:
   CARGO_INCREMENTAL: ${{ vars.CARGO_INCREMENTAL }}
 
 jobs:
-  build:
-    name: Build images
-    if: github.repository_owner == 'ZcashFoundation'
-    timeout-minutes: 210
+  prepare-matrix:
+    name: Prepare build matrix
     runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Set build matrix
+        id: set-matrix
+        run: |
+          # Runtime builds: AMD64 + ARM64 (multi-arch)
+          # Other targets: AMD64 only (lightwalletd dependency)
+          if [[ "${{ inputs.dockerfile_target }}" == "runtime" ]]; then
+            MATRIX='{"include":[{"platform":"linux/amd64","runner":"ubuntu-latest"},{"platform":"linux/arm64","runner":"ubuntu-24.04-arm"}]}'
+          else
+            MATRIX='{"include":[{"platform":"linux/amd64","runner":"ubuntu-latest"}]}'
+          fi
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+          echo "Platforms: $(echo $MATRIX | jq -r '.include[].platform' | paste -sd ',' -)"
+
+  build:
+    name: Build images (${{ matrix.platform }})
+    needs: prepare-matrix
+    timeout-minutes: 210
+    runs-on: ${{ matrix.runner }}
     environment: ${{ github.event_name == 'release' && 'prod' || inputs.environment || 'dev' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare-matrix.outputs.matrix) }}
     outputs:
       image_digest: ${{ steps.docker_build.outputs.digest || steps.docker_build_no_attestations.outputs.digest }}
       image_name: ${{ fromJSON(steps.docker_build.outputs.metadata || steps.docker_build_no_attestations.outputs.metadata)['image.name'] }}
@@ -172,6 +194,7 @@ jobs:
         if: github.repository_owner == 'ZcashFoundation'
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 #v6.18.0
         with:
+          platforms: ${{ matrix.platform }}
           target: ${{ inputs.dockerfile_target }}
           context: .
           file: ${{ inputs.dockerfile_path }}
@@ -197,6 +220,7 @@ jobs:
         if: github.repository_owner != 'ZcashFoundation'
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 #v6.18.0
         with:
+          platforms: ${{ matrix.platform }}
           target: ${{ inputs.dockerfile_target }}
           context: .
           file: ${{ inputs.dockerfile_path }}
@@ -226,9 +250,10 @@ jobs:
         uses: docker/scout-action@f8c776824083494ab0d56b8105ba2ca85c86e4de #v1.18.2
         # We only run Docker Scout on the `runtime` target, as the other targets are not meant to be released
         # and are commonly used for testing, and thus are ephemeral.
+        # Run only on AMD64 to avoid running twice in matrix builds
         # TODO: Remove the `contains` check once we have a better way to determine if just new vulnerabilities are present.
         # See: https://github.com/docker/scout-action/issues/56
-        if: ${{ inputs.dockerfile_target == 'runtime' && contains(github.event.pull_request.title, 'Release v') }}
+        if: ${{ matrix.platform == 'linux/amd64' && inputs.dockerfile_target == 'runtime' && contains(github.event.pull_request.title, 'Release v') }}
         with:
           command: cves,recommendations,compare,environment
           image: us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }}:${{ steps.meta.outputs.version }}
