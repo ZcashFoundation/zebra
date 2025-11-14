@@ -11,8 +11,9 @@ use tracing::instrument;
 use zebra_chain::{block, transparent};
 
 use crate::{
-    error::QueueAndCommitError, BoxError, CheckpointVerifiedBlock, CommitSemanticallyVerifiedError,
-    NonFinalizedState, SemanticallyVerifiedBlock,
+    error::{CommitBlockError, CommitCheckpointVerifiedError},
+    CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, KnownBlock, NonFinalizedState,
+    SemanticallyVerifiedBlock,
 };
 
 #[cfg(test)]
@@ -21,7 +22,7 @@ mod tests;
 /// A queued checkpoint verified block, and its corresponding [`Result`] channel.
 pub type QueuedCheckpointVerified = (
     CheckpointVerifiedBlock,
-    oneshot::Sender<Result<block::Hash, BoxError>>,
+    oneshot::Sender<Result<block::Hash, CommitCheckpointVerifiedError>>,
 );
 
 /// A queued semantically verified block, and its corresponding [`Result`] channel.
@@ -145,9 +146,11 @@ impl QueuedBlocks {
             let parent_hash = &expired_block.block.header.previous_block_hash;
 
             // we don't care if the receiver was dropped
-            let _ = expired_sender.send(Err(
-                QueueAndCommitError::new_pruned(expired_block.height).into()
-            ));
+            let _ = expired_sender.send(Err(CommitBlockError::new_duplicate(
+                Some(expired_block.height.into()),
+                KnownBlock::Finalized,
+            )
+            .into()));
 
             // TODO: only remove UTXOs if there are no queued blocks with that UTXO
             //       (known_utxos is best-effort, so this is ok for now)
