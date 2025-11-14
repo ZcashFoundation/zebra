@@ -12,30 +12,18 @@ use std::fmt;
 use chrono::{DateTime, Duration, Utc};
 use hex::{FromHex, ToHex};
 
+use strum::{EnumIter, IntoEnumIterator};
+
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
-
-/// A list of network upgrades in the order that they must be activated.
-const NETWORK_UPGRADES_IN_ORDER: &[NetworkUpgrade] = &[
-    Genesis,
-    BeforeOverwinter,
-    Overwinter,
-    Sapling,
-    Blossom,
-    Heartwood,
-    Canopy,
-    Nu5,
-    Nu6,
-    Nu6_1,
-    #[cfg(any(test, feature = "zebra-test"))]
-    Nu7,
-];
 
 /// A Zcash network upgrade.
 ///
 /// Network upgrades change the Zcash network protocol or consensus rules. Note that they have no
 /// designated codenames from NU5 onwards.
-#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Ord, PartialOrd)]
+#[derive(
+    Copy, Clone, EnumIter, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Ord, PartialOrd,
+)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum NetworkUpgrade {
     /// The Zcash protocol for a Genesis block.
@@ -292,9 +280,8 @@ impl Network {
     /// Returns a vector of all implicit and explicit network upgrades for `network`,
     /// in ascending height order.
     pub fn full_activation_list(&self) -> Vec<(block::Height, NetworkUpgrade)> {
-        NETWORK_UPGRADES_IN_ORDER
-            .iter()
-            .map_while(|&nu| Some((NetworkUpgrade::activation_height(&nu, self)?, nu)))
+        NetworkUpgrade::iter()
+            .filter_map(|nu| Some((NetworkUpgrade::activation_height(&nu, self)?, nu)))
             .collect()
     }
 }
@@ -516,7 +503,7 @@ impl NetworkUpgrade {
 
     /// Returns an iterator over [`NetworkUpgrade`] variants.
     pub fn iter() -> impl DoubleEndedIterator<Item = NetworkUpgrade> {
-        NETWORK_UPGRADES_IN_ORDER.iter().copied()
+        <Self as IntoEnumIterator>::iter()
     }
 }
 
@@ -555,5 +542,43 @@ impl ConsensusBranchId {
     /// Returns None if the network has no branch id at this height.
     pub fn current(network: &Network, height: block::Height) -> Option<ConsensusBranchId> {
         NetworkUpgrade::current(network, height).branch_id()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A list of network upgrades in the order that they must be activated.
+    const NETWORK_UPGRADES_IN_ORDER: &[NetworkUpgrade] = &[
+        Genesis,
+        BeforeOverwinter,
+        Overwinter,
+        Sapling,
+        Blossom,
+        Heartwood,
+        Canopy,
+        Nu5,
+        Nu6,
+        Nu6_1,
+        #[cfg(any(test, feature = "zebra-test"))]
+        Nu7,
+    ];
+
+    #[test]
+    fn network_upgrade_iter_matches_order_constant() {
+        let iter_upgrades: Vec<NetworkUpgrade> = NetworkUpgrade::iter().collect();
+        let expected_upgrades: Vec<NetworkUpgrade> = NETWORK_UPGRADES_IN_ORDER.to_vec();
+
+        assert_eq!(iter_upgrades, expected_upgrades);
+    }
+
+    #[test]
+    fn full_activation_list_contains_all_upgrades() {
+        let network = Network::Mainnet;
+        let full_list = network.full_activation_list();
+
+        // NU7 is only included in tests; on Mainnet, NU7 isn’t live yet, so we subtract 1 here.
+        assert_eq!(full_list.len(), NetworkUpgrade::iter().count() - 1);
     }
 }
