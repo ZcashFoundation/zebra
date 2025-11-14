@@ -6,8 +6,9 @@ use chrono::{DateTime, Utc};
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
-    block::{self, Block, ChainHistoryMmrRootHash},
+    block::{self, merkle::AuthDataRoot, Block, ChainHistoryMmrRootHash},
     block_info::BlockInfo,
+    history_tree::HistoryTree,
     orchard,
     parameters::Network,
     sapling,
@@ -16,6 +17,7 @@ use zebra_chain::{
     transaction::{self, Transaction},
     transparent,
     value_balance::ValueBalance,
+    work::difficulty::U256,
 };
 
 use zebra_chain::work::difficulty::CompactDifficulty;
@@ -389,6 +391,21 @@ pub enum ReadResponse {
         BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<orchard::tree::Node>>,
     ),
 
+    /// Response to [`ReadRequest::HistoryTree`] with the specified history tree.
+    HistoryTree(Option<Arc<HistoryTree>>),
+
+    /// Response to [`ReadRequest::HistoryNode`] with the specified history tree.
+    HistoryNode(Option<zebra_chain::primitives::zcash_history::Entry>),
+
+    /// Response to [`ReadRequest::HistoryNode`] with the specified auth data root.
+    AuthDataRoot(Option<AuthDataRoot>),
+
+    /// Response to [`ReadRequest::FirstBlockWithTotalWork`] with the specified height and hash.
+    FirstBlockWithTotalWork(Option<(block::Height, block::Hash)>),
+
+    /// Response to [`ReadRequest::TotalWork`] with the specified total work.
+    TotalWork(Option<U256>),
+
     /// Response to [`ReadRequest::AddressBalance`] with the total balance of the addresses,
     /// and the total received funds, including change.
     AddressBalance {
@@ -522,6 +539,11 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::OrchardTree(_)
             | ReadResponse::SaplingSubtrees(_)
             | ReadResponse::OrchardSubtrees(_)
+            | ReadResponse::HistoryTree(_)
+            | ReadResponse::HistoryNode(_)
+            | ReadResponse::AuthDataRoot(_)
+            | ReadResponse:: FirstBlockWithTotalWork(_)
+            | ReadResponse::TotalWork(_)
             | ReadResponse::AddressBalance { .. }
             | ReadResponse::AddressesTransactionIds(_)
             | ReadResponse::AddressUtxos(_)

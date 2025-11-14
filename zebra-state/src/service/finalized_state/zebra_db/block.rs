@@ -20,7 +20,7 @@ use itertools::Itertools;
 
 use zebra_chain::{
     amount::NonNegative,
-    block::{self, Block, Height},
+    block::{self, merkle::AuthDataRoot, Block, Height},
     orchard,
     parallel::tree::NoteCommitmentTrees,
     parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
@@ -411,6 +411,17 @@ impl ZebraDb {
         }
 
         Some(transaction_hashes.into())
+    }
+
+    /// Returns the [`AuthDataRoot`] in the block with `hash_or_height`,
+    /// if it exists in this chain.
+    ///
+    /// Returns `None` if the block is not found.
+    pub fn auth_data_root(&self, hash_or_height: HashOrHeight) -> Option<AuthDataRoot> {
+        // Block
+        let block = self.block(hash_or_height)?;
+
+        Some(block.auth_data_root())
     }
 
     // Write block methods

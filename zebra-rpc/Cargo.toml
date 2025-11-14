@@ -89,6 +89,9 @@ zcash_protocol = { workspace = true }
 zcash_script = { workspace = true }
 zcash_transparent = { workspace = true }
 
+# For the `gethistorynode` RPC method
+zcash_history.workspace = true
+bytemuck = {version = "1.22", features = ["derive"] }
 sapling-crypto = { workspace = true }
 
 # Test-only feature proptest-impl
