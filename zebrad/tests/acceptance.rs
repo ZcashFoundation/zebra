@@ -177,7 +177,9 @@ use zebra_rpc::{
     server::OPENED_RPC_ENDPOINT_MSG,
     SubmitBlockChannel,
 };
-use zebra_state::{constants::LOCK_FILE_ERROR, state_database_format_version_in_code};
+use zebra_state::{
+    constants::LOCK_FILE_ERROR, state_database_format_version_in_code, SemanticallyVerifiedBlock,
+};
 use zebra_test::{
     args,
     command::{to_regex::CollectRegexSet, ContextFrom},
@@ -3154,10 +3156,12 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
 
         header.previous_block_hash = chain_info.tip_hash;
 
+        let mut semantically_verified: SemanticallyVerifiedBlock = Arc::new(block.clone()).into();
+        semantically_verified.block_miner_fees = Some(0.try_into().unwrap());
         let Response::Committed(block_hash) = state2
             .clone()
             .oneshot(zebra_state::Request::CommitSemanticallyVerifiedBlock(
-                Arc::new(block.clone()).into(),
+                semantically_verified,
             ))
             .await
             .map_err(|err| eyre!(err))?
@@ -3308,6 +3312,10 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     use zebra_node_services::mempool;
     use zebra_rpc::client::HexData;
     use zebra_test::mock_service::MockService;
+
+    #[cfg(zcash_unstable = "zip234")]
+    use zebra_chain::amount::{Amount, MAX_MONEY};
+
     let _init_guard = zebra_test::init();
 
     tracing::info!("running nu6_funding_streams_and_coinbase_balance test");
@@ -3523,6 +3531,8 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         vec![],
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         None,
+        #[cfg(zcash_unstable = "zip234")]
+        Amount::new(MAX_MONEY),
     )
     .expect("coinbase transaction should be valid under the given parameters");
 
@@ -3583,6 +3593,8 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         vec![],
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         None,
+        #[cfg(zcash_unstable = "zip234")]
+        Amount::new(MAX_MONEY),
     )
     .expect("coinbase transaction should be valid under the given parameters");
 

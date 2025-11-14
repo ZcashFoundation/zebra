@@ -4,6 +4,8 @@ use std::{io, sync::Arc};
 use thiserror::Error;
 use zcash_protocol::value::BalanceError;
 
+use crate::parameters::subsidy::SubsidyError;
+
 // TODO: Move all these enums into a common enum at the bottom.
 
 /// Errors related to random bytes generation.
@@ -112,3 +114,47 @@ impl PartialEq for Error {
 }
 
 impl Eq for Error {}
+
+#[derive(Error, Clone, Debug, PartialEq, Eq)]
+#[allow(missing_docs)]
+pub enum CoinbaseTransactionError {
+    #[error("block has no transactions")]
+    NoTransactions,
+
+    #[error("first transaction must be coinbase")]
+    Position,
+
+    #[error("coinbase input found in non-coinbase transaction")]
+    AfterFirst,
+
+    #[error("coinbase transaction MUST NOT have any JoinSplit descriptions")]
+    HasJoinSplit,
+
+    #[error("coinbase transaction MUST NOT have any Spend descriptions")]
+    HasSpend,
+
+    #[error("coinbase transaction MUST NOT have any Output descriptions pre-Heartwood")]
+    HasOutputPreHeartwood,
+
+    #[error("coinbase transaction MUST NOT have the EnableSpendsOrchard flag set")]
+    HasEnableSpendsOrchard,
+
+    #[error("coinbase transaction Sapling or Orchard outputs MUST be decryptable with an all-zero outgoing viewing key")]
+    OutputsNotDecryptable,
+
+    #[error("coinbase inputs MUST NOT exist in mempool")]
+    InMempool,
+
+    #[error(
+        "coinbase expiry {expiry_height:?} must be the same as the block {block_height:?} \
+         after NU5 activation, failing transaction: {transaction_hash:?}"
+    )]
+    ExpiryBlockHeight {
+        expiry_height: Option<crate::block::Height>,
+        block_height: crate::block::Height,
+        transaction_hash: crate::transaction::Hash,
+    },
+
+    #[error("coinbase transaction failed subsidy validation")]
+    Subsidy(#[from] SubsidyError),
+}

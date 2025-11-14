@@ -23,13 +23,14 @@ use zcash_script::script::Evaluable;
 use zebra_chain::{
     amount::{self, Amount, NegativeOrZero, NonNegative},
     block::{
-        self, Block, ChainHistoryBlockTxAuthCommitmentHash, ChainHistoryMmrRootHash, Height,
-        MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION,
+        self, subsidy::funding_streams::funding_stream_address, Block,
+        ChainHistoryBlockTxAuthCommitmentHash, ChainHistoryMmrRootHash, Height, MAX_BLOCK_BYTES,
+        ZCASH_BLOCK_VERSION,
     },
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     parameters::{
-        subsidy::{block_subsidy, funding_stream_values, miner_subsidy, FundingStreamReceiver},
+        subsidy::{funding_stream_values, miner_subsidy, FundingStreamReceiver},
         Network, NetworkUpgrade,
     },
     serialization::{DateTime32, ZcashDeserializeInto},
@@ -43,9 +44,7 @@ use zebra_chain::{
 #[allow(unused_imports)]
 use zebra_chain::serialization::BytesInDisplayOrder;
 
-use zebra_consensus::{
-    funding_stream_address, router::service_trait::BlockVerifierService, MAX_BLOCK_SIGOPS,
-};
+use zebra_consensus::{router::service_trait::BlockVerifierService, MAX_BLOCK_SIGOPS};
 use zebra_node_services::mempool::{self, TransactionDependencies};
 use zebra_state::GetBlockTemplateChainInfo;
 
@@ -66,6 +65,12 @@ pub use parameters::{
     GetBlockTemplateCapability, GetBlockTemplateParameters, GetBlockTemplateRequestMode,
 };
 pub use proposal::{BlockProposalResponse, BlockTemplateTimeSource};
+
+#[cfg(not(zcash_unstable = "zip234"))]
+use zebra_chain::parameters::subsidy::block_subsidy_pre_nsm;
+
+#[cfg(zcash_unstable = "zip234")]
+use zebra_chain::parameters::subsidy::block_subsidy;
 
 /// An alias to indicate that a usize value represents the depth of in-block dependencies of a
 /// transaction.
@@ -283,6 +288,7 @@ impl BlockTemplateResponse {
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))] zip233_amount: Option<
             Amount<NonNegative>,
         >,
+        #[cfg(zcash_unstable = "zip234")] money_reserve: Amount<NonNegative>,
     ) -> Self {
         // Calculate the next block height.
         let next_block_height =
@@ -336,6 +342,8 @@ impl BlockTemplateResponse {
             extra_coinbase_data,
             #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             zip233_amount,
+            #[cfg(zcash_unstable = "zip234")]
+            money_reserve,
         )
         .expect("coinbase should be valid under the given parameters");
 
@@ -807,9 +815,17 @@ pub fn generate_coinbase_and_roots(
     #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))] zip233_amount: Option<
         Amount<NonNegative>,
     >,
+    #[cfg(zcash_unstable = "zip234")] money_reserve: Amount<NonNegative>,
 ) -> Result<(TransactionTemplate<NegativeOrZero>, DefaultRoots), &'static str> {
     let miner_fee = calculate_miner_fee(mempool_txs);
-    let outputs = standard_coinbase_outputs(network, height, miner_address, miner_fee);
+    let outputs = standard_coinbase_outputs(
+        network,
+        height,
+        miner_address,
+        miner_fee,
+        #[cfg(zcash_unstable = "zip234")]
+        money_reserve,
+    );
     let current_nu = NetworkUpgrade::current(network, height);
 
     let tx = match current_nu {
@@ -820,9 +836,15 @@ pub fn generate_coinbase_and_roots(
         #[cfg(not(all(zcash_unstable = "nu7", feature = "tx_v6")))]
         NetworkUpgrade::Nu7 => Transaction::new_v5_coinbase(network, height, outputs, miner_data),
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-        NetworkUpgrade::Nu7 => {
-            Transaction::new_v6_coinbase(network, height, outputs, miner_data, zip233_amount)
-        }
+        NetworkUpgrade::Nu7 => Transaction::new_v6_coinbase(
+            network,
+            height,
+            outputs,
+            miner_data,
+            zip233_amount,
+            #[cfg(zcash_unstable = "zip235")]
+            miner_fee,
+        ),
         _ => Err("Zebra does not support generating pre-Canopy coinbase transactions")?,
     }
     .into();
@@ -863,8 +885,16 @@ pub fn standard_coinbase_outputs(
     height: Height,
     miner_address: &Address,
     miner_fee: Amount<NonNegative>,
+    #[cfg(zcash_unstable = "zip234")] money_reserve: Amount<NonNegative>,
 ) -> Vec<(Amount<NonNegative>, transparent::Script)> {
-    let expected_block_subsidy = block_subsidy(height, network).expect("valid block subsidy");
+    #[cfg(not(zcash_unstable = "zip234"))]
+    let expected_block_subsidy =
+        block_subsidy_pre_nsm(height, network).expect("valid block subsidy");
+
+    #[cfg(zcash_unstable = "zip234")]
+    let expected_block_subsidy =
+        block_subsidy(height, network, money_reserve).expect("valid block subsidy");
+
     let funding_streams = funding_stream_values(height, network, expected_block_subsidy)
         .expect("funding stream value calculations are valid for reasonable chain heights");
 
