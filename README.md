@@ -55,7 +55,7 @@ compiler. Below are quick summaries for installing these dependencies.
      `libclang`, `libclang-dev`, `llvm`, or `llvm-dev`;
    - **clang** or another C++ compiler (`g++,` which is for all platforms or
      `Xcode`, which is for macOS);
-   - **[`protoc`](https://grpc.io/docs/protoc-installation/)**.
+   - **[`protoc`](https://grpc.io/docs/protoc-installation/)** (optional).
 
 </details>
 
