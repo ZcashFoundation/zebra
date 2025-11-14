@@ -43,7 +43,8 @@ pub(super) fn restore_backup(
     }
 
     for (height, blocks) in store {
-        for block in blocks {
+        #[allow(unused_mut)]
+        for mut block in blocks {
             #[cfg(test)]
             let commit_result = if non_finalized_state
                 .any_chain_contains(&block.block.header.previous_block_hash)
@@ -54,8 +55,11 @@ pub(super) fn restore_backup(
             };
 
             #[cfg(not(test))]
-            let commit_result =
-                validate_and_commit_non_finalized(finalized_state, &mut non_finalized_state, block);
+            let commit_result = validate_and_commit_non_finalized(
+                finalized_state,
+                &mut non_finalized_state,
+                &mut block,
+            );
 
             // Re-computes the block hash in case the hash from the filename is wrong.
             if let Err(commit_error) = commit_result {

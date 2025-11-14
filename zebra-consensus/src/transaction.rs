@@ -28,6 +28,7 @@ use zcash_protocol::value::ZatBalance;
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block,
+    error::CoinbaseTransactionError,
     parameters::{Network, NetworkUpgrade},
     primitives::Groth16Proof,
     serialization::DateTime32,
@@ -418,7 +419,7 @@ where
 
             // Validate the coinbase input consensus rules
             if req.is_mempool() && tx.is_coinbase() {
-                return Err(TransactionError::CoinbaseInMempool);
+                return Err(TransactionError::Coinbase(CoinbaseTransactionError::InMempool));
             }
 
             if tx.is_coinbase() {
