@@ -4,10 +4,15 @@
 
 use std::collections::HashMap;
 
+use crate::{
+    amount::Amount,
+    parameters::{
+        subsidy::{block_subsidy_pre_nsm, funding_stream_values, FundingStreamReceiver},
+        NetworkKind,
+        NetworkUpgrade::*,
+    },
+};
 use color_eyre::Report;
-use zebra_chain::amount::Amount;
-use zebra_chain::parameters::NetworkUpgrade::*;
-use zebra_chain::parameters::{subsidy::FundingStreamReceiver, NetworkKind};
 
 use crate::block::subsidy::new_coinbase_script;
 
@@ -89,7 +94,8 @@ fn test_funding_stream_values() -> Result<(), Report> {
         nu6_1_fund_height_range.end,
         nu6_1_fund_height_range.end.next().unwrap(),
     ] {
-        let fsv = funding_stream_values(height, network, block_subsidy(height, network)?).unwrap();
+        let fsv = funding_stream_values(height, network, block_subsidy_pre_nsm(height, network)?)
+            .unwrap();
 
         if height < canopy_activation_height {
             assert!(fsv.is_empty());

@@ -10,14 +10,15 @@ use tokio::sync::{
 
 use tracing::Span;
 use zebra_chain::{
+    amount::DeferredPoolBalanceChange,
     block::{self, Height},
     transparent::EXTRA_ZEBRA_COINBASE_DATA,
 };
 
 use crate::{
+    check::initial_contextual_validity,
     constants::MAX_BLOCK_REORG_HEIGHT,
     service::{
-        check,
         finalized_state::{FinalizedState, ZebraDb},
         non_finalized_state::NonFinalizedState,
         queued_blocks::{QueuedCheckpointVerified, QueuedSemanticallyVerified},
@@ -25,6 +26,14 @@ use crate::{
     },
     SemanticallyVerifiedBlock, ValidateContextError,
 };
+
+use zebra_chain::parameters::subsidy::{funding_stream_values, FundingStreamReceiver};
+
+#[cfg(not(zcash_unstable = "zip234"))]
+use zebra_chain::parameters::subsidy::block_subsidy_pre_nsm;
+
+#[cfg(zcash_unstable = "zip234")]
+use zebra_chain::{amount::MAX_MONEY, parameters::subsidy::block_subsidy};
 
 // These types are used in doc links
 #[allow(unused_imports)]
@@ -52,15 +61,15 @@ const PARENT_ERROR_MAP_LIMIT: usize = MAX_BLOCK_REORG_HEIGHT as usize * 2;
 pub(crate) fn validate_and_commit_non_finalized(
     finalized_state: &ZebraDb,
     non_finalized_state: &mut NonFinalizedState,
-    prepared: SemanticallyVerifiedBlock,
+    prepared: &mut SemanticallyVerifiedBlock,
 ) -> Result<(), ValidateContextError> {
-    check::initial_contextual_validity(finalized_state, non_finalized_state, &prepared)?;
+    initial_contextual_validity(finalized_state, non_finalized_state, prepared)?;
     let parent_hash = prepared.block.header.previous_block_hash;
 
     if finalized_state.finalized_tip_hash() == parent_hash {
-        non_finalized_state.commit_new_chain(prepared, finalized_state)?;
+        non_finalized_state.commit_new_chain(prepared.clone(), finalized_state)?;
     } else {
-        non_finalized_state.commit_block(prepared, finalized_state)?;
+        non_finalized_state.commit_block(prepared.clone(), finalized_state)?;
     }
 
     Ok(())
@@ -251,7 +260,7 @@ impl WriteBlockWorkerTask {
 
         // Write all the finalized blocks sent by the state,
         // until the state closes the finalized block channel's sender.
-        while let Some(ordered_block) = finalized_block_write_receiver.blocking_recv() {
+        while let Some(mut ordered_block) = finalized_block_write_receiver.blocking_recv() {
             // TODO: split these checks into separate functions
 
             if invalid_block_reset_sender.is_closed() {
@@ -284,6 +293,42 @@ impl WriteBlockWorkerTask {
                 std::mem::drop(ordered_block);
                 continue;
             }
+
+            // We can't get the block subsidy for blocks with heights in the slow start interval, so we
+            // omit the calculation of the expected deferred amount.
+            let network = finalized_state.network();
+            let ordered_block_height = ordered_block.0.height;
+            let expected_deferred_amount = if ordered_block_height > network.slow_start_interval() {
+                let block_subsidy = {
+                    #[cfg(not(zcash_unstable = "zip234"))]
+                    {
+                        block_subsidy_pre_nsm(ordered_block_height, &network)
+                            .expect("valid block subsidy")
+                    }
+
+                    #[cfg(zcash_unstable = "zip234")]
+                    {
+                        let money_reserve = if ordered_block_height > 1.try_into().unwrap() {
+                            finalized_state.db.finalized_value_pool().money_reserve()
+                        } else {
+                            MAX_MONEY.try_into().unwrap()
+                        };
+                        block_subsidy(ordered_block_height, &network, money_reserve)
+                            .expect("valid block subsidy")
+                    }
+                };
+                funding_stream_values(ordered_block_height, &network, block_subsidy)
+                    .expect("we always expect a funding stream hashmap response even if empty")
+                    .remove(&FundingStreamReceiver::Deferred)
+            } else {
+                None
+            };
+            let deferred_pool_balance_change = expected_deferred_amount
+                .unwrap_or_default()
+                .checked_sub(network.lockbox_disbursement_total_amount(ordered_block_height))
+                .map(DeferredPoolBalanceChange::new);
+
+            ordered_block.0.deferred_pool_balance_change = deferred_pool_balance_change;
 
             // Try committing the block
             match finalized_state
@@ -349,7 +394,7 @@ impl WriteBlockWorkerTask {
                 }
             };
 
-            let Some((queued_child, rsp_tx)) = queued_child_and_rsp_tx else {
+            let Some((mut queued_child, rsp_tx)) = queued_child_and_rsp_tx else {
                 update_latest_chain_channels(
                     non_finalized_state,
                     chain_tip_sender,
@@ -375,7 +420,7 @@ impl WriteBlockWorkerTask {
                 validate_and_commit_non_finalized(
                     &finalized_state.db,
                     non_finalized_state,
-                    queued_child,
+                    &mut queued_child,
                 )
             };
 
