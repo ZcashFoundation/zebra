@@ -285,7 +285,12 @@ panic = "abort"
 #     - add "-flto=thin" to all C/C++ code builds
 #     - see https://doc.rust-lang.org/rustc/linker-plugin-lto.html#cc-code-as-a-dependency-in-rust
 lto = "thin"
+# Enable line numbers in stack traces. Note that we re-disable it for dependencies below.
+debug = "line-tables-only"
 
+[profile.release.package."*"]
+# Disable debug info for dependencies to reduce binary size.
+debug = false
 
 [workspace.lints.rust]
 # The linter should ignore these expected config flags/values
