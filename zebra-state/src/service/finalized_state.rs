@@ -38,6 +38,9 @@ mod disk_db;
 mod disk_format;
 mod zebra_db;
 
+#[cfg(feature = "elasticsearch")]
+mod elastic;
+
 #[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;
 
@@ -54,6 +57,9 @@ pub use disk_format::{
     MAX_ON_DISK_HEIGHT,
 };
 pub use zebra_db::ZebraDb;
+
+#[cfg(feature = "elasticsearch")]
+use elastic::ElasticBlockObject;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use disk_format::KV;
@@ -519,8 +525,9 @@ impl FinalizedState {
             );
 
             // Insert the block itself.
+            let elastic_obj = ElasticBlockObject::from(block.as_ref());
             self.elastic_blocks
-                .push(serde_json::json!(block).to_string());
+                .push(serde_json::to_string(&elastic_obj).unwrap());
 
             // We are in bulk time, insert to ES all we have.
             if self.elastic_blocks.len() >= blocks_size_to_dump {
