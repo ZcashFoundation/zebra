@@ -102,8 +102,9 @@ pub enum Commitment {
 pub const CHAIN_HISTORY_ACTIVATION_RESERVED: [u8; 32] = [0; 32];
 
 impl Commitment {
-    /// Returns `bytes` as the Commitment variant for `network` and `height`.
-    //
+    /// Returns `bytes` as the [`Commitment`] variant as specified in [§7.6].
+    ///
+    /// [§7.6]: (https://zips.z.cash/protocol/protocol.pdf)
     // TODO: rename as from_bytes_in_serialized_order()
     pub(super) fn from_bytes(
         bytes: [u8; 32],
@@ -113,38 +114,42 @@ impl Commitment {
         use Commitment::*;
         use CommitmentError::*;
 
-        match NetworkUpgrade::current_with_activation_height(network, height) {
-            (Genesis | BeforeOverwinter | Overwinter, _) => Ok(PreSaplingReserved(bytes)),
-            (Sapling | Blossom, _) => match sapling::tree::Root::try_from(bytes) {
+        match NetworkUpgrade::current(network, height) {
+            Genesis | BeforeOverwinter | Overwinter => Ok(PreSaplingReserved(bytes)),
+
+            Sapling | Blossom => match sapling::tree::Root::try_from(bytes) {
                 Ok(root) => Ok(FinalSaplingRoot(root)),
                 _ => Err(InvalidSapingRootBytes),
             },
-            (Heartwood, activation_height) if height == activation_height => {
-                if bytes == CHAIN_HISTORY_ACTIVATION_RESERVED {
-                    Ok(ChainHistoryActivationReserved)
+
+            Heartwood | Canopy => {
+                // [ZIP-221], activated at Heartwood, mandates:
+                //
+                // > In the block that activates this ZIP, `hashLightClientRoot` MUST be set to all
+                // > zero bytes.
+                //
+                // On Regtest, Heartwood can activate at the same height as other NUs, so the above
+                // can hold for Canopy as well, but not other NUs because the field adheres to
+                // different rules for them.
+                //
+                // [ZIP-221]: (https://zips.z.cash/zip-0221)
+                if Some(height) == Heartwood.activation_height(network) {
+                    if bytes == CHAIN_HISTORY_ACTIVATION_RESERVED {
+                        Ok(ChainHistoryActivationReserved)
+                    } else {
+                        Err(InvalidChainHistoryActivationReserved { actual: bytes })
+                    }
                 } else {
-                    Err(InvalidChainHistoryActivationReserved { actual: bytes })
+                    Ok(ChainHistoryRoot(ChainHistoryMmrRootHash(bytes)))
                 }
             }
-            // It's possible for the current network upgrade to be Heartwood or any network upgrade after Heartwood at
-            // the Heartwood activation height on Regtest or configured test networks. The reserved chain history root
-            // activation bytes should still be used pre-NU5.
-            //
-            // See <https://zips.z.cash/zip-0221> and the [protocol specification §7.6](https://zips.z.cash/protocol/protocol.pdf).
-            (Canopy, _) if Some(height) == Heartwood.activation_height(network) => {
-                if bytes == CHAIN_HISTORY_ACTIVATION_RESERVED {
-                    Ok(ChainHistoryActivationReserved)
-                } else {
-                    Err(InvalidChainHistoryActivationReserved { actual: bytes })
-                }
-            }
-            (Heartwood | Canopy, _) => Ok(ChainHistoryRoot(ChainHistoryMmrRootHash(bytes))),
-            (Nu5 | Nu6 | Nu6_1 | Nu7, _) => Ok(ChainHistoryBlockTxAuthCommitment(
+
+            Nu5 | Nu6 | Nu6_1 | Nu7 => Ok(ChainHistoryBlockTxAuthCommitment(
                 ChainHistoryBlockTxAuthCommitmentHash(bytes),
             )),
 
             #[cfg(zcash_unstable = "zfuture")]
-            (ZFuture, _) => Ok(ChainHistoryBlockTxAuthCommitment(
+            ZFuture => Ok(ChainHistoryBlockTxAuthCommitment(
                 ChainHistoryBlockTxAuthCommitmentHash(bytes),
             )),
         }
