@@ -105,7 +105,11 @@ impl Block {
             None => Err(CommitmentError::MissingBlockHeight {
                 block_hash: self.hash(),
             }),
-            Some(height) => Commitment::from_bytes(*self.header.commitment_bytes, network, height),
+            Some(height) => Commitment::from_bytes_in_serialized_order(
+                *self.header.commitment_bytes,
+                network,
+                height,
+            ),
         }
     }
 

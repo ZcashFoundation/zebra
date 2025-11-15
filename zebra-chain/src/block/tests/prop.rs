@@ -79,7 +79,7 @@ proptest! {
 
         // just skip the test if the bytes don't parse, because there's nothing
         // to compare with
-        if let Ok(commitment) = Commitment::from_bytes(bytes, &network, block_height) {
+        if let Ok(commitment) = Commitment::from_bytes_in_serialized_order(bytes, &network, block_height) {
             let other_bytes = commitment.to_bytes();
 
             prop_assert_eq![bytes, other_bytes];

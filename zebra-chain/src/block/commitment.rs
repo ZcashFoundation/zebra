@@ -105,8 +105,7 @@ impl Commitment {
     /// Returns `bytes` as the [`Commitment`] variant as specified in [§7.6].
     ///
     /// [§7.6]: (https://zips.z.cash/protocol/protocol.pdf)
-    // TODO: rename as from_bytes_in_serialized_order()
-    pub(super) fn from_bytes(
+    pub(super) fn from_bytes_in_serialized_order(
         bytes: [u8; 32],
         network: &Network,
         height: block::Height,

@@ -132,7 +132,7 @@ impl Header {
         network: &Network,
         height: Height,
     ) -> Result<Commitment, CommitmentError> {
-        Commitment::from_bytes(*self.commitment_bytes, network, height)
+        Commitment::from_bytes_in_serialized_order(*self.commitment_bytes, network, height)
     }
 
     /// Compute the hash of this header.
