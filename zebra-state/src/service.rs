@@ -54,6 +54,7 @@ use crate::{
         non_finalized_state::{Chain, NonFinalizedState},
         pending_utxos::PendingUtxos,
         queued_blocks::QueuedBlocks,
+        read::difficulty::gbt_chain_info,
         watch_receiver::WatchReceiver,
     },
     BoxError, CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, Config, ReadRequest,
@@ -2076,17 +2077,12 @@ impl Service<ReadRequest> for ReadStateService {
                         //
                         // In that case, the `getblocktemplate` RPC will return an error because Zebra
                         // is not synced to the tip. That check happens before the RPC makes this request.
-                        let get_block_template_info =
-                            read::difficulty::get_block_template_chain_info(
-                                &latest_non_finalized_state,
-                                &state.db,
-                                &state.network,
-                            );
 
-                        // The work is done in the future.
+                        let gbt_chain_info = gbt_chain_info(&latest_non_finalized_state, &state.db);
+
                         timer.finish(module_path!(), line!(), "ReadRequest::ChainInfo");
 
-                        get_block_template_info.map(ReadResponse::ChainInfo)
+                        gbt_chain_info.map(ReadResponse::ChainInfo)
                     })
                 })
                 .wait_for_panics()

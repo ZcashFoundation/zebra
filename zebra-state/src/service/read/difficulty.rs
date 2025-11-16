@@ -37,43 +37,6 @@ use crate::{
 /// This is a Zebra-specific standard rule.
 pub const EXTRA_TIME_TO_MINE_A_BLOCK: u32 = POST_BLOSSOM_POW_TARGET_SPACING * 2;
 
-/// Returns the [`GetBlockTemplateChainInfo`] for the current best chain.
-///
-/// # Panics
-///
-/// - If we don't have enough blocks in the state.
-pub fn get_block_template_chain_info(
-    non_finalized_state: &NonFinalizedState,
-    db: &ZebraDb,
-    network: &Network,
-) -> Result<GetBlockTemplateChainInfo, BoxError> {
-    let mut best_relevant_chain_and_history_tree_result =
-        best_relevant_chain_and_history_tree(non_finalized_state, db);
-
-    // Retry the finalized state query if it was interrupted by a finalizing block.
-    //
-    // TODO: refactor this into a generic retry(finalized_closure, process_and_check_closure) fn
-    for _ in 0..FINALIZED_STATE_QUERY_RETRIES {
-        if best_relevant_chain_and_history_tree_result.is_ok() {
-            break;
-        }
-
-        best_relevant_chain_and_history_tree_result =
-            best_relevant_chain_and_history_tree(non_finalized_state, db);
-    }
-
-    let (best_tip_height, best_tip_hash, best_relevant_chain, best_tip_history_tree) =
-        best_relevant_chain_and_history_tree_result?;
-
-    Ok(difficulty_time_and_history_tree(
-        best_relevant_chain,
-        best_tip_height,
-        best_tip_hash,
-        network,
-        best_tip_history_tree,
-    ))
-}
-
 /// Accepts a `non_finalized_state`, [`ZebraDb`], `num_blocks`, and a block hash to start at.
 ///
 /// Iterates over up to the last `num_blocks` blocks, summing up their total work.
@@ -150,7 +113,7 @@ pub fn solution_rate(
 /// # Panics
 ///
 /// - If we don't have enough blocks in the state.
-fn best_relevant_chain_and_history_tree(
+fn best_chain_data(
     non_finalized_state: &NonFinalizedState,
     db: &ZebraDb,
 ) -> Result<(Height, block::Hash, Vec<Arc<Block>>, Arc<HistoryTree>), BoxError> {
@@ -193,40 +156,41 @@ fn best_relevant_chain_and_history_tree(
     ))
 }
 
-/// Returns the [`GetBlockTemplateChainInfo`] for the supplied `relevant_chain`, tip, `network`,
-/// and `history_tree`.
-///
-/// The `relevant_chain` has recent blocks in reverse height order from the tip.
-///
-/// See [`get_block_template_chain_info()`] for details.
-fn difficulty_time_and_history_tree(
-    relevant_chain: Vec<Arc<Block>>,
-    tip_height: Height,
-    tip_hash: block::Hash,
-    network: &Network,
-    history_tree: Arc<HistoryTree>,
-) -> GetBlockTemplateChainInfo {
-    let relevant_data: Vec<(CompactDifficulty, DateTime<Utc>)> = relevant_chain
+/// Returns [`GetBlockTemplateChainInfo`] for the supplied `state` and `db`.
+pub(crate) fn gbt_chain_info(
+    state: &NonFinalizedState,
+    db: &ZebraDb,
+) -> Result<GetBlockTemplateChainInfo, BoxError> {
+    let mut chain_data = best_chain_data(state, db);
+
+    // Retry the finalized state query if it was interrupted by a finalizing block.
+    //
+    // TODO: refactor this into a generic retry(finalized_closure, process_and_check_closure) fn
+    for _ in 0..FINALIZED_STATE_QUERY_RETRIES {
+        if chain_data.is_ok() {
+            break;
+        }
+
+        chain_data = best_chain_data(state, db);
+    }
+
+    let (tip_height, tip_hash, chain, hist_tree) = chain_data?;
+
+    let chain_data: Vec<(CompactDifficulty, DateTime<Utc>)> = chain
         .iter()
         .map(|block| (block.header.difficulty_threshold, block.header.time))
         .collect();
 
-    let cur_time = DateTime32::now();
-
     // > For each block other than the genesis block , nTime MUST be strictly greater than
     // > the median-time-past of that block.
+    //
     // https://zips.z.cash/protocol/protocol.pdf#blockheader
-    let median_time_past = calculate_median_time_past(
-        relevant_chain
-            .iter()
-            .take(POW_MEDIAN_BLOCK_SPAN)
-            .cloned()
-            .collect(),
-    );
+    let median_time_past =
+        calculate_median_time_past(chain.iter().take(POW_MEDIAN_BLOCK_SPAN).cloned().collect());
 
     let min_time = median_time_past
         .checked_add(Duration32::from_seconds(1))
-        .expect("a valid block time plus a small constant is in-range");
+        .ok_or("min_time calculation overflowed, invalid median time past")?;
 
     // > For each block at block height 2 or greater on Mainnet, or block height 653606 or greater on Testnet, nTime
     // > MUST be less than or equal to the median-time-past of that block plus 90 * 60 seconds.
@@ -234,32 +198,31 @@ fn difficulty_time_and_history_tree(
     // We ignore the height as we are checkpointing on Canopy or higher in Mainnet and Testnet.
     let max_time = median_time_past
         .checked_add(Duration32::from_seconds(BLOCK_MAX_TIME_SINCE_MEDIAN))
-        .expect("a valid block time plus a small constant is in-range");
+        .ok_or("max_time calculation overflowed, invalid median time past")?;
 
-    let cur_time = cur_time.clamp(min_time, max_time);
+    let candidate_header_time = DateTime32::now().clamp(min_time, max_time);
 
     // Now that we have a valid time, get the difficulty for that time.
     let difficulty_adjustment = AdjustedDifficulty::new_from_header_time(
-        cur_time.into(),
+        candidate_header_time.into(),
         tip_height,
-        network,
-        relevant_data.iter().cloned(),
+        &state.network,
+        chain_data.iter().cloned(),
     );
-    let expected_difficulty = difficulty_adjustment.expected_difficulty_threshold();
 
-    let mut result = GetBlockTemplateChainInfo {
+    let mut chain_info = GetBlockTemplateChainInfo {
         tip_hash,
         tip_height,
-        chain_history_root: history_tree.hash(),
-        expected_difficulty,
-        cur_time,
+        chain_history_root: hist_tree.hash(),
+        expected_difficulty: difficulty_adjustment.expected_difficulty_threshold(),
+        cur_time: candidate_header_time,
         min_time,
         max_time,
     };
 
-    adjust_difficulty_and_time_for_testnet(&mut result, network, tip_height, relevant_data);
+    adjust_difficulty_and_time_for_testnet(&mut chain_info, &state.network, tip_height, chain_data);
 
-    result
+    Ok(chain_info)
 }
 
 /// Adjust the difficulty and time for the testnet minimum difficulty rule.
