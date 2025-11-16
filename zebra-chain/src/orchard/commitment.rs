@@ -103,8 +103,8 @@ impl NoteCommitment {
 /// Action descriptions.
 ///
 /// <https://zips.z.cash/protocol/nu5.pdf#concretehomomorphiccommit>
-#[derive(Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
-pub struct ValueCommitment(#[serde(with = "serde_helpers::Affine")] pub pallas::Affine);
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct ValueCommitment(pub pallas::Affine);
 
 impl<'a> std::ops::Add<&'a ValueCommitment> for ValueCommitment {
     type Output = Self;

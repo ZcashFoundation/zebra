@@ -21,7 +21,7 @@ use crate::{
 };
 
 /// A bundle of [`Action`] descriptions and signature data.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ShieldedData {
     /// The orchard flags for this transaction.
     /// Denoted as `flagsOrchard` in the spec.
@@ -130,7 +130,7 @@ impl AtLeastOne<AuthorizedAction> {
 /// An authorized action description.
 ///
 /// Every authorized Orchard `Action` must have a corresponding `SpendAuth` signature.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AuthorizedAction {
     /// The action description of this Action.
     pub action: Action,

@@ -33,7 +33,7 @@ use super::{
 /// `V5` transactions split them into multiple arrays.
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#spendencoding
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Getters)]
+#[derive(Clone, Debug, PartialEq, Getters)]
 pub struct Spend<AnchorV: AnchorVariant> {
     /// A value commitment to the value of the input note.
     pub cv: commitment::ValueCommitment,
@@ -65,7 +65,7 @@ pub struct Spend<AnchorV: AnchorVariant> {
 /// Serialized as `SpendDescriptionV5` in [protocol specification §7.3][ps].
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#spendencoding
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SpendPrefixInTransactionV5 {
     /// A value commitment to the value of the input note.
     pub cv: commitment::ValueCommitment,

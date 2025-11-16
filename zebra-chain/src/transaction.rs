@@ -72,10 +72,6 @@ use crate::{
 /// internally by different enum variants. Because we checkpoint on Canopy
 /// activation, we do not validate any pre-Sapling transaction types.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(
-    any(test, feature = "proptest-impl", feature = "elasticsearch"),
-    derive(Serialize)
-)]
 pub enum Transaction {
     /// A fully transparent transaction (`version = 1`).
     V1 {

@@ -3,9 +3,7 @@ use std::io;
 use halo2::pasta::pallas;
 use reddsa::orchard::SpendAuth;
 
-use crate::serialization::{
-    serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
-};
+use crate::serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize};
 
 use super::{
     commitment::{self, ValueCommitment},
@@ -20,7 +18,7 @@ use super::{
 /// describe Action transfers.
 ///
 /// [actiondesc]: https://zips.z.cash/protocol/nu5.pdf#actiondesc
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Action {
     /// A value commitment to net value of the input note minus the output note
     pub cv: commitment::ValueCommitment,
@@ -29,7 +27,6 @@ pub struct Action {
     /// The randomized validating key for spendAuthSig,
     pub rk: reddsa::VerificationKeyBytes<SpendAuth>,
     /// The x-coordinate of the note commitment for the output note.
-    #[serde(with = "serde_helpers::Base")]
     pub cm_x: pallas::Base,
     /// An encoding of an ephemeral Pallas public key corresponding to the
     /// encrypted private key in `out_ciphertext`.
