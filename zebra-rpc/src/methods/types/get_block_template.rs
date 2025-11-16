@@ -788,18 +788,14 @@ where
         + Sync
         + 'static,
 {
-    let request = zebra_state::ReadRequest::ChainInfo;
-    let response = state
-        .oneshot(request.clone())
+    match state
+        .oneshot(zebra_state::ReadRequest::ChainInfo)
         .await
-        .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?;
-
-    let chain_info = match response {
-        zebra_state::ReadResponse::ChainInfo(chain_info) => chain_info,
-        _ => unreachable!("incorrect response to {request:?}"),
-    };
-
-    Ok(chain_info)
+        .map_err(|e| ErrorObject::owned(0, e.to_string(), None::<()>))?
+    {
+        zebra_state::ReadResponse::ChainInfo(chain_info) => Ok(chain_info),
+        _ => unreachable!("incorrect response to a chain info request"),
+    }
 }
 
 /// Returns the transactions that are currently in `mempool`, or None if the
