@@ -773,31 +773,6 @@ where
 
 // - State and mempool data fetches
 
-/// Returns the state data for the block template.
-///
-/// You should call `check_synced_to_tip()` before calling this function.
-/// If the state does not have enough blocks, returns an error.
-pub async fn fetch_chain_info<State>(state: State) -> RpcResult<GetBlockTemplateChainInfo>
-where
-    State: Service<
-            zebra_state::ReadRequest,
-            Response = zebra_state::ReadResponse,
-            Error = zebra_state::BoxError,
-        > + Clone
-        + Send
-        + Sync
-        + 'static,
-{
-    match state
-        .oneshot(zebra_state::ReadRequest::ChainInfo)
-        .await
-        .map_err(|e| ErrorObject::owned(0, e.to_string(), None::<()>))?
-    {
-        zebra_state::ReadResponse::ChainInfo(chain_info) => Ok(chain_info),
-        _ => unreachable!("incorrect response to a chain info request"),
-    }
-}
-
 /// Returns the transactions that are currently in `mempool`, or None if the
 /// `last_seen_tip_hash` from the mempool response doesn't match the tip hash from the state.
 ///

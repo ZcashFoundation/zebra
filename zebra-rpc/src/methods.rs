@@ -2115,7 +2115,7 @@ where
         parameters: Option<GetBlockTemplateParameters>,
     ) -> Result<GetBlockTemplateResponse> {
         use types::get_block_template::{
-            check_parameters, check_synced_to_tip, fetch_chain_info, fetch_mempool_transactions,
+            check_parameters, check_synced_to_tip, fetch_mempool_transactions,
             validate_block_proposal, zip317::select_mempool_transactions,
         };
 
@@ -2183,7 +2183,15 @@ where
                 max_time,
                 cur_time,
                 ..
-            } = fetch_chain_info(read_state.clone()).await?;
+            } = match read_state
+                .clone()
+                .oneshot(zebra_state::ReadRequest::ChainInfo)
+                .await
+                .map_err(|e| ErrorObject::owned(0, e.to_string(), None::<()>))?
+            {
+                zebra_state::ReadResponse::ChainInfo(chain_info) => chain_info,
+                _ => unreachable!("incorrect response to a chain info request"),
+            };
 
             // Fetch the mempool data for the block template:
             // - if the mempool transactions change, we might return from long polling.
@@ -2308,7 +2316,6 @@ where
             // When Zebra supports shielded coinbase, we might want to do this in parallel.
             // But the coinbase value depends on the selected transactions, so this needs
             // further analysis to check if it actually saves us any time.
-
             tokio::select! {
                 // Poll the futures in the listed order, for efficiency.
                 // We put the most frequent conditions first.
@@ -2327,10 +2334,18 @@ where
                 }
 
                 precomputed_coinbase = wait_for_new_tip => {
-                    let chain_info = fetch_chain_info(read_state.clone()).await?;
+                    let chain_info = match read_state
+                        .clone()
+                        .oneshot(zebra_state::ReadRequest::ChainInfo)
+                        .await
+                        .map_err(|e| ErrorObject::owned(0, e.to_string(), None::<()>))?
+                    {
+                        zebra_state::ReadResponse::ChainInfo(chain_info) => chain_info,
+                        _ => unreachable!("incorrect response to a chain info request"),
+                    };
 
                     let server_long_poll_id = LongPollInput::new(
-                        chain_info.tip_height,
+                       chain_info.tip_height,
                         chain_info.tip_hash,
                         chain_info.max_time,
                         vec![]

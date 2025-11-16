@@ -16,6 +16,6 @@ pub mod sync;
 mod tests;
 
 pub use methods::types::{
-    get_block_template::{fetch_chain_info, proposal::proposal_block_from_template, MinerParams},
+    get_block_template::{proposal::proposal_block_from_template, MinerParams},
     submit_block::SubmitBlockChannel,
 };

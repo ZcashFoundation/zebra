@@ -171,7 +171,6 @@ use zebra_rpc::{
         GetBlockTemplateRequestMode, GetBlockTemplateResponse, SubmitBlockErrorResponse,
         SubmitBlockResponse, TransactionTemplate,
     },
-    fetch_chain_info,
     methods::{RpcImpl, RpcServer},
     proposal_block_from_template,
     server::OPENED_RPC_ENDPOINT_MSG,
@@ -3514,7 +3513,14 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 
     let zebra_state::GetBlockTemplateChainInfo {
         chain_history_root, ..
-    } = fetch_chain_info(read_state.clone()).await?;
+    } = match read_state
+        .oneshot(zebra_state::ReadRequest::ChainInfo)
+        .await
+        .map_err(|err| eyre!(err))?
+    {
+        zebra_state::ReadResponse::ChainInfo(chain_info) => chain_info,
+        _ => unreachable!("incorrect response to a chain info request"),
+    };
 
     let net = base_network_params
         .clone()
