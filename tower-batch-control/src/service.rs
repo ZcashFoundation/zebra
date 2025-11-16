@@ -245,6 +245,12 @@ where
             .expect("previous task panicked while holding the worker handle mutex")
             .as_mut()
         {
+            if worker_handle.is_finished() {
+                let worker_error = self.get_worker_error();
+                tracing::warn!(?worker_error, "batch worker handle finished unexpectedly");
+                return Poll::Ready(Err(worker_error));
+            }
+
             match Pin::new(worker_handle).poll(cx) {
                 Poll::Ready(Ok(())) => return Poll::Ready(Err(self.get_worker_error())),
                 Poll::Ready(Err(task_cancelled)) if task_cancelled.is_cancelled() => {
