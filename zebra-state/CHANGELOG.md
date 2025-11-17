@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `response::GetBlockTemplateChainInfo::sapling_root` 
+
 ### Removed
 
 - `service::read::difficulty::get_block_template_chain_info`

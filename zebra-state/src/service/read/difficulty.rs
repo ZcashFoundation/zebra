@@ -5,9 +5,9 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 
 use zebra_chain::{
-    block::{self, Block, Hash, Height},
-    history_tree::HistoryTree,
+    block::{self, Block, ChainHistoryMmrRootHash, Hash, Height},
     parameters::{Network, NetworkUpgrade, POST_BLOSSOM_POW_TARGET_SPACING},
+    sapling,
     serialization::{DateTime32, Duration32},
     work::difficulty::{CompactDifficulty, PartialCumulativeWork, Work},
 };
@@ -24,7 +24,7 @@ use crate::{
         },
         finalized_state::ZebraDb,
         read::{
-            self, find::calculate_median_time_past, tree::history_tree,
+            self, find::calculate_median_time_past, sapling_tree, tree::history_tree,
             FINALIZED_STATE_QUERY_RETRIES,
         },
         NonFinalizedState,
@@ -103,57 +103,40 @@ pub fn solution_rate(
     Some(total_work.as_u128() / work_duration as u128)
 }
 
-/// Do a consistency check by checking the finalized tip before and after all other database
-/// queries.
+/// Returns best chain data.
 ///
-/// Returns the best chain tip, recent blocks in reverse height order from the tip,
-/// and the tip history tree.
-/// Returns an error if the tip obtained before and after is not the same.
-///
-/// # Panics
-///
-/// - If we don't have enough blocks in the state.
-fn best_chain_data(
-    non_finalized_state: &NonFinalizedState,
+/// Makes sure the best tip did not change while reading the data.
+fn tip_data(
+    state: &NonFinalizedState,
     db: &ZebraDb,
-) -> Result<(Height, block::Hash, Vec<Arc<Block>>, Arc<HistoryTree>), BoxError> {
-    let state_tip_before_queries = read::best_tip(non_finalized_state, db).ok_or_else(|| {
-        BoxError::from("Zebra's state is empty, wait until it syncs to the chain tip")
-    })?;
+) -> Result<
+    (
+        Height,
+        Hash,
+        Vec<Arc<Block>>,
+        Option<ChainHistoryMmrRootHash>,
+        Option<sapling::tree::Root>,
+    ),
+    BoxError,
+> {
+    let tip = read::best_tip(state, db).ok_or("best tip must be available")?;
 
-    let best_relevant_chain =
-        any_ancestor_blocks(non_finalized_state, db, state_tip_before_queries.1);
-    let best_relevant_chain: Vec<_> = best_relevant_chain
-        .into_iter()
+    let blocks: Vec<_> = any_ancestor_blocks(state, db, tip.1)
         .take(POW_ADJUSTMENT_BLOCK_SPAN)
         .collect();
 
-    if best_relevant_chain.is_empty() {
-        return Err("missing genesis block, wait until it is committed".into());
+    if blocks.is_empty() {
+        Err("state cannot be empty")?;
     };
 
-    let history_tree = history_tree(
-        non_finalized_state.best_chain(),
-        db,
-        state_tip_before_queries.into(),
-    )
-    .expect("tip hash should exist in the chain");
+    let hist_root = history_tree(state.best_chain(), db, tip.into()).and_then(|tree| tree.hash());
+    let sapling_root = sapling_tree(state.best_chain(), db, tip.into()).map(|tree| tree.root());
 
-    let state_tip_after_queries =
-        read::best_tip(non_finalized_state, db).expect("already checked for an empty tip");
-
-    if state_tip_before_queries != state_tip_after_queries {
-        return Err("Zebra is committing too many blocks to the state, \
-                    wait until it syncs to the chain tip"
-            .into());
+    if tip != read::best_tip(state, db).ok_or("best tip must be available")? {
+        Err("chain tip changed since reading the last tip")?;
     }
 
-    Ok((
-        state_tip_before_queries.0,
-        state_tip_before_queries.1,
-        best_relevant_chain,
-        history_tree,
-    ))
+    Ok((tip.0, tip.1, blocks, hist_root, sapling_root))
 }
 
 /// Returns [`GetBlockTemplateChainInfo`] for the supplied `state` and `db`.
@@ -161,7 +144,7 @@ pub(crate) fn gbt_chain_info(
     state: &NonFinalizedState,
     db: &ZebraDb,
 ) -> Result<GetBlockTemplateChainInfo, BoxError> {
-    let mut chain_data = best_chain_data(state, db);
+    let mut chain_data = tip_data(state, db);
 
     // Retry the finalized state query if it was interrupted by a finalizing block.
     //
@@ -171,12 +154,12 @@ pub(crate) fn gbt_chain_info(
             break;
         }
 
-        chain_data = best_chain_data(state, db);
+        chain_data = tip_data(state, db);
     }
 
-    let (tip_height, tip_hash, chain, hist_tree) = chain_data?;
+    let (tip_height, tip_hash, chain, chain_history_root, sapling_root) = chain_data?;
 
-    let chain_data: Vec<(CompactDifficulty, DateTime<Utc>)> = chain
+    let blocks: Vec<(CompactDifficulty, DateTime<Utc>)> = chain
         .iter()
         .map(|block| (block.header.difficulty_threshold, block.header.time))
         .collect();
@@ -200,27 +183,28 @@ pub(crate) fn gbt_chain_info(
         .checked_add(Duration32::from_seconds(BLOCK_MAX_TIME_SINCE_MEDIAN))
         .ok_or("max_time calculation overflowed, invalid median time past")?;
 
-    let candidate_header_time = DateTime32::now().clamp(min_time, max_time);
+    let cur_time = DateTime32::now().clamp(min_time, max_time);
 
     // Now that we have a valid time, get the difficulty for that time.
     let difficulty_adjustment = AdjustedDifficulty::new_from_header_time(
-        candidate_header_time.into(),
+        cur_time.into(),
         tip_height,
         &state.network,
-        chain_data.iter().cloned(),
+        blocks.iter().cloned(),
     );
 
     let mut chain_info = GetBlockTemplateChainInfo {
         tip_hash,
         tip_height,
-        chain_history_root: hist_tree.hash(),
+        chain_history_root,
+        sapling_root,
         expected_difficulty: difficulty_adjustment.expected_difficulty_threshold(),
-        cur_time: candidate_header_time,
+        cur_time,
         min_time,
         max_time,
     };
 
-    adjust_difficulty_and_time_for_testnet(&mut chain_info, &state.network, tip_height, chain_data);
+    adjust_difficulty_and_time_for_testnet(&mut chain_info, &state.network, tip_height, blocks);
 
     Ok(chain_info)
 }

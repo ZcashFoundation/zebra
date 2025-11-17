@@ -39,7 +39,7 @@ use zebra_test::mock_service::MockService;
 
 use crate::methods::{
     hex_data::HexData,
-    tests::utils::fake_history_tree,
+    tests::utils::fake_roots,
     types::get_block_template::{
         constants::{CAPABILITIES_FIELD, MUTABLE_FIELD, NONCE_RANGE_FIELD},
         GetBlockTemplateRequestMode,
@@ -88,6 +88,7 @@ async fn rpc_getinfo() {
             tip_hash: Mainnet.genesis_hash(),
             tip_height: Height::MIN,
             chain_history_root: HistoryTree::default().hash(),
+            sapling_root: Some(Default::default()),
             expected_difficulty: Default::default(),
             cur_time: zebra_chain::serialization::DateTime32::now(),
             min_time: zebra_chain::serialization::DateTime32::now(),
@@ -2113,6 +2114,7 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
         let mut read_state = read_state.clone();
 
         async move {
+            let (chain_history_root, sapling_root) = fake_roots(&Mainnet);
             read_state
                 .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
                 .await
@@ -2123,7 +2125,8 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
                     cur_time: fake_cur_time,
                     min_time: fake_min_time,
                     max_time: fake_max_time,
-                    chain_history_root: fake_history_tree(&Mainnet).hash(),
+                    chain_history_root: Some(chain_history_root),
+                    sapling_root: Some(sapling_root),
                 }));
         }
     };
@@ -2795,7 +2798,11 @@ async fn rpc_getdifficulty() {
     // Fake the ChainInfo response: smallest numeric difficulty
     // (this is invalid on mainnet and testnet under the consensus rules)
     let fake_difficulty = CompactDifficulty::from(ExpandedDifficulty::from(U256::MAX));
+
+    let (fake_chain_history_root, fake_sapling_root) = fake_roots(&Mainnet);
+
     let mut read_state1 = read_state.clone();
+
     let mock_read_state_request_handler = async move {
         read_state1
             .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
@@ -2807,7 +2814,8 @@ async fn rpc_getdifficulty() {
                 cur_time: fake_cur_time,
                 min_time: fake_min_time,
                 max_time: fake_max_time,
-                chain_history_root: fake_history_tree(&Mainnet).hash(),
+                chain_history_root: Some(fake_chain_history_root),
+                sapling_root: Some(fake_sapling_root),
             }));
     };
 
@@ -2833,7 +2841,8 @@ async fn rpc_getdifficulty() {
                 cur_time: fake_cur_time,
                 min_time: fake_min_time,
                 max_time: fake_max_time,
-                chain_history_root: fake_history_tree(&Mainnet).hash(),
+                chain_history_root: Some(fake_chain_history_root),
+                sapling_root: Some(fake_sapling_root),
             }));
     };
 
@@ -2856,7 +2865,8 @@ async fn rpc_getdifficulty() {
                 cur_time: fake_cur_time,
                 min_time: fake_min_time,
                 max_time: fake_max_time,
-                chain_history_root: fake_history_tree(&Mainnet).hash(),
+                chain_history_root: Some(fake_chain_history_root),
+                sapling_root: Some(fake_sapling_root),
             }));
     };
 
@@ -2879,7 +2889,8 @@ async fn rpc_getdifficulty() {
                 cur_time: fake_cur_time,
                 min_time: fake_min_time,
                 max_time: fake_max_time,
-                chain_history_root: fake_history_tree(&Mainnet).hash(),
+                chain_history_root: Some(fake_chain_history_root),
+                sapling_root: Some(fake_sapling_root),
             }));
     };
 

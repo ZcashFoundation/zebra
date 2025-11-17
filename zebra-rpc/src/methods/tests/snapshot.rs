@@ -50,7 +50,7 @@ use zebra_test::{
 
 use crate::methods::{
     hex_data::HexData,
-    tests::utils::fake_history_tree,
+    tests::utils::fake_roots,
     types::{
         get_block_template::GetBlockTemplateRequestMode,
         long_poll::{LongPollId, LONG_POLL_ID_LENGTH},
@@ -1156,6 +1156,8 @@ pub async fn test_mining_rpcs<State, ReadState>(
         let mut read_state = read_state.clone();
 
         async move {
+            let (fake_chain_history_root, fake_sapling_root) = fake_roots(network);
+
             read_state
                 .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
                 .await
@@ -1166,7 +1168,8 @@ pub async fn test_mining_rpcs<State, ReadState>(
                     cur_time: fake_cur_time,
                     min_time: fake_min_time,
                     max_time: fake_max_time,
-                    chain_history_root: fake_history_tree(network).hash(),
+                    chain_history_root: Some(fake_chain_history_root),
+                    sapling_root: Some(fake_sapling_root),
                 }));
         }
     };

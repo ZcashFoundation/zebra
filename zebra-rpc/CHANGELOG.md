@@ -7,9 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `methods::tests::utils::fake_roots`
+
 ### Removed
 
 - `methods::types::get_block_template::fetch_chain_info`
+- `methods::tests::utils::fake_history_tree`
 
 ## [3.1.0] - 2025-11-17
 

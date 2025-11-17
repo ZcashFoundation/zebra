@@ -452,6 +452,9 @@ pub struct GetBlockTemplateChainInfo {
     /// Depends on the `tip_hash`.
     pub chain_history_root: Option<ChainHistoryMmrRootHash>,
 
+    /// Sapling note commitment tree root at the tip.
+    pub sapling_root: Option<sapling::tree::Root>,
+
     // Data derived from the state tip and recent blocks, and the current local clock.
     //
     /// The expected difficulty of the candidate block.

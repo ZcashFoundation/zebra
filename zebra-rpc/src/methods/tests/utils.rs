@@ -2,27 +2,38 @@
 
 use std::sync::Arc;
 use zebra_chain::{
-    block::Block,
-    history_tree::{HistoryTree, NonEmptyHistoryTree},
+    block::{Block, ChainHistoryMmrRootHash},
+    history_tree::NonEmptyHistoryTree,
     parameters::Network,
-    sapling::tree::Root,
+    sapling,
     serialization::ZcashDeserialize,
 };
+use zebra_test::vectors::{
+    SAPLING_FINAL_ROOT_MAINNET_1046400_BYTES, SAPLING_FINAL_ROOT_TESTNET_1116000_BYTES,
+};
 
-/// Create a history tree with one single block for a network by using Zebra test vectors.
-pub fn fake_history_tree(network: &Network) -> Arc<HistoryTree> {
-    let (block, sapling_root) = network.test_block_sapling_roots(1046400, 1116000).unwrap();
+/// Creates a history tree with a single block for the given network by using Zebra test vectors.
+///
+/// Returns the tree root, and the Sapling note commitment tree root used for its computation.
+pub fn fake_roots(net: &Network) -> (ChainHistoryMmrRootHash, sapling::tree::Root) {
+    let (block, sapling_root) = if net.is_mainnet() {
+        (
+            &zebra_test::vectors::BLOCK_MAINNET_1046400_BYTES[..],
+            *SAPLING_FINAL_ROOT_MAINNET_1046400_BYTES,
+        )
+    } else {
+        (
+            &zebra_test::vectors::BLOCK_TESTNET_1116000_BYTES[..],
+            *SAPLING_FINAL_ROOT_TESTNET_1116000_BYTES,
+        )
+    };
 
     let block = Arc::<Block>::zcash_deserialize(block).expect("block should deserialize");
-    let first_sapling_root = Root::try_from(sapling_root).unwrap();
+    let sapling_root = sapling::tree::Root::try_from(sapling_root).unwrap();
 
-    let history_tree = NonEmptyHistoryTree::from_block(
-        &Network::Mainnet,
-        block,
-        &first_sapling_root,
-        &Default::default(),
-    )
-    .unwrap();
+    let hist_root = NonEmptyHistoryTree::from_block(net, block, &sapling_root, &Default::default())
+        .expect("should create a fake history tree")
+        .hash();
 
-    Arc::new(HistoryTree::from(history_tree))
+    (hist_root, sapling_root)
 }
