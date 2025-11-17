@@ -2,7 +2,7 @@
 
 use std::{
     cmp::{max, Ordering},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use chrono::Utc;
@@ -189,6 +189,17 @@ pub struct MetaAddr {
     /// See the [`MetaAddr::last_seen`] method for details.
     last_response: Option<DateTime32>,
 
+    /// The last measured round-trip time (RTT) for this peer, if available.
+    ///
+    /// This value is updated when the peer responds to a ping (Pong).
+    rtt: Option<Duration>,
+
+    /// The last time we sent a ping to this peer.
+    ///
+    /// This value is updated each time a heartbeat ping is sent,
+    /// even if we never receive a response.
+    ping_sent_at: Option<Instant>,
+
     /// The last time we tried to open an outbound connection to this peer.
     ///
     /// See the [`MetaAddr::last_attempt`] method for details.
@@ -278,6 +289,8 @@ pub enum MetaAddrChange {
             proptest(strategy = "canonical_peer_addr_strategy()")
         )]
         addr: PeerSocketAddr,
+        rtt: Option<Duration>,
+        ping_sent_at: Option<Instant>,
     },
 
     /// Updates an existing `MetaAddr` when a peer fails.
@@ -320,6 +333,8 @@ impl MetaAddr {
             services: Some(untrusted_services),
             untrusted_last_seen: Some(untrusted_last_seen),
             last_response: None,
+            rtt: None,
+            ping_sent_at: None,
             last_attempt: None,
             last_failure: None,
             last_connection_state: NeverAttemptedGossiped,
@@ -380,9 +395,15 @@ impl MetaAddr {
     /// - malicious peers could interfere with other peers' [`AddressBook`](crate::AddressBook)
     ///   state, or
     /// - Zebra could advertise unreachable addresses to its own peers.
-    pub fn new_responded(addr: PeerSocketAddr) -> MetaAddrChange {
+    pub fn new_responded(
+        addr: PeerSocketAddr,
+        rtt: Option<Duration>,
+        ping_sent_at: Option<Instant>,
+    ) -> MetaAddrChange {
         UpdateResponded {
             addr: canonical_peer_addr(*addr),
+            rtt,
+            ping_sent_at,
         }
     }
 
@@ -448,6 +469,20 @@ impl MetaAddr {
     /// Returns whether the address is from an inbound peer connection
     pub fn is_inbound(&self) -> bool {
         self.is_inbound
+    }
+
+    /// Returns the round-trip time (RTT) for this peer, if available,
+    /// as the number of seconds (f64). This value is updated when the peer
+    /// responds to a ping (Pong).
+    pub fn rtt(&self) -> Option<f64> {
+        self.rtt.map(|duration| duration.as_secs_f64())
+    }
+
+    /// Returns the time this peer was last pinged, if available,
+    /// as the number of seconds since the epoch or some reference point
+    pub fn ping_sent_at(&self) -> Option<f64> {
+        self.ping_sent_at
+            .map(|instant| instant.elapsed().as_secs_f64())
     }
 
     /// Returns the unverified "last seen time" gossiped by the remote peer that
@@ -691,6 +726,8 @@ impl MetaAddr {
             untrusted_last_seen: Some(last_seen),
             last_response: None,
             // these fields aren't sent to the remote peer, but sanitize them anyway
+            rtt: None,
+            ping_sent_at: None,
             last_attempt: None,
             last_failure: None,
             last_connection_state: NeverAttemptedGossiped,
@@ -826,6 +863,22 @@ impl MetaAddrChange {
         }
     }
 
+    /// Return the RTT for this change, if available
+    pub fn rtt(&self) -> Option<Duration> {
+        match self {
+            UpdateResponded { rtt, .. } => *rtt,
+            _ => None,
+        }
+    }
+
+    /// Returns the timestamp when a ping was last sent, if available.
+    pub fn ping_sent_at(&self) -> Option<Instant> {
+        match self {
+            UpdateResponded { ping_sent_at, .. } => *ping_sent_at,
+            _ => None,
+        }
+    }
+
     /// Return the last failure for this change, if available.
     pub fn last_failure(&self, now: Instant) -> Option<Instant> {
         match self {
@@ -864,6 +917,8 @@ impl MetaAddrChange {
             services: self.untrusted_services(),
             untrusted_last_seen: self.untrusted_last_seen(local_now),
             last_response: self.last_response(local_now),
+            rtt: self.rtt(),
+            ping_sent_at: self.ping_sent_at(),
             last_attempt: self.last_attempt(instant_now),
             last_failure: self.last_failure(instant_now),
             last_connection_state: self.peer_addr_state(),
@@ -907,6 +962,8 @@ impl MetaAddrChange {
             services: self.untrusted_services(),
             untrusted_last_seen: self.untrusted_last_seen(local_now),
             last_response: self.last_response(local_now),
+            rtt: None,
+            ping_sent_at: None,
             last_attempt: None,
             last_failure: None,
             last_connection_state: self.peer_addr_state(),
@@ -1061,6 +1118,8 @@ impl MetaAddrChange {
                     .or_else(|| self.untrusted_last_seen(local_now)),
                 // The peer has not been attempted, so these fields must be None
                 last_response: None,
+                rtt: None,
+                ping_sent_at: None,
                 last_attempt: None,
                 last_failure: None,
                 last_connection_state: self.peer_addr_state(),
@@ -1083,6 +1142,8 @@ impl MetaAddrChange {
                 // This is a wall clock time, but we already checked that responses are in order.
                 // Even if the wall clock time has jumped, we want to use the latest time.
                 last_response: self.last_response(local_now).or(previous.last_response),
+                rtt: self.rtt(),
+                ping_sent_at: self.ping_sent_at(),
                 // These are monotonic times, we already checked the responses are in order.
                 last_attempt: self.last_attempt(instant_now).or(previous.last_attempt),
                 last_failure: self.last_failure(instant_now).or(previous.last_failure),

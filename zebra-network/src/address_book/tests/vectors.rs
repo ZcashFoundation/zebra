@@ -128,7 +128,9 @@ fn address_book_peer_order() {
 fn reconnection_peers_skips_recently_updated_ip() {
     // tests that reconnection_peers() skips addresses where there's a connection at that IP with a recent:
     // - `last_response`
-    test_reconnection_peers_skips_recently_updated_ip(true, MetaAddr::new_responded);
+    test_reconnection_peers_skips_recently_updated_ip(true, |addr| {
+        MetaAddr::new_responded(addr, None, None)
+    });
 
     // tests that reconnection_peers() *does not* skip addresses where there's a connection at that IP with a recent:
     // - `last_attempt`
