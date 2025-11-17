@@ -704,11 +704,7 @@ pub fn first_block_with_total_work(db: &ZebraDb, threshold: U256) -> Option<(Hei
         .root_node()?
         .subtree_total_work();
     if threshold <= min_work {
-        return Some((
-            min_work_height,
-            db.hash(min_work_height)
-                .expect("Hash must exist if block exists"),
-        ));
+        return Some((min_work_height, db.hash(min_work_height)?));
     }
 
     let mut total_work = U256::zero();
@@ -740,15 +736,11 @@ pub fn first_block_with_total_work(db: &ZebraDb, threshold: U256) -> Option<(Hei
                 if local_work >= local_threshold {
                     end_height = middle;
                 } else {
-                    start_height = (middle + 1).expect("Height range is bound");
+                    start_height = (middle + 1)?;
                 }
             }
 
-            return Some((
-                end_height,
-                db.hash(end_height)
-                    .expect("Hash must exist if block exists"),
-            ));
+            return Some((end_height, db.hash(end_height)?));
         }
     }
 
