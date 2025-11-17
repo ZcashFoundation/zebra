@@ -245,14 +245,21 @@ where
             .expect("previous task panicked while holding the worker handle mutex")
             .as_mut()
         {
-            if worker_handle.is_finished() {
-                let worker_error = self.get_worker_error();
-                tracing::warn!(?worker_error, "batch worker handle finished unexpectedly");
-                return Poll::Ready(Err(worker_error));
-            }
-
+            // # Correctness
+            //
+            // The inner service used with `Batch` MUST NOT return recoverable errors from its:
+            // - `poll_ready` method, or
+            // - `call` method when called with a `BatchControl::Flush` request.
+            //
+            // If the inner service returns an error in those cases, this `poll_ready` method will
+            // return an error the first time its called, and will panic the second time its called
+            // as it attempts to call `poll` on a `JoinHandle` that has already completed.
             match Pin::new(worker_handle).poll(cx) {
-                Poll::Ready(Ok(())) => return Poll::Ready(Err(self.get_worker_error())),
+                Poll::Ready(Ok(())) => {
+                    let worker_error = self.get_worker_error();
+                    tracing::warn!(?worker_error, "batch worker finished unexpectedly");
+                    return Poll::Ready(Err(worker_error));
+                }
                 Poll::Ready(Err(task_cancelled)) if task_cancelled.is_cancelled() => {
                     tracing::warn!(
                         "batch task cancelled: {task_cancelled}\n\
