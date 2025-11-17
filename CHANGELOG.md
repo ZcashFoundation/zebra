@@ -5,7 +5,7 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Zebra 3.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v3.0.0) - 2025-11-13
+## [Zebra 3.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v3.0.0) - 2025-11-17
 
 This release is a stable version of the release candidate deploying NU6.1 on Mainnet. It fixes some issues that were found after
 the release candidate was published but otherwise mostly includes technical improvements and cleanup with relatively few user-visible changes.

@@ -75,11 +75,11 @@ tracing-error = { workspace = true }
 tracing-subscriber = { workspace = true }
 thiserror = { workspace = true }
 
-zebra-node-services = { path = "../zebra-node-services", version = "2.0.1" }
+zebra-node-services = { path = "../zebra-node-services", version = "2.1.0" }
 zebra-chain = { path = "../zebra-chain", version = "3.0.1" }
 
 # These crates are needed for the block-template-to-proposal binary
-zebra-rpc = { path = "../zebra-rpc", version = "3.0.1" }
+zebra-rpc = { path = "../zebra-rpc", version = "3.1.0" }
 
 # These crates are needed for the zebra-checkpoints binary
 itertools = { workspace = true, optional = true }

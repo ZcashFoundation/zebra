@@ -6814,7 +6814,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-consensus"
-version = "3.0.1"
+version = "3.1.0"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -6902,7 +6902,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-node-services"
-version = "2.0.1"
+version = "2.1.0"
 dependencies = [
  "color-eyre",
  "jsonrpsee-types",
@@ -6916,7 +6916,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-rpc"
-version = "3.0.1"
+version = "3.1.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -6982,7 +6982,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-state"
-version = "3.0.1"
+version = "3.1.0"
 dependencies = [
  "bincode",
  "chrono",
