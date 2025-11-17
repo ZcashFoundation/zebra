@@ -71,15 +71,37 @@ env:
   CARGO_INCREMENTAL: ${{ vars.CARGO_INCREMENTAL }}
 
 jobs:
-  build:
-    name: Build images
-    if: github.repository_owner == 'ZcashFoundation'
-    timeout-minutes: 210
+  prepare-matrix:
+    name: Prepare build matrix
     runs-on: ubuntu-latest
-    environment: ${{ github.event_name == 'release' && 'prod' || inputs.environment || 'dev' }}
     outputs:
-      image_digest: ${{ steps.docker_build.outputs.digest }}
-      image_name: ${{ fromJSON(steps.docker_build.outputs.metadata)['image.name'] }}
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Set build matrix
+        id: set-matrix
+        run: |
+          # Runtime builds: AMD64 + ARM64 (multi-arch)
+          # Other targets: AMD64 only (lightwalletd dependency)
+          if [[ "${{ inputs.dockerfile_target }}" == "runtime" ]]; then
+            MATRIX='{"include":[{"platform":"linux/amd64","runner":"ubuntu-latest"},{"platform":"linux/arm64","runner":"ubuntu-24.04-arm"}]}'
+          else
+            MATRIX='{"include":[{"platform":"linux/amd64","runner":"ubuntu-latest"}]}'
+          fi
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+          echo "Platforms: $(echo $MATRIX | jq -r '.include[].platform' | paste -sd ',' -)"
+
+  build:
+    name: Build images (${{ matrix.platform }})
+    needs: prepare-matrix
+    timeout-minutes: 210
+    runs-on: ${{ matrix.runner }}
+    environment: ${{ github.event_name == 'release' && 'prod' || inputs.environment || 'dev' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare-matrix.outputs.matrix) }}
+    outputs:
+      image_digest: ${{ steps.docker_build.outputs.digest || steps.docker_build_no_attestations.outputs.digest }}
+      image_name: ${{ fromJSON(steps.docker_build.outputs.metadata || steps.docker_build_no_attestations.outputs.metadata)['image.name'] }}
     permissions:
       contents: read
       id-token: write
@@ -166,10 +188,13 @@ jobs:
           endpoint: zfnd/zebra
 
       # Build and push image to Google Artifact Registry, and possibly DockerHub
-      - name: Build & push
+      # With provenance and SBOM (ZcashFoundation repository only)
+      - name: Build & push (with attestations)
         id: docker_build
+        if: github.repository_owner == 'ZcashFoundation'
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 #v6.18.0
         with:
+          platforms: ${{ matrix.platform }}
           target: ${{ inputs.dockerfile_target }}
           context: .
           file: ${{ inputs.dockerfile_path }}
@@ -183,9 +208,30 @@ jobs:
           push: true
           # It's recommended to build images with max-level provenance attestations
           # https://docs.docker.com/build/ci/github-actions/attestations/
-          # TODO: Uncomment this once we have a better way to turn on/off provenance
-          # provenance: mode=max
-          # sbom: true
+          provenance: mode=max
+          sbom: true
+          # Don't read from the cache if the caller disabled it.
+          # https://docs.docker.com/engine/reference/commandline/buildx_build/#options
+          no-cache: ${{ inputs.no_cache }}
+
+      # Build and push image without attestations (contributor forks)
+      - name: Build & push (without attestations)
+        id: docker_build_no_attestations
+        if: github.repository_owner != 'ZcashFoundation'
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 #v6.18.0
+        with:
+          platforms: ${{ matrix.platform }}
+          target: ${{ inputs.dockerfile_target }}
+          context: .
+          file: ${{ inputs.dockerfile_path }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}
+            RUST_LOG=${{ env.RUST_LOG }}
+            CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}
+            FEATURES=${{ env.FEATURES }}
+          push: true
           # Don't read from the cache if the caller disabled it.
           # https://docs.docker.com/engine/reference/commandline/buildx_build/#options
           no-cache: ${{ inputs.no_cache }}
@@ -204,9 +250,10 @@ jobs:
         uses: docker/scout-action@f8c776824083494ab0d56b8105ba2ca85c86e4de #v1.18.2
         # We only run Docker Scout on the `runtime` target, as the other targets are not meant to be released
         # and are commonly used for testing, and thus are ephemeral.
+        # Run only on AMD64 to avoid running twice in matrix builds
         # TODO: Remove the `contains` check once we have a better way to determine if just new vulnerabilities are present.
         # See: https://github.com/docker/scout-action/issues/56
-        if: ${{ inputs.dockerfile_target == 'runtime' && contains(github.event.pull_request.title, 'Release v') }}
+        if: ${{ matrix.platform == 'linux/amd64' && inputs.dockerfile_target == 'runtime' && contains(github.event.pull_request.title, 'Release v') }}
         with:
           command: cves,recommendations,compare,environment
           image: us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }}:${{ steps.meta.outputs.version }}

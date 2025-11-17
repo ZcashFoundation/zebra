@@ -3,8 +3,6 @@
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or https://www.opensource.org/licenses/mit-license.php .
 
-import time
-
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import assert_equal, start_nodes, connect_nodes_bi
 

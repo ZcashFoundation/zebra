@@ -18,6 +18,7 @@ For the full requirements, see [Tier 1 platform policy](target-tier-policies.md#
 | platform | os | notes | rust | artifacts
 | -------|-------|-------|-------|-------
 | `x86_64-unknown-linux-gnu` | [Debian 11](https://www.debian.org/releases/bookworm/) | 64-bit | [latest stable release](https://github.com/rust-lang/rust/releases) | Docker
+| `aarch64-unknown-linux-gnu` | [Debian 11](https://www.debian.org/releases/bookworm/) | 64-bit ARM64 | [latest stable release](https://github.com/rust-lang/rust/releases) | Docker
 
 ## Tier 2
 
@@ -47,5 +48,4 @@ For the full requirements, see [Tier 3 platform policy](target-tier-policies.md#
 
 | platform | os | notes | rust | artifacts
 | -------|-------|-------|-------|-------
-| `aarch64-unknown-linux-gnu` | [Debian 11](https://www.debian.org/releases/bookworm/) | 64-bit | [latest stable release](https://github.com/rust-lang/rust/releases) | N/A
 | `aarch64-apple-darwin` | latest macOS | 64-bit, Apple M1 or M2 | [latest stable release](https://github.com/rust-lang/rust/releases) | N/A
