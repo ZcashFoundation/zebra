@@ -19,6 +19,7 @@ the release candidate was published but otherwise mostly includes technical impr
 - Added ZIP 233 (Network Sustainability Mechanism) implementation  ([#8930](https://github.com/ZcashFoundation/zebra/pull/8930))
 - Populated `asm` field returned by Zebra's RPC methods with code in script outputs as well as script types ([#10019](https://github.com/ZcashFoundation/zebra/pull/10019))
 - Added a [CHANGELOG](https://github.com/ZcashFoundation/zebra/blob/main/zebra-rpc/qa/CHANGELOG.md) file to track changes in the python QA framework ([#10076](https://github.com/ZcashFoundation/zebra/pull/10076))
+- Enabled backtraces and added debug info by default in production builds ([#10097](https://github.com/ZcashFoundation/zebra/pull/10097))
 
 ### Fixed
 
@@ -27,6 +28,7 @@ the release candidate was published but otherwise mostly includes technical impr
 - Fixed a bug in `z_validateaddress` around parsing Testnet transparent addresses on Regtest ([#10022](https://github.com/ZcashFoundation/zebra/pull/10022))
 - Re-enabled Docker provenance and SBOM attestations ([#10071](https://github.com/ZcashFoundation/zebra/pull/10071))
 - Fixed an issue where Zebra would panic in some edge cases around mempool transactions depending on other mempool transactions ([#10049](https://github.com/ZcashFoundation/zebra/pull/10049))
+- Fixed a DDoS vulnerability and panic issue around error handling in proof verifiers ([#10099](https://github.com/ZcashFoundation/zebra/pull/10099))
 
 ### Contributors
 
