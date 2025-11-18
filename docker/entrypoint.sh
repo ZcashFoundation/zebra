@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 
 # Entrypoint for running Zebra in Docker.
 #
@@ -21,11 +21,11 @@ set -eo pipefail
 : "${LWD_CACHE_DIR:=${HOME}/.cache/lwd}"
 : "${ZEBRA_COOKIE_DIR:=${HOME}/.cache/zebra}"
 
-# Use chroot to drop privileges and execute the given command as the specified UID:GID
+# Use setpriv to drop privileges and execute the given command as the specified UID:GID
 exec_as_user() {
   user=$(id -u)
   if [[ ${user} == '0' ]]; then
-    exec chroot --userspec=${UID}:${GID} / "$@"
+    setpriv --reuid="${UID}" --regid="${GID}" --init-groups "$@"
   else
     exec "$@"
   fi
