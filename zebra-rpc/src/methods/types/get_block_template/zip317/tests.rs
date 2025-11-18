@@ -10,6 +10,9 @@ use zebra_node_services::mempool::TransactionDependencies;
 
 use super::select_mempool_transactions;
 
+#[cfg(zcash_unstable = "zip234")]
+use zebra_chain::amount::{Amount, MAX_MONEY};
+
 #[test]
 fn excludes_tx_with_unselected_dependencies() {
     let network = Network::Mainnet;
@@ -38,6 +41,8 @@ fn excludes_tx_with_unselected_dependencies() {
             extra_coinbase_data,
             #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             None,
+            #[cfg(zcash_unstable = "zip234")]
+            Amount::new(MAX_MONEY),
         ),
         vec![],
         "should not select any transactions when dependencies are unavailable"
@@ -84,6 +89,8 @@ fn includes_tx_with_selected_dependencies() {
         extra_coinbase_data,
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         None,
+        #[cfg(zcash_unstable = "zip234")]
+        Amount::new(MAX_MONEY),
     );
 
     assert_eq!(

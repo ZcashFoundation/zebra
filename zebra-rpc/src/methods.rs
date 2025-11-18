@@ -62,14 +62,14 @@ use zcash_primitives::consensus::Parameters;
 
 use zebra_chain::{
     amount::{self, Amount, NegativeAllowed, NonNegative},
-    block::{self, Block, Commitment, Height, SerializedBlock, TryIntoHeight},
+    block::{
+        self, subsidy::funding_streams::funding_stream_address, Block, Commitment, Height,
+        SerializedBlock, TryIntoHeight,
+    },
     chain_sync_status::ChainSyncStatus,
     chain_tip::{ChainTip, NetworkChainTipHeightEstimator},
     parameters::{
-        subsidy::{
-            block_subsidy, funding_stream_values, miner_subsidy, FundingStreamReceiver,
-            ParameterSubsidy,
-        },
+        subsidy::{funding_stream_values, miner_subsidy, FundingStreamReceiver, ParameterSubsidy},
         ConsensusBranchId, Network, NetworkUpgrade, POW_AVERAGING_WINDOW,
     },
     serialization::{BytesInDisplayOrder, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
@@ -82,9 +82,7 @@ use zebra_chain::{
         equihash::Solution,
     },
 };
-use zebra_consensus::{
-    funding_stream_address, router::service_trait::BlockVerifierService, RouterError,
-};
+use zebra_consensus::{router::service_trait::BlockVerifierService, RouterError};
 use zebra_network::{address_book_peers::AddressBookPeers, types::PeerServices, PeerSocketAddr};
 use zebra_node_services::mempool::{self, MempoolService};
 use zebra_state::{
@@ -102,6 +100,12 @@ use crate::{
         error::{MapError, OkOrError},
     },
 };
+
+#[cfg(not(zcash_unstable = "zip234"))]
+use zebra_chain::parameters::subsidy::block_subsidy_pre_nsm;
+
+#[cfg(zcash_unstable = "zip234")]
+use zebra_chain::parameters::subsidy::block_subsidy;
 
 pub(crate) mod hex_data;
 pub(crate) mod trees;
@@ -2405,6 +2409,24 @@ where
             "selecting transactions for the template from the mempool"
         );
 
+        #[cfg(zcash_unstable = "zip234")]
+        let money_reserve = {
+            let response = read_state
+                .clone()
+                .ready()
+                .and_then(|service| service.call(ReadRequest::TipPoolValues))
+                .await
+                .map_error(server::error::LegacyCode::default())?;
+            match response {
+                ReadResponse::TipPoolValues {
+                    tip_hash: _,
+                    tip_height: _,
+                    value_balance,
+                } => value_balance.money_reserve(),
+                _ => unreachable!("wrong response to ReadRequest::TipPoolValues"),
+            }
+        };
+
         // Randomly select some mempool transactions.
         let mempool_txs = select_mempool_transactions(
             &network,
@@ -2415,6 +2437,8 @@ where
             extra_coinbase_data.clone(),
             #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             None,
+            #[cfg(zcash_unstable = "zip234")]
+            money_reserve,
         );
 
         tracing::debug!(
@@ -2437,6 +2461,8 @@ where
             extra_coinbase_data,
             #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             None,
+            #[cfg(zcash_unstable = "zip234")]
+            money_reserve,
         );
 
         Ok(response.into())
@@ -2706,8 +2732,33 @@ where
         // Always zero for post-halving blocks
         let founders = Amount::zero();
 
-        let total_block_subsidy =
-            block_subsidy(height, &network).map_error(server::error::LegacyCode::default())?;
+        #[cfg(not(zcash_unstable = "zip234"))]
+        let total_block_subsidy = block_subsidy_pre_nsm(height, &network)
+            .map_error(server::error::LegacyCode::default())?;
+
+        #[cfg(zcash_unstable = "zip234")]
+        let total_block_subsidy = {
+            let money_reserve = {
+                let response = self
+                    .read_state
+                    .clone()
+                    .ready()
+                    .and_then(|service| service.call(ReadRequest::TipPoolValues))
+                    .await
+                    .map_error(server::error::LegacyCode::default())?;
+                match response {
+                    ReadResponse::TipPoolValues {
+                        tip_hash: _,
+                        tip_height: _,
+                        value_balance,
+                    } => value_balance.money_reserve(),
+                    _ => unreachable!("wrong response to ReadRequest::TipPoolValues"),
+                }
+            };
+            block_subsidy(height, &network, money_reserve)
+                .map_error(server::error::LegacyCode::default())?
+        };
+
         let miner_subsidy = miner_subsidy(height, &network, total_block_subsidy)
             .map_error(server::error::LegacyCode::default())?;
 
