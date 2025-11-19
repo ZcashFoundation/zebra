@@ -149,13 +149,13 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v4.2.2
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd #v4.2.2
         with:
           persist-credentials: false
           fetch-depth: '2'
 
       - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@c33ff65466c58d57e4d796f88bb1ae0ff26ee453 #v5.2.0
+        uses: rlespinasse/github-slug-action@ac4a3a266833ca6b6086466a921fae9f3c671596 #v5.3.0
         with:
           short-length: 7
 
@@ -363,13 +363,13 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v4.2.2
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd #v4.2.2
         with:
           persist-credentials: false
           fetch-depth: '2'
 
       - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@c33ff65466c58d57e4d796f88bb1ae0ff26ee453 #v5.2.0
+        uses: rlespinasse/github-slug-action@ac4a3a266833ca6b6086466a921fae9f3c671596 #v5.3.0
         with:
           short-length: 7
 
@@ -693,13 +693,13 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v4.2.2
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd #v4.2.2
         with:
           persist-credentials: false
           fetch-depth: '2'
 
       - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@c33ff65466c58d57e4d796f88bb1ae0ff26ee453 #v5.2.0
+        uses: rlespinasse/github-slug-action@ac4a3a266833ca6b6086466a921fae9f3c671596 #v5.3.0
         with:
           short-length: 7
 
