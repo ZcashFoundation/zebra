@@ -107,7 +107,8 @@ COPY --link --chown=${UID}:${GID} ./ ${HOME}
 
 # Build Zebra test binaries using nextest, but don't run them.
 # This also copies the necessary binaries to /usr/local/bin.
-RUN cargo nextest run --locked --release --no-run --features "${FEATURES}" && \
+RUN --mount=type=bind,source=.git,target=.git,readonly \
+    cargo nextest run --locked --release --no-run --features "${FEATURES}" && \
     # Copy binaries to standard location
     cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin && \
     # Only copy zebra-checkpoints if the feature is enabled
@@ -146,7 +147,8 @@ WORKDIR ${HOME}
 ARG CARGO_HOME
 ARG CARGO_TARGET_DIR
 
-RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
+RUN --mount=type=bind,source=.git,target=.git,readonly \
+    --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     --mount=type=bind,source=tower-fallback,target=tower-fallback \
     --mount=type=bind,source=zebra-chain,target=zebra-chain \
     --mount=type=bind,source=zebra-consensus,target=zebra-consensus \
