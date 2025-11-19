@@ -28,31 +28,12 @@ ARG CARGO_TARGET_DIR="${HOME}/target"
 FROM rust:${RUST_VERSION}-bookworm AS deps
 SHELL ["/bin/bash", "-xo", "pipefail", "-c"]
 
-# Make the build platform available as a variable
-ARG BUILDPLATFORM
-
 # Install zebra build deps
 RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
     libclang-dev \
     protobuf-compiler \
     && rm -rf /var/lib/apt/lists/* /tmp/*
-
-# Build arguments and variables
-ARG CARGO_INCREMENTAL
-ENV CARGO_INCREMENTAL=${CARGO_INCREMENTAL:-0}
-
-ARG CARGO_HOME
-ENV CARGO_HOME=${CARGO_HOME}
-
-ARG CARGO_TARGET_DIR
-ENV CARGO_TARGET_DIR=${CARGO_TARGET_DIR}
-
-# If this is not set, it must be an empty string, so Zebra can try an
-# alternative git commit source:
-# https://github.com/ZcashFoundation/zebra/blob/9ebd56092bcdfc1a09062e15a0574c94af37f389/zebrad/src/application.rs#L179-L182
-ARG SHORT_SHA
-ENV SHORT_SHA=${SHORT_SHA:-}
 
 # This stage builds tests without running them.
 #
@@ -63,9 +44,21 @@ FROM deps AS tests
 ARG FEATURES
 ENV FEATURES=${FEATURES}
 
+ARG BUILDPLATFORM
+
 # Skip IPv6 tests by default, as some CI environment don't have IPv6 available
 ARG SKIP_IPV6_TESTS
 ENV SKIP_IPV6_TESTS=${SKIP_IPV6_TESTS:-1}
+
+# Build arguments and variables
+ARG CARGO_INCREMENTAL
+ENV CARGO_INCREMENTAL=${CARGO_INCREMENTAL:-0}
+
+# If this is not set, it must be an empty string, so Zebra can try an
+# alternative git commit source:
+# https://github.com/ZcashFoundation/zebra/blob/9ebd56092bcdfc1a09062e15a0574c94af37f389/zebrad/src/application.rs#L179-L182
+ARG SHORT_SHA
+ENV SHORT_SHA=${SHORT_SHA:-}
 
 # This environment setup is almost identical to the `runtime` target so that the
 # `tests` target differs minimally. In fact, a subset of this setup is used for
@@ -139,6 +132,9 @@ FROM deps AS release
 
 ARG FEATURES
 ENV FEATURES=${FEATURES}
+
+ARG SHORT_SHA
+ENV SHORT_SHA=${SHORT_SHA:-}
 
 # Set the working directory for the build.
 ARG HOME
