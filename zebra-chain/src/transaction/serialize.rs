@@ -14,7 +14,7 @@ use crate::{
     parameters::{OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID, TX_V5_VERSION_GROUP_ID},
     primitives::{Halo2Proof, ZkSnarkProof},
     serialization::{
-        zcash_deserialize_external_count, zcash_serialize_bytes, zcash_serialize_empty_list,
+        zcash_deserialize_external_count, zcash_serialize_empty_list,
         zcash_serialize_external_count, AtLeastOne, ReadZcashExt, SerializationError,
         TrustedPreallocate, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
     },
@@ -22,16 +22,18 @@ use crate::{
 
 #[cfg(feature = "tx_v6")]
 use crate::{
-    orchard::OrchardZSA, orchard_zsa::NoBurn, parameters::TX_V6_VERSION_GROUP_ID,
+    orchard::OrchardZSA,
+    orchard_zsa::NoBurn,
+    parameters::TX_V6_VERSION_GROUP_ID,
     serialization::CompactSizeMessage,
+    versioned_sig::{SighashInfo, VersionedSig},
 };
 
 use super::*;
 use crate::sapling;
 
 #[cfg(feature = "tx_v6")]
-/// TransparentSighashInfo V0 bytes used in V6.
-const TRANSPARENT_SIGHASH_INFO_V0: [u8; 1] = [0];
+mod sapling_v6;
 
 impl ZcashDeserialize for jubjub::Fq {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
@@ -400,15 +402,20 @@ impl ZcashSerialize for orchard::ShieldedData<OrchardVanilla> {
 impl ZcashSerialize for orchard::ShieldedData<OrchardZSA> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         // Denoted as `nActionGroupsOrchard` in the spec  (ZIP 230) (must be one for V6/NU7).
-        let csm = CompactSizeMessage::try_from(1).unwrap_or_else(|_| unreachable!());
-        csm.zcash_serialize(&mut writer)?;
+        CompactSizeMessage::try_from(1)
+            .unwrap_or_else(|_| unreachable!())
+            .zcash_serialize(&mut writer)?;
 
         // Split the AuthorizedAction
-        let (actions, sigs): (Vec<orchard::Action<OrchardZSA>>, Vec<Signature<SpendAuth>>) = self
+        let (actions, sigs): (
+            Vec<orchard::Action<OrchardZSA>>,
+            Vec<VersionedSig<Signature<SpendAuth>>>,
+        ) = self
             .actions
             .iter()
             .cloned()
             .map(orchard::AuthorizedAction::into_parts)
+            .map(|(action, sig)| (action, VersionedSig::for_tx_v6(sig)))
             .unzip();
 
         // Denoted as `nActionsOrchard` and `vActionsOrchard` in the spec.
@@ -436,7 +443,7 @@ impl ZcashSerialize for orchard::ShieldedData<OrchardZSA> {
         self.value_balance.zcash_serialize(&mut writer)?;
 
         // Denoted as `bindingSigOrchard` in the spec.
-        self.binding_sig.zcash_serialize(&mut writer)?;
+        VersionedSig::for_tx_v6(self.binding_sig).zcash_serialize(&mut writer)?;
 
         Ok(())
     }
@@ -565,23 +572,26 @@ impl ZcashDeserialize for Option<orchard::ShieldedData<OrchardZSA>> {
         let proof: Halo2Proof = (&mut reader).zcash_deserialize_into()?;
 
         // Denoted as `vSpendAuthSigsOrchard` in the spec.
-        let sigs: Vec<Signature<SpendAuth>> =
+        let spend_sigs: Vec<VersionedSig<Signature<SpendAuth>>> =
             zcash_deserialize_external_count(actions.len(), &mut reader)?;
 
         // Denoted as `valueBalanceOrchard` in the spec.
         let value_balance: Amount = (&mut reader).zcash_deserialize_into()?;
 
         // Denoted as `bindingSigOrchard` in the spec.
-        let binding_sig: Signature<Binding> = (&mut reader).zcash_deserialize_into()?;
+        let binding_sig: Signature<Binding> =
+            VersionedSig::zcash_deserialize(&mut reader)?.as_tx_v6()?;
 
         // Create the AuthorizedAction from deserialized parts
         let authorized_actions: Vec<orchard::AuthorizedAction<OrchardZSA>> = actions
             .into_iter()
-            .zip(sigs)
-            .map(|(action, spend_auth_sig)| {
-                orchard::AuthorizedAction::from_parts(action, spend_auth_sig)
+            .zip(spend_sigs)
+            .map(|(action, spend_sig)| {
+                spend_sig
+                    .as_tx_v6()
+                    .map(|sig| orchard::AuthorizedAction::from_parts(action, sig))
             })
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
 
         let actions: AtLeastOne<orchard::AuthorizedAction<OrchardZSA>> =
             authorized_actions.try_into()?;
@@ -857,14 +867,14 @@ impl ZcashSerialize for Transaction {
                 // Denoted as `vSighashInfo` in the spec.
                 // There is one sighash info per transparent input. For now, only V0 is supported.
                 for _ in 0..inputs.len() {
-                    zcash_serialize_bytes(&TRANSPARENT_SIGHASH_INFO_V0.to_vec(), &mut writer)?;
+                    SighashInfo::for_tx_v6().zcash_serialize(&mut writer)?;
                 }
 
                 // A bundle of fields denoted in the spec as `nSpendsSapling`, `vSpendsSapling`,
                 // `nOutputsSapling`,`vOutputsSapling`, `valueBalanceSapling`, `anchorSapling`,
                 // `vSpendProofsSapling`, `vSpendAuthSigsSapling`, `vOutputProofsSapling` and
                 // `bindingSigSapling`.
-                sapling_shielded_data.zcash_serialize(&mut writer)?;
+                sapling_v6::zcash_serialize_v6(sapling_shielded_data, &mut writer)?;
 
                 // A bundle of fields denoted in the spec as `nActionsOrchard`, `vActionsOrchard`,
                 // `flagsOrchard`,`valueBalanceOrchard`, `anchorOrchard`, `sizeProofsOrchard`,
@@ -1167,19 +1177,14 @@ impl ZcashDeserialize for Transaction {
                 // There is one `TransparentSighashInfo` per transparent input (tx_in_count entries).
                 // For now, only V0 is supported, which must decode to a Vector<u8> == [0x00].
                 for _ in 0..inputs.len() {
-                    let sighash_info_bytes = Vec::<u8>::zcash_deserialize(&mut limited_reader)?;
-                    if sighash_info_bytes.as_slice() != TRANSPARENT_SIGHASH_INFO_V0 {
-                        return Err(SerializationError::Parse(
-                            "unsupported TransparentSighashInfo (expected V0 = [0])",
-                        ));
-                    }
+                    SighashInfo::zcash_deserialize(&mut limited_reader)?.as_tx_v6()?;
                 }
 
                 // A bundle of fields denoted in the spec as `nSpendsSapling`, `vSpendsSapling`,
                 // `nOutputsSapling`,`vOutputsSapling`, `valueBalanceSapling`, `anchorSapling`,
                 // `vSpendProofsSapling`, `vSpendAuthSigsSapling`, `vOutputProofsSapling` and
                 // `bindingSigSapling`.
-                let sapling_shielded_data = (&mut limited_reader).zcash_deserialize_into()?;
+                let sapling_shielded_data = sapling_v6::zcash_deserialize_v6(&mut limited_reader)?;
 
                 // A bundle of fields denoted in the spec as `nActionsOrchard`, `vActionsOrchard`,
                 // `flagsOrchard`,`valueBalanceOrchard`, `anchorOrchard`, `sizeProofsOrchard`,

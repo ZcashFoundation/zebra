@@ -44,6 +44,9 @@ pub mod work;
 #[cfg(feature = "tx_v6")]
 pub mod orchard_zsa;
 
+#[cfg(feature = "tx_v6")]
+pub mod versioned_sig;
+
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use block::LedgerState;
 
