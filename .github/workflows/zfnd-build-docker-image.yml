@@ -109,19 +109,19 @@ jobs:
     env:
       DOCKER_BUILD_SUMMARY: ${{ vars.DOCKER_BUILD_SUMMARY }}
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v4.2.2
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd #v4.2.2
         with:
           persist-credentials: false
 
       - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@c33ff65466c58d57e4d796f88bb1ae0ff26ee453 #v5.2.0
+        uses: rlespinasse/github-slug-action@ac4a3a266833ca6b6086466a921fae9f3c671596 #v5.3.0
         with:
           short-length: 7
 
       # Automatic tag management and OCI Image Format Specification for labels
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@c1e51972afc2121e065aed6d45c65596fe445f3f #v5.8.0
+        uses: docker/metadata-action@318604b99e75e41977312d83839a89be02ca4893 #v5.9.0
         with:
           # list of Docker images to use as base name for tags
           # Docker Hub publishing requires ALL conditions to be true:
