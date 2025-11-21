@@ -25,7 +25,7 @@ ARG CARGO_HOME="${HOME}/.cargo"
 ARG CARGO_TARGET_DIR="${HOME}/target"
 
 # This stage prepares Zebra's build deps and captures build args as env vars.
-FROM rust:${RUST_VERSION}-bookworm AS deps
+FROM rust:${RUST_VERSION}-trixie AS deps
 SHELL ["/bin/bash", "-xo", "pipefail", "-c"]
 
 # Make the build platform available as a variable
@@ -34,9 +34,13 @@ ARG BUILDPLATFORM
 # Install zebra build deps
 RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
+    librocksdb-dev \
     libclang-dev \
     protobuf-compiler \
     && rm -rf /var/lib/apt/lists/* /tmp/*
+
+# Link RocksDB dynamically for faster builds
+ENV ROCKSDB_LIB_DIR="/usr/lib/"
 
 # Build arguments and variables
 ARG CARGO_INCREMENTAL
@@ -123,7 +127,7 @@ COPY --link --from=electriccoinco/lightwalletd:v0.4.17 /usr/local/bin/lightwalle
 
 # Copy the gosu binary to be able to run the entrypoint as non-root user
 # and allow to change permissions for mounted cache directories
-COPY --link --from=tianon/gosu:bookworm /gosu /usr/local/bin/
+COPY --link --from=tianon/gosu:trixie /gosu /usr/local/bin/
 
 COPY --link --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
@@ -167,7 +171,7 @@ RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
 
 # This stage starts from scratch using Debian and copies the built zebrad binary
 # from the `release` stage along with other binaries and files.
-FROM debian:bookworm-slim AS runtime
+FROM debian:trixie-slim AS runtime
 
 ARG FEATURES
 ENV FEATURES=${FEATURES}
@@ -195,9 +199,10 @@ ENV USER=${USER}
 ARG HOME
 ENV HOME=${HOME}
 
-# Install curl for healtchecks
+# Install curl for healtchecks and adduser for user/group creation
 RUN apt-get -q update && \
     apt-get -q install -y --no-install-recommends \
+    adduser \
     curl \
     && rm -rf /var/lib/apt/lists/* /tmp/*
 
@@ -214,7 +219,7 @@ RUN chown -R ${UID}:${GID} ${HOME}
 # User with UID=${UID} is created above and used via gosu in entrypoint.sh.
 
 # Copy the gosu binary to be able to run the entrypoint as non-root user
-COPY --link --from=tianon/gosu:bookworm /gosu /usr/local/bin/
+COPY --link --from=tianon/gosu:trixie /gosu /usr/local/bin/
 COPY --link --from=release /usr/local/bin/zebrad /usr/local/bin/
 COPY --link --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
