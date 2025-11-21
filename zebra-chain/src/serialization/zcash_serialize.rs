@@ -97,11 +97,7 @@ impl<T: ZcashSerialize> ZcashSerialize for AtLeastOne<T> {
 // we specifically want to serialize `Vec`s here, rather than generic slices
 #[allow(clippy::ptr_arg)]
 pub fn zcash_serialize_bytes<W: io::Write>(vec: &Vec<u8>, mut writer: W) -> Result<(), io::Error> {
-    let len: CompactSizeMessage = vec
-        .len()
-        .try_into()
-        .expect("len fits in MAX_PROTOCOL_MESSAGE_LEN");
-    len.zcash_serialize(&mut writer)?;
+    CompactSizeMessage::try_from(vec.len())?.zcash_serialize(&mut writer)?;
 
     zcash_serialize_bytes_external_count(vec, writer)
 }
@@ -109,8 +105,7 @@ pub fn zcash_serialize_bytes<W: io::Write>(vec: &Vec<u8>, mut writer: W) -> Resu
 /// Serialize an empty list of items, by writing a zero CompactSize length.
 /// (And no items.)
 pub fn zcash_serialize_empty_list<W: io::Write>(writer: W) -> Result<(), io::Error> {
-    let len: CompactSizeMessage = 0.try_into().expect("zero fits in MAX_PROTOCOL_MESSAGE_LEN");
-    len.zcash_serialize(writer)
+    CompactSizeMessage::default().zcash_serialize(writer)
 }
 
 /// Serialize a typed `Vec` **without** writing the number of items as a

@@ -2671,6 +2671,77 @@ async fn rpc_z_validateaddress() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn rpc_z_validateaddress_regtest() {
+    let _init_guard = zebra_test::init();
+
+    // Init RPC
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _) = RpcImpl::new(
+        Testnet(Arc::new(Parameters::new_regtest(Default::default()))),
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    // tm address (P2PKH): valid
+    let z_validate_address = rpc
+        .z_validate_address("tmVqEASZxBNKFTbmASZikGa5fPLkd68iJyx".to_string())
+        .await
+        .expect("we should have a validate_address::Response");
+
+    assert!(
+        z_validate_address.is_valid,
+        "tm address (P2PKH) should be valid on Regtest"
+    );
+
+    // t2 address (P2SH): valid
+    let z_validate_address = rpc
+        .z_validate_address("t2MjoXQ2iDrjG9QXNZNCY9io8ecN4FJYK1u".to_string())
+        .await
+        .expect("we should have a z_validate_address::Response");
+
+    assert!(
+        z_validate_address.is_valid(),
+        "t2 address (P2SH) should be valid on Regtest"
+    );
+
+    // sapling address: valid
+    let z_validate_address = rpc
+        .z_validate_address(
+            "zregtestsapling1jalqhycwumq3unfxlzyzcktq3n478n82k2wacvl8gwfxk6ahshkxmtp2034qj28n7gl92ka5wca"
+                .to_string(),
+        )
+        .await
+        .expect("We should have a validate_address::Response");
+
+    assert!(
+        z_validate_address.is_valid,
+        "Sapling address should be valid on Regtest"
+    );
+
+    // unified address: valid
+    let z_validate_address = rpc
+        .z_validate_address("uregtest1njwg60x0jarhyuuxrcdvw854p68cgdfe85822lmclc7z9vy9xqr7t49n3d97k2dwlee82skwwe0ens0rc06p4vr04tvd3j9ckl3qry83ckay4l4ngdq9atg7vuj9z58tfjs0mnsgyrnprtqfv8almu564z498zy6tp2aa569tk8fyhdazyhytel2m32awe4kuy6qq996um3ljaajj36".to_string())
+        .await
+        .expect("We should have a validate_address::Response");
+
+    assert!(
+        z_validate_address.is_valid,
+        "Unified address should be valid on Regtest"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn rpc_getdifficulty() {
     let _init_guard = zebra_test::init();
 

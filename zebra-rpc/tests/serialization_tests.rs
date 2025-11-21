@@ -4,6 +4,8 @@
 //! We want to ensure that users can use this crate to build RPC clients, so
 //! this is an integration test to ensure only the public API is accessed.
 
+#![allow(clippy::unwrap_in_result)]
+
 mod vectors;
 
 use std::{io::Cursor, ops::Deref};
@@ -209,7 +211,6 @@ fn test_get_block_1() -> Result<(), Box<dyn std::error::Error>> {
     let tx = block
         .tx()
         .iter()
-        .cloned()
         .map(|tx| {
             let GetBlockTransaction::Hash(h) = tx else {
                 panic!("Expected GetBlockTransaction::Hash")

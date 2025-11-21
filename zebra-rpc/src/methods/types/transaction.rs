@@ -8,6 +8,7 @@ use derive_getters::Getters;
 use derive_new::new;
 use hex::ToHex;
 
+use zcash_script::script::Asm;
 use zebra_chain::{
     amount::{self, Amount, NegativeOrZero, NonNegative},
     block::{self, merkle::AUTH_DIGEST_PLACEHOLDER, Height},
@@ -19,7 +20,6 @@ use zebra_chain::{
     transaction::{self, SerializedTransaction, Transaction, UnminedTx, VerifiedUnminedTx},
     transparent::Script,
 };
-use zebra_consensus::groth16::Description;
 use zebra_script::Sigops;
 use zebra_state::IntoDisk;
 
@@ -353,7 +353,6 @@ pub struct Output {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
 pub struct ScriptPubKey {
     /// the asm.
-    // #9330: The `asm` field is not currently populated.
     asm: String,
     /// the hex.
     #[serde(with = "hex")]
@@ -365,7 +364,6 @@ pub struct ScriptPubKey {
     #[getter(copy)]
     req_sigs: Option<u32>,
     /// The type, eg 'pubkeyhash'.
-    // #9330: The `type` field is not currently populated.
     r#type: String,
     /// The addresses.
     #[serde(default)]
@@ -377,7 +375,6 @@ pub struct ScriptPubKey {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
 pub struct ScriptSig {
     /// The asm.
-    // #9330: The `asm` field is not currently populated.
     asm: String,
     /// The hex.
     hex: Script,
@@ -661,7 +658,8 @@ impl TransactionObject {
                         txid: outpoint.hash.encode_hex(),
                         vout: outpoint.index,
                         script_sig: ScriptSig {
-                            asm: "".to_string(),
+                            asm: zcash_script::script::Code(unlock_script.as_raw_bytes().to_vec())
+                                .to_asm(false),
                             hex: unlock_script.clone(),
                         },
                         sequence: *sequence,
@@ -688,12 +686,28 @@ impl TransactionObject {
                         value_zat: output.1.value.zatoshis(),
                         n: output.0 as u32,
                         script_pub_key: ScriptPubKey {
-                            // TODO: Fill this out.
-                            asm: "".to_string(),
+                            asm: zcash_script::script::Code(
+                                output.1.lock_script.as_raw_bytes().to_vec(),
+                            )
+                            .to_asm(false),
                             hex: output.1.lock_script.clone(),
                             req_sigs,
-                            // TODO: Fill this out.
-                            r#type: "".to_string(),
+                            r#type: zcash_script::script::Code(
+                                output.1.lock_script.as_raw_bytes().to_vec(),
+                            )
+                            .to_component()
+                            .ok()
+                            .and_then(|c| c.refine().ok())
+                            .and_then(|component| zcash_script::solver::standard(&component))
+                            .map(|kind| match kind {
+                                zcash_script::solver::ScriptKind::PubKeyHash { .. } => "pubkeyhash",
+                                zcash_script::solver::ScriptKind::ScriptHash { .. } => "scripthash",
+                                zcash_script::solver::ScriptKind::MultiSig { .. } => "multisig",
+                                zcash_script::solver::ScriptKind::NullData { .. } => "nulldata",
+                                zcash_script::solver::ScriptKind::PubKey { .. } => "pubkey",
+                            })
+                            .unwrap_or("nonstandard")
+                            .to_string(),
                             addresses,
                         },
                     }
@@ -718,7 +732,7 @@ impl TransactionObject {
                         anchor,
                         nullifier,
                         rk,
-                        proof: spend.proof().0,
+                        proof: spend.zkproof.0,
                         spend_auth_sig,
                     }
                 })
@@ -739,7 +753,7 @@ impl TransactionObject {
                         ephemeral_key,
                         enc_ciphertext,
                         out_ciphertext,
-                        proof: output.proof().0,
+                        proof: output.zkproof.0,
                     }
                 })
                 .collect(),

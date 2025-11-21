@@ -380,6 +380,12 @@ pub enum ValidateContextError {
     },
 }
 
+impl From<sprout::tree::NoteCommitmentTreeError> for ValidateContextError {
+    fn from(value: sprout::tree::NoteCommitmentTreeError) -> Self {
+        ValidateContextError::NoteCommitmentTreeError(value.into())
+    }
+}
+
 /// Trait for creating the corresponding duplicate nullifier error from a nullifier.
 pub trait DuplicateNullifierError {
     /// Returns the corresponding duplicate nullifier error for `self`.

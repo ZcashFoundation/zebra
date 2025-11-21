@@ -1,5 +1,7 @@
 //! Fixed test vectors for the mempool.
 
+#![allow(clippy::unwrap_in_result)]
+
 use std::{sync::Arc, time::Duration};
 
 use color_eyre::Report;

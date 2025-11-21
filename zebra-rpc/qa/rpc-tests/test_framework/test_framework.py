@@ -16,6 +16,7 @@ import traceback
 
 from .proxy import JSONRPCException
 from .util import (
+    stop_wallets,
     zcashd_binary,
     initialize_chain,
     start_nodes,
@@ -36,6 +37,7 @@ class BitcoinTestFramework(object):
         self.num_nodes = 4
         self.cache_behavior = 'current'
         self.nodes = None
+        self.wallets = None
 
     def run_test(self):
         raise NotImplementedError
@@ -158,6 +160,13 @@ class BitcoinTestFramework(object):
             traceback.print_tb(sys.exc_info()[2])
         except KeyboardInterrupt as e:
             print("Exiting after " + repr(e))
+
+        print("Stopping wallets")
+        try:
+            if self.wallets:
+                stop_wallets(self.wallets)
+        except Exception as e:
+            print("Ignoring error while stopping wallets: ", repr(e))
 
         if not self.options.noshutdown:
             print("Stopping nodes")

@@ -1582,7 +1582,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -2272,7 +2272,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.0",
  "tokio",
  "tower-service",
  "tracing",
@@ -2561,7 +2561,7 @@ checksum = "e04d7f318608d35d4b61ddd75cbdaee86b023ebe2bd5a66ee0915f0bf93095a9"
 dependencies = [
  "hermit-abi 0.5.2",
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3831,7 +3831,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash 2.1.1",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.0",
  "thiserror 2.0.17",
  "tokio",
  "tracing",
@@ -3868,9 +3868,9 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.0",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4325,7 +4325,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5031,7 +5031,7 @@ dependencies = [
  "getrandom 0.3.3",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5491,7 +5491,7 @@ dependencies = [
 
 [[package]]
 name = "tower-batch-control"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "color-eyre",
  "ed25519-zebra",
@@ -6224,7 +6224,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -6698,9 +6698,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_script"
-version = "0.4.0"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c1d06ec5990ad2c51c3052fd41f87aa5ccab92d02d1ab5173712c2e37c24658"
+checksum = "9bed6cf5b2b4361105d4ea06b2752f0c8af4641756c7fbc9858a80af186c234f"
 dependencies = [
  "bitflags 2.9.4",
  "bounded-vec",
@@ -6747,7 +6747,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-chain"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "bech32",
  "bitflags 2.9.4",
@@ -6814,7 +6814,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-consensus"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -6861,7 +6861,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-network"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "bitflags 2.9.4",
  "byteorder",
@@ -6902,7 +6902,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-node-services"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "color-eyre",
  "jsonrpsee-types",
@@ -6910,12 +6910,13 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tower 0.4.13",
  "zebra-chain",
 ]
 
 [[package]]
 name = "zebra-rpc"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -6967,7 +6968,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-script"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "hex",
  "lazy_static",
@@ -6981,7 +6982,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-state"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "bincode",
  "chrono",
@@ -7024,12 +7025,13 @@ dependencies = [
  "tower 0.4.13",
  "tracing",
  "zebra-chain",
+ "zebra-node-services",
  "zebra-test",
 ]
 
 [[package]]
 name = "zebra-test"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "color-eyre",
  "futures",
@@ -7056,7 +7058,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-utils"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "color-eyre",
  "hex",
@@ -7084,7 +7086,7 @@ dependencies = [
 
 [[package]]
 name = "zebrad"
-version = "3.0.0-rc.0"
+version = "3.0.0"
 dependencies = [
  "abscissa_core",
  "atty",

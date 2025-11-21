@@ -132,6 +132,8 @@
 //! export TMPDIR=/path/to/disk/directory
 //! ```
 
+#![allow(clippy::unwrap_in_result)]
+
 mod common;
 
 use std::{
@@ -410,7 +412,7 @@ async fn db_init_outside_future_executor() -> Result<()> {
         "futures executor was blocked longer than expected ({block_duration:?})",
     );
 
-    db_init_handle.await?;
+    db_init_handle.await.map_err(|e| eyre!(e))?;
 
     Ok(())
 }
@@ -511,7 +513,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
     // Make sure the command was killed
     output.assert_was_killed()?;
 
-    let expected_run_dir_file_names = match cache_dir_check {
+    let (expected_run_dir_file_names, optional_run_dir_file_names) = match cache_dir_check {
         // we created the state directory, so it should still exist
         EphemeralCheck::ExistingDirectory => {
             assert_with_context!(
@@ -526,8 +528,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
                 cache_dir_check,
                 ignored_cache_dir.read_dir().unwrap().collect::<Vec<_>>()
             );
-
-            ["state", "network", "zebrad.toml"].iter()
+            (["state", "zebrad.toml"].iter(), ["network"].iter())
         }
 
         // we didn't create the state directory, so it should not exist
@@ -545,11 +546,16 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
                 ignored_cache_dir.read_dir().unwrap().collect::<Vec<_>>()
             );
 
-            ["network", "zebrad.toml"].iter()
+            (["zebrad.toml"].iter(), ["network"].iter())
         }
     };
 
-    let expected_run_dir_file_names = expected_run_dir_file_names.map(Into::into).collect();
+    let expected_run_dir_file_names: HashSet<std::ffi::OsString> =
+        expected_run_dir_file_names.map(Into::into).collect();
+
+    let optional_run_dir_file_names: HashSet<std::ffi::OsString> =
+        optional_run_dir_file_names.map(Into::into).collect();
+
     let run_dir_file_names = run_dir
         .path()
         .read_dir()
@@ -558,8 +564,17 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
         // ignore directory list order, because it can vary based on the OS and filesystem
         .collect::<HashSet<_>>();
 
+    let has_expected_file_paths = expected_run_dir_file_names
+        .iter()
+        .all(|expected_file_name| run_dir_file_names.contains(expected_file_name));
+
+    let has_only_allowed_file_paths = run_dir_file_names.iter().all(|file_name| {
+        optional_run_dir_file_names.contains(file_name)
+            || expected_run_dir_file_names.contains(file_name)
+    });
+
     assert_with_context!(
-        run_dir_file_names == expected_run_dir_file_names,
+        has_expected_file_paths && has_only_allowed_file_paths,
         &output,
         "run_dir not empty for ephemeral {:?} {:?}: expected {:?}, actual: {:?}",
         cache_dir_config,
@@ -3525,6 +3540,8 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         &[],
         chain_history_root,
         vec![],
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+        None,
     )
     .expect("coinbase transaction should be valid under the given parameters");
 
@@ -3584,6 +3601,8 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         &[],
         chain_history_root,
         vec![],
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+        None,
     )
     .expect("coinbase transaction should be valid under the given parameters");
 
@@ -3630,6 +3649,164 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     let proposal_block =
         proposal_block_from_template(&valid_original_block_template, None, &network)?;
 
+    let submit_block_response = rpc
+        .submit_block(HexData(proposal_block.zcash_serialize_to_vec()?), None)
+        .await?;
+
+    assert_eq!(
+        submit_block_response,
+        SubmitBlockResponse::Accepted,
+        "valid block should be accepted"
+    );
+
+    Ok(())
+}
+
+/// Test successful block template submission as a block proposal.
+///
+/// This test can be run locally with:
+/// `RUSTFLAGS='--cfg zcash_unstable="nu7"' cargo test --package zebrad --test acceptance --features tx_v6 -- nu7_nsm_transactions --exact --show-output`
+#[tokio::test(flavor = "multi_thread")]
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+async fn nu7_nsm_transactions() -> Result<()> {
+    use zebra_chain::{
+        chain_sync_status::MockSyncStatus,
+        parameters::testnet::{self, ConfiguredActivationHeights, ConfiguredFundingStreams},
+        serialization::ZcashSerialize,
+        work::difficulty::U256,
+    };
+    use zebra_network::address_book_peers::MockAddressBookPeers;
+    use zebra_node_services::mempool;
+    use zebra_rpc::client::HexData;
+    use zebra_test::mock_service::MockService;
+    let _init_guard = zebra_test::init();
+
+    tracing::info!("running nu7_nsm_transactions test");
+
+    let base_network_params = testnet::Parameters::build()
+        // Regtest genesis hash
+        .with_genesis_hash("029f11d80ef9765602235e1bc9727e3eb6ba20839319f761fee920d63401e327")
+        .with_checkpoints(false)
+        .with_target_difficulty_limit(U256::from_big_endian(&[0x0f; 32]))
+        .with_disable_pow(true)
+        .with_slow_start_interval(Height::MIN)
+        .with_lockbox_disbursements(vec![])
+        .with_activation_heights(ConfiguredActivationHeights {
+            nu7: Some(1),
+            ..Default::default()
+        });
+
+    let network = base_network_params
+        .clone()
+        .with_funding_streams(vec![ConfiguredFundingStreams {
+            // Start checking funding streams from block height 1
+            height_range: Some(Height(1)..Height(100)),
+            // Use default post-NU6 recipients
+            recipients: None,
+        }])
+        .to_network();
+
+    tracing::info!("built configured Testnet, starting state service and block verifier");
+
+    let default_test_config = default_test_config(&network)?;
+    let mining_config = default_test_config.mining;
+
+    let (state, read_state, latest_chain_tip, _chain_tip_change) =
+        zebra_state::init_test_services(&network).await;
+
+    let (
+        block_verifier_router,
+        _transaction_verifier,
+        _parameter_download_task_handle,
+        _max_checkpoint_height,
+    ) = zebra_consensus::router::init_test(
+        zebra_consensus::Config::default(),
+        &network,
+        state.clone(),
+    )
+    .await;
+
+    tracing::info!("started state service and block verifier, committing Regtest genesis block");
+
+    let genesis_hash = block_verifier_router
+        .clone()
+        .oneshot(zebra_consensus::Request::Commit(regtest_genesis_block()))
+        .await
+        .expect("should validate Regtest genesis block");
+
+    let mut mempool = MockService::build()
+        .with_max_request_delay(Duration::from_secs(5))
+        .for_unit_tests();
+    let mut mock_sync_status = MockSyncStatus::default();
+    mock_sync_status.set_is_close_to_tip(true);
+
+    let submitblock_channel = SubmitBlockChannel::new();
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+
+    let (rpc, _) = RpcImpl::new(
+        network.clone(),
+        mining_config,
+        false,
+        "0.0.1",
+        "Zebra tests",
+        mempool.clone(),
+        state.clone(),
+        read_state.clone(),
+        block_verifier_router,
+        mock_sync_status,
+        latest_chain_tip,
+        MockAddressBookPeers::default(),
+        rx,
+        Some(submitblock_channel.sender()),
+    );
+
+    let make_mock_mempool_request_handler = || async move {
+        mempool
+            .expect_request(mempool::Request::FullTransactions)
+            .await
+            .respond(mempool::Response::FullTransactions {
+                transactions: vec![],
+                transaction_dependencies: Default::default(),
+                // tip hash needs to match chain info for long poll requests
+                last_seen_tip_hash: genesis_hash,
+            });
+    };
+
+    let block_template_fut = rpc.get_block_template(None);
+    let mock_mempool_request_handler = make_mock_mempool_request_handler.clone()();
+    let (block_template, _) = tokio::join!(block_template_fut, mock_mempool_request_handler);
+    let GetBlockTemplateResponse::TemplateMode(block_template) =
+        block_template.expect("unexpected error in getblocktemplate RPC call")
+    else {
+        panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
+    };
+
+    let proposal_block = proposal_block_from_template(&block_template, None, &network)?;
+    let hex_proposal_block = HexData(proposal_block.zcash_serialize_to_vec()?);
+
+    // Check that the block template is a valid block proposal
+    let GetBlockTemplateResponse::ProposalMode(block_proposal_result) = rpc
+        .get_block_template(Some(GetBlockTemplateParameters::new(
+            GetBlockTemplateRequestMode::Proposal,
+            Some(hex_proposal_block),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+        )))
+        .await?
+    else {
+        panic!(
+            "this getblocktemplate call should return the `ProposalMode` variant of the response"
+        )
+    };
+
+    assert!(
+        block_proposal_result.is_valid(),
+        "block proposal should succeed"
+    );
+
+    // Submit the same block
     let submit_block_response = rpc
         .submit_block(HexData(proposal_block.zcash_serialize_to_vec()?), None)
         .await?;

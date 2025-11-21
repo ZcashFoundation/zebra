@@ -54,7 +54,7 @@ use tokio::{
     sync::{broadcast, mpsc, watch},
     task::JoinHandle,
 };
-use tower::{Service, ServiceExt};
+use tower::ServiceExt;
 use tracing::Instrument;
 
 use zcash_address::{unified::Encoding, TryFromAddress};
@@ -82,11 +82,14 @@ use zebra_chain::{
         equihash::Solution,
     },
 };
-use zebra_consensus::{funding_stream_address, RouterError};
+use zebra_consensus::{
+    funding_stream_address, router::service_trait::BlockVerifierService, RouterError,
+};
 use zebra_network::{address_book_peers::AddressBookPeers, types::PeerServices, PeerSocketAddr};
-use zebra_node_services::mempool;
+use zebra_node_services::mempool::{self, MempoolService};
 use zebra_state::{
-    AnyTx, HashOrHeight, OutputLocation, ReadRequest, ReadResponse, TransactionLocation,
+    AnyTx, HashOrHeight, OutputLocation, ReadRequest, ReadResponse, ReadState as ReadStateService,
+    State as StateService, TransactionLocation,
 };
 
 use crate::{
@@ -697,41 +700,12 @@ pub trait Rpc {
 #[derive(Clone)]
 pub struct RpcImpl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus>
 where
-    Mempool: Service<
-            mempool::Request,
-            Response = mempool::Response,
-            Error = zebra_node_services::BoxError,
-        > + Clone
-        + Send
-        + Sync
-        + 'static,
-    Mempool::Future: Send,
-    State: Service<
-            zebra_state::Request,
-            Response = zebra_state::Response,
-            Error = zebra_state::BoxError,
-        > + Clone
-        + Send
-        + Sync
-        + 'static,
-    State::Future: Send,
-    ReadState: Service<
-            zebra_state::ReadRequest,
-            Response = zebra_state::ReadResponse,
-            Error = zebra_state::BoxError,
-        > + Clone
-        + Send
-        + Sync
-        + 'static,
-    ReadState::Future: Send,
+    Mempool: MempoolService,
+    State: StateService,
+    ReadState: ReadStateService,
     Tip: ChainTip + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
-    BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
-        + Clone
-        + Send
-        + Sync
-        + 'static,
-    <BlockVerifierRouter as Service<zebra_consensus::Request>>::Future: Send,
+    BlockVerifierRouter: BlockVerifierService,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
     // Configuration
@@ -784,41 +758,12 @@ pub type LoggedLastEvent = watch::Receiver<Option<(String, tracing::Level, chron
 impl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus> fmt::Debug
     for RpcImpl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus>
 where
-    Mempool: Service<
-            mempool::Request,
-            Response = mempool::Response,
-            Error = zebra_node_services::BoxError,
-        > + Clone
-        + Send
-        + Sync
-        + 'static,
-    Mempool::Future: Send,
-    State: Service<
-            zebra_state::Request,
-            Response = zebra_state::Response,
-            Error = zebra_state::BoxError,
-        > + Clone
-        + Send
-        + Sync
-        + 'static,
-    State::Future: Send,
-    ReadState: Service<
-            zebra_state::ReadRequest,
-            Response = zebra_state::ReadResponse,
-            Error = zebra_state::BoxError,
-        > + Clone
-        + Send
-        + Sync
-        + 'static,
-    ReadState::Future: Send,
+    Mempool: MempoolService,
+    State: StateService,
+    ReadState: ReadStateService,
     Tip: ChainTip + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
-    BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
-        + Clone
-        + Send
-        + Sync
-        + 'static,
-    <BlockVerifierRouter as Service<zebra_consensus::Request>>::Future: Send,
+    BlockVerifierRouter: BlockVerifierService,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -836,41 +781,12 @@ where
 impl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus>
     RpcImpl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus>
 where
-    Mempool: Service<
-            mempool::Request,
-            Response = mempool::Response,
-            Error = zebra_node_services::BoxError,
-        > + Clone
-        + Send
-        + Sync
-        + 'static,
-    Mempool::Future: Send,
-    State: Service<
-            zebra_state::Request,
-            Response = zebra_state::Response,
-            Error = zebra_state::BoxError,
-        > + Clone
-        + Send
-        + Sync
-        + 'static,
-    State::Future: Send,
-    ReadState: Service<
-            zebra_state::ReadRequest,
-            Response = zebra_state::ReadResponse,
-            Error = zebra_state::BoxError,
-        > + Clone
-        + Send
-        + Sync
-        + 'static,
-    ReadState::Future: Send,
+    Mempool: MempoolService,
+    State: StateService,
+    ReadState: ReadStateService,
     Tip: ChainTip + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
-    BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
-        + Clone
-        + Send
-        + Sync
-        + 'static,
-    <BlockVerifierRouter as Service<zebra_consensus::Request>>::Future: Send,
+    BlockVerifierRouter: BlockVerifierService,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
     /// Create a new instance of the RPC handler.
@@ -951,41 +867,12 @@ where
 impl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus> RpcServer
     for RpcImpl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus>
 where
-    Mempool: Service<
-            mempool::Request,
-            Response = mempool::Response,
-            Error = zebra_node_services::BoxError,
-        > + Clone
-        + Send
-        + Sync
-        + 'static,
-    Mempool::Future: Send,
-    State: Service<
-            zebra_state::Request,
-            Response = zebra_state::Response,
-            Error = zebra_state::BoxError,
-        > + Clone
-        + Send
-        + Sync
-        + 'static,
-    State::Future: Send,
-    ReadState: Service<
-            zebra_state::ReadRequest,
-            Response = zebra_state::ReadResponse,
-            Error = zebra_state::BoxError,
-        > + Clone
-        + Send
-        + Sync
-        + 'static,
-    ReadState::Future: Send,
+    Mempool: MempoolService,
+    State: StateService,
+    ReadState: ReadStateService,
     Tip: ChainTip + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
-    BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
-        + Clone
-        + Send
-        + Sync
-        + 'static,
-    <BlockVerifierRouter as Service<zebra_consensus::Request>>::Future: Send,
+    BlockVerifierRouter: BlockVerifierService,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
     async fn get_info(&self) -> Result<GetInfoResponse> {
@@ -2526,6 +2413,8 @@ where
             mempool_txs,
             mempool_tx_deps,
             extra_coinbase_data.clone(),
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            None,
         );
 
         tracing::debug!(
@@ -2546,6 +2435,8 @@ where
             mempool_txs,
             submit_old,
             extra_coinbase_data,
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            None,
         );
 
         Ok(response.into())
@@ -3404,7 +3295,8 @@ enum DGetAddressBalanceRequest {
 #[deprecated(note = "Use `GetAddressBalanceRequest` instead.")]
 pub type AddressStrings = GetAddressBalanceRequest;
 
-trait ValidateAddresses {
+/// A collection of validatable addresses
+pub trait ValidateAddresses {
     /// Given a list of addresses as strings:
     /// - check if provided list have all valid transparent addresses.
     /// - return valid addresses as a set of `Address`.
@@ -4346,10 +4238,15 @@ fn build_height_range(
 /// <https://github.com/zcash/zcash/blob/c267c3ee26510a974554f227d40a89e3ceb5bb4d/src/rpc/blockchain.cpp#L589-L618>
 //
 // TODO: also use this function in `get_block` and `z_get_treestate`
-#[allow(dead_code)]
 pub fn height_from_signed_int(index: i32, tip_height: Height) -> Result<Height> {
     if index >= 0 {
-        let height = index.try_into().expect("Positive i32 always fits in u32");
+        let height = index.try_into().map_err(|_| {
+            ErrorObject::borrowed(
+                ErrorCode::InvalidParams.code(),
+                "Index conversion failed",
+                None,
+            )
+        })?;
         if height > tip_height.0 {
             return Err(ErrorObject::borrowed(
                 ErrorCode::InvalidParams.code(),
@@ -4361,7 +4258,13 @@ pub fn height_from_signed_int(index: i32, tip_height: Height) -> Result<Height> 
     } else {
         // `index + 1` can't overflow, because `index` is always negative here.
         let height = i32::try_from(tip_height.0)
-            .expect("tip height fits in i32, because Height::MAX fits in i32")
+            .map_err(|_| {
+                ErrorObject::borrowed(
+                    ErrorCode::InvalidParams.code(),
+                    "Tip height conversion failed",
+                    None,
+                )
+            })?
             .checked_add(index + 1);
 
         let sanitized_height = match height {
@@ -4380,7 +4283,13 @@ pub fn height_from_signed_int(index: i32, tip_height: Height) -> Result<Height> 
                         None,
                     ));
                 }
-                let h: u32 = h.try_into().expect("Positive i32 always fits in u32");
+                let h: u32 = h.try_into().map_err(|_| {
+                    ErrorObject::borrowed(
+                        ErrorCode::InvalidParams.code(),
+                        "Height conversion failed",
+                        None,
+                    )
+                })?;
                 if h > tip_height.0 {
                     return Err(ErrorObject::borrowed(
                         ErrorCode::InvalidParams.code(),
@@ -4483,15 +4392,7 @@ pub async fn chain_tip_difficulty<State>(
     should_use_default: bool,
 ) -> Result<f64>
 where
-    State: Service<
-            zebra_state::ReadRequest,
-            Response = zebra_state::ReadResponse,
-            Error = zebra_state::BoxError,
-        > + Clone
-        + Send
-        + Sync
-        + 'static,
-    State::Future: Send,
+    State: ReadStateService,
 {
     let request = ReadRequest::ChainInfo;
 

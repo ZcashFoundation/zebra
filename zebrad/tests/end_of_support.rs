@@ -1,5 +1,7 @@
 //! Testing the end of support feature.
 
+#![allow(clippy::unwrap_in_result)]
+
 use std::time::Duration;
 
 use color_eyre::eyre::Result;

@@ -1,5 +1,7 @@
 //! Tests for Zebra blocks
 
+#![allow(clippy::unwrap_in_result)]
+
 // TODO: generate should be rewritten as strategies
 #[cfg(any(test, feature = "bench", feature = "proptest-impl"))]
 pub mod generate;

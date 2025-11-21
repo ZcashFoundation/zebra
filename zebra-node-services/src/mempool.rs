@@ -14,11 +14,13 @@ use crate::BoxError;
 
 mod gossip;
 mod mempool_change;
+mod service_trait;
 mod transaction_dependencies;
 
 pub use self::{
     gossip::Gossip,
     mempool_change::{MempoolChange, MempoolChangeKind, MempoolTxSubscriber},
+    service_trait::MempoolService,
     transaction_dependencies::TransactionDependencies,
 };
 

@@ -1,5 +1,7 @@
 //! Randomised property tests for the mempool.
 
+#![allow(clippy::unwrap_in_result)]
+
 use std::{env, fmt, sync::Arc};
 
 use proptest::{collection::vec, prelude::*};

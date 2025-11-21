@@ -1,5 +1,7 @@
 //! Tests for chain verification
 
+#![allow(clippy::unwrap_in_result)]
+
 use std::{sync::Arc, time::Duration};
 
 use color_eyre::eyre::Report;

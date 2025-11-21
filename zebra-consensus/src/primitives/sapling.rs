@@ -136,9 +136,9 @@ impl Service<BatchControl<Item>> for Verifier {
                         let (spend_vk, output_vk) = SAPLING.verifying_keys();
 
                         let res = batch.validate(&spend_vk, &output_vk, thread_rng());
-                        tx.send(Some(res))
+                        let _ = tx.send(Some(res));
                     })
-                    .await?
+                    .await
                     .map_err(Self::Error::from)
                 }
                 .boxed()

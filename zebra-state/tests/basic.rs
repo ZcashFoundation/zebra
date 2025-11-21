@@ -1,5 +1,7 @@
 //! Basic integration tests for zebra-state
 
+#![allow(clippy::unwrap_in_result)]
+
 use std::sync::Arc;
 
 use color_eyre::eyre::Report;

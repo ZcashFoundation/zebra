@@ -1,5 +1,7 @@
 //! Tests for checkpoint-based block verification
 
+#![allow(clippy::unwrap_in_result)]
+
 use std::{cmp::min, time::Duration};
 
 use color_eyre::eyre::{eyre, Report};

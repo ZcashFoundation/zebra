@@ -1,5 +1,7 @@
 //! Tests for transaction verification
 
+#![allow(clippy::unwrap_in_result)]
+
 use futures::{
     future::ready,
     stream::{FuturesUnordered, StreamExt},

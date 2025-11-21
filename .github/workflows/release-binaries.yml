@@ -32,6 +32,9 @@ jobs:
       image_name: zebra
       features: ${{ vars.RUST_PROD_FEATURES }}
       rust_log: ${{ vars.RUST_LOG }}
+      # Enable Docker Hub publishing for official releases (this is the single source of truth for production images)
+      # The deploy-nodes workflow also builds for releases but doesn't publish to Docker Hub (defaults to false)
+      publish_to_dockerhub: true
     # This step needs access to Docker Hub secrets to run successfully
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
