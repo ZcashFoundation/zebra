@@ -195,9 +195,10 @@ ENV USER=${USER}
 ARG HOME
 ENV HOME=${HOME}
 
-# Install curl for healtchecks
+# Install curl for healtchecks and adduser for user/group creation
 RUN apt-get -q update && \
     apt-get -q install -y --no-install-recommends \
+    adduser \
     curl \
     && rm -rf /var/lib/apt/lists/* /tmp/*
 
