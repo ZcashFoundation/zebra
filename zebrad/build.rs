@@ -12,6 +12,7 @@ use vergen_git2::{CargoBuilder, Emitter, Git2Builder, RustcBuilder};
 /// This builder fails the build on error.
 fn add_base_emitter_instructions(emitter: &mut Emitter) {
     emitter
+        .fail_on_error()
         .add_instructions(
             &CargoBuilder::all_cargo().expect("all_cargo() should build successfully"),
         )
@@ -43,20 +44,11 @@ fn main() {
         .build()
         .expect("all_git + describe + sha should build successfully");
 
-    emitter
-        .add_instructions(&all_git)
-        .expect("adding all_git + describe + sha instructions should succeed");
-
-    // Disable git if we're building with an invalid `zebra/.git`
-    match emitter.fail_on_error().emit() {
-        Ok(_) => {}
-        Err(e) => {
-            eprintln!("git error in vergen build script: skipping git env vars: {e:?}",);
-            let mut emitter = Emitter::default();
-            add_base_emitter_instructions(&mut emitter);
-            emitter.emit().expect("base emit should succeed");
-        }
+    if let Err(e) = emitter.add_instructions(&all_git) {
+        println!("git error in vergen build script: skipping git env vars: {e:?}",);
     }
+
+    emitter.emit().expect("base emit should succeed");
 
     #[cfg(feature = "lightwalletd-grpc-tests")]
     tonic_prost_build::configure()
