@@ -282,6 +282,16 @@ pub enum MetaAddrChange {
         is_inbound: bool,
     },
 
+    /// Updates an existing `MetaAddr` when we send a ping to a peer.
+    UpdatePingSent {
+        #[cfg_attr(
+            any(test, feature = "proptest-impl"),
+            proptest(strategy = "canonical_peer_addr_strategy()")
+        )]
+        addr: PeerSocketAddr,
+        ping_sent_at: Instant,
+    },
+
     /// Updates an existing `MetaAddr` when a peer responds with a message.
     UpdateResponded {
         #[cfg_attr(
@@ -384,6 +394,14 @@ impl MetaAddr {
         }
     }
 
+    /// Returns a [`MetaAddrChange::UpdatePingSent`] for a peer that we just sent a ping to.
+    pub fn new_ping_sent(addr: PeerSocketAddr, ping_sent_at: Instant) -> MetaAddrChange {
+        UpdatePingSent {
+            addr: canonical_peer_addr(*addr),
+            ping_sent_at,
+        }
+    }
+
     /// Returns a [`MetaAddrChange::UpdateResponded`] for a peer that has just
     /// sent us a message.
     ///
@@ -471,18 +489,14 @@ impl MetaAddr {
         self.is_inbound
     }
 
-    /// Returns the round-trip time (RTT) for this peer, if available,
-    /// as the number of seconds (f64). This value is updated when the peer
-    /// responds to a ping (Pong).
-    pub fn rtt(&self) -> Option<f64> {
-        self.rtt.map(|duration| duration.as_secs_f64())
+    /// Returns the round-trip time (RTT) for this peer, if available.
+    pub fn rtt(&self) -> Option<Duration> {
+        self.rtt
     }
 
-    /// Returns the time this peer was last pinged, if available,
-    /// as the number of seconds since the epoch or some reference point
-    pub fn ping_sent_at(&self) -> Option<f64> {
+    /// Returns the time this peer was last pinged, if available.
+    pub fn ping_sent_at(&self) -> Option<Instant> {
         self.ping_sent_at
-            .map(|instant| instant.elapsed().as_secs_f64())
     }
 
     /// Returns the unverified "last seen time" gossiped by the remote peer that
@@ -756,6 +770,7 @@ impl MetaAddrChange {
             | NewLocal { addr, .. }
             | UpdateAttempt { addr }
             | UpdateConnected { addr, .. }
+            | UpdatePingSent { addr, .. }
             | UpdateResponded { addr, .. }
             | UpdateFailed { addr, .. }
             | UpdateMisbehavior { addr, .. } => *addr,
@@ -773,6 +788,7 @@ impl MetaAddrChange {
             | NewLocal { addr, .. }
             | UpdateAttempt { addr }
             | UpdateConnected { addr, .. }
+            | UpdatePingSent { addr, .. }
             | UpdateResponded { addr, .. }
             | UpdateFailed { addr, .. }
             | UpdateMisbehavior { addr, .. } => *addr = new_addr,
@@ -791,6 +807,7 @@ impl MetaAddrChange {
             NewLocal { .. } => Some(PeerServices::NODE_NETWORK),
             UpdateAttempt { .. } => None,
             UpdateConnected { services, .. } => Some(*services),
+            UpdatePingSent { .. } => None,
             UpdateResponded { .. } => None,
             UpdateFailed { services, .. } => *services,
             UpdateMisbehavior { .. } => None,
@@ -809,6 +826,7 @@ impl MetaAddrChange {
             NewLocal { .. } => Some(now),
             UpdateAttempt { .. }
             | UpdateConnected { .. }
+            | UpdatePingSent { .. }
             | UpdateResponded { .. }
             | UpdateFailed { .. }
             | UpdateMisbehavior { .. } => None,
@@ -843,6 +861,7 @@ impl MetaAddrChange {
             // handshake time.
             UpdateAttempt { .. } => Some(now),
             UpdateConnected { .. }
+            | UpdatePingSent { .. }
             | UpdateResponded { .. }
             | UpdateFailed { .. }
             | UpdateMisbehavior { .. } => None,
@@ -860,6 +879,15 @@ impl MetaAddrChange {
             //   reconnection attempts.
             UpdateConnected { .. } | UpdateResponded { .. } => Some(now),
             UpdateFailed { .. } | UpdateMisbehavior { .. } => None,
+            UpdatePingSent { .. } => None,
+        }
+    }
+
+    /// Return the timestamp when a ping was last sent, if available.
+    pub fn ping_sent(&self) -> Option<Instant> {
+        match self {
+            UpdatePingSent { ping_sent_at, .. } => Some(*ping_sent_at),
+            _ => None,
         }
     }
 
@@ -887,6 +915,7 @@ impl MetaAddrChange {
             | NewLocal { .. }
             | UpdateAttempt { .. }
             | UpdateConnected { .. }
+            | UpdatePingSent { .. }
             | UpdateResponded { .. } => None,
             // If there is a large delay applying this change, then:
             // - the peer might stay in the `AttemptPending` or `Responded`
@@ -905,7 +934,12 @@ impl MetaAddrChange {
             // local listeners get sanitized, so the state doesn't matter here
             NewLocal { .. } => NeverAttemptedGossiped,
             UpdateAttempt { .. } => AttemptPending,
-            UpdateConnected { .. } | UpdateResponded { .. } | UpdateMisbehavior { .. } => Responded,
+            UpdateConnected { .. }
+            // Sending a ping is an interaction with a connected peer, but does not indicate new liveness.
+            // Peers stay in Responded once connected, so we keep them in that state for UpdatePingSent.
+            | UpdatePingSent { .. }
+            | UpdateResponded { .. }
+            | UpdateMisbehavior { .. } => Responded,
             UpdateFailed { .. } => Failed,
         }
     }

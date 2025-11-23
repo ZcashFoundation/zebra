@@ -1314,6 +1314,11 @@ async fn send_periodic_heartbeats_run_loop(
         // We've reached another heartbeat interval without
         // shutting down, so do a heartbeat request.
         let ping_sent_at = Instant::now();
+        if let Some(book_addr) = connected_addr.get_address_book_addr() {
+            let _ = heartbeat_ts_collector
+                .send(MetaAddr::new_ping_sent(book_addr, ping_sent_at.into()))
+                .await;
+        }
 
         let heartbeat = send_one_heartbeat(&mut server_tx);
         let rtt = heartbeat_timeout(heartbeat, &heartbeat_ts_collector, &connected_addr).await?;
@@ -1329,19 +1334,7 @@ async fn send_periodic_heartbeats_run_loop(
                 // the collector doesn't depend on network activity,
                 // so this await should not hang
                 let _ = heartbeat_ts_collector
-                    .send(MetaAddr::new_responded(
-                        book_addr,
-                        Some(rtt),
-                        Some(ping_sent_at.into()),
-                    ))
-                    .await;
-            } else {
-                let _ = heartbeat_ts_collector
-                    .send(MetaAddr::new_responded(
-                        book_addr,
-                        None,
-                        Some(ping_sent_at.into()),
-                    ))
+                    .send(MetaAddr::new_responded(book_addr, Some(rtt), None))
                     .await;
             }
         }

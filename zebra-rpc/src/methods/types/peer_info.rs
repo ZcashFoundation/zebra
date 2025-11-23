@@ -31,9 +31,8 @@ impl From<MetaAddr> for PeerInfo {
         Self {
             addr: meta_addr.addr(),
             inbound: meta_addr.is_inbound(),
-            // TODO: Fill in pingtime and pingwait once live ping tracking is implemented.
-            pingtime: meta_addr.rtt(),
-            pingwait: meta_addr.ping_sent_at(),
+            pingtime: meta_addr.rtt().map(|d| d.as_secs_f64()),
+            pingwait: meta_addr.ping_sent_at().map(|t| t.elapsed().as_secs_f64()),
         }
     }
 }
