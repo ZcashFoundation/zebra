@@ -501,7 +501,7 @@ impl Block {
                         }
                         std::cmp::Ordering::Greater => {
                             // Set the correct commitment bytes according to the network upgrade.
-                            let history_tree_root = match &history_tree {
+                            let chain_history_root = match &history_tree {
                                 Some(tree) => tree.hash().unwrap_or_else(|| [0u8; 32].into()),
                                 None => [0u8; 32].into(),
                             };
@@ -510,8 +510,8 @@ impl Block {
                                 let auth_data_root = block.auth_data_root();
                                 let hash_block_commitments =
                                     ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
-                                        &history_tree_root,
-                                        &auth_data_root,
+                                        chain_history_root,
+                                        auth_data_root,
                                     );
                                 let block_header = Arc::make_mut(&mut block.header);
                                 block_header.commitment_bytes =
@@ -519,7 +519,7 @@ impl Block {
                             } else {
                                 let block_header = Arc::make_mut(&mut block.header);
                                 block_header.commitment_bytes =
-                                    history_tree_root.bytes_in_serialized_order().into();
+                                    chain_history_root.bytes_in_serialized_order().into();
                             }
                         }
                     }

@@ -203,8 +203,8 @@ pub(crate) fn block_commitment_is_valid_for_chain_history(
             let auth_data_root = block.auth_data_root();
 
             let hash_block_commitments = ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
-                &history_tree_root,
-                &auth_data_root,
+                history_tree_root,
+                auth_data_root,
             );
 
             if actual_hash_block_commitments == hash_block_commitments {

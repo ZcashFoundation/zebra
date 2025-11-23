@@ -56,6 +56,11 @@ impl Root {
         root.reverse();
         root
     }
+
+    /// Return the node bytes in internal serialized order.
+    pub fn bytes_in_serialized_order(&self) -> [u8; 32] {
+        self.0.into()
+    }
 }
 
 impl fmt::Debug for Root {

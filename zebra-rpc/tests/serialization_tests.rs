@@ -15,16 +15,19 @@ use vectors::{
     GET_BLOCK_TEMPLATE_RESPONSE_TEMPLATE, GET_RAW_TRANSACTION_RESPONSE_TRUE,
 };
 
-use zebra_rpc::client::zebra_chain::{
-    sapling::ValueCommitment,
-    serialization::{BytesInDisplayOrder, ZcashDeserialize, ZcashSerialize},
-    subtree::NoteCommitmentSubtreeIndex,
-    transparent::{OutputIndex, Script},
-    work::difficulty::{CompactDifficulty, ExpandedDifficulty},
+use zebra_rpc::client::{
+    zebra_chain::{
+        sapling::ValueCommitment,
+        serialization::{BytesInDisplayOrder, ZcashDeserialize, ZcashSerialize},
+        subtree::NoteCommitmentSubtreeIndex,
+        transparent::{OutputIndex, Script},
+        work::difficulty::{CompactDifficulty, ExpandedDifficulty},
+    },
+    DefaultRoots,
 };
 use zebra_rpc::client::{
-    BlockHeaderObject, BlockObject, BlockTemplateResponse, Commitments, DefaultRoots,
-    FundingStream, GetAddressBalanceRequest, GetAddressBalanceResponse, GetAddressTxIdsRequest,
+    BlockHeaderObject, BlockObject, BlockTemplateResponse, Commitments, FundingStream,
+    GetAddressBalanceRequest, GetAddressBalanceResponse, GetAddressTxIdsRequest,
     GetAddressUtxosResponse, GetAddressUtxosResponseObject, GetBlockHashResponse,
     GetBlockHeaderResponse, GetBlockHeightAndHashResponse, GetBlockResponse,
     GetBlockSubsidyResponse, GetBlockTemplateParameters, GetBlockTemplateRequestMode,
@@ -1040,21 +1043,33 @@ fn test_get_block_template_response() -> Result<(), Box<dyn std::error::Error>> 
     let capabilities = template.capabilities().clone();
     let version = template.version();
     let previous_block_hash = template.previous_block_hash().0;
-    let block_commitments_hash: [u8; 32] = template.block_commitments_hash().into();
-    let light_client_root_hash: [u8; 32] = template.light_client_root_hash().into();
-    let final_sapling_root_hash: [u8; 32] = template.final_sapling_root_hash().into();
-    let default_roots_merkle_root: [u8; 32] = template.default_roots().merkle_root().into();
-    let default_roots_chain_history_root: [u8; 32] =
-        template.default_roots().chain_history_root().into();
-    let default_roots_auth_data_root: [u8; 32] = template.default_roots().auth_data_root().into();
-    let default_roots_block_commitments_hash: [u8; 32] =
-        template.default_roots().block_commitments_hash().into();
-    let default_roots = DefaultRoots::new(
-        default_roots_merkle_root.into(),
-        default_roots_chain_history_root.into(),
-        default_roots_auth_data_root.into(),
-        default_roots_block_commitments_hash.into(),
-    );
+
+    let final_sapling_root_hash: Option<[u8; 32]> = template.final_sapling_root_hash();
+    let light_client_root_hash: Option<[u8; 32]> = template.light_client_root_hash();
+
+    let block_commitments_hash: Option<[u8; 32]> =
+        template.block_commitments_hash().map(|h| h.into());
+
+    let default_roots = template
+        .default_roots()
+        .as_ref()
+        .map(|roots| {
+            (
+                <[u8; 32]>::from(roots.merkle_root()),
+                <[u8; 32]>::from(roots.chain_history_root()),
+                <[u8; 32]>::from(roots.auth_data_root()),
+                <[u8; 32]>::from(roots.block_commitments_hash()),
+            )
+        })
+        .map(|roots| {
+            DefaultRoots::new(
+                roots.0.into(),
+                roots.1.into(),
+                roots.2.into(),
+                roots.3.into(),
+            )
+        });
+
     let transactions = template
         .transactions()
         .clone()
@@ -1079,6 +1094,7 @@ fn test_get_block_template_response() -> Result<(), Box<dyn std::error::Error>> 
             )
         })
         .collect::<Vec<_>>();
+
     let coinbase_txn = template.coinbase_txn().clone();
     // We manually checked all LongPollId fields are extractable
     let long_poll_id = template.long_poll_id();
@@ -1098,9 +1114,9 @@ fn test_get_block_template_response() -> Result<(), Box<dyn std::error::Error>> 
         capabilities,
         version,
         previous_block_hash.into(),
-        block_commitments_hash.into(),
-        light_client_root_hash.into(),
-        final_sapling_root_hash.into(),
+        block_commitments_hash.map(|h| h.into()),
+        light_client_root_hash,
+        final_sapling_root_hash,
         default_roots,
         transactions,
         coinbase_txn,

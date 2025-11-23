@@ -9,12 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `methods::tests::utils::fake_roots`
+- `methods::tests::utils::fake_roots` fn
+- `methods::types::got_block_template::roots` mod
+
+### Changed
+
+- `methods::types::get_block_template::proposal::proposal_block_from_template`
+  does not take the `net` parameter anymore.
 
 ### Removed
 
-- `methods::types::get_block_template::fetch_chain_info`
-- `methods::tests::utils::fake_history_tree`
+- `methods::types::default_roots` mod
+- `methods::types::get_block_template::fetch_chain_info` fn
+- `methods::tests::utils::fake_history_tree` fn
 
 ## [3.1.0] - 2025-11-17
 

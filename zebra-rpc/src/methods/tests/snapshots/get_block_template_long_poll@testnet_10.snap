@@ -9,8 +9,8 @@ expression: block_template
   "version": 4,
   "previousblockhash": "0000000000d723156d9b65ffcf4984da7a19675ed7e2f06d9e5d5188af087bf8",
   "blockcommitmentshash": "1d445cc3e1f19f1d8613bb50f3152e4fd28c57bc5a98eb35dc96830d17368ebb",
-  "lightclientroothash": "1d445cc3e1f19f1d8613bb50f3152e4fd28c57bc5a98eb35dc96830d17368ebb",
-  "finalsaplingroothash": "1d445cc3e1f19f1d8613bb50f3152e4fd28c57bc5a98eb35dc96830d17368ebb",
+  "lightclientroothash": "03bc75f00c307a05aed2023819e18c2672cbe15fbd3200944997def141967387",
+  "finalsaplingroothash": "03bc75f00c307a05aed2023819e18c2672cbe15fbd3200944997def141967387",
   "defaultroots": {
     "merkleroot": "2c8d99718285381ff38cd2605ccb7ce5dc7529756d2cc57fef99fbb26332dd9f",
     "chainhistoryroot": "03bc75f00c307a05aed2023819e18c2672cbe15fbd3200944997def141967387",

@@ -1,4 +1,4 @@
-//! The `DefaultRoots` type is part of the `getblocktemplate` RPC method output.
+//! Block header roots for block templates.
 
 use std::iter;
 
@@ -7,13 +7,15 @@ use derive_new::new;
 use zebra_chain::{
     amount::NegativeOrZero,
     block::{
-        self,
         merkle::{self, AuthDataRoot, AUTH_DIGEST_PLACEHOLDER},
         ChainHistoryBlockTxAuthCommitmentHash, ChainHistoryMmrRootHash, Height,
+        CHAIN_HISTORY_ACTIVATION_RESERVED,
     },
     parameters::{Network, NetworkUpgrade},
+    serialization::BytesInDisplayOrder,
     transaction::VerifiedUnminedTx,
 };
+use zebra_state::GetBlockTemplateChainInfo;
 
 use crate::client::TransactionTemplate;
 
@@ -56,20 +58,11 @@ pub struct DefaultRoots {
 impl DefaultRoots {
     /// Creates a new [`DefaultRoots`] instance from the given coinbase tx template.
     pub fn from_coinbase(
-        net: &Network,
-        height: Height,
         coinbase: &TransactionTemplate<NegativeOrZero>,
-        chain_history_root: Option<ChainHistoryMmrRootHash>,
+        chain_history_root: ChainHistoryMmrRootHash,
         mempool_txs: &[VerifiedUnminedTx],
     ) -> Self {
-        let chain_history_root = chain_history_root
-            .or_else(|| {
-                (NetworkUpgrade::Heartwood.activation_height(net) == Some(height))
-                    .then_some(block::CHAIN_HISTORY_ACTIVATION_RESERVED.into())
-            })
-            .expect("history root is required for block templates");
-
-        // TODO:
+        // TODO: (Performance)
         // Computing `auth_data_root` and `merkle_root` gets more expensive as `mempool_txs` grows.
         // It might be worth doing it in rayon.
 
@@ -82,23 +75,81 @@ impl DefaultRoots {
             }))
             .collect();
 
-        Self {
-            merkle_root: iter::once(coinbase.hash)
-                .chain(mempool_txs.iter().map(|tx| tx.transaction.id.mined_id()))
-                .collect(),
+        let merkle_root = iter::once(coinbase.hash)
+            .chain(mempool_txs.iter().map(|tx| tx.transaction.id.mined_id()))
+            .collect();
+
+        let block_commitments_hash = ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
             chain_history_root,
             auth_data_root,
-            block_commitments_hash: if NetworkUpgrade::current(net, height)
-                == NetworkUpgrade::Heartwood
-                && chain_history_root == block::CHAIN_HISTORY_ACTIVATION_RESERVED.into()
-            {
-                block::CHAIN_HISTORY_ACTIVATION_RESERVED.into()
-            } else {
-                ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
-                    &chain_history_root,
-                    &auth_data_root,
-                )
-            },
+        );
+
+        Self {
+            merkle_root,
+            chain_history_root,
+            auth_data_root,
+            block_commitments_hash,
+        }
+    }
+}
+
+/// Computes the block header roots.
+pub fn compute_roots(
+    net: &Network,
+    height: Height,
+    chain_info: &GetBlockTemplateChainInfo,
+    coinbase: &TransactionTemplate<NegativeOrZero>,
+    mempool_txs: &[VerifiedUnminedTx],
+) -> (
+    Option<[u8; 32]>,
+    Option<[u8; 32]>,
+    Option<ChainHistoryBlockTxAuthCommitmentHash>,
+    Option<DefaultRoots>,
+) {
+    use NetworkUpgrade::*;
+
+    let chain_history_root = chain_info.chain_history_root.or_else(|| {
+        Heartwood
+            .activation_height(net)
+            .and_then(|h| (h == height).then_some(CHAIN_HISTORY_ACTIVATION_RESERVED.into()))
+    });
+
+    match NetworkUpgrade::current(net, height) {
+        Genesis | BeforeOverwinter | Overwinter => (None, None, None, None),
+
+        Sapling | Blossom => (
+            Some(
+                chain_info
+                    .sapling_root
+                    .expect("Sapling note commitment tree root must be available for Sapling+")
+                    .bytes_in_display_order(),
+            ),
+            None,
+            None,
+            None,
+        ),
+
+        Heartwood | Canopy => {
+            let chain_hist_root = chain_history_root
+                .expect("chain history root must be available for Heartwood+")
+                .bytes_in_display_order();
+
+            (Some(chain_hist_root), Some(chain_hist_root), None, None)
+        }
+
+        Nu5 | Nu6 | Nu6_1 | Nu7 => {
+            let default_roots = DefaultRoots::from_coinbase(
+                coinbase,
+                chain_history_root.expect("chain history root must be available for Nu5+"),
+                mempool_txs,
+            );
+
+            (
+                Some(default_roots.chain_history_root.bytes_in_display_order()),
+                Some(default_roots.chain_history_root.bytes_in_display_order()),
+                Some(default_roots.block_commitments_hash),
+                Some(default_roots),
+            )
         }
     }
 }

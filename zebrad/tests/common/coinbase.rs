@@ -50,7 +50,7 @@ pub(crate) async fn regtest_coinbase() -> eyre::Result<()> {
         )?);
 
         for _ in 0..2 {
-            let (mut block, height) = client.block_from_template(&net).await?;
+            let (mut block, height) = client.new_block_from_gbt().await?;
 
             // If the network requires PoW, find a valid nonce.
             if !net.disable_pow() {

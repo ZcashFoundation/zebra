@@ -2874,12 +2874,9 @@ where
                 ));
             };
 
-            let proposal_block = proposal_block_from_template(
-                &block_template,
-                BlockTemplateTimeSource::CurTime,
-                &network,
-            )
-            .map_error(server::error::LegacyCode::default())?;
+            let proposal_block =
+                proposal_block_from_template(&block_template, BlockTemplateTimeSource::CurTime)
+                    .map_error(server::error::LegacyCode::default())?;
 
             let hex_proposal_block = HexData(
                 proposal_block

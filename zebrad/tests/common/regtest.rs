@@ -31,19 +31,20 @@ use crate::common::{
     launch::{ZebradTestDirExt, LAUNCH_DELAY},
 };
 
-/// Number of blocks that should be submitted before the test is considered successful.
-const NUM_BLOCKS_TO_SUBMIT: usize = 200;
-
 pub(crate) async fn submit_blocks_test() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     let net = Network::new_regtest(
         ConfiguredActivationHeights {
-            nu5: Some(100),
+            canopy: Some(1),
+            nu5: Some(10),
+            nu6: Some(20),
+            nu6_1: Some(30),
             ..Default::default()
         }
         .into(),
     );
+
     let mut config = os_assigned_rpc_port_config(false, &net)?;
     config.mempool.debug_enable_at_height = Some(0);
 
@@ -57,8 +58,8 @@ pub(crate) async fn submit_blocks_test() -> Result<()> {
 
     let client = RpcRequestClient::new(rpc_address);
 
-    for _ in 1..=NUM_BLOCKS_TO_SUBMIT {
-        let (mut block, height) = client.block_from_template(&net).await?;
+    for _ in 1..=100 {
+        let (mut block, height) = client.new_block_from_gbt().await?;
 
         while !net.disable_pow()
             && zebra_consensus::difficulty_is_valid(&block.header, &net, &height, &block.hash())
@@ -82,7 +83,7 @@ pub(crate) async fn submit_blocks_test() -> Result<()> {
 
 #[allow(dead_code)]
 pub trait MiningRpcMethods {
-    async fn block_from_template(&self, net: &Network) -> Result<(Block, Height)>;
+    async fn new_block_from_gbt(&self) -> Result<(Block, Height)>;
     async fn submit_block(&self, block: Block) -> Result<()>;
     async fn get_block(&self, height: i32) -> Result<Option<Arc<Block>>, BoxError>;
     async fn generate(&self, num_blocks: u32) -> Result<Vec<block::Hash>>;
@@ -90,14 +91,14 @@ pub trait MiningRpcMethods {
 }
 
 impl MiningRpcMethods for RpcRequestClient {
-    async fn block_from_template(&self, net: &Network) -> Result<(Block, Height)> {
+    async fn new_block_from_gbt(&self) -> Result<(Block, Height)> {
         let block_template: BlockTemplateResponse = self
             .json_result_from_call("getblocktemplate", "[]".to_string())
             .await
             .expect("response should be success output with a serialized `GetBlockTemplate`");
 
         Ok((
-            proposal_block_from_template(&block_template, BlockTemplateTimeSource::default(), net)?,
+            proposal_block_from_template(&block_template, BlockTemplateTimeSource::default())?,
             Height(block_template.height()),
         ))
     }

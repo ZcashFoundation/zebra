@@ -246,14 +246,15 @@ impl Network {
     /// If a Zcash consensus rule only applies before the mandatory checkpoint,
     /// Zebra can skip validation of that rule.
     /// This is necessary because Zebra can't fully validate the blocks prior to Canopy.
-    // TODO:
-    // - Support constructing pre-Canopy coinbase tx and block templates and return `Height::MAX` instead of panicking
-    //   when Canopy activation height is `None` (#8434)
+    ///
+    /// # Panics
+    ///
+    /// Panics if the Canopy activation height is [`Height::MIN]`.
     pub fn mandatory_checkpoint_height(&self) -> Height {
         // Currently this is just before Canopy activation
         NetworkUpgrade::Canopy
             .activation_height(self)
-            .expect("Canopy activation height must be present on all networks")
+            .unwrap_or(Height::MAX)
             .previous()
             .expect("Canopy activation height must be above min height")
     }

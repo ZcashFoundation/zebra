@@ -3,6 +3,7 @@
 pub mod constants;
 pub mod parameters;
 pub mod proposal;
+pub mod roots;
 pub mod zip317;
 
 #[cfg(test)]
@@ -49,8 +50,13 @@ use zebra_state::GetBlockTemplateChainInfo;
 
 use crate::{
     config,
-    methods::types::{
-        default_roots::DefaultRoots, long_poll::LongPollId, transaction::TransactionTemplate,
+    methods::{
+        opthex,
+        types::{
+            get_block_template::roots::{compute_roots, DefaultRoots},
+            long_poll::LongPollId,
+            transaction::TransactionTemplate,
+        },
     },
     server::error::OkOrError,
     SubmitBlockChannel,
@@ -103,32 +109,40 @@ pub struct BlockTemplateResponse {
     ///
     /// Same as [`DefaultRoots::block_commitments_hash`], see that field for details.
     #[serde(rename = "blockcommitmentshash")]
-    #[serde(with = "hex")]
+    #[serde(with = "opthex")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     #[getter(copy)]
-    pub(crate) block_commitments_hash: ChainHistoryBlockTxAuthCommitmentHash,
+    pub(crate) block_commitments_hash: Option<ChainHistoryBlockTxAuthCommitmentHash>,
 
     /// Legacy backwards-compatibility header root field.
     ///
     /// Same as [`DefaultRoots::block_commitments_hash`], see that field for details.
     #[serde(rename = "lightclientroothash")]
-    #[serde(with = "hex")]
+    #[serde(with = "opthex")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     #[getter(copy)]
-    pub(crate) light_client_root_hash: ChainHistoryBlockTxAuthCommitmentHash,
+    pub(crate) light_client_root_hash: Option<[u8; 32]>,
 
     /// Legacy backwards-compatibility header root field.
     ///
     /// Same as [`DefaultRoots::block_commitments_hash`], see that field for details.
     #[serde(rename = "finalsaplingroothash")]
-    #[serde(with = "hex")]
+    #[serde(with = "opthex")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     #[getter(copy)]
-    pub(crate) final_sapling_root_hash: ChainHistoryBlockTxAuthCommitmentHash,
+    pub(crate) final_sapling_root_hash: Option<[u8; 32]>,
 
     /// The block header roots for the transactions in the block template.
     ///
     /// If the transactions in the block template are modified, these roots must be recalculated
     /// [according to the specification](https://zcash.github.io/rpc/getblocktemplate.html).
     #[serde(rename = "defaultroots")]
-    pub(crate) default_roots: DefaultRoots,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub(crate) default_roots: Option<DefaultRoots>,
 
     /// The non-coinbase transactions selected for this block template.
     pub(crate) transactions: Vec<TransactionTemplate<amount::NonNegative>>,
@@ -342,13 +356,12 @@ impl BlockTemplateResponse {
             .expect("valid coinbase tx"),
         );
 
-        let default_roots = DefaultRoots::from_coinbase(
-            net,
-            height,
-            &coinbase_txn,
-            chain_info.chain_history_root,
-            &mempool_txs,
-        );
+        let (
+            final_sapling_root_hash,
+            light_client_root_hash,
+            block_commitments_hash,
+            default_roots,
+        ) = compute_roots(net, height, chain_info, &coinbase_txn, &mempool_txs);
 
         // Convert difficulty
         let target = chain_info
@@ -374,9 +387,9 @@ impl BlockTemplateResponse {
             version: ZCASH_BLOCK_VERSION,
 
             previous_block_hash: chain_info.tip_hash,
-            block_commitments_hash: default_roots.block_commitments_hash,
-            light_client_root_hash: default_roots.block_commitments_hash,
-            final_sapling_root_hash: default_roots.block_commitments_hash,
+            block_commitments_hash,
+            light_client_root_hash,
+            final_sapling_root_hash,
             default_roots,
 
             transactions: mempool_tx_templates,

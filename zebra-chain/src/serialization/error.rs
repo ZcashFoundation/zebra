@@ -55,6 +55,10 @@ pub enum SerializationError {
     /// Invalid coinbase transaction.
     #[error("coinbase error: {0}")]
     Coinbase(#[from] coinbase::Error),
+
+    /// Height would exceed [`Height::MAX`](crate::block::Height::MAX).
+    #[error("height exceeds maximum allowed height")]
+    InvalidHeight,
 }
 
 impl From<SerializationError> for io::Error {
@@ -78,6 +82,10 @@ impl From<SerializationError> for io::Error {
                 "bad transaction balance: non-zero with no Sapling shielded spends or outputs",
             ),
             SerializationError::Coinbase(e) => io::Error::new(io::ErrorKind::InvalidData, e),
+            SerializationError::InvalidHeight => io::Error::new(
+                io::ErrorKind::InvalidData,
+                "height exceeds maximum allowed height",
+            ),
         }
     }
 }

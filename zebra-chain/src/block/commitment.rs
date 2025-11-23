@@ -302,8 +302,8 @@ impl ChainHistoryBlockTxAuthCommitmentHash {
     ///
     ///  [ZIP-244]: https://zips.z.cash/zip-0244#block-header-changes
     pub fn from_commitments(
-        history_tree_root: &ChainHistoryMmrRootHash,
-        auth_data_root: &AuthDataRoot,
+        chain_history_root: ChainHistoryMmrRootHash,
+        auth_data_root: AuthDataRoot,
     ) -> Self {
         // > The value of this hash [hashBlockCommitments] is the BLAKE2b-256 hash personalized
         // > by the string "ZcashBlockCommit" of the following elements:
@@ -314,8 +314,8 @@ impl ChainHistoryBlockTxAuthCommitmentHash {
             .hash_length(32)
             .personal(b"ZcashBlockCommit")
             .to_state()
-            .update(&<[u8; 32]>::from(*history_tree_root)[..])
-            .update(&<[u8; 32]>::from(*auth_data_root))
+            .update(&<[u8; 32]>::from(chain_history_root)[..])
+            .update(&<[u8; 32]>::from(auth_data_root))
             .update(&[0u8; 32])
             .finalize()
             .as_bytes()

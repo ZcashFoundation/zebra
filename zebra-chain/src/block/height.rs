@@ -113,7 +113,7 @@ impl From<Height> for BlockHeight {
 }
 
 impl TryFrom<BlockHeight> for Height {
-    type Error = &'static str;
+    type Error = SerializationError;
 
     /// Checks that the `height` is within the valid [`Height`] range.
     fn try_from(height: BlockHeight) -> Result<Self, Self::Error> {
@@ -131,20 +131,13 @@ pub type HeightDiff = i64;
 // Instead, use 1u64.try_into_height().
 
 impl TryFrom<u32> for Height {
-    type Error = &'static str;
+    type Error = SerializationError;
 
     /// Checks that the `height` is within the valid [`Height`] range.
     fn try_from(height: u32) -> Result<Self, Self::Error> {
-        // Check the bounds.
-        //
-        // Clippy warns that `height >= Height::MIN.0` is always true.
-        assert_eq!(Height::MIN.0, 0);
-
-        if height <= Height::MAX.0 {
-            Ok(Height(height))
-        } else {
-            Err("heights must be less than or equal to Height::MAX")
-        }
+        (height <= Height::MAX.0)
+            .then_some(Height(height))
+            .ok_or(SerializationError::InvalidHeight)
     }
 }
 

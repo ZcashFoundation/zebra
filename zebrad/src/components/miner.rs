@@ -317,11 +317,7 @@ where
             None,
         );
 
-        let block = proposal_block_from_template(
-            &template,
-            BlockTemplateTimeSource::CurTime,
-            rpc.network(),
-        )?;
+        let block = proposal_block_from_template(&template, BlockTemplateTimeSource::CurTime)?;
 
         // If the template has actually changed, send an updated template.
         template_sender.send_if_modified(|old_block| {

@@ -167,10 +167,11 @@ use zebra_chain::{
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::{
     client::{
-        BlockTemplateResponse, DefaultRoots, GetBlockTemplateParameters,
-        GetBlockTemplateRequestMode, GetBlockTemplateResponse, SubmitBlockErrorResponse,
-        SubmitBlockResponse, TransactionTemplate,
+        BlockTemplateResponse, GetBlockTemplateParameters, GetBlockTemplateRequestMode,
+        GetBlockTemplateResponse, SubmitBlockErrorResponse, SubmitBlockResponse,
+        TransactionTemplate,
     },
+    compute_roots,
     methods::{RpcImpl, RpcServer},
     proposal_block_from_template,
     server::OPENED_RPC_ENDPOINT_MSG,
@@ -3072,7 +3073,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     let rpc_client = RpcRequestClient::new(rpc_address);
     let mut blocks = Vec::new();
     for _ in 0..10 {
-        let (block, height) = rpc_client.block_from_template(&net).await?;
+        let (block, height) = rpc_client.new_block_from_gbt().await?;
 
         rpc_client.submit_block(block.clone()).await?;
 
@@ -3122,7 +3123,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     }
 
     tracing::info!("getting next block template");
-    let (block_11, _) = rpc_client.block_from_template(&net).await?;
+    let (block_11, _) = rpc_client.new_block_from_gbt().await?;
     blocks.push(block_11);
     let next_blocks: Vec<_> = blocks.split_off(5);
 
@@ -3147,22 +3148,31 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
         };
 
         let height = block.coinbase_height().unwrap();
-        let auth_root = block.auth_data_root();
-        let hist_root = chain_info.chain_history_root.unwrap_or_default();
+        let auth_data_root = block.auth_data_root();
         let header = Arc::make_mut(&mut block.header);
 
+        use NetworkUpgrade::*;
         header.commitment_bytes = match NetworkUpgrade::current(&net, height) {
-            NetworkUpgrade::Canopy => hist_root.bytes_in_serialized_order(),
-            NetworkUpgrade::Nu5
-            | NetworkUpgrade::Nu6
-            | NetworkUpgrade::Nu6_1
-            | NetworkUpgrade::Nu7 => {
-                ChainHistoryBlockTxAuthCommitmentHash::from_commitments(&hist_root, &auth_root)
-                    .bytes_in_serialized_order()
+            Genesis | BeforeOverwinter | Overwinter => [0u8; 32],
+            Sapling | Blossom => chain_info
+                .sapling_root
+                .expect("sapling root must be available in Sapling+")
+                .bytes_in_serialized_order(),
+            Heartwood | Canopy => chain_info
+                .chain_history_root
+                .expect("hist root must be available in Heartwood+")
+                .bytes_in_serialized_order(),
+            Nu5 | Nu6 | Nu6_1 | Nu7 => {
+                let chain_history_root = chain_info
+                    .chain_history_root
+                    .expect("hist root must be available in Nu5+");
+
+                ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
+                    chain_history_root,
+                    auth_data_root,
+                )
+                .bytes_in_serialized_order()
             }
-            _ => Err(eyre!(
-                "Zebra does not support generating pre-Canopy block templates"
-            ))?,
         }
         .into();
 
@@ -3419,6 +3429,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     };
 
     let block_template_fut = rpc.get_block_template(None);
+
     let mock_mempool_request_handler = make_mock_mempool_request_handler.clone()();
     let (block_template, _) = tokio::join!(block_template_fut, mock_mempool_request_handler);
     let GetBlockTemplateResponse::TemplateMode(block_template) =
@@ -3429,7 +3440,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         )
     };
 
-    let proposal_block = proposal_block_from_template(&block_template, None, &network)?;
+    let proposal_block = proposal_block_from_template(&block_template, None)?;
     let hex_proposal_block = HexData(proposal_block.zcash_serialize_to_vec()?);
 
     // Check that the block template is a valid block proposal
@@ -3511,9 +3522,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 
     let valid_original_block_template = block_template.clone();
 
-    let zebra_state::GetBlockTemplateChainInfo {
-        chain_history_root, ..
-    } = match read_state
+    let chain_info = match read_state
         .oneshot(zebra_state::ReadRequest::ChainInfo)
         .await
         .map_err(|err| eyre!(err))?
@@ -3530,9 +3539,11 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         }])
         .to_network();
 
+    let height = Height(block_template.height());
+
     let coinbase_txn = TransactionTemplate::new_coinbase(
         &net,
-        Height(block_template.height()),
+        height,
         &miner_params,
         Amount::zero(),
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
@@ -3540,21 +3551,17 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     )
     .expect("coinbase transaction should be valid under the given parameters");
 
-    let default_roots = DefaultRoots::from_coinbase(
-        &net,
-        Height(block_template.height()),
-        &coinbase_txn,
-        chain_history_root,
-        &[],
-    );
+    // Recompute roots based on the new coinbase transaction.
+    let (final_sapling_root_hash, light_client_root_hash, block_commitments_hash, default_roots) =
+        compute_roots(&net, height, &chain_info, &coinbase_txn, &[]);
 
     let block_template = BlockTemplateResponse::new(
         block_template.capabilities().clone(),
         block_template.version(),
         block_template.previous_block_hash(),
-        default_roots.block_commitments_hash(),
-        default_roots.block_commitments_hash(),
-        default_roots.block_commitments_hash(),
+        block_commitments_hash,
+        light_client_root_hash,
+        final_sapling_root_hash,
         default_roots,
         block_template.transactions().clone(),
         coinbase_txn,
@@ -3572,7 +3579,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         block_template.submit_old(),
     );
 
-    let proposal_block = proposal_block_from_template(&block_template, None, &net)?;
+    let proposal_block = proposal_block_from_template(&block_template, None)?;
 
     // Submit the invalid block with an excessive coinbase output value
     let submit_block_response = rpc
@@ -3596,9 +3603,11 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         }])
         .to_network();
 
+    let height = Height(block_template.height());
+
     let coinbase_txn = TransactionTemplate::new_coinbase(
         &net,
-        Height(block_template.height()),
+        height,
         &miner_params,
         Amount::zero(),
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
@@ -3606,21 +3615,17 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     )
     .expect("coinbase transaction should be valid under the given parameters");
 
-    let default_roots = DefaultRoots::from_coinbase(
-        &net,
-        Height(block_template.height()),
-        &coinbase_txn,
-        chain_history_root,
-        &[],
-    );
+    // Recompute roots based on the new coinbase transaction.
+    let (final_sapling_root_hash, light_client_root_hash, block_commitments_hash, default_roots) =
+        compute_roots(&net, height, &chain_info, &coinbase_txn, &[]);
 
     let block_template = BlockTemplateResponse::new(
         block_template.capabilities().clone(),
         block_template.version(),
         block_template.previous_block_hash(),
-        default_roots.block_commitments_hash(),
-        default_roots.block_commitments_hash(),
-        default_roots.block_commitments_hash(),
+        block_commitments_hash,
+        light_client_root_hash,
+        final_sapling_root_hash,
         default_roots,
         block_template.transactions().clone(),
         coinbase_txn,
@@ -3638,7 +3643,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         block_template.submit_old(),
     );
 
-    let proposal_block = proposal_block_from_template(&block_template, None, &net)?;
+    let proposal_block = proposal_block_from_template(&block_template, None)?;
 
     // Submit the invalid block with an excessive coinbase input value
     let submit_block_response = rpc
@@ -3654,7 +3659,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     );
 
     // Check that the original block template can be submitted successfully
-    let proposal_block = proposal_block_from_template(&valid_original_block_template, None, &net)?;
+    let proposal_block = proposal_block_from_template(&valid_original_block_template, None)?;
 
     let submit_block_response = rpc
         .submit_block(HexData(proposal_block.zcash_serialize_to_vec()?), None)
@@ -3995,7 +4000,7 @@ async fn invalidate_and_reconsider_block() -> Result<()> {
     let rpc_client = RpcRequestClient::new(rpc_address);
     let mut blocks = Vec::new();
     for _ in 0..50 {
-        let (block, _) = rpc_client.block_from_template(&net).await?;
+        let (block, _) = rpc_client.new_block_from_gbt().await?;
 
         rpc_client.submit_block(block.clone()).await?;
         blocks.push(block);

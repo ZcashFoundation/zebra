@@ -16,11 +16,10 @@ pub use crate::methods::{
         Commitments, GetSubtreesByIndexResponse, GetTreestateResponse, SubtreeRpcData, Treestate,
     },
     types::{
-        default_roots::DefaultRoots,
         get_block_template::{
-            BlockProposalResponse, BlockTemplateResponse, BlockTemplateTimeSource,
-            GetBlockTemplateCapability, GetBlockTemplateParameters, GetBlockTemplateRequestMode,
-            GetBlockTemplateResponse,
+            roots::DefaultRoots, BlockProposalResponse, BlockTemplateResponse,
+            BlockTemplateTimeSource, GetBlockTemplateCapability, GetBlockTemplateParameters,
+            GetBlockTemplateRequestMode, GetBlockTemplateResponse,
         },
         get_blockchain_info::GetBlockchainInfoBalance,
         get_mining_info::GetMiningInfoResponse,

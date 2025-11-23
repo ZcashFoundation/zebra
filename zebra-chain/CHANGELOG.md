@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `sapling::tree::Root::bytes_in_serialized_order` fn
+- `serialization::SerializationError::InvalidHeight` enum variant
+
+### Changed
+
+- `<block::Height as TryFrom<u32>>::try_from` now returns `Result<Self, SerializationError>`
+
 ### Removed
 
 - `tests::vectors::test_block_sapling_roots`

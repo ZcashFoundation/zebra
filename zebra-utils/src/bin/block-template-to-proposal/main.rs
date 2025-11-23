@@ -90,7 +90,7 @@ fn main() -> Result<()> {
     let template: BlockTemplateResponse = serde_json::from_value(template)?;
 
     // generate proposal according to arguments
-    let proposal = proposal_block_from_template(&template, time_source, &args.net)?;
+    let proposal = proposal_block_from_template(&template, time_source)?;
     eprintln!("{proposal:#?}");
 
     let proposal = proposal.zcash_serialize_to_vec()?;

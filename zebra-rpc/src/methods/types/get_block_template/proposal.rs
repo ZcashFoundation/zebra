@@ -2,20 +2,16 @@
 //!
 //! `BlockProposalResponse` is the output of the `getblocktemplate` RPC method in 'proposal' mode.
 
-use std::{num::ParseIntError, str::FromStr, sync::Arc};
+use std::{iter, num::ParseIntError, str::FromStr, sync::Arc};
 
 use zebra_chain::{
-    block::{self, Block, Height},
-    parameters::{Network, NetworkUpgrade},
+    block::{self, Block},
     serialization::{BytesInDisplayOrder, DateTime32, SerializationError, ZcashDeserializeInto},
     work::equihash::Solution,
 };
 use zebra_node_services::BoxError;
 
-use crate::methods::types::{
-    default_roots::DefaultRoots,
-    get_block_template::{BlockTemplateResponse, GetBlockTemplateResponse},
-};
+use crate::methods::types::get_block_template::{BlockTemplateResponse, GetBlockTemplateResponse};
 
 /// Response to a `getblocktemplate` RPC request in proposal mode.
 ///
@@ -170,33 +166,19 @@ impl FromStr for BlockTemplateTimeSource {
 pub fn proposal_block_from_template(
     template: &BlockTemplateResponse,
     time_source: impl Into<Option<BlockTemplateTimeSource>>,
-    net: &Network,
 ) -> Result<Block, SerializationError> {
     let BlockTemplateResponse {
         version,
-        height,
         previous_block_hash,
-        default_roots:
-            DefaultRoots {
-                merkle_root,
-                block_commitments_hash,
-                chain_history_root,
-                ..
-            },
         bits: difficulty_threshold,
+        final_sapling_root_hash,
+        light_client_root_hash,
+        block_commitments_hash,
+        ref default_roots,
         ref coinbase_txn,
-        transactions: ref tx_templates,
+        ref transactions,
         ..
     } = *template;
-
-    let height = Height(height);
-
-    // TODO: Refactor [`Height`] so that these checks lose relevance.
-    if height > Height::MAX {
-        Err(SerializationError::Parse(
-            "height of coinbase transaction is {height}, which exceeds the maximum of {Height::MAX}",
-        ))?;
-    };
 
     let time = time_source
         .into()
@@ -204,22 +186,23 @@ pub fn proposal_block_from_template(
         .time_from_template(template)
         .into();
 
-    let mut transactions = vec![coinbase_txn.data.as_ref().zcash_deserialize_into()?];
-
-    for tx_template in tx_templates {
-        transactions.push(tx_template.data.as_ref().zcash_deserialize_into()?);
+    fn rev(mut arr: [u8; 32]) -> [u8; 32] {
+        arr.reverse();
+        arr
     }
 
-    let commitment_bytes = match NetworkUpgrade::current(net, height) {
-        NetworkUpgrade::Canopy => chain_history_root.bytes_in_serialized_order(),
-        NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 | NetworkUpgrade::Nu6_1 | NetworkUpgrade::Nu7 => {
-            block_commitments_hash.bytes_in_serialized_order()
-        }
-        _ => Err(SerializationError::Parse(
-            "Zebra does not support generating pre-Canopy block templates",
-        ))?,
-    }
-    .into();
+    let commitment_bytes = block_commitments_hash
+        .map(|hash| hash.bytes_in_serialized_order().into())
+        .or_else(|| light_client_root_hash.map(|hash| rev(hash).into()))
+        .or_else(|| final_sapling_root_hash.map(|hash| rev(hash).into()))
+        .unwrap_or_else(|| [0; 32].into());
+
+    let merkle_root = default_roots.as_ref().map_or(
+        iter::once(coinbase_txn.hash())
+            .chain(transactions.iter().map(|tx| tx.hash()))
+            .collect(),
+        |roots| roots.merkle_root,
+    );
 
     Ok(Block {
         header: Arc::new(block::Header {
@@ -232,6 +215,12 @@ pub fn proposal_block_from_template(
             nonce: [0; 32].into(),
             solution: Solution::for_proposal(),
         }),
-        transactions,
+        transactions: iter::once(coinbase_txn.data().as_ref().zcash_deserialize_into())
+            .chain(
+                transactions
+                    .iter()
+                    .map(|tx| tx.data().as_ref().zcash_deserialize_into()),
+            )
+            .collect::<Result<Vec<_>, _>>()?,
     })
 }
