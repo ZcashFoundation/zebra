@@ -34,7 +34,7 @@ jobs:
       - name: Install formatting & linting tools
         run: rustup component add rustfmt clippy
       - name: Run tests
-        run: cargo test --verbose --locked
+        run: timeout --preserve-status 1h cargo test --verbose --locked
       - name: Verify working directory is clean
         run: git diff --exit-code
       - name: Run doc check
