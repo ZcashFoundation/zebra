@@ -71,9 +71,14 @@ expression: info
       "activationheight": 2726400,
       "status": "pending"
     },
+    "4dec4df0": {
+      "name": "NU6.1",
+      "activationheight": 4111000,
+      "status": "pending"
+    },
     "77190ad8": {
       "name": "NU7",
-      "activationheight": 3111000,
+      "activationheight": 4333000,
       "status": "pending"
     }
   },
