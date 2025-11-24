@@ -58,7 +58,7 @@ async fn check_zsa_workflow() -> Result<(), Report> {
 
     timeout(
         Duration::from_secs(60),
-        Transcript::from(transcript_data).check(block_verifier_router.clone()),
+        Transcript::from(create_transcript_data()).check(block_verifier_router.clone()),
     )
     .await
     .map_err(|_| eyre!("Task timed out"))?
