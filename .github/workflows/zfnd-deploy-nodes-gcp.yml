@@ -325,6 +325,13 @@ jobs:
             LOG_FILE="${{ vars.CD_LOG_FILE }}"
           fi
 
+          # Set RPC port based on network
+          if [ "${{ matrix.network }}" = "Mainnet" ]; then
+            RPC_PORT="8232"
+          else
+            RPC_PORT="18232"
+          fi
+
           gcloud compute instance-templates create-with-container "${TEMPLATE_NAME}" \
           --machine-type ${{ vars.GCP_SMALL_MACHINE }} \
           --provisioning-model=SPOT \
@@ -338,7 +345,7 @@ jobs:
           --container-stdin \
           --container-tty \
           --container-image ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
-          --container-env "ZEBRA_NETWORK__NETWORK=${{ matrix.network }},LOG_FILE=${LOG_FILE},SENTRY_DSN=${{ vars.SENTRY_DSN }},ZEBRA_HEALTH__LISTEN_ADDR=0.0.0.0:8080,ZEBRA_HEALTH__MIN_CONNECTED_PEERS=1" \
+          --container-env "ZEBRA_NETWORK__NETWORK=${{ matrix.network }},LOG_FILE=${LOG_FILE},SENTRY_DSN=${{ vars.SENTRY_DSN }},ZEBRA_HEALTH__LISTEN_ADDR=0.0.0.0:8080,ZEBRA_HEALTH__MIN_CONNECTED_PEERS=1,ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:${RPC_PORT}" \
           --service-account ${{ vars.GCP_DEPLOYMENTS_SA }} \
           --scopes cloud-platform \
           --metadata google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true \
