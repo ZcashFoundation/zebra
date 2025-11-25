@@ -2677,7 +2677,10 @@ async fn rpc_z_validateaddress_regtest() {
     // Init RPC
     let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, _) = RpcImpl::new(
-        Testnet(Arc::new(Parameters::new_regtest(Default::default()))),
+        Testnet(Arc::new(
+            Parameters::new_regtest(Default::default())
+                .expect("failed to build regtest parameters"),
+        )),
         Default::default(),
         Default::default(),
         "0.0.1",

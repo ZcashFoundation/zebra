@@ -21,14 +21,12 @@ fn minimal_coinbase() -> Result<(), Box<dyn std::error::Error>> {
         .with_activation_heights(ConfiguredActivationHeights {
             nu6: Some(1),
             ..Default::default()
-        })
-        .expect("failed to set activation heights")
+        })?
         .with_funding_streams(vec![ConfiguredFundingStreams {
             height_range: Some(Height(1)..Height(10)),
             recipients: None,
         }])
-        .to_network()
-        .expect("failed to build configured network");
+        .to_network()?;
 
     let outputs = standard_coinbase_outputs(
         &regtest,
