@@ -1,0 +1,30 @@
+FROM rust:1.81.0
+
+# Accept build arguments for Git information
+ARG GIT_COMMIT
+ARG GIT_TAG
+
+# Set up Rust and cargo
+RUN apt-get update && apt-get install git build-essential clang -y
+
+# Set the working directory to the repo root
+WORKDIR /app
+
+# Copy files
+COPY . .
+
+# Set Git environment variables for the build
+# These will be used by the build.rs script
+ENV GIT_COMMIT_FULL=$GIT_COMMIT
+ENV GIT_TAG=$GIT_TAG
+
+# Validate the presence of the config file
+RUN test -f testnet-single-node-deploy/regtest-config.toml
+
+# Build zebrad with the required features
+RUN cargo build --release --package zebrad --bin zebrad --features="getblocktemplate-rpcs"
+
+EXPOSE 18232
+
+# Run the zebra node
+ENTRYPOINT ["target/release/zebrad", "-c", "/app/testnet-single-node-deploy/regtest-config.toml"]
