@@ -14,7 +14,8 @@
 
 use std::sync::Arc;
 
-use color_eyre::eyre::Report;
+use color_eyre::eyre::{eyre, Report};
+use tokio::time::{timeout, Duration};
 
 use zebra_chain::{
     block::{genesis::regtest_genesis_block, Block, Hash},
@@ -55,7 +56,10 @@ async fn check_zsa_workflow() -> Result<(), Report> {
         _max_checkpoint_height,
     ) = crate::router::init(Config::default(), &network, state_service.clone()).await;
 
-    Transcript::from(create_transcript_data())
-        .check(block_verifier_router.clone())
-        .await
+    timeout(
+        Duration::from_secs(60),
+        Transcript::from(create_transcript_data()).check(block_verifier_router.clone()),
+    )
+    .await
+    .map_err(|_| eyre!("Task timed out"))?
 }

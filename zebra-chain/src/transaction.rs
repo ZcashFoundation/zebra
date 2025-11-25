@@ -56,6 +56,9 @@ use crate::{
 #[cfg(feature = "tx_v6")]
 use crate::orchard_zsa;
 
+#[cfg(feature = "tx_v6")]
+pub mod versioned_sig;
+
 /// A Zcash transaction.
 ///
 /// A transaction is an encoded data structure that facilitates the transfer of
