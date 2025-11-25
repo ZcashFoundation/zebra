@@ -444,7 +444,7 @@ jobs:
             --region "${{ vars.GCP_REGION }}" \
             --format="table[no-heading](instance.basename(),instance.scope().segment(0))" | sort)
 
-          IFS=$'\n' read -rd '' -a INSTANCE_ROWS <<<"$INSTANCE_DATA"
+          IFS=$'\n' read -rd '' -a INSTANCE_ROWS <<<"$INSTANCE_DATA" || true
 
           # Loop to assign all IPs
           for i in "${!INSTANCE_ROWS[@]}"; do
