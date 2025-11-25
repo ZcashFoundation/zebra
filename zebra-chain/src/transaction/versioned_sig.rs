@@ -100,8 +100,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use redjubjub::{Signature, SpendAuth};
+
+    use super::*;
 
     #[test]
     fn sighash_info_v0_roundtrip() {
@@ -128,17 +129,22 @@ mod tests {
 
     #[test]
     fn versioned_sig_v0_roundtrip() {
-        let sig_bytes = [0x11u8; 64];
+        // Create a test signature using real Sapling SpendAuth signature type (64 bytes)
+        // Using fixed bytes for deterministic testing (not a cryptographically valid signature)
+        let sig_bytes = [0x11u8; 64]; // Arbitrary 64-byte pattern
         let original_sig = Signature::<SpendAuth>::from(sig_bytes);
 
         let versioned_sig = VersionedSigV0::new(original_sig);
         let serialized_bytes = versioned_sig.zcash_serialize_to_vec().unwrap();
 
-        // Format: CompactSize(1) || version(0) || signature(64 bytes)
-        assert_eq!(serialized_bytes.len(), 66);
+        // Expected format: [CompactSize(1), version(0), sig_bytes...]
+        // 0x01 = CompactSize encoding of length 1 (just the version byte)
+        // 0x00 = sighash version 0
+        // followed by 64 bytes of the signature
+        assert_eq!(serialized_bytes.len(), 1 + 1 + 64); // CompactSize + version + sig
         assert_eq!(serialized_bytes[0], 0x01); // CompactSize(1)
         assert_eq!(serialized_bytes[1], 0x00); // version 0
-        assert_eq!(&serialized_bytes[2..], &sig_bytes[..]); // signature
+        assert_eq!(&serialized_bytes[2..], &sig_bytes[..]); // signature bytes
 
         let deserialized_sig =
             VersionedSigV0::<Signature<SpendAuth>>::zcash_deserialize(&serialized_bytes[..])
