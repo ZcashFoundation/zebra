@@ -8,7 +8,7 @@ use color_eyre::eyre::Result;
 
 use transparent::OutPoint;
 use zebra_chain::{
-    amount::Amount,
+    amount::{Amount, NonNegative},
     block::{Block, Height},
     parameters::Network,
 };
@@ -316,9 +316,18 @@ fn mempool_removes_dependent_transactions() -> Result<()> {
     });
 
     let unmined_txs_with_transparent_outputs = || {
-        network
-            .unmined_transactions_in_blocks(..)
-            .filter(|tx| !tx.transaction.transaction.outputs().is_empty())
+        network.unmined_transactions_in_blocks(..).filter(|tx| {
+            // treat outputs < 100 zatoshis as "dust" for these tests, we want them out
+            let dust_threshold: Amount<NonNegative> =
+                Amount::try_from(100u64).expect("valid amount");
+            !tx.transaction.transaction.outputs().is_empty()
+                && tx
+                    .transaction
+                    .transaction
+                    .outputs()
+                    .iter()
+                    .all(|out| out.value >= dust_threshold)
+        })
     };
 
     let mut fake_spent_outpoints: Vec<OutPoint> = Vec::new();
