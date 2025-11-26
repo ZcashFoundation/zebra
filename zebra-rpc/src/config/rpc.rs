@@ -65,6 +65,9 @@ pub struct Config {
 
     /// Enable cookie-based authentication for RPCs.
     pub enable_cookie_auth: bool,
+
+    /// The maximum size of the response body in bytes.
+    pub max_response_body_size: usize,
 }
 
 // This impl isn't derivable because it depends on features.
@@ -89,6 +92,9 @@ impl Default for Config {
 
             // Enable cookie-based authentication by default.
             enable_cookie_auth: true,
+
+            // 50 MiB
+            max_response_body_size: 52_428_800,
         }
     }
 }
