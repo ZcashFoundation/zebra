@@ -1,0 +1,101 @@
+# Default configuration for zebrad.
+#
+# This file can be used as a skeleton for custom configs.
+#
+# Unspecified fields use default values. Optional fields are Some(field) if the
+# field is present and None if it is absent.
+#
+# This file is generated as an example using zebrad's current defaults.
+# You should set only the config options you want to keep, and delete the rest.
+# Only a subset of fields are present in the skeleton, since optional values
+# whose default is None are omitted.
+#
+# The config format (including a complete list of sections and fields) is
+# documented here:
+# https://docs.rs/zebrad/latest/zebrad/config/struct.ZebradConfig.html
+#
+# CONFIGURATION SOURCES (in order of precedence, highest to lowest):
+#
+# 1. Environment variables with ZEBRA_ prefix (highest precedence)
+#    - Format: ZEBRA_SECTION__KEY (double underscore for nested keys)
+#    - Examples:
+#      - ZEBRA_NETWORK__NETWORK=Testnet
+#      - ZEBRA_RPC__LISTEN_ADDR=127.0.0.1:8232
+#      - ZEBRA_STATE__CACHE_DIR=/path/to/cache
+#      - ZEBRA_TRACING__FILTER=debug
+#      - ZEBRA_METRICS__ENDPOINT_ADDR=0.0.0.0:9999
+#
+# 2. Configuration file (TOML format)
+#    - At the path specified via -c flag, e.g. `zebrad -c myconfig.toml start`, or
+#    - At the default path in the user's preference directory (platform-dependent, see below)
+#
+# 3. Hard-coded defaults (lowest precedence)
+#
+# The user's preference directory and the default path to the `zebrad` config are platform dependent,
+# based on `dirs::preference_dir`, see https://docs.rs/dirs/latest/dirs/fn.preference_dir.html :
+#
+# | Platform | Value                                 | Example                                        |
+# | -------- | ------------------------------------- | ---------------------------------------------- |
+# | Linux    | `$XDG_CONFIG_HOME` or `$HOME/.config` | `/home/alice/.config/zebrad.toml`              |
+# | macOS    | `$HOME/Library/Preferences`           | `/Users/Alice/Library/Preferences/zebrad.toml` |
+# | Windows  | `{FOLDERID_RoamingAppData}`           | `C:\Users\Alice\AppData\Local\zebrad.toml`     |
+
+[consensus]
+checkpoint_sync = true
+
+[health]
+enforce_on_test_networks = false
+min_connected_peers = 1
+ready_max_blocks_behind = 2
+ready_max_tip_age = "5m"
+
+[mempool]
+eviction_memory_time = "1h"
+tx_cost_limit = 80000000
+
+[metrics]
+
+[mining]
+internal_miner = false
+
+[network]
+cache_dir = true
+crawl_new_peer_interval = "1m 1s"
+initial_mainnet_peers = [
+    "dnsseed.z.cash:8233",
+    "dnsseed.str4d.xyz:8233",
+    "mainnet.seeder.zfnd.org:8233",
+]
+initial_testnet_peers = [
+    "dnsseed.testnet.z.cash:18233",
+    "testnet.seeder.zfnd.org:18233",
+]
+listen_addr = "[::]:8233"
+max_connections_per_ip = 1
+network = "Mainnet"
+peerset_initial_target_size = 25
+
+[rpc]
+cookie_dir = "cache_dir"
+debug_force_finished_sync = false
+enable_cookie_auth = true
+max_response_body_size = 52428800
+parallel_cpu_threads = 0
+
+[state]
+cache_dir = "cache_dir"
+delete_old_database = true
+ephemeral = false
+should_backup_non_finalized_state = true
+
+[sync]
+checkpoint_verify_concurrency_limit = 1000
+download_concurrency_limit = 50
+full_verify_concurrency_limit = 20
+parallel_cpu_threads = 0
+
+[tracing]
+buffer_limit = 128000
+force_use_color = false
+use_color = true
+use_journald = false
