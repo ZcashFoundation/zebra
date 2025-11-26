@@ -21,7 +21,8 @@ use std::{
     sync::Arc,
 };
 
-use color_eyre::eyre::Report;
+use color_eyre::eyre::{eyre, Report};
+use tokio::time::{timeout, Duration};
 use tower::ServiceExt;
 
 use orchard::{
@@ -242,9 +243,12 @@ async fn check_orchard_zsa_workflow() -> Result<(), Report> {
     }
 
     // Verify all blocks in the transcript against the consensus and the state.
-    Transcript::from(transcript_data)
-        .check(block_verifier_router.clone())
-        .await?;
+    timeout(
+        Duration::from_secs(60),
+        Transcript::from(transcript_data).check(block_verifier_router.clone()),
+    )
+    .await
+    .map_err(|_| eyre!("Task timed out"))?;
 
     // After processing the transcript blocks, verify that the state matches the expected supply info.
     for (&asset_base, asset_record) in &asset_records {
