@@ -435,37 +435,34 @@ pub fn num_halvings(height: Height, network: &Network) -> u32 {
 /// `BlockSubsidy(height)` as described in [protocol specification §7.8][7.8]
 ///
 /// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
-pub fn block_subsidy(
-    height: Height,
-    network: &Network,
-) -> Result<Amount<NonNegative>, SubsidyError> {
-    let blossom_height = NetworkUpgrade::Blossom
-        .activation_height(network)
-        .expect("blossom activation height should be available");
-
-    // If the halving divisor is larger than u64::MAX, the block subsidy is zero,
-    // because amounts fit in an i64.
-    //
-    // Note: bitcoind incorrectly wraps here, which restarts large block rewards.
-    let Some(halving_div) = halving_divisor(height, network) else {
+pub fn block_subsidy(height: Height, net: &Network) -> Result<Amount<NonNegative>, SubsidyError> {
+    let Some(halving_div) = halving_divisor(height, net) else {
         return Ok(Amount::zero());
     };
 
-    // Zebra doesn't need to calculate block subsidies for blocks with heights in the slow start
-    // interval because it handles those blocks through checkpointing.
-    if height < network.slow_start_interval() {
-        Err(SubsidyError::UnsupportedHeight)
-    } else if height < blossom_height {
-        // this calculation is exact, because the halving divisor is 1 here
-        Ok(Amount::try_from(MAX_BLOCK_SUBSIDY / halving_div)?)
+    let slow_start_interval = net.slow_start_interval();
+
+    // The `floor` fn used in the spec is implicit in Rust's division of primitive integer types.
+
+    let amount = if height < slow_start_interval {
+        let slow_start_rate = MAX_BLOCK_SUBSIDY / u64::from(slow_start_interval);
+
+        if height < net.slow_start_shift() {
+            slow_start_rate * u64::from(height)
+        } else {
+            slow_start_rate * (u64::from(height) + 1)
+        }
     } else {
-        let scaled_max_block_subsidy =
-            MAX_BLOCK_SUBSIDY / u64::from(BLOSSOM_POW_TARGET_SPACING_RATIO);
-        // in future halvings, this calculation might not be exact
-        // Amount division is implemented using integer division,
-        // which truncates (rounds down) the result, as specified
-        Ok(Amount::try_from(scaled_max_block_subsidy / halving_div)?)
-    }
+        let base_subsidy = if NetworkUpgrade::current(net, height) < NetworkUpgrade::Blossom {
+            MAX_BLOCK_SUBSIDY
+        } else {
+            MAX_BLOCK_SUBSIDY / u64::from(BLOSSOM_POW_TARGET_SPACING_RATIO)
+        };
+
+        base_subsidy / halving_div
+    };
+
+    Ok(Amount::try_from(amount)?)
 }
 
 /// `MinerSubsidy(height)` as described in [protocol specification §7.8][7.8]
