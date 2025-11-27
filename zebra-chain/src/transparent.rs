@@ -66,7 +66,7 @@ pub const EXTRA_ZEBRA_COINBASE_DATA: &str = "z\u{1F993}";
 
 /// The rate used to calculate the dust threshold, in zatoshis per 1000 bytes.
 ///
-/// History: https://github.com/zcash/zcash/blob/v6.10.0/src/policy/policy.h#L43-L89
+/// History: <https://github.com/zcash/zcash/blob/v6.10.0/src/policy/policy.h#L43-L89>
 pub const ONE_THIRD_DUST_THRESHOLD_RATE: u32 = 100;
 
 /// Arbitrary data inserted by miners into a coinbase transaction.
@@ -130,8 +130,7 @@ pub struct OutPoint {
     ///
     /// # Correctness
     ///
-    /// Consensus-critical serialization uses
-    /// [`ZcashSerialize`](crate::serialization::ZcashSerialize).
+    /// Consensus-critical serialization uses [`ZcashSerialize`].
     /// [`serde`]-based hex serialization must only be used for testing.
     #[cfg_attr(any(test, feature = "proptest-impl"), serde(with = "hex"))]
     pub hash: transaction::Hash,
