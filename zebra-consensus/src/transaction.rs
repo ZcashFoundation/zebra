@@ -511,6 +511,7 @@ impl OrchardTransaction for orchard::OrchardVanilla {
     const SUPPORTED_NETWORK_UPGRADES: &'static [NetworkUpgrade] = &[
         NetworkUpgrade::Nu5,
         NetworkUpgrade::Nu6,
+        NetworkUpgrade::Nu6_1,
         #[cfg(feature = "tx_v6")]
         NetworkUpgrade::Nu7,
     ];
@@ -712,6 +713,7 @@ where
             | NetworkUpgrade::Canopy
             | NetworkUpgrade::Nu5
             | NetworkUpgrade::Nu6
+            | NetworkUpgrade::Nu6_1
             | NetworkUpgrade::Nu7 => Ok(()),
 
             // Does not support V4 transactions

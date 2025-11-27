@@ -110,6 +110,7 @@ sapling-crypto.workspace = true
 zcash_protocol.workspace = true
 zcash_address.workspace = true
 zcash_transparent.workspace = true
+zcash_script.workspace = true
 
 # Used for orchard serialization
 nonempty = { version = "0.7", optional = true }

@@ -4,7 +4,7 @@ use std::fmt::Debug;
 
 use serde::{de::DeserializeOwned, Serialize};
 
-use orchard::{domain::OrchardDomainCommon, orchard_flavor::OrchardFlavor};
+use orchard::{orchard_flavor::OrchardFlavor, primitives::OrchardPrimitives};
 
 pub use orchard::orchard_flavor::OrchardVanilla;
 
