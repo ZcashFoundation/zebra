@@ -20,8 +20,10 @@ on:
         required: true
         type: string
       short_sha:
+        description: "Git short SHA to embed in the build. Defaults to GITHUB_SHA_SHORT. Pass empty string to disable."
         required: false
         type: string
+        default: auto
       rust_backtrace:
         required: false
         type: string
@@ -201,7 +203,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}
+            SHORT_SHA=${{ inputs.short_sha == 'auto' && env.GITHUB_SHA_SHORT || inputs.short_sha }}
             RUST_LOG=${{ env.RUST_LOG }}
             CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}
             FEATURES=${{ env.FEATURES }}
@@ -227,7 +229,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}
+            SHORT_SHA=${{ inputs.short_sha == 'auto' && env.GITHUB_SHA_SHORT || inputs.short_sha }}
             RUST_LOG=${{ env.RUST_LOG }}
             CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}
             FEATURES=${{ env.FEATURES }}

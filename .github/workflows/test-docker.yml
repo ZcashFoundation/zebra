@@ -55,6 +55,10 @@ jobs:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
         with:
           persist-credentials: false
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@c33ff65466c58d57e4d796f88bb1ae0ff26ee453 #v5.2.0
+        with:
+          short-length: 7
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 #v3.11.1
       - name: Build & push
@@ -66,7 +70,7 @@ jobs:
           file: docker/Dockerfile
           tags: zebrad-test:${{ github.sha }}
           build-args: |
-            SHORT_SHA=${{ github.sha }}
+            SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}
             CARGO_INCREMENTAL=1
           outputs: type=docker,dest=${{ runner.temp }}/zebrad-test.tar
 
@@ -151,11 +155,6 @@ jobs:
         run: |
           docker load --input ${{ runner.temp }}/zebrad-test.tar
           docker image ls -a
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@c33ff65466c58d57e4d796f88bb1ae0ff26ee453 #v5.2.0
-        with:
-          short-length: 7
 
       - name: Run ${{ matrix.name }} test
         # Only run custom-conf test if the config file exists in the built image

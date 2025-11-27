@@ -48,18 +48,13 @@ ENV CARGO_HOME=${CARGO_HOME}
 ARG CARGO_TARGET_DIR
 ENV CARGO_TARGET_DIR=${CARGO_TARGET_DIR}
 
-# If this is not set, it must be an empty string, so Zebra can try an
-# alternative git commit source:
-# https://github.com/ZcashFoundation/zebra/blob/9ebd56092bcdfc1a09062e15a0574c94af37f389/zebrad/src/application.rs#L179-L182
-ARG SHORT_SHA
-ENV SHORT_SHA=${SHORT_SHA:-}
-
 # This stage builds tests without running them.
 #
 # We also download needed dependencies for tests to work, from other images.
 # An entrypoint.sh is only available in this step for easier test handling with variables.
 FROM deps AS tests
 
+ARG SHORT_SHA
 ARG FEATURES
 ENV FEATURES=${FEATURES}
 
@@ -107,7 +102,8 @@ COPY --link --chown=${UID}:${GID} ./ ${HOME}
 
 # Build Zebra test binaries using nextest, but don't run them.
 # This also copies the necessary binaries to /usr/local/bin.
-RUN cargo nextest run --locked --release --no-run --features "${FEATURES}" && \
+RUN [ -n "${SHORT_SHA}" ] && export SHORT_SHA="${SHORT_SHA}" || true; \
+    cargo nextest run --locked --release --no-run --features "${FEATURES}" && \
     # Copy binaries to standard location
     cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin && \
     # Only copy zebra-checkpoints if the feature is enabled
@@ -136,6 +132,7 @@ CMD [ "cargo", "test" ]
 # `test` stage. The resulting zebrad binary is used in the `runtime` stage.
 FROM deps AS release
 
+ARG SHORT_SHA
 ARG FEATURES
 ENV FEATURES=${FEATURES}
 
@@ -162,6 +159,7 @@ RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     --mount=type=bind,source=Cargo.lock,target=Cargo.lock \
     --mount=type=cache,target=${CARGO_TARGET_DIR} \
     --mount=type=cache,target=${CARGO_HOME} \
+    [ -n "${SHORT_SHA}" ] && export SHORT_SHA="${SHORT_SHA}" || true; \
     cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad && \
     cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin
 
