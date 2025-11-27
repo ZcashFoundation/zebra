@@ -38,7 +38,7 @@ fn mempool_storage_crud_exact_mainnet() {
     // Get one (1) unmined transaction
     let unmined_tx = network
         .unmined_transactions_in_blocks(..)
-        .next()
+        .next_back()
         .expect("at least one unmined transaction");
 
     // Insert unmined tx into the mempool.
@@ -166,7 +166,7 @@ fn mempool_storage_crud_same_effects_mainnet() {
     // Get one (1) unmined transaction
     let unmined_tx_1 = network
         .unmined_transactions_in_blocks(..)
-        .next()
+        .next_back()
         .expect("at least one unmined transaction");
 
     // Insert unmined tx into the mempool.

@@ -229,15 +229,13 @@ impl Storage {
     fn is_standard_tx(&mut self, tx: &VerifiedUnminedTx) -> Result<(), MempoolError> {
         // TODO: implement other standard transaction checks from zcashd.
 
-        if tx.height.unwrap_or_default() > Height::MIN {
-            // Check for dust outputs.
-            for output in tx.transaction.transaction.outputs() {
-                if output.is_dust() {
-                    let rejection_error = NonStandardTransactionError::IsDust;
-                    self.reject(tx.transaction.id, rejection_error.clone().into());
+        // Check for dust outputs.
+        for output in tx.transaction.transaction.outputs() {
+            if output.is_dust() {
+                let rejection_error = NonStandardTransactionError::IsDust;
+                self.reject(tx.transaction.id, rejection_error.clone().into());
 
-                    return Err(MempoolError::NonStandardTransaction(rejection_error));
-                }
+                return Err(MempoolError::NonStandardTransaction(rejection_error));
             }
         }
 
