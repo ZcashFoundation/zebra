@@ -5,6 +5,32 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+
+## [Zebra 3.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v3.1.0) - 2025-11-27
+
+This release fixes how Docker images are published for ARM64 platforms, fixes how commit IDs are logged in panic messages, and filters out dust transactions in the mempool.
+
+### Added
+
+- Implemented filter for dust transactions in the mempool ([#10134](https://github.com/ZcashFoundation/zebra/pull/10134))
+
+### Changed
+
+- Updated Zebra Docker configuration to use IPv6 listen address [::]:8233 ([#10095](https://github.com/ZcashFoundation/zebra/pull/10095))
+- Increased allowed RPC response size ([#10118](https://github.com/ZcashFoundation/zebra/pull/10118))
+- Enabled RPC on GCP instances deployed from main and releases ([#10120](https://github.com/ZcashFoundation/zebra/pull/10120))
+
+### Fixed
+
+- Fixed publishing workflow for ARM64 and AMD64 Docker images ([#10125](https://github.com/ZcashFoundation/zebra/pull/10125))
+- Fixed logging of commit IDs ([#10135](https://github.com/ZcashFoundation/zebra/pull/10135))
+- Prevented static IP assignment step from failing on read command ([#10123](https://github.com/ZcashFoundation/zebra/pull/10123))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@conradoplg, @gustavovalverde, @imcdona, @oxarbitrage and @upbqdn
+
 ## [Zebra 3.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v3.0.0) - 2025-11-17
 
 This release is a stable version of the release candidate deploying NU6.1 on Mainnet. It fixes some issues that were found after
