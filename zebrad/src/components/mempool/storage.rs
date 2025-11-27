@@ -217,16 +217,16 @@ impl Storage {
         }
     }
 
-    /// Check whether a transaction is standard.
+    /// Check and reject non-standard transaction.
     ///
     /// Zcashd defines non-consensus standard transaction checks in
-    /// https://github.com/zcash/zcash/blob/v6.10.0/src/policy/policy.cpp#L58-L135
+    /// <https://github.com/zcash/zcash/blob/v6.10.0/src/policy/policy.cpp#L58-L135>
     ///
     /// This checks are applied before inserting a transaction in `AcceptToMemoryPool`:
-    /// https://github.com/zcash/zcash/blob/v6.10.0/src/main.cpp#L1819
+    /// <https://github.com/zcash/zcash/blob/v6.10.0/src/main.cpp#L1819>
     ///
     /// Currently, we only implement the dust output check.
-    fn is_standard_tx(&mut self, tx: &VerifiedUnminedTx) -> Result<(), MempoolError> {
+    fn reject_if_non_standard_tx(&mut self, tx: &VerifiedUnminedTx) -> Result<(), MempoolError> {
         // TODO: implement other standard transaction checks from zcashd.
 
         // Check for dust outputs.
@@ -261,9 +261,6 @@ impl Storage {
         spent_mempool_outpoints: Vec<transparent::OutPoint>,
         height: Option<Height>,
     ) -> Result<UnminedTxId, MempoolError> {
-        // Check that the transaction is standard.
-        self.is_standard_tx(&tx)?;
-
         // # Security
         //
         // This method must call `reject`, rather than modifying the rejection lists directly.
@@ -295,6 +292,9 @@ impl Storage {
 
             return Err(MempoolError::InMempool);
         }
+
+        // Check that the transaction is standard.
+        self.reject_if_non_standard_tx(&tx)?;
 
         // Then, we try to insert into the pool. If this fails the transaction is rejected.
         let mut result = Ok(unmined_tx_id);

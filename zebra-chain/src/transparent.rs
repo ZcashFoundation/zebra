@@ -463,9 +463,7 @@ impl Output {
     /// Returns true if this output is considered dust.
     pub fn is_dust(&self) -> bool {
         let output_size: u32 = self
-            .zcash_serialize_to_vec()
-            .expect("serializing to vec should not fail")
-            .len()
+            .zcash_serialized_size()
             .try_into()
             .expect("output size should fit in u32");
 
