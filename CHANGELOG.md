@@ -6,9 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
 
-## [Zebra 3.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v3.1.0) - 2025-11-27
+## [Zebra 3.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v3.1.0) - 2025-11-28
 
-This release fixes how Docker images are published for ARM64 platforms, fixes how commit IDs are logged in panic messages, and filters out dust transactions in the mempool.
+This release fixes how Docker images are published for ARM64 platforms, increases the maximum size of RPC responses and allows configuring it, and filters out dust transactions in the mempool.
 
 ### Added
 
@@ -17,14 +17,13 @@ This release fixes how Docker images are published for ARM64 platforms, fixes ho
 ### Changed
 
 - Updated Debian from `bookworm` to `trixie` in Docker ([#10111](https://github.com/ZcashFoundation/zebra/issues/10111))
-- Updated Zebra Docker configuration to use IPv6 listen address [::]:8233 ([#10095](https://github.com/ZcashFoundation/zebra/pull/10095))
+- Configured Zebra to listen on the all-zero IPv6 address in Docker by default ([#10095](https://github.com/ZcashFoundation/zebra/pull/10095))
 - Increased allowed RPC response size ([#10118](https://github.com/ZcashFoundation/zebra/pull/10118))
-- Enabled RPC on GCP instances deployed from main and releases ([#10120](https://github.com/ZcashFoundation/zebra/pull/10120))
 
 ### Fixed
 
 - Fixed publishing workflow for ARM64 and AMD64 Docker images ([#10125](https://github.com/ZcashFoundation/zebra/pull/10125))
-- Fixed logging of commit IDs ([#10135](https://github.com/ZcashFoundation/zebra/pull/10135))
+- Fixed logging of commit IDs ([#10135](https://github.com/ZcashFoundation/zebra/pull/10135) and [[#10115](https://github.com/ZcashFoundation/zebra/pull/10115))
 - Prevented static IP assignment step from failing on read command ([#10123](https://github.com/ZcashFoundation/zebra/pull/10123))
 
 ### Contributors
