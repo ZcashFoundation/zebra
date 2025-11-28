@@ -82,14 +82,20 @@ jobs:
       - name: Set build matrix
         id: set-matrix
         run: |
+          # Runners are configurable via repository variables to allow larger runners
+          # for ZcashFoundation (more disk space) while forks use default runners.
+          AMD64_RUNNER="${{ vars.DOCKER_BUILD_RUNNER_AMD64 || 'ubuntu-latest' }}"
+          ARM64_RUNNER="${{ vars.DOCKER_BUILD_RUNNER_ARM64 || 'ubuntu-24.04-arm' }}"
+
           # Runtime builds: AMD64 + ARM64 (multi-arch)
           # Other targets: AMD64 only (lightwalletd dependency)
           if [[ "${{ inputs.dockerfile_target }}" == "runtime" ]]; then
-            MATRIX='{"include":[{"platform":"linux/amd64","runner":"ubuntu-latest"},{"platform":"linux/arm64","runner":"ubuntu-24.04-arm"}]}'
+            MATRIX='{"include":[{"platform":"linux/amd64","runner":"'"$AMD64_RUNNER"'"},{"platform":"linux/arm64","runner":"'"$ARM64_RUNNER"'"}]}'
           else
-            MATRIX='{"include":[{"platform":"linux/amd64","runner":"ubuntu-latest"}]}'
+            MATRIX='{"include":[{"platform":"linux/amd64","runner":"'"$AMD64_RUNNER"'"}]}'
           fi
           echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+          echo "Runners: AMD64=$AMD64_RUNNER, ARM64=$ARM64_RUNNER"
           echo "Platforms: $(echo $MATRIX | jq -r '.include[].platform' | paste -sd ',' -)"
 
   build:
