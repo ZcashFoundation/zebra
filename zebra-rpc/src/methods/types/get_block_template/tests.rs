@@ -21,12 +21,12 @@ fn minimal_coinbase() -> Result<(), Box<dyn std::error::Error>> {
         .with_activation_heights(ConfiguredActivationHeights {
             nu6: Some(1),
             ..Default::default()
-        })
+        })?
         .with_funding_streams(vec![ConfiguredFundingStreams {
             height_range: Some(Height(1)..Height(10)),
             recipients: None,
         }])
-        .to_network();
+        .to_network()?;
 
     let outputs = standard_coinbase_outputs(
         &regtest,
