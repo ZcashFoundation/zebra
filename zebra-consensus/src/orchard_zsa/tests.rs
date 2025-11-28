@@ -223,8 +223,8 @@ async fn check_orchard_zsa_workflow() -> Result<(), Report> {
 
     let (state_service, read_state_service, _, _) = zebra_state::init_test_services(&network);
 
-    let (block_verifier_router, _tx_verifier, _groth16_download_handle, _max_checkpoint_height) =
-        crate::router::init(Config::default(), &network, state_service.clone()).await;
+    let (block_verifier_router, ..) =
+        crate::router::init(Config::default(), &network, state_service).await;
 
     let transcript_data =
         create_transcript_data(ORCHARD_ZSA_WORKFLOW_BLOCKS.iter()).collect::<Vec<_>>();
@@ -244,11 +244,11 @@ async fn check_orchard_zsa_workflow() -> Result<(), Report> {
 
     // Verify all blocks in the transcript against the consensus and the state.
     timeout(
-        Duration::from_secs(60),
-        Transcript::from(transcript_data).check(block_verifier_router.clone()),
+        Duration::from_secs(15),
+        Transcript::from(transcript_data).check(block_verifier_router),
     )
     .await
-    .map_err(|_| eyre!("Task timed out"))?;
+    .map_err(|_| eyre!("Task timed out"))??;
 
     // After processing the transcript blocks, verify that the state matches the expected supply info.
     for (&asset_base, asset_record) in &asset_records {

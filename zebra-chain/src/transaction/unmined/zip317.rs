@@ -162,6 +162,17 @@ pub fn conventional_actions(transaction: &Transaction) -> u32 {
         + 2 * n_join_split
         + max(n_spends_sapling, n_outputs_sapling)
         + n_actions_orchard;
+
+    // TODO: Add ZSA issuance-related ZIP-317 terms to logical_actions formula, like:
+    //
+    // let logical_actions =
+    //     ...
+    //     + n_zsa_issue_notes
+    //     + CREATION_COST * n_asset_creations;
+    //
+    // librustzcash already includes these; see:
+    // zcash_primitives/src/transaction/fees/zip317.rs, FeeRule::fee_required
+
     let logical_actions: u32 = logical_actions
         .try_into()
         .expect("transaction items are limited by serialized size limit");

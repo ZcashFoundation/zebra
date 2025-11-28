@@ -399,8 +399,7 @@ impl ZcashSerialize for orchard::ShieldedData<OrchardVanilla> {
 impl ZcashSerialize for orchard::ShieldedData<OrchardZSA> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         // Denoted as `nActionGroupsOrchard` in the spec (ZIP 230).
-        // TODO: Implement support for multiple groups as defined in ZIP 230
-        // (now the number of action groups is hardcoded to 1 to support V5-like transactions only).
+        // TxV6 currently supports only one action group.
         CompactSizeMessage::try_from(1)
             .unwrap_or_else(|_| unreachable!())
             .zcash_serialize(&mut writer)?;
@@ -531,8 +530,7 @@ impl ZcashDeserialize for Option<orchard::ShieldedData<OrchardVanilla>> {
 impl ZcashDeserialize for Option<orchard::ShieldedData<OrchardZSA>> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         // Denoted as `nActionGroupsOrchard` in the spec (ZIP 230).
-        // TODO: Implement support for multiple groups as defined in ZIP 230
-        // (now the number of action groups is hardcoded to 1 to support V5-like transactions only).
+        // TxV6 currently supports only one action group.
         let n_action_groups: usize = (&mut reader)
             .zcash_deserialize_into::<CompactSizeMessage>()?
             .into();
@@ -1353,7 +1351,6 @@ impl FromHex for SerializedTransaction {
 }
 
 // TODO: After tx-v6 merge, refactor to share common serialization logic with V5.
-// For now the only difference is versioned signatures in V6.
 #[cfg(feature = "tx_v6")]
 mod sapling_v6 {
     use super::*;
