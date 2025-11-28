@@ -1,6 +1,6 @@
 //! Zebra's internal peer message response format.
 
-use std::{fmt, sync::Arc};
+use std::{fmt, sync::Arc, time::Duration};
 
 use zebra_chain::{
     block::{self, Block},
@@ -34,6 +34,11 @@ pub enum Response {
     //
     // TODO: make this into a HashMap<PeerSocketAddr, MetaAddr> - a unique list of peer addresses (#2244)
     Peers(Vec<MetaAddr>),
+
+    /// A pong response containing the round-trip latency for a peer.
+    ///
+    /// Returned after a ping/pong exchange to measure RTT.
+    Pong(Duration),
 
     /// An ordered list of block hashes.
     ///
@@ -85,6 +90,8 @@ impl fmt::Display for Response {
 
             Response::Peers(peers) => format!("Peers {{ peers: {} }}", peers.len()),
 
+            Response::Pong(duration) => format!("Pong {{ latency: {:?} }}", duration),
+
             Response::BlockHashes(hashes) => format!("BlockHashes {{ hashes: {} }}", hashes.len()),
             Response::BlockHeaders(headers) => {
                 format!("BlockHeaders {{ headers: {} }}", headers.len())
@@ -128,6 +135,8 @@ impl Response {
             Response::Nil => "Nil",
 
             Response::Peers(_) => "Peers",
+
+            Response::Pong(_) => "Pong",
 
             Response::BlockHashes(_) => "BlockHashes",
             Response::BlockHeaders(_) => "BlockHeaders",
