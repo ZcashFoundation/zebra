@@ -20,9 +20,11 @@ use std::{
 use chrono::{DateTime, Utc};
 use zebra_chain::{
     amount::NonNegative,
-    block::{self, Block, Height},
+    block::{self, Block, Hash, Height},
+    parameters::NetworkUpgrade,
     serialization::DateTime32,
     value_balance::ValueBalance,
+    work::difficulty::U256,
 };
 
 use crate::{
@@ -678,4 +680,70 @@ pub(crate) fn calculate_median_time_past(relevant_chain: Vec<Arc<Block>>) -> Dat
     let median_time_past = AdjustedDifficulty::median_time(relevant_data);
 
     DateTime32::try_from(median_time_past).expect("valid blocks have in-range times")
+}
+
+/// Return the height and hash of the first block with cumulative total work equal or greater than `threshold`.
+///
+/// Returns `None` if the threshold is greater than the total work of the finalized state, or if
+/// history trees are not present for this chain.
+pub fn first_block_with_total_work(db: &ZebraDb, threshold: U256) -> Option<(Height, Hash)> {
+    // Search upgrades with history trees
+    let network = db.network();
+    let tip_height = db.finalized_tip_height()?;
+    let current_upgrade = NetworkUpgrade::current(&network, tip_height);
+    let history_tree_upgrades: Vec<NetworkUpgrade> = NetworkUpgrade::iter()
+        .skip_while(|u| *u != NetworkUpgrade::Heartwood)
+        .take_while(|u| *u != current_upgrade)
+        .chain(std::iter::once(current_upgrade))
+        .collect();
+
+    // Edge case: try to match the very first Heartwood tree which would otherwise get skipped over
+    let min_work_height = (NetworkUpgrade::Heartwood.activation_height(&network)? + 1)?;
+    let min_work = db
+        .history_tree_by_height(min_work_height)?
+        .root_node()?
+        .subtree_total_work();
+    if threshold <= min_work {
+        return Some((min_work_height, db.hash(min_work_height)?));
+    }
+
+    let mut total_work = U256::zero();
+
+    // Find first upgrade that goes over the threshold
+    for upgrade in history_tree_upgrades {
+        let start_work = total_work;
+        total_work += db
+            .history_tree_by_upgrade(upgrade)?
+            .root_node()?
+            .subtree_total_work();
+        if total_work >= threshold {
+            let local_threshold = threshold - start_work;
+            let mut start_height = upgrade.activation_height(&network)?;
+            let mut end_height = if upgrade == current_upgrade {
+                db.finalized_tip_height()?
+            } else {
+                upgrade.next_upgrade()?.activation_height(&network)?
+            };
+
+            // Binary search over subtree_total_work within this upgrade
+            while start_height != end_height {
+                let middle = Height(((start_height.as_usize() + end_height.as_usize()) / 2) as u32);
+                let local_work = db
+                    .history_tree_by_height(middle)?
+                    .root_node()?
+                    .subtree_total_work();
+
+                if local_work >= local_threshold {
+                    end_height = middle;
+                } else {
+                    start_height = (middle + 1)?;
+                }
+            }
+
+            return Some((end_height, db.hash(end_height)?));
+        }
+    }
+
+    // Total work is less than threshold
+    None
 }

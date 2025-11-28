@@ -19,6 +19,7 @@ use crate::{
     parameters::{Network, NetworkUpgrade},
     primitives::zcash_history::{Entry, Tree, V1 as PreOrchard, V2 as OrchardOnward},
     sapling,
+    work::difficulty::U256,
 };
 
 /// An error describing why a history tree operation failed.
@@ -43,6 +44,24 @@ impl PartialEq for HistoryTreeError {
 }
 
 impl Eq for HistoryTreeError {}
+
+/// The inner data of a node in the history tree.
+pub enum HistoryNodeData {
+    /// A pre-Orchard node.
+    PreOrchard(<zcash_history::V1 as zcash_history::Version>::NodeData),
+    /// An Orchard-onward node.
+    OrchardOnward(<zcash_history::V2 as zcash_history::Version>::NodeData),
+}
+
+impl HistoryNodeData {
+    /// Return the total work of this history node.
+    pub fn subtree_total_work(&self) -> U256 {
+        match self {
+            HistoryNodeData::PreOrchard(v1) => U256(v1.subtree_total_work.0),
+            HistoryNodeData::OrchardOnward(v2) => U256(v2.v1.subtree_total_work.0),
+        }
+    }
+}
 
 /// The inner [Tree] in one of its supported versions.
 #[derive(Debug)]
@@ -222,7 +241,7 @@ impl NonEmptyHistoryTree {
         block: Arc<Block>,
         sapling_root: &sapling::tree::Root,
         orchard_root: &orchard::tree::Root,
-    ) -> Result<(), HistoryTreeError> {
+    ) -> Result<Vec<Entry>, HistoryTreeError> {
         // Check if the block has the expected height.
         // librustzcash assumes the heights are correct and corrupts the tree if they are wrong,
         // resulting in a confusing error, which we prevent here.
@@ -245,7 +264,7 @@ impl NonEmptyHistoryTree {
             // Replaces self with the new tree
             *self = new_tree;
             assert_eq!(self.network_upgrade, network_upgrade);
-            return Ok(());
+            return Ok(vec![self.peaks.get(&0).unwrap().clone()]);
         }
 
         let new_entries = match &mut self.inner {
@@ -256,14 +275,14 @@ impl NonEmptyHistoryTree {
                 .append_leaf(block, sapling_root, orchard_root)
                 .map_err(|e| HistoryTreeError::InnerError { inner: e })?,
         };
-        for entry in new_entries {
+        for entry in new_entries.clone() {
             // Not every entry is a peak; those will be trimmed later
             self.peaks.insert(self.size, entry);
             self.size += 1;
         }
         self.prune()?;
         self.current_height = height;
-        Ok(())
+        Ok(new_entries)
     }
 
     /// Extend the history tree with the given blocks.
@@ -377,6 +396,18 @@ impl NonEmptyHistoryTree {
         Ok(())
     }
 
+    /// Return the tree root.
+    pub fn root(&self) -> HistoryNodeData {
+        match &self.inner {
+            InnerHistoryTree::PreOrchard(tree) => {
+                HistoryNodeData::PreOrchard(tree.root_node_data())
+            }
+            InnerHistoryTree::OrchardOnward(tree) => {
+                HistoryNodeData::OrchardOnward(tree.root_node_data())
+            }
+        }
+    }
+
     /// Return the hash of the tree root.
     pub fn hash(&self) -> ChainHistoryMmrRootHash {
         match &self.inner {
@@ -485,17 +516,17 @@ impl HistoryTree {
         block: Arc<Block>,
         sapling_root: &sapling::tree::Root,
         orchard_root: &orchard::tree::Root,
-    ) -> Result<(), HistoryTreeError> {
+    ) -> Result<Option<Vec<Entry>>, HistoryTreeError> {
         let Some(heartwood_height) = NetworkUpgrade::Heartwood.activation_height(network) else {
             assert!(
                 self.0.is_none(),
                 "history tree must not exist pre-Heartwood"
             );
 
-            return Ok(());
+            return Ok(None);
         };
 
-        match block
+        let new_entries: Vec<Entry> = match block
             .coinbase_height()
             .expect("must have height")
             .cmp(&heartwood_height)
@@ -505,6 +536,7 @@ impl HistoryTree {
                     self.0.is_none(),
                     "history tree must not exist pre-Heartwood"
                 );
+                Vec::new()
             }
             std::cmp::Ordering::Equal => {
                 let tree = Some(NonEmptyHistoryTree::from_block(
@@ -515,20 +547,81 @@ impl HistoryTree {
                 )?);
                 // Replace the current object with the new tree
                 *self = HistoryTree(tree);
+                vec![self.0.as_ref().unwrap().peaks().get(&0).unwrap().clone()]
             }
-            std::cmp::Ordering::Greater => {
-                self.0
-                    .as_mut()
-                    .expect("history tree must exist Heartwood-onward")
-                    .push(block.clone(), sapling_root, orchard_root)?;
-            }
+            std::cmp::Ordering::Greater => self
+                .0
+                .as_mut()
+                .expect("history tree must exist Heartwood-onward")
+                .push(block.clone(), sapling_root, orchard_root)?,
         };
-        Ok(())
+        Ok(Some(new_entries))
     }
 
     /// Return the hash of the tree root if the tree is not empty.
     pub fn hash(&self) -> Option<ChainHistoryMmrRootHash> {
         Some(self.0.as_ref()?.hash())
+    }
+
+    /// Return the index of the block at the given height by order of insertion,
+    /// or `None` if the height is less than the activation height of this tree.
+    pub fn insertion_index_of_block(&self, height: Height) -> Option<u32> {
+        let diff = height
+            - self
+                .0
+                .as_ref()?
+                .network_upgrade
+                .activation_height(&self.0.as_ref()?.network)?;
+        if diff < 0 {
+            None
+        } else {
+            Some(diff as u32)
+        }
+    }
+
+    /// Calculate the peak indexes of the tree when the last appended block is at the given height.
+    ///
+    /// Returns `None` if the height is less than the activation height of this tree.
+    pub fn peaks_at(&self, height: Height) -> Option<Vec<u32>> {
+        let leaf_count = 1 + self.insertion_index_of_block(height)?;
+
+        // If bit h of leaf_count is set, there is a peak at height h.
+        // Each peak at height h has 2^h leaves and 2^(h+1) - 1 nodes.
+        // Each peak index equals the index of the previous peak plus
+        // the number of nodes in the current peak - 1.
+        let mut peaks = Vec::new();
+        let mut total_nodes = 0;
+        for h in (0..31).rev() {
+            let mask = 1 << h;
+            if leaf_count & mask != 0 {
+                total_nodes += u32::pow(2, h + 1) - 1;
+                peaks.push(total_nodes - 1);
+            }
+        }
+
+        Some(peaks)
+    }
+
+    /// Return the number of nodes in the tree at the given block height.
+    ///
+    /// Returns `None` if the height is less than the activation height of this tree.
+    pub fn node_count_at(&self, height: Height) -> Option<u32> {
+        self.peaks_at(height)
+            .map(|peaks| match peaks.iter().last() {
+                Some(last_peak) => last_peak + 1,
+                None => 0,
+            })
+    }
+
+    /// Return the index of the MMR node of this tree corresponding to the given block height,
+    /// or `None` if the height is less than the activation height of this tree.
+    pub fn node_index_of_block(&self, height: Height) -> Option<u32> {
+        self.node_count_at(height).map(|count| count - 1)
+    }
+
+    /// Returns the root node of this tree, or `None` if the tree is empty.
+    pub fn root_node(&self) -> Option<HistoryNodeData> {
+        Some(self.0.as_ref()?.root())
     }
 }
 
