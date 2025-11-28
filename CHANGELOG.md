@@ -16,6 +16,7 @@ This release fixes how Docker images are published for ARM64 platforms, fixes ho
 
 ### Changed
 
+- Updated Debian from `bookworm` to `trixie` in Docker ([#10111](https://github.com/ZcashFoundation/zebra/issues/10111))
 - Updated Zebra Docker configuration to use IPv6 listen address [::]:8233 ([#10095](https://github.com/ZcashFoundation/zebra/pull/10095))
 - Increased allowed RPC response size ([#10118](https://github.com/ZcashFoundation/zebra/pull/10118))
 - Enabled RPC on GCP instances deployed from main and releases ([#10120](https://github.com/ZcashFoundation/zebra/pull/10120))
