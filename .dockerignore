@@ -21,4 +21,4 @@
 !zebra-*
 !zebrad
 !docker/entrypoint.sh
-!testnet-single-node-deploy/
+!testnet-single-node-deploy
