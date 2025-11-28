@@ -8,7 +8,7 @@ use std::{
 
 use tower::{BoxError, Service, ServiceExt};
 use zebra_chain::{
-    amount::{DeferredPoolBalanceChange, NegativeAllowed},
+    amount::{Amount, DeferredPoolBalanceChange, NegativeAllowed, NonNegative},
     block::{self, Block, HeightDiff},
     history_tree::HistoryTree,
     orchard,
@@ -258,6 +258,8 @@ pub struct SemanticallyVerifiedBlock {
     pub transaction_hashes: Arc<[transaction::Hash]>,
     /// This block's deferred pool value balance change.
     pub deferred_pool_balance_change: Option<DeferredPoolBalanceChange>,
+    /// This block's miner fees
+    pub block_miner_fees: Option<Amount<NonNegative>>,
 }
 
 /// A block ready to be committed directly to the finalized state with
@@ -489,6 +491,7 @@ impl ContextuallyVerifiedBlock {
             new_outputs,
             transaction_hashes,
             deferred_pool_balance_change,
+            block_miner_fees: _,
         } = semantically_verified;
 
         // This is redundant for the non-finalized state,
@@ -550,6 +553,7 @@ impl SemanticallyVerifiedBlock {
             new_outputs,
             transaction_hashes,
             deferred_pool_balance_change: None,
+            block_miner_fees: None,
         }
     }
 
@@ -585,6 +589,7 @@ impl From<Arc<Block>> for SemanticallyVerifiedBlock {
             new_outputs,
             transaction_hashes,
             deferred_pool_balance_change: None,
+            block_miner_fees: None,
         }
     }
 }
@@ -600,6 +605,7 @@ impl From<ContextuallyVerifiedBlock> for SemanticallyVerifiedBlock {
             deferred_pool_balance_change: Some(DeferredPoolBalanceChange::new(
                 valid.chain_value_pool_change.deferred_amount(),
             )),
+            block_miner_fees: None,
         }
     }
 }
@@ -613,6 +619,7 @@ impl From<FinalizedBlock> for SemanticallyVerifiedBlock {
             new_outputs: finalized.new_outputs,
             transaction_hashes: finalized.transaction_hashes,
             deferred_pool_balance_change: finalized.deferred_pool_balance_change,
+            block_miner_fees: None,
         }
     }
 }
@@ -821,6 +828,9 @@ pub enum Request {
     /// with the current best chain tip.
     Tip,
 
+    #[cfg(zcash_unstable = "zip234")]
+    TipPoolValues,
+
     /// Computes a block locator object based on the current best chain.
     ///
     /// Returns [`Response::BlockLocator`] with hashes starting
@@ -999,6 +1009,8 @@ impl Request {
             Request::AwaitUtxo(_) => "await_utxo",
             Request::Depth(_) => "depth",
             Request::Tip => "tip",
+            #[cfg(zcash_unstable = "zip234")]
+            Request::TipPoolValues => "tip_pool_values",
             Request::BlockLocator => "block_locator",
             Request::Transaction(_) => "transaction",
             Request::AnyChainTransaction(_) => "any_chain_transaction",
@@ -1405,6 +1417,8 @@ impl TryFrom<Request> for ReadRequest {
     fn try_from(request: Request) -> Result<ReadRequest, Self::Error> {
         match request {
             Request::Tip => Ok(ReadRequest::Tip),
+            #[cfg(zcash_unstable = "zip234")]
+            Request::TipPoolValues => Ok(ReadRequest::TipPoolValues),
             Request::Depth(hash) => Ok(ReadRequest::Depth(hash)),
             Request::BestChainNextMedianTimePast => Ok(ReadRequest::BestChainNextMedianTimePast),
             Request::BestChainBlockHash(hash) => Ok(ReadRequest::BestChainBlockHash(hash)),

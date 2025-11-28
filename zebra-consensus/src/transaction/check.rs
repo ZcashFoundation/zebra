@@ -14,6 +14,7 @@ use chrono::{DateTime, Utc};
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block::Height,
+    error::CoinbaseTransactionError,
     orchard::Flags,
     parameters::{Network, NetworkUpgrade},
     primitives::zcash_note_encryption,
@@ -173,14 +174,20 @@ pub fn has_enough_orchard_flags(tx: &Transaction) -> Result<(), TransactionError
 pub fn coinbase_tx_no_prevout_joinsplit_spend(tx: &Transaction) -> Result<(), TransactionError> {
     if tx.is_coinbase() {
         if tx.joinsplit_count() > 0 {
-            return Err(TransactionError::CoinbaseHasJoinSplit);
+            return Err(TransactionError::Coinbase(
+                CoinbaseTransactionError::HasJoinSplit,
+            ));
         } else if tx.sapling_spends_per_anchor().count() > 0 {
-            return Err(TransactionError::CoinbaseHasSpend);
+            return Err(TransactionError::Coinbase(
+                CoinbaseTransactionError::HasSpend,
+            ));
         }
 
         if let Some(orchard_shielded_data) = tx.orchard_shielded_data() {
             if orchard_shielded_data.flags.contains(Flags::ENABLE_SPENDS) {
-                return Err(TransactionError::CoinbaseHasEnableSpendsOrchard);
+                return Err(TransactionError::Coinbase(
+                    CoinbaseTransactionError::HasEnableSpendsOrchard,
+                ));
             }
         }
     }
@@ -359,7 +366,9 @@ pub fn coinbase_outputs_are_decryptable(
     }
 
     if !zcash_note_encryption::decrypts_successfully(transaction, network, height) {
-        return Err(TransactionError::CoinbaseOutputsNotDecryptable);
+        return Err(TransactionError::Coinbase(
+            CoinbaseTransactionError::OutputsNotDecryptable,
+        ));
     }
 
     Ok(())
@@ -386,11 +395,13 @@ pub fn coinbase_expiry_height(
         // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
         if *block_height >= nu5_activation_height {
             if expiry_height != Some(*block_height) {
-                return Err(TransactionError::CoinbaseExpiryBlockHeight {
-                    expiry_height,
-                    block_height: *block_height,
-                    transaction_hash: coinbase.hash(),
-                });
+                return Err(TransactionError::Coinbase(
+                    CoinbaseTransactionError::ExpiryBlockHeight {
+                        expiry_height,
+                        block_height: *block_height,
+                        transaction_hash: coinbase.hash(),
+                    },
+                ));
             } else {
                 return Ok(());
             }
