@@ -627,6 +627,11 @@ struct DConfig {
     listen_addr: String,
     external_addr: Option<String>,
     network: DNetwork,
+
+    /// Legacy testnet parameters, kept for backwards compatibility.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    testnet_parameters: Option<DTestnetParameters>,
+
     initial_mainnet_peers: IndexSet<String>,
     initial_testnet_peers: IndexSet<String>,
     cache_dir: CacheDir,
@@ -643,6 +648,7 @@ impl Default for DConfig {
             listen_addr: "[::]".to_string(),
             external_addr: None,
             network: Default::default(),
+            testnet_parameters: None,
             initial_mainnet_peers: config.initial_mainnet_peers,
             initial_testnet_peers: config.initial_testnet_peers,
             cache_dir: config.cache_dir,
@@ -719,6 +725,7 @@ impl From<Config> for DConfig {
             listen_addr: listen_addr.to_string(),
             external_addr: external_addr.map(|addr| addr.to_string()),
             network: dnetwork,
+            testnet_parameters: None,
             initial_mainnet_peers,
             initial_testnet_peers,
             cache_dir,
@@ -738,6 +745,7 @@ impl<'de> Deserialize<'de> for Config {
             listen_addr,
             external_addr,
             network: dnetwork,
+            testnet_parameters,
             initial_mainnet_peers,
             initial_testnet_peers,
             cache_dir,
