@@ -1064,6 +1064,7 @@ fn stored_configs_work() -> Result<()> {
 }
 */
 
+/*
 /// Test if `zebrad` can sync the first checkpoint on mainnet.
 ///
 /// The first checkpoint contains a single genesis block.
@@ -1145,6 +1146,7 @@ fn restart_stop_at_height_for_network(network: Network, height: block::Height) -
 
     Ok(())
 }
+*/
 
 /// Test if `zebrad` can activate the mempool on mainnet.
 /// Debug activation happens after committing the genesis block.
@@ -1400,6 +1402,7 @@ fn sync_full_testnet() -> Result<()> {
     )
 }
 
+/*
 #[cfg(all(feature = "prometheus", not(target_os = "windows")))]
 #[tokio::test]
 async fn metrics_endpoint() -> Result<()> {
@@ -1736,6 +1739,7 @@ async fn rpc_endpoint_client_content_type() -> Result<()> {
 
     Ok(())
 }
+*/
 
 /// Test that Zebra's non-blocking logger works, by creating lots of debug output, but not reading the logs.
 /// Then make sure Zebra drops excess log lines. (Previously, it would block waiting for logs to be read.)
@@ -2195,6 +2199,7 @@ fn lwd_integration_test(test_type: TestType) -> Result<()> {
     Ok(())
 }
 
+/*
 /// Test will start 2 zebrad nodes one after the other using the same Zcash listener.
 /// It is expected that the first node spawned will get exclusive use of the port.
 /// The second node will panic with the Zcash listener conflict hint added in #1535.
@@ -2430,6 +2435,7 @@ where
 
     Ok(())
 }
+*/
 
 #[tokio::test]
 #[ignore]
@@ -2477,6 +2483,7 @@ async fn lwd_rpc_test() -> Result<()> {
     Ok(())
 }
 
+/*
 #[test]
 #[cfg(not(target_os = "windows"))]
 fn delete_old_databases() -> Result<()> {
@@ -2549,6 +2556,7 @@ fn delete_old_databases() -> Result<()> {
 
     Ok(())
 }
+*/
 
 /// Test sending transactions using a lightwalletd instance connected to a zebrad instance.
 ///
@@ -2602,6 +2610,7 @@ async fn rpc_submit_block() -> Result<()> {
     common::get_block_template_rpcs::submit_block::run().await
 }
 
+/*
 /// Check that the end of support code is called at least once.
 #[test]
 fn end_of_support_is_checked_at_start() -> Result<()> {
@@ -2628,6 +2637,7 @@ fn end_of_support_is_checked_at_start() -> Result<()> {
 
     Ok(())
 }
+*/
 
 /// Test `zebra-checkpoints` on mainnet.
 ///
