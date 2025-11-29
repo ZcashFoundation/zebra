@@ -340,10 +340,13 @@ pub fn funding_stream_values(
     network: &Network,
     expected_block_subsidy: Amount<NonNegative>,
 ) -> Result<HashMap<FundingStreamReceiver, Amount<NonNegative>>, crate::amount::Error> {
-    let canopy_height = NetworkUpgrade::Canopy.activation_height(network).unwrap();
     let mut results = HashMap::new();
 
-    if height >= canopy_height {
+    if expected_block_subsidy.is_zero() {
+        return Ok(results);
+    }
+
+    if NetworkUpgrade::current(network, height) >= NetworkUpgrade::Canopy {
         let funding_streams = network.funding_streams(height);
         if let Some(funding_streams) = funding_streams {
             for (&receiver, recipient) in funding_streams.recipients() {
