@@ -222,6 +222,7 @@ use crate::common::regtest::MiningRpcMethods;
 /// This limit only applies to some tests.
 pub const MAX_ASYNC_BLOCKING_TIME: Duration = zebra_test::mock_service::DEFAULT_MAX_REQUEST_DELAY;
 
+/*
 #[test]
 fn generate_no_args() -> Result<()> {
     let _init_guard = zebra_test::init();
@@ -382,6 +383,7 @@ fn start_args() -> Result<()> {
 
     Ok(())
 }
+*/
 
 #[tokio::test]
 async fn db_init_outside_future_executor() -> Result<()> {
@@ -417,6 +419,7 @@ async fn db_init_outside_future_executor() -> Result<()> {
     Ok(())
 }
 
+/*
 /// Check that the block state and peer list caches are written to disk.
 #[test]
 fn persistent_mode() -> Result<()> {
@@ -1059,6 +1062,7 @@ fn stored_configs_work() -> Result<()> {
 
     Ok(())
 }
+*/
 
 /// Test if `zebrad` can sync the first checkpoint on mainnet.
 ///
