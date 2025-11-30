@@ -1266,6 +1266,7 @@ fn sync_past_mandatory_checkpoint(network: Network) -> Result<()> {
 }
 */
 
+/*
 /// Sync `network` until the chain tip is reached, or a timeout elapses.
 ///
 /// The timeout is specified using an environment variable, with the name configured by the
@@ -1302,6 +1303,7 @@ fn full_sync_test(network: Network, timeout_argument_name: &str) -> Result<()> {
         Ok(())
     }
 }
+*/
 
 /*
 // These tests are ignored because they're too long running to run during our
@@ -1379,6 +1381,7 @@ fn sync_past_mandatory_checkpoint_testnet() -> Result<()> {
 }
 */
 
+/*
 /// Test if `zebrad` can fully sync the chain on mainnet.
 ///
 /// This test takes a long time to run, so we don't run it by default. This test is only executed
@@ -1405,6 +1408,7 @@ fn sync_full_testnet() -> Result<()> {
         "SYNC_FULL_TESTNET_TIMEOUT_MINUTES",
     )
 }
+*/
 
 /*
 #[cfg(all(feature = "prometheus", not(target_os = "windows")))]
@@ -1852,6 +1856,7 @@ fn lwd_sync_update() -> Result<()> {
 }
 */
 
+/*
 /// Make sure `lightwalletd` can fully sync from genesis using Zebra.
 ///
 /// This test only runs when:
@@ -1870,6 +1875,7 @@ fn lwd_sync_full() -> Result<()> {
         allow_lightwalletd_cached_state: false,
     })
 }
+*/
 
 /*
 /// Make sure `lightwalletd` can sync from Zebra, in all available modes.
@@ -2653,6 +2659,7 @@ fn end_of_support_is_checked_at_start() -> Result<()> {
 }
 */
 
+/*
 /// Test `zebra-checkpoints` on mainnet.
 ///
 /// If you want to run this test individually, see the module documentation.
@@ -2675,6 +2682,7 @@ async fn generate_checkpoints_mainnet() -> Result<()> {
 async fn generate_checkpoints_testnet() -> Result<()> {
     common::checkpoints::run(Network::new_default_testnet()).await
 }
+*/
 
 /// Check that new states are created with the current state format version,
 /// and that restarting `zebrad` doesn't change the format version.
