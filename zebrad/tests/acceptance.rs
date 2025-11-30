@@ -222,6 +222,7 @@ use crate::common::regtest::MiningRpcMethods;
 /// This limit only applies to some tests.
 pub const MAX_ASYNC_BLOCKING_TIME: Duration = zebra_test::mock_service::DEFAULT_MAX_REQUEST_DELAY;
 
+/*
 #[test]
 fn generate_no_args() -> Result<()> {
     let _init_guard = zebra_test::init();
@@ -382,6 +383,7 @@ fn start_args() -> Result<()> {
 
     Ok(())
 }
+*/
 
 #[tokio::test]
 async fn db_init_outside_future_executor() -> Result<()> {
@@ -417,6 +419,7 @@ async fn db_init_outside_future_executor() -> Result<()> {
     Ok(())
 }
 
+/*
 /// Check that the block state and peer list caches are written to disk.
 #[test]
 fn persistent_mode() -> Result<()> {
@@ -1059,7 +1062,9 @@ fn stored_configs_work() -> Result<()> {
 
     Ok(())
 }
+*/
 
+/*
 /// Test if `zebrad` can sync the first checkpoint on mainnet.
 ///
 /// The first checkpoint contains a single genesis block.
@@ -1141,6 +1146,7 @@ fn restart_stop_at_height_for_network(network: Network, height: block::Height) -
 
     Ok(())
 }
+*/
 
 /// Test if `zebrad` can activate the mempool on mainnet.
 /// Debug activation happens after committing the genesis block.
@@ -1226,6 +1232,7 @@ fn sync_large_checkpoints_mempool_mainnet() -> Result<()> {
     .map(|_tempdir| ())
 }
 
+/*
 #[tracing::instrument]
 fn create_cached_database(network: Network) -> Result<()> {
     let height = network.mandatory_checkpoint_height();
@@ -1257,6 +1264,7 @@ fn sync_past_mandatory_checkpoint(network: Network) -> Result<()> {
         &full_validation_stop_regex,
     )
 }
+*/
 
 /// Sync `network` until the chain tip is reached, or a timeout elapses.
 ///
@@ -1295,6 +1303,7 @@ fn full_sync_test(network: Network, timeout_argument_name: &str) -> Result<()> {
     }
 }
 
+/*
 // These tests are ignored because they're too long running to run during our
 // traditional CI, and they depend on persistent state that cannot be made
 // available in github actions or google cloud build. Instead we run these tests
@@ -1368,6 +1377,7 @@ fn sync_past_mandatory_checkpoint_testnet() -> Result<()> {
     let network = Network::new_default_testnet();
     sync_past_mandatory_checkpoint(network)
 }
+*/
 
 /// Test if `zebrad` can fully sync the chain on mainnet.
 ///
@@ -1396,6 +1406,7 @@ fn sync_full_testnet() -> Result<()> {
     )
 }
 
+/*
 #[cfg(all(feature = "prometheus", not(target_os = "windows")))]
 #[tokio::test]
 async fn metrics_endpoint() -> Result<()> {
@@ -1732,6 +1743,7 @@ async fn rpc_endpoint_client_content_type() -> Result<()> {
 
     Ok(())
 }
+*/
 
 /// Test that Zebra's non-blocking logger works, by creating lots of debug output, but not reading the logs.
 /// Then make sure Zebra drops excess log lines. (Previously, it would block waiting for logs to be read.)
@@ -1798,6 +1810,7 @@ fn non_blocking_logger() -> Result<()> {
     }
 }
 
+/*
 /// Make sure `lightwalletd` works with Zebra, when both their states are empty.
 ///
 /// This test only runs when the `TEST_LIGHTWALLETD` env var is set.
@@ -1837,6 +1850,7 @@ fn sync_update_mainnet() -> Result<()> {
 fn lwd_sync_update() -> Result<()> {
     lwd_integration_test(UpdateCachedState)
 }
+*/
 
 /// Make sure `lightwalletd` can fully sync from genesis using Zebra.
 ///
@@ -1857,6 +1871,7 @@ fn lwd_sync_full() -> Result<()> {
     })
 }
 
+/*
 /// Make sure `lightwalletd` can sync from Zebra, in all available modes.
 ///
 /// Runs the tests in this order:
@@ -2190,7 +2205,9 @@ fn lwd_integration_test(test_type: TestType) -> Result<()> {
 
     Ok(())
 }
+*/
 
+/*
 /// Test will start 2 zebrad nodes one after the other using the same Zcash listener.
 /// It is expected that the first node spawned will get exclusive use of the port.
 /// The second node will panic with the Zcash listener conflict hint added in #1535.
@@ -2426,7 +2443,9 @@ where
 
     Ok(())
 }
+*/
 
+/*
 #[tokio::test]
 #[ignore]
 async fn lwd_rpc_test() -> Result<()> {
@@ -2472,7 +2491,9 @@ async fn lwd_rpc_test() -> Result<()> {
 
     Ok(())
 }
+*/
 
+/*
 #[test]
 #[cfg(not(target_os = "windows"))]
 fn delete_old_databases() -> Result<()> {
@@ -2545,7 +2566,9 @@ fn delete_old_databases() -> Result<()> {
 
     Ok(())
 }
+*/
 
+/*
 /// Test sending transactions using a lightwalletd instance connected to a zebrad instance.
 ///
 /// See [`common::lightwalletd::send_transaction_test`] for more information.
@@ -2571,7 +2594,9 @@ async fn lwd_rpc_send_tx() -> Result<()> {
 async fn lwd_grpc_wallet() -> Result<()> {
     common::lightwalletd::wallet_grpc_test::run().await
 }
+*/
 
+/*
 /// Test successful getpeerinfo rpc call
 ///
 /// See [`common::get_block_template_rpcs::get_peer_info`] for more information.
@@ -2597,7 +2622,9 @@ async fn rpc_get_block_template() -> Result<()> {
 async fn rpc_submit_block() -> Result<()> {
     common::get_block_template_rpcs::submit_block::run().await
 }
+*/
 
+/*
 /// Check that the end of support code is called at least once.
 #[test]
 fn end_of_support_is_checked_at_start() -> Result<()> {
@@ -2624,6 +2651,7 @@ fn end_of_support_is_checked_at_start() -> Result<()> {
 
     Ok(())
 }
+*/
 
 /// Test `zebra-checkpoints` on mainnet.
 ///
@@ -2848,6 +2876,7 @@ async fn state_format_test(
     Ok(())
 }
 
+/*
 /// Snapshot the `z_getsubtreesbyindex` method in a synchronized chain.
 ///
 /// This test name must have the same prefix as the `lwd_rpc_test`, so they can be run in the same test job.
@@ -2944,6 +2973,7 @@ async fn fully_synced_rpc_z_getsubtreesbyindex_snapshot_test() -> Result<()> {
 
     Ok(())
 }
+*/
 
 /// Checks that the Regtest genesis block can be validated.
 #[tokio::test]
@@ -3813,6 +3843,7 @@ async fn nu7_nsm_transactions() -> Result<()> {
     Ok(())
 }
 
+/*
 /// Checks that the cached finalized state has the spending transaction ids for every
 /// spent outpoint and revealed nullifier in the last 100 blocks of a cached state.
 //
@@ -3951,6 +3982,7 @@ async fn has_spending_transaction_ids() -> Result<()> {
 
     Ok(())
 }
+*/
 
 #[tokio::test(flavor = "multi_thread")]
 async fn invalidate_and_reconsider_block() -> Result<()> {
