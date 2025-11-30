@@ -133,6 +133,7 @@
 //! ```
 
 #![allow(clippy::unwrap_in_result)]
+#![allow(unused_imports)]
 
 mod common;
 

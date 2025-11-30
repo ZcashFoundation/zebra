@@ -1,11 +1,15 @@
 //! Mining RPC tests
 
+#![allow(clippy::unwrap_in_result)]
+#![allow(unused_imports)] // TODO: remove when tests are properly gated behind features/profiles
+
 use std::env;
 
-use color_eyre::eyre::WrapErr;
+use color_eyre::eyre::{eyre, WrapErr};
 use serde_json::Value;
+use tower::ServiceExt;
 
-use zebra_chain::parameters::Network;
+use zebra_chain::parameters::Network::{self, Mainnet};
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_state::state_database_format_version_in_code;
 use zebra_test::prelude::*;
@@ -17,6 +21,8 @@ use crate::common::{
     sync::SYNC_FINISHED_REGEX,
     test_type::TestType,
 };
+
+use crate::mining_rpcs::TestType::UpdateZebraCachedStateWithRpc;
 
 /// Test successful getpeerinfo rpc call
 ///
@@ -158,7 +164,7 @@ async fn has_spending_transaction_ids() -> Result<()> {
     use zebra_chain::{chain_tip::ChainTip, transparent::Input};
     use zebra_state::{ReadRequest, ReadResponse, SemanticallyVerifiedBlock, Spend};
 
-    use common::cached_state::future_blocks;
+    use crate::common::cached_state::future_blocks;
 
     let _init_guard = zebra_test::init();
     let test_type = UpdateZebraCachedStateWithRpc;
@@ -175,8 +181,11 @@ async fn has_spending_transaction_ids() -> Result<()> {
     let non_finalized_blocks = future_blocks(&network, test_type, test_name, 100).await?;
 
     let (mut state, mut read_state, latest_chain_tip, _chain_tip_change) =
-        common::cached_state::start_state_service_with_cache_dir(&Mainnet, zebrad_state_path)
-            .await?;
+        crate::common::cached_state::start_state_service_with_cache_dir(
+            &Mainnet,
+            zebrad_state_path,
+        )
+        .await?;
 
     tracing::info!("committing blocks to non-finalized state");
 

@@ -2,8 +2,6 @@
 
 #![cfg(all(feature = "lightwalletd-grpc-tests", not(target_os = "windows")))]
 
-use std::panic;
-
 use color_eyre::eyre::WrapErr;
 
 use zebra_chain::parameters::Network::Mainnet;
@@ -224,7 +222,7 @@ fn lwd_integration_test(test_type: TestType) -> Result<()> {
         if let Some((lightwalletd, lightwalletd_rpc_port)) = lightwalletd_and_port {
             #[cfg(feature = "lightwalletd-grpc-tests")]
             {
-                use common::lightwalletd::sync::wait_for_zebrad_and_lightwalletd_sync;
+                use crate::common::lightwalletd::sync::wait_for_zebrad_and_lightwalletd_sync;
 
                 tracing::info!(
                     ?lightwalletd_rpc_port,

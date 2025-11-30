@@ -1,5 +1,7 @@
 //! Full chain sync tests: verifies mainnet/testnet synchronization and optional checkpoint generation.
 
+#![allow(clippy::unwrap_in_result)]
+
 use std::env;
 
 use zebra_chain::{

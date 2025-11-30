@@ -1,6 +1,6 @@
 //! Lightwallet tests
 
-use std::panic;
+#![allow(clippy::unwrap_in_result)]
 
 use color_eyre::eyre::WrapErr;
 
@@ -117,7 +117,7 @@ fn lwd_sync_update() -> Result<()> {
 #[cfg(feature = "lightwalletd-grpc-tests")]
 #[cfg(not(target_os = "windows"))]
 async fn lwd_rpc_send_tx() -> Result<()> {
-    common::lightwalletd::send_transaction_test::run().await
+    crate::common::lightwalletd::send_transaction_test::run().await
 }
 
 /// Test all the rpc methods a wallet connected to lightwalletd can call.
@@ -130,7 +130,7 @@ async fn lwd_rpc_send_tx() -> Result<()> {
 #[cfg(feature = "lightwalletd-grpc-tests")]
 #[cfg(not(target_os = "windows"))]
 async fn lwd_grpc_wallet() -> Result<()> {
-    common::lightwalletd::wallet_grpc_test::run().await
+    crate::common::lightwalletd::wallet_grpc_test::run().await
 }
 
 /// Make sure `lightwalletd` can sync from Zebra, in all available modes.
@@ -167,7 +167,7 @@ async fn lightwalletd_test_suite() -> Result<()> {
         lwd_integration_test(UpdateCachedState)?;
 
         // Only runs when a cached Zebra state is configured
-        common::lightwalletd::wallet_grpc_test::run().await?;
+        crate::common::lightwalletd::wallet_grpc_test::run().await?;
 
         // Then do the slow tests
 
@@ -178,7 +178,7 @@ async fn lightwalletd_test_suite() -> Result<()> {
         })?;
 
         // Only runs when a cached Zebra state is configured
-        common::lightwalletd::send_transaction_test::run().await?;
+        crate::common::lightwalletd::send_transaction_test::run().await?;
     }
 
     Ok(())
@@ -370,7 +370,7 @@ fn lwd_integration_test(test_type: TestType) -> Result<()> {
         if let Some((lightwalletd, lightwalletd_rpc_port)) = lightwalletd_and_port {
             #[cfg(feature = "lightwalletd-grpc-tests")]
             {
-                use common::lightwalletd::sync::wait_for_zebrad_and_lightwalletd_sync;
+                use crate::common::lightwalletd::sync::wait_for_zebrad_and_lightwalletd_sync;
 
                 tracing::info!(
                     ?lightwalletd_rpc_port,

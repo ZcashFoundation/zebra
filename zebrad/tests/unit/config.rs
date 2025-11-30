@@ -1,5 +1,7 @@
 //! Ephemeral Tests: Verifies Zebra's ephemeral state behavior.
 
+#![allow(clippy::unwrap_in_result)]
+
 use crate::assert_with_context;
 
 use color_eyre::eyre::{eyre, WrapErr};

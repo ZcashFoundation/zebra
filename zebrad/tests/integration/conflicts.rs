@@ -1,5 +1,7 @@
 //! Conflict Tests: Verifies Zebra's behavior when conflicting resources are used.
 
+#![allow(clippy::unwrap_in_result)]
+
 use std::{path::PathBuf, time::Duration};
 
 use color_eyre::{

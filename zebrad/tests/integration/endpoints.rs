@@ -1,5 +1,7 @@
 //! Endpoint Tests: Verifies Zebra's RPC and HTTP endpoints behavior.
 
+#![allow(clippy::unwrap_in_result)]
+
 use color_eyre::eyre::WrapErr;
 use serde_json::Value;
 
