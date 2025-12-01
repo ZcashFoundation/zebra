@@ -902,7 +902,7 @@ impl MetaAddrChange {
     /// Returns the timestamp when a ping was last sent, if available.
     pub fn ping_sent_at(&self) -> Option<Instant> {
         match self {
-            UpdateResponded { ping_sent_at, .. } => *ping_sent_at,
+            UpdatePingSent { ping_sent_at, .. } => Some(*ping_sent_at),
             _ => None,
         }
     }
