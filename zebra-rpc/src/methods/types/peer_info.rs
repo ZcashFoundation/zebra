@@ -5,7 +5,7 @@ use derive_new::new;
 use zebra_network::{types::MetaAddr, PeerSocketAddr};
 
 /// Item of the `getpeerinfo` response
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, Getters, new)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
 pub struct PeerInfo {
     /// The IP address and port of the peer
     #[getter(copy)]
@@ -13,6 +13,14 @@ pub struct PeerInfo {
 
     /// Inbound (true) or Outbound (false)
     pub(crate) inbound: bool,
+
+    /// The round-trip ping time in seconds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) pingtime: Option<f64>,
+
+    /// The wait time on a ping response in seconds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) pingwait: Option<f64>,
 }
 
 /// Response type for the `getpeerinfo` RPC method.
@@ -23,6 +31,8 @@ impl From<MetaAddr> for PeerInfo {
         Self {
             addr: meta_addr.addr(),
             inbound: meta_addr.is_inbound(),
+            pingtime: meta_addr.rtt().map(|d| d.as_secs_f64()),
+            pingwait: meta_addr.ping_sent_at().map(|t| t.elapsed().as_secs_f64()),
         }
     }
 }
@@ -32,6 +42,8 @@ impl Default for PeerInfo {
         Self {
             addr: PeerSocketAddr::unspecified(),
             inbound: false,
+            pingtime: None,
+            pingwait: None,
         }
     }
 }
