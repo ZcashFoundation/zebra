@@ -4,7 +4,7 @@
 //! after the RPC request is parsed and split into calls.
 
 use jsonrpsee::{
-    server::middleware::rpc::{layer::ResponseFuture, RpcService, RpcServiceT},
+    server::middleware::rpc::{layer::ResponseFuture, RpcServiceT},
     MethodResponse,
 };
 use jsonrpsee_types::ErrorObject;
@@ -21,18 +21,22 @@ use jsonrpsee_types::ErrorObject;
 /// But these codes are different from `zcashd`, and some RPC clients rely on the exact code.
 /// Specifically, the [`jsonrpsee_types::error::INVALID_PARAMS_CODE`] is different:
 /// <https://docs.rs/jsonrpsee-types/latest/jsonrpsee_types/error/constant.INVALID_PARAMS_CODE.html>
-pub struct FixRpcResponseMiddleware {
-    service: RpcService,
+#[derive(Clone)]
+pub struct FixRpcResponseMiddleware<S> {
+    service: S,
 }
 
-impl FixRpcResponseMiddleware {
+impl<S> FixRpcResponseMiddleware<S> {
     /// Create a new `FixRpcResponseMiddleware` with the given `service`.
-    pub fn new(service: RpcService) -> Self {
+    pub fn new(service: S) -> Self {
         Self { service }
     }
 }
 
-impl<'a> RpcServiceT<'a> for FixRpcResponseMiddleware {
+impl<'a, S> RpcServiceT<'a> for FixRpcResponseMiddleware<S>
+where
+    S: RpcServiceT<'a> + Send + Sync + Clone + 'static,
+{
     type Future = ResponseFuture<futures::future::BoxFuture<'a, jsonrpsee::MethodResponse>>;
 
     fn call(&self, request: jsonrpsee::types::Request<'a>) -> Self::Future {
