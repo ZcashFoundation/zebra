@@ -1,4 +1,4 @@
-//! Ephemeral Tests: Verifies Zebra's ephemeral state behavior.
+//! Config Tests: Verify that zebrad's configuration system works correctly.
 
 #![allow(clippy::unwrap_in_result)]
 

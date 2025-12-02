@@ -12,3 +12,6 @@ mod lightwalletd;
 
 #[path = "stateful/mining_rpcs.rs"]
 mod mining_rpcs;
+
+#[path = "stateful/state_format.rs"]
+mod state_format;

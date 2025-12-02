@@ -8,7 +8,8 @@ use zebra_chain::{
 use zebra_test::prelude::*;
 
 use crate::common::sync::{
-    sync_until, MempoolBehavior, STOP_AT_HEIGHT_REGEX, STOP_ON_LOAD_TIMEOUT,
+    sync_until, MempoolBehavior, LARGE_CHECKPOINT_TEST_HEIGHT, LARGE_CHECKPOINT_TIMEOUT,
+    MEDIUM_CHECKPOINT_TEST_HEIGHT, STOP_AT_HEIGHT_REGEX, STOP_ON_LOAD_TIMEOUT,
     TINY_CHECKPOINT_TEST_HEIGHT, TINY_CHECKPOINT_TIMEOUT,
 };
 
@@ -92,4 +93,88 @@ fn restart_stop_at_height_for_network(network: Network, height: block::Height) -
     )?;
 
     Ok(())
+}
+
+/// Test if `zebrad` can activate the mempool on mainnet.
+/// Debug activation happens after committing the genesis block.
+#[test]
+fn activate_mempool_mainnet() -> Result<()> {
+    sync_until(
+        block::Height(TINY_CHECKPOINT_TEST_HEIGHT.0 + 1),
+        &Mainnet,
+        STOP_AT_HEIGHT_REGEX,
+        TINY_CHECKPOINT_TIMEOUT,
+        None,
+        MempoolBehavior::ForceActivationAt(TINY_CHECKPOINT_TEST_HEIGHT),
+        // checkpoint sync is irrelevant here - all tested checkpoints are mandatory
+        true,
+        true,
+    )
+    .map(|_tempdir| ())
+}
+
+/// Test if `zebrad` can sync some larger checkpoints on mainnet.
+///
+/// This test might fail or timeout on slow or unreliable networks,
+/// so we don't run it by default. It also takes a lot longer than
+/// our 10 second target time for default tests.
+#[test]
+#[ignore]
+fn sync_large_checkpoints_empty() -> Result<()> {
+    // Skip unless explicitly enabled
+    if std::env::var("TEST_LARGE_CHECKPOINTS").is_err() {
+        tracing::warn!(
+            "Skipped sync_large_checkpoints_empty, set the TEST_LARGE_CHECKPOINTS environmental variable to run the test"
+        );
+        return Ok(());
+    }
+
+    let reuse_tempdir = sync_until(
+        LARGE_CHECKPOINT_TEST_HEIGHT,
+        &Mainnet,
+        STOP_AT_HEIGHT_REGEX,
+        LARGE_CHECKPOINT_TIMEOUT,
+        None,
+        MempoolBehavior::ShouldNotActivate,
+        // checkpoint sync is irrelevant here - all tested checkpoints are mandatory
+        true,
+        true,
+    )?;
+    // if this sync fails, see the failure notes in `restart_stop_at_height`
+    sync_until(
+        (LARGE_CHECKPOINT_TEST_HEIGHT - 1).unwrap(),
+        &Mainnet,
+        "previous state height is greater than the stop height",
+        STOP_ON_LOAD_TIMEOUT,
+        reuse_tempdir,
+        MempoolBehavior::ShouldNotActivate,
+        // checkpoint sync is irrelevant here - all tested checkpoints are mandatory
+        true,
+        false,
+    )?;
+
+    Ok(())
+}
+
+// TODO: We had `sync_large_checkpoints_empty` and `sync_large_checkpoints_mempool_testnet`,
+// but they were removed because the testnet is unreliable (#1222).
+// We should re-add them after we have more testnet instances (#1791).
+
+/// Test if `zebrad` can run side by side with the mempool.
+/// This is done by running the mempool and syncing some checkpoints.
+#[test]
+#[ignore]
+fn sync_large_checkpoints_mempool_mainnet() -> Result<()> {
+    sync_until(
+        MEDIUM_CHECKPOINT_TEST_HEIGHT,
+        &Mainnet,
+        STOP_AT_HEIGHT_REGEX,
+        LARGE_CHECKPOINT_TIMEOUT,
+        None,
+        MempoolBehavior::ForceActivationAt(TINY_CHECKPOINT_TEST_HEIGHT),
+        // checkpoint sync is irrelevant here - all tested checkpoints are mandatory
+        true,
+        true,
+    )
+    .map(|_tempdir| ())
 }

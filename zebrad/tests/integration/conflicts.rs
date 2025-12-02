@@ -2,14 +2,19 @@
 
 #![allow(clippy::unwrap_in_result)]
 
-use std::{path::PathBuf, time::Duration};
+use std::{
+    path::PathBuf,
+    time::{Duration, Instant},
+};
 
 use color_eyre::{
     eyre::{eyre, WrapErr},
     Help,
 };
 
-use zebra_chain::parameters::Network::Mainnet;
+use zebra_chain::{block::Height, parameters::Network::Mainnet};
+use zebra_node_services::rpc_client::RpcRequestClient;
+use zebra_rpc::server::OPENED_RPC_ENDPOINT_MSG;
 use zebra_state::constants::LOCK_FILE_ERROR;
 use zebra_test::{args, command::ContextFrom, net::random_known_port, prelude::*};
 
@@ -17,8 +22,12 @@ use zebra_test::{args, command::ContextFrom, net::random_known_port, prelude::*}
 use zebra_network::constants::PORT_IN_USE_ERROR;
 
 use crate::common::{
-    config::{default_test_config, persistent_test_config, random_known_rpc_port_config, testdir},
+    config::{
+        default_test_config, os_assigned_rpc_port_config, persistent_test_config,
+        random_known_rpc_port_config, read_listen_addr_from_logs, testdir,
+    },
     launch::{ZebradTestDirExt, BETWEEN_NODES_DELAY, LAUNCH_DELAY},
+    sync::TINY_CHECKPOINT_TIMEOUT,
 };
 
 /// Test will start 2 zebrad nodes one after the other using the same Zcash listener.
@@ -355,4 +364,110 @@ fn end_of_support_is_checked_at_start() -> Result<()> {
     output.assert_was_killed()?;
 
     Ok(())
+}
+
+/// The maximum amount of time that we allow the creation of a future to block the `tokio` executor.
+///
+/// This should be larger than the amount of time between thread time slices on a busy test VM.
+///
+/// This limit only applies to some tests.
+pub const MAX_ASYNC_BLOCKING_TIME: Duration = zebra_test::mock_service::DEFAULT_MAX_REQUEST_DELAY;
+
+#[tokio::test]
+async fn db_init_outside_future_executor() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let config = default_test_config(&Mainnet)?;
+
+    let start = Instant::now();
+
+    // This test doesn't need UTXOs to be verified efficiently, because it uses an empty state.
+    let db_init_handle = {
+        let config = config.clone();
+        tokio::spawn(async move {
+            zebra_state::init(
+                config.state.clone(),
+                &config.network.network,
+                Height::MAX,
+                0,
+            )
+            .await
+        })
+    };
+
+    // it's faster to panic if it takes longer than expected, since the executor
+    // will wait indefinitely for blocking operation to finish once started
+    let block_duration = start.elapsed();
+    assert!(
+        block_duration <= MAX_ASYNC_BLOCKING_TIME,
+        "futures executor was blocked longer than expected ({block_duration:?})",
+    );
+
+    db_init_handle.await.map_err(|e| eyre!(e))?;
+
+    Ok(())
+}
+
+/// Test that Zebra's non-blocking logger works, by creating lots of debug output, but not reading the logs.
+/// Then make sure Zebra drops excess log lines. (Previously, it would block waiting for logs to be read.)
+///
+/// This test is unreliable and sometimes hangs on macOS.
+#[test]
+#[cfg(not(target_os = "macos"))]
+fn non_blocking_logger() -> Result<()> {
+    use futures::FutureExt;
+    use std::{sync::mpsc, time::Duration};
+
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let (done_tx, done_rx) = mpsc::channel();
+
+    let test_task_handle: tokio::task::JoinHandle<Result<()>> = rt.spawn(async move {
+        let mut config = os_assigned_rpc_port_config(false, &Mainnet)?;
+        config.tracing.filter = Some("trace".to_string());
+        config.tracing.buffer_limit = 100;
+
+        let dir = testdir()?.with_config(&mut config)?;
+        let mut child = dir
+            .spawn_child(args!["start"])?
+            .with_timeout(TINY_CHECKPOINT_TIMEOUT);
+
+        // Wait until port is open.
+        let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
+
+        // Create an http client
+        let client = RpcRequestClient::new(rpc_address);
+
+        // Most of Zebra's lines are 100-200 characters long, so 500 requests should print enough to fill the unix pipe,
+        // fill the channel that tracing logs are queued onto, and drop logs rather than block execution.
+        for _ in 0..500 {
+            let res = client.call("getinfo", "[]".to_string()).await?;
+
+            // Test that zebrad rpc endpoint is still responding to requests
+            assert!(res.status().is_success());
+        }
+
+        child.kill(false)?;
+
+        let output = child.wait_with_output()?;
+        let output = output.assert_failure()?;
+
+        // [Note on port conflict](#Note on port conflict)
+        output
+            .assert_was_killed()
+            .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
+
+        done_tx.send(())?;
+
+        Ok(())
+    });
+
+    // Wait until the spawned task finishes up to 45 seconds before shutting down tokio runtime
+    if done_rx.recv_timeout(Duration::from_secs(90)).is_ok() {
+        rt.shutdown_timeout(Duration::from_secs(3));
+    }
+
+    match test_task_handle.now_or_never() {
+        Some(Ok(result)) => result,
+        Some(Err(error)) => Err(eyre!("join error: {:?}", error)),
+        None => Err(eyre!("unexpected test task hang")),
+    }
 }
