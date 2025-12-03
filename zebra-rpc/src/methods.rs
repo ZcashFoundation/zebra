@@ -35,6 +35,7 @@ use std::{
     cmp,
     collections::{HashMap, HashSet},
     fmt,
+    io::Cursor,
     ops::RangeInclusive,
     sync::Arc,
     time::Duration,
@@ -91,6 +92,8 @@ use zebra_state::{
     AnyTx, HashOrHeight, OutputLocation, ReadRequest, ReadResponse, ReadState as ReadStateService,
     State as StateService, TransactionLocation,
 };
+
+use zcash_history::{Version, V1, V2};
 
 use crate::{
     client::Treestate,
@@ -424,6 +427,61 @@ pub trait Rpc {
         &self,
         request: GetAddressUtxosRequest,
     ) -> Result<GetAddressUtxosResponse>;
+
+    /// Returns the node of the history tree for the given network upgrade at the specified index.
+    ///
+    /// method: post
+    /// tags: blockchain
+    ///
+    /// # Parameters
+    ///
+    /// - `upgrade`: (string, required, default="nu6") The network upgrade of the node. Must be one of "heartwood", "canopy", "nu5" or "nu6".
+    /// - `index`: (numeric, required) The index of the node in the array representation of the MMR tree.
+    /// - `verbose`: (number, optional, default=1, example=1) If 0, return a string of hex-encoded data, otherwise return a JSON object.
+    ///
+    #[method(name = "gethistorynode")]
+    async fn get_history_node(
+        &self,
+        upgrade: String,
+        index: u32,
+        verbose: Option<u8>,
+    ) -> Result<GetHistoryNode>;
+
+    /// Returns the auth data root field of the block with the provided hash or height.
+    ///
+    /// method: post
+    /// tags: blockchain
+    ///
+    ///  # Parameters
+    ///
+    /// - `hash_or_height`: (string, required, example="1") The hash or height for the block to be returned.
+    #[method(name = "getauthdataroot")]
+    async fn get_auth_data_root(&self, hash_or_height: String) -> Result<GetAuthDataRoot>;
+
+    /// Returns the cumulative total work from Heartwood activation up to the provided hash or height.
+    ///
+    /// method: post
+    /// tags: blockchain
+    ///
+    ///  # Parameters
+    ///
+    /// - `hash_or_height`: (string, required, example="1") The hash or height for the block to be returned.
+    #[method(name = "gettotalwork")]
+    async fn get_total_work(&self, hash_or_height: String) -> Result<GetTotalWork>;
+
+    /// Returns the hash and height of the first finalized block with cumulative work at least equal to the provided threshold.
+    ///
+    /// method: post
+    /// tags: blockchain
+    ///
+    ///  # Parameters
+    ///
+    /// - `threshold`: (string, required, example="1") The minimum total work the block should have, as a 32-byte hex string in presentation order.
+    #[method(name = "getfirstblockwithtotalwork")]
+    async fn get_first_block_with_total_work(
+        &self,
+        threshold: String,
+    ) -> Result<GetFirstBlockWithTotalWork>;
 
     /// Stop the running zebrad process.
     ///
@@ -1214,6 +1272,7 @@ where
                 merkle_root,
                 block_commitments,
                 final_sapling_root,
+                chain_history_root,
                 sapling_tree_size,
                 time,
                 nonce,
@@ -1371,6 +1430,7 @@ where
                 block_commitments: Some(block_commitments),
                 final_sapling_root: Some(final_sapling_root),
                 final_orchard_root,
+                chain_history_root: Some(chain_history_root),
                 previous_block_hash: Some(previous_block_hash),
                 next_block_hash,
             })))
@@ -1470,13 +1530,37 @@ where
 
             let difficulty = header.difficulty_threshold.relative_to_network(&network);
 
-            let block_commitments = match header.commitment(&network, height).expect(
+            let commitment = header.commitment(&network, height).expect(
                 "Unexpected failure while parsing the blockcommitments field in get_block_header",
-            ) {
+            );
+
+            let chain_history_root = match commitment {
+                Commitment::ChainHistoryRoot(root) => root.bytes_in_display_order(),
+                Commitment::ChainHistoryBlockTxAuthCommitment(_) => {
+                    let zebra_state::ReadResponse::HistoryTree(history_tree) = self
+                        .read_state
+                        .clone()
+                        .oneshot(zebra_state::ReadRequest::HistoryTree(height))
+                        .await
+                        .map_misc_error()?
+                    else {
+                        panic!("unexpected response to HistoryTree request")
+                    };
+
+                    history_tree
+                        .ok_or_misc_error("missing history tree")?
+                        .hash()
+                        .ok_or_misc_error("history tree was empty")?
+                        .bytes_in_display_order()
+                }
+                _ => [0; 32],
+            };
+
+            let block_commitments = match commitment {
                 Commitment::PreSaplingReserved(bytes) => bytes,
                 Commitment::FinalSaplingRoot(_) => final_sapling_root,
-                Commitment::ChainHistoryActivationReserved => [0; 32],
-                Commitment::ChainHistoryRoot(root) => root.bytes_in_display_order(),
+                Commitment::ChainHistoryActivationReserved => chain_history_root,
+                Commitment::ChainHistoryRoot(_) => chain_history_root,
                 Commitment::ChainHistoryBlockTxAuthCommitment(hash) => {
                     hash.bytes_in_display_order()
                 }
@@ -1490,6 +1574,7 @@ where
                 merkle_root: header.merkle_root,
                 block_commitments,
                 final_sapling_root,
+                chain_history_root,
                 sapling_tree_size,
                 time: header.time.timestamp(),
                 nonce,
@@ -2063,6 +2148,257 @@ where
                     hash,
                     height,
                 },
+            ))
+        }
+    }
+
+    async fn get_history_node(
+        &self,
+        upgrade: String,
+        index: u32,
+        verbose: Option<u8>,
+    ) -> Result<GetHistoryNode> {
+        const UPGRADE_LIST: &[(&str, NetworkUpgrade)] = &[
+            ("heartwood", NetworkUpgrade::Heartwood),
+            ("canopy", NetworkUpgrade::Canopy),
+            ("nu5", NetworkUpgrade::Nu5),
+            ("nu6", NetworkUpgrade::Nu6),
+            ("nu6.1", NetworkUpgrade::Nu6_1),
+        ];
+
+        let network = self.network.clone();
+        let verbose = verbose.unwrap_or(1);
+
+        // Fail if history trees are not active yet.
+        let Some(_) = NetworkUpgrade::Heartwood.activation_height(&network) else {
+            return Err(ErrorObject::owned(
+                server::error::LegacyCode::Misc.into(),
+                "Heartwood activation height was not reached yet.",
+                None::<()>,
+            ));
+        };
+
+        let network_upgrade = UPGRADE_LIST
+            .iter()
+            .find(|&&(name, _)| name == upgrade.as_str())
+            .map(|&(_, upgrade)| upgrade)
+            .ok_or_else(|| {
+                ErrorObject::owned(
+                    server::error::LegacyCode::Misc.into(),
+                    format!(
+                        "invalid network upgrade, must be one of: {:?}",
+                        UPGRADE_LIST.iter().map(|(s, _)| *s).collect::<Vec<_>>()
+                    )
+                    .as_str(),
+                    None::<()>,
+                )
+            })?;
+
+        let branch_id = network_upgrade.branch_id().unwrap();
+
+        let zebra_state::ReadResponse::HistoryNode(entry) = self
+            .read_state
+            .clone()
+            .oneshot(zebra_state::ReadRequest::HistoryNode(
+                network_upgrade,
+                index,
+            ))
+            .await
+            .map_misc_error()?
+        else {
+            panic!("unexpected response to HistoryNode request")
+        };
+
+        if let Some(entry) = entry {
+            let response = if verbose == 0 {
+                GetHistoryNode::Raw(HexData(entry.inner().to_vec()))
+            } else {
+                let response_object = match network_upgrade {
+                    NetworkUpgrade::Heartwood | NetworkUpgrade::Canopy => {
+                        let entry_object =
+                            zcash_history::Entry::<V1>::from_bytes(branch_id.into(), entry.inner())
+                                .expect("entry object should be valid");
+                        let node_bytes = match entry_object.leaf() {
+                            true => entry.inner().split_at(1).1,
+                            false => entry.inner().split_at(9).1,
+                        };
+                        let mut cursor = Cursor::new(&node_bytes);
+                        let node = V1::read(branch_id.into(), &mut cursor)
+                            .expect("node data should be valid");
+                        let mut total_work: [u8; 32] = bytemuck::cast(node.subtree_total_work.0);
+                        total_work.reverse();
+                        GetHistoryNodeObject {
+                            subtree_commitment: node.subtree_commitment,
+                            consensus_branch_id: ConsensusBranchIdHex(
+                                node.consensus_branch_id.into(),
+                            ),
+                            start_time: node.start_time,
+                            end_time: node.end_time,
+                            start_target: node.start_target,
+                            end_target: node.end_target,
+                            start_sapling_root: node.start_sapling_root,
+                            end_sapling_root: node.end_sapling_root,
+                            subtree_total_work: total_work,
+                            start_height: node.start_height,
+                            end_height: node.end_height,
+                            sapling_tx: node.sapling_tx,
+                            start_orchard_root: [0; 32],
+                            end_orchard_root: [0; 32],
+                            orchard_tx: 0,
+                        }
+                    }
+                    _ => {
+                        let entry_object =
+                            zcash_history::Entry::<V2>::from_bytes(branch_id.into(), entry.inner())
+                                .expect("entry object should be valid");
+                        let node_bytes = match entry_object.leaf() {
+                            true => entry.inner().split_at(1).1,
+                            false => entry.inner().split_at(9).1,
+                        };
+                        let mut cursor = Cursor::new(&node_bytes);
+                        let node = V2::read(branch_id.into(), &mut cursor)
+                            .expect("node data should be valid");
+                        let mut total_work: [u8; 32] = bytemuck::cast(node.v1.subtree_total_work.0);
+                        total_work.reverse();
+                        GetHistoryNodeObject {
+                            consensus_branch_id: ConsensusBranchIdHex(
+                                node.v1.consensus_branch_id.into(),
+                            ),
+                            subtree_commitment: node.v1.subtree_commitment,
+                            start_time: node.v1.start_time,
+                            end_time: node.v1.end_time,
+                            start_target: node.v1.start_target,
+                            end_target: node.v1.end_target,
+                            start_sapling_root: node.v1.start_sapling_root,
+                            end_sapling_root: node.v1.end_sapling_root,
+                            subtree_total_work: total_work,
+                            start_height: node.v1.start_height,
+                            end_height: node.v1.end_height,
+                            sapling_tx: node.v1.sapling_tx,
+                            start_orchard_root: node.start_orchard_root,
+                            end_orchard_root: node.end_orchard_root,
+                            orchard_tx: node.orchard_tx,
+                        }
+                    }
+                };
+                GetHistoryNode::Object(Box::new(response_object))
+            };
+
+            Ok(response)
+        } else {
+            Err(ErrorObject::owned(
+                server::error::LegacyCode::Misc.into(),
+                "The requested history node was not found.",
+                None::<()>,
+            ))
+        }
+    }
+
+    async fn get_auth_data_root(&self, hash_or_height: String) -> Result<GetAuthDataRoot> {
+        let hash_or_height =
+            HashOrHeight::new(&hash_or_height, self.latest_chain_tip.best_tip_height())
+                .map_error(server::error::LegacyCode::InvalidParameter)?;
+
+        let zebra_state::ReadResponse::AuthDataRoot(auth_data_root) = self
+            .read_state
+            .clone()
+            .oneshot(zebra_state::ReadRequest::AuthDataRoot(hash_or_height))
+            .await
+            .map_misc_error()?
+        else {
+            panic!("unexpected response to HistoryNode request")
+        };
+
+        if let Some(auth_data_root) = auth_data_root {
+            Ok(GetAuthDataRoot {
+                auth_data_root: auth_data_root.bytes_in_display_order(),
+            })
+        } else {
+            Err(ErrorObject::owned(
+                server::error::LegacyCode::Misc.into(),
+                "The requested hash or height does not exist.",
+                None::<()>,
+            ))
+        }
+    }
+
+    async fn get_total_work(&self, hash_or_height: String) -> Result<GetTotalWork> {
+        let hash_or_height =
+            HashOrHeight::new(&hash_or_height, self.latest_chain_tip.best_tip_height())
+                .map_error(server::error::LegacyCode::InvalidParameter)?;
+
+        if let Some(height) = hash_or_height.height() {
+            if let Some(heartwood_activation) =
+                NetworkUpgrade::Heartwood.activation_height(&self.network)
+            {
+                if height <= heartwood_activation {
+                    return Err(ErrorObject::owned(
+                        server::error::LegacyCode::Misc.into(),
+                        "Total work is not defined until after Heartwood activation.",
+                        None::<()>,
+                    ));
+                }
+            } else {
+                return Err(ErrorObject::owned(
+                    server::error::LegacyCode::Misc.into(),
+                    "History trees are not available.",
+                    None::<()>,
+                ));
+            }
+        }
+
+        let zebra_state::ReadResponse::TotalWork(total_work) = self
+            .read_state
+            .clone()
+            .oneshot(zebra_state::ReadRequest::TotalWork(hash_or_height))
+            .await
+            .map_misc_error()?
+        else {
+            panic!("unexpected response to TotalWork request")
+        };
+
+        if let Some(value) = total_work {
+            Ok(GetTotalWork {
+                total_work: value.to_big_endian(),
+            })
+        } else {
+            Err(ErrorObject::owned(
+                server::error::LegacyCode::Misc.into(),
+                "The requested hash or height does not exist.",
+                None::<()>,
+            ))
+        }
+    }
+
+    async fn get_first_block_with_total_work(
+        &self,
+        threshold: String,
+    ) -> Result<GetFirstBlockWithTotalWork> {
+        let total_work = U256::from_str_radix(&threshold, 16)
+            .map_error(server::error::LegacyCode::InvalidParameter)?;
+
+        let zebra_state::ReadResponse::FirstBlockWithTotalWork(block_index) = self
+            .read_state
+            .clone()
+            .oneshot(zebra_state::ReadRequest::FirstBlockWithTotalWork(
+                total_work,
+            ))
+            .await
+            .map_misc_error()?
+        else {
+            panic!("unexpected response to HistoryNode request")
+        };
+
+        if let Some(block_index) = block_index {
+            Ok(GetFirstBlockWithTotalWork {
+                height: block_index.0.as_usize() as u64,
+                hash: block_index.1.bytes_in_display_order(),
+            })
+        } else {
+            Err(ErrorObject::owned(
+                server::error::LegacyCode::Misc.into(),
+                "A block with the requested total work was not found.",
+                None::<()>,
             ))
         }
     }
@@ -3602,6 +3938,7 @@ impl Default for GetBlockResponse {
             size: None,
             version: None,
             merkle_root: None,
+            chain_history_root: None,
             block_commitments: None,
             final_sapling_root: None,
             final_orchard_root: None,
@@ -3672,8 +4009,11 @@ pub struct BlockObject {
     #[getter(copy)]
     final_orchard_root: Option<[u8; 32]>,
 
-    // `chainhistoryroot` would be here. Undocumented. TODO: decide if we want to support it
-    //
+    /// The root of the Merkle mountain range history tree of the requested block.
+    #[serde(with = "opthex", rename = "chainhistoryroot")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    chain_history_root: Option<[u8; 32]>,
+
     /// List of transactions in block order, hex-encoded if verbosity=1 or
     /// as objects if verbosity=2.
     tx: Vec<GetBlockTransaction>,
@@ -3803,6 +4143,11 @@ pub struct BlockHeaderObject {
     #[getter(copy)]
     final_sapling_root: [u8; 32],
 
+    /// The Merkle mountain range history tree of the requested block.
+    #[serde(with = "hex", rename = "chainhistoryroot")]
+    #[getter(copy)]
+    pub chain_history_root: [u8; 32],
+
     /// The number of Sapling notes in the Sapling note commitment tree
     /// after applying this block. Used by the `getblock` RPC method.
     #[serde(skip)]
@@ -3865,6 +4210,7 @@ impl Default for BlockHeaderObject {
             block_commitments: Default::default(),
             final_sapling_root: Default::default(),
             sapling_tree_size: Default::default(),
+            chain_history_root: Default::default(),
             time: 0,
             nonce: [0; 32],
             solution: Solution::for_proposal(),
@@ -4208,6 +4554,122 @@ impl OrchardTrees {
     fn is_empty(&self) -> bool {
         self.size == 0
     }
+}
+
+/// Response to a `gethistorynode` RPC request.
+///
+/// See the notes for the [`RpcServer::get_history_node`] method.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[serde(untagged)]
+pub enum GetHistoryNode {
+    /// The requested history node, as hex-encoded data.
+    Raw(hex_data::HexData),
+
+    /// The history node object.
+    Object(Box<GetHistoryNodeObject>),
+}
+
+/// Verbose response to a `gethistorynode` RPC request.
+///
+/// See the notes for the [`RpcServer::get_history_node`] method.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct GetHistoryNodeObject {
+    /// Consensus branch id, should be provided by deserializing node.
+    pub consensus_branch_id: ConsensusBranchIdHex,
+    /// Subtree commitment - either block hash for leaves or hashsum of children for nodes.
+    #[serde(with = "hex")]
+    pub subtree_commitment: [u8; 32],
+    /// Start time.
+    pub start_time: u32,
+    /// End time.
+    pub end_time: u32,
+    /// Start target.
+    pub start_target: u32,
+    /// End target.
+    pub end_target: u32,
+    /// Start sapling tree root.
+    #[serde(with = "hex")]
+    pub start_sapling_root: [u8; 32],
+    /// End sapling tree root.
+    #[serde(with = "hex")]
+    pub end_sapling_root: [u8; 32],
+    /// Part of tree total work.
+    #[serde(with = "hex")]
+    pub subtree_total_work: [u8; 32],
+    /// Start height.
+    pub start_height: u64,
+    /// End height
+    pub end_height: u64,
+    /// Number of Sapling transactions.
+    pub sapling_tx: u64,
+    /// Start Orchard tree root.
+    #[serde(with = "hex")]
+    pub start_orchard_root: [u8; 32],
+    /// End Orchard tree root.
+    #[serde(with = "hex")]
+    pub end_orchard_root: [u8; 32],
+    /// Number of Orchard transactions.
+    pub orchard_tx: u64,
+}
+
+impl Default for GetHistoryNode {
+    fn default() -> Self {
+        GetHistoryNode::Object(Box::default())
+    }
+}
+
+impl Default for GetHistoryNodeObject {
+    fn default() -> Self {
+        GetHistoryNodeObject {
+            subtree_commitment: [0; 32],
+            consensus_branch_id: ConsensusBranchIdHex(ConsensusBranchId::default()),
+            start_time: 0,
+            end_time: 0,
+            start_target: 0,
+            end_target: 0,
+            start_sapling_root: [0; 32],
+            end_sapling_root: [0; 32],
+            subtree_total_work: [0; 32],
+            start_height: 0,
+            end_height: 0,
+            sapling_tx: 0,
+            start_orchard_root: [0; 32],
+            end_orchard_root: [0; 32],
+            orchard_tx: 0,
+        }
+    }
+}
+
+/// Response to a `getauthdataroot` RPC request.
+///
+/// See the notes for the [`RpcServer::get_auth_data_root`] method.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct GetAuthDataRoot {
+    /// Auth data root of the block.
+    #[serde(with = "hex")]
+    pub auth_data_root: [u8; 32],
+}
+
+/// Response to a `getfirstblockwithtotalwork` RPC request.
+///
+/// See the notes for the [`RpcServer::get_first_block_with_total_work`] method.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct GetFirstBlockWithTotalWork {
+    /// Height of the block.
+    pub height: u64,
+    /// Hash of the block.
+    #[serde(with = "hex")]
+    pub hash: [u8; 32],
+}
+
+/// Response to a `gettotalwork` RPC request.
+///
+/// See the notes for the [`RpcServer::get_total_work`] method.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct GetTotalWork {
+    /// Total work at this block.
+    #[serde(with = "hex")]
+    pub total_work: [u8; 32],
 }
 
 /// Build a valid height range from the given optional start and end numbers.

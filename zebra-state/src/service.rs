@@ -1828,6 +1828,116 @@ impl Service<ReadRequest> for ReadStateService {
                 .wait_for_panics()
             }
 
+            ReadRequest::HistoryTree(height) => {
+                let state = self.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let history_tree = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::history_tree_by_height(
+                                    non_finalized_state.best_chain(),
+                                    &state.db,
+                                    height,
+                                )
+                            },
+                        );
+
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::HistoryTree");
+
+                        Ok(ReadResponse::HistoryTree(history_tree))
+                    })
+                })
+                .wait_for_panics()
+            }
+
+            ReadRequest::HistoryNode(upgrade, index) => {
+                let state = self.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let history_node = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::history_node(
+                                    non_finalized_state.best_chain(),
+                                    &state.db,
+                                    upgrade,
+                                    index,
+                                )
+                            },
+                        );
+
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::HistoryNode");
+
+                        Ok(ReadResponse::HistoryNode(history_node))
+                    })
+                })
+                .wait_for_panics()
+            }
+
+            ReadRequest::AuthDataRoot(hash_or_height) => {
+                let state = self.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let auth_data_root = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::auth_data_root(
+                                    non_finalized_state.best_chain(),
+                                    &state.db,
+                                    hash_or_height,
+                                )
+                            },
+                        );
+
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::HistoryNode");
+
+                        Ok(ReadResponse::AuthDataRoot(auth_data_root))
+                    })
+                })
+                .wait_for_panics()
+            }
+
+            ReadRequest::FirstBlockWithTotalWork(threshold) => {
+                let state = self.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let block_index =
+                            state.non_finalized_state_receiver.with_watch_data(|_| {
+                                read::first_block_with_total_work(&state.db, threshold)
+                            });
+
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::HistoryNode");
+
+                        Ok(ReadResponse::FirstBlockWithTotalWork(block_index))
+                    })
+                })
+                .wait_for_panics()
+            }
+
+            ReadRequest::TotalWork(hash_or_height) => {
+                let state = self.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let total_work = state
+                            .non_finalized_state_receiver
+                            .with_watch_data(|_| read::total_work(&state.db, hash_or_height));
+
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::HistoryNode");
+
+                        Ok(ReadResponse::TotalWork(total_work))
+                    })
+                })
+                .wait_for_panics()
+            }
+
             ReadRequest::SaplingSubtrees { start_index, limit } => {
                 let state = self.clone();
 
