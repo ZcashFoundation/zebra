@@ -391,6 +391,7 @@ impl ZebraCheckpointsTestDirExt for TempDir {
 
 /// Wait for `zebra-checkpoints` to generate checkpoints, clearing Zebra's logs at the same time.
 #[tracing::instrument]
+#[allow(clippy::unwrap_in_result)]
 pub fn wait_for_zebra_checkpoints_generation<
     P: ZebradTestDirExt + std::fmt::Debug + std::marker::Send + 'static,
 >(
