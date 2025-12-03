@@ -59,7 +59,10 @@ pub fn decrypts_successfully(transaction: &Transaction, network: &Network, heigh
         let is_decrypted_successfully = match bundle {
             OrchardBundle::OrchardVanilla(bundle) => orchard_bundle_decrypts_successfully(bundle),
             OrchardBundle::OrchardZSA(bundle) => orchard_bundle_decrypts_successfully(bundle),
-            OrchardBundle::OrchardSwap(bundle) => !bundle.action_groups().iter().any(|group| !orchard_bundle_decrypts_successfully(group)),
+            OrchardBundle::OrchardSwap(bundle) => !bundle
+                .action_groups()
+                .iter()
+                .any(|group| !orchard_bundle_decrypts_successfully(group)),
         };
 
         if !is_decrypted_successfully {
@@ -71,8 +74,8 @@ pub fn decrypts_successfully(transaction: &Transaction, network: &Network, heigh
 }
 
 /// Checks if all actions in an Orchard bundle decrypt successfully.
-fn orchard_bundle_decrypts_successfully<A: Authorization, V, O: OrchardPrimitives>(
-    bundle: &Bundle<A, V, O>,
+fn orchard_bundle_decrypts_successfully<A: Authorization, V, D: OrchardPrimitives>(
+    bundle: &Bundle<A, V, D>,
 ) -> bool {
     bundle.actions().iter().all(|act| {
         zcash_note_encryption::try_output_recovery_with_ovk(

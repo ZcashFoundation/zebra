@@ -49,19 +49,23 @@ pub struct ActionGroup<Flavor: ShieldedDataFlavor> {
     /// The shared anchor for all `Spend`s in this transaction.
     /// Denoted as `anchorOrchard` in the spec.
     pub shared_anchor: tree::Root,
+
     /// Block height after which this Bundle's Actions are invalid by consensus.
+    /// Denoted as `nAGExpiryHeight` in the spec.
+    #[cfg(feature = "tx_v6")]
     pub expiry_height: u32,
+
+    /// Assets intended for burning
+    /// Denoted as `vAssetBurn` in the spec (ZIP 230).
+    #[cfg(feature = "tx_v6")]
+    pub burn: Flavor::BurnType,
+
     /// The aggregated zk-SNARK proof for all the actions in this transaction.
     /// Denoted as `proofsOrchard` in the spec.
     pub proof: Halo2Proof,
     /// The Orchard Actions, in the order they appear in the transaction.
     /// Denoted as `vActionsOrchard` and `vSpendAuthSigsOrchard` in the spec.
     pub actions: AtLeastOne<AuthorizedAction<Flavor>>,
-
-    #[cfg(feature = "tx_v6")]
-    /// Assets intended for burning
-    /// Denoted as `vAssetBurn` in the spec (ZIP 230).
-    pub burn: Flavor::BurnType,
 }
 
 impl<Flavor: ShieldedDataFlavor> ActionGroup<Flavor> {
@@ -100,17 +104,18 @@ impl<Flavor: ShieldedDataFlavor> fmt::Display for ActionGroup<Flavor> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut fmter = f.debug_struct("orchard::ActionGroup");
 
-        // FIXME: reorder fields here according the struct/spec?
-
         fmter.field("actions", &self.actions.len());
         fmter.field("flags", &self.flags);
+
+        #[cfg(feature = "tx_v6")]
+        fmter.field("expiry_height", &self.expiry_height);
+
+        #[cfg(feature = "tx_v6")]
+        fmter.field("burn", &self.burn.as_ref().len());
 
         fmter.field("proof_len", &self.proof.zcash_serialized_size());
 
         fmter.field("shared_anchor", &self.shared_anchor);
-
-        #[cfg(feature = "tx_v6")]
-        fmter.field("burn", &self.burn.as_ref().len());
 
         fmter.finish()
     }

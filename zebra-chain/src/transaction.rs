@@ -56,6 +56,9 @@ use crate::{
 #[cfg(feature = "tx_v6")]
 use crate::orchard_zsa;
 
+#[cfg(feature = "tx_v6")]
+pub mod versioned_sig;
+
 /// A Zcash transaction.
 ///
 /// A transaction is an encoded data structure that facilitates the transfer of
@@ -1130,7 +1133,6 @@ impl Transaction {
     /// regardless of version.
     pub fn orchard_flags_union(&self) -> Option<orchard::shielded_data::Flags> {
         match self {
-            // No Orchard shielded data
             Transaction::V1 { .. }
             | Transaction::V2 { .. }
             | Transaction::V3 { .. }
@@ -1157,7 +1159,6 @@ impl Transaction {
     /// regardless of version.
     pub fn orchard_shared_anchors(&self) -> Box<dyn Iterator<Item = orchard::tree::Root> + '_> {
         match self {
-            // No Orchard shielded data
             Transaction::V1 { .. }
             | Transaction::V2 { .. }
             | Transaction::V3 { .. }
@@ -1467,7 +1468,6 @@ impl Transaction {
     /// <https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions>
     pub fn orchard_value_balance(&self) -> ValueBalance<NegativeAllowed> {
         let value_balance = match self {
-            // No Orchard shielded data
             Transaction::V1 { .. }
             | Transaction::V2 { .. }
             | Transaction::V3 { .. }

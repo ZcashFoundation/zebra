@@ -101,10 +101,10 @@ pub(super) const MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
     (block::Height(1_046_400), Canopy),
     (block::Height(1_687_104), Nu5),
     (block::Height(2_726_400), Nu6),
-    // FIXME: TODO: Use a proper value below.
-    #[cfg(zcash_unstable = "nu7")]
-    (block::Height(3_111_000), Nu7),
-    (block::Height(3_111_001), Swap),
+    (block::Height(4_111_000), Nu6_1),
+    // FIXME: TODO: Update height values for Nu6_1 and Nu7 when real values will be known.
+    (block::Height(4_333_000), Nu7),
+    (block::Height(4_333_001), Swap),
 ];
 
 /// Fake mainnet network upgrade activation heights, used in tests.
@@ -119,8 +119,9 @@ const FAKE_MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
     (block::Height(30), Canopy),
     (block::Height(35), Nu5),
     (block::Height(40), Nu6),
-    (block::Height(45), Nu7),
-    (block::Height(50), Swap),
+    (block::Height(45), Nu6_1),
+    (block::Height(50), Nu7),
+    (block::Height(55), Swap),
 ];
 
 /// Testnet network upgrade activation heights.
@@ -143,10 +144,10 @@ pub(super) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
     (block::Height(1_028_500), Canopy),
     (block::Height(1_842_420), Nu5),
     (block::Height(2_976_000), Nu6),
-    // FIXME: TODO: Use a proper value below.
-    #[cfg(zcash_unstable = "nu7")]
-    (block::Height(3_222_000), Nu7),
-    (block::Height(3_222_001), Swap),
+    (block::Height(4_222_000), Nu6_1),
+    // FIXME: TODO: Update height values for Nu6_1 and Nu7 when real values will be known.
+    (block::Height(4_444_000), Nu7),
+    (block::Height(4_444_001), Swap),
 ];
 
 /// Fake testnet network upgrade activation heights, used in tests.
@@ -161,8 +162,9 @@ const FAKE_TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
     (block::Height(30), Canopy),
     (block::Height(35), Nu5),
     (block::Height(40), Nu6),
-    (block::Height(45), Nu7),
-    (block::Height(50), Swap),
+    (block::Height(45), Nu6_1),
+    (block::Height(50), Nu7),
+    (block::Height(55), Swap),
 ];
 
 /// The Consensus Branch Id, used to bind transactions and blocks to a

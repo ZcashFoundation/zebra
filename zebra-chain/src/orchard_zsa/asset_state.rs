@@ -3,6 +3,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use orchard::issuance::{compute_asset_desc_hash, IssueAction};
+use orchard::issuance_auth::{IssueAuthKey, IssueValidatingKey, ZSASchnorr};
 pub use orchard::note::AssetBase;
 
 use crate::{serialization::ZcashSerialize, transaction::Transaction};
@@ -380,16 +381,11 @@ pub trait RandomAssetBase {
 
 impl RandomAssetBase for AssetBase {
     fn random_serialized() -> String {
-        let isk = orchard::issuance_auth::IssueAuthKey::from_bytes(
-            k256::NonZeroScalar::random(&mut rand_core::OsRng)
-                .to_bytes().as_slice()
-        )
-        .unwrap();
-        let ik = orchard::issuance_auth::IssueValidatingKey::from(&isk);
-        let asset_desc = b"zsa_asset";
-        let asset_desc_hash =
-            compute_asset_desc_hash(&(asset_desc[0], asset_desc[1..].to_vec()).into());
-        AssetBase::derive(&ik, &asset_desc_hash)
+        let isk = IssueAuthKey::<ZSASchnorr>::random(&mut rand_core::OsRng);
+        let ik = IssueValidatingKey::<ZSASchnorr>::from(&isk);
+        let desc = b"zsa_asset";
+        let hash = compute_asset_desc_hash(&(desc[0], desc[1..].to_vec()).into());
+        AssetBase::derive(&ik, &hash)
             .zcash_serialize_to_vec()
             .map(hex::encode)
             .expect("random asset base should serialize")

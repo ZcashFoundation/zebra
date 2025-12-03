@@ -18,9 +18,12 @@ use orchard::{
 use rand::rngs::OsRng;
 
 use zebra_chain::{
-    orchard::{ShieldedData, ShieldedDataFlavor},
+    orchard::{OrchardVanilla, ShieldedData, ShieldedDataFlavor},
     serialization::{AtLeastOne, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
 };
+
+#[cfg(feature = "tx_v6")]
+use zebra_chain::orchard::OrchardZSA;
 
 use crate::primitives::halo2::*;
 
@@ -81,7 +84,10 @@ where
                     flags,
                     shared_anchor: anchor_bytes.try_into().unwrap(),
                     // FIXME: use a proper value below if needed
+                    #[cfg(feature = "tx_v6")]
                     expiry_height: 0,
+                    #[cfg(feature = "tx_v6")]
+                    burn: bundle.burn().as_slice().into(),
                     proof: zebra_chain::primitives::Halo2Proof(
                         // FIXME: can we use `expect` here?
                         bundle
@@ -111,18 +117,16 @@ where
                             };
                             zebra_chain::orchard::shielded_data::AuthorizedAction {
                                 action,
-                                spend_auth_sig: <[u8; 64]>::from(a.authorization()).into(),
+                                spend_auth_sig: <[u8; 64]>::from(a.authorization().sig()).into(),
                             }
                         })
                         .collect::<Vec<_>>()
                         .try_into()
                         .unwrap(),
-                    // FIXME: use a proper value when implementing V6
-                    #[cfg(feature = "tx_v6")]
-                    burn: bundle.burn().as_slice().into(),
                 }),
                 value_balance: note_value.try_into().unwrap(),
-                binding_sig: <[u8; 64]>::from(bundle.authorization().binding_signature()).into(),
+                binding_sig: <[u8; 64]>::from(bundle.authorization().binding_signature().sig())
+                    .into(),
             }
         })
         .collect();

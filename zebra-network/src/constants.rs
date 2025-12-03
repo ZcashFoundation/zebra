@@ -343,7 +343,7 @@ pub const TIMESTAMP_TRUNCATION_SECONDS: u32 = 30 * 60;
 pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = {
     #[cfg(not(zcash_unstable = "nu7"))]
     {
-        Version(170_120)
+        Version(170_140)
     }
     #[cfg(zcash_unstable = "nu7")]
     {

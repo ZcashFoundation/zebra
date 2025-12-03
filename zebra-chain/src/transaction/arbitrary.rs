@@ -806,19 +806,19 @@ impl<Flavor: orchard::ShieldedDataFlavor + 'static> Arbitrary for orchard::Shiel
                 let (flags, value_balance, shared_anchor, proof, actions, binding_sig, burn) =
                     props;
 
-                // FIXME: support multiple action groups
                 Self {
                     action_groups: AtLeastOne::from_one(orchard::ActionGroup {
                         flags,
                         shared_anchor,
                         // FIXME: use a proper arbitrary value here?
+                        #[cfg(feature = "tx_v6")]
                         expiry_height: 0,
+                        #[cfg(feature = "tx_v6")]
+                        burn,
                         proof,
                         actions: actions
                             .try_into()
                             .expect("arbitrary vector size range produces at least one action"),
-                        #[cfg(feature = "tx_v6")]
-                        burn,
                     }),
                     value_balance,
                     binding_sig: binding_sig.0,
@@ -1180,11 +1180,12 @@ pub fn insert_fake_orchard_shielded_data(
             flags: orchard::Flags::empty(),
             shared_anchor: orchard::tree::Root::default(),
             // FIXME: use a proper arbitrary value here?
+            #[cfg(feature = "tx_v6")]
             expiry_height: 0,
-            proof: Halo2Proof(vec![]),
-            actions: at_least_one![dummy_authorized_action],
             #[cfg(feature = "tx_v6")]
             burn: Default::default(),
+            proof: Halo2Proof(vec![]),
+            actions: at_least_one![dummy_authorized_action],
         }),
         value_balance: Amount::try_from(0).expect("invalid transaction amount"),
         binding_sig: Signature::from([0u8; 64]),
