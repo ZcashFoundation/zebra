@@ -19,14 +19,15 @@ use crate::{
 };
 
 mod commitment;
-mod error;
 mod hash;
 mod header;
 mod height;
 mod serialize;
 
+pub mod error;
 pub mod genesis;
 pub mod merkle;
+pub mod subsidy;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod arbitrary;
