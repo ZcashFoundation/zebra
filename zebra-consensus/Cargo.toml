@@ -40,6 +40,12 @@ tx_v6 = [
     "zebra-chain/tx_v6"
 ]
 
+# Support for ZSA asset swaps
+zsa-swap = [
+    "zebra-state/zsa-swap",
+    "zebra-chain/zsa-swap"
+]
+
 [dependencies]
 blake2b_simd = "1.0.2"
 bellman = "0.14.0"

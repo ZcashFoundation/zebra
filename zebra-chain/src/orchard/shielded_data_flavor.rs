@@ -53,6 +53,8 @@ pub trait ShieldedDataFlavor: OrchardFlavor {
     #[cfg(feature = "tx_v6")]
     type BurnType: Clone
         + Debug
+        + PartialEq
+        + Eq
         + ZcashDeserialize
         + ZcashSerialize
         + AsRef<[BurnItem]>

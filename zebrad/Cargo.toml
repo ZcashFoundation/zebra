@@ -163,6 +163,13 @@ tx_v6 = [
     "zebra-chain/tx_v6"
 ]
 
+# Support for ZSA asset swaps
+zsa-swap = [
+    "zebra-consensus/zsa-swap",
+    "zebra-state/zsa-swap",
+    "zebra-chain/zsa-swap"
+]
+
 [dependencies]
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.41" }
 zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.41" }

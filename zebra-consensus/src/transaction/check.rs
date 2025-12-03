@@ -172,7 +172,8 @@ pub fn coinbase_tx_no_prevout_joinsplit_spend(tx: &Transaction) -> Result<(), Tr
             return Err(TransactionError::CoinbaseHasSpend);
         }
 
-        if let Some(orchard_flags) = tx.orchard_flags() {
+        // FIXME: is it correct to use orchard_flags_union here?
+        if let Some(orchard_flags) = tx.orchard_flags_union() {
             if orchard_flags.contains(Flags::ENABLE_SPENDS) {
                 return Err(TransactionError::CoinbaseHasEnableSpendsOrchard);
             }

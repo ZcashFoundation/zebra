@@ -14,7 +14,7 @@ use crate::{
     parameters::{Network, NetworkUpgrade},
     primitives::{Bctv14Proof, Groth16Proof, Halo2Proof, ZkSnarkProof},
     sapling::{self, AnchorVariant, PerSpendAnchor, SharedAnchor},
-    serialization::ZcashDeserializeInto,
+    serialization::{AtLeastOne, ZcashDeserializeInto},
     sprout, transparent,
     value_balance::{ValueBalance, ValueBalanceError},
     LedgerState,
@@ -807,16 +807,21 @@ impl<Flavor: orchard::ShieldedDataFlavor + 'static> Arbitrary for orchard::Shiel
                     props;
 
                 Self {
-                    flags,
+                    action_groups: AtLeastOne::from_one(orchard::ActionGroup {
+                        flags,
+                        shared_anchor,
+                        // FIXME: use a proper arbitrary value here?
+                        #[cfg(feature = "tx_v6")]
+                        expiry_height: 0,
+                        #[cfg(feature = "tx_v6")]
+                        burn,
+                        proof,
+                        actions: actions
+                            .try_into()
+                            .expect("arbitrary vector size range produces at least one action"),
+                    }),
                     value_balance,
-                    shared_anchor,
-                    proof,
-                    actions: actions
-                        .try_into()
-                        .expect("arbitrary vector size range produces at least one action"),
                     binding_sig: binding_sig.0,
-                    #[cfg(feature = "tx_v6")]
-                    burn,
                 }
             })
             .boxed()
@@ -1169,14 +1174,19 @@ pub fn insert_fake_orchard_shielded_data(
 
     // Place the dummy action inside the Orchard shielded data
     let dummy_shielded_data = orchard::ShieldedData::<orchard::OrchardVanilla> {
-        flags: orchard::Flags::empty(),
+        action_groups: AtLeastOne::from_one(orchard::ActionGroup {
+            flags: orchard::Flags::empty(),
+            shared_anchor: orchard::tree::Root::default(),
+            // FIXME: use a proper arbitrary value here?
+            #[cfg(feature = "tx_v6")]
+            expiry_height: 0,
+            #[cfg(feature = "tx_v6")]
+            burn: Default::default(),
+            proof: Halo2Proof(vec![]),
+            actions: at_least_one![dummy_authorized_action],
+        }),
         value_balance: Amount::try_from(0).expect("invalid transaction amount"),
-        shared_anchor: orchard::tree::Root::default(),
-        proof: Halo2Proof(vec![]),
-        actions: at_least_one![dummy_authorized_action],
         binding_sig: Signature::from([0u8; 64]),
-        #[cfg(feature = "tx_v6")]
-        burn: Default::default(),
     };
 
     // Replace the shielded data in the transaction

@@ -66,6 +66,9 @@ tx_v6 = [
     "nonempty"
 ]
 
+# Support for ZSA asset swaps
+zsa-swap = []
+
 [dependencies]
 
 # Cryptography
