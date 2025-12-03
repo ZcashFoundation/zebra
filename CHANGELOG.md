@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Added RPC metrics middleware tracking request counts, latencies, active requests, and errors per method ([#10163](https://github.com/ZcashFoundation/zebra/issues/10163))
 - Added peer handshake metrics for duration histograms and failure tracking by reason ([#10164](https://github.com/ZcashFoundation/zebra/issues/10164))
 - Added Prometheus alert rules and Grafana dashboards for value pools and RPC monitoring ([#10167](https://github.com/ZcashFoundation/zebra/issues/10167))
+- Added performance histograms for sync pipeline stages, consensus batch verification, and RocksDB database metrics ([#10165](https://github.com/ZcashFoundation/zebra/issues/10165))
 
 
 ## [Zebra 3.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v3.1.0) - 2025-11-28
