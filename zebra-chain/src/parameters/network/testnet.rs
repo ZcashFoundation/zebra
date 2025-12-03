@@ -1,4 +1,5 @@
 //! Types and implementation for Testnet consensus parameters
+
 use std::{collections::BTreeMap, fmt, sync::Arc};
 
 use crate::{
@@ -10,8 +11,16 @@ use crate::{
         network::error::ParametersBuilderError,
         network_upgrade::TESTNET_ACTIVATION_HEIGHTS,
         subsidy::{
-            funding_stream_address_period, FUNDING_STREAMS_MAINNET, FUNDING_STREAMS_TESTNET,
-            FUNDING_STREAM_RECEIVER_DENOMINATOR, NU6_1_LOCKBOX_DISBURSEMENTS_TESTNET,
+            constants::{
+                testnet::{
+                    FUNDING_STREAM_ECC_ADDRESSES_TESTNET, FUNDING_STREAM_MG_ADDRESSES_TESTNET,
+                    FUNDING_STREAM_ZF_ADDRESSES_TESTNET, NU6_1_LOCKBOX_DISBURSEMENTS_TESTNET,
+                },
+                BLOSSOM_POW_TARGET_SPACING_RATIO, FUNDING_STREAM_RECEIVER_DENOMINATOR,
+                POST_BLOSSOM_HALVING_INTERVAL, PRE_BLOSSOM_HALVING_INTERVAL,
+            },
+            funding_stream_address_period, FundingStreamReceiver, FundingStreamRecipient,
+            FundingStreams, FUNDING_STREAMS_MAINNET, FUNDING_STREAMS_TESTNET,
         },
         Network, NetworkKind, NetworkUpgrade,
     },
@@ -19,14 +28,7 @@ use crate::{
     work::difficulty::{ExpandedDifficulty, U256},
 };
 
-use super::{
-    magic::Magic,
-    subsidy::{
-        FundingStreamReceiver, FundingStreamRecipient, FundingStreams,
-        BLOSSOM_POW_TARGET_SPACING_RATIO, POST_BLOSSOM_HALVING_INTERVAL,
-        PRE_BLOSSOM_HALVING_INTERVAL,
-    },
-};
+use super::magic::Magic;
 
 /// Reserved network names that should not be allowed for configured Testnets.
 pub const RESERVED_NETWORK_NAMES: [&str; 6] = [
@@ -69,6 +71,46 @@ pub struct ConfiguredFundingStreamRecipient {
 }
 
 impl ConfiguredFundingStreamRecipient {
+    /// Creates a new [`ConfiguredFundingStreamRecipient`] with the provided receiver and default
+    /// values for other fields.
+    pub fn new_for(receiver: FundingStreamReceiver) -> Self {
+        use FundingStreamReceiver::*;
+        match receiver {
+            Ecc => Self {
+                receiver: Ecc,
+                numerator: 7,
+                addresses: Some(
+                    FUNDING_STREAM_ECC_ADDRESSES_TESTNET
+                        .map(ToString::to_string)
+                        .to_vec(),
+                ),
+            },
+            ZcashFoundation => Self {
+                receiver: ZcashFoundation,
+                numerator: 5,
+                addresses: Some(
+                    FUNDING_STREAM_ZF_ADDRESSES_TESTNET
+                        .map(ToString::to_string)
+                        .to_vec(),
+                ),
+            },
+            MajorGrants => Self {
+                receiver: MajorGrants,
+                numerator: 8,
+                addresses: Some(
+                    FUNDING_STREAM_MG_ADDRESSES_TESTNET
+                        .map(ToString::to_string)
+                        .to_vec(),
+                ),
+            },
+            Deferred => Self {
+                receiver,
+                numerator: 0,
+                addresses: None,
+            },
+        }
+    }
+
     /// Converts a [`ConfiguredFundingStreamRecipient`] to a [`FundingStreamReceiver`] and [`FundingStreamRecipient`].
     pub fn into_recipient(self) -> (FundingStreamReceiver, FundingStreamRecipient) {
         (

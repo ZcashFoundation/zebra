@@ -8,8 +8,15 @@ use crate::{
     parameters::{
         network::error::ParametersBuilderError,
         subsidy::{
-            block_subsidy, funding_stream_values, FundingStreamReceiver, FUNDING_STREAMS_TESTNET,
-            FUNDING_STREAM_ECC_ADDRESSES_MAINNET, FUNDING_STREAM_ECC_ADDRESSES_TESTNET,
+            block_subsidy,
+            constants::{
+                mainnet::FUNDING_STREAM_ECC_ADDRESSES_MAINNET,
+                testnet::{
+                    FUNDING_STREAM_ECC_ADDRESSES_TESTNET,
+                    POST_NU6_FUNDING_STREAM_FPF_ADDRESSES_TESTNET,
+                },
+            },
+            funding_stream_values, FundingStreamReceiver, FUNDING_STREAMS_TESTNET,
         },
         testnet::{
             self, ConfiguredActivationHeights, ConfiguredFundingStreamRecipient,
@@ -619,4 +626,76 @@ fn lockbox_input_value(network: &Network, height: Height) -> Amount<NonNegative>
 
     (deferred_amount_per_block * num_blocks_with_lockbox_output.into())
         .expect("lockbox input value should fit in Amount")
+}
+
+#[test]
+fn funding_streams_default_values() {
+    let _init_guard = zebra_test::init();
+
+    let fs = vec![
+        ConfiguredFundingStreams {
+            height_range: Some(Height(1_028_500 - 1)..Height(2_796_000 - 1)),
+            // Will read from existing values
+            recipients: None,
+        },
+        ConfiguredFundingStreams {
+            // Will read from existing values
+            height_range: None,
+            recipients: Some(vec![
+                ConfiguredFundingStreamRecipient {
+                    receiver: FundingStreamReceiver::Deferred,
+                    numerator: 1,
+                    addresses: None,
+                },
+                ConfiguredFundingStreamRecipient {
+                    receiver: FundingStreamReceiver::MajorGrants,
+                    numerator: 2,
+                    addresses: Some(
+                        POST_NU6_FUNDING_STREAM_FPF_ADDRESSES_TESTNET
+                            .iter()
+                            .map(|s| s.to_string())
+                            .collect(),
+                    ),
+                },
+            ]),
+        },
+    ];
+
+    let network = testnet::Parameters::build()
+        .with_funding_streams(fs)
+        .to_network()
+        .expect("failed to build configured network");
+
+    // Check if value hasn't changed
+    assert_eq!(
+        network.all_funding_streams()[0].height_range().clone(),
+        Height(1_028_500 - 1)..Height(2_796_000 - 1)
+    );
+    // Check if value was copied from default
+    assert_eq!(
+        network.all_funding_streams()[0]
+            .recipients()
+            .get(&FundingStreamReceiver::ZcashFoundation)
+            .unwrap()
+            .addresses(),
+        FUNDING_STREAMS_TESTNET[0]
+            .recipients()
+            .get(&FundingStreamReceiver::ZcashFoundation)
+            .unwrap()
+            .addresses()
+    );
+    // Check if value was copied from default
+    assert_eq!(
+        network.all_funding_streams()[1].height_range(),
+        FUNDING_STREAMS_TESTNET[1].height_range()
+    );
+    // Check if value hasn't changed
+    assert_eq!(
+        network.all_funding_streams()[1]
+            .recipients()
+            .get(&FundingStreamReceiver::Deferred)
+            .unwrap()
+            .numerator(),
+        1
+    );
 }

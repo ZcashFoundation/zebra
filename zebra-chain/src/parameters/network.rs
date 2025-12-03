@@ -7,7 +7,19 @@ use thiserror::Error;
 use crate::{
     amount::{Amount, NonNegative},
     block::{self, Height},
-    parameters::NetworkUpgrade,
+    parameters::{
+        subsidy::constants::{
+            mainnet::{
+                EXPECTED_NU6_1_LOCKBOX_DISBURSEMENTS_TOTAL_MAINNET,
+                NU6_1_LOCKBOX_DISBURSEMENTS_MAINNET,
+            },
+            testnet::{
+                EXPECTED_NU6_1_LOCKBOX_DISBURSEMENTS_TOTAL_TESTNET,
+                NU6_1_LOCKBOX_DISBURSEMENTS_TESTNET,
+            },
+        },
+        NetworkUpgrade,
+    },
     transparent,
 };
 
@@ -294,9 +306,9 @@ impl Network {
         };
 
         match self {
-            Self::Mainnet => subsidy::EXPECTED_NU6_1_LOCKBOX_DISBURSEMENTS_TOTAL_MAINNET,
+            Self::Mainnet => EXPECTED_NU6_1_LOCKBOX_DISBURSEMENTS_TOTAL_MAINNET,
             Self::Testnet(params) if params.is_default_testnet() => {
-                subsidy::EXPECTED_NU6_1_LOCKBOX_DISBURSEMENTS_TOTAL_TESTNET
+                EXPECTED_NU6_1_LOCKBOX_DISBURSEMENTS_TOTAL_TESTNET
             }
             Self::Testnet(params) => params.lockbox_disbursement_total_amount(),
         }
@@ -312,9 +324,9 @@ impl Network {
         };
 
         let expected_lockbox_disbursements = match self {
-            Self::Mainnet => subsidy::NU6_1_LOCKBOX_DISBURSEMENTS_MAINNET.to_vec(),
+            Self::Mainnet => NU6_1_LOCKBOX_DISBURSEMENTS_MAINNET.to_vec(),
             Self::Testnet(params) if params.is_default_testnet() => {
-                subsidy::NU6_1_LOCKBOX_DISBURSEMENTS_TESTNET.to_vec()
+                NU6_1_LOCKBOX_DISBURSEMENTS_TESTNET.to_vec()
             }
             Self::Testnet(params) => return params.lockbox_disbursements(),
         };
