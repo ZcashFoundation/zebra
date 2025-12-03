@@ -40,7 +40,7 @@ use crate::{
         },
         zebra_db::ZebraDb,
     },
-    BoxError, FromDisk, IntoDisk,
+    FromDisk, IntoDisk,
 };
 
 use super::super::TypedColumnFamily;
@@ -415,10 +415,6 @@ impl DiskWriteBatch {
     ///
     /// If this method returns an error, it will be propagated,
     /// and the batch should not be written to the database.
-    ///
-    /// # Errors
-    ///
-    /// - Propagates any errors from updating note commitment trees
     #[allow(clippy::too_many_arguments)]
     pub fn prepare_transparent_transaction_batch(
         &mut self,
@@ -433,7 +429,7 @@ impl DiskWriteBatch {
             OutputLocation,
         >,
         mut address_balances: AddressBalanceLocationUpdates,
-    ) -> Result<(), BoxError> {
+    ) {
         let db = &zebra_db.db;
         let FinalizedBlock { block, height, .. } = finalized;
 
@@ -443,13 +439,13 @@ impl DiskWriteBatch {
             network,
             new_outputs_by_out_loc,
             &mut address_balances,
-        )?;
+        );
         self.prepare_spent_transparent_outputs_batch(
             db,
             network,
             spent_utxos_by_out_loc,
             &mut address_balances,
-        )?;
+        );
 
         // Index the transparent addresses that spent in each transaction
         for (tx_index, transaction) in block.transactions.iter().enumerate() {
@@ -464,10 +460,10 @@ impl DiskWriteBatch {
                 #[cfg(feature = "indexer")]
                 out_loc_by_outpoint,
                 &address_balances,
-            )?;
+            );
         }
 
-        self.prepare_transparent_balances_batch(db, address_balances)
+        self.prepare_transparent_balances_batch(db, address_balances);
     }
 
     /// Prepare a database batch for the new UTXOs in `new_outputs_by_out_loc`.
@@ -491,7 +487,7 @@ impl DiskWriteBatch {
         network: &Network,
         new_outputs_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
         address_balances: &mut AddressBalanceLocationUpdates,
-    ) -> Result<(), BoxError> {
+    ) {
         let utxo_by_out_loc = db.cf_handle("utxo_by_out_loc").unwrap();
         let utxo_loc_by_transparent_addr_loc =
             db.cf_handle("utxo_loc_by_transparent_addr_loc").unwrap();
@@ -574,8 +570,6 @@ impl DiskWriteBatch {
             // to get an output.)
             self.zs_insert(&utxo_by_out_loc, new_output_location, unspent_output);
         }
-
-        Ok(())
     }
 
     /// Prepare a database batch for the spent outputs in `spent_utxos_by_out_loc`.
@@ -598,7 +592,7 @@ impl DiskWriteBatch {
         network: &Network,
         spent_utxos_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
         address_balances: &mut AddressBalanceLocationUpdates,
-    ) -> Result<(), BoxError> {
+    ) {
         let utxo_by_out_loc = db.cf_handle("utxo_by_out_loc").unwrap();
         let utxo_loc_by_transparent_addr_loc =
             db.cf_handle("utxo_loc_by_transparent_addr_loc").unwrap();
@@ -652,8 +646,6 @@ impl DiskWriteBatch {
             // Delete the OutputLocation, and the copy of the spent Output in the database.
             self.zs_delete(&utxo_by_out_loc, spent_output_location);
         }
-
-        Ok(())
     }
 
     /// Prepare a database batch indexing the transparent addresses that spent in this transaction.
@@ -680,7 +672,7 @@ impl DiskWriteBatch {
             OutputLocation,
         >,
         address_balances: &AddressBalanceLocationUpdates,
-    ) -> Result<(), BoxError> {
+    ) {
         let db = &zebra_db.db;
         let tx_loc_by_transparent_addr_loc =
             db.cf_handle("tx_loc_by_transparent_addr_loc").unwrap();
@@ -729,8 +721,6 @@ impl DiskWriteBatch {
                     .zs_insert(spent_output_location, &spending_tx_location);
             }
         }
-
-        Ok(())
     }
 
     /// Prepare a database batch containing `finalized.block`'s:
@@ -746,7 +736,7 @@ impl DiskWriteBatch {
         &mut self,
         db: &DiskDb,
         address_balances: AddressBalanceLocationUpdates,
-    ) -> Result<(), BoxError> {
+    ) {
         let balance_by_transparent_addr = db.cf_handle(BALANCE_BY_TRANSPARENT_ADDR).unwrap();
 
         // Update all the changed address balances in the database.
@@ -772,7 +762,5 @@ impl DiskWriteBatch {
                 }
             }
         };
-
-        Ok(())
     }
 }
