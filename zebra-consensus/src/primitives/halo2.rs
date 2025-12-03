@@ -19,7 +19,7 @@ use tower::{util::ServiceFn, Service};
 use tower_batch_control::{Batch, BatchControl};
 use tower_fallback::Fallback;
 
-use zebra_chain::orchard::{OrchardVanilla, ShieldedData, ShieldedDataFlavor};
+use zebra_chain::orchard::{ActionGroup, OrchardVanilla, ShieldedDataFlavor};
 
 #[cfg(feature = "tx_v6")]
 use zebra_chain::orchard::OrchardZSA;
@@ -141,16 +141,16 @@ impl BatchVerifier {
 
 // === END TEMPORARY BATCH HALO2 SUBSTITUTE ===
 
-impl<V: OrchardVerifier> From<&ShieldedData<V>> for Item {
-    fn from(shielded_data: &ShieldedData<V>) -> Item {
+impl<V: OrchardVerifier> From<&ActionGroup<V>> for Item {
+    fn from(action_group: &ActionGroup<V>) -> Item {
         use orchard::{circuit, note, primitives::redpallas, tree, value};
 
-        let anchor = tree::Anchor::from_bytes(shielded_data.shared_anchor.into()).unwrap();
+        let anchor = tree::Anchor::from_bytes(action_group.shared_anchor.into()).unwrap();
 
-        let flags = orchard::bundle::Flags::from_byte(shielded_data.flags.bits())
+        let flags = orchard::bundle::Flags::from_byte(action_group.flags.bits())
             .expect("failed to convert flags: shielded_data.flags contains unexpected bits that are not valid in orchard::bundle::Flags");
 
-        let instances = shielded_data
+        let instances = action_group
             .actions()
             .map(|action| {
                 circuit::Instance::from_parts(
@@ -169,7 +169,7 @@ impl<V: OrchardVerifier> From<&ShieldedData<V>> for Item {
 
         Item {
             instances,
-            proof: orchard::circuit::Proof::new(shielded_data.proof.0.clone()),
+            proof: orchard::circuit::Proof::new(action_group.proof.0.clone()),
         }
     }
 }
