@@ -447,6 +447,16 @@ impl StateService {
         tracing::info!("cached state consensus branch is valid: no legacy chain found");
         timer.finish(module_path!(), line!(), "legacy chain check");
 
+        // Spawn a background task to periodically export RocksDB metrics to Prometheus
+        let db_for_metrics = read_service.db.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(30));
+            loop {
+                interval.tick().await;
+                db_for_metrics.export_metrics();
+            }
+        });
+
         (state, read_service, latest_chain_tip, chain_tip_change)
     }
 
