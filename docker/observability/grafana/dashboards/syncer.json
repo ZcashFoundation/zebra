@@ -21,6 +21,263 @@
   "links": [],
   "panels": [
     {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 200,
+      "panels": [],
+      "title": "Key Metrics",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
+      "description": "Current blockchain height",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      },
+      "id": 201,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          },
+          "expr": "state_finalized_block_height",
+          "legendFormat": "Height",
+          "refId": "A"
+        }
+      ],
+      "title": "Block Height",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
+      "description": "Total blocks downloaded during sync",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 1
+      },
+      "id": 202,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          },
+          "expr": "sync_downloaded_block_count",
+          "legendFormat": "Downloaded",
+          "refId": "A"
+        }
+      ],
+      "title": "Downloaded Blocks",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
+      "description": "Total blocks verified during sync",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 1
+      },
+      "id": 203,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          },
+          "expr": "sync_verified_block_count",
+          "legendFormat": "Verified",
+          "refId": "A"
+        }
+      ],
+      "title": "Verified Blocks",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
+      "description": "Block downloads currently in progress",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 100
+              },
+              {
+                "color": "red",
+                "value": 200
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 1
+      },
+      "id": 204,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          },
+          "expr": "sync_downloads_in_flight",
+          "legendFormat": "In-Flight",
+          "refId": "A"
+        }
+      ],
+      "title": "In-Flight Downloads",
+      "type": "stat"
+    },
+    {
       "aliasColors": {},
       "bars": false,
       "dashLength": 10,
@@ -39,7 +296,7 @@
         "h": 9,
         "w": 12,
         "x": 0,
-        "y": 0
+        "y": 5
       },
       "hiddenSeries": false,
       "id": 2,
@@ -162,7 +419,7 @@
         "h": 9,
         "w": 12,
         "x": 12,
-        "y": 0
+        "y": 5
       },
       "hiddenSeries": false,
       "id": 8,
@@ -292,7 +549,7 @@
         "h": 9,
         "w": 12,
         "x": 0,
-        "y": 9
+        "y": 14
       },
       "heatmap": {},
       "hideZeroBuckets": false,
@@ -389,7 +646,7 @@
         "h": 9,
         "w": 12,
         "x": 12,
-        "y": 9
+        "y": 14
       },
       "heatmap": {},
       "hideZeroBuckets": false,
@@ -481,7 +738,7 @@
         "h": 9,
         "w": 12,
         "x": 0,
-        "y": 18
+        "y": 23
       },
       "hiddenSeries": false,
       "id": 7,
@@ -652,7 +909,7 @@
         "h": 9,
         "w": 12,
         "x": 12,
-        "y": 18
+        "y": 23
       },
       "hiddenSeries": false,
       "id": 10,
@@ -863,7 +1120,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 36
+        "y": 32
       },
       "id": 100,
       "options": {
@@ -968,7 +1225,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 36
+        "y": 32
       },
       "id": 101,
       "options": {

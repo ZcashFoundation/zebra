@@ -655,6 +655,28 @@ impl DiskDb {
         metrics::gauge!("zebra.state.rocksdb.total_disk_size_bytes").set(total_disk as f64);
         metrics::gauge!("zebra.state.rocksdb.live_data_size_bytes").set(total_live as f64);
         metrics::gauge!("zebra.state.rocksdb.total_memory_size_bytes").set(total_mem as f64);
+
+        // Compaction metrics - these use database-wide properties (not per-column-family)
+        if let Ok(Some(pending)) = db.property_int_value("rocksdb.compaction-pending") {
+            metrics::gauge!("zebra.state.rocksdb.compaction.pending_bytes").set(pending as f64);
+        }
+
+        if let Ok(Some(running)) = db.property_int_value("rocksdb.num-running-compactions") {
+            metrics::gauge!("zebra.state.rocksdb.compaction.running").set(running as f64);
+        }
+
+        if let Ok(Some(cache)) = db.property_int_value("rocksdb.block-cache-usage") {
+            metrics::gauge!("zebra.state.rocksdb.block_cache_usage_bytes").set(cache as f64);
+        }
+
+        // Level-by-level file counts (RocksDB typically has up to 7 levels)
+        for level in 0..7 {
+            let prop = format!("rocksdb.num-files-at-level{}", level);
+            if let Ok(Some(count)) = db.property_int_value(&prop) {
+                metrics::gauge!("zebra.state.rocksdb.num_files_at_level", "level" => level.to_string())
+                    .set(count as f64);
+            }
+        }
     }
 
     /// Returns the estimated total disk space usage of the database.

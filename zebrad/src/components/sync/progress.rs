@@ -165,6 +165,12 @@ pub async fn show_block_chain_progress(
                 remaining_sync_blocks = 0;
             }
 
+            // Export sync distance metrics for observability
+            metrics::gauge!("sync.estimated_network_tip_height")
+                .set(estimated_height.0 as f64);
+            metrics::gauge!("sync.estimated_distance_to_tip")
+                .set(remaining_sync_blocks as f64);
+
             // Work out how long it has been since the state height has increased.
             //
             // Non-finalized forks can decrease the height, we only want to track increases.
