@@ -30,12 +30,18 @@ use super::{OrchardVanilla, ShieldedDataFlavor};
 
 // FIXME: wrap all ActionGroup usages with tx_v6 feature flag?
 /// Action Group description.
-#[cfg(feature = "tx_v6")]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(bound(
-    serialize = "Flavor::EncryptedNote: serde::Serialize, Flavor::BurnType: serde::Serialize",
-    deserialize = "Flavor::BurnType: serde::Deserialize<'de>"
-))]
+#[cfg_attr(
+    not(feature = "tx_v6"),
+    serde(bound(serialize = "Flavor::EncryptedNote: serde::Serialize"))
+)]
+#[cfg_attr(
+    feature = "tx_v6",
+    serde(bound(
+        serialize = "Flavor::EncryptedNote: serde::Serialize, Flavor::BurnType: serde::Serialize",
+        deserialize = "Flavor::BurnType: serde::Deserialize<'de>"
+    ))
+)]
 pub struct ActionGroup<Flavor: ShieldedDataFlavor> {
     /// The orchard flags for this transaction.
     /// Denoted as `flagsOrchard` in the spec.
@@ -72,10 +78,17 @@ impl<Flavor: ShieldedDataFlavor> ActionGroup<Flavor> {
 
 /// A bundle of [`Action`] descriptions and signature data.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(bound(
-    serialize = "Flavor::EncryptedNote: serde::Serialize, Flavor::BurnType: serde::Serialize",
-    deserialize = "Flavor::BurnType: serde::Deserialize<'de>"
-))]
+#[cfg_attr(
+    not(feature = "tx_v6"),
+    serde(bound(serialize = "Flavor::EncryptedNote: serde::Serialize"))
+)]
+#[cfg_attr(
+    feature = "tx_v6",
+    serde(bound(
+        serialize = "Flavor::EncryptedNote: serde::Serialize, Flavor::BurnType: serde::Serialize",
+        deserialize = "Flavor::BurnType: serde::Deserialize<'de>"
+    ))
+)]
 pub struct ShieldedData<Flavor: ShieldedDataFlavor> {
     /// Action Group descriptions.
     /// Denoted as `vActionGroupsOrchard` in the spec (ZIP 230).

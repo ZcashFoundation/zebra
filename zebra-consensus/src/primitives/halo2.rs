@@ -148,7 +148,7 @@ impl<V: OrchardVerifier> From<&ActionGroup<V>> for Item {
         let anchor = tree::Anchor::from_bytes(action_group.shared_anchor.into()).unwrap();
 
         let flags = orchard::bundle::Flags::from_byte(action_group.flags.bits())
-            .expect("failed to convert flags: shielded_data.flags contains unexpected bits that are not valid in orchard::bundle::Flags");
+            .expect("failed to convert flags: action_group.flags contains unexpected bits that are not valid in orchard::bundle::Flags");
 
         let instances = action_group
             .actions()

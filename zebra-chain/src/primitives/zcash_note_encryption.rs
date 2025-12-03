@@ -70,8 +70,8 @@ pub fn decrypts_successfully(transaction: &Transaction, network: &Network, heigh
 }
 
 /// Checks if all actions in an Orchard bundle decrypt successfully.
-fn orchard_bundle_decrypts_successfully<A: Authorization, V, D: OrchardPrimitives>(
-    bundle: &Bundle<A, V, D>,
+fn orchard_bundle_decrypts_successfully<A: Authorization, V, P: OrchardPrimitives>(
+    bundle: &Bundle<A, V, P>,
 ) -> bool {
     bundle.actions().iter().all(|act| {
         zcash_note_encryption::try_output_recovery_with_ovk(
