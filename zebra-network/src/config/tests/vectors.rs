@@ -1,10 +1,7 @@
 //! Fixed test vectors for zebra-network configuration.
 
 use static_assertions::const_assert;
-use zebra_chain::parameters::{
-    subsidy::FUNDING_STREAMS_TESTNET,
-    testnet::{self, ConfiguredFundingStreams},
-};
+use zebra_chain::parameters::testnet::{self, ConfiguredFundingStreams};
 
 use crate::{
     constants::{INBOUND_PEER_LIMIT_MULTIPLIER, OUTBOUND_PEER_LIMIT_MULTIPLIER},
@@ -92,7 +89,8 @@ fn default_config_uses_ipv6() {
 fn funding_streams_serialization_roundtrip() {
     let _init_guard = zebra_test::init();
 
-    let fs = FUNDING_STREAMS_TESTNET
+    let fs = testnet::Parameters::default()
+        .funding_streams()
         .iter()
         .map(ConfiguredFundingStreams::from)
         .collect();

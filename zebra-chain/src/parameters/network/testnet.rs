@@ -11,16 +11,14 @@ use crate::{
         network::error::ParametersBuilderError,
         network_upgrade::TESTNET_ACTIVATION_HEIGHTS,
         subsidy::{
+            constants::mainnet,
+            constants::testnet,
             constants::{
-                testnet::{
-                    FUNDING_STREAM_ECC_ADDRESSES_TESTNET, FUNDING_STREAM_MG_ADDRESSES_TESTNET,
-                    FUNDING_STREAM_ZF_ADDRESSES_TESTNET, NU6_1_LOCKBOX_DISBURSEMENTS_TESTNET,
-                },
                 BLOSSOM_POW_TARGET_SPACING_RATIO, FUNDING_STREAM_RECEIVER_DENOMINATOR,
                 POST_BLOSSOM_HALVING_INTERVAL, PRE_BLOSSOM_HALVING_INTERVAL,
             },
             funding_stream_address_period, FundingStreamReceiver, FundingStreamRecipient,
-            FundingStreams, FUNDING_STREAMS_MAINNET, FUNDING_STREAMS_TESTNET,
+            FundingStreams,
         },
         Network, NetworkKind, NetworkUpgrade,
     },
@@ -80,7 +78,7 @@ impl ConfiguredFundingStreamRecipient {
                 receiver: Ecc,
                 numerator: 7,
                 addresses: Some(
-                    FUNDING_STREAM_ECC_ADDRESSES_TESTNET
+                    testnet::FUNDING_STREAM_ECC_ADDRESSES
                         .map(ToString::to_string)
                         .to_vec(),
                 ),
@@ -89,7 +87,7 @@ impl ConfiguredFundingStreamRecipient {
                 receiver: ZcashFoundation,
                 numerator: 5,
                 addresses: Some(
-                    FUNDING_STREAM_ZF_ADDRESSES_TESTNET
+                    testnet::FUNDING_STREAM_ZF_ADDRESSES
                         .map(ToString::to_string)
                         .to_vec(),
                 ),
@@ -98,7 +96,7 @@ impl ConfiguredFundingStreamRecipient {
                 receiver: MajorGrants,
                 numerator: 8,
                 addresses: Some(
-                    FUNDING_STREAM_MG_ADDRESSES_TESTNET
+                    testnet::FUNDING_STREAM_MG_ADDRESSES
                         .map(ToString::to_string)
                         .to_vec(),
                 ),
@@ -505,12 +503,12 @@ impl Default for ParametersBuilder {
                 .to_expanded()
                 .expect("difficulty limits are valid expanded values"),
             disable_pow: false,
-            funding_streams: FUNDING_STREAMS_TESTNET.clone(),
+            funding_streams: testnet::FUNDING_STREAMS.clone(),
             should_lock_funding_stream_address_period: false,
             pre_blossom_halving_interval: PRE_BLOSSOM_HALVING_INTERVAL,
             post_blossom_halving_interval: POST_BLOSSOM_HALVING_INTERVAL,
             should_allow_unshielded_coinbase_spends: false,
-            lockbox_disbursements: NU6_1_LOCKBOX_DISBURSEMENTS_TESTNET
+            lockbox_disbursements: testnet::NU6_1_LOCKBOX_DISBURSEMENTS
                 .iter()
                 .map(|(addr, amount)| (addr.to_string(), *amount))
                 .collect(),
@@ -678,14 +676,14 @@ impl ParametersBuilder {
     ///
     /// # Panics
     ///
-    /// If `funding_streams` is longer than `FUNDING_STREAMS_TESTNET`, and one
+    /// If `funding_streams` is longer than `testnet::FUNDING_STREAMS`, and one
     /// of the extra streams requires a default value.
     pub fn with_funding_streams(mut self, funding_streams: Vec<ConfiguredFundingStreams>) -> Self {
         self.funding_streams = funding_streams
             .into_iter()
             .enumerate()
             .map(|(idx, streams)| {
-                let default_streams = FUNDING_STREAMS_TESTNET.get(idx).cloned();
+                let default_streams = testnet::FUNDING_STREAMS.get(idx).cloned();
                 streams.convert_with_default(default_streams)
             })
             .collect();
@@ -704,8 +702,6 @@ impl ParametersBuilder {
     ///
     /// This should be called after configuring the desired network upgrade activation heights.
     pub fn extend_funding_streams(mut self) -> Self {
-        // self.funding_streams.extend(FUNDING_STREAMS_TESTNET);
-
         let network = self.to_network_unchecked();
 
         for funding_streams in &mut self.funding_streams {
@@ -1203,7 +1199,7 @@ impl Network {
         if let Self::Testnet(params) = self {
             params.funding_streams()
         } else {
-            &FUNDING_STREAMS_MAINNET
+            &mainnet::FUNDING_STREAMS
         }
     }
 

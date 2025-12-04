@@ -3,4 +3,4 @@
 use crate::block::Height;
 
 /// The first halving height in the regtest is at block height `287`.
-pub(crate) const FIRST_HALVING_REGTEST: Height = Height(287);
+pub(crate) const FIRST_HALVING: Height = Height(287);
