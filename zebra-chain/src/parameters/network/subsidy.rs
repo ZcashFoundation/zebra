@@ -12,7 +12,7 @@
 //! Typically, consensus parameters are accessed via a function that takes a
 //! `Network` and `block::Height`.
 
-pub mod constants;
+pub(crate) mod constants;
 
 use std::collections::HashMap;
 

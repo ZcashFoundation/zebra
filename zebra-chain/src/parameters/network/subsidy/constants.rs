@@ -1,8 +1,8 @@
 //! Constants for block subsidies.
 
-pub mod mainnet;
-pub mod regtest;
-pub mod testnet;
+pub(crate) mod mainnet;
+pub(crate) mod regtest;
+pub(crate) mod testnet;
 
 use crate::amount::COIN;
 use crate::block::HeightDiff;
