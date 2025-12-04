@@ -1,12 +1,18 @@
 //! Mainnet-specific constants for block subsidies.
 
+use lazy_static::lazy_static;
+
 use crate::parameters::{
+    constants::activation_heights,
     network::{Amount, Height, NonNegative},
-    subsidy::constants::POST_NU6_FUNDING_STREAM_NUM_BLOCKS,
+    subsidy::{
+        constants::POST_NU6_FUNDING_STREAM_NUM_BLOCKS, FundingStreamReceiver,
+        FundingStreamRecipient, FundingStreams,
+    },
 };
 
 /// The start height of post-NU6 funding streams on Mainnet as described in [ZIP-1015](https://zips.z.cash/zip-1015).
-pub(crate) const POST_NU6_FUNDING_STREAM_START_HEIGHT_MAINNET: u32 = 2_726_400;
+pub(crate) const POST_NU6_FUNDING_STREAM_START_HEIGHT: u32 = 2_726_400;
 
 /// The one-time lockbox disbursement output addresses and amounts expected in the NU6.1 activation block's
 /// coinbase transaction on Mainnet.
@@ -15,31 +21,30 @@ pub(crate) const POST_NU6_FUNDING_STREAM_START_HEIGHT_MAINNET: u32 = 2_726_400;
 ///
 /// - <https://zips.z.cash/zip-0271#one-timelockboxdisbursement>
 /// - <https://zips.z.cash/zip-0214#mainnet-recipients-for-revision-2>
-pub(crate) const NU6_1_LOCKBOX_DISBURSEMENTS_MAINNET: [(&str, Amount<NonNegative>); 10] = [(
+pub(crate) const NU6_1_LOCKBOX_DISBURSEMENTS: [(&str, Amount<NonNegative>); 10] = [(
     "t3ev37Q2uL1sfTsiJQJiWJoFzQpDhmnUwYo",
-    EXPECTED_NU6_1_LOCKBOX_DISBURSEMENTS_TOTAL_MAINNET.div_exact(10),
+    EXPECTED_NU6_1_LOCKBOX_DISBURSEMENTS_TOTAL.div_exact(10),
 ); 10];
 
 /// The expected total amount of the one-time lockbox disbursement on Mainnet.
 /// See: <https://zips.z.cash/zip-0271#one-timelockboxdisbursement>.
-pub(crate) const EXPECTED_NU6_1_LOCKBOX_DISBURSEMENTS_TOTAL_MAINNET: Amount<NonNegative> =
+pub(crate) const EXPECTED_NU6_1_LOCKBOX_DISBURSEMENTS_TOTAL: Amount<NonNegative> =
     Amount::new_from_zec(78_750);
 
 /// The post-NU6 funding stream height range on Mainnet
-pub(crate) const POST_NU6_FUNDING_STREAM_START_RANGE_MAINNET: std::ops::Range<Height> =
-    Height(POST_NU6_FUNDING_STREAM_START_HEIGHT_MAINNET)
-        ..Height(POST_NU6_FUNDING_STREAM_START_HEIGHT_MAINNET + POST_NU6_FUNDING_STREAM_NUM_BLOCKS);
+pub(crate) const POST_NU6_FUNDING_STREAM_START_RANGE: std::ops::Range<Height> =
+    Height(POST_NU6_FUNDING_STREAM_START_HEIGHT)
+        ..Height(POST_NU6_FUNDING_STREAM_START_HEIGHT + POST_NU6_FUNDING_STREAM_NUM_BLOCKS);
 
 /// Number of addresses for each funding stream in the Mainnet.
 /// In the spec ([protocol specification §7.10][7.10]) this is defined as: `fs.addressindex(fs.endheight - 1)`
 /// however we know this value beforehand so we prefer to make it a constant instead.
 ///
 /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
-pub(crate) const FUNDING_STREAMS_NUM_ADDRESSES_MAINNET: usize = 48;
+pub(crate) const FUNDING_STREAMS_NUM_ADDRESSES: usize = 48;
 
 /// List of addresses for the ECC funding stream in the Mainnet.
-pub(crate) const FUNDING_STREAM_ECC_ADDRESSES_MAINNET: [&str;
-    FUNDING_STREAMS_NUM_ADDRESSES_MAINNET] = [
+pub(crate) const FUNDING_STREAM_ECC_ADDRESSES: [&str; FUNDING_STREAMS_NUM_ADDRESSES] = [
     "t3LmX1cxWPPPqL4TZHx42HU3U5ghbFjRiif",
     "t3Toxk1vJQ6UjWQ42tUJz2rV2feUWkpbTDs",
     "t3ZBdBe4iokmsjdhMuwkxEdqMCFN16YxKe6",
@@ -91,35 +96,95 @@ pub(crate) const FUNDING_STREAM_ECC_ADDRESSES_MAINNET: [&str;
 ];
 
 /// List of addresses for the Zcash Foundation funding stream in the Mainnet.
-pub(crate) const FUNDING_STREAM_ZF_ADDRESSES_MAINNET: [&str;
-    FUNDING_STREAMS_NUM_ADDRESSES_MAINNET] =
-    ["t3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1"; FUNDING_STREAMS_NUM_ADDRESSES_MAINNET];
+pub(crate) const FUNDING_STREAM_ZF_ADDRESSES: [&str; FUNDING_STREAMS_NUM_ADDRESSES] =
+    ["t3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1"; FUNDING_STREAMS_NUM_ADDRESSES];
 
 /// List of addresses for the Major Grants funding stream in the Mainnet.
-pub(crate) const FUNDING_STREAM_MG_ADDRESSES_MAINNET: [&str;
-    FUNDING_STREAMS_NUM_ADDRESSES_MAINNET] =
-    ["t3XyYW8yBFRuMnfvm5KLGFbEVz25kckZXym"; FUNDING_STREAMS_NUM_ADDRESSES_MAINNET];
+pub(crate) const FUNDING_STREAM_MG_ADDRESSES: [&str; FUNDING_STREAMS_NUM_ADDRESSES] =
+    ["t3XyYW8yBFRuMnfvm5KLGFbEVz25kckZXym"; FUNDING_STREAMS_NUM_ADDRESSES];
 
 /// Number of addresses for each post-NU6 funding stream on Mainnet.
 /// In the spec ([protocol specification §7.10][7.10]) this is defined as: `fs.addressindex(fs.endheight - 1)`
 /// however we know this value beforehand so we prefer to make it a constant instead.
 ///
 /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
-pub(crate) const POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES_MAINNET: usize = 12;
+pub(crate) const POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES: usize = 12;
 
 /// List of addresses for the Major Grants post-NU6 funding stream on Mainnet administered by the Financial Privacy Fund (FPF).
-pub(crate) const POST_NU6_FUNDING_STREAM_FPF_ADDRESSES_MAINNET: [&str;
-    POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES_MAINNET] =
-    ["t3cFfPt1Bcvgez9ZbMBFWeZsskxTkPzGCow"; POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES_MAINNET];
+pub(crate) const POST_NU6_FUNDING_STREAM_FPF_ADDRESSES: [&str;
+    POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES] =
+    ["t3cFfPt1Bcvgez9ZbMBFWeZsskxTkPzGCow"; POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES];
 
 /// Number of addresses for each post-NU6.1 funding stream on Mainnet.
 /// In the spec ([protocol specification §7.10][7.10]) this is defined as: `fs.addressindex(fs.endheight - 1)`
 /// however we know this value beforehand so we prefer to make it a constant instead.
 ///
 /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
-pub(crate) const POST_NU6_1_FUNDING_STREAMS_NUM_ADDRESSES_MAINNET: usize = 36;
+pub(crate) const POST_NU6_1_FUNDING_STREAMS_NUM_ADDRESSES: usize = 36;
 
 /// List of addresses for the Major Grants post-NU6.1 funding stream on Mainnet administered by the Financial Privacy Fund (FPF).
-pub(crate) const POST_NU6_1_FUNDING_STREAM_FPF_ADDRESSES_MAINNET: [&str;
-    POST_NU6_1_FUNDING_STREAMS_NUM_ADDRESSES_MAINNET] =
-    ["t3cFfPt1Bcvgez9ZbMBFWeZsskxTkPzGCow"; POST_NU6_1_FUNDING_STREAMS_NUM_ADDRESSES_MAINNET];
+pub(crate) const POST_NU6_1_FUNDING_STREAM_FPF_ADDRESSES: [&str;
+    POST_NU6_1_FUNDING_STREAMS_NUM_ADDRESSES] =
+    ["t3cFfPt1Bcvgez9ZbMBFWeZsskxTkPzGCow"; POST_NU6_1_FUNDING_STREAMS_NUM_ADDRESSES];
+
+lazy_static! {
+    /// The funding streams for Mainnet as described in:
+    /// - [protocol specification §7.10.1][7.10.1]
+    /// - [ZIP-1015](https://zips.z.cash/zip-1015)
+    /// - [ZIP-214#funding-streams](https://zips.z.cash/zip-0214#funding-streams)
+    ///
+    /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
+    pub(crate) static ref FUNDING_STREAMS: Vec<FundingStreams> = vec![
+        FundingStreams {
+            height_range: Height(1_046_400)..Height(2_726_400),
+            recipients: [
+                (
+                    FundingStreamReceiver::Ecc,
+                    FundingStreamRecipient::new(7, FUNDING_STREAM_ECC_ADDRESSES),
+                ),
+                (
+                    FundingStreamReceiver::ZcashFoundation,
+                    FundingStreamRecipient::new(5, FUNDING_STREAM_ZF_ADDRESSES),
+                ),
+                (
+                    FundingStreamReceiver::MajorGrants,
+                    FundingStreamRecipient::new(8, FUNDING_STREAM_MG_ADDRESSES),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        },
+        FundingStreams {
+            height_range: POST_NU6_FUNDING_STREAM_START_RANGE,
+            recipients: [
+                (
+                    FundingStreamReceiver::Deferred,
+                    FundingStreamRecipient::new::<[&str; 0], &str>(12, []),
+                ),
+                (
+                    FundingStreamReceiver::MajorGrants,
+                    FundingStreamRecipient::new(8, POST_NU6_FUNDING_STREAM_FPF_ADDRESSES),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        },
+
+        FundingStreams {
+            height_range: activation_heights::mainnet::NU6_1..Height(4_406_400),
+            recipients: [
+                (
+                    FundingStreamReceiver::Deferred,
+                    FundingStreamRecipient::new::<[&str; 0], &str>(12, []),
+                ),
+                (
+                    FundingStreamReceiver::MajorGrants,
+                    FundingStreamRecipient::new(8, POST_NU6_1_FUNDING_STREAM_FPF_ADDRESSES),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        },
+    ];
+
+}

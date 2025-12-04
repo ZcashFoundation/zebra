@@ -16,29 +16,15 @@ pub mod constants;
 
 use std::collections::HashMap;
 
-use lazy_static::lazy_static;
-
 use crate::{
     amount::{self, Amount, NonNegative},
     block::{Height, HeightDiff},
-    parameters::{constants::activation_heights, Network, NetworkUpgrade},
+    parameters::{Network, NetworkUpgrade},
     transparent,
 };
 
 use constants::{
-    mainnet::{
-        FUNDING_STREAM_ECC_ADDRESSES_MAINNET, FUNDING_STREAM_MG_ADDRESSES_MAINNET,
-        FUNDING_STREAM_ZF_ADDRESSES_MAINNET, POST_NU6_1_FUNDING_STREAM_FPF_ADDRESSES_MAINNET,
-        POST_NU6_FUNDING_STREAM_FPF_ADDRESSES_MAINNET, POST_NU6_FUNDING_STREAM_START_RANGE_MAINNET,
-    },
-    regtest::FIRST_HALVING_REGTEST,
-    testnet::{
-        FIRST_HALVING_TESTNET, FUNDING_STREAM_ECC_ADDRESSES_TESTNET,
-        FUNDING_STREAM_MG_ADDRESSES_TESTNET, FUNDING_STREAM_ZF_ADDRESSES_TESTNET,
-        POST_NU6_1_FUNDING_STREAM_FPF_ADDRESSES_TESTNET,
-        POST_NU6_FUNDING_STREAM_FPF_ADDRESSES_TESTNET, POST_NU6_FUNDING_STREAM_START_RANGE_TESTNET,
-    },
-    BLOSSOM_POW_TARGET_SPACING_RATIO, FUNDING_STREAM_RECEIVER_DENOMINATOR,
+    regtest, testnet, BLOSSOM_POW_TARGET_SPACING_RATIO, FUNDING_STREAM_RECEIVER_DENOMINATOR,
     FUNDING_STREAM_SPECIFICATION, LOCKBOX_SPECIFICATION, MAX_BLOCK_SUBSIDY,
     POST_BLOSSOM_HALVING_INTERVAL, PRE_BLOSSOM_HALVING_INTERVAL,
 };
@@ -225,125 +211,6 @@ impl FundingStreamRecipient {
     }
 }
 
-lazy_static! {
-    /// The funding streams for Mainnet as described in:
-    /// - [protocol specification §7.10.1][7.10.1]
-    /// - [ZIP-1015](https://zips.z.cash/zip-1015)
-    /// - [ZIP-214#funding-streams](https://zips.z.cash/zip-0214#funding-streams)
-    ///
-    /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
-    pub static ref FUNDING_STREAMS_MAINNET: Vec<FundingStreams> = vec![
-        FundingStreams {
-            height_range: Height(1_046_400)..Height(2_726_400),
-            recipients: [
-                (
-                    FundingStreamReceiver::Ecc,
-                    FundingStreamRecipient::new(7, FUNDING_STREAM_ECC_ADDRESSES_MAINNET),
-                ),
-                (
-                    FundingStreamReceiver::ZcashFoundation,
-                    FundingStreamRecipient::new(5, FUNDING_STREAM_ZF_ADDRESSES_MAINNET),
-                ),
-                (
-                    FundingStreamReceiver::MajorGrants,
-                    FundingStreamRecipient::new(8, FUNDING_STREAM_MG_ADDRESSES_MAINNET),
-                ),
-            ]
-            .into_iter()
-            .collect(),
-        },
-        FundingStreams {
-            height_range: POST_NU6_FUNDING_STREAM_START_RANGE_MAINNET,
-            recipients: [
-                (
-                    FundingStreamReceiver::Deferred,
-                    FundingStreamRecipient::new::<[&str; 0], &str>(12, []),
-                ),
-                (
-                    FundingStreamReceiver::MajorGrants,
-                    FundingStreamRecipient::new(8, POST_NU6_FUNDING_STREAM_FPF_ADDRESSES_MAINNET),
-                ),
-            ]
-            .into_iter()
-            .collect(),
-        },
-
-        FundingStreams {
-            height_range: activation_heights::mainnet::NU6_1..Height(4_406_400),
-            recipients: [
-                (
-                    FundingStreamReceiver::Deferred,
-                    FundingStreamRecipient::new::<[&str; 0], &str>(12, []),
-                ),
-                (
-                    FundingStreamReceiver::MajorGrants,
-                    FundingStreamRecipient::new(8, POST_NU6_1_FUNDING_STREAM_FPF_ADDRESSES_MAINNET),
-                ),
-            ]
-            .into_iter()
-            .collect(),
-        },
-    ];
-
-    /// The funding streams for Testnet as described in:
-    /// - [protocol specification §7.10.1][7.10.1]
-    /// - [ZIP-1015](https://zips.z.cash/zip-1015)
-    /// - [ZIP-214#funding-streams](https://zips.z.cash/zip-0214#funding-streams)
-    ///
-    /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
-    pub static ref FUNDING_STREAMS_TESTNET: Vec<FundingStreams> = vec![
-        FundingStreams {
-            height_range: Height(1_028_500)..Height(2_796_000),
-            recipients: [
-                (
-                    FundingStreamReceiver::Ecc,
-                    FundingStreamRecipient::new(7, FUNDING_STREAM_ECC_ADDRESSES_TESTNET),
-                ),
-                (
-                    FundingStreamReceiver::ZcashFoundation,
-                    FundingStreamRecipient::new(5, FUNDING_STREAM_ZF_ADDRESSES_TESTNET),
-                ),
-                (
-                    FundingStreamReceiver::MajorGrants,
-                    FundingStreamRecipient::new(8, FUNDING_STREAM_MG_ADDRESSES_TESTNET),
-                ),
-            ]
-            .into_iter()
-            .collect(),
-        },
-        FundingStreams {
-            height_range: POST_NU6_FUNDING_STREAM_START_RANGE_TESTNET,
-            recipients: [
-                (
-                    FundingStreamReceiver::Deferred,
-                    FundingStreamRecipient::new::<[&str; 0], &str>(12, []),
-                ),
-                (
-                    FundingStreamReceiver::MajorGrants,
-                    FundingStreamRecipient::new(8, POST_NU6_FUNDING_STREAM_FPF_ADDRESSES_TESTNET),
-                ),
-            ]
-            .into_iter()
-            .collect(),
-        },
-        FundingStreams {
-            height_range: activation_heights::testnet::NU6_1..Height(4_476_000),
-            recipients: [
-                (
-                    FundingStreamReceiver::Deferred,
-                    FundingStreamRecipient::new::<[&str; 0], &str>(12, []),
-                ),
-                (
-                    FundingStreamReceiver::MajorGrants,
-                    FundingStreamRecipient::new(8, POST_NU6_1_FUNDING_STREAM_FPF_ADDRESSES_TESTNET),
-                ),
-            ]
-            .into_iter()
-            .collect(),
-        },
-    ];
-}
-
 /// Functionality specific to block subsidy-related consensus rules
 pub trait ParameterSubsidy {
     /// Returns the minimum height after the first halving
@@ -379,9 +246,9 @@ impl ParameterSubsidy for Network {
                 .expect("canopy activation height should be available"),
             Network::Testnet(params) => {
                 if params.is_regtest() {
-                    FIRST_HALVING_REGTEST
+                    regtest::FIRST_HALVING
                 } else if params.is_default_testnet() {
-                    FIRST_HALVING_TESTNET
+                    testnet::FIRST_HALVING
                 } else {
                     height_for_halving(1, self).expect("first halving height should be available")
                 }
