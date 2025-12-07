@@ -1334,7 +1334,7 @@ async fn send_periodic_heartbeats_run_loop(
                 // the collector doesn't depend on network activity,
                 // so this await should not hang
                 let _ = heartbeat_ts_collector
-                    .send(MetaAddr::new_responded(book_addr, Some(rtt), None))
+                    .send(MetaAddr::new_responded(book_addr, Some(rtt)))
                     .await;
             }
         }
