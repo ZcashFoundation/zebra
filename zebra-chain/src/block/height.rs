@@ -148,6 +148,12 @@ impl TryFrom<u32> for Height {
     }
 }
 
+impl From<Height> for u32 {
+    fn from(height: Height) -> Self {
+        height.0
+    }
+}
+
 impl From<Height> for u64 {
     fn from(height: Height) -> Self {
         height.0.into()

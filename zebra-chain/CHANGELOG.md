@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `amount::Amount::is_zero`
 - `parameters::network::subsidy::constants` module.
 - `impl From<block::Height> for u64`
+- `impl From<block::Height> for u32`
 
 ### Removed
 
