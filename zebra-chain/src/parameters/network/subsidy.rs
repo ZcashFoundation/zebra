@@ -489,3 +489,16 @@ pub fn miner_subsidy(
 
     expected_block_subsidy - total_funding_stream_amount?
 }
+
+/// `FoundersReward(height)` as described in [§7.8].
+///
+/// [§7.8]: <https://zips.z.cash/protocol/protocol.pdf#subsidies>
+pub fn founders_reward(net: &Network, height: Height) -> Amount<NonNegative> {
+    if halving(height, net) < 1 {
+        block_subsidy(height, net)
+            .map(|subsidy| subsidy.div_exact(5))
+            .expect("block subsidy must be valid for founders rewards")
+    } else {
+        Amount::zero()
+    }
+}
