@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `parameters::network::subsidy::SubsidyError::` has new variants:
   `FoundersRewardNotFound` and ` Underflow`, and the variant `SumOverflow` was
   renamed to `Overflow`.
+- `parameters::network::subsidy::num_halvings` was renamed to `halving`.
 
 ### Removed
 
