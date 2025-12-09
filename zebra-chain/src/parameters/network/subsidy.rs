@@ -339,7 +339,7 @@ pub fn funding_stream_values(
     height: Height,
     network: &Network,
     expected_block_subsidy: Amount<NonNegative>,
-) -> Result<HashMap<FundingStreamReceiver, Amount<NonNegative>>, crate::amount::Error> {
+) -> Result<HashMap<FundingStreamReceiver, Amount<NonNegative>>, amount::Error> {
     let mut results = HashMap::new();
 
     if expected_block_subsidy.is_zero() {
