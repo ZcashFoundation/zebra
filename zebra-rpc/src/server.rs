@@ -12,6 +12,7 @@ use std::{fmt, panic};
 use cookie::Cookie;
 use jsonrpsee::server::{middleware::rpc::RpcServiceBuilder, Server, ServerHandle};
 use tokio::task::JoinHandle;
+use tower_http::cors::{Any, CorsLayer};
 use tracing::*;
 
 use zebra_chain::{chain_sync_status::ChainSyncStatus, chain_tip::ChainTip, parameters::Network};
@@ -123,7 +124,25 @@ impl RpcServer {
             HttpRequestMiddlewareLayer::new(None)
         };
 
-        let http_middleware = tower::ServiceBuilder::new().layer(http_middleware_layer);
+        // CORS for the OpenRPC Inspector and Playground.
+        //
+        // Allows to use localhost in the inspector and playground.
+        // TODO: Needs to be configurable.
+        let cors = CorsLayer::new()
+            .allow_origin(tower_http::cors::AllowOrigin::list(vec![
+                "https://inspector.open-rpc.org"
+                    .parse::<hyper::header::HeaderValue>()
+                    .expect("valid header value"),
+                "https://playground.open-rpc.org"
+                    .parse::<hyper::header::HeaderValue>()
+                    .expect("valid header value"),
+            ]))
+            .allow_methods([hyper::Method::POST, hyper::Method::OPTIONS])
+            .allow_headers(Any);
+
+        let http_middleware = tower::ServiceBuilder::new()
+            .layer(cors)
+            .layer(http_middleware_layer);
 
         let rpc_middleware = RpcServiceBuilder::new()
             .rpc_logger(1024)
