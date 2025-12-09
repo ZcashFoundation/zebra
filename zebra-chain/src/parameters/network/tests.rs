@@ -11,8 +11,8 @@ use crate::{
     block::Height,
     parameters::{
         subsidy::{
-            block_subsidy, constants::POST_BLOSSOM_HALVING_INTERVAL, halving_divisor,
-            height_for_halving, num_halvings, ParameterSubsidy as _,
+            block_subsidy, constants::POST_BLOSSOM_HALVING_INTERVAL, halving, halving_divisor,
+            height_for_halving, ParameterSubsidy as _,
         },
         NetworkUpgrade,
     },
@@ -295,9 +295,9 @@ fn block_subsidy_for_network(network: &Network) -> Result<(), Report> {
 #[test]
 fn check_height_for_num_halvings() {
     for network in Network::iter() {
-        for halving in 1..1000 {
-            let Some(height_for_halving) = height_for_halving(halving, &network) else {
-                panic!("could not find height for halving {halving}");
+        for h in 1..1000 {
+            let Some(height_for_halving) = height_for_halving(h, &network) else {
+                panic!("could not find height for halving {h}");
             };
 
             let prev_height = height_for_halving
@@ -305,14 +305,14 @@ fn check_height_for_num_halvings() {
                 .expect("there should be a previous height");
 
             assert_eq!(
-                halving,
-                num_halvings(height_for_halving, &network),
+                h,
+                halving(height_for_halving, &network),
                 "num_halvings should match the halving index"
             );
 
             assert_eq!(
-                halving - 1,
-                num_halvings(prev_height, &network),
+                h - 1,
+                halving(prev_height, &network),
                 "num_halvings for the prev height should be 1 less than the halving index"
             );
         }

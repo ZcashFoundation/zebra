@@ -407,7 +407,7 @@ pub enum SubsidyError {
 /// Returns `None` if the divisor would overflow a `u64`.
 pub fn halving_divisor(height: Height, network: &Network) -> Option<u64> {
     // Some far-future shifts can be more than 63 bits
-    1u64.checked_shl(num_halvings(height, network))
+    1u64.checked_shl(halving(height, network))
 }
 
 /// The halving index for a block height and network.
@@ -415,7 +415,7 @@ pub fn halving_divisor(height: Height, network: &Network) -> Option<u64> {
 /// `Halving(height)`, as described in [protocol specification §7.8][7.8]
 ///
 /// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
-pub fn num_halvings(height: Height, network: &Network) -> u32 {
+pub fn halving(height: Height, network: &Network) -> u32 {
     let slow_start_shift = network.slow_start_shift();
     let blossom_height = NetworkUpgrade::Blossom
         .activation_height(network)
