@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `block::subsidy::funding_stream_address`
+- `impl From<zebra_chain::amount::Error> for error::BlockError`
 
 ### Removed
 
