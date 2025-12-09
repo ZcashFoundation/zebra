@@ -11,20 +11,21 @@ use zebra_chain::{
     },
     block::{Block, Hash, Header, Height},
     parameters::{
-        subsidy::{FundingStreamReceiver, SubsidyError},
+        subsidy::{
+            founders_reward, founders_reward_address, funding_stream_values, FundingStreamReceiver,
+            ParameterSubsidy, SubsidyError,
+        },
         Network, NetworkUpgrade,
     },
     transaction::{self, Transaction},
-    transparent::Output,
+    transparent::{Address, Output},
     work::{
         difficulty::{ExpandedDifficulty, ParameterDifficulty as _},
         equihash,
     },
 };
 
-use crate::error::*;
-
-use super::subsidy;
+use crate::{error::*, funding_stream_address};
 
 /// Checks if there is exactly one coinbase transaction in `Block`,
 /// and if that coinbase transaction is the first transaction in the block.
@@ -148,112 +149,156 @@ pub fn equihash_solution_is_valid(header: &Header) -> Result<(), equihash::Error
     header.solution.check(header)
 }
 
-/// Returns `Ok()` with the deferred pool balance change of the coinbase transaction if
-/// the block subsidy in `block` is valid for `network`
+/// Returns `Ok()` with the deferred pool balance change of the coinbase transaction if the block
+/// subsidy in `block` is valid for `network`
 ///
 /// [3.9]: https://zips.z.cash/protocol/protocol.pdf#subsidyconcepts
 pub fn subsidy_is_valid(
     block: &Block,
-    network: &Network,
+    net: &Network,
     expected_block_subsidy: Amount<NonNegative>,
 ) -> Result<DeferredPoolBalanceChange, BlockError> {
-    let height = block.coinbase_height().ok_or(SubsidyError::NoCoinbase)?;
-    let coinbase = block.transactions.first().ok_or(SubsidyError::NoCoinbase)?;
-
-    // Validate funding streams
-    let Some(halving_div) = zebra_chain::parameters::subsidy::halving_divisor(height, network)
-    else {
-        // Far future halving, with no founders reward or funding streams
+    if expected_block_subsidy.is_zero() {
         return Ok(DeferredPoolBalanceChange::zero());
+    }
+
+    let height = block.coinbase_height().ok_or(SubsidyError::NoCoinbase)?;
+
+    let mut coinbase_outputs: MultiSet<Output> = block
+        .transactions
+        .first()
+        .ok_or(SubsidyError::NoCoinbase)?
+        .outputs()
+        .iter()
+        .cloned()
+        .collect();
+
+    let mut has_amount = |addr: &Address, amount| {
+        assert!(addr.is_script_hash(), "address must be P2SH");
+
+        coinbase_outputs.remove(&Output::new(amount, addr.script()))
     };
 
-    let canopy_activation_height = NetworkUpgrade::Canopy
-        .activation_height(network)
-        .expect("Canopy activation height is known");
+    // # Note
+    //
+    // Canopy activation is at the first halving on Mainnet, but not on Testnet. [ZIP-1014] only
+    // applies to Mainnet; [ZIP-214] contains the specific rules for Testnet funding stream amount
+    // values.
+    //
+    // [ZIP-1014]: <https://zips.z.cash/zip-1014>
+    // [ZIP-214]: <https://zips.z.cash/zip-0214
+    if NetworkUpgrade::current(net, height) < NetworkUpgrade::Canopy {
+        // # Consensus
+        //
+        // > [Pre-Canopy] A coinbase transaction at `height ∈ {1 .. FoundersRewardLastBlockHeight}`
+        // > MUST include at least one output that pays exactly `FoundersReward(height)` zatoshi
+        // > with a standard P2SH script of the form `OP_HASH160 FounderRedeemScriptHash(height)
+        // > OP_EQUAL` as its `scriptPubKey`.
+        //
+        // ## Notes
+        //
+        // - `FoundersRewardLastBlockHeight := max({height : N | Halving(height) < 1})`
+        //
+        // <https://zips.z.cash/protocol/protocol.pdf#foundersreward>
 
-    let slow_start_interval = network.slow_start_interval();
+        if Height::MIN < height && height < net.height_for_first_halving() {
+            let addr = founders_reward_address(net, height).ok_or(BlockError::Other(format!(
+                "founders reward address must be defined for height: {height:?}"
+            )))?;
 
-    if height < slow_start_interval {
-        unreachable!(
-            "unsupported block height: callers should handle blocks below {:?}",
-            slow_start_interval
-        )
-    } else if halving_div.count_ones() != 1 {
-        unreachable!("invalid halving divisor: the halving divisor must be a non-zero power of two")
-    } else if height < canopy_activation_height {
-        // Founders rewards are paid up to Canopy activation, on both mainnet and testnet.
-        // But we checkpoint in Canopy so founders reward does not apply for Zebra.
-        unreachable!("we cannot verify consensus rules before Canopy activation");
-    } else if halving_div < 8 {
-        let mut coinbase_outputs: MultiSet<Output> = coinbase.outputs().iter().cloned().collect();
+            if !has_amount(&addr, founders_reward(net, height)) {
+                Err(SubsidyError::FoundersRewardNotFound)?;
+            }
+        }
 
-        // Funding streams are paid from Canopy activation to the second halving
-        // Note: Canopy activation is at the first halving on mainnet, but not on testnet
-        // ZIP-1014 only applies to mainnet, ZIP-214 contains the specific rules for testnet
-        // funding stream amount values
-        let mut funding_streams = zebra_chain::parameters::subsidy::funding_stream_values(
-            height,
-            network,
-            expected_block_subsidy,
-        )
-        // we always expect a funding stream hashmap response even if empty
-        .map_err(|err| BlockError::Other(err.to_string()))?;
+        Ok(DeferredPoolBalanceChange::zero())
+    } else {
+        // # Consensus
+        //
+        // > [Canopy onward] In each block with coinbase transaction `cb` at block height `height`,
+        // > `cb` MUST contain at least the given number of distinct outputs for each of the
+        // > following:
+        //
+        // > • for each funding stream `fs` active at that block height with a recipient identifier
+        // > other than `DEFERRED_POOL` given by `fs.Recipient(height)`, one output that pays
+        // > `fs.Value(height)` zatoshi in the prescribed way to the address represented by that
+        // > recipient identifier;
+        //
+        // > • [NU6.1 onward] if the block height is `ZIP271ActivationHeight`,
+        // > `ZIP271DisbursementChunks` equal outputs paying a total of `ZIP271DisbursementAmount`
+        // > zatoshi in the prescribed way to the Key-Holder Organizations’ P2SH multisig address
+        // > represented by `ZIP271DisbursementAddress`, as specified by [ZIP-271].
+        //
+        // > The term “prescribed way” is defined as follows:
+        //
+        // > The prescribed way to pay a transparent P2SH address is to use a standard P2SH script
+        // > of the form `OP_HASH160 fs.RedeemScriptHash(height) OP_EQUAL` as the `scriptPubKey`.
+        // > Here `fs.RedeemScriptHash(height)` is the standard redeem script hash for the recipient
+        // > address for `fs.Recipient(height)` in _Base58Check_ form. Standard redeem script hashes
+        // > are defined in [ZIP-48] for P2SH multisig addresses, or [Bitcoin-P2SH] for other P2SH
+        // > addresses.
+        //
+        // <https://zips.z.cash/protocol/protocol.pdf#fundingstreams>
+        //
+        // [ZIP-271]: <https://zips.z.cash/zip-0271>
+        // [ZIP-48]: <https://zips.z.cash/zip-0048>
+        // [Bitcoin-P2SH]: <https://developer.bitcoin.org/devguide/transactions.html#pay-to-script-hash-p2sh>
 
-        let mut has_expected_output = |address, expected_amount| {
-            coinbase_outputs.remove(&Output::new_coinbase(
-                expected_amount,
-                subsidy::new_coinbase_script(address),
-            ))
-        };
+        let mut funding_streams = funding_stream_values(height, net, expected_block_subsidy)?;
 
-        // The deferred pool contribution is checked in `miner_fees_are_valid()`
-        // See [ZIP-1015](https://zips.z.cash/zip-1015) for more details.
+        // The deferred pool contribution is checked in `miner_fees_are_valid()` according to
+        // [ZIP-1015](https://zips.z.cash/zip-1015).
         let mut deferred_pool_balance_change = funding_streams
             .remove(&FundingStreamReceiver::Deferred)
             .unwrap_or_default()
-            .constrain::<NegativeAllowed>()
-            .map_err(|e| BlockError::Other(format!("invalid deferred pool amount: {e}")))?;
+            .constrain::<NegativeAllowed>()?;
 
-        // Checks the one-time lockbox disbursements in the NU6.1 activation block's coinbase transaction
-        // See [ZIP-271](https://zips.z.cash/zip-0271) and [ZIP-1016](https://zips.z.cash/zip-1016) for more details.
-        let expected_one_time_lockbox_disbursements = network.lockbox_disbursements(height);
-        for (address, expected_amount) in &expected_one_time_lockbox_disbursements {
-            if !has_expected_output(address, *expected_amount) {
-                Err(SubsidyError::OneTimeLockboxDisbursementNotFound)?;
+        // Check the one-time lockbox disbursements in the NU6.1 activation block's coinbase tx
+        // according to [ZIP-271] and [ZIP-1016].
+        //
+        // [ZIP-271]: <https://zips.z.cash/zip-0271>
+        // [ZIP-1016]: <https://zips.z.cash/zip-101>
+        if Some(height) == NetworkUpgrade::Nu6_1.activation_height(net) {
+            let lockbox_disbursements = net.lockbox_disbursements(height);
+
+            if lockbox_disbursements.is_empty() {
+                Err(BlockError::Other(
+                    "missing lockbox disbursements for NU6.1 activation block".to_string(),
+                ))?;
             }
 
-            deferred_pool_balance_change = deferred_pool_balance_change
-                .checked_sub(*expected_amount)
-                .expect("should be a valid Amount");
-        }
+            deferred_pool_balance_change = lockbox_disbursements.into_iter().try_fold(
+                deferred_pool_balance_change,
+                |balance, (addr, expected_amount)| {
+                    if !has_amount(&addr, expected_amount) {
+                        Err(SubsidyError::OneTimeLockboxDisbursementNotFound)?;
+                    }
 
-        // # Consensus
-        //
-        // > [Canopy onward] The coinbase transaction at block height `height`
-        // > MUST contain at least one output per funding stream `fs` active at `height`,
-        // > that pays `fs.Value(height)` zatoshi in the prescribed way to the stream's
-        // > recipient address represented by `fs.AddressList[fs.AddressIndex(height)]
-        //
-        // https://zips.z.cash/protocol/protocol.pdf#fundingstreams
-        for (receiver, expected_amount) in funding_streams {
-            let address =
-                subsidy::funding_streams::funding_stream_address(height, network, receiver)
-                    // funding stream receivers other than the deferred pool must have an address
-                    .ok_or_else(|| {
-                        BlockError::Other(format!(
-                            "missing funding stream address at height {height:?}"
-                        ))
-                    })?;
+                    balance
+                        .checked_sub(expected_amount)
+                        .ok_or(SubsidyError::Underflow)
+                },
+            )?;
+        };
 
-            if !has_expected_output(address, expected_amount) {
-                Err(SubsidyError::FundingStreamNotFound)?;
-            }
-        }
+        // Check each funding stream output.
+        funding_streams.into_iter().try_for_each(
+            |(receiver, expected_amount)| -> Result<(), BlockError> {
+                let addr =
+                    funding_stream_address(height, net, receiver).ok_or(BlockError::Other(
+                        "A funding stream other than the deferred pool must have an address"
+                            .to_string(),
+                    ))?;
+
+                if !has_amount(addr, expected_amount) {
+                    Err(SubsidyError::FundingStreamNotFound)?;
+                }
+
+                Ok(())
+            },
+        )?;
 
         Ok(DeferredPoolBalanceChange::new(deferred_pool_balance_change))
-    } else {
-        // Future halving, with no founders reward or funding streams
-        Ok(DeferredPoolBalanceChange::zero())
     }
 }
 
