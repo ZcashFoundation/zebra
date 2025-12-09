@@ -376,14 +376,20 @@ pub enum SubsidyError {
     #[error("funding stream expected output not found")]
     FundingStreamNotFound,
 
+    #[error("founders reward output not found")]
+    FoundersRewardNotFound,
+
     #[error("one-time lockbox disbursement output not found")]
     OneTimeLockboxDisbursementNotFound,
 
     #[error("miner fees are invalid")]
     InvalidMinerFees,
 
-    #[error("a sum of amounts overflowed")]
-    SumOverflow,
+    #[error("addition of amounts overflowed")]
+    Overflow,
+
+    #[error("subtraction of amounts underflowed")]
+    Underflow,
 
     #[error("unsupported height")]
     UnsupportedHeight,

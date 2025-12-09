@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `impl From<block::Height> for u32`
 - `parameters::network::testnet::founder_address_list`
 
+### Changed
+
+- `parameters::network::subsidy::SubsidyError::` has new variants:
+  `FoundersRewardNotFound` and ` Underflow`, and the variant `SumOverflow` was
+  renamed to `Overflow`.
+
 ### Removed
 
 - All constants from `parameters::network::subsidy`.

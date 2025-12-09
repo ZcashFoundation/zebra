@@ -273,7 +273,7 @@ pub fn miner_fees_are_valid(
         .iter()
         .map(|output| output.value())
         .sum::<Result<Amount<NonNegative>, AmountError>>()
-        .map_err(|_| SubsidyError::SumOverflow)?
+        .map_err(|_| SubsidyError::Overflow)?
         .constrain()
         .map_err(|e| BlockError::Other(format!("invalid transparent value balance: {e}")))?;
     let sapling_value_balance = coinbase_tx.sapling_value_balance().sapling_amount();
@@ -293,10 +293,10 @@ pub fn miner_fees_are_valid(
     let total_output_value =
         (transparent_value_balance - sapling_value_balance - orchard_value_balance
             + expected_deferred_pool_balance_change.value())
-        .map_err(|_| SubsidyError::SumOverflow)?;
+        .map_err(|_| SubsidyError::Overflow)?;
 
     let total_input_value =
-        (expected_block_subsidy + block_miner_fees).map_err(|_| SubsidyError::SumOverflow)?;
+        (expected_block_subsidy + block_miner_fees).map_err(|_| SubsidyError::Overflow)?;
 
     // # Consensus
     //
