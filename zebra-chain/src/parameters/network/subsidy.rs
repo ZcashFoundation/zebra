@@ -490,6 +490,46 @@ pub fn miner_subsidy(
     expected_block_subsidy - total_funding_stream_amount?
 }
 
+/// Returns the founders reward address for a given height and network as described in [§7.9].
+///
+/// [§7.9]: <https://zips.z.cash/protocol/protocol.pdf#foundersreward>
+pub fn founders_reward_address(net: &Network, height: Height) -> Option<transparent::Address> {
+    let founders_address_list = net.founder_address_list();
+    let num_founder_addresses = u32::try_from(founders_address_list.len()).ok()?;
+    let slow_start_shift = u32::from(net.slow_start_shift());
+    let pre_blossom_halving_interval = u32::try_from(net.pre_blossom_halving_interval()).ok()?;
+
+    let founder_address_change_interval = slow_start_shift
+        .checked_add(pre_blossom_halving_interval)?
+        .div_ceil(num_founder_addresses);
+
+    let founder_address_adjusted_height =
+        if NetworkUpgrade::current(net, height) < NetworkUpgrade::Blossom {
+            u32::from(height)
+        } else {
+            NetworkUpgrade::Blossom
+                .activation_height(net)
+                .and_then(|h| {
+                    let blossom_activation_height = u32::from(h);
+                    let height = u32::from(height);
+
+                    blossom_activation_height.checked_add(
+                        height.checked_sub(blossom_activation_height)?
+                            / BLOSSOM_POW_TARGET_SPACING_RATIO,
+                    )
+                })?
+        };
+
+    let founder_address_index =
+        usize::try_from(founder_address_adjusted_height / founder_address_change_interval)
+            .ok()?
+            .checked_add(1)?;
+
+    founders_address_list
+        .get(founder_address_index)
+        .and_then(|a| a.parse().ok())
+}
+
 /// `FoundersReward(height)` as described in [§7.8].
 ///
 /// [§7.8]: <https://zips.z.cash/protocol/protocol.pdf#subsidies>
