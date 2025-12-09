@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `parameters::network::subsidy::constants` module.
 - `impl From<block::Height> for u64`
 - `impl From<block::Height> for u32`
+- `parameters::network::testnet::founder_address_list`
 
 ### Removed
 
