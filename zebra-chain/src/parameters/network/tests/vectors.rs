@@ -6,6 +6,7 @@ use crate::{
     amount::{Amount, NonNegative},
     block::Height,
     parameters::{
+        network::error::ParametersBuilderError,
         subsidy::{
             block_subsidy, funding_stream_values, FundingStreamReceiver, FUNDING_STREAMS_TESTNET,
             FUNDING_STREAM_ECC_ADDRESSES_MAINNET, FUNDING_STREAM_ECC_ADDRESSES_TESTNET,
@@ -111,8 +112,10 @@ fn activates_network_upgrades_correctly() {
             nu7: Some(expected_activation_height),
             ..Default::default()
         })
+        .expect("failed to set activation heights")
         .clear_funding_streams()
-        .to_network();
+        .to_network()
+        .expect("failed to build configured network");
 
     let genesis_activation_height = NetworkUpgrade::Genesis
         .activation_height(&network)
@@ -167,29 +170,37 @@ fn activates_network_upgrades_correctly() {
 /// Checks that configured testnet names are validated and used correctly.
 #[test]
 fn check_configured_network_name() {
-    // Sets a no-op panic hook to avoid long output.
-    std::panic::set_hook(Box::new(|_| {}));
-
     // Checks that reserved network names cannot be used for configured testnets.
     for reserved_network_name in RESERVED_NETWORK_NAMES {
-        std::panic::catch_unwind(|| {
-            testnet::Parameters::build().with_network_name(reserved_network_name)
-        })
-        .expect_err("should panic when attempting to set network name as a reserved name");
+        let err = testnet::Parameters::build()
+            .with_network_name(reserved_network_name.to_string())
+            .expect_err("should fail when using reserved network name");
+
+        assert!(
+            matches!(err, ParametersBuilderError::ReservedNetworkName { .. }),
+            "unexpected error: {err:?}"
+        )
     }
 
-    // Check that max length is enforced, and that network names may only contain alphanumeric characters and '_'.
-    for invalid_network_name in [
-        "a".repeat(MAX_NETWORK_NAME_LENGTH + 1),
-        "!!!!non-alphanumeric-name".to_string(),
-    ] {
-        std::panic::catch_unwind(|| {
-            testnet::Parameters::build().with_network_name(invalid_network_name)
-        })
-        .expect_err("should panic when setting network name that's too long or contains non-alphanumeric characters (except '_')");
-    }
+    // Check that max length is enforced
+    let err = testnet::Parameters::build()
+        .with_network_name("a".repeat(MAX_NETWORK_NAME_LENGTH + 1))
+        .expect_err("should fail for invalid name");
 
-    drop(std::panic::take_hook());
+    assert!(
+        matches!(err, ParametersBuilderError::NetworkNameTooLong { .. }),
+        "unexpected error: {err:?}"
+    );
+
+    // Check that network names may only contain alphanumeric characters and '_'.
+    let err = testnet::Parameters::build()
+        .with_network_name("!!!!non-alphanumeric-name".to_string())
+        .expect_err("should fail for invalid name");
+
+    assert!(
+        matches!(err, ParametersBuilderError::InvalidCharacter),
+        "unexpected error: {err:?}"
+    );
 
     // Checks that network names are displayed correctly
     assert_eq!(
@@ -213,8 +224,11 @@ fn check_configured_network_name() {
     let network = testnet::Parameters::build()
         // Check that network name can contain `MAX_NETWORK_NAME_LENGTH` characters
         .with_network_name("a".repeat(MAX_NETWORK_NAME_LENGTH))
+        .expect("failed to set first network name")
         .with_network_name(expected_name)
-        .to_network();
+        .expect("failed to set expected network name")
+        .to_network()
+        .expect("failed to build configured network");
 
     // Check that configured network name is displayed
     assert_eq!(
@@ -227,30 +241,37 @@ fn check_configured_network_name() {
 /// Checks that configured testnet names are validated and used correctly.
 #[test]
 fn check_network_name() {
-    // Sets a no-op panic hook to avoid long output.
-    std::panic::set_hook(Box::new(|_| {}));
-
     // Checks that reserved network names cannot be used for configured testnets.
     for reserved_network_name in RESERVED_NETWORK_NAMES {
-        std::panic::catch_unwind(|| {
-            testnet::Parameters::build().with_network_name(reserved_network_name)
-        })
-        .expect_err("should panic when attempting to set network name as a reserved name");
+        let err = testnet::Parameters::build()
+            .with_network_name(reserved_network_name.to_string())
+            .expect_err("should fail when using reserved network name");
+
+        assert!(
+            matches!(err, ParametersBuilderError::ReservedNetworkName { .. }),
+            "unexpected error: {err:?}"
+        )
     }
 
-    // Check that max length is enforced, and that network names may only contain alphanumeric characters and '_'.
-    for invalid_network_name in [
-        "a".repeat(MAX_NETWORK_NAME_LENGTH + 1),
-        "!!!!non-alphanumeric-name".to_string(),
-    ] {
-        std::panic::catch_unwind(|| {
-            testnet::Parameters::build().with_network_name(invalid_network_name)
-        })
-        .expect_err("should panic when setting network name that's too long or contains non-alphanumeric characters (except '_')");
-    }
+    // Check that max length is enforced
+    let err = testnet::Parameters::build()
+        .with_network_name("a".repeat(MAX_NETWORK_NAME_LENGTH + 1))
+        .expect_err("should fail for invalid name");
 
-    // Restore the regular panic hook for any unexpected panics
-    drop(std::panic::take_hook());
+    assert!(
+        matches!(err, ParametersBuilderError::NetworkNameTooLong { .. }),
+        "unexpected error: {err:?}"
+    );
+
+    // Check that network names may only contain alphanumeric characters and '_'.
+    let err = testnet::Parameters::build()
+        .with_network_name("!!!!non-alphanumeric-name".to_string())
+        .expect_err("should fail for invalid name");
+
+    assert!(
+        matches!(err, ParametersBuilderError::InvalidCharacter),
+        "unexpected error: {err:?}"
+    );
 
     // Checks that network names are displayed correctly
     assert_eq!(
@@ -271,8 +292,11 @@ fn check_network_name() {
     let network = testnet::Parameters::build()
         // Check that network name can contain `MAX_NETWORK_NAME_LENGTH` characters
         .with_network_name("a".repeat(MAX_NETWORK_NAME_LENGTH))
+        .expect("failed to set first network name")
         .with_network_name(expected_name)
-        .to_network();
+        .expect("failed to set expected network name")
+        .to_network()
+        .expect("failed to build configured network");
 
     // Check that configured network name is displayed
     assert_eq!(
@@ -291,8 +315,10 @@ fn check_full_activation_list() {
             nu7: Some(1),
             ..Default::default()
         })
+        .expect("failed to set activation heights")
         .clear_funding_streams()
-        .to_network();
+        .to_network()
+        .expect("failed to build configured network");
 
     // We expect the first 11 network upgrades to be included, up to and including NU7
     let expected_network_upgrades = NetworkUpgrade::iter().take(11);
@@ -357,6 +383,7 @@ fn check_configured_funding_stream_constraints() {
                     testnet::Parameters::build()
                         .with_funding_streams(vec![configured_funding_streams.clone()])
                         .to_network()
+                        .expect("failed to build configured network")
                         .all_funding_streams()[0]
                         .clone(),
                     FUNDING_STREAMS_TESTNET[0].clone(),
@@ -369,6 +396,7 @@ fn check_configured_funding_stream_constraints() {
                             configured_funding_streams.clone(),
                         ])
                         .to_network()
+                        .expect("failed to build configured network")
                         .all_funding_streams()[1]
                         .clone(),
                     FUNDING_STREAMS_TESTNET[1].clone(),
@@ -521,11 +549,13 @@ fn sum_of_one_time_lockbox_disbursements_is_correct() {
 
     let custom_testnet = testnet::Parameters::build()
         .with_activation_heights(configured_activation_heights)
+        .expect("failed to set activation heights")
         .with_lockbox_disbursements(vec![ConfiguredLockboxDisbursement {
             address: "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz".to_string(),
             amount: Amount::new_from_zec(78_750),
         }])
-        .to_network();
+        .to_network()
+        .expect("failed to build configured network");
 
     for network in Network::iter().chain(std::iter::once(custom_testnet)) {
         let Some(nu6_1_activation_height) = NetworkUpgrade::Nu6_1.activation_height(&network)

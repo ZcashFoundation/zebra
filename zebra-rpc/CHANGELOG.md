@@ -12,6 +12,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Changed `GetInfoResponse::errors_timestamp`from `String` to `i64` to match
   `zcashd`.
 
+## [3.1.0] - 2025-11-17
+
+## Added
+
+- Populated `asm` field returned by Zebra's RPC methods with code in script outputs as well as script types ([#10019](https://github.com/ZcashFoundation/zebra/pull/10019))
+
+### Fixed
+
+- Republicized `valid_addresses` method ([#10021](https://github.com/ZcashFoundation/zebra/pull/10021))
+
 
 ## [3.0.0] - 2025-10-15
 
@@ -42,6 +52,7 @@ process and third-party integration improvements.
 ### Fixed
 
 - Use `STANDARD` Base64 for RPC auth encoding/decoding ([#9968](https://github.com/ZcashFoundation/zebra/pull/9968))
+- Fixed issue around copying generated files to output directory when `protoc` or `.proto` files are unavailable ([#10006](https://github.com/ZcashFoundation/zebra/pull/10006))
 
 
 ## [2.0.1] - 2025-08-22

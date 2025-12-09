@@ -74,7 +74,8 @@ fn testnet_params_serialization_roundtrip() {
     let config = Config {
         network: testnet::Parameters::build()
             .with_disable_pow(true)
-            .to_network(),
+            .to_network()
+            .expect("failed to build configured network"),
         initial_testnet_peers: [].into(),
         ..Config::default()
     };
@@ -138,7 +139,8 @@ fn funding_streams_serialization_roundtrip() {
     let config = Config {
         network: testnet::Parameters::build()
             .with_funding_streams(fs)
-            .to_network(),
+            .to_network()
+            .expect("failed to build configured network"),
         initial_testnet_peers: [].into(),
         ..Config::default()
     };
@@ -184,7 +186,8 @@ fn funding_streams_default_values() {
 
     let network = testnet::Parameters::build()
         .with_funding_streams(fs)
-        .to_network();
+        .to_network()
+        .expect("failed to build configured network");
 
     // Check if value hasn't changed
     assert_eq!(

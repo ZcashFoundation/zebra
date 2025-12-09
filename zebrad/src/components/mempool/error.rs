@@ -9,7 +9,8 @@ use thiserror::Error;
 use proptest_derive::Arbitrary;
 
 use super::storage::{
-    ExactTipRejectionError, SameEffectsChainRejectionError, SameEffectsTipRejectionError,
+    ExactTipRejectionError, NonStandardTransactionError, SameEffectsChainRejectionError,
+    SameEffectsTipRejectionError,
 };
 
 /// Mempool errors.
@@ -74,4 +75,8 @@ pub enum MempoolError {
     /// Zebra enables the mempool when it is at the chain tip.
     #[error("mempool is disabled since synchronization is behind the chain tip")]
     Disabled,
+
+    /// The transaction is non-standard.
+    #[error("transaction is non-standard")]
+    NonStandardTransaction(#[from] NonStandardTransactionError),
 }

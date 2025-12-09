@@ -11,6 +11,7 @@ use crate::{
     transparent,
 };
 
+mod error;
 pub mod magic;
 pub mod subsidy;
 pub mod testnet;
@@ -170,7 +171,10 @@ impl Network {
 
     /// Creates a new [`Network::Testnet`] with `Regtest` parameters and the provided network upgrade activation heights.
     pub fn new_regtest(params: testnet::RegtestParameters) -> Self {
-        Self::new_configured_testnet(testnet::Parameters::new_regtest(params))
+        Self::new_configured_testnet(
+            testnet::Parameters::new_regtest(params)
+                .expect("regtest parameters should always be valid"),
+        )
     }
 
     /// Returns true if the network is the default Testnet, or false otherwise.

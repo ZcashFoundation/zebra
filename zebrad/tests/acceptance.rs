@@ -513,7 +513,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
     // Make sure the command was killed
     output.assert_was_killed()?;
 
-    let expected_run_dir_file_names = match cache_dir_check {
+    let (expected_run_dir_file_names, optional_run_dir_file_names) = match cache_dir_check {
         // we created the state directory, so it should still exist
         EphemeralCheck::ExistingDirectory => {
             assert_with_context!(
@@ -528,8 +528,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
                 cache_dir_check,
                 ignored_cache_dir.read_dir().unwrap().collect::<Vec<_>>()
             );
-
-            ["state", "network", "zebrad.toml"].iter()
+            (["state", "zebrad.toml"].iter(), ["network"].iter())
         }
 
         // we didn't create the state directory, so it should not exist
@@ -547,11 +546,16 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
                 ignored_cache_dir.read_dir().unwrap().collect::<Vec<_>>()
             );
 
-            ["network", "zebrad.toml"].iter()
+            (["zebrad.toml"].iter(), ["network"].iter())
         }
     };
 
-    let expected_run_dir_file_names = expected_run_dir_file_names.map(Into::into).collect();
+    let expected_run_dir_file_names: HashSet<std::ffi::OsString> =
+        expected_run_dir_file_names.map(Into::into).collect();
+
+    let optional_run_dir_file_names: HashSet<std::ffi::OsString> =
+        optional_run_dir_file_names.map(Into::into).collect();
+
     let run_dir_file_names = run_dir
         .path()
         .read_dir()
@@ -560,8 +564,17 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
         // ignore directory list order, because it can vary based on the OS and filesystem
         .collect::<HashSet<_>>();
 
+    let has_expected_file_paths = expected_run_dir_file_names
+        .iter()
+        .all(|expected_file_name| run_dir_file_names.contains(expected_file_name));
+
+    let has_only_allowed_file_paths = run_dir_file_names.iter().all(|file_name| {
+        optional_run_dir_file_names.contains(file_name)
+            || expected_run_dir_file_names.contains(file_name)
+    });
+
     assert_with_context!(
-        run_dir_file_names == expected_run_dir_file_names,
+        has_expected_file_paths && has_only_allowed_file_paths,
         &output,
         "run_dir not empty for ephemeral {:?} {:?}: expected {:?}, actual: {:?}",
         cache_dir_config,
@@ -3315,14 +3328,18 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     let base_network_params = testnet::Parameters::build()
         // Regtest genesis hash
         .with_genesis_hash("029f11d80ef9765602235e1bc9727e3eb6ba20839319f761fee920d63401e327")
+        .expect("failed to set genesis hash")
         .with_checkpoints(false)
+        .expect("failed to verify checkpoints")
         .with_target_difficulty_limit(U256::from_big_endian(&[0x0f; 32]))
+        .expect("failed to set target difficulty limit")
         .with_disable_pow(true)
         .with_slow_start_interval(Height::MIN)
         .with_activation_heights(ConfiguredActivationHeights {
             nu6: Some(1),
             ..Default::default()
-        });
+        })
+        .expect("failed to set activation heights");
 
     let network = base_network_params
         .clone()
@@ -3332,7 +3349,8 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
             // Use default post-NU6 recipients
             recipients: None,
         }])
-        .to_network();
+        .to_network()
+        .expect("failed to build configured network");
 
     tracing::info!("built configured Testnet, starting state service and block verifier");
 
@@ -3512,7 +3530,8 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
             height_range: Some(Height(1)..Height(100)),
             recipients: make_configured_recipients_with_lockbox_numerator(0),
         }])
-        .to_network();
+        .to_network()
+        .expect("failed to build configured network");
 
     let (coinbase_txn, default_roots) = generate_coinbase_and_roots(
         &network,
@@ -3572,7 +3591,8 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
             height_range: Some(Height(1)..Height(100)),
             recipients: make_configured_recipients_with_lockbox_numerator(20),
         }])
-        .to_network();
+        .to_network()
+        .expect("failed to build configured network");
 
     let (coinbase_txn, default_roots) = generate_coinbase_and_roots(
         &network,
@@ -4228,11 +4248,15 @@ async fn disconnects_from_misbehaving_peers() -> Result<()> {
             nu6: Some(3),
             ..Default::default()
         })
+        .expect("failed to set activation heights")
         .with_slow_start_interval(Height::MIN)
         .with_disable_pow(true)
         .clear_checkpoints()
+        .expect("failed to clear checkpoints")
         .with_network_name("PoWDisabledTestnet")
-        .to_network();
+        .expect("failed to set network name")
+        .to_network()
+        .expect("failed to build configured network");
 
     let test_type = LaunchWithEmptyState {
         launches_lightwalletd: false,
@@ -4293,10 +4317,14 @@ async fn disconnects_from_misbehaving_peers() -> Result<()> {
             nu6: Some(3),
             ..Default::default()
         })
+        .expect("failed to set activation heights")
         .with_slow_start_interval(Height::MIN)
         .clear_checkpoints()
+        .expect("failed to clear checkpoints")
         .with_network_name("PoWEnabledTestnet")
-        .to_network();
+        .expect("failed to set network name")
+        .to_network()
+        .expect("failed to build configured network");
 
     config.network.network = network2;
     config.network.initial_testnet_peers = [config.network.listen_addr.to_string()].into();

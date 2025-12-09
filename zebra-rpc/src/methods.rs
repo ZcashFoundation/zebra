@@ -570,6 +570,17 @@ pub trait Rpc {
     #[method(name = "getpeerinfo")]
     async fn get_peer_info(&self) -> Result<Vec<PeerInfo>>;
 
+    /// Requests that a ping be sent to all other nodes, to measure ping time.
+    ///
+    /// Results provided in getpeerinfo, pingtime and pingwait fields are decimal seconds.
+    /// Ping command is handled in queue with all other commands, so it measures processing backlog, not just network ping.
+    ///
+    /// zcashd reference: [`ping`](https://zcash.github.io/rpc/ping.html)
+    /// method: post
+    /// tags: network
+    #[method(name = "ping")]
+    async fn ping(&self) -> Result<()>;
+
     /// Checks if a zcash transparent address of type P2PKH, P2SH or TEX is valid.
     /// Returns information about the given address if valid.
     ///
@@ -2670,6 +2681,15 @@ where
             .into_iter()
             .map(PeerInfo::from)
             .collect())
+    }
+
+    async fn ping(&self) -> Result<()> {
+        tracing::debug!("Receiving ping request via RPC");
+
+        // TODO: Send Message::Ping(nonce) to all connected peers,
+        // and track response round-trip time for getpeerinfo's pingtime/pingwait fields.
+
+        Ok(())
     }
 
     async fn validate_address(&self, raw_address: String) -> Result<ValidateAddressResponse> {

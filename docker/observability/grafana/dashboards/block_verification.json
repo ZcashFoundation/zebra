@@ -35,7 +35,7 @@
       "dashes": false,
       "datasource": {
         "type": "prometheus",
-        "uid": "rpR76-qMz"
+        "uid": "zebra-prometheus"
       },
       "decimals": 0,
       "fill": 1,
@@ -79,7 +79,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "rpR76-qMz"
+            "uid": "zebra-prometheus"
           },
           "editorMode": "code",
           "exemplar": true,
@@ -93,7 +93,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "rpR76-qMz"
+            "uid": "zebra-prometheus"
           },
           "editorMode": "code",
           "exemplar": true,
@@ -107,7 +107,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "rpR76-qMz"
+            "uid": "zebra-prometheus"
           },
           "editorMode": "code",
           "expr": "state_memory_queued_max_height{job=\"$job\"}",
@@ -119,7 +119,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "rpR76-qMz"
+            "uid": "zebra-prometheus"
           },
           "editorMode": "code",
           "expr": "state_memory_queued_min_height{job=\"$job\"}",
@@ -131,7 +131,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "rpR76-qMz"
+            "uid": "zebra-prometheus"
           },
           "editorMode": "code",
           "expr": "state_checkpoint_queued_max_height{job=\"$job\"}",
@@ -143,7 +143,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "rpR76-qMz"
+            "uid": "zebra-prometheus"
           },
           "editorMode": "code",
           "expr": "state_checkpoint_queued_min_height{job=\"$job\"}",
@@ -155,7 +155,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "rpR76-qMz"
+            "uid": "zebra-prometheus"
           },
           "editorMode": "code",
           "expr": "state_memory_sent_block_height{job=\"$job\"}",
@@ -167,7 +167,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "rpR76-qMz"
+            "uid": "zebra-prometheus"
           },
           "editorMode": "code",
           "expr": "state_checkpoint_sent_block_height{job=\"$job\"}",
@@ -179,7 +179,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "rpR76-qMz"
+            "uid": "zebra-prometheus"
           },
           "editorMode": "code",
           "exemplar": true,
@@ -192,7 +192,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "rpR76-qMz"
+            "uid": "zebra-prometheus"
           },
           "editorMode": "code",
           "exemplar": true,
@@ -243,7 +243,7 @@
       "dashes": false,
       "datasource": {
         "type": "prometheus",
-        "uid": "rpR76-qMz"
+        "uid": "zebra-prometheus"
       },
       "fill": 1,
       "fillGradient": 0,
@@ -285,19 +285,19 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "rpR76-qMz"
+            "uid": "zebra-prometheus"
           },
-          "expr": "rate(zcash_chain_verified_block_total{job=\"$job\"}[1s])",
+          "expr": "rate(zcash_chain_verified_block_total{job=\"$job\"}[1m])",
           "interval": "",
-          "legendFormat": "zcash_chain_verified_block_total[1s]",
+          "legendFormat": "zcash_chain_verified_block_total[1m]",
           "refId": "A"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "rpR76-qMz"
+            "uid": "zebra-prometheus"
           },
-          "expr": "rate(sync_downloaded_block_count{job=\"$job\"}[1s])",
+          "expr": "rate(sync_downloaded_block_count{job=\"$job\"}[1m])",
           "interval": "",
           "legendFormat": "sync_downloaded_block_count",
           "refId": "H"
@@ -305,7 +305,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "rpR76-qMz"
+            "uid": "zebra-prometheus"
           },
           "expr": "sync_downloads_in_flight{job=\"$job\"}",
           "interval": "",
@@ -315,9 +315,9 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "rpR76-qMz"
+            "uid": "zebra-prometheus"
           },
-          "expr": "rate(sync_verified_block_count{job=\"$job\"}[1s])",
+          "expr": "rate(sync_verified_block_count{job=\"$job\"}[1m])",
           "interval": "",
           "legendFormat": "sync_verified_block_count",
           "refId": "J"
@@ -362,7 +362,7 @@
       "dashes": false,
       "datasource": {
         "type": "prometheus",
-        "uid": "rpR76-qMz"
+        "uid": "zebra-prometheus"
       },
       "fill": 1,
       "fillGradient": 0,
@@ -404,37 +404,37 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "rpR76-qMz"
+            "uid": "zebra-prometheus"
           },
-          "expr": "rate(zcash_chain_verified_block_total{job=\"$job\"}[1s])",
+          "expr": "rate(zcash_chain_verified_block_total{job=\"$job\"}[1m])",
           "interval": "",
-          "legendFormat": "zcash_chain_verified_block_total[1s]",
+          "legendFormat": "zcash_chain_verified_block_total[1m]",
           "refId": "A"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "rpR76-qMz"
+            "uid": "zebra-prometheus"
           },
-          "expr": "rate(gossip_downloaded_block_count{job=\"$job\"}[1s])",
+          "expr": "rate(gossip_downloaded_block_count{job=\"$job\"}[1m])",
           "interval": "",
-          "legendFormat": "gossip_downloaded_block_count[1s]",
+          "legendFormat": "gossip_downloaded_block_count[1m]",
           "refId": "C"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "rpR76-qMz"
+            "uid": "zebra-prometheus"
           },
-          "expr": "rate(gossip_verified_block_count{job=\"$job\"}[1s])",
+          "expr": "rate(gossip_verified_block_count{job=\"$job\"}[1m])",
           "interval": "",
-          "legendFormat": "gossip_verified_block_count[1s]",
+          "legendFormat": "gossip_verified_block_count[1m]",
           "refId": "D"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "rpR76-qMz"
+            "uid": "zebra-prometheus"
           },
           "expr": "gossip_queued_block_count{job=\"$job\"}",
           "interval": "",
@@ -493,7 +493,7 @@
         },
         "datasource": {
           "type": "prometheus",
-          "uid": "rpR76-qMz"
+          "uid": "zebra-prometheus"
         },
         "definition": "label_values(zcash_chain_verified_block_height, job)",
         "hide": 0,

@@ -30,6 +30,7 @@ jobs:
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: runtime
       image_name: zebra
+      short_sha: ''
       features: ${{ vars.RUST_PROD_FEATURES }}
       rust_log: ${{ vars.RUST_LOG }}
       # Enable Docker Hub publishing for official releases (this is the single source of truth for production images)

@@ -15,8 +15,6 @@
 
 ARG RUST_VERSION=1.89.0
 
-# Keep in sync with vars.RUST_PROD_FEATURES in GitHub
-# https://github.com/ZcashFoundation/zebra/settings/variables/actions
 ARG FEATURES="default-release-binaries"
 
 ARG UID=10001
@@ -27,7 +25,7 @@ ARG CARGO_HOME="${HOME}/.cargo"
 ARG CARGO_TARGET_DIR="${HOME}/target"
 
 # This stage prepares Zebra's build deps and captures build args as env vars.
-FROM rust:${RUST_VERSION}-bookworm AS deps
+FROM rust:${RUST_VERSION}-trixie AS deps
 SHELL ["/bin/bash", "-xo", "pipefail", "-c"]
 
 # Make the build platform available as a variable
@@ -50,23 +48,14 @@ ENV CARGO_HOME=${CARGO_HOME}
 ARG CARGO_TARGET_DIR
 ENV CARGO_TARGET_DIR=${CARGO_TARGET_DIR}
 
-ARG FEATURES
-ENV FEATURES=${FEATURES}
-
-# If this is not set, it must be an empty string, so Zebra can try an
-# alternative git commit source:
-# https://github.com/ZcashFoundation/zebra/blob/9ebd56092bcdfc1a09062e15a0574c94af37f389/zebrad/src/application.rs#L179-L182
-ARG SHORT_SHA
-ENV SHORT_SHA=${SHORT_SHA:-}
-
 # This stage builds tests without running them.
 #
 # We also download needed dependencies for tests to work, from other images.
 # An entrypoint.sh is only available in this step for easier test handling with variables.
 FROM deps AS tests
 
-# Use minimal feature set - tests are now controlled by environment variables per CI job
-ARG FEATURES="default-release-binaries proptest-impl lightwalletd-grpc-tests zebra-checkpoints"
+ARG SHORT_SHA
+ARG FEATURES
 ENV FEATURES=${FEATURES}
 
 # Skip IPv6 tests by default, as some CI environment don't have IPv6 available
@@ -113,7 +102,8 @@ COPY --link --chown=${UID}:${GID} ./ ${HOME}
 
 # Build Zebra test binaries using nextest, but don't run them.
 # This also copies the necessary binaries to /usr/local/bin.
-RUN cargo nextest run --locked --release --no-run --features "${FEATURES}" && \
+RUN [ -n "${SHORT_SHA}" ] && export SHORT_SHA="${SHORT_SHA}" || true; \
+    cargo nextest run --locked --release --no-run --features "${FEATURES}" && \
     # Copy binaries to standard location
     cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin && \
     # Only copy zebra-checkpoints if the feature is enabled
@@ -129,7 +119,7 @@ COPY --link --from=electriccoinco/lightwalletd:v0.4.17 /usr/local/bin/lightwalle
 
 # Copy the gosu binary to be able to run the entrypoint as non-root user
 # and allow to change permissions for mounted cache directories
-COPY --link --from=tianon/gosu:bookworm /gosu /usr/local/bin/
+COPY --link --from=tianon/gosu:trixie /gosu /usr/local/bin/
 
 COPY --link --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
@@ -141,6 +131,10 @@ CMD [ "cargo", "test" ]
 # It also adds `cache mounts` as this stage is completely independent from the
 # `test` stage. The resulting zebrad binary is used in the `runtime` stage.
 FROM deps AS release
+
+ARG SHORT_SHA
+ARG FEATURES
+ENV FEATURES=${FEATURES}
 
 # Set the working directory for the build.
 ARG HOME
@@ -165,12 +159,13 @@ RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     --mount=type=bind,source=Cargo.lock,target=Cargo.lock \
     --mount=type=cache,target=${CARGO_TARGET_DIR} \
     --mount=type=cache,target=${CARGO_HOME} \
-    cargo build --locked --release --package zebrad --bin zebrad && \
+    [ -n "${SHORT_SHA}" ] && export SHORT_SHA="${SHORT_SHA}" || true; \
+    cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad && \
     cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin
 
 # This stage starts from scratch using Debian and copies the built zebrad binary
 # from the `release` stage along with other binaries and files.
-FROM debian:bookworm-slim AS runtime
+FROM debian:trixie-slim AS runtime
 
 ARG FEATURES
 ENV FEATURES=${FEATURES}
@@ -198,9 +193,10 @@ ENV USER=${USER}
 ARG HOME
 ENV HOME=${HOME}
 
-# Install curl for healtchecks
+# Install curl for healtchecks and adduser for user/group creation
 RUN apt-get -q update && \
     apt-get -q install -y --no-install-recommends \
+    adduser \
     curl \
     && rm -rf /var/lib/apt/lists/* /tmp/*
 
@@ -217,7 +213,7 @@ RUN chown -R ${UID}:${GID} ${HOME}
 # User with UID=${UID} is created above and used via gosu in entrypoint.sh.
 
 # Copy the gosu binary to be able to run the entrypoint as non-root user
-COPY --link --from=tianon/gosu:bookworm /gosu /usr/local/bin/
+COPY --link --from=tianon/gosu:trixie /gosu /usr/local/bin/
 COPY --link --from=release /usr/local/bin/zebrad /usr/local/bin/
 COPY --link --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
