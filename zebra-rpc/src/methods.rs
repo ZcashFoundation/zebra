@@ -50,6 +50,7 @@ use jsonrpsee::core::{async_trait, RpcResult as Result};
 use jsonrpsee_proc_macros::rpc;
 use jsonrpsee_types::{ErrorCode, ErrorObject};
 use rand::{rngs::OsRng, RngCore};
+use schemars::JsonSchema;
 use tokio::{
     sync::{broadcast, mpsc, watch},
     task::JoinHandle,
@@ -133,6 +134,37 @@ use types::{
     validate_address::ValidateAddressResponse,
     z_validate_address::ZValidateAddressResponse,
 };
+
+include!(concat!(env!("OUT_DIR"), "/rpc_openrpc.rs"));
+
+// TODO: Parameter descriptions has to be revised, argument docs in the methods should use
+// these constants where needed.
+pub(super) const PARAM_VERBOSE_DESC: &str =
+    "Boolean flag to indicate verbosity, true for a json object, false for hex encoded data.";
+pub(super) const PARAM_POOL_DESC: &str =
+    "The pool from which subtrees should be returned. Either \"sapling\" or \"orchard\".";
+pub(super) const PARAM_START_INDEX_DESC: &str =
+    "The index of the first 2^16-leaf subtree to return.";
+pub(super) const PARAM_LIMIT_DESC: &str = "The maximum number of subtrees to return.";
+pub(super) const PARAM_REQUEST_DESC: &str = "The request object containing the parameters.";
+pub(super) const PARAM_INDEX_DESC: &str = "The index of the subtree to return.";
+pub(super) const PARAM_RAW_TRANSACTION_HEX_DESC: &str = "The hex-encoded raw transaction bytes.";
+#[allow(non_upper_case_globals)]
+pub(super) const PARAM__ALLOW_HIGH_FEES_DESC: &str = "Whether to allow high fees.";
+pub(super) const PARAM_NUM_BLOCKS_DESC: &str = "The number of blocks to return.";
+pub(super) const PARAM_HEIGHT_DESC: &str = "The height of the block to return.";
+pub(super) const PARAM_COMMAND_DESC: &str = "The command to execute.";
+#[allow(non_upper_case_globals)]
+pub(super) const PARAM__PARAMETERS_DESC: &str = "The parameters for the command.";
+pub(super) const PARAM_BLOCK_HASH_DESC: &str = "The hash of the block to return.";
+pub(super) const PARAM_ADDRESS_DESC: &str = "The address to return.";
+pub(super) const PARAM_ADDRESS_STRINGS_DESC: &str = "The addresses to return.";
+pub(super) const PARAM_ADDR_DESC: &str = "The address to return.";
+pub(super) const PARAM_HEX_DATA_DESC: &str = "The hex-encoded data to return.";
+pub(super) const PARAM_TXID_DESC: &str = "The transaction ID to return.";
+pub(super) const PARAM_HASH_OR_HEIGHT_DESC: &str = "The block hash or height to return.";
+pub(super) const PARAM_PARAMETERS_DESC: &str = "The parameters for the command.";
+pub(super) const PARAM_VERBOSITY_DESC: &str = "Whether to include verbose output.";
 
 #[cfg(test)]
 mod tests;
@@ -694,6 +726,10 @@ pub trait Rpc {
     /// method: post
     /// tags: network
     async fn add_node(&self, addr: PeerSocketAddr, command: AddNodeCommand) -> Result<()>;
+
+    /// Returns an OpenRPC schema as a description of this service.
+    #[method(name = "rpc.discover")]
+    fn openrpc(&self) -> openrpsee::openrpc::Response;
 }
 
 /// RPC method implementations.
@@ -2943,6 +2979,26 @@ where
             ));
         }
     }
+
+    fn openrpc(&self) -> openrpsee::openrpc::Response {
+        let mut generator = openrpsee::openrpc::Generator::new();
+
+        let methods = METHODS
+            .into_iter()
+            .map(|(name, method)| method.generate(&mut generator, name))
+            .collect();
+
+        Ok(openrpsee::openrpc::OpenRpc {
+            openrpc: "1.3.2",
+            info: openrpsee::openrpc::Info {
+                title: env!("CARGO_PKG_NAME"),
+                description: env!("CARGO_PKG_DESCRIPTION"),
+                version: env!("CARGO_PKG_VERSION"),
+            },
+            methods,
+            components: generator.into_components(),
+        })
+    }
 }
 
 // TODO: Move the code below to separate modules.
@@ -3261,7 +3317,7 @@ impl GetBlockchainInfoResponse {
 }
 
 /// A request for [`RpcServer::get_address_balance`].
-#[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Deserialize, serde::Serialize, JsonSchema)]
 #[serde(from = "DGetAddressBalanceRequest")]
 pub struct GetAddressBalanceRequest {
     /// A list of transparent address strings.
@@ -3282,7 +3338,7 @@ impl From<DGetAddressBalanceRequest> for GetAddressBalanceRequest {
 }
 
 /// An intermediate type used to deserialize [`AddressStrings`].
-#[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Deserialize, JsonSchema)]
 #[serde(untagged)]
 enum DGetAddressBalanceRequest {
     /// A list of address strings.
@@ -3368,7 +3424,9 @@ pub struct GetAddressBalanceResponse {
 pub use self::GetAddressBalanceResponse as AddressBalance;
 
 /// Parameters of [`RpcServer::get_address_utxos`] RPC method.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize, Getters, new)]
+#[derive(
+    Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize, Getters, new, JsonSchema,
+)]
 #[serde(from = "DGetAddressUtxosRequest")]
 pub struct GetAddressUtxosRequest {
     /// A list of addresses to get transactions from.
@@ -3398,7 +3456,7 @@ impl From<DGetAddressUtxosRequest> for GetAddressUtxosRequest {
 }
 
 /// An intermediate type used to deserialize [`GetAddressUtxosRequest`].
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, serde::Deserialize, JsonSchema)]
 #[serde(untagged)]
 enum DGetAddressUtxosRequest {
     /// A single address string.
@@ -4051,7 +4109,9 @@ impl Utxo {
 /// Parameters of [`RpcServer::get_address_tx_ids`] RPC method.
 ///
 /// See [`RpcServer::get_address_tx_ids`] for more details.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize, Getters, new)]
+#[derive(
+    Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize, Getters, new, JsonSchema,
+)]
 #[serde(from = "DGetAddressTxIdsRequest")]
 pub struct GetAddressTxIdsRequest {
     /// A list of addresses. The RPC method will get transactions IDs that sent or received
@@ -4106,7 +4166,7 @@ impl From<DGetAddressTxIdsRequest> for GetAddressTxIdsRequest {
 }
 
 /// An intermediate type used to deserialize [`GetAddressTxIdsRequest`].
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, serde::Deserialize, JsonSchema)]
 #[serde(untagged)]
 enum DGetAddressTxIdsRequest {
     /// A single address string.
@@ -4460,7 +4520,7 @@ where
 }
 
 /// Commands for the `addnode` RPC method.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, JsonSchema)]
 pub enum AddNodeCommand {
     /// Add a node to the address book.
     #[serde(rename = "add")]
