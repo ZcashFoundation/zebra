@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `impl From<block::Height> for u64`
 - `impl From<block::Height> for u32`
 - `parameters::network::testnet::founder_address_list`
+- `parameters::network::subsidy::founders_reward`
 
 ### Changed
 
