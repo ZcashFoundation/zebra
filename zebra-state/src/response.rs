@@ -52,6 +52,7 @@ pub enum Response {
     //       `LatestChainTip::best_tip_height_and_hash()`
     Tip(Option<(block::Height, block::Hash)>),
 
+    #[cfg(zcash_unstable = "zip234")]
     /// Response to [`Request::TipPoolValues`] with the current best chain tip values.
     TipPoolValues {
         /// The current best chain tip height.
