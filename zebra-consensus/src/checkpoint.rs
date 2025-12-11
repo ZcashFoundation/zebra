@@ -610,15 +610,10 @@ where
             crate::block::check::equihash_solution_is_valid(&block.header)?;
         }
 
-        // We can't get the block subsidy for blocks with heights in the slow start interval, so we
-        // omit the calculation of the expected deferred amount.
-        let expected_deferred_amount = if height > self.network.slow_start_interval() {
-            // See [ZIP-1015](https://zips.z.cash/zip-1015).
+        // See [ZIP-1015](https://zips.z.cash/zip-1015).
+        let expected_deferred_amount =
             funding_stream_values(height, &self.network, block_subsidy(height, &self.network)?)?
-                .remove(&FundingStreamReceiver::Deferred)
-        } else {
-            None
-        };
+                .remove(&FundingStreamReceiver::Deferred);
 
         let deferred_pool_balance_change = expected_deferred_amount
             .unwrap_or_default()
