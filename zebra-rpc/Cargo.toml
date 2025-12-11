@@ -87,7 +87,6 @@ nix = { workspace = true, features = ["signal"] }
 openrpsee = { path = "/home/alfredo/zebra/openrpc-zebra/openrpsee" }
 phf = { workspace = true, features = ["macros"] }
 schemars = { workspace = true }
-tower-http = { workspace = true, features = ["cors"] }
 
 zcash_address = { workspace = true }
 zcash_keys = { workspace = true }

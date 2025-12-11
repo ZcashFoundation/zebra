@@ -7148,7 +7148,6 @@ dependencies = [
  "tonic-prost-build",
  "tonic-reflection",
  "tower 0.4.13",
- "tower-http",
  "tracing",
  "which",
  "zcash_address",
