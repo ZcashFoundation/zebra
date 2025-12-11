@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
 
+## [Unreleased]
+
+### Added
+
+- Added OpenTelemetry tracing support behind the `opentelemetry` feature flag. Configure via `ZEBRA_TRACING__OPENTELEMETRY_ENDPOINT`, `ZEBRA_TRACING__OPENTELEMETRY_SERVICE_NAME`, and `ZEBRA_TRACING__OPENTELEMETRY_SAMPLE_PERCENT` environment variables ([#10166](https://github.com/ZcashFoundation/zebra/issues/10166))
+- Added RPC tracing middleware with `SPAN_KIND_SERVER` spans for Jaeger Service Performance Monitoring (SPM) visibility ([#10168](https://github.com/ZcashFoundation/zebra/issues/10168))
+- Added Docker Compose observability stack with Jaeger, Prometheus, Grafana, and AlertManager for local development and testing
+
+
 ## [Zebra 3.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v3.1.0) - 2025-11-28
 
 This release fixes how Docker images are published for ARM64 platforms, increases the maximum size of RPC responses and allows configuring it, and filters out dust transactions in the mempool.
