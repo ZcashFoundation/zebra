@@ -11,6 +11,9 @@ use zebra_chain::{
     transaction::Transaction,
 };
 
+#[cfg(zcash_unstable = "zip234")]
+use zebra_chain::amount::MAX_MONEY;
+
 use super::standard_coinbase_outputs;
 
 /// Tests that a minimal coinbase transaction can be generated.
@@ -33,6 +36,8 @@ fn minimal_coinbase() -> Result<(), Box<dyn std::error::Error>> {
         Height(1),
         &Address::from(TransparentAddress::PublicKeyHash([0x42; 20])),
         Amount::zero(),
+        #[cfg(zcash_unstable = "zip234")]
+        Amount::new(MAX_MONEY),
     );
 
     // It should be possible to generate a coinbase tx from these params.

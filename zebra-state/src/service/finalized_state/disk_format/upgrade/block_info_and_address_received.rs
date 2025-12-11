@@ -10,7 +10,7 @@ use zebra_chain::{
     amount::{DeferredPoolBalanceChange, NonNegative},
     block::{Block, Height},
     block_info::BlockInfo,
-    parameters::subsidy::{block_subsidy, funding_stream_values, FundingStreamReceiver},
+    parameters::subsidy::{funding_stream_values, FundingStreamReceiver},
     transparent::{self, OutPoint, Utxo},
     value_balance::ValueBalance,
 };
@@ -24,6 +24,12 @@ use crate::{
 };
 
 use super::{CancelFormatChange, DiskFormatUpgrade};
+
+#[cfg(not(zcash_unstable = "zip234"))]
+use zebra_chain::parameters::subsidy::block_subsidy_pre_nsm;
+
+#[cfg(zcash_unstable = "zip234")]
+use zebra_chain::parameters::subsidy::block_subsidy;
 
 /// Implements [`DiskFormatUpgrade`] for adding additionl block info to the
 /// database.
@@ -178,16 +184,23 @@ impl DiskFormatUpgrade for Upgrade {
 
             // Get the deferred amount which is required to update the value pool.
             let deferred_pool_balance_change = if height > network.slow_start_interval() {
+                let block_subsidy = {
+                    #[cfg(zcash_unstable = "zip234")]
+                    {
+                        let money_reserve = value_pool.money_reserve();
+                        block_subsidy(height, &network, money_reserve).unwrap_or_default()
+                    }
+                    #[cfg(not(zcash_unstable = "zip234"))]
+                    block_subsidy_pre_nsm(height, &network).unwrap_or_default()
+                };
+
                 // See [ZIP-1015](https://zips.z.cash/zip-1015).
-                let deferred_pool_balance_change = funding_stream_values(
-                    height,
-                    &network,
-                    block_subsidy(height, &network).unwrap_or_default(),
-                )
-                .expect("should have valid funding stream values")
-                .remove(&FundingStreamReceiver::Deferred)
-                .unwrap_or_default()
-                .checked_sub(network.lockbox_disbursement_total_amount(height));
+                let deferred_pool_balance_change =
+                    funding_stream_values(height, &network, block_subsidy)
+                        .expect("should have valid funding stream values")
+                        .remove(&FundingStreamReceiver::Deferred)
+                        .unwrap_or_default()
+                        .checked_sub(network.lockbox_disbursement_total_amount(height));
 
                 Some(
                     deferred_pool_balance_change

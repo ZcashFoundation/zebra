@@ -9,8 +9,11 @@ use thiserror::Error;
 use zebra_chain::{
     amount::{self, NegativeAllowed, NonNegative},
     block,
+    error::CoinbaseTransactionError,
     history_tree::HistoryTreeError,
-    orchard, sapling, sprout, transaction, transparent,
+    orchard,
+    parameters::subsidy::SubsidyError,
+    sapling, sprout, transaction, transparent,
     value_balance::{ValueBalance, ValueBalanceError},
     work::difficulty::CompactDifficulty,
 };
@@ -378,6 +381,24 @@ pub enum ValidateContextError {
         tx_index_in_block: Option<usize>,
         transaction_hash: transaction::Hash,
     },
+
+    #[error("could not validate block subsidy")]
+    SubsidyError(Arc<SubsidyError>),
+
+    #[error("could not validate coinbase transaction")]
+    CoinbaseTransactionError(Arc<CoinbaseTransactionError>),
+}
+
+impl From<SubsidyError> for ValidateContextError {
+    fn from(err: SubsidyError) -> Self {
+        ValidateContextError::SubsidyError(Arc::new(err))
+    }
+}
+
+impl From<CoinbaseTransactionError> for ValidateContextError {
+    fn from(err: CoinbaseTransactionError) -> Self {
+        ValidateContextError::CoinbaseTransactionError(Arc::new(err))
+    }
 }
 
 impl From<sprout::tree::NoteCommitmentTreeError> for ValidateContextError {

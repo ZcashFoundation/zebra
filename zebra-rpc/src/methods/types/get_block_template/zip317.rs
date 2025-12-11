@@ -69,6 +69,7 @@ pub fn select_mempool_transactions(
     #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))] zip233_amount: Option<
         Amount<NonNegative>,
     >,
+    #[cfg(zcash_unstable = "zip234")] money_reserve: Amount<NonNegative>,
 ) -> Vec<SelectedMempoolTx> {
     // Use a fake coinbase transaction to break the dependency between transaction
     // selection, the miner fee, and the fee payment in the coinbase transaction.
@@ -79,6 +80,8 @@ pub fn select_mempool_transactions(
         extra_coinbase_data,
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         zip233_amount,
+        #[cfg(zcash_unstable = "zip234")]
+        money_reserve,
     );
 
     let tx_dependencies = mempool_tx_deps.dependencies();
@@ -157,6 +160,7 @@ pub fn fake_coinbase_transaction(
     #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))] zip233_amount: Option<
         Amount<NonNegative>,
     >,
+    #[cfg(zcash_unstable = "zip234")] money_reserve: Amount<NonNegative>,
 ) -> TransactionTemplate<NegativeOrZero> {
     // Block heights are encoded as variable-length (script) and `u32` (lock time, expiry height).
     // They can also change the `u32` consensus branch id.
@@ -168,7 +172,14 @@ pub fn fake_coinbase_transaction(
     // so one zat has the same size as the real amount:
     // https://developer.bitcoin.org/reference/transactions.html#txout-a-transaction-output
     let miner_fee = 1.try_into().expect("amount is valid and non-negative");
-    let outputs = standard_coinbase_outputs(net, height, miner_address, miner_fee);
+    let outputs = standard_coinbase_outputs(
+        net,
+        height,
+        miner_address,
+        miner_fee,
+        #[cfg(zcash_unstable = "zip234")]
+        money_reserve,
+    );
 
     #[cfg(not(all(zcash_unstable = "nu7", feature = "tx_v6")))]
     let coinbase = Transaction::new_v5_coinbase(net, height, outputs, extra_coinbase_data).into();
@@ -179,8 +190,16 @@ pub fn fake_coinbase_transaction(
         if network_upgrade < NetworkUpgrade::Nu7 {
             Transaction::new_v5_coinbase(net, height, outputs, extra_coinbase_data).into()
         } else {
-            Transaction::new_v6_coinbase(net, height, outputs, extra_coinbase_data, zip233_amount)
-                .into()
+            Transaction::new_v6_coinbase(
+                net,
+                height,
+                outputs,
+                extra_coinbase_data,
+                zip233_amount,
+                #[cfg(zcash_unstable = "zip235")]
+                miner_fee,
+            )
+            .into()
         }
     };
 

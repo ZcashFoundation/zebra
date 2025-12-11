@@ -789,6 +789,12 @@ pub enum SubsidyError {
 
     #[error("invalid amount")]
     InvalidAmount(#[from] amount::Error),
+
+    #[error("invalid zip233 amount")]
+    InvalidZip233Amount,
+
+    #[error("unexpected error occurred: {0}")]
+    Other(String),
 }
 
 /// The divisor used for halvings.
@@ -834,10 +840,34 @@ pub fn num_halvings(height: Height, network: &Network) -> u32 {
         .expect("already checked for negatives")
 }
 
+#[cfg(zcash_unstable = "zip234")]
+pub fn block_subsidy(
+    height: Height,
+    network: &Network,
+    money_reserve: Amount<NonNegative>,
+) -> Result<Amount<NonNegative>, SubsidyError> {
+    let Some(nsm_activation_height) = NetworkUpgrade::Nu7.activation_height(network) else {
+        return block_subsidy_pre_nsm(height, network);
+    };
+    if height < nsm_activation_height {
+        return block_subsidy_pre_nsm(height, network);
+    }
+    let money_reserve: i64 = money_reserve.into();
+    let money_reserve: i128 = money_reserve.into();
+    const BLOCK_SUBSIDY_DENOMINATOR: i128 = 10_000_000_000;
+    const BLOCK_SUBSIDY_NUMERATOR: i128 = 4_126;
+
+    // calculate the block subsidy (in zatoshi) using the money reserve, note the rounding up
+    let subsidy = (money_reserve * BLOCK_SUBSIDY_NUMERATOR + (BLOCK_SUBSIDY_DENOMINATOR - 1))
+        / BLOCK_SUBSIDY_DENOMINATOR;
+
+    Ok(subsidy.try_into().expect("subsidy should fit in Amount"))
+}
+
 /// `BlockSubsidy(height)` as described in [protocol specification §7.8][7.8]
 ///
 /// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
-pub fn block_subsidy(
+pub fn block_subsidy_pre_nsm(
     height: Height,
     network: &Network,
 ) -> Result<Amount<NonNegative>, SubsidyError> {
