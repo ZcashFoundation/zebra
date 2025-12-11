@@ -9,9 +9,7 @@ use derive_getters::Getters;
 use crate::{
     block::MAX_BLOCK_BYTES,
     primitives::Groth16Proof,
-    serialization::{
-        serde_helpers, SerializationError, TrustedPreallocate, ZcashDeserialize, ZcashSerialize,
-    },
+    serialization::{SerializationError, TrustedPreallocate, ZcashDeserialize, ZcashSerialize},
 };
 
 use super::{commitment, keys, note};
@@ -24,12 +22,11 @@ use super::{commitment, keys, note};
 /// `V5` transactions split them into multiple arrays.
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#outputencoding
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Getters)]
+#[derive(Clone, Debug, PartialEq, Eq, Getters)]
 pub struct Output {
     /// A value commitment to the value of the input note.
     pub cv: commitment::ValueCommitment,
     /// The u-coordinate of the note commitment for the output note.
-    #[serde(with = "serde_helpers::SaplingExtractedNoteCommitment")]
     pub cm_u: sapling_crypto::note::ExtractedNoteCommitment,
     /// An encoding of an ephemeral Jubjub public key.
     pub ephemeral_key: keys::EphemeralPublicKey,
@@ -44,7 +41,7 @@ pub struct Output {
 /// Wrapper for `Output` serialization in a `V4` transaction.
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#outputencoding>
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OutputInTransactionV4(pub Output);
 
 /// The serialization prefix fields of an `Output` in Transaction V5.
@@ -55,12 +52,11 @@ pub struct OutputInTransactionV4(pub Output);
 /// Serialized as `OutputDescriptionV5` in [protocol specification §7.3][ps].
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#outputencoding
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OutputPrefixInTransactionV5 {
     /// A value commitment to the value of the input note.
     pub cv: commitment::ValueCommitment,
     /// The u-coordinate of the note commitment for the output note.
-    #[serde(with = "serde_helpers::SaplingExtractedNoteCommitment")]
     pub cm_u: sapling_crypto::note::ExtractedNoteCommitment,
     /// An encoding of an ephemeral Jubjub public key.
     pub ephemeral_key: keys::EphemeralPublicKey,
