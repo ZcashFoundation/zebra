@@ -300,7 +300,6 @@ pub enum MetaAddrChange {
         )]
         addr: PeerSocketAddr,
         rtt: Option<Duration>,
-        ping_sent_at: Option<Instant>,
     },
 
     /// Updates an existing `MetaAddr` when a peer fails.
@@ -413,15 +412,10 @@ impl MetaAddr {
     /// - malicious peers could interfere with other peers' [`AddressBook`](crate::AddressBook)
     ///   state, or
     /// - Zebra could advertise unreachable addresses to its own peers.
-    pub fn new_responded(
-        addr: PeerSocketAddr,
-        rtt: Option<Duration>,
-        ping_sent_at: Option<Instant>,
-    ) -> MetaAddrChange {
+    pub fn new_responded(addr: PeerSocketAddr, rtt: Option<Duration>) -> MetaAddrChange {
         UpdateResponded {
             addr: canonical_peer_addr(*addr),
             rtt,
-            ping_sent_at,
         }
     }
 
