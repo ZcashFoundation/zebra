@@ -579,7 +579,7 @@ pub fn subsidy_is_valid(
         // ZIP-1014 only applies to mainnet, ZIP-214 contains the specific rules for testnet
         // funding stream amount values
         let mut funding_streams = funding_stream_values(height, network, expected_block_subsidy)
-            .map_err(|err| SubsidyError::InvalidFundingStreams(err))?;
+            .map_err(SubsidyError::InvalidFundingStreams)?;
 
         let mut has_expected_output = |address, expected_amount| {
             coinbase_outputs.remove(&Output::new_coinbase(
@@ -594,7 +594,7 @@ pub fn subsidy_is_valid(
             .remove(&FundingStreamReceiver::Deferred)
             .unwrap_or_default()
             .constrain::<NegativeAllowed>()
-            .map_err(|err| SubsidyError::InvalidDeferredPoolAmount(err))?;
+            .map_err(SubsidyError::InvalidDeferredPoolAmount)?;
 
         // Checks the one-time lockbox disbursements in the NU6.1 activation block's coinbase transaction
         // See [ZIP-271](https://zips.z.cash/zip-0271) and [ZIP-1016](https://zips.z.cash/zip-1016) for more details.
@@ -620,7 +620,7 @@ pub fn subsidy_is_valid(
         for (receiver, expected_amount) in funding_streams {
             let address = funding_stream_address(height, network, receiver)
                 // funding stream receivers other than the deferred pool must have an address
-                .ok_or_else(|| SubsidyError::FundingStreamAddressNotFound(height))?;
+                .ok_or(SubsidyError::FundingStreamAddressNotFound(height))?;
 
             if !has_expected_output(address, expected_amount) {
                 Err(SubsidyError::FundingStreamNotFound)?;
@@ -659,7 +659,7 @@ pub fn miner_fees_are_valid(
     let zip233_amount: Amount<NegativeAllowed> = coinbase_tx
         .zip233_amount()
         .constrain()
-        .expect("positive value always fit in `NegativeAllowed`");
+        .map_err(|_| SubsidyError::InvalidZip233Amount)?;
 
     // # Consensus
     //

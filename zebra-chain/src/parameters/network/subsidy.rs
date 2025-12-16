@@ -896,7 +896,7 @@ pub fn block_subsidy_pre_nsm(
     } else if height < blossom_height {
         // this calculation is exact, because the halving divisor is 1 here
         Ok(Amount::try_from(MAX_BLOCK_SUBSIDY / halving_div)
-            .map_err(|err| SubsidyError::InvalidAmount(err))?)
+            .map_err(SubsidyError::InvalidAmount)?)
     } else {
         let scaled_max_block_subsidy =
             MAX_BLOCK_SUBSIDY / u64::from(BLOSSOM_POW_TARGET_SPACING_RATIO);
@@ -904,7 +904,7 @@ pub fn block_subsidy_pre_nsm(
         // Amount division is implemented using integer division,
         // which truncates (rounds down) the result, as specified
         Ok(Amount::try_from(scaled_max_block_subsidy / halving_div)
-            .map_err(|err| SubsidyError::InvalidAmount(err))?)
+            .map_err(SubsidyError::InvalidAmount)?)
     }
 }
 
