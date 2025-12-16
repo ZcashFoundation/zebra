@@ -17,7 +17,10 @@ use std::collections::HashMap;
 use lazy_static::lazy_static;
 
 use crate::{
-    amount::{self, Amount, NonNegative, COIN}, block::{Height, HeightDiff}, parameters::{constants::activation_heights, Network, NetworkUpgrade}, transparent
+    amount::{self, Amount, NonNegative, COIN},
+    block::{Height, HeightDiff},
+    parameters::{constants::activation_heights, Network, NetworkUpgrade},
+    transparent,
 };
 
 /// The largest block subsidy, used before the first halving.
