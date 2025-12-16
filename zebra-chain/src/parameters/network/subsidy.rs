@@ -17,10 +17,7 @@ use std::collections::HashMap;
 use lazy_static::lazy_static;
 
 use crate::{
-    amount::{self, Amount, NonNegative, COIN},
-    block::{Height, HeightDiff},
-    parameters::{constants::activation_heights, Network, NetworkUpgrade},
-    transparent,
+    amount::{self, Amount, NonNegative, COIN}, block::{Height, HeightDiff}, parameters::{constants::activation_heights, Network, NetworkUpgrade}, transparent
 };
 
 /// The largest block subsidy, used before the first halving.
@@ -775,11 +772,11 @@ pub enum SubsidyError {
     #[error("funding stream expected output not found")]
     FundingStreamNotFound,
 
+    #[error("funding stream address at height {0:?} not found")]
+    FundingStreamAddressNotFound(Height),
+
     #[error("one-time lockbox disbursement output not found")]
     OneTimeLockboxDisbursementNotFound,
-
-    #[error("miner fees are invalid")]
-    InvalidMinerFees,
 
     #[error("a sum of amounts overflowed")]
     SumOverflow,
@@ -787,14 +784,20 @@ pub enum SubsidyError {
     #[error("unsupported height")]
     UnsupportedHeight,
 
+    #[error("miner fees are invalid")]
+    InvalidMinerFees,
+
     #[error("invalid amount")]
-    InvalidAmount(#[from] amount::Error),
+    InvalidAmount(amount::Error),
 
     #[error("invalid zip233 amount")]
     InvalidZip233Amount,
 
-    #[error("unexpected error occurred: {0}")]
-    Other(String),
+    #[error("invalid funding streams: {0}")]
+    InvalidFundingStreams(amount::Error),
+
+    #[error("invalid deferred pool amount: {0}")]
+    InvalidDeferredPoolAmount(amount::Error),
 }
 
 /// The divisor used for halvings.
@@ -889,14 +892,16 @@ pub fn block_subsidy_pre_nsm(
         Err(SubsidyError::UnsupportedHeight)
     } else if height < blossom_height {
         // this calculation is exact, because the halving divisor is 1 here
-        Ok(Amount::try_from(MAX_BLOCK_SUBSIDY / halving_div)?)
+        Ok(Amount::try_from(MAX_BLOCK_SUBSIDY / halving_div)
+            .map_err(|err| SubsidyError::InvalidAmount(err))?)
     } else {
         let scaled_max_block_subsidy =
             MAX_BLOCK_SUBSIDY / u64::from(BLOSSOM_POW_TARGET_SPACING_RATIO);
         // in future halvings, this calculation might not be exact
         // Amount division is implemented using integer division,
         // which truncates (rounds down) the result, as specified
-        Ok(Amount::try_from(scaled_max_block_subsidy / halving_div)?)
+        Ok(Amount::try_from(scaled_max_block_subsidy / halving_div)
+            .map_err(|err| SubsidyError::InvalidAmount(err))?)
     }
 }
 
