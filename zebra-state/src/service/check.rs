@@ -462,8 +462,7 @@ pub(crate) fn initial_contextual_validity(
             expected_block_subsidy,
         )?);
 
-        let coinbase_tx = coinbase_is_first(&semantically_verified.block)
-            .map_err(|e| SubsidyError::Other(format!("invalid coinbase transaction: {e}")))?;
+        let coinbase_tx = coinbase_is_first(&semantically_verified.block)?;
 
         // Blocks restored from disk may not have this field set. In that case, we treat
         // missing miner fees as zero fees.
@@ -580,7 +579,7 @@ pub fn subsidy_is_valid(
         // ZIP-1014 only applies to mainnet, ZIP-214 contains the specific rules for testnet
         // funding stream amount values
         let mut funding_streams = funding_stream_values(height, network, expected_block_subsidy)
-            .map_err(|err| SubsidyError::Other(err.to_string()))?;
+            .map_err(|err| SubsidyError::InvalidFundingStreams(err))?;
 
         let mut has_expected_output = |address, expected_amount| {
             coinbase_outputs.remove(&Output::new_coinbase(
@@ -595,7 +594,7 @@ pub fn subsidy_is_valid(
             .remove(&FundingStreamReceiver::Deferred)
             .unwrap_or_default()
             .constrain::<NegativeAllowed>()
-            .map_err(|e| SubsidyError::Other(format!("invalid deferred pool amount: {e}")))?;
+            .map_err(|err| SubsidyError::InvalidDeferredPoolAmount(err))?;
 
         // Checks the one-time lockbox disbursements in the NU6.1 activation block's coinbase transaction
         // See [ZIP-271](https://zips.z.cash/zip-0271) and [ZIP-1016](https://zips.z.cash/zip-1016) for more details.
@@ -621,11 +620,7 @@ pub fn subsidy_is_valid(
         for (receiver, expected_amount) in funding_streams {
             let address = funding_stream_address(height, network, receiver)
                 // funding stream receivers other than the deferred pool must have an address
-                .ok_or_else(|| {
-                    SubsidyError::Other(format!(
-                        "missing funding stream address at height {height:?}"
-                    ))
-                })?;
+                .ok_or_else(|| SubsidyError::FundingStreamAddressNotFound(height))?;
 
             if !has_expected_output(address, expected_amount) {
                 Err(SubsidyError::FundingStreamNotFound)?;
@@ -655,9 +650,8 @@ pub fn miner_fees_are_valid(
         .iter()
         .map(|output| output.value())
         .sum::<Result<Amount<NonNegative>, AmountError>>()
-        .map_err(|_| SubsidyError::SumOverflow)?
-        .constrain()
-        .map_err(|e| SubsidyError::Other(format!("invalid transparent value balance: {e}")))?;
+        .map(|sum| sum.constrain())
+        .map_err(|_| SubsidyError::SumOverflow)?;
     let sapling_value_balance = coinbase_tx.sapling_value_balance().sapling_amount();
     let orchard_value_balance = coinbase_tx.orchard_value_balance().orchard_amount();
 
