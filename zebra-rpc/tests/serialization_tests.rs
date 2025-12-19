@@ -53,7 +53,7 @@ fn test_get_info() -> Result<(), Box<dyn std::error::Error>> {
   "paytxfee": 0.0,
   "relayfee": 1e-6,
   "errors": "no errors",
-  "errorstimestamp": "2025-05-20 19:33:53.395307694 UTC"
+  "errorstimestamp": 1762881920
 }"#;
     let obj: GetInfoResponse = serde_json::from_str(json)?;
 
@@ -84,7 +84,7 @@ fn test_get_info() -> Result<(), Box<dyn std::error::Error>> {
         pay_tx_fee,
         relay_fee,
         errors.clone(),
-        errors_timestamp.clone(),
+        errors_timestamp,
     );
 
     assert_eq!(obj, new_obj);
@@ -1265,8 +1265,47 @@ fn test_get_peer_info() -> Result<(), Box<dyn std::error::Error>> {
     let inbound1 = obj[1].inbound();
 
     let new_obj = vec![
-        PeerInfo::new(addr0.into(), inbound0),
-        PeerInfo::new(addr1.into(), inbound1),
+        PeerInfo::new(addr0.into(), inbound0, None, None),
+        PeerInfo::new(addr1.into(), inbound1, None, None),
+    ];
+    assert_eq!(obj, new_obj);
+
+    Ok(())
+}
+
+#[test]
+fn test_get_peer_info_with_ping_values_serialization() -> Result<(), Box<dyn std::error::Error>> {
+    let json = r#"
+[
+  {
+    "addr": "192.168.0.1:8233",
+    "inbound": false,
+    "pingtime": 123,
+    "pingwait": 45
+  },
+  {
+    "addr": "[2000:2000:2000:0000::]:8233",
+    "inbound": false,
+    "pingtime": 67,
+    "pingwait": 89
+  }
+]
+"#;
+    let obj: GetPeerInfoResponse = serde_json::from_str(json)?;
+
+    let addr0 = *obj[0].addr().deref();
+    let inbound0 = obj[0].inbound();
+    let pingtime0 = obj[0].pingtime();
+    let pingwait0 = obj[0].pingwait();
+
+    let addr1 = *obj[1].addr().deref();
+    let inbound1 = obj[1].inbound();
+    let pingtime1 = obj[1].pingtime();
+    let pingwait1 = obj[1].pingwait();
+
+    let new_obj = vec![
+        PeerInfo::new(addr0.into(), inbound0, *pingtime0, *pingwait0),
+        PeerInfo::new(addr1.into(), inbound1, *pingtime1, *pingwait1),
     ];
     assert_eq!(obj, new_obj);
 
