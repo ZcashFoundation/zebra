@@ -25,7 +25,7 @@ example above is Zebra's default Mainnet RPC port.
 Instead of listing the environment variables on the command line, you can use
 Docker's `--env-file` flag to specify a file containing the variables. You can
 find more info here
-https://docs.docker.com/engine/reference/commandline/run/#env.
+<https://docs.docker.com/engine/reference/commandline/run/#env>.
 
 If you don't want to set any environment variables, you can edit the
 `docker/default-zebra-config.toml` file, and pass it to Zebra before starting

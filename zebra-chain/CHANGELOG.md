@@ -95,7 +95,7 @@ These changes break the public API and may require updates in downstream crates.
 
 - The `ValueCommitment` type no longer derives `Copy`.
 - `zebra-chain::Errors` has new variants.
-- ` ValueCommitment::new` and `ValueCommitment::randomized` methods were removed.
+- `ValueCommitment::new` and `ValueCommitment::randomized` methods were removed.
 - Constant `NU6_1_ACTIVATION_HEIGHT_TESTNET` was removed as is now part of `activation_heights` module.
 - Structs `sapling::NoteCommitment`, `sapling::NotSmallOrderValueCommitment` and `sapling::tree::Node` were
   removed.

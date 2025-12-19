@@ -50,7 +50,6 @@ across peers ([#9907](https://github.com/ZcashFoundation/zebra/pull/9907)).
 
 - Added `AdvertiseBlockToAll` variant to the `Request` enum.
 
-
 ## [1.1.0] - 2025-08-07
 
 Support for NU6.1 testnet activation.
@@ -64,7 +63,6 @@ Support for NU6.1 testnet activation.
 
 - The `pre_nu6_funding_streams` and `post_nu6_funding_streams` config
   fields are now deprecated; use `funding_streams` instead.
-
 
 ## [1.0.0] - 2025-07-11
 

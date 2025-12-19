@@ -1,10 +1,9 @@
 ---
-name: 'Release Checklist Template'
-about: 'Checklist to create and publish a Zebra release'
-title: 'Release Zebra (version)'
-labels: 'A-release, C-exclude-from-changelog, P-Critical :ambulance:'
-assignees: ''
-
+name: "Release Checklist Template"
+about: "Checklist to create and publish a Zebra release"
+title: "Release Zebra (version)"
+labels: "A-release, C-exclude-from-changelog, P-Critical :ambulance:"
+assignees: ""
 ---
 
 # Prepare for the Release
@@ -14,6 +13,7 @@ assignees: ''
 # Checkpoints
 
 For performance and security, we want to update the Zebra checkpoints in every release.
+
 - [ ] You can copy the latest checkpoints from CI by following [the zebra-checkpoints README](https://github.com/ZcashFoundation/zebra/blob/main/zebra-utils/README.md#zebra-checkpoints).
 
 # Missed Dependency Updates
@@ -23,6 +23,7 @@ Sometimes `dependabot` misses some dependency updates, or we accidentally turned
 This step can be skipped if there is a large pending dependency upgrade. (For example, shared ECC crates.)
 
 Here's how we make sure we got everything:
+
 - [ ] Run `cargo update` on the latest `main` branch, and keep the output
 - [ ] If needed, [add duplicate dependency exceptions to deny.toml](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/continuous-integration.md#fixing-duplicate-dependencies-in-check-denytoml-bans)
 - [ ] If needed, remove resolved duplicate dependencies from `deny.toml`
@@ -41,11 +42,12 @@ Once you are ready to tag a release, copy the draft changelog into `CHANGELOG.md
 We use [the Release Drafter workflow](https://github.com/marketplace/actions/release-drafter) to automatically create a [draft changelog](https://github.com/ZcashFoundation/zebra/releases). We follow the [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) format.
 
 To create the final change log:
+
 - [ ] Copy the [**latest** draft
-  changelog](https://github.com/ZcashFoundation/zebra/releases) into
-  `CHANGELOG.md` (there can be multiple draft releases)
+      changelog](https://github.com/ZcashFoundation/zebra/releases) into
+      `CHANGELOG.md` (there can be multiple draft releases)
 - [ ] Delete any trivial changes
-    - [ ] Put the list of deleted changelog entries in a PR comment to make reviewing easier
+  - [ ] Put the list of deleted changelog entries in a PR comment to make reviewing easier
 - [ ] Combine duplicate changes
 - [ ] Edit change descriptions so they will make sense to Zebra users
 - [ ] Check the category for each change
@@ -56,12 +58,14 @@ To create the final change log:
 README updates can be skipped for urgent releases.
 
 Update the README to:
+
 - [ ] Remove any "Known Issues" that have been fixed since the last release.
 - [ ] Update the "Build and Run Instructions" with any new dependencies.
       Check for changes in the `Dockerfile` since the last tag: `git diff <previous-release-tag> docker/Dockerfile`.
 - [ ] If Zebra has started using newer Rust language features or standard library APIs, update the known working Rust version in the README, book, and `Cargo.toml`s
 
 You can use a command like:
+
 ```sh
 fastmod --fixed-strings '1.58' '1.65'
 ```
@@ -88,20 +92,11 @@ This check runs automatically on pull requests with the `A-release` label. It mu
 
 Zebra follows [semantic versioning](https://semver.org). Semantic versions look like: MAJOR.MINOR.PATCH[-TAG.PRE-RELEASE]
 
-Choose a release level for `zebrad`. Release levels are based on user-visible changes:
+Choose a release level for `zebrad`. Release levels are based on user-visible changes from the changelog:
 
-- Major release: breaking changes to RPCs (fields changed or removed), config files (fields
-  changed or removed), command line (arguments changed or removed), features
-  (features changed or removed), environment variables (changed or removed)
-  or any other external interface of Zebra
-- Minor release: new features are `minor` releases
-- Patch release: otherwise
-
-Update the version using:
-
-```
-cargo release version --verbose --execute --allow-branch '*' -p zebrad patch # [ major | minor ]
-```
+- Mainnet Network Upgrades are `major` releases
+- significant new features or behaviour changes; changes to RPCs, command-line, or configs; and deprecations or removals are `minor` releases
+- otherwise, it is a `patch` release
 
 ## Update Crate Versions and Crate Change Logs
 
@@ -144,6 +139,7 @@ cargo release replace --verbose --execute --allow-branch '*' -p <crate>
 
 The end of support height is calculated from the current blockchain height:
 
+- [ ] Find where the Zcash blockchain tip is now by using a [Zcash Block Explorer](https://mainnet.zcashexplorer.app/) or other tool.
 - [ ] Replace `ESTIMATED_RELEASE_HEIGHT` in [`end_of_support.rs`](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/src/components/sync/end_of_support.rs) with the height you estimate the release will be tagged.
 
 <details>
@@ -159,7 +155,6 @@ The end of support height is calculated from the current blockchain height:
 ## Update the Release PR
 
 - [ ] Push the version increments and the release constants to the release branch.
-
 
 # Publish the Zebra Release
 
@@ -182,7 +177,7 @@ The end of support height is calculated from the current blockchain height:
 ## Test the Pre-Release
 
 - [ ] Wait until the Docker binaries have been built on `main`, and the quick tests have passed:
-    - [ ] [zfnd-ci-integration-tests-gcp.yml](https://github.com/ZcashFoundation/zebra/actions/workflows/zfnd-ci-integration-tests-gcp.yml?query=branch%3Amain)
+  - [ ] [zfnd-ci-integration-tests-gcp.yml](https://github.com/ZcashFoundation/zebra/actions/workflows/zfnd-ci-integration-tests-gcp.yml?query=branch%3Amain)
 - [ ] Wait until the [pre-release deployment machines have successfully launched](https://github.com/ZcashFoundation/zebra/actions/workflows/zfnd-deploy-nodes-gcp.yml?query=event%3Arelease)
 
 ## Publish Release

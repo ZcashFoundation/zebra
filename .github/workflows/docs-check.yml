@@ -1,0 +1,124 @@
+name: Docs Check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**.md"
+      - "book/**"
+      - ".lychee.toml"
+      - ".codespellrc"
+      - ".trunk/configs/.markdownlint.yaml"
+      - ".github/workflows/docs-check.yml"
+  pull_request:
+    paths:
+      - "**.md"
+      - "book/**"
+      - ".lychee.toml"
+      - ".codespellrc"
+      - ".trunk/configs/.markdownlint.yaml"
+      - ".github/workflows/docs-check.yml"
+
+# Ensures that only one workflow task will run at a time. Previous builds, if
+# already in process, will get cancelled. Only the latest commit will be allowed
+# to run, cancelling any workflows in between
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  link-check:
+    name: link-check
+    permissions:
+      contents: read
+      pull-requests: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 #v6.0.1
+        with:
+          persist-credentials: false
+
+      - name: Restore lychee cache
+        uses: actions/cache@9255dc7a253b0ccc959486e2bca901246202afeb #v5.0.1
+        with:
+          path: .lycheecache
+          key: cache-lychee-${{ github.sha }}
+          restore-keys: cache-lychee-
+
+      - name: Link Checker
+        uses: lycheeverse/lychee-action@a8c4c7cb88f0c7386610c35eb25108e448569cb0 #v2.7.0
+        with:
+          args: >-
+            --verbose
+            --no-progress
+            --cache
+            --max-cache-age 1d
+            --config .lychee.toml
+            "**/*.md"
+          fail: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  spell-check:
+    name: spell-check
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 #v6.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install codespell
+        run: pip install codespell
+
+      - name: Run codespell
+        run: codespell --config .codespellrc
+
+  markdown-lint:
+    name: markdown-lint
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 #v6.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f #v6.1.0
+        with:
+          node-version: "22"
+
+      - name: Install markdownlint-cli
+        run: npm install -g markdownlint-cli
+
+      - name: Run markdownlint
+        run: |
+          markdownlint "**/*.md" \
+            --ignore node_modules \
+            --ignore target \
+            --ignore .git \
+            --config .trunk/configs/.markdownlint.yaml
+
+  docs-check-success:
+    name: docs check success
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - link-check
+      - spell-check
+      - markdown-lint
+    timeout-minutes: 5
+    steps:
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@afee1c1eac2a506084c274e9c02c8e0687b48d9e #v1.2.2
+        with:
+          jobs: ${{ toJSON(needs) }}

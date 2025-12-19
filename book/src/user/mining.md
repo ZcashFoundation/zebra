@@ -13,6 +13,7 @@ Contents:
 - [Run a mining pool](#run-a-mining-pool)
 
 ## Download Zebra
+
 [#download-and-build-zebra]: #download-and-build-zebra
 
 The easiest way to run Zebra for mining is with [our docker images](https://zebra.zfnd.org/user/mining-docker.html).
@@ -21,6 +22,7 @@ If you have [installed Zebra another way](https://zebra.zfnd.org/user/install.ht
 instructions below to start mining:
 
 ## Configure zebra for mining
+
 [#configure-zebra-for-mining]: #configure-zebra-for-mining
 
 We need a configuration file. First, we create a file with the default settings:
@@ -35,11 +37,12 @@ The above command places the generated `zebrad.toml` config file in the default 
 Tweak the following options in order to prepare for mining.
 
 ### Miner address
+
 [#miner-address]: #miner-address
 
 Node miner address is required. At the moment zebra only allows `p2pkh` or `p2sh` transparent addresses.
 
-```
+```toml
 [mining]
 miner_address = 't3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1'
 ```
@@ -47,16 +50,18 @@ miner_address = 't3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1'
 The above address is the ZF Mainnet funding stream address. It is used here purely as an example.
 
 ### RPC section
+
 [#rpc-section]: #rpc-section
 
 This change is required for zebra to behave as an RPC endpoint. The standard port for RPC endpoint is `8232` on mainnet.
 
-```
+```toml
 [rpc]
 listen_addr = "127.0.0.1:8232"
 ```
 
 ## Running zebra
+
 [#running-zebra]: #running-zebra
 
 If the configuration file is in the default directory, then zebra will just read from it. All we need to do is to start zebra as follows:
@@ -67,29 +72,28 @@ zebrad
 
 You can specify the configuration file path with `-c /path/to/config.file`.
 
-Wait until zebra is in sync, you will see the sync at 100% when this happens:
+Wait until Zebra is in sync. You will see the sync at 100% when this happens:
 
 ```console
-...
-2023-02-21T18:41:09.088931Z  INFO {zebrad="4daedbc" net="Main"}: zebrad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(1992055) network_upgrade=Nu5 remaining_sync_blocks=1 time_since_last_state_block=0s
-...
+INFO zebrad::components::sync::progress: finished initial sync to chain tip, using gossiped blocks sync_percent=100.000% current_height=Height(...) network_upgrade=Nu6 remaining_sync_blocks=1 time_since_last_state_block=0s
 ```
 
 ## Testing the setup
+
 [#testing-the-setup]: #testing-the-setup
 
 The easiest way to check your setup is to call the `getblocktemplate` RPC method and check the result.
 
 Starting with Zebra v2.0.0, a cookie authentication method similar to the one used by the `zcashd` node is enabled by default. The cookie is stored in the default cache directory when the RPC endpoint starts and is deleted at shutdown. By default, the cookie is located in the cache directory; for example, on Linux, it may be found at `/home/user/.cache/zebra/.cookie`. You can change the cookie's location using the `rpc.cookie_dir` option in the configuration, or disable cookie authentication altogether by setting `rpc.enable_cookie_auth` to false. The contents of the cookie file look like this:
 
-```
+```text
 __cookie__:YwDDua GzvtEmWG6KWnhgd9gilo5mKdi6m38v__we3Ko=
 ```
 
 The password is an encoded, randomly generated string. You can use it in your call as follows:
 
 ```console
-$ curl --silent --data-binary '{"jsonrpc": "1.0", "id":"curltest", "method": "getblocktemplate", "params": [] }' -H 'Content-type: application/json' http://__cookie__:YwDDuaGzvtEmWG6KWnhgd9gilo5mKdi6m38v__we3Ko=@127.0.0.1:8232/ | jq
+curl --silent --data-binary '{"jsonrpc": "1.0", "id":"curltest", "method": "getblocktemplate", "params": [] }' -H 'Content-type: application/json' http://__cookie__:YwDDuaGzvtEmWG6KWnhgd9gilo5mKdi6m38v__we3Ko=@127.0.0.1:8232/ | jq
 ```
 
 If you can see something similar to the following then you are good to go.
@@ -170,10 +174,11 @@ If you can see something similar to the following then you are good to go.
   "id": "curltest"
 }
 ```
+
 </details>
 
-
 ## Run a mining pool
+
 [#run-a-mining-pool]: #run-a-mining-pool
 
 Just point your mining pool software to the Zebra RPC endpoint (127.0.0.1:8232). Zebra supports the RPC methods needed to run most mining pool software.

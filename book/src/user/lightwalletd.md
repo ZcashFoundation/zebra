@@ -96,9 +96,10 @@ You can interrupt the process at any time with `ctrl-c` and Zebra will resume th
 
 When deploying for production infrastructure, the above command can be run as a service or daemon.
 
-For implementing zebra as a service please see [here](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/systemd/zebrad.service).
+For implementing zebra as a service please see the [zebrad systemd service file](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/systemd/zebrad.service).
 
 ## Download and build lightwalletd
+
 [#download-and-build-lightwalletd]: #download-and-build-lightwalletd
 
 While you synchronize Zebra you can install [lightwalletd](https://github.com/zcash/lightwalletd).
@@ -117,14 +118,15 @@ make install
 If everything went good you should have a `lightwalletd` binary in `~/go/bin/`.
 
 ## Sync lightwalletd
+
 [#sync-lightwalletd]: (#sync-lightwalletd)
 
 Please make sure you have zebrad running (with RPC endpoint and up to date blockchain) to synchronize lightwalletd.
 
 - `lightwalletd` requires a `zcash.conf` file, however this file can be empty if you are using the default Zebra rpc endpoint (`127.0.0.1:8232`) and the `zcash/lightwalletd` fork.
-    - Some `lightwalletd` forks also require a `rpcuser` and `rpcpassword`, but Zebra ignores them if it receives them from `lightwalletd`
-    - When using a non-default port, use `rpcport=28232` and `rpcbind=127.0.0.1`
-    - When using testnet, use `testnet=1`
+  - Some `lightwalletd` forks also require a `rpcuser` and `rpcpassword`, but Zebra ignores them if it receives them from `lightwalletd`
+  - When using a non-default port, use `rpcport=28232` and `rpcbind=127.0.0.1`
+  - When using testnet, use `testnet=1`
 
 - For production setups `lightwalletd` requires a `cert.pem`. For more information on how to do this please [see here](https://github.com/zcash/lightwalletd#production-usage).
 
@@ -140,22 +142,22 @@ By default lightwalletd service will listen on `127.0.0.1:9067`
 
 Lightwalletd will do its own synchronization, while it is doing you will see messages as:
 
-```console
-...
-{"app":"lightwalletd","level":"info","msg":"Ingestor adding block to cache: 748000","time":"2022-05-28T19:25:49-03:00"}
-{"app":"lightwalletd","level":"info","msg":"Ingestor adding block to cache: 749540","time":"2022-05-28T19:25:53-03:00"}
-{"app":"lightwalletd","level":"info","msg":"Ingestor adding block to cache: 751074","time":"2022-05-28T19:25:57-03:00"}
-...
+```json
+{"app":"lightwalletd","level":"info","msg":"Ingestor adding block to cache: 748000","time":"..."}
+{"app":"lightwalletd","level":"info","msg":"Ingestor adding block to cache: 749540","time":"..."}
+{"app":"lightwalletd","level":"info","msg":"Ingestor adding block to cache: 751074","time":"..."}
 ```
 
 Wait until lightwalletd is in sync before connecting any wallet into it. You will know when it is in sync as those messages will not be displayed anymore.
 
 ## Run tests
+
 [#run-tests]: (#run-tests)
 
 The Zebra team created tests for the interaction of `zebrad` and `lightwalletd`.
 
 To run all the Zebra `lightwalletd` tests:
+
 1. install `lightwalletd`
 2. install `protoc`
 3. build Zebra with `--features=lightwalletd-grpc-tests`
@@ -163,6 +165,7 @@ To run all the Zebra `lightwalletd` tests:
 Please refer to [acceptance](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/tests/acceptance.rs) tests documentation in the `Lightwalletd tests` section. When running tests that use a cached lightwalletd state, the test harness will use a platform default cache directory (for example, `~/.cache/lwd` on Linux) unless overridden via the `LWD_CACHE_DIR` environment variable.
 
 ## Connect a wallet to lightwalletd
+
 [#connect-wallet-to-lightwalletd]: (#connect-wallet-to-lightwalletd)
 
 The final goal is to connect wallets to the lightwalletd service backed by Zebra.
@@ -173,6 +176,7 @@ We didn't test [zecwallet-cli](https://github.com/adityapk00/zecwallet-light-cli
 Make sure both `zebrad` and `lightwalletd` are running and listening.
 
 ### Download and build the cli-wallet
+
 [#download-and-build-the-cli-wallet]: (#download-and-build-the-cli-wallet)
 
 ```console
@@ -182,6 +186,7 @@ cargo install --locked --git https://github.com/adityapk00/zecwallet-light-cli
 zecwallet-cli binary will be at `~/.cargo/bin/zecwallet-cli`.
 
 ### Run the wallet
+
 [#run-the-wallet]: (#run-the-wallet)
 
 ```console
