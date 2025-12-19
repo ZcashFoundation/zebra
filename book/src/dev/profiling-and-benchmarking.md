@@ -13,7 +13,7 @@ sudo samply record zebrad
 
 where `zebrad` is the binary you want to inspect. You can then press `Ctrl+c`,
 and the profiler will instruct you to navigate your web browser to
-http://127.0.0.1:3000 where you can snoop around the call stack to see where
+<http://127.0.0.1:3000> where you can snoop around the call stack to see where
 Zebra loafs around the most.
 
 ## Benchmarking
@@ -110,4 +110,4 @@ Note that:
   To speed the build process up, you can link RocksDB dynamically, as described
   in the section on [building Zebra][building-zebra].
 
-[building-zebra]: <https://zebra.zfnd.org/user/install.html#building-zebra>
+[building-zebra]: https://zebra.zfnd.org/user/install.html#building-zebra
