@@ -24,7 +24,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "decimals": null,
       "fieldConfig": {
         "defaults": {},
@@ -83,42 +86,66 @@
           "expr": "checkpoint_processing_next_height{job=\"$job\"}",
           "interval": "",
           "legendFormat": "next_check",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
           "expr": "checkpoint_queued_continuous_height{job=\"$job\"}",
           "interval": "",
           "legendFormat": "queue_cont",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
           "expr": "checkpoint_verified_height{job=\"$job\"}",
           "interval": "",
           "legendFormat": "verified",
-          "refId": "C"
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
           "expr": "checkpoint_queued_max_height{job=\"$job\"}",
           "interval": "",
           "legendFormat": "queue_max",
-          "refId": "D"
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
           "expr": "state_checkpoint_committed_block_height{job=\"$job\"}",
           "interval": "",
           "legendFormat": "state_commit",
-          "refId": "E"
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
           "expr": "state_checkpoint_queued_max_height{job=\"$job\"}",
           "interval": "",
           "legendFormat": "state_q_max",
-          "refId": "F"
+          "refId": "F",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -169,7 +196,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "decimals": null,
       "fieldConfig": {
         "defaults": {},
@@ -229,42 +259,66 @@
           "expr": "checkpoint_processing_next_height{job=\"$job\"}",
           "interval": "",
           "legendFormat": "next_check",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
           "expr": "checkpoint_queued_continuous_height{job=\"$job\"}",
           "interval": "",
           "legendFormat": "queue_cont",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
           "expr": "checkpoint_verified_height{job=\"$job\"}",
           "interval": "",
           "legendFormat": "verified",
-          "refId": "C"
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
           "expr": "checkpoint_queued_max_height{job=\"$job\"}",
           "interval": "",
           "legendFormat": "queue_max",
-          "refId": "D"
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
           "expr": "state_checkpoint_committed_block_height{job=\"$job\"}",
           "interval": "",
           "legendFormat": "state_commit",
-          "refId": "E"
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
           "expr": "state_checkpoint_queued_max_height{job=\"$job\"}",
           "interval": "",
           "legendFormat": "state_q_max",
-          "refId": "F"
+          "refId": "F",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -315,7 +369,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "decimals": null,
       "fieldConfig": {
         "defaults": {},
@@ -375,42 +432,66 @@
           "expr": "checkpoint_processing_next_height{job=\"$job\"}",
           "interval": "",
           "legendFormat": "next_check",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
           "expr": "checkpoint_queued_continuous_height{job=\"$job\"}",
           "interval": "",
           "legendFormat": "queue_cont",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
           "expr": "checkpoint_verified_height{job=\"$job\"}",
           "interval": "",
           "legendFormat": "verified",
-          "refId": "C"
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
           "expr": "checkpoint_queued_max_height{job=\"$job\"}",
           "interval": "",
           "legendFormat": "queue_max",
-          "refId": "D"
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
           "expr": "state_checkpoint_committed_block_height{job=\"$job\"}",
           "interval": "",
           "legendFormat": "state_commit",
-          "refId": "E"
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
           "expr": "state_checkpoint_queued_max_height{job=\"$job\"}",
           "interval": "",
           "legendFormat": "state_q_max",
-          "refId": "F"
+          "refId": "F",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -461,7 +542,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "decimals": null,
       "fieldConfig": {
         "defaults": {},
@@ -521,42 +605,66 @@
           "expr": "checkpoint_processing_next_height{job=\"$job\"}",
           "interval": "",
           "legendFormat": "next_check",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
           "expr": "checkpoint_queued_continuous_height{job=\"$job\"}",
           "interval": "",
           "legendFormat": "queue_cont",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
           "expr": "checkpoint_verified_height{job=\"$job\"}",
           "interval": "",
           "legendFormat": "verified",
-          "refId": "C"
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
           "expr": "checkpoint_queued_max_height{job=\"$job\"}",
           "interval": "",
           "legendFormat": "queue_max",
-          "refId": "D"
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
           "expr": "state_checkpoint_committed_block_height{job=\"$job\"}",
           "interval": "",
           "legendFormat": "state_commit",
-          "refId": "E"
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
           "expr": "state_checkpoint_queued_max_height{job=\"$job\"}",
           "interval": "",
           "legendFormat": "state_q_max",
-          "refId": "F"
+          "refId": "F",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -607,7 +715,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -657,29 +768,45 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "rate(checkpoint_verified_block_count[1s])",
+          "expr": "rate(checkpoint_verified_block_count[1m])",
           "interval": "",
-          "legendFormat": "checkpoint verify rate [1s]",
-          "refId": "A"
+          "legendFormat": "checkpoint verify rate [1m]",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
-          "expr": "rate(state_checkpoint_committed_block_count[1s])",
+          "expr": "rate(state_checkpoint_committed_block_count[1m])",
           "interval": "",
-          "legendFormat": "state commit rate [1s]",
-          "refId": "C"
+          "legendFormat": "state commit rate [1m]",
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
-          "expr": "rate(sync_downloaded_block_count[1s])",
+          "expr": "rate(sync_downloaded_block_count[1m])",
           "interval": "",
-          "legendFormat": "sync download rate [1s]",
-          "refId": "E"
+          "legendFormat": "sync download rate [1m]",
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
-          "expr": "rate(gossip_downloaded_block_count[1s])",
+          "expr": "rate(gossip_downloaded_block_count[1m])",
           "interval": "",
-          "legendFormat": "gossip download rate [1s]",
-          "refId": "B"
+          "legendFormat": "gossip download rate [1m]",
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -730,7 +857,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -781,29 +911,45 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "rate(checkpoint_verified_block_count[1s])",
+          "expr": "rate(checkpoint_verified_block_count[1m])",
           "interval": "",
-          "legendFormat": "checkpoint verify rate [1s]",
-          "refId": "A"
+          "legendFormat": "checkpoint verify rate [1m]",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
-          "expr": "rate(state_checkpoint_committed_block_count[1s])",
+          "expr": "rate(state_checkpoint_committed_block_count[1m])",
           "interval": "",
-          "legendFormat": "state commit rate [1s]",
-          "refId": "C"
+          "legendFormat": "state commit rate [1m]",
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
-          "expr": "rate(sync_downloaded_block_count[1s])",
+          "expr": "rate(sync_downloaded_block_count[1m])",
           "interval": "",
-          "legendFormat": "sync download rate [1s]",
-          "refId": "E"
+          "legendFormat": "sync download rate [1m]",
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
-          "expr": "rate(gossip_downloaded_block_count[1s])",
+          "expr": "rate(gossip_downloaded_block_count[1m])",
           "interval": "",
-          "legendFormat": "gossip download rate [1s]",
-          "refId": "B"
+          "legendFormat": "gossip download rate [1m]",
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -854,7 +1000,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -905,29 +1054,45 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "rate(checkpoint_verified_block_count[1s])",
+          "expr": "rate(checkpoint_verified_block_count[1m])",
           "interval": "",
-          "legendFormat": "checkpoint verify rate [1s]",
-          "refId": "A"
+          "legendFormat": "checkpoint verify rate [1m]",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
-          "expr": "rate(state_checkpoint_committed_block_count[1s])",
+          "expr": "rate(state_checkpoint_committed_block_count[1m])",
           "interval": "",
-          "legendFormat": "state commit rate [1s]",
-          "refId": "C"
+          "legendFormat": "state commit rate [1m]",
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
-          "expr": "rate(sync_downloaded_block_count[1s])",
+          "expr": "rate(sync_downloaded_block_count[1m])",
           "interval": "",
-          "legendFormat": "sync download rate [1s]",
-          "refId": "E"
+          "legendFormat": "sync download rate [1m]",
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
-          "expr": "rate(gossip_downloaded_block_count[1s])",
+          "expr": "rate(gossip_downloaded_block_count[1m])",
           "interval": "",
-          "legendFormat": "gossip download rate [1s]",
-          "refId": "B"
+          "legendFormat": "gossip download rate [1m]",
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -978,7 +1143,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -1029,29 +1197,45 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "rate(checkpoint_verified_block_count[1s])",
+          "expr": "rate(checkpoint_verified_block_count[1m])",
           "interval": "",
-          "legendFormat": "checkpoint verify rate [1s]",
-          "refId": "A"
+          "legendFormat": "checkpoint verify rate [1m]",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
-          "expr": "rate(state_checkpoint_committed_block_count[1s])",
+          "expr": "rate(state_checkpoint_committed_block_count[1m])",
           "interval": "",
-          "legendFormat": "state commit rate [1s]",
-          "refId": "C"
+          "legendFormat": "state commit rate [1m]",
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
-          "expr": "rate(sync_downloaded_block_count[1s])",
+          "expr": "rate(sync_downloaded_block_count[1m])",
           "interval": "",
-          "legendFormat": "sync download rate [1s]",
-          "refId": "E"
+          "legendFormat": "sync download rate [1m]",
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
-          "expr": "rate(gossip_downloaded_block_count[1s])",
+          "expr": "rate(gossip_downloaded_block_count[1m])",
           "interval": "",
-          "legendFormat": "gossip download rate [1s]",
-          "refId": "B"
+          "legendFormat": "gossip download rate [1m]",
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -1102,7 +1286,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -1155,50 +1342,82 @@
           "expr": "checkpoint_queued_slots{job=\"$job\"}",
           "interval": "",
           "legendFormat": "checkpoint_queued_slots",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
           "expr": "state_checkpoint_queued_block_count{job=\"$job\"}",
           "interval": "",
           "legendFormat": "state_finalized_queued_block_count",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "sync_prospective_tips_len{job=\"$job\"}",
           "interval": "",
           "legendFormat": "sync_prospective_tips_len",
-          "refId": "C"
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "sync_downloads_in_flight{job=\"$job\"}",
           "interval": "",
           "legendFormat": "sync_downloads_in_flight",
-          "refId": "D"
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "sync_pending_blocks_len{job=\"$job\"}",
           "interval": "",
           "legendFormat": "sync_pending_blocks_len",
-          "refId": "E"
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
-          "expr": "rate(sync_cancelled_download_count{job=\"$job\"}[1s])",
+          "expr": "rate(sync_cancelled_download_count{job=\"$job\"}[1m])",
           "interval": "",
-          "legendFormat": "sync_cancelled_download_count[1s]",
-          "refId": "F"
+          "legendFormat": "sync_cancelled_download_count[1m]",
+          "refId": "F",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
-          "expr": "rate(sync_cancelled_verify_count{job=\"$job\"}[1s])",
+          "expr": "rate(sync_cancelled_verify_count{job=\"$job\"}[1m])",
           "interval": "",
-          "legendFormat": "sync_cancelled_verify_count[1s]",
-          "refId": "G"
+          "legendFormat": "sync_cancelled_verify_count[1m]",
+          "refId": "G",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
-          "expr": "rate(gossip_queued_block_count{job=\"$job\"}[1s])",
+          "expr": "rate(gossip_queued_block_count{job=\"$job\"}[1m])",
           "interval": "",
-          "legendFormat": "gossip_queued_block_count[1s]",
-          "refId": "H"
+          "legendFormat": "gossip_queued_block_count[1m]",
+          "refId": "H",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -1249,7 +1468,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -1303,50 +1525,82 @@
           "expr": "checkpoint_queued_slots{job=\"$job\"}",
           "interval": "",
           "legendFormat": "checkpoint_queued_slots",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
           "expr": "state_checkpoint_queued_block_count{job=\"$job\"}",
           "interval": "",
           "legendFormat": "state_finalized_queued_block_count",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "sync_prospective_tips_len{job=\"$job\"}",
           "interval": "",
           "legendFormat": "sync_prospective_tips_len",
-          "refId": "C"
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "sync_downloads_in_flight{job=\"$job\"}",
           "interval": "",
           "legendFormat": "sync_downloads_in_flight",
-          "refId": "D"
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "sync_pending_blocks_len{job=\"$job\"}",
           "interval": "",
           "legendFormat": "sync_pending_blocks_len",
-          "refId": "E"
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
-          "expr": "rate(sync_cancelled_download_count{job=\"$job\"}[1s])",
+          "expr": "rate(sync_cancelled_download_count{job=\"$job\"}[1m])",
           "interval": "",
-          "legendFormat": "sync_cancelled_download_count[1s]",
-          "refId": "F"
+          "legendFormat": "sync_cancelled_download_count[1m]",
+          "refId": "F",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
-          "expr": "rate(sync_cancelled_verify_count{job=\"$job\"}[1s])",
+          "expr": "rate(sync_cancelled_verify_count{job=\"$job\"}[1m])",
           "interval": "",
-          "legendFormat": "sync_cancelled_verify_count[1s]",
-          "refId": "G"
+          "legendFormat": "sync_cancelled_verify_count[1m]",
+          "refId": "G",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
-          "expr": "rate(gossip_queued_block_count{job=\"$job\"}[1s])",
+          "expr": "rate(gossip_queued_block_count{job=\"$job\"}[1m])",
           "interval": "",
-          "legendFormat": "gossip_queued_block_count[1s]",
-          "refId": "H"
+          "legendFormat": "gossip_queued_block_count[1m]",
+          "refId": "H",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -1397,7 +1651,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -1451,50 +1708,82 @@
           "expr": "checkpoint_queued_slots{job=\"$job\"}",
           "interval": "",
           "legendFormat": "checkpoint_queued_slots",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
           "expr": "state_checkpoint_queued_block_count{job=\"$job\"}",
           "interval": "",
           "legendFormat": "state_finalized_queued_block_count",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "sync_prospective_tips_len{job=\"$job\"}",
           "interval": "",
           "legendFormat": "sync_prospective_tips_len",
-          "refId": "C"
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "sync_downloads_in_flight{job=\"$job\"}",
           "interval": "",
           "legendFormat": "sync_downloads_in_flight",
-          "refId": "D"
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "sync_pending_blocks_len{job=\"$job\"}",
           "interval": "",
           "legendFormat": "sync_pending_blocks_len",
-          "refId": "E"
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
-          "expr": "rate(sync_cancelled_download_count{job=\"$job\"}[1s])",
+          "expr": "rate(sync_cancelled_download_count{job=\"$job\"}[1m])",
           "interval": "",
-          "legendFormat": "sync_cancelled_download_count[1s]",
-          "refId": "F"
+          "legendFormat": "sync_cancelled_download_count[1m]",
+          "refId": "F",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
-          "expr": "rate(sync_cancelled_verify_count{job=\"$job\"}[1s])",
+          "expr": "rate(sync_cancelled_verify_count{job=\"$job\"}[1m])",
           "interval": "",
-          "legendFormat": "sync_cancelled_verify_count[1s]",
-          "refId": "G"
+          "legendFormat": "sync_cancelled_verify_count[1m]",
+          "refId": "G",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
-          "expr": "rate(gossip_queued_block_count{job=\"$job\"}[1s])",
+          "expr": "rate(gossip_queued_block_count{job=\"$job\"}[1m])",
           "interval": "",
-          "legendFormat": "gossip_queued_block_count[1s]",
-          "refId": "H"
+          "legendFormat": "gossip_queued_block_count[1m]",
+          "refId": "H",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -1545,7 +1834,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -1599,50 +1891,82 @@
           "expr": "checkpoint_queued_slots{job=\"$job\"}",
           "interval": "",
           "legendFormat": "checkpoint_queued_slots",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
           "expr": "state_checkpoint_queued_block_count{job=\"$job\"}",
           "interval": "",
           "legendFormat": "state_finalized_queued_block_count",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "sync_prospective_tips_len{job=\"$job\"}",
           "interval": "",
           "legendFormat": "sync_prospective_tips_len",
-          "refId": "C"
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "sync_downloads_in_flight{job=\"$job\"}",
           "interval": "",
           "legendFormat": "sync_downloads_in_flight",
-          "refId": "D"
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "sync_pending_blocks_len{job=\"$job\"}",
           "interval": "",
           "legendFormat": "sync_pending_blocks_len",
-          "refId": "E"
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
-          "expr": "rate(sync_cancelled_download_count{job=\"$job\"}[1s])",
+          "expr": "rate(sync_cancelled_download_count{job=\"$job\"}[1m])",
           "interval": "",
-          "legendFormat": "sync_cancelled_download_count[1s]",
-          "refId": "F"
+          "legendFormat": "sync_cancelled_download_count[1m]",
+          "refId": "F",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
-          "expr": "rate(sync_cancelled_verify_count{job=\"$job\"}[1s])",
+          "expr": "rate(sync_cancelled_verify_count{job=\"$job\"}[1m])",
           "interval": "",
-          "legendFormat": "sync_cancelled_verify_count[1s]",
-          "refId": "G"
+          "legendFormat": "sync_cancelled_verify_count[1m]",
+          "refId": "G",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
-          "expr": "rate(gossip_queued_block_count{job=\"$job\"}[1s])",
+          "expr": "rate(gossip_queued_block_count{job=\"$job\"}[1m])",
           "interval": "",
-          "legendFormat": "gossip_queued_block_count[1s]",
-          "refId": "H"
+          "legendFormat": "gossip_queued_block_count[1m]",
+          "refId": "H",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -1706,7 +2030,10 @@
             "$__all"
           ]
         },
-        "datasource": "Prometheus-Zebra",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "zebra-prometheus"
+        },
         "definition": "label_values(sync_prospective_tips_len, job)",
         "description": null,
         "error": null,

@@ -41,7 +41,7 @@ jobs:
         uses: jontze/action-mdbook@6c0be56d14c4bf16861b00af61f50ff7400ce502 #v4.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          mdbook-version: ~0.4
+          mdbook-version: ~0.5
           use-linkcheck: true
           use-mermaid: true
       - name: Install last version of Protoc

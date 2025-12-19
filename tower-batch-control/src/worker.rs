@@ -291,7 +291,7 @@ where
 
     /// Register an inner service failure.
     ///
-    /// The underlying service failed when we called `poll_ready` on it with the given `error`. We
+    /// The underlying service failed with the given `error` when we called `poll_ready` or `call` on it. We
     /// need to communicate this to all the `Batch` handles. To do so, we wrap up the error in
     /// an `Arc`, send that `Arc<E>` to all pending requests, and store it so that subsequent
     /// requests will also fail with the same error.

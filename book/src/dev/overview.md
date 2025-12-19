@@ -244,8 +244,6 @@ encapsulated.
 
 #### Internal Dependencies
 
-- ??? depends on how it's implemented internally
-
 #### Responsible for
 
 - the minimal Bitcoin script implementation required for Zcash

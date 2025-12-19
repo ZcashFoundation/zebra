@@ -133,6 +133,11 @@ impl RpcServer {
             .http_only()
             .set_http_middleware(http_middleware)
             .set_rpc_middleware(rpc_middleware)
+            .max_response_body_size(
+                conf.max_response_body_size
+                    .try_into()
+                    .expect("should be valid"),
+            )
             .build(listen_addr)
             .await?;
 

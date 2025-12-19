@@ -2,7 +2,7 @@
 
 use std::{
     sync::{Arc, Mutex},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use crate::{meta_addr::MetaAddr, AddressBookPeers, PeerSocketAddr};
@@ -25,8 +25,9 @@ impl MockAddressBookPeers {
     /// Adds a peer to the mock address book.
     pub fn add_peer(&mut self, peer: PeerSocketAddr) -> bool {
         // The real add peer will use `MetaAddr::new_initial_peer` but we just want to get a `MetaAddr` for the mock.
+        let rtt = Duration::from_millis(100);
         self.recently_live_peers.push(
-            MetaAddr::new_responded(peer).into_new_meta_addr(
+            MetaAddr::new_responded(peer, Some(rtt)).into_new_meta_addr(
                 Instant::now(),
                 chrono::Utc::now()
                     .try_into()
