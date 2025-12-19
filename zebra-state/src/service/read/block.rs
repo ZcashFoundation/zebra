@@ -17,7 +17,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 
 use zebra_chain::{
-    block::{self, Block, Height},
+    block::{self, merkle::AuthDataRoot, Block, Height},
     block_info::BlockInfo,
     serialization::ZcashSerialize as _,
     transaction::{self, Transaction},
@@ -345,4 +345,18 @@ where
         .as_ref()
         .and_then(|chain| chain.as_ref().block_info(hash_or_height))
         .or_else(|| db.block_info(hash_or_height))
+}
+
+pub fn auth_data_root<C>(
+    chain: Option<C>,
+    db: &ZebraDb,
+    hash_or_height: HashOrHeight,
+) -> Option<AuthDataRoot>
+where
+    C: AsRef<Chain>,
+{
+    chain
+        .as_ref()
+        .and_then(|chain| chain.as_ref().auth_data_root(hash_or_height))
+        .or_else(|| db.auth_data_root(hash_or_height))
 }

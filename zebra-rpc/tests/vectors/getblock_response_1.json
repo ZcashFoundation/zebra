@@ -7,6 +7,7 @@
     "blockcommitments": "fa1c98f49f74831f8a74f1b8908b6c8889a56ffebc20f62c114a7a007efc4dad",
     "finalsaplingroot": "5fe3724bebe096cc42c951803dd01e9657ead338327439902d19417ae9bda7e2",
     "finalorchardroot": "9cbf6c20965e2ae361322b9e7fd92c7df8b3c6d41040f544a205a4a2d75abf2a",
+    "chainhistoryroot": "2a206a88fa0417a5a63b93c5155315abd4cbdf91801342ead7948e8bcdd1a45c",
     "tx": [
         "21f2c7d10cc8857e60fd225f0f089126d9274e892f8d4e135e9e915adb06b72d",
         "603df6640eade811df35190e544560531b9e4fbe3e13e423a191fa5598b2a0ea"
