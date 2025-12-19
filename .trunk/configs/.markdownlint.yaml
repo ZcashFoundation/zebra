@@ -5,8 +5,11 @@
 default: true
 
 # Disable rules with legitimate exceptions for this project
+MD001: false  # Heading increment - existing docs have intentional heading structures
 MD024: false  # Duplicate headings - often intentional in documentation
+MD028: false  # Blank lines in blockquote - RFC files use this for readability
 MD033: false  # Inline HTML - needed for mdBook admonitions and formatting
+MD036: false  # Emphasis as heading - existing docs use emphasis for subheadings
 MD013: false  # Line length - Prettier handles this
 MD060: false  # Table column style - conflicts with GFM table formatting
 MD053: false  # Unused link references - RFC files use this pattern intentionally
