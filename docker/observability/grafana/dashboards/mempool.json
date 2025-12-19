@@ -1,0 +1,943 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "target": {
+          "limit": 100,
+          "matchAny": false,
+          "tags": [],
+          "type": "dashboard"
+        },
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "",
+  "editable": true,
+  "gnetId": null,
+  "graphTooltip": 0,
+  "id": 15,
+  "iteration": 1634239984015,
+  "links": [],
+  "panels": [
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "Transactions"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "transactions"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "Serialized Bytes"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "serialized bytes"
+              }
+            ]
+          }
+        ]
+      },
+      "fill": 1,
+      "fillGradient": 1,
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "hiddenSeries": false,
+      "id": 2,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "rightSide": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "8.1.2",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "repeat": "job",
+      "seriesOverrides": [
+        {
+          "$$hashKey": "object:232",
+          "alias": "transactions",
+          "yaxis": 1
+        },
+        {
+          "$$hashKey": "object:239",
+          "alias": "serialized bytes",
+          "yaxis": 2
+        },
+        {
+          "alias": "rejected serialized bytes",
+          "yaxis": 2
+        }
+      ],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "zcash_mempool_size_transactions{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "transactions",
+          "refId": "Transactions",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        },
+        {
+          "exemplar": true,
+          "expr": "zcash_mempool_size_bytes{job=\"$job\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": " serialized bytes",
+          "refId": "Serialized Bytes",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        },
+        {
+          "exemplar": true,
+          "expr": "mempool_currently_queued_transactions{job=\"$job\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "queued transactions",
+          "refId": "Queued Transactions",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Mempool Storage  - $job",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "$$hashKey": "object:65",
+          "format": "none",
+          "label": "",
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "$$hashKey": "object:66",
+          "decimals": null,
+          "format": "decbytes",
+          "label": "",
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "Transactions"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "transactions"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "Serialized Bytes"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "serialized bytes"
+              }
+            ]
+          }
+        ]
+      },
+      "fill": 1,
+      "fillGradient": 1,
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      },
+      "hiddenSeries": false,
+      "id": 9,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "rightSide": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "8.1.2",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [
+        {
+          "$$hashKey": "object:232",
+          "alias": "transactions",
+          "yaxis": 1
+        },
+        {
+          "$$hashKey": "object:239",
+          "alias": "serialized bytes",
+          "yaxis": 2
+        },
+        {
+          "alias": "rejected serialized bytes",
+          "yaxis": 2
+        }
+      ],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "mempool_rejected_transaction_ids{job=\"$job\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "rejected transactions",
+          "refId": "Rejected Transactions IDs",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        },
+        {
+          "exemplar": true,
+          "expr": "mempool_rejected_transaction_ids_bytes{job=\"$job\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "rejected serialized bytes",
+          "refId": "Rejected Serialized TXID Bytes",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Mempool Rejected Storage  - $job",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "$$hashKey": "object:65",
+          "format": "none",
+          "label": "",
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "$$hashKey": "object:66",
+          "decimals": null,
+          "format": "decbytes",
+          "label": "",
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      },
+      "hiddenSeries": false,
+      "id": 7,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "8.1.2",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "repeat": "job",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "rate(sync_downloaded_block_count{job=\"$job\"}[1m])",
+          "hide": false,
+          "instant": false,
+          "interval": "",
+          "legendFormat": "sync download",
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        },
+        {
+          "exemplar": true,
+          "expr": "rate(zcash_chain_verified_block_total{job=\"$job\"}[1m])",
+          "interval": "",
+          "legendFormat": "state commit",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Block Rates",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "$$hashKey": "object:80",
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "$$hashKey": "object:81",
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
+      "description": "",
+      "fill": 1,
+      "fillGradient": 1,
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 26
+      },
+      "hiddenSeries": false,
+      "id": 8,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "rightSide": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "8.1.2",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [
+        {
+          "$$hashKey": "object:232",
+          "alias": "transactions",
+          "yaxis": 1
+        },
+        {
+          "$$hashKey": "object:239",
+          "alias": "serialized bytes",
+          "yaxis": 2
+        }
+      ],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "mempool_queued_transactions_total{job=\"$job\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "queued",
+          "refId": "Queued",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        },
+        {
+          "exemplar": true,
+          "expr": "mempool_downloaded_transactions_total{job=\"$job\"}",
+          "interval": "",
+          "legendFormat": "downloaded",
+          "refId": "Downloaded",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        },
+        {
+          "exemplar": true,
+          "expr": "mempool_pushed_transactions_total{job=\"$job\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "pushed",
+          "refId": "Pushed",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        },
+        {
+          "exemplar": true,
+          "expr": "mempool_verified_transactions_total{job=\"$job\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "verified",
+          "refId": "Verified",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        },
+        {
+          "exemplar": true,
+          "expr": "mempool_cancelled_verify_tasks_total{job=\"$job\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "cancelled",
+          "refId": "Cancelled",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        },
+        {
+          "exemplar": true,
+          "expr": "mempool_failed_verify_tasks_total{job=\"$job\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "failed - {{reason}}",
+          "refId": "Failed",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        },
+        {
+          "exemplar": true,
+          "expr": "mempool_gossiped_transactions_total{job=\"$job\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "gossiped",
+          "refId": "Gossiped",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Transaction Downloader and Verifier, Gossiper  - $job",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "$$hashKey": "object:65",
+          "format": "none",
+          "label": "",
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "$$hashKey": "object:66",
+          "decimals": null,
+          "format": "decbytes",
+          "label": "",
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 35
+      },
+      "hiddenSeries": false,
+      "id": 12,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "8.1.2",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "repeatDirection": "h",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "rate(mempool_downloaded_transactions_total{job=\"$job\"}[1m]) * 60",
+          "interval": "",
+          "legendFormat": "downloaded per min",
+          "refId": "Downloaded",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        },
+        {
+          "exemplar": true,
+          "expr": "rate(mempool_verified_transactions_total{job=\"$job\"}[1m]) * 60",
+          "interval": "",
+          "legendFormat": "verified per min",
+          "refId": "Verified",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        },
+        {
+          "exemplar": true,
+          "expr": "rate(mempool_queued_transactions_total{job=\"$job\"}[1m]) * 60",
+          "interval": "",
+          "legendFormat": "queued per min",
+          "refId": "Queued",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Transaction Downloader and Verifier (Rates) - $job",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "$$hashKey": "object:1174",
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "$$hashKey": "object:1175",
+          "format": "short",
+          "label": null,
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
+      "description": "",
+      "fill": 1,
+      "fillGradient": 1,
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 42
+      },
+      "hiddenSeries": false,
+      "id": 10,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "rightSide": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "8.1.2",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [
+        {
+          "$$hashKey": "object:232",
+          "alias": "transactions",
+          "yaxis": 1
+        },
+        {
+          "$$hashKey": "object:239",
+          "alias": "serialized bytes",
+          "yaxis": 2
+        }
+      ],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "sum by (version) (mempool_downloaded_transactions_total{job=\"$job\"})",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "{{version}}",
+          "refId": "Downloaded",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        }
+      ],
+      "thresholds": [],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Downloaded Txs by Version - $job",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "buckets": null,
+        "mode": "time",
+        "name": null,
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "$$hashKey": "object:65",
+          "format": "none",
+          "label": "",
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        },
+        {
+          "$$hashKey": "object:66",
+          "decimals": null,
+          "format": "decbytes",
+          "label": "",
+          "logBase": 1,
+          "max": null,
+          "min": null,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false,
+        "alignLevel": null
+      }
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 30,
+  "style": "dark",
+  "tags": [],
+  "templating": {
+    "list": [
+      {
+        "allValue": null,
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "datasource": null,
+        "definition": "label_values(zcash_net_in_bytes_total, job)",
+        "description": null,
+        "error": null,
+        "hide": 0,
+        "includeAll": true,
+        "label": null,
+        "multi": true,
+        "name": "job",
+        "options": [],
+        "query": {
+          "query": "label_values(zcash_net_in_bytes_total, job)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "tagValuesQuery": "",
+        "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      }
+    ]
+  },
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "mempool",
+  "uid": "wVXGE6v7z",
+  "version": 8
+}

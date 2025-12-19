@@ -1,0 +1,30 @@
+# Prometheus configuration for Zebra metrics
+#
+# IMPORTANT: The scrape_interval affects Grafana dashboard queries.
+# The rate() function requires at least 2 data points, so rate windows
+# must be > 2x scrape_interval. With 15s scrape_interval:
+#   - rate(...[1m]) works (4 samples)
+#   - rate(...[30s]) works (2 samples minimum)
+#   - rate(...[1s]) does NOT work (insufficient samples)
+#
+# If you change scrape_interval, update dashboard rate() windows accordingly.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
+scrape_configs:
+  - job_name: "zebra"
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    metrics_path: "/metrics"
+    static_configs:
+      - targets: ["zebra:9999"]

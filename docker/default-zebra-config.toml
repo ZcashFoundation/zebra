@@ -13,7 +13,7 @@
 
 [network]
 network = "Mainnet"
-listen_addr = "0.0.0.0"
+listen_addr = "[::]:8233"
 cache_dir = "/home/zebra/.cache/zebra"
 
 [rpc]

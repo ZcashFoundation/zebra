@@ -24,7 +24,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -75,17 +78,25 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum(rate(zcash_net_in_bytes_total{job=\"$job\"}[1s]))",
+          "expr": "sum(rate(zcash_net_in_bytes_total{job=\"$job\"}[1m]))",
           "hide": false,
           "interval": "",
-          "legendFormat": "bytes read [1s]",
-          "refId": "A"
+          "legendFormat": "bytes read [1m]",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
-          "expr": "sum(rate(zcash_net_out_bytes_total{job=\"$job\"}[1s]))",
+          "expr": "sum(rate(zcash_net_out_bytes_total{job=\"$job\"}[1m]))",
           "interval": "",
-          "legendFormat": "bytes written [1s]",
-          "refId": "B"
+          "legendFormat": "bytes written [1m]",
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -136,7 +147,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -188,17 +202,25 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum(rate(zcash_net_in_bytes_total{job=\"$job\"}[1s]))",
+          "expr": "sum(rate(zcash_net_in_bytes_total{job=\"$job\"}[1m]))",
           "hide": false,
           "interval": "",
-          "legendFormat": "bytes read [1s]",
-          "refId": "A"
+          "legendFormat": "bytes read [1m]",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
-          "expr": "sum(rate(zcash_net_out_bytes_total{job=\"$job\"}[1s]))",
+          "expr": "sum(rate(zcash_net_out_bytes_total{job=\"$job\"}[1m]))",
           "interval": "",
-          "legendFormat": "bytes written [1s]",
-          "refId": "B"
+          "legendFormat": "bytes written [1m]",
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -249,7 +271,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -301,17 +326,25 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum(rate(zcash_net_in_bytes_total{job=\"$job\"}[1s]))",
+          "expr": "sum(rate(zcash_net_in_bytes_total{job=\"$job\"}[1m]))",
           "hide": false,
           "interval": "",
-          "legendFormat": "bytes read [1s]",
-          "refId": "A"
+          "legendFormat": "bytes read [1m]",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
-          "expr": "sum(rate(zcash_net_out_bytes_total{job=\"$job\"}[1s]))",
+          "expr": "sum(rate(zcash_net_out_bytes_total{job=\"$job\"}[1m]))",
           "interval": "",
-          "legendFormat": "bytes written [1s]",
-          "refId": "B"
+          "legendFormat": "bytes written [1m]",
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -362,7 +395,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -414,17 +450,25 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum(rate(zcash_net_in_bytes_total{job=\"$job\"}[1s]))",
+          "expr": "sum(rate(zcash_net_in_bytes_total{job=\"$job\"}[1m]))",
           "hide": false,
           "interval": "",
-          "legendFormat": "bytes read [1s]",
-          "refId": "A"
+          "legendFormat": "bytes read [1m]",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
-          "expr": "sum(rate(zcash_net_out_bytes_total{job=\"$job\"}[1s]))",
+          "expr": "sum(rate(zcash_net_out_bytes_total{job=\"$job\"}[1m]))",
           "interval": "",
-          "legendFormat": "bytes written [1s]",
-          "refId": "B"
+          "legendFormat": "bytes written [1m]",
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -475,7 +519,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -528,19 +575,31 @@
           "expr": "zcash_net_peers{job=\"$job\"}",
           "interval": "",
           "legendFormat": "total peers",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "pool_num_ready{job=\"$job\"}",
           "interval": "",
           "legendFormat": "ready peers",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "pool_num_unready{job=\"$job\"}",
           "interval": "",
           "legendFormat": "unready peers",
-          "refId": "C"
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -589,7 +648,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -643,19 +705,31 @@
           "expr": "zcash_net_peers{job=\"$job\"}",
           "interval": "",
           "legendFormat": "total peers",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "pool_num_ready{job=\"$job\"}",
           "interval": "",
           "legendFormat": "ready peers",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "pool_num_unready{job=\"$job\"}",
           "interval": "",
           "legendFormat": "unready peers",
-          "refId": "C"
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -704,7 +778,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -758,19 +835,31 @@
           "expr": "zcash_net_peers{job=\"$job\"}",
           "interval": "",
           "legendFormat": "total peers",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "pool_num_ready{job=\"$job\"}",
           "interval": "",
           "legendFormat": "ready peers",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "pool_num_unready{job=\"$job\"}",
           "interval": "",
           "legendFormat": "unready peers",
-          "refId": "C"
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -819,7 +908,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -873,19 +965,31 @@
           "expr": "zcash_net_peers{job=\"$job\"}",
           "interval": "",
           "legendFormat": "total peers",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "pool_num_ready{job=\"$job\"}",
           "interval": "",
           "legendFormat": "ready peers",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "pool_num_unready{job=\"$job\"}",
           "interval": "",
           "legendFormat": "unready peers",
-          "refId": "C"
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -934,7 +1038,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -987,37 +1094,61 @@
           "hide": false,
           "interval": "",
           "legendFormat": "recently stopped peers",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "candidate_set_failed{job=\"$job\"}",
           "interval": "",
           "legendFormat": "failed candidates",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "candidate_set_gossiped{job=\"$job\"}",
           "interval": "",
           "legendFormat": "never attempted candidates",
-          "refId": "C"
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "candidate_set_pending{job=\"$job\"}",
           "interval": "",
           "legendFormat": "connection attempt pending",
-          "refId": "D"
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "candidate_set_responded{job=\"$job\"}",
           "interval": "",
           "legendFormat": "recent peers",
-          "refId": "E"
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "candidate_set_recently_live{job=\"$job\"}",
           "interval": "",
           "legendFormat": "recently live peers",
-          "refId": "F"
+          "refId": "F",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -1066,7 +1197,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -1120,37 +1254,61 @@
           "hide": false,
           "interval": "",
           "legendFormat": "recently stopped peers",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "candidate_set_failed{job=\"$job\"}",
           "interval": "",
           "legendFormat": "failed candidates",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "candidate_set_gossiped{job=\"$job\"}",
           "interval": "",
           "legendFormat": "never attempted candidates",
-          "refId": "C"
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "candidate_set_pending{job=\"$job\"}",
           "interval": "",
           "legendFormat": "connection attempt pending",
-          "refId": "D"
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "candidate_set_responded{job=\"$job\"}",
           "interval": "",
           "legendFormat": "recent peers",
-          "refId": "E"
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "candidate_set_recently_live{job=\"$job\"}",
           "interval": "",
           "legendFormat": "recently live peers",
-          "refId": "F"
+          "refId": "F",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -1199,7 +1357,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -1253,37 +1414,61 @@
           "hide": false,
           "interval": "",
           "legendFormat": "recently stopped peers",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "candidate_set_failed{job=\"$job\"}",
           "interval": "",
           "legendFormat": "failed candidates",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "candidate_set_gossiped{job=\"$job\"}",
           "interval": "",
           "legendFormat": "never attempted candidates",
-          "refId": "C"
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "candidate_set_pending{job=\"$job\"}",
           "interval": "",
           "legendFormat": "connection attempt pending",
-          "refId": "D"
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "candidate_set_responded{job=\"$job\"}",
           "interval": "",
           "legendFormat": "recent peers",
-          "refId": "E"
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "candidate_set_recently_live{job=\"$job\"}",
           "interval": "",
           "legendFormat": "recently live peers",
-          "refId": "F"
+          "refId": "F",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -1332,7 +1517,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -1386,37 +1574,61 @@
           "hide": false,
           "interval": "",
           "legendFormat": "recently stopped peers",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "candidate_set_failed{job=\"$job\"}",
           "interval": "",
           "legendFormat": "failed candidates",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "candidate_set_gossiped{job=\"$job\"}",
           "interval": "",
           "legendFormat": "never attempted candidates",
-          "refId": "C"
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "candidate_set_pending{job=\"$job\"}",
           "interval": "",
           "legendFormat": "connection attempt pending",
-          "refId": "D"
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "candidate_set_responded{job=\"$job\"}",
           "interval": "",
           "legendFormat": "recent peers",
-          "refId": "E"
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "candidate_set_recently_live{job=\"$job\"}",
           "interval": "",
           "legendFormat": "recently live peers",
-          "refId": "F"
+          "refId": "F",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -1465,7 +1677,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -1519,7 +1734,11 @@
           "hide": false,
           "interval": "",
           "legendFormat": "",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -1570,7 +1789,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -1625,7 +1847,11 @@
           "hide": false,
           "interval": "",
           "legendFormat": "",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -1676,7 +1902,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -1731,7 +1960,11 @@
           "hide": false,
           "interval": "",
           "legendFormat": "",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -1782,7 +2015,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -1837,7 +2073,11 @@
           "hide": false,
           "interval": "",
           "legendFormat": "",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -1901,7 +2141,10 @@
             "$__all"
           ]
         },
-        "datasource": "Prometheus-Zebra",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "zebra-prometheus"
+        },
         "definition": "label_values(zcash_net_in_bytes_total, job)",
         "description": null,
         "error": null,

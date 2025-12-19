@@ -15,6 +15,7 @@ use crate::{
     amount::{Amount, NonNegative},
     block,
     parameters::Network,
+    serialization::ZcashSerialize,
     transaction,
 };
 
@@ -62,6 +63,11 @@ pub const MIN_TRANSPARENT_COINBASE_MATURITY: u32 = 100;
 // - https://github.com/emacs-lsp/lsp-mode/issues/2080
 // - https://github.com/rust-lang/rust-analyzer/issues/13709
 pub const EXTRA_ZEBRA_COINBASE_DATA: &str = "z\u{1F993}";
+
+/// The rate used to calculate the dust threshold, in zatoshis per 1000 bytes.
+///
+/// History: <https://github.com/zcash/zcash/blob/v6.10.0/src/policy/policy.h#L43-L89>
+pub const ONE_THIRD_DUST_THRESHOLD_RATE: u32 = 100;
 
 /// Arbitrary data inserted by miners into a coinbase transaction.
 //
@@ -124,8 +130,7 @@ pub struct OutPoint {
     ///
     /// # Correctness
     ///
-    /// Consensus-critical serialization uses
-    /// [`ZcashSerialize`](crate::serialization::ZcashSerialize).
+    /// Consensus-critical serialization uses [`ZcashSerialize`].
     /// [`serde`]-based hex serialization must only be used for testing.
     #[cfg_attr(any(test, feature = "proptest-impl"), serde(with = "hex"))]
     pub hash: transaction::Hash,
@@ -453,6 +458,20 @@ impl Output {
                 Some(Address::from_script_hash(net.t_addr_kind(), sh))
             }
         }
+    }
+
+    /// Returns true if this output is considered dust.
+    pub fn is_dust(&self) -> bool {
+        let output_size: u32 = self
+            .zcash_serialized_size()
+            .try_into()
+            .expect("output size should fit in u32");
+
+        // https://github.com/zcash/zcash/blob/v6.10.0/src/primitives/transaction.cpp#L75-L80
+        let threshold = 3 * (ONE_THIRD_DUST_THRESHOLD_RATE * (output_size + 148) / 1000);
+
+        // https://github.com/zcash/zcash/blob/v6.10.0/src/primitives/transaction.h#L396-L399
+        self.value.zatoshis() < threshold as i64
     }
 }
 

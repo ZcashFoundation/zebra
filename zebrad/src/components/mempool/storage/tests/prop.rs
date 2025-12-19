@@ -217,6 +217,7 @@ proptest! {
                 // used.
                 match rejection_error {
                     RejectionError::ExactTip(_) |
+                    RejectionError::NonStandardTransaction(_) |
                     RejectionError::SameEffectsTip(_) => {
                         prop_assert_eq!(storage.rejected_transaction_count(), 0);
                     },

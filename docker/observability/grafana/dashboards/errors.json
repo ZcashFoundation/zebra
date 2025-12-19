@@ -24,7 +24,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "custom": {}
@@ -78,19 +81,31 @@
           "expr": "zebra_error_sapling_binding{job=\"$job\"}",
           "interval": "",
           "legendFormat": "",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "zebra_sighash_error_sapling_spend{job=\"$job\"}",
           "interval": "",
           "legendFormat": "",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "zebra_sighash_error_sprout_joinsplit{job=\"$job\"}",
           "interval": "",
           "legendFormat": "",
-          "refId": "C"
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -139,7 +154,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "custom": {}
@@ -194,19 +212,31 @@
           "expr": "zebra_error_sapling_binding{job=\"$job\"}",
           "interval": "",
           "legendFormat": "",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "zebra_sighash_error_sapling_spend{job=\"$job\"}",
           "interval": "",
           "legendFormat": "",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "zebra_sighash_error_sprout_joinsplit{job=\"$job\"}",
           "interval": "",
           "legendFormat": "",
-          "refId": "C"
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -255,7 +285,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "custom": {}
@@ -310,19 +343,31 @@
           "expr": "zebra_error_sapling_binding{job=\"$job\"}",
           "interval": "",
           "legendFormat": "",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "zebra_sighash_error_sapling_spend{job=\"$job\"}",
           "interval": "",
           "legendFormat": "",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "expr": "zebra_sighash_error_sprout_joinsplit{job=\"$job\"}",
           "interval": "",
           "legendFormat": "",
-          "refId": "C"
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -388,7 +433,10 @@
             "zebrad-testnet-tmp-1"
           ]
         },
-        "datasource": "Prometheus-Zebra",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "zebra-prometheus"
+        },
         "definition": "label_values(zcash_net_peers, job)",
         "hide": 0,
         "includeAll": true,

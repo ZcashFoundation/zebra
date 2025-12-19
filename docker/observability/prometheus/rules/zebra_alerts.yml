@@ -1,0 +1,60 @@
+# Zebra Alerting Rules
+#
+# These rules are evaluated by Prometheus and sent to AlertManager.
+# AlertManager handles routing, grouping, and notifications.
+#
+# To receive notifications, configure receivers in:
+#   docker/observability/alertmanager/alertmanager.yml
+
+groups:
+  - name: zebra
+    rules:
+      # Node is down or metrics endpoint unreachable
+      - alert: ZebraDown
+        expr: up{job="zebra"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Zebra node is down"
+          description: "Zebra metrics endpoint has been unreachable for 2 minutes."
+
+      # Block height not increasing (sync may be stalled)
+      - alert: ZebraSyncStalled
+        expr: changes(zcash_chain_verified_block_height[15m]) == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Block height stalled"
+          description: "Zebra block height has not increased in the last 15 minutes. Node may be stuck or network may be partitioned."
+
+      # Low peer count (degraded connectivity)
+      - alert: ZebraLowPeers
+        expr: zcash_net_peers < 3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low peer count"
+          description: "Zebra has fewer than 3 peers for 5 minutes. Network connectivity may be degraded."
+
+      # No peers at all (network isolation)
+      - alert: ZebraNoPeers
+        expr: zcash_net_peers == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No peers connected"
+          description: "Zebra has 0 peers for 2 minutes. Check network connectivity and firewall rules."
+
+      # High error rate
+      - alert: ZebraHighErrorRate
+        expr: rate(zebra_errors_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error rate"
+          description: "Zebra is experiencing elevated error rates (> 0.1/s for 5 minutes)."

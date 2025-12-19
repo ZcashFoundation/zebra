@@ -58,6 +58,8 @@ pub(crate) const MAX_EVICTION_MEMORY_ENTRIES: usize = 40_000;
 pub enum ExactTipRejectionError {
     #[error("transaction did not pass consensus validation: {0}")]
     FailedVerification(#[from] zebra_consensus::error::TransactionError),
+    #[error("transaction did not pass standard validation: {0}")]
+    FailedStandard(#[from] NonStandardTransactionError),
 }
 
 /// Transactions rejected based only on their effects (spends, outputs, transaction header).
@@ -121,6 +123,16 @@ pub enum RejectionError {
     SameEffectsTip(#[from] SameEffectsTipRejectionError),
     #[error(transparent)]
     SameEffectsChain(#[from] SameEffectsChainRejectionError),
+    #[error(transparent)]
+    NonStandardTransaction(#[from] NonStandardTransactionError),
+}
+
+/// Non-standard transaction error.
+#[derive(Error, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+pub enum NonStandardTransactionError {
+    #[error("transaction is dust")]
+    IsDust,
 }
 
 /// Represents a set of transactions that have been removed from the mempool, either because
@@ -205,6 +217,31 @@ impl Storage {
         }
     }
 
+    /// Check and reject non-standard transaction.
+    ///
+    /// Zcashd defines non-consensus standard transaction checks in
+    /// <https://github.com/zcash/zcash/blob/v6.10.0/src/policy/policy.cpp#L58-L135>
+    ///
+    /// This checks are applied before inserting a transaction in `AcceptToMemoryPool`:
+    /// <https://github.com/zcash/zcash/blob/v6.10.0/src/main.cpp#L1819>
+    ///
+    /// Currently, we only implement the dust output check.
+    fn reject_if_non_standard_tx(&mut self, tx: &VerifiedUnminedTx) -> Result<(), MempoolError> {
+        // TODO: implement other standard transaction checks from zcashd.
+
+        // Check for dust outputs.
+        for output in tx.transaction.transaction.outputs() {
+            if output.is_dust() {
+                let rejection_error = NonStandardTransactionError::IsDust;
+                self.reject(tx.transaction.id, rejection_error.clone().into());
+
+                return Err(MempoolError::NonStandardTransaction(rejection_error));
+            }
+        }
+
+        Ok(())
+    }
+
     /// Insert a [`VerifiedUnminedTx`] into the mempool, caching any rejections.
     ///
     /// Accepts the [`VerifiedUnminedTx`] being inserted and `spent_mempool_outpoints`,
@@ -255,6 +292,9 @@ impl Storage {
 
             return Err(MempoolError::InMempool);
         }
+
+        // Check that the transaction is standard.
+        self.reject_if_non_standard_tx(&tx)?;
 
         // Then, we try to insert into the pool. If this fails the transaction is rejected.
         let mut result = Ok(unmined_tx_id);
@@ -596,6 +636,12 @@ impl Storage {
                         EvictionList::new(MAX_EVICTION_MEMORY_ENTRIES, eviction_memory_time)
                     })
                     .insert(tx_id.mined_id());
+            }
+            RejectionError::NonStandardTransaction(e) => {
+                // Non-standard transactions are rejected based on their exact
+                // transaction data.
+                self.tip_rejected_exact
+                    .insert(tx_id, ExactTipRejectionError::from(e));
             }
         }
         self.limit_rejection_list_memory();

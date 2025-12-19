@@ -1071,17 +1071,17 @@ fn add_some_stuff_to_mempool(
     mempool_service: &mut Mempool,
     network: Network,
 ) -> Vec<VerifiedUnminedTx> {
-    // get the genesis block coinbase transaction from the Zcash blockchain.
-    let genesis_transactions: Vec<_> = network
-        .unmined_transactions_in_blocks(..=0)
-        .take(1)
-        .collect();
-
-    // Insert the genesis block coinbase transaction into the mempool storage.
-    mempool_service
-        .storage()
-        .insert(genesis_transactions[0].clone(), Vec::new(), None)
+    // get the last transaction from the Zcash blockchain.
+    let last_transaction = network
+        .unmined_transactions_in_blocks(..=10)
+        .last()
         .unwrap();
 
-    genesis_transactions
+    // Insert the last transaction into the mempool storage.
+    mempool_service
+        .storage()
+        .insert(last_transaction.clone(), Vec::new(), None)
+        .unwrap();
+
+    vec![last_transaction]
 }

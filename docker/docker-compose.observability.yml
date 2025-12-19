@@ -1,0 +1,94 @@
+# Zebra Observability Stack: Prometheus + Grafana + AlertManager
+# Usage: docker compose -f docker/docker-compose.observability.yml up
+#
+# Services:
+#   - Zebra: Zcash node with metrics endpoint
+#   - Prometheus: Metrics collection and storage
+#   - Grafana: Dashboards and visualization (http://localhost:3000)
+#   - AlertManager: Alert routing and notifications
+
+services:
+  zebra:
+    container_name: zebra
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile
+      target: runtime
+    volumes:
+      - zebrad-cache:/home/zebra/.cache/zebra
+    tty: true
+    environment:
+      - ZEBRA_METRICS__ENDPOINT_ADDR=0.0.0.0:9999
+    ports:
+      - "9999:9999"
+    networks:
+      - observability
+
+  prometheus:
+    container_name: prometheus
+    image: prom/prometheus:latest
+    volumes:
+      - prometheus-data:/prometheus
+      - ./observability/prometheus/rules:/etc/prometheus/rules:ro
+    configs:
+      - source: prometheus-config
+        target: /etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    ports:
+      - "9094:9090"
+    networks:
+      - observability
+
+  grafana:
+    container_name: grafana
+    image: grafana/grafana:latest
+    volumes:
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    environment:
+      # Default login: admin/admin (Grafana prompts to change on first login)
+      # To set a custom password, create a .env file with GF_SECURITY_ADMIN_PASSWORD=yourpassword
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/network_health.json
+    ports:
+      - "3000:3000"
+    networks:
+      - observability
+    depends_on:
+      - prometheus
+
+  alertmanager:
+    container_name: alertmanager
+    image: prom/alertmanager:latest
+    volumes:
+      - ./observability/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+    ports:
+      - "9093:9093"
+    networks:
+      - observability
+
+networks:
+  observability:
+    driver: bridge
+
+volumes:
+  zebrad-cache:
+    driver: local
+  grafana-data:
+    driver: local
+  prometheus-data:
+    driver: local
+  alertmanager-data:
+    driver: local
+
+configs:
+  prometheus-config:
+    file: ./observability/prometheus/prometheus.yaml

@@ -8,9 +8,15 @@ use color_eyre::Report;
 use tokio::time::{self, timeout};
 use tower::{ServiceBuilder, ServiceExt};
 
+use rand::{seq::SliceRandom, thread_rng};
 use zebra_chain::{
-    amount::Amount, block::Block, fmt::humantime_seconds, parameters::Network,
-    serialization::ZcashDeserializeInto, transaction::VerifiedUnminedTx, transparent::OutPoint,
+    amount::Amount,
+    block::Block,
+    fmt::humantime_seconds,
+    parameters::Network,
+    serialization::ZcashDeserializeInto,
+    transaction::VerifiedUnminedTx,
+    transparent::{self, OutPoint},
 };
 use zebra_consensus::transaction as tx;
 use zebra_state::{Config as StateConfig, CHAIN_TIP_UPDATE_WAIT_LIMIT};
@@ -1172,6 +1178,63 @@ async fn mempool_responds_to_await_output() -> Result<(), Report> {
     assert_eq!(
         mempool_change,
         MempoolChange::added([unmined_tx_id].into_iter().collect())
+    );
+
+    Ok(())
+}
+
+/// Check that verified transactions are rejected if non-standard
+#[tokio::test(flavor = "multi_thread")]
+async fn mempool_reject_non_standard() -> Result<(), Report> {
+    let network = Network::Mainnet;
+
+    // pick a random transaction from the dummy Zcash blockchain
+    let unmined_transactions = network.unmined_transactions_in_blocks(1..=10);
+    let transactions = unmined_transactions.collect::<Vec<_>>();
+    let mut rng = thread_rng();
+    let mut last_transaction = transactions
+        .choose(&mut rng)
+        .expect("Missing transaction")
+        .clone();
+
+    last_transaction.height = Some(Height(100_000));
+
+    // Modify the transaction to make it non-standard.
+    // This is done by replacing its outputs with a dust output.
+    let mut tx = last_transaction.transaction.transaction.clone();
+    let tx_mut = Arc::make_mut(&mut tx);
+    *tx_mut.outputs_mut() = vec![transparent::Output {
+        value: Amount::new(10), // this is below the dust threshold
+        lock_script: transparent::Script::new(vec![1, 2, 3].as_slice()),
+    }];
+    last_transaction.transaction.transaction = tx;
+
+    // Set cost limit to the cost of the transaction we will try to insert.
+    let cost_limit = last_transaction.cost();
+
+    let (
+        mut service,
+        _peer_set,
+        _state_service,
+        _chain_tip_change,
+        _tx_verifier,
+        mut recent_syncs,
+        _mempool_transaction_receiver,
+    ) = setup(&network, cost_limit, true).await;
+
+    // Enable the mempool
+    service.enable(&mut recent_syncs).await;
+
+    // Insert the modified transaction into the mempool storage.
+    // Expect insertion to fail for non-standard transaction.
+    let insert_err = service
+        .storage()
+        .insert(last_transaction.clone(), Vec::new(), None)
+        .expect_err("expected insert to fail for non-standard tx");
+
+    assert_eq!(
+        insert_err,
+        MempoolError::NonStandardTransaction(storage::NonStandardTransactionError::IsDust)
     );
 
     Ok(())

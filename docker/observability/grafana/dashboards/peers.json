@@ -32,7 +32,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
@@ -79,7 +82,11 @@
           "instant": false,
           "interval": "",
           "legendFormat": "{{remote_version}} - {{seed}}",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -130,7 +137,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
@@ -174,7 +184,11 @@
           "instant": false,
           "interval": "",
           "legendFormat": "{{remote_version}} - {{seed}}",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -225,7 +239,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
@@ -267,7 +284,11 @@
           "expr": "sum by (remote_version) (zcash_net_peers_connected{job=\"$job\"})",
           "interval": "",
           "legendFormat": "{{remote_version}}",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -318,7 +339,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
@@ -360,7 +384,11 @@
           "expr": "sum by (remote_version) (zcash_net_peers_obsolete{job=\"$job\"})",
           "interval": "",
           "legendFormat": "{{remote_version}}",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -411,7 +439,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
@@ -452,7 +483,11 @@
           "expr": "sum by (user_agent) (zcash_net_peers_connected{job=\"$job\"})",
           "interval": "",
           "legendFormat": "{{user_agent}}",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
