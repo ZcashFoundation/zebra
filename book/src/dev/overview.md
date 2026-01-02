@@ -18,7 +18,7 @@ The following are general desiderata for Zebra:
   required dependencies.  Note that "minimize number of dependencies"
   is usually a proxy for this desideratum, but is not exactly the same:
   for instance, a collection of crates like the tokio crates are all
-  developed together and have one trust boundary.
+  developed together and share a single trust boundary.
 
 * Zebra should be well-factored internally into a collection of
   component libraries which can be used by other applications to
