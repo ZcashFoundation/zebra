@@ -59,7 +59,7 @@ listen_addr = "127.0.0.1:8232"
 ## Running zebra
 [#running-zebra]: #running-zebra
 
-If the configuration file is in the default directory, then zebra will just read from it. All we need to do is to start zebra as follows:
+If the configuration file is in the default directory, then zebra will just read from it. All we need to do is start zebra as follows:
 
 ```console
 zebrad
