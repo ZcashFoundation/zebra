@@ -25,9 +25,9 @@ The pre-release version is denoted by appending a hyphen and a series of dot sep
 
 | Level of change | Details |
 |:---             |:---     |
-| Major release   | Contains significant new features, and commonly correspond to network upgrades; some technical assistance may be needed during the update. When updating to a major release, you may need to follow the specific upgrade instructions provided in the release notes. |
-| Minor release   | Contains new smaller features. Minor releases should be fully backward-compatible. No technical assistance is expected during update.  If you want to use the new features in a minor release, you might need to follow the instructions in the release notes. |
-| Patch release   | Low risk, bug fix release. No technical assistance is expected during update. |
+| Major release   | Contains significant new features, and commonly corresponds to network upgrades; some technical assistance may be needed during the update. When updating to a major release, you may need to follow the specific upgrade instructions provided in the release notes. |
+| Minor release   | Contains new, smaller features. Minor releases should be fully backward-compatible. No technical assistance is expected during the update.  If you want to use the new features in a minor release, you might need to follow the instructions in the release notes. |
+| Patch release   | Low risk, bug fix release. No technical assistance is expected during the update. |
 
 <a id="supported-releases"></a>
 
@@ -93,11 +93,11 @@ Dates are offered as general guidance and are subject to change.
 
 In general, expect the following release cycle:
 
-* A major release for each network upgrade, whenever there are breaking changes to Zebra (by API, severe bugs or other kind of upgrades)
+* A major release for each network upgrade, whenever there are breaking changes to Zebra (by API, severe bugs or other kinds of upgrades)
 * Minor releases for significant new Zebra features or severe bug fixes
 * A patch release around every 6 weeks
 
-This cadence of releases gives eager developers access to new features as soon as they are fully developed and pass through our code review and integration testing processes, while maintaining the stability and reliability of the platform for production users that prefer to receive features after they have been validated by Zcash and other developers that use the pre-release builds.
+This cadence of releases gives eager developers access to new features as soon as they are fully developed and pass through our code review and integration testing processes, while maintaining the stability and reliability of the platform for production users who prefer to receive features after they have been validated by Zcash and other developers who use the pre-release builds.
 
 <a id="deprecation"></a>
 
@@ -121,7 +121,7 @@ To help ensure that you have sufficient time and a clear path to update, this is
 | Deprecation stages | Details |
 |:---                |:---     |
 | Announcement       | We announce deprecated RPCs and features in the [change log](https://github.com/ZcashFoundation/zebra/blob/main/CHANGELOG.md "Zebra change log"). When we announce a deprecation, we also announce a recommended update path. |
-| Deprecation period | When a RPC or a feature is deprecated, it is still present until the next major release. A deprecation can be announced in any release, but the removal of a deprecated RPC or feature happens only in major release. Until a deprecated RPC or feature is removed, it is maintained according to the Tier 1 support policy, meaning that only critical and security issues are fixed. |
+| Deprecation period | When an RPC or a feature is deprecated, it is still present until the next major release. A deprecation can be announced in any release, but the removal of a deprecated RPC or feature happens only in major release. Until a deprecated RPC or feature is removed, it is maintained according to the Tier 1 support policy, meaning that only critical and security issues are fixed. |
 | Rust APIs          | The Rust APIs of the Zebra crates are currently unstable and unsupported. Use the `zebrad` commands or JSON-RPCs to interact with Zebra. |
 
 <a id="process"></a>
