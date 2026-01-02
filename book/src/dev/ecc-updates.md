@@ -3,7 +3,7 @@
 Zebra relies on numerous Electric Coin Company ([ECC](https://electriccoin.co/)) dependencies, and updating them can be a complex task. This guide will help you navigate the process.
 
 
-The main dependency that influences that is [zcash](https://github.com/zcash/zcash) itself. This is because [zebra_script](https://github.com/ZcashFoundation/zcash_script) links to specific files from it (zcash_script.cpp and all on which it depends). Due to the architecture of zcash, this requires linking to a lot of seemingly unrelated dependencies like orchard, halo2, etc (which are all Rust crates).
+The main dependency that influences this is [zcash](https://github.com/zcash/zcash) itself. This is because [zebra_script](https://github.com/ZcashFoundation/zcash_script) links to specific files from it (zcash_script.cpp and all on which it depends). Due to the architecture of zcash, this requires linking to a lot of seemingly unrelated dependencies like orchard, halo2, etc (which are all Rust crates).
 
 ## Steps for upgrading
 
@@ -29,7 +29,7 @@ cargo upgrade --incompatible -p bridgetree -p incrementalmerkletree -p orchard -
 
 Notes:
 
-- Insert all the crate names to be updated to the command.
+- Insert all the crate names to be updated in the command.
 
 - Use `crate-name@version` to upgrade to a specific version of that crate, instead of just the highest version. 
 
