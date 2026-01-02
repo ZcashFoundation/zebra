@@ -67,7 +67,7 @@ And monitor logs for behaviour.
 ### Do Tests
 
 Do tests, including sending transactions if possible (which will require the
-lightwalletd server). Check if whatever activated in the upgrade works.
+lightwalletd server). Check if whatever was activated in the upgrade works.
 
 
 ## Zebra
