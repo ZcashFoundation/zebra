@@ -57,7 +57,7 @@ RUST_LOG=info zebra-scanner --sapling-keys-to-scan '{"key":"zxviews1q0duytgcqqqq
 ```
 
 - A birthday lower than the Sapling activation height defaults to Sapling activation height.
-- A birthday greater or equal than Sapling activation height will start scanning at provided height, improving scanner speed.
+- A birthday greater than or equal to Sapling activation height will start scanning at provided height, improving scanner speed.
 
 The scanning process begins once Zebra syncs its state past the Sapling activation height. Scanning a synced state takes between 12 and 24 hours. The scanner searches for transactions containing Sapling notes with outputs decryptable by the provided viewing keys.
 
@@ -84,7 +84,7 @@ An easy way to query the results is to use the
 
 ## Querying Raw Scanning Results
 
-A more advanced way to query results is to use `ldb` tool, requires a certain level of expertise.
+A more advanced way to query results is to use `ldb` tool, which requires a certain level of expertise.
 
 Install `ldb`:
 
