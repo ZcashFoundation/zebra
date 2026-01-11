@@ -50,7 +50,7 @@ bytes = "1.10"
 chrono = { version = "0.4.40", default-features = false }
 clap = "4.5"
 color-eyre = { version = "0.6.3", default-features = false }
-console-subscriber = "0.4"
+console-subscriber = "0.5"
 criterion = "0.5"
 crossbeam-channel = "0.5.14"
 derive-getters = "0.5"
