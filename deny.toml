@@ -42,10 +42,6 @@ deny = [
 #
 # Certain crates/versions that will be skipped when doing duplicate detection.
 skip = [
-    # Allow mixed versions pulled in by transitive dev/test deps vs runtime deps
-    # ron 0.7.x is required by insta; 0.8.x is required by config
-    { name = "ron", version = "=0.7.1" },
-
     # Multiple windows-sys versions via different dependencies
     # 0.60.2 via clap/anstream; 0.61.0 via dirs-sys
     { name = "windows-sys", version = "=0.60.2" }
@@ -57,9 +53,6 @@ skip = [
 # dependencies starting at the specified crate, up to a certain depth, which is
 # by default infinite
 skip-tree = [
-    # wait for bindgen to update itertools
-    { name = "itertools", version = "0.13" },
-
     # wait for ordered-map to release a dependency fix
     { name = "ordered-map", version = "=0.4.2" },
 
@@ -68,12 +61,6 @@ skip-tree = [
 
     # wait for abscissa_core to upgrade
     {name = "tracing-log", version = "=0.1.4" },
-
-    # wait for console-subscriber and tower to update hdrhistogram.
-    # also wait for ron to update insta, and wait for tonic update.
-    { name = "base64", version = "=0.13.1" },
-    # Multiple base64 versions through different dependencies
-    { name = "base64", version = "=0.21.7" },
 
     # wait for abscissa_core to update toml
     { name = "toml", version = "=0.5.11" },
@@ -101,13 +88,7 @@ skip-tree = [
     # wait for abscissa_core to update synstructure
     { name = "synstructure", version = "=0.12.6" },
 
-    # wait for librustzcash to update tonic
-    { name = "tonic", version = "0.12" },
-    { name = "prost-types", version = "0.13" },
-
     { name = "windows-sys", version = "=0.52.0" },
-
-    { name = "quick-xml", version = "0.37.5" },
 
     { name = "indexmap", version = "1.9" },
 
