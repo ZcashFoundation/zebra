@@ -176,15 +176,19 @@ zcash_script = "0.4.4"
 config = { version = "0.15.14", features = ["toml"] }
 which = "8.0.0"
 
+# TODO: Remove the whole patch table once the upstream changes land in a release.
 [patch.crates-io]
-zcash_primitives = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
-zcash_address = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
-zcash_encoding = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
-zcash_history = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
-zcash_keys = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
-zcash_proofs = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
-zcash_transparent = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
-zcash_protocol = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
+zcash_primitives = { git = "https://github.com/zcash/librustzcash", branch = "bump-zcash_script" }
+zcash_address = { git = "https://github.com/zcash/librustzcash", branch = "bump-zcash_script" }
+zcash_encoding = { git = "https://github.com/zcash/librustzcash", branch = "bump-zcash_script" }
+zcash_history = { git = "https://github.com/zcash/librustzcash", branch = "bump-zcash_script" }
+zcash_keys = { git = "https://github.com/zcash/librustzcash", branch = "bump-zcash_script" }
+zcash_proofs = { git = "https://github.com/zcash/librustzcash", branch = "bump-zcash_script" }
+zcash_transparent = { git = "https://github.com/zcash/librustzcash", branch = "bump-zcash_script" }
+zcash_protocol = { git = "https://github.com/zcash/librustzcash", branch = "bump-zcash_script" }
+
+zcash_script = { git = "https://github.com/ZcashFoundation/zcash_script", branch = "make-parse-pub" }
+libzcash_script = { git = "https://github.com/ZcashFoundation/zcash_script", branch = "make-parse-pub" }
 
 [workspace.metadata.release]
 
