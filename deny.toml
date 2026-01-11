@@ -130,18 +130,20 @@ skip-tree = [
 # Lint level for what to happen when a crate from a crate registry that is not
 # in the allow list is encountered
 unknown-registry = "deny"
+
 # Lint level for what to happen when a crate from a git repository that is not
 # in the allow list is encountered
 unknown-git = "deny"
+
 # List of URLs for allowed crate registries. Defaults to the crates.io index
 # if not specified. If it is specified but empty, no registries are allowed.
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+
 # List of URLs for allowed Git repositories
+# TODO: Remove the URLs once the patch table in Cargo.toml is removed.
 allow-git = [
     "https://github.com/zcash/librustzcash.git",
-    "https://github.com/zcash/incrementalmerkletree",
-    "https://github.com/zcash/orchard",
-    "https://github.com/zcash/sapling-crypto"
+    "https://github.com/ZcashFoundation/zcash_script",
 ]
 
 [sources.allow-org]
