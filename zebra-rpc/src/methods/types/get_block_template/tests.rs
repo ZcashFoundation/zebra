@@ -6,15 +6,12 @@ use std::iter;
 use strum::IntoEnumIterator;
 use zcash_keys::address::Address;
 
-use zebra_chain::parameters::subsidy::{
-    FUNDING_STREAM_ECC_ADDRESSES_TESTNET, FUNDING_STREAM_MG_ADDRESSES_TESTNET,
-    FUNDING_STREAM_ZF_ADDRESSES_TESTNET,
-};
 use zebra_chain::parameters::testnet::ConfiguredFundingStreamRecipient;
+
 use zebra_chain::{
     block::Height,
     parameters::{
-        subsidy::FundingStreamReceiver,
+        subsidy::FundingStreamReceiver::{Deferred, Ecc, MajorGrants, ZcashFoundation},
         testnet::{self, ConfiguredActivationHeights, ConfiguredFundingStreams},
         Network, NetworkUpgrade,
     },
@@ -52,49 +49,17 @@ fn coinbase() -> anyhow::Result<()> {
             ConfiguredFundingStreams {
                 height_range: Some(Height(1)..Height(100)),
                 recipients: Some(vec![
-                    ConfiguredFundingStreamRecipient {
-                        receiver: FundingStreamReceiver::ZcashFoundation,
-                        numerator: 5,
-                        addresses: Some(
-                            FUNDING_STREAM_ZF_ADDRESSES_TESTNET
-                                .map(ToString::to_string)
-                                .to_vec(),
-                        ),
-                    },
-                    ConfiguredFundingStreamRecipient {
-                        receiver: FundingStreamReceiver::Ecc,
-                        numerator: 7,
-                        addresses: Some(
-                            FUNDING_STREAM_ECC_ADDRESSES_TESTNET
-                                .map(ToString::to_string)
-                                .to_vec(),
-                        ),
-                    },
-                    ConfiguredFundingStreamRecipient {
-                        receiver: FundingStreamReceiver::MajorGrants,
-                        numerator: 8,
-                        addresses: Some(
-                            FUNDING_STREAM_MG_ADDRESSES_TESTNET
-                                .map(ToString::to_string)
-                                .to_vec(),
-                        ),
-                    },
+                    ConfiguredFundingStreamRecipient::new_for(Ecc),
+                    ConfiguredFundingStreamRecipient::new_for(ZcashFoundation),
+                    ConfiguredFundingStreamRecipient::new_for(MajorGrants),
                 ]),
             },
             ConfiguredFundingStreams {
                 height_range: Some(Height(1)..Height(100)),
                 recipients: Some(vec![
+                    ConfiguredFundingStreamRecipient::new_for(MajorGrants),
                     ConfiguredFundingStreamRecipient {
-                        receiver: FundingStreamReceiver::MajorGrants,
-                        numerator: 8,
-                        addresses: Some(
-                            FUNDING_STREAM_MG_ADDRESSES_TESTNET
-                                .map(ToString::to_string)
-                                .to_vec(),
-                        ),
-                    },
-                    ConfiguredFundingStreamRecipient {
-                        receiver: FundingStreamReceiver::Deferred,
+                        receiver: Deferred,
                         numerator: 12,
                         addresses: None,
                     },
