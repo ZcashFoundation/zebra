@@ -21,8 +21,8 @@ resolver = "2"
 
 [workspace.dependencies]
 incrementalmerkletree = { version = "0.8.2", features = ["legacy-api"] }
-orchard = "0.11"
-sapling-crypto = "0.5"
+orchard = "0.12"
+sapling-crypto = "0.6"
 zcash_address = "0.10"
 zcash_encoding = "0.3"
 zcash_history = "0.4"
@@ -155,19 +155,23 @@ uint = "0.10"
 vergen-git2 = { version = "1.0", default-features = false }
 x25519-dalek = "2.0.1"
 zcash_note_encryption = "0.4.1"
-zcash_script = "0.4.2"
+zcash_script = "0.5"
 config = { version = "0.15.14", features = ["toml"] }
 which = "8.0.0"
 
+# TODO: Remove the whole patch table once the upstream changes land in a release.
 [patch.crates-io]
-zcash_primitives = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
-zcash_address = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
-zcash_encoding = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
-zcash_history = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
-zcash_keys = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
-zcash_proofs = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
-zcash_transparent = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
-zcash_protocol = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
+zcash_primitives = { git = "https://github.com/zcash/librustzcash", branch = "bump-zcash_script" }
+zcash_address = { git = "https://github.com/zcash/librustzcash", branch = "bump-zcash_script" }
+zcash_encoding = { git = "https://github.com/zcash/librustzcash", branch = "bump-zcash_script" }
+zcash_history = { git = "https://github.com/zcash/librustzcash", branch = "bump-zcash_script" }
+zcash_keys = { git = "https://github.com/zcash/librustzcash", branch = "bump-zcash_script" }
+zcash_proofs = { git = "https://github.com/zcash/librustzcash", branch = "bump-zcash_script" }
+zcash_transparent = { git = "https://github.com/zcash/librustzcash", branch = "bump-zcash_script" }
+zcash_protocol = { git = "https://github.com/zcash/librustzcash", branch = "bump-zcash_script" }
+
+zcash_script = { git = "https://github.com/ZcashFoundation/zcash_script", branch = "make-parse-pub" }
+libzcash_script = { git = "https://github.com/ZcashFoundation/zcash_script", branch = "make-parse-pub" }
 
 [workspace.metadata.release]
 

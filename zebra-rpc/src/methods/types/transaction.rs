@@ -145,8 +145,7 @@ impl TransactionTemplate<NegativeOrZero> {
             net,
             BlockHeight::from(height),
             BuildConfig::Coinbase {
-                miner_data: miner_params.data().cloned().unwrap_or_default(),
-                sequence: 0,
+                miner_data: miner_params.data().clone(),
             },
         );
 
