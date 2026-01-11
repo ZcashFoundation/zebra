@@ -17,7 +17,6 @@ use halo2::pasta::{group::ff::PrimeField, pallas};
 use tokio::time::timeout;
 use tower::{buffer::Buffer, service_fn, ServiceExt};
 
-use zcash_transparent::coinbase::MinerData;
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{self, Block, Height},
@@ -3117,7 +3116,7 @@ fn mock_coinbase_transparent_output(
 
     let input = transparent::Input::Coinbase {
         height: coinbase_height,
-        data: MinerData::default(),
+        data: vec![],
         sequence: u32::MAX,
     };
 
