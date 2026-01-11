@@ -132,7 +132,7 @@ impl Transaction {
         //
         // > A coinbase transaction script MUST have length in {2 .. 100} bytes.
         //
-        // Zebra adds extra coinbase data if configured to do so.
+        // Zebra adds optional miner data if configured to do so.
         //
         // Since we're not using a lock time, any sequence number is valid here.
         // See `Transaction::lock_time()` for the relevant consensus rules.
@@ -156,7 +156,7 @@ impl Transaction {
         // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
         let outputs: Vec<_> = outputs
             .into_iter()
-            .map(|(amount, lock_script)| transparent::Output::new_coinbase(amount, lock_script))
+            .map(|(amount, lock_script)| transparent::Output::new(amount, lock_script))
             .collect();
 
         assert!(
@@ -222,7 +222,7 @@ impl Transaction {
         // > and nJoinSplit MUST be nonzero.
         let outputs: Vec<_> = outputs
             .into_iter()
-            .map(|(amount, lock_script)| transparent::Output::new_coinbase(amount, lock_script))
+            .map(|(amount, lock_script)| transparent::Output::new(amount, lock_script))
             .collect();
 
         assert!(

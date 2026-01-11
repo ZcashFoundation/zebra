@@ -9,8 +9,6 @@ use zebra_chain::amount::Amount;
 use zebra_chain::parameters::NetworkUpgrade::*;
 use zebra_chain::parameters::{subsidy::FundingStreamReceiver, NetworkKind};
 
-use crate::block::subsidy::new_coinbase_script;
-
 use super::*;
 
 /// Checks that the Mainnet funding stream values are correct.
@@ -129,8 +127,12 @@ fn test_funding_stream_addresses() -> Result<(), Report> {
                     "incorrect network for {receiver:?} funding stream address constant: {address}",
                 );
 
-                // Asserts if address is not a P2SH address.
-                let _script = new_coinbase_script(address);
+                assert!(
+                    address.is_script_hash(),
+                    "funding stream address is not P2SH: {address}"
+                );
+
+                let _script = address.script();
             }
         }
     }

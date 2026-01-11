@@ -8,54 +8,56 @@ pub mod zip317;
 #[cfg(test)]
 mod tests;
 
-use std::{collections::HashMap, fmt, iter, sync::Arc};
+use std::{
+    fmt::{self},
+    sync::Arc,
+};
 
 use derive_getters::Getters;
 use derive_new::new;
 use jsonrpsee::core::RpcResult;
 use jsonrpsee_types::{ErrorCode, ErrorObject};
+use rand::{rngs::OsRng, RngCore};
 use tokio::sync::mpsc::{self, error::TrySendError};
 use tower::{Service, ServiceExt};
 use zcash_keys::address::Address;
-use zcash_protocol::PoolType;
-use zcash_script::script::Evaluable;
+use zcash_protocol::memo::MemoBytes;
 
+use zcash_script::{
+    opcode::{Evaluable, PushValue},
+    pv::push_value,
+};
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+use zebra_chain::amount::{Amount, NonNegative};
 use zebra_chain::{
-    amount::{self, Amount, NegativeOrZero, NonNegative},
+    amount::{self, NegativeOrZero},
     block::{
         self, Block, ChainHistoryBlockTxAuthCommitmentHash, ChainHistoryMmrRootHash, Height,
         MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION,
     },
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
-    parameters::{
-        subsidy::{block_subsidy, funding_stream_values, miner_subsidy, FundingStreamReceiver},
-        Network, NetworkUpgrade,
-    },
+    parameters::Network,
     serialization::{DateTime32, ZcashDeserializeInto},
-    transaction::{Transaction, UnminedTx, VerifiedUnminedTx},
-    transparent::{
-        self, EXTRA_ZEBRA_COINBASE_DATA, MAX_COINBASE_DATA_LEN, MAX_COINBASE_HEIGHT_DATA_LEN,
-    },
+    transaction::VerifiedUnminedTx,
     work::difficulty::{CompactDifficulty, ExpandedDifficulty},
 };
 // Required for trait method `.bytes_in_display_order()` used indirectly in Debug impl
 #[allow(unused_imports)]
 use zebra_chain::serialization::BytesInDisplayOrder;
 
-use zebra_consensus::{
-    funding_stream_address, router::service_trait::BlockVerifierService, MAX_BLOCK_SIGOPS,
-};
+use zebra_consensus::{router::service_trait::BlockVerifierService, MAX_BLOCK_SIGOPS};
 use zebra_node_services::mempool::{self, TransactionDependencies};
 use zebra_state::GetBlockTemplateChainInfo;
 
 use crate::{
     config,
     methods::types::{
-        default_roots::DefaultRoots, long_poll::LongPollId, submit_block,
-        transaction::TransactionTemplate,
+        default_roots::DefaultRoots, get_block_template::constants::MAX_MINER_DATA_LEN,
+        long_poll::LongPollId, transaction::TransactionTemplate,
     },
     server::error::OkOrError,
+    SubmitBlockChannel,
 };
 
 use constants::{
@@ -273,22 +275,23 @@ impl BlockTemplateResponse {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_internal(
         network: &Network,
-        miner_address: &Address,
+        miner_params: &MinerParams,
         chain_tip_and_local_time: &GetBlockTemplateChainInfo,
         long_poll_id: LongPollId,
         #[cfg(not(test))] mempool_txs: Vec<VerifiedUnminedTx>,
         #[cfg(test)] mempool_txs: Vec<(InBlockTxDependenciesDepth, VerifiedUnminedTx)>,
         submit_old: Option<bool>,
-        extra_coinbase_data: Vec<u8>,
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))] zip233_amount: Option<
             Amount<NonNegative>,
         >,
     ) -> Self {
-        // Calculate the next block height.
-        let next_block_height =
-            (chain_tip_and_local_time.tip_height + 1).expect("tip is far below Height::MAX");
+        // Determine the next block height.
+        let height = chain_tip_and_local_time
+            .tip_height
+            .next()
+            .expect("chain tip must be below Height::MAX");
 
-        // Convert transactions into TransactionTemplates
+        // Convert transactions into TransactionTemplates.
         #[cfg(not(test))]
         let (mempool_tx_templates, mempool_txs): (Vec<_>, Vec<_>) =
             mempool_txs.into_iter().map(|tx| ((&tx).into(), tx)).unzip();
@@ -327,13 +330,12 @@ impl BlockTemplateResponse {
         // Generate the coinbase transaction and default roots
         //
         // TODO: move expensive root, hash, and tree cryptography to a rayon thread?
-        let (coinbase_txn, default_roots) = generate_coinbase_and_roots(
+        let (coinbase_txn, default_roots) = new_coinbase_with_roots(
             network,
-            next_block_height,
-            miner_address,
+            height,
+            miner_params,
             &mempool_txs,
             chain_tip_and_local_time.chain_history_root,
-            extra_coinbase_data,
             #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             zip233_amount,
         )
@@ -390,7 +392,7 @@ impl BlockTemplateResponse {
 
             bits: chain_tip_and_local_time.expected_difficulty,
 
-            height: next_block_height.0,
+            height: height.0,
 
             max_time: chain_tip_and_local_time.max_time,
 
@@ -428,19 +430,109 @@ impl GetBlockTemplateResponse {
     }
 }
 
-///  Handler for the `getblocktemplate` RPC.
+/// Miner parameters.
+#[derive(Clone, Debug)]
+pub struct MinerParams {
+    /// Address for receiving miner subsidy and tx fees.
+    addr: Address,
+
+    /// Optional data to include in the coinbase input script.
+    data: Option<PushValue>,
+
+    /// Optional shielded memo for the miner's coinbase transaction.
+    ///
+    /// Applies only if [`Self::addr`] contains a shielded component.
+    memo: Option<MemoBytes>,
+}
+
+impl MinerParams {
+    /// Creates a new instance of [`MinerParams`].
+    pub fn new(net: &Network, conf: config::mining::Config) -> Result<Self, MinerParamsError> {
+        let addr = conf
+            .miner_address
+            .map(|addr| Address::try_from_zcash_address(net, addr))
+            .ok_or(MinerParamsError::MissingAddr)??;
+
+        let data = conf
+            .miner_data
+            .map(|s| {
+                let data = push_value(s.as_bytes()).ok_or(MinerParamsError::OversizedData)?;
+
+                (data.byte_len() <= MAX_MINER_DATA_LEN)
+                    .then_some(data)
+                    .ok_or(MinerParamsError::OversizedData)
+            })
+            .transpose()?;
+
+        let memo = conf
+            .miner_memo
+            .map(|memo| MemoBytes::from_bytes(memo.as_bytes()))
+            .transpose()?;
+
+        Ok(Self { addr, data, memo })
+    }
+
+    /// Returns the miner address.
+    pub fn addr(&self) -> &Address {
+        &self.addr
+    }
+
+    /// Returns the miner data.
+    pub fn data(&self) -> &Option<PushValue> {
+        &self.data
+    }
+
+    /// Returns the miner memo.
+    pub fn memo(&self) -> Option<&MemoBytes> {
+        self.memo.as_ref()
+    }
+
+    /// Randomizes the memo.
+    pub fn randomize_memo(&mut self) {
+        let mut random = [0u8; 512];
+        OsRng.fill_bytes(&mut random);
+        self.memo = Some(MemoBytes::from_bytes(&random).unwrap());
+    }
+}
+
+impl From<Address> for MinerParams {
+    fn from(addr: Address) -> Self {
+        Self {
+            addr,
+            data: None,
+            memo: None,
+        }
+    }
+}
+
+/// Errors that can occur when creating [`MinerParams`].
+#[derive(Debug, thiserror::Error)]
+pub enum MinerParamsError {
+    #[error("Missing miner address")]
+    MissingAddr,
+    #[error("Invalid miner address: {0}")]
+    InvalidAddr(zcash_address::ConversionError<&'static str>),
+    #[error("Miner data exceeds {MAX_MINER_DATA_LEN} bytes")]
+    OversizedData,
+    #[error(transparent)]
+    InvalidMemo(#[from] zcash_protocol::memo::Error),
+}
+
+impl From<zcash_address::ConversionError<&'static str>> for MinerParamsError {
+    fn from(err: zcash_address::ConversionError<&'static str>) -> Self {
+        Self::InvalidAddr(err)
+    }
+}
+
+/// Handler for the `getblocktemplate` RPC.
 #[derive(Clone)]
 pub struct GetBlockTemplateHandler<BlockVerifierRouter, SyncStatus>
 where
     BlockVerifierRouter: BlockVerifierService,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
-    /// Address for receiving miner subsidy and tx fees.
-    miner_address: Option<Address>,
-
-    /// Extra data to include in coinbase transaction inputs.
-    /// Limited to around 95 bytes by the consensus rules.
-    extra_coinbase_data: Vec<u8>,
+    /// Miner parameters, including the miner address, data, and memo.
+    miner_params: Option<MinerParams>,
 
     /// The chain verifier, used for submitting blocks.
     block_verifier_router: BlockVerifierRouter,
@@ -453,20 +545,12 @@ where
     mined_block_sender: mpsc::Sender<(block::Hash, block::Height)>,
 }
 
-// A limit on the configured extra coinbase data, regardless of the current block height.
-// This is different from the consensus rule, which limits the total height + data.
-const EXTRA_COINBASE_DATA_LIMIT: usize = MAX_COINBASE_DATA_LEN - MAX_COINBASE_HEIGHT_DATA_LEN;
-
 impl<BlockVerifierRouter, SyncStatus> GetBlockTemplateHandler<BlockVerifierRouter, SyncStatus>
 where
     BlockVerifierRouter: BlockVerifierService,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
     /// Creates a new [`GetBlockTemplateHandler`].
-    ///
-    /// # Panics
-    ///
-    /// - If the `miner_address` in `conf` is not valid.
     pub fn new(
         net: &Network,
         conf: config::mining::Config,
@@ -474,65 +558,18 @@ where
         sync_status: SyncStatus,
         mined_block_sender: Option<mpsc::Sender<(block::Hash, block::Height)>>,
     ) -> Self {
-        // Check that the configured miner address is valid.
-        let miner_address = conf.miner_address.map(|addr| {
-            if addr.can_receive_as(PoolType::Transparent) {
-                Address::try_from_zcash_address(net, addr)
-                    .expect("miner_address must be a valid Zcash address")
-            } else {
-                // TODO: Remove this panic once we support mining to shielded addresses.
-                panic!("miner_address can't receive transparent funds")
-            }
-        });
-
-        // Hex-decode to bytes if possible, otherwise UTF-8 encode to bytes.
-        let extra_coinbase_data = conf
-            .extra_coinbase_data
-            .unwrap_or_else(|| EXTRA_ZEBRA_COINBASE_DATA.to_string());
-        let extra_coinbase_data = hex::decode(&extra_coinbase_data)
-            .unwrap_or_else(|_error| extra_coinbase_data.as_bytes().to_vec());
-
-        assert!(
-            extra_coinbase_data.len() <= EXTRA_COINBASE_DATA_LIMIT,
-            "extra coinbase data is {} bytes, but Zebra's limit is {}.\n\
-             Configure mining.extra_coinbase_data with a shorter string",
-            extra_coinbase_data.len(),
-            EXTRA_COINBASE_DATA_LIMIT,
-        );
-
         Self {
-            miner_address,
-            extra_coinbase_data,
+            miner_params: MinerParams::new(net, conf).ok(),
             block_verifier_router,
             sync_status,
             mined_block_sender: mined_block_sender
-                .unwrap_or(submit_block::SubmitBlockChannel::default().sender()),
+                .unwrap_or(SubmitBlockChannel::default().sender()),
         }
     }
 
-    /// Returns a valid miner address, if any.
-    pub fn miner_address(&self) -> Option<Address> {
-        self.miner_address.clone()
-    }
-
-    /// Returns the extra coinbase data.
-    pub fn extra_coinbase_data(&self) -> Vec<u8> {
-        self.extra_coinbase_data.clone()
-    }
-
-    /// Changes the extra coinbase data.
-    ///
-    /// # Panics
-    ///
-    /// If `extra_coinbase_data` exceeds [`EXTRA_COINBASE_DATA_LIMIT`].
-    pub fn set_extra_coinbase_data(&mut self, extra_coinbase_data: Vec<u8>) {
-        assert!(
-            extra_coinbase_data.len() <= EXTRA_COINBASE_DATA_LIMIT,
-            "extra coinbase data is {} bytes, but Zebra's limit is {}.",
-            extra_coinbase_data.len(),
-            EXTRA_COINBASE_DATA_LIMIT,
-        );
-        self.extra_coinbase_data = extra_coinbase_data;
+    /// Returns the miner parameters, including the address, data, and memo.
+    pub fn miner_params(&self) -> Option<&MinerParams> {
+        self.miner_params.as_ref()
     }
 
     /// Returns the sync status.
@@ -553,6 +590,13 @@ where
     ) -> Result<(), TrySendError<(block::Hash, block::Height)>> {
         self.mined_block_sender.try_send((block, height))
     }
+
+    /// Randomizes the coinbase memo, if miner parameters are set.
+    pub fn randomize_coinbase_data(&mut self) {
+        if let Some(miner_params) = &mut self.miner_params {
+            miner_params.randomize_memo();
+        }
+    }
 }
 
 impl<BlockVerifierRouter, SyncStatus> fmt::Debug
@@ -563,9 +607,8 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Skip fields without debug impls
-        f.debug_struct("GetBlockTemplateRpcImpl")
-            .field("miner_address", &self.miner_address)
-            .field("extra_coinbase_data", &self.extra_coinbase_data)
+        f.debug_struct("GetBlockTemplateHandler")
+            .field("miner_params", &self.miner_params)
             .finish()
     }
 }
@@ -623,7 +666,7 @@ pub fn check_parameters(parameters: &Option<GetBlockTemplateParameters>) -> RpcR
 pub async fn validate_block_proposal<BlockVerifierRouter, Tip, SyncStatus>(
     mut block_verifier_router: BlockVerifierRouter,
     block_proposal_bytes: Vec<u8>,
-    network: Network,
+    net: &Network,
     latest_chain_tip: Tip,
     sync_status: SyncStatus,
 ) -> RpcResult<GetBlockTemplateResponse>
@@ -636,7 +679,7 @@ where
     Tip: ChainTip + Clone + Send + Sync + 'static,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
-    check_synced_to_tip(&network, latest_chain_tip, sync_status)?;
+    check_synced_to_tip(net, latest_chain_tip, sync_status)?;
 
     let block: Block = match block_proposal_bytes.zcash_deserialize_into() {
         Ok(block) => block,
@@ -796,164 +839,25 @@ where
 // - Response processing
 
 /// Generates and returns the coinbase transaction and default roots.
-#[allow(clippy::too_many_arguments)]
-pub fn generate_coinbase_and_roots(
-    network: &Network,
+pub fn new_coinbase_with_roots(
+    net: &Network,
     height: Height,
-    miner_address: &Address,
+    miner_params: &MinerParams,
     mempool_txs: &[VerifiedUnminedTx],
     chain_history_root: Option<ChainHistoryMmrRootHash>,
-    miner_data: Vec<u8>,
     #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))] zip233_amount: Option<
         Amount<NonNegative>,
     >,
-) -> Result<(TransactionTemplate<NegativeOrZero>, DefaultRoots), &'static str> {
-    let miner_fee = calculate_miner_fee(mempool_txs);
-    let outputs = standard_coinbase_outputs(network, height, miner_address, miner_fee);
-    let current_nu = NetworkUpgrade::current(network, height);
-
-    let tx = match current_nu {
-        NetworkUpgrade::Canopy => Transaction::new_v4_coinbase(height, outputs, miner_data),
-        NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 | NetworkUpgrade::Nu6_1 => {
-            Transaction::new_v5_coinbase(network, height, outputs, miner_data)
-        }
-        #[cfg(not(all(zcash_unstable = "nu7", feature = "tx_v6")))]
-        NetworkUpgrade::Nu7 => Transaction::new_v5_coinbase(network, height, outputs, miner_data),
+) -> Result<(TransactionTemplate<NegativeOrZero>, DefaultRoots), Box<dyn std::error::Error>> {
+    let tx = TransactionTemplate::new_coinbase(
+        net,
+        height,
+        miner_params,
+        mempool_txs,
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-        NetworkUpgrade::Nu7 => {
-            Transaction::new_v6_coinbase(network, height, outputs, miner_data, zip233_amount)
-        }
-        _ => Err("Zebra does not support generating pre-Canopy coinbase transactions")?,
-    }
-    .into();
+        zip233_amount,
+    )?;
+    let roots = DefaultRoots::from_coinbase(net, height, &tx, chain_history_root, mempool_txs)?;
 
-    // Calculate block default roots
-    //
-    // TODO: move expensive root, hash, and tree cryptography to a rayon thread?
-    let chain_history_root = chain_history_root
-        .or_else(|| {
-            (NetworkUpgrade::Heartwood.activation_height(network) == Some(height))
-                .then_some(block::CHAIN_HISTORY_ACTIVATION_RESERVED.into())
-        })
-        .expect("history tree can't be empty");
-
-    Ok((
-        TransactionTemplate::from_coinbase(&tx, miner_fee),
-        calculate_default_root_hashes(current_nu, &tx, mempool_txs, chain_history_root),
-    ))
-}
-
-/// Returns the total miner fee for `mempool_txs`.
-pub fn calculate_miner_fee(mempool_txs: &[VerifiedUnminedTx]) -> Amount<NonNegative> {
-    let miner_fee: amount::Result<Amount<NonNegative>> =
-        mempool_txs.iter().map(|tx| tx.miner_fee).sum();
-
-    miner_fee.expect(
-        "invalid selected transactions: \
-         fees in a valid block can not be more than MAX_MONEY",
-    )
-}
-
-/// Returns the standard funding stream and miner reward transparent output scripts
-/// for `network`, `height` and `miner_fee`.
-///
-/// Only works for post-Canopy heights.
-pub fn standard_coinbase_outputs(
-    network: &Network,
-    height: Height,
-    miner_address: &Address,
-    miner_fee: Amount<NonNegative>,
-) -> Vec<(Amount<NonNegative>, transparent::Script)> {
-    let expected_block_subsidy = block_subsidy(height, network).expect("valid block subsidy");
-    let funding_streams = funding_stream_values(height, network, expected_block_subsidy)
-        .expect("funding stream value calculations are valid for reasonable chain heights");
-
-    // Optional TODO: move this into a zebra_consensus function?
-    let funding_streams: HashMap<
-        FundingStreamReceiver,
-        (Amount<NonNegative>, &transparent::Address),
-    > = funding_streams
-        .into_iter()
-        .filter_map(|(receiver, amount)| {
-            Some((
-                receiver,
-                (amount, funding_stream_address(height, network, receiver)?),
-            ))
-        })
-        .collect();
-
-    let miner_reward = miner_subsidy(height, network, expected_block_subsidy)
-        .expect("reward calculations are valid for reasonable chain heights")
-        + miner_fee;
-    let miner_reward =
-        miner_reward.expect("reward calculations are valid for reasonable chain heights");
-
-    // Collect all the funding streams and convert them to outputs.
-    let funding_streams_outputs: Vec<(transparent::Address, Amount<NonNegative>)> = funding_streams
-        .into_iter()
-        .map(|(_receiver, (amount, address))| (address.clone(), amount))
-        .collect();
-    let one_time_lockbox_disbursements = network.lockbox_disbursements(height);
-
-    // Combine the miner reward and funding streams into a list of coinbase amounts and addresses.
-    let mut coinbase_outputs: Vec<(Amount<NonNegative>, transparent::Script)> =
-        funding_streams_outputs
-            .iter()
-            .chain(&one_time_lockbox_disbursements)
-            .map(|(address, amount)| (*amount, address.script()))
-            .collect();
-
-    let script = transparent::Script::new(
-        &miner_address
-            .to_transparent_address()
-            .expect("address must have a transparent component")
-            .script()
-            .to_bytes(),
-    );
-
-    // The HashMap returns funding streams in an arbitrary order,
-    // but Zebra's snapshot tests expect the same order every time.
-
-    // zcashd sorts outputs in serialized data order, excluding the length field
-    coinbase_outputs.sort_by_key(|(_amount, script)| script.clone());
-
-    // The miner reward is always the first output independent of the sort order
-    coinbase_outputs.insert(0, (miner_reward, script));
-
-    coinbase_outputs
-}
-
-// - Transaction roots processing
-
-/// Returns the default block roots for the supplied coinbase and mempool transactions,
-/// and the supplied history tree.
-///
-/// This function runs expensive cryptographic operations.
-pub fn calculate_default_root_hashes(
-    current_nu: NetworkUpgrade,
-    coinbase_txn: &UnminedTx,
-    mempool_txs: &[VerifiedUnminedTx],
-    chain_history_root: ChainHistoryMmrRootHash,
-) -> DefaultRoots {
-    let block_txs = || iter::once(coinbase_txn).chain(mempool_txs.iter().map(|tx| &tx.transaction));
-    let merkle_root = block_txs().cloned().collect();
-    let auth_data_root = block_txs().cloned().collect();
-
-    let block_commitments_hash = if current_nu == NetworkUpgrade::Heartwood
-        && chain_history_root == block::CHAIN_HISTORY_ACTIVATION_RESERVED.into()
-    {
-        block::CHAIN_HISTORY_ACTIVATION_RESERVED.into()
-    } else {
-        ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
-            &chain_history_root,
-            &auth_data_root,
-        )
-    };
-
-    DefaultRoots {
-        merkle_root,
-        chain_history_root,
-        auth_data_root,
-        block_commitments_hash,
-    }
+    Ok((tx, roots))
 }

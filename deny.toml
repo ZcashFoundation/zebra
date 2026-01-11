@@ -42,14 +42,6 @@ deny = [
 #
 # Certain crates/versions that will be skipped when doing duplicate detection.
 skip = [
-    # Allow mixed versions pulled in by transitive dev/test deps vs runtime deps
-    # ron 0.7.x is required by insta; 0.8.x is required by config
-    { name = "ron", version = "=0.7.1" },
-
-    # Keep older toml_datetime required via jsonrpsee-proc-macros -> toml_edit 0.22.x
-    # We can't upgrade jsonrpsee yet to 0.25.x (as it introduces breaking changes)
-    { name = "toml_datetime", version = "=0.6.11" },
-    
     # Multiple windows-sys versions via different dependencies
     # 0.60.2 via clap/anstream; 0.61.0 via dirs-sys
     { name = "windows-sys", version = "=0.60.2" }
@@ -69,12 +61,6 @@ skip-tree = [
 
     # wait for abscissa_core to upgrade
     {name = "tracing-log", version = "=0.1.4" },
-
-    # wait for console-subscriber and tower to update hdrhistogram.
-    # also wait for ron to update insta, and wait for tonic update.
-    { name = "base64", version = "=0.13.1" },
-    # Multiple base64 versions through different dependencies
-    { name = "base64", version = "=0.21.7" },
 
     # wait for abscissa_core to update toml
     { name = "toml", version = "=0.5.11" },
@@ -102,17 +88,12 @@ skip-tree = [
     # wait for abscissa_core to update synstructure
     { name = "synstructure", version = "=0.12.6" },
 
-    # wait for librustzcash to update tonic
-    { name = "tonic", version = "0.12" },
-    { name = "prost-types", version = "0.13" },
-
     { name = "windows-sys", version = "=0.52.0" },
-
-    { name = "quick-xml", version = "0.37.5" },
 
     { name = "indexmap", version = "1.9" },
 
-    { name = "hashbrown", version = "0.12" },
+    # TODO: Bump `hashbrown` to 0.16 in ed25519-zebra.
+    { name = "hashbrown", version = "0.15" },
 
     { name = "getrandom", version = "0.2" },
 
@@ -134,18 +115,20 @@ skip-tree = [
 # Lint level for what to happen when a crate from a crate registry that is not
 # in the allow list is encountered
 unknown-registry = "deny"
+
 # Lint level for what to happen when a crate from a git repository that is not
 # in the allow list is encountered
 unknown-git = "deny"
+
 # List of URLs for allowed crate registries. Defaults to the crates.io index
 # if not specified. If it is specified but empty, no registries are allowed.
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+
 # List of URLs for allowed Git repositories
+# TODO: Remove the URLs once the patch table in Cargo.toml is removed.
 allow-git = [
     "https://github.com/zcash/librustzcash.git",
-    "https://github.com/zcash/incrementalmerkletree",
-    "https://github.com/zcash/orchard",
-    "https://github.com/zcash/sapling-crypto"
+    "https://github.com/ZcashFoundation/zcash_script",
 ]
 
 [sources.allow-org]

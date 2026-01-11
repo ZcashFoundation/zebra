@@ -26,7 +26,6 @@ use zebra_chain::{
     chain_tip::mock::MockChainTip,
     orchard,
     parameters::{
-        subsidy::FUNDING_STREAMS_TESTNET,
         testnet::{self, ConfiguredActivationHeights, Parameters},
         Network::{self, Mainnet},
         NetworkKind, NetworkUpgrade,
@@ -76,7 +75,7 @@ async fn test_rpc_response_data() {
         .expect("failed to set network name")
         .with_activation_heights(ConfiguredActivationHeights {
             blossom: Some(584_000),
-            nu6: Some(FUNDING_STREAMS_TESTNET[1].height_range().start.0),
+            nu6: Some(2_976_000),
             ..Default::default()
         })
         .expect("failed to set activation heights")
@@ -1008,7 +1007,8 @@ pub async fn test_mining_rpcs<State, ReadState>(
             NetworkType::from(NetworkKind::from(network)),
             [0x7e; 20],
         )),
-        extra_coinbase_data: None,
+        miner_data: None,
+        miner_memo: None,
         // TODO: Use default field values when optional features are enabled in tests #8183
         internal_miner: true,
     };

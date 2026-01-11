@@ -49,7 +49,6 @@ use indexmap::IndexMap;
 use jsonrpsee::core::{async_trait, RpcResult as Result};
 use jsonrpsee_proc_macros::rpc;
 use jsonrpsee_types::{ErrorCode, ErrorObject};
-use rand::{rngs::OsRng, RngCore};
 use tokio::{
     sync::{broadcast, mpsc, watch},
     task::JoinHandle,
@@ -58,18 +57,14 @@ use tower::ServiceExt;
 use tracing::Instrument;
 
 use zcash_address::{unified::Encoding, TryFromAddress};
-use zcash_primitives::consensus::Parameters;
-
+use zcash_protocol::consensus::{self, Parameters};
 use zebra_chain::{
-    amount::{self, Amount, NegativeAllowed, NonNegative},
+    amount::{Amount, NegativeAllowed},
     block::{self, Block, Commitment, Height, SerializedBlock, TryIntoHeight},
     chain_sync_status::ChainSyncStatus,
     chain_tip::{ChainTip, NetworkChainTipHeightEstimator},
     parameters::{
-        subsidy::{
-            block_subsidy, funding_stream_values, miner_subsidy, FundingStreamReceiver,
-            ParameterSubsidy,
-        },
+        subsidy::{block_subsidy, funding_stream_values, miner_subsidy, FundingStreamReceiver},
         ConsensusBranchId, Network, NetworkUpgrade, POW_AVERAGING_WINDOW,
     },
     serialization::{BytesInDisplayOrder, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
@@ -95,7 +90,9 @@ use zebra_state::{
 use crate::{
     client::Treestate,
     config,
-    methods::types::{validate_address::validate_address, z_validate_address::z_validate_address},
+    methods::types::{
+        validate_address::validate_address, z_validate_address::z_validate_address, zec::Zec,
+    },
     queue::Queue,
     server::{
         self,
@@ -1823,8 +1820,7 @@ where
         let time = u32::try_from(block.header.time.timestamp())
             .expect("Timestamps of valid blocks always fit into u32.");
 
-        let sapling_nu = zcash_primitives::consensus::NetworkUpgrade::Sapling;
-        let sapling = if network.is_nu_active(sapling_nu, height.into()) {
+        let sapling = if network.is_nu_active(consensus::NetworkUpgrade::Sapling, height.into()) {
             match read_state
                 .ready()
                 .and_then(|service| {
@@ -1844,8 +1840,7 @@ where
         let (sapling_tree, sapling_root) =
             sapling.map_or((None, None), |(tree, root)| (Some(tree), Some(root)));
 
-        let orchard_nu = zcash_primitives::consensus::NetworkUpgrade::Nu5;
-        let orchard = if network.is_nu_active(orchard_nu, height.into()) {
+        let orchard = if network.is_nu_active(consensus::NetworkUpgrade::Nu5, height.into()) {
             match read_state
                 .ready()
                 .and_then(|service| {
@@ -2134,10 +2129,6 @@ where
             zip317::select_mempool_transactions,
         };
 
-        // Clone Configs
-        let network = self.network.clone();
-        let extra_coinbase_data = self.gbt.extra_coinbase_data();
-
         // Clone Services
         let mempool = self.mempool.clone();
         let mut latest_chain_tip = self.latest_chain_tip.clone();
@@ -2151,7 +2142,7 @@ where
             return validate_block_proposal(
                 self.gbt.block_verifier_router(),
                 block_proposal_bytes,
-                network,
+                &self.network,
                 latest_chain_tip,
                 sync_status,
             )
@@ -2162,11 +2153,6 @@ where
         check_parameters(&parameters)?;
 
         let client_long_poll_id = parameters.as_ref().and_then(|params| params.long_poll_id);
-
-        let miner_address = self
-            .gbt
-            .miner_address()
-            .ok_or_misc_error("miner_address not configured")?;
 
         // - Checks and fetches that can change during long polling
         //
@@ -2187,7 +2173,7 @@ where
             //
             // Optional TODO:
             // - add `async changed()` method to ChainSyncStatus (like `ChainTip`)
-            check_synced_to_tip(&network, latest_chain_tip.clone(), sync_status.clone())?;
+            check_synced_to_tip(&self.network, latest_chain_tip.clone(), sync_status.clone())?;
             // TODO: return an error if we have no peers, like `zcashd` does,
             //       and add a developer config that mines regardless of how many peers we have.
             // https://github.com/zcash/zcash/blob/6fdd9f1b81d3b228326c9826fa10696fc516444b/src/miner.cpp#L865-L880
@@ -2404,10 +2390,6 @@ where
         // the template only depends on the previously fetched data.
         // This processing never fails.
 
-        // Calculate the next block height.
-        let next_block_height =
-            (chain_tip_and_local_time.tip_height + 1).expect("tip is far below Height::MAX");
-
         tracing::debug!(
             mempool_tx_hashes = ?mempool_txs
                 .iter()
@@ -2416,14 +2398,24 @@ where
             "selecting transactions for the template from the mempool"
         );
 
+        let miner_params = self.gbt.miner_params().ok_or_error(
+            0,
+            "miner parameters must be present to generate a coinbase transaction",
+        )?;
+
+        // Determine the next block height.
+        let height = chain_tip_and_local_time
+            .tip_height
+            .next()
+            .expect("chain tip must be below Height::MAX");
+
         // Randomly select some mempool transactions.
         let mempool_txs = select_mempool_transactions(
-            &network,
-            next_block_height,
-            &miner_address,
+            &self.network,
+            height,
+            miner_params,
             mempool_txs,
             mempool_tx_deps,
-            extra_coinbase_data.clone(),
             #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             None,
         );
@@ -2439,13 +2431,12 @@ where
         // - After this point, the template only depends on the previously fetched data.
 
         let response = BlockTemplateResponse::new_internal(
-            &network,
-            &miner_address,
+            &self.network,
+            miner_params,
             &chain_tip_and_local_time,
             server_long_poll_id,
             mempool_txs,
             submit_old,
-            extra_coinbase_data,
             #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             None,
         );
@@ -2705,46 +2696,30 @@ where
     }
 
     async fn get_block_subsidy(&self, height: Option<u32>) -> Result<GetBlockSubsidyResponse> {
-        let latest_chain_tip = self.latest_chain_tip.clone();
-        let network = self.network.clone();
+        let net = self.network.clone();
 
-        let height = if let Some(height) = height {
-            Height(height)
-        } else {
-            best_chain_tip_height(&latest_chain_tip)?
-        };
+        let height = height.map_or(best_chain_tip_height(&self.latest_chain_tip)?, |h| {
+            Height(h)
+        });
 
-        if height < network.height_for_first_halving() {
-            return Err(ErrorObject::borrowed(
-                0,
-                "Zebra does not support founders' reward subsidies, \
-                        use a block height that is after the first halving",
-                None,
-            ));
-        }
-
-        // Always zero for post-halving blocks
-        let founders = Amount::zero();
-
-        let total_block_subsidy =
-            block_subsidy(height, &network).map_error(server::error::LegacyCode::default())?;
-        let miner_subsidy = miner_subsidy(height, &network, total_block_subsidy)
-            .map_error(server::error::LegacyCode::default())?;
+        let subsidy = block_subsidy(height, &net).map_misc_error()?;
 
         let (lockbox_streams, mut funding_streams): (Vec<_>, Vec<_>) =
-            funding_stream_values(height, &network, total_block_subsidy)
-                .map_error(server::error::LegacyCode::default())?
+            funding_stream_values(height, &net, subsidy)
+                .map_misc_error()?
                 .into_iter()
                 // Separate the funding streams into deferred and non-deferred streams
                 .partition(|(receiver, _)| matches!(receiver, FundingStreamReceiver::Deferred));
 
-        let is_nu6 = NetworkUpgrade::current(&network, height) == NetworkUpgrade::Nu6;
-
-        let [lockbox_total, funding_streams_total]: [std::result::Result<
-            Amount<NonNegative>,
-            amount::Error,
-        >; 2] = [&lockbox_streams, &funding_streams]
-            .map(|streams| streams.iter().map(|&(_, amount)| amount).sum());
+        let [lockbox_total, funding_streams_total] =
+            [&lockbox_streams, &funding_streams].map(|streams| {
+                streams
+                    .iter()
+                    .map(|&(_, amount)| amount)
+                    .sum::<std::result::Result<Amount<_>, _>>()
+                    .map(Zec::from)
+                    .map_misc_error()
+            });
 
         // Use the same funding stream order as zcashd
         funding_streams.sort_by_key(|(receiver, _funding_stream)| {
@@ -2753,13 +2728,15 @@ where
                 .position(|zcashd_receiver| zcashd_receiver == receiver)
         });
 
+        let is_nu6 = NetworkUpgrade::current(&net, height) == NetworkUpgrade::Nu6;
+
         // Format the funding streams and lockbox streams
-        let [funding_streams, lockbox_streams]: [Vec<_>; 2] = [funding_streams, lockbox_streams]
-            .map(|streams| {
+        let [funding_streams, lockbox_streams] =
+            [funding_streams, lockbox_streams].map(|streams| {
                 streams
                     .into_iter()
                     .map(|(receiver, value)| {
-                        let address = funding_stream_address(height, &network, receiver);
+                        let address = funding_stream_address(height, &net, receiver);
                         types::subsidy::FundingStream::new_internal(
                             is_nu6, receiver, value, address,
                         )
@@ -2768,17 +2745,15 @@ where
             });
 
         Ok(GetBlockSubsidyResponse {
-            miner: miner_subsidy.into(),
-            founders: founders.into(),
+            miner: miner_subsidy(height, &net, subsidy)
+                .map_misc_error()?
+                .into(),
+            founders: Amount::zero().into(),
             funding_streams,
             lockbox_streams,
-            funding_streams_total: funding_streams_total
-                .map_error(server::error::LegacyCode::default())?
-                .into(),
-            lockbox_total: lockbox_total
-                .map_error(server::error::LegacyCode::default())?
-                .into(),
-            total_block_subsidy: total_block_subsidy.into(),
+            funding_streams_total: funding_streams_total?,
+            lockbox_total: lockbox_total?,
+            total_block_subsidy: subsidy.into(),
         })
     }
 
@@ -2879,14 +2854,10 @@ where
 
         let mut block_hashes = Vec::new();
         for _ in 0..num_blocks {
-            // Use random coinbase data in order to ensure the coinbase
-            // transaction is unique. This is useful for tests that exercise
-            // forks, since otherwise the coinbase txs of blocks with the same
-            // height across different forks would be identical.
-            let mut extra_coinbase_data = [0u8; 32];
-            OsRng.fill_bytes(&mut extra_coinbase_data);
-            rpc.gbt
-                .set_extra_coinbase_data(extra_coinbase_data.to_vec());
+            // Use random coinbase data in order to ensure the coinbase transaction is unique. This
+            // is useful for tests that exercise forks, since otherwise the coinbase txs of blocks
+            // with the same height across different forks would be identical.
+            rpc.gbt.randomize_coinbase_data();
 
             let block_template = rpc
                 .get_block_template(None)
@@ -4058,7 +4029,7 @@ impl Utxo {
         Height,
     ) {
         (
-            self.address.clone(),
+            self.address,
             self.txid,
             self.output_index,
             self.script.clone(),

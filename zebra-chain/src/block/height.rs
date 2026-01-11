@@ -2,7 +2,7 @@
 
 use std::ops::{Add, Sub};
 use thiserror::Error;
-use zcash_primitives::consensus::BlockHeight;
+use zcash_protocol::consensus::BlockHeight;
 
 use crate::{serialization::SerializationError, BoxError};
 
@@ -145,6 +145,38 @@ impl TryFrom<u32> for Height {
         } else {
             Err("heights must be less than or equal to Height::MAX")
         }
+    }
+}
+
+impl TryFrom<i64> for Height {
+    type Error = core::num::TryFromIntError;
+
+    fn try_from(height: i64) -> Result<Self, Self::Error> {
+        u32::try_from(height).map(Height)
+    }
+}
+
+impl From<Height> for u32 {
+    fn from(height: Height) -> Self {
+        height.0
+    }
+}
+
+impl From<Height> for u64 {
+    fn from(height: Height) -> Self {
+        height.0.into()
+    }
+}
+
+impl From<Height> for i64 {
+    fn from(height: Height) -> Self {
+        height.0.into()
+    }
+}
+
+impl From<&Height> for i64 {
+    fn from(height: &Height) -> Self {
+        height.0.into()
     }
 }
 
