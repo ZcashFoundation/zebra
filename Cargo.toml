@@ -159,7 +159,10 @@ zcash_script = "0.5"
 config = { version = "0.15.14", features = ["toml"] }
 which = "8.0.0"
 
-# TODO: Remove the whole patch table once the upstream changes land in a release.
+# TODO
+#
+# 1. Remove the whole patch table once the upstream changes land in a release.
+# 2. Also remove the corresponding URLs in the `allow-git` table in the `deny.toml` file.
 [patch.crates-io]
 zcash_primitives = { git = "https://github.com/zcash/librustzcash", branch = "bump-zcash_script" }
 zcash_address = { git = "https://github.com/zcash/librustzcash", branch = "bump-zcash_script" }
