@@ -223,12 +223,11 @@ impl TransactionTemplate<NegativeOrZero> {
         let mut funding_streams = funding_stream_values(height, net, block_subsidy)?
             .into_iter()
             .filter_map(|(receiver, amount)| {
-                Some((
-                    Zatoshis::try_from(amount).ok()?,
-                    (*funding_stream_address(height, net, receiver)?)
-                        .try_into()
-                        .ok()?,
-                ))
+                Some((*funding_stream_address(height, net, receiver)?, amount))
+            })
+            .chain(net.lockbox_disbursements(height))
+            .filter_map(|(addr, amount)| {
+                Some((Zatoshis::try_from(amount).ok()?, addr.try_into().ok()?))
             })
             .collect::<Vec<_>>();
 
