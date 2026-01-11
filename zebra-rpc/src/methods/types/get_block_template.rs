@@ -22,8 +22,11 @@ use tokio::sync::mpsc::{self, error::TrySendError};
 use tower::{Service, ServiceExt};
 use zcash_keys::address::Address;
 use zcash_protocol::memo::MemoBytes;
-use zcash_transparent::coinbase::MinerData;
 
+use zcash_script::{
+    opcode::{Evaluable, PushValue},
+    pv::push_value,
+};
 #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
 use zebra_chain::amount::{Amount, NonNegative};
 use zebra_chain::{
@@ -37,7 +40,6 @@ use zebra_chain::{
     parameters::Network,
     serialization::{DateTime32, ZcashDeserializeInto},
     transaction::VerifiedUnminedTx,
-    transparent::ZEBRA_MINER_DATA,
     work::difficulty::{CompactDifficulty, ExpandedDifficulty},
 };
 // Required for trait method `.bytes_in_display_order()` used indirectly in Debug impl
@@ -51,7 +53,8 @@ use zebra_state::GetBlockTemplateChainInfo;
 use crate::{
     config,
     methods::types::{
-        default_roots::DefaultRoots, long_poll::LongPollId, transaction::TransactionTemplate,
+        default_roots::DefaultRoots, get_block_template::constants::MAX_MINER_DATA_LEN,
+        long_poll::LongPollId, transaction::TransactionTemplate,
     },
     server::error::OkOrError,
     SubmitBlockChannel,
@@ -434,7 +437,7 @@ pub struct MinerParams {
     addr: Address,
 
     /// Optional data to include in the coinbase input script.
-    data: Option<MinerData>,
+    data: Option<PushValue>,
 
     /// Optional shielded memo for the miner's coinbase transaction.
     ///
@@ -452,9 +455,13 @@ impl MinerParams {
 
         let data = conf
             .miner_data
-            .or_else(|| Some(ZEBRA_MINER_DATA.to_string()))
-            .map(|str| hex::decode(&str).unwrap_or_else(|_| str.as_bytes().to_vec()))
-            .map(|bytes| MinerData::try_from(bytes.as_ref()))
+            .map(|s| {
+                let data = push_value(s.as_bytes()).ok_or(MinerParamsError::OversizedData)?;
+
+                (data.byte_len() <= MAX_MINER_DATA_LEN)
+                    .then_some(data)
+                    .ok_or(MinerParamsError::OversizedData)
+            })
             .transpose()?;
 
         let memo = conf
@@ -471,8 +478,8 @@ impl MinerParams {
     }
 
     /// Returns the miner data.
-    pub fn data(&self) -> Option<&MinerData> {
-        self.data.as_ref()
+    pub fn data(&self) -> &Option<PushValue> {
+        &self.data
     }
 
     /// Returns the miner memo.
@@ -505,8 +512,8 @@ pub enum MinerParamsError {
     MissingAddr,
     #[error("Invalid miner address: {0}")]
     InvalidAddr(zcash_address::ConversionError<&'static str>),
-    #[error(transparent)]
-    InvalidData(#[from] zcash_transparent::coinbase::Error),
+    #[error("Miner data exceeds {MAX_MINER_DATA_LEN} bytes")]
+    OversizedData,
     #[error(transparent)]
     InvalidMemo(#[from] zcash_protocol::memo::Error),
 }

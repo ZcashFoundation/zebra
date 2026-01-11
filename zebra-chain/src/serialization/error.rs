@@ -51,6 +51,18 @@ pub enum SerializationError {
     /// rule](https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus).
     #[error("transaction balance is non-zero but doesn't have Sapling shielded spends or outputs")]
     BadTransactionBalance,
+
+    /// Could not de/serialize a transparent script.
+    #[error("script error: {0}")]
+    Script(#[from] zcash_script::script::Error),
+
+    /// Errors that occur when parsing opcodes in transparent scripts.
+    #[error("script opcode error: {0}")]
+    Opcode(#[from] zcash_script::opcode::Error),
+
+    /// Errors that occur when parsing integers in transparent scripts.
+    #[error("script number error: {0}")]
+    Num(#[from] zcash_script::num::Error),
 }
 
 impl From<SerializationError> for io::Error {
@@ -73,7 +85,9 @@ impl From<SerializationError> for io::Error {
                 io::ErrorKind::InvalidData,
                 "bad transaction balance: non-zero with no Sapling shielded spends or outputs",
             ),
-            SerializationError::Coinbase(e) => io::Error::new(io::ErrorKind::InvalidData, e),
+            SerializationError::Script(e) => io::Error::new(io::ErrorKind::InvalidData, e),
+            SerializationError::Opcode(e) => io::Error::new(io::ErrorKind::InvalidData, e),
+            SerializationError::Num(e) => io::Error::new(io::ErrorKind::InvalidData, e),
         }
     }
 }
