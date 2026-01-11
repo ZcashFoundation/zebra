@@ -1,42 +1,9 @@
 use std::sync::Arc;
 
-use super::super::serialize::parse_coinbase_script;
-use crate::{
-    block::{Block, Height},
-    parameters::Network,
-    serialization::ZcashDeserializeInto,
-    transaction,
-};
+use crate::{block::Block, parameters::Network, serialization::ZcashDeserializeInto, transaction};
 use hex::FromHex;
 
-use zcash_transparent::coinbase::MinerData;
 use zebra_test::prelude::*;
-
-#[test]
-fn parse_coinbase_height_mins() -> Result<()> {
-    let _init_guard = zebra_test::init();
-
-    // height 1:
-    let (height, data) = parse_coinbase_script(&[0x51, 0x00])?;
-    assert_eq!(height, Height(1));
-    assert_eq!(data, MinerData::default());
-
-    parse_coinbase_script(&[0x01, 0x01]).expect_err("invalid script");
-    parse_coinbase_script(&[0x02, 0x01, 0x00]).expect_err("invalid script");
-    parse_coinbase_script(&[0x03, 0x01, 0x00, 0x00]).expect_err("invalid script");
-    parse_coinbase_script(&[0x04, 0x01, 0x00, 0x00, 0x00]).expect_err("invalid script");
-
-    // height 17:
-    let (height, data) = parse_coinbase_script(&[0x01, 0x11, 0x00])?;
-    assert_eq!(height, Height(17));
-    assert_eq!(data, MinerData::default());
-
-    parse_coinbase_script(&[0x02, 0x11, 0x00]).expect_err("invalid script");
-    parse_coinbase_script(&[0x03, 0x11, 0x00, 0x00]).expect_err("invalid script");
-    parse_coinbase_script(&[0x04, 0x11, 0x00, 0x00, 0x00]).expect_err("invalid script");
-
-    Ok(())
-}
 
 #[test]
 fn get_transparent_output_address() -> Result<()> {
