@@ -9,14 +9,8 @@ V5(
   inputs: [
     Coinbase(
       height: Height(1687105),
-      data: MinerData([
-        122,
-        240,
-        159,
-        166,
-        147,
-      ]),
-      sequence: 0,
+      data: [],
+      sequence: 4294967295,
     ),
   ],
   outputs: [
