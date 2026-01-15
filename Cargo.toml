@@ -90,7 +90,7 @@ log = "0.4.27"
 metrics = "0.24"
 metrics-exporter-prometheus = { version = "0.16", default-features = false }
 mset = "0.1"
-nix = "0.29"
+nix = "0.30"
 num-integer = "0.1.46"
 once_cell = "1.21"
 ordered-map = "0.4.2"
