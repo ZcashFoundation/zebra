@@ -299,7 +299,10 @@ impl Tracing {
             match super::otel::layer(endpoint.as_deref(), service_name.as_deref(), sample_percent) {
                 Ok((layer, provider)) => (layer, provider, resolved_config),
                 Err(e) => {
-                    tracing::warn!(?e, "failed to initialize OpenTelemetry, traces will not be exported");
+                    tracing::warn!(
+                        ?e,
+                        "failed to initialize OpenTelemetry, traces will not be exported"
+                    );
                     (None, None, resolved_config)
                 }
             }
