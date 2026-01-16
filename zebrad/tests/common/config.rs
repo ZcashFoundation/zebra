@@ -29,6 +29,7 @@ use crate::common::cached_state::DATABASE_FORMAT_CHECK_INTERVAL;
 /// - an ephemeral state,
 /// - the minimum syncer lookahead limit, and
 /// - shorter task intervals, to improve test coverage.
+#[allow(clippy::unwrap_in_result)]
 pub fn default_test_config(net: &Network) -> Result<ZebradConfig> {
     const TEST_DURATION: Duration = Duration::from_secs(30);
 
@@ -156,6 +157,7 @@ pub fn os_assigned_rpc_port_config(
 /// Returns a `zebrad` config with the provided RPC port.
 ///
 /// Set `parallel_cpu_threads` to true to auto-configure based on the number of CPU cores.
+#[allow(clippy::unwrap_in_result)]
 pub fn rpc_port_config(
     listen_port: u16,
     parallel_cpu_threads: bool,
