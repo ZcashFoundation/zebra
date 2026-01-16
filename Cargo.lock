@@ -7378,6 +7378,7 @@ dependencies = [
  "tracing-test",
  "vergen-git2",
  "zcash_keys",
+ "zcash_script",
  "zebra-chain",
  "zebra-consensus",
  "zebra-network",

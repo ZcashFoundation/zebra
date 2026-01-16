@@ -161,6 +161,7 @@ zebra-state = { path = "../zebra-state", version = "3.1.1" }
 # "comparison-interpreter" feature. (Feature unification will take care of
 # enabling it in the other imports of zcash-script.)
 zebra-script = { path = "../zebra-script", version = "3.0.1" }
+zcash_script = { workspace = true }
 
 # Required for crates.io publishing, but it's only used in tests
 zebra-utils = { path = "../zebra-utils", version = "3.0.1", optional = true }

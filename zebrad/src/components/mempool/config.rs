@@ -41,6 +41,17 @@ pub struct Config {
     // - allow the mempool to be enabled before the genesis block is committed?
     //   we could replace `Option` with an enum that has an `AlwaysEnable` variant
     pub debug_enable_at_height: Option<u32>,
+
+    /// Whether to accept data carrier (OP_RETURN) outputs in standardness checks.
+    ///
+    /// Matches zcashd's `-datacarrier` default behavior.
+    pub accept_datacarrier: bool,
+
+    /// Maximum size in bytes of an OP_RETURN script that is considered standard.
+    ///
+    /// This size includes the OP_RETURN opcode and pushdata overhead.
+    /// Matches zcashd's `-datacarriersize` default behavior.
+    pub max_datacarrier_bytes: u32,
 }
 
 impl Default for Config {
@@ -59,6 +70,14 @@ impl Default for Config {
             eviction_memory_time: Duration::from_secs(60 * 60),
 
             debug_enable_at_height: None,
+
+            accept_datacarrier: true,
+            max_datacarrier_bytes: DEFAULT_MAX_DATACARRIER_BYTES,
         }
     }
 }
+
+/// Default maximum size of data carrier scripts (OP_RETURN), in bytes.
+///
+/// Equivalent to zcashd's `MAX_OP_RETURN_RELAY`.
+pub const DEFAULT_MAX_DATACARRIER_BYTES: u32 = 83;

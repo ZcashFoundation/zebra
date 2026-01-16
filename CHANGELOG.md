@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - OpenTelemetry tracing support behind the `opentelemetry` feature flag ([#10174](https://github.com/ZcashFoundation/zebra/pull/10174))
 - RPC tracing middleware with `SPAN_KIND_SERVER` spans for Jaeger Service Performance Monitoring ([#10174](https://github.com/ZcashFoundation/zebra/pull/10174))
 - Added Docker Compose observability stack with Jaeger, Prometheus, Grafana, and AlertManager for local development and testing
+- Added mempool standardness policy checks for transparent scripts (scriptSig size/push-only, standard script kinds, bare multisig rejection, OP_RETURN size/count limits).
+- Added mempool configuration options `accept_datacarrier` and `max_datacarrier_bytes` for OP_RETURN policy.
 
 
 ## [Zebra 3.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v3.1.0) - 2025-11-28
