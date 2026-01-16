@@ -23,8 +23,8 @@ mod hash;
 mod header;
 mod height;
 mod serialize;
+mod error;
 
-pub mod error;
 pub mod genesis;
 pub mod merkle;
 pub mod subsidy;
