@@ -911,6 +911,9 @@ where
                 "negotiating protocol version with remote peer"
             );
 
+            // Start timing the handshake for metrics
+            let handshake_start = Instant::now();
+
             let mut peer_conn = Framed::new(
                 data_stream,
                 Codec::builder()
@@ -919,7 +922,7 @@ where
                     .finish(),
             );
 
-            let connection_info = negotiate_version(
+            let connection_info = match negotiate_version(
                 &mut peer_conn,
                 &connected_addr,
                 config,
@@ -929,7 +932,44 @@ where
                 relay,
                 minimum_peer_version,
             )
-            .await?;
+            .await
+            {
+                Ok(info) => {
+                    // Record successful handshake duration
+                    let duration = handshake_start.elapsed().as_secs_f64();
+                    metrics::histogram!(
+                        "zcash.net.peer.handshake.duration_seconds",
+                        "result" => "success"
+                    )
+                    .record(duration);
+                    info
+                }
+                Err(err) => {
+                    // Record failed handshake duration and failure reason
+                    let duration = handshake_start.elapsed().as_secs_f64();
+                    let reason = match &err {
+                        HandshakeError::UnexpectedMessage(_) => "unexpected_message",
+                        HandshakeError::RemoteNonceReuse => "nonce_reuse",
+                        HandshakeError::LocalDuplicateNonce => "duplicate_nonce",
+                        HandshakeError::ConnectionClosed => "connection_closed",
+                        HandshakeError::Io(_) => "io_error",
+                        HandshakeError::Serialization(_) => "serialization",
+                        HandshakeError::ObsoleteVersion(_) => "obsolete_version",
+                        HandshakeError::Timeout => "timeout",
+                    };
+                    metrics::histogram!(
+                        "zcash.net.peer.handshake.duration_seconds",
+                        "result" => "failure"
+                    )
+                    .record(duration);
+                    metrics::counter!(
+                        "zcash.net.peer.handshake.failures.total",
+                        "reason" => reason
+                    )
+                    .increment(1);
+                    return Err(err.into());
+                }
+            };
 
             let remote_services = connection_info.remote.services;
 
