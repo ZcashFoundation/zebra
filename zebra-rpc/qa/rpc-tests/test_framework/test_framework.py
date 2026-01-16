@@ -17,6 +17,7 @@ import traceback
 from .proxy import JSONRPCException
 from .util import (
     stop_wallets,
+    stop_zainos,
     zcashd_binary,
     initialize_chain,
     start_nodes,
@@ -167,6 +168,13 @@ class BitcoinTestFramework(object):
                 stop_wallets(self.wallets)
         except Exception as e:
             print("Ignoring error while stopping wallets: ", repr(e))
+
+        print("Stopping indexers")
+        try:
+            if self.zainos:
+                stop_zainos(self.zainos)
+        except Exception as e:
+            print("Ignoring error while stopping zainos: ", repr(e))
 
         if not self.options.noshutdown:
             print("Stopping nodes")
