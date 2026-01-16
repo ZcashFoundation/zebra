@@ -101,6 +101,8 @@ Refer to the [Building and Installing
 Zebra](https://zebra.zfnd.org/user/install.html) and [Running
 Zebra](https://zebra.zfnd.org/user/run.html) sections in the book for enabling
 optional features, detailed configuration and further details.
+See the [Mempool Specification](https://zebra.zfnd.org/dev/mempool-specification.html)
+for mempool configuration options such as standardness policy and OP_RETURN limits.
 
 ## CI/CD Architecture
 
