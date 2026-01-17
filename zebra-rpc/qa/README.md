@@ -1,47 +1,51 @@
-The [pull-tester](/pull-tester/) folder contains a script to call
-multiple tests from the [rpc-tests](/rpc-tests/) folder.
+The [pull-tester](./pull-tester/) folder contains a script to call
+multiple tests from the [rpc-tests](./rpc-tests/) folder.
 
-Test dependencies
-=================
+# Test dependencies
 
 Before running the tests, the following must be installed.
 
-Unix
-----
+## Unix
 
 The `zmq`, `toml` and `base58` Python libraries are required. On Ubuntu or Debian-based
 distributions they can be installed via:
-```
+
+```bash
 sudo apt-get install python3-zmq python3-base58
 ```
 
-OS X
-------
+## OS X
 
-```
+```bash
 pip3 install pyzmq base58 toml
 ```
 
-Running tests locally
-=====================
+# Running tests locally
 
 Make sure `zebrad` binary exists in the `../target/debug/` folder or set the binary path with:
-```
+
+```bash
 export CARGO_BIN_EXE_zebrad=/path/to/zebrad
 ```
 
 For wallet tests, make sure `zallet` binary exists in the `../target/debug/` folder.
 You can build `zebrad` and `zallet` with the following command:
 
-    ZALLET=1 cargo build
+```bash
+ZALLET=1 cargo build
+```
 
 You can run any single test by calling
 
-    ./qa/pull-tester/rpc-tests.py <testname1>
+```bash
+./qa/pull-tester/rpc-tests.py <testname1>
+```
 
 Run the regression test suite with
 
-    ./qa/pull-tester/rpc-tests.py
+```bash
+./qa/pull-tester/rpc-tests.py
+```
 
 By default, tests will be run in parallel. To specify how many jobs to run,
 append `--jobs=n` (default n=4).
@@ -50,11 +54,11 @@ If you want to create a basic coverage report for the RPC test suite, append `--
 
 Possible options, which apply to each individual test run:
 
-```
+```text
   -h, --help            show this help message and exit
-  --nocleanup           Leave zcashds and test.* datadir on exit or error
-  --noshutdown          Don't stop zcashds after the test execution
-  --srcdir=SRCDIR       Source directory containing zcashd/zcash-cli
+  --nocleanup           Leave test nodes and test.* datadir on exit or error
+  --noshutdown          Don't stop test nodes after the test execution
+  --srcdir=SRCDIR       Source directory containing zebrad
                         (default: ../../src)
   --tmpdir=TMPDIR       Root directory for datadirs
   --tracerpc            Print out all RPC calls as they are made
@@ -68,7 +72,7 @@ output (example: `PYTHON_DEBUG=1 qa/pull-tester/rpc-tests.py wallet`).
 To get real-time output during a test you can run it using the
 `python3` binary such as:
 
-```
+```bash
 python3 qa/rpc-tests/wallet.py
 ```
 
@@ -83,8 +87,8 @@ Zcashd's test framework includes a [cache mechanism](https://github.com/zcash/zc
 to speed up certain tests.
 This version of the framework currently has that functionality disabled.
 
-Writing tests
-=============
+# Writing tests
+
 You are encouraged to write tests for new or existing features.
 Further information about the test framework and individual RPC
 tests is found in [rpc-tests](rpc-tests).

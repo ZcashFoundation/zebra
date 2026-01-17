@@ -6,7 +6,7 @@ While the Zebra source code and RPC methods are well-documented, accessing this 
 
 To address this issue, the Zebra team has created an [OpenAPI](https://www.openapis.org/) specification in the [YAML](https://en.wikipedia.org/wiki/YAML) format.
 
-The Zebra OpenAPI specification is stored in a file named openapi.yaml, located at the root of the project. The latest version of this specification will always be available [here](https://github.com/ZcashFoundation/zebra/blob/main/openapi.yaml).
+The Zebra OpenAPI specification is stored in a file named openapi.yaml, located at the root of the project. The latest version of this specification will always be available in the [openapi.yaml file on GitHub](https://github.com/ZcashFoundation/zebra/blob/main/openapi.yaml).
 
 ## Usage
 
@@ -25,7 +25,7 @@ zebrad generate -o ~/.config/zebrad.toml
 
 Then, add the IP address and port to the `rpc` section of the configuration:
 
-```
+```toml
 [rpc]
 listen_addr = "127.0.0.1:8232"
 ```
@@ -43,5 +43,3 @@ You should now be able to send requests and receive responses within Swagger.
 ![image info](openapi2.png)
 
 ![image info](openapi3.png)
-
-
