@@ -1,7 +1,7 @@
 [package]
 # Crate metadata
 name = "zebrad"
-version = "3.1.0"
+version = "4.0.0"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "The Zcash Foundation's independent, consensus-compatible implementation of a Zcash node"
 license = "MIT OR Apache-2.0"
@@ -153,9 +153,9 @@ comparison-interpreter = ["zebra-script/comparison-interpreter"]
 [dependencies]
 zebra-chain = { path = "../zebra-chain", version = "3.1.0" }
 zebra-consensus = { path = "../zebra-consensus", version = "3.1.1" }
-zebra-network = { path = "../zebra-network", version = "2.0.2" }
+zebra-network = { path = "../zebra-network", version = "3.0.0" }
 zebra-node-services = { path = "../zebra-node-services", version = "2.1.1", features = ["rpc-client"] }
-zebra-rpc = { path = "../zebra-rpc", version = "3.1.0" }
+zebra-rpc = { path = "../zebra-rpc", version = "4.0.0" }
 zebra-state = { path = "../zebra-state", version = "3.1.1" }
 # zebra-script is not used directly, but we list it here to enable the
 # "comparison-interpreter" feature. (Feature unification will take care of
@@ -163,7 +163,7 @@ zebra-state = { path = "../zebra-state", version = "3.1.1" }
 zebra-script = { path = "../zebra-script", version = "3.0.1" }
 
 # Required for crates.io publishing, but it's only used in tests
-zebra-utils = { path = "../zebra-utils", version = "3.0.1", optional = true }
+zebra-utils = { path = "../zebra-utils", version = "3.0.2", optional = true }
 
 abscissa_core = { workspace = true }
 clap = { workspace = true, features = ["cargo"] }
@@ -295,7 +295,7 @@ color-eyre = { workspace = true }
 
 zebra-chain = { path = "../zebra-chain", version = "3.1.0", features = ["proptest-impl"] }
 zebra-consensus = { path = "../zebra-consensus", version = "3.1.1", features = ["proptest-impl"] }
-zebra-network = { path = "../zebra-network", version = "2.0.2", features = ["proptest-impl"] }
+zebra-network = { path = "../zebra-network", version = "3.0.0", features = ["proptest-impl"] }
 zebra-state = { path = "../zebra-state", version = "3.1.1", features = ["proptest-impl"] }
 
 zebra-test = { path = "../zebra-test", version = "2.0.1" }
@@ -309,7 +309,7 @@ zebra-test = { path = "../zebra-test", version = "2.0.1" }
 # When `-Z bindeps` is stabilised, enable this binary dependency instead:
 # https://github.com/rust-lang/cargo/issues/9096
 # zebra-utils { path = "../zebra-utils", artifact = "bin:zebra-checkpoints" }
-zebra-utils = { path = "../zebra-utils", version = "3.0.1" }
+zebra-utils = { path = "../zebra-utils", version = "3.0.2" }
 
 [package.metadata.cargo-udeps.ignore]
 # These dependencies are false positives - they are actually used
