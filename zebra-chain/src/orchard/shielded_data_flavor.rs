@@ -4,12 +4,12 @@ use std::fmt::Debug;
 
 use serde::{de::DeserializeOwned, Serialize};
 
-use orchard::{orchard_flavor::OrchardFlavor, primitives::OrchardPrimitives};
+use orchard::{flavor::OrchardFlavor, primitives::OrchardPrimitives};
 
-pub use orchard::orchard_flavor::OrchardVanilla;
+pub use orchard::flavor::OrchardVanilla;
 
 #[cfg(feature = "tx_v6")]
-pub use orchard::{note::AssetBase, orchard_flavor::OrchardZSA, value::NoteValue};
+pub use orchard::{flavor::OrchardZSA, note::AssetBase, value::NoteValue};
 
 use crate::serialization::{ZcashDeserialize, ZcashSerialize};
 
