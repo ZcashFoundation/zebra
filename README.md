@@ -43,6 +43,7 @@ Building Zebra requires [Rust](https://www.rust-lang.org/tools/install),
 compiler. Below are quick summaries for installing these dependencies.
 
 [//]: # "The empty lines in the `summary` tag below are required for correct Markdown rendering."
+
 <details><summary>
 
 #### General Instructions for Installing Dependencies
@@ -60,6 +61,7 @@ compiler. Below are quick summaries for installing these dependencies.
 </details>
 
 [//]: # "The empty lines in the `summary` tag below are required for correct Markdown rendering."
+
 <details><summary>
 
 #### Dependencies on Arch Linux
