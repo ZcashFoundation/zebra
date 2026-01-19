@@ -60,15 +60,15 @@ jobs:
             rust-version: beta
 
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 #v6.0.1
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 #v1.15.1
+      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
         with:
           toolchain: ${{ matrix.rust-version }}
           cache-key: unit-tests-${{ matrix.os }}-${{ matrix.rust-version }}-${{ matrix.features }}
           cache-on-failure: true
-      - uses: taiki-e/install-action@d6d752794628f1e1fffa3c4d3c8874e06f043d50 #v2.62.15
+      - uses: taiki-e/install-action@542cebaaed782771e619bd5609d97659d109c492 #v2.66.7
         with:
           tool: cargo-nextest
       - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3.0.0
@@ -107,14 +107,14 @@ jobs:
     timeout-minutes: 30
     if: contains(github.event.pull_request.labels.*.name, 'A-release')
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 #v6.0.1
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 #v1.15.1
+      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
         with:
           toolchain: stable
           cache-on-failure: true
-      - uses: taiki-e/install-action@d6d752794628f1e1fffa3c4d3c8874e06f043d50 #v2.62.15
+      - uses: taiki-e/install-action@542cebaaed782771e619bd5609d97659d109c492 #v2.66.7
         with:
           tool: cargo-nextest
       - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3.0.0
