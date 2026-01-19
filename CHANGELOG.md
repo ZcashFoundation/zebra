@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Added
 
-- Added OpenTelemetry tracing support behind the `opentelemetry` feature flag ([#10174](https://github.com/ZcashFoundation/zebra/pull/10174))
+- OpenTelemetry tracing support behind the `opentelemetry` feature flag ([#10174](https://github.com/ZcashFoundation/zebra/pull/10174))
 - Added RPC tracing middleware with `SPAN_KIND_SERVER` spans for Jaeger Service Performance Monitoring (SPM) visibility ([#10168](https://github.com/ZcashFoundation/zebra/issues/10168))
 - Added Docker Compose observability stack with Jaeger, Prometheus, Grafana, and AlertManager for local development and testing
 
