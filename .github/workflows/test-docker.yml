@@ -49,7 +49,7 @@ jobs:
     permissions:
       id-token: write
       statuses: write
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.DOCKER_BUILD_RUNNER_AMD64 || 'ubuntu-latest' }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
@@ -87,7 +87,7 @@ jobs:
       contents: read
       actions: read
       checks: read
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.DOCKER_BUILD_RUNNER_AMD64 || 'ubuntu-latest' }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -97,12 +97,12 @@ jobs:
           - id: default-conf
             name: Default config
             env_vars: ""
-            grep_patterns: -e "net.*=.*Main.*estimated progress to chain tip.*BeforeOverwinter"
+            grep_patterns: -e "resolved seed peer IP addresses.*mainnet.seeder"
 
           - id: testnet-conf
             name: Testnet config
             env_vars: -e ZEBRA_NETWORK__NETWORK=Testnet
-            grep_patterns: -e "net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter"
+            grep_patterns: -e "resolved seed peer IP addresses.*testnet.seeder"
 
           # Only runs when using the image is built with the `tests` target, because the `runtime` target
           # doesn't have the custom config file available in the tests/common/configs directory
