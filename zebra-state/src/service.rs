@@ -467,7 +467,7 @@ impl StateService {
         // This method must not block, access the database, or perform CPU-intensive tasks,
         // because it is called directly from the tokio executor's Future threads.
 
-        let queued_prev_hash = checkpoint_verified.block.header.previous_block_hash;
+        let queued_prev_hash = checkpoint_verified.block.block.header.previous_block_hash;
         let queued_height = checkpoint_verified.height;
 
         // If we're close to the final checkpoint, make the block's UTXOs available for

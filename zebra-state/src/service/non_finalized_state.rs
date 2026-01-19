@@ -13,10 +13,16 @@ use indexmap::IndexMap;
 use tokio::sync::watch;
 use zebra_chain::{
     block::{self, Block, Hash, Height},
-    parameters::Network,
+    parameters::{Network, NetworkUpgrade},
     sprout::{self},
     transparent,
 };
+
+#[cfg(not(zcash_unstable = "zip234"))]
+use zebra_chain::parameters::subsidy::block_subsidy_pre_nsm;
+
+#[cfg(zcash_unstable = "zip234")]
+use zebra_chain::{amount::MAX_MONEY, parameters::subsidy::block_subsidy};
 
 use crate::{
     constants::{MAX_INVALIDATED_BLOCKS, MAX_NON_FINALIZED_CHAIN_FORKS},
@@ -565,10 +571,59 @@ impl NonFinalizedState {
             &prepared,
         );
 
+        let deferred_pool_balance_change = {
+            let height = prepared.height;
+            let network = new_chain.network();
+
+            let canopy_activation_height = NetworkUpgrade::Canopy
+                .activation_height(&network)
+                .expect("Canopy activation height is known");
+
+            if height >= canopy_activation_height {
+                #[cfg(not(zcash_unstable = "zip234"))]
+                let expected_block_subsidy = block_subsidy_pre_nsm(height, &network)?;
+
+                #[cfg(zcash_unstable = "zip234")]
+                let expected_block_subsidy = {
+                    let money_reserve = if height > Height(1) {
+                        new_chain.chain_value_pools.money_reserve()
+                    } else {
+                        MAX_MONEY.try_into().unwrap()
+                    };
+
+                    block_subsidy(height, &network, money_reserve)?
+                };
+
+                let deferred_pool_balance_change =
+                    check::subsidy_is_valid(&prepared.block, &network, expected_block_subsidy)
+                        .map_err(ValidateContextError::from)?;
+
+                let coinbase_tx = check::coinbase_is_first(&prepared.block)
+                    .map_err(ValidateContextError::from)?;
+
+                if let Some(block_miner_fees) = prepared.block_miner_fees {
+                    check::miner_fees_are_valid(
+                        &coinbase_tx,
+                        height,
+                        block_miner_fees,
+                        expected_block_subsidy,
+                        deferred_pool_balance_change,
+                        &network,
+                    )
+                    .map_err(ValidateContextError::from)?;
+                }
+
+                Some(deferred_pool_balance_change)
+            } else {
+                None
+            }
+        };
+
         // Quick check that doesn't read from disk
         let contextual = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
             prepared.clone(),
             spent_utxos.clone(),
+            deferred_pool_balance_change,
         )
         .map_err(|value_balance_error| {
             ValidateContextError::CalculateBlockChainValueChange {

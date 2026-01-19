@@ -9,7 +9,7 @@ use std::{
 
 use hex::ToHex;
 use zebra_chain::{
-    amount::{Amount, DeferredPoolBalanceChange},
+    amount::Amount,
     block::{self, Block, Height},
     serialization::{ZcashDeserializeInto, ZcashSerialize},
 };
@@ -219,12 +219,9 @@ fn read_non_finalized_blocks_from_backup<'a>(
             match NonFinalizedBlockBackup::from_bytes(backup_block_file_contents) {
                 Ok(NonFinalizedBlockBackup {
                     block,
-                    deferred_pool_balance_change,
+                    deferred_pool_balance_change: _,
                 }) if block.coinbase_height().is_some() => {
-                    let block = SemanticallyVerifiedBlock::from(block)
-                        .with_deferred_pool_balance_change(Some(DeferredPoolBalanceChange::new(
-                            deferred_pool_balance_change,
-                        )));
+                    let block = SemanticallyVerifiedBlock::from(block);
                     if block.hash != expected_block_hash {
                         tracing::warn!(
                             block_hash = ?block.hash,

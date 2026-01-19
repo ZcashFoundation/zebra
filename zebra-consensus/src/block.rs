@@ -322,7 +322,6 @@ where
                 height,
                 new_outputs,
                 transaction_hashes,
-                deferred_pool_balance_change: None,
                 block_miner_fees: Some(block_miner_fees),
             };
 

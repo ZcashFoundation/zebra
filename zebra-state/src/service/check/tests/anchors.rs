@@ -95,12 +95,16 @@ fn check_sprout_anchors() {
 
     // Validate and commit [`block_1`]. This will add an anchor referencing the
     // empty note commitment tree to the state.
-    assert!(validate_and_commit_non_finalized(
+    let result = validate_and_commit_non_finalized(
         &finalized_state.db,
         &mut non_finalized_state,
-        &mut block_1
-    )
-    .is_ok());
+        &mut block_1,
+    );
+    assert!(
+        result.is_ok(),
+        "validate_and_commit_non_finalized failed: {:?}",
+        result
+    );
 
     let check_unmined_tx_anchors_result = unmined_txs.iter().try_for_each(|unmined_tx| {
         tx_anchors_refer_to_final_treestates(

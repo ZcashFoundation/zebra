@@ -42,12 +42,6 @@ use super::check;
 #[allow(unused_imports)]
 use crate::service::non_finalized_state::Chain;
 
-#[cfg(not(zcash_unstable = "zip234"))]
-use zebra_chain::parameters::subsidy::block_subsidy_pre_nsm;
-
-#[cfg(zcash_unstable = "zip234")]
-use zebra_chain::{amount::MAX_MONEY, parameters::subsidy::block_subsidy};
-
 pub(crate) mod anchors;
 pub(crate) mod difficulty;
 pub(crate) mod nullifier;
@@ -426,57 +420,6 @@ pub(crate) fn initial_contextual_validity(
         finalized_state,
         semantically_verified.block.header.previous_block_hash,
     );
-
-    // [ZIP-234]: Block subsidy can be calculated only when the pool balances from previous block are known
-    let network = &non_finalized_state.network;
-    if semantically_verified.height > network.slow_start_interval() {
-        #[cfg(not(zcash_unstable = "zip234"))]
-        let expected_block_subsidy = block_subsidy_pre_nsm(semantically_verified.height, network)?;
-
-        #[cfg(zcash_unstable = "zip234")]
-        let expected_block_subsidy = {
-            let pool_value_balance = non_finalized_state
-                .best_chain()
-                .map(|chain| chain.chain_value_pools)
-                .or_else(|| {
-                    finalized_state
-                        .finalized_tip_height()
-                        .filter(|x| (*x + 1).unwrap() == semantically_verified.height)
-                        .map(|_| finalized_state.finalized_value_pool())
-                });
-
-            let money_reserve = if semantically_verified.height > 1.try_into().unwrap() {
-                pool_value_balance
-                    .expect("a chain must contain valid pool value balance")
-                    .money_reserve()
-            } else {
-                MAX_MONEY.try_into().unwrap()
-            };
-            block_subsidy(semantically_verified.height, network, money_reserve)?
-        };
-
-        // See [ZIP-1015](https://zips.z.cash/zip-1015).
-        semantically_verified.deferred_pool_balance_change = Some(subsidy_is_valid(
-            &semantically_verified.block,
-            network,
-            expected_block_subsidy,
-        )?);
-
-        let coinbase_tx = coinbase_is_first(&semantically_verified.block)?;
-
-        // Blocks restored from disk may not have this field set. In that case, we treat
-        // missing miner fees as zero fees.
-        if let Some(block_miner_fees) = semantically_verified.block_miner_fees {
-            miner_fees_are_valid(
-                &coinbase_tx,
-                semantically_verified.height,
-                block_miner_fees,
-                expected_block_subsidy,
-                semantically_verified.deferred_pool_balance_change.unwrap(),
-                network,
-            )?;
-        }
-    }
 
     // Security: check proof of work before any other checks
     check::block_is_valid_for_recent_chain(

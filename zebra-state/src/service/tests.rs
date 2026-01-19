@@ -424,7 +424,7 @@ proptest! {
             // which is not included in the UTXO set
             if block.height > block::Height(0) {
                 let utxos = &block.new_outputs.iter().map(|(k, ordered_utxo)| (*k, ordered_utxo.utxo.clone())).collect();
-                let block_value_pool = &block.block.chain_value_pool_change(utxos, None)?;
+                let block_value_pool = &block.block.block.chain_value_pool_change(utxos, None)?;
                 expected_finalized_value_pool += *block_value_pool;
             }
 
@@ -592,8 +592,13 @@ fn continuous_empty_blocks_from_test_vectors() -> impl Strategy<
         })
         .prop_map(|(network, mut blocks, finalized_blocks_count)| {
             let non_finalized_blocks = blocks.split_off(finalized_blocks_count);
-            let finalized_blocks: Vec<_> =
-                blocks.into_iter().map(CheckpointVerifiedBlock).collect();
+            let finalized_blocks: Vec<_> = blocks
+                .into_iter()
+                .map(|block| CheckpointVerifiedBlock {
+                    block,
+                    deferred_pool_balance_change: None,
+                })
+                .collect();
 
             (
                 network,

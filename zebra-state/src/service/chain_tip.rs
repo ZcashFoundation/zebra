@@ -115,7 +115,6 @@ impl From<SemanticallyVerifiedBlock> for ChainTipBlock {
             height,
             new_outputs: _,
             transaction_hashes,
-            deferred_pool_balance_change: _,
             block_miner_fees: _,
         } = prepared;
 
@@ -131,8 +130,8 @@ impl From<SemanticallyVerifiedBlock> for ChainTipBlock {
 }
 
 impl From<CheckpointVerifiedBlock> for ChainTipBlock {
-    fn from(CheckpointVerifiedBlock(prepared): CheckpointVerifiedBlock) -> Self {
-        prepared.into()
+    fn from(prepared: CheckpointVerifiedBlock) -> Self {
+        prepared.block.into()
     }
 }
 
