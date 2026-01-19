@@ -12,11 +12,12 @@
       }
     ]
   },
+  "description": "",
   "editable": true,
   "gnetId": null,
   "graphTooltip": 0,
-  "id": 6,
-  "iteration": 1639360549666,
+  "id": 5,
+  "iteration": 1633496321106,
   "links": [],
   "panels": [
     {
@@ -24,7 +25,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -33,330 +37,9 @@
       "fillGradient": 0,
       "gridPos": {
         "h": 9,
-        "w": 24,
+        "w": 12,
         "x": 0,
         "y": 0
-      },
-      "hiddenSeries": false,
-      "id": 12,
-      "legend": {
-        "avg": false,
-        "current": false,
-        "max": false,
-        "min": false,
-        "show": true,
-        "total": false,
-        "values": false
-      },
-      "lines": true,
-      "linewidth": 1,
-      "nullPointMode": "null",
-      "options": {
-        "alertThreshold": true
-      },
-      "percentage": false,
-      "pluginVersion": "7.5.7",
-      "pointradius": 2,
-      "points": false,
-      "renderer": "flot",
-      "repeat": "job",
-      "scopedVars": {
-        "job": {
-          "selected": true,
-          "text": "zebrad-mainnet",
-          "value": "zebrad-mainnet"
-        }
-      },
-      "seriesOverrides": [],
-      "spaceLength": 10,
-      "stack": false,
-      "steppedLine": false,
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "sum by (command) (zebra_net_in_requests{job=\"$job\"})",
-          "interval": "",
-          "legendFormat": "Req::{{command}}",
-          "refId": "A"
-        },
-        {
-          "exemplar": true,
-          "expr": "sum by (command) (zebra_net_out_responses{job=\"$job\"})",
-          "hide": false,
-          "interval": "",
-          "legendFormat": "Rsp::{{command}}",
-          "refId": "B"
-        }
-      ],
-      "thresholds": [],
-      "timeFrom": null,
-      "timeRegions": [],
-      "timeShift": null,
-      "title": "inbound requests & responses - $job",
-      "tooltip": {
-        "shared": true,
-        "sort": 0,
-        "value_type": "individual"
-      },
-      "type": "graph",
-      "xaxis": {
-        "buckets": null,
-        "mode": "time",
-        "name": null,
-        "show": true,
-        "values": []
-      },
-      "yaxes": [
-        {
-          "$$hashKey": "object:65",
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        },
-        {
-          "$$hashKey": "object:66",
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        }
-      ],
-      "yaxis": {
-        "align": false,
-        "alignLevel": null
-      }
-    },
-    {
-      "aliasColors": {},
-      "bars": false,
-      "dashLength": 10,
-      "dashes": false,
-      "datasource": null,
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
-      "fill": 1,
-      "fillGradient": 0,
-      "gridPos": {
-        "h": 9,
-        "w": 24,
-        "x": 0,
-        "y": 9
-      },
-      "hiddenSeries": false,
-      "id": 13,
-      "legend": {
-        "avg": false,
-        "current": false,
-        "max": false,
-        "min": false,
-        "show": true,
-        "total": false,
-        "values": false
-      },
-      "lines": true,
-      "linewidth": 1,
-      "nullPointMode": "null",
-      "options": {
-        "alertThreshold": true
-      },
-      "percentage": false,
-      "pluginVersion": "7.5.7",
-      "pointradius": 2,
-      "points": false,
-      "renderer": "flot",
-      "repeat": "job",
-      "scopedVars": {
-        "job": {
-          "selected": true,
-          "text": "zebrad-mainnet",
-          "value": "zebrad-mainnet"
-        }
-      },
-      "seriesOverrides": [],
-      "spaceLength": 10,
-      "stack": false,
-      "steppedLine": false,
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "sum by (command) (zebra_net_out_requests{job=\"$job\"})",
-          "interval": "",
-          "legendFormat": "Req::{{command}}",
-          "refId": "A"
-        },
-        {
-          "exemplar": true,
-          "expr": "sum by (command) (zebra_net_in_responses{job=\"$job\"})",
-          "hide": false,
-          "interval": "",
-          "legendFormat": "Rsp::{{command}}",
-          "refId": "B"
-        }
-      ],
-      "thresholds": [],
-      "timeFrom": null,
-      "timeRegions": [],
-      "timeShift": null,
-      "title": "outbound requests & responses - $job",
-      "tooltip": {
-        "shared": true,
-        "sort": 0,
-        "value_type": "individual"
-      },
-      "type": "graph",
-      "xaxis": {
-        "buckets": null,
-        "mode": "time",
-        "name": null,
-        "show": true,
-        "values": []
-      },
-      "yaxes": [
-        {
-          "$$hashKey": "object:65",
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        },
-        {
-          "$$hashKey": "object:66",
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        }
-      ],
-      "yaxis": {
-        "align": false,
-        "alignLevel": null
-      }
-    },
-    {
-      "aliasColors": {},
-      "bars": false,
-      "dashLength": 10,
-      "dashes": false,
-      "datasource": null,
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
-      "fill": 1,
-      "fillGradient": 0,
-      "gridPos": {
-        "h": 9,
-        "w": 24,
-        "x": 0,
-        "y": 18
-      },
-      "hiddenSeries": false,
-      "id": 14,
-      "legend": {
-        "avg": false,
-        "current": false,
-        "max": false,
-        "min": false,
-        "show": true,
-        "total": false,
-        "values": false
-      },
-      "lines": true,
-      "linewidth": 1,
-      "nullPointMode": "null",
-      "options": {
-        "alertThreshold": true
-      },
-      "percentage": false,
-      "pluginVersion": "7.5.7",
-      "pointradius": 2,
-      "points": false,
-      "renderer": "flot",
-      "repeat": "job",
-      "seriesOverrides": [],
-      "spaceLength": 10,
-      "stack": false,
-      "steppedLine": false,
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "sum by (command) (zebra_net_out_requests_canceled{job=\"$job\"})",
-          "interval": "",
-          "legendFormat": "Req::{{command}}",
-          "refId": "A"
-        }
-      ],
-      "thresholds": [],
-      "timeFrom": null,
-      "timeRegions": [],
-      "timeShift": null,
-      "title": "canceled outbound requests - $job",
-      "tooltip": {
-        "shared": true,
-        "sort": 0,
-        "value_type": "individual"
-      },
-      "type": "graph",
-      "xaxis": {
-        "buckets": null,
-        "mode": "time",
-        "name": null,
-        "show": true,
-        "values": []
-      },
-      "yaxes": [
-        {
-          "$$hashKey": "object:65",
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        },
-        {
-          "$$hashKey": "object:66",
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        }
-      ],
-      "yaxis": {
-        "align": false,
-        "alignLevel": null
-      }
-    },
-    {
-      "aliasColors": {},
-      "bars": false,
-      "dashLength": 10,
-      "dashes": false,
-      "datasource": null,
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
-      "fill": 1,
-      "fillGradient": 0,
-      "gridPos": {
-        "h": 9,
-        "w": 24,
-        "x": 0,
-        "y": 27
       },
       "hiddenSeries": false,
       "id": 2,
@@ -383,7 +66,7 @@
       "repeat": "job",
       "scopedVars": {
         "job": {
-          "selected": true,
+          "selected": false,
           "text": "zebrad-mainnet",
           "value": "zebrad-mainnet"
         }
@@ -395,17 +78,33 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum by (command) (zcash_net_in_messages{job=\"$job\"})",
+          "expr": "sync_obtain_queued_hash_count{job=\"$job\"}",
           "interval": "",
-          "legendFormat": "{{command}}",
-          "refId": "A"
+          "legendFormat": "obtain tips",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        },
+        {
+          "exemplar": true,
+          "expr": "sync_extend_queued_hash_count{job=\"$job\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "extend tips",
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "inbound message types - $job",
+      "title": "Sync Queued Downloads  - $job",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -449,7 +148,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -458,12 +160,12 @@
       "fillGradient": 0,
       "gridPos": {
         "h": 9,
-        "w": 24,
-        "x": 0,
-        "y": 36
+        "w": 12,
+        "x": 12,
+        "y": 0
       },
       "hiddenSeries": false,
-      "id": 4,
+      "id": 8,
       "legend": {
         "avg": false,
         "current": false,
@@ -484,12 +186,13 @@
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
-      "repeat": "job",
+      "repeatIteration": 1633496321106,
+      "repeatPanelId": 2,
       "scopedVars": {
         "job": {
-          "selected": true,
-          "text": "zebrad-mainnet",
-          "value": "zebrad-mainnet"
+          "selected": false,
+          "text": "zebrad-testnet",
+          "value": "zebrad-testnet"
         }
       },
       "seriesOverrides": [],
@@ -499,17 +202,33 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum by (command) (zcash_net_out_messages{job=\"$job\"})",
+          "expr": "sync_obtain_queued_hash_count{job=\"$job\"}",
           "interval": "",
-          "legendFormat": "{{command}}",
-          "refId": "A"
+          "legendFormat": "obtain tips",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        },
+        {
+          "exemplar": true,
+          "expr": "sync_extend_queued_hash_count{job=\"$job\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "extend tips",
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "outbound message types - $job",
+      "title": "Sync Queued Downloads  - $job",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -549,11 +268,209 @@
       }
     },
     {
+      "cards": {
+        "cardPadding": null,
+        "cardRound": null
+      },
+      "color": {
+        "cardColor": "#b4ff00",
+        "colorScale": "sqrt",
+        "colorScheme": "interpolateOranges",
+        "exponent": 0.5,
+        "mode": "spectrum"
+      },
+      "dataFormat": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 9
+      },
+      "heatmap": {},
+      "hideZeroBuckets": false,
+      "highlightCards": true,
+      "id": 4,
+      "legend": {
+        "show": false
+      },
+      "pluginVersion": "7.5.7",
+      "repeat": "job",
+      "reverseYBuckets": false,
+      "scopedVars": {
+        "job": {
+          "selected": false,
+          "text": "zebrad-mainnet",
+          "value": "zebrad-mainnet"
+        }
+      },
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "sync_obtain_response_hash_count{job=\"$job\"}",
+          "format": "heatmap",
+          "interval": "",
+          "legendFormat": "obtain tips",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        },
+        {
+          "exemplar": true,
+          "expr": "sync_extend_response_hash_count{job=\"$job\"}",
+          "format": "heatmap",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "extend tips",
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        }
+      ],
+      "timeFrom": null,
+      "timeShift": null,
+      "title": "Sync Peer Responses  - $job",
+      "tooltip": {
+        "show": true,
+        "showHistogram": false
+      },
+      "type": "heatmap",
+      "xAxis": {
+        "show": true
+      },
+      "xBucketNumber": null,
+      "xBucketSize": null,
+      "yAxis": {
+        "decimals": null,
+        "format": "short",
+        "logBase": 1,
+        "max": null,
+        "min": null,
+        "show": true,
+        "splitFactor": null
+      },
+      "yBucketBound": "auto",
+      "yBucketNumber": null,
+      "yBucketSize": null
+    },
+    {
+      "cards": {
+        "cardPadding": null,
+        "cardRound": null
+      },
+      "color": {
+        "cardColor": "#b4ff00",
+        "colorScale": "sqrt",
+        "colorScheme": "interpolateOranges",
+        "exponent": 0.5,
+        "mode": "spectrum"
+      },
+      "dataFormat": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 9
+      },
+      "heatmap": {},
+      "hideZeroBuckets": false,
+      "highlightCards": true,
+      "id": 9,
+      "legend": {
+        "show": false
+      },
+      "pluginVersion": "7.5.7",
+      "repeatIteration": 1633496321106,
+      "repeatPanelId": 4,
+      "reverseYBuckets": false,
+      "scopedVars": {
+        "job": {
+          "selected": false,
+          "text": "zebrad-testnet",
+          "value": "zebrad-testnet"
+        }
+      },
+      "targets": [
+        {
+          "exemplar": true,
+          "expr": "sync_obtain_response_hash_count{job=\"$job\"}",
+          "format": "heatmap",
+          "interval": "",
+          "legendFormat": "obtain tips",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        },
+        {
+          "exemplar": true,
+          "expr": "sync_extend_response_hash_count{job=\"$job\"}",
+          "format": "heatmap",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "extend tips",
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        }
+      ],
+      "timeFrom": null,
+      "timeShift": null,
+      "title": "Sync Peer Responses  - $job",
+      "tooltip": {
+        "show": true,
+        "showHistogram": false
+      },
+      "type": "heatmap",
+      "xAxis": {
+        "show": true
+      },
+      "xBucketNumber": null,
+      "xBucketSize": null,
+      "yAxis": {
+        "decimals": null,
+        "format": "short",
+        "logBase": 1,
+        "max": null,
+        "min": null,
+        "show": true,
+        "splitFactor": null
+      },
+      "yBucketBound": "auto",
+      "yBucketNumber": null,
+      "yBucketSize": null
+    },
+    {
       "aliasColors": {},
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -562,9 +479,9 @@
       "fillGradient": 0,
       "gridPos": {
         "h": 9,
-        "w": 24,
+        "w": 12,
         "x": 0,
-        "y": 45
+        "y": 18
       },
       "hiddenSeries": false,
       "id": 7,
@@ -591,7 +508,7 @@
       "repeat": "job",
       "scopedVars": {
         "job": {
-          "selected": true,
+          "selected": false,
           "text": "zebrad-mainnet",
           "value": "zebrad-mainnet"
         }
@@ -603,17 +520,81 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum by (addr) (zcash_net_in_messages{job=\"$job\"})",
+          "expr": "sync_cancelled_download_count{job=\"$job\"}",
           "interval": "",
-          "legendFormat": "{{command}}",
-          "refId": "A"
+          "legendFormat": "cancelled downloads",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        },
+        {
+          "exemplar": true,
+          "expr": "sync_cancelled_verify_count{job=\"$job\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "cancelled verifications",
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        },
+        {
+          "exemplar": true,
+          "expr": "sync_downloads_in_flight{job=\"$job\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "in-flight downloads",
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        },
+        {
+          "exemplar": true,
+          "expr": "sync_prospective_tips_len{job=\"$job\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "prospective tips",
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        },
+        {
+          "exemplar": true,
+          "expr": "sync_downloaded_block_count{job=\"$job\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "downloaded blocks",
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        },
+        {
+          "exemplar": true,
+          "expr": "sync_verified_block_count{job=\"$job\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "verified blocks",
+          "refId": "F",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "inbound message peers - $job",
+      "title": "Sync Status  - $job",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -657,7 +638,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fieldConfig": {
         "defaults": {},
         "overrides": []
@@ -666,12 +650,12 @@
       "fillGradient": 0,
       "gridPos": {
         "h": 9,
-        "w": 24,
-        "x": 0,
-        "y": 54
+        "w": 12,
+        "x": 12,
+        "y": 18
       },
       "hiddenSeries": false,
-      "id": 11,
+      "id": 10,
       "legend": {
         "avg": false,
         "current": false,
@@ -692,12 +676,13 @@
       "pointradius": 2,
       "points": false,
       "renderer": "flot",
-      "repeat": "job",
+      "repeatIteration": 1633496321106,
+      "repeatPanelId": 7,
       "scopedVars": {
         "job": {
-          "selected": true,
-          "text": "zebrad-mainnet",
-          "value": "zebrad-mainnet"
+          "selected": false,
+          "text": "zebrad-testnet",
+          "value": "zebrad-testnet"
         }
       },
       "seriesOverrides": [],
@@ -707,17 +692,81 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum by (addr) (zcash_net_out_messages{job=\"$job\"})",
+          "expr": "sync_cancelled_download_count{job=\"$job\"}",
           "interval": "",
-          "legendFormat": "{{command}}",
-          "refId": "A"
+          "legendFormat": "cancelled downloads",
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        },
+        {
+          "exemplar": true,
+          "expr": "sync_cancelled_verify_count{job=\"$job\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "cancelled verifications",
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        },
+        {
+          "exemplar": true,
+          "expr": "sync_downloads_in_flight{job=\"$job\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "in-flight downloads",
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        },
+        {
+          "exemplar": true,
+          "expr": "sync_prospective_tips_len{job=\"$job\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "prospective tips",
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        },
+        {
+          "exemplar": true,
+          "expr": "sync_downloaded_block_count{job=\"$job\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "downloaded blocks",
+          "refId": "E",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
+        },
+        {
+          "exemplar": true,
+          "expr": "sync_verified_block_count{job=\"$job\"}",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "verified blocks",
+          "refId": "F",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "outbound message peers - $job",
+      "title": "Sync Status  - $job",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -757,6 +806,7 @@
       }
     }
   ],
+  "refresh": "5s",
   "schemaVersion": 27,
   "style": "dark",
   "tags": [],
@@ -765,12 +815,12 @@
       {
         "allValue": null,
         "current": {
-          "selected": false,
+          "selected": true,
           "text": [
-            "zebrad-mainnet"
+            "All"
           ],
           "value": [
-            "zebrad-mainnet"
+            "$__all"
           ]
         },
         "datasource": null,
@@ -805,7 +855,7 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "network messages",
-  "uid": "YQ3yxiVnk",
-  "version": 9
+  "title": "syncer",
+  "uid": "Sl3h19Gnk",
+  "version": 11
 }
