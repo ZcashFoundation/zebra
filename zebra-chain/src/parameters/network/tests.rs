@@ -11,8 +11,8 @@ use crate::{
     block::Height,
     parameters::{
         subsidy::{
-            block_subsidy, halving_divisor, height_for_halving, num_halvings,
-            ParameterSubsidy as _, POST_BLOSSOM_HALVING_INTERVAL,
+            block_subsidy, constants::POST_BLOSSOM_HALVING_INTERVAL, halving_divisor,
+            height_for_halving, num_halvings, ParameterSubsidy as _,
         },
         NetworkUpgrade,
     },
