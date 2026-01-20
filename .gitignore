@@ -1,5 +1,3 @@
-docs/
-!docs/**/*.md
 # Cargo files
 /coverage-target/
 # Legacy Zebra state (alpha versions only)
