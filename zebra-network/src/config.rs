@@ -556,6 +556,7 @@ impl Default for Config {
         .collect();
 
         let testnet_peers = [
+            "dnsseed.testnet.z.cash:18233",
             "testnet.seeder.zfnd.org:18233"
         ]
         .iter()
