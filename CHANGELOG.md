@@ -18,6 +18,9 @@ configuration. However, if you already have a config in place, you will need
 to add it manually; add `"mainnet.seeder.shieldedinfra.net:8233"` to
 `initial_mainnet_peers`.
 
+The new OpenTelemetry support must be enabled at compile time with the
+`opentelemetry` feature, e.g. `cargo build --features=opentelemetry --release`.
+
 ### Breaking Changes
 
 This release has the following breaking changes:
