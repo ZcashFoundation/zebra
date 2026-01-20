@@ -245,9 +245,13 @@ impl Storage {
     ///
     /// Currently, we implement the input scriptSig size/push-only checks,
     /// standard output script checks (including OP_RETURN limits), and dust checks.
+    ///
+    /// TODO: implement other standard transaction checks from zcashd.
+    /// <https://github.com/zcash/zcash/blob/v6.10.0/src/policy/policy.cpp#L58-L135>
     fn reject_if_non_standard_tx(&mut self, tx: &VerifiedUnminedTx) -> Result<(), MempoolError> {
-        // https://github.com/zcash/zcash/blob/v6.10.0/src/policy/policy.cpp#L58-L135
+        // https://github.com/zcash/zcash/blob/v6.10.0/src/policy/policy.cpp#L92-L99
         const MAX_STANDARD_SCRIPTSIG_SIZE: usize = 1650;
+        // https://github.com/zcash/zcash/blob/v6.10.0/src/policy/policy.cpp#L46-L48
         const MAX_STANDARD_MULTISIG_PUBKEYS: usize = 3;
 
         let transaction = tx.transaction.transaction.as_ref();
