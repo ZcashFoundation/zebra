@@ -25,8 +25,7 @@ use crate::{
     methods::{RpcImpl, RpcServer as _},
     server::{
         http_request_compatibility::HttpRequestMiddlewareLayer,
-        rpc_call_compatibility::FixRpcResponseMiddleware,
-        rpc_metrics::RpcMetricsMiddleware,
+        rpc_call_compatibility::FixRpcResponseMiddleware, rpc_metrics::RpcMetricsMiddleware,
         rpc_tracing::RpcTracingMiddleware,
     },
 };

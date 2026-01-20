@@ -54,7 +54,11 @@ where
             let duration = start.elapsed().as_secs_f64();
 
             // Determine status and record metrics
-            let status = if response.is_error() { "error" } else { "success" };
+            let status = if response.is_error() {
+                "error"
+            } else {
+                "success"
+            };
 
             // Record request count
             metrics::counter!("rpc.requests.total", "method" => method.clone(), "status" => status)
