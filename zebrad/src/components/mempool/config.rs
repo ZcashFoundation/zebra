@@ -42,11 +42,6 @@ pub struct Config {
     //   we could replace `Option` with an enum that has an `AlwaysEnable` variant
     pub debug_enable_at_height: Option<u32>,
 
-    /// Whether to accept data carrier (OP_RETURN) outputs in standardness checks.
-    ///
-    /// Matches zcashd's `-datacarrier` default behavior.
-    pub accept_datacarrier: bool,
-
     /// Maximum size in bytes of an OP_RETURN script that is considered standard.
     ///
     /// This size includes the OP_RETURN opcode and pushdata overhead.
@@ -71,7 +66,6 @@ impl Default for Config {
 
             debug_enable_at_height: None,
 
-            accept_datacarrier: true,
             max_datacarrier_bytes: DEFAULT_MAX_DATACARRIER_BYTES,
         }
     }
@@ -79,5 +73,6 @@ impl Default for Config {
 
 /// Default maximum size of data carrier scripts (OP_RETURN), in bytes.
 ///
-/// Equivalent to zcashd's `MAX_OP_RETURN_RELAY`.
+/// Equivalent to zcashd's `MAX_OP_RETURN_RELAY`:
+/// https://github.com/zcash/zcash/blob/v6.10.0/src/script/standard.h#L22-L26
 pub const DEFAULT_MAX_DATACARRIER_BYTES: u32 = 83;

@@ -145,8 +145,6 @@ pub enum NonStandardTransactionError {
     BareMultiSig,
     #[error("transaction has multiple OP_RETURN outputs")]
     MultiOpReturn,
-    #[error("transaction has OP_RETURN outputs but datacarrier is disabled")]
-    DataCarrierDisabled,
     #[error("transaction has an OP_RETURN output that exceeds the size limit")]
     DataCarrierTooLarge,
 }
@@ -212,9 +210,6 @@ pub struct Storage {
     /// are evicted to make room.
     tx_cost_limit: u64,
 
-    /// Whether to accept data carrier (OP_RETURN) outputs in standardness checks.
-    accept_datacarrier: bool,
-
     /// Maximum allowed size of OP_RETURN scripts, in bytes.
     max_datacarrier_bytes: u32,
 }
@@ -231,7 +226,6 @@ impl Storage {
         Self {
             tx_cost_limit: config.tx_cost_limit,
             eviction_memory_time: config.eviction_memory_time,
-            accept_datacarrier: config.accept_datacarrier,
             max_datacarrier_bytes: config.max_datacarrier_bytes,
             verified: Default::default(),
             pending_outputs: Default::default(),
@@ -296,13 +290,6 @@ impl Storage {
                     );
                 }
                 Some(solver::ScriptKind::NullData { .. }) => {
-                    // Rule: OP_RETURN is allowed only if datacarrier is enabled.
-                    if !self.accept_datacarrier {
-                        return self.reject_non_standard(
-                            tx,
-                            NonStandardTransactionError::DataCarrierDisabled,
-                        );
-                    }
                     // Rule: OP_RETURN script size is limited.
                     if script_len > self.max_datacarrier_bytes as usize {
                         return self.reject_non_standard(

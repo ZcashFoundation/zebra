@@ -114,7 +114,6 @@ checkpoint_sync = true
 [mempool]
 eviction_memory_time = "1h"
 tx_cost_limit = 80000000
-accept_datacarrier = true
 max_datacarrier_bytes = 83
 
 [metrics]

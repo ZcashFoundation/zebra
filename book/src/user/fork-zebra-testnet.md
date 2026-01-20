@@ -92,7 +92,6 @@ Relevant parts of the configuration file:
 ```
 [mempool]
 debug_enable_at_height = 0
-accept_datacarrier = true
 max_datacarrier_bytes = 83
     
 [mining]
