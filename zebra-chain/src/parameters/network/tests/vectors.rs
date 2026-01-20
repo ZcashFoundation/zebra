@@ -614,8 +614,7 @@ fn lockbox_input_value(network: &Network, height: Height) -> Amount<NonNegative>
     // Funding stream height range end bound is not incremented since it's an exclusive end bound
     let num_blocks_with_lockbox_output = (height.0 + 1)
         .min(post_nu6_funding_stream_height_range.end.0)
-        .checked_sub(post_nu6_funding_stream_height_range.start.0)
-        .unwrap_or_default();
+        .saturating_sub(post_nu6_funding_stream_height_range.start.0);
 
     (deferred_amount_per_block * num_blocks_with_lockbox_output.into())
         .expect("lockbox input value should fit in Amount")
