@@ -46,6 +46,7 @@ features = [
     "filter-reload",
     "flamegraph",
     "journald",
+    "opentelemetry",
     "prometheus",
     "sentry",
     "indexer",
@@ -81,6 +82,7 @@ elasticsearch = [
 sentry = ["dep:sentry"]
 journald = ["tracing-journald"]
 filter-reload = []
+opentelemetry = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp", "dep:tracing-opentelemetry"]
 
 progress-bar = [
     "howudoin",
@@ -218,6 +220,12 @@ inferno = { workspace = true, optional = true }
 
 # prod feature journald
 tracing-journald = { workspace = true, optional = true }
+
+# prod feature opentelemetry
+opentelemetry = { workspace = true, optional = true }
+opentelemetry_sdk = { workspace = true, features = ["rt-tokio"], optional = true }
+opentelemetry-otlp = { workspace = true, features = ["http-proto", "reqwest-blocking-client"], optional = true }
+tracing-opentelemetry = { workspace = true, optional = true }
 
 # prod feature filter-reload
 bytes = { workspace = true }
