@@ -967,7 +967,7 @@ where
                         "reason" => reason
                     )
                     .increment(1);
-                    return Err(err.into());
+                    return Err(err);
                 }
             };
 
