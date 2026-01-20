@@ -20,6 +20,9 @@ use zebra_chain::{
     transparent, LedgerState,
 };
 
+use crate::components::mempool::tests::{
+    standard_verified_unmined_tx_strategy, standardize_transaction,
+};
 use crate::components::mempool::{
     config::Config,
     storage::{
@@ -113,7 +116,8 @@ proptest! {
     /// Test that the reject list length limits are applied when evicting transactions.
     #[test]
     fn reject_lists_are_limited_insert_eviction(
-        transactions in vec(any::<VerifiedUnminedTx>(), MEMPOOL_TX_COUNT + 1).prop_map(SummaryDebug),
+        transactions in vec(standard_verified_unmined_tx_strategy(), MEMPOOL_TX_COUNT + 1)
+            .prop_map(SummaryDebug),
         mut rejection_template in any::<UnminedTxId>()
     ) {
         // Use as cost limit the costs of all transactions except one
@@ -454,7 +458,7 @@ enum SpendConflictTestInput {
 impl SpendConflictTestInput {
     /// Return two transactions that have a spend conflict.
     pub fn conflicting_transactions(self) -> (VerifiedUnminedTx, VerifiedUnminedTx) {
-        let (first, second) = match self {
+        let (mut first, mut second) = match self {
             SpendConflictTestInput::V4 {
                 mut first,
                 mut second,
@@ -476,6 +480,9 @@ impl SpendConflictTestInput {
                 (first, second)
             }
         };
+
+        standardize_transaction(&mut first.0);
+        standardize_transaction(&mut second.0);
 
         (
             VerifiedUnminedTx::new(
@@ -506,6 +513,9 @@ impl SpendConflictTestInput {
         Self::remove_sprout_conflicts(&mut first, &mut second);
         Self::remove_sapling_conflicts(&mut first, &mut second);
         Self::remove_orchard_conflicts(&mut first, &mut second);
+
+        standardize_transaction(&mut first.0);
+        standardize_transaction(&mut second.0);
 
         (
             VerifiedUnminedTx::new(
@@ -979,7 +989,7 @@ impl Arbitrary for MultipleTransactionRemovalTestInput {
     type Parameters = ();
 
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-        vec(any::<VerifiedUnminedTx>(), 1..MEMPOOL_TX_COUNT)
+        vec(standard_verified_unmined_tx_strategy(), 1..MEMPOOL_TX_COUNT)
             .prop_flat_map(|transactions| {
                 let indices_to_remove =
                     vec(any::<bool>(), 1..=transactions.len()).prop_map(|removal_markers| {

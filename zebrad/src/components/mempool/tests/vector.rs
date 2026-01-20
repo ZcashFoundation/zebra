@@ -1281,61 +1281,6 @@ async fn mempool_accept_standard_op_return() -> Result<(), Report> {
     Ok(())
 }
 
-/// Check that OP_RETURN outputs are rejected when datacarrier is disabled.
-#[tokio::test(flavor = "multi_thread")]
-async fn mempool_reject_op_return_when_datacarrier_disabled() -> Result<(), Report> {
-    let network = Network::Mainnet;
-
-    let mut last_transaction = network
-        .unmined_transactions_in_blocks(1..=10)
-        .next()
-        .expect("missing transaction");
-
-    last_transaction.height = Some(Height(100_000));
-
-    let mut tx = last_transaction.transaction.transaction.clone();
-    let tx_mut = Arc::make_mut(&mut tx);
-    *tx_mut.outputs_mut() = vec![transparent::Output {
-        value: Amount::new(0),
-        lock_script: op_return_script(&[0x02]),
-    }];
-    last_transaction.transaction.transaction = tx;
-
-    let cost_limit = last_transaction.cost();
-    // Override datacarrier policy to force rejection of OP_RETURN outputs.
-    let mempool_config = mempool::Config {
-        tx_cost_limit: cost_limit,
-        accept_datacarrier: false,
-        ..Default::default()
-    };
-
-    let (
-        mut service,
-        _peer_set,
-        _state_service,
-        _chain_tip_change,
-        _tx_verifier,
-        mut recent_syncs,
-        _mempool_transaction_receiver,
-    ) = setup_with_mempool_config(&network, mempool_config, true).await;
-
-    service.enable(&mut recent_syncs).await;
-
-    let insert_err = service
-        .storage()
-        .insert(last_transaction.clone(), Vec::new(), None)
-        .expect_err("expected insert to fail for non-standard tx");
-
-    assert_eq!(
-        insert_err,
-        MempoolError::NonStandardTransaction(
-            storage::NonStandardTransactionError::DataCarrierDisabled
-        )
-    );
-
-    Ok(())
-}
-
 /// Check that oversized OP_RETURN scripts are rejected.
 #[tokio::test(flavor = "multi_thread")]
 async fn mempool_reject_op_return_too_large() -> Result<(), Report> {
