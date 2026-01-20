@@ -705,6 +705,25 @@ pub trait Rpc {
     /// method: post
     /// tags: network
     async fn add_node(&self, addr: PeerSocketAddr, command: AddNodeCommand) -> Result<()>;
+
+    /// Returns the raw transaction data, as a [`GetRawTransaction`] JSON string or structure.
+    ///
+    /// zcashd reference: [`gettxout`](https://zcash.github.io/rpc/gettxout.html)
+    /// method: post
+    /// tags: transaction
+    ///
+    /// # Parameters
+    ///
+    /// - `txid`: (string, required, example="mytxid") The transaction ID of the transaction to be returned.
+    /// - `n`: (number, required) The output index number.
+    /// - `include_mempool` (bool, optional) Whether to include the mempool in the search.
+    #[method(name = "gettxout")]
+    async fn get_tx_out(
+        &self,
+        txid: String,
+        n: u32,
+        include_mempool: Option<bool>,
+    ) -> Result<GetTxOutResponse>;
 }
 
 /// RPC method implementations.
@@ -2963,6 +2982,118 @@ where
             ));
         }
     }
+
+    async fn get_tx_out(
+        &self,
+        txid: String,
+        n: u32,
+        include_mempool: Option<bool>,
+    ) -> Result<GetTxOutResponse> {
+        // Reference for the legacy error code:
+        // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/rawtransaction.cpp#L544>
+        let txid = transaction::Hash::from_hex(txid)
+            .map_error(server::error::LegacyCode::InvalidAddressOrKey)?;
+
+        let mut mempool = self.mempool.clone();
+
+        // Check the mempool first.
+        if include_mempool.is_some() && include_mempool.unwrap() {
+            match mempool
+                .ready()
+                .and_then(|service| {
+                    service.call(mempool::Request::TransactionsByMinedId([txid].into()))
+                })
+                .await
+                .map_misc_error()?
+            {
+                mempool::Response::Transactions(txns) => {
+                    if let Some(tx) = txns.first() {
+                        let response = GetTxOutResponse(Box::new(
+                            types::transaction::OutputObject::from_output(
+                                &tx.transaction.outputs()[n as usize],
+                                "mempool".to_string(),
+                                0,
+                                tx.transaction.version(),
+                                tx.transaction.is_coinbase(),
+                            ),
+                        ));
+
+                        return Ok(response);
+                    }
+                }
+                _ => unreachable!("unmatched response to a `TransactionsByMinedId` request"),
+            };
+        }
+
+        // If the tx wasn't in the mempool, check the state.
+        let response = match self
+            .read_state
+            .clone()
+            .oneshot(zebra_state::ReadRequest::AnyChainTransaction(txid))
+            .await
+            .map_misc_error()?
+        {
+            zebra_state::ReadResponse::AnyChainTransaction(Some(tx)) => Ok(match tx {
+                AnyTx::Mined(tx) => {
+                    let block_hash = match self
+                        .read_state
+                        .clone()
+                        .oneshot(zebra_state::ReadRequest::BestChainBlockHash(tx.height))
+                        .await
+                        .map_misc_error()?
+                    {
+                        zebra_state::ReadResponse::BlockHash(block_hash) => block_hash,
+                        _ => {
+                            unreachable!("unmatched response to a `BestChainBlockHash` request")
+                        }
+                    };
+
+                    //
+                    let outputs = tx.tx.outputs();
+                    if n as usize >= outputs.len() {
+                        return Err("Transaction output index out of range")
+                            .map_error(server::error::LegacyCode::InvalidParameter);
+                    }
+
+                    let output_object = types::transaction::OutputObject::from_output(
+                        &outputs[n as usize],
+                        block_hash.unwrap().to_string(),
+                        tx.confirmations,
+                        tx.tx.version(),
+                        tx.tx.is_coinbase(),
+                    );
+
+                    GetTxOutResponse(Box::new(output_object))
+                }
+                AnyTx::Side((tx, block_hash)) => {
+                    let outputs = tx.outputs();
+                    if n as usize >= outputs.len() {
+                        return Err("Transaction output index out of range")
+                            .map_error(server::error::LegacyCode::InvalidParameter);
+                    }
+
+                    let output_object = types::transaction::OutputObject::from_output(
+                        &outputs[n as usize],
+                        block_hash.to_string(),
+                        0,
+                        tx.version(),
+                        tx.is_coinbase(),
+                    );
+
+                    GetTxOutResponse(Box::new(output_object))
+                }
+            }),
+
+            zebra_state::ReadResponse::AnyChainTransaction(None) => {
+                Err("No such mempool or main chain transaction")
+                    .map_error(server::error::LegacyCode::InvalidAddressOrKey)
+            }
+
+            _ => unreachable!("unmatched response to a `Transaction` read request"),
+        };
+
+        Ok(response?)
+    }
 }
 
 // TODO: Move the code below to separate modules.
@@ -4486,3 +4617,10 @@ pub enum AddNodeCommand {
     #[serde(rename = "add")]
     Add,
 }
+
+/// Response to a `gettxout` RPC request.
+///
+/// See the notes for the [`Rpc::get_tx_out` method].
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
+pub struct GetTxOutResponse(Box<types::transaction::OutputObject>);

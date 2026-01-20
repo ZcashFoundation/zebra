@@ -349,6 +349,49 @@ pub struct Output {
     script_pub_key: ScriptPubKey,
 }
 
+/// The output object returned by `gettxout` RPC requests.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+pub struct OutputObject {
+    #[getter(rename = "bestblock")]
+    best_block: String,
+    confirmations: u32,
+    value: f64,
+    #[getter(rename = "scriptPubKey")]
+    script_pub_key: ScriptPubKey,
+    version: u32,
+    coinbase: bool,
+}
+impl OutputObject {
+    pub fn from_output(
+        output: &zebra_chain::transparent::Output,
+        best_block: String,
+        confirmations: u32,
+        version: u32,
+        coinbase: bool,
+    ) -> Self {
+        let lock_script = &output.lock_script;
+
+        let script_pub_key = ScriptPubKey::new(
+            lock_script.as_raw_bytes().encode_hex(),
+            lock_script.clone(),
+            None,
+            "pubkeyhash".to_string(),
+            output
+                .address(&zebra_chain::parameters::Network::Mainnet)
+                .map(|addr| vec![addr.to_string()]),
+        );
+
+        Self {
+            best_block,
+            confirmations,
+            value: crate::methods::types::zec::Zec::from(output.value()).lossy_zec(),
+            script_pub_key,
+            version,
+            coinbase,
+        }
+    }
+}
+
 /// The scriptPubKey of a transaction output.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
 pub struct ScriptPubKey {
