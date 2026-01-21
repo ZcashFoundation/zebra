@@ -10,21 +10,8 @@ use zcash_primitives::transaction::components::orchard::{read_burn, write_burn};
 
 use crate::{
     orchard::ValueCommitment,
-    serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},
+    serialization::{SerializationError, ZcashDeserialize, ZcashSerialize},
 };
-
-impl ZcashSerialize for AssetBase {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        writer.write_all(&self.to_bytes())
-    }
-}
-
-impl ZcashDeserialize for AssetBase {
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        Option::from(AssetBase::from_bytes(&reader.read_32_bytes()?))
-            .ok_or_else(|| SerializationError::Parse("Invalid orchard_zsa AssetBase!"))
-    }
-}
 
 /// OrchardZSA burn item.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

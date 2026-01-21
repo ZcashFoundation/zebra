@@ -1128,22 +1128,20 @@ impl Transaction {
     /// Access the Orchard asset burns in this transaction, if there are any,
     /// regardless of version.
     #[cfg(feature = "tx_v6")]
-    pub fn orchard_burns(&self) -> Box<dyn Iterator<Item = &orchard_zsa::BurnItem> + '_> {
+    pub fn orchard_burns(&self) -> Option<&'_ [orchard_zsa::BurnItem]> {
         match self {
             Transaction::V1 { .. }
             | Transaction::V2 { .. }
             | Transaction::V3 { .. }
             | Transaction::V4 { .. }
-            | Transaction::V5 { .. } => Box::new(std::iter::empty()),
+            | Transaction::V5 { .. } => None,
 
             Transaction::V6 {
                 orchard_shielded_data,
                 ..
-            } => Box::new(
-                orchard_shielded_data
-                    .iter()
-                    .flat_map(|data| data.burn.as_ref().iter()),
-            ),
+            } => orchard_shielded_data
+                .as_ref()
+                .map(|data| data.burn.as_ref()),
         }
     }
 

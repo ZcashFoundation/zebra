@@ -1,137 +1,143 @@
 //! Defines and implements the issued asset state types
 
-use std::{collections::HashMap, sync::Arc};
+use byteorder::{ReadBytesExt, WriteBytesExt};
+use std::{
+    collections::{BTreeMap, HashMap},
+    io,
+    sync::Arc,
+};
 use thiserror::Error;
 
-use orchard::issuance::IssueAction;
-use orchard::issuance_auth::{IssueValidatingKey, ZSASchnorr};
 pub use orchard::note::AssetBase;
+use orchard::{
+    bundle::burn_validation::{validate_bundle_burn, BurnError},
+    issuance::{verify_issue_bundle, AssetRecord, Error as IssueError},
+    issuance_auth::{IssueValidatingKey, ZSASchnorr},
+    note::Nullifier,
+    value::NoteValue,
+    Note,
+};
 
-use super::BurnItem;
-use crate::transaction::{SigHash, Transaction};
+use zcash_primitives::transaction::components::issuance::{read_note, write_note};
 
-#[cfg(any(test, feature = "proptest-impl"))]
-use crate::serialization::ZcashSerialize;
+use crate::{
+    // FIXME:
+    //serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},
+    transaction::{SigHash, Transaction},
+};
+
+// FIXME:
+//#[cfg(any(test, feature = "proptest-impl"))]
+//use crate::serialization::ZcashSerialize;
 #[cfg(any(test, feature = "proptest-impl"))]
 use orchard::{issuance::compute_asset_desc_hash, issuance_auth::IssueAuthKey};
 
-/// The circulating supply and whether that supply has been finalized.
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
-pub struct AssetState {
-    /// Indicates whether no further issuance is allowed.
-    pub is_finalized: bool,
-    /// The circulating supply that has been issued.
-    pub total_supply: u64,
+/*
+FIXME:
+impl ZcashSerialize for AssetBase {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        writer.write_all(&self.to_bytes())
+    }
 }
+
+impl ZcashDeserialize for AssetBase {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        Option::from(AssetBase::from_bytes(&reader.read_32_bytes()?))
+            .ok_or_else(|| SerializationError::Parse("Invalid orchard_zsa AssetBase!"))
+    }
+}
+*/
+
+pub fn write_asset_state<W: io::Write>(mut writer: W, asset_state: &AssetState) -> io::Result<()> {
+    writer.write_all(&asset_state.0.amount.to_bytes())?;
+    writer.write_u8(asset_state.0.is_finalized as u8)?;
+    // Additionally write asset here as it's needed when we read and contruct reference_node
+    writer.write_all(&asset_state.0.reference_note.asset().to_bytes())?;
+    write_note(&mut writer, &asset_state.0.reference_note)?;
+    Ok(())
+}
+
+pub fn read_asset_state<R: io::Read>(mut reader: R) -> io::Result<AssetState> {
+    let mut amount_bytes = [0; 8];
+    reader.read_exact(&mut amount_bytes)?;
+
+    let is_finalized = match reader.read_u8()? {
+        0 => false,
+        1 => true,
+        _ => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Invalid is_finalized",
+            ))
+        }
+    };
+
+    let mut asset_bytes = [0u8; 32];
+    reader.read_exact(&mut asset_bytes)?;
+    let asset = Option::from(AssetBase::from_bytes(&asset_bytes))
+        .ok_or(io::Error::new(io::ErrorKind::InvalidData, "Invalid asset"))?;
+
+    let reference_note = read_note(reader, asset)?;
+
+    Ok(AssetState(AssetRecord::new(
+        NoteValue::from_bytes(amount_bytes),
+        is_finalized,
+        reference_note,
+    )))
+}
+
+/// Wraps orchard's AssetRecord for use in zebra state management.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AssetState(AssetRecord);
 
 impl AssetState {
-    /// Applies a change, returning `None` if invalid (e.g., issuance after finalization or underflow).
-    fn apply_change(self, change: &AssetStateChange) -> Option<Self> {
-        // Disallow issuance after finalization
-        if self.is_finalized && change.is_issuance() {
-            return None;
-        }
-        // Compute new supply
-        let new_supply = change.apply_to(self.total_supply)?;
-        Some(AssetState {
-            is_finalized: self.is_finalized || change.finalize,
-            total_supply: new_supply,
-        })
+    /// Creates a new [`AssetRecord`] instance.
+    pub fn new(amount: NoteValue, is_finalized: bool, reference_note: Note) -> Self {
+        Self(AssetRecord::new(amount, is_finalized, reference_note))
     }
+
+    /// FIXME: add doc comment
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, io::Error> {
+        read_asset_state(bytes)
+    }
+
+    /// FIXME: add doc comment
+    pub fn to_bytes(self) -> Result<Vec<u8>, io::Error> {
+        let mut bytes: Vec<u8> = Vec::new();
+        write_asset_state(&mut bytes, &self)?;
+        Ok(bytes)
+    }
+
+    /*
+    // FIXME: Do we need it to be pub?
+    /// Returns whether the asset is finalized.
+    //pub fn is_finalized(&self) -> bool {
+    //    self.0.is_finalized
+    //}
+
+    // FIXME: Do we need it to be pub?
+    /// Returns the total supply.
+    //pub fn total_supply(&self) -> u64 {
+    //    self.0.amount.inner()
+    //}
+    */
 }
 
-/// Internal representation of a supply change: signed delta plus finalization flag.
-#[derive(Copy, Clone, Debug)]
-struct AssetStateChange {
-    /// Positive for issuance, negative for burn.
-    supply_delta: i128,
-    /// Whether to mark the asset finalized.
-    finalize: bool,
-}
-
-impl AssetStateChange {
-    /// Returns true if this change includes an issuance.
-    fn is_issuance(&self) -> bool {
-        self.supply_delta > 0
-    }
-
-    /// Applies the delta to an existing supply, returning `None` on overflow/underflow.
-    fn apply_to(&self, supply: u64) -> Option<u64> {
-        if self.supply_delta >= 0 {
-            supply.checked_add(self.supply_delta as u64)
-        } else {
-            supply.checked_sub((-self.supply_delta) as u64)
-        }
-    }
-
-    /// Build from a burn: negative delta, no finalization.
-    fn from_burn(burn: &BurnItem) -> (AssetBase, Self) {
-        (
-            burn.asset(),
-            AssetStateChange {
-                supply_delta: -(burn.raw_amount() as i128),
-                finalize: false,
-            },
-        )
-    }
-
-    /// Build from an issuance action: may include zero-amount finalization or per-note issuances.
-    fn from_issue_action(
-        ik: &IssueValidatingKey<ZSASchnorr>,
-        action: &IssueAction,
-    ) -> Vec<(AssetBase, Self)> {
-        let mut changes = Vec::new();
-        // Action that only finalizes (no notes)
-        if action.is_finalized() && action.notes().is_empty() {
-            let asset = AssetBase::derive(ik, action.asset_desc_hash());
-            changes.push((
-                asset,
-                AssetStateChange {
-                    supply_delta: 0,
-                    finalize: true,
-                },
-            ));
-        }
-        // Each note issues value.inner() tokens
-        for note in action.notes() {
-            changes.push((
-                note.asset(),
-                AssetStateChange {
-                    supply_delta: note.value().inner() as i128,
-                    finalize: action.is_finalized(),
-                },
-            ));
-        }
-        changes
-    }
-
-    /// Collect all state changes (burns and issuances) from the given transaction.
-    fn from_transaction(tx: &Arc<Transaction>) -> Vec<(AssetBase, Self)> {
-        let mut all = Vec::new();
-        for burn in tx.orchard_burns() {
-            all.push(Self::from_burn(burn));
-        }
-        for issue_data in tx.orchard_issue_data() {
-            let ik = issue_data.inner().ik();
-            for action in issue_data.actions() {
-                all.extend(Self::from_issue_action(ik, action));
-            }
-        }
-        all
+impl From<AssetRecord> for AssetState {
+    fn from(record: AssetRecord) -> Self {
+        Self(record)
     }
 }
 
 /// Errors returned when validating asset state updates.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[allow(missing_docs)]
 pub enum AssetStateError {
-    #[error("invalid issue bundle signature")]
-    InvalidIssueBundleSig,
+    #[error("issuance validation failed: {0}")]
+    Issue(IssueError),
 
-    #[error("invalid asset burn")]
-    InvalidBurn,
-
-    #[error("invalid asset issuance")]
-    InvalidIssuance,
+    #[error("burn validation failed: {0}")]
+    Burn(BurnError),
 }
 
 /// A map of asset state changes for assets modified in a block or transaction set.
@@ -139,25 +145,29 @@ pub enum AssetStateError {
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct IssuedAssetChanges(HashMap<AssetBase, (Option<AssetState>, AssetState)>);
 
-impl IssuedAssetChanges {
-    /// Iterator over `(AssetBase, (old_state, new_state))`.
-    pub fn iter(&self) -> impl Iterator<Item = (&AssetBase, &(Option<AssetState>, AssetState))> {
-        self.0.iter()
+/// Apply validator output to the mutable state map.
+fn apply_updates(
+    states: &mut HashMap<AssetBase, (Option<AssetState>, AssetState)>,
+    updates: BTreeMap<AssetBase, AssetRecord>,
+) {
+    use std::collections::hash_map::Entry;
+    for (asset, record) in updates {
+        match states.entry(asset) {
+            Entry::Occupied(mut entry) => entry.get_mut().1 = AssetState::from(record),
+            Entry::Vacant(entry) => {
+                entry.insert((None, AssetState::from(record)));
+            }
+        }
     }
+}
 
+impl IssuedAssetChanges {
     /// Validates burns and issuances across transactions, returning the map of changes.
-    ///
-    /// - `get_state` fetches the current `AssetState`, if any.
-    /// - Returns `Err(InvalidBurn)` if any burn exceeds available supply.
-    /// - Returns `Err(InvalidIssuance)` if any issuance is invalid.
     pub fn validate_and_get_changes(
         transactions: &[Arc<Transaction>],
         transaction_sighashes: &[SigHash],
         get_state: impl Fn(&AssetBase) -> Option<AssetState>,
     ) -> Result<Self, AssetStateError> {
-        let mut changes: HashMap<AssetBase, (Option<AssetState>, AssetState)> = HashMap::new();
-
-        // FIXME: Return error instead?
         assert_eq!(
             transactions.len(),
             transaction_sighashes.len(),
@@ -166,46 +176,79 @@ impl IssuedAssetChanges {
             transaction_sighashes.len()
         );
 
+        // Track old and current states - old_state is None for newly created assets
+        let mut states = HashMap::<AssetBase, (Option<AssetState>, AssetState)>::new();
+
         for (tx, sighash) in transactions.iter().zip(transaction_sighashes) {
-            // Verify IssueBundle Auth signature
-            if let Some(issue_data) = tx.orchard_issue_data() {
-                let bundle = issue_data.inner();
-                bundle
-                    .ik()
-                    .verify(sighash.as_ref(), bundle.authorization().signature().sig())
-                    .map_err(|_| AssetStateError::InvalidIssueBundleSig)?;
+            // Validate and apply burns
+            // FIXME: Avoid using collect (pass the iterator directly or use another way to get burns)
+            if let Some(burn) = tx.orchard_burns() {
+                let burn_records = validate_bundle_burn(
+                    burn.iter()
+                        .map(|burn_item| <(AssetBase, NoteValue)>::from(*burn_item)),
+                    |asset| Self::get_or_cache_record(&mut states, asset, &get_state),
+                )
+                .map_err(AssetStateError::Burn)?;
+                apply_updates(&mut states, burn_records);
             }
 
-            // Check burns against current or updated state
-            for burn in tx.orchard_burns() {
-                let base = burn.asset();
-                let available = changes
-                    .get(&base)
-                    .map(|(_, s)| *s)
-                    .or_else(|| get_state(&base))
-                    .ok_or(AssetStateError::InvalidBurn)?;
-                if available.total_supply < burn.raw_amount() {
-                    return Err(AssetStateError::InvalidBurn);
-                }
-            }
-            // Apply all state changes
-            for (base, change) in AssetStateChange::from_transaction(tx) {
-                let old = changes
-                    .get(&base)
-                    .map(|(_, s)| *s)
-                    .or_else(|| get_state(&base));
-                let new = old
-                    .unwrap_or_default()
-                    .apply_change(&change)
-                    .ok_or(AssetStateError::InvalidIssuance)?;
-                changes
-                    .entry(base)
-                    .and_modify(|e| e.1 = new)
-                    .or_insert((old, new));
+            // Validate and apply issuances
+            if let Some(issue_data) = tx.orchard_issue_data() {
+                // FIXME: Is it correct to use `except` if transaction has no nullifiers?
+                let issue_records = verify_issue_bundle(
+                    issue_data.inner(),
+                    *sighash.as_ref(),
+                    |asset| Self::get_or_cache_record(&mut states, asset, &get_state),
+                    // FIXME: For now the only way to conver zebra nullifier type to orchard nullifier type
+                    // is the following non-optimal construction through byte arrays alhought they both are
+                    // wrappers arounf pallas::Point?
+                    &Nullifier::from_bytes(&<[u8; 32]>::from(
+                        *tx.orchard_nullifiers()
+                            .next()
+                            .expect("Transaction should have at least one nullifier"),
+                    ))
+                    .expect("Bytes can be converted to Nullifier"),
+                )
+                .map_err(AssetStateError::Issue)?;
+                apply_updates(&mut states, issue_records);
             }
         }
 
-        Ok(IssuedAssetChanges(changes))
+        Ok(IssuedAssetChanges(states))
+    }
+
+    /// Gets current record from cache or fetches and caches it.
+    fn get_or_cache_record(
+        states: &mut HashMap<AssetBase, (Option<AssetState>, AssetState)>,
+        asset: &AssetBase,
+        get_state: &impl Fn(&AssetBase) -> Option<AssetState>,
+    ) -> Option<AssetRecord> {
+        use std::collections::hash_map::Entry;
+
+        match states.entry(*asset) {
+            Entry::Occupied(entry) => Some(entry.get().1 .0),
+            Entry::Vacant(entry) => {
+                let state = get_state(asset)?;
+                entry.insert((Some(state), state));
+                Some(state.0)
+            }
+        }
+    }
+
+    /// Gets an iterator over `IssuedAssetChanges` inner `HashMap` elements.
+    pub fn iter(&self) -> impl Iterator<Item = (&AssetBase, &(Option<AssetState>, AssetState))> {
+        self.0.iter()
+    }
+}
+
+impl From<HashMap<AssetBase, AssetState>> for IssuedAssetChanges {
+    fn from(issued: HashMap<AssetBase, AssetState>) -> Self {
+        IssuedAssetChanges(
+            issued
+                .into_iter()
+                .map(|(base, state)| (base, (None, state)))
+                .collect(),
+        )
     }
 }
 
@@ -222,20 +265,6 @@ impl RandomAssetBase for AssetBase {
         let ik = IssueValidatingKey::<ZSASchnorr>::from(&isk);
         let desc = b"zsa_asset";
         let hash = compute_asset_desc_hash(&(desc[0], desc[1..].to_vec()).into());
-        AssetBase::derive(&ik, &hash)
-            .zcash_serialize_to_vec()
-            .map(hex::encode)
-            .expect("random asset base should serialize")
-    }
-}
-
-impl From<HashMap<AssetBase, AssetState>> for IssuedAssetChanges {
-    fn from(issued: HashMap<AssetBase, AssetState>) -> Self {
-        IssuedAssetChanges(
-            issued
-                .into_iter()
-                .map(|(base, state)| (base, (None, state)))
-                .collect(),
-        )
+        hex::encode(AssetBase::derive(&ik, &hash).to_bytes())
     }
 }

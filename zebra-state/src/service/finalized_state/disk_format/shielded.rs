@@ -215,29 +215,18 @@ impl<Node: FromDisk> FromDisk for NoteCommitmentSubtreeData<Node> {
 
 #[cfg(feature = "tx_v6")]
 impl IntoDisk for AssetState {
-    type Bytes = [u8; 9];
+    type Bytes = Vec<u8>;
 
     fn as_bytes(&self) -> Self::Bytes {
-        [
-            vec![self.is_finalized as u8],
-            self.total_supply.to_be_bytes().to_vec(),
-        ]
-        .concat()
-        .try_into()
-        .unwrap()
+        self.to_bytes()
+            .expect("asset state should serialize successfully")
     }
 }
 
 #[cfg(feature = "tx_v6")]
 impl FromDisk for AssetState {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        let (&is_finalized_byte, bytes) = bytes.as_ref().split_first().unwrap();
-        let (&total_supply_bytes, _bytes) = bytes.split_first_chunk().unwrap();
-
-        Self {
-            is_finalized: is_finalized_byte != 0,
-            total_supply: u64::from_be_bytes(total_supply_bytes),
-        }
+        Self::from_bytes(bytes.as_ref()).expect("asset state should deserialize successfully")
     }
 }
 
@@ -253,7 +242,11 @@ impl IntoDisk for AssetBase {
 #[cfg(feature = "tx_v6")]
 impl FromDisk for AssetBase {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        let (asset_base_bytes, _) = bytes.as_ref().split_first_chunk().unwrap();
-        Self::from_bytes(asset_base_bytes).unwrap()
+        bytes
+            .as_ref()
+            .try_into()
+            .ok()
+            .and_then(|asset_bytes| Option::from(Self::from_bytes(asset_bytes)))
+            .expect("asset base should deserialize successfully")
     }
 }

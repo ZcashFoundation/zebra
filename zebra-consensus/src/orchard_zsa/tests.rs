@@ -62,7 +62,7 @@ enum AssetRecordsError {
 }
 
 /// Processes orchard burns, decreasing asset supply.
-fn process_burns<'a, I: Iterator<Item = &'a BurnItem>>(
+fn process_burns<'a, I: IntoIterator<Item = &'a BurnItem>>(
     asset_records: &mut AssetRecords,
     burns: I,
 ) -> Result<(), AssetRecordsError> {
