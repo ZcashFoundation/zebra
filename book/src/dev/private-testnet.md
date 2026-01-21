@@ -114,6 +114,7 @@ checkpoint_sync = true
 [mempool]
 eviction_memory_time = "1h"
 tx_cost_limit = 80000000
+max_datacarrier_bytes = 83
 
 [metrics]
 
@@ -178,4 +179,3 @@ use_journald = false
 # This enables debug network logging. It can be useful but it's very verbose!
 filter = 'info,zebra_network=debug'
 ```
-
