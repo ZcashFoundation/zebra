@@ -5,6 +5,49 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 4.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v4.0.0) - 2025-01-20
+
+This release fixes the type of a field in the `getinfo` RPC and adds support for
+the `pingtime` and `pingwait` fields of the `getpeerinfo` RPC.
+
+It also changes the Grafana dashboards to add auto-provisioning and AlertManager
+support.
+
+This release also adds a new mainnet DNS seeder from Shielded Labs to the default
+configuration. However, if you already have a config in place, you will need
+to add it manually; add `"mainnet.seeder.shieldedinfra.net:8233"` to
+`initial_mainnet_peers`.
+
+The new OpenTelemetry support must be enabled at compile time with the
+`opentelemetry` feature, e.g. `cargo build --features=opentelemetry --release`.
+
+### Breaking Changes
+
+This release has the following breaking changes:
+
+- Changed the `getinfo` RPC `errorstimestamp` field from a string timestamp (ISO
+  UTC timestamp) to a i64 (seconds from Unix epoch) to match zcashd
+  ([#10079](https://github.com/ZcashFoundation/zebra/pull/10079)). If you rely
+  on this field, you will need to change your code to be able to interpret
+  the i64 result.
+- Always parse Zebra's config file as TOML (#10222). This allows using a config
+  file with an extension different than `.toml`. Previously, it would use the
+  format detected from the extension, so in the unlikely case you were using
+  a format different than TOML you will need to change your config to TOML.
+
+
+### Added
+
+- Added `pingtime` and `pingwait` to `getpeerinfo` RPC ([#9880](https://github.com/ZcashFoundation/zebra/pull/9880))
+- Added Grafana auto-provisioning and AlertManager ([#10171](https://github.com/ZcashFoundation/zebra/pull/10171))
+- Added OpenTelemetry distributed tracing support ([#10174](https://github.com/ZcashFoundation/zebra/pull/10174))
+- Added new Shielded Labs mainnet seeder ([#10228](https://github.com/ZcashFoundation/zebra/pull/10228))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@conradoplg, @gustavovalverde and @syszery
+
 
 ## [Unreleased]
 

@@ -1,6 +1,6 @@
 [package]
 name = "zebra-rpc"
-version = "3.1.0"
+version = "4.0.0"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "A Zebra JSON Remote Procedure Call (JSON-RPC) interface"
 license = "MIT OR Apache-2.0"
@@ -98,7 +98,7 @@ zebra-chain = { path = "../zebra-chain", version = "3.1.0", features = [
     "json-conversion",
 ] }
 zebra-consensus = { path = "../zebra-consensus", version = "3.1.1" }
-zebra-network = { path = "../zebra-network", version = "2.0.2" }
+zebra-network = { path = "../zebra-network", version = "3.0.0" }
 zebra-node-services = { path = "../zebra-node-services", version = "2.1.1", features = [
     "rpc-client",
 ] }
@@ -123,7 +123,7 @@ zebra-chain = { path = "../zebra-chain", version = "3.1.0", features = [
 zebra-consensus = { path = "../zebra-consensus", version = "3.1.1", features = [
     "proptest-impl",
 ] }
-zebra-network = { path = "../zebra-network", version = "2.0.2", features = [
+zebra-network = { path = "../zebra-network", version = "3.0.0", features = [
     "proptest-impl",
 ] }
 zebra-state = { path = "../zebra-state", version = "3.1.1", features = [
