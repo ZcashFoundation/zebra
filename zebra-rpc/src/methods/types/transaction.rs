@@ -372,7 +372,7 @@ impl OutputObject {
         let lock_script = &output.lock_script;
 
         let script_pub_key = ScriptPubKey::new(
-            lock_script.as_raw_bytes().encode_hex(),
+            zcash_script::script::Code(lock_script.as_raw_bytes().to_vec()).to_asm(false),
             lock_script.clone(),
             None,
             "pubkeyhash".to_string(),

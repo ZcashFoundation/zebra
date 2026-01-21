@@ -3062,8 +3062,7 @@ async fn rpc_gettxout() {
         None,
     );
 
-    // Test case where transaction is in mempool.
-    // Skip genesis because its tx is not indexed.
+    // Create mempool test responses for all transactions except the genesis block's coinbase
     for block in blocks.iter().skip(1) {
         for tx in block.transactions.iter() {
             let mempool_req = mempool
@@ -3087,7 +3086,7 @@ async fn rpc_gettxout() {
 
             let (rsp, _) = futures::join!(rpc_req, mempool_req);
             let get_tx_output = rsp.expect("we should have a `GetTxOut` struct");
-            let output_object = get_tx_output.0;
+            let output_object = get_tx_output.0.unwrap();
             assert_eq!(
                 output_object.value(),
                 crate::methods::types::zec::Zec::from(tx.outputs()[0].value()).lossy_zec()
@@ -3100,6 +3099,7 @@ async fn rpc_gettxout() {
         }
     }
 
+    // Create a mempool request generator for all transactions
     let make_mempool_req = |tx_hash: transaction::Hash| {
         let mut mempool = mempool.clone();
 
@@ -3117,23 +3117,19 @@ async fn rpc_gettxout() {
         }
     };
 
-    let run_state_test_case = |_block_idx: usize, _block: Arc<Block>, tx: Arc<Transaction>| {
+    // Build a state and mempool test for all transactions
+    let run_test_case = |_block_idx: usize, _block: Arc<Block>, tx: Arc<Transaction>| {
         let read_state = read_state.clone();
         let txid = tx.hash();
         let hex_txid = txid.encode_hex::<String>();
 
-        let get_tx_verbose_0_req = rpc.get_tx_out(hex_txid.clone(), 0u32, Some(true));
-        let get_tx_verbose_1_req = rpc.get_tx_out(hex_txid, 1u32, None);
+        let get_tx_out_req = rpc.get_tx_out(hex_txid.clone(), 0u32, Some(true));
 
         async move {
-            let (response, _, _) = futures::join!(
-                get_tx_verbose_0_req,
-                get_tx_verbose_1_req,
-                make_mempool_req(txid)
-            );
+            let (response, _) = futures::join!(get_tx_out_req, make_mempool_req(txid));
             let get_tx_output = response.expect("We should have a GetTxOut struct");
 
-            let output_object = get_tx_output.0;
+            let output_object = get_tx_output.0.unwrap();
             assert_eq!(
                 output_object.value(),
                 crate::methods::types::zec::Zec::from(tx.outputs()[0].value()).lossy_zec()
@@ -3152,16 +3148,14 @@ async fn rpc_gettxout() {
             };
 
             let expected_confirmations = 1 + depth.expect("depth should be Some");
-
             assert_eq!(output_object.confirmations(), expected_confirmations);
         }
     };
 
-    // Test case where transaction is _not_ in mempool.
-    // Skip genesis because its tx is not indexed.
+    // Run the tests for all transactions except the genesis block's coinbase
     for (block_idx, block) in blocks.iter().enumerate().skip(1) {
         for tx in block.transactions.iter() {
-            run_state_test_case(block_idx, block.clone(), tx.clone()).await;
+            run_test_case(block_idx, block.clone(), tx.clone()).await;
         }
     }
 
