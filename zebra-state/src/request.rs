@@ -400,11 +400,7 @@ pub struct FinalizedBlock {
 impl FinalizedBlock {
     /// Constructs [`FinalizedBlock`] from [`CheckpointVerifiedBlock`] and its [`Treestate`].
     pub fn from_checkpoint_verified(block: CheckpointVerifiedBlock, treestate: Treestate) -> Self {
-        Self::from_semantically_verified(
-            block.block,
-            treestate,
-            block.deferred_pool_balance_change,
-        )
+        Self::from_semantically_verified(block.block, treestate, block.deferred_pool_balance_change)
     }
 
     /// Constructs [`FinalizedBlock`] from [`ContextuallyVerifiedBlock`] and its [`Treestate`].

@@ -19,11 +19,11 @@ use crate::{
 };
 
 mod commitment;
+mod error;
 mod hash;
 mod header;
 mod height;
 mod serialize;
-mod error;
 
 pub mod genesis;
 pub mod merkle;
