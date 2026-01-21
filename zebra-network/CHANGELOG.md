@@ -8,9 +8,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [3.0.0] - 2026-01-20
 
-Changes introduce to keep track of ping times for peers, for the `getpeerinfo`
-RPC.
-
 ### Breaking Changes
 
 - Added `rtt` argument to `MetaAddr::new_responded(addr, rtt)`
