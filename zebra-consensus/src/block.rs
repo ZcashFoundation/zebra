@@ -362,7 +362,7 @@ where
                 .mapped_oneshot(&mut state_service)
                 .await
                 .map_err(|err| match err {
-                    LayeredStateError::State(commit_error) => commit_error.value().into(),
+                    LayeredStateError::State(commit_error) => commit_error.into(),
                     LayeredStateError::Layer(source) => {
                         VerifyBlockError::StateService { source, hash }
                     }

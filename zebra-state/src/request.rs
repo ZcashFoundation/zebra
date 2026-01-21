@@ -22,16 +22,13 @@ use zebra_chain::{
     value_balance::{ValueBalance, ValueBalanceError},
 };
 
+use crate::error::{CommitBlockError, InvalidateError, LayeredStateError, ReconsiderError};
 /// Allow *only* these unused imports, so that rustdoc link resolution
 /// will work with inline links.
 #[allow(unused_imports)]
 use crate::{
     constants::{MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS},
     ReadResponse, Response,
-};
-use crate::{
-    error::{CommitCheckpointVerifiedError, InvalidateError, LayeredStateError, ReconsiderError},
-    CommitSemanticallyVerifiedError,
 };
 
 /// Identify a spend by a transparent outpoint or revealed nullifier.
@@ -677,7 +674,7 @@ pub struct CommitSemanticallyVerifiedBlockRequest(SemanticallyVerifiedBlock);
 
 impl MappedRequest for CommitSemanticallyVerifiedBlockRequest {
     type MappedResponse = block::Hash;
-    type Error = CommitSemanticallyVerifiedError;
+    type Error = CommitBlockError;
 
     fn map_request(self) -> Request {
         Request::CommitSemanticallyVerifiedBlock(self.0)
@@ -699,7 +696,7 @@ pub struct CommitCheckpointVerifiedBlockRequest(pub CheckpointVerifiedBlock);
 
 impl MappedRequest for CommitCheckpointVerifiedBlockRequest {
     type MappedResponse = block::Hash;
-    type Error = CommitCheckpointVerifiedError;
+    type Error = CommitBlockError;
 
     fn map_request(self) -> Request {
         Request::CommitCheckpointVerifiedBlock(self.0)
@@ -768,7 +765,7 @@ pub enum Request {
     /// until its parent is ready.
     ///
     /// Returns [`Response::Committed`] with the hash of the block when it is
-    /// committed to the state, or a [`CommitSemanticallyVerifiedError`][0] if
+    /// committed to the state, or a [`CommitBlockError`][0] if
     /// the block fails contextual validation or otherwise could not be committed.
     ///
     /// This request cannot be cancelled once submitted; dropping the response
@@ -782,7 +779,7 @@ pub enum Request {
     /// out-of-order and invalid requests do not hang indefinitely. See the [`crate`]
     /// documentation for details.
     ///
-    /// [0]: (crate::error::CommitSemanticallyVerifiedError)
+    /// [0]: (crate::error::CommitBlockError)
     CommitSemanticallyVerifiedBlock(SemanticallyVerifiedBlock),
 
     /// Commit a checkpointed block to the state, skipping most but not all
@@ -793,7 +790,7 @@ pub enum Request {
     /// it until its parent is ready.
     ///
     /// Returns [`Response::Committed`] with the hash of the newly committed
-    /// block, or a [`CommitCheckpointVerifiedError`][0] if the block could not be
+    /// block, or a [`CommitBlockError`][0] if the block could not be
     /// committed to the state.
     ///
     /// This request cannot be cancelled once submitted; dropping the response
@@ -832,7 +829,7 @@ pub enum Request {
     /// out-of-order and invalid requests do not hang indefinitely. See the [`crate`]
     /// documentation for details.
     ///
-    /// [0]: (crate::error::CommitCheckpointVerifiedError)
+    /// [0]: (crate::error::CommitBlockError)
     CommitCheckpointVerifiedBlock(CheckpointVerifiedBlock),
 
     /// Computes the depth in the current best chain of the block identified by the given hash.

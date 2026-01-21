@@ -25,8 +25,8 @@ pub struct CloneError {
     source: Arc<dyn std::error::Error + Send + Sync + 'static>,
 }
 
-impl From<CommitSemanticallyVerifiedError> for CloneError {
-    fn from(source: CommitSemanticallyVerifiedError) -> Self {
+impl From<CommitBlockError> for CloneError {
+    fn from(source: CommitBlockError) -> Self {
         let source = Arc::new(source);
         Self { source }
     }
@@ -72,23 +72,6 @@ impl CommitBlockError {
     }
 }
 
-/// An error describing why a `CommitSemanticallyVerified` request failed.
-#[derive(Debug, Error, Clone, PartialEq, Eq)]
-#[error("could not commit semantically-verified block")]
-pub struct CommitSemanticallyVerifiedError(#[from] CommitBlockError);
-
-impl CommitSemanticallyVerifiedError {
-    pub fn value(self) -> CommitBlockError {
-        self.0
-    }
-}
-
-impl From<ValidateContextError> for CommitSemanticallyVerifiedError {
-    fn from(value: ValidateContextError) -> Self {
-        Self(CommitBlockError::ValidateContextError(Box::new(value)))
-    }
-}
-
 #[derive(Debug, Error)]
 pub enum LayeredStateError<E: std::error::Error + std::fmt::Display> {
     #[error("{0}")]
@@ -103,17 +86,6 @@ impl<E: std::error::Error + 'static> From<BoxError> for LayeredStateError<E> {
             Ok(state_err) => Self::State(*state_err),
             Err(layer_error) => Self::Layer(layer_error),
         }
-    }
-}
-
-/// An error describing why a `CommitCheckpointVerifiedBlock` request failed.
-#[derive(Debug, Error, Clone)]
-#[error("could not commit checkpoint-verified block")]
-pub struct CommitCheckpointVerifiedError(#[from] CommitBlockError);
-
-impl From<ValidateContextError> for CommitCheckpointVerifiedError {
-    fn from(value: ValidateContextError) -> Self {
-        Self(CommitBlockError::ValidateContextError(Box::new(value)))
     }
 }
 
