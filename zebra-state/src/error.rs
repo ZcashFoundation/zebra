@@ -77,6 +77,12 @@ impl CommitBlockError {
 #[error("could not commit semantically-verified block")]
 pub struct CommitSemanticallyVerifiedError(#[from] CommitBlockError);
 
+impl CommitSemanticallyVerifiedError {
+    pub fn value(self) -> CommitBlockError {
+        self.0
+    }
+}
+
 impl From<ValidateContextError> for CommitSemanticallyVerifiedError {
     fn from(value: ValidateContextError) -> Self {
         Self(CommitBlockError::ValidateContextError(Box::new(value)))

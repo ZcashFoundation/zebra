@@ -29,7 +29,9 @@ use zebra_chain::{
     transaction, transparent,
     work::equihash,
 };
-use zebra_state as zs;
+use zebra_state::{
+    self as zs, CommitSemanticallyVerifiedBlockRequest, LayeredStateError, MappedRequest,
+};
 
 use crate::{error::*, transaction as tx, BoxError};
 
@@ -356,28 +358,18 @@ where
                 };
             }
 
-            match state_service
-                .ready()
+            let committed_hash = CommitSemanticallyVerifiedBlockRequest::new(prepared_block)
+                .mapped_oneshot(&mut state_service)
                 .await
-                .map_err(|source| VerifyBlockError::StateService { source, hash })?
-                .call(zs::Request::CommitSemanticallyVerifiedBlock(prepared_block))
-                .await
-            {
-                Ok(zs::Response::Committed(committed_hash)) => {
-                    assert_eq!(committed_hash, hash, "state must commit correct hash");
-                    Ok(hash)
-                }
-
-                Err(source) => {
-                    if let Some(commit_err) = source.downcast_ref::<zs::CommitBlockError>() {
-                        return Err(VerifyBlockError::Commit(commit_err.clone()));
+                .map_err(|err| match err {
+                    LayeredStateError::State(commit_error) => commit_error.value().into(),
+                    LayeredStateError::Layer(source) => {
+                        VerifyBlockError::StateService { source, hash }
                     }
+                })?;
 
-                    Err(VerifyBlockError::StateService { source, hash })
-                }
-
-                _ => unreachable!("wrong response for CommitSemanticallyVerifiedBlock"),
-            }
+            assert_eq!(committed_hash, hash, "state must commit correct hash");
+            Ok(hash)
         }
         .instrument(span)
         .boxed()

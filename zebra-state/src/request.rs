@@ -672,7 +672,8 @@ pub trait MappedRequest: Sized + Send + 'static {
 /// committing it to the state if successful.
 ///
 /// See the [`crate`] documentation and [`Request::CommitSemanticallyVerifiedBlock`] for details.
-pub struct CommitSemanticallyVerifiedBlockRequest(pub SemanticallyVerifiedBlock);
+#[derive(Debug, Clone, derive_new::new)]
+pub struct CommitSemanticallyVerifiedBlockRequest(SemanticallyVerifiedBlock);
 
 impl MappedRequest for CommitSemanticallyVerifiedBlockRequest {
     type MappedResponse = block::Hash;
