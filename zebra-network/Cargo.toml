@@ -83,7 +83,7 @@ howudoin = { workspace = true, optional = true }
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
 
-zebra-chain = { path = "../zebra-chain", version = "3.1.0", features = ["async-error"] }
+zebra-chain = { path = "../zebra-chain", version = "4.0.0", features = ["async-error"] }
 
 [dev-dependencies]
 proptest = { workspace = true }

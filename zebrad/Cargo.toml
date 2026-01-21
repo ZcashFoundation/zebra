@@ -151,16 +151,16 @@ tx_v6 = ["zebra-chain/tx_v6", "zebra-state/tx_v6", "zebra-consensus/tx_v6", "zeb
 comparison-interpreter = ["zebra-script/comparison-interpreter"]
 
 [dependencies]
-zebra-chain = { path = "../zebra-chain", version = "3.1.0" }
-zebra-consensus = { path = "../zebra-consensus", version = "3.1.1" }
+zebra-chain = { path = "../zebra-chain", version = "4.0.0" }
+zebra-consensus = { path = "../zebra-consensus", version = "3.1.2" }
 zebra-network = { path = "../zebra-network", version = "3.0.0" }
-zebra-node-services = { path = "../zebra-node-services", version = "2.1.1", features = ["rpc-client"] }
+zebra-node-services = { path = "../zebra-node-services", version = "2.1.2", features = ["rpc-client"] }
 zebra-rpc = { path = "../zebra-rpc", version = "4.0.0" }
-zebra-state = { path = "../zebra-state", version = "3.1.1" }
+zebra-state = { path = "../zebra-state", version = "3.1.2" }
 # zebra-script is not used directly, but we list it here to enable the
 # "comparison-interpreter" feature. (Feature unification will take care of
 # enabling it in the other imports of zcash-script.)
-zebra-script = { path = "../zebra-script", version = "3.0.1" }
+zebra-script = { path = "../zebra-script", version = "3.0.2" }
 
 # Required for crates.io publishing, but it's only used in tests
 zebra-utils = { path = "../zebra-utils", version = "3.0.2", optional = true }
@@ -293,10 +293,10 @@ proptest-derive = { workspace = true }
 # enable span traces and track caller in tests
 color-eyre = { workspace = true }
 
-zebra-chain = { path = "../zebra-chain", version = "3.1.0", features = ["proptest-impl"] }
-zebra-consensus = { path = "../zebra-consensus", version = "3.1.1", features = ["proptest-impl"] }
+zebra-chain = { path = "../zebra-chain", version = "4.0.0", features = ["proptest-impl"] }
+zebra-consensus = { path = "../zebra-consensus", version = "3.1.2", features = ["proptest-impl"] }
 zebra-network = { path = "../zebra-network", version = "3.0.0", features = ["proptest-impl"] }
-zebra-state = { path = "../zebra-state", version = "3.1.1", features = ["proptest-impl"] }
+zebra-state = { path = "../zebra-state", version = "3.1.2", features = ["proptest-impl"] }
 
 zebra-test = { path = "../zebra-test", version = "2.0.1" }
 
