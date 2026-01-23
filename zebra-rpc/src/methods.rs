@@ -3043,7 +3043,22 @@ where
                             None => return Ok(GetTxOutResponse(Box::new(None))),
                         };
 
-                        // TODO: prune mempool outputs that are spent in the mempool
+                        // Prune mempool outputs that are spent by other transactions in the mempool
+                        let outpoint = transparent::OutPoint::from_usize(txid, index);
+                        let rsp = mempool
+                            .ready()
+                            .and_then(|svc| {
+                                svc.call(mempool::Request::IsTransparentOutputSpent(outpoint))
+                            })
+                            .await
+                            .map_misc_error()?;
+                        let is_spent = match rsp {
+                            mempool::Response::IsTransparentOutputSpent(spent) => spent,
+                            _ => unreachable!(),
+                        };
+                        if is_spent {
+                            return Ok(GetTxOutResponse(Box::new(None)));
+                        }
 
                         return Ok(GetTxOutResponse(Box::new(Some(
                             types::transaction::OutputObject::from_output(
@@ -3077,6 +3092,7 @@ where
                     None => return Ok(GetTxOutResponse(Box::new(None))),
                 };
 
+                // Prune state outputs that are spent
                 let outpoint = transparent::OutPoint::from_usize(txid, index);
                 if is_spent(outpoint).await? {
                     return Ok(GetTxOutResponse(Box::new(None)));

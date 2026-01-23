@@ -107,6 +107,9 @@ pub enum Request {
 
     /// Request summary statistics from the mempool for `getmempoolinfo`.
     QueueStats,
+
+    /// Check whether a transparent output is spent in the mempool.
+    IsTransparentOutputSpent(transparent::OutPoint),
 }
 
 /// A response to a mempool service request.
@@ -176,4 +179,7 @@ pub enum Response {
         /// Whether all transactions have been fully notified (regtest only)
         fully_notified: Option<bool>,
     },
+
+    /// Returns whether a transparent output is spent in the mempool.
+    IsTransparentOutputSpent(bool),
 }

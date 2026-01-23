@@ -919,6 +919,23 @@ impl Service<Request> for Mempool {
                     }
                     .boxed()
                 }
+                Request::IsTransparentOutputSpent(outpoint) => {
+                    trace!(?req, "got mempool request");
+
+                    let spent = storage.transactions().values().any(|tx| {
+                        tx.transaction.transaction.inputs().iter().any(|input| {
+                            matches!(
+                                input,
+                                zebra_chain::transparent::Input::PrevOut { outpoint: prev, .. }
+                                    if prev == &outpoint
+                            )
+                        })
+                    });
+
+                    trace!(?req, "answered mempool request");
+
+                    async move { Ok(Response::IsTransparentOutputSpent(spent)) }.boxed()
+                }
             },
             ActiveState::Disabled => {
                 // TODO: add the name of the request, but not the content,
@@ -935,7 +952,9 @@ impl Service<Request> for Mempool {
 
                     Request::TransactionsById(_) => Response::Transactions(Default::default()),
                     Request::TransactionsByMinedId(_) => Response::Transactions(Default::default()),
-                    Request::TransactionWithDepsByMinedId(_) | Request::AwaitOutput(_) => {
+                    Request::TransactionWithDepsByMinedId(_)
+                    | Request::AwaitOutput(_)
+                    | Request::IsTransparentOutputSpent(_) => {
                         return async move {
                             Err("mempool is not active: wait for Zebra to sync to the tip".into())
                         }

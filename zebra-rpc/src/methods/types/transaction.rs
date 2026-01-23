@@ -379,7 +379,20 @@ impl OutputObject {
             zcash_script::script::Code(lock_script.as_raw_bytes().to_vec()).to_asm(false),
             lock_script.clone(),
             req_sigs,
-            "pubkeyhash".to_string(),
+            zcash_script::script::Code(lock_script.as_raw_bytes().to_vec())
+                .to_component()
+                .ok()
+                .and_then(|c| c.refine().ok())
+                .and_then(|component| zcash_script::solver::standard(&component))
+                .map(|kind| match kind {
+                    zcash_script::solver::ScriptKind::PubKeyHash { .. } => "pubkeyhash",
+                    zcash_script::solver::ScriptKind::ScriptHash { .. } => "scripthash",
+                    zcash_script::solver::ScriptKind::MultiSig { .. } => "multisig",
+                    zcash_script::solver::ScriptKind::NullData { .. } => "nulldata",
+                    zcash_script::solver::ScriptKind::PubKey { .. } => "pubkey",
+                })
+                .unwrap_or("nonstandard")
+                .to_string(),
             addresses,
         );
 
