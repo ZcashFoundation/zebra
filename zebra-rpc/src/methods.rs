@@ -3011,6 +3011,19 @@ where
             }
         };
 
+        // Get the best block tip hash
+        let tip_rsp = self
+            .read_state
+            .clone()
+            .oneshot(zebra_state::ReadRequest::Tip)
+            .await
+            .map_misc_error()?;
+
+        let best_block_hash = match tip_rsp {
+            zebra_state::ReadResponse::Tip(tip) => tip.ok_or_misc_error("No blocks in state")?.1,
+            _ => unreachable!("unmatched response to a `Tip` request"),
+        };
+
         // Optional mempool path
         if include_mempool.unwrap_or(false) {
             let mut mempool = self.mempool.clone();
@@ -3030,15 +3043,12 @@ where
                             None => return Ok(GetTxOutResponse(Box::new(None))),
                         };
 
-                        let outpoint = transparent::OutPoint::from_usize(txid, index);
-                        if is_spent(outpoint).await? {
-                            return Ok(GetTxOutResponse(Box::new(None)));
-                        }
+                        // TODO: prune mempool outputs that are spent in the mempool
 
                         return Ok(GetTxOutResponse(Box::new(Some(
                             types::transaction::OutputObject::from_output(
                                 output,
-                                "mempool".to_string(),
+                                best_block_hash.to_string(),
                                 0,
                                 tx.transaction.version(),
                                 tx.transaction.is_coinbase(),
@@ -3065,19 +3075,6 @@ where
                     Some(output) => output,
                     // return null if the output is not found
                     None => return Ok(GetTxOutResponse(Box::new(None))),
-                };
-                let tip_rsp = self
-                    .read_state
-                    .clone()
-                    .oneshot(zebra_state::ReadRequest::Tip)
-                    .await
-                    .map_misc_error()?;
-
-                let best_block_hash = match tip_rsp {
-                    zebra_state::ReadResponse::Tip(tip) => {
-                        tip.ok_or_misc_error("No blocks in state")?.1
-                    }
-                    _ => unreachable!("unmatched response to a `Tip` request"),
                 };
 
                 let outpoint = transparent::OutPoint::from_usize(txid, index);
