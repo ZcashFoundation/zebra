@@ -16,6 +16,9 @@ pub const SLOW_START_INTERVAL: Height = Height(20_000);
 /// This calculation is exact, because `SLOW_START_INTERVAL` is divisible by 2.
 pub const SLOW_START_SHIFT: Height = Height(SLOW_START_INTERVAL.0 / 2);
 
+/// The block height at which ZIP-234 starts.
+pub const ZIP234_START_HEIGHT: Height = Height(4_250_000);
+
 /// Magic numbers used to identify different Zcash networks.
 pub mod magics {
     use crate::parameters::network::magic::Magic;

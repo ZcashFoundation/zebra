@@ -3343,6 +3343,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         .expect("failed to set target difficulty limit")
         .with_disable_pow(true)
         .with_slow_start_interval(Height::MIN)
+        .with_zip234_start_height(Height::MIN)
         .with_activation_heights(ConfiguredActivationHeights {
             nu6: Some(1),
             ..Default::default()

@@ -13,7 +13,7 @@ use indexmap::IndexMap;
 use tokio::sync::watch;
 use zebra_chain::{
     block::{self, Block, Hash, Height},
-    parameters::{Network, NetworkUpgrade},
+    parameters::Network,
     sprout::{self},
     transparent,
 };
@@ -575,24 +575,16 @@ impl NonFinalizedState {
             let height = prepared.height;
             let network = new_chain.network();
 
-            let canopy_activation_height = NetworkUpgrade::Canopy
-                .activation_height(&network)
-                .expect("Canopy activation height is known");
-
-            if height >= canopy_activation_height {
+            if height >= network.zip234_start_height() {
                 #[cfg(not(zcash_unstable = "zip234"))]
                 let expected_block_subsidy = block_subsidy_pre_nsm(height, &network)?;
 
                 #[cfg(zcash_unstable = "zip234")]
-                let expected_block_subsidy = {
-                    let money_reserve = if height > Height(1) {
-                        new_chain.chain_value_pools.money_reserve()
-                    } else {
-                        MAX_MONEY.try_into().unwrap()
-                    };
-
-                    block_subsidy(height, &network, money_reserve)?
-                };
+                let expected_block_subsidy = block_subsidy(
+                    height,
+                    &network,
+                    new_chain.chain_value_pools.money_reserve(),
+                )?;
 
                 let deferred_pool_balance_change =
                     check::subsidy_is_valid(&prepared.block, &network, expected_block_subsidy)
