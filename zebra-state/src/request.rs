@@ -690,7 +690,7 @@ impl MappedRequest for CommitSemanticallyVerifiedBlockRequest {
     }
 }
 
-/// Commit a checkpointed block to the state
+/// Commit a checkpoint-verified block to the state
 ///
 /// See the [`crate`] documentation and [`Request::CommitCheckpointVerifiedBlock`] for details.
 #[allow(dead_code)]
