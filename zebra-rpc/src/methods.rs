@@ -2994,23 +2994,6 @@ where
 
         let index: usize = n.try_into().expect("u32 always fits in usize");
 
-        // Helper closure to check whether an outpoint is spent
-        let is_spent = |outpoint: transparent::OutPoint| async move {
-            let rsp = self
-                .read_state
-                .clone()
-                .oneshot(zebra_state::ReadRequest::IsTransparentOutputSpent(outpoint))
-                .await
-                .map_misc_error()?;
-
-            match rsp {
-                zebra_state::ReadResponse::IsTransparentOutputSpent(spent) => {
-                    Ok::<bool, ErrorObject>(spent)
-                }
-                _ => unreachable!("unmatched response to an `IsTransparentOutputSpent` request"),
-            }
-        };
-
         // Get the best block tip hash
         let tip_rsp = self
             .read_state
@@ -3094,7 +3077,26 @@ where
 
                 // Prune state outputs that are spent
                 let outpoint = transparent::OutPoint::from_usize(txid, index);
-                if is_spent(outpoint).await? {
+
+                let is_spent = {
+                    let rsp = self
+                        .read_state
+                        .clone()
+                        .oneshot(zebra_state::ReadRequest::IsTransparentOutputSpent(outpoint))
+                        .await
+                        .map_misc_error()?;
+
+                    match rsp {
+                        zebra_state::ReadResponse::IsTransparentOutputSpent(spent) => {
+                            Ok::<bool, ErrorObject>(spent)
+                        }
+                        _ => unreachable!(
+                            "unmatched response to an `IsTransparentOutputSpent` request"
+                        ),
+                    }
+                };
+
+                if is_spent? {
                     return Ok(GetTxOutResponse(Box::new(None)));
                 }
 
