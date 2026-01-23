@@ -2994,15 +2994,6 @@ where
 
         let index: usize = n.try_into().expect("u32 always fits in usize");
 
-        // An invalid error closure for out-of-range output indexes
-        let invalid_index = || {
-            ErrorObject::owned(
-                server::error::LegacyCode::InvalidParameter.into(),
-                "No transparent output found at the given index",
-                None::<()>,
-            )
-        };
-
         // Helper closure to check whether an outpoint is spent
         let is_spent = |outpoint: transparent::OutPoint| async move {
             let rsp = self
@@ -3033,8 +3024,11 @@ where
             match rsp {
                 mempool::Response::Transactions(txns) => {
                     if let Some(tx) = txns.first() {
-                        let outputs = tx.transaction.outputs();
-                        let output = outputs.get(index).ok_or_else(invalid_index)?;
+                        let output = match tx.transaction.outputs().get(index) {
+                            Some(output) => output,
+                            // return null if the output is not found
+                            None => return Ok(GetTxOutResponse(Box::new(None))),
+                        };
 
                         let outpoint = transparent::OutPoint::from_usize(txid, index);
                         if is_spent(outpoint).await? {
@@ -3067,8 +3061,11 @@ where
         match rsp {
             zebra_state::ReadResponse::Transaction(Some(tx)) => {
                 let outputs = tx.tx.outputs();
-                let output = outputs.get(index).ok_or_else(invalid_index)?;
-
+                let output = match outputs.get(index) {
+                    Some(output) => output,
+                    // return null if the output is not found
+                    None => return Ok(GetTxOutResponse(Box::new(None))),
+                };
                 let tip_rsp = self
                     .read_state
                     .clone()

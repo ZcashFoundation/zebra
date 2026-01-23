@@ -352,11 +352,11 @@ pub struct Output {
 /// The output object returned by `gettxout` RPC requests.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
 pub struct OutputObject {
-    #[getter(rename = "bestblock")]
+    #[serde(rename = "bestblock")]
     best_block: String,
     confirmations: u32,
     value: f64,
-    #[getter(rename = "scriptPubKey")]
+    #[serde(rename = "scriptPubKey")]
     script_pub_key: ScriptPubKey,
     version: u32,
     coinbase: bool,
@@ -370,15 +370,17 @@ impl OutputObject {
         coinbase: bool,
     ) -> Self {
         let lock_script = &output.lock_script;
+        let addresses = output
+            .address(&zebra_chain::parameters::Network::Mainnet)
+            .map(|addr| vec![addr.to_string()]);
+        let req_sigs = addresses.as_ref().map(|a| a.len() as u32);
 
         let script_pub_key = ScriptPubKey::new(
             zcash_script::script::Code(lock_script.as_raw_bytes().to_vec()).to_asm(false),
             lock_script.clone(),
-            None,
+            req_sigs,
             "pubkeyhash".to_string(),
-            output
-                .address(&zebra_chain::parameters::Network::Mainnet)
-                .map(|addr| vec![addr.to_string()]),
+            addresses,
         );
 
         Self {

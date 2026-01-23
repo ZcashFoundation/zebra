@@ -3092,7 +3092,7 @@ async fn rpc_gettxout() {
                 crate::methods::types::zec::Zec::from(tx.outputs()[0].value()).lossy_zec()
             );
             assert_eq!(
-                output_object.scriptPubKey().hex().as_raw_bytes(),
+                output_object.script_pub_key().hex().as_raw_bytes(),
                 tx.outputs()[0].lock_script.as_raw_bytes()
             );
             assert_eq!(output_object.confirmations(), 0);
@@ -3135,7 +3135,7 @@ async fn rpc_gettxout() {
                 crate::methods::types::zec::Zec::from(tx.outputs()[0].value()).lossy_zec()
             );
             assert_eq!(
-                output_object.scriptPubKey().hex().as_raw_bytes(),
+                output_object.script_pub_key().hex().as_raw_bytes(),
                 tx.outputs()[0].lock_script.as_raw_bytes()
             );
             let depth_response = read_state
