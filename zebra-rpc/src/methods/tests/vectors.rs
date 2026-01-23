@@ -3037,7 +3037,7 @@ async fn rpc_gettxout() {
         .map(|block_bytes| block_bytes.zcash_deserialize_into().unwrap())
         .collect();
 
-    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let (state, read_state, _, _) = zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
     let (tip, tip_sender) = MockChainTip::new();
@@ -3065,7 +3065,8 @@ async fn rpc_gettxout() {
     // Create mempool test responses for all transactions except the genesis block's coinbase
     for block in blocks.iter().skip(1) {
         for tx in block.transactions.iter() {
-            let mempool_req = mempool
+            let mut mempool1 = mempool.clone();
+            let mempool_req1 = mempool1
                 .expect_request_that(|request| {
                     if let mempool::Request::TransactionsByMinedId(ids) = request {
                         ids.len() == 1 && ids.contains(&tx.hash())
@@ -3082,9 +3083,19 @@ async fn rpc_gettxout() {
                     }]));
                 });
 
+            let mut mempool2 = mempool.clone();
+            let mempool_req2 = mempool2
+                .expect_request_that(|request| {
+                    let outpoint = zebra_chain::transparent::OutPoint::from_usize(tx.hash(), 0);
+                    mempool::Request::IsTransparentOutputSpent(outpoint) == *request
+                })
+                .map(|responder| {
+                    responder.respond(mempool::Response::IsTransparentOutputSpent(false));
+                });
+
             let rpc_req = rpc.get_tx_out(tx.hash().encode_hex(), 0u32, Some(true));
 
-            let (rsp, _) = futures::join!(rpc_req, mempool_req);
+            let (rsp, _, _) = futures::join!(rpc_req, mempool_req1, mempool_req2);
             let get_tx_output = rsp.expect("we should have a `GetTxOut` struct");
             let output_object = get_tx_output.0.unwrap();
             assert_eq!(
