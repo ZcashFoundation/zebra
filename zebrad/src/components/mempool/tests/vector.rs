@@ -1305,7 +1305,7 @@ async fn mempool_reject_op_return_too_large() -> Result<(), Report> {
     // Shrink the OP_RETURN size limit to trigger the oversized rejection path.
     let mempool_config = mempool::Config {
         tx_cost_limit: cost_limit,
-        max_datacarrier_bytes: 2,
+        max_datacarrier_bytes: Some(2),
         ..Default::default()
     };
 

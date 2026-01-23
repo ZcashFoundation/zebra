@@ -44,9 +44,9 @@ pub struct Config {
 
     /// Maximum size in bytes of an OP_RETURN script that is considered standard.
     ///
-    /// This size includes the OP_RETURN opcode and pushdata overhead.
-    /// Matches zcashd's `-datacarriersize` default behavior.
-    pub max_datacarrier_bytes: u32,
+    /// If unset, defaults to [`DEFAULT_MAX_DATACARRIER_BYTES`]. This size includes the OP_RETURN
+    /// opcode and pushdata overhead. Matches zcashd's `-datacarriersize` default behavior.
+    pub max_datacarrier_bytes: Option<u32>,
 }
 
 impl Default for Config {
@@ -66,7 +66,7 @@ impl Default for Config {
 
             debug_enable_at_height: None,
 
-            max_datacarrier_bytes: DEFAULT_MAX_DATACARRIER_BYTES,
+            max_datacarrier_bytes: Some(DEFAULT_MAX_DATACARRIER_BYTES),
         }
     }
 }

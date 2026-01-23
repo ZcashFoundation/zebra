@@ -226,7 +226,9 @@ impl Storage {
         Self {
             tx_cost_limit: config.tx_cost_limit,
             eviction_memory_time: config.eviction_memory_time,
-            max_datacarrier_bytes: config.max_datacarrier_bytes,
+            max_datacarrier_bytes: config
+                .max_datacarrier_bytes
+                .unwrap_or(config::DEFAULT_MAX_DATACARRIER_BYTES),
             verified: Default::default(),
             pending_outputs: Default::default(),
             tip_rejected_exact: Default::default(),
