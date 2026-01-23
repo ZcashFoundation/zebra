@@ -706,7 +706,7 @@ pub trait Rpc {
     /// tags: network
     async fn add_node(&self, addr: PeerSocketAddr, command: AddNodeCommand) -> Result<()>;
 
-    /// Returns the raw transaction data, as a [`GetRawTransaction`] JSON string or structure.
+    /// Returns details about an unspent transaction output.
     ///
     /// zcashd reference: [`gettxout`](https://zcash.github.io/rpc/gettxout.html)
     /// method: post
@@ -714,7 +714,7 @@ pub trait Rpc {
     ///
     /// # Parameters
     ///
-    /// - `txid`: (string, required, example="mytxid") The transaction ID of the transaction to be returned.
+    /// - `txid`: (string, required, example="mytxid") The transaction ID that contains the output.
     /// - `n`: (number, required) The output index number.
     /// - `include_mempool` (bool, optional) Whether to include the mempool in the search.
     #[method(name = "gettxout")]
@@ -2989,124 +2989,118 @@ where
         n: u32,
         include_mempool: Option<bool>,
     ) -> Result<GetTxOutResponse> {
-        // Reference for the legacy error code:
-        // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/rawtransaction.cpp#L544>
         let txid = transaction::Hash::from_hex(txid)
-            .map_error(server::error::LegacyCode::InvalidAddressOrKey)?;
+            .map_error(server::error::LegacyCode::InvalidParameter)?;
 
-        let mut mempool = self.mempool.clone();
+        let index: usize = n.try_into().expect("u32 always fits in usize");
 
-        // Check the mempool first.
-        if include_mempool.is_some() && include_mempool.unwrap() {
-            match mempool
-                .ready()
-                .and_then(|service| {
-                    service.call(mempool::Request::TransactionsByMinedId([txid].into()))
-                })
+        // An invalid error closure for out-of-range output indexes
+        let invalid_index = || {
+            ErrorObject::owned(
+                server::error::LegacyCode::InvalidParameter.into(),
+                "No transparent output found at the given index",
+                None::<()>,
+            )
+        };
+
+        // Helper closure to check whether an outpoint is spent
+        let is_spent = |outpoint: transparent::OutPoint| async move {
+            let rsp = self
+                .read_state
+                .clone()
+                .oneshot(zebra_state::ReadRequest::IsTransparentOutputSpent(outpoint))
                 .await
-                .map_misc_error()?
-            {
+                .map_misc_error()?;
+
+            match rsp {
+                zebra_state::ReadResponse::IsTransparentOutputSpent(spent) => {
+                    Ok::<bool, ErrorObject>(spent)
+                }
+                _ => unreachable!("unmatched response to an `IsTransparentOutputSpent` request"),
+            }
+        };
+
+        // Optional mempool path
+        if include_mempool.unwrap_or(false) {
+            let mut mempool = self.mempool.clone();
+
+            let rsp = mempool
+                .ready()
+                .and_then(|svc| svc.call(mempool::Request::TransactionsByMinedId([txid].into())))
+                .await
+                .map_misc_error()?;
+
+            match rsp {
                 mempool::Response::Transactions(txns) => {
                     if let Some(tx) = txns.first() {
-                        let outpoint =
-                            transparent::OutPoint::from_usize(txid, n.try_into().unwrap());
-                        let is_spent_response = self
-                            .read_state
-                            .clone()
-                            .oneshot(zebra_state::ReadRequest::IsTransparentOutputSpent(outpoint))
-                            .await
-                            .map_misc_error()?;
+                        let outputs = tx.transaction.outputs();
+                        let output = outputs.get(index).ok_or_else(invalid_index)?;
 
-                        let is_spent = match is_spent_response {
-                            zebra_state::ReadResponse::IsTransparentOutputSpent(spent) => spent,
-                            _ => unreachable!(
-                                "unmatched response to an IsTransparentOutputSpent request"
-                            ),
-                        };
-
-                        if is_spent {
+                        let outpoint = transparent::OutPoint::from_usize(txid, index);
+                        if is_spent(outpoint).await? {
                             return Ok(GetTxOutResponse(Box::new(None)));
                         }
-                        let response = GetTxOutResponse(Box::new(Some(
+
+                        return Ok(GetTxOutResponse(Box::new(Some(
                             types::transaction::OutputObject::from_output(
-                                &tx.transaction.outputs()[n as usize],
+                                output,
                                 "mempool".to_string(),
                                 0,
                                 tx.transaction.version(),
                                 tx.transaction.is_coinbase(),
                             ),
-                        )));
-
-                        return Ok(response);
+                        ))));
                     }
                 }
                 _ => unreachable!("unmatched response to a `TransactionsByMinedId` request"),
-            };
+            }
         }
 
-        // If the tx wasn't in the mempool, check the state.
-        let response = match self
+        // State path
+        let rsp = self
             .read_state
             .clone()
             .oneshot(zebra_state::ReadRequest::Transaction(txid))
             .await
-            .map_misc_error()?
-        {
+            .map_misc_error()?;
+
+        match rsp {
             zebra_state::ReadResponse::Transaction(Some(tx)) => {
-                let best_block_hash = match self
+                let outputs = tx.tx.outputs();
+                let output = outputs.get(index).ok_or_else(invalid_index)?;
+
+                let tip_rsp = self
                     .read_state
                     .clone()
                     .oneshot(zebra_state::ReadRequest::Tip)
                     .await
-                    .map_misc_error()?
-                {
-                    zebra_state::ReadResponse::Tip(tip) => tip.unwrap().1,
+                    .map_misc_error()?;
+
+                let best_block_hash = match tip_rsp {
+                    zebra_state::ReadResponse::Tip(tip) => {
+                        tip.ok_or_misc_error("No blocks in state")?.1
+                    }
                     _ => unreachable!("unmatched response to a `Tip` request"),
                 };
 
-                //
-                let outputs = tx.tx.outputs();
-                if n as usize >= outputs.len() {
-                    return Err("Transaction output index out of range")
-                        .map_error(server::error::LegacyCode::InvalidParameter);
+                let outpoint = transparent::OutPoint::from_usize(txid, index);
+                if is_spent(outpoint).await? {
+                    return Ok(GetTxOutResponse(Box::new(None)));
                 }
 
-                let outpoint = transparent::OutPoint::from_usize(txid, n.try_into().unwrap());
-                let is_spent_response = self
-                    .read_state
-                    .clone()
-                    .oneshot(zebra_state::ReadRequest::IsTransparentOutputSpent(outpoint))
-                    .await
-                    .map_misc_error()?;
-
-                let is_spent = match is_spent_response {
-                    zebra_state::ReadResponse::IsTransparentOutputSpent(spent) => spent,
-                    _ => unreachable!("unmatched response to an IsTransparentOutputSpent request"),
-                };
-
-                if is_spent {
-                    return Err("Output was spent")
-                        .map_error(server::error::LegacyCode::InvalidAddressOrKey);
-                }
-
-                let output_object = types::transaction::OutputObject::from_output(
-                    &outputs[n as usize],
-                    best_block_hash.to_string(),
-                    tx.confirmations,
-                    tx.tx.version(),
-                    tx.tx.is_coinbase(),
-                );
-
-                GetTxOutResponse(Box::new(Some(output_object)))
+                Ok(GetTxOutResponse(Box::new(Some(
+                    types::transaction::OutputObject::from_output(
+                        output,
+                        best_block_hash.to_string(),
+                        tx.confirmations,
+                        tx.tx.version(),
+                        tx.tx.is_coinbase(),
+                    ),
+                ))))
             }
-            zebra_state::ReadResponse::Transaction(None) => {
-                return Err("No such mempool or main chain transaction")
-                    .map_error(server::error::LegacyCode::InvalidAddressOrKey);
-            }
-            _ => unreachable!("unmatched response to a Transaction request"),
-        };
-
-        Ok(response)
+            zebra_state::ReadResponse::Transaction(None) => Ok(GetTxOutResponse(Box::new(None))),
+            _ => unreachable!("unmatched response to a `Transaction` request"),
+        }
     }
 }
 

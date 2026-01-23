@@ -2275,7 +2275,7 @@ impl Service<ReadRequest> for ReadStateService {
                             "ReadRequest::IsTransparentOutputSpent",
                         );
 
-                        Ok(ReadResponse::IsTransparentOutputSpent(!is_spent.is_some()))
+                        Ok(ReadResponse::IsTransparentOutputSpent(is_spent.is_none()))
                     })
                 })
                 .wait_for_panics()
