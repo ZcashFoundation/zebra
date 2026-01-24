@@ -3037,7 +3037,9 @@ where
                             .map_misc_error()?;
                         let is_spent = match rsp {
                             mempool::Response::IsTransparentOutputSpent(spent) => spent,
-                            _ => unreachable!("unmatched response to an `IsTransparentOutputSpent` request"),
+                            _ => unreachable!(
+                                "unmatched response to an `IsTransparentOutputSpent` request"
+                            ),
                         };
                         if is_spent {
                             return Ok(GetTxOutResponse(Box::new(None)));
