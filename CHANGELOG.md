@@ -57,9 +57,7 @@ Thank you to everyone who contributed to this release, we couldn't make Zebra wi
 - Peer handshake metrics for duration histograms and failure tracking by reason ([#10175](https://github.com/ZcashFoundation/zebra/pull/10175))
 - Prometheus alert rules and Grafana dashboards for value pools and RPC monitoring ([#10175](https://github.com/ZcashFoundation/zebra/pull/10175))
 - Sync pipeline, consensus verification, and RocksDB performance histograms ([#10179](https://github.com/ZcashFoundation/zebra/pull/10179))
-- RocksDB batch commit latency histogram and compaction metrics ([#10181](https://github.com/ZcashFoundation/zebra/pull/10181))
-- Sync distance metrics for monitoring sync progress ([#10181](https://github.com/ZcashFoundation/zebra/pull/10181))
-- Zebra Overview dashboard with health status panels, sync distance, and system resources ([#10181](https://github.com/ZcashFoundation/zebra/pull/10181))
+- RocksDB I/O latency, sync distance metrics, and Zebra Overview dashboard ([#10181](https://github.com/ZcashFoundation/zebra/pull/10181))
 
 
 ## [Zebra 3.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v3.1.0) - 2025-11-28
