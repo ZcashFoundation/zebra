@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `rpc_metrics` module for Prometheus metrics middleware tracking request counts, latencies, active requests, and errors ([#10175](https://github.com/ZcashFoundation/zebra/pull/10175))
+
 ## [4.0.0] - 2026-01-21
 
 Most changes are related to a fix to `getinfo` RPC response which used a string

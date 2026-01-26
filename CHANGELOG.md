@@ -53,13 +53,10 @@ Thank you to everyone who contributed to this release, we couldn't make Zebra wi
 
 ### Added
 
-- OpenTelemetry tracing support behind the `opentelemetry` feature flag ([#10174](https://github.com/ZcashFoundation/zebra/pull/10174))
-- RPC tracing middleware with `SPAN_KIND_SERVER` spans for Jaeger Service Performance Monitoring ([#10174](https://github.com/ZcashFoundation/zebra/pull/10174))
-- Added Docker Compose observability stack with Jaeger, Prometheus, Grafana, and AlertManager for local development and testing
-- Added value pool metrics exposing transparent, sprout, sapling, orchard, and deferred pool balances plus total chain supply ([#10162](https://github.com/ZcashFoundation/zebra/issues/10162))
-- Added RPC metrics middleware tracking request counts, latencies, active requests, and errors per method ([#10163](https://github.com/ZcashFoundation/zebra/issues/10163))
-- Added peer handshake metrics for duration histograms and failure tracking by reason ([#10164](https://github.com/ZcashFoundation/zebra/issues/10164))
-- Added Prometheus alert rules and Grafana dashboards for value pools and RPC monitoring ([#10167](https://github.com/ZcashFoundation/zebra/issues/10167))
+- Value pool metrics exposing transparent, sprout, sapling, orchard, and deferred pool balances plus total chain supply ([#10175](https://github.com/ZcashFoundation/zebra/pull/10175))
+- RPC metrics middleware tracking request counts, latencies, active requests, and errors per method ([#10175](https://github.com/ZcashFoundation/zebra/pull/10175))
+- Peer handshake metrics for duration histograms and failure tracking by reason ([#10175](https://github.com/ZcashFoundation/zebra/pull/10175))
+- Prometheus alert rules and Grafana dashboards for value pools and RPC monitoring ([#10175](https://github.com/ZcashFoundation/zebra/pull/10175))
 
 
 ## [Zebra 3.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v3.1.0) - 2025-11-28
