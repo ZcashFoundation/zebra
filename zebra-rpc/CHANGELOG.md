@@ -9,7 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `rpc_metrics` module for Prometheus metrics middleware tracking request counts, latencies, active requests, and errors ([#10175](https://github.com/ZcashFoundation/zebra/pull/10175))
+- `server/rpc_metrics` module.
+- `server/rpc_tracing` module.
+- Dependency on the `metrics` crate.
 
 ## [4.0.0] - 2026-01-21
 
