@@ -25,7 +25,8 @@ use crate::{
     methods::{RpcImpl, RpcServer as _},
     server::{
         http_request_compatibility::HttpRequestMiddlewareLayer,
-        rpc_call_compatibility::FixRpcResponseMiddleware, rpc_tracing::RpcTracingMiddleware,
+        rpc_call_compatibility::FixRpcResponseMiddleware, rpc_metrics::RpcMetricsMiddleware,
+        rpc_tracing::RpcTracingMiddleware,
     },
 };
 
@@ -33,6 +34,7 @@ pub mod cookie;
 pub mod error;
 pub mod http_request_compatibility;
 pub mod rpc_call_compatibility;
+pub mod rpc_metrics;
 pub mod rpc_tracing;
 
 #[cfg(test)]
@@ -129,6 +131,7 @@ impl RpcServer {
         let rpc_middleware = RpcServiceBuilder::new()
             .rpc_logger(1024)
             .layer_fn(FixRpcResponseMiddleware::new)
+            .layer_fn(RpcMetricsMiddleware::new)
             .layer_fn(RpcTracingMiddleware::new);
 
         let server = Server::builder()
