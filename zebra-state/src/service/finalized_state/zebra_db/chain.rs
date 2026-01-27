@@ -26,7 +26,7 @@ use crate::{
     service::finalized_state::{
         disk_db::DiskWriteBatch,
         disk_format::{chain::HistoryTreeParts, RawBytes},
-        zebra_db::ZebraDb,
+        zebra_db::{metrics::value_pool_metrics, ZebraDb},
         TypedColumnFamily,
     },
     BoxError, HashOrHeight,
@@ -258,6 +258,10 @@ impl DiskWriteBatch {
                 &utxos_spent_by_block,
                 finalized.deferred_pool_balance_change,
             )?)?;
+
+        // Update value pool metrics for observability (ZIP-209 compliance monitoring)
+        value_pool_metrics(&new_value_pool);
+
         let _ = db
             .chain_value_pools_cf()
             .with_batch_for_writing(self)

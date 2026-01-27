@@ -7158,6 +7158,7 @@ dependencies = [
  "jsonrpsee",
  "jsonrpsee-proc-macros",
  "jsonrpsee-types",
+ "metrics",
  "nix",
  "proptest",
  "prost 0.14.3",
