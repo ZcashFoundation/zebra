@@ -346,7 +346,7 @@ jobs:
           --container-stdin \
           --container-tty \
           --container-image ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
-          --container-env "ZEBRA_NETWORK__NETWORK=${{ matrix.network }},LOG_FILE=${LOG_FILE},SENTRY_DSN=${{ vars.SENTRY_DSN }},ZEBRA_HEALTH__LISTEN_ADDR=0.0.0.0:8080,ZEBRA_HEALTH__MIN_CONNECTED_PEERS=1,ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:${RPC_PORT}" \
+          --container-env "ZEBRA_NETWORK__NETWORK=${{ matrix.network }},ZEBRA_NETWORK__LISTEN_ADDR=0.0.0.0,LOG_FILE=${LOG_FILE},SENTRY_DSN=${{ vars.SENTRY_DSN }},ZEBRA_HEALTH__LISTEN_ADDR=0.0.0.0:8080,ZEBRA_HEALTH__MIN_CONNECTED_PEERS=1,ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:${RPC_PORT}" \
           --service-account ${{ vars.GCP_DEPLOYMENTS_SA }} \
           --scopes cloud-platform \
           --metadata google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true \
@@ -416,66 +416,37 @@ jobs:
       - name: Assign static IPs to instances
         if: ${{ steps.does-group-exist.outcome == 'failure' && github.event_name != 'workflow_dispatch' }}
         run: |
-          # Retrieve the 3 static IP addresses into array
+          # Wait for MIG to be stable (all instances created)
+          gcloud compute instance-groups managed wait-until "${MIG_NAME}" \
+            --stable \
+            --region "${{ vars.GCP_REGION }}" \
+            --timeout=1200
+
+          # Get static IPs and instances
           IP_NAMES=("zebra-${NETWORK}" "zebra-${NETWORK}-secondary" "zebra-${NETWORK}-tertiary")
-          IP_ADDRESSES=()
+          mapfile -t IP_ADDRESSES < <(
+            for ip_name in "${IP_NAMES[@]}"; do
+              gcloud compute addresses describe "$ip_name" \
+                --region ${{ vars.GCP_REGION }} \
+                --format='value(address)' 2>/dev/null || echo ""
+            done
+          )
 
-          for ip_name in "${IP_NAMES[@]}"; do
-            IP_ADDRESSES+=($(gcloud compute addresses describe "$ip_name" \
-              --region ${{ vars.GCP_REGION }} \
-              --format='value(address)' 2>/dev/null || echo ""))
-          done
-
-          # Get the MIG's target size
-          TARGET_SIZE=$(gcloud compute instance-groups managed describe "${MIG_NAME}" \
-            --region "${{ vars.GCP_REGION }}" \
-            --format="value(targetSize)")
-
-          # Wait for instances to be created
-          echo "Waiting for ${TARGET_SIZE} instances to be created..."
-          for attempt in {1..60}; do
-            INSTANCE_COUNT=$(gcloud compute instance-groups managed list-instances "${MIG_NAME}" \
+          mapfile -t INSTANCES < <(
+            gcloud compute instance-groups managed list-instances "${MIG_NAME}" \
               --region "${{ vars.GCP_REGION }}" \
-              --format="value(instance)" | wc -l)
+              --format="value(instance.basename())" | sort
+          )
 
-            if [ "$INSTANCE_COUNT" -ge "$TARGET_SIZE" ]; then
-              echo "All $INSTANCE_COUNT instances exist"
-              break
-            fi
-
-            echo "Found $INSTANCE_COUNT instances, waiting for $TARGET_SIZE... (attempt $attempt/60)"
-            sleep 10
-          done
-
-          # Get instance names AND zones in one call
-          INSTANCE_DATA=$(gcloud compute instance-groups managed list-instances "${MIG_NAME}" \
-            --region "${{ vars.GCP_REGION }}" \
-            --format="table[no-heading](instance.basename(),instance.scope().segment(0))" | sort)
-
-          IFS=$'\n' read -rd '' -a INSTANCE_ROWS <<<"$INSTANCE_DATA" || true
-
-          # Loop to assign all IPs
-          # Note: Instance template uses --no-address, so instances start without external IP.
-          # This avoids race conditions with MIG trying to restore ephemeral IPs.
-          for i in "${!INSTANCE_ROWS[@]}"; do
+          # Assign IPs via stateful instance config (creates config + assigns IP in one command)
+          for i in "${!INSTANCES[@]}"; do
             [ -z "${IP_ADDRESSES[$i]}" ] && continue
 
-            read -r INSTANCE_NAME ZONE <<<"${INSTANCE_ROWS[$i]}"
-            IP_ADDRESS="${IP_ADDRESSES[$i]}"
-
-            echo "Assigning ${IP_ADDRESS} to ${INSTANCE_NAME} in zone ${ZONE}"
-
-            # First: Configure stateful IP policy (tells MIG to preserve this IP)
-            gcloud compute instance-groups managed update-instances "${MIG_NAME}" \
-              --instances="${INSTANCE_NAME}" \
-              --stateful-external-ip "interface-name=nic0,address=${IP_ADDRESS},auto-delete=never" \
+            echo "Assigning ${IP_ADDRESSES[$i]} to ${INSTANCES[$i]}"
+            gcloud compute instance-groups managed instance-configs create "${MIG_NAME}" \
+              --instance="${INSTANCES[$i]}" \
+              --stateful-external-ip="address=${IP_ADDRESSES[$i]},interface-name=nic0,auto-delete=never" \
               --region "${{ vars.GCP_REGION }}"
-
-            # Then: Add the static IP access config to the instance
-            gcloud compute instances add-access-config "${INSTANCE_NAME}" \
-              --access-config-name="external-nat" \
-              --address="${IP_ADDRESS}" \
-              --zone="${ZONE}"
           done
 
       # Detect how many zones the MIG spans (needed for max-unavailable constraint)
@@ -500,6 +471,48 @@ jobs:
           --max-surge=0 \
           --max-unavailable=${{ steps.zone-count.outputs.count }} \
           --region "${{ vars.GCP_REGION }}"
+
+      # Re-assign static IPs after rolling update (instances are recreated without external IPs)
+      - name: Re-assign static IPs after rolling update
+        if: ${{ steps.does-group-exist.outcome == 'success' && github.event_name != 'workflow_dispatch' }}
+        run: |
+          # Wait for rolling update to complete
+          gcloud compute instance-groups managed wait-until "${MIG_NAME}" \
+            --stable \
+            --region "${{ vars.GCP_REGION }}" \
+            --timeout=1200
+
+          # Get static IPs and instances
+          IP_NAMES=("zebra-${NETWORK}" "zebra-${NETWORK}-secondary" "zebra-${NETWORK}-tertiary")
+          mapfile -t IP_ADDRESSES < <(
+            for ip_name in "${IP_NAMES[@]}"; do
+              gcloud compute addresses describe "$ip_name" \
+                --region ${{ vars.GCP_REGION }} \
+                --format='value(address)' 2>/dev/null || echo ""
+            done
+          )
+
+          mapfile -t INSTANCES < <(
+            gcloud compute instance-groups managed list-instances "${MIG_NAME}" \
+              --region "${{ vars.GCP_REGION }}" \
+              --format="value(instance.basename())" | sort
+          )
+
+          # Assign IPs via stateful instance config (creates config + assigns IP in one command)
+          for i in "${!INSTANCES[@]}"; do
+            [ -z "${IP_ADDRESSES[$i]}" ] && continue
+
+            echo "Assigning ${IP_ADDRESSES[$i]} to ${INSTANCES[$i]}"
+            gcloud compute instance-groups managed instance-configs create "${MIG_NAME}" \
+              --instance="${INSTANCES[$i]}" \
+              --stateful-external-ip="address=${IP_ADDRESSES[$i]},interface-name=nic0,auto-delete=never" \
+              --region "${{ vars.GCP_REGION }}" \
+              --update-instance 2>/dev/null || \
+            gcloud compute instance-groups managed instance-configs update "${MIG_NAME}" \
+              --instance="${INSTANCES[$i]}" \
+              --stateful-external-ip="address=${IP_ADDRESSES[$i]},interface-name=nic0,auto-delete=never" \
+              --region "${{ vars.GCP_REGION }}"
+          done
 
   deploy-nodes-success:
     name: Deploy nodes success
