@@ -38,7 +38,7 @@ jobs:
     timeout-minutes: 120
 
     steps:
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 #v6.0.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
       - name: Install last version of Protoc
@@ -50,7 +50,7 @@ jobs:
           toolchain: stable
           components: llvm-tools-preview
           cache-on-failure: true
-      - uses: taiki-e/install-action@0bc4cd8a3e21db4cb9519857377b0c8c5e150de5 #v2.67.2
+      - uses: taiki-e/install-action@7e574ed8bb89811282a11aecb3fe1d043bf5bf0e #v2.67.15
         with:
           tool: cargo-llvm-cov,nextest
       - name: Run coverage tests
