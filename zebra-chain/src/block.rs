@@ -27,6 +27,7 @@ mod serialize;
 
 pub mod genesis;
 pub mod merkle;
+pub mod subsidy;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod arbitrary;

@@ -477,7 +477,7 @@ impl StateService {
         // This method must not block, access the database, or perform CPU-intensive tasks,
         // because it is called directly from the tokio executor's Future threads.
 
-        let queued_prev_hash = checkpoint_verified.block.header.previous_block_hash;
+        let queued_prev_hash = checkpoint_verified.block.block.header.previous_block_hash;
         let queued_height = checkpoint_verified.height;
 
         // If we're close to the final checkpoint, make the block's UTXOs available for
@@ -1235,6 +1235,22 @@ impl Service<Request> for StateService {
                         .try_into()
                         .expect("ReadRequest conversion should not fail");
 
+                    let rsp = read_service.oneshot(req).await?;
+                    let rsp = rsp.try_into().expect("Response conversion should not fail");
+
+                    Ok(rsp)
+                }
+                .boxed()
+            }
+
+            #[cfg(zcash_unstable = "zip234")]
+            Request::TipPoolValues => {
+                // Redirect the request to the concurrent ReadStateService
+                let read_service = self.read_service.clone();
+                async move {
+                    let req = req
+                        .try_into()
+                        .expect("ReadRequest conversion should not fail");
                     let rsp = read_service.oneshot(req).await?;
                     let rsp = rsp.try_into().expect("Response conversion should not fail");
 
@@ -2154,7 +2170,7 @@ impl Service<ReadRequest> for ReadStateService {
                 .wait_for_panics()
             }
 
-            ReadRequest::CheckBlockProposalValidity(semantically_verified) => {
+            ReadRequest::CheckBlockProposalValidity(mut semantically_verified) => {
                 let state = self.clone();
 
                 // # Performance
@@ -2185,7 +2201,7 @@ impl Service<ReadRequest> for ReadStateService {
                         write::validate_and_commit_non_finalized(
                             &state.db,
                             &mut latest_non_finalized_state,
-                            semantically_verified,
+                            &mut semantically_verified,
                         )?;
 
                         // The work is done in the future.
