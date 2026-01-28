@@ -380,7 +380,7 @@ impl ZebraDb {
     ///
     /// This function collects database statistics and exposes them as Prometheus metrics.
     /// Call this periodically (e.g., every 30 seconds) from a background task.
-    pub fn export_metrics(&self) {
+    pub(crate) fn export_metrics(&self) {
         self.db.export_metrics();
     }
 

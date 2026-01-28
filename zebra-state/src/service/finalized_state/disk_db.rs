@@ -613,7 +613,7 @@ impl DiskDb {
     ///
     /// This function collects database statistics and exposes them as Prometheus metrics.
     /// Call this periodically (e.g., every 30 seconds) from a background task.
-    pub fn export_metrics(&self) {
+    pub(crate) fn export_metrics(&self) {
         let db: &Arc<DB> = &self.db;
         let db_options = DiskDb::options();
         let column_families = DiskDb::construct_column_families(db_options, db.path(), []);
