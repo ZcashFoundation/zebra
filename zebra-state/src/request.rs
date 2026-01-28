@@ -1341,6 +1341,9 @@ pub enum ReadRequest {
     /// Returns [`ReadResponse::NonFinalizedBlocksListener`] with a channel receiver
     /// allowing the caller to listen for new blocks in the non-finalized state.
     NonFinalizedBlocksListener,
+
+    /// Checks if a transparent output is spent in the best chain.
+    IsTransparentOutputSpent(transparent::OutPoint),
 }
 
 impl ReadRequest {
@@ -1382,6 +1385,7 @@ impl ReadRequest {
             ReadRequest::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
             ReadRequest::TipBlockSize => "tip_block_size",
             ReadRequest::NonFinalizedBlocksListener => "non_finalized_blocks_listener",
+            ReadRequest::IsTransparentOutputSpent(_) => "is_transparent_output_spent",
         }
     }
 

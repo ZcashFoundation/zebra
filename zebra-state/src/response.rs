@@ -432,6 +432,9 @@ pub enum ReadResponse {
 
     /// Response to [`ReadRequest::NonFinalizedBlocksListener`]
     NonFinalizedBlocksListener(NonFinalizedBlocksListener),
+
+    /// Response to [`ReadRequest::IsTransparentOutputSpent`]
+    IsTransparentOutputSpent(bool),
 }
 
 /// A structure with the information needed from the state to build a `getblocktemplate` RPC response.
@@ -526,7 +529,8 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::AddressesTransactionIds(_)
             | ReadResponse::AddressUtxos(_)
             | ReadResponse::ChainInfo(_)
-            | ReadResponse::NonFinalizedBlocksListener(_) => {
+            | ReadResponse::NonFinalizedBlocksListener(_)
+            | ReadResponse::IsTransparentOutputSpent(_) => {
                 Err("there is no corresponding Response for this ReadResponse")
             }
 
