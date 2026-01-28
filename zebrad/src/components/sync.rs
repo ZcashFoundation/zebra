@@ -671,6 +671,8 @@ where
     /// multiple peers
     #[instrument(skip(self))]
     async fn obtain_tips(&mut self) -> Result<IndexSet<block::Hash>, Report> {
+        let stage_start = std::time::Instant::now();
+
         let block_locator = self
             .state
             .ready()
@@ -825,11 +827,16 @@ where
 
         let response = self.request_blocks(download_set).await;
 
+        metrics::histogram!("sync.stage.duration_seconds", "stage" => "obtain_tips")
+            .record(stage_start.elapsed().as_secs_f64());
+
         Self::handle_hash_response(response).map_err(Into::into)
     }
 
     #[instrument(skip(self))]
     async fn extend_tips(&mut self) -> Result<IndexSet<block::Hash>, Report> {
+        let stage_start = std::time::Instant::now();
+
         let tips = std::mem::take(&mut self.prospective_tips);
 
         let mut download_set = IndexSet::new();
@@ -962,6 +969,9 @@ where
         self.recent_syncs.push_extend_tips_length(new_downloads);
 
         let response = self.request_blocks(download_set).await;
+
+        metrics::histogram!("sync.stage.duration_seconds", "stage" => "extend_tips")
+            .record(stage_start.elapsed().as_secs_f64());
 
         Self::handle_hash_response(response).map_err(Into::into)
     }

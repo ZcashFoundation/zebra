@@ -609,6 +609,54 @@ impl DiskDb {
         );
     }
 
+    /// Exports RocksDB metrics to Prometheus.
+    ///
+    /// This function collects database statistics and exposes them as Prometheus metrics.
+    /// Call this periodically (e.g., every 30 seconds) from a background task.
+    pub(crate) fn export_metrics(&self) {
+        let db: &Arc<DB> = &self.db;
+        let db_options = DiskDb::options();
+        let column_families = DiskDb::construct_column_families(db_options, db.path(), []);
+
+        let mut total_disk: u64 = 0;
+        let mut total_live: u64 = 0;
+        let mut total_mem: u64 = 0;
+
+        for cf_descriptor in column_families {
+            let cf_name = cf_descriptor.name().to_string();
+            if let Some(cf_handle) = db.cf_handle(&cf_name) {
+                let disk = db
+                    .property_int_value_cf(cf_handle, "rocksdb.total-sst-files-size")
+                    .ok()
+                    .flatten()
+                    .unwrap_or(0);
+                let live = db
+                    .property_int_value_cf(cf_handle, "rocksdb.estimate-live-data-size")
+                    .ok()
+                    .flatten()
+                    .unwrap_or(0);
+                let mem = db
+                    .property_int_value_cf(cf_handle, "rocksdb.size-all-mem-tables")
+                    .ok()
+                    .flatten()
+                    .unwrap_or(0);
+
+                total_disk += disk;
+                total_live += live;
+                total_mem += mem;
+
+                metrics::gauge!("zebra.state.rocksdb.cf_disk_size_bytes", "cf" => cf_name.clone())
+                    .set(disk as f64);
+                metrics::gauge!("zebra.state.rocksdb.cf_memory_size_bytes", "cf" => cf_name)
+                    .set(mem as f64);
+            }
+        }
+
+        metrics::gauge!("zebra.state.rocksdb.total_disk_size_bytes").set(total_disk as f64);
+        metrics::gauge!("zebra.state.rocksdb.live_data_size_bytes").set(total_live as f64);
+        metrics::gauge!("zebra.state.rocksdb.total_memory_size_bytes").set(total_mem as f64);
+    }
+
     /// Returns the estimated total disk space usage of the database.
     pub fn size(&self) -> u64 {
         let db: &Arc<DB> = &self.db;
