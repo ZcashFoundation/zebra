@@ -96,7 +96,7 @@ services:
     environment:
       # Default login: admin/admin (Grafana prompts to change on first login)
       # To set a custom password, create a .env file with GF_SECURITY_ADMIN_PASSWORD=yourpassword
-      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/network_health.json
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/zebra_overview.json
     ports:
       - "3000:3000"
     networks:
