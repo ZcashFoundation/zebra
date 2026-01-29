@@ -365,11 +365,14 @@ where
             async move {
                 // Download the block.
                 // Prefer the cancel handle if both are ready.
+                let download_start = std::time::Instant::now();
                 let rsp = tokio::select! {
                     biased;
                     _ = &mut cancel_rx => {
                         trace!("task cancelled prior to download completion");
                         metrics::counter!("sync.cancelled.download.count").increment(1);
+                        metrics::histogram!("sync.block.download.duration_seconds", "result" => "cancelled")
+                            .record(download_start.elapsed().as_secs_f64());
                         return Err(BlockDownloadVerifyError::CancelledDuringDownload { hash })
                     }
                     rsp = block_req => rsp.map_err(|error| BlockDownloadVerifyError::DownloadFailed { error, hash})?,
@@ -391,6 +394,8 @@ where
                     unreachable!("wrong response to block request");
                 };
                 metrics::counter!("sync.downloaded.block.count").increment(1);
+                metrics::histogram!("sync.block.download.duration_seconds", "result" => "success")
+                    .record(download_start.elapsed().as_secs_f64());
 
                 // Security & Performance: reject blocks that are too far ahead of our tip.
                 // Avoids denial of service attacks, and reduces wasted work on high blocks
@@ -521,6 +526,7 @@ where
                 };
 
                 // Verify the block.
+                let verify_start = std::time::Instant::now();
                 let mut rsp = verifier
                     .map_err(|error| BlockDownloadVerifyError::VerifierServiceError { error })?
                     .call(zebra_consensus::Request::Commit(block)).boxed();
@@ -538,10 +544,16 @@ where
                     _ = &mut cancel_rx => {
                         trace!("task cancelled prior to verification");
                         metrics::counter!("sync.cancelled.verify.count").increment(1);
+                        metrics::histogram!("sync.block.verify.duration_seconds", "result" => "cancelled")
+                            .record(verify_start.elapsed().as_secs_f64());
                         return Err(BlockDownloadVerifyError::CancelledDuringVerification { height: block_height, hash })
                     }
                     verification = rsp => verification,
                 };
+
+                let verify_result = if verification.is_ok() { "success" } else { "failure" };
+                metrics::histogram!("sync.block.verify.duration_seconds", "result" => verify_result)
+                    .record(verify_start.elapsed().as_secs_f64());
 
                 if verification.is_ok() {
                     metrics::counter!("sync.verified.block.count").increment(1);
