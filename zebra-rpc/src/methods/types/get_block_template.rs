@@ -52,7 +52,9 @@ use zebra_state::GetBlockTemplateChainInfo;
 use crate::{
     config,
     methods::types::{
-        default_roots::DefaultRoots, long_poll::LongPollId, submit_block,
+        default_roots::DefaultRoots,
+        long_poll::LongPollId,
+        submit_block::{self, MinedBlocksCounter},
         transaction::TransactionTemplate,
     },
     server::error::OkOrError,
@@ -451,6 +453,9 @@ where
     /// A channel to send successful block submissions to the block gossip task,
     /// so they can be advertised to peers.
     mined_block_sender: mpsc::Sender<(block::Hash, block::Height)>,
+
+    /// A counter to track the number of mined blocks for the progress bar.
+    mined_blocks_counter: Option<MinedBlocksCounter>,
 }
 
 // A limit on the configured extra coinbase data, regardless of the current block height.
@@ -473,6 +478,7 @@ where
         block_verifier_router: BlockVerifierRouter,
         sync_status: SyncStatus,
         mined_block_sender: Option<mpsc::Sender<(block::Hash, block::Height)>>,
+        mined_blocks_counter: Option<MinedBlocksCounter>,
     ) -> Self {
         // Check that the configured miner address is valid.
         let miner_address = conf.miner_address.map(|addr| {
@@ -507,6 +513,7 @@ where
             sync_status,
             mined_block_sender: mined_block_sender
                 .unwrap_or(submit_block::SubmitBlockChannel::default().sender()),
+            mined_blocks_counter,
         }
     }
 
@@ -546,12 +553,23 @@ where
     }
 
     /// Advertises the mined block.
+    ///
+    /// If the block is successfully sent, this also:
+    /// - Increments the `mining.blocks_mined` metric counter
+    /// - Increments the shared mined blocks counter for the progress bar
     pub fn advertise_mined_block(
         &self,
         block: block::Hash,
         height: block::Height,
     ) -> Result<(), TrySendError<(block::Hash, block::Height)>> {
-        self.mined_block_sender.try_send((block, height))
+        let result = self.mined_block_sender.try_send((block, height));
+        if result.is_ok() {
+            metrics::counter!("mining.blocks_mined").increment(1);
+            if let Some(counter) = &self.mined_blocks_counter {
+                counter.increment();
+            }
+        }
+        result
     }
 }
 

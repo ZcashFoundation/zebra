@@ -84,7 +84,7 @@ use tracing_futures::Instrument;
 
 use zebra_chain::block::genesis::regtest_genesis_block;
 use zebra_consensus::router::BackgroundTaskHandles;
-use zebra_rpc::{methods::RpcImpl, server::RpcServer, SubmitBlockChannel};
+use zebra_rpc::{methods::RpcImpl, server::RpcServer, MinedBlocksCounter, SubmitBlockChannel};
 
 use crate::{
     application::{build_version, user_agent, LAST_WARN_ERROR_LOG_SENDER},
@@ -246,6 +246,9 @@ impl StartCmd {
         // Create a channel to send mined blocks to the gossip task
         let submit_block_channel = SubmitBlockChannel::new();
 
+        // Create a counter to track mined blocks for the progress bar
+        let (mined_blocks_counter, mined_blocks_receiver) = MinedBlocksCounter::new();
+
         // Launch RPC server
         let (rpc_impl, mut rpc_tx_queue_handle) = RpcImpl::new(
             config.network.network.clone(),
@@ -262,6 +265,7 @@ impl StartCmd {
             address_book.clone(),
             LAST_WARN_ERROR_LOG_SENDER.subscribe(),
             Some(submit_block_channel.sender()),
+            Some(mined_blocks_counter),
         );
 
         let rpc_task_handle = if config.rpc.listen_addr.is_some() {
@@ -332,6 +336,7 @@ impl StartCmd {
                 latest_chain_tip.clone(),
                 sync_status.clone(),
                 chain_tip_metrics_sender,
+                Some(mined_blocks_receiver),
             )
             .in_current_span(),
         );

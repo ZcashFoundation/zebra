@@ -20,5 +20,5 @@ pub use methods::types::{
         fetch_state_tip_and_local_time, generate_coinbase_and_roots,
         proposal::proposal_block_from_template,
     },
-    submit_block::SubmitBlockChannel,
+    submit_block::{MinedBlocksCounter, SubmitBlockChannel},
 };

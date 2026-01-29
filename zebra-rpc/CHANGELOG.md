@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `MinedBlocksCounter` struct and `mining.blocks_mined` metric for tracking blocks submitted via `submit_block` RPC.
 - `server/rpc_metrics` module.
 - `server/rpc_tracing` module.
 - Dependency on the `metrics` crate.

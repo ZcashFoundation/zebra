@@ -126,7 +126,9 @@ use types::{
     long_poll::LongPollInput,
     network_info::{GetNetworkInfoResponse, NetworkInfo},
     peer_info::PeerInfo,
-    submit_block::{SubmitBlockErrorResponse, SubmitBlockParameters, SubmitBlockResponse},
+    submit_block::{
+        MinedBlocksCounter, SubmitBlockErrorResponse, SubmitBlockParameters, SubmitBlockResponse,
+    },
     subsidy::GetBlockSubsidyResponse,
     transaction::TransactionObject,
     unified_address::ZListUnifiedReceiversResponse,
@@ -820,6 +822,7 @@ where
         address_book: AddressBook,
         last_warn_error_log_rx: LoggedLastEvent,
         mined_block_sender: Option<mpsc::Sender<(block::Hash, block::Height)>>,
+        mined_blocks_counter: Option<MinedBlocksCounter>,
     ) -> (Self, JoinHandle<()>)
     where
         VersionString: ToString + Clone + Send + 'static,
@@ -841,6 +844,7 @@ where
             block_verifier_router,
             sync_status,
             mined_block_sender,
+            mined_blocks_counter,
         );
 
         let rpc_impl = RpcImpl {

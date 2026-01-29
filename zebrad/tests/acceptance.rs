@@ -3413,6 +3413,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         MockAddressBookPeers::default(),
         rx,
         Some(submitblock_channel.sender()),
+        None,
     );
 
     let make_mock_mempool_request_handler = || async move {
@@ -3759,6 +3760,7 @@ async fn nu7_nsm_transactions() -> Result<()> {
         MockAddressBookPeers::default(),
         rx,
         Some(submitblock_channel.sender()),
+        None,
     );
 
     let make_mock_mempool_request_handler = || async move {

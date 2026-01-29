@@ -1,6 +1,8 @@
 //! Parameter and response types for the `submitblock` RPC.
 
-use tokio::sync::mpsc;
+use std::sync::Arc;
+
+use tokio::sync::{mpsc, watch};
 
 use zebra_chain::block;
 
@@ -106,5 +108,107 @@ impl SubmitBlockChannel {
 impl Default for SubmitBlockChannel {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// A counter for tracking the number of blocks submitted to this node.
+///
+/// This counter is incremented each time a block is successfully submitted via this node's
+/// `submit_block` RPC. This includes blocks from Zebra's internal miner and blocks from
+/// external mining software that connects to this node.
+///
+/// The counter serves two purposes:
+/// - Exposes the `mining.blocks_mined` Prometheus metric for monitoring dashboards
+/// - Provides a watch channel so the progress bar can display "mined N blocks" when at chain tip
+///
+/// # Cloning
+///
+/// Cloned instances share the same underlying watch channel sender,
+/// so increments from any clone are visible to all receivers.
+#[derive(Clone)]
+pub struct MinedBlocksCounter {
+    /// A sender to notify the progress bar task of count changes.
+    ///
+    /// The watch channel stores the current count. The progress bar holds the
+    /// corresponding receiver and updates its display when the count changes.
+    sender: Arc<watch::Sender<u64>>,
+}
+
+impl MinedBlocksCounter {
+    /// Creates a new `MinedBlocksCounter` initialized to zero.
+    ///
+    /// Returns both the counter and a receiver that can be used to watch for count changes.
+    /// The receiver is typically passed to the progress bar task.
+    pub fn new() -> (Self, watch::Receiver<u64>) {
+        let (sender, receiver) = watch::channel(0);
+        (
+            Self {
+                sender: Arc::new(sender),
+            },
+            receiver,
+        )
+    }
+
+    /// Increments the mined blocks count by 1 and notifies subscribers.
+    ///
+    /// This method is called by [`GetBlockTemplateHandler::advertise_mined_block`]
+    /// when a block is successfully submitted.
+    pub fn increment(&self) {
+        self.sender.send_modify(|count| *count += 1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_counter_starts_at_zero() {
+        let (_counter, rx) = MinedBlocksCounter::new();
+        assert_eq!(*rx.borrow(), 0);
+    }
+
+    #[test]
+    fn increment_increases_count() {
+        let (counter, rx) = MinedBlocksCounter::new();
+
+        counter.increment();
+        assert_eq!(*rx.borrow(), 1);
+
+        counter.increment();
+        assert_eq!(*rx.borrow(), 2);
+    }
+
+    #[test]
+    fn cloned_counters_share_state() {
+        let (counter1, rx) = MinedBlocksCounter::new();
+        let counter2 = counter1.clone();
+
+        counter1.increment();
+        counter2.increment();
+
+        // Both clones increment the same underlying counter
+        assert_eq!(*rx.borrow(), 2);
+    }
+
+    #[test]
+    fn multiple_receivers_see_updates() {
+        let (counter, rx1) = MinedBlocksCounter::new();
+        let rx2 = rx1.clone();
+
+        counter.increment();
+
+        assert_eq!(*rx1.borrow(), 1);
+        assert_eq!(*rx2.borrow(), 1);
+    }
+
+    /// Tests that the `mining.blocks_mined` metric can be incremented.
+    ///
+    /// This verifies the metric name is valid and the metrics system accepts it.
+    /// The actual metric emission happens in [`GetBlockTemplateHandler::advertise_mined_block`].
+    #[test]
+    fn mining_blocks_mined_metric_is_valid() {
+        // Verify the metric can be incremented without panicking
+        metrics::counter!("mining.blocks_mined").increment(1);
     }
 }

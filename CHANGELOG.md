@@ -53,6 +53,7 @@ Thank you to everyone who contributed to this release, we couldn't make Zebra wi
 
 ### Added
 
+- Blocks mined counter showing "mined N blocks" in progress bar when at chain tip, plus `mining.blocks_mined` Prometheus metric ([#10190](https://github.com/ZcashFoundation/zebra/issues/10190))
 - Value pool metrics exposing transparent, sprout, sapling, orchard, and deferred pool balances plus total chain supply ([#10175](https://github.com/ZcashFoundation/zebra/pull/10175))
 - Peer handshake metrics for duration histograms and failure tracking by reason ([#10175](https://github.com/ZcashFoundation/zebra/pull/10175))
 - Prometheus alert rules and Grafana dashboards for value pools and RPC monitoring ([#10175](https://github.com/ZcashFoundation/zebra/pull/10175))

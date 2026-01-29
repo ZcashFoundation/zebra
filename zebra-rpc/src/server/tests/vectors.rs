@@ -64,6 +64,7 @@ async fn rpc_server_spawn() {
         MockAddressBookPeers::default(),
         rx,
         None,
+        None,
     );
 
     RpcServer::start(rpc_impl, conf)
@@ -133,6 +134,7 @@ async fn rpc_spawn_unallocated_port(do_shutdown: bool) {
         MockAddressBookPeers::default(),
         rx,
         None,
+        None,
     );
 
     let rpc = RpcServer::start(rpc_impl, conf)
@@ -189,6 +191,7 @@ async fn rpc_server_spawn_port_conflict() {
         NoChainTip,
         MockAddressBookPeers::default(),
         rx.clone(),
+        None,
         None,
     );
 
