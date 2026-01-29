@@ -63,8 +63,9 @@ internal_miner = false
 cache_dir = true
 crawl_new_peer_interval = "1m 1s"
 initial_mainnet_peers = [
-    "dnsseed.z.cash:8233",
     "dnsseed.str4d.xyz:8233",
+    "dnsseed.z.cash:8233",
+    "mainnet.seeder.shieldedinfra.net:8233",
     "mainnet.seeder.zfnd.org:8233",
 ]
 initial_testnet_peers = [
