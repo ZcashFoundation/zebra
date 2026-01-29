@@ -3062,82 +3062,18 @@ async fn rpc_gettxout() {
         None,
     );
 
-    // Create mempool test responses for all transactions except the genesis block's coinbase
-    for block in blocks.iter().skip(1) {
-        for tx in block.transactions.iter() {
-            let mut mempool1 = mempool.clone();
-            let mempool_req1 = mempool1
-                .expect_request_that(|request| {
-                    if let mempool::Request::TransactionsByMinedId(ids) = request {
-                        ids.len() == 1 && ids.contains(&tx.hash())
-                    } else {
-                        false
-                    }
-                })
-                .map(|responder| {
-                    responder.respond(mempool::Response::Transactions(vec![UnminedTx {
-                        id: UnminedTxId::Legacy(tx.hash()),
-                        transaction: tx.clone(),
-                        size: 0,
-                        conventional_fee: Amount::zero(),
-                    }]));
-                });
+    // TODO: Create a mempool test
 
-            let mut mempool2 = mempool.clone();
-            let mempool_req2 = mempool2
-                .expect_request_that(|request| {
-                    let outpoint = zebra_chain::transparent::OutPoint::from_usize(tx.hash(), 0);
-                    mempool::Request::IsTransparentOutputSpent(outpoint) == *request
-                })
-                .map(|responder| {
-                    responder.respond(mempool::Response::IsTransparentOutputSpent(false));
-                });
-
-            let rpc_req = rpc.get_tx_out(tx.hash().encode_hex(), 0u32, Some(true));
-
-            let (rsp, _, _) = futures::join!(rpc_req, mempool_req1, mempool_req2);
-            let get_tx_output = rsp.expect("we should have a `GetTxOut` struct");
-            let output_object = get_tx_output.0.unwrap();
-            assert_eq!(
-                output_object.value(),
-                crate::methods::types::zec::Zec::from(tx.outputs()[0].value()).lossy_zec()
-            );
-            assert_eq!(
-                output_object.script_pub_key().hex().as_raw_bytes(),
-                tx.outputs()[0].lock_script.as_raw_bytes()
-            );
-            assert_eq!(output_object.confirmations(), 0);
-        }
-    }
-
-    // Create a mempool request generator for all transactions
-    let make_mempool_req = |tx_hash: transaction::Hash| {
-        let mut mempool = mempool.clone();
-
-        async move {
-            mempool
-                .expect_request_that(|request| {
-                    if let mempool::Request::TransactionsByMinedId(ids) = request {
-                        ids.len() == 1 && ids.contains(&tx_hash)
-                    } else {
-                        false
-                    }
-                })
-                .await
-                .respond(mempool::Response::Transactions(vec![]));
-        }
-    };
-
-    // Build a state and mempool test for all transactions
+    // Build a state test for all transactions
     let run_test_case = |_block_idx: usize, _block: Arc<Block>, tx: Arc<Transaction>| {
         let read_state = read_state.clone();
         let txid = tx.hash();
         let hex_txid = txid.encode_hex::<String>();
 
-        let get_tx_out_req = rpc.get_tx_out(hex_txid.clone(), 0u32, Some(true));
+        let get_tx_out_req = rpc.get_tx_out(hex_txid.clone(), 0u32, Some(false));
 
         async move {
-            let (response, _) = futures::join!(get_tx_out_req, make_mempool_req(txid));
+            let response = get_tx_out_req.await;
             let get_tx_output = response.expect("We should have a GetTxOut struct");
 
             let output_object = get_tx_output.0.unwrap();

@@ -190,8 +190,11 @@ pub enum Response {
 pub enum CreatedOrSpent {
     /// An unspent output that was created by a transaction in the mempool and not spent by any other mempool tx.
     Created {
+        /// The output
         output: transparent::Output,
+        /// The version
         tx_version: u32,
+        /// The last seen hash
         last_seen_hash: block::Hash,
     },
     /// Indicates that an output was spent by a mempool transaction.

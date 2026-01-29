@@ -3006,7 +3006,7 @@ where
                 .map_misc_error()?;
 
             match rsp {
-                // Return the output found in the
+                // Return the output found in the mempool
                 mempool::Response::TransparentOutput(Some(CreatedOrSpent::Created {
                     output,
                     tx_version,
@@ -3026,7 +3026,7 @@ where
                     return Ok(GetTxOutResponse(None))
                 }
                 mempool::Response::TransparentOutput(None) => {}
-                _ => unreachable!("unmatched response to an `IsTransparentOutputSpent` request"),
+                _ => unreachable!("unmatched response to an `UnspentOutput` request"),
             };
         }
 
