@@ -1545,10 +1545,7 @@ async fn mempool_reject_large_scriptsig() -> Result<(), Report> {
 
     let mut tx = last_transaction.transaction.transaction.clone();
     let tx_mut = Arc::make_mut(&mut tx);
-    set_first_prevout_unlock_script(
-        tx_mut,
-        transparent::Script::new(&vec![0u8; 1651]),
-    );
+    set_first_prevout_unlock_script(tx_mut, transparent::Script::new(&vec![0u8; 1651]));
     last_transaction.transaction.transaction = tx;
 
     let cost_limit = last_transaction.cost();
@@ -1625,10 +1622,7 @@ async fn mempool_reject_non_push_only_scriptsig() -> Result<(), Report> {
 
 fn op_return_script(data: &[u8]) -> transparent::Script {
     // Build a minimal OP_RETURN script using small pushdata (<= 75 bytes).
-    assert!(
-        data.len() <= 75,
-        "test helper only supports small pushdata"
-    );
+    assert!(data.len() <= 75, "test helper only supports small pushdata");
 
     let mut bytes = Vec::with_capacity(2 + data.len());
     bytes.push(0x6a);

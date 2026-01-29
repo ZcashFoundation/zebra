@@ -16,14 +16,14 @@ use std::{
 
 use thiserror::Error;
 
+use zcash_script::script::Evaluable as ScriptEvaluable;
+use zcash_script::{script, solver};
 use zebra_chain::{
     block::Height,
     transaction::{self, Hash, Transaction, UnminedTx, UnminedTxId, VerifiedUnminedTx},
     transparent,
 };
 use zebra_node_services::mempool::TransactionDependencies;
-use zcash_script::{script, solver};
-use zcash_script::script::Evaluable as ScriptEvaluable;
 
 use self::{eviction_list::EvictionList, verified_set::VerifiedSet};
 use super::{
@@ -266,16 +266,15 @@ impl Storage {
 
             // Rule: scriptSig size must be within the standard limit.
             if unlock_script.as_raw_bytes().len() > MAX_STANDARD_SCRIPTSIG_SIZE {
-                return self.reject_non_standard(tx, NonStandardTransactionError::ScriptSigTooLarge);
+                return self
+                    .reject_non_standard(tx, NonStandardTransactionError::ScriptSigTooLarge);
             }
 
             let code = script::Code(unlock_script.as_raw_bytes().to_vec());
             // Rule: scriptSig must be push-only.
             if !code.is_push_only() {
-                return self.reject_non_standard(
-                    tx,
-                    NonStandardTransactionError::ScriptSigNotPushOnly,
-                );
+                return self
+                    .reject_non_standard(tx, NonStandardTransactionError::ScriptSigNotPushOnly);
             }
         }
 

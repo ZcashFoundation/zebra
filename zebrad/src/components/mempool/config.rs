@@ -74,5 +74,5 @@ impl Default for Config {
 /// Default maximum size of data carrier scripts (OP_RETURN), in bytes.
 ///
 /// Equivalent to zcashd's `MAX_OP_RETURN_RELAY`:
-/// https://github.com/zcash/zcash/blob/v6.10.0/src/script/standard.h#L22-L26
+/// <https://github.com/zcash/zcash/blob/v6.10.0/src/script/standard.h#L22-L26>
 pub const DEFAULT_MAX_DATACARRIER_BYTES: u32 = 83;

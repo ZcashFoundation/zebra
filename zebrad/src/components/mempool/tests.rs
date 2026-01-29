@@ -13,8 +13,8 @@ use crate::{
 use zebra_chain::{
     amount::{Amount, NonNegative},
     parameters::NetworkKind,
-    transparent::{self, Address},
     transaction::{Transaction, UnminedTx, VerifiedUnminedTx},
+    transparent::{self, Address},
 };
 
 mod prop;
