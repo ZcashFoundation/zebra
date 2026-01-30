@@ -19,7 +19,7 @@ use super::{
     accumulator,
     action::{AuthorizedTachyaction, Tachyaction},
     commitment::ValueCommitment,
-    nullifier::Nullifier,
+    nullifier::FlavoredNullifier,
     proof::TransactionProof,
     tachygram::Tachygram,
 };
@@ -132,7 +132,7 @@ impl ShieldedData {
     }
 
     /// Collect the nullifiers from this bundle.
-    pub fn nullifiers(&self) -> impl Iterator<Item = &Nullifier> {
+    pub fn nullifiers(&self) -> impl Iterator<Item = &FlavoredNullifier> {
         self.actions().map(|action| &action.nullifier)
     }
 
@@ -147,8 +147,10 @@ impl ShieldedData {
     /// then all note commitments. This ordering is important for the
     /// Tachyon accumulator.
     pub fn tachygrams(&self) -> impl Iterator<Item = Tachygram> + '_ {
-        // Nullifiers as tachygrams
-        let nullifier_tachygrams = self.nullifiers().map(Tachygram::from_nullifier);
+        // Nullifiers as tachygrams (extract the nullifier from FlavoredNullifier)
+        let nullifier_tachygrams = self
+            .nullifiers()
+            .map(|fnf| Tachygram::from_nullifier(&fnf.nullifier()));
 
         // Note commitments as tachygrams
         let commitment_tachygrams = self.note_commitments().map(|cm_x| {

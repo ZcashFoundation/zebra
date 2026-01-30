@@ -6898,6 +6898,7 @@ dependencies = [
  "sinsemilla",
  "spandoc",
  "static_assertions",
+ "tachyon",
  "tempfile",
  "thiserror 2.0.17",
  "tokio",

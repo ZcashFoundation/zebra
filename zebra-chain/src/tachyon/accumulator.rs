@@ -11,6 +11,13 @@
 //! This enables efficient set membership and non-membership proofs using
 //! polynomial evaluation, which integrates with the Ragu PCD system.
 //!
+//! ## Types
+//!
+//! - [`Anchor`] - serializable accumulator root for blockchain storage
+//! - [`tachyon::AccumulatorRoot`] - protocol-level root type from the tachyon crate
+//!
+//! Use conversion methods to move between these representations.
+//!
 //! **TODO**: This module is a placeholder. The actual accumulator implementation
 //! will be provided by the Ragu library integration.
 
@@ -133,6 +140,21 @@ impl ZcashSerialize for Anchor {
 impl ZcashDeserialize for Anchor {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         Self::try_from(reader.read_32_bytes()?)
+    }
+}
+
+impl From<tachyon::AccumulatorRoot> for Anchor {
+    fn from(root: tachyon::AccumulatorRoot) -> Self {
+        // Convert the tachyon AccumulatorRoot bytes to pallas::Base
+        let bytes = root.to_bytes();
+        Self(pallas::Base::from_repr(bytes).expect("valid field element from AccumulatorRoot"))
+    }
+}
+
+impl From<Anchor> for tachyon::AccumulatorRoot {
+    fn from(anchor: Anchor) -> Self {
+        tachyon::AccumulatorRoot::from_bytes(&anchor.0.to_repr())
+            .expect("valid field element from Anchor")
     }
 }
 

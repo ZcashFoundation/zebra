@@ -2,12 +2,16 @@
 //!
 //! Tachygrams form the basis of the Tachyon commitment tree, enabling a single
 //! accumulator structure for both nullifiers and note commitments.
+//!
+//! This module provides a serializable Tachygram type for blockchain storage.
+//! Unlike [`tachyon::Tachygram`] which stores an `Fp` field element, this type
+//! stores raw bytes for efficient serialization.
 
 use std::{fmt, io};
 
 use crate::serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize};
 
-use super::{commitment::NoteCommitment, nullifier::Nullifier};
+use super::commitment::NoteCommitment;
 
 /// A unified 32-byte representation that can be either a nullifier or note commitment.
 ///
@@ -36,7 +40,7 @@ impl Tachygram {
     /// Note: The epoch is not included in the tachygram representation.
     /// The epoch is used for wallet scanning but the core nullifier value
     /// is what gets committed to the accumulator.
-    pub fn from_nullifier(nf: &Nullifier) -> Self {
+    pub fn from_nullifier(nf: &tachyon::Nullifier) -> Self {
         Self(nf.to_bytes())
     }
 
@@ -69,6 +73,22 @@ impl From<Tachygram> for [u8; 32] {
 impl AsRef<[u8; 32]> for Tachygram {
     fn as_ref(&self) -> &[u8; 32] {
         &self.0
+    }
+}
+
+impl From<tachyon::Tachygram> for Tachygram {
+    fn from(tg: tachyon::Tachygram) -> Self {
+        Self(tg.to_bytes())
+    }
+}
+
+impl TryFrom<Tachygram> for tachyon::Tachygram {
+    type Error = SerializationError;
+
+    fn try_from(tg: Tachygram) -> Result<Self, Self::Error> {
+        tachyon::Tachygram::from_bytes(&tg.0).ok_or(SerializationError::Parse(
+            "Invalid field element for Tachygram",
+        ))
     }
 }
 

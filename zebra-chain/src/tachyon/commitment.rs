@@ -1,6 +1,17 @@
 //! Tachyon note and value commitments.
 //!
 //! These are similar to Orchard commitments but used in the Tachyon shielded pool.
+//!
+//! ## Note Commitment Representations
+//!
+//! There are two note commitment types:
+//! - [`NoteCommitment`] (this module) - stores the full `pallas::Affine` curve point
+//!   for blockchain serialization
+//! - [`tachyon::NoteCommitment`] - stores just the x-coordinate (`Fp`) for the
+//!   polynomial accumulator
+//!
+//! Use [`NoteCommitment::to_tachyon`] to convert from the full point to the extracted
+//! x-coordinate for accumulator operations.
 
 use std::{fmt, io, iter::Sum, ops};
 
@@ -40,6 +51,14 @@ impl NoteCommitment {
     /// Extract the x-coordinate as bytes.
     pub fn extract_x_bytes(&self) -> [u8; 32] {
         self.extract_x().to_repr()
+    }
+
+    /// Convert to tachyon crate NoteCommitment (extracted x-coordinate).
+    ///
+    /// The tachyon crate represents note commitments as field elements (the x-coordinate),
+    /// which is what gets accumulated in the polynomial accumulator.
+    pub fn to_tachyon(&self) -> tachyon::NoteCommitment {
+        tachyon::NoteCommitment::from_field(self.extract_x())
     }
 }
 

@@ -1,18 +1,18 @@
 //! Proptest arbitrary implementations for Tachyon types.
 
-use group::ff::Field;
+use group::prime::PrimeCurveAffine;
 use halo2::pasta::pallas;
 use proptest::{arbitrary::any, prelude::*};
-use reddsa::{orchard::SpendAuth, Signature};
+use reddsa::Signature;
+use tachyon::primitives::Fp;
 
 use super::{
+    accumulator::Anchor,
     action::{AuthorizedTachyaction, Tachyaction},
     commitment::ValueCommitment,
-    epoch::EpochId,
-    nullifier::Nullifier,
+    nullifier::FlavoredNullifier,
     proof::TransactionProof,
     tachygram::Tachygram,
-    tree::Root,
 };
 
 impl Arbitrary for Tachygram {
@@ -24,22 +24,18 @@ impl Arbitrary for Tachygram {
     }
 }
 
-impl Arbitrary for EpochId {
+impl Arbitrary for FlavoredNullifier {
     type Parameters = ();
     type Strategy = BoxedStrategy<Self>;
 
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-        any::<u32>().prop_map(EpochId::new).boxed()
-    }
-}
-
-impl Arbitrary for Nullifier {
-    type Parameters = ();
-    type Strategy = BoxedStrategy<Self>;
-
-    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-        (any::<u64>(), any::<EpochId>())
-            .prop_map(|(nf_val, epoch)| Nullifier::new(pallas::Base::from(nf_val), epoch))
+        (any::<u64>(), any::<u64>())
+            .prop_map(|(nf_val, epoch_val)| {
+                FlavoredNullifier::new(
+                    tachyon::Nullifier::from_field(Fp::from(nf_val)),
+                    tachyon::Epoch::new(epoch_val),
+                )
+            })
             .boxed()
     }
 }
@@ -70,7 +66,7 @@ impl Arbitrary for Tachyaction {
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
         (
             any::<ValueCommitment>(),
-            any::<Nullifier>(),
+            any::<FlavoredNullifier>(),
             any::<u64>(),
             any::<[u8; 32]>(),
         )
@@ -109,13 +105,13 @@ impl Arbitrary for TransactionProof {
     }
 }
 
-impl Arbitrary for Root {
+impl Arbitrary for Anchor {
     type Parameters = ();
     type Strategy = BoxedStrategy<Self>;
 
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
         any::<u64>()
-            .prop_map(|val| Root::from_base(pallas::Base::from(val)))
+            .prop_map(|val| Anchor::from_base(pallas::Base::from(val)))
             .boxed()
     }
 }

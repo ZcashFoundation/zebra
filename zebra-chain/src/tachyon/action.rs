@@ -18,7 +18,7 @@ use crate::serialization::{
     serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
 };
 
-use super::{commitment::ValueCommitment, nullifier::Nullifier};
+use super::{commitment::ValueCommitment, nullifier::FlavoredNullifier};
 
 /// A Tachyon action description.
 ///
@@ -32,7 +32,7 @@ pub struct Tachyaction {
     pub cv: ValueCommitment,
 
     /// Nullifier with epoch flavor.
-    pub nullifier: Nullifier,
+    pub nullifier: FlavoredNullifier,
 
     /// The x-coordinate of the note commitment for the output note.
     #[serde(with = "serde_helpers::Base")]
@@ -45,11 +45,11 @@ pub struct Tachyaction {
 impl Tachyaction {
     /// The size of a serialized Tachyaction in bytes.
     ///
-    /// cv: 32 + nullifier: 36 (32 + 4) + cm_x: 32 + rk: 32 = 132 bytes
+    /// cv: 32 + nullifier: 40 (32 + 8) + cm_x: 32 + rk: 32 = 136 bytes
     ///
     /// This is significantly smaller than Orchard actions (~580 bytes)
     /// due to the absence of encrypted ciphertexts.
-    pub const SIZE: usize = 132;
+    pub const SIZE: usize = 136;
 }
 
 impl ZcashSerialize for Tachyaction {
@@ -65,7 +65,7 @@ impl ZcashSerialize for Tachyaction {
 impl ZcashDeserialize for Tachyaction {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         let cv = ValueCommitment::zcash_deserialize(&mut reader)?;
-        let nullifier = Nullifier::zcash_deserialize(&mut reader)?;
+        let nullifier = FlavoredNullifier::zcash_deserialize(&mut reader)?;
 
         let cm_x_bytes = reader.read_32_bytes()?;
         let cm_x = pallas::Base::from_repr(cm_x_bytes);
@@ -151,7 +151,7 @@ mod tests {
         // Verify our size calculations are correct
         assert_eq!(
             Tachyaction::SIZE,
-            32 + 36 + 32 + 32, // cv + nullifier + cm_x + rk
+            32 + 40 + 32 + 32, // cv + nullifier (32 + 8) + cm_x + rk
         );
         assert_eq!(
             AuthorizedTachyaction::SIZE,

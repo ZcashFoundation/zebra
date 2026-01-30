@@ -84,6 +84,7 @@ zcash_script.workspace = true
 # ECC deps
 halo2 = { package = "halo2_proofs", version = "0.3" }
 orchard.workspace = true
+tachyon.workspace = true
 zcash_encoding.workspace = true
 zcash_history.workspace = true
 zcash_note_encryption = { workspace = true }
