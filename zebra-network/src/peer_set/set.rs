@@ -262,6 +262,24 @@ where
 
     /// The network of this peer set.
     network: Network,
+
+    /// Set of addresses of established outbound peers.
+    /// Used to accurately report the outbound connection count
+    /// without counting pending handshakes.
+    outbound_peers: HashSet<D::Key>,
+
+    /// Set of addresses of established inbound peers.
+    /// Used to accurately report the inbound connection count
+    /// without counting pending handshakes.
+    inbound_peers: HashSet<D::Key>,
+
+    /// Established outbound connection count progress bar.
+    #[cfg(feature = "progress-bar")]
+    outbound_connection_bar: howudoin::Tx,
+
+    /// Established inbound connection count progress bar.
+    #[cfg(feature = "progress-bar")]
+    inbound_connection_bar: howudoin::Tx,
 }
 
 impl<D, C> Drop for PeerSet<D, C>
@@ -271,6 +289,11 @@ where
     C: ChainTip,
 {
     fn drop(&mut self) {
+        #[cfg(feature = "progress-bar")]
+        self.outbound_connection_bar.close();
+        #[cfg(feature = "progress-bar")]
+        self.inbound_connection_bar.close();
+
         // We don't have access to the current task (if any), so we just drop everything we can.
         let waker = noop_waker();
         let mut cx = Context::from_waker(&waker);
@@ -346,6 +369,13 @@ where
             max_conns_per_ip: max_conns_per_ip.unwrap_or(config.max_connections_per_ip),
 
             network: config.network.clone(),
+
+            outbound_peers: HashSet::new(),
+            inbound_peers: HashSet::new(),
+            #[cfg(feature = "progress-bar")]
+            outbound_connection_bar: howudoin::new_root().label("Outbound Connections"),
+            #[cfg(feature = "progress-bar")]
+            inbound_connection_bar: howudoin::new_root().label("Inbound Connections"),
         }
     }
 
@@ -428,6 +458,8 @@ where
     fn shut_down_tasks_and_channels(&mut self, cx: &mut Context<'_>) {
         // Drop services and cancel their background tasks.
         self.ready_services = HashMap::new();
+        self.outbound_peers.clear();
+        self.inbound_peers.clear();
 
         for (_peer_key, handle) in self.cancel_handles.drain() {
             let _ = handle.send(CancelClientWork);
@@ -523,6 +555,8 @@ where
 
                     if self.bans_receiver.borrow().contains_key(&key.ip()) {
                         warn!(?key, "service is banned, dropping service");
+                        self.outbound_peers.remove(&key);
+                        self.inbound_peers.remove(&key);
                         std::mem::drop(svc);
                         continue;
                     }
@@ -535,28 +569,46 @@ where
 
                 // Unready -> Canceled
                 Some(Err((key, UnreadyError::Canceled))) => {
-                    // A service be canceled because we've connected to the same service twice.
-                    // In that case, there is a cancel handle for the peer address,
-                    // but it belongs to the service for the newer connection.
+                    // A service can be canceled because we've connected to the same peer twice.
+                    //
+                    // In that case, there can still be an active connection for this key
+                    // (either unready with a cancel handle, or already moved to `ready_services`).
+                    // Don't remove this key from `outbound_peers` unless there are no other
+                    // tracked connections for it.
+                    let duplicate_connection = self.has_peer_with_addr(key);
                     trace!(
                         ?key,
-                        duplicate_connection = self.cancel_handles.contains_key(&key),
+                        duplicate_connection,
                         "service was canceled, dropping service"
                     );
+
+                    if !duplicate_connection {
+                        self.outbound_peers.remove(&key);
+                        self.inbound_peers.remove(&key);
+                    }
                 }
                 Some(Err((key, UnreadyError::CancelHandleDropped(_)))) => {
-                    // Similarly, services with dropped cancel handes can have duplicates.
+                    // Similarly, services with dropped cancel handles can have duplicates.
+                    // Avoid removing a peer entry if another connection is still tracked.
+                    let duplicate_connection = self.has_peer_with_addr(key);
                     trace!(
                         ?key,
-                        duplicate_connection = self.cancel_handles.contains_key(&key),
+                        duplicate_connection,
                         "cancel handle was dropped, dropping service"
                     );
+
+                    if !duplicate_connection {
+                        self.outbound_peers.remove(&key);
+                        self.inbound_peers.remove(&key);
+                    }
                 }
 
                 // Unready -> Errored
                 Some(Err((key, UnreadyError::Inner(error)))) => {
                     debug!(%error, "service failed while unready, dropping service");
 
+                    self.outbound_peers.remove(&key);
+                    self.inbound_peers.remove(&key);
                     let cancel = self.cancel_handles.remove(&key);
                     assert!(cancel.is_some(), "missing cancel handle");
                 }
@@ -599,6 +651,8 @@ where
                 Ok(()) => {
                     if self.bans_receiver.borrow().contains_key(&key.ip()) {
                         debug!(?key, "service ip is banned, dropping service");
+                        self.outbound_peers.remove(&key);
+                        self.inbound_peers.remove(&key);
                         std::mem::drop(svc);
                         continue;
                     }
@@ -610,6 +664,8 @@ where
                 Err(error) => {
                     debug!(%error, "service failed while ready, dropping service");
 
+                    self.outbound_peers.remove(&key);
+                    self.inbound_peers.remove(&key);
                     // Ready services can just be dropped, they don't need any cleanup.
                     std::mem::drop(svc);
                 }
@@ -700,6 +756,12 @@ where
                         continue;
                     }
 
+                    if svc.is_outbound() {
+                        self.outbound_peers.insert(key);
+                    } else {
+                        self.inbound_peers.insert(key);
+                    }
+
                     self.push_unready(key, svc);
                 }
             }
@@ -711,6 +773,18 @@ where
     /// Checks if the minimum peer version has changed, and disconnects from outdated peers.
     fn disconnect_from_outdated_peers(&mut self) {
         if let Some(minimum_version) = self.minimum_peer_version.changed() {
+            let outdated: Vec<_> = self
+                .ready_services
+                .iter()
+                .filter(|(_, peer)| peer.remote_version() < minimum_version)
+                .map(|(addr, _)| *addr)
+                .collect();
+
+            for key in &outdated {
+                self.outbound_peers.remove(key);
+                self.inbound_peers.remove(key);
+            }
+
             // It is ok to drop ready services, they don't need anything cancelled.
             self.ready_services
                 .retain(|_address, peer| peer.remote_version() >= minimum_version);
@@ -736,6 +810,9 @@ where
     /// Drops the service, cancelling any pending request or response to that peer.
     /// If the peer does not exist, does nothing.
     fn remove(&mut self, key: &D::Key) {
+        self.outbound_peers.remove(key);
+        self.inbound_peers.remove(key);
+
         if let Some(ready_service) = self.take_ready_service(key) {
             // A ready service has no work to cancel, so just drop it.
             std::mem::drop(ready_service);
@@ -762,6 +839,8 @@ where
         if svc.remote_version() >= self.minimum_peer_version.current() {
             self.ready_services.insert(key, svc);
         } else {
+            self.outbound_peers.remove(&key);
+            self.inbound_peers.remove(&key);
             std::mem::drop(svc);
         }
     }
@@ -1226,6 +1305,18 @@ where
         metrics::gauge!("pool.num_ready").set(num_ready as f64);
         metrics::gauge!("pool.num_unready").set(num_unready as f64);
         metrics::gauge!("zcash.net.peers").set(num_peers as f64);
+
+        let num_outbound = self.outbound_peers.len();
+        let num_inbound = self.inbound_peers.len();
+        metrics::gauge!("zcash.net.peers.outbound").set(num_outbound as f64);
+        metrics::gauge!("zcash.net.peers.inbound").set(num_inbound as f64);
+
+        #[cfg(feature = "progress-bar")]
+        self.outbound_connection_bar
+            .set_pos(u64::try_from(num_outbound).expect("fits in u64"));
+        #[cfg(feature = "progress-bar")]
+        self.inbound_connection_bar
+            .set_pos(u64::try_from(num_inbound).expect("fits in u64"));
 
         // Security: make sure we haven't exceeded the connection limit
         if num_peers > self.peerset_total_connection_limit {

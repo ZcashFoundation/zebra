@@ -376,6 +376,11 @@ impl ConnectedAddr {
     pub fn is_inbound(&self) -> bool {
         matches!(self, InboundDirect { .. } | InboundProxy { .. })
     }
+
+    /// Returns true if the [`ConnectedAddr`] was created for an outbound connection.
+    pub fn is_outbound(&self) -> bool {
+        matches!(self, OutboundDirect { .. } | OutboundProxy { .. })
+    }
 }
 
 impl fmt::Debug for ConnectedAddr {
