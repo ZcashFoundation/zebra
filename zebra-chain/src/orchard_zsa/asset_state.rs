@@ -108,24 +108,45 @@ impl AssetState {
         Ok(bytes)
     }
 
-    /*
-    // FIXME: Do we need it to be pub?
     /// Returns whether the asset is finalized.
-    //pub fn is_finalized(&self) -> bool {
-    //    self.0.is_finalized
-    //}
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn is_finalized(&self) -> bool {
+        self.0.is_finalized
+    }
 
-    // FIXME: Do we need it to be pub?
     /// Returns the total supply.
-    //pub fn total_supply(&self) -> u64 {
-    //    self.0.amount.inner()
-    //}
-    */
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn total_supply(&self) -> u64 {
+        self.0.amount.inner()
+    }
 }
 
 impl From<AssetRecord> for AssetState {
     fn from(record: AssetRecord) -> Self {
         Self(record)
+    }
+}
+
+// Needed for the new `getassetstate` RPC endpoint in `zebra-rpc`.
+// Can't derive `Serialize` here as `orchard::AssetRecord` doesn't implement it.
+impl serde::Serialize for AssetState {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use crate::serde::ser::SerializeStruct;
+
+        // "2" is the expected number of struct fields (a hint for pre-allocation).
+        let mut st = serializer.serialize_struct("AssetState", 2)?;
+
+        let inner = &self.0;
+        st.serialize_field("amount", &inner.amount.inner())?;
+        st.serialize_field("is_finalized", &inner.is_finalized)?;
+
+        // FIXME: serialize `reference_note` if/when needed (pick a canonical byte encoding).
+        // st.serialize_field("reference_note", ...)?;
+
+        st.end()
     }
 }
 

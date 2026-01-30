@@ -23,7 +23,7 @@ use zebra_chain::{
     block::{self, Height, SerializedBlock},
     chain_tip::{ChainTip, NetworkChainTipHeightEstimator},
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
-    serialization::{ZcashDeserialize, ZcashDeserializeInto},
+    serialization::ZcashDeserialize,
     subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx},
     transparent::{self, Address},
@@ -1369,6 +1369,7 @@ where
         .boxed()
     }
 
+    // FIXME: Add #[cfg(feature = "tx_v6")] here
     fn get_asset_state(
         &self,
         asset_base: String,
@@ -1378,10 +1379,13 @@ where
         let include_non_finalized = include_non_finalized.unwrap_or(true);
 
         async move {
-            let asset_base = hex::decode(asset_base)
-                .map_server_error()?
-                .zcash_deserialize_into()
-                .map_server_error()?;
+            let asset_base = zebra_chain::orchard_zsa::asset_state::AssetBase::from_bytes(
+                &hex::decode(asset_base).map_server_error()?[..]
+                    .try_into()
+                    .map_server_error()?,
+            )
+            .into_option()
+            .ok_or_server_error("invalid asset base")?;
 
             let request = zebra_state::ReadRequest::AssetState {
                 asset_base,

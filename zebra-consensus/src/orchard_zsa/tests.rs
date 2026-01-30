@@ -155,7 +155,9 @@ fn build_asset_records<'a, I: IntoIterator<Item = &'a TranscriptItem>>(
         })
         .flatten()
         .try_fold(HashMap::new(), |mut asset_records, tx| {
-            process_burns(&mut asset_records, tx.orchard_burns())?;
+            if let Some(burns) = tx.orchard_burns() {
+                process_burns(&mut asset_records, burns.into_iter())?;
+            }
 
             if let Some(issue_data) = tx.orchard_issue_data() {
                 process_issue_actions(
@@ -257,14 +259,15 @@ async fn check_orchard_zsa_workflow() -> Result<(), Report> {
             .expect("State should contain this asset now.");
 
         assert_eq!(
-            asset_state.is_finalized, asset_record.is_finalized,
+            asset_state.is_finalized(),
+            asset_record.is_finalized,
             "Finalized state does not match for asset {:?}.",
             asset_base
         );
 
         assert_eq!(
-            asset_state.total_supply,
-            // FIXME: Fix it after chaning ValueSum to NoteValue in AssetSupply in orchard
+            asset_state.total_supply(),
+            // FIXME: Fix it after changing ValueSum to NoteValue in AssetSupply in orchard
             u64::try_from(i128::from(asset_record.amount))
                 .expect("asset supply amount should be within u64 range"),
             "Total supply mismatch for asset {:?}.",
