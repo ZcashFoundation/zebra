@@ -134,17 +134,18 @@ impl serde::Serialize for AssetState {
     where
         S: serde::Serializer,
     {
-        use crate::serde::ser::SerializeStruct;
+        use serde::ser::{Error as _, SerializeStruct};
 
-        // "2" is the expected number of struct fields (a hint for pre-allocation).
-        let mut st = serializer.serialize_struct("AssetState", 2)?;
+        // "3" is the expected number of struct fields (a hint for pre-allocation).
+        let mut st = serializer.serialize_struct("AssetState", 3)?;
 
         let inner = &self.0;
         st.serialize_field("amount", &inner.amount.inner())?;
         st.serialize_field("is_finalized", &inner.is_finalized)?;
 
-        // FIXME: serialize `reference_note` if/when needed (pick a canonical byte encoding).
-        // st.serialize_field("reference_note", ...)?;
+        let mut note_bytes = Vec::<u8>::new();
+        write_note(&mut note_bytes, &inner.reference_note).map_err(S::Error::custom)?;
+        st.serialize_field("reference_note", &hex::encode(note_bytes))?;
 
         st.end()
     }
