@@ -1,0 +1,26 @@
+[package]
+name = "tachyon"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.90.0"
+description = "The Tachyon shielded transaction protocol (stub)"
+readme = "README.md"
+categories = ["cryptography::cryptocurrencies"]
+keywords = ["zcash", "tachyon"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[dependencies]
+serde = { workspace = true }
+core2 = { version = "0.3", default-features = false, features = ["alloc"] }
+
+[dev-dependencies]
+proptest = { workspace = true }
+
+[lib]
+bench = false
+
+[features]
+default = ["std"]
+std = ["core2/std"]

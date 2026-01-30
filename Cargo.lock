@@ -5016,6 +5016,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "tachyon"
+version = "0.0.0"
+dependencies = [
+ "core2",
+ "proptest",
+ "serde",
+]
+
+[[package]]
 name = "tap"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1,17 +1,18 @@
 [workspace]
 members = [
-        "zebrad",
-        "zebra-chain",
-        "zebra-network",
-        "zebra-state",
-        "zebra-script",
-        "zebra-consensus",
-        "zebra-rpc",
-        "zebra-node-services",
-        "zebra-test",
-        "zebra-utils",
-        "tower-batch-control",
-        "tower-fallback",
+    "zebrad",
+    "zebra-chain",
+    "zebra-network",
+    "zebra-state",
+    "zebra-script",
+    "zebra-consensus",
+    "zebra-rpc",
+    "zebra-node-services",
+    "zebra-test",
+    "zebra-utils",
+    "tower-batch-control",
+    "tower-fallback",
+    "tachyon",
 ]
 
 # Use the edition 2021 dependency resolver in the workspace, to match the crates
@@ -22,6 +23,7 @@ resolver = "2"
 [workspace.dependencies]
 incrementalmerkletree = { version = "0.8.2", features = ["legacy-api"] }
 orchard = "0.11"
+tachyon = { path = "tachyon", version = "0.0.0" }
 sapling-crypto = "0.5"
 zcash_address = "0.10"
 zcash_encoding = "0.3"
@@ -295,6 +297,6 @@ debug = false
 [workspace.lints.rust]
 # The linter should ignore these expected config flags/values
 unexpected_cfgs = { level = "warn", check-cfg = [
-    'cfg(tokio_unstable)', # Used by tokio-console
-    'cfg(zcash_unstable, values("zfuture", "nu6.1", "nu7"))' # Used in Zebra and librustzcash
+    'cfg(tokio_unstable)',                                    # Used by tokio-console
+    'cfg(zcash_unstable, values("zfuture", "nu6.1", "nu7"))', # Used in Zebra and librustzcash
 ] }
