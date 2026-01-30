@@ -1,6 +1,6 @@
 //! Tachyon transaction bundles.
 
-use alloc::vec::Vec;
+use std::vec::Vec;
 
 use crate::Action;
 

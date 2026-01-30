@@ -6,7 +6,7 @@ rustflags = [
     # Zebra standard lints for Rust 1.65+
 
     # High-risk code
-    "-Dunsafe_code",
+    # "-Dunsafe_code",
     "-Dnon_ascii_idents",
 
     # Potential bugs
@@ -90,4 +90,4 @@ rustdocflags = [
 ]
 
 [env]
-RUST_BACKTRACE="1"
+RUST_BACKTRACE = "1"

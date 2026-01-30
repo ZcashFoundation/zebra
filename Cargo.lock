@@ -3895,6 +3895,95 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
 
 [[package]]
+name = "ragu"
+version = "0.0.0"
+dependencies = [
+ "ragu_arithmetic",
+ "ragu_circuits",
+ "ragu_core",
+ "ragu_pcd",
+ "ragu_primitives",
+]
+
+[[package]]
+name = "ragu_arithmetic"
+version = "0.0.0"
+dependencies = [
+ "ff",
+ "pasta_curves",
+ "ragu_macros",
+ "rand 0.8.5",
+]
+
+[[package]]
+name = "ragu_circuits"
+version = "0.0.0"
+dependencies = [
+ "ff",
+ "group",
+ "ragu_arithmetic",
+ "ragu_core",
+ "ragu_primitives",
+ "rand 0.8.5",
+]
+
+[[package]]
+name = "ragu_core"
+version = "0.0.0"
+dependencies = [
+ "ff",
+ "ragu_arithmetic",
+ "ragu_macros",
+ "thiserror 2.0.17",
+]
+
+[[package]]
+name = "ragu_macros"
+version = "0.0.0"
+dependencies = [
+ "num-bigint",
+ "num-traits",
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.106",
+]
+
+[[package]]
+name = "ragu_pasta"
+version = "0.0.0"
+dependencies = [
+ "ff",
+ "group",
+ "pasta_curves",
+ "ragu_arithmetic",
+]
+
+[[package]]
+name = "ragu_pcd"
+version = "0.0.0"
+dependencies = [
+ "ff",
+ "pasta_curves",
+ "ragu_arithmetic",
+ "ragu_circuits",
+ "ragu_core",
+ "ragu_primitives",
+ "rand 0.8.5",
+]
+
+[[package]]
+name = "ragu_primitives"
+version = "0.0.0"
+dependencies = [
+ "ff",
+ "ragu_arithmetic",
+ "ragu_core",
+ "ragu_macros",
+ "thiserror 2.0.17",
+]
+
+[[package]]
 name = "rand"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5020,7 +5109,12 @@ name = "tachyon"
 version = "0.0.0"
 dependencies = [
  "core2",
+ "ff",
+ "group",
+ "pasta_curves",
  "proptest",
+ "ragu",
+ "ragu_pasta",
  "serde",
 ]
 

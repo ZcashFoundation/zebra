@@ -18,7 +18,6 @@
 //! types. For example, [`Address`] is a Tachyon payment address, and [`Tachygram`]
 //! is a unified commitment/nullifier representation unique to Tachyon.
 
-#![no_std]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 // Temporary until we have more of the crate implemented.
 #![allow(dead_code)]
@@ -27,11 +26,6 @@
 #![deny(missing_debug_implementations)]
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
-
-extern crate alloc;
-
-#[cfg(feature = "std")]
-extern crate std;
 
 pub mod accumulator;
 mod action;
@@ -43,10 +37,13 @@ pub mod primitives;
 pub mod tachygram;
 pub mod value;
 
-pub use accumulator::AccumulatorRoot;
+pub use accumulator::{Accumulator, AccumulatorRoot, MembershipWitness};
 pub use action::Action;
 pub use address::Address;
 pub use bundle::Bundle;
-pub use note::{Note, Nullifier};
+pub use keys::{
+    ConstrainedNullifierKey, FullViewingKey, IncomingViewingKey, NullifierKey, SpendingKey,
+};
+pub use note::{Epoch, Note, NoteCommitment, Nullifier, NullifierTrapdoor};
 pub use tachygram::Tachygram;
 pub use value::ValueCommitment;
