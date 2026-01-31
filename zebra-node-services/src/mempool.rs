@@ -6,6 +6,7 @@ use std::collections::HashSet;
 
 use tokio::sync::oneshot;
 use zebra_chain::{
+    block,
     transaction::{self, UnminedTx, UnminedTxId, VerifiedUnminedTx},
     transparent,
 };
@@ -109,7 +110,7 @@ pub enum Request {
     QueueStats,
 
     /// Check whether a transparent output is spent in the mempool.
-    IsTransparentOutputSpent(transparent::OutPoint),
+    UnspentOutput(transparent::OutPoint),
 }
 
 /// A response to a mempool service request.
@@ -180,6 +181,22 @@ pub enum Response {
         fully_notified: Option<bool>,
     },
 
-    /// Returns whether a transparent output is spent in the mempool.
-    IsTransparentOutputSpent(bool),
+    /// Returns whether a transparent output is created or spent in the mempool, if present.
+    TransparentOutput(Option<CreatedOrSpent>),
+}
+
+/// Indicates whether an output was created or spent by a mempool transaction.
+#[derive(Debug)]
+pub enum CreatedOrSpent {
+    /// An unspent output that was created by a transaction in the mempool and not spent by any other mempool tx.
+    Created {
+        /// The output
+        output: transparent::Output,
+        /// The version
+        tx_version: u32,
+        /// The last seen hash
+        last_seen_hash: block::Hash,
+    },
+    /// Indicates that an output was spent by a mempool transaction.
+    Spent,
 }

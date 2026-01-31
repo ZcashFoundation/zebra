@@ -38,7 +38,9 @@ use zebra_chain::{
 };
 use zebra_consensus::{error::TransactionError, transaction};
 use zebra_network::{self as zn, PeerSocketAddr};
-use zebra_node_services::mempool::{Gossip, MempoolChange, MempoolTxSubscriber, Request, Response};
+use zebra_node_services::mempool::{
+    CreatedOrSpent, Gossip, MempoolChange, MempoolTxSubscriber, Request, Response,
+};
 use zebra_state as zs;
 use zebra_state::{ChainTipChange, TipAction};
 
@@ -919,22 +921,44 @@ impl Service<Request> for Mempool {
                     }
                     .boxed()
                 }
-                Request::IsTransparentOutputSpent(outpoint) => {
+                Request::UnspentOutput(outpoint) => {
                     trace!(?req, "got mempool request");
 
-                    let spent = storage.transactions().values().any(|tx| {
-                        tx.transaction.transaction.inputs().iter().any(|input| {
-                            matches!(
-                                input,
-                                zebra_chain::transparent::Input::PrevOut { outpoint: prev, .. }
-                                    if prev == &outpoint
-                            )
+                    if storage.has_spent_outpoint(&outpoint) {
+                        trace!(?req, "answered mempool request");
+
+                        return async move {
+                            Ok(Response::TransparentOutput(Some(CreatedOrSpent::Spent)))
+                        }
+                        .boxed();
+                    }
+
+                    if let Some((tx_version, output)) = storage
+                        .transactions()
+                        .get(&outpoint.hash)
+                        .map(|tx| tx.transaction.transaction.clone())
+                        .and_then(|tx| {
+                            tx.outputs()
+                                .get(outpoint.index as usize)
+                                .map(|output| (tx.version(), output.clone()))
                         })
-                    });
+                    {
+                        trace!(?req, "answered mempool request");
+
+                        let last_seen_hash = *last_seen_tip_hash;
+                        return async move {
+                            Ok(Response::TransparentOutput(Some(CreatedOrSpent::Created {
+                                output,
+                                tx_version,
+                                last_seen_hash,
+                            })))
+                        }
+                        .boxed();
+                    }
 
                     trace!(?req, "answered mempool request");
 
-                    async move { Ok(Response::IsTransparentOutputSpent(spent)) }.boxed()
+                    async move { Ok(Response::TransparentOutput(None)) }.boxed()
                 }
             },
             ActiveState::Disabled => {
@@ -954,7 +978,7 @@ impl Service<Request> for Mempool {
                     Request::TransactionsByMinedId(_) => Response::Transactions(Default::default()),
                     Request::TransactionWithDepsByMinedId(_)
                     | Request::AwaitOutput(_)
-                    | Request::IsTransparentOutputSpent(_) => {
+                    | Request::UnspentOutput(_) => {
                         return async move {
                             Err("mempool is not active: wait for Zebra to sync to the tip".into())
                         }

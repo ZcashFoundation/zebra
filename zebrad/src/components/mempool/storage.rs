@@ -528,6 +528,11 @@ impl Storage {
         self.verified.created_output(outpoint)
     }
 
+    /// Returns true if a tx in the set has spent the output at the provided outpoint.
+    pub fn has_spent_outpoint(&self, outpoint: &transparent::OutPoint) -> bool {
+        self.verified.has_spent_outpoint(outpoint)
+    }
+
     /// Returns the number of transactions in the mempool.
     #[allow(dead_code)]
     pub fn transaction_count(&self) -> usize {
