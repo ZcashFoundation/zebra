@@ -52,6 +52,8 @@ The mempool has the following configurable parameters:
 
 3. **Debug Enable At Height** (`debug_enable_at_height`): An optional height at which to enable the mempool for debugging, regardless of sync status.
 
+4. **Max Data Carrier Bytes** (`max_datacarrier_bytes`): Optional maximum size of an `OP_RETURN` output script in bytes. If omitted, defaults to 83 (80-byte payload plus opcode overhead).
+
 ## State Management
 
 The mempool maintains an `ActiveState` which can be either:
