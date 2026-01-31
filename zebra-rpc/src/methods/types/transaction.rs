@@ -368,11 +368,10 @@ impl OutputObject {
         confirmations: u32,
         version: u32,
         coinbase: bool,
+        network: &Network,
     ) -> Self {
         let lock_script = &output.lock_script;
-        let addresses = output
-            .address(&zebra_chain::parameters::Network::Mainnet)
-            .map(|addr| vec![addr.to_string()]);
+        let addresses = output.address(network).map(|addr| vec![addr.to_string()]);
         let req_sigs = addresses.as_ref().map(|a| a.len() as u32);
 
         let script_pub_key = ScriptPubKey::new(

@@ -3019,6 +3019,7 @@ where
                             0,
                             tx_version,
                             false,
+                            self.network(),
                         ),
                     )))
                 }
@@ -3095,6 +3096,7 @@ where
                         tx.confirmations,
                         tx.tx.version(),
                         tx.tx.is_coinbase(),
+                        self.network(),
                     ),
                 )))
             }
