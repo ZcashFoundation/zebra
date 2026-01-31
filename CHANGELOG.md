@@ -58,6 +58,8 @@ Thank you to everyone who contributed to this release, we couldn't make Zebra wi
 - Prometheus alert rules and Grafana dashboards for value pools and RPC monitoring ([#10175](https://github.com/ZcashFoundation/zebra/pull/10175))
 - Sync pipeline, consensus verification, and RocksDB performance histograms ([#10179](https://github.com/ZcashFoundation/zebra/pull/10179))
 - RocksDB I/O latency, sync distance metrics, and Zebra Overview dashboard ([#10181](https://github.com/ZcashFoundation/zebra/pull/10181))
+- Added mempool standardness policy checks for transparent scripts (scriptSig size/push-only, standard script kinds, bare multisig rejection, OP_RETURN size/count limits).
+- Added mempool configuration option `max_datacarrier_bytes` for OP_RETURN policy.
 
 
 ## [Zebra 3.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v3.1.0) - 2025-11-28
