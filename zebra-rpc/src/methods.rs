@@ -3076,16 +3076,14 @@ where
                         .map_misc_error()?;
 
                     match rsp {
-                        zebra_state::ReadResponse::IsTransparentOutputSpent(spent) => {
-                            Ok::<bool, ErrorObject>(spent)
-                        }
+                        zebra_state::ReadResponse::IsTransparentOutputSpent(spent) => spent,
                         _ => unreachable!(
                             "unmatched response to an `IsTransparentOutputSpent` request"
                         ),
                     }
                 };
 
-                if is_spent? {
+                if is_spent {
                     return Ok(GetTxOutResponse(None));
                 }
 
