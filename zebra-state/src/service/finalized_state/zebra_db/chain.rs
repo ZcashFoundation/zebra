@@ -278,7 +278,6 @@ impl DiskWriteBatch {
                 height: Some(finalized.height),
             })?;
 
-
         // Update value pool metrics for observability (ZIP-209 compliance monitoring)
         value_pool_metrics(&new_value_pool);
 

@@ -56,7 +56,7 @@ pub enum CommitBlockError {
 
     /// Contextual validation failed.
     #[error("could not contextually validate semantically verified block")]
-    ValidateContextError(#[from] ValidateContextError),
+    ValidateContextError(#[from] Box<ValidateContextError>),
 
     /// The write task exited (likely during shutdown).
     #[error("block commit task exited. Is Zebra shutting down?")]
@@ -79,7 +79,7 @@ pub struct CommitSemanticallyVerifiedError(#[from] CommitBlockError);
 
 impl From<ValidateContextError> for CommitSemanticallyVerifiedError {
     fn from(value: ValidateContextError) -> Self {
-        Self(value.into())
+        Self(CommitBlockError::ValidateContextError(Box::new(value)))
     }
 }
 
@@ -107,7 +107,7 @@ pub struct CommitCheckpointVerifiedError(#[from] CommitBlockError);
 
 impl From<ValidateContextError> for CommitCheckpointVerifiedError {
     fn from(value: ValidateContextError) -> Self {
-        Self(value.into())
+        Self(CommitBlockError::ValidateContextError(Box::new(value)))
     }
 }
 
