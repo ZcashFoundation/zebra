@@ -2268,7 +2268,6 @@ impl Service<ReadRequest> for ReadStateService {
                             },
                         );
 
-                        // The work is done in the future.
                         timer.finish(
                             module_path!(),
                             line!(),

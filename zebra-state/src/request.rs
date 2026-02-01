@@ -1342,7 +1342,8 @@ pub enum ReadRequest {
     /// allowing the caller to listen for new blocks in the non-finalized state.
     NonFinalizedBlocksListener,
 
-    /// Checks if a transparent output is spent in the best chain.
+    /// Returns `true` if the transparent output is spent in the best chain,
+    /// or `false` if it is unspent.
     IsTransparentOutputSpent(transparent::OutPoint),
 }
 
