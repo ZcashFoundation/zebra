@@ -1,6 +1,6 @@
 //! Fixed test vectors for the peer set.
 
-use std::{cmp::max, iter, time::Duration};
+use std::{cmp::max, collections::HashSet, iter, net::SocketAddr, sync::Arc, time::Duration};
 
 use tokio::time::timeout;
 use tower::{Service, ServiceExt};
@@ -15,8 +15,10 @@ use crate::{
     peer::{ClientRequest, MinimumPeerVersion},
     peer_set::inventory_registry::InventoryStatus,
     protocol::external::{types::Version, InventoryHash},
-    Request, SharedPeerError,
+    PeerSocketAddr, Request, SharedPeerError,
 };
+use indexmap::IndexMap;
+use tokio::sync::watch;
 
 use super::{PeerSetBuilder, PeerVersions};
 
@@ -288,6 +290,53 @@ fn peer_set_route_inv_empty_registry() {
         }
 
         assert_eq!(received_count, 1);
+    });
+}
+
+#[test]
+fn broadcast_all_queued_removes_banned_peers() {
+    let peer_versions = PeerVersions {
+        peer_versions: vec![Version::min_specified_for_upgrade(
+            &Network::Mainnet,
+            NetworkUpgrade::Nu6,
+        )],
+    };
+
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    let (discovered_peers, _handles) = peer_versions.mock_peer_discovery();
+    let (minimum_peer_version, _best_tip_height) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+
+    runtime.block_on(async move {
+        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version.clone())
+            .build();
+
+        let banned_ip: std::net::IpAddr = "127.0.0.1".parse().unwrap();
+        let mut bans_map: IndexMap<std::net::IpAddr, std::time::Instant> = IndexMap::new();
+        bans_map.insert(banned_ip, std::time::Instant::now());
+
+        let (bans_tx, bans_rx) = watch::channel(Arc::new(bans_map));
+        let _ = bans_tx;
+        peer_set.bans_receiver = bans_rx;
+
+        let banned_addr: PeerSocketAddr = SocketAddr::new(banned_ip, 1).into();
+        let mut remaining_peers = HashSet::new();
+        remaining_peers.insert(banned_addr);
+
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
+        peer_set.queued_broadcast_all = Some((Request::Peers, sender, remaining_peers));
+
+        peer_set.broadcast_all_queued();
+
+        if let Some((_req, _sender, remaining_peers)) = peer_set.queued_broadcast_all.take() {
+            assert!(remaining_peers.is_empty());
+        } else {
+            assert!(receiver.try_recv().is_ok());
+        }
     });
 }
 
