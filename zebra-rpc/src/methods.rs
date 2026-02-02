@@ -716,7 +716,7 @@ pub trait Rpc {
     ///
     /// - `txid`: (string, required, example="mytxid") The transaction ID that contains the output.
     /// - `n`: (number, required) The output index number.
-    /// - `include_mempool` (bool, optional) Whether to include the mempool in the search.
+    /// - `include_mempool` (bool, optional, default=true) Whether to include the mempool in the search.
     #[method(name = "gettxout")]
     async fn get_tx_out(
         &self,
@@ -2992,12 +2992,13 @@ where
         let txid = transaction::Hash::from_hex(txid)
             .map_error(server::error::LegacyCode::InvalidParameter)?;
 
-        let index: usize = n.try_into().expect("u32 always fits in usize");
-
-        let outpoint = transparent::OutPoint::from_usize(txid, index);
+        let outpoint = transparent::OutPoint {
+            hash: txid,
+            index: n,
+        };
 
         // Optional mempool path
-        if include_mempool.unwrap_or(false) {
+        if include_mempool.unwrap_or(true) {
             let rsp = self
                 .mempool
                 .clone()
@@ -3058,6 +3059,7 @@ where
         match rsp {
             zebra_state::ReadResponse::Transaction(Some(tx)) => {
                 let outputs = tx.tx.outputs();
+                let index: usize = n.try_into().expect("u32 always fits in usize");
                 let output = match outputs.get(index) {
                     Some(output) => output,
                     // return null if the output is not found
@@ -3065,8 +3067,6 @@ where
                 };
 
                 // Prune state outputs that are spent
-                let outpoint = transparent::OutPoint::from_usize(txid, index);
-
                 let is_spent = {
                     let rsp = self
                         .read_state
