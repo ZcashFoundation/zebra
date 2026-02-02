@@ -332,26 +332,31 @@ jobs:
             RPC_PORT="18232"
           fi
 
-          gcloud compute instance-templates create-with-container "${TEMPLATE_NAME}" \
-          --machine-type ${{ vars.GCP_SMALL_MACHINE }} \
-          --provisioning-model=SPOT \
-          --boot-disk-size=10GB \
-          --boot-disk-type=pd-standard \
-          --image-project=cos-cloud \
-          --image-family=cos-stable \
-          --subnet=${{ vars.GCP_SUBNETWORK }} \
-          --no-address `# Static IPs are assigned after MIG creation; avoids race conditions` \
-          --create-disk="${DISK_PARAMS}" \
-          --container-mount-disk=mount-path='/home/zebra/.cache/zebra',name=${DISK_NAME},mode=rw \
-          --container-stdin \
-          --container-tty \
-          --container-image ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
-          --container-env "ZEBRA_NETWORK__NETWORK=${{ matrix.network }},ZEBRA_NETWORK__LISTEN_ADDR=0.0.0.0,LOG_FILE=${LOG_FILE},SENTRY_DSN=${{ vars.SENTRY_DSN }},ZEBRA_HEALTH__LISTEN_ADDR=0.0.0.0:8080,ZEBRA_HEALTH__MIN_CONNECTED_PEERS=1,ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:${RPC_PORT}" \
-          --service-account ${{ vars.GCP_DEPLOYMENTS_SA }} \
-          --scopes cloud-platform \
-          --metadata google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true \
-          --labels=app=zebrad,environment=${{ github.event_name == 'release' && 'prod' || (github.event_name == 'workflow_dispatch' && inputs.environment) || 'dev' }},network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }} \
-          --tags zebrad
+          # Check if template already exists (templates are immutable, same commit = same config)
+          if gcloud compute instance-templates describe "${TEMPLATE_NAME}" &>/dev/null; then
+            echo "Template ${TEMPLATE_NAME} already exists, reusing existing template"
+          else
+            gcloud compute instance-templates create-with-container "${TEMPLATE_NAME}" \
+            --machine-type ${{ vars.GCP_SMALL_MACHINE }} \
+            --provisioning-model=SPOT \
+            --boot-disk-size=10GB \
+            --boot-disk-type=pd-standard \
+            --image-project=cos-cloud \
+            --image-family=cos-stable \
+            --subnet=${{ vars.GCP_SUBNETWORK }} \
+            --no-address `# Static IPs are assigned after MIG creation; avoids race conditions` \
+            --create-disk="${DISK_PARAMS}" \
+            --container-mount-disk=mount-path='/home/zebra/.cache/zebra',name=${DISK_NAME},mode=rw \
+            --container-stdin \
+            --container-tty \
+            --container-image ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
+            --container-env "ZEBRA_NETWORK__NETWORK=${{ matrix.network }},ZEBRA_NETWORK__LISTEN_ADDR=0.0.0.0,LOG_FILE=${LOG_FILE},SENTRY_DSN=${{ vars.SENTRY_DSN }},ZEBRA_HEALTH__LISTEN_ADDR=0.0.0.0:8080,ZEBRA_HEALTH__MIN_CONNECTED_PEERS=1,ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:${RPC_PORT}" \
+            --service-account ${{ vars.GCP_DEPLOYMENTS_SA }} \
+            --scopes cloud-platform \
+            --metadata google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true \
+            --labels=app=zebrad,environment=${{ github.event_name == 'release' && 'prod' || (github.event_name == 'workflow_dispatch' && inputs.environment) || 'dev' }},network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }} \
+            --tags zebrad
+          fi
 
       # HTTP health check on /healthy endpoint (sync-aware: 200 during sync, 503 on failure)
       - name: Create or update health check
