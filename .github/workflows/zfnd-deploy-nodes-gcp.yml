@@ -344,7 +344,7 @@ jobs:
             --image-project=cos-cloud \
             --image-family=cos-stable \
             --subnet=${{ vars.GCP_SUBNETWORK }} \
-            --no-address `# Static IPs are assigned after MIG creation; avoids race conditions` \
+            --no-address \
             --create-disk="${DISK_PARAMS}" \
             --container-mount-disk=mount-path='/home/zebra/.cache/zebra',name=${DISK_NAME},mode=rw \
             --container-stdin \
