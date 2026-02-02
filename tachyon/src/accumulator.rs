@@ -17,7 +17,7 @@
 //!
 //! - **Unified tracking**: Both commitments and nullifiers use the same structure
 //! - **Efficient membership proofs**: Polynomial evaluation proofs are compact
-//! - **PCD-friendly**: Works naturally with recursive proof composition
+//! - **Aggregate-friendly**: Works naturally with Ragu proof aggregation
 
 use ff::{Field, PrimeField};
 

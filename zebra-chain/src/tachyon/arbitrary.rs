@@ -6,12 +6,15 @@ use proptest::{arbitrary::any, prelude::*};
 use reddsa::Signature;
 use tachyon::primitives::Fp;
 
+use crate::transaction;
+
 use super::{
     accumulator::Anchor,
     action::{AuthorizedTachyaction, Tachyaction},
     commitment::ValueCommitment,
     nullifier::FlavoredNullifier,
-    proof::TransactionProof,
+    proof::AggregateProof,
+    shielded_data::AggregateData,
     tachygram::Tachygram,
 };
 
@@ -94,13 +97,33 @@ impl Arbitrary for AuthorizedTachyaction {
     }
 }
 
-impl Arbitrary for TransactionProof {
+impl Arbitrary for AggregateProof {
     type Parameters = ();
     type Strategy = BoxedStrategy<Self>;
 
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
         proptest::collection::vec(any::<u8>(), 0..256)
-            .prop_map(|bytes| TransactionProof::new(bytes).unwrap())
+            .prop_map(|bytes| AggregateProof::new(bytes).unwrap())
+            .boxed()
+    }
+}
+
+impl Arbitrary for AggregateData {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+        (
+            any::<AggregateProof>(),
+            proptest::collection::vec(any::<[u8; 32]>(), 0..10),
+        )
+            .prop_map(|(proof, tx_hashes)| {
+                let covered = tx_hashes
+                    .into_iter()
+                    .map(transaction::Hash)
+                    .collect();
+                AggregateData::new(proof, covered)
+            })
             .boxed()
     }
 }

@@ -1,7 +1,19 @@
-//! Tachyon shielded data (TachyonBundle) for transactions.
+//! Tachyon shielded data for transactions.
 //!
-//! This module defines the `ShieldedData` type (also called TachyonBundle) that
-//! contains all Tachyon-specific data in a transaction.
+//! This module defines two types for Tachyon transactions:
+//!
+//! - [`ShieldedData`] - Regular tachyon transaction data that references an aggregate
+//! - [`AggregateData`] - Aggregate transaction data containing the proof
+//!
+//! ## Aggregate Transaction Model
+//!
+//! Tachyon uses an aggregate proof model where:
+//! - **Aggregate transactions** contain an [`AggregateProof`] covering multiple tachyon txs
+//! - **Regular tachyon transactions** contain [`ShieldedData`] and reference an aggregate
+//!   by transaction hash
+//!
+//! Multiple aggregate transactions may exist per block, and regular tachyon
+//! transactions specify which aggregate covers them via `aggregate_ref`.
 
 use std::fmt;
 
@@ -13,6 +25,7 @@ use reddsa::{orchard::Binding, Signature};
 use crate::{
     amount::{Amount, NegativeAllowed},
     serialization::{AtLeastOne, TrustedPreallocate},
+    transaction,
 };
 
 use super::{
@@ -20,7 +33,7 @@ use super::{
     action::{AuthorizedTachyaction, Tachyaction},
     commitment::ValueCommitment,
     nullifier::FlavoredNullifier,
-    proof::TransactionProof,
+    proof::AggregateProof,
     tachygram::Tachygram,
 };
 
@@ -72,11 +85,14 @@ impl Default for Flags {
     }
 }
 
-/// Tachyon shielded data bundle for a transaction.
+/// Tachyon shielded data bundle for a regular tachyon transaction.
 ///
-/// This is the main container for all Tachyon-related data in a transaction.
-/// It's analogous to Orchard's `ShieldedData` but designed for Tachyon's
-/// block-level proof aggregation and out-of-band payment model.
+/// This is the main container for Tachyon-related data in a transaction that
+/// performs spends/outputs. It references an aggregate transaction that
+/// contains the proof covering this transaction's validity.
+///
+/// Unlike Orchard's `ShieldedData` which contains its own proof, tachyon
+/// transactions reference an [`AggregateData`] transaction via `aggregate_ref`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShieldedData {
     /// Transaction flags (enable spends/outputs).
@@ -94,11 +110,11 @@ pub struct ShieldedData {
     /// at or before this accumulator state.
     pub shared_anchor: accumulator::Anchor,
 
-    /// Transaction-level proof (to be aggregated at block level).
+    /// Reference to the aggregate transaction that proves this bundle.
     ///
-    /// This proof will be combined with other transaction proofs
-    /// using the Ragu PCD library to create a single block proof.
-    pub proof: TransactionProof,
+    /// The aggregate transaction must be in the same block and its
+    /// [`AggregateData::covered_transactions`] must include this transaction.
+    pub aggregate_ref: transaction::Hash,
 
     /// The Tachyactions with authorization signatures.
     ///
@@ -114,13 +130,70 @@ pub struct ShieldedData {
     pub binding_sig: Signature<Binding>,
 }
 
+/// Aggregate transaction data containing the proof for multiple tachyon transactions.
+///
+/// This type is used in "aggregate transactions" that exist solely to carry
+/// the aggregated Ragu proof covering a set of regular tachyon transactions.
+///
+/// Multiple aggregate transactions may exist per block, each covering a
+/// different subset of tachyon transactions.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AggregateData {
+    /// The aggregated Ragu proof covering all referenced transactions.
+    pub proof: AggregateProof,
+
+    /// List of transaction hashes covered by this aggregate proof.
+    ///
+    /// Each transaction in this list must:
+    /// - Be in the same block as this aggregate transaction
+    /// - Have its `ShieldedData::aggregate_ref` point to this aggregate
+    pub covered_transactions: Vec<transaction::Hash>,
+}
+
+impl AggregateData {
+    /// Create a new aggregate data with the given proof and covered transactions.
+    pub fn new(proof: AggregateProof, covered_transactions: Vec<transaction::Hash>) -> Self {
+        Self {
+            proof,
+            covered_transactions,
+        }
+    }
+
+    /// Create an empty aggregate (for testing purposes).
+    pub fn empty() -> Self {
+        Self {
+            proof: AggregateProof::empty(),
+            covered_transactions: Vec::new(),
+        }
+    }
+
+    /// Get the number of transactions covered by this aggregate.
+    pub fn covered_count(&self) -> usize {
+        self.covered_transactions.len()
+    }
+
+    /// Check if this aggregate covers a specific transaction.
+    pub fn covers(&self, tx_hash: &transaction::Hash) -> bool {
+        self.covered_transactions.contains(tx_hash)
+    }
+}
+
 impl fmt::Display for ShieldedData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("tachyon::ShieldedData")
             .field("actions", &self.actions.len())
             .field("value_balance", &self.value_balance)
             .field("flags", &self.flags)
+            .field("aggregate_ref", &self.aggregate_ref)
+            .finish()
+    }
+}
+
+impl fmt::Display for AggregateData {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("tachyon::AggregateData")
             .field("proof_size", &self.proof.size())
+            .field("covered_transactions", &self.covered_transactions.len())
             .finish()
     }
 }
@@ -225,5 +298,21 @@ mod tests {
         let output_only = Flags::ENABLE_OUTPUTS;
         assert!(!output_only.spends_enabled());
         assert!(output_only.outputs_enabled());
+    }
+
+    #[test]
+    fn aggregate_data_covers() {
+        let _init_guard = zebra_test::init();
+
+        let tx1 = transaction::Hash([1u8; 32]);
+        let tx2 = transaction::Hash([2u8; 32]);
+        let tx3 = transaction::Hash([3u8; 32]);
+
+        let aggregate = AggregateData::new(AggregateProof::empty(), vec![tx1, tx2]);
+
+        assert!(aggregate.covers(&tx1));
+        assert!(aggregate.covers(&tx2));
+        assert!(!aggregate.covers(&tx3));
+        assert_eq!(aggregate.covered_count(), 2);
     }
 }
