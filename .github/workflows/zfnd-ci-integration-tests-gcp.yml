@@ -342,8 +342,7 @@ jobs:
   # zebra testnet checkpoint generation tests
   #
   # These tests will fail when testnet is unstable, they should not be required to merge.
-  #
-  # TODO: ignore failures on testnet, so any failures don't appear in the GitHub interface.
+  # Testnet jobs use continue-on-error so failures don't block PRs or appear as workflow failures.
 
   # Test that Zebra can run a full testnet sync, and regenerate chain tip Zebra cached state disks.
   # This job always runs on testnet, regardless of any inputs or variable settings.
@@ -357,11 +356,12 @@ jobs:
   sync-full-testnet:
     name: Zebra tip on testnet
     needs: [build, get-available-disks-testnet]
+    continue-on-error: true
     permissions:
       contents: read
       id-token: write
     uses: ./.github/workflows/zfnd-deploy-integration-tests-gcp.yml
-    if: ${{ (needs.get-available-disks-testnet.result == 'success' && !fromJSON(needs.get-available-disks-testnet.outputs.zebra_tip_disk)) || (github.event.inputs.run-full-sync == 'true' && (inputs.network || vars.ZCASH_NETWORK) == 'Testnet') }}
+    if: ${{ github.event_name == 'schedule' || (needs.get-available-disks-testnet.result == 'success' && !fromJSON(needs.get-available-disks-testnet.outputs.zebra_tip_disk)) || (github.event.inputs.run-full-sync == 'true' && (inputs.network || vars.ZCASH_NETWORK) == 'Testnet') }}
     concurrency:
       group: ${{ github.event_name == 'workflow_dispatch' && format('manual-{0}-sync-full-testnet', github.run_id) || 'sync-full-testnet' }}
       cancel-in-progress: false
@@ -395,6 +395,7 @@ jobs:
   generate-checkpoints-testnet:
     name: Generate checkpoints testnet
     needs: [sync-full-testnet, get-available-disks-testnet]
+    continue-on-error: true
     permissions:
       contents: read
       id-token: write
