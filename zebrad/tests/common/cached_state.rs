@@ -278,8 +278,10 @@ pub async fn raw_future_blocks(
 
     zebrad.kill(true)?;
 
-    // Sleep for a few seconds to make sure zebrad releases lock on cached state directory
-    std::thread::sleep(Duration::from_secs(3));
+    // Wait for zebrad to fully terminate to ensure database lock is released.
+    // Just sending SIGKILL doesn't guarantee the process has terminated - we must
+    // wait for the OS to clean up the process and release all file locks.
+    let _ = zebrad.wait_with_output();
 
     let zebrad_state_path = test_type
         .zebrad_state_path(test_name)
