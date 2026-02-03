@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Refactor `NetworkUpgrade` to use `strum::EnumIter` instead of `NETWORK_UPGRADES_IN_ORDER` and add the `strum` dependency to `zebra-chain`. (#10096)
+- `parameters/network_upgrade/NetworkUpgrade` now derives `strum::EnumIter`
 
 ## [4.0.0] - 2026-01-21
 
