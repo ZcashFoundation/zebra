@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `strum` dependency
+- 
+
 ### Changed
 
 - `parameters/network_upgrade/NetworkUpgrade` now derives `strum::EnumIter`
