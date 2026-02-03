@@ -78,6 +78,11 @@ on:
         type: string
         default: zebra
         description: Application name, used to work out when a job is an update job
+      allow_failure:
+        required: false
+        type: boolean
+        default: false
+        description: If true, test failures won't fail the workflow (shows check mark instead of X)
     secrets:
       GCP_SSH_PRIVATE_KEY:
         required: true
@@ -138,6 +143,7 @@ jobs:
     runs-on: zfnd-runners
     needs: [ get-disk-name ]
     if: ${{ !cancelled() && !failure() && (needs.get-disk-name.result == 'success' || needs.get-disk-name.result == 'skipped') }}
+    continue-on-error: ${{ inputs.allow_failure }}
     timeout-minutes: ${{ inputs.is_long_test && 7200 || 180 }}
     outputs:
       cached_disk_name: ${{ (inputs.needs_zebra_state || inputs.needs_lwd_state) && needs.get-disk-name.outputs.cached_disk_name || '' }}
