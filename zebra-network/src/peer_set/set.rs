@@ -758,7 +758,7 @@ where
 
                     if svc.is_outbound() {
                         self.outbound_peers.insert(key);
-                    } else {
+                    } else if svc.is_inbound() {
                         self.inbound_peers.insert(key);
                     }
 
