@@ -25,7 +25,7 @@ use std::{
 use itertools::Itertools;
 use rlimit::increase_nofile_limit;
 
-use rocksdb::{ColumnFamilyDescriptor, ErrorKind, Options, ReadOptions};
+use rocksdb::{ColumnFamilyDescriptor, ErrorKind, Options, ReadOptions, WaitForCompactOptions};
 use semver::Version;
 use zebra_chain::{parameters::Network, primitives::byte_array::increment_big_endian};
 
@@ -1514,6 +1514,33 @@ impl DiskDb {
                     ?error,
                     ?path,
                     "unexpected error flushing database WAL buffer to disk during shutdown"
+                );
+            }
+        }
+
+        // Wait for all background compaction and flush jobs to complete before dropping.
+        // This ensures the database lock is properly released when the DB object is dropped,
+        // preventing "Database likely already open" errors when another process tries to
+        // open the same database immediately after this one closes.
+        //
+        // See: https://github.com/facebook/rocksdb/wiki/Basic-Operations
+        // "DB::WaitForCompact() will wait for all flush and compaction jobs to finish"
+        debug!(?path, "waiting for background database jobs to complete");
+
+        let wait_opts = WaitForCompactOptions::default();
+        if let Err(error) = self.db.wait_for_compact(&wait_opts) {
+            let error = format!("{error:?}");
+            if error.to_ascii_lowercase().contains("shutdown in progress") {
+                debug!(
+                    ?error,
+                    ?path,
+                    "expected shutdown error waiting for background jobs to complete"
+                );
+            } else {
+                info!(
+                    ?error,
+                    ?path,
+                    "unexpected error waiting for background jobs during shutdown"
                 );
             }
         }
