@@ -134,6 +134,7 @@ rand = { workspace = true, optional = true }
 rand_chacha = { workspace = true, optional = true }
 
 zebra-test = { path = "../zebra-test/", version = "2.0.1", optional = true }
+bounded-vec = { version = "0.9.0", features = ["serde"] }
 
 [dev-dependencies]
 # Benchmarks

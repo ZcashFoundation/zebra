@@ -10,11 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `strum` dependency
-- 
+- `parameters::network::subsidy::constants` module.
 
 ### Changed
 
 - `parameters/network_upgrade/NetworkUpgrade` now derives `strum::EnumIter`
+
+### Removed
+
+- All constants from `parameters::network::subsidy`.
 
 ## [4.0.0] - 2026-01-21
 
