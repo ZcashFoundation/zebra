@@ -2,18 +2,20 @@
 //!
 //! This module defines two types for Tachyon transactions:
 //!
-//! - [`ShieldedData`] - Regular tachyon transaction data that references an aggregate
-//! - [`AggregateData`] - Aggregate transaction data containing the proof
+//! - [`ShieldedData`] - Stripped tachyon transaction data (signatures only, as appears in blocks)
+//! - [`AggregateData`] - Aggregate transaction data containing all tachygrams and merged proof
 //!
 //! ## Aggregate Transaction Model
 //!
-//! Tachyon uses an aggregate proof model where:
-//! - **Aggregate transactions** contain an [`AggregateProof`] covering multiple tachyon txs
-//! - **Regular tachyon transactions** contain [`ShieldedData`] and reference an aggregate
-//!   by transaction hash
+//! Tachyon uses an aggregate proof model:
 //!
-//! Multiple aggregate transactions may exist per block, and regular tachyon
-//! transactions specify which aggregate covers them via `aggregate_ref`.
+//! 1. Users broadcast full transactions (tachygrams, proof, anchor, signatures)
+//! 2. Aggregators collect transactions and merge proofs
+//! 3. In blocks, individual transactions are **stripped** (signatures only)
+//! 4. The aggregate transaction contains all tachygrams and the merged proof
+//!
+//! The relationship between aggregate and individual transactions is implicit
+//! through the tachygrams - no explicit linkage fields are needed.
 
 use std::fmt;
 
@@ -25,7 +27,6 @@ use reddsa::{orchard::Binding, Signature};
 use crate::{
     amount::{Amount, NegativeAllowed},
     serialization::{AtLeastOne, TrustedPreallocate},
-    transaction,
 };
 
 use super::{
@@ -85,14 +86,14 @@ impl Default for Flags {
     }
 }
 
-/// Tachyon shielded data bundle for a regular tachyon transaction.
+/// Tachyon shielded data bundle for a transaction (as it appears in a block).
 ///
-/// This is the main container for Tachyon-related data in a transaction that
-/// performs spends/outputs. It references an aggregate transaction that
-/// contains the proof covering this transaction's validity.
+/// This is the **stripped** form of a tachyon transaction after aggregation.
+/// It contains only the signatures and value balance - the tachygrams, proof,
+/// and anchor have been moved to the [`AggregateData`].
 ///
-/// Unlike Orchard's `ShieldedData` which contains its own proof, tachyon
-/// transactions reference an [`AggregateData`] transaction via `aggregate_ref`.
+/// When broadcast, transactions contain additional fields (tachygrams, proof,
+/// anchor) that are stripped out during aggregation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShieldedData {
     /// Transaction flags (enable spends/outputs).
@@ -104,23 +105,10 @@ pub struct ShieldedData {
     /// Negative means value flows into Tachyon pool (shielding).
     pub value_balance: Amount<NegativeAllowed>,
 
-    /// Shared anchor for all spends (Tachyon accumulator state).
+    /// The authorized tachyactions (signatures only in block form).
     ///
-    /// All spends in this transaction must reference notes committed
-    /// at or before this accumulator state.
-    pub shared_anchor: accumulator::Anchor,
-
-    /// Reference to the aggregate transaction that proves this bundle.
-    ///
-    /// The aggregate transaction must be in the same block and its
-    /// [`AggregateData::covered_transactions`] must include this transaction.
-    pub aggregate_ref: transaction::Hash,
-
-    /// The Tachyactions with authorization signatures.
-    ///
-    /// Each action represents a spend and/or output. Actions may be
-    /// dummy actions (spending zero value from dummy notes) to hide
-    /// the true number of spends/outputs.
+    /// Each action represents a spend and/or output with its authorization
+    /// signature. The tachygrams from these actions are in the aggregate.
     pub actions: AtLeastOne<AuthorizedTachyaction>,
 
     /// Binding signature on transaction sighash.
@@ -130,51 +118,59 @@ pub struct ShieldedData {
     pub binding_sig: Signature<Binding>,
 }
 
-/// Aggregate transaction data containing the proof for multiple tachyon transactions.
+/// Aggregate transaction data containing the merged proof and all tachygrams.
 ///
-/// This type is used in "aggregate transactions" that exist solely to carry
-/// the aggregated Ragu proof covering a set of regular tachyon transactions.
+/// This type is used in "aggregate transactions" that bundle:
+/// - All tachygrams (nullifiers and note commitments) from aggregated transactions
+/// - A single merged Ragu proof covering all operations
+/// - The accumulator anchor
 ///
-/// Multiple aggregate transactions may exist per block, each covering a
-/// different subset of tachyon transactions.
+/// The relationship between this aggregate and the individual stripped
+/// transactions is implicit through the tachygrams themselves.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AggregateData {
-    /// The aggregated Ragu proof covering all referenced transactions.
+    /// All tachygrams from the aggregated transactions.
+    ///
+    /// These are the nullifiers and note commitments that get recorded
+    /// in the polynomial accumulator.
+    pub tachygrams: Vec<Tachygram>,
+
+    /// The aggregated Ragu proof covering all operations.
     pub proof: AggregateProof,
 
-    /// List of transaction hashes covered by this aggregate proof.
+    /// Recent accumulator anchor.
     ///
-    /// Each transaction in this list must:
-    /// - Be in the same block as this aggregate transaction
-    /// - Have its `ShieldedData::aggregate_ref` point to this aggregate
-    pub covered_transactions: Vec<transaction::Hash>,
+    /// All spends in the aggregated transactions reference notes
+    /// committed at or before this accumulator state.
+    pub anchor: accumulator::Anchor,
 }
 
 impl AggregateData {
-    /// Create a new aggregate data with the given proof and covered transactions.
-    pub fn new(proof: AggregateProof, covered_transactions: Vec<transaction::Hash>) -> Self {
+    /// Create a new aggregate data.
+    pub fn new(
+        tachygrams: Vec<Tachygram>,
+        proof: AggregateProof,
+        anchor: accumulator::Anchor,
+    ) -> Self {
         Self {
+            tachygrams,
             proof,
-            covered_transactions,
+            anchor,
         }
     }
 
     /// Create an empty aggregate (for testing purposes).
     pub fn empty() -> Self {
         Self {
+            tachygrams: Vec::new(),
             proof: AggregateProof::empty(),
-            covered_transactions: Vec::new(),
+            anchor: accumulator::Anchor::default(),
         }
     }
 
-    /// Get the number of transactions covered by this aggregate.
-    pub fn covered_count(&self) -> usize {
-        self.covered_transactions.len()
-    }
-
-    /// Check if this aggregate covers a specific transaction.
-    pub fn covers(&self, tx_hash: &transaction::Hash) -> bool {
-        self.covered_transactions.contains(tx_hash)
+    /// Get the number of tachygrams in this aggregate.
+    pub fn tachygram_count(&self) -> usize {
+        self.tachygrams.len()
     }
 }
 
@@ -184,7 +180,6 @@ impl fmt::Display for ShieldedData {
             .field("actions", &self.actions.len())
             .field("value_balance", &self.value_balance)
             .field("flags", &self.flags)
-            .field("aggregate_ref", &self.aggregate_ref)
             .finish()
     }
 }
@@ -192,8 +187,8 @@ impl fmt::Display for ShieldedData {
 impl fmt::Display for AggregateData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("tachyon::AggregateData")
+            .field("tachygrams", &self.tachygrams.len())
             .field("proof_size", &self.proof.size())
-            .field("covered_transactions", &self.covered_transactions.len())
             .finish()
     }
 }
@@ -301,18 +296,18 @@ mod tests {
     }
 
     #[test]
-    fn aggregate_data_covers() {
+    fn aggregate_data_tachygrams() {
         let _init_guard = zebra_test::init();
 
-        let tx1 = transaction::Hash([1u8; 32]);
-        let tx2 = transaction::Hash([2u8; 32]);
-        let tx3 = transaction::Hash([3u8; 32]);
+        let tg1 = Tachygram::from_bytes([1u8; 32]);
+        let tg2 = Tachygram::from_bytes([2u8; 32]);
 
-        let aggregate = AggregateData::new(AggregateProof::empty(), vec![tx1, tx2]);
+        let aggregate = AggregateData::new(
+            vec![tg1, tg2],
+            AggregateProof::empty(),
+            accumulator::Anchor::default(),
+        );
 
-        assert!(aggregate.covers(&tx1));
-        assert!(aggregate.covers(&tx2));
-        assert!(!aggregate.covers(&tx3));
-        assert_eq!(aggregate.covered_count(), 2);
+        assert_eq!(aggregate.tachygram_count(), 2);
     }
 }

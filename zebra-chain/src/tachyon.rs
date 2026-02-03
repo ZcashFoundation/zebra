@@ -2,16 +2,21 @@
 //!
 //! Tachyon is a scaling solution for Zcash that introduces:
 //! - Tachygrams: Unified 32-byte blobs (nullifiers or note commitments)
-//! - Tachyactions: Simplified actions with epoch-flavored nullifiers
+//! - Tachyactions: Independent spend/output operations with epoch-flavored nullifiers
 //! - Aggregate proof transactions via Ragu PCD
 //! - Out-of-band payment distribution (no ciphertexts on-chain)
 //!
 //! ## Aggregate Transaction Model
 //!
 //! Tachyon uses an aggregate proof model:
-//! - **Aggregate transactions** contain an [`AggregateProof`] covering multiple tachyon txs
-//! - **Regular tachyon transactions** reference an aggregate by [`transaction::Hash`]
-//! - Multiple aggregates may exist per block
+//!
+//! 1. Users broadcast full transactions (tachygrams, proof, anchor, signatures)
+//! 2. Aggregators collect transactions and merge Ragu proofs
+//! 3. In blocks, individual transactions are **stripped** (signatures only)
+//! 4. The aggregate transaction contains all tachygrams and the merged proof
+//!
+//! The relationship between aggregate and individual transactions is implicit
+//! through the tachygrams themselves - no explicit linkage fields are needed.
 //!
 //! ## Type Re-exports
 //!
@@ -23,10 +28,10 @@
 //!
 //! ## Blockchain-Specific Types
 //!
-//! These types provide [`ZcashSerialize`]/[`ZcashDeserialize`] for blockchain storage:
+//! These types provide serialization for blockchain storage:
 //!
-//! - [`ShieldedData`] - regular tachyon transaction data (references an aggregate)
-//! - [`AggregateData`] - aggregate transaction data (contains the proof)
+//! - [`ShieldedData`] - stripped tachyon transaction (signatures only, as in blocks)
+//! - [`AggregateData`] - aggregate transaction (all tachygrams + merged proof + anchor)
 //! - [`FlavoredNullifier`] - bundles a [`Nullifier`] with its [`Epoch`]
 //! - [`NoteCommitment`] - full curve point (use [`tachyon::NoteCommitment`] for x-coordinate)
 //! - [`ValueCommitment`] - homomorphic commitment with Add/Sub/Sum

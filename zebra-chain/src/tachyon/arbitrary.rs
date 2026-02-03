@@ -6,8 +6,6 @@ use proptest::{arbitrary::any, prelude::*};
 use reddsa::Signature;
 use tachyon::primitives::Fp;
 
-use crate::transaction;
-
 use super::{
     accumulator::Anchor,
     action::{AuthorizedTachyaction, Tachyaction},
@@ -114,16 +112,11 @@ impl Arbitrary for AggregateData {
 
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
         (
+            proptest::collection::vec(any::<Tachygram>(), 0..20),
             any::<AggregateProof>(),
-            proptest::collection::vec(any::<[u8; 32]>(), 0..10),
+            any::<Anchor>(),
         )
-            .prop_map(|(proof, tx_hashes)| {
-                let covered = tx_hashes
-                    .into_iter()
-                    .map(transaction::Hash)
-                    .collect();
-                AggregateData::new(proof, covered)
-            })
+            .prop_map(|(tachygrams, proof, anchor)| AggregateData::new(tachygrams, proof, anchor))
             .boxed()
     }
 }
