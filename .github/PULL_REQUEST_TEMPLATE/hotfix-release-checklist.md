@@ -17,36 +17,27 @@ A hotfix release should only be created when a bug or critical issue is discover
 - [ ] Create a hotfix release PR by adding `&template=hotfix-release-checklist.md` to the comparing url ([Example](https://github.com/ZcashFoundation/zebra/compare/bump-v1.0.0?expand=1&template=hotfix-release-checklist.md)).
 - [ ] Add the `C-exclude-from-changelog` label so that the PR is omitted from the next release changelog
 - [ ] Add the `A-release` tag to the release pull request in order for the `check_no_git_refs_in_cargo_lock` to run.
+- [ ] Add the `do-not-merge` tag to prevent Mergify from merging, since after PR approval the
+      release is done from the branch itself.
 - [ ] Ensure the `check_no_git_refs_in_cargo_lock` check passes.
 - [ ] Add a changelog entry for the release summarizing user-visible changes.
 
 ## Update Versions
 
-The release level for a hotfix should always follow semantic versioning as a `patch` release.
+If it is a Zebra hotfix, the release level for should always follow semantic
+versioning as a `patch` release. If is is a crate hotfix, it should simply
+follow semver, depending on thing being fixed.
 
-<details>
-<summary>Update crate versions, commit the changes to the release branch, and do a release dry-run:</summary>
-
-```sh
-# Update everything except for alpha crates and zebrad:
-cargo release version --verbose --execute --allow-branch '*' --workspace --exclude zebrad beta
-# Due to a bug in cargo-release, we need to pass exact versions for alpha crates:
-# Update zebrad:
-cargo release version --verbose --execute --allow-branch '*' --package zebrad patch
-# Continue with the release process:
-cargo release replace --verbose --execute --allow-branch '*' --package zebrad
-cargo release commit --verbose --execute --allow-branch '*'
-```
-
-</details>
+- [ ] Follow the "Update Zebra Version" section in the regular checklist for
+  instructions
 
 ## Update the Release PR
 
 - [ ] Push the version increments and the release constants to the hotfix release branch.
 
-# Publish the Zebra Release
+# Publish the Release
 
-## Create the GitHub Pre-Release
+## Create the GitHub Pre-Release (if Zebra hotfix)
 
 - [ ] Wait for the hotfix release PR to be reviewed, approved, and merged into main.
 - [ ] Create a new release
@@ -61,13 +52,13 @@ cargo release commit --verbose --execute --allow-branch '*'
 - [ ] Mark the release as 'pre-release', until it has been built and tested
 - [ ] Publish the pre-release to GitHub using "Publish Release"
 
-## Test the Pre-Release
+## Test the Pre-Release (if Zebra hotfix)
 
 - [ ] Wait until the Docker binaries have been built on the hotfix release branch, and the quick tests have passed:
     - [ ] [ci-tests.yml](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-tests.yml)
 - [ ] Wait until the [pre-release deployment machines have successfully launched](https://github.com/ZcashFoundation/zebra/actions/workflows/zfnd-deploy-nodes-gcp.yml?query=event%3Arelease)
 
-## Publish Release
+## Publish Release (if Zebra hotfix)
 
 - [ ] [Publish the release to GitHub](https://github.com/ZcashFoundation/zebra/releases) by disabling 'pre-release', then clicking "Set as the latest release"
 
@@ -81,15 +72,19 @@ cargo release commit --verbose --execute --allow-branch '*'
       `cargo install --locked --force --version 2.minor.patch zebrad && ~/.cargo/bin/zebrad`
       and put the output in a comment on the PR.
 
-## Publish Docker Images
+## Publish Docker Images (if Zebra hotfix)
 
 - [ ] Wait for the [the Docker images to be published successfully](https://github.com/ZcashFoundation/zebra/actions/workflows/release-binaries.yml?query=event%3Arelease).
 - [ ] Wait for the new tag in the [dockerhub zebra space](https://hub.docker.com/r/zfnd/zebra/tags)
 
 ## Merge hotfix into main
 
-- [ ] Review and merge the hotfix branch into the main branch. The changes and the update to the changelog must be included in the next release from main as well.
-- [ ] If there are conflicts between the hotfix branch and main, the conflicts should be resolved after the hotfix release is tagged and published.
+- [ ] Solve any conflicts between the hotfix branch and main. Do not force-push
+      into the branch! We need to include the commit that was released into `main`.
+- [ ] Get the PR reviewed again if changes were made
+- [ ] Admin-merge the PR with a merge commit (if by the time you are following
+      this we have switched to merge commits by default, then just remove
+      the `do-not-merge` label)
 
 ## Release Failures
 

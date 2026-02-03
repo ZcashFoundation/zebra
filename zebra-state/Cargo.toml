@@ -1,6 +1,6 @@
 [package]
 name = "zebra-state"
-version = "3.1.2"
+version = "4.0.0"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "State contextual verification and storage code for Zebra"
 license = "MIT OR Apache-2.0"
@@ -77,7 +77,7 @@ sapling-crypto = { workspace = true }
 elasticsearch = { workspace = true, features = ["rustls-tls"], optional = true }
 serde_json = { workspace = true, optional = true }
 
-zebra-node-services = { path = "../zebra-node-services", version = "2.1.2" }
+zebra-node-services = { path = "../zebra-node-services", version = "3.0.0" }
 zebra-chain = { path = "../zebra-chain", version = "4.0.0", features = ["async-error"] }
 
 # prod feature progress-bar

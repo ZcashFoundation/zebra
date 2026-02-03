@@ -7,13 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.0.0] - 2026-02-04
+
+### Breaking Changes
+
+- `zebra-state` bumped to `4.0.0`
+- `zebra-chain` bumped to `4.0.0`
+
 ### Added
 
 - `server/rpc_metrics` module.
 - `server/rpc_tracing` module.
 - Dependency on the `metrics` crate.
 
-## [4.0.0] - 2026-01-21
+## [4.0.0] - 2026-01-21 - Yanked
 
 Most changes are related to a fix to `getinfo` RPC response which used a string
 for the `errors_timestamp` field, which was changed to `i64` to match `zcashd`.
