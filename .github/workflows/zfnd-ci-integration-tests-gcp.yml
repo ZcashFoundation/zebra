@@ -356,7 +356,6 @@ jobs:
   sync-full-testnet:
     name: Zebra tip on testnet
     needs: [build, get-available-disks-testnet]
-    continue-on-error: true
     permissions:
       contents: read
       id-token: write
@@ -380,6 +379,7 @@ jobs:
       saves_to_disk: true
       force_save_to_disk: ${{ inputs.force_save_to_disk || false }}
       height_grep_text: current_height.*=.*Height.*\(
+      allow_failure: true
 
   # Test that Zebra can generate testnet checkpoints after syncing to the chain tip,
   # using a cached Zebra tip state.
@@ -395,7 +395,6 @@ jobs:
   generate-checkpoints-testnet:
     name: Generate checkpoints testnet
     needs: [sync-full-testnet, get-available-disks-testnet]
-    continue-on-error: true
     permissions:
       contents: read
       id-token: write
@@ -415,6 +414,7 @@ jobs:
       saves_to_disk: true
       force_save_to_disk: ${{ inputs.force_save_to_disk || false }}
       height_grep_text: zebra_tip_height.*=.*Height.*\(
+      allow_failure: true
 
   # lightwalletd cached tip state tests
 
