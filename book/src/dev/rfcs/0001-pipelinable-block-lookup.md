@@ -82,36 +82,3 @@ When starting from a verified chain tip, the choice of block locator can find fo
 ### Retries and Fanout
 
 We should consider the fanout parameter `F` and the retry policy for the different requests. I'm not sure whether we need to retry requests to discover new block hashes, since the fanout may already provide redundancy. For the block requests themselves, we should have a retry policy with a limited number of attempts, enough to insulate against network failures but not so many that we would retry a bogus block indefinitely. Maybe fanout 4 and 3 retries?
-
-# Implementation Notes
-
-[implementation-notes]: #implementation-notes
-
-> **Last validated:** December 2025
-
-This RFC has been fully implemented. The following notes document naming
-evolution and implementation details:
-
-## Type Name Changes
-
-| RFC Name | Implementation Name | Location |
-|----------|-------------------|----------|
-| `FindBlocksByHash` | `FindBlocks` | `zebra-network/src/protocol/internal/request.rs` |
-
-## Implementation Constants
-
-| Parameter | RFC Suggested | Implemented | Location |
-|-----------|---------------|-------------|----------|
-| Fanout (`F`) | 4 | 3 (`FANOUT`) | `zebrad/src/components/sync.rs:51` |
-| Retry Limit | 3 | 3 (`BLOCK_DOWNLOAD_RETRY_LIMIT`) | `zebrad/src/components/sync.rs` |
-
-## Algorithm Changes
-
-- **ObtainTips**: Implemented in `zebrad/src/components/sync.rs:673-829`
-- **ExtendTips**: Uses stricter `CheckedTip` validation pattern instead of genesis check
-- **Block Locator**: Uses exponential doubling via `successors()` (equivalent to RFC's sparse structure)
-
-## DoS Resistance
-
-DoS resistance is implemented via Tower middleware hedge pattern (random load-balancing),
-matching the RFC's design for routing requests across multiple peers.

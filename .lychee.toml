@@ -25,32 +25,11 @@ exclude = [
     "^https://github.com/.*/pull/0000",
     # Mergify dashboard (requires auth)
     "^https://dashboard.mergify.com/",
-    # zips.z.cash PDFs - currently returning 404 but linked from official site
-    # This appears to be an infrastructure issue on the Zcash side
-    "^https://zips.z.cash/protocol/.*\\.pdf",
-
-    # Deprecated/internal documentation sites
-    "^https://doc-internal\\.zebra\\.zfnd\\.org",
-    "^https://doc\\.zebra\\.zfnd\\.org",
-
-    # ZF blog posts that have been removed or reorganized
-    "^https://www\\.zfnd\\.org/blog/futures-batch-verification/",
-
-    # GitHub issues that may have been deleted or made private
-    "^https://github\\.com/nginxinc/docker-nginx/issues/490",
-
-    # Zcash zips repo branch name change (master -> main migration)
-    # TODO: Fix these links when the zcash/zips repo completes migration
-    "^https://github\\.com/zcash/zips/blob/master/",
-
-    # docs.rs API anchors that may not exist (API changes)
-    "^https://docs\\.rs/zebra-rpc/latest/zebra_rpc/config/struct\\.Config\\.html#structfield",
 
     # zebra.zfnd.org pages that may not be deployed yet (new documentation)
     # These will be valid once the book is rebuilt and deployed
     "^https://zebra\\.zfnd\\.org/dev/crates\\.html",
     "^https://zebra\\.zfnd\\.org/dev/diagrams/crate-architecture\\.html",
-    "^https://zebra\\.zfnd\\.org/user/shielded-scan-grpc-server\\.html",
 ]
 
 # Exclude paths
@@ -61,6 +40,8 @@ exclude_path = [
     "book/mermaid.min.js",
     "zebra-rpc/qa/rpc-tests",
     "supply-chain",
+    # CHANGELOG contains historical references to deprecated URLs
+    "CHANGELOG.md",
 ]
 
 # Accept these HTTP status codes as valid

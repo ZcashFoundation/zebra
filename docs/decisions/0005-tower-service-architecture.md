@@ -76,5 +76,5 @@ Tower provides the right abstractions for Zebra's needs:
 ## More Information
 
 - [Tower Documentation](https://docs.rs/tower/)
-- [Blog: A New Network Stack for Zcash](https://www.zfnd.org/blog/a-new-network-stack-for-zcash/)
-- [Blog: Composable Futures-based Batch Verification](https://www.zfnd.org/blog/futures-batch-verification/)
+- [Blog: A New Network Stack for Zcash](https://zfnd.org/a-new-network-stack-for-zcash/)
+- [Blog: Composable Futures-based Batch Verification](https://zfnd.org/composable-futures-based-batch-verification/)

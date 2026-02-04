@@ -722,9 +722,9 @@ validation and the anchor calculations.)
 Hypothetically, if Sapling were activated from genesis, the specification requires
 a Sapling anchor, but `zcashd` would ignore that anchor.
 
-[`JoinSplit`]: https://doc-internal.zebra.zfnd.org/zebra_chain/sprout/struct.JoinSplit.html
-[`Spend`]: https://doc-internal.zebra.zfnd.org/zebra_chain/sapling/spend/struct.Spend.html
-[`Action`]: https://doc-internal.zebra.zfnd.org/zebra_chain/orchard/struct.Action.html
+[`JoinSplit`]: https://zebra.zfnd.org/internal/zebra_chain/sprout/struct.JoinSplit.html
+[`Spend`]: https://zebra.zfnd.org/internal/zebra_chain/sapling/spend/struct.Spend.html
+[`Action`]: https://zebra.zfnd.org/internal/zebra_chain/orchard/struct.Action.html
 
 These updates can be performed in a batch or without necessarily iterating
 over all transactions, if the data is available by other means; they're
@@ -963,38 +963,3 @@ Then validating:
   pathological reorg cases.
 - testnet rollbacks are infrequent, but possible, due to bugs in testnet
   releases. Each testnet rollback will require additional state service code.
-
-# Implementation Notes
-
-[implementation-notes]: #implementation-notes
-
-> **Last validated:** December 2025
-
-This RFC has been fully implemented. The following notes document naming
-evolution and implementation details:
-
-## Type Name Changes
-
-| RFC Name | Implementation Name | Location |
-|----------|-------------------|----------|
-| `CommitBlock` | `CommitSemanticallyVerifiedBlock` | `zebra-state/src/request.rs` |
-| `CommitFinalizedBlock` | `CommitCheckpointVerifiedBlock` | `zebra-state/src/request.rs` |
-| `Chain` | `Chain` (unchanged) | `zebra-state/src/service/non_finalized_state/chain.rs` |
-
-## Core Components (Verified)
-
-- **FinalizedState**: `zebra-state/src/service/finalized_state.rs` - RocksDB storage
-- **NonFinalizedState**: `zebra-state/src/service/non_finalized_state.rs` - In-memory chains
-- **QueuedBlocks**: `zebra-state/src/service/queued_blocks.rs` - Block queuing system
-- **Chain**: `zebra-state/src/service/non_finalized_state/chain.rs` - Fork chain representation
-
-## Request/Response Patterns
-
-The Tower service architecture matches the RFC. The `Request` and `Response`
-enums are in `zebra-state/src/request.rs` and `zebra-state/src/response.rs`.
-
-## Enhancements Beyond RFC
-
-- **Value Pool Tracking**: Chain value pools (`chain_value_pools`) added for ZIP-209 compliance
-- **Deferred Pool**: Support for deferred balance changes (future network upgrades)
-- **Block Info**: Per-height block metadata tracking for diagnostics
