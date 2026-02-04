@@ -37,7 +37,6 @@ All `ParametersBuilder` methods and `Parameters::new_regtest()` now return `Resu
 - Chain builder calls with `?` operator: `.with_network_name("test")?`
 - Or use `.expect()` if errors are unexpected: `.with_network_name("test").expect("valid name")`
 
-
 ## [3.1.0] - 2025-11-28
 
 ### Added
