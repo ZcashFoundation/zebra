@@ -59,12 +59,12 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 #v6.0.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
           fetch-depth: 0
       - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@6f7a8d2348e2a4aa5defafcdaafe5aef3f83bd4b #v5.4.0
+        uses: rlespinasse/github-slug-action@9e7def61550737ba68c62d34a32dd31792e3f429 #v5.5.0
         with:
           short-length: 7
 
