@@ -1,16 +1,17 @@
 [package]
 name = "zebra-consensus"
 version = "3.1.2"
-authors = ["Zcash Foundation <zebra@zfnd.org>"]
+authors.workspace = true
 description = "Implementation of Zcash consensus checks"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/ZcashFoundation/zebra"
-edition = "2021"
+license.workspace = true
+repository.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 
 readme = "../README.md"
-homepage = "https://zfnd.org/zebra/"
+homepage.workspace = true
 # crates.io is limited to 5 keywords and categories
-keywords = ["zebra", "zcash"]
+keywords.workspace = true
 # Must be one of <https://crates.io/category_slugs>
 categories = ["asynchronous", "cryptography::cryptocurrencies"]
 

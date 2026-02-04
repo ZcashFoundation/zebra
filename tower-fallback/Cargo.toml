@@ -1,11 +1,12 @@
 [package]
 name = "tower-fallback"
 version = "0.2.41"
-authors = ["Zcash Foundation <zebra@zfnd.org>"]
+authors.workspace = true
 description = "A Tower service combinator that sends requests to a first service, then retries processing on a second fallback service if the first service errors."
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/ZcashFoundation/zebra"
-edition = "2021"
+license.workspace = true
+repository.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 
 # TODO: decide if we want to use the Zebra readme and home page
 #readme = "../README.md"

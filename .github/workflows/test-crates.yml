@@ -142,6 +142,45 @@ jobs:
           cargo clippy --package ${{ matrix.crate }} --all-features --all-targets -- -D warnings
           cargo build --package ${{ matrix.crate }} --all-features --all-targets
 
+  build-msrv:
+    name: Build all crates with MSRV
+    permissions:
+      id-token: write
+      statuses: write
+    timeout-minutes: 90
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 #v6.0.1
+        with:
+          persist-credentials: false
+
+      - name: Extract MSRV from Cargo.toml
+        id: msrv
+        run: |
+          MSRV=$(grep 'rust-version' Cargo.toml | head -n1 | cut -d'"' -f2)
+          echo "version=$MSRV" >> "$GITHUB_OUTPUT"
+          echo "Extracted MSRV: $MSRV"
+
+      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+          components: clippy
+          cache-key: crate-build-msrv
+          cache-on-failure: true
+
+      - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3.0.0
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # We build the whole workspace at once, to save time. Any crate-specific
+      # build errors will likely be caught in the previous build jobs.
+      - name: Build workspace with MSRV
+        run: |
+          cargo clippy --workspace --all-features --all-targets -- -D warnings
+          cargo build --workspace --all-features --all-targets
+
+
   test-crate-build-success:
     name: test crate build success
     runs-on: ubuntu-latest
@@ -149,6 +188,7 @@ jobs:
     needs:
       - matrix
       - build
+      - build-msrv
     timeout-minutes: 30
     steps:
       - name: Decide whether the needed jobs succeeded or failed

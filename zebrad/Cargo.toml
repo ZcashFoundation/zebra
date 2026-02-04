@@ -2,24 +2,23 @@
 # Crate metadata
 name = "zebrad"
 version = "4.0.0"
-authors = ["Zcash Foundation <zebra@zfnd.org>"]
+authors.workspace = true
 description = "The Zcash Foundation's independent, consensus-compatible implementation of a Zcash node"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/ZcashFoundation/zebra"
+license.workspace = true
+repository.workspace = true
 
 readme = "../README.md"
-homepage = "https://zfnd.org/zebra/"
+homepage.workspace = true
 # crates.io is limited to 5 keywords and categories
-keywords = ["zebra", "zcash"]
+keywords.workspace = true
 # Must be one of <https://crates.io/category_slugs>
 categories = ["command-line-utilities", "cryptography::cryptocurrencies"]
 
 # Settings that impact compilation
-edition = "2021"
+edition.workspace = true
 
-# Zebra is only supported on the latest stable Rust version. See the README for details.
-# Any Zebra release can break compatibility with older Rust versions.
-rust-version = "1.89.0"
+# Zebra can have a higher MSRV than the other crates since it is a binary.
+rust-version = "1.89"
 
 # Settings that impact runtime behaviour
 

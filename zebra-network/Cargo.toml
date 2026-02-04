@@ -14,13 +14,14 @@ description = "Networking code for Zebra"
 # was modified from a 2019 version of:
 # https://github.com/tower-rs/tower/tree/master/tower/src/balance/p2c/service.rs
 license = "MIT"
-repository = "https://github.com/ZcashFoundation/zebra"
-edition = "2021"
+repository.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 
 readme = "../README.md"
-homepage = "https://zfnd.org/zebra/"
+homepage.workspace = true
 # crates.io is limited to 5 keywords and categories
-keywords = ["zebra", "zcash"]
+keywords.workspace = true
 # Must be one of <https://crates.io/category_slugs>
 categories = ["asynchronous", "cryptography::cryptocurrencies", "encoding", "network-programming"]
 
