@@ -3312,7 +3312,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     use zebra_chain::{
         chain_sync_status::MockSyncStatus,
         parameters::{
-            subsidy::{FundingStreamReceiver, FUNDING_STREAM_MG_ADDRESSES_TESTNET},
+            subsidy::FundingStreamReceiver,
             testnet::{
                 self, ConfiguredActivationHeights, ConfiguredFundingStreamRecipient,
                 ConfiguredFundingStreams,
@@ -3503,15 +3503,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
                 numerator,
                 addresses: None,
             },
-            ConfiguredFundingStreamRecipient {
-                receiver: FundingStreamReceiver::MajorGrants,
-                numerator: 8,
-                addresses: Some(
-                    FUNDING_STREAM_MG_ADDRESSES_TESTNET
-                        .map(ToString::to_string)
-                        .to_vec(),
-                ),
-            },
+            ConfiguredFundingStreamRecipient::new_for(FundingStreamReceiver::MajorGrants),
         ])
     };
 

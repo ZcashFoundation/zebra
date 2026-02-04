@@ -15,6 +15,9 @@ use rand::{
 
 use zcash_keys::address::Address;
 
+#[cfg(zcash_unstable = "zip234")]
+use zebra_chain::amount::{Amount, NonNegative};
+
 use zebra_chain::{
     amount::NegativeOrZero,
     block::{Height, MAX_BLOCK_BYTES},

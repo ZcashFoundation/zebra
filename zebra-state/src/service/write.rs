@@ -384,9 +384,6 @@ impl WriteBlockWorkerTask {
             //       and send the result on rsp_tx here
 
             if let Err(ref error) = result {
-                // Update the caller with the error.
-                let _ = rsp_tx.send(result.clone().map(|()| child_hash).map_err(Into::into));
-
                 // If the block is invalid, mark any descendant blocks as rejected.
                 parent_error_map.insert(child_hash, error.clone());
 
@@ -395,6 +392,9 @@ impl WriteBlockWorkerTask {
                     // We only add one hash at a time, so we only need to remove one extra here.
                     parent_error_map.shift_remove_index(0);
                 }
+
+                // Update the caller with the error.
+                let _ = rsp_tx.send(result.map(|()| child_hash).map_err(Into::into));
 
                 // Skip the things we only need to do for successfully committed blocks
                 continue;
@@ -414,7 +414,7 @@ impl WriteBlockWorkerTask {
             );
 
             // Update the caller with the result.
-            let _ = rsp_tx.send(result.clone().map(|()| child_hash).map_err(Into::into));
+            let _ = rsp_tx.send(result.map(|()| child_hash).map_err(Into::into));
 
             while non_finalized_state
                 .best_chain_len()

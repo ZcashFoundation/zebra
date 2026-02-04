@@ -22,7 +22,7 @@ use zebra_chain::{
 use zebra_chain::parameters::subsidy::block_subsidy_pre_nsm;
 
 #[cfg(zcash_unstable = "zip234")]
-use zebra_chain::{amount::MAX_MONEY, parameters::subsidy::block_subsidy};
+use zebra_chain::{parameters::subsidy::block_subsidy};
 
 use crate::{
     constants::{MAX_INVALIDATED_BLOCKS, MAX_NON_FINALIZED_CHAIN_FORKS},

@@ -125,14 +125,32 @@ pub enum Response {
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// An enum of block stores in the state where a block hash could be found.
 pub enum KnownBlock {
+    /// Block is in the finalized portion of the best chain.
+    Finalized,
+
     /// Block is in the best chain.
     BestChain,
 
     /// Block is in a side chain.
     SideChain,
 
+    /// Block is in a block write channel
+    WriteChannel,
+
     /// Block is queued to be validated and committed, or rejected and dropped.
     Queue,
+}
+
+impl std::fmt::Display for KnownBlock {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            KnownBlock::Finalized => write!(f, "finalized state"),
+            KnownBlock::BestChain => write!(f, "best chain"),
+            KnownBlock::SideChain => write!(f, "side chain"),
+            KnownBlock::WriteChannel => write!(f, "block write channel"),
+            KnownBlock::Queue => write!(f, "validation/commit queue"),
+        }
+    }
 }
 
 /// Information about a transaction in any chain.

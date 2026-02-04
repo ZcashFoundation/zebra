@@ -18,7 +18,7 @@ use zebra_chain::{
     work::difficulty::CompactDifficulty,
 };
 
-use crate::constants::MIN_TRANSPARENT_COINBASE_MATURITY;
+use crate::{constants::MIN_TRANSPARENT_COINBASE_MATURITY, HashOrHeight, KnownBlock};
 
 /// A wrapper for type erased errors that is itself clonable and implements the
 /// Error trait
@@ -47,49 +47,43 @@ pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 /// An error describing why a block could not be queued to be committed to the state.
 #[derive(Debug, Error, Clone, PartialEq, Eq, new)]
-pub enum QueueAndCommitError {
-    #[error("block hash {block_hash} has already been sent to be committed to the state")]
-    #[non_exhaustive]
-    Duplicate { block_hash: block::Hash },
+pub enum CommitBlockError {
+    #[error("block hash is a duplicate: already in {location}")]
+    /// The block is a duplicate: it is already queued or committed in the state.
+    Duplicate {
+        /// Hash or height of the duplicated block.
+        hash_or_height: Option<HashOrHeight>,
+        /// Location in the state where the block can be found.
+        location: KnownBlock,
+    },
 
-    #[error("block height {block_height:?} is already committed in the finalized state")]
-    #[non_exhaustive]
-    AlreadyFinalized { block_height: block::Height },
+    /// Contextual validation failed.
+    #[error("could not contextually validate semantically verified block")]
+    ValidateContextError(#[from] Box<ValidateContextError>),
 
-    #[error("block hash {block_hash} was replaced by a newer commit request")]
-    #[non_exhaustive]
-    Replaced { block_hash: block::Hash },
-
-    #[error("pruned block at or below the finalized tip height: {block_height:?}")]
-    #[non_exhaustive]
-    Pruned { block_height: block::Height },
-
-    #[error("block {block_hash} was dropped from the queue of non-finalized blocks")]
-    #[non_exhaustive]
-    Dropped { block_hash: block::Hash },
-
+    /// The write task exited (likely during shutdown).
     #[error("block commit task exited. Is Zebra shutting down?")]
     #[non_exhaustive]
-    CommitTaskExited,
+    WriteTaskExited,
+}
 
-    #[error("dropping the state: dropped unused non-finalized state queue block")]
-    #[non_exhaustive]
-    DroppedUnusedBlock,
+impl CommitBlockError {
+    /// Returns `true` if this is definitely a duplicate commit request.
+    /// Some duplicate requests might not be detected, and therefore return `false`.
+    pub fn is_duplicate_request(&self) -> bool {
+        matches!(self, CommitBlockError::Duplicate { .. })
+    }
 }
 
 /// An error describing why a `CommitSemanticallyVerified` request failed.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum CommitSemanticallyVerifiedError {
-    /// Queuing/commit step failed.
-    #[error("could not queue and commit semantically verified block")]
-    QueueAndCommitError(#[from] QueueAndCommitError),
-    /// Contextual validation failed.
-    #[error("could not contextually validate semantically verified block")]
-    ValidateContextError(#[from] ValidateContextError),
-    /// The write task exited (likely during shutdown).
-    #[error("block write task has exited. Is Zebra shutting down?")]
-    WriteTaskExited,
+#[error("could not commit semantically-verified block")]
+pub struct CommitSemanticallyVerifiedError(#[from] CommitBlockError);
+
+impl From<ValidateContextError> for CommitSemanticallyVerifiedError {
+    fn from(value: ValidateContextError) -> Self {
+        Self(CommitBlockError::ValidateContextError(Box::new(value)))
+    }
 }
 
 #[derive(Debug, Error)]
@@ -106,6 +100,17 @@ impl<E: std::error::Error + 'static> From<BoxError> for LayeredStateError<E> {
             Ok(state_err) => Self::State(*state_err),
             Err(layer_error) => Self::Layer(layer_error),
         }
+    }
+}
+
+/// An error describing why a `CommitCheckpointVerifiedBlock` request failed.
+#[derive(Debug, Error, Clone)]
+#[error("could not commit checkpoint-verified block")]
+pub struct CommitCheckpointVerifiedError(#[from] CommitBlockError);
+
+impl From<ValidateContextError> for CommitCheckpointVerifiedError {
+    fn from(value: ValidateContextError) -> Self {
+        Self(CommitBlockError::ValidateContextError(Box::new(value)))
     }
 }
 
