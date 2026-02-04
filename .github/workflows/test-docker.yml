@@ -93,6 +93,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Privilege drop verification - runs 'id' to verify non-root user
+          - id: privilege-drop
+            name: Privilege drop
+            env_vars: ""
+            test_cmd: id
+            grep_patterns: -e "uid=10001(zebra).*gid=10001(zebra)"
+
           # Basic network configurations
           - id: default-conf
             name: Default config
@@ -159,7 +166,23 @@ jobs:
       - name: Run ${{ matrix.name }} test
         # Only run custom-conf test if the config file exists in the built image
         if: ${{ matrix.id != 'custom-conf' || hashFiles('zebrad/tests/common/configs/custom-conf.toml') != '' }}
+        env:
+          TEST_CMD: ${{ matrix.test_cmd }}
         run: |
+          # For one-shot commands (like 'id'), run directly and check output
+          if [ -n "$TEST_CMD" ]; then
+            OUTPUT=$(docker run --rm ${{ matrix.env_vars }} zebrad-test:${{ github.sha }} $TEST_CMD)
+            echo "Output: $OUTPUT"
+            if echo "$OUTPUT" | grep --extended-regexp ${{ matrix.grep_patterns }}; then
+              echo "SUCCESS: Found expected pattern in output"
+              exit 0
+            else
+              echo "FAILURE: Expected pattern not found in output"
+              exit 1
+            fi
+          fi
+
+          # For long-running commands (zebrad start), run detached and follow logs
           docker run ${{ matrix.env_vars }} --detach --name ${{ matrix.id }} -t zebrad-test:${{ github.sha }} zebrad start
           # Use a subshell to handle the broken pipe error gracefully
           (
