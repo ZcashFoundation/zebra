@@ -2,6 +2,9 @@
 
 #![allow(clippy::unwrap_in_result)]
 #![allow(dead_code)]
+// Allow unused imports: this module is included via `proptest-impl` feature for
+// integration tests, but some imports are only used by `#[test]` functions which
+// are compiled only in test mode.
 #![allow(unused_imports)]
 
 use std::ops::Deref;

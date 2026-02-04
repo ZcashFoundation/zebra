@@ -149,13 +149,16 @@ pub async fn start_state_service_with_cache_dir(
     Ok(zebra_state::init(config, network, Height::MAX, 0).await)
 }
 
-/// Loads the chain tip height from the state stored in a specified directory.
+/// Loads the finalized tip height from the state stored in a specified directory.
 ///
 /// This function uses `init_read_only` instead of `init` to avoid spawning
 /// background tasks (like the metrics export task) that would keep the database
 /// lock held after this function returns.
+///
+/// Note: This returns the finalized tip height, which may be behind the best chain tip
+/// if there are non-finalized blocks.
 #[tracing::instrument]
-pub async fn load_tip_height_from_state_directory(
+pub async fn load_finalized_tip_height_from_state_directory(
     network: &Network,
     state_path: &Path,
 ) -> Result<block::Height> {
@@ -168,13 +171,13 @@ pub async fn load_tip_height_from_state_directory(
     let (_read_state, db, _sender) =
         tokio::task::spawn_blocking(move || zebra_state::init_read_only(config, &network))
             .await
-            .map_err(|e| eyre!("Failed to spawn blocking task: {e}"))?;
+            .map_err(|e| eyre!("Blocking task failed while loading state: {e}"))?;
 
-    let chain_tip_height = db
+    let finalized_tip_height = db
         .finalized_tip_height()
-        .ok_or_else(|| eyre!("State directory doesn't have a chain tip block"))?;
+        .ok_or_else(|| eyre!("State directory doesn't have a finalized tip block"))?;
 
-    Ok(chain_tip_height)
+    Ok(finalized_tip_height)
 }
 
 /// Accepts a network, test_type, test_name, and num_blocks (how many blocks past the finalized tip to try getting)
@@ -292,14 +295,14 @@ pub async fn raw_future_blocks(
     // Wait for zebrad to fully terminate to ensure database lock is released.
     // Just sending SIGKILL doesn't guarantee the process has terminated - we must
     // wait for the OS to clean up the process and release all file locks.
-    let _ = zebrad.wait_with_output();
+    zebrad.wait_with_output()?;
 
     let zebrad_state_path = test_type
         .zebrad_state_path(test_name)
         .expect("already checked that there is a cached state path");
 
     let Height(finalized_tip_height) =
-        load_tip_height_from_state_directory(network, zebrad_state_path.as_ref()).await?;
+        load_finalized_tip_height_from_state_directory(network, zebrad_state_path.as_ref()).await?;
 
     tracing::info!(
         ?finalized_tip_height,

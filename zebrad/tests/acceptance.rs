@@ -4082,7 +4082,9 @@ async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
 
     child.kill(true)?;
     // Wait for zebrad to fully terminate to ensure database lock is released.
-    let _ = child.wait_with_output();
+    child
+        .wait_with_output()
+        .wrap_err("failed to wait for zebrad to fully terminate")?;
     // Prepare checkpoint heights/hashes
     let last_hash = *generated_block_hashes
         .last()
@@ -4142,7 +4144,9 @@ async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
     );
     child.kill(true)?;
     // Wait for zebrad to fully terminate to ensure database lock is released.
-    let _ = child.wait_with_output();
+    child
+        .wait_with_output()
+        .wrap_err("failed to wait for zebrad to fully terminate")?;
 
     // Check that the non-finalized state is not restored from backup when the finalized tip height is below the
     // max checkpoint height and that it can still commit more blocks to its state
@@ -4190,7 +4194,9 @@ async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
 
     child.kill(true)?;
     // Wait for zebrad to fully terminate to ensure database lock is released.
-    let _ = child.wait_with_output();
+    child
+        .wait_with_output()
+        .wrap_err("failed to wait for zebrad process to exit after kill")?;
 
     // Check that Zebra will can commit blocks to its state when its finalized tip is past the max checkpoint height
     // and the non-finalized backup cache is disabled or empty.

@@ -240,7 +240,7 @@ pub fn sync_until(
         child.kill(true)?;
         let dir = child.dir.take().expect("dir was not already taken");
         // Wait for zebrad to fully terminate to ensure database lock is released.
-        let _ = child.wait_with_output();
+        child.wait_with_output()?;
 
         Ok(dir)
     } else {
