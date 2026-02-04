@@ -98,7 +98,7 @@ jobs:
             name: Privilege drop
             env_vars: ""
             test_cmd: id
-            grep_patterns: -e "uid=10001(zebra).*gid=10001(zebra)"
+            grep_patterns: -e "uid=10001\\(zebra\\).*gid=10001\\(zebra\\)"
 
           # Basic network configurations
           - id: default-conf
