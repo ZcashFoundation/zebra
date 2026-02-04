@@ -74,9 +74,6 @@ cargo build
 # Run with default configuration (Mainnet)
 cargo run --release
 
-# Run on Testnet
-cargo run --release -- --network testnet
-
 # Run with custom config file
 cargo run --release -- --config /path/to/zebrad.toml
 ```
