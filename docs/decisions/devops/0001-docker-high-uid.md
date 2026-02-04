@@ -46,6 +46,6 @@ This approach significantly reduces the risk of UID/GID collision with host syst
 
 ## More Information
 
-- [NGINX Docker User ID Issue](https://github.com/nginxinc/docker-nginx/issues/490) - Demonstrates the risks of using UID 101 which overlaps with `systemd-network` user on Debian systems
+- [NGINX Docker User ID Issue](https://github.com/nginx/docker-nginx/issues/490) - Demonstrates the risks of using UID 101 which overlaps with `systemd-network` user on Debian systems
 - [.NET Docker Issue on System Users](https://github.com/dotnet/dotnet-docker/issues/4624) - Details the problems with using `--system` flag and the SYS_UID_MAX warnings
 - [Docker Security Best Practices](https://docs.docker.com/develop/security-best-practices/) - General security recommendations for Docker containers

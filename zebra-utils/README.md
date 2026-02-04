@@ -38,7 +38,7 @@ To create checkpoints, you need a synchronized instance of `zebrad` or `zcashd`.
 
 #### Checkpoint Generation Setup
 
-Make sure your `zebrad` or `zcashd` is [listening for RPC requests](https://doc-internal.zebra.zfnd.org/zebra_rpc/config/struct.Config.html#structfield.listen_addr),
+Make sure your `zebrad` or `zcashd` is [listening for RPC requests](https://docs.rs/zebra-rpc/latest/zebra_rpc/config/rpc/struct.Config.html#structfield.listen_addr),
 and synced to the network tip.
 
 If you are on a Debian system, `zcash-cli` [can be installed as a package](https://zcash.readthedocs.io/en/master/rtd_pages/install_debian_bin_packages.html).
