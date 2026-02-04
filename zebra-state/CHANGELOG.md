@@ -12,7 +12,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `ReadRequest::IsTransparentOutputSpent` and `ReadResponse::IsTransparentOutputSpent` to the read state service ([#10235](https://github.com/ZcashFoundation/zebra/pull/10235))
 - Added `{ReadRequest, Request}::AnyChainBlock` to the read state service ([#10325](https://github.com/ZcashFoundation/zebra/pull/10325))
 
-
 ## [4.0.0] - 2026-02-05
 
 ### Breaking Changes
@@ -28,7 +27,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `KnownBlock::Finalized` and `KnownBlock::WriteChannel` variants.
 - `impl From<ValidateContextError> for CommitSemanticallyVerifiedError`.
 
-
 ## [3.1.2] - 2026-01-21 - Yanked
 
 This should have been a major release, see 4.0.0.
@@ -39,14 +37,12 @@ Dependencies updated.
 
 No API changes; internal dependencies updated.
 
-
 ## [3.1.0] - 2025-11-17
 
 ### Added
 
 - Added `State` and `ReadState` helper traits for convenience when constraining generic type parameters ([#10010](https://github.com/ZcashFoundation/zebra/pull/10010))
-- Made `response::NonFinalizedBlocksListener` publically accessible ([#10083](https://github.com/ZcashFoundation/zebra/pull/10083))
-
+- Made `response::NonFinalizedBlocksListener` publicly accessible ([#10083](https://github.com/ZcashFoundation/zebra/pull/10083))
 
 ## [3.0.0] - 2025-10-15
 
@@ -74,7 +70,6 @@ Additionally, it fixes a regression in Zebra’s sync performance that was intro
 - Restore initial sync performance by avoiding RocksDB merge operations when the on-disk database format is up-to-date ([#9973](https://github.com/ZcashFoundation/zebra/pull/9973))
 - Replaced boxed-string errors in response to failed `CommitSemanticallyVerifiedBlock` and `ReconsiderBlock` state requests with concrete error type ([#9848](https://github.com/ZcashFoundation/zebra/pull/9848), [#9923](https://github.com/ZcashFoundation/zebra/pull/9923), [#9919](https://github.com/ZcashFoundation/zebra/pull/9919))
 
-
 ## [2.0.0] - 2025-08-07
 
 ### Breaking Changes
@@ -84,14 +79,12 @@ Additionally, it fixes a regression in Zebra’s sync performance that was intro
 - Renamed `SemanticallyVerifiedBlock::deferred_balance` to
   `SemanticallyVerifiedBlock::deferred_pool_balance_change`
 
-
 ## [1.0.1] - 2025-07-22
 
 ### Fixed
 
 - Fix 2.4.0 DB upgrade; add warning if impacted ([#9709](https://github.com/ZcashFoundation/zebra/pull/9709)).
   See the Zebra changelog for more details.
-
 
 ## [1.0.0] - 2025-07-11
 

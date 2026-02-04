@@ -10,23 +10,23 @@ docker compose -f docker/docker-compose.observability.yml up -d
 
 # View logs
 docker compose -f docker/docker-compose.observability.yml logs -f zebra
-```
+```text
 
 ## Components
 
 | Component | Port | URL | Purpose |
 |-----------|------|-----|---------|
 | **Zebra** | 9999, 8232 | - | Zcash node with metrics and tracing |
-| **Prometheus** | 9094 | http://localhost:9094 | Metrics collection and storage |
-| **Grafana** | 3000 | http://localhost:3000 | Dashboards and visualization |
-| **Jaeger** | 16686 | http://localhost:16686 | Distributed tracing UI |
-| **AlertManager** | 9093 | http://localhost:9093 | Alert routing |
+| **Prometheus** | 9094 | <http://localhost:9094> | Metrics collection and storage |
+| **Grafana** | 3000 | <http://localhost:3000> | Dashboards and visualization |
+| **Jaeger** | 16686 | <http://localhost:16686> | Distributed tracing UI |
+| **AlertManager** | 9093 | <http://localhost:9093> | Alert routing |
 
 Default Grafana credentials: `admin` / `admin` (you'll be prompted to change on first login)
 
 ## Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────┐
 │                         Zebra Node                                  │
 │  ┌─────────────────┐              ┌─────────────────────────────┐  │
@@ -59,7 +59,7 @@ Default Grafana credentials: `admin` / `admin` (you'll be prompted to change on 
 │                   │
 │  Routes alerts    │
 └───────────────────┘
-```
+```text
 
 ## What Each Component Provides
 
@@ -117,7 +117,7 @@ During high-volume operations (initial sync), reduce sampling to avoid overwhelm
 zebra:
   environment:
     - OTEL_TRACES_SAMPLER_ARG=10  # 10% sampling during sync
-```
+```text
 
 | Scenario | Percentage | Notes |
 |----------|------------|-------|
@@ -129,7 +129,7 @@ zebra:
 
 ## Directory Structure
 
-```
+```text
 observability/
 ├── README.md                    # This file
 ├── alertmanager/
@@ -148,7 +148,7 @@ observability/
 └── prometheus/
     ├── prometheus.yaml          # Scrape configuration
     └── rules/                   # Recording and alert rules
-```
+```text
 
 ## Common Tasks
 
@@ -156,18 +156,18 @@ observability/
 
 ```bash
 curl -s http://localhost:9999/metrics | grep zcash
-```
+```text
 
 ### Query Prometheus directly
 
 ```bash
 # Current block height
 curl -s 'http://localhost:9094/api/v1/query?query=zcash_state_tip_height'
-```
+```text
 
 ### Find slow operations in Jaeger
 
-1. Open http://localhost:16686
+1. Open <http://localhost:16686>
 2. Select service: `zebra`
 3. Set "Min Duration" to filter slow traces
 4. Click "Find Traces"
@@ -176,20 +176,20 @@ curl -s 'http://localhost:9094/api/v1/query?query=zcash_state_tip_height'
 
 ```bash
 curl -s http://localhost:8889/metrics | grep rpc_request
-```
+```text
 
 ## Troubleshooting
 
 ### No metrics in Grafana
 
 1. Check Zebra is exposing metrics: `curl http://localhost:9999/metrics`
-2. Check Prometheus targets: http://localhost:9094/targets
+2. Check Prometheus targets: <http://localhost:9094/targets>
 3. Verify job name matches dashboard queries (default: `zebra`)
 
 ### No traces in Jaeger
 
 1. Verify OTLP endpoint is set: `OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318`
-2. Check Jaeger is healthy: http://localhost:16686
+2. Check Jaeger is healthy: <http://localhost:16686>
 3. Check Jaeger logs: `docker compose logs jaeger`
 
 ### High memory usage in Jaeger
@@ -199,7 +199,7 @@ Reduce trace sampling during sync:
 ```yaml
 environment:
   - OTEL_TRACES_SAMPLER_ARG=10  # Sample only 10%
-```
+```text
 
 ## Related Documentation
 

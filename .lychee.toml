@@ -26,10 +26,9 @@ exclude = [
     # Mergify dashboard (requires auth)
     "^https://dashboard.mergify.com/",
 
-    # zebra.zfnd.org pages that may not be deployed yet (new documentation)
-    # These will be valid once the book is rebuilt and deployed
-    "^https://zebra\\.zfnd\\.org/dev/crates\\.html",
-    "^https://zebra\\.zfnd\\.org/dev/diagrams/crate-architecture\\.html",
+    # Dead upstream links in historical audit document (zebra-dependencies-for-audit.md)
+    "^https://github.com/iqlusioninc/abscissa/tree/develop",
+    "^https://github.com/servo/bincode/releases/tag/v1\\.3\\.3",
 ]
 
 # Exclude paths

@@ -16,7 +16,7 @@ Jaeger is used by other blockchain clients including Lighthouse, Reth, Hyperledg
 
 ## Accessing Jaeger
 
-Open http://localhost:16686 in your browser.
+Open <http://localhost:16686> in your browser.
 
 ## Concepts
 
@@ -44,7 +44,7 @@ The Monitor tab provides RED metrics (Rate, Errors, Duration) aggregated from tr
 
 ### Understanding the Dashboard
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────┐
 │  Service: zebra              Span Kind: [Internal ▼]               │
 ├─────────────────────────────────────────────────────────────────────┤
@@ -67,7 +67,7 @@ The Monitor tab provides RED metrics (Rate, Errors, Duration) aggregated from tr
 │  │ download_and_verify       2.32s         0.11 req/s     < 0.1%  ││
 │  └────────────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────────────┘
-```
+```text
 
 ### Columns Explained
 
@@ -119,29 +119,32 @@ Use the Search tab to find specific traces.
 ### Useful Search Queries
 
 **Find slow RPC calls:**
-```
+
+```text
 Service: zebra
 Operation: rpc_request
 Min Duration: 1s
-```
+```text
 
 **Find failed operations:**
-```
+
+```text
 Service: zebra
 Tags: error=true
-```
+```text
 
 **Find specific RPC method:**
-```
+
+```text
 Service: zebra
 Tags: rpc.method=getblock
-```
+```text
 
 ## Trace Detail View
 
 Clicking a trace opens the detail view showing:
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────┐
 │ Trace: abc123 (5 spans, 234ms)                                      │
 ├─────────────────────────────────────────────────────────────────────┤
@@ -159,7 +162,7 @@ Clicking a trace opens the detail view showing:
 │ │  └─────────────────────────────────────────────────────────────┘││
 │ └─────────────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────────────┘
-```
+```text
 
 ### Reading the Waterfall
 
@@ -197,7 +200,7 @@ Clicking a trace opens the detail view showing:
 
 ### Example: Debugging Slow RPC
 
-```
+```text
 Problem: getblock calls are slow
 
 1. Search:
@@ -217,7 +220,7 @@ Problem: getblock calls are slow
    - Disk I/O
    - Large block size
    - Missing cache
-```
+```text
 
 ## RPC Tracing
 
@@ -248,6 +251,7 @@ Use Compare to diff two traces:
 3. Identify differences in timing or structure
 
 Useful for:
+
 - Comparing fast vs slow versions of same request
 - Before/after optimization comparisons
 - Debugging intermittent issues
@@ -282,7 +286,7 @@ connectors:
 exporters:
   prometheus:
     endpoint: 0.0.0.0:8889  # Spanmetrics for Prometheus
-```
+```text
 
 ### Spanmetrics
 
@@ -291,7 +295,7 @@ Jaeger automatically generates Prometheus metrics from spans:
 ```bash
 # View spanmetrics
 curl -s http://localhost:8889/metrics | grep traces_spanmetrics
-```
+```text
 
 These power the Monitor tab and can be scraped by Prometheus for Grafana dashboards.
 
@@ -321,7 +325,7 @@ These power the Monitor tab and can be scraped by Prometheus for Grafana dashboa
 ### No traces appearing
 
 1. Check OTLP endpoint: `OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318`
-2. Verify Jaeger health: http://localhost:16686
+2. Verify Jaeger health: <http://localhost:16686>
 3. Check Jaeger logs: `docker compose logs jaeger`
 
 ### Monitor tab shows "No Data"

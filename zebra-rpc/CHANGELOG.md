@@ -62,7 +62,6 @@ for the `errors_timestamp` field, which was changed to `i64` to match `zcashd`.
 - Added `zebra_rpc::server::rpc_tracing` module
 - Added `RpcTracingMiddleware<S>` with `new()`, `call()`, and `RpcServiceT` implementation
 
-
 ## [3.1.0] - 2025-11-17
 
 ## Added

@@ -15,18 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `zebra-rpc` was bumped to 5.0.0
 - `zebra-node-services` bumped to 3.0.0
 
-
 ## [3.0.2] - 2026-01-21
 
 This should have been a major release, see 4.0.0.
 
 Dependencies updated.
 
-
 ## [3.0.1] - 2025-11-28
 
 No API changes; internal dependencies updated.
-
 
 ## [3.0.0] - 2025-10-15
 

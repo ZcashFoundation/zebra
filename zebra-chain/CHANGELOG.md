@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `parameters::network::subsidy::SubsidyError::` has new variants:
-  `FoundersRewardNotFound` and ` Underflow`, and the variant `SumOverflow` was
+  `FoundersRewardNotFound` and `Underflow`, and the variant `SumOverflow` was
   renamed to `Overflow`.
 - `parameters::network::subsidy::num_halvings` was renamed to `halving`.
 - `transparent::Output::new_coinbase` was renamed to `new`.
@@ -69,7 +69,6 @@ All `ParametersBuilder` methods and `Parameters::new_regtest()` now return `Resu
 
 - Chain builder calls with `?` operator: `.with_network_name("test")?`
 - Or use `.expect()` if errors are unexpected: `.with_network_name("test").expect("valid name")`
-
 
 ## [3.1.0] - 2025-11-28
 

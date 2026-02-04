@@ -17,6 +17,9 @@ MD041: false  # First-line heading - mdBook includes and some files have valid e
 MD025: false  # Single title - RFC format uses multiple top-level headings intentionally
 MD051: false  # Link fragments - RFC files use link anchors that may not resolve
 MD056: false  # Table column count - existing docs have intentional varying column counts
+MD055: false  # Table pipe style - existing audit docs use trailing pipes in tables
+MD040: false  # Fenced code language - CHANGELOGs have unlabeled code blocks
+MD059: false  # Descriptive link text - existing docs use "here" links
 
 # Configure rules that need customization
 MD004:
