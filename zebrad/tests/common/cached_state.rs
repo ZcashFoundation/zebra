@@ -17,7 +17,6 @@ use tower::{util::BoxService, Service};
 
 use zebra_chain::{
     block::{self, Block, Height},
-    chain_tip::ChainTip,
     parameters::Network,
     serialization::ZcashDeserializeInto,
 };
@@ -151,16 +150,28 @@ pub async fn start_state_service_with_cache_dir(
 }
 
 /// Loads the chain tip height from the state stored in a specified directory.
+///
+/// This function uses `init_read_only` instead of `init` to avoid spawning
+/// background tasks (like the metrics export task) that would keep the database
+/// lock held after this function returns.
 #[tracing::instrument]
 pub async fn load_tip_height_from_state_directory(
     network: &Network,
     state_path: &Path,
 ) -> Result<block::Height> {
-    let (_state_service, _read_state_service, latest_chain_tip, _chain_tip_change) =
-        start_state_service_with_cache_dir(network, state_path).await?;
+    let config = zebra_state::Config {
+        cache_dir: state_path.to_path_buf(),
+        ..zebra_state::Config::default()
+    };
 
-    let chain_tip_height = latest_chain_tip
-        .best_tip_height()
+    let network = network.clone();
+    let (_read_state, db, _sender) =
+        tokio::task::spawn_blocking(move || zebra_state::init_read_only(config, &network))
+            .await
+            .map_err(|e| eyre!("Failed to spawn blocking task: {e}"))?;
+
+    let chain_tip_height = db
+        .finalized_tip_height()
         .ok_or_else(|| eyre!("State directory doesn't have a chain tip block"))?;
 
     Ok(chain_tip_height)
