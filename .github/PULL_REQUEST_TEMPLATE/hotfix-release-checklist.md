@@ -24,12 +24,12 @@ A hotfix release should only be created when a bug or critical issue is discover
 
 ## Update Versions
 
-If it is a Zebra hotfix, the release level for should always follow semantic
+If it is a Zebra hotfix, the release level should always follow semantic
 versioning as a `patch` release. If it is a crate hotfix, it should simply
 follow semver, depending on the thing being fixed.
 
 - [ ] Follow the "Update Zebra Version" section in the regular checklist for
-  instructions
+  instructions.
 
 ## Update the Release PR
 
