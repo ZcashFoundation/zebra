@@ -7,9 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added the concrete error type `CommitCheckpointVerifiedBlock` for handling failed state requests during checkpoint verification ([#9979](https://github.com/ZcashFoundation/zebra/pull/9979))
+- Added `MappedRequest` for `CommitCheckpointVerifiedBlockRequest` ([#9979](https://github.com/ZcashFoundation/zebra/pull/9979))
+
 ### Changed
 
-- `AdjustedDifficulty` now uses `BoundedVec` in `relevant_difficulty_thresholds` and `relevant_times` to enforce fixed upper bounds.
+- `AdjustedDifficulty` now uses `BoundedVec` in `relevant_difficulty_thresholds` and `relevant_times` to enforce fixed upper bounds ([#10056](https://github.com/ZcashFoundation/zebra/pull/10056))
+- Updated the `KnownBlock` struct and state request to record when blocks are found in the sent hashes, tracking which blocks have been sent to the block write channel ([#9999](https://github.com/ZcashFoundation/zebra/pull/9999))
+
+### Fixed
+
+- Fixed return types of infallible `DiskWriteBatch` methods ([#9999](https://github.com/ZcashFoundation/zebra/pull/9999))
+- Fixed an issue where Zebra could incorrectly add a non-finalized chain segment that was a duplicate of another non-finalized chain ([#9999](https://github.com/ZcashFoundation/zebra/pull/9999))
 
 ## [3.1.2] - 2026-01-21
 
