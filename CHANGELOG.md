@@ -5,7 +5,36 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Zebra 4.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v4.0.0) - 2025-01-20
+## [Zebra 4.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v4.1.0) - 2026-02-05
+
+This release has no breaking changes for node operators. It expands Zebra's
+observability with new Prometheus metrics and Grafana dashboards. It also adds
+mempool checks for standard transparent scripts to match zcashd.
+
+Listed below are all user-visible changes.
+
+### Changed
+
+- Split subsidy constants into submodules ([#10185](https://github.com/ZcashFoundation/zebra/pull/10185))
+- Check that `SENTRY_DSN` env variable is present before initializing sentry ([#10256](https://github.com/ZcashFoundation/zebra/pull/10256))
+- Report connection task exits as ConnectionTaskExited ([#10231](https://github.com/ZcashFoundation/zebra/pull/10231))
+- Improve error propagation for `CommitCheckpointVerifiedBlock` ([#9979](https://github.com/ZcashFoundation/zebra/pull/9979))
+
+### Added
+
+- Add RocksDB I/O latency and sync distance metrics ([#10181](https://github.com/ZcashFoundation/zebra/pull/10181))
+- Add performance histograms for bottleneck identification ([#10179](https://github.com/ZcashFoundation/zebra/pull/10179))
+- Add value pool, RPC, and peer health metrics ([#10175](https://github.com/ZcashFoundation/zebra/pull/10175))
+- Add new `Bounded` vec type and apply it in `AdjustDifficulty` ([#10056](https://github.com/ZcashFoundation/zebra/pull/10056))
+- Add standardness checks and configurable `OP_RETURN` policy ([#10224](https://github.com/ZcashFoundation/zebra/pull/10224))
+- Add zaino to the qa rpc framework ([#10199](https://github.com/ZcashFoundation/zebra/pull/10199))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@Bashmunta, @MozirDmitriy, @gustavovalverde, @mpguerra, @oxarbitrage, @syszery, @upbqdn and @zlyzol
+
+## [Zebra 4.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v4.0.0) - 2026-01-20
 
 This release fixes the type of a field in the `getinfo` RPC and adds support for
 the `pingtime` and `pingwait` fields of the `getpeerinfo` RPC.
@@ -47,9 +76,6 @@ This release has the following breaking changes:
 
 Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
 @conradoplg, @gustavovalverde and @syszery
-
-
-## [Unreleased]
 
 ### Added
 
