@@ -334,6 +334,7 @@ impl ZebraDb {
             .expect("Orchard note commitment tree must exist if there is a finalized tip")
     }
 
+    // ORCHARD: this file contains various methods to get the Orchard state out of RocksDB (only finalized state is stored in RocksDB)
     /// Returns the Orchard note commitment tree matching the given block height,
     /// or `None` if the height is above the finalized tip.
     #[allow(clippy::unwrap_in_result)]

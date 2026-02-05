@@ -18,8 +18,8 @@ group = { version = "0.13", default-features = false }
 pasta_curves = "0.5.1"
 
 # Ragu proof system
-ragu = { path = "../../../ragu" }
-ragu_pasta = { path = "../../../ragu/crates/ragu_pasta" }
+ragu = { path = "../../ragu" }
+# ragu_pasta = { path = "../../../ragu/crates/ragu_pasta" }
 
 [dev-dependencies]
 proptest = { workspace = true }

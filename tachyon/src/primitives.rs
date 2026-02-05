@@ -35,7 +35,7 @@ pub type PallasPoint = pallas::Affine;
 /// This re-exports the `Pasta` type from ragu_pasta, which provides
 /// the complete curve cycle implementation including generators and
 /// Poseidon parameters.
-pub use ragu_pasta::Pasta;
+//pub use ragu_pasta::Pasta;
 
 /// Domain separator for Tachyon nullifier derivation.
 ///

@@ -169,6 +169,7 @@ pub enum Transaction {
         outputs: Vec<transparent::Output>,
         /// The sapling shielded data for this transaction, if any.
         sapling_shielded_data: Option<sapling::ShieldedData<sapling::SharedAnchor>>,
+        /// ORCHARD: transactions (sent by users) contain orchard::ShieldedData
         /// The orchard data for this transaction, if any.
         orchard_shielded_data: Option<orchard::ShieldedData>,
     },

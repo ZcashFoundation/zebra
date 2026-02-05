@@ -3950,16 +3950,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ragu_pasta"
-version = "0.0.0"
-dependencies = [
- "ff",
- "group",
- "pasta_curves",
- "ragu_arithmetic",
-]
-
-[[package]]
 name = "ragu_pcd"
 version = "0.0.0"
 dependencies = [
@@ -5114,7 +5104,6 @@ dependencies = [
  "pasta_curves",
  "proptest",
  "ragu",
- "ragu_pasta",
  "serde",
 ]
 

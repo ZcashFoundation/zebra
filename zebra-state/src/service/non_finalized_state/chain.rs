@@ -46,6 +46,7 @@ use self::index::TransparentTransfers;
 
 pub mod index;
 
+/// ORCHARD: non-finalized (volatile and suseptible to re-orgs) is stored in memory with these types)
 /// A single non-finalized partial chain, from the child of the finalized tip,
 /// to a non-finalized chain tip.
 #[derive(Clone, Debug, Default)]
