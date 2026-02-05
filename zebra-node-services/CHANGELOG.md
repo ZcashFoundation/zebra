@@ -5,9 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.0.0] - 2026-02-04
+## [3.0.0] - 2026-02-05
 
-- `zebra-chain` was bumped to `4.0.0`, requiring a major release
+### Breaking Changes
+
+- `zebra-chain` dependency bumped to `5.0.0`.
 
 ## [2.1.2] - 2026-01-21 - Yanked
 

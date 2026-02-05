@@ -76,7 +76,7 @@ tracing-subscriber = { workspace = true }
 thiserror = { workspace = true }
 
 zebra-node-services = { path = "../zebra-node-services", version = "3.0.0" }
-zebra-chain = { path = "../zebra-chain", version = "4.0.0" }
+zebra-chain = { path = "../zebra-chain", version = "5.0.0" }
 
 # These crates are needed for the block-template-to-proposal binary
 zebra-rpc = { path = "../zebra-rpc", version = "5.0.0" }

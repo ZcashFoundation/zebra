@@ -1,7 +1,7 @@
 [package]
 # Crate metadata
 name = "zebrad"
-version = "4.0.0"
+version = "4.1.0"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "The Zcash Foundation's independent, consensus-compatible implementation of a Zcash node"
 license = "MIT OR Apache-2.0"
@@ -151,9 +151,9 @@ tx_v6 = ["zebra-chain/tx_v6", "zebra-state/tx_v6", "zebra-consensus/tx_v6", "zeb
 comparison-interpreter = ["zebra-script/comparison-interpreter"]
 
 [dependencies]
-zebra-chain = { path = "../zebra-chain", version = "4.0.0" }
+zebra-chain = { path = "../zebra-chain", version = "5.0.0" }
 zebra-consensus = { path = "../zebra-consensus", version = "4.0.0" }
-zebra-network = { path = "../zebra-network", version = "3.0.0" }
+zebra-network = { path = "../zebra-network", version = "4.0.0" }
 zebra-node-services = { path = "../zebra-node-services", version = "3.0.0", features = ["rpc-client"] }
 zebra-rpc = { path = "../zebra-rpc", version = "5.0.0" }
 zebra-state = { path = "../zebra-state", version = "4.0.0" }
@@ -294,9 +294,9 @@ proptest-derive = { workspace = true }
 # enable span traces and track caller in tests
 color-eyre = { workspace = true }
 
-zebra-chain = { path = "../zebra-chain", version = "4.0.0", features = ["proptest-impl"] }
+zebra-chain = { path = "../zebra-chain", version = "5.0.0", features = ["proptest-impl"] }
 zebra-consensus = { path = "../zebra-consensus", version = "4.0.0", features = ["proptest-impl"] }
-zebra-network = { path = "../zebra-network", version = "3.0.0", features = ["proptest-impl"] }
+zebra-network = { path = "../zebra-network", version = "4.0.0", features = ["proptest-impl"] }
 zebra-state = { path = "../zebra-state", version = "4.0.0", features = ["proptest-impl"] }
 
 zebra-test = { path = "../zebra-test", version = "2.0.1" }

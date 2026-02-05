@@ -7,12 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [5.0.0] - 2026-02-04
+## [5.0.0] - 2026-02-05
 
 ### Breaking Changes
 
+- `zebra-chain` bumped to `5.0.0`
+- `zebra-script` bumped to `4.0.0`
 - `zebra-state` bumped to `4.0.0`
-- `zebra-chain` bumped to `4.0.0`
+- `zebra-node-services` bumped to `3.0.0`
+- `zebra-consensus` bumped to `4.0.0`
+- `zebra-network` bumped to `4.0.0`
 
 ### Added
 
