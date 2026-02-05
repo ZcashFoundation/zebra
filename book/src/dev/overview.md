@@ -6,38 +6,49 @@ This document sketches the design for Zebra.
 
 The following are general desiderata for Zebra:
 
-* [George's list..]
-
-* As much as reasonably possible, it and its dependencies should be
-  implemented in Rust.  While it may not make sense to require this in
+- As much as reasonably possible, it and its dependencies should be
+  implemented in Rust. While it may not make sense to require this in
   every case (for instance, it probably doesn't make sense to rewrite
   libsecp256k1 in Rust, instead of using the same upstream library as
   Bitcoin), we should generally aim for it.
 
-* As much as reasonably possible, Zebra should minimize trust in
-  required dependencies.  Note that "minimize number of dependencies"
+- As much as reasonably possible, Zebra should minimize trust in
+  required dependencies. Note that "minimize number of dependencies"
   is usually a proxy for this desideratum, but is not exactly the same:
   for instance, a collection of crates like the tokio crates are all
   developed together and have one trust boundary.
 
-* Zebra should be well-factored internally into a collection of
+- Zebra should be well-factored internally into a collection of
   component libraries which can be used by other applications to
-  perform Zcash-related tasks.  Implementation details of each
+  perform Zcash-related tasks. Implementation details of each
   component should not leak into all other components.
 
-* Zebra should checkpoint on Canopy activation and drop all
+- Zebra should checkpoint on Canopy activation and drop all
   Sprout-related functionality not required post-Canopy.
 
 ## Non-Goals
 
-* Zebra keeps a copy of the chain state, so it isn't intended for
+- Zebra keeps a copy of the chain state, so it isn't intended for
   lightweight applications like light wallets. Those applications
   should use a light client protocol.
 
 ## Notable Blog Posts
+
 - [A New Network Stack For Zcash](https://www.zfnd.org/blog/a-new-network-stack-for-zcash)
-- [Composable Futures-based Batch Verification](https://www.zfnd.org/blog/futures-batch-verification)
+- [Composable Futures-based Batch Verification](https://zfnd.org/composable-futures-based-batch-verification/)
 - [Decoding Bitcoin Messages with Tokio Codecs](https://www.zfnd.org/blog/decoding-bitcoin-messages-with-tokio-codecs)
+
+## Crate Architecture
+
+For a visual overview of how Zebra's crates relate to each other, see the
+[Crate Architecture Diagram](diagrams/crate-architecture.md), which includes:
+
+- Dependency graph between all 12 crates
+- Data flow through the verification pipeline
+- External dependencies (RocksDB, Tower, zcash_script)
+
+For detailed information about each crate including key types and entry points,
+see the [Crates Reference](crates.md).
 
 ## Service Dependencies
 
@@ -45,7 +56,7 @@ The following are general desiderata for Zebra:
 {{#include diagrams/service-dependencies.svg}}
 </div>
 
-<!-- 
+<!--
 Service dependencies diagram source:
 
 digraph services {
@@ -88,10 +99,10 @@ into several components:
 
 - [`zebra-chain`](https://docs.rs/zebra_chain), providing
   definitions of core data structures for Zcash, such as blocks, transactions,
-  addresses, etc., and related functionality.  It also contains the
+  addresses, etc., and related functionality. It also contains the
   implementation of the consensus-critical serialization formats used in Zcash.
   The data structures in `zebra-chain` are defined to enforce
-  [*structural validity*](https://zebra.zfnd.org/dev/rfcs/0002-parallel-verification.html#verification-stages)
+  [_structural validity_](https://zebra.zfnd.org/dev/rfcs/0002-parallel-verification.html#verification-stages)
   by making invalid states unrepresentable. For instance, the
   `Transaction` enum has variants for each transaction version, and it's
   impossible to construct a transaction with, e.g., spend or output
@@ -110,7 +121,7 @@ into several components:
     over available peers, and sends peer requests to a local inbound service,
     and
   - a `connect_isolated` method that produces a peer connection completely
-    isolated from all other node state.  This can be used, for instance, to
+    isolated from all other node state. This can be used, for instance, to
     safely relay data over Tor, without revealing distinguishing information.
 
 - [`zebra-script`](https://docs.rs/zebra_script) provides
@@ -119,7 +130,7 @@ into several components:
   pure-Rust script implementation.
 
 - [`zebra-consensus`](https://docs.rs/zebra_consensus)
-  performs [*semantic validation*](https://zebra.zfnd.org/dev/rfcs/0002-parallel-verification.html#verification-stages)
+  performs [_semantic validation_](https://zebra.zfnd.org/dev/rfcs/0002-parallel-verification.html#verification-stages)
   of blocks and transactions: all consensus
   rules that can be checked independently of the chain state, such as
   verification of signatures, proofs, and scripts. Internally, the library
@@ -129,7 +140,7 @@ into several components:
 
 - [`zebra-state`](https://docs.rs/zebra_state) is
   responsible for storing, updating, and querying the chain state. The state
-  service is responsible for [*contextual verification*](https://zebra.zfnd.org/dev/rfcs/0002-parallel-verification.html#verification-stages):
+  service is responsible for [_contextual verification_](https://zebra.zfnd.org/dev/rfcs/0002-parallel-verification.html#verification-stages):
   all consensus rules
   that check whether a new block is a valid extension of an existing chain,
   such as updating the nullifier set or checking that transaction inputs remain
@@ -156,7 +167,7 @@ None: these are the core data structure definitions.
   - `Block`,
   - `Transaction`,
   - `Address`,
-  - `KeyPair`...
+  - `Amount`...
 - parsing bytes into these data structures
 
 - definitions of core traits, e.g.,
@@ -189,15 +200,31 @@ None: these are the core data structure definitions.
 - `Response`, an enum representing all possible responses in the internal protocol;
 - `AddressBook`, a data structure for storing peer addresses;
 - `Config`, a configuration object for all networking-related parameters;
-- `init<S: Service>(Config, S) -> (impl Service,
-  Arc<Mutex<AddressBook>>)`, the main entry-point.
+- `init(Config, S, C, String) -> (impl Service, Arc<Mutex<AddressBook>>, mpsc::Sender)`,
+  the main entry-point (see below for full signature).
+
+```rust
+pub async fn init<S, C>(
+    config: Config,
+    inbound_service: S,
+    latest_chain_tip: C,
+    user_agent: String,
+) -> (
+    Buffer<BoxService<Request, Response, BoxError>, Request>,
+    Arc<std::sync::Mutex<AddressBook>>,
+    mpsc::Sender<(PeerSocketAddr, u32)>,  // misbehavior reports
+)
+```
 
 The `init` entrypoint constructs a dynamically-sized pool of peers
 sending inbound requests to the provided `S: tower::Service`
-representing "this node", and returns a `Service` that can be used to
-send requests to "the network", together with an `AddressBook` updated
-with liveness information from the peer pool.  The `AddressBook` can
-be used to respond to inbound requests for peers.
+representing "this node", and returns:
+
+- a `Service` for sending requests to "the network",
+- an `AddressBook` updated with liveness information from the peer pool,
+- a channel for reporting peer misbehavior.
+
+The `AddressBook` can be used to respond to inbound requests for peers.
 
 All peerset management (finding new peers, creating new outbound
 connections, etc) is completely encapsulated, as is responsibility for
@@ -232,10 +259,32 @@ routing outbound requests to appropriate peers.
   - blocks can be accessed via their chain height or hash
   - confirmed transactions can be accessed via their block, or directly via their hash
 - `Response`, an enum representing all possible responses in the internal protocol;
-- `init() -> impl Service`, the main entry-point.
+- `ReadStateService`, a read-only state service for concurrent queries;
+- `LatestChainTip`, provides the current best chain tip;
+- `ChainTipChange`, notifies when the chain tip changes;
+- `init(Config, &Network, Height, usize) -> (Service, ReadStateService, LatestChainTip, ChainTipChange)`,
+  the main entry-point (see below for full signature).
 
-The `init` entrypoint returns a `Service` that can be used to
-send requests for the chain state.
+```rust
+pub async fn init(
+    config: Config,
+    network: &Network,
+    max_checkpoint_height: block::Height,
+    checkpoint_verify_concurrency_limit: usize,
+) -> (
+    BoxService<Request, Response, BoxError>,
+    ReadStateService,
+    LatestChainTip,
+    ChainTipChange,
+)
+```
+
+The `init` entrypoint returns:
+
+- a `Service` for sending state requests,
+- a `ReadStateService` for concurrent read-only queries,
+- a `LatestChainTip` for accessing the current best chain tip,
+- a `ChainTipChange` for receiving notifications when the chain tip changes.
 
 All state management (adding blocks, getting blocks by index or hash) is completely
 encapsulated.
@@ -263,7 +312,9 @@ for Zcash script inspection, debugging, etc.
 
 #### Exported types
 
-- [...]
+- `Error`, script verification error types
+- `CachedFfiTransaction`, preprocessed transaction for efficient script verification
+- `Sigops`, trait for counting signature operations
 
 ### `zebra-consensus`
 
@@ -279,70 +330,62 @@ for Zcash script inspection, debugging, etc.
   parameters, etc) that determine the network consensus
 - consensus logic to decide which block is the current block
 - block and transaction verification
-  - context-free validation, e.g., signature, proof verification, etc.
-  - context-dependent validation, e.g., determining whether a
-    transaction is accepted in a particular chain state context.
+  - semantic validation, e.g., signature, proof verification, etc.
   - verifying mempool (unconfirmed) transactions
 - block checkpoints
-  - mandatory checkpoints (genesis block, canopy activation)
+  - mandatory checkpoints (genesis block, network upgrades)
   - optional regular checkpoints (every Nth block)
-- modifying the chain state
-  - adding new blocks to `ZebraState`, including chain reorganisation
-  - adding new transactions to `ZebraMempoolState`
-- storing the transaction mempool state
-  - mempool transactions can be accessed via their hash
 - providing `tower::Service` interfaces for all of the above to
   support backpressure and batch validation.
 
 #### Exported types
 
-- `block::init() -> impl Service`, the main entry-point for block
-  verification.
-- `ZebraMempoolState`
-  - all state management (adding transactions, getting transactions
-    by hash) is completely encapsulated.
-- `mempool::init() -> impl Service`, the main entry-point for
-    mempool transaction verification.
+- `Config`, consensus configuration;
+- `Request`, block verification requests;
+- `RouterError`, `VerifyBlockError`, `VerifyCheckpointError`, error types;
+- `init(Config, &Network, S, Receiver<Mempool>) -> (BlockVerifier, TxVerifier, BackgroundTaskHandles, Height)`,
+  the main entry-point (see below for full signature).
 
-The `init` entrypoints return `Service`s that can be used to
-verify blocks or transactions, and add them to the relevant state.
+```rust
+pub async fn init<S, Mempool>(
+    config: Config,
+    network: &Network,
+    state_service: S,
+    mempool: oneshot::Receiver<Mempool>,
+) -> (
+    Buffer<BoxService<Request, block::Hash, RouterError>, Request>,      // block verifier
+    Buffer<BoxService<transaction::Request, transaction::Response, TransactionError>,
+        transaction::Request>,                                            // transaction verifier
+    BackgroundTaskHandles,                                                // background tasks
+    Height,                                                               // max checkpoint height
+)
+```
+
+The `init` entrypoint returns:
+
+- a block verification `Service` (internally routes to checkpoint or semantic verification),
+- a transaction verification `Service` for mempool transactions,
+- handles for background verification tasks,
+- the maximum checkpoint height.
+
+Note: `SemanticBlockVerifier` and `CheckpointVerifier` are accessible via their respective
+submodules (`zebra_consensus::block::SemanticBlockVerifier`, `zebra_consensus::checkpoint::CheckpointVerifier`).
+The internal `BlockVerifierRouter` is not exported.
 
 ### `zebra-rpc`
 
 #### Internal Dependencies
 
 - `zebra-chain` for data structure definitions
-- `zebra-node-services` for shared request type definitions
-- `zebra-utils` for developer and power user tools
+- `zebra-consensus` for block/transaction verification
+- `zebra-network` for peer information
+- `zebra-node-services` for shared service traits
+- `zebra-script` for script verification
+- `zebra-state` for chain state queries
 
 #### Responsible for
 
 - rpc interface
-
-#### Exported types
-
-- [...]
-
-### `zebra-client`
-
-#### Internal Dependencies
-
-- `zebra-chain` for structure definitions
-- `zebra-state` for transaction queries and client/wallet state storage
-- `zebra-script` possibly? for constructing transactions
-
-#### Responsible for
-
-- implementation of some event a user might trigger
-- would be used to implement a full wallet
-- create transactions, monitors shielded wallet state, etc.
-
-#### Notes
-
-Communication between the client code and the rest of the node should be done
-by a tower service interface. Since the `Service` trait can abstract from a
-function call to RPC, this means that it will be possible for us to isolate
-all client code to a subprocess.
 
 #### Exported types
 
@@ -364,7 +407,6 @@ and connects them to each other.
 - `zebra-network`
 - `zebra-state`
 - `zebra-consensus`
-- `zebra-client`
 - `zebra-rpc`
 
 ### Unassigned functionality

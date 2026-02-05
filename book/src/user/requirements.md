@@ -6,14 +6,14 @@ Zebra has the following hardware requirements.
 
 - 4 CPU cores
 - 16 GB RAM
-- 300 GB available disk space 
+- 300 GB available disk space
 - 100 Mbps network connection, with 300 GB of uploads and downloads per month
 
 ## Minimum Hardware Requirements
 
 - 2 CPU cores
 - 4 GB RAM
-- 300 GB available disk space 
+- 300 GB available disk space
 
 [Zebra has successfully run on an Orange Pi Zero 2W with a 512 GB microSD card
 without any issues.](https://x.com/Zerodartz/status/1811460885996798159)
@@ -37,7 +37,7 @@ Zebra uses the following inbound and outbound TCP ports:
 - 18233 on Testnet
 
 If you configure Zebra with a specific
-[`listen_addr`](https://docs.rs/zebra_network/latest/zebra_network/struct.Config.html#structfield.listen_addr),
+[`listen_addr`](https://docs.rs/zebra-network/latest/zebra_network/config/struct.Config.html#structfield.listen_addr),
 it will advertise this address to other nodes for inbound connections. Outbound
 connections are required to sync, inbound connections are optional. Zebra also
 needs access to the Zcash DNS seeders, via the OS DNS resolver (usually port

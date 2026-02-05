@@ -2,11 +2,11 @@
 
 - Feature Name: state_updates
 - Start Date: 2020-08-14
-- Design PR: https://github.com/ZcashFoundation/zebra/pull/902
-- Zebra Issue: https://github.com/ZcashFoundation/zebra/issues/1049
-
+- Design PR: <https://github.com/ZcashFoundation/zebra/pull/902>
+- Zebra Issue: <https://github.com/ZcashFoundation/zebra/issues/1049>
 
 # Summary
+
 [summary]: #summary
 
 Zebra manages chain state in the `zebra-state` crate, which allows state
@@ -19,6 +19,7 @@ and how state updates are performed.
 [RFC2]: ./0002-parallel-verification.md
 
 # Motivation
+
 [motivation]: #motivation
 
 We need to be able to access and modify the chain state, and we want to have
@@ -26,61 +27,63 @@ a description of how this happens and what guarantees are provided by the
 state service.
 
 # Definitions
+
 [definitions]: #definitions
 
-* **state data**: Any data the state service uses to represent chain state.
+- **state data**: Any data the state service uses to represent chain state.
 
-* **structural/semantic/contextual verification**: as defined in [RFC2].
+- **structural/semantic/contextual verification**: as defined in [RFC2].
 
-* **block chain**: A sequence of valid blocks linked by inclusion of the
+- **block chain**: A sequence of valid blocks linked by inclusion of the
   previous block hash in the subsequent block. Chains are rooted at the
   genesis block and extend to a **tip**.
 
-* **chain state**: The state of the ledger after application of a particular
+- **chain state**: The state of the ledger after application of a particular
   sequence of blocks (state transitions).
 
-* **block work**: The approximate amount of work required for a miner to generate
+- **block work**: The approximate amount of work required for a miner to generate
   a block hash that passes the difficulty filter. The number of block header
   attempts and the mining time are proportional to the work value. Numerically
   higher work values represent longer processing times.
 
-* **cumulative work**: The sum of the **block work** of all blocks in a chain, from
+- **cumulative work**: The sum of the **block work** of all blocks in a chain, from
   genesis to the chain tip.
 
-* **best chain**: The chain with the greatest **cumulative work**. This chain
+- **best chain**: The chain with the greatest **cumulative work**. This chain
   represents the consensus state of the Zcash network and transactions.
 
-* **side chain**: A chain which is not contained in the best chain.
+- **side chain**: A chain which is not contained in the best chain.
   Side chains are pruned at the reorg limit, when they are no longer
   connected to the finalized state.
 
-* **chain reorganization**: Occurs when a new best chain is found and the
+- **chain reorganization**: Occurs when a new best chain is found and the
   previous best chain becomes a side chain.
 
-* **reorg limit**: The longest reorganization accepted by `zcashd`, 100 blocks.
+- **reorg limit**: The longest reorganization accepted by `zcashd`, 100 blocks.
 
-* **orphaned block**: A block which is no longer included in the best chain.
+- **orphaned block**: A block which is no longer included in the best chain.
 
-* **non-finalized state**: State data corresponding to blocks above the reorg
+- **non-finalized state**: State data corresponding to blocks above the reorg
   limit. This data can change in the event of a chain reorg.
 
-* **finalized state**: State data corresponding to blocks below the reorg
+- **finalized state**: State data corresponding to blocks below the reorg
   limit. This data cannot change in the event of a chain reorg.
 
-* **non-finalized tips**: The highest blocks in each non-finalized chain. These
+- **non-finalized tips**: The highest blocks in each non-finalized chain. These
   tips might be at different heights.
 
-* **finalized tip**: The highest block in the finalized state. The tip of the best
+- **finalized tip**: The highest block in the finalized state. The tip of the best
   chain is usually 100 blocks (the reorg limit) above the finalized tip. But it can
   be lower during the initial sync, and after a chain reorganization, if the new
   best chain is at a lower height.
 
-* **relevant chain**: The relevant chain for a block starts at the previous
+- **relevant chain**: The relevant chain for a block starts at the previous
   block, and extends back to genesis.
 
-* **relevant tip**: The tip of the relevant chain.
+- **relevant tip**: The tip of the relevant chain.
 
 # Guide-level explanation
+
 [guide-level-explanation]: #guide-level-explanation
 
 The `zebra-state` crate provides an implementation of the chain state storage
@@ -110,7 +113,7 @@ assert!(matches!(response, zebra_state::Response::BlockLocator(_)));
 exactly once before each `call`. It is up to users of the zebra state service
 to uphold this contract.
 
-The `tower::Buffer` wrapper is `Clone`able, allowing shared access to a common state service.  This allows different tasks to share access to the chain state.
+The `tower::Buffer` wrapper is `Clone`able, allowing shared access to a common state service. This allows different tasks to share access to the chain state.
 
 The set of operations supported by `zebra-state` are encoded in its `Request`
 enum. This enum has one variant for each supported operation.
@@ -144,6 +147,7 @@ race conditions between the read state and the written state by doing all
 contextual verification internally.
 
 # Reference-level explanation
+
 [reference-level-explanation]: #reference-level-explanation
 
 ## State Components
@@ -164,9 +168,9 @@ finality, while in Zcash, chain state is final once it is beyond the reorg
 limit. To simplify our implementation, we split the representation of the
 state data at the finality boundary provided by the reorg limit.
 
-State data from blocks *above* the reorg limit (*non-finalized state*) is
-stored in-memory and handles multiple chains. State data from blocks *below*
-the reorg limit (*finalized state*) is stored persistently using `rocksdb` and
+State data from blocks _above_ the reorg limit (_non-finalized state_) is
+stored in-memory and handles multiple chains. State data from blocks _below_
+the reorg limit (_finalized state_) is stored persistently using `rocksdb` and
 only tracks a single chain. This allows a simplification of our state
 handling, because only finalized data is persistent and the logic for
 finalized data handles less invariants.
@@ -176,13 +180,14 @@ blocks, but node restarts are relatively infrequent and a short re-sync is
 cheap relative to the cost of additional implementation complexity.
 
 Another downside of this design is that we do not achieve exactly the same
-behavior as `zcashd` in the event of a 51% attack: `zcashd` limits *each* chain
+behavior as `zcashd` in the event of a 51% attack: `zcashd` limits _each_ chain
 reorganization to 100 blocks, but permits multiple reorgs, while Zebra limits
-*all* chain reorgs to 100 blocks. In the event of a successful 51% attack on
+_all_ chain reorgs to 100 blocks. In the event of a successful 51% attack on
 Zcash, this could be resolved by wiping the rocksdb state and re-syncing the new
 chain, but in this scenario there are worse problems.
 
 ## Service Interface
+
 [service-interface]: #service-interface
 
 The state is accessed asynchronously through a Tower service interface.
@@ -217,7 +222,7 @@ sure that all future requests will see the resulting rocksdb state. Or, we can
 perform rocksdb operations asynchronously in the future returned by
 `Service::call`.
 
-If we perform all *writes* synchronously and allow reads to be either
+If we perform all _writes_ synchronously and allow reads to be either
 synchronous or asynchronous, we ensure that writes cannot race each other.
 Asynchronous reads are guaranteed to read at least the state present at the
 time the request was processed, or a later state.
@@ -230,6 +235,7 @@ time the request was processed, or a later state.
 - **rocksdb writes** must be done synchronously (in `call`)
 
 ## In-memory data structures
+
 [in-memory]: #in-memory
 
 At a high level, the in-memory data structures store a collection of chains,
@@ -238,6 +244,7 @@ heights to blocks. Chains are stored using an ordered map from cumulative work t
 chains, so that the map ordering is the ordering of worst to best chains.
 
 ### The `Chain` type
+
 [chain-type]: #chain-type
 
 The `Chain` type represents a chain of blocks. Each block represents an
@@ -360,13 +367,13 @@ pub struct Chain {
 Push a block into a chain as the new tip
 
 1. Update cumulative data members
-    - Add the block's hash to `height_by_hash`
-    - Add work to `self.partial_cumulative_work`
-    - For each `transaction` in `block`
-      - Add key: `transaction.hash` and value: `(height, tx_index)` to `tx_loc_by_hash`
-      - Add created utxos to `self.created_utxos`
-      - Add spent utxos to `self.spent_utxos`
-      - Add nullifiers to the appropriate `self.<version>_nullifiers`
+   - Add the block's hash to `height_by_hash`
+   - Add work to `self.partial_cumulative_work`
+   - For each `transaction` in `block`
+     - Add key: `transaction.hash` and value: `(height, tx_index)` to `tx_loc_by_hash`
+     - Add created utxos to `self.created_utxos`
+     - Add spent utxos to `self.spent_utxos`
+     - Add nullifiers to the appropriate `self.<version>_nullifiers`
 
 2. Add block to `self.blocks`
 
@@ -377,13 +384,13 @@ Remove the lowest height block of the non-finalized portion of a chain.
 1. Remove the lowest height block from `self.blocks`
 
 2. Update cumulative data members
-    - Remove the block's hash from `self.height_by_hash`
-    - Subtract work from `self.partial_cumulative_work`
-    - For each `transaction` in `block`
-      - Remove `transaction.hash` from `tx_loc_by_hash`
-      - Remove created utxos from `self.created_utxos`
-      - Remove spent utxos from `self.spent_utxos`
-      - Remove the nullifiers from the appropriate `self.<version>_nullifiers`
+   - Remove the block's hash from `self.height_by_hash`
+   - Subtract work from `self.partial_cumulative_work`
+   - For each `transaction` in `block`
+     - Remove `transaction.hash` from `tx_loc_by_hash`
+     - Remove created utxos from `self.created_utxos`
+     - Remove spent utxos from `self.spent_utxos`
+     - Remove the nullifiers from the appropriate `self.<version>_nullifiers`
 
 3. Return the block
 
@@ -407,13 +414,13 @@ Remove the highest height block of the non-finalized portion of a chain.
 1. Remove the highest height `block` from `self.blocks`
 
 2. Update cumulative data members
-    - Remove the corresponding hash from `self.height_by_hash`
-    - Subtract work from `self.partial_cumulative_work`
-    - for each `transaction` in `block`
-      - remove `transaction.hash` from `tx_loc_by_hash`
-      - Remove created utxos from `self.created_utxos`
-      - Remove spent utxos from `self.spent_utxos`
-      - Remove the nullifiers from the appropriate `self.<version>_nullifiers`
+   - Remove the corresponding hash from `self.height_by_hash`
+   - Subtract work from `self.partial_cumulative_work`
+   - for each `transaction` in `block`
+     - remove `transaction.hash` from `tx_loc_by_hash`
+     - Remove created utxos from `self.created_utxos`
+     - Remove spent utxos from `self.spent_utxos`
+     - Remove the nullifiers from the appropriate `self.<version>_nullifiers`
 
 #### `Ord`
 
@@ -435,15 +442,16 @@ parent block is the tip of the finalized state. This implementation should be
 handled by `#[derive(Default)]`.
 
 1. initialise cumulative data members
-    - Construct an empty `self.blocks`, `height_by_hash`, `tx_loc_by_hash`,
-    `self.created_utxos`, `self.spent_utxos`, `self.<version>_anchors`,
-    `self.<version>_nullifiers`
-    - Zero `self.partial_cumulative_work`
+   - Construct an empty `self.blocks`, `height_by_hash`, `tx_loc_by_hash`,
+     `self.created_utxos`, `self.spent_utxos`, `self.<version>_anchors`,
+     `self.<version>_nullifiers`
+   - Zero `self.partial_cumulative_work`
 
 **Note:** The `ChainState` can be empty after a restart, because the
 non-finalized state is empty.
 
 ### `NonFinalizedState` Type
+
 [nonfinalizedstate-type]: #nonfinalizedstate-type
 
 The `NonFinalizedState` type represents the set of all non-finalized state.
@@ -480,9 +488,9 @@ chain and updates all side chains to match.
 4. Add `best_chain` back to `self.chain_set` if `best_chain` is not empty
 
 5. For each remaining `chain` in `side_chains`
-    - remove the lowest height block from `chain`
-    - If that block is equal to `finalized_block` and `chain` is not empty add `chain` back to `self.chain_set`
-    - Else, drop `chain`
+   - remove the lowest height block from `chain`
+   - If that block is equal to `finalized_block` and `chain` is not empty add `chain` back to `self.chain_set`
+   - Else, drop `chain`
 
 6. Return `finalized_block`
 
@@ -495,8 +503,8 @@ Commit `block` to the non-finalized state.
 2. If any chains tip hash equal `block.header.previous_block_hash` remove that chain from `self.chain_set`
 
 3. Else Find the first chain that contains `block.parent` and fork it with
-  `block.parent` as the new tip
-    - `let fork = self.chain_set.iter().find_map(|chain| chain.fork(block.parent));`
+   `block.parent` as the new tip
+   - `let fork = self.chain_set.iter().find_map(|chain| chain.fork(block.parent));`
 
 4. Else panic, this should be unreachable because `commit_block` is only
    called when `block` is ready to be committed.
@@ -560,10 +568,10 @@ Dequeue the set of blocks waiting on `parent`.
 1. Remove the set of hashes waiting on `parent` from `self.by_parent`
 
 2. Remove and collect each block in that set of hashes from `self.blocks` as
-  `queued_children`
+   `queued_children`
 
 3. For each `block` in `queued_children` remove the associated `block.hash`
-  from `self.by_height`
+   from `self.by_height`
 
 4. Return `queued_children`
 
@@ -576,10 +584,9 @@ Prune all queued blocks whose height are less than or equal to
    that are below `finalized_height`
 
 2. for each hash in the removed values of `by_height`
-    - remove the corresponding block from `self.blocks`
-    - remove the block's hash from the list of blocks waiting on
-      `block.header.previous_block_hash` from `self.by_parent`
-
+   - remove the corresponding block from `self.blocks`
+   - remove the block's hash from the list of blocks waiting on
+     `block.header.previous_block_hash` from `self.by_parent`
 
 ### Summary
 
@@ -591,6 +598,7 @@ Prune all queued blocks whose height are less than or equal to
   context to be available.
 
 The state service uses the following entry points:
+
 - `commit_block` when it receives new blocks.
 
 - `finalize` to prevent chains in `NonFinalizedState` from growing beyond the reorg limit.
@@ -605,55 +613,55 @@ New `non-finalized` blocks are committed as follows:
 
 1. If a duplicate block hash exists in a non-finalized chain, or the finalized chain,
    it has already been successfully verified:
-     - create a new oneshot channel
-     - immediately send `Err(DuplicateBlockHash)` drop the sender
-     - return the receiver
+   - create a new oneshot channel
+   - immediately send `Err(DuplicateBlockHash)` drop the sender
+   - return the receiver
 
 2. If a duplicate block hash exists in the queue:
-     - Find the `QueuedBlock` for that existing duplicate block
-     - create a new channel for the new request
-     - replace the old sender in `queued_block` with the new sender
-     - send `Err(DuplicateBlockHash)` through the old sender channel
-     - continue to use the new receiver
+   - Find the `QueuedBlock` for that existing duplicate block
+   - create a new channel for the new request
+   - replace the old sender in `queued_block` with the new sender
+   - send `Err(DuplicateBlockHash)` through the old sender channel
+   - continue to use the new receiver
 
 3. Else create a `QueuedBlock` for `block`:
-     - Create a `tokio::sync::oneshot` channel
-     - Use that channel to create a `QueuedBlock` for `block`
-     - Add `block` to `self.queued_blocks`
-     - continue to use the new receiver
+   - Create a `tokio::sync::oneshot` channel
+   - Use that channel to create a `QueuedBlock` for `block`
+   - Add `block` to `self.queued_blocks`
+   - continue to use the new receiver
 
 4. If `block.header.previous_block_hash` is not present in the finalized or
    non-finalized state:
-     - Return the receiver for the block's channel
+   - Return the receiver for the block's channel
 
 5. Else iteratively attempt to process queued blocks by their parent hash
    starting with `block.header.previous_block_hash`
 
 6. While there are recently committed parent hashes to process
-    - Dequeue all blocks waiting on `parent` with `let queued_children =
-      self.queued_blocks.dequeue_children(parent);`
-    - for each queued `block`
-      - **Run contextual validation** on `block`
-           - contextual validation should check that the block height is
-             equal to the previous block height plus 1. This check will
-             reject blocks with invalid heights.
-      - If the block fails contextual validation send the result to the
-        associated channel
-      - Else if the block's previous hash is the finalized tip add to the
-        non-finalized state with `self.mem.commit_new_chain(block)`
-      - Else add the new block to an existing non-finalized chain or new fork
-        with `self.mem.commit_block(block);`
-      - Send `Ok(hash)` over the associated channel to indicate the block
-        was successfully committed
-      - Add `block.hash` to the set of recently committed parent hashes to
-        process
+   - Dequeue all blocks waiting on `parent` with `let queued_children =
+self.queued_blocks.dequeue_children(parent);`
+   - for each queued `block`
+     - **Run contextual validation** on `block`
+       - contextual validation should check that the block height is
+         equal to the previous block height plus 1. This check will
+         reject blocks with invalid heights.
+     - If the block fails contextual validation send the result to the
+       associated channel
+     - Else if the block's previous hash is the finalized tip add to the
+       non-finalized state with `self.mem.commit_new_chain(block)`
+     - Else add the new block to an existing non-finalized chain or new fork
+       with `self.mem.commit_block(block);`
+     - Send `Ok(hash)` over the associated channel to indicate the block
+       was successfully committed
+     - Add `block.hash` to the set of recently committed parent hashes to
+       process
 
 7. While the length of the non-finalized portion of the best chain is greater
    than the reorg limit
-    - Remove the lowest height block from the non-finalized state with
-      `self.mem.finalize();`
-    - Commit that block to the finalized state with
-      `self.disk.commit_finalized_direct(finalized);`
+   - Remove the lowest height block from the non-finalized state with
+     `self.mem.finalize();`
+   - Commit that block to the finalized state with
+     `self.disk.commit_finalized_direct(finalized);`
 
 8. Prune orphaned blocks from `self.queued_blocks` with
    `self.queued_blocks.prune_by_height(finalized_height);`
@@ -661,6 +669,7 @@ New `non-finalized` blocks are committed as follows:
 9. Return the receiver for the block's channel
 
 ## rocksdb data structures
+
 [rocksdb]: #rocksdb
 
 The current database format is documented in [Upgrading the State Database](../state-db-upgrades.md).
@@ -668,8 +677,8 @@ The current database format is documented in [Upgrading the State Database](../s
 ## Committing finalized blocks
 
 If the parent block is not committed, add the block to an internal queue for
-future processing.  Otherwise, commit the block described below, then
-commit any queued children.  (Although the checkpointer generates verified
+future processing. Otherwise, commit the block described below, then
+commit any queued children. (Although the checkpointer generates verified
 blocks in order when it completes a checkpoint, the blocks are committed in the
 response futures, so they may arrive out of order).
 
@@ -680,24 +689,24 @@ which should:
 #### `pub(super) fn queue_and_commit_finalized_blocks(&mut self, queued_block: QueuedBlock)`
 
 1. Obtain the highest entry of `hash_by_height` as `(old_height, old_tip)`.
-Check that `block`'s parent hash is `old_tip` and its height is
-`old_height+1`, or panic. This check is performed as defense-in-depth to
-prevent database corruption, but it is the caller's responsibility (e.g. the
-zebra-state service's responsibility) to commit finalized blocks in order.
+   Check that `block`'s parent hash is `old_tip` and its height is
+   `old_height+1`, or panic. This check is performed as defense-in-depth to
+   prevent database corruption, but it is the caller's responsibility (e.g. the
+   zebra-state service's responsibility) to commit finalized blocks in order.
 
 The genesis block does not have a parent block. For genesis blocks,
 check that `block`'s parent hash is `null` (all zeroes) and its height is `0`.
 
-2. Insert the block and transaction data into the relevant column families.
+1. Insert the block and transaction data into the relevant column families.
 
-3. If the block is a genesis block, skip any transaction updates.
+2. If the block is a genesis block, skip any transaction updates.
 
-    (Due to a [bug in zcashd](https://github.com/ZcashFoundation/zebra/issues/559),
-    genesis block anchors and transactions are ignored during validation.)
+   (Due to a [bug in zcashd](https://github.com/ZcashFoundation/zebra/issues/559),
+   genesis block anchors and transactions are ignored during validation.)
 
-4.  Update the block anchors, history tree, and chain value pools.
+3. Update the block anchors, history tree, and chain value pools.
 
-5. Iterate over the enumerated transactions in the block. For each transaction,
+4. Iterate over the enumerated transactions in the block. For each transaction,
    update the relevant column families.
 
 **Note**: The Sprout and Sapling anchors are the roots of the Sprout and
@@ -713,15 +722,16 @@ validation and the anchor calculations.)
 Hypothetically, if Sapling were activated from genesis, the specification requires
 a Sapling anchor, but `zcashd` would ignore that anchor.
 
-[`JoinSplit`]: https://doc-internal.zebra.zfnd.org/zebra_chain/sprout/struct.JoinSplit.html
-[`Spend`]: https://doc-internal.zebra.zfnd.org/zebra_chain/sapling/spend/struct.Spend.html
-[`Action`]: https://doc-internal.zebra.zfnd.org/zebra_chain/orchard/struct.Action.html
+[`JoinSplit`]: https://zebra.zfnd.org/internal/zebra_chain/sprout/struct.JoinSplit.html
+[`Spend`]: https://zebra.zfnd.org/internal/zebra_chain/sapling/spend/struct.Spend.html
+[`Action`]: https://zebra.zfnd.org/internal/zebra_chain/orchard/struct.Action.html
 
 These updates can be performed in a batch or without necessarily iterating
 over all transactions, if the data is available by other means; they're
 specified this way for clarity.
 
 ## Accessing previous blocks for contextual validation
+
 [previous-block-context]: #previous-block-context
 
 The state service performs contextual validation of blocks received via the
@@ -732,18 +742,21 @@ The relevant chain for a block starts at its previous block, and follows the
 chain of previous blocks back to the genesis block.
 
 ### Relevant chain iterator
+
 [relevant-chain-iterator]: #relevant-chain-iterator
 
 The relevant chain can be retrieved from the state service as follows:
-* if the previous block is the finalized tip:
-  * get recent blocks from the finalized state
-* if the previous block is in the non-finalized state:
-  * get recent blocks from the relevant chain, then
-  * get recent blocks from the finalized state, if required
+
+- if the previous block is the finalized tip:
+  - get recent blocks from the finalized state
+- if the previous block is in the non-finalized state:
+  - get recent blocks from the relevant chain, then
+  - get recent blocks from the finalized state, if required
 
 The relevant chain can start at any non-finalized block, or at the finalized tip.
 
 ### Relevant chain implementation
+
 [relevant-chain-implementation]: #relevant-chain-implementation
 
 The relevant chain is implemented as a `StateService` iterator, which returns
@@ -776,6 +789,7 @@ For further details, see [PR 1271].
 [PR 1271]: https://github.com/ZcashFoundation/zebra/pull/1271
 
 ## Request / Response API
+
 [request-response]: #request-response
 
 The state API is provided by a pair of `Request`/`Response` enums. Each
@@ -790,6 +804,7 @@ restrict access to write calls, we could implement a wrapper service that
 rejects these, and export "read" and "write" frontends to the same inner service.
 
 ### `Request::CommitBlock`
+
 [request-commit-block]: #request-commit-block
 
 ```rust
@@ -805,6 +820,7 @@ if successful. Returns `Response::Added(block::Hash)` with the hash of
 the newly committed block or an error.
 
 ### `Request::CommitFinalizedBlock`
+
 [request-commit-finalized-block]: #request-finalized-block
 
 ```rust
@@ -821,6 +837,7 @@ blocks. Returns `Response::Added(block::Hash)` with the hash of the
 committed block if successful.
 
 ### `Request::Depth(block::Hash)`
+
 [request-depth]: #request-depth
 
 Computes the depth in the best chain of the block identified by the given
@@ -835,6 +852,7 @@ Implemented by querying:
 - (finalized) the `height_by_hash` tree
 
 ### `Request::Tip`
+
 [request-tip]: #request-tip
 
 Returns `Response::Tip(block::Hash)` with the current best chain tip.
@@ -845,6 +863,7 @@ Implemented by querying:
 - (finalized) the highest height block in the `hash_by_height` tree, if the `non-finalized` state is empty
 
 ### `Request::BlockLocator`
+
 [request-block-locator]: #request-block-locator
 
 Returns `Response::BlockLocator(Vec<block::Hash>)` with hashes starting from
@@ -862,15 +881,16 @@ Implemented by querying:
 - (finalized) the `hash_by_height` tree.
 
 ### `Request::Transaction(transaction::Hash)`
+
 [request-transaction]: #request-transaction
 
 Returns
 
 - `Response::Transaction(Some(Transaction))` if the transaction identified by
-    the given hash is contained in the state;
+  the given hash is contained in the state;
 
 - `Response::Transaction(None)` if the transaction identified by the given
-    hash is not contained in the state.
+  hash is not contained in the state.
 
 Implemented by querying:
 
@@ -884,15 +904,16 @@ Implemented by querying:
   non-finalized chain
 
 ### `Request::Block(block::Hash)`
+
 [request-block]: #request-block
 
 Returns
 
 - `Response::Block(Some(Arc<Block>))` if the block identified by the given
-    hash is contained in the state;
+  hash is contained in the state;
 
 - `Response::Block(None)` if the block identified by the given hash is not
-    contained in the state;
+  contained in the state;
 
 Implemented by querying:
 
@@ -909,6 +930,7 @@ Returns
 - `Response::SpendableUtxo(transparent::Output)`
 
 Implemented by querying:
+
 - (non-finalized) if any `Chains` contain `OutPoint` in their `created_utxos`,
   return the `Utxo` for `OutPoint`;
 - (finalized) else if `OutPoint` is in `utxos_by_outpoint`,
@@ -916,6 +938,7 @@ Implemented by querying:
 - else wait for `OutPoint` to be created as described in [RFC0004];
 
 Then validating:
+
 - check the transparent coinbase spend restrictions specified in [RFC0004];
 - if the restrictions are satisfied, return the response;
 - if the spend is invalid, drop the request (and the caller will time out).
@@ -923,6 +946,7 @@ Then validating:
 [RFC0004]: https://zebra.zfnd.org/dev/rfcs/0004-asynchronous-script-verification.html
 
 # Drawbacks
+
 [drawbacks]: #drawbacks
 
 - Restarts can cause `zebrad` to redownload up to the last one hundred blocks
