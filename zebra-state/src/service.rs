@@ -44,7 +44,7 @@ use crate::{
     constants::{
         MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS, MAX_LEGACY_CHAIN_BLOCKS,
     },
-    error::{CommitBlockError, CommitCheckpointVerifiedError, InvalidateError, ReconsiderError},
+    error::{CommitBlockError, InvalidateError, ReconsiderError},
     response::NonFinalizedBlocksListener,
     service::{
         block_iter::any_ancestor_blocks,
@@ -55,8 +55,8 @@ use crate::{
         queued_blocks::QueuedBlocks,
         watch_receiver::WatchReceiver,
     },
-    BoxError, CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, Config, KnownBlock,
-    ReadRequest, ReadResponse, Request, Response, SemanticallyVerifiedBlock,
+    BoxError, CheckpointVerifiedBlock, Config, KnownBlock, ReadRequest, ReadResponse, Request,
+    Response, SemanticallyVerifiedBlock,
 };
 
 pub mod block_iter;
@@ -468,7 +468,7 @@ impl StateService {
     fn queue_and_commit_to_finalized_state(
         &mut self,
         checkpoint_verified: CheckpointVerifiedBlock,
-    ) -> oneshot::Receiver<Result<block::Hash, CommitCheckpointVerifiedError>> {
+    ) -> oneshot::Receiver<Result<block::Hash, CommitBlockError>> {
         // # Correctness & Performance
         //
         // This method must not block, access the database, or perform CPU-intensive tasks,
@@ -597,10 +597,7 @@ impl StateService {
     }
 
     /// Drops all finalized state queue blocks, and sends an error on their result channels.
-    fn clear_finalized_block_queue(
-        &mut self,
-        error: impl Into<CommitCheckpointVerifiedError> + Clone,
-    ) {
+    fn clear_finalized_block_queue(&mut self, error: impl Into<CommitBlockError> + Clone) {
         for (_hash, queued) in self.finalized_state_queued_blocks.drain() {
             Self::send_checkpoint_verified_block_error(queued, error.clone());
         }
@@ -609,7 +606,7 @@ impl StateService {
     /// Send an error on a `QueuedCheckpointVerified` block's result channel, and drop the block
     fn send_checkpoint_verified_block_error(
         queued: QueuedCheckpointVerified,
-        error: impl Into<CommitCheckpointVerifiedError>,
+        error: impl Into<CommitBlockError>,
     ) {
         let (finalized, rsp_tx) = queued;
 
@@ -620,10 +617,7 @@ impl StateService {
     }
 
     /// Drops all non-finalized state queue blocks, and sends an error on their result channels.
-    fn clear_non_finalized_block_queue(
-        &mut self,
-        error: impl Into<CommitSemanticallyVerifiedError> + Clone,
-    ) {
+    fn clear_non_finalized_block_queue(&mut self, error: impl Into<CommitBlockError> + Clone) {
         for (_hash, queued) in self.non_finalized_state_queued_blocks.drain() {
             Self::send_semantically_verified_block_error(queued, error.clone());
         }
@@ -632,7 +626,7 @@ impl StateService {
     /// Send an error on a `QueuedSemanticallyVerified` block's result channel, and drop the block
     fn send_semantically_verified_block_error(
         queued: QueuedSemanticallyVerified,
-        error: impl Into<CommitSemanticallyVerifiedError>,
+        error: impl Into<CommitBlockError>,
     ) {
         let (finalized, rsp_tx) = queued;
 
@@ -653,7 +647,7 @@ impl StateService {
     fn queue_and_commit_to_non_finalized_state(
         &mut self,
         semantically_verified: SemanticallyVerifiedBlock,
-    ) -> oneshot::Receiver<Result<block::Hash, CommitSemanticallyVerifiedError>> {
+    ) -> oneshot::Receiver<Result<block::Hash, CommitBlockError>> {
         tracing::debug!(block = %semantically_verified.block, "queueing block for contextual verification");
         let parent_hash = semantically_verified.block.header.previous_block_hash;
 
@@ -988,7 +982,7 @@ impl Service<Request> for StateService {
             // Uses non_finalized_state_queued_blocks and pending_utxos in the StateService
             // Accesses shared writeable state in the StateService, NonFinalizedState, and ZebraDb.
             //
-            // The expected error type for this request is `CommitSemanticallyVerifiedError`.
+            // The expected error type for this request is `CommitBlockError`.
             Request::CommitSemanticallyVerifiedBlock(semantically_verified) => {
                 self.assert_block_can_be_validated(&semantically_verified);
 
@@ -1020,7 +1014,7 @@ impl Service<Request> for StateService {
                 timer.finish(module_path!(), line!(), "CommitSemanticallyVerifiedBlock");
 
                 // Await the channel response, flatten the result, map receive errors to
-                // `CommitSemanticallyVerifiedError::WriteTaskExited`.
+                // `CommitBlockError::WriteTaskExited`.
                 // Then flatten the nested Result and convert any errors to a BoxError.
                 let span = Span::current();
                 async move {
@@ -1038,7 +1032,7 @@ impl Service<Request> for StateService {
             // Uses finalized_state_queued_blocks and pending_utxos in the StateService.
             // Accesses shared writeable state in the StateService.
             //
-            // The expected error type for this request is `CommitCheckpointVerifiedError`.
+            // The expected error type for this request is `CommitBlockError`.
             Request::CommitCheckpointVerifiedBlock(finalized) => {
                 // # Consensus
                 //
@@ -1070,7 +1064,7 @@ impl Service<Request> for StateService {
                 timer.finish(module_path!(), line!(), "CommitCheckpointVerifiedBlock");
 
                 // Await the channel response, flatten the result, map receive errors to
-                // `CommitCheckpointVerifiedError::WriteTaskExited`.
+                // `CommitBlockError::WriteTaskExited`.
                 // Then flatten the nested Result and convert any errors to a BoxError.
                 async move {
                     rsp_rx
@@ -2196,7 +2190,7 @@ impl Service<ReadRequest> for ReadStateService {
                         // The non-finalized state that's used in the rest of the state (including finalizing
                         // blocks into the db) is not mutated here.
                         //
-                        // TODO: Convert `CommitSemanticallyVerifiedError` to a new `ValidateProposalError`?
+                        // TODO: Convert `CommitBlockError` to a new `ValidateProposalError`?
                         latest_non_finalized_state.disable_metrics();
 
                         write::validate_and_commit_non_finalized(

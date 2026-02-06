@@ -22,16 +22,13 @@ use zebra_chain::{
     value_balance::{ValueBalance, ValueBalanceError},
 };
 
+use crate::error::{CommitBlockError, InvalidateError, LayeredStateError, ReconsiderError};
 /// Allow *only* these unused imports, so that rustdoc link resolution
 /// will work with inline links.
 #[allow(unused_imports)]
 use crate::{
     constants::{MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS},
     ReadResponse, Response,
-};
-use crate::{
-    error::{CommitCheckpointVerifiedError, InvalidateError, LayeredStateError, ReconsiderError},
-    CommitSemanticallyVerifiedError,
 };
 
 /// Identify a spend by a transparent outpoint or revealed nullifier.
@@ -637,17 +634,14 @@ impl DerefMut for CheckpointVerifiedBlock {
 }
 
 /// Helper trait for convenient access to expected response and error types.
-pub trait MappedRequest: Sized + Send + 'static {
+pub trait MappedRequest: Sized + Send + 'static + Into<Request> {
     /// Expected response type for this state request.
     type MappedResponse;
     /// Expected error type for this state request.
     type Error: std::error::Error + std::fmt::Display + 'static;
 
-    /// Maps the request type to a [`Request`].
-    fn map_request(self) -> Request;
-
     /// Maps the expected [`Response`] variant for this request to the mapped response type.
-    fn map_response(response: Response) -> Self::MappedResponse;
+    fn map_rsp(response: Response) -> Self::MappedResponse;
 
     /// Accepts a state service to call, maps this request to a [`Request`], waits for the state to be ready,
     /// calls the state with the mapped request, then maps the success or error response to the expected response
@@ -655,16 +649,33 @@ pub trait MappedRequest: Sized + Send + 'static {
     ///
     /// Returns a [`Result<MappedResponse, LayeredServicesError<RequestError>>`].
     #[allow(async_fn_in_trait)]
-    async fn mapped_oneshot<State>(
+    async fn run<State>(
         self,
-        state: &mut State,
+        s: &mut State,
     ) -> Result<Self::MappedResponse, LayeredStateError<Self::Error>>
     where
         State: Service<Request, Response = Response, Error = BoxError>,
         State::Future: Send,
     {
-        let response = state.ready().await?.call(self.map_request()).await?;
-        Ok(Self::map_response(response))
+        Ok(Self::map_rsp(s.ready().await?.call(self.into()).await?))
+    }
+
+    #[allow(async_fn_in_trait)]
+    async fn map_err<State, E>(
+        self,
+        state: &mut State,
+        map_layer_err_f: impl FnOnce(BoxError) -> E,
+    ) -> Result<Self::MappedResponse, E>
+    where
+        State: Service<Request, Response = Response, Error = BoxError>,
+        State::Future: Send,
+        E: From<Self::Error>,
+    {
+        match self.run(state).await {
+            Ok(rsp) => Ok(rsp),
+            Err(LayeredStateError::State(e)) => Err(e.into()),
+            Err(LayeredStateError::Layer(e)) => Err(map_layer_err_f(e)),
+        }
     }
 }
 
@@ -672,17 +683,20 @@ pub trait MappedRequest: Sized + Send + 'static {
 /// committing it to the state if successful.
 ///
 /// See the [`crate`] documentation and [`Request::CommitSemanticallyVerifiedBlock`] for details.
-pub struct CommitSemanticallyVerifiedBlockRequest(pub SemanticallyVerifiedBlock);
+#[derive(Debug, Clone, derive_new::new)]
+pub struct CommitSemanticallyVerifiedBlockRequest(SemanticallyVerifiedBlock);
+
+impl From<CommitSemanticallyVerifiedBlockRequest> for Request {
+    fn from(value: CommitSemanticallyVerifiedBlockRequest) -> Self {
+        Self::CommitSemanticallyVerifiedBlock(value.0)
+    }
+}
 
 impl MappedRequest for CommitSemanticallyVerifiedBlockRequest {
     type MappedResponse = block::Hash;
-    type Error = CommitSemanticallyVerifiedError;
+    type Error = CommitBlockError;
 
-    fn map_request(self) -> Request {
-        Request::CommitSemanticallyVerifiedBlock(self.0)
-    }
-
-    fn map_response(response: Response) -> Self::MappedResponse {
+    fn map_rsp(response: Response) -> Self::MappedResponse {
         match response {
             Response::Committed(hash) => hash,
             _ => unreachable!("wrong response variant for request"),
@@ -696,15 +710,17 @@ impl MappedRequest for CommitSemanticallyVerifiedBlockRequest {
 #[allow(dead_code)]
 pub struct CommitCheckpointVerifiedBlockRequest(pub CheckpointVerifiedBlock);
 
+impl From<CommitCheckpointVerifiedBlockRequest> for Request {
+    fn from(value: CommitCheckpointVerifiedBlockRequest) -> Self {
+        Self::CommitCheckpointVerifiedBlock(value.0)
+    }
+}
+
 impl MappedRequest for CommitCheckpointVerifiedBlockRequest {
     type MappedResponse = block::Hash;
-    type Error = CommitCheckpointVerifiedError;
+    type Error = CommitBlockError;
 
-    fn map_request(self) -> Request {
-        Request::CommitCheckpointVerifiedBlock(self.0)
-    }
-
-    fn map_response(response: Response) -> Self::MappedResponse {
+    fn map_rsp(response: Response) -> Self::MappedResponse {
         match response {
             Response::Committed(hash) => hash,
             _ => unreachable!("wrong response variant for request"),
@@ -718,15 +734,17 @@ impl MappedRequest for CommitCheckpointVerifiedBlockRequest {
 #[allow(dead_code)]
 pub struct InvalidateBlockRequest(pub block::Hash);
 
+impl From<InvalidateBlockRequest> for Request {
+    fn from(value: InvalidateBlockRequest) -> Self {
+        Self::InvalidateBlock(value.0)
+    }
+}
+
 impl MappedRequest for InvalidateBlockRequest {
     type MappedResponse = block::Hash;
     type Error = InvalidateError;
 
-    fn map_request(self) -> Request {
-        Request::InvalidateBlock(self.0)
-    }
-
-    fn map_response(response: Response) -> Self::MappedResponse {
+    fn map_rsp(response: Response) -> Self::MappedResponse {
         match response {
             Response::Invalidated(hash) => hash,
             _ => unreachable!("wrong response variant for request"),
@@ -740,15 +758,17 @@ impl MappedRequest for InvalidateBlockRequest {
 #[allow(dead_code)]
 pub struct ReconsiderBlockRequest(pub block::Hash);
 
+impl From<ReconsiderBlockRequest> for Request {
+    fn from(value: ReconsiderBlockRequest) -> Self {
+        Self::ReconsiderBlock(value.0)
+    }
+}
+
 impl MappedRequest for ReconsiderBlockRequest {
     type MappedResponse = Vec<block::Hash>;
     type Error = ReconsiderError;
 
-    fn map_request(self) -> Request {
-        Request::ReconsiderBlock(self.0)
-    }
-
-    fn map_response(response: Response) -> Self::MappedResponse {
+    fn map_rsp(response: Response) -> Self::MappedResponse {
         match response {
             Response::Reconsidered(hashes) => hashes,
             _ => unreachable!("wrong response variant for request"),
@@ -767,7 +787,7 @@ pub enum Request {
     /// until its parent is ready.
     ///
     /// Returns [`Response::Committed`] with the hash of the block when it is
-    /// committed to the state, or a [`CommitSemanticallyVerifiedError`][0] if
+    /// committed to the state, or a [`CommitBlockError`][0] if
     /// the block fails contextual validation or otherwise could not be committed.
     ///
     /// This request cannot be cancelled once submitted; dropping the response
@@ -781,7 +801,7 @@ pub enum Request {
     /// out-of-order and invalid requests do not hang indefinitely. See the [`crate`]
     /// documentation for details.
     ///
-    /// [0]: (crate::error::CommitSemanticallyVerifiedError)
+    /// [0]: (crate::error::CommitBlockError)
     CommitSemanticallyVerifiedBlock(SemanticallyVerifiedBlock),
 
     /// Commit a checkpointed block to the state, skipping most but not all
@@ -792,7 +812,7 @@ pub enum Request {
     /// it until its parent is ready.
     ///
     /// Returns [`Response::Committed`] with the hash of the newly committed
-    /// block, or a [`CommitCheckpointVerifiedError`][0] if the block could not be
+    /// block, or a [`CommitBlockError`][0] if the block could not be
     /// committed to the state.
     ///
     /// This request cannot be cancelled once submitted; dropping the response
@@ -831,7 +851,7 @@ pub enum Request {
     /// out-of-order and invalid requests do not hang indefinitely. See the [`crate`]
     /// documentation for details.
     ///
-    /// [0]: (crate::error::CommitCheckpointVerifiedError)
+    /// [0]: (crate::error::CommitBlockError)
     CommitCheckpointVerifiedBlock(CheckpointVerifiedBlock),
 
     /// Computes the depth in the current best chain of the block identified by the given hash.
