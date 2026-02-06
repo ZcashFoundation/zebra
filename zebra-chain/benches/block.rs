@@ -12,9 +12,9 @@ use zebra_chain::{
         },
         Block,
     },
-    serialization::{ZcashDeserialize, ZcashSerialize},
+    serialization::{TrustedDeserializationGuard, ZcashDeserialize, ZcashSerialize},
 };
-use zebra_test::vectors::BLOCK_TESTNET_141042_BYTES;
+use zebra_test::vectors::{BLOCK_MAINNET_434873_BYTES, BLOCK_TESTNET_141042_BYTES};
 
 fn block_serialization(c: &mut Criterion) {
     // Biggest block from `zebra-test`.
@@ -49,9 +49,39 @@ fn block_serialization(c: &mut Criterion) {
     }
 }
 
+fn trusted_vs_untrusted_deserialization(c: &mut Criterion) {
+    let mut group = c.benchmark_group("trusted_deserialization");
+    group.noise_threshold(0.05);
+    group.sample_size(50);
+
+    // Sapling-heavy block (height 434873, post-Sapling activation at 419200)
+    let sapling_block_bytes: &[u8] = BLOCK_MAINNET_434873_BYTES.as_ref();
+
+    group.bench_with_input(
+        BenchmarkId::new("untrusted", "BLOCK_MAINNET_434873"),
+        &sapling_block_bytes,
+        |b, bytes| {
+            b.iter(|| Block::zcash_deserialize(Cursor::new(bytes)).unwrap());
+        },
+    );
+
+    group.bench_with_input(
+        BenchmarkId::new("trusted", "BLOCK_MAINNET_434873"),
+        &sapling_block_bytes,
+        |b, bytes| {
+            b.iter(|| {
+                let _guard = TrustedDeserializationGuard::new();
+                Block::zcash_deserialize(Cursor::new(bytes)).unwrap()
+            });
+        },
+    );
+
+    group.finish();
+}
+
 criterion_group!(
     name = benches;
     config = Criterion::default().noise_threshold(0.05).sample_size(50);
-    targets = block_serialization
+    targets = block_serialization, trusted_vs_untrusted_deserialization
 );
 criterion_main!(benches);

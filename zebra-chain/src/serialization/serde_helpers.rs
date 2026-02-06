@@ -67,19 +67,6 @@ impl From<Base> for pallas::Base {
 }
 
 #[derive(Deserialize, Serialize)]
-#[serde(remote = "sapling_crypto::value::ValueCommitment")]
-pub struct ValueCommitment {
-    #[serde(getter = "sapling_crypto::value::ValueCommitment::to_bytes")]
-    bytes: [u8; 32],
-}
-
-impl From<ValueCommitment> for sapling_crypto::value::ValueCommitment {
-    fn from(local: ValueCommitment) -> Self {
-        sapling_crypto::value::ValueCommitment::from_bytes_not_small_order(&local.bytes).unwrap()
-    }
-}
-
-#[derive(Deserialize, Serialize)]
 #[serde(remote = "sapling_crypto::note::ExtractedNoteCommitment")]
 pub struct SaplingExtractedNoteCommitment {
     #[serde(getter = "SaplingExtractedNoteCommitment::as_serializable_bytes")]

@@ -144,6 +144,9 @@ color-eyre = { workspace = true }
 spandoc = { workspace = true }
 tracing = { workspace = true }
 
+# Serialization
+serde_json = { workspace = true }
+
 # Make the optional testing dependencies required
 proptest = { workspace = true }
 proptest-derive = { workspace = true }

@@ -124,7 +124,7 @@ impl OutputInTransactionV4 {
 impl ZcashSerialize for OutputInTransactionV4 {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         let output = self.0.clone();
-        writer.write_all(&output.cv.0.to_bytes())?;
+        writer.write_all(&output.cv.to_bytes())?;
         writer.write_all(&output.cm_u.to_bytes())?;
         output.ephemeral_key.zcash_serialize(&mut writer)?;
         output.enc_ciphertext.zcash_serialize(&mut writer)?;
@@ -150,10 +150,8 @@ impl ZcashDeserialize for OutputInTransactionV4 {
         Ok(OutputInTransactionV4(Output {
             // Type is `ValueCommit^{Sapling}.Output`, i.e. J
             // https://zips.z.cash/protocol/protocol.pdf#abstractcommit
-            // See [`sapling_crypto::value::ValueCommitment::zcash_deserialize`].
-            cv: commitment::ValueCommitment(
-                sapling_crypto::value::ValueCommitment::zcash_deserialize(&mut reader)?,
-            ),
+            // See [`commitment::ValueCommitment::zcash_deserialize`].
+            cv: commitment::ValueCommitment::zcash_deserialize(&mut reader)?,
             // Type is `B^{[ℓ_{Sapling}_{Merkle}]}`, i.e. 32 bytes.
             // However, the consensus rule above restricts it even more.
             // See [`sapling_crypto::note::ExtractedNoteCommitment::zcash_deserialize`].
@@ -190,7 +188,7 @@ impl ZcashDeserialize for OutputInTransactionV4 {
 
 impl ZcashSerialize for OutputPrefixInTransactionV5 {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        writer.write_all(&self.cv.0.to_bytes())?;
+        writer.write_all(&self.cv.to_bytes())?;
         writer.write_all(&self.cm_u.to_bytes())?;
         self.ephemeral_key.zcash_serialize(&mut writer)?;
         self.enc_ciphertext.zcash_serialize(&mut writer)?;
@@ -215,10 +213,8 @@ impl ZcashDeserialize for OutputPrefixInTransactionV5 {
         Ok(OutputPrefixInTransactionV5 {
             // Type is `ValueCommit^{Sapling}.Output`, i.e. J
             // https://zips.z.cash/protocol/protocol.pdf#abstractcommit
-            // See [`sapling_crypto::value::ValueCommitment::zcash_deserialize`].
-            cv: commitment::ValueCommitment(
-                sapling_crypto::value::ValueCommitment::zcash_deserialize(&mut reader)?,
-            ),
+            // See [`commitment::ValueCommitment::zcash_deserialize`].
+            cv: commitment::ValueCommitment::zcash_deserialize(&mut reader)?,
             // Type is `B^{[ℓ_{Sapling}_{Merkle}]}`, i.e. 32 bytes.
             // However, the consensus rule above restricts it even more.
             // See [`sapling_crypto::note::ExtractedNoteCommitment::zcash_deserialize`].

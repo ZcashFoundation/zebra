@@ -6,6 +6,8 @@
 //! `ReadZcashExt`, extension traits for `io::Read` and `io::Write` with utility functions
 //! for reading and writing data (e.g., the Bitcoin variable-integer format).
 
+use std::{cell::Cell, marker::PhantomData};
+
 mod compact_size;
 mod constraint;
 mod date_time;
@@ -42,3 +44,41 @@ pub use zcash_serialize::{
     zcash_serialize_bytes, zcash_serialize_bytes_external_count, zcash_serialize_empty_list,
     zcash_serialize_external_count, FakeWriter, ZcashSerialize, MAX_PROTOCOL_MESSAGE_LEN,
 };
+
+// Trusted deserialization context
+
+thread_local! {
+    static TRUSTED_DEPTH: Cell<u32> = const { Cell::new(0) };
+}
+
+/// Guard that sets the trusted deserialization flag on creation and unsets it on drop.
+///
+/// When active, `ZcashDeserialize` implementations may skip expensive cryptographic
+/// validation for data that was already validated before being stored (e.g. blocks
+/// read from the finalized state database).
+///
+/// Guards are re-entrant: nesting multiple guards is safe and the trusted flag
+/// remains active until the outermost guard is dropped.
+///
+/// This guard is `!Send` because the underlying flag is thread-local. It must be
+/// created and dropped on the same thread.
+pub struct TrustedDeserializationGuard(PhantomData<*const ()>);
+
+impl TrustedDeserializationGuard {
+    /// Create a new guard, incrementing the thread-local trusted depth counter.
+    pub fn new() -> Self {
+        TRUSTED_DEPTH.set(TRUSTED_DEPTH.get() + 1);
+        Self(PhantomData)
+    }
+}
+
+impl Drop for TrustedDeserializationGuard {
+    fn drop(&mut self) {
+        TRUSTED_DEPTH.set(TRUSTED_DEPTH.get() - 1);
+    }
+}
+
+/// Returns `true` if the current thread is deserializing from a trusted source.
+pub fn is_trusted_source() -> bool {
+    TRUSTED_DEPTH.get() > 0
+}

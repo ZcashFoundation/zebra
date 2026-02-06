@@ -281,9 +281,9 @@ where
     /// <https://zips.z.cash/protocol/protocol.pdf#saplingbalance>
     pub fn binding_verification_key(&self) -> redjubjub::VerificationKeyBytes<Binding> {
         let cv_old: sapling_crypto::value::CommitmentSum =
-            self.spends().map(|spend| spend.cv.0.clone()).sum();
+            self.spends().map(|spend| spend.cv.inner().clone()).sum();
         let cv_new: sapling_crypto::value::CommitmentSum =
-            self.outputs().map(|output| output.cv.0.clone()).sum();
+            self.outputs().map(|output| output.cv.inner().clone()).sum();
 
         (cv_old - cv_new)
             .into_bvk(self.value_balance.zatoshis())
