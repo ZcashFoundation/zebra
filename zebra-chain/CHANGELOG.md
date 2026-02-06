@@ -13,7 +13,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `parameters::network::subsidy::constants` module.
 - `BoundedVec` re-export.
 - `OrchardActions` trait with `actions()` method.
 - `ConfiguredFundingStreamRecipient::new_for()` method.
