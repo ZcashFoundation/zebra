@@ -1027,7 +1027,7 @@ impl Service<Request> for StateService {
                     rsp_rx
                         .await
                         .map_err(|_recv_error| CommitBlockError::WriteTaskExited.into())
-                        .flatten()
+                        .and_then(|result| result)
                         .map_err(BoxError::from)
                         .map(Response::Committed)
                 }
@@ -1076,7 +1076,7 @@ impl Service<Request> for StateService {
                     rsp_rx
                         .await
                         .map_err(|_recv_error| CommitBlockError::WriteTaskExited.into())
-                        .flatten()
+                        .and_then(|result| result)
                         .map_err(BoxError::from)
                         .map(Response::Committed)
                 }
@@ -1199,7 +1199,7 @@ impl Service<Request> for StateService {
                     rsp_rx
                         .await
                         .map_err(|_recv_error| InvalidateError::InvalidateRequestDropped)
-                        .flatten()
+                        .and_then(|result| result)
                         .map_err(BoxError::from)
                         .map(Response::Invalidated)
                 }
@@ -1221,7 +1221,7 @@ impl Service<Request> for StateService {
                     rsp_rx
                         .await
                         .map_err(|_recv_error| ReconsiderError::ReconsiderResponseDropped)
-                        .flatten()
+                        .and_then(|result| result)
                         .map_err(BoxError::from)
                         .map(Response::Reconsidered)
                 }
