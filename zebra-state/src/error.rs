@@ -72,6 +72,12 @@ impl CommitBlockError {
     }
 }
 
+impl From<ValidateContextError> for CommitBlockError {
+    fn from(value: ValidateContextError) -> Self {
+        Box::new(value).into()
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum LayeredStateError<E: std::error::Error + std::fmt::Display> {
     #[error("{0}")]

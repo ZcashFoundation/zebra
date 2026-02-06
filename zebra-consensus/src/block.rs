@@ -29,9 +29,7 @@ use zebra_chain::{
     transaction, transparent,
     work::equihash,
 };
-use zebra_state::{
-    self as zs, CommitSemanticallyVerifiedBlockRequest, LayeredStateError, MappedRequest,
-};
+use zebra_state::{self as zs, CommitSemanticallyVerifiedBlockRequest, MappedRequest};
 
 use crate::{error::*, transaction as tx, BoxError};
 
@@ -57,7 +55,7 @@ pub struct SemanticBlockVerifier<S, V> {
 // TODO: dedupe with crate::error::BlockError
 #[non_exhaustive]
 #[allow(missing_docs)]
-#[derive(Debug, Error)]
+#[derive(Debug, Error, derive_new::new)]
 pub enum VerifyBlockError {
     #[error("unable to verify depth for block {hash} from chain state during block verification")]
     Depth { source: BoxError, hash: block::Hash },
@@ -94,7 +92,7 @@ pub enum VerifyBlockError {
     /// Errors originating from the state service, which may arise from general failures in interacting with the state.
     /// This is for errors that are not specifically related to block depth or commit failures.
     #[error("state service error for block {hash}: {source}")]
-    StateService { source: BoxError, hash: block::Hash },
+    Tower { source: BoxError, hash: block::Hash },
 }
 
 impl VerifyBlockError {
@@ -166,7 +164,7 @@ where
     }
 
     fn call(&mut self, request: Request) -> Self::Future {
-        let mut state_service = self.state_service.clone();
+        let mut state = self.state_service.clone();
         let mut transaction_verifier = self.transaction_verifier.clone();
         let network = self.network.clone();
 
@@ -179,7 +177,7 @@ where
             let hash = block.hash();
             // Check that this block is actually a new block.
             tracing::trace!("checking that block is not already in state");
-            match state_service
+            match state
                 .ready()
                 .await
                 .map_err(|source| VerifyBlockError::Depth { source, hash })?
@@ -345,7 +343,7 @@ where
 
             // Return early for proposal requests.
             if request.is_proposal() {
-                return match state_service
+                return match state
                     .ready()
                     .await
                     .map_err(VerifyBlockError::ValidateProposal)?
@@ -358,18 +356,10 @@ where
                 };
             }
 
-            let committed_hash = CommitSemanticallyVerifiedBlockRequest::new(prepared_block)
-                .mapped_oneshot(&mut state_service)
+            CommitSemanticallyVerifiedBlockRequest::new(prepared_block)
+                .map_err(&mut state, |e| VerifyBlockError::new_tower(e, hash))
                 .await
-                .map_err(|err| match err {
-                    LayeredStateError::State(commit_error) => commit_error.into(),
-                    LayeredStateError::Layer(source) => {
-                        VerifyBlockError::StateService { source, hash }
-                    }
-                })?;
-
-            assert_eq!(committed_hash, hash, "state must commit correct hash");
-            Ok(hash)
+                .inspect(|&res| assert_eq!(res, hash, "state must commit correct hash"))
         }
         .instrument(span)
         .boxed()

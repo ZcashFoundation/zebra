@@ -7050,6 +7050,7 @@ dependencies = [
  "chrono",
  "color-eyre",
  "derive-getters",
+ "derive-new",
  "futures",
  "futures-util",
  "halo2_proofs",
