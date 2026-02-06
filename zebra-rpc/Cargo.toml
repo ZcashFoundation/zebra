@@ -1,6 +1,6 @@
 [package]
 name = "zebra-rpc"
-version = "4.0.0"
+version = "5.0.0"
 authors.workspace = true
 description = "A Zebra JSON Remote Procedure Call (JSON-RPC) interface"
 license.workspace = true
@@ -98,16 +98,16 @@ sapling-crypto = { workspace = true }
 # Test-only feature proptest-impl
 proptest = { workspace = true, optional = true }
 
-zebra-chain = { path = "../zebra-chain", version = "4.0.0", features = [
+zebra-chain = { path = "../zebra-chain", version = "5.0.0", features = [
     "json-conversion",
 ] }
-zebra-consensus = { path = "../zebra-consensus", version = "3.1.2" }
-zebra-network = { path = "../zebra-network", version = "3.0.0" }
-zebra-node-services = { path = "../zebra-node-services", version = "2.1.2", features = [
+zebra-consensus = { path = "../zebra-consensus", version = "4.0.0" }
+zebra-network = { path = "../zebra-network", version = "4.0.0" }
+zebra-node-services = { path = "../zebra-node-services", version = "3.0.0", features = [
     "rpc-client",
 ] }
-zebra-script = { path = "../zebra-script", version = "3.0.2" }
-zebra-state = { path = "../zebra-state", version = "3.1.2" }
+zebra-script = { path = "../zebra-script", version = "4.0.0" }
+zebra-state = { path = "../zebra-state", version = "4.0.0" }
 
 [build-dependencies]
 tonic-prost-build = { workspace = true }
@@ -121,16 +121,16 @@ proptest = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 
-zebra-chain = { path = "../zebra-chain", version = "4.0.0", features = [
+zebra-chain = { path = "../zebra-chain", version = "5.0.0", features = [
     "proptest-impl",
 ] }
-zebra-consensus = { path = "../zebra-consensus", version = "3.1.2", features = [
+zebra-consensus = { path = "../zebra-consensus", version = "4.0.0", features = [
     "proptest-impl",
 ] }
-zebra-network = { path = "../zebra-network", version = "3.0.0", features = [
+zebra-network = { path = "../zebra-network", version = "4.0.0", features = [
     "proptest-impl",
 ] }
-zebra-state = { path = "../zebra-state", version = "3.1.2", features = [
+zebra-state = { path = "../zebra-state", version = "4.0.0", features = [
     "proptest-impl",
 ] }
 

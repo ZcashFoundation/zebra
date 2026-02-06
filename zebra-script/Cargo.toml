@@ -1,6 +1,6 @@
 [package]
 name = "zebra-script"
-version = "3.0.2"
+version = "4.0.0"
 authors.workspace = true
 description = "Zebra script verification wrapping zcashd's zcash_script library"
 license.workspace = true
@@ -26,7 +26,7 @@ comparison-interpreter = []
 libzcash_script = { workspace = true }
 zcash_script = { workspace = true }
 zcash_primitives = { workspace = true }
-zebra-chain = { path = "../zebra-chain", version = "4.0.0" }
+zebra-chain = { path = "../zebra-chain", version = "5.0.0" }
 
 thiserror = { workspace = true }
 
