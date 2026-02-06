@@ -12,7 +12,6 @@ pub use orchard::note::AssetBase;
 use orchard::{
     bundle::burn_validation::{validate_bundle_burn, BurnError},
     issuance::{verify_issue_bundle, AssetRecord, Error as IssueError},
-    issuance_auth::{IssueValidatingKey, ZSASchnorr},
     note::Nullifier,
     value::NoteValue,
     Note,
@@ -20,71 +19,7 @@ use orchard::{
 
 use zcash_primitives::transaction::components::issuance::{read_note, write_note};
 
-use crate::{
-    // FIXME:
-    //serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},
-    transaction::{SigHash, Transaction},
-};
-
-// FIXME:
-//#[cfg(any(test, feature = "proptest-impl"))]
-//use crate::serialization::ZcashSerialize;
-#[cfg(any(test, feature = "proptest-impl"))]
-use orchard::{issuance::compute_asset_desc_hash, issuance_auth::IssueAuthKey};
-
-/*
-FIXME:
-impl ZcashSerialize for AssetBase {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        writer.write_all(&self.to_bytes())
-    }
-}
-
-impl ZcashDeserialize for AssetBase {
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        Option::from(AssetBase::from_bytes(&reader.read_32_bytes()?))
-            .ok_or_else(|| SerializationError::Parse("Invalid orchard_zsa AssetBase!"))
-    }
-}
-*/
-
-pub fn write_asset_state<W: io::Write>(mut writer: W, asset_state: &AssetState) -> io::Result<()> {
-    writer.write_all(&asset_state.0.amount.to_bytes())?;
-    writer.write_u8(asset_state.0.is_finalized as u8)?;
-    // Additionally write asset here as it's needed when we read and contruct reference_node
-    writer.write_all(&asset_state.0.reference_note.asset().to_bytes())?;
-    write_note(&mut writer, &asset_state.0.reference_note)?;
-    Ok(())
-}
-
-pub fn read_asset_state<R: io::Read>(mut reader: R) -> io::Result<AssetState> {
-    let mut amount_bytes = [0; 8];
-    reader.read_exact(&mut amount_bytes)?;
-
-    let is_finalized = match reader.read_u8()? {
-        0 => false,
-        1 => true,
-        _ => {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "Invalid is_finalized",
-            ))
-        }
-    };
-
-    let mut asset_bytes = [0u8; 32];
-    reader.read_exact(&mut asset_bytes)?;
-    let asset = Option::from(AssetBase::from_bytes(&asset_bytes))
-        .ok_or(io::Error::new(io::ErrorKind::InvalidData, "Invalid asset"))?;
-
-    let reference_note = read_note(reader, asset)?;
-
-    Ok(AssetState(AssetRecord::new(
-        NoteValue::from_bytes(amount_bytes),
-        is_finalized,
-        reference_note,
-    )))
-}
+use crate::transaction::{SigHash, Transaction};
 
 /// Wraps orchard's AssetRecord for use in zebra state management.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,15 +31,51 @@ impl AssetState {
         Self(AssetRecord::new(amount, is_finalized, reference_note))
     }
 
-    /// FIXME: add doc comment
+    /// Deserializes a new [`AssetState`] from its canonical byte encoding.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, io::Error> {
-        read_asset_state(bytes)
+        use std::io::{Cursor, Read};
+
+        let mut reader = Cursor::new(bytes);
+        let mut amount_bytes = [0; 8];
+        reader.read_exact(&mut amount_bytes)?;
+
+        let is_finalized = match reader.read_u8()? {
+            0 => false,
+            1 => true,
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Invalid is_finalized",
+                ))
+            }
+        };
+
+        let mut asset_bytes = [0u8; 32];
+        reader.read_exact(&mut asset_bytes)?;
+        let asset = Option::from(AssetBase::from_bytes(&asset_bytes))
+            .ok_or(io::Error::new(io::ErrorKind::InvalidData, "Invalid asset"))?;
+
+        let reference_note = read_note(reader, asset)?;
+
+        Ok(AssetState(AssetRecord::new(
+            NoteValue::from_bytes(amount_bytes),
+            is_finalized,
+            reference_note,
+        )))
     }
 
-    /// FIXME: add doc comment
-    pub fn to_bytes(self) -> Result<Vec<u8>, io::Error> {
-        let mut bytes: Vec<u8> = Vec::new();
-        write_asset_state(&mut bytes, &self)?;
+    /// Serializes [`AssetState`] to its canonical byte encoding.
+    pub fn to_bytes(&self) -> Result<Vec<u8>, io::Error> {
+        use std::io::Write;
+
+        // FIXME: Consider writing a leading version byte here so we can change AssetState's
+        // on-disk format without silently mis-parsing old DB entries during upgrades (and fix
+        // from_bytes accordingly).
+        let mut bytes = Vec::new();
+        bytes.write_all(&self.0.amount.to_bytes())?;
+        bytes.write_u8(self.0.is_finalized as u8)?;
+        bytes.write_all(&self.0.reference_note.asset().to_bytes())?;
+        write_note(&mut bytes, &self.0.reference_note)?;
         Ok(bytes)
     }
 
@@ -173,6 +144,7 @@ fn apply_updates(
     updates: BTreeMap<AssetBase, AssetRecord>,
 ) {
     use std::collections::hash_map::Entry;
+
     for (asset, record) in updates {
         match states.entry(asset) {
             Entry::Occupied(mut entry) => entry.get_mut().1 = AssetState::from(record),
@@ -190,6 +162,8 @@ impl IssuedAssetChanges {
         transaction_sighashes: &[SigHash],
         get_state: impl Fn(&AssetBase) -> Option<AssetState>,
     ) -> Result<Self, AssetStateError> {
+        // transactions and sighashes must be equal length by design of the code,
+        // so we use assert instead of returning error
         assert_eq!(
             transactions.len(),
             transaction_sighashes.len(),
@@ -203,7 +177,6 @@ impl IssuedAssetChanges {
 
         for (tx, sighash) in transactions.iter().zip(transaction_sighashes) {
             // Validate and apply burns
-            // FIXME: Avoid using collect (pass the iterator directly or use another way to get burns)
             if let Some(burn) = tx.orchard_burns() {
                 let burn_records = validate_bundle_burn(
                     burn.iter()
@@ -216,18 +189,22 @@ impl IssuedAssetChanges {
 
             // Validate and apply issuances
             if let Some(issue_data) = tx.orchard_issue_data() {
-                // FIXME: Is it correct to use `except` if transaction has no nullifiers?
+                // ZIP-0227 defines issued-note rho as DeriveIssuedRho(nf_{0,0}, i_action, i_note),
+                // so we must pass the first Action nullifier (nf_{0,0}). We rely on
+                // `orchard_nullifiers()` preserving Action order, so `.next()` returns nf_{0,0}.
                 let issue_records = verify_issue_bundle(
                     issue_data.inner(),
                     *sighash.as_ref(),
                     |asset| Self::get_or_cache_record(&mut states, asset, &get_state),
-                    // FIXME: For now the only way to conver zebra nullifier type to orchard nullifier type
-                    // is the following non-optimal construction through byte arrays alhought they both are
-                    // wrappers arounf pallas::Point?
+                    // FIXME: For now, the only way to convert Zebra's nullifier type to Orchard's nullifier type
+                    // is via bytes, although they both wrap pallas::Point. Consider a more direct conversion to
+                    // avoid this round-trip, if possible.
                     &Nullifier::from_bytes(&<[u8; 32]>::from(
                         *tx.orchard_nullifiers()
                             .next()
-                            .expect("Transaction should have at least one nullifier"),
+                            // ZIP-0227 requires an issuance bundle to contain at least one OrchardZSA Action Group.
+                            // `ShieldedData.actions` is `AtLeastOne<...>`, so nf_{0,0} must exist.
+                            .expect("issuance must have at least one nullifier"),
                     ))
                     .expect("Bytes can be converted to Nullifier"),
                 )
@@ -275,18 +252,113 @@ impl From<HashMap<AssetBase, AssetState>> for IssuedAssetChanges {
 }
 
 #[cfg(any(test, feature = "proptest-impl"))]
-pub trait RandomAssetBase {
-    /// Generates a random serialized asset base for testing.
-    fn random_serialized() -> String;
+pub mod testing {
+    use super::AssetState;
+
+    use orchard::{
+        issuance::compute_asset_desc_hash,
+        issuance_auth::{IssueAuthKey, IssueValidatingKey, ZSASchnorr},
+        note::{AssetBase, RandomSeed, Rho},
+        value::NoteValue,
+        Note, ReferenceKeys,
+    };
+
+    use rand::{RngCore, SeedableRng};
+    use rand_chacha::ChaChaRng;
+
+    /// Deterministic "random" AssetBase for tests.
+    pub fn mock_asset_base(desc: &[u8]) -> AssetBase {
+        let mut rng = ChaChaRng::seed_from_u64(0);
+
+        let isk = IssueAuthKey::<ZSASchnorr>::random(&mut rng);
+        let ik = IssueValidatingKey::<ZSASchnorr>::from(&isk);
+
+        let desc_hash = compute_asset_desc_hash(
+            &desc
+                .split_first()
+                .map(|(first, rest)| (*first, rest.to_vec()))
+                .expect("Asset description must be non-empty")
+                .into(),
+        );
+
+        AssetBase::derive(&ik, &desc_hash)
+    }
+
+    /// Creates a reference note.
+    // TODO: Consider making create_reference_note function pub in orchard and remove this
+    // implementation.
+    fn create_reference_note(asset: AssetBase, mut rng: impl RngCore) -> Note {
+        let rho = Rho::from_bytes(&[0u8; 32]).expect("Rho note must be valid");
+
+        let rseed = loop {
+            let mut bytes = [0u8; 32];
+            rng.fill_bytes(&mut bytes);
+
+            if let Some(rseed) = Option::from(RandomSeed::from_bytes(bytes, &rho)) {
+                break rseed;
+            }
+        };
+
+        Note::from_parts(
+            ReferenceKeys::recipient(),
+            NoteValue::from_raw(0),
+            asset,
+            rho,
+            rseed,
+        )
+        .expect("Reference note must be valid")
+    }
+
+    /// Mock AssetState for tests.
+    pub fn mock_asset_state(asset: AssetBase, total_supply: u64, is_finalized: bool) -> AssetState {
+        let reference_note = create_reference_note(asset, ChaChaRng::seed_from_u64(0));
+        let amount = NoteValue::from_bytes(total_supply.to_le_bytes());
+        AssetState::new(amount, is_finalized, reference_note)
+    }
 }
 
-#[cfg(any(test, feature = "proptest-impl"))]
-impl RandomAssetBase for AssetBase {
-    fn random_serialized() -> String {
-        let isk = IssueAuthKey::<ZSASchnorr>::random(&mut rand_core::OsRng);
-        let ik = IssueValidatingKey::<ZSASchnorr>::from(&isk);
-        let desc = b"zsa_asset";
-        let hash = compute_asset_desc_hash(&(desc[0], desc[1..].to_vec()).into());
-        hex::encode(AssetBase::derive(&ik, &hash).to_bytes())
+#[cfg(test)]
+mod tests {
+    use super::{
+        testing::{mock_asset_base, mock_asset_state},
+        *,
+    };
+
+    #[test]
+    fn asset_state_roundtrip_serialization() {
+        let asset = mock_asset_base(b"test_asset");
+        let state = mock_asset_state(asset, 1000, false);
+
+        let bytes = state.to_bytes().unwrap();
+        let decoded = AssetState::from_bytes(&bytes).unwrap();
+
+        assert_eq!(state, decoded);
+    }
+
+    #[test]
+    fn asset_state_finalized_roundtrip() {
+        let asset = mock_asset_base(b"finalized");
+        let state = mock_asset_state(asset, 5000, true);
+
+        let bytes = state.to_bytes().unwrap();
+        let decoded = AssetState::from_bytes(&bytes).unwrap();
+
+        assert_eq!(decoded.is_finalized(), true);
+        assert_eq!(decoded.total_supply(), 5000);
+    }
+
+    #[test]
+    fn read_asset_state_invalid_finalized_byte() {
+        let mut bytes = vec![0u8; 8]; // amount
+        bytes.push(2); // invalid is_finalized (not 0 or 1)
+
+        let result = AssetState::from_bytes(&bytes);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn issued_asset_changes_empty() {
+        let changes = IssuedAssetChanges::default();
+        assert_eq!(changes.iter().count(), 0);
     }
 }

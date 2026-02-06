@@ -14,7 +14,7 @@ use zebra_chain::{
     block::Block,
     chain_tip::mock::MockChainTip,
     orchard,
-    orchard_zsa::{asset_state::RandomAssetBase, AssetBase, AssetState},
+    orchard_zsa::asset_state::testing::{mock_asset_base, mock_asset_state},
     parameters::{
         subsidy::POST_NU6_FUNDING_STREAMS_TESTNET,
         testnet::{self, ConfiguredActivationHeights, Parameters},
@@ -541,10 +541,11 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
     // Test the response format from `getassetstate`.
 
     // Prepare the state response and make the RPC request.
+    let asset_base = mock_asset_base(b"Asset1");
     let rsp = state
         .expect_request_that(|req| matches!(req, ReadRequest::AssetState { .. }))
         .map(|responder| responder.respond(ReadResponse::AssetState(None)));
-    let req = rpc.get_asset_state(AssetBase::random_serialized(), None);
+    let req = rpc.get_asset_state(hex::encode(asset_base.to_bytes()), None);
 
     // Get the RPC error response.
     let (asset_state_rsp, ..) = tokio::join!(req, rsp);
@@ -555,15 +556,12 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
         .bind(|| insta::assert_json_snapshot!(format!("get_asset_state_not_found"), asset_state));
 
     // Prepare the state response and make the RPC request.
+    let asset_base = mock_asset_base(b"Asset2");
+    let asset_state = mock_asset_state(asset_base.clone(), 1000, true);
     let rsp = state
         .expect_request_that(|req| matches!(req, ReadRequest::AssetState { .. }))
-        .map(|responder| {
-            responder.respond(ReadResponse::AssetState(Some(AssetState {
-                is_finalized: true,
-                total_supply: 1000,
-            })))
-        });
-    let req = rpc.get_asset_state(AssetBase::random_serialized(), None);
+        .map(|responder| responder.respond(ReadResponse::AssetState(Some(asset_state))));
+    let req = rpc.get_asset_state(hex::encode(asset_base.to_bytes()), None);
 
     // Get the RPC response.
     let (asset_state_rsp, ..) = tokio::join!(req, rsp);
