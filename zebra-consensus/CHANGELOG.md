@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `zebra-state` bumped to 4.0.0
 - `zebra-chain` bumped to 5.0.0
+- `zebra-script` bumped to 4.0.0
+- `zebra-node-services` bumped to 3.0.0
 - `VerifyBlockError::Commit` now contains `CommitBlockError` instead of `BoxError`.
 
 ### Added

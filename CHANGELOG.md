@@ -15,17 +15,13 @@ Listed below are all user-visible changes.
 
 ### Changed
 
-- Split subsidy constants into submodules ([#10185](https://github.com/ZcashFoundation/zebra/pull/10185))
 - Check that `SENTRY_DSN` env variable is present before initializing sentry ([#10256](https://github.com/ZcashFoundation/zebra/pull/10256))
-- Report connection task exits as ConnectionTaskExited ([#10231](https://github.com/ZcashFoundation/zebra/pull/10231))
-- Improve error propagation for `CommitCheckpointVerifiedBlock` ([#9979](https://github.com/ZcashFoundation/zebra/pull/9979))
 
 ### Added
 
 - Add RocksDB I/O latency and sync distance metrics ([#10181](https://github.com/ZcashFoundation/zebra/pull/10181))
 - Add performance histograms for bottleneck identification ([#10179](https://github.com/ZcashFoundation/zebra/pull/10179))
 - Add value pool, RPC, and peer health metrics ([#10175](https://github.com/ZcashFoundation/zebra/pull/10175))
-- Add new `Bounded` vec type and apply it in `AdjustDifficulty` ([#10056](https://github.com/ZcashFoundation/zebra/pull/10056))
 - Add standardness checks and configurable `OP_RETURN` policy ([#10224](https://github.com/ZcashFoundation/zebra/pull/10224))
 - Add zaino to the qa rpc framework ([#10199](https://github.com/ZcashFoundation/zebra/pull/10199))
 
