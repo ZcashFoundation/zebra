@@ -241,6 +241,7 @@ pub fn sync_until(
         let dir = child.dir.take().expect("dir was not already taken");
         // Wait for zebrad to fully terminate to ensure database lock is released.
         child.wait_with_output()?;
+        std::thread::sleep(std::time::Duration::from_secs(3));
 
         Ok(dir)
     } else {

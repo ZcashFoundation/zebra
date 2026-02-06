@@ -296,6 +296,7 @@ pub async fn raw_future_blocks(
     // Just sending SIGKILL doesn't guarantee the process has terminated - we must
     // wait for the OS to clean up the process and release all file locks.
     zebrad.wait_with_output()?;
+    std::thread::sleep(Duration::from_secs(3));
 
     let zebrad_state_path = test_type
         .zebrad_state_path(test_name)
