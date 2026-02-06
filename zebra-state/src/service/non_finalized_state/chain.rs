@@ -87,6 +87,8 @@ pub(crate) type SpendingTransactionId = ();
 
 /// The internal state of [`Chain`].
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
+// ORCHARD: The "ChainInner" stores all the orchard (and sapling) related fields, such as note commmitment trees and nullifier sets
+// specifically, this struct is the in-memory storage prior to "finality".
 pub struct ChainInner {
     // Blocks, heights, hashes, and transaction locations
     //
