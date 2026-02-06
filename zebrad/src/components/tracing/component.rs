@@ -68,6 +68,10 @@ pub struct Tracing {
     #[cfg(feature = "flamegraph")]
     flamegrapher: Option<flame::Grapher>,
 
+    /// The OpenTelemetry tracer provider, if enabled.
+    #[cfg(feature = "opentelemetry")]
+    otel_provider: Option<opentelemetry_sdk::trace::SdkTracerProvider>,
+
     /// Drop guard for worker thread of non-blocking logger,
     /// responsible for flushing any remaining logs when the program terminates.
     //
@@ -267,6 +271,45 @@ impl Tracing {
         #[cfg(feature = "sentry")]
         let subscriber = subscriber.with(sentry::integrations::tracing::layer());
 
+        // OpenTelemetry layer - zero overhead when config.opentelemetry_endpoint is None
+        #[cfg(feature = "opentelemetry")]
+        let (otel_layer, otel_provider, otel_resolved_config) = {
+            // Check standard OTEL_* env vars as fallback (lower precedence than config/ZEBRA_*)
+            let endpoint = config
+                .opentelemetry_endpoint
+                .clone()
+                .or_else(|| std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok());
+            let service_name = config
+                .opentelemetry_service_name
+                .clone()
+                .or_else(|| std::env::var("OTEL_SERVICE_NAME").ok());
+            let sample_percent = config.opentelemetry_sample_percent.or_else(|| {
+                std::env::var("OTEL_TRACES_SAMPLER_ARG")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+            });
+
+            // Capture resolved values for logging
+            let resolved_config = (
+                endpoint.clone(),
+                service_name.clone().unwrap_or_else(|| "zebra".to_string()),
+                sample_percent.unwrap_or(100),
+            );
+
+            match super::otel::layer(endpoint.as_deref(), service_name.as_deref(), sample_percent) {
+                Ok((layer, provider)) => (layer, provider, resolved_config),
+                Err(e) => {
+                    tracing::warn!(
+                        ?e,
+                        "failed to initialize OpenTelemetry, traces will not be exported"
+                    );
+                    (None, None, resolved_config)
+                }
+            }
+        };
+        #[cfg(feature = "opentelemetry")]
+        let subscriber = subscriber.with(otel_layer);
+
         // spawn the console server in the background, and apply the console layer
         // TODO: set Builder::poll_duration_histogram_max() if needed
         #[cfg(all(feature = "tokio-console", tokio_unstable))]
@@ -316,6 +359,28 @@ impl Tracing {
             "installed tokio-console tracing layer",
         );
 
+        // Log OpenTelemetry status
+        #[cfg(feature = "opentelemetry")]
+        if otel_provider.is_some() {
+            let (ref endpoint, ref service_name, sample_percent) = otel_resolved_config;
+            info!(
+                ?endpoint,
+                %service_name,
+                sample_percent,
+                "installed OpenTelemetry tracing layer",
+            );
+        }
+
+        // Warning if OpenTelemetry is configured but feature not compiled
+        #[cfg(not(feature = "opentelemetry"))]
+        if config.opentelemetry_endpoint.is_some() {
+            warn!(
+                endpoint = ?config.opentelemetry_endpoint,
+                "unable to activate OpenTelemetry tracing: \
+                 enable the 'opentelemetry' feature when compiling zebrad",
+            );
+        }
+
         // Write any progress reports sent by other tasks to the terminal
         //
         // TODO: move this to its own module?
@@ -342,6 +407,8 @@ impl Tracing {
             initial_filter: filter,
             #[cfg(feature = "flamegraph")]
             flamegrapher,
+            #[cfg(feature = "opentelemetry")]
+            otel_provider,
             _guard: Some(worker_guard),
         })
     }
@@ -353,6 +420,13 @@ impl Tracing {
 
         #[cfg(feature = "flamegraph")]
         self.flamegrapher.take();
+
+        #[cfg(feature = "opentelemetry")]
+        if let Some(provider) = self.otel_provider.take() {
+            if let Err(e) = provider.shutdown() {
+                tracing::warn!(?e, "OpenTelemetry shutdown error");
+            }
+        }
 
         self._guard.take();
     }

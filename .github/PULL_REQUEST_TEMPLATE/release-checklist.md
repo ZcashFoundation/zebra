@@ -90,10 +90,20 @@ This check runs automatically on pull requests with the `A-release` label. It mu
 
 Zebra follows [semantic versioning](https://semver.org). Semantic versions look like: MAJOR.MINOR.PATCH[-TAG.PRE-RELEASE]
 
-Choose a release level for `zebrad`. Release levels are based on user-visible changes from the changelog:
-- Mainnet Network Upgrades are `major` releases
-- significant new features or behaviour changes; changes to RPCs, command-line, or configs; and deprecations or removals are `minor` releases
-- otherwise, it is a `patch` release
+Choose a release level for `zebrad`. Release levels are based on user-visible changes:
+
+- Major release: breaking changes to RPCs (fields changed or removed), config files (fields
+  changed or removed), command line (arguments changed or removed), features
+  (features changed or removed), environment variables (changed or removed)
+  or any other external interface of Zebra
+- Minor release: new features are `minor` releases
+- Patch release: otherwise
+
+Update the version using:
+
+```
+cargo release version --verbose --execute --allow-branch '*' -p zebrad patch # [ major | minor ]
+```
 
 ### Update Crate Versions and Crate Change Logs
 
@@ -104,36 +114,45 @@ Check that the release will work:
 
 - [ ] Determine which crates require release. Run `git diff --stat <previous_tag>`
       and enumerate the crates that had changes.
-- [ ] Determine which type of release to make. Run `semver-checks` to list API
-      changes: `cargo semver-checks -p <crate> --default-features`. If there are
-      breaking API changes, do a major release, or try to revert the API change
-      if it was accidental. Otherwise do a minor or patch release depending on
-      whether a new API was added. Note that `semver-checks` won't work
-      if the previous realase was yanked; you will have to determine the
-      type of release manually.
-- [ ] Update the crate `CHANGELOG.md` listing the API changes or other
-      relevant information for a crate consumer. It might make sense to copy
-      entries from the `zebrad` changelog.
-- [ ] Update crate versions:
+- [ ] Update (or install) `semver-checks`: `cargo +stable install cargo-semver-checks --locked`
+- [ ] Update (or install) `public-api`: `cargo +stable install cargo-public-api --locked`
+- [ ] For each crate that requires a release:
+  - [ ] Determine which type of release to make. Run `semver-checks` to list API
+        changes: `cargo semver-checks -p <crate> --default-features`. If there are
+        breaking API changes, do a major release, or try to revert the API change
+        if it was accidental. Otherwise do a minor or patch release depending on
+        whether a new API was added. Note that `semver-checks` won't work
+        if the previous realase was yanked; you will have to determine the
+        type of release manually.
+  - [ ] Update the crate `CHANGELOG.md` listing the API changes or other
+        relevant information for a crate consumer. Use `public-api` to list all
+        API changes: `cargo public-api diff latest -p <crate> -sss`. You can use
+        e.g. copilot to turn it into a human-readable list, e.g. (write the output
+        to `api.txt` beforehand):
+        ```
+        copilot -p "Transform @api.txt which is a API diff into a human-readable description of the API changes. Be terse. Write output api-readable.txt. Use backtick quotes for identifiers. Use '### Breaking Changes' header for changes and removals, and '### Added' for additions. Make each item start with a verb e.g, Added, Changed" --allow-tool write
+        ```
+        It might also make sense to copy entries from the `zebrad` changelog.
+  - [ ] Update crate versions:
 
 ```sh
 cargo release version --verbose --execute --allow-branch '*' -p <crate> patch # [ major | minor ]
 cargo release replace --verbose --execute --allow-branch '*' -p <crate>
 ```
 
-- [ ] Update the crate `CHANGELOG.md`
 - [ ] Commit and push the above version changes to the release branch.
 
 ## Update End of Support
 
 The end of support height is calculated from the current blockchain height:
-- [ ] Find where the Zcash blockchain tip is now by using a [Zcash Block Explorer](https://mainnet.zcashexplorer.app/) or other tool.
+
 - [ ] Replace `ESTIMATED_RELEASE_HEIGHT` in [`end_of_support.rs`](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/src/components/sync/end_of_support.rs) with the height you estimate the release will be tagged.
 
 <details>
 
 <summary>Optional: calculate the release tagging height</summary>
 
+- Find where the Zcash blockchain tip is now by using a [Zcash Block Explorer](https://mainnet.zcashexplorer.app/) or other tool.
 - Add `1152` blocks for each day until the release
 - For example, if the release is in 3 days, add `1152 * 3` to the current Mainnet block height
 
