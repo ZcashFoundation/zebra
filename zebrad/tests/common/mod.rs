@@ -9,6 +9,8 @@
 //! to avoid compiling an empty "common" test binary:
 //! <https://doc.rust-lang.org/book/ch11-03-test-organization.html#submodules-in-integration-tests>
 
+#![allow(dead_code)]
+
 pub mod cached_state;
 pub mod check;
 #[cfg(feature = "zebra-checkpoints")]
