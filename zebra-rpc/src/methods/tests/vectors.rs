@@ -75,6 +75,7 @@ async fn rpc_getinfo() {
         MockAddressBookPeers::default(),
         rx,
         None,
+        None,
     );
 
     let getinfo_future = tokio::spawn(async move { rpc.get_info().await });
@@ -222,6 +223,7 @@ async fn rpc_getblock() {
         tip,
         MockAddressBookPeers::default(),
         rx,
+        None,
         None,
     );
 
@@ -736,6 +738,7 @@ async fn rpc_getblock_parse_error() {
         MockAddressBookPeers::default(),
         rx,
         None,
+        None,
     );
 
     // Make sure we get an error if Zebra can't parse the block height.
@@ -785,6 +788,7 @@ async fn rpc_getblock_missing_error() {
         NoChainTip,
         MockAddressBookPeers::default(),
         rx,
+        None,
         None,
     );
 
@@ -852,6 +856,7 @@ async fn rpc_getblockheader() {
         tip,
         MockAddressBookPeers::default(),
         rx,
+        None,
         None,
     );
 
@@ -986,6 +991,7 @@ async fn rpc_getbestblockhash() {
         MockAddressBookPeers::default(),
         rx,
         None,
+        None,
     );
 
     // Get the tip hash using RPC method `get_best_block_hash`
@@ -1036,6 +1042,7 @@ async fn rpc_getrawtransaction() {
         tip,
         MockAddressBookPeers::default(),
         rx,
+        None,
         None,
     );
 
@@ -1223,6 +1230,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
         tip,
         MockAddressBookPeers::default(),
         rx,
+        None,
         None,
     );
 
@@ -1414,6 +1422,7 @@ async fn rpc_getaddresstxids_response_with(
         MockAddressBookPeers::default(),
         rx,
         None,
+        None,
     );
 
     // call the method with valid arguments
@@ -1489,6 +1498,7 @@ async fn getaddresstxids_single_equals_object_full_range() {
         MockAddressBookPeers::default(),
         rx,
         None,
+        None,
     );
 
     let addr_str = address.to_string();
@@ -1541,6 +1551,7 @@ async fn rpc_getaddressutxos_invalid_arguments() {
         NoChainTip,
         MockAddressBookPeers::default(),
         rx,
+        None,
         None,
     );
 
@@ -1600,6 +1611,7 @@ async fn rpc_getaddressutxos_response() {
         tip,
         MockAddressBookPeers::default(),
         rx,
+        None,
         None,
     );
 
@@ -1694,6 +1706,7 @@ async fn rpc_getblockcount() {
         MockAddressBookPeers::default(),
         rx,
         None,
+        None,
     );
 
     // Get the tip height using RPC method `get_block_count`
@@ -1737,6 +1750,7 @@ async fn rpc_getblockcount_empty_state() {
         tip.clone(),
         MockAddressBookPeers::default(),
         rx,
+        None,
         None,
     );
 
@@ -1836,6 +1850,7 @@ async fn rpc_getpeerinfo() {
         mock_address_book,
         rx,
         None,
+        None,
     );
 
     // Call `get_peer_info`
@@ -1904,6 +1919,7 @@ async fn rpc_getblockhash() {
         MockAddressBookPeers::default(),
         rx,
         None,
+        None,
     );
 
     // Query the hashes using positive indexes
@@ -1962,6 +1978,7 @@ async fn rpc_getmininginfo() {
         MockAddressBookPeers::default(),
         rx,
         None,
+        None,
     );
 
     rpc.get_mining_info()
@@ -1998,6 +2015,7 @@ async fn rpc_getnetworksolps() {
         tip.clone(),
         MockAddressBookPeers::default(),
         rx,
+        None,
         None,
     );
 
@@ -2104,6 +2122,7 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
         mock_tip,
         MockAddressBookPeers::default(),
         rx,
+        None,
         None,
     );
 
@@ -2391,6 +2410,7 @@ async fn rpc_submitblock_errors() {
         MockAddressBookPeers::default(),
         rx,
         None,
+        None,
     );
 
     // Try to submit pre-populated blocks and assert that it responds with duplicate.
@@ -2439,6 +2459,7 @@ async fn rpc_validateaddress() {
         NoChainTip,
         MockAddressBookPeers::default(),
         rx,
+        None,
         None,
     );
 
@@ -2526,6 +2547,7 @@ async fn rpc_validateaddress_regtest() {
         MockAddressBookPeers::default(),
         rx,
         None,
+        None,
     );
 
     // t1 address: invalid
@@ -2584,6 +2606,7 @@ async fn rpc_z_validateaddress() {
         NoChainTip,
         MockAddressBookPeers::default(),
         rx,
+        None,
         None,
     );
 
@@ -2694,6 +2717,7 @@ async fn rpc_z_validateaddress_regtest() {
         MockAddressBookPeers::default(),
         rx,
         None,
+        None,
     );
 
     // tm address (P2PKH): valid
@@ -2793,6 +2817,7 @@ async fn rpc_getdifficulty() {
         mock_tip,
         MockAddressBookPeers::default(),
         rx,
+        None,
         None,
     );
 
@@ -2914,6 +2939,7 @@ async fn rpc_z_listunifiedreceivers() {
         MockAddressBookPeers::default(),
         rx,
         None,
+        None,
     );
 
     // invalid address
@@ -2991,6 +3017,7 @@ async fn rpc_addnode() {
         tip.clone(),
         mock_address_book,
         rx,
+        None,
         None,
     );
 
