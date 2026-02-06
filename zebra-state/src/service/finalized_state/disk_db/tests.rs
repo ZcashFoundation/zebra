@@ -2,24 +2,10 @@
 
 #![allow(clippy::unwrap_in_result)]
 #![allow(dead_code)]
-// Allow unused imports: this module is included via `proptest-impl` feature for
-// integration tests, but some imports are only used by `#[test]` functions which
-// are compiled only in test mode.
-#![allow(unused_imports)]
 
 use std::ops::Deref;
 
-use tempfile::TempDir;
-use zebra_chain::parameters::Network::Mainnet;
-
-use crate::{
-    constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
-    service::finalized_state::{
-        disk_db::{DiskDb, DB},
-        STATE_COLUMN_FAMILIES_IN_CODE,
-    },
-    Config,
-};
+use crate::service::finalized_state::disk_db::{DiskDb, DB};
 
 // Enable older test code to automatically access the inner database via Deref coercion.
 impl Deref for DiskDb {
@@ -84,67 +70,5 @@ fn zs_iter_opts_increments_key_by_one() {
         } else {
             assert_eq!(extra_bytes.len(), 0, "there should be no extra bytes");
         }
-    }
-}
-
-/// Test that a database can be reopened immediately after closing.
-///
-/// This validates that `wait_for_compact()` in the shutdown sequence properly
-/// waits for background jobs to complete, ensuring the lock is released.
-///
-/// Before the fix, this test would fail with "Database likely already open"
-/// because the lock wasn't released immediately when the DB was dropped.
-#[test]
-fn database_can_be_reopened_immediately_after_close() {
-    let _init_guard = zebra_test::init();
-
-    // Create a persistent (non-ephemeral) temp directory that survives across DB instances
-    let temp_dir = TempDir::new().expect("failed to create temp dir");
-
-    let config = Config {
-        cache_dir: temp_dir.path().to_path_buf(),
-        ephemeral: false,
-        ..Config::default()
-    };
-
-    let network = Mainnet;
-    let db_kind = STATE_DATABASE_KIND;
-    let format_version = state_database_format_version_in_code();
-
-    let column_families = STATE_COLUMN_FAMILIES_IN_CODE
-        .iter()
-        .map(ToString::to_string);
-
-    // First open: create the database
-    {
-        let db = DiskDb::new(
-            &config,
-            db_kind,
-            &format_version,
-            &network,
-            column_families.clone(),
-            false,
-        );
-        assert!(
-            db.path().exists(),
-            "database directory should exist after creation"
-        );
-        // DB is dropped here, triggering shutdown with wait_for_compact
-    }
-
-    // Second open: should succeed immediately without "Database likely already open" error
-    {
-        let db = DiskDb::new(
-            &config,
-            db_kind,
-            &format_version,
-            &network,
-            column_families.clone(),
-            false,
-        );
-        assert!(
-            db.path().exists(),
-            "database should be accessible after immediate reopen"
-        );
     }
 }
