@@ -143,12 +143,19 @@ jobs:
           cargo build --package ${{ matrix.crate }} --all-features --all-targets
 
   build-msrv:
-    name: Build all crates with MSRV
+    name: Build ${{ matrix.crate }} crate with MSRV
     permissions:
       id-token: write
       statuses: write
     timeout-minutes: 90
+    needs: [matrix]
     runs-on: ubuntu-latest
+    strategy:
+      # avoid rate-limit errors by only launching a few of these jobs at a time,
+      # but still finish in a similar time to the longest tests
+      max-parallel: 4
+      fail-fast: true
+      matrix: ${{ fromJson(needs.matrix.outputs.matrix) }}
 
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 #v6.0.1
@@ -166,19 +173,19 @@ jobs:
         with:
           toolchain: ${{ steps.msrv.outputs.version }}
           components: clippy
-          cache-key: crate-build-msrv
+          cache-key: crate-build-msrv-${{ matrix.crate }}
           cache-on-failure: true
 
       - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3.0.0
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      # We build the whole workspace at once, to save time. Any crate-specific
-      # build errors will likely be caught in the previous build jobs.
-      - name: Build workspace with MSRV
+      - name: Build ${{ matrix.crate }} crate with MSRV, all features and all targets
+        # zebrad can have a higher MSRV than the other crates since it is a binary, so we skip the MSRV build for it.
+        if: matrix.crate != 'zebrad'
         run: |
-          cargo clippy --workspace --all-features --all-targets -- -D warnings
-          cargo build --workspace --all-features --all-targets
+          cargo clippy --package ${{ matrix.crate }} --all-features --all-targets -- -D warnings
+          cargo build --package ${{ matrix.crate }} --all-features --all-targets
 
 
   test-crate-build-success:
