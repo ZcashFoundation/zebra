@@ -1,6 +1,6 @@
 [package]
 name = "zebra-consensus"
-version = "3.1.2"
+version = "4.0.0"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "Implementation of Zcash consensus checks"
 license = "MIT OR Apache-2.0"
@@ -61,10 +61,10 @@ zcash_proofs = { workspace = true, features = ["multicore", "bundled-prover"] }
 tower-fallback = { path = "../tower-fallback/", version = "0.2.41" }
 tower-batch-control = { path = "../tower-batch-control/", version = "1.0.1" }
 
-zebra-script = { path = "../zebra-script", version = "3.0.2" }
-zebra-state = { path = "../zebra-state", version = "3.1.2" }
-zebra-node-services = { path = "../zebra-node-services", version = "2.1.2" }
-zebra-chain = { path = "../zebra-chain", version = "4.0.0" }
+zebra-script = { path = "../zebra-script", version = "4.0.0" }
+zebra-state = { path = "../zebra-state", version = "4.0.0" }
+zebra-node-services = { path = "../zebra-node-services", version = "3.0.0" }
+zebra-chain = { path = "../zebra-chain", version = "5.0.0" }
 
 zcash_protocol.workspace = true
 
@@ -88,8 +88,8 @@ tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 tracing-error = { workspace = true }
 tracing-subscriber = { workspace = true }
 
-zebra-state = { path = "../zebra-state", version = "3.1.2", features = ["proptest-impl"] }
-zebra-chain = { path = "../zebra-chain", version = "4.0.0", features = ["proptest-impl"] }
+zebra-state = { path = "../zebra-state", version = "4.0.0", features = ["proptest-impl"] }
+zebra-chain = { path = "../zebra-chain", version = "5.0.0", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/", version = "2.0.1" }
 
 [lints]
