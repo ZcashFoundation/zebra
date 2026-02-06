@@ -2,7 +2,7 @@
 //!
 //! [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 
-use zebra_chain::transparent::{self, Script};
+use crate::transparent::{self, Script};
 
 /// Funding Streams functions apply for blocks at and after Canopy.
 pub mod funding_streams;

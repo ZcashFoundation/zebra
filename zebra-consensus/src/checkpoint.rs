@@ -28,12 +28,11 @@ use tower::{Service, ServiceExt};
 use tracing::instrument;
 
 use zebra_chain::{
-    amount::{self, DeferredPoolBalanceChange},
+    amount,
     block::{self, Block},
     parameters::{
-        checkpoint::list::CheckpointList,
-        subsidy::{block_subsidy, funding_stream_values, FundingStreamReceiver, SubsidyError},
-        Network, GENESIS_PREVIOUS_BLOCK_HASH,
+        checkpoint::list::CheckpointList, subsidy::SubsidyError, Network,
+        GENESIS_PREVIOUS_BLOCK_HASH,
     },
     work::equihash,
 };
@@ -610,23 +609,8 @@ where
             crate::block::check::equihash_solution_is_valid(&block.header)?;
         }
 
-        // We can't get the block subsidy for blocks with heights in the slow start interval, so we
-        // omit the calculation of the expected deferred amount.
-        let expected_deferred_amount = if height > self.network.slow_start_interval() {
-            // See [ZIP-1015](https://zips.z.cash/zip-1015).
-            funding_stream_values(height, &self.network, block_subsidy(height, &self.network)?)?
-                .remove(&FundingStreamReceiver::Deferred)
-        } else {
-            None
-        };
-
-        let deferred_pool_balance_change = expected_deferred_amount
-            .unwrap_or_default()
-            .checked_sub(self.network.lockbox_disbursement_total_amount(height))
-            .map(DeferredPoolBalanceChange::new);
-
         // don't do precalculation until the block passes basic difficulty checks
-        let block = CheckpointVerifiedBlock::new(block, Some(hash), deferred_pool_balance_change);
+        let block = CheckpointVerifiedBlock::new(block, Some(hash), None);
 
         crate::block::check::merkle_root_validity(
             &self.network,

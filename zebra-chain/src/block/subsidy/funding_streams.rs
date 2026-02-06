@@ -2,7 +2,7 @@
 //!
 //! [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 
-use zebra_chain::{
+use crate::{
     block::Height,
     parameters::{subsidy::*, Network},
     transparent::{self},

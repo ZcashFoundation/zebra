@@ -25,17 +25,17 @@ use tracing::Instrument;
 use zebra_chain::{
     amount::Amount,
     block,
+    error::CoinbaseTransactionError,
     parameters::{subsidy::SubsidyError, Network},
     transaction, transparent,
     work::equihash,
 };
-use zebra_state as zs;
+use zebra_state::{self as zs, check::coinbase_is_first};
 
 use crate::{error::*, transaction as tx, BoxError};
 
 pub mod check;
 pub mod request;
-pub mod subsidy;
 
 pub use request::Request;
 
@@ -64,6 +64,12 @@ pub enum VerifyBlockError {
     Block {
         #[from]
         source: BlockError,
+    },
+
+    #[error(transparent)]
+    CoinbaseTransaction {
+        #[from]
+        source: CoinbaseTransactionError,
     },
 
     #[error(transparent)]
@@ -231,14 +237,7 @@ where
             let now = Utc::now();
             check::time_is_valid_at(&block.header, now, &height, &hash)
                 .map_err(VerifyBlockError::Time)?;
-            let coinbase_tx = check::coinbase_is_first(&block)?;
-
-            let expected_block_subsidy =
-                zebra_chain::parameters::subsidy::block_subsidy(height, &network)?;
-
-            // See [ZIP-1015](https://zips.z.cash/zip-1015).
-            let deferred_pool_balance_change =
-                check::subsidy_is_valid(&block, &network, expected_block_subsidy)?;
+            let coinbase_tx = coinbase_is_first(&block)?;
 
             // Now do the slower checks
 
@@ -319,15 +318,6 @@ where
                     source: amount_error,
                 })?;
 
-            check::miner_fees_are_valid(
-                &coinbase_tx,
-                height,
-                block_miner_fees,
-                expected_block_subsidy,
-                deferred_pool_balance_change,
-                &network,
-            )?;
-
             // Finally, submit the block for contextual verification.
             let new_outputs = Arc::into_inner(known_utxos)
                 .expect("all verification tasks using known_utxos are complete");
@@ -338,7 +328,7 @@ where
                 height,
                 new_outputs,
                 transaction_hashes,
-                deferred_pool_balance_change: Some(deferred_pool_balance_change),
+                block_miner_fees: Some(block_miner_fees),
             };
 
             // Return early for proposal requests.

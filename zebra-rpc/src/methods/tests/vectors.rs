@@ -2124,6 +2124,16 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
                     max_time: fake_max_time,
                     chain_history_root: fake_history_tree(&Mainnet).hash(),
                 }));
+
+            #[cfg(zcash_unstable = "zip234")]
+            read_state
+                .expect_request_that(|req| matches!(req, ReadRequest::TipPoolValues))
+                .await
+                .respond(ReadResponse::TipPoolValues {
+                    tip_height: fake_tip_height,
+                    tip_hash: fake_tip_hash,
+                    value_balance: ValueBalance::zero(),
+                });
         }
     };
 
