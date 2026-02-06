@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# check=skip=UndefinedVar,UserExist # We use gosu in the entrypoint instead of USER directive
+# check=skip=UndefinedVar,UserExist # We use setpriv in the entrypoint instead of USER directive
 
 # If you want to include a file in the Docker image, add it to .dockerignore.
 #
@@ -117,10 +117,6 @@ RUN [ -n "${SHORT_SHA}" ] && export SHORT_SHA="${SHORT_SHA}" || true; \
 # Copy the lightwalletd binary and source files to be able to run tests
 COPY --link --from=electriccoinco/lightwalletd:v0.4.17 /usr/local/bin/lightwalletd /usr/local/bin/
 
-# Copy the gosu binary to be able to run the entrypoint as non-root user
-# and allow to change permissions for mounted cache directories
-COPY --link --from=tianon/gosu:trixie /gosu /usr/local/bin/
-
 COPY --link --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 ENTRYPOINT [ "entrypoint.sh", "test" ]
@@ -207,13 +203,12 @@ WORKDIR ${HOME}
 RUN chown -R ${UID}:${GID} ${HOME}
 
 # We're explicitly NOT using the USER directive here.
-# Instead, we run as root initially and use gosu in the entrypoint.sh
+# Instead, we run as root initially and use setpriv in the entrypoint.sh
 # to step down to the non-privileged user. This allows us to change permissions
 # on mounted volumes before running the application as a non-root user.
-# User with UID=${UID} is created above and used via gosu in entrypoint.sh.
+# User with UID=${UID} is created above and used via setpriv in entrypoint.sh.
+# setpriv is part of util-linux, already included in debian:trixie-slim.
 
-# Copy the gosu binary to be able to run the entrypoint as non-root user
-COPY --link --from=tianon/gosu:trixie /gosu /usr/local/bin/
 COPY --link --from=release /usr/local/bin/zebrad /usr/local/bin/
 COPY --link --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
