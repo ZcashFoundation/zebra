@@ -70,6 +70,7 @@ where
     )
 }
 
+// ORCHARD-STATE: Read Orchard note commitment tree from state
 /// Returns the Orchard
 /// [`NoteCommitmentTree`](orchard::tree::NoteCommitmentTree) specified by a
 /// hash or height, if it exists in the non-finalized `chain` or finalized `db`.
@@ -91,6 +92,7 @@ where
         .or_else(|| db.orchard_tree_by_hash_or_height(hash_or_height))
 }
 
+// ORCHARD-STATE: Read Orchard subtrees for lightwalletd
 /// Returns a list of Orchard [`NoteCommitmentSubtree`]s with indexes in the provided range.
 ///
 /// If there is no subtree at the first index in the range, the returned list is empty.

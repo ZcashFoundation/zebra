@@ -14,6 +14,7 @@ use chrono::{DateTime, Utc};
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block::Height,
+    // ORCHARD-VERIFICATION: orchard::Flags used for coinbase and action validation
     orchard::Flags,
     parameters::{Network, NetworkUpgrade},
     primitives::zcash_note_encryption,
@@ -146,6 +147,7 @@ pub fn has_inputs_and_outputs(tx: &Transaction) -> Result<(), TransactionError> 
 /// > [NU5 onward] If effectiveVersion >= 5 and nActionsOrchard > 0, then at least one of enableSpendsOrchard and enableOutputsOrchard MUST be 1.
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+// ORCHARD-VERIFICATION: Validates orchard Flags for consensus compliance
 pub fn has_enough_orchard_flags(tx: &Transaction) -> Result<(), TransactionError> {
     if !tx.has_enough_orchard_flags() {
         return Err(TransactionError::NotEnoughFlags);
@@ -178,6 +180,7 @@ pub fn coinbase_tx_no_prevout_joinsplit_spend(tx: &Transaction) -> Result<(), Tr
             return Err(TransactionError::CoinbaseHasSpend);
         }
 
+        // ORCHARD-VERIFICATION: Coinbase tx must not have ENABLE_SPENDS flag set
         if let Some(orchard_shielded_data) = tx.orchard_shielded_data() {
             if orchard_shielded_data.flags.contains(Flags::ENABLE_SPENDS) {
                 return Err(TransactionError::CoinbaseHasEnableSpendsOrchard);
@@ -270,6 +273,7 @@ pub fn spend_conflicts(transaction: &Transaction) -> Result<(), TransactionError
     let transparent_outpoints = transaction.spent_outpoints().map(Cow::Owned);
     let sprout_nullifiers = transaction.sprout_nullifiers().map(Cow::Borrowed);
     let sapling_nullifiers = transaction.sapling_nullifiers().map(Cow::Borrowed);
+    // ORCHARD-VERIFICATION: Check for duplicate orchard nullifiers within the transaction
     let orchard_nullifiers = transaction.orchard_nullifiers().map(Cow::Borrowed);
 
     check_for_duplicates(transparent_outpoints, DuplicateTransparentSpend)?;

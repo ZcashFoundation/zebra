@@ -374,6 +374,7 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::SaplingTree`] with the specified Sapling note commitment tree.
     SaplingTree(Option<Arc<sapling::tree::NoteCommitmentTree>>),
 
+    // ORCHARD-STATE: Response containing Orchard note commitment tree
     /// Response to [`ReadRequest::OrchardTree`] with the specified Orchard note commitment tree.
     OrchardTree(Option<Arc<orchard::tree::NoteCommitmentTree>>),
 
@@ -383,6 +384,7 @@ pub enum ReadResponse {
         BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<sapling_crypto::Node>>,
     ),
 
+    // ORCHARD-STATE: Response containing Orchard subtrees for lightwalletd
     /// Response to [`ReadRequest::OrchardSubtrees`] with the specified Orchard note commitment
     /// subtrees.
     OrchardSubtrees(

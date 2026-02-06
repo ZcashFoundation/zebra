@@ -6,6 +6,7 @@ use std::{borrow::Borrow, io, sync::Arc};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use halo2::pasta::group::ff::PrimeField;
 use hex::FromHex;
+// ORCHARD-SERIALIZATION: reddsa Binding and SpendAuth are signature types used in Orchard
 use reddsa::{orchard::Binding, orchard::SpendAuth, Signature};
 
 use crate::{
@@ -326,6 +327,7 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<sapling::SharedAnchor>> {
     }
 }
 
+// ORCHARD-SERIALIZATION: Serialize Orchard ShieldedData (Actions, proof, signatures)
 impl ZcashSerialize for Option<orchard::ShieldedData> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         match self {
@@ -346,8 +348,10 @@ impl ZcashSerialize for Option<orchard::ShieldedData> {
     }
 }
 
+// ORCHARD-SERIALIZATION: Serialize full Orchard ShieldedData with Actions, Flags, proof, sigs
 impl ZcashSerialize for orchard::ShieldedData {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        // ORCHARD-SERIALIZATION: Split AuthorizedAction into Action and SpendAuth signature
         // Split the AuthorizedAction
         let (actions, sigs): (Vec<orchard::Action>, Vec<Signature<SpendAuth>>) = self
             .actions
@@ -381,10 +385,12 @@ impl ZcashSerialize for orchard::ShieldedData {
     }
 }
 
+// ORCHARD-SERIALIZATION: Deserialize Orchard ShieldedData from network/disk format
 // we can't split ShieldedData out of Option<ShieldedData> deserialization,
 // because the counts are read along with the arrays.
 impl ZcashDeserialize for Option<orchard::ShieldedData> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        // ORCHARD-SERIALIZATION: Deserialize nActionsOrchard and each Action
         // Denoted as `nActionsOrchard` and `vActionsOrchard` in the spec.
         let actions: Vec<orchard::Action> = (&mut reader).zcash_deserialize_into()?;
 
@@ -403,6 +409,7 @@ impl ZcashDeserialize for Option<orchard::ShieldedData> {
         //
         // Some Action elements are validated in this function; they are described below.
 
+        // ORCHARD-SERIALIZATION: Deserialize flagsOrchard (ENABLE_SPENDS, ENABLE_OUTPUTS)
         // Denoted as `flagsOrchard` in the spec.
         // Consensus: type of each flag is 𝔹, i.e. a bit. This is enforced implicitly
         // in [`Flags::zcash_deserialized`].
@@ -411,6 +418,7 @@ impl ZcashDeserialize for Option<orchard::ShieldedData> {
         // Denoted as `valueBalanceOrchard` in the spec.
         let value_balance: amount::Amount = (&mut reader).zcash_deserialize_into()?;
 
+        // ORCHARD-SERIALIZATION: Deserialize anchorOrchard (note commitment tree root)
         // Denoted as `anchorOrchard` in the spec.
         // Consensus: type is `{0 .. 𝑞_ℙ − 1}`. See [`orchard::tree::Root::zcash_deserialize`].
         let shared_anchor: orchard::tree::Root = (&mut reader).zcash_deserialize_into()?;
@@ -431,6 +439,7 @@ impl ZcashDeserialize for Option<orchard::ShieldedData> {
         // Denoted as `bindingSigOrchard` in the spec.
         let binding_sig: Signature<Binding> = (&mut reader).zcash_deserialize_into()?;
 
+        // ORCHARD-SERIALIZATION: Recombine Action with SpendAuth sig into AuthorizedAction
         // Create the AuthorizedAction from deserialized parts
         let authorized_actions: Vec<orchard::AuthorizedAction> = actions
             .into_iter()

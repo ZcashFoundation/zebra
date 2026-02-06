@@ -43,7 +43,9 @@ use zcash_protocol::consensus;
 use crate::parameters::TX_V6_VERSION_GROUP_ID;
 use crate::{
     amount::{Amount, Error as AmountError, NegativeAllowed, NonNegative},
-    block, orchard,
+    block,
+    // ORCHARD-TRANSACTION: orchard module provides ShieldedData, Action, Nullifier, Flags types
+    orchard,
     parameters::{
         Network, NetworkUpgrade, OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID,
         TX_V5_VERSION_GROUP_ID,
@@ -146,6 +148,7 @@ pub enum Transaction {
         outputs: Vec<transparent::Output>,
         /// The sapling shielded data for this transaction, if any.
         sapling_shielded_data: Option<sapling::ShieldedData<sapling::SharedAnchor>>,
+        // ORCHARD-TRANSACTION: V5 transactions can contain Orchard shielded data with Actions
         /// The orchard data for this transaction, if any.
         orchard_shielded_data: Option<orchard::ShieldedData>,
     },
@@ -169,7 +172,7 @@ pub enum Transaction {
         outputs: Vec<transparent::Output>,
         /// The sapling shielded data for this transaction, if any.
         sapling_shielded_data: Option<sapling::ShieldedData<sapling::SharedAnchor>>,
-        /// ORCHARD: transactions (sent by users) contain orchard::ShieldedData
+        /// ORCHARD-TRANSACTION: transactions (sent by users) contain orchard::ShieldedData
         /// The orchard data for this transaction, if any.
         orchard_shielded_data: Option<orchard::ShieldedData>,
     },
@@ -1067,6 +1070,7 @@ impl Transaction {
 
     // orchard
 
+    // ORCHARD-TRANSACTION: Methods for accessing Orchard shielded data from transactions
     /// Access the [`orchard::ShieldedData`] in this transaction,
     /// regardless of version.
     pub fn orchard_shielded_data(&self) -> Option<&orchard::ShieldedData> {
@@ -1090,6 +1094,7 @@ impl Transaction {
         }
     }
 
+    // ORCHARD-TRANSACTION: Iterate over Orchard Actions (each contains a spend and output)
     /// Iterate over the [`orchard::Action`]s in this transaction, if there are any,
     /// regardless of version.
     pub fn orchard_actions(&self) -> impl Iterator<Item = &orchard::Action> {
@@ -1098,6 +1103,7 @@ impl Transaction {
             .flat_map(orchard::ShieldedData::actions)
     }
 
+    // ORCHARD-TRANSACTION: Extract Orchard nullifiers (used for double-spend prevention)
     /// Access the [`orchard::Nullifier`]s in this transaction, if there are any,
     /// regardless of version.
     pub fn orchard_nullifiers(&self) -> impl Iterator<Item = &orchard::Nullifier> {
@@ -1106,6 +1112,7 @@ impl Transaction {
             .flat_map(orchard::ShieldedData::nullifiers)
     }
 
+    // ORCHARD-TRANSACTION: Extract Orchard note commitments (added to note commitment tree)
     /// Access the note commitments in this transaction, if there are any,
     /// regardless of version.
     pub fn orchard_note_commitments(&self) -> impl Iterator<Item = &pallas::Base> {
@@ -1114,6 +1121,7 @@ impl Transaction {
             .flat_map(orchard::ShieldedData::note_commitments)
     }
 
+    // ORCHARD-TRANSACTION: Access Orchard flags (ENABLE_SPENDS, ENABLE_OUTPUTS)
     /// Access the [`orchard::Flags`] in this transaction, if there is any,
     /// regardless of version.
     pub fn orchard_flags(&self) -> Option<orchard::shielded_data::Flags> {

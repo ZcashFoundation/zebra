@@ -1,4 +1,7 @@
 //! Async RedPallas batch verifier service
+//!
+//! ORCHARD-VERIFICATION: This module handles RedPallas signature verification for Orchard.
+//! RedPallas is used for both SpendAuth signatures (per-action) and Binding signatures (per-bundle).
 
 use std::{
     future::Future,
@@ -16,6 +19,7 @@ use tower::{util::ServiceFn, Service};
 use tower_batch_control::{Batch, BatchControl, RequestWeight};
 use tower_fallback::Fallback;
 
+// ORCHARD-VERIFICATION: orchard::SpendAuth and orchard::Binding are RedPallas signature types for Orchard
 use zebra_chain::primitives::reddsa::{batch, orchard, Error, Signature, VerificationKeyBytes};
 
 use crate::BoxError;
@@ -25,6 +29,7 @@ use super::{spawn_fifo, spawn_fifo_and_convert};
 #[cfg(test)]
 mod tests;
 
+// ORCHARD-VERIFICATION: BatchVerifier for Orchard SpendAuth and Binding signatures
 /// The type of the batch verifier.
 type BatchVerifier = batch::Verifier<orchard::SpendAuth, orchard::Binding>;
 
@@ -36,6 +41,7 @@ type Sender = watch::Sender<Option<VerifyResult>>;
 
 /// The type of the batch item.
 /// This is a newtype around a `RedPallasItem`.
+// ORCHARD-VERIFICATION: Wraps orchard signature items for batch verification
 #[derive(Clone, Debug)]
 pub struct Item(batch::Item<orchard::SpendAuth, orchard::Binding>);
 
@@ -53,6 +59,7 @@ impl Item {
     }
 
     /// Create a batch item from a `SpendAuth` signature.
+    // ORCHARD-VERIFICATION: SpendAuth signatures authorize each Orchard Action spend
     pub fn from_spendauth(
         vk_bytes: VerificationKeyBytes<orchard::SpendAuth>,
         sig: Signature<orchard::SpendAuth>,
@@ -62,6 +69,7 @@ impl Item {
     }
 
     /// Create a batch item from a `Binding` signature.
+    // ORCHARD-VERIFICATION: Binding signature proves value balance across all Orchard Actions
     pub fn from_binding(
         vk_bytes: VerificationKeyBytes<orchard::Binding>,
         sig: Signature<orchard::Binding>,

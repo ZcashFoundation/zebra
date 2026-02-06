@@ -33,6 +33,7 @@ impl IntoDisk for sapling::Nullifier {
     }
 }
 
+// ORCHARD-STATE: Serialize Orchard nullifier for disk storage
 impl IntoDisk for orchard::Nullifier {
     type Bytes = [u8; 32];
 
@@ -72,6 +73,7 @@ impl FromDisk for sapling::tree::Root {
     }
 }
 
+// ORCHARD-STATE: Serialize/deserialize Orchard tree root for disk storage (anchor validation)
 impl IntoDisk for orchard::tree::Root {
     type Bytes = [u8; 32];
 

@@ -82,10 +82,11 @@ fn sapling_orchard_anchors_refer_to_final_treestates(
     // MUST refer to some earlier block’s final Orchard treestate.
     //
     // # Consensus
+    // ORCHARD-STATE: Validate that Orchard anchor refers to a valid prior tree root
     //
     // > The anchorOrchard field of the transaction, whenever it exists
     // > (i.e. when there are any Action descriptions), MUST refer to some
-    // > earlier block’s final Orchard treestate.
+    // > earlier block's final Orchard treestate.
     //
     // <https://zips.z.cash/protocol/protocol.pdf#actions>
     if let Some(orchard_shielded_data) = transaction.orchard_shielded_data() {

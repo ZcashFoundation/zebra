@@ -63,6 +63,7 @@ pub struct VerifiedSet {
     /// The set of revealed Sapling nullifiers.
     sapling_nullifiers: HashSet<sapling::Nullifier>,
 
+    // ORCHARD-MEMPOOL: Track revealed Orchard nullifiers for mempool double-spend detection
     /// The set of revealed Orchard nullifiers.
     orchard_nullifiers: HashSet<orchard::Nullifier>,
 }

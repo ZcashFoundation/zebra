@@ -372,7 +372,7 @@ impl WriteBlockWorkerTask {
                 Err(parent_error.clone())
             } else {
                 tracing::trace!(?child_hash, "validating queued child");
-                // ORCHARD: performs validation on blocks
+                // ORCHARD-STATE: performs validation on blocks
                 validate_and_commit_non_finalized(
                     &finalized_state.db,
                     non_finalized_state,

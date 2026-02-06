@@ -47,6 +47,7 @@ pub enum Spend {
     Sprout(sprout::Nullifier),
     /// A spend identified by a [`sapling::Nullifier`].
     Sapling(sapling::Nullifier),
+    // ORCHARD-STATE: Orchard spend identified by nullifier
     /// A spend identified by a [`orchard::Nullifier`].
     Orchard(orchard::Nullifier),
 }
@@ -72,6 +73,7 @@ impl From<sapling::Nullifier> for Spend {
     }
 }
 
+// ORCHARD-STATE: Convert Orchard nullifier to Spend enum
 #[cfg(feature = "indexer")]
 impl From<orchard::Nullifier> for Spend {
     fn from(orchard_nullifier: orchard::Nullifier) -> Self {

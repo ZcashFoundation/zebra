@@ -49,17 +49,13 @@ impl SpendingKey {
     /// Derives the nullifier key from this spending key.
     pub fn nullifier_key(&self) -> NullifierKey {
         // TODO: Implement proper key derivation using Poseidon
-        NullifierKey {
-            inner: self.inner,
-        }
+        NullifierKey { inner: self.inner }
     }
 
     /// Derives the full viewing key from this spending key.
     pub fn full_viewing_key(&self) -> FullViewingKey {
         // TODO: Implement proper key derivation
-        FullViewingKey {
-            _inner: self.inner,
-        }
+        FullViewingKey { _inner: self.inner }
     }
 }
 

@@ -43,9 +43,7 @@ impl NoteCommitment {
         // For non-identity points, return the x-coordinate.
         // For identity, return zero (same as Orchard behavior).
         let coords: Option<Coordinates<pallas::Affine>> = self.0.coordinates().into();
-        coords
-            .map(|c| *c.x())
-            .unwrap_or_else(pallas::Base::zero)
+        coords.map(|c| *c.x()).unwrap_or_else(pallas::Base::zero)
     }
 
     /// Extract the x-coordinate as bytes.
@@ -206,10 +204,7 @@ impl ops::Sub for ValueCommitment {
 
 impl Sum for ValueCommitment {
     fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
-        iter.fold(
-            ValueCommitment(pallas::Affine::identity()),
-            ops::Add::add,
-        )
+        iter.fold(ValueCommitment(pallas::Affine::identity()), ops::Add::add)
     }
 }
 

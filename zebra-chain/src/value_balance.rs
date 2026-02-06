@@ -103,11 +103,13 @@ where
         self
     }
 
+    // ORCHARD-TRANSACTION: Access Orchard pool value balance
     /// Get the orchard amount from the [`ValueBalance`].
     pub fn orchard_amount(&self) -> Amount<C> {
         self.orchard
     }
 
+    // ORCHARD-TRANSACTION: Set Orchard pool value balance
     /// Insert an orchard value balance into a given [`ValueBalance`]
     /// leaving the other values untouched.
     pub fn set_orchard_value_balance(&mut self, orchard_value_balance: ValueBalance<C>) -> &Self {

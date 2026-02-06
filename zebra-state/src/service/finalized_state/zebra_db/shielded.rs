@@ -55,6 +55,7 @@ impl ZebraDb {
         self.db.zs_contains(&sapling_nullifiers, &sapling_nullifier)
     }
 
+    // ORCHARD-STATE: Check if Orchard nullifier exists in finalized state (double-spend check)
     /// Returns `true` if the finalized state contains `orchard_nullifier`.
     pub fn contains_orchard_nullifier(&self, orchard_nullifier: &orchard::Nullifier) -> bool {
         let orchard_nullifiers = self.db.cf_handle("orchard_nullifiers").unwrap();
@@ -85,6 +86,7 @@ impl ZebraDb {
         self.db.zs_get(&sapling_nullifiers, &sapling_nullifier)?
     }
 
+    // ORCHARD-STATE: Get transaction that revealed an Orchard nullifier
     /// Returns the [`TransactionLocation`] of the transaction that revealed
     /// the given [`orchard::Nullifier`], if it is revealed in the finalized state and its
     /// spending transaction hash has been indexed.
@@ -110,6 +112,7 @@ impl ZebraDb {
         self.db.zs_contains(&sapling_anchors, &sapling_anchor)
     }
 
+    // ORCHARD-STATE: Check if Orchard anchor exists in finalized state (anchor validation)
     /// Returns `true` if the finalized state contains `orchard_anchor`.
     pub fn contains_orchard_anchor(&self, orchard_anchor: &orchard::tree::Root) -> bool {
         let orchard_anchors = self.db.cf_handle("orchard_anchors").unwrap();
@@ -334,7 +337,7 @@ impl ZebraDb {
             .expect("Orchard note commitment tree must exist if there is a finalized tip")
     }
 
-    // ORCHARD: this file contains various methods to get the Orchard state out of RocksDB (only finalized state is stored in RocksDB)
+    // ORCHARD-STATE: this file contains various methods to get the Orchard state out of RocksDB (only finalized state is stored in RocksDB)
     /// Returns the Orchard note commitment tree matching the given block height,
     /// or `None` if the height is above the finalized tip.
     #[allow(clippy::unwrap_in_result)]

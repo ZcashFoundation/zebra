@@ -1207,7 +1207,9 @@ where
     }
 
     /// Verifies a transaction's Orchard shielded data.
+    // ORCHARD-VERIFICATION: This method queues verification of the Orchard bundle's Halo2 proof
     fn verify_orchard_bundle(
+        // ORCHARD-VERIFICATION: The orchard Bundle contains Actions with their aggregated proof
         bundle: Option<::orchard::bundle::Bundle<::orchard::bundle::Authorized, ZatBalance>>,
         sighash: &SigHash,
     ) -> AsyncChecks {

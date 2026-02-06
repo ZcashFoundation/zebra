@@ -425,8 +425,8 @@ dependencies = [
  "blake2s_simd",
  "byteorder",
  "crossbeam-channel",
- "ff",
- "group",
+ "ff 0.13.1",
+ "group 0.13.0",
  "lazy_static",
  "log",
  "num_cpus",
@@ -597,8 +597,8 @@ version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d7bc6d6292be3a19e6379786dac800f551e5865a5bb51ebbe3064ab80433f403"
 dependencies = [
- "ff",
- "group",
+ "ff 0.13.1",
+ "group 0.13.0",
  "pairing",
  "rand_core 0.6.4",
  "subtle",
@@ -1622,6 +1622,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ff"
+version = "0.14.0-pre.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d42dd26f5790eda47c1a2158ea4120e32c35ddc9a7743c98a292accc01b54ef3"
+dependencies = [
+ "rand_core 0.9.3",
+ "subtle",
+]
+
+[[package]]
 name = "fiat-crypto"
 version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1904,9 +1914,20 @@ version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0f9ef7462f7c099f518d754361858f86d8a07af53ba9af0fe635bbccb151a63"
 dependencies = [
- "ff",
+ "ff 0.13.1",
  "memuse",
  "rand_core 0.6.4",
+ "subtle",
+]
+
+[[package]]
+name = "group"
+version = "0.14.0-pre.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ff6a0b2dd4b981b1ae9e3e6830ab146771f3660d31d57bafd9018805a91b0f1"
+dependencies = [
+ "ff 0.14.0-pre.0",
+ "rand_core 0.9.3",
  "subtle",
 ]
 
@@ -1947,8 +1968,8 @@ checksum = "73a5e510d58a07d8ed238a5a8a436fe6c2c79e1bb2611f62688bc65007b4e6e7"
 dependencies = [
  "arrayvec",
  "bitvec",
- "ff",
- "group",
+ "ff 0.13.1",
+ "group 0.13.0",
  "halo2_poseidon",
  "halo2_proofs",
  "lazy_static",
@@ -1972,8 +1993,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fa3da60b81f02f9b33ebc6252d766f843291fb4d2247a07ae73d20b791fc56f"
 dependencies = [
  "bitvec",
- "ff",
- "group",
+ "ff 0.13.1",
+ "group 0.13.0",
  "pasta_curves",
 ]
 
@@ -1984,8 +2005,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "019561b5f3be60731e7b72f3f7878c5badb4174362d860b03d3cf64cb47f90db"
 dependencies = [
  "blake2b_simd",
- "ff",
- "group",
+ "ff 0.13.1",
+ "group 0.13.0",
  "halo2_legacy_pdqsort",
  "indexmap 1.9.3",
  "maybe-rayon",
@@ -2720,8 +2741,8 @@ checksum = "8499f7a74008aafbecb2a2e608a3e13e4dd3e84df198b604451efe93f2de6e61"
 dependencies = [
  "bitvec",
  "bls12_381",
- "ff",
- "group",
+ "ff 0.13.1",
+ "group 0.13.0",
  "rand_core 0.6.4",
  "subtle",
 ]
@@ -3191,10 +3212,10 @@ dependencies = [
  "bitvec",
  "blake2b_simd",
  "core2",
- "ff",
+ "ff 0.13.1",
  "fpe",
  "getset",
- "group",
+ "group 0.13.0",
  "halo2_gadgets",
  "halo2_poseidon",
  "halo2_proofs",
@@ -3260,7 +3281,7 @@ version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81fec4625e73cf41ef4bb6846cafa6d44736525f442ba45e407c4a000a13996f"
 dependencies = [
- "group",
+ "group 0.13.0",
 ]
 
 [[package]]
@@ -3321,8 +3342,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3e57598f73cc7e1b2ac63c79c517b31a0877cd7c402cdcaa311b5208de7a095"
 dependencies = [
  "blake2b_simd",
- "ff",
- "group",
+ "ff 0.13.1",
+ "group 0.13.0",
  "lazy_static",
  "rand 0.8.5",
  "static_assertions",
@@ -3909,29 +3930,29 @@ dependencies = [
 name = "ragu_arithmetic"
 version = "0.0.0"
 dependencies = [
- "ff",
+ "ff 0.14.0-pre.0",
  "pasta_curves",
  "ragu_macros",
- "rand 0.8.5",
+ "rand 0.9.2",
 ]
 
 [[package]]
 name = "ragu_circuits"
 version = "0.0.0"
 dependencies = [
- "ff",
- "group",
+ "ff 0.14.0-pre.0",
+ "group 0.14.0-pre.0",
  "ragu_arithmetic",
  "ragu_core",
  "ragu_primitives",
- "rand 0.8.5",
+ "rand 0.9.2",
 ]
 
 [[package]]
 name = "ragu_core"
 version = "0.0.0"
 dependencies = [
- "ff",
+ "ff 0.14.0-pre.0",
  "ragu_arithmetic",
  "ragu_macros",
  "thiserror 2.0.17",
@@ -3953,20 +3974,20 @@ dependencies = [
 name = "ragu_pcd"
 version = "0.0.0"
 dependencies = [
- "ff",
+ "ff 0.14.0-pre.0",
  "pasta_curves",
  "ragu_arithmetic",
  "ragu_circuits",
  "ragu_core",
  "ragu_primitives",
- "rand 0.8.5",
+ "rand 0.9.2",
 ]
 
 [[package]]
 name = "ragu_primitives"
 version = "0.0.0"
 dependencies = [
- "ff",
+ "ff 0.14.0-pre.0",
  "ragu_arithmetic",
  "ragu_core",
  "ragu_macros",
@@ -4128,7 +4149,7 @@ checksum = "78a5191930e84973293aa5f532b513404460cd2216c1cfb76d08748c15b40b02"
 dependencies = [
  "blake2b_simd",
  "byteorder",
- "group",
+ "group 0.13.0",
  "hex",
  "jubjub",
  "pasta_curves",
@@ -4499,10 +4520,10 @@ dependencies = [
  "bls12_381",
  "core2",
  "document-features",
- "ff",
+ "ff 0.13.1",
  "fpe",
  "getset",
- "group",
+ "group 0.13.0",
  "hex",
  "incrementalmerkletree",
  "jubjub",
@@ -4880,7 +4901,7 @@ version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d268ae0ea06faafe1662e9967cd4f9022014f5eeb798e0c302c876df8b7af9c"
 dependencies = [
- "group",
+ "group 0.13.0",
  "pasta_curves",
  "subtle",
 ]
@@ -5099,8 +5120,8 @@ name = "tachyon"
 version = "0.0.0"
 dependencies = [
  "core2",
- "ff",
- "group",
+ "ff 0.13.1",
+ "group 0.13.0",
  "pasta_curves",
  "proptest",
  "ragu",
@@ -6682,7 +6703,7 @@ dependencies = [
  "bs58",
  "core2",
  "document-features",
- "group",
+ "group 0.13.0",
  "memuse",
  "nonempty",
  "rand_core 0.6.4",
@@ -6723,10 +6744,10 @@ dependencies = [
  "crypto-common 0.2.0-rc.1",
  "document-features",
  "equihash",
- "ff",
+ "ff 0.13.1",
  "fpe",
  "getset",
- "group",
+ "group 0.13.0",
  "hex",
  "incrementalmerkletree",
  "jubjub",
@@ -6762,7 +6783,7 @@ dependencies = [
  "blake2b_simd",
  "bls12_381",
  "document-features",
- "group",
+ "group 0.13.0",
  "home",
  "jubjub",
  "known-folders",
@@ -6857,7 +6878,7 @@ dependencies = [
  "ed25519-zebra",
  "equihash",
  "futures",
- "group",
+ "group 0.13.0",
  "halo2_proofs",
  "hex",
  "humantime",

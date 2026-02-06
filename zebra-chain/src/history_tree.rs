@@ -143,6 +143,7 @@ impl NonEmptyHistoryTree {
     /// `sapling_root` is the root of the Sapling note commitment tree of the block.
     /// `orchard_root` is the root of the Orchard note commitment tree of the block;
     ///  (ignored for pre-Orchard blocks).
+    // ORCHARD-TREE: History tree includes Orchard root from NU5 onward
     #[allow(clippy::unwrap_in_result)]
     pub fn from_block(
         network: &Network,

@@ -120,6 +120,8 @@ impl
     }
 }
 
+// ORCHARD-PRIMITIVES: MapAuth implementation for Orchard bundle authorization
+// Used by zcash_primitives for transaction processing
 impl zp_tx::components::orchard::MapAuth<orchard::bundle::Authorized, orchard::bundle::Authorized>
     for IdentityMap
 {
@@ -141,6 +143,7 @@ struct PrecomputedAuth {}
 impl zp_tx::Authorization for PrecomputedAuth {
     type TransparentAuth = TransparentAuth;
     type SaplingAuth = sapling_crypto::bundle::Authorized;
+    // ORCHARD-PRIMITIVES: Associates Orchard authorization type with precomputed auth
     type OrchardAuth = orchard::bundle::Authorized;
 
     #[cfg(zcash_unstable = "zfuture")]

@@ -258,6 +258,7 @@ pub enum ValidateContextError {
         in_finalized_state: bool,
     },
 
+    // ORCHARD-STATE: Error for Orchard nullifier double-spend detection
     #[error("orchard double-spend: duplicate nullifier: {nullifier:?}, in finalized state: {in_finalized_state:?}")]
     #[non_exhaustive]
     DuplicateOrchardNullifier {

@@ -1,4 +1,7 @@
 //! Async Halo2 batch verifier service
+//!
+//! ORCHARD-VERIFICATION: This entire module handles Halo2 proof verification for Orchard Actions.
+//! The orchard crate provides BatchValidator and VerifyingKey for proof verification.
 
 use std::{
     fmt,
@@ -10,6 +13,7 @@ use std::{
 
 use futures::{future::BoxFuture, FutureExt};
 use once_cell::sync::Lazy;
+// ORCHARD-VERIFICATION: BatchValidator and VerifyingKey are the core types for Orchard proof verification
 use orchard::{bundle::BatchValidator, circuit::VerifyingKey};
 use rand::thread_rng;
 use zcash_protocol::value::ZatBalance;
@@ -57,6 +61,7 @@ lazy_static::lazy_static! {
 /// A Halo2 verification item, used as the request type of the service.
 #[derive(Clone, Debug)]
 pub struct Item {
+    // ORCHARD-VERIFICATION: The orchard Bundle contains the aggregated Halo2 proof to verify
     bundle: orchard::bundle::Bundle<orchard::bundle::Authorized, ZatBalance>,
     sighash: SigHash,
 }
@@ -69,6 +74,7 @@ impl RequestWeight for Item {
 
 impl Item {
     /// Creates a new [`Item`] from a bundle and sighash.
+    // ORCHARD-VERIFICATION: Constructs a verification item from an orchard Bundle
     pub fn new(
         bundle: orchard::bundle::Bundle<orchard::bundle::Authorized, ZatBalance>,
         sighash: SigHash,
@@ -80,6 +86,7 @@ impl Item {
     ///
     /// This is useful (in combination with `Item::clone`) for implementing
     /// fallback logic when batch verification fails.
+    // ORCHARD-VERIFICATION: Uses orchard's BatchValidator to verify a single proof
     pub fn verify_single(self, vk: &ItemVerifyingKey) -> bool {
         let mut batch = BatchValidator::default();
         batch.queue(self);

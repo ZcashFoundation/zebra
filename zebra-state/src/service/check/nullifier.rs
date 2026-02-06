@@ -129,6 +129,7 @@ pub(crate) fn tx_no_duplicates_in_chain(
     Ok(())
 }
 
+// ORCHARD-STATE: Generic nullifier double-spend check applies to Orchard nullifiers
 /// Reject double-spends of nullifers:
 /// - both within the same `JoinSplit` (sprout only),
 /// - from different `JoinSplit`s, [`sapling::Spend`][2]s or

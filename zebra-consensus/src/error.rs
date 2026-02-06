@@ -9,9 +9,13 @@ use chrono::{DateTime, Utc};
 use thiserror::Error;
 
 use zebra_chain::{
-    amount, block, orchard,
+    amount,
+    block,
+    // ORCHARD-VERIFICATION: orchard::Nullifier is used in consensus error types
+    orchard,
     parameters::subsidy::SubsidyError,
-    sapling, sprout,
+    sapling,
+    sprout,
     transparent::{self, MIN_TRANSPARENT_COINBASE_MATURITY},
 };
 use zebra_state::ValidateContextError;
@@ -168,6 +172,7 @@ pub enum TransactionError {
     #[error("sapling double-spend: duplicate nullifier: {_0:?}")]
     DuplicateSaplingNullifier(sapling::Nullifier),
 
+    // ORCHARD-VERIFICATION: Orchard nullifier double-spend error
     #[error("orchard double-spend: duplicate nullifier: {_0:?}")]
     DuplicateOrchardNullifier(orchard::Nullifier),
 

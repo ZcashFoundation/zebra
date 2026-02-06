@@ -551,7 +551,7 @@ impl NonFinalizedState {
             finalized_state,
         )?;
 
-        // ORCHARD: various orchard-related validation checks get called here, in validate_and_commit
+        // ORCHARD-STATE: various orchard-related validation checks get called here, in validate_and_commit
         // Reads from disk
         check::anchors::block_sapling_orchard_anchors_refer_to_final_treestates(
             finalized_state,

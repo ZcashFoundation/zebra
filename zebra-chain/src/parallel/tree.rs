@@ -24,9 +24,11 @@ pub struct NoteCommitmentTrees {
     /// The sapling note commitment subtree.
     pub sapling_subtree: Option<NoteCommitmentSubtree<sapling_crypto::Node>>,
 
+    // ORCHARD-TREE: Orchard note commitment tree, updated with each block
     /// The orchard note commitment tree.
     pub orchard: Arc<orchard::tree::NoteCommitmentTree>,
 
+    // ORCHARD-TREE: Subtree for lightwalletd sync optimization
     /// The orchard note commitment subtree.
     pub orchard_subtree: Option<NoteCommitmentSubtree<orchard::tree::Node>>,
 }
@@ -42,6 +44,7 @@ pub enum NoteCommitmentTreeError {
     #[error("sapling error: {0}")]
     Sapling(#[from] sapling::tree::NoteCommitmentTreeError),
 
+    // ORCHARD-TREE: Error from orchard note commitment tree operations
     /// A orchard tree error
     #[error("orchard error: {0}")]
     Orchard(#[from] orchard::tree::NoteCommitmentTreeError),
@@ -190,6 +193,7 @@ impl NoteCommitmentTrees {
         Ok((sapling, subtree_root))
     }
 
+    // ORCHARD-TREE: Append Orchard note commitments to the tree
     /// Update the orchard note commitment tree.
     /// This method modifies the tree inside the `Arc`, if the `Arc` only has one reference.
     #[allow(clippy::unwrap_in_result)]

@@ -46,7 +46,7 @@ use self::index::TransparentTransfers;
 
 pub mod index;
 
-/// ORCHARD: non-finalized (volatile and suseptible to re-orgs) is stored in memory with these types)
+/// ORCHARD-STATE: non-finalized (volatile and susceptible to re-orgs) is stored in memory with these types)
 /// A single non-finalized partial chain, from the child of the finalized tip,
 /// to a non-finalized chain tip.
 #[derive(Clone, Debug, Default)]
@@ -87,7 +87,7 @@ pub(crate) type SpendingTransactionId = ();
 
 /// The internal state of [`Chain`].
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
-// ORCHARD: The "ChainInner" stores all the orchard (and sapling) related fields, such as note commmitment trees and nullifier sets
+// ORCHARD-STATE: The "ChainInner" stores all the orchard (and sapling) related fields, such as note commitment trees and nullifier sets
 // specifically, this struct is the in-memory storage prior to "finality".
 pub struct ChainInner {
     // Blocks, heights, hashes, and transaction locations
@@ -139,6 +139,7 @@ pub struct ChainInner {
     pub(crate) sapling_trees_by_height:
         BTreeMap<block::Height, Arc<sapling::tree::NoteCommitmentTree>>,
 
+    // ORCHARD-STATE: Orchard note commitment trees indexed by height for non-finalized chain
     /// The Orchard note commitment tree for each height.
     ///
     /// When a chain is forked from the finalized tip, also contains the finalized tip tree.
@@ -182,6 +183,7 @@ pub struct ChainInner {
     pub(crate) sapling_subtrees:
         BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<sapling_crypto::Node>>,
 
+    // ORCHARD-STATE: Orchard anchors (tree roots) for anchor validation in non-finalized chain
     /// The Orchard anchors created by `blocks`.
     ///
     /// When a chain is forked from the finalized tip, also contains the finalized tip root.
@@ -192,6 +194,7 @@ pub struct ChainInner {
     /// When a chain is forked from the finalized tip, also contains the finalized tip root.
     /// This extra root is removed when the first non-finalized block is committed.
     pub(crate) orchard_anchors_by_height: BTreeMap<block::Height, orchard::tree::Root>,
+    // ORCHARD-STATE: Orchard subtrees for lightwalletd sync
     /// A list of Orchard subtrees completed in the non-finalized state
     pub(crate) orchard_subtrees:
         BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<orchard::tree::Node>>,
@@ -204,6 +207,7 @@ pub struct ChainInner {
     /// The Sapling nullifiers revealed by `blocks` and, if the `indexer` feature is selected,
     /// the id of the transaction that revealed them.
     pub(crate) sapling_nullifiers: HashMap<sapling::Nullifier, SpendingTransactionId>,
+    // ORCHARD-STATE: Orchard nullifiers in non-finalized chain for double-spend prevention
     /// The Orchard nullifiers revealed by `blocks` and, if the `indexer` feature is selected,
     /// the id of the transaction that revealed them.
     pub(crate) orchard_nullifiers: HashMap<orchard::Nullifier, SpendingTransactionId>,

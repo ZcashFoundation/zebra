@@ -39,6 +39,8 @@ pub fn decrypts_successfully(tx: &Transaction, network: &Network, height: Height
         }
     }
 
+    // ORCHARD-PRIMITIVES: Attempt Orchard note decryption for coinbase outputs
+    // Uses orchard::note_encryption and orchard::keys for output recovery
     if let Some(bundle) = tx.orchard_bundle() {
         for act in bundle.actions() {
             if zcash_note_encryption::try_output_recovery_with_ovk(

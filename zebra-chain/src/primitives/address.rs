@@ -29,6 +29,7 @@ pub enum Address {
         /// Unified address
         unified_address: zcash_address::unified::Address,
 
+        // ORCHARD-PRIMITIVES: Orchard receiver in unified address
         /// Orchard address
         orchard: Option<orchard::Address>,
 

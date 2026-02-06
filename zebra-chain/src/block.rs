@@ -154,6 +154,7 @@ impl Block {
             .flat_map(|transaction| transaction.sapling_nullifiers())
     }
 
+    // ORCHARD-TRANSACTION: Collect all Orchard nullifiers from block transactions
     /// Access the [`orchard::Nullifier`]s from all transactions in this block.
     pub fn orchard_nullifiers(&self) -> impl Iterator<Item = &orchard::Nullifier> {
         self.transactions

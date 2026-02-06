@@ -838,6 +838,7 @@ impl TransactionObject {
                     .collect(),
                 value_balance: Zec::from(tx.orchard_value_balance().orchard_amount()).lossy_zec(),
                 value_balance_zat: tx.orchard_value_balance().orchard_amount().zatoshis(),
+                // ORCHARD-RPC: Extract Orchard flags for RPC response
                 flags: tx.orchard_shielded_data().map(|data| {
                     OrchardFlags::new(
                         data.flags.contains(orchard::Flags::ENABLE_OUTPUTS),

@@ -124,6 +124,7 @@ impl SigHasher {
         )
     }
 
+    // ORCHARD-PRIMITIVES: Returns the Orchard bundle for sighash computation and verification
     /// Returns the Orchard bundle in the precomputed transaction data.
     pub fn orchard_bundle(
         &self,

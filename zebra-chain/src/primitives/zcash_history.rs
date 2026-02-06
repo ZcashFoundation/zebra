@@ -25,6 +25,7 @@ pub trait Version: zcash_history::Version {
         block: Arc<Block>,
         network: &Network,
         sapling_root: &sapling::tree::Root,
+        // ORCHARD-TREE: History tree includes Orchard root from NU5 onward
         orchard_root: &orchard::tree::Root,
     ) -> Self::NodeData;
 }
