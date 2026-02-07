@@ -2278,6 +2278,34 @@ impl Service<ReadRequest> for ReadStateService {
                 }
                 .boxed()
             }
+
+            // Used by `gettxout` RPC method.
+            ReadRequest::IsTransparentOutputSpent(outpoint) => {
+                let state = self.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let is_spent = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::block::unspent_utxo(
+                                    non_finalized_state.best_chain(),
+                                    &state.db,
+                                    outpoint,
+                                )
+                            },
+                        );
+
+                        timer.finish(
+                            module_path!(),
+                            line!(),
+                            "ReadRequest::IsTransparentOutputSpent",
+                        );
+
+                        Ok(ReadResponse::IsTransparentOutputSpent(is_spent.is_none()))
+                    })
+                })
+                .wait_for_panics()
+            }
         }
     }
 }
