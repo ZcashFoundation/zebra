@@ -547,6 +547,62 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     settings.bind(|| insta::assert_json_snapshot!(format!("getrawtransaction_invalid_txid"), rsp));
     mempool.expect_no_requests().await;
 
+    // `gettxout` for a valid UTXO (output index 1 of block 1's coinbase tx)
+    //
+    // - Similarly to `getrawtransaction`, a mempool request will be made first.
+    //   Response will be empty as we have this transaction in the state.
+    let txid = first_block_first_tx.hash().encode_hex::<String>();
+
+    let mempool_req = mempool
+        .expect_request_that(|request| {
+            matches!(request, mempool::Request::TransactionsByMinedId(_))
+        })
+        .map(|responder| {
+            responder.respond(mempool::Response::Transactions(vec![]));
+        });
+
+    let rpc_req = rpc.get_tx_out(txid.clone(), 1, None);
+    let (rsp, _) = futures::join!(rpc_req, mempool_req);
+    settings.bind(|| insta::assert_json_snapshot!("gettxout_valid", rsp));
+    mempool.expect_no_requests().await;
+
+    // `gettxout` for a nonexistent output index
+    let mempool_req = mempool
+        .expect_request_that(|request| {
+            matches!(request, mempool::Request::TransactionsByMinedId(_))
+        })
+        .map(|responder| {
+            responder.respond(mempool::Response::Transactions(vec![]));
+        });
+
+    let rpc_req = rpc.get_tx_out(txid.clone(), 99, None);
+    let (rsp, _) = futures::join!(rpc_req, mempool_req);
+    settings.bind(|| insta::assert_json_snapshot!("gettxout_nonexistent_index", rsp));
+    mempool.expect_no_requests().await;
+
+    // `gettxout` with unknown txid
+    let mempool_req = mempool
+        .expect_request_that(|request| {
+            matches!(request, mempool::Request::TransactionsByMinedId(_))
+        })
+        .map(|responder| {
+            responder.respond(mempool::Response::Transactions(vec![]));
+        });
+
+    let rpc_req = rpc.get_tx_out(
+        transaction::Hash::from([0; 32]).encode_hex(),
+        0,
+        None,
+    );
+    let (rsp, _) = futures::join!(rpc_req, mempool_req);
+    settings.bind(|| insta::assert_json_snapshot!("gettxout_unknown_txid", rsp));
+    mempool.expect_no_requests().await;
+
+    // `gettxout` with an invalid txid
+    let rsp = rpc.get_tx_out("aBadC0de".to_owned(), 0, None).await;
+    settings.bind(|| insta::assert_json_snapshot!("gettxout_invalid_txid", rsp));
+    mempool.expect_no_requests().await;
+
     // `getaddresstxids`
     let get_address_tx_ids = rpc
         .get_address_tx_ids(GetAddressTxIdsRequest {

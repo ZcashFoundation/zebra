@@ -128,7 +128,8 @@ use types::{
     peer_info::PeerInfo,
     submit_block::{SubmitBlockErrorResponse, SubmitBlockParameters, SubmitBlockResponse},
     subsidy::GetBlockSubsidyResponse,
-    transaction::TransactionObject,
+    transaction::{ScriptPubKey, TransactionObject},
+    zec::Zec,
     unified_address::ZListUnifiedReceiversResponse,
     validate_address::ValidateAddressResponse,
     z_validate_address::ZValidateAddressResponse,
@@ -368,6 +369,29 @@ pub trait Rpc {
         verbose: Option<u8>,
         block_hash: Option<String>,
     ) -> Result<GetRawTransactionResponse>;
+
+    /// Returns details about an unspent transaction output.
+    ///
+    /// zcashd reference: [`gettxout`](https://zcash.github.io/rpc/gettxout.html)
+    /// method: post
+    /// tags: blockchain
+    ///
+    /// # Parameters
+    ///
+    /// - `txid`: (string, required) The transaction id.
+    /// - `n`: (numeric, required) The vout index.
+    /// - `include_mempool`: (boolean, optional, default=true) Whether to include the mempool.
+    ///
+    /// # Notes
+    ///
+    /// Returns `null` (JSON null) if the output is spent or doesn't exist.
+    #[method(name = "gettxout")]
+    async fn get_tx_out(
+        &self,
+        txid: String,
+        n: u32,
+        include_mempool: Option<bool>,
+    ) -> Result<Option<GetTxOutResponse>>;
 
     /// Returns the transaction ids made by the provided transparent addresses.
     ///
@@ -1776,6 +1800,140 @@ where
 
             _ => unreachable!("unmatched response to a `Transaction` read request"),
         }
+    }
+
+    async fn get_tx_out(
+        &self,
+        txid: String,
+        n: u32,
+        include_mempool: Option<bool>,
+    ) -> Result<Option<GetTxOutResponse>> {
+        let mut mempool = self.mempool.clone();
+        let include_mempool = include_mempool.unwrap_or(true);
+
+        let txid = transaction::Hash::from_hex(txid)
+            .map_error(server::error::LegacyCode::InvalidAddressOrKey)?;
+
+        let outpoint = transparent::OutPoint { hash: txid, index: n };
+
+        // Check the mempool first if requested.
+        if include_mempool {
+            match mempool
+                .ready()
+                .and_then(|service| {
+                    service.call(mempool::Request::TransactionsByMinedId([txid].into()))
+                })
+                .await
+                .map_misc_error()?
+            {
+                mempool::Response::Transactions(txns) => {
+                    if let Some(tx) = txns.first() {
+                        let outputs = tx.transaction.outputs();
+                        if let Some(output) = outputs.get(n as usize) {
+                            let best_tip_hash = self
+                                .latest_chain_tip
+                                .best_tip_hash()
+                                .ok_or_misc_error("No blocks in state")?;
+
+                            return Ok(Some(GetTxOutResponse {
+                                bestblock: GetBlockHashResponse(best_tip_hash),
+                                confirmations: 0,
+                                value: Zec::from(output.value).lossy_zec(),
+                                script_pub_key: ScriptPubKey::from_output(
+                                    output,
+                                    &self.network,
+                                ),
+                                version: tx.transaction.version(),
+                                coinbase: false,
+                            }));
+                        }
+                    }
+                }
+                _ => unreachable!("unmatched response to a `TransactionsByMinedId` request"),
+            };
+        }
+
+        // Check the chain state for the UTXO.
+        let utxo = match self
+            .read_state
+            .clone()
+            .oneshot(zebra_state::ReadRequest::UnspentBestChainUtxo(outpoint))
+            .await
+            .map_misc_error()?
+        {
+            zebra_state::ReadResponse::UnspentBestChainUtxo(utxo) => utxo,
+            _ => unreachable!("unmatched response to a `UnspentBestChainUtxo` request"),
+        };
+
+        let Some(utxo) = utxo else {
+            return Ok(None);
+        };
+
+        // Get the best block hash for the response.
+        let best_tip_hash = self
+            .latest_chain_tip
+            .best_tip_hash()
+            .ok_or_misc_error("No blocks in state")?;
+
+        // Get the block hash at the UTXO's height for confirmations.
+        let block_hash = match self
+            .read_state
+            .clone()
+            .oneshot(zebra_state::ReadRequest::BestChainBlockHash(utxo.height))
+            .await
+            .map_misc_error()?
+        {
+            zebra_state::ReadResponse::BlockHash(hash) => hash,
+            _ => unreachable!("unmatched response to a `BestChainBlockHash` request"),
+        };
+
+        let Some(block_hash) = block_hash else {
+            // The block may have been pruned between queries due to a chain reorg.
+            return Ok(None);
+        };
+
+        // Get confirmations via depth.
+        let confirmations = match self
+            .read_state
+            .clone()
+            .oneshot(zebra_state::ReadRequest::Depth(block_hash))
+            .await
+            .map_misc_error()?
+        {
+            zebra_state::ReadResponse::Depth(depth) => {
+                depth.map(|d| i64::from(d) + 1).unwrap_or(0)
+            }
+            _ => unreachable!("unmatched response to a `Depth` request"),
+        };
+
+        // Get the transaction version.
+        let tx_version = match self
+            .read_state
+            .clone()
+            .oneshot(zebra_state::ReadRequest::AnyChainTransaction(txid))
+            .await
+            .map_misc_error()?
+        {
+            zebra_state::ReadResponse::AnyChainTransaction(Some(tx)) => {
+                let tx: Arc<Transaction> = tx.into();
+                tx.version()
+            }
+            _ => {
+                // Transaction may have been pruned between queries.
+                return Ok(None);
+            }
+        };
+
+        let script_pub_key = ScriptPubKey::from_output(&utxo.output, &self.network);
+
+        Ok(Some(GetTxOutResponse {
+            bestblock: GetBlockHashResponse(best_tip_hash),
+            confirmations,
+            value: Zec::from(utxo.output.value).lossy_zec(),
+            script_pub_key,
+            version: tx_version,
+            coinbase: utxo.from_coinbase,
+        }))
     }
 
     async fn z_get_treestate(&self, hash_or_height: String) -> Result<GetTreestateResponse> {
@@ -3951,6 +4109,36 @@ impl Default for GetRawTransactionResponse {
     fn default() -> Self {
         Self::Object(Box::default())
     }
+}
+
+/// Response to a `gettxout` RPC request.
+///
+/// See the notes for the [`Rpc::get_tx_out` method].
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+pub struct GetTxOutResponse {
+    /// The block hash of the best chain tip.
+    #[getter(copy)]
+    bestblock: GetBlockHashResponse,
+
+    /// The number of confirmations.
+    #[getter(copy)]
+    confirmations: i64,
+
+    /// The transaction value in ZEC.
+    #[getter(copy)]
+    value: f64,
+
+    /// The scriptPubKey of the output.
+    #[serde(rename = "scriptPubKey")]
+    script_pub_key: ScriptPubKey,
+
+    /// The transaction version.
+    #[getter(copy)]
+    version: u32,
+
+    /// Whether the output is from a coinbase transaction.
+    #[getter(copy)]
+    coinbase: bool,
 }
 
 /// Response to a `getaddressutxos` RPC request.

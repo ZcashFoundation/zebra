@@ -1,0 +1,8 @@
+---
+source: zebra-rpc/src/methods/tests/snapshot.rs
+assertion_line: 580
+expression: rsp
+---
+{
+  "Ok": null
+}

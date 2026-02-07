@@ -1,0 +1,23 @@
+---
+source: zebra-rpc/src/methods/tests/snapshot.rs
+assertion_line: 566
+expression: rsp
+---
+{
+  "Ok": {
+    "bestblock": "00074c46a4aa8172df8ae2ad1848a2e084e1b6989b7d9e6132adc938bf835b36",
+    "confirmations": 10,
+    "value": 0.000125,
+    "scriptPubKey": {
+      "asm": "OP_HASH160 7d46a730d31f97b1930d3368a967c309bd4d136a OP_EQUAL",
+      "hex": "a9147d46a730d31f97b1930d3368a967c309bd4d136a87",
+      "reqSigs": 1,
+      "type": "scripthash",
+      "addresses": [
+        "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd"
+      ]
+    },
+    "version": 1,
+    "coinbase": true
+  }
+}

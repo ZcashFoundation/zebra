@@ -1,0 +1,11 @@
+---
+source: zebra-rpc/src/methods/tests/snapshot.rs
+assertion_line: 603
+expression: rsp
+---
+{
+  "Err": {
+    "code": -5,
+    "message": "Invalid string length"
+  }
+}

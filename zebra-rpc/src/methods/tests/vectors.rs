@@ -3026,3 +3026,110 @@ async fn rpc_addnode() {
 
     mempool.expect_no_requests().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_gettxout() {
+    let _init_guard = zebra_test::init();
+
+    // Create a continuous chain of mainnet blocks from genesis.
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .values()
+        .map(|block_bytes| block_bytes.zcash_deserialize_into().unwrap())
+        .collect();
+
+    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let (state, read_state, tip, _) = zebra_state::populated_state(blocks.clone(), &Mainnet).await;
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, rpc_tx_queue) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        tip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    // Use the coinbase transaction of block 1 (guaranteed unspent outputs).
+    let coinbase_tx = &blocks[1].transactions[0];
+    let txid: String = coinbase_tx.hash().encode_hex();
+
+    // Test 1: Valid UTXO lookup with mempool enabled (default).
+    // The mempool request returns empty, so the state is queried.
+    let mempool_req = mempool
+        .expect_request_that(|request| {
+            matches!(request, mempool::Request::TransactionsByMinedId(_))
+        })
+        .map(|responder| {
+            responder.respond(mempool::Response::Transactions(vec![]));
+        });
+
+    let rpc_req = rpc.get_tx_out(txid.clone(), 0, None);
+    let (result, _) = futures::join!(rpc_req, mempool_req);
+    let result = result.expect("get_tx_out should not return an error");
+    assert!(result.is_some(), "Coinbase output 0 should be unspent");
+    let response = result.unwrap();
+    assert!(response.confirmations > 0, "Confirmations should be positive");
+    assert!(response.coinbase, "Block 1 tx 0 should be a coinbase tx");
+    assert_eq!(response.version, coinbase_tx.version());
+    mempool.expect_no_requests().await;
+
+    // Test 2: Valid UTXO lookup with mempool disabled.
+    // No mempool request should be made.
+    let result = rpc
+        .get_tx_out(txid.clone(), 0, Some(false))
+        .await
+        .expect("get_tx_out should not return an error");
+    assert!(result.is_some(), "Coinbase output 0 should be unspent");
+    let response = result.unwrap();
+    assert!(response.confirmations > 0, "Confirmations should be positive");
+    mempool.expect_no_requests().await;
+
+    // Test 3: Nonexistent output index returns None.
+    let mempool_req = mempool
+        .expect_request_that(|request| {
+            matches!(request, mempool::Request::TransactionsByMinedId(_))
+        })
+        .map(|responder| {
+            responder.respond(mempool::Response::Transactions(vec![]));
+        });
+
+    let rpc_req = rpc.get_tx_out(txid.clone(), 99, None);
+    let (result, _) = futures::join!(rpc_req, mempool_req);
+    let result = result.expect("get_tx_out should not return an error");
+    assert!(result.is_none(), "Nonexistent output index should return None");
+    mempool.expect_no_requests().await;
+
+    // Test 4: Unknown txid returns None.
+    let mempool_req = mempool
+        .expect_request_that(|request| {
+            matches!(request, mempool::Request::TransactionsByMinedId(_))
+        })
+        .map(|responder| {
+            responder.respond(mempool::Response::Transactions(vec![]));
+        });
+
+    let unknown_txid: String = zebra_chain::transaction::Hash::from([0; 32]).encode_hex();
+    let rpc_req = rpc.get_tx_out(unknown_txid, 0, None);
+    let (result, _) = futures::join!(rpc_req, mempool_req);
+    let result = result.expect("get_tx_out should not return an error");
+    assert!(result.is_none(), "Unknown txid should return None");
+    mempool.expect_no_requests().await;
+
+    // Test 5: Invalid txid returns an error.
+    let result = rpc.get_tx_out("aBadC0de".to_owned(), 0, None).await;
+    assert!(result.is_err(), "Invalid txid should return an error");
+    mempool.expect_no_requests().await;
+
+    // The queue task should continue without errors or panics.
+    let rpc_tx_queue_task_result = rpc_tx_queue.now_or_never();
+    assert!(rpc_tx_queue_task_result.is_none());
+}

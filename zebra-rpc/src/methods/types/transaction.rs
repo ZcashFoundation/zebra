@@ -371,6 +371,38 @@ pub struct ScriptPubKey {
     addresses: Option<Vec<String>>,
 }
 
+impl ScriptPubKey {
+    /// Build a `ScriptPubKey` from a transparent output and network.
+    pub fn from_output(output: &zebra_chain::transparent::Output, network: &Network) -> Self {
+        let (addresses, req_sigs) = output
+            .address(network)
+            .map(|address| (vec![address.to_string()], 1))
+            .unzip();
+
+        ScriptPubKey {
+            asm: zcash_script::script::Code(output.lock_script.as_raw_bytes().to_vec())
+                .to_asm(false),
+            hex: output.lock_script.clone(),
+            req_sigs,
+            r#type: zcash_script::script::Code(output.lock_script.as_raw_bytes().to_vec())
+                .to_component()
+                .ok()
+                .and_then(|c| c.refine().ok())
+                .and_then(|component| zcash_script::solver::standard(&component))
+                .map(|kind| match kind {
+                    zcash_script::solver::ScriptKind::PubKeyHash { .. } => "pubkeyhash",
+                    zcash_script::solver::ScriptKind::ScriptHash { .. } => "scripthash",
+                    zcash_script::solver::ScriptKind::MultiSig { .. } => "multisig",
+                    zcash_script::solver::ScriptKind::NullData { .. } => "nulldata",
+                    zcash_script::solver::ScriptKind::PubKey { .. } => "pubkey",
+                })
+                .unwrap_or("nonstandard")
+                .to_string(),
+            addresses,
+        }
+    }
+}
+
 /// The scriptSig of a transaction input.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
 pub struct ScriptSig {
@@ -673,44 +705,11 @@ impl TransactionObject {
                 .outputs()
                 .iter()
                 .enumerate()
-                .map(|output| {
-                    // Parse the scriptPubKey to find destination addresses.
-                    let (addresses, req_sigs) = output
-                        .1
-                        .address(network)
-                        .map(|address| (vec![address.to_string()], 1))
-                        .unzip();
-
-                    Output {
-                        value: Zec::from(output.1.value).lossy_zec(),
-                        value_zat: output.1.value.zatoshis(),
-                        n: output.0 as u32,
-                        script_pub_key: ScriptPubKey {
-                            asm: zcash_script::script::Code(
-                                output.1.lock_script.as_raw_bytes().to_vec(),
-                            )
-                            .to_asm(false),
-                            hex: output.1.lock_script.clone(),
-                            req_sigs,
-                            r#type: zcash_script::script::Code(
-                                output.1.lock_script.as_raw_bytes().to_vec(),
-                            )
-                            .to_component()
-                            .ok()
-                            .and_then(|c| c.refine().ok())
-                            .and_then(|component| zcash_script::solver::standard(&component))
-                            .map(|kind| match kind {
-                                zcash_script::solver::ScriptKind::PubKeyHash { .. } => "pubkeyhash",
-                                zcash_script::solver::ScriptKind::ScriptHash { .. } => "scripthash",
-                                zcash_script::solver::ScriptKind::MultiSig { .. } => "multisig",
-                                zcash_script::solver::ScriptKind::NullData { .. } => "nulldata",
-                                zcash_script::solver::ScriptKind::PubKey { .. } => "pubkey",
-                            })
-                            .unwrap_or("nonstandard")
-                            .to_string(),
-                            addresses,
-                        },
-                    }
+                .map(|output| Output {
+                    value: Zec::from(output.1.value).lossy_zec(),
+                    value_zat: output.1.value.zatoshis(),
+                    n: output.0 as u32,
+                    script_pub_key: ScriptPubKey::from_output(output.1, network),
                 })
                 .collect(),
             shielded_spends: tx
