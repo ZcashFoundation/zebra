@@ -638,7 +638,8 @@ impl Service<Request> for Mempool {
                                 .download_if_needed_and_verify(tx.transaction.into(), rsp_tx);
                         }
                     }
-                    Ok(Err((tx_id, error))) => {
+                    Ok(Err(boxed_err)) => {
+                        let (tx_id, error) = *boxed_err;
                         if let TransactionDownloadVerifyError::Invalid {
                             error,
                             advertiser_addr: Some(advertiser_addr),

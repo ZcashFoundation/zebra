@@ -1,23 +1,20 @@
 [package]
 name = "zebra-utils"
-version = "3.0.1"
-authors = ["Zcash Foundation <zebra@zfnd.org>"]
+version = "4.0.0"
+authors.workspace = true
 description = "Developer tools for Zebra maintenance and testing"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/ZcashFoundation/zebra"
-edition = "2021"
+license.workspace = true
+repository.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 
 # zebra-utils has a separate README file
 readme = "README.md"
-homepage = "https://zfnd.org/zebra/"
+homepage.workspace = true
 # crates.io is limited to 5 keywords and categories
-keywords = ["zebra", "zcash"]
+keywords.workspace = true
 # Must be one of <https://crates.io/category_slugs>
 categories = ["command-line-utilities", "cryptography::cryptocurrencies"]
-
-# Zebra is only supported on the latest stable Rust version. See the README for details.
-# Any Zebra release can break compatibility with older Rust versions.
-rust-version = "1.73"
 
 [[bin]]
 name = "zebra-checkpoints"
@@ -75,11 +72,11 @@ tracing-error = { workspace = true }
 tracing-subscriber = { workspace = true }
 thiserror = { workspace = true }
 
-zebra-node-services = { path = "../zebra-node-services", version = "2.1.1" }
-zebra-chain = { path = "../zebra-chain", version = "3.1.0" }
+zebra-node-services = { path = "../zebra-node-services", version = "3.0.0" }
+zebra-chain = { path = "../zebra-chain", version = "5.0.0" }
 
 # These crates are needed for the block-template-to-proposal binary
-zebra-rpc = { path = "../zebra-rpc", version = "3.1.0" }
+zebra-rpc = { path = "../zebra-rpc", version = "5.0.0" }
 
 # These crates are needed for the zebra-checkpoints binary
 itertools = { workspace = true, optional = true }

@@ -401,27 +401,29 @@ impl Application for ZebradApp {
 
         // The Sentry default config pulls in the DSN from the `SENTRY_DSN`
         // environment variable.
-        #[cfg(feature = "sentry")]
-        let guard = sentry::init(sentry::ClientOptions {
-            debug: true,
-            release: Some(build_version().to_string().into()),
-            ..Default::default()
-        });
-
-        std::panic::set_hook(Box::new(move |panic_info| {
-            let panic_report = panic_hook.panic_report(panic_info);
-            eprintln!("{panic_report}");
-
+        if env::var_os("SENTRY_DSN").is_some() {
             #[cfg(feature = "sentry")]
-            {
-                let event = crate::sentry::panic_event_from(panic_report);
-                sentry::capture_event(event);
+            let guard = sentry::init(sentry::ClientOptions {
+                debug: true,
+                release: Some(build_version().to_string().into()),
+                ..Default::default()
+            });
 
-                if !guard.close(None) {
-                    warn!("unable to flush sentry events during panic");
+            std::panic::set_hook(Box::new(move |panic_info| {
+                let panic_report = panic_hook.panic_report(panic_info);
+                eprintln!("{panic_report}");
+
+                #[cfg(feature = "sentry")]
+                {
+                    let event = crate::sentry::panic_event_from(panic_report);
+                    sentry::capture_event(event);
+
+                    if !guard.close(None) {
+                        warn!("unable to flush sentry events during panic");
+                    }
                 }
-            }
-        }));
+            }));
+        }
 
         // Apply the configured number of threads to the thread pool.
         //

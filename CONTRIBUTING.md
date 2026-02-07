@@ -21,7 +21,7 @@ Please [create an issue](https://github.com/ZcashFoundation/zebra/issues/new?ass
 
 PRs are welcome for small and large changes, but please don't make large PRs
 without coordinating with us via the [issue tracker](https://github.com/ZcashFoundation/zebra/issues) or [Discord](https://discord.gg/yVNhQwQE68). This helps
-increase development coordination and makes PRs easier to merge. Low-effort PRs, including but not limited to fixing typos and grammatical corrections, will generally be redone by us to dissuade metric farming.
+increase development coordination and makes PRs easier to merge. Low-effort PRs, including but not limited to fixing typos and grammatical corrections, will generally be redone or closed by us to dissuade metric farming.
 
 Issues in this repository may not need to be addressed here, Zebra is meant to exclude any new features that are not strictly needed by the validator node. It may be desirable to implement features that support wallets, 
 block explorers, and other clients, particularly features that require database format changes, in [Zaino](https://github.com/zingolabs/zaino), [Zallet](https://github.com/zcash/wallet), or [librustzcash](https://github.com/zcash/librustzcash/). 
