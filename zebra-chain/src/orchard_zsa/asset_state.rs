@@ -252,6 +252,7 @@ impl From<HashMap<AssetBase, AssetState>> for IssuedAssetChanges {
 }
 
 #[cfg(any(test, feature = "proptest-impl"))]
+/// Test utilities for creating mock asset states and bases, used in zebra-rpc tests.
 pub mod testing {
     use super::AssetState;
 
