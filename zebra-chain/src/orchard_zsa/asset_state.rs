@@ -11,7 +11,9 @@ use thiserror::Error;
 pub use orchard::note::AssetBase;
 use orchard::{
     bundle::burn_validation::{validate_bundle_burn, BurnError},
-    issuance::{verify_issue_bundle, AssetRecord, Error as IssueError},
+    issuance::{
+        verify_issue_bundle, verify_trusted_issue_bundle, AssetRecord, Error as IssueError,
+    },
     note::Nullifier,
     value::NoteValue,
     Note,
@@ -157,25 +159,36 @@ fn apply_updates(
 
 impl IssuedAssetChanges {
     /// Validates burns and issuances across transactions, returning the map of changes.
+    ///
+    /// # Signature Verification Modes
+    ///
+    /// - **With `transaction_sighashes` (Some)**: Full validation for Contextually Verified Blocks
+    ///   from the consensus workflow. Performs signature verification using `verify_issue_bundle`.
+    ///
+    /// - **Without `transaction_sighashes` (None)**: Trusted validation for Checkpoint Verified Blocks
+    ///   loaded during bootstrap/startup from disk. These blocks are within checkpoint ranges and
+    ///   are considered trusted, so signature verification is skipped using `verify_trusted_issue_bundle`.
     pub fn validate_and_get_changes(
         transactions: &[Arc<Transaction>],
-        transaction_sighashes: &[SigHash],
+        transaction_sighashes: Option<&[SigHash]>,
         get_state: impl Fn(&AssetBase) -> Option<AssetState>,
     ) -> Result<Self, AssetStateError> {
-        // transactions and sighashes must be equal length by design of the code,
-        // so we use assert instead of returning error
-        assert_eq!(
-            transactions.len(),
-            transaction_sighashes.len(),
-            "Mismatched lengths: {} transactions but {} sighashes",
-            transactions.len(),
-            transaction_sighashes.len()
-        );
+        // When sighashes are provided, transactions and sighashes must be equal length by design,
+        // so we use assert instead of returning error.
+        if let Some(sighashes) = transaction_sighashes {
+            assert_eq!(
+                transactions.len(),
+                sighashes.len(),
+                "Bug in caller: {} transactions but {} sighashes. Caller must provide one sighash per transaction.",
+                transactions.len(),
+                sighashes.len()
+            );
+        }
 
         // Track old and current states - old_state is None for newly created assets
         let mut states = HashMap::<AssetBase, (Option<AssetState>, AssetState)>::new();
 
-        for (tx, sighash) in transactions.iter().zip(transaction_sighashes) {
+        for (i, tx) in transactions.iter().enumerate() {
             // Validate and apply burns
             if let Some(burn) = tx.orchard_burns() {
                 let burn_records = validate_bundle_burn(
@@ -192,10 +205,7 @@ impl IssuedAssetChanges {
                 // ZIP-0227 defines issued-note rho as DeriveIssuedRho(nf_{0,0}, i_action, i_note),
                 // so we must pass the first Action nullifier (nf_{0,0}). We rely on
                 // `orchard_nullifiers()` preserving Action order, so `.next()` returns nf_{0,0}.
-                let issue_records = verify_issue_bundle(
-                    issue_data.inner(),
-                    *sighash.as_ref(),
-                    |asset| Self::get_or_cache_record(&mut states, asset, &get_state),
+                let first_nullifier =
                     // FIXME: For now, the only way to convert Zebra's nullifier type to Orchard's nullifier type
                     // is via bytes, although they both wrap pallas::Point. Consider a more direct conversion to
                     // avoid this round-trip, if possible.
@@ -206,9 +216,30 @@ impl IssuedAssetChanges {
                             // `ShieldedData.actions` is `AtLeastOne<...>`, so nf_{0,0} must exist.
                             .expect("issuance must have at least one nullifier"),
                     ))
-                    .expect("Bytes can be converted to Nullifier"),
-                )
-                .map_err(AssetStateError::Issue)?;
+                    .expect("Bytes can be converted to Nullifier");
+
+                let issue_records = match transaction_sighashes {
+                    Some(sighashes) => {
+                        // Full verification with signature check (Contextually Verified Block)
+                        verify_issue_bundle(
+                            issue_data.inner(),
+                            *sighashes[i].as_ref(),
+                            |asset| Self::get_or_cache_record(&mut states, asset, &get_state),
+                            first_nullifier,
+                        )
+                        .map_err(AssetStateError::Issue)?
+                    }
+                    None => {
+                        // Trusted verification without signature check (Checkpoint Verified Block)
+                        verify_trusted_issue_bundle(
+                            issue_data.inner(),
+                            |asset| Self::get_or_cache_record(&mut states, asset, &get_state),
+                            first_nullifier,
+                        )
+                        .map_err(AssetStateError::Issue)?
+                    }
+                };
+
                 apply_updates(&mut states, issue_records);
             }
         }

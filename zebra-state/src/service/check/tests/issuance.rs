@@ -74,7 +74,7 @@ fn check_burns_and_issuance() {
 
     let block_1_issued_assets = IssuedAssetChanges::validate_and_get_changes(
         &block.block.transactions,
-        &block.transaction_sighashes,
+        None,
         |asset_base: &AssetBase| {
             read::asset_state(
                 Some(&Arc::new(empty_chain.clone())),

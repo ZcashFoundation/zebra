@@ -529,28 +529,24 @@ impl DiskWriteBatch {
         finalized: &FinalizedBlock,
     ) -> Result<(), BoxError> {
         let mut batch = zebra_db.issued_assets_cf().with_batch_for_writing(self);
-
         let asset_changes = if let Some(asset_changes) = finalized.issued_asset_changes.as_ref() {
             asset_changes.clone()
         } else {
-            // Recalculate changes from transactions if not provided
-            // FIXME: Why they can't be provided?
-            // FIXME: Why do we need to re-ferify the changes here?
+            // Recalculate changes from transactions if not provided.
+            // This happens for Checkpoint Verified Blocks loaded during startup.
+            // We use trusted validation (no signature verification) since these blocks
+            // are within checkpoint ranges and already considered valid.
             IssuedAssetChanges::validate_and_get_changes(
                 &finalized.block.transactions,
-                // FIXME: Add and use validate_and_get_changes variant without sighash arg
-                // (based on trusted version of verify_issue_bundle)
-                &[],
+                None, // No sighashes - uses trusted validation without signature checks
                 |asset_base| zebra_db.issued_asset(asset_base),
             )
             .map_err(|_| BoxError::from("invalid issued assets changes"))?
         };
-
         // Write only the new states to the database
         for (asset_base, (_old_state, new_state)) in asset_changes.iter() {
             batch = batch.zs_insert(asset_base, new_state);
         }
-
         Ok(())
     }
 
