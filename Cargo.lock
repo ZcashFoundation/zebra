@@ -2842,12 +2842,6 @@ dependencies = [
 
 [[package]]
 name = "nonempty"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9e591e719385e6ebaeb5ce5d3887f7d5676fceca6411d1925ccc95745f3d6f7"
-
-[[package]]
-name = "nonempty"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "549e471b99ccaf2f89101bec68f4d244457d5a95a9c3d0672e9564124397741d"
@@ -2985,7 +2979,7 @@ dependencies = [
  "k256",
  "lazy_static",
  "memuse",
- "nonempty 0.11.0",
+ "nonempty",
  "pasta_curves",
  "proptest",
  "rand 0.8.5",
@@ -5980,7 +5974,7 @@ dependencies = [
  "hex",
  "incrementalmerkletree",
  "memuse",
- "nonempty 0.11.0",
+ "nonempty",
  "percent-encoding",
  "prost",
  "rand_core 0.6.4",
@@ -6011,7 +6005,7 @@ name = "zcash_encoding"
 version = "0.3.0"
 dependencies = [
  "core2",
- "nonempty 0.11.0",
+ "nonempty",
 ]
 
 [[package]]
@@ -6035,7 +6029,7 @@ dependencies = [
  "document-features",
  "group",
  "memuse",
- "nonempty 0.11.0",
+ "nonempty",
  "rand_core 0.6.4",
  "sapling-crypto",
  "secrecy",
@@ -6081,7 +6075,7 @@ dependencies = [
  "jubjub",
  "lazy_static",
  "memuse",
- "nonempty 0.11.0",
+ "nonempty",
  "orchard",
  "rand 0.8.5",
  "rand_core 0.6.4",
@@ -6216,7 +6210,6 @@ dependencies = [
  "jubjub",
  "k256",
  "lazy_static",
- "nonempty 0.7.0",
  "num-integer",
  "orchard",
  "primitive-types",

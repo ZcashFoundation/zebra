@@ -62,9 +62,7 @@ proptest-impl = [
 bench = ["zebra-test"]
 
 # Support for transaction version 6
-tx_v6 = [
-    "nonempty"
-]
+tx_v6 = []
 
 [dependencies]
 
@@ -111,9 +109,6 @@ zcash_protocol.workspace = true
 zcash_address.workspace = true
 zcash_transparent.workspace = true
 zcash_script.workspace = true
-
-# Used for orchard serialization
-nonempty = { version = "0.7", optional = true }
 
 # Time
 chrono = { version = "0.4.38", default-features = false, features = ["clock", "std", "serde"] }
