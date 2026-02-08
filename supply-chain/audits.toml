@@ -249,11 +249,6 @@ who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.16.2+1.7.2 -> 0.17.0+1.8.1"
 
-[[audits.libyml]]
-who = "Alfredo Garcia <oxarbitrage@gmail.com>"
-criteria = "safe-to-deploy"
-version = "0.0.5"
-
 [[audits.log]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
@@ -465,11 +460,6 @@ delta = "3.8.3 -> 3.9.0"
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "3.9.0 -> 3.11.0"
-
-[[audits.serde_yml]]
-who = "Alfredo Garcia <oxarbitrage@gmail.com>"
-criteria = "safe-to-deploy"
-version = "0.0.12"
 
 [[audits.shardtree]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"

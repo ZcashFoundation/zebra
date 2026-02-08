@@ -58,7 +58,7 @@ search-issue-refs = [
 openapi-generator = [
     "syn",
     "quote",
-    "serde_yml",
+    "serde_yaml_ng",
     "serde"
 ]
 
@@ -96,7 +96,7 @@ zcash_protocol.workspace = true
 rand = { workspace = true }
 syn = { workspace = true, features = ["full"], optional = true }
 quote = { workspace = true, optional = true }
-serde_yml = { workspace = true, optional = true }
+serde_yaml_ng = { workspace = true, optional = true }
 serde = { workspace = true, features = ["serde_derive"], optional = true }
 indexmap = { workspace = true }
 
