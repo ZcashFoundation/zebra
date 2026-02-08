@@ -279,9 +279,9 @@ pub struct TransactionObject {
     pub(crate) lock_time: u32,
 
     /// The block height after which the transaction expires
-    #[serde(rename = "expiryheight", skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "expiryheight")]
     #[getter(copy)]
-    pub(crate) expiry_height: Option<Height>,
+    pub(crate) expiry_height: Height,
 
     /// The block hash
     #[serde(
@@ -598,7 +598,7 @@ impl Default for TransactionObject {
             version: 4,
             version_group_id: None,
             lock_time: 0,
-            expiry_height: None,
+            expiry_height: Height(0),
             block_hash: None,
             block_time: None,
         }
@@ -659,7 +659,7 @@ impl TransactionObject {
                         vout: outpoint.index,
                         script_sig: ScriptSig {
                             asm: zcash_script::script::Code(unlock_script.as_raw_bytes().to_vec())
-                                .to_asm(false),
+                                .to_asm(true),
                             hex: unlock_script.clone(),
                         },
                         sequence: *sequence,
@@ -871,7 +871,7 @@ impl TransactionObject {
             version: tx.version(),
             version_group_id: tx.version_group_id().map(|id| id.to_be_bytes().to_vec()),
             lock_time: tx.raw_lock_time(),
-            expiry_height: tx.expiry_height(),
+            expiry_height: tx.expiry_height().unwrap_or(Height(0)),
             block_hash,
             block_time,
         }

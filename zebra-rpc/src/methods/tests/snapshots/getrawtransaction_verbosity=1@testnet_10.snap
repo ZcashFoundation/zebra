@@ -56,6 +56,7 @@ expression: rsp
     "overwintered": false,
     "version": 1,
     "locktime": 0,
+    "expiryheight": 0,
     "blockhash": "025579869bcf52a989337342f5f57a84f3a28b968f7d6a8307902b065a668d23",
     "blocktime": 1477674473
   }

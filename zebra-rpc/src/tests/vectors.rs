@@ -1,6 +1,6 @@
 //! Fixed Zebra RPC serialization test vectors.
 
-use zebra_chain::transaction;
+use zebra_chain::{block::Height, transaction};
 
 use crate::client::{GetBlockResponse, GetRawTransactionResponse, TransactionObject};
 
@@ -34,14 +34,14 @@ pub fn test_transaction_serialization() {
         version: 2,
         version_group_id: None,
         lock_time: 0,
-        expiry_height: None,
+        expiry_height: Height(0),
         block_hash: None,
         block_time: None,
     }));
 
     assert_eq!(
         serde_json::to_string(&tx).unwrap(),
-        r#"{"hex":"42","height":1,"confirmations":0,"vin":[],"vout":[],"vShieldedSpend":[],"vShieldedOutput":[],"vjoinsplit":[],"txid":"0000000000000000000000000000000000000000000000000000000000000000","overwintered":false,"version":2,"locktime":0}"#
+        r#"{"hex":"42","height":1,"confirmations":0,"vin":[],"vout":[],"vShieldedSpend":[],"vShieldedOutput":[],"vjoinsplit":[],"txid":"0000000000000000000000000000000000000000000000000000000000000000","overwintered":false,"version":2,"locktime":0,"expiryheight":0}"#
     );
 
     let tx = GetRawTransactionResponse::Object(Box::new(TransactionObject {
@@ -68,14 +68,14 @@ pub fn test_transaction_serialization() {
         version: 4,
         version_group_id: None,
         lock_time: 0,
-        expiry_height: None,
+        expiry_height: Height(0),
         block_hash: None,
         block_time: None,
     }));
 
     assert_eq!(
         serde_json::to_string(&tx).unwrap(),
-        r#"{"hex":"42","vin":[],"vout":[],"vShieldedSpend":[],"vShieldedOutput":[],"vjoinsplit":[],"txid":"0000000000000000000000000000000000000000000000000000000000000000","overwintered":false,"version":4,"locktime":0}"#
+        r#"{"hex":"42","vin":[],"vout":[],"vShieldedSpend":[],"vShieldedOutput":[],"vjoinsplit":[],"txid":"0000000000000000000000000000000000000000000000000000000000000000","overwintered":false,"version":4,"locktime":0,"expiryheight":0}"#
     );
 }
 
