@@ -340,6 +340,54 @@ fn broadcast_all_queued_removes_banned_peers() {
     });
 }
 
+#[test]
+fn remove_unready_peer_clears_cancel_handle_and_updates_counts() {
+    let peer_versions = PeerVersions {
+        peer_versions: vec![Version::min_specified_for_upgrade(
+            &Network::Mainnet,
+            NetworkUpgrade::Nu6,
+        )],
+    };
+
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    let (discovered_peers, _handles) = peer_versions.mock_peer_discovery();
+    let (minimum_peer_version, _best_tip_height) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+
+    runtime.block_on(async move {
+        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version.clone())
+            .build();
+
+        // Prepare a banned IP map (not strictly required for remove(), but keeps
+        // the test's setup similar to real-world conditions).
+        let banned_ip: std::net::IpAddr = "127.0.0.1".parse().unwrap();
+        let mut bans_map: IndexMap<std::net::IpAddr, std::time::Instant> = IndexMap::new();
+        bans_map.insert(banned_ip, std::time::Instant::now());
+        let (_bans_tx, bans_rx) = watch::channel(Arc::new(bans_map));
+        peer_set.bans_receiver = bans_rx;
+
+        // Create a cancel handle as if a request was in-flight to `banned_addr`.
+        let banned_addr: PeerSocketAddr = SocketAddr::new(banned_ip, 1).into();
+        let (tx, _rx) =
+            crate::peer_set::set::oneshot::channel::<crate::peer_set::set::CancelClientWork>();
+        peer_set.cancel_handles.insert(banned_addr, tx);
+
+        // The peer is counted as 1 peer with that IP.
+        assert_eq!(peer_set.num_peers_with_ip(banned_ip), 1);
+
+        // Remove the peer (simulates a discovery::Remove or equivalent).
+        peer_set.remove(&banned_addr);
+
+        // After removal, the cancel handle should be gone and the count zero.
+        assert!(!peer_set.cancel_handles.contains_key(&banned_addr));
+        assert_eq!(peer_set.num_peers_with_ip(banned_ip), 0);
+    });
+}
+
 /// Check that a peer set routes inventory requests to a peer that has advertised that inventory.
 #[test]
 fn peer_set_route_inv_advertised_registry() {
