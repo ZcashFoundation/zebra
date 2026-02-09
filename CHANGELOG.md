@@ -5,6 +5,14 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+This release adds the `gettxout` RPC method.
+
+### Added
+
+- Added `UnspentOutput` to mempool component service ([#10235](https://github.com/ZcashFoundation/zebra/pull/10235))
+
 ## [Zebra 4.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v4.1.0) - 2026-02-05
 
 This release has no breaking changes for node operators. It expands Zebra's
