@@ -23,16 +23,20 @@ class WalletTest (BitcoinTestFramework):
         args = [None]
         self.nodes = start_nodes(self.num_nodes, self.options.tmpdir, args)
 
-        # Zallet needs a block to start
+        # Generate a block before starting the wallet
         self.nodes[0].generate(1)
 
         self.wallets = start_wallets(self.num_nodes, self.options.tmpdir)
+        sync_wallet_node(self.wallets[0], 1)
 
-        # TODO: Use `getwalletstatus` in all sync issues
-        # https://github.com/zcash/wallet/issues/316
-        time.sleep(2)
+        # Generate a block and wait for the wallet to scan it
+        self.nodes[0].generate(1)
+        sync_wallet_node(self.wallets[0], 2)
 
     def run_test(self):
+        # Make sure the blocks are scanned
+        sync_wallet(self.wallets[0], 2)
+
         # Generate a new account
         account = self.wallets[0].z_getnewaccount("test_account")
 
@@ -50,11 +54,12 @@ class WalletTest (BitcoinTestFramework):
             self.wallets[0].stop()
         except Exception as e:
             print("Ignoring stopping wallet error: ", e)
-        time.sleep(1)
+        # Wait for the wallet to stop
+        # TODO: Poll status instead, or other alternative to remove the sleep
+        time.sleep(2)
 
         # Stop the node
         self.nodes[0].stop()
-        time.sleep(1)
 
         # Restart the node with the generated address as the miner address
         args = [ZebraExtraArgs(miner_address=transparent_address)]
@@ -62,6 +67,10 @@ class WalletTest (BitcoinTestFramework):
 
         # Restart the wallet
         self.wallets = start_wallets(self.num_nodes, self.options.tmpdir)
+
+        # Wait until the wallet and the node are synced to the same height
+        # from the wallet perspective
+        sync_wallet(self.wallets[0], 2)
 
         # TODO: Use getwalletinfo when implemented
         # https://github.com/zcash/wallet/issues/55
@@ -78,18 +87,25 @@ class WalletTest (BitcoinTestFramework):
         # Mine a block
         self.nodes[0].generate(1)
 
-        # Wait for the wallet to sync
-        time.sleep(1)
+        # Poll until wallet scan new block
+        sync_wallet(self.wallets[0], 3)
 
         # Balance for the address increases in the node
         node_balance = self.nodes[0].getaddressbalance(transparent_address)
         assert_equal(node_balance['balance'], 625000000)
 
+        # Confirmed balance in the wallet is 6.25 ZEC
+        wallet_balance = self.wallets[0].z_gettotalbalance(1, True)
+        assert_equal(wallet_balance['transparent'], '6.25000000')
+
+        # There is 1 transaction in the wallet
+        assert_equal(len(self.wallets[0].z_listtransactions()), 1)
+
         # Mine another block
         self.nodes[0].generate(1)
 
         # Wait for the wallet to sync
-        time.sleep(1)
+        sync_wallet(self.wallets[0], 4)
 
         node_balance = self.nodes[0].getaddressbalance(transparent_address)
         assert_equal(node_balance['balance'], 1250000000)
@@ -97,11 +113,36 @@ class WalletTest (BitcoinTestFramework):
         # There are 2 transactions in the wallet
         assert_equal(len(self.wallets[0].z_listtransactions()), 2)
 
-        # Confirmed balance in the wallet is either 6.25 or 12.5 ZEC
+        # Confirmed balance in the wallet is 12.5 ZEC
         wallet_balance = self.wallets[0].z_gettotalbalance(1, True)
-        assert_true(
-            wallet_balance['transparent'] == '6.25000000' or
-            wallet_balance['transparent'] == '12.50000000')
+        assert_equal(wallet_balance['transparent'], '12.50000000')
+
+# Wait until the wallet is synced to the expected height
+def sync_wallet(wallet, expected_height):
+    while True:
+        status = wallet.getwalletstatus()
+        print(status)
+        wallet_tip = status.get('wallet_tip')
+        node_tip = status.get('node_tip')
+
+        if (wallet_tip
+            and 'height' in wallet_tip
+            and wallet_tip['height'] == expected_height
+            and node_tip['height'] == expected_height):
+            break
+
+        time.sleep(0.1)
+
+# Wait for the wallet view of the node to reach the expected height
+def sync_wallet_node(wallet, expected_height):
+    while True:
+        status = wallet.getwalletstatus()
+        node_tip = status.get('node_tip')
+
+        if (node_tip['height'] == expected_height):
+            break
+
+        time.sleep(0.1)
 
 if __name__ == '__main__':
     WalletTest ().main ()
