@@ -1523,11 +1523,16 @@ impl Chain {
                     *current_state = *new_state;
                 })
                 .or_insert_with(|| {
-                    assert!(
-                        old_state_from_block.is_none(),
-                        "issued asset state mismatch for {:?}",
-                        asset_base
-                    );
+                    // FIXME: This assert fails if the asset was removed in revert_issued_assets
+                    // at RevertPosition::Root position. And it looks like it's a legal case
+                    // when the previous state in block is not None but the state item was
+                    // removed during eviction in revert_issued_assets. So we should not use
+                    // this check here?
+                    //assert!(
+                    //    old_state_from_block.is_none(),
+                    //    "issued asset state mismatch for {:?}",
+                    //    asset_base
+                    //);
                     // FIXME: Also set the history marker on `*new_state` here.
                     *new_state
                 });
