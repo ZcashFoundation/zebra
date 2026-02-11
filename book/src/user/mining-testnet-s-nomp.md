@@ -89,7 +89,7 @@ These fixes disable mining pool operator payments and miner payments: they just 
 1. Install `redis` and run it on the default port: <https://redis.io/docs/getting-started/>
 
     ```sh
-    sudo apt install lsb-release
+    sudo apt-get install lsb-release
     curl -fsSL https://packages.redis.io/gpg | sudo gpg --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg
 
     echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/redis.list

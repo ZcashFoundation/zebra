@@ -10,11 +10,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `MinedBlocksCounter` struct and `mining.blocks_mined` metric for tracking blocks submitted via `submit_block` RPC.
+- Added `get_tx_out` method and `OutputObject` response. ([#10235](https://github.com/ZcashFoundation/zebra/pull/10235))
+
+## [5.0.0] - 2026-02-05
+
+### Breaking Changes
+
+- `zebra-chain` bumped to `5.0.0`
+- `zebra-script` bumped to `4.0.0`
+- `zebra-state` bumped to `4.0.0`
+- `zebra-node-services` bumped to `3.0.0`
+- `zebra-consensus` bumped to `4.0.0`
+- `zebra-network` bumped to `4.0.0`
+
+### Added
+
 - `server/rpc_metrics` module.
 - `server/rpc_tracing` module.
 - Dependency on the `metrics` crate.
 
-## [4.0.0] - 2026-01-21
+## [4.0.0] - 2026-01-21 - Yanked
 
 Most changes are related to a fix to `getinfo` RPC response which used a string
 for the `errors_timestamp` field, which was changed to `i64` to match `zcashd`.

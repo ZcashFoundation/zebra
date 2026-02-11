@@ -86,7 +86,7 @@ use zebra_consensus::{
     funding_stream_address, router::service_trait::BlockVerifierService, RouterError,
 };
 use zebra_network::{address_book_peers::AddressBookPeers, types::PeerServices, PeerSocketAddr};
-use zebra_node_services::mempool::{self, MempoolService};
+use zebra_node_services::mempool::{self, CreatedOrSpent, MempoolService};
 use zebra_state::{
     AnyTx, HashOrHeight, OutputLocation, ReadRequest, ReadResponse, ReadState as ReadStateService,
     State as StateService, TransactionLocation,
@@ -707,6 +707,25 @@ pub trait Rpc {
     /// method: post
     /// tags: network
     async fn add_node(&self, addr: PeerSocketAddr, command: AddNodeCommand) -> Result<()>;
+
+    /// Returns details about an unspent transaction output.
+    ///
+    /// zcashd reference: [`gettxout`](https://zcash.github.io/rpc/gettxout.html)
+    /// method: post
+    /// tags: transaction
+    ///
+    /// # Parameters
+    ///
+    /// - `txid`: (string, required, example="mytxid") The transaction ID that contains the output.
+    /// - `n`: (number, required) The output index number.
+    /// - `include_mempool` (bool, optional, default=true) Whether to include the mempool in the search.
+    #[method(name = "gettxout")]
+    async fn get_tx_out(
+        &self,
+        txid: String,
+        n: u32,
+        include_mempool: Option<bool>,
+    ) -> Result<GetTxOutResponse>;
 }
 
 /// RPC method implementations.
@@ -2967,6 +2986,126 @@ where
             ));
         }
     }
+
+    async fn get_tx_out(
+        &self,
+        txid: String,
+        n: u32,
+        include_mempool: Option<bool>,
+    ) -> Result<GetTxOutResponse> {
+        let txid = transaction::Hash::from_hex(txid)
+            .map_error(server::error::LegacyCode::InvalidParameter)?;
+
+        let outpoint = transparent::OutPoint {
+            hash: txid,
+            index: n,
+        };
+
+        // Optional mempool path
+        if include_mempool.unwrap_or(true) {
+            let rsp = self
+                .mempool
+                .clone()
+                .oneshot(mempool::Request::UnspentOutput(outpoint))
+                .await
+                .map_misc_error()?;
+
+            match rsp {
+                // Return the output found in the mempool
+                mempool::Response::TransparentOutput(Some(CreatedOrSpent::Created {
+                    output,
+                    tx_version,
+                    last_seen_hash,
+                })) => {
+                    return Ok(GetTxOutResponse(Some(
+                        types::transaction::OutputObject::from_output(
+                            &output,
+                            last_seen_hash.to_string(),
+                            0,
+                            tx_version,
+                            false,
+                            self.network(),
+                        ),
+                    )))
+                }
+                mempool::Response::TransparentOutput(Some(CreatedOrSpent::Spent)) => {
+                    return Ok(GetTxOutResponse(None))
+                }
+                mempool::Response::TransparentOutput(None) => {}
+                _ => unreachable!("unmatched response to an `UnspentOutput` request"),
+            };
+        }
+
+        // TODO: Ensure that the returned tip hash is always valid for the response, i.e. that Zebra can't return a tip that
+        //       hadn't yet included the queried transaction output.
+
+        // Get the best block tip hash
+        let tip_rsp = self
+            .read_state
+            .clone()
+            .oneshot(zebra_state::ReadRequest::Tip)
+            .await
+            .map_misc_error()?;
+
+        let best_block_hash = match tip_rsp {
+            zebra_state::ReadResponse::Tip(tip) => tip.ok_or_misc_error("No blocks in state")?.1,
+            _ => unreachable!("unmatched response to a `Tip` request"),
+        };
+
+        // State path
+        let rsp = self
+            .read_state
+            .clone()
+            .oneshot(zebra_state::ReadRequest::Transaction(txid))
+            .await
+            .map_misc_error()?;
+
+        match rsp {
+            zebra_state::ReadResponse::Transaction(Some(tx)) => {
+                let outputs = tx.tx.outputs();
+                let index: usize = n.try_into().expect("u32 always fits in usize");
+                let output = match outputs.get(index) {
+                    Some(output) => output,
+                    // return null if the output is not found
+                    None => return Ok(GetTxOutResponse(None)),
+                };
+
+                // Prune state outputs that are spent
+                let is_spent = {
+                    let rsp = self
+                        .read_state
+                        .clone()
+                        .oneshot(zebra_state::ReadRequest::IsTransparentOutputSpent(outpoint))
+                        .await
+                        .map_misc_error()?;
+
+                    match rsp {
+                        zebra_state::ReadResponse::IsTransparentOutputSpent(spent) => spent,
+                        _ => unreachable!(
+                            "unmatched response to an `IsTransparentOutputSpent` request"
+                        ),
+                    }
+                };
+
+                if is_spent {
+                    return Ok(GetTxOutResponse(None));
+                }
+
+                Ok(GetTxOutResponse(Some(
+                    types::transaction::OutputObject::from_output(
+                        output,
+                        best_block_hash.to_string(),
+                        tx.confirmations,
+                        tx.tx.version(),
+                        tx.tx.is_coinbase(),
+                        self.network(),
+                    ),
+                )))
+            }
+            zebra_state::ReadResponse::Transaction(None) => Ok(GetTxOutResponse(None)),
+            _ => unreachable!("unmatched response to a `Transaction` request"),
+        }
+    }
 }
 
 // TODO: Move the code below to separate modules.
@@ -4490,3 +4629,10 @@ pub enum AddNodeCommand {
     #[serde(rename = "add")]
     Add,
 }
+
+/// Response to a `gettxout` RPC request.
+///
+/// See the notes for the [`Rpc::get_tx_out` method].
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
+pub struct GetTxOutResponse(Option<types::transaction::OutputObject>);
