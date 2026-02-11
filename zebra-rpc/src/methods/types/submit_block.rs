@@ -154,7 +154,7 @@ impl MinedBlocksCounter {
     /// This method is called by [`GetBlockTemplateHandler::advertise_mined_block`]
     /// when a block is successfully submitted.
     pub fn increment(&self) {
-        self.sender.send_modify(|count| *count += 1);
+        self.sender.send_modify(|count| *count = count.saturating_add(1));
     }
 }
 
