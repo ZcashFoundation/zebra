@@ -174,7 +174,7 @@ pub enum TransactionError {
     #[error("must have at least one active orchard flag")]
     NotEnoughFlags,
 
-    #[error("could not find transparent input UTXO in the chain or mempool")]
+    #[error("could not find transparent input UTXO in the best chain or mempool")]
     TransparentInputNotFound,
 
     #[error("could not contextually validate transaction on best chain: {0}")]
