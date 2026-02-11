@@ -586,10 +586,26 @@ where
                     sigops,
                 },
                 Request::Mempool { transaction: tx, .. } => {
+                    let spent_outputs = cached_ffi_transaction.all_previous_outputs();
+
+                    let inputs_are_standard = zebra_script::are_inputs_standard(
+                        tx.transaction.as_ref(),
+                        spent_outputs,
+                    );
+
+                    // zcashd sums GetLegacySigOpCount + GetP2SHSigOpCount for the
+                    // per-tx sigops limit in AcceptToMemoryPool.
+                    let p2sh_sigops = zebra_script::p2sh_sigop_count(
+                        tx.transaction.as_ref(),
+                        spent_outputs,
+                    );
+                    let total_sigops = sigops + p2sh_sigops;
+
                     let transaction = VerifiedUnminedTx::new(
                         tx,
                         miner_fee.expect("fee should have been checked earlier"),
-                        sigops,
+                        total_sigops,
+                        inputs_are_standard,
                     )?;
 
                     if let Some(mut mempool) = mempool {

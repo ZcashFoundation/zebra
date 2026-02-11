@@ -335,8 +335,11 @@ pub struct VerifiedUnminedTx {
     /// The transaction fee for this unmined transaction.
     pub miner_fee: Amount<NonNegative>,
 
-    /// The number of legacy signature operations in this transaction's
-    /// transparent inputs and outputs.
+    /// The number of transparent signature operations in this transaction.
+    ///
+    /// For mempool transactions, this is the sum of legacy sigops and P2SH sigops,
+    /// matching zcashd's `GetLegacySigOpCount + GetP2SHSigOpCount`.
+    /// For block transactions, this is the legacy sigop count only.
     pub sigops: u32,
 
     /// The number of conventional actions for `transaction`, as defined by [ZIP-317].
@@ -369,6 +372,11 @@ pub struct VerifiedUnminedTx {
     /// The tip height when the transaction was added to the mempool, or None if
     /// it has not reached the mempool yet.
     pub height: Option<Height>,
+
+    /// Whether all P2SH inputs have redeemed scripts within the sigops limit.
+    /// Computed by the consensus verifier which has access to spent outputs.
+    /// Corresponds to zcashd's `AreInputsStandard()`.
+    pub inputs_are_standard: bool,
 }
 
 impl fmt::Debug for VerifiedUnminedTx {
@@ -391,11 +399,12 @@ impl fmt::Display for VerifiedUnminedTx {
 
 impl VerifiedUnminedTx {
     /// Create a new verified unmined transaction from an unmined transaction,
-    /// its miner fee, and its legacy sigop count.
+    /// its miner fee, its total sigop count (legacy + P2SH), and whether inputs are standard.
     pub fn new(
         transaction: UnminedTx,
         miner_fee: Amount<NonNegative>,
-        legacy_sigop_count: u32,
+        sigop_count: u32,
+        inputs_are_standard: bool,
     ) -> Result<Self, zip317::Error> {
         let fee_weight_ratio = zip317::conventional_fee_weight_ratio(&transaction, miner_fee);
         let conventional_actions = zip317::conventional_actions(&transaction.transaction);
@@ -406,12 +415,13 @@ impl VerifiedUnminedTx {
         Ok(Self {
             transaction,
             miner_fee,
-            sigops: legacy_sigop_count,
+            sigops: sigop_count,
             fee_weight_ratio,
             conventional_actions,
             unpaid_actions,
             time: None,
             height: None,
+            inputs_are_standard,
         })
     }
 

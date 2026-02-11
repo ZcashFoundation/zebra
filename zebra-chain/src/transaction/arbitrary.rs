@@ -853,6 +853,7 @@ impl Arbitrary for VerifiedUnminedTx {
                         fee_weight_ratio,
                         time: Some(time),
                         height: Some(height),
+                        inputs_are_standard: true,
                     }
                 },
             )
