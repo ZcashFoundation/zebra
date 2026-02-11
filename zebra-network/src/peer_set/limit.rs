@@ -20,8 +20,11 @@ pub struct ConnectionClosed;
 /// Creates a [`ConnectionTracker`] to track each active connection.
 /// When these trackers are dropped, the counter gets notified.
 pub struct ActiveConnectionCounter {
-    /// The number of active peers tracked using this counter.
+    /// The number of active connections tracked using this counter.
     count: usize,
+
+    /// The number of connection slots that are reserved for connection attempts.
+    reserved_count: usize,
 
     /// The limit for this type of connection, for diagnostics only.
     /// The caller must enforce the limit by ignoring, delaying, or dropping connections.
@@ -29,6 +32,12 @@ pub struct ActiveConnectionCounter {
 
     /// The label for this connection counter, typically its type.
     label: Arc<str>,
+
+    /// The channel used to send opened connection notifications.
+    open_notification_tx: mpsc::UnboundedSender<()>,
+
+    /// The channel used to receive opened connection notifications.
+    open_notification_rx: mpsc::UnboundedReceiver<()>,
 
     /// The channel used to send closed connection notifications.
     close_notification_tx: mpsc::UnboundedSender<ConnectionClosed>,
@@ -46,6 +55,7 @@ impl fmt::Debug for ActiveConnectionCounter {
         f.debug_struct("ActiveConnectionCounter")
             .field("label", &self.label)
             .field("count", &self.count)
+            .field("reserved_count", &self.reserved_count)
             .field("limit", &self.limit)
             .finish()
     }
@@ -62,6 +72,7 @@ impl ActiveConnectionCounter {
     pub fn new_counter_with<S: ToString>(limit: usize, label: S) -> Self {
         // The number of items in this channel is bounded by the connection limit.
         let (close_notification_tx, close_notification_rx) = mpsc::unbounded_channel();
+        let (open_notification_tx, open_notification_rx) = mpsc::unbounded_channel();
 
         let label = label.to_string();
 
@@ -70,8 +81,11 @@ impl ActiveConnectionCounter {
 
         Self {
             count: 0,
+            reserved_count: 0,
             limit,
             label: label.into(),
+            open_notification_rx,
+            open_notification_tx,
             close_notification_rx,
             close_notification_tx,
             #[cfg(feature = "progress-bar")]
@@ -93,6 +107,19 @@ impl ActiveConnectionCounter {
         // We ignore errors here:
         // - TryRecvError::Empty means that there are no pending close notifications
         // - TryRecvError::Closed is unreachable, because we hold a sender
+        while let Ok(()) = self.open_notification_rx.try_recv() {
+            self.reserved_count -= 1;
+            self.count += 1;
+
+            debug!(
+                open_connections = ?self.count,
+                ?previous_connections,
+                limit = ?self.limit,
+                label = ?self.label,
+                "a peer connection was opened",
+            );
+        }
+
         while let Ok(ConnectionClosed) = self.close_notification_rx.try_recv() {
             self.count -= 1;
 
@@ -118,7 +145,7 @@ impl ActiveConnectionCounter {
             .set_pos(u64::try_from(self.count).expect("fits in u64"));
         // .set_len(u64::try_from(self.limit).expect("fits in u64"));
 
-        self.count
+        self.count + self.reserved_count
     }
 }
 
@@ -137,6 +164,9 @@ pub struct ConnectionTracker {
     /// The channel used to send closed connection notifications on drop.
     close_notification_tx: mpsc::UnboundedSender<ConnectionClosed>,
 
+    /// The channel used to send open connection notifications on first response.
+    open_notification_tx: Option<mpsc::UnboundedSender<()>>,
+
     /// The label for this connection counter, typically its type.
     label: Arc<str>,
 }
@@ -150,12 +180,18 @@ impl fmt::Debug for ConnectionTracker {
 }
 
 impl ConnectionTracker {
+    pub fn mark_open(&mut self) {
+        if let Some(open_notification_tx) = self.open_notification_tx.take() {
+            let _ = open_notification_tx.send(());
+        }
+    }
+
     /// Create and return a new active connection tracker, and add 1 to `counter`.
     /// All connection trackers share a label with their connection counter.
     ///
     /// When the returned tracker is dropped, `counter` will be notified, and decreased by 1.
     fn new(counter: &mut ActiveConnectionCounter) -> Self {
-        counter.count += 1;
+        counter.reserved_count += 1;
 
         debug!(
             open_connections = ?counter.count,
@@ -165,6 +201,7 @@ impl ConnectionTracker {
         );
 
         Self {
+            open_notification_tx: Some(counter.open_notification_tx.clone()),
             close_notification_tx: counter.close_notification_tx.clone(),
             label: counter.label.clone(),
         }
@@ -181,6 +218,7 @@ impl Drop for ConnectionTracker {
         // # Security
         //
         // This channel is actually bounded by the inbound and outbound connection limit.
+        self.mark_open();
         let _ = self.close_notification_tx.send(ConnectionClosed);
     }
 }
