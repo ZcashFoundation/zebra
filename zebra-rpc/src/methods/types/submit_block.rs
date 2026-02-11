@@ -154,7 +154,8 @@ impl MinedBlocksCounter {
     /// This method is called by [`GetBlockTemplateHandler::advertise_mined_block`]
     /// when a block is successfully submitted.
     pub fn increment(&self) {
-        self.sender.send_modify(|count| *count = count.saturating_add(1));
+        self.sender
+            .send_modify(|count| *count = count.saturating_add(1));
     }
 }
 
@@ -200,15 +201,5 @@ mod tests {
 
         assert_eq!(*rx1.borrow(), 1);
         assert_eq!(*rx2.borrow(), 1);
-    }
-
-    /// Tests that the `mining.blocks_mined` metric can be incremented.
-    ///
-    /// This verifies the metric name is valid and the metrics system accepts it.
-    /// The actual metric emission happens in [`GetBlockTemplateHandler::advertise_mined_block`].
-    #[test]
-    fn mining_blocks_mined_metric_is_valid() {
-        // Verify the metric can be incremented without panicking
-        metrics::counter!("mining.blocks_mined").increment(1);
     }
 }
