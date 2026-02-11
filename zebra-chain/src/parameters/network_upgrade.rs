@@ -21,6 +21,8 @@ use proptest_derive::Arbitrary;
 ///
 /// Network upgrades change the Zcash network protocol or consensus rules. Note that they have no
 /// designated codenames from NU5 onwards.
+///
+/// Enum variants must be ordered by activation height.
 #[derive(
     Copy, Clone, EnumIter, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Ord, PartialOrd,
 )]
