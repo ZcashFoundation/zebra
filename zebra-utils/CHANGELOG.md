@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- The `openapi-generator` tool was removed in favor of OpenRPC (#10297, #10201 ).
+- The `openapi-generator` tool was removed in favor of OpenRPC (#10297, #10201).
 
 ## [4.0.0] - 2026-02-05
 
