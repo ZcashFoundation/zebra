@@ -92,6 +92,7 @@ Relevant parts of the configuration file:
 ```
 [mempool]
 debug_enable_at_height = 0
+max_datacarrier_bytes = 83
     
 [mining]
 miner_address = 't27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v'

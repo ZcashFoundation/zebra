@@ -86,8 +86,6 @@ This check runs automatically on pull requests with the `A-release` label. It mu
 
 ## Update Zebra Version
 
-### Choose a Release Level
-
 Zebra follows [semantic versioning](https://semver.org). Semantic versions look like: MAJOR.MINOR.PATCH[-TAG.PRE-RELEASE]
 
 Choose a release level for `zebrad`. Release levels are based on user-visible changes:
@@ -105,7 +103,7 @@ Update the version using:
 cargo release version --verbose --execute --allow-branch '*' -p zebrad patch # [ major | minor ]
 ```
 
-### Update Crate Versions and Crate Change Logs
+## Update Crate Versions and Crate Change Logs
 
 If you're publishing crates for the first time, [log in to crates.io](https://zebra.zfnd.org/dev/crate-owners.html#logging-in-to-cratesio),
 and make sure you're a member of owners group.

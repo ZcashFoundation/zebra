@@ -20,6 +20,9 @@ use zebra_chain::{
     transparent, LedgerState,
 };
 
+use crate::components::mempool::tests::{
+    standard_verified_unmined_tx_strategy, standardize_transaction,
+};
 use crate::components::mempool::{
     config::Config,
     storage::{
@@ -113,7 +116,8 @@ proptest! {
     /// Test that the reject list length limits are applied when evicting transactions.
     #[test]
     fn reject_lists_are_limited_insert_eviction(
-        transactions in vec(any::<VerifiedUnminedTx>(), MEMPOOL_TX_COUNT + 1).prop_map(SummaryDebug),
+        transactions in vec(standard_verified_unmined_tx_strategy(), MEMPOOL_TX_COUNT + 1)
+            .prop_map(SummaryDebug),
         mut rejection_template in any::<UnminedTxId>()
     ) {
         // Use as cost limit the costs of all transactions except one
@@ -454,7 +458,7 @@ enum SpendConflictTestInput {
 impl SpendConflictTestInput {
     /// Return two transactions that have a spend conflict.
     pub fn conflicting_transactions(self) -> (VerifiedUnminedTx, VerifiedUnminedTx) {
-        let (first, second) = match self {
+        let (mut first, mut second) = match self {
             SpendConflictTestInput::V4 {
                 mut first,
                 mut second,
@@ -476,6 +480,9 @@ impl SpendConflictTestInput {
                 (first, second)
             }
         };
+
+        standardize_transaction(&mut first.0);
+        standardize_transaction(&mut second.0);
 
         (
             VerifiedUnminedTx::new(
@@ -506,6 +513,9 @@ impl SpendConflictTestInput {
         Self::remove_sprout_conflicts(&mut first, &mut second);
         Self::remove_sapling_conflicts(&mut first, &mut second);
         Self::remove_orchard_conflicts(&mut first, &mut second);
+
+        standardize_transaction(&mut first.0);
+        standardize_transaction(&mut second.0);
 
         (
             VerifiedUnminedTx::new(
@@ -679,7 +689,7 @@ impl SpendConflictTestInput {
                     maybe_outputs,
                 } => {
                     let updated_spends: Vec<_> = spends
-                        .into_vec()
+                        .to_vec()
                         .into_iter()
                         .filter(|spend| !conflicts.contains(&spend.nullifier))
                         .collect();
@@ -748,7 +758,7 @@ impl SpendConflictTestInput {
         if let Some(shielded_data) = maybe_shielded_data.take() {
             let updated_actions: Vec<_> = shielded_data
                 .actions
-                .into_vec()
+                .to_vec()
                 .into_iter()
                 .filter(|action| !conflicts.contains(&action.action.nullifier))
                 .collect();
@@ -925,14 +935,19 @@ impl<A: sapling::AnchorVariant + Clone> SaplingSpendConflict<A> {
         let shielded_data = sapling_shielded_data.get_or_insert(self.fallback_shielded_data.0);
 
         match &mut shielded_data.transfers {
-            SpendsAndMaybeOutputs { ref mut spends, .. } => spends.push(self.new_spend.0),
+            SpendsAndMaybeOutputs { ref mut spends, .. } => {
+                let mut spends_vec = spends.as_slice().to_vec();
+                spends_vec.push(self.new_spend.0);
+                *spends = AtLeastOne::from_vec(spends_vec)
+                    .expect("pushing one element never breaks at least one constraints");
+            }
             JustOutputs { ref mut outputs } => {
                 let new_outputs = outputs.clone();
 
                 shielded_data.transfers = SpendsAndMaybeOutputs {
                     shared_anchor: self.new_shared_anchor,
                     spends: at_least_one![self.new_spend.0],
-                    maybe_outputs: new_outputs.into_vec(),
+                    maybe_outputs: new_outputs.to_vec(),
                 };
             }
         }
@@ -950,8 +965,13 @@ impl OrchardSpendConflict {
     /// The transaction will then conflict with any other transaction with the same new nullifier.
     pub fn apply_to(self, orchard_shielded_data: &mut Option<orchard::ShieldedData>) {
         if let Some(shielded_data) = orchard_shielded_data.as_mut() {
-            shielded_data.actions.first_mut().action.nullifier =
-                self.new_shielded_data.actions.first().action.nullifier;
+            shielded_data
+                .actions
+                .iter_mut()
+                .next()
+                .unwrap()
+                .action
+                .nullifier = self.new_shielded_data.actions.first().action.nullifier;
         } else {
             *orchard_shielded_data = Some(self.new_shielded_data.0);
         }
@@ -979,7 +999,7 @@ impl Arbitrary for MultipleTransactionRemovalTestInput {
     type Parameters = ();
 
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-        vec(any::<VerifiedUnminedTx>(), 1..MEMPOOL_TX_COUNT)
+        vec(standard_verified_unmined_tx_strategy(), 1..MEMPOOL_TX_COUNT)
             .prop_flat_map(|transactions| {
                 let indices_to_remove =
                     vec(any::<bool>(), 1..=transactions.len()).prop_map(|removal_markers| {
