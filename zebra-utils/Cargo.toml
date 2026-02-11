@@ -32,11 +32,6 @@ name = "block-template-to-proposal"
 # this setting is required for Zebra's Docker build caches
 path = "src/bin/block-template-to-proposal/main.rs"
 
-[[bin]]
-name = "openapi-generator"
-path = "src/bin/openapi-generator/main.rs"
-required-features = ["openapi-generator"]
-
 [features]
 default = []
 
@@ -53,13 +48,6 @@ search-issue-refs = [
     "regex",
     "reqwest",
     "tokio"
-]
-
-openapi-generator = [
-    "syn",
-    "quote",
-    "serde_yml",
-    "serde"
 ]
 
 [dependencies]
@@ -91,14 +79,6 @@ tokio = { workspace = true, features = ["full"], optional = true }
 
 zcash_primitives = { workspace = true, optional = true }
 zcash_protocol.workspace = true
-
-# For the openapi generator
-rand = { workspace = true }
-syn = { workspace = true, features = ["full"], optional = true }
-quote = { workspace = true, optional = true }
-serde_yml = { workspace = true, optional = true }
-serde = { workspace = true, features = ["serde_derive"], optional = true }
-indexmap = { workspace = true }
 
 [lints]
 workspace = true
