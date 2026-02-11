@@ -21,7 +21,6 @@
   - [Forking the Zcash Testnet with Zebra](user/fork-zebra-testnet.md)
   - [Custom Testnets](user/custom-testnets.md)
     - [Regtest with Zebra](user/regtest.md)
-  - [OpenAPI specification](user/openapi.md)
   - [Troubleshooting](user/troubleshooting.md)
 - [Developer Documentation](dev.md)
   - [Contribution Guide](CONTRIBUTING.md)
