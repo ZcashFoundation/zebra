@@ -62,12 +62,27 @@ thread_local! {
 ///
 /// This guard is `!Send` because the underlying flag is thread-local. It must be
 /// created and dropped on the same thread.
+///
+/// # Correct usage
+///
+/// Only create this guard when deserializing data from a **trusted source** (the
+/// finalized state DB). Never hold this guard while deserializing data from the
+/// network or any other untrusted source, as it would skip cryptographic validation.
 pub struct TrustedDeserializationGuard(PhantomData<*const ()>);
 
 impl TrustedDeserializationGuard {
     /// Create a new guard, incrementing the thread-local trusted depth counter.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the depth counter overflows (impossible in practice).
     pub fn new() -> Self {
-        TRUSTED_DEPTH.set(TRUSTED_DEPTH.get() + 1);
+        let depth = TRUSTED_DEPTH.get();
+        TRUSTED_DEPTH.set(
+            depth
+                .checked_add(1)
+                .expect("TrustedDeserializationGuard nesting depth overflow"),
+        );
         Self(PhantomData)
     }
 }

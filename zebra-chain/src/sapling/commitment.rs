@@ -40,7 +40,13 @@ impl ValueCommitment {
     }
 
     /// Create from raw bytes without validation. Validation is deferred until `inner()` is called.
-    pub fn from_bytes_unchecked(bytes: [u8; 32]) -> Self {
+    ///
+    /// # Safety (logical)
+    ///
+    /// The caller must ensure the bytes came from a trusted source (e.g. finalized state DB)
+    /// where they were previously validated before storage. Using this with unvalidated
+    /// network data would defer rejection of invalid points.
+    pub(crate) fn from_bytes_unchecked(bytes: [u8; 32]) -> Self {
         Self {
             bytes,
             inner: OnceLock::new(),

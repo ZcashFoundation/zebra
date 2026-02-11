@@ -84,6 +84,41 @@ fn trusted_guard_reentrant() {
     );
 }
 
+/// Test that untrusted deserialization rejects the identity point (all zeros).
+#[test]
+fn value_commitment_rejects_identity_point() {
+    let _init_guard = zebra_test::init();
+
+    let zero_bytes = [0u8; 32];
+    let result = ValueCommitment::zcash_deserialize(Cursor::new(&zero_bytes));
+    assert!(
+        result.is_err(),
+        "untrusted deserialization must reject the identity point (all zeros)"
+    );
+}
+
+/// Test that trusted deserialization of invalid bytes defers the error to try_inner().
+#[test]
+fn value_commitment_trusted_invalid_bytes_defers_error() {
+    let _init_guard = zebra_test::init();
+
+    let zero_bytes = [0u8; 32];
+    let vc = {
+        let _guard = TrustedDeserializationGuard::new();
+        ValueCommitment::zcash_deserialize(Cursor::new(&zero_bytes))
+            .expect("trusted deserialization should accept any bytes")
+    };
+
+    // Raw bytes should be accessible without error
+    assert_eq!(vc.to_bytes(), zero_bytes);
+
+    // But try_inner() should return an error when the bytes are invalid
+    assert!(
+        vc.try_inner().is_err(),
+        "try_inner() must return an error for invalid bytes (identity point)"
+    );
+}
+
 /// Test that trusted deserialization skips validation and untrusted does not.
 #[test]
 fn value_commitment_trusted_vs_untrusted() {
