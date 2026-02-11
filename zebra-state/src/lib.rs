@@ -11,6 +11,9 @@
 #![doc(html_favicon_url = "https://zfnd.org/wp-content/uploads/2022/03/zebra-favicon-128.png")]
 #![doc(html_logo_url = "https://zfnd.org/wp-content/uploads/2022/03/zebra-icon.png")]
 #![doc(html_root_url = "https://docs.rs/zebra_state")]
+// Remove if possible if MSRV is increased
+#![allow(unknown_lints)]
+#![allow(clippy::manual_is_multiple_of)]
 
 #[macro_use]
 extern crate tracing;
@@ -38,8 +41,8 @@ pub use config::{
 };
 pub use constants::{state_database_format_version_in_code, MAX_BLOCK_REORG_HEIGHT};
 pub use error::{
-    BoxError, CloneError, CommitSemanticallyVerifiedError, DuplicateNullifierError,
-    ValidateContextError,
+    BoxError, CloneError, CommitBlockError, CommitSemanticallyVerifiedError,
+    DuplicateNullifierError, ValidateContextError,
 };
 pub use request::{
     CheckpointVerifiedBlock, CommitSemanticallyVerifiedBlockRequest, HashOrHeight, MappedRequest,

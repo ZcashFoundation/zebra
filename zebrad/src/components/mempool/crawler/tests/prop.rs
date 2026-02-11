@@ -22,6 +22,10 @@ use crate::{
             self,
             crawler::{Crawler, SyncStatus, FANOUT, RATE_LIMIT_DELAY},
             error::MempoolError,
+            storage::{
+                NonStandardTransactionError, SameEffectsChainRejectionError,
+                SameEffectsTipRejectionError,
+            },
             Config,
         },
         sync::RecentSyncLengths,
@@ -48,6 +52,32 @@ type MockPeerSet = MockService<zn::Request, zn::Response, PropTestAssertion>;
 
 /// A [`MockService`] representing the mempool service.
 type MockMempool = MockService<mempool::Request, mempool::Response, PropTestAssertion>;
+
+fn mempool_error_strategy() -> BoxedStrategy<MempoolError> {
+    prop_oneof![
+        Just(MempoolError::InMempool),
+        Just(MempoolError::AlreadyQueued),
+        Just(MempoolError::FullQueue),
+        Just(MempoolError::Disabled),
+        Just(MempoolError::StorageEffectsTip(
+            SameEffectsTipRejectionError::SpendConflict
+        )),
+        Just(MempoolError::StorageEffectsTip(
+            SameEffectsTipRejectionError::MissingOutput
+        )),
+        Just(MempoolError::StorageEffectsChain(
+            SameEffectsChainRejectionError::RandomlyEvicted
+        )),
+        Just(MempoolError::NonStandardTransaction(
+            NonStandardTransactionError::IsDust
+        )),
+    ]
+    .boxed()
+}
+
+fn mempool_error_result_strategy() -> BoxedStrategy<Result<(), MempoolError>> {
+    prop_oneof![Just(Ok(())), mempool_error_strategy().prop_map(Err)].boxed()
+}
 
 proptest! {
     /// Test if crawler periodically crawls for transaction IDs.
@@ -137,10 +167,10 @@ proptest! {
     /// even if the mempool service fails to enqueue the transactions to be downloaded.
     #[test]
     fn transaction_id_forwarding_errors_dont_stop_the_crawler(
-        service_call_error in any::<MempoolError>(),
+        service_call_error in mempool_error_strategy(),
         transaction_ids_for_call_failure in hash_set(any::<UnminedTxId>(), 1..MAX_CRAWLED_TX),
         transaction_ids_and_responses in
-            vec(any::<(UnminedTxId, Result<(), MempoolError>)>(), 1..MAX_CRAWLED_TX),
+            vec((any::<UnminedTxId>(), mempool_error_result_strategy()), 1..MAX_CRAWLED_TX),
         transaction_ids_for_return_to_normal in hash_set(any::<UnminedTxId>(), 1..MAX_CRAWLED_TX),
     ) {
         let (runtime, _init_guard) = zebra_test::init_async();

@@ -17,6 +17,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `block::subsidy::new_coinbase_script`
 - `block::subsidy::funding_streams`
 
+## [4.0.0] - 2026-02-05
+
+### Breaking Changes
+
+- `zebra-state` bumped to 4.0.0
+- `zebra-chain` bumped to 5.0.0
+- `zebra-script` bumped to 4.0.0
+- `zebra-node-services` bumped to 3.0.0
+- `VerifyBlockError::Commit` now contains `CommitBlockError` instead of `BoxError`.
+
+### Added
+
+- `VerifyBlockError::StateService` variant with `hash` and `source` fields.
+
+## [3.1.2] - 2026-01-21 - Yanked
+
+This should have been a major release, see 4.0.0.
+
+Dependencies updated. 
+
+## [3.1.1] - 2025-11-28
+
+No API changes; internal dependencies updated.
+
 ## [3.1.0] - 2025-11-17
 
 ### Added

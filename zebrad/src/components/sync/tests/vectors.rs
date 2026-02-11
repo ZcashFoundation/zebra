@@ -12,7 +12,7 @@ use zebra_chain::{
     chain_tip::mock::{MockChainTip, MockChainTipSender},
     serialization::ZcashDeserializeInto,
 };
-use zebra_consensus::Config as ConsensusConfig;
+use zebra_consensus::{Config as ConsensusConfig, RouterError, VerifyBlockError};
 use zebra_network::InventoryResponse;
 use zebra_state::Config as StateConfig;
 use zebra_test::mock_service::{MockService, PanicAssertion};
@@ -22,7 +22,7 @@ use zebra_state as zs;
 
 use crate::{
     components::{
-        sync::{self, SyncStatus},
+        sync::{self, downloads::BlockDownloadVerifyError, SyncStatus},
         ChainSync,
     },
     config::ZebradConfig,
@@ -985,6 +985,39 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
     );
 
     Ok(())
+}
+
+/// Tests that a `BlockDownloadVerifyError::Invalid` wrapping a
+/// `CommitBlockError::Duplicate` error does NOT trigger a sync restart.
+#[tokio::test]
+async fn should_restart_sync_returns_false() {
+    let commit_error = zs::CommitBlockError::Duplicate {
+        hash_or_height: None,
+        location: zebra_state::KnownBlock::BestChain,
+    };
+
+    let verify_block_error = VerifyBlockError::Commit(commit_error);
+    let router_error = RouterError::Block {
+        source: Box::new(verify_block_error),
+    };
+
+    let err = BlockDownloadVerifyError::Invalid {
+        error: router_error,
+        height: block::Height(42),
+        hash: block::Hash::from([0xAA; 32]),
+        advertiser_addr: None,
+    };
+
+    let restart = ChainSync::<
+        MockService<zn::Request, zn::Response, PanicAssertion>,
+        MockService<zs::Request, zs::Response, PanicAssertion>,
+        MockService<zebra_consensus::Request, block::Hash, PanicAssertion>,
+        MockChainTip,
+    >::should_restart_sync(&err);
+    assert!(
+        !restart,
+        "duplicate commit block errors should NOT trigger sync restart"
+    );
 }
 
 fn setup() -> (
