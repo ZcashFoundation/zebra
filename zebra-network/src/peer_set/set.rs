@@ -773,16 +773,14 @@ where
     /// Checks if the minimum peer version has changed, and disconnects from outdated peers.
     fn disconnect_from_outdated_peers(&mut self) {
         if let Some(minimum_version) = self.minimum_peer_version.changed() {
-            let outdated: Vec<_> = self
+            for addr in self
                 .ready_services
                 .iter()
                 .filter(|(_, peer)| peer.remote_version() < minimum_version)
                 .map(|(addr, _)| *addr)
-                .collect();
-
-            for key in &outdated {
-                self.outbound_peers.remove(key);
-                self.inbound_peers.remove(key);
+            {
+                self.outbound_peers.remove(&addr);
+                self.inbound_peers.remove(&addr);
             }
 
             // It is ok to drop ready services, they don't need anything cancelled.
