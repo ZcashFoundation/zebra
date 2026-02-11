@@ -14,7 +14,10 @@ use zebra_chain::{
     },
     serialization::{TrustedDeserializationGuard, ZcashDeserialize, ZcashSerialize},
 };
-use zebra_test::vectors::{BLOCK_MAINNET_434873_BYTES, BLOCK_TESTNET_141042_BYTES};
+use zebra_test::vectors::{
+    BLOCK_MAINNET_419201_BYTES, BLOCK_MAINNET_903000_BYTES, BLOCK_MAINNET_1046401_BYTES,
+    BLOCK_TESTNET_141042_BYTES,
+};
 
 fn block_serialization(c: &mut Criterion) {
     // Biggest block from `zebra-test`.
@@ -54,27 +57,35 @@ fn trusted_vs_untrusted_deserialization(c: &mut Criterion) {
     group.noise_threshold(0.05);
     group.sample_size(50);
 
-    // Sapling-heavy block (height 434873, post-Sapling activation at 419200)
-    let sapling_block_bytes: &[u8] = BLOCK_MAINNET_434873_BYTES.as_ref();
+    let blocks: Vec<(&str, &[u8])> = vec![
+        // First post-Sapling block (height 419201)
+        ("mainnet_419201", BLOCK_MAINNET_419201_BYTES.as_ref()),
+        // Heartwood activation block (height 903000)
+        ("mainnet_903000", BLOCK_MAINNET_903000_BYTES.as_ref()),
+        // Post-Canopy block (height 1046401, largest available test vector)
+        ("mainnet_1046401", BLOCK_MAINNET_1046401_BYTES.as_ref()),
+    ];
 
-    group.bench_with_input(
-        BenchmarkId::new("untrusted", "BLOCK_MAINNET_434873"),
-        &sapling_block_bytes,
-        |b, bytes| {
-            b.iter(|| Block::zcash_deserialize(Cursor::new(bytes)).unwrap());
-        },
-    );
+    for (name, block_bytes) in blocks {
+        group.bench_with_input(
+            BenchmarkId::new("untrusted", name),
+            &block_bytes,
+            |b, bytes| {
+                b.iter(|| Block::zcash_deserialize(Cursor::new(bytes)).unwrap());
+            },
+        );
 
-    group.bench_with_input(
-        BenchmarkId::new("trusted", "BLOCK_MAINNET_434873"),
-        &sapling_block_bytes,
-        |b, bytes| {
-            b.iter(|| {
-                let _guard = TrustedDeserializationGuard::new();
-                Block::zcash_deserialize(Cursor::new(bytes)).unwrap()
-            });
-        },
-    );
+        group.bench_with_input(
+            BenchmarkId::new("trusted", name),
+            &block_bytes,
+            |b, bytes| {
+                b.iter(|| {
+                    let _guard = TrustedDeserializationGuard::new();
+                    Block::zcash_deserialize(Cursor::new(bytes)).unwrap()
+                });
+            },
+        );
+    }
 
     group.finish();
 }
