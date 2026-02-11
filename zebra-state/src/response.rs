@@ -52,6 +52,17 @@ pub enum Response {
     //       `LatestChainTip::best_tip_height_and_hash()`
     Tip(Option<(block::Height, block::Hash)>),
 
+    #[cfg(zcash_unstable = "zip234")]
+    /// Response to [`Request::TipPoolValues`] with the current best chain tip values.
+    TipPoolValues {
+        /// The current best chain tip height.
+        tip_height: block::Height,
+        /// The current best chain tip hash.
+        tip_hash: block::Hash,
+        /// The value pool balance at the current best chain tip.
+        value_balance: ValueBalance<NonNegative>,
+    },
+
     /// Response to [`Request::BlockLocator`] with a block locator object.
     BlockLocator(Vec<block::Hash>),
 
@@ -535,7 +546,6 @@ impl TryFrom<ReadResponse> for Response {
             ReadResponse::ValidBestChainTipNullifiersAndAnchors => Ok(Response::ValidBestChainTipNullifiersAndAnchors),
 
             ReadResponse::UsageInfo(_)
-            | ReadResponse::TipPoolValues { .. }
             | ReadResponse::BlockInfo(_)
             | ReadResponse::TransactionIdsForBlock(_)
             | ReadResponse::AnyChainTransactionIdsForBlock(_)
@@ -558,6 +568,13 @@ impl TryFrom<ReadResponse> for Response {
             ReadResponse::ValidBlockProposal => Ok(Response::ValidBlockProposal),
 
             ReadResponse::SolutionRate(_) | ReadResponse::TipBlockSize(_) => {
+                Err("there is no corresponding Response for this ReadResponse")
+            }
+            #[cfg(zcash_unstable = "zip234")]
+            ReadResponse::TipPoolValues { tip_height, tip_hash, value_balance } => Ok(Response::TipPoolValues { tip_height, tip_hash, value_balance }),
+
+            #[cfg(not(zcash_unstable = "zip234"))]
+            ReadResponse::TipPoolValues { .. } => {
                 Err("there is no corresponding Response for this ReadResponse")
             }
         }

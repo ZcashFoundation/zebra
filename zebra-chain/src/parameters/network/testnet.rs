@@ -7,7 +7,7 @@ use crate::{
     block::{self, Height, HeightDiff},
     parameters::{
         checkpoint::list::{CheckpointList, TESTNET_CHECKPOINTS},
-        constants::{magics, SLOW_START_INTERVAL, SLOW_START_SHIFT},
+        constants::{magics, SLOW_START_INTERVAL, SLOW_START_SHIFT, ZIP234_START_HEIGHT},
         network::error::ParametersBuilderError,
         network_upgrade::TESTNET_ACTIVATION_HEIGHTS,
         subsidy::{
@@ -457,6 +457,8 @@ pub struct ParametersBuilder {
     activation_heights: BTreeMap<Height, NetworkUpgrade>,
     /// Slow start interval for this network
     slow_start_interval: Height,
+    /// ZIP-234 start height for this network
+    zip234_start_height: Height,
     /// Funding streams for this network
     funding_streams: Vec<FundingStreams>,
     /// A flag indicating whether to allow changes to fields that affect
@@ -493,6 +495,7 @@ impl Default for ParametersBuilder {
                 .parse()
                 .expect("hard-coded hash parses"),
             slow_start_interval: SLOW_START_INTERVAL,
+            zip234_start_height: ZIP234_START_HEIGHT,
             // Testnet PoWLimit is defined as `2^251 - 1` on page 73 of the protocol specification:
             // <https://zips.z.cash/protocol/protocol.pdf>
             //
@@ -672,6 +675,12 @@ impl ParametersBuilder {
         self
     }
 
+    /// Sets the ZIP-234 start height to be used in the [`Parameters`] being built.
+    pub fn with_zip234_start_height(mut self, zip234_start_height: Height) -> Self {
+        self.zip234_start_height = zip234_start_height;
+        self
+    }
+
     /// Sets funding streams to be used in the [`Parameters`] being built.
     ///
     /// # Panics
@@ -819,6 +828,7 @@ impl ParametersBuilder {
             genesis_hash,
             activation_heights,
             slow_start_interval,
+            zip234_start_height,
             funding_streams,
             should_lock_funding_stream_address_period: _,
             target_difficulty_limit,
@@ -836,6 +846,7 @@ impl ParametersBuilder {
             activation_heights,
             slow_start_interval,
             slow_start_shift: Height(slow_start_interval.0 / 2),
+            zip234_start_height,
             funding_streams,
             target_difficulty_limit,
             disable_pow,
@@ -881,6 +892,7 @@ impl ParametersBuilder {
             genesis_hash,
             activation_heights,
             slow_start_interval,
+            zip234_start_height,
             funding_streams,
             should_lock_funding_stream_address_period: _,
             target_difficulty_limit,
@@ -896,6 +908,7 @@ impl ParametersBuilder {
             && self.network_magic == network_magic
             && self.genesis_hash == genesis_hash
             && self.slow_start_interval == slow_start_interval
+            && self.zip234_start_height == zip234_start_height
             && self.funding_streams == funding_streams
             && self.target_difficulty_limit == target_difficulty_limit
             && self.disable_pow == disable_pow
@@ -946,6 +959,8 @@ pub struct Parameters {
     slow_start_interval: Height,
     /// Slow start shift for this network, always half the slow start interval
     slow_start_shift: Height,
+    /// ZIP-234 activation height for this network
+    zip234_start_height: Height,
     /// Funding streams for this network
     funding_streams: Vec<FundingStreams>,
     /// Target difficulty limit for this network
@@ -1039,6 +1054,7 @@ impl Parameters {
             activation_heights: _,
             slow_start_interval,
             slow_start_shift,
+            zip234_start_height,
             funding_streams: _,
             target_difficulty_limit,
             disable_pow,
@@ -1053,6 +1069,7 @@ impl Parameters {
             && self.genesis_hash == genesis_hash
             && self.slow_start_interval == slow_start_interval
             && self.slow_start_shift == slow_start_shift
+            && self.zip234_start_height == zip234_start_height
             && self.target_difficulty_limit == target_difficulty_limit
             && self.disable_pow == disable_pow
             && self.should_allow_unshielded_coinbase_spends
@@ -1089,6 +1106,11 @@ impl Parameters {
     /// Returns slow start shift for this network
     pub fn slow_start_shift(&self) -> Height {
         self.slow_start_shift
+    }
+
+    /// Returns ZIP-234 activation height for this network
+    pub fn zip234_start_height(&self) -> Height {
+        self.zip234_start_height
     }
 
     /// Returns funding streams for this network.
@@ -1184,6 +1206,15 @@ impl Network {
             params.slow_start_shift()
         } else {
             SLOW_START_SHIFT
+        }
+    }
+
+    /// Returns the ZIP-234 activation height for this network
+    pub fn zip234_start_height(&self) -> Height {
+        if let Self::Testnet(params) = self {
+            params.zip234_start_height()
+        } else {
+            ZIP234_START_HEIGHT
         }
     }
 

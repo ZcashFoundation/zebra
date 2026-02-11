@@ -18,6 +18,12 @@ use zebra_chain::{
     transparent,
 };
 
+#[cfg(not(zcash_unstable = "zip234"))]
+use zebra_chain::parameters::subsidy::block_subsidy_pre_nsm;
+
+#[cfg(zcash_unstable = "zip234")]
+use zebra_chain::{parameters::subsidy::block_subsidy};
+
 use crate::{
     constants::{MAX_INVALIDATED_BLOCKS, MAX_NON_FINALIZED_CHAIN_FORKS},
     error::ReconsiderError,
@@ -565,10 +571,51 @@ impl NonFinalizedState {
             &prepared,
         );
 
+        let deferred_pool_balance_change = {
+            let height = prepared.height;
+            let network = new_chain.network();
+
+            if height >= network.zip234_start_height() {
+                #[cfg(not(zcash_unstable = "zip234"))]
+                let expected_block_subsidy = block_subsidy_pre_nsm(height, &network)?;
+
+                #[cfg(zcash_unstable = "zip234")]
+                let expected_block_subsidy = block_subsidy(
+                    height,
+                    &network,
+                    new_chain.chain_value_pools.money_reserve(),
+                )?;
+
+                let deferred_pool_balance_change =
+                    check::subsidy_is_valid(&prepared.block, &network, expected_block_subsidy)
+                        .map_err(ValidateContextError::from)?;
+
+                let coinbase_tx = check::coinbase_is_first(&prepared.block)
+                    .map_err(ValidateContextError::from)?;
+
+                if let Some(block_miner_fees) = prepared.block_miner_fees {
+                    check::miner_fees_are_valid(
+                        &coinbase_tx,
+                        height,
+                        block_miner_fees,
+                        expected_block_subsidy,
+                        deferred_pool_balance_change,
+                        &network,
+                    )
+                    .map_err(ValidateContextError::from)?;
+                }
+
+                Some(deferred_pool_balance_change)
+            } else {
+                None
+            }
+        };
+
         // Quick check that doesn't read from disk
         let contextual = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
             prepared.clone(),
             spent_utxos.clone(),
+            deferred_pool_balance_change,
         )
         .map_err(|value_balance_error| {
             ValidateContextError::CalculateBlockChainValueChange {

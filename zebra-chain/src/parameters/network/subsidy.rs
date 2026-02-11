@@ -373,11 +373,11 @@ pub enum SubsidyError {
     #[error("funding stream expected output not found")]
     FundingStreamNotFound,
 
+    #[error("funding stream address at height {0:?} not found")]
+    FundingStreamAddressNotFound(Height),
+
     #[error("one-time lockbox disbursement output not found")]
     OneTimeLockboxDisbursementNotFound,
-
-    #[error("miner fees are invalid")]
-    InvalidMinerFees,
 
     #[error("a sum of amounts overflowed")]
     SumOverflow,
@@ -385,8 +385,20 @@ pub enum SubsidyError {
     #[error("unsupported height")]
     UnsupportedHeight,
 
+    #[error("miner fees are invalid")]
+    InvalidMinerFees,
+
     #[error("invalid amount")]
-    InvalidAmount(#[from] amount::Error),
+    InvalidAmount(amount::Error),
+
+    #[error("invalid zip233 amount")]
+    InvalidZip233Amount,
+
+    #[error("invalid funding streams: {0}")]
+    InvalidFundingStreams(amount::Error),
+
+    #[error("invalid deferred pool amount: {0}")]
+    InvalidDeferredPoolAmount(amount::Error),
 }
 
 /// The divisor used for halvings.
@@ -432,10 +444,34 @@ pub fn num_halvings(height: Height, network: &Network) -> u32 {
         .expect("already checked for negatives")
 }
 
+#[cfg(zcash_unstable = "zip234")]
+pub fn block_subsidy(
+    height: Height,
+    network: &Network,
+    money_reserve: Amount<NonNegative>,
+) -> Result<Amount<NonNegative>, SubsidyError> {
+    let Some(nsm_activation_height) = NetworkUpgrade::Nu7.activation_height(network) else {
+        return block_subsidy_pre_nsm(height, network);
+    };
+    if height < nsm_activation_height {
+        return block_subsidy_pre_nsm(height, network);
+    }
+    let money_reserve: i64 = money_reserve.into();
+    let money_reserve: i128 = money_reserve.into();
+    const BLOCK_SUBSIDY_DENOMINATOR: i128 = 10_000_000_000;
+    const BLOCK_SUBSIDY_NUMERATOR: i128 = 4_126;
+
+    // calculate the block subsidy (in zatoshi) using the money reserve, note the rounding up
+    let subsidy = (money_reserve * BLOCK_SUBSIDY_NUMERATOR + (BLOCK_SUBSIDY_DENOMINATOR - 1))
+        / BLOCK_SUBSIDY_DENOMINATOR;
+
+    Ok(subsidy.try_into().expect("subsidy should fit in Amount"))
+}
+
 /// `BlockSubsidy(height)` as described in [protocol specification §7.8][7.8]
 ///
 /// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
-pub fn block_subsidy(
+pub fn block_subsidy_pre_nsm(
     height: Height,
     network: &Network,
 ) -> Result<Amount<NonNegative>, SubsidyError> {
@@ -457,14 +493,16 @@ pub fn block_subsidy(
         Err(SubsidyError::UnsupportedHeight)
     } else if height < blossom_height {
         // this calculation is exact, because the halving divisor is 1 here
-        Ok(Amount::try_from(MAX_BLOCK_SUBSIDY / halving_div)?)
+        Ok(Amount::try_from(MAX_BLOCK_SUBSIDY / halving_div)
+            .map_err(SubsidyError::InvalidAmount)?)
     } else {
         let scaled_max_block_subsidy =
             MAX_BLOCK_SUBSIDY / u64::from(BLOSSOM_POW_TARGET_SPACING_RATIO);
         // in future halvings, this calculation might not be exact
         // Amount division is implemented using integer division,
         // which truncates (rounds down) the result, as specified
-        Ok(Amount::try_from(scaled_max_block_subsidy / halving_div)?)
+        Ok(Amount::try_from(scaled_max_block_subsidy / halving_div)
+            .map_err(SubsidyError::InvalidAmount)?)
     }
 }
 

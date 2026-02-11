@@ -203,7 +203,7 @@ proptest! {
             let commit_result = validate_and_commit_non_finalized(
                 &finalized_state.db,
                 &mut non_finalized_state,
-                block1.clone()
+                &mut block1.clone()
             );
 
             // the block was committed
@@ -289,7 +289,7 @@ proptest! {
             let commit_result = validate_and_commit_non_finalized(
                 &finalized_state.db,
                 &mut non_finalized_state,
-                block2.clone()
+                &mut block2.clone()
             );
 
             // the block was committed
@@ -364,11 +364,11 @@ proptest! {
             let (finalized_state, mut non_finalized_state, genesis) = new_state_with_mainnet_genesis();
             let previous_non_finalized_state = non_finalized_state.clone();
 
-        let block1 = Arc::new(block1).prepare();
+        let mut block1 = Arc::new(block1).prepare();
         let commit_result = validate_and_commit_non_finalized(
             &finalized_state.db,
             &mut non_finalized_state,
-            block1
+            &mut block1
         );
 
         // the block was rejected
@@ -427,11 +427,11 @@ proptest! {
 
         block2.transactions.push(spend_transaction.into());
 
-        let block2 = Arc::new(block2).prepare();
+        let mut block2 = Arc::new(block2).prepare();
         let commit_result = validate_and_commit_non_finalized(
             &finalized_state.db,
             &mut non_finalized_state,
-            block2
+            &mut block2
         );
 
         // the block was rejected
@@ -511,11 +511,11 @@ proptest! {
             .transactions
             .extend([spend_transaction1.into(), spend_transaction2.into()]);
 
-        let block2 = Arc::new(block2).prepare();
+        let mut block2 = Arc::new(block2).prepare();
         let commit_result = validate_and_commit_non_finalized(
             &finalized_state.db,
             &mut non_finalized_state,
-            block2
+            &mut block2
         );
 
         // the block was rejected
@@ -627,7 +627,7 @@ proptest! {
             let commit_result = validate_and_commit_non_finalized(
                 &finalized_state.db,
                 &mut non_finalized_state,
-                block2.clone()
+                &mut block2.clone()
             );
 
             // the block was committed
@@ -660,11 +660,11 @@ proptest! {
             previous_non_finalized_state = non_finalized_state.clone();
         }
 
-        let block3 = Arc::new(block3).prepare();
+        let mut block3 = Arc::new(block3).prepare();
         let commit_result = validate_and_commit_non_finalized(
             &finalized_state.db,
             &mut non_finalized_state,
-            block3
+            &mut block3
         );
 
         // the block was rejected
@@ -734,11 +734,11 @@ proptest! {
         let (finalized_state, mut non_finalized_state, genesis) = new_state_with_mainnet_genesis();
         let previous_non_finalized_state = non_finalized_state.clone();
 
-        let block1 = Arc::new(block1).prepare();
+        let mut block1 = Arc::new(block1).prepare();
         let commit_result = validate_and_commit_non_finalized(
             &finalized_state.db,
             &mut non_finalized_state,
-            block1
+            &mut block1
         );
 
         // the block was rejected
@@ -800,11 +800,11 @@ proptest! {
             let (finalized_state, mut non_finalized_state, genesis) = new_state_with_mainnet_genesis();
             let previous_non_finalized_state = non_finalized_state.clone();
 
-        let block1 = Arc::new(block1).prepare();
+        let mut block1 = Arc::new(block1).prepare();
         let commit_result = validate_and_commit_non_finalized(
             &finalized_state.db,
             &mut non_finalized_state,
-            block1
+            &mut block1
         );
 
         // the block was rejected
@@ -901,7 +901,7 @@ fn new_state_with_mainnet_transparent_data(
         let commit_result = validate_and_commit_non_finalized(
             &finalized_state.db,
             &mut non_finalized_state,
-            block1.clone(),
+            &mut block1.clone(),
         );
 
         // the block was committed

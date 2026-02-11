@@ -36,6 +36,7 @@
 use color_eyre::eyre::Result;
 use hex_literal::hex;
 
+use zebra_chain::block::subsidy::funding_streams::funding_stream_address;
 use zebra_chain::{
     block::{Block, Height},
     parameters::{
@@ -44,7 +45,6 @@ use zebra_chain::{
     },
     serialization::ZcashDeserializeInto,
 };
-use zebra_consensus::funding_stream_address;
 use zebra_state::state_database_format_version_in_code;
 
 use crate::common::{

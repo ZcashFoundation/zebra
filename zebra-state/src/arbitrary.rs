@@ -82,7 +82,7 @@ impl ContextuallyVerifiedBlock {
             .map(|outpoint| (outpoint, zero_utxo.clone()))
             .collect();
 
-        ContextuallyVerifiedBlock::with_block_and_spent_utxos(block, zero_spent_utxos)
+        ContextuallyVerifiedBlock::with_block_and_spent_utxos(block, zero_spent_utxos, None)
             .expect("all UTXOs are provided with zero values")
     }
 
@@ -97,7 +97,7 @@ impl ContextuallyVerifiedBlock {
             height,
             new_outputs,
             transaction_hashes,
-            deferred_pool_balance_change: _,
+            block_miner_fees: _,
         } = block.into();
 
         Self {

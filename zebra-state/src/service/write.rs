@@ -15,9 +15,9 @@ use zebra_chain::{
 };
 
 use crate::{
+    check::initial_contextual_validity,
     constants::MAX_BLOCK_REORG_HEIGHT,
     service::{
-        check,
         finalized_state::{FinalizedState, ZebraDb},
         non_finalized_state::NonFinalizedState,
         queued_blocks::{QueuedCheckpointVerified, QueuedSemanticallyVerified},
@@ -52,15 +52,15 @@ const PARENT_ERROR_MAP_LIMIT: usize = MAX_BLOCK_REORG_HEIGHT as usize * 2;
 pub(crate) fn validate_and_commit_non_finalized(
     finalized_state: &ZebraDb,
     non_finalized_state: &mut NonFinalizedState,
-    prepared: SemanticallyVerifiedBlock,
+    prepared: &mut SemanticallyVerifiedBlock,
 ) -> Result<(), ValidateContextError> {
-    check::initial_contextual_validity(finalized_state, non_finalized_state, &prepared)?;
+    initial_contextual_validity(finalized_state, non_finalized_state, prepared)?;
     let parent_hash = prepared.block.header.previous_block_hash;
 
     if finalized_state.finalized_tip_hash() == parent_hash {
-        non_finalized_state.commit_new_chain(prepared, finalized_state)?;
+        non_finalized_state.commit_new_chain(prepared.clone(), finalized_state)?;
     } else {
-        non_finalized_state.commit_block(prepared, finalized_state)?;
+        non_finalized_state.commit_block(prepared.clone(), finalized_state)?;
     }
 
     Ok(())
@@ -349,7 +349,7 @@ impl WriteBlockWorkerTask {
                 }
             };
 
-            let Some((queued_child, rsp_tx)) = queued_child_and_rsp_tx else {
+            let Some((mut queued_child, rsp_tx)) = queued_child_and_rsp_tx else {
                 update_latest_chain_channels(
                     non_finalized_state,
                     chain_tip_sender,
@@ -375,7 +375,7 @@ impl WriteBlockWorkerTask {
                 validate_and_commit_non_finalized(
                     &finalized_state.db,
                     non_finalized_state,
-                    queued_child,
+                    &mut queued_child,
                 )
             };
 
