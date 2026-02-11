@@ -55,6 +55,7 @@ use crate::methods::{
         get_block_template::GetBlockTemplateRequestMode,
         long_poll::{LongPollId, LONG_POLL_ID_LENGTH},
         peer_info::PeerInfo,
+        submit_block::MinedBlocksCounter,
         subsidy::GetBlockSubsidyResponse,
     },
     GetBlockHashResponse,
@@ -158,7 +159,7 @@ async fn test_z_get_treestate() {
         MockAddressBookPeers::default(),
         rx,
         None,
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     // Request the treestate by a hash.
@@ -261,7 +262,7 @@ async fn test_rpc_response_data_for_network(network: &Network) {
         MockAddressBookPeers::default(),
         rx,
         None,
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     // We only want a snapshot of the `getblocksubsidy` and `getblockchaininfo` methods for the
@@ -637,7 +638,7 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
         MockAddressBookPeers::default(),
         rx,
         None,
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     // Test the response format from `z_getsubtreesbyindex` for Sapling.
@@ -1067,7 +1068,7 @@ pub async fn test_mining_rpcs<State, ReadState>(
         mock_address_book,
         rx.clone(),
         None,
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     if network.is_a_test_network() && !network.is_default_testnet() {
@@ -1214,7 +1215,7 @@ pub async fn test_mining_rpcs<State, ReadState>(
         MockAddressBookPeers::default(),
         rx.clone(),
         None,
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     // Basic variant (default mode and no extra features)
@@ -1332,7 +1333,7 @@ pub async fn test_mining_rpcs<State, ReadState>(
         MockAddressBookPeers::default(),
         rx,
         None,
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     let get_block_template_fut =

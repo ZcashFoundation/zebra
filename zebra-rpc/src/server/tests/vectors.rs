@@ -17,6 +17,7 @@ use zebra_test::mock_service::MockService;
 
 use super::super::*;
 
+use crate::methods::types::submit_block::MinedBlocksCounter;
 use config::rpc::Config;
 
 /// Test that the JSON-RPC server spawns.
@@ -64,7 +65,7 @@ async fn rpc_server_spawn() {
         MockAddressBookPeers::default(),
         rx,
         None,
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     RpcServer::start(rpc_impl, conf)
@@ -134,7 +135,7 @@ async fn rpc_spawn_unallocated_port(do_shutdown: bool) {
         MockAddressBookPeers::default(),
         rx,
         None,
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     let rpc = RpcServer::start(rpc_impl, conf)
@@ -192,7 +193,7 @@ async fn rpc_server_spawn_port_conflict() {
         MockAddressBookPeers::default(),
         rx.clone(),
         None,
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     RpcServer::start(rpc_impl.clone(), conf.clone())

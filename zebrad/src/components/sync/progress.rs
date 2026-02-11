@@ -63,9 +63,6 @@ const MIN_BLOCKS_MINED_AFTER_CHECKPOINT_UPDATE: u32 = 10;
 /// Logs Zebra's estimated progress towards the chain tip every minute or so, and
 /// updates a terminal progress bar every few seconds.
 ///
-/// If `mined_blocks_receiver` is provided, the progress bar will show the number of
-/// mined blocks when the node is at the chain tip.
-///
 /// TODO:
 /// - log progress towards, remaining blocks before, and remaining time to next network upgrade
 /// - add some progress info to the metrics
@@ -74,7 +71,7 @@ pub async fn show_block_chain_progress(
     latest_chain_tip: impl ChainTip,
     sync_status: SyncStatus,
     chain_tip_metrics_sender: watch::Sender<ChainTipMetrics>,
-    mined_blocks_receiver: Option<watch::Receiver<u64>>,
+    mined_blocks_receiver: watch::Receiver<u64>,
 ) -> ! {
     // The minimum number of extra blocks after the highest checkpoint, based on:
     // - the non-finalized state limit, and
@@ -288,10 +285,7 @@ pub async fn show_block_chain_progress(
             } else if is_syncer_stopped {
                 // We've stayed near the tip for a while, and we've stopped syncing lots of blocks.
                 // So we're mostly using gossiped blocks now.
-                let mined_count = mined_blocks_receiver
-                    .as_ref()
-                    .map(|r| *r.borrow())
-                    .unwrap_or(0);
+                let mined_count = *mined_blocks_receiver.borrow();
 
                 info!(
                     %sync_percent,

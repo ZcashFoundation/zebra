@@ -175,7 +175,7 @@ use zebra_rpc::{
     methods::{RpcImpl, RpcServer},
     proposal_block_from_template,
     server::OPENED_RPC_ENDPOINT_MSG,
-    SubmitBlockChannel,
+    MinedBlocksCounter, SubmitBlockChannel,
 };
 use zebra_state::{constants::LOCK_FILE_ERROR, state_database_format_version_in_code};
 use zebra_test::{
@@ -3413,7 +3413,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         MockAddressBookPeers::default(),
         rx,
         Some(submitblock_channel.sender()),
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     let make_mock_mempool_request_handler = || async move {
@@ -3760,7 +3760,7 @@ async fn nu7_nsm_transactions() -> Result<()> {
         MockAddressBookPeers::default(),
         rx,
         Some(submitblock_channel.sender()),
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     let make_mock_mempool_request_handler = || async move {

@@ -822,7 +822,7 @@ where
         address_book: AddressBook,
         last_warn_error_log_rx: LoggedLastEvent,
         mined_block_sender: Option<mpsc::Sender<(block::Hash, block::Height)>>,
-        mined_blocks_counter: Option<MinedBlocksCounter>,
+        mined_blocks_counter: MinedBlocksCounter,
     ) -> (Self, JoinHandle<()>)
     where
         VersionString: ToString + Clone + Send + 'static,

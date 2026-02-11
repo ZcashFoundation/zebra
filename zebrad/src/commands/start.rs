@@ -265,7 +265,7 @@ impl StartCmd {
             address_book.clone(),
             LAST_WARN_ERROR_LOG_SENDER.subscribe(),
             Some(submit_block_channel.sender()),
-            Some(mined_blocks_counter),
+            mined_blocks_counter,
         );
 
         let rpc_task_handle = if config.rpc.listen_addr.is_some() {
@@ -336,7 +336,7 @@ impl StartCmd {
                 latest_chain_tip.clone(),
                 sync_status.clone(),
                 chain_tip_metrics_sender,
-                Some(mined_blocks_receiver),
+                mined_blocks_receiver,
             )
             .in_current_span(),
         );

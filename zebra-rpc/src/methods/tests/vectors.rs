@@ -40,9 +40,12 @@ use zebra_test::mock_service::MockService;
 use crate::methods::{
     hex_data::HexData,
     tests::utils::fake_history_tree,
-    types::get_block_template::{
-        constants::{CAPABILITIES_FIELD, MUTABLE_FIELD, NONCE_RANGE_FIELD},
-        GetBlockTemplateRequestMode,
+    types::{
+        get_block_template::{
+            constants::{CAPABILITIES_FIELD, MUTABLE_FIELD, NONCE_RANGE_FIELD},
+            GetBlockTemplateRequestMode,
+        },
+        submit_block::MinedBlocksCounter,
     },
 };
 
@@ -75,7 +78,7 @@ async fn rpc_getinfo() {
         MockAddressBookPeers::default(),
         rx,
         None,
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     let getinfo_future = tokio::spawn(async move { rpc.get_info().await });
@@ -224,7 +227,7 @@ async fn rpc_getblock() {
         MockAddressBookPeers::default(),
         rx,
         None,
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     // Make height calls with verbosity=0 and check response
@@ -738,7 +741,7 @@ async fn rpc_getblock_parse_error() {
         MockAddressBookPeers::default(),
         rx,
         None,
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     // Make sure we get an error if Zebra can't parse the block height.
@@ -789,7 +792,7 @@ async fn rpc_getblock_missing_error() {
         MockAddressBookPeers::default(),
         rx,
         None,
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     // Make sure Zebra returns the correct error code `-8` for missing blocks
@@ -857,7 +860,7 @@ async fn rpc_getblockheader() {
         MockAddressBookPeers::default(),
         rx,
         None,
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     // Make height calls with verbose=false and check response
@@ -991,7 +994,7 @@ async fn rpc_getbestblockhash() {
         MockAddressBookPeers::default(),
         rx,
         None,
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     // Get the tip hash using RPC method `get_best_block_hash`
@@ -1043,7 +1046,7 @@ async fn rpc_getrawtransaction() {
         MockAddressBookPeers::default(),
         rx,
         None,
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     // Test case where transaction is in mempool.
@@ -1231,7 +1234,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
         MockAddressBookPeers::default(),
         rx,
         None,
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     // call the method with an invalid address string
@@ -1422,7 +1425,7 @@ async fn rpc_getaddresstxids_response_with(
         MockAddressBookPeers::default(),
         rx,
         None,
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     // call the method with valid arguments
@@ -1498,7 +1501,7 @@ async fn getaddresstxids_single_equals_object_full_range() {
         MockAddressBookPeers::default(),
         rx,
         None,
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     let addr_str = address.to_string();
@@ -1552,7 +1555,7 @@ async fn rpc_getaddressutxos_invalid_arguments() {
         MockAddressBookPeers::default(),
         rx,
         None,
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     // call the method with an invalid address string
@@ -1612,7 +1615,7 @@ async fn rpc_getaddressutxos_response() {
         MockAddressBookPeers::default(),
         rx,
         None,
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     // call the method with a valid address
@@ -1706,7 +1709,7 @@ async fn rpc_getblockcount() {
         MockAddressBookPeers::default(),
         rx,
         None,
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     // Get the tip height using RPC method `get_block_count`
@@ -1751,7 +1754,7 @@ async fn rpc_getblockcount_empty_state() {
         MockAddressBookPeers::default(),
         rx,
         None,
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     // Get the tip height using RPC method `get_block_count
@@ -1850,7 +1853,7 @@ async fn rpc_getpeerinfo() {
         mock_address_book,
         rx,
         None,
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     // Call `get_peer_info`
@@ -1919,7 +1922,7 @@ async fn rpc_getblockhash() {
         MockAddressBookPeers::default(),
         rx,
         None,
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     // Query the hashes using positive indexes
@@ -1978,7 +1981,7 @@ async fn rpc_getmininginfo() {
         MockAddressBookPeers::default(),
         rx,
         None,
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     rpc.get_mining_info()
@@ -2016,7 +2019,7 @@ async fn rpc_getnetworksolps() {
         MockAddressBookPeers::default(),
         rx,
         None,
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     let get_network_sol_ps_inputs = [
@@ -2123,7 +2126,7 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
         MockAddressBookPeers::default(),
         rx,
         None,
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     // Fake the ChainInfo response
@@ -2410,7 +2413,7 @@ async fn rpc_submitblock_errors() {
         MockAddressBookPeers::default(),
         rx,
         None,
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     // Try to submit pre-populated blocks and assert that it responds with duplicate.
@@ -2460,7 +2463,7 @@ async fn rpc_validateaddress() {
         MockAddressBookPeers::default(),
         rx,
         None,
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     // t1 address: valid
@@ -2547,7 +2550,7 @@ async fn rpc_validateaddress_regtest() {
         MockAddressBookPeers::default(),
         rx,
         None,
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     // t1 address: invalid
@@ -2607,7 +2610,7 @@ async fn rpc_z_validateaddress() {
         MockAddressBookPeers::default(),
         rx,
         None,
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     // t1 address: valid
@@ -2717,7 +2720,7 @@ async fn rpc_z_validateaddress_regtest() {
         MockAddressBookPeers::default(),
         rx,
         None,
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     // tm address (P2PKH): valid
@@ -2818,7 +2821,7 @@ async fn rpc_getdifficulty() {
         MockAddressBookPeers::default(),
         rx,
         None,
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     // Fake the ChainInfo response: smallest numeric difficulty
@@ -2939,7 +2942,7 @@ async fn rpc_z_listunifiedreceivers() {
         MockAddressBookPeers::default(),
         rx,
         None,
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     // invalid address
@@ -3018,7 +3021,7 @@ async fn rpc_addnode() {
         mock_address_book,
         rx,
         None,
-        None,
+        MinedBlocksCounter::new().0,
     );
 
     let get_peer_info = rpc

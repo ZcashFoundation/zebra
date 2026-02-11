@@ -455,7 +455,7 @@ where
     mined_block_sender: mpsc::Sender<(block::Hash, block::Height)>,
 
     /// A counter to track the number of mined blocks for the progress bar.
-    mined_blocks_counter: Option<MinedBlocksCounter>,
+    mined_blocks_counter: MinedBlocksCounter,
 }
 
 // A limit on the configured extra coinbase data, regardless of the current block height.
@@ -478,7 +478,7 @@ where
         block_verifier_router: BlockVerifierRouter,
         sync_status: SyncStatus,
         mined_block_sender: Option<mpsc::Sender<(block::Hash, block::Height)>>,
-        mined_blocks_counter: Option<MinedBlocksCounter>,
+        mined_blocks_counter: MinedBlocksCounter,
     ) -> Self {
         // Check that the configured miner address is valid.
         let miner_address = conf.miner_address.map(|addr| {
@@ -565,9 +565,7 @@ where
         let result = self.mined_block_sender.try_send((block, height));
         if result.is_ok() {
             metrics::counter!("mining.blocks_mined").increment(1);
-            if let Some(counter) = &self.mined_blocks_counter {
-                counter.increment();
-            }
+            self.mined_blocks_counter.increment();
         }
         result
     }
