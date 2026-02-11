@@ -554,7 +554,7 @@ where
 
     /// Advertises the mined block.
     ///
-    /// If the block is successfully sent, this also:
+    /// If the block is successfully sent to the gossip channel, this also:
     /// - Increments the `mining.blocks_mined` metric counter
     /// - Increments the shared mined blocks counter for the progress bar
     pub fn advertise_mined_block(
