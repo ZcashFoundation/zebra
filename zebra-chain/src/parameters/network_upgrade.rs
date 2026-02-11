@@ -12,30 +12,20 @@ use std::fmt;
 use chrono::{DateTime, Duration, Utc};
 use hex::{FromHex, ToHex};
 
+use strum::{EnumIter, IntoEnumIterator};
+
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
-
-/// A list of network upgrades in the order that they must be activated.
-const NETWORK_UPGRADES_IN_ORDER: &[NetworkUpgrade] = &[
-    Genesis,
-    BeforeOverwinter,
-    Overwinter,
-    Sapling,
-    Blossom,
-    Heartwood,
-    Canopy,
-    Nu5,
-    Nu6,
-    Nu6_1,
-    #[cfg(any(test, feature = "zebra-test"))]
-    Nu7,
-];
 
 /// A Zcash network upgrade.
 ///
 /// Network upgrades change the Zcash network protocol or consensus rules. Note that they have no
 /// designated codenames from NU5 onwards.
-#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Ord, PartialOrd)]
+///
+/// Enum variants must be ordered by activation height.
+#[derive(
+    Copy, Clone, EnumIter, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Ord, PartialOrd,
+)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum NetworkUpgrade {
     /// The Zcash protocol for a Genesis block.
@@ -292,9 +282,8 @@ impl Network {
     /// Returns a vector of all implicit and explicit network upgrades for `network`,
     /// in ascending height order.
     pub fn full_activation_list(&self) -> Vec<(block::Height, NetworkUpgrade)> {
-        NETWORK_UPGRADES_IN_ORDER
-            .iter()
-            .map_while(|&nu| Some((NetworkUpgrade::activation_height(&nu, self)?, nu)))
+        NetworkUpgrade::iter()
+            .filter_map(|nu| Some((NetworkUpgrade::activation_height(&nu, self)?, nu)))
             .collect()
     }
 }
@@ -516,7 +505,7 @@ impl NetworkUpgrade {
 
     /// Returns an iterator over [`NetworkUpgrade`] variants.
     pub fn iter() -> impl DoubleEndedIterator<Item = NetworkUpgrade> {
-        NETWORK_UPGRADES_IN_ORDER.iter().copied()
+        <Self as IntoEnumIterator>::iter()
     }
 }
 
