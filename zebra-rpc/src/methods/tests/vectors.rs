@@ -3028,3 +3028,87 @@ async fn rpc_addnode() {
 
     mempool.expect_no_requests().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_gettxout() {
+    let _init_guard = zebra_test::init();
+
+    // Create a continuous chain of mainnet blocks from genesis
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .values()
+        .map(|block_bytes| block_bytes.zcash_deserialize_into().unwrap())
+        .collect();
+
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let (state, read_state, _, _) = zebra_state::populated_state(blocks.clone(), &Mainnet).await;
+
+    let (tip, tip_sender) = MockChainTip::new();
+    tip_sender.send_best_tip_height(Height(10));
+
+    // Init RPC
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, rpc_tx_queue) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        tip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    // TODO: Create a mempool test
+
+    // Build a state test for all transactions
+    let run_test_case = |_block_idx: usize, _block: Arc<Block>, tx: Arc<Transaction>| {
+        let read_state = read_state.clone();
+        let txid = tx.hash();
+        let hex_txid = txid.encode_hex::<String>();
+
+        let get_tx_out_req = rpc.get_tx_out(hex_txid.clone(), 0u32, Some(false));
+
+        async move {
+            let response = get_tx_out_req.await;
+            let get_tx_output = response.expect("We should have a GetTxOut struct");
+
+            let output_object = get_tx_output.0.unwrap();
+            assert_eq!(
+                output_object.value(),
+                crate::methods::types::zec::Zec::from(tx.outputs()[0].value()).lossy_zec()
+            );
+            assert_eq!(
+                output_object.script_pub_key().hex().as_raw_bytes(),
+                tx.outputs()[0].lock_script.as_raw_bytes()
+            );
+            let depth_response = read_state
+                .oneshot(zebra_state::ReadRequest::Depth(_block.hash()))
+                .await
+                .expect("state request should succeed");
+
+            let zebra_state::ReadResponse::Depth(depth) = depth_response else {
+                panic!("unexpected response to Depth request");
+            };
+
+            let expected_confirmations = 1 + depth.expect("depth should be Some");
+            assert_eq!(output_object.confirmations(), expected_confirmations);
+        }
+    };
+
+    // Run the tests for all transactions except the genesis block's coinbase
+    for (block_idx, block) in blocks.iter().enumerate().skip(1) {
+        for tx in block.transactions.iter() {
+            run_test_case(block_idx, block.clone(), tx.clone()).await;
+        }
+    }
+
+    // The queue task should continue without errors or panics
+    let rpc_tx_queue_task_result = rpc_tx_queue.now_or_never();
+    assert!(rpc_tx_queue_task_result.is_none());
+}

@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Added `ReadRequest::IsTransparentOutputSpent` and `ReadResponse::IsTransparentOutputSpent` to the read state service ([#10235](https://github.com/ZcashFoundation/zebra/pull/10235))
+
+
+## [4.0.0] - 2026-02-05
+
+### Breaking Changes
+
+- `zebra-chain` bumped to 5.0.0.
+- `CommitSemanticallyVerifiedError` changed from enum to struct.
+- `DiskWriteBatch::prepare_*` methods now return `()` or specific error types instead of `Result<(), BoxError>`.
+- `FinalizedState::commit_finalized*` methods now return `CommitCheckpointVerifiedError`.
+
+### Added
+
+- `CommitBlockError` enum with `Duplicate`, `ValidateContextError`, `WriteTaskExited` variants.
+- `KnownBlock::Finalized` and `KnownBlock::WriteChannel` variants.
+- `impl From<ValidateContextError> for CommitSemanticallyVerifiedError`.
+
+
+## [3.1.2] - 2026-01-21 - Yanked
+
+This should have been a major release, see 4.0.0.
+
+Dependencies updated.
+
+## [3.1.1] - 2025-11-28
+
+No API changes; internal dependencies updated.
+
 
 ## [3.1.0] - 2025-11-17
 

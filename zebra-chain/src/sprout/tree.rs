@@ -258,10 +258,10 @@ impl NoteCommitmentTree {
     /// Appends a note commitment to the leafmost layer of the tree.
     ///
     /// Returns an error if the tree is full.
+    #[allow(clippy::unwrap_in_result)]
     pub fn append(&mut self, cm: NoteCommitment) -> Result<(), NoteCommitmentTreeError> {
         if self.inner.append(cm.into()) {
             // Invalidate cached root
-            #[allow(clippy::unwrap_in_result)]
             let cached_root = self
                 .cached_root
                 .get_mut()

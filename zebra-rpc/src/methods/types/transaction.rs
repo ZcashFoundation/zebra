@@ -468,6 +468,63 @@ pub struct Output {
     script_pub_key: ScriptPubKey,
 }
 
+/// The output object returned by `gettxout` RPC requests.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+pub struct OutputObject {
+    #[serde(rename = "bestblock")]
+    best_block: String,
+    confirmations: u32,
+    value: f64,
+    #[serde(rename = "scriptPubKey")]
+    script_pub_key: ScriptPubKey,
+    version: u32,
+    coinbase: bool,
+}
+impl OutputObject {
+    pub fn from_output(
+        output: &zebra_chain::transparent::Output,
+        best_block: String,
+        confirmations: u32,
+        version: u32,
+        coinbase: bool,
+        network: &Network,
+    ) -> Self {
+        let lock_script = &output.lock_script;
+        let addresses = output.address(network).map(|addr| vec![addr.to_string()]);
+        let req_sigs = addresses.as_ref().map(|a| a.len() as u32);
+
+        let script_pub_key = ScriptPubKey::new(
+            zcash_script::script::Code(lock_script.as_raw_bytes().to_vec()).to_asm(false),
+            lock_script.clone(),
+            req_sigs,
+            zcash_script::script::Code(lock_script.as_raw_bytes().to_vec())
+                .to_component()
+                .ok()
+                .and_then(|c| c.refine().ok())
+                .and_then(|component| zcash_script::solver::standard(&component))
+                .map(|kind| match kind {
+                    zcash_script::solver::ScriptKind::PubKeyHash { .. } => "pubkeyhash",
+                    zcash_script::solver::ScriptKind::ScriptHash { .. } => "scripthash",
+                    zcash_script::solver::ScriptKind::MultiSig { .. } => "multisig",
+                    zcash_script::solver::ScriptKind::NullData { .. } => "nulldata",
+                    zcash_script::solver::ScriptKind::PubKey { .. } => "pubkey",
+                })
+                .unwrap_or("nonstandard")
+                .to_string(),
+            addresses,
+        );
+
+        Self {
+            best_block,
+            confirmations,
+            value: crate::methods::types::zec::Zec::from(output.value()).lossy_zec(),
+            script_pub_key,
+            version,
+            coinbase,
+        }
+    }
+}
+
 /// The scriptPubKey of a transaction output.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
 pub struct ScriptPubKey {

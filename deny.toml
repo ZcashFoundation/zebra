@@ -62,6 +62,9 @@ skip-tree = [
     # wait for abscissa_core to upgrade
     {name = "tracing-log", version = "=0.1.4" },
 
+    # Multiple base64 versions through different dependencies
+    { name = "base64", version = "=0.21.7" },
+
     # wait for abscissa_core to update toml
     { name = "toml", version = "=0.5.11" },
 
@@ -92,8 +95,12 @@ skip-tree = [
 
     { name = "indexmap", version = "1.9" },
 
-    # TODO: Bump `hashbrown` to 0.16 in ed25519-zebra.
+    { name = "hashbrown", version = "0.12" },
+    # hashbrown 0.15.x pulled by various deps; 0.16.x pulled by indexmap 2.x
     { name = "hashbrown", version = "0.15" },
+
+    # itertools 0.13.x pulled by halo2 deps; 0.14.x pulled by other deps
+    { name = "itertools", version = "0.13" },
 
     { name = "getrandom", version = "0.2" },
 

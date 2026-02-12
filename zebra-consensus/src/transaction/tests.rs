@@ -24,7 +24,7 @@ use zebra_chain::{
     parameters::{testnet::ConfiguredActivationHeights, Network, NetworkUpgrade},
     primitives::{ed25519, x25519, Groth16Proof},
     sapling,
-    serialization::{DateTime32, ZcashDeserialize, ZcashDeserializeInto},
+    serialization::{AtLeastOne, DateTime32, ZcashDeserialize, ZcashDeserializeInto},
     sprout,
     transaction::{
         arbitrary::{
@@ -2832,7 +2832,10 @@ async fn v5_with_duplicate_orchard_action() {
         let duplicate_nullifier = duplicate_action.action.nullifier;
 
         // Duplicate the first action
-        orchard_shielded_data.actions.push(duplicate_action);
+        let mut actions_vec = orchard_shielded_data.actions.as_slice().to_vec();
+        actions_vec.push(duplicate_action.clone());
+        orchard_shielded_data.actions = AtLeastOne::from_vec(actions_vec)
+            .expect("pushing one element never breaks at least one constraints");
 
         let verifier = Verifier::new_for_tests(
             &net,
@@ -3263,7 +3266,10 @@ fn duplicate_sapling_spend_in_shielded_data<A: sapling::AnchorVariant + Clone>(
             let duplicate_spend = spends.first().clone();
             let duplicate_nullifier = duplicate_spend.nullifier;
 
-            spends.push(duplicate_spend);
+            let mut spends_vec = spends.as_slice().to_vec();
+            spends_vec.push(duplicate_spend);
+            *spends = AtLeastOne::from_vec(spends_vec)
+                .expect("pushing one element never breaks at least one constraints");
 
             duplicate_nullifier
         }
@@ -3460,9 +3466,11 @@ fn coinbase_outputs_are_decryptable_for_fake_v5_blocks() {
             let shielded_data = insert_fake_orchard_shielded_data(&mut transaction);
             shielded_data.flags = Flags::ENABLE_OUTPUTS;
 
-            let action =
-                fill_action_with_note_encryption_test_vector(&shielded_data.actions[0].action, v);
-            let sig = shielded_data.actions[0].spend_auth_sig;
+            let action = fill_action_with_note_encryption_test_vector(
+                &shielded_data.actions.first().action,
+                v,
+            );
+            let sig = shielded_data.actions.first().spend_auth_sig;
             shielded_data.actions = vec![AuthorizedAction::from_parts(action, sig)]
                 .try_into()
                 .unwrap();
@@ -3491,9 +3499,11 @@ fn shielded_outputs_are_not_decryptable_for_fake_v5_blocks() {
             let shielded_data = insert_fake_orchard_shielded_data(&mut tx);
             shielded_data.flags = Flags::ENABLE_OUTPUTS;
 
-            let action =
-                fill_action_with_note_encryption_test_vector(&shielded_data.actions[0].action, v);
-            let sig = shielded_data.actions[0].spend_auth_sig;
+            let action = fill_action_with_note_encryption_test_vector(
+                &shielded_data.actions.first().action,
+                v,
+            );
+            let sig = shielded_data.actions.first().spend_auth_sig;
             shielded_data.actions = vec![AuthorizedAction::from_parts(action, sig)]
                 .try_into()
                 .unwrap();

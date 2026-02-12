@@ -81,7 +81,7 @@ use zebra_consensus::{
     funding_stream_address, router::service_trait::BlockVerifierService, RouterError,
 };
 use zebra_network::{address_book_peers::AddressBookPeers, types::PeerServices, PeerSocketAddr};
-use zebra_node_services::mempool::{self, MempoolService};
+use zebra_node_services::mempool::{self, CreatedOrSpent, MempoolService};
 use zebra_state::{
     AnyTx, HashOrHeight, OutputLocation, ReadRequest, ReadResponse, ReadState as ReadStateService,
     State as StateService, TransactionLocation,
@@ -702,6 +702,25 @@ pub trait Rpc {
     /// method: post
     /// tags: network
     async fn add_node(&self, addr: PeerSocketAddr, command: AddNodeCommand) -> Result<()>;
+
+    /// Returns details about an unspent transaction output.
+    ///
+    /// zcashd reference: [`gettxout`](https://zcash.github.io/rpc/gettxout.html)
+    /// method: post
+    /// tags: transaction
+    ///
+    /// # Parameters
+    ///
+    /// - `txid`: (string, required, example="mytxid") The transaction ID that contains the output.
+    /// - `n`: (number, required) The output index number.
+    /// - `include_mempool` (bool, optional, default=true) Whether to include the mempool in the search.
+    #[method(name = "gettxout")]
+    async fn get_tx_out(
+        &self,
+        txid: String,
+        n: u32,
+        include_mempool: Option<bool>,
+    ) -> Result<GetTxOutResponse>;
 }
 
 /// RPC method implementations.
@@ -869,6 +888,16 @@ where
     pub fn network(&self) -> &Network {
         &self.network
     }
+
+    fn tip(&self) -> Result<(block::Height, block::Hash)> {
+        self.latest_chain_tip
+            .best_tip_height_and_hash()
+            .ok_or_misc_error("No blocks in state")
+    }
+
+    fn tip_height(&self) -> Result<block::Height> {
+        self.tip().map(|(height, _)| height)
+    }
 }
 
 #[async_trait]
@@ -896,10 +925,7 @@ where
             Utc::now(),
         ));
 
-        let tip_height = self
-            .latest_chain_tip
-            .best_tip_height()
-            .unwrap_or(Height::MIN);
+        let tip_height = self.tip_height().unwrap_or(Height::MIN);
         let testnet = self.network.is_a_test_network();
 
         // This field is behind the `ENABLE_WALLET` feature flag in zcashd:
@@ -1171,11 +1197,10 @@ where
             None
         };
 
-        let hash_or_height =
-            HashOrHeight::new(&hash_or_height, self.latest_chain_tip.best_tip_height())
-                // Reference for the legacy error code:
-                // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
-                .map_error(server::error::LegacyCode::InvalidParameter)?;
+        let hash_or_height = HashOrHeight::new(&hash_or_height, self.tip_height().ok())
+            // Reference for the legacy error code:
+            // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
+            .map_error(server::error::LegacyCode::InvalidParameter)?;
 
         if verbosity == 0 {
             let request = zebra_state::ReadRequest::Block(hash_or_height);
@@ -1384,11 +1409,10 @@ where
         let verbose = verbose.unwrap_or(true);
         let network = self.network.clone();
 
-        let hash_or_height =
-            HashOrHeight::new(&hash_or_height, self.latest_chain_tip.best_tip_height())
-                // Reference for the legacy error code:
-                // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
-                .map_error(server::error::LegacyCode::InvalidParameter)?;
+        let hash_or_height = HashOrHeight::new(&hash_or_height, self.tip_height().ok())
+            // Reference for the legacy error code:
+            // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
+            .map_error(server::error::LegacyCode::InvalidParameter)?;
         let zebra_state::ReadResponse::BlockHeader {
             header,
             hash,
@@ -1504,17 +1528,12 @@ where
     }
 
     fn get_best_block_hash(&self) -> Result<GetBlockHashResponse> {
-        self.latest_chain_tip
-            .best_tip_hash()
-            .map(GetBlockHashResponse)
-            .ok_or_misc_error("No blocks in state")
+        self.tip().map(|(_, hash)| GetBlockHashResponse(hash))
     }
 
     fn get_best_block_height_and_hash(&self) -> Result<GetBlockHeightAndHashResponse> {
-        self.latest_chain_tip
-            .best_tip_height_and_hash()
-            .map(|(height, hash)| GetBlockHeightAndHashResponse { height, hash })
-            .ok_or_misc_error("No blocks in state")
+        let (height, hash) = self.tip()?;
+        Ok(GetBlockHeightAndHashResponse { height, hash })
     }
 
     async fn get_mempool_info(&self) -> Result<GetMempoolInfoResponse> {
@@ -1779,11 +1798,10 @@ where
         let mut read_state = self.read_state.clone();
         let network = self.network.clone();
 
-        let hash_or_height =
-            HashOrHeight::new(&hash_or_height, self.latest_chain_tip.best_tip_height())
-                // Reference for the legacy error code:
-                // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
-                .map_error(server::error::LegacyCode::InvalidParameter)?;
+        let hash_or_height = HashOrHeight::new(&hash_or_height, self.tip_height().ok())
+            // Reference for the legacy error code:
+            // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
+            .map_error(server::error::LegacyCode::InvalidParameter)?;
 
         // Fetch the block referenced by [`hash_or_height`] from the state.
         //
@@ -1945,13 +1963,8 @@ where
 
     async fn get_address_tx_ids(&self, request: GetAddressTxIdsRequest) -> Result<Vec<String>> {
         let mut read_state = self.read_state.clone();
-        let latest_chain_tip = self.latest_chain_tip.clone();
 
-        let height_range = build_height_range(
-            request.start,
-            request.end,
-            best_chain_tip_height(&latest_chain_tip)?,
-        )?;
+        let height_range = build_height_range(request.start, request.end, self.tip_height()?)?;
 
         let valid_addresses = request.valid_addresses()?;
 
@@ -2089,15 +2102,14 @@ where
     }
 
     fn get_block_count(&self) -> Result<u32> {
-        best_chain_tip_height(&self.latest_chain_tip).map(|height| height.0)
+        self.tip_height().map(|height| height.0)
     }
 
     async fn get_block_hash(&self, index: i32) -> Result<GetBlockHashResponse> {
         let mut read_state = self.read_state.clone();
-        let latest_chain_tip = self.latest_chain_tip.clone();
 
         // TODO: look up this height as part of the state request?
-        let tip_height = best_chain_tip_height(&latest_chain_tip)?;
+        let tip_height = self.tip_height()?;
 
         let height = height_from_signed_int(index, tip_height)?;
 
@@ -2698,9 +2710,10 @@ where
     async fn get_block_subsidy(&self, height: Option<u32>) -> Result<GetBlockSubsidyResponse> {
         let net = self.network.clone();
 
-        let height = height.map_or(best_chain_tip_height(&self.latest_chain_tip)?, |h| {
-            Height(h)
-        });
+        let height = match height {
+            Some(h) => Height(h),
+            None => self.tip_height()?,
+        };
 
         let subsidy = block_subsidy(height, &net).map_misc_error()?;
 
@@ -2744,17 +2757,17 @@ where
                     .collect()
             });
 
-        Ok(GetBlockSubsidyResponse {
-            miner: miner_subsidy(height, &net, subsidy)
-                .map_misc_error()?
-                .into(),
-            founders: Amount::zero().into(),
+        Ok(GetBlockSubsidyResponse::new(
             funding_streams,
             lockbox_streams,
-            funding_streams_total: funding_streams_total?,
-            lockbox_total: lockbox_total?,
-            total_block_subsidy: subsidy.into(),
-        })
+            miner_subsidy(height, &net, subsidy)
+                .map_misc_error()?
+                .into(),
+            Amount::zero().into(),
+            funding_streams_total?,
+            lockbox_total?,
+            subsidy.into(),
+        ))
     }
 
     async fn get_difficulty(&self) -> Result<f64> {
@@ -2934,20 +2947,129 @@ where
             ));
         }
     }
+
+    async fn get_tx_out(
+        &self,
+        txid: String,
+        n: u32,
+        include_mempool: Option<bool>,
+    ) -> Result<GetTxOutResponse> {
+        let txid = transaction::Hash::from_hex(txid)
+            .map_error(server::error::LegacyCode::InvalidParameter)?;
+
+        let outpoint = transparent::OutPoint {
+            hash: txid,
+            index: n,
+        };
+
+        // Optional mempool path
+        if include_mempool.unwrap_or(true) {
+            let rsp = self
+                .mempool
+                .clone()
+                .oneshot(mempool::Request::UnspentOutput(outpoint))
+                .await
+                .map_misc_error()?;
+
+            match rsp {
+                // Return the output found in the mempool
+                mempool::Response::TransparentOutput(Some(CreatedOrSpent::Created {
+                    output,
+                    tx_version,
+                    last_seen_hash,
+                })) => {
+                    return Ok(GetTxOutResponse(Some(
+                        types::transaction::OutputObject::from_output(
+                            &output,
+                            last_seen_hash.to_string(),
+                            0,
+                            tx_version,
+                            false,
+                            self.network(),
+                        ),
+                    )))
+                }
+                mempool::Response::TransparentOutput(Some(CreatedOrSpent::Spent)) => {
+                    return Ok(GetTxOutResponse(None))
+                }
+                mempool::Response::TransparentOutput(None) => {}
+                _ => unreachable!("unmatched response to an `UnspentOutput` request"),
+            };
+        }
+
+        // TODO: Ensure that the returned tip hash is always valid for the response, i.e. that Zebra can't return a tip that
+        //       hadn't yet included the queried transaction output.
+
+        // Get the best block tip hash
+        let tip_rsp = self
+            .read_state
+            .clone()
+            .oneshot(zebra_state::ReadRequest::Tip)
+            .await
+            .map_misc_error()?;
+
+        let best_block_hash = match tip_rsp {
+            zebra_state::ReadResponse::Tip(tip) => tip.ok_or_misc_error("No blocks in state")?.1,
+            _ => unreachable!("unmatched response to a `Tip` request"),
+        };
+
+        // State path
+        let rsp = self
+            .read_state
+            .clone()
+            .oneshot(zebra_state::ReadRequest::Transaction(txid))
+            .await
+            .map_misc_error()?;
+
+        match rsp {
+            zebra_state::ReadResponse::Transaction(Some(tx)) => {
+                let outputs = tx.tx.outputs();
+                let index: usize = n.try_into().expect("u32 always fits in usize");
+                let output = match outputs.get(index) {
+                    Some(output) => output,
+                    // return null if the output is not found
+                    None => return Ok(GetTxOutResponse(None)),
+                };
+
+                // Prune state outputs that are spent
+                let is_spent = {
+                    let rsp = self
+                        .read_state
+                        .clone()
+                        .oneshot(zebra_state::ReadRequest::IsTransparentOutputSpent(outpoint))
+                        .await
+                        .map_misc_error()?;
+
+                    match rsp {
+                        zebra_state::ReadResponse::IsTransparentOutputSpent(spent) => spent,
+                        _ => unreachable!(
+                            "unmatched response to an `IsTransparentOutputSpent` request"
+                        ),
+                    }
+                };
+
+                if is_spent {
+                    return Ok(GetTxOutResponse(None));
+                }
+
+                Ok(GetTxOutResponse(Some(
+                    types::transaction::OutputObject::from_output(
+                        output,
+                        best_block_hash.to_string(),
+                        tx.confirmations,
+                        tx.tx.version(),
+                        tx.tx.is_coinbase(),
+                        self.network(),
+                    ),
+                )))
+            }
+            zebra_state::ReadResponse::Transaction(None) => Ok(GetTxOutResponse(None)),
+            _ => unreachable!("unmatched response to a `Transaction` request"),
+        }
+    }
 }
 
 // TODO: Move the code below to separate modules.
-
-/// Returns the best chain tip height of `latest_chain_tip`,
-/// or an RPC error if there are no blocks in the state.
-pub fn best_chain_tip_height<Tip>(latest_chain_tip: &Tip) -> Result<Height>
-where
-    Tip: ChainTip + Clone + Send + Sync + 'static,
-{
-    latest_chain_tip
-        .best_tip_height()
-        .ok_or_misc_error("No blocks in state")
-}
 
 /// Response to a `getinfo` RPC request.
 ///
@@ -4457,3 +4579,10 @@ pub enum AddNodeCommand {
     #[serde(rename = "add")]
     Add,
 }
+
+/// Response to a `gettxout` RPC request.
+///
+/// See the notes for the [`Rpc::get_tx_out` method].
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
+pub struct GetTxOutResponse(Option<types::transaction::OutputObject>);
