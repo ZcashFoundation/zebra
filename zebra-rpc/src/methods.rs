@@ -2725,9 +2725,10 @@ where
     async fn get_block_subsidy(&self, height: Option<u32>) -> Result<GetBlockSubsidyResponse> {
         let net = self.network.clone();
 
-        let height = height.map_or(best_chain_tip_height(&self.latest_chain_tip)?, |h| {
-            Height(h)
-        });
+        let height = match height {
+            Some(h) => Height(h),
+            None => best_chain_tip_height(&self.latest_chain_tip)?,
+        };
 
         let subsidy = block_subsidy(height, &net).map_misc_error()?;
 

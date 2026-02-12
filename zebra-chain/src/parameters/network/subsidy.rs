@@ -521,9 +521,7 @@ pub fn founders_reward_address(net: &Network, height: Height) -> Option<transpar
         };
 
     let founder_address_index =
-        usize::try_from(founder_address_adjusted_height / founder_address_change_interval)
-            .ok()?
-            .checked_add(1)?;
+        usize::try_from(founder_address_adjusted_height / founder_address_change_interval).ok()?;
 
     founders_address_list
         .get(founder_address_index)
