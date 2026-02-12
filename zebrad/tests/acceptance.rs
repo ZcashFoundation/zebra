@@ -4081,7 +4081,10 @@ async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
     tokio::time::sleep(Duration::from_secs(6)).await;
 
     child.kill(true)?;
-    // Wait for Zebra to shut down.
+    // Wait for zebrad to fully terminate to ensure database lock is released.
+    child
+        .wait_with_output()
+        .wrap_err("failed to wait for zebrad to fully terminate")?;
     tokio::time::sleep(Duration::from_secs(3)).await;
     // Prepare checkpoint heights/hashes
     let last_hash = *generated_block_hashes
@@ -4141,7 +4144,10 @@ async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
          the finalized tip is below the max checkpoint height"
     );
     child.kill(true)?;
-    // Wait for Zebra to shut down.
+    // Wait for zebrad to fully terminate to ensure database lock is released.
+    child
+        .wait_with_output()
+        .wrap_err("failed to wait for zebrad to fully terminate")?;
     tokio::time::sleep(Duration::from_secs(3)).await;
 
     // Check that the non-finalized state is not restored from backup when the finalized tip height is below the
@@ -4189,6 +4195,11 @@ async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
         .expect("should successfully commit more blocks to the state");
 
     child.kill(true)?;
+    // Wait for zebrad to fully terminate to ensure database lock is released.
+    child
+        .wait_with_output()
+        .wrap_err("failed to wait for zebrad process to exit after kill")?;
+    tokio::time::sleep(Duration::from_secs(3)).await;
 
     // Check that Zebra will can commit blocks to its state when its finalized tip is past the max checkpoint height
     // and the non-finalized backup cache is disabled or empty.
