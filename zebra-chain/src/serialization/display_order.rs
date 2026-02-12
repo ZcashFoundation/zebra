@@ -17,6 +17,16 @@ pub trait BytesInDisplayOrder<
     /// Creates an instance from bytes in the internal serialized order.
     fn from_bytes_in_serialized_order(bytes: [u8; BYTE_LEN]) -> Self;
 
+    /// Alias for [`BytesInDisplayOrder::bytes_in_serialized_order`].
+    fn bytes(&self) -> [u8; BYTE_LEN] {
+        self.bytes_in_serialized_order()
+    }
+
+    /// Converts the bytes in the internal serialized order to the expected type.
+    fn bytes_into<T: From<[u8; BYTE_LEN]>>(&self) -> T {
+        self.bytes_in_serialized_order().into()
+    }
+
     /// Return the bytes in big-endian byte-order suitable for printing out byte by byte.
     fn bytes_in_display_order(&self) -> [u8; BYTE_LEN] {
         let mut reversed_bytes = self.bytes_in_serialized_order();

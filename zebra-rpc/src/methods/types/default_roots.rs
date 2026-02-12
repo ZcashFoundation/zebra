@@ -12,6 +12,7 @@ use zebra_chain::{
         ChainHistoryBlockTxAuthCommitmentHash, ChainHistoryMmrRootHash, Height,
     },
     parameters::{Network, NetworkUpgrade},
+    serialization::BytesInDisplayOrder,
     transaction::VerifiedUnminedTx,
 };
 
@@ -88,11 +89,8 @@ impl DefaultRoots {
                 .collect(),
             chain_history_root,
             auth_data_root,
-            block_commitments_hash: if NetworkUpgrade::current(net, height)
-                == NetworkUpgrade::Heartwood
-                && chain_history_root == block::CHAIN_HISTORY_ACTIVATION_RESERVED.into()
-            {
-                block::CHAIN_HISTORY_ACTIVATION_RESERVED.into()
+            block_commitments_hash: if NetworkUpgrade::current(net, height) < NetworkUpgrade::Nu5 {
+                chain_history_root.bytes_into()
             } else {
                 ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
                     &chain_history_root,
