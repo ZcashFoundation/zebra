@@ -62,7 +62,7 @@ use zcash_primitives::consensus::Parameters;
 
 use zebra_chain::{
     amount::{self, Amount, NegativeAllowed, NonNegative},
-    block::{self, Block, Commitment, Height, SerializedBlock, TryIntoHeight},
+    block::{self, Commitment, Height, SerializedBlock, TryIntoHeight},
     chain_sync_status::ChainSyncStatus,
     chain_tip::{ChainTip, NetworkChainTipHeightEstimator},
     parameters::{
@@ -72,7 +72,7 @@ use zebra_chain::{
         },
         ConsensusBranchId, Network, NetworkUpgrade, POW_AVERAGING_WINDOW,
     },
-    serialization::{BytesInDisplayOrder, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
+    serialization::{BytesInDisplayOrder, ZcashDeserialize, ZcashSerialize},
     subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx},
     transparent::{self, Address, OutputIndex},
@@ -82,9 +82,7 @@ use zebra_chain::{
         equihash::Solution,
     },
 };
-use zebra_consensus::{
-    funding_stream_address, router::service_trait::BlockVerifierService, RouterError,
-};
+use zebra_consensus::{funding_stream_address, router::service_trait::BlockVerifierService};
 use zebra_network::{address_book_peers::AddressBookPeers, types::PeerServices, PeerSocketAddr};
 use zebra_node_services::mempool::{self, CreatedOrSpent, MempoolService};
 use zebra_state::{
@@ -126,7 +124,7 @@ use types::{
     long_poll::LongPollInput,
     network_info::{GetNetworkInfoResponse, NetworkInfo},
     peer_info::PeerInfo,
-    submit_block::{SubmitBlockErrorResponse, SubmitBlockParameters, SubmitBlockResponse},
+    submit_block::{SubmitBlockParameters, SubmitBlockResponse},
     subsidy::GetBlockSubsidyResponse,
     transaction::TransactionObject,
     unified_address::ZListUnifiedReceiversResponse,
@@ -2477,93 +2475,7 @@ where
         HexData(block_bytes): HexData,
         _parameters: Option<SubmitBlockParameters>,
     ) -> Result<SubmitBlockResponse> {
-        let mut block_verifier_router = self.gbt.block_verifier_router();
-
-        let block: Block = match block_bytes.zcash_deserialize_into() {
-            Ok(block_bytes) => block_bytes,
-            Err(error) => {
-                tracing::info!(
-                    ?error,
-                    "submit block failed: block bytes could not be deserialized into a structurally valid block"
-                );
-
-                return Ok(SubmitBlockErrorResponse::Rejected.into());
-            }
-        };
-
-        let height = block
-            .coinbase_height()
-            .ok_or_error(0, "coinbase height not found")?;
-        let block_hash = block.hash();
-
-        let block_verifier_router_response = block_verifier_router
-            .ready()
-            .await
-            .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?
-            .call(zebra_consensus::Request::Commit(Arc::new(block)))
-            .await;
-
-        let chain_error = match block_verifier_router_response {
-            // Currently, this match arm returns `null` (Accepted) for blocks committed
-            // to any chain, but Accepted is only for blocks in the best chain.
-            //
-            // TODO (#5487):
-            // - Inconclusive: check if the block is on a side-chain
-            // The difference is important to miners, because they want to mine on the best chain.
-            Ok(hash) => {
-                tracing::info!(?hash, ?height, "submit block accepted");
-
-                self.gbt
-                    .advertise_mined_block(hash, height)
-                    .map_error_with_prefix(0, "failed to send mined block to gossip task")?;
-
-                return Ok(SubmitBlockResponse::Accepted);
-            }
-
-            // Turns BoxError into Result<VerifyChainError, BoxError>,
-            // by downcasting from Any to VerifyChainError.
-            Err(box_error) => {
-                let error = box_error
-                    .downcast::<RouterError>()
-                    .map(|boxed_chain_error| *boxed_chain_error);
-
-                tracing::info!(
-                    ?error,
-                    ?block_hash,
-                    ?height,
-                    "submit block failed verification"
-                );
-
-                error
-            }
-        };
-
-        let response = match chain_error {
-            Ok(source) if source.is_duplicate_request() => SubmitBlockErrorResponse::Duplicate,
-
-            // Currently, these match arms return Reject for the older duplicate in a queue,
-            // but queued duplicates should be DuplicateInconclusive.
-            //
-            // Optional TODO (#5487):
-            // - DuplicateInconclusive: turn these non-finalized state duplicate block errors
-            //   into BlockError enum variants, and handle them as DuplicateInconclusive:
-            //   - "block already sent to be committed to the state"
-            //   - "replaced by newer request"
-            // - keep the older request in the queue,
-            //   and return a duplicate error for the newer request immediately.
-            //   This improves the speed of the RPC response.
-            //
-            // Checking the download queues and BlockVerifierRouter buffer for duplicates
-            // might require architectural changes to Zebra, so we should only do it
-            // if mining pools really need it.
-            Ok(_verify_chain_error) => SubmitBlockErrorResponse::Rejected,
-
-            // This match arm is currently unreachable, but if future changes add extra error types,
-            // we want to turn them into `Rejected`.
-            Err(_unknown_error_type) => SubmitBlockErrorResponse::Rejected,
-        };
-
-        Ok(response.into())
+        self.gbt.submit_block(block_bytes).await
     }
 
     async fn get_mining_info(&self) -> Result<GetMiningInfoResponse> {

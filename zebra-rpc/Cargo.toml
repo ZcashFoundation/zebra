@@ -32,6 +32,8 @@ tx_v6 = ["zebra-chain/tx_v6", "zebra-state/tx_v6", "zebra-consensus/tx_v6"]
 # Experimental internal miner support
 internal-miner = []
 
+progress-bar = ["howudoin"]
+
 # Test-only features
 proptest-impl = [
     "proptest",
@@ -79,6 +81,7 @@ tracing = { workspace = true }
 
 # Metrics collection
 metrics = { workspace = true }
+howudoin = { workspace = true, optional = true }
 
 hex = { workspace = true, features = ["serde"] }
 serde = { workspace = true, features = ["serde_derive"] }

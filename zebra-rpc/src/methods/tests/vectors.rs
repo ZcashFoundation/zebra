@@ -37,12 +37,15 @@ use zebra_state::{
 };
 use zebra_test::mock_service::MockService;
 
-use crate::methods::{
-    hex_data::HexData,
-    tests::utils::fake_history_tree,
-    types::get_block_template::{
-        constants::{CAPABILITIES_FIELD, MUTABLE_FIELD, NONCE_RANGE_FIELD},
-        GetBlockTemplateRequestMode,
+use crate::{
+    client::SubmitBlockErrorResponse,
+    methods::{
+        hex_data::HexData,
+        tests::utils::fake_history_tree,
+        types::get_block_template::{
+            constants::{CAPABILITIES_FIELD, MUTABLE_FIELD, NONCE_RANGE_FIELD},
+            GetBlockTemplateRequestMode,
+        },
     },
 };
 

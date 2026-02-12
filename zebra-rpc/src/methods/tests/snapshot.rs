@@ -35,7 +35,7 @@ use zebra_chain::{
     transaction::Transaction,
     work::difficulty::CompactDifficulty,
 };
-use zebra_consensus::Request;
+use zebra_consensus::{Request, RouterError};
 use zebra_network::{
     address_book_peers::MockAddressBookPeers,
     types::{MetaAddr, PeerServices},

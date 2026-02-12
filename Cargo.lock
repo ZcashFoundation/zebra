@@ -7150,6 +7150,7 @@ dependencies = [
  "derive-new",
  "futures",
  "hex",
+ "howudoin",
  "http-body-util",
  "hyper",
  "indexmap 2.13.0",

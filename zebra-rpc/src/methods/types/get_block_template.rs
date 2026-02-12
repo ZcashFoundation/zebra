@@ -8,6 +8,8 @@ pub mod zip317;
 #[cfg(test)]
 mod tests;
 
+#[cfg(feature = "progress-bar")]
+use std::sync::atomic::AtomicU64;
 use std::{collections::HashMap, fmt, iter, sync::Arc};
 
 use derive_getters::Getters;
@@ -44,18 +46,20 @@ use zebra_chain::{
 use zebra_chain::serialization::BytesInDisplayOrder;
 
 use zebra_consensus::{
-    funding_stream_address, router::service_trait::BlockVerifierService, MAX_BLOCK_SIGOPS,
+    funding_stream_address, router::service_trait::BlockVerifierService, RouterError,
+    MAX_BLOCK_SIGOPS,
 };
 use zebra_node_services::mempool::{self, TransactionDependencies};
 use zebra_state::GetBlockTemplateChainInfo;
 
 use crate::{
+    client::{SubmitBlockErrorResponse, SubmitBlockResponse},
     config,
     methods::types::{
         default_roots::DefaultRoots, long_poll::LongPollId, submit_block,
         transaction::TransactionTemplate,
     },
-    server::error::OkOrError,
+    server::error::{MapError, OkOrError},
 };
 
 use constants::{
@@ -451,6 +455,14 @@ where
     /// A channel to send successful block submissions to the block gossip task,
     /// so they can be advertised to peers.
     mined_block_sender: mpsc::Sender<(block::Hash, block::Height)>,
+
+    /// Mined block count.
+    #[cfg(feature = "progress-bar")]
+    num_mined_blocks: Arc<AtomicU64>,
+
+    /// Mined block count progress transmitter.
+    #[cfg(feature = "progress-bar")]
+    num_mined_blocks_bar: howudoin::Tx,
 }
 
 // A limit on the configured extra coinbase data, regardless of the current block height.
@@ -500,6 +512,9 @@ where
             EXTRA_COINBASE_DATA_LIMIT,
         );
 
+        #[cfg(feature = "progress-bar")]
+        let num_mined_blocks_bar = howudoin::new_root().label("Mined Blocks");
+
         Self {
             miner_address,
             extra_coinbase_data,
@@ -507,6 +522,10 @@ where
             sync_status,
             mined_block_sender: mined_block_sender
                 .unwrap_or(submit_block::SubmitBlockChannel::default().sender()),
+            #[cfg(feature = "progress-bar")]
+            num_mined_blocks: Arc::new(AtomicU64::new(0)),
+            #[cfg(feature = "progress-bar")]
+            num_mined_blocks_bar,
         }
     }
 
@@ -545,7 +564,106 @@ where
         self.block_verifier_router.clone()
     }
 
-    /// Advertises the mined block.
+    pub async fn submit_block(&self, block_bytes: Vec<u8>) -> RpcResult<SubmitBlockResponse> {
+        let block: Block = match block_bytes.zcash_deserialize_into() {
+            Ok(block_bytes) => block_bytes,
+            Err(error) => {
+                tracing::info!(
+                    ?error,
+                    "submit block failed: block bytes could not be deserialized into a structurally valid block"
+                );
+
+                return Ok(SubmitBlockErrorResponse::Rejected.into());
+            }
+        };
+
+        let height = block
+            .coinbase_height()
+            .ok_or_error(0, "coinbase height not found")?;
+        let block_hash = block.hash();
+
+        let block_verifier_router_response = self
+            .block_verifier_router()
+            .ready()
+            .await
+            .map_error(0)?
+            .call(zebra_consensus::Request::Commit(Arc::new(block)))
+            .await;
+
+        let chain_error = match block_verifier_router_response {
+            // Currently, this match arm returns `null` (Accepted) for blocks committed
+            // to any chain, but Accepted is only for blocks in the best chain.
+            //
+            // TODO (#5487):
+            // - Inconclusive: check if the block is on a side-chain
+            // The difference is important to miners, because they want to mine on the best chain.
+            Ok(hash) => {
+                tracing::info!(?hash, ?height, "submit block accepted");
+                metrics::counter!("rpc.mined_blocks").increment(1);
+
+                #[cfg(feature = "progress-bar")]
+                {
+                    use std::sync::atomic::Ordering;
+
+                    let pos = 1 + self.num_mined_blocks.fetch_add(1, Ordering::Relaxed);
+                    self.num_mined_blocks_bar.set_pos(pos);
+                    self.num_mined_blocks_bar
+                        .set_len(pos + (8 * pos).isqrt() / 2 + 1);
+                }
+
+                self.advertise_mined_block(hash, height)
+                    .map_error_with_prefix(0, "failed to send mined block to gossip task")?;
+
+                return Ok(SubmitBlockResponse::Accepted);
+            }
+
+            // Turns BoxError into Result<VerifyChainError, BoxError>,
+            // by downcasting from Any to VerifyChainError.
+            Err(box_error) => {
+                let error = box_error
+                    .downcast::<RouterError>()
+                    .map(|boxed_chain_error| *boxed_chain_error);
+
+                tracing::info!(
+                    ?error,
+                    ?block_hash,
+                    ?height,
+                    "submit block failed verification"
+                );
+
+                error
+            }
+        };
+
+        let response = match chain_error {
+            Ok(source) if source.is_duplicate_request() => SubmitBlockErrorResponse::Duplicate,
+
+            // Currently, these match arms return Reject for the older duplicate in a queue,
+            // but queued duplicates should be DuplicateInconclusive.
+            //
+            // Optional TODO (#5487):
+            // - DuplicateInconclusive: turn these non-finalized state duplicate block errors
+            //   into BlockError enum variants, and handle them as DuplicateInconclusive:
+            //   - "block already sent to be committed to the state"
+            //   - "replaced by newer request"
+            // - keep the older request in the queue,
+            //   and return a duplicate error for the newer request immediately.
+            //   This improves the speed of the RPC response.
+            //
+            // Checking the download queues and BlockVerifierRouter buffer for duplicates
+            // might require architectural changes to Zebra, so we should only do it
+            // if mining pools really need it.
+            Ok(_verify_chain_error) => SubmitBlockErrorResponse::Rejected,
+
+            // This match arm is currently unreachable, but if future changes add extra error types,
+            // we want to turn them into `Rejected`.
+            Err(_unknown_error_type) => SubmitBlockErrorResponse::Rejected,
+        };
+
+        Ok(response.into())
+    }
+
+    /// Advertises the mined block to peer node connections.
     pub fn advertise_mined_block(
         &self,
         block: block::Hash,
