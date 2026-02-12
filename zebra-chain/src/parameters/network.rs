@@ -11,6 +11,7 @@ use crate::{
     transparent,
 };
 
+mod error;
 pub mod magic;
 pub mod subsidy;
 pub mod testnet;
@@ -170,7 +171,10 @@ impl Network {
 
     /// Creates a new [`Network::Testnet`] with `Regtest` parameters and the provided network upgrade activation heights.
     pub fn new_regtest(params: testnet::RegtestParameters) -> Self {
-        Self::new_configured_testnet(testnet::Parameters::new_regtest(params))
+        Self::new_configured_testnet(
+            testnet::Parameters::new_regtest(params)
+                .expect("regtest parameters should always be valid"),
+        )
     }
 
     /// Returns true if the network is the default Testnet, or false otherwise.
@@ -290,9 +294,11 @@ impl Network {
         };
 
         match self {
-            Self::Mainnet => subsidy::EXPECTED_NU6_1_LOCKBOX_DISBURSEMENTS_TOTAL_MAINNET,
+            Self::Mainnet => {
+                subsidy::constants::mainnet::EXPECTED_NU6_1_LOCKBOX_DISBURSEMENTS_TOTAL
+            }
             Self::Testnet(params) if params.is_default_testnet() => {
-                subsidy::EXPECTED_NU6_1_LOCKBOX_DISBURSEMENTS_TOTAL_TESTNET
+                subsidy::constants::testnet::EXPECTED_NU6_1_LOCKBOX_DISBURSEMENTS_TOTAL
             }
             Self::Testnet(params) => params.lockbox_disbursement_total_amount(),
         }
@@ -308,9 +314,9 @@ impl Network {
         };
 
         let expected_lockbox_disbursements = match self {
-            Self::Mainnet => subsidy::NU6_1_LOCKBOX_DISBURSEMENTS_MAINNET.to_vec(),
+            Self::Mainnet => subsidy::constants::mainnet::NU6_1_LOCKBOX_DISBURSEMENTS.to_vec(),
             Self::Testnet(params) if params.is_default_testnet() => {
-                subsidy::NU6_1_LOCKBOX_DISBURSEMENTS_TESTNET.to_vec()
+                subsidy::constants::testnet::NU6_1_LOCKBOX_DISBURSEMENTS.to_vec()
             }
             Self::Testnet(params) => return params.lockbox_disbursements(),
         };

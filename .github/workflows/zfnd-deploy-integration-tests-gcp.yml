@@ -78,6 +78,11 @@ on:
         type: string
         default: zebra
         description: Application name, used to work out when a job is an update job
+      allow_failure:
+        required: false
+        type: boolean
+        default: false
+        description: If true, test failures won't fail the workflow (shows check mark instead of X)
     secrets:
       GCP_SSH_PRIVATE_KEY:
         required: true
@@ -138,6 +143,7 @@ jobs:
     runs-on: zfnd-runners
     needs: [ get-disk-name ]
     if: ${{ !cancelled() && !failure() && (needs.get-disk-name.result == 'success' || needs.get-disk-name.result == 'skipped') }}
+    continue-on-error: ${{ inputs.allow_failure }}
     timeout-minutes: ${{ inputs.is_long_test && 7200 || 180 }}
     outputs:
       cached_disk_name: ${{ (inputs.needs_zebra_state || inputs.needs_lwd_state) && needs.get-disk-name.outputs.cached_disk_name || '' }}
@@ -149,15 +155,18 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v4.2.2
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 #v6.0.1
         with:
           persist-credentials: false
           fetch-depth: '2'
 
       - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@c33ff65466c58d57e4d796f88bb1ae0ff26ee453 #v5.2.0
+        uses: rlespinasse/github-slug-action@6f7a8d2348e2a4aa5defafcdaafe5aef3f83bd4b #v5.4.0
         with:
           short-length: 7
+          # GCP instance names are limited to 63 chars. With test_id (max ~31) + sha (7) + hyphens (2),
+          # we need to limit the slug to 23 chars to stay under the limit.
+          slug-maxlength: 23
 
       - name: Downcase network name for disks and labels
         run: |
@@ -215,13 +224,18 @@ jobs:
 
           # Create disk separately if using cached image, or prepare params for --create-disk if new
           if [ -n "${{ env.CACHED_DISK_NAME }}" ]; then
-            # Create disk from cached image separately (allows partition mounting)
-            echo "Creating disk ${NAME} from cached image ${{ env.CACHED_DISK_NAME }}"
-            gcloud compute disks create "${NAME}" \
-              --size=400GB \
-              --type=pd-balanced \
-              --image="${{ env.CACHED_DISK_NAME }}" \
-              --zone=${{ vars.GCP_ZONE }}
+            # Check if disk already exists (from a previous failed run)
+            if gcloud compute disks describe "${NAME}" --zone=${{ vars.GCP_ZONE }} &>/dev/null; then
+              echo "Disk ${NAME} already exists, reusing it"
+            else
+              # Create disk from cached image separately (allows partition mounting)
+              echo "Creating disk ${NAME} from cached image ${{ env.CACHED_DISK_NAME }}"
+              gcloud compute disks create "${NAME}" \
+                --size=400GB \
+                --type=pd-balanced \
+                --image="${{ env.CACHED_DISK_NAME }}" \
+                --zone=${{ vars.GCP_ZONE }}
+            fi
             DISK_ATTACH_PARAMS="--disk=name=${NAME},device-name=${NAME}"
           else
             # Use --create-disk for new disks (no partition support)
@@ -363,15 +377,16 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v4.2.2
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 #v6.0.1
         with:
           persist-credentials: false
           fetch-depth: '2'
 
       - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@c33ff65466c58d57e4d796f88bb1ae0ff26ee453 #v5.2.0
+        uses: rlespinasse/github-slug-action@6f7a8d2348e2a4aa5defafcdaafe5aef3f83bd4b #v5.4.0
         with:
           short-length: 7
+          slug-maxlength: 23
 
       # Performs formatting on disk name components.
       #
@@ -693,15 +708,16 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v4.2.2
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 #v6.0.1
         with:
           persist-credentials: false
           fetch-depth: '2'
 
       - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@c33ff65466c58d57e4d796f88bb1ae0ff26ee453 #v5.2.0
+        uses: rlespinasse/github-slug-action@6f7a8d2348e2a4aa5defafcdaafe5aef3f83bd4b #v5.4.0
         with:
           short-length: 7
+          slug-maxlength: 23
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud

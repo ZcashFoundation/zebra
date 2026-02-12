@@ -1,16 +1,17 @@
 [package]
 name = "zebra-chain"
-version = "3.1.0"
-authors = ["Zcash Foundation <zebra@zfnd.org>"]
+version = "5.0.0"
+authors.workspace = true
 description = "Core Zcash data structures"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/ZcashFoundation/zebra"
-edition = "2021"
+license.workspace = true
+repository.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 
 readme = "../README.md"
-homepage = "https://zfnd.org/zebra/"
+homepage.workspace = true
 # crates.io is limited to 5 keywords and categories
-keywords = ["zebra", "zcash"]
+keywords.workspace = true
 # Must be one of <https://crates.io/category_slugs>
 categories = ["asynchronous", "cryptography::cryptocurrencies", "encoding"]
 
@@ -114,6 +115,7 @@ serde-big-array = { workspace = true }
 futures = { workspace = true }
 itertools = { workspace = true }
 rayon = { workspace = true }
+strum = { version = "0.27.2", features = ["derive"] }
 
 # ZF deps
 ed25519-zebra = { workspace = true }
@@ -134,6 +136,7 @@ rand = { workspace = true, optional = true }
 rand_chacha = { workspace = true, optional = true }
 
 zebra-test = { path = "../zebra-test/", version = "2.0.1", optional = true }
+bounded-vec = { version = "0.9.0", features = ["serde"] }
 
 [dev-dependencies]
 # Benchmarks

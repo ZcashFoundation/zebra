@@ -5,6 +5,86 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `amount::Amount::is_zero`
+- `parameters::network::subsidy::constants` module.
+- `impl From<block::Height> for u64`
+- `impl From<block::Height> for u32`
+- `parameters::network::testnet::founder_address_list`
+- `parameters::network::subsidy::founders_reward`
+- `parameters::network::subsidy::founders_reward_address`
+
+### Changed
+
+- `parameters::network::subsidy::SubsidyError::` has new variants:
+  `FoundersRewardNotFound` and ` Underflow`, and the variant `SumOverflow` was
+  renamed to `Overflow`.
+- `parameters::network::subsidy::num_halvings` was renamed to `halving`.
+- `transparent::Output::new_coinbase` was renamed to `new`.
+
+## [5.0.0] - 2026-02-05
+
+### Breaking Changes
+
+- `AtLeastOne<T>` is now a type alias for `BoundedVec<T, 1, { usize::MAX }>`.
+
+### Added
+
+- `BoundedVec` re-export.
+- `OrchardActions` trait with `actions()` method.
+- `ConfiguredFundingStreamRecipient::new_for()` method.
+- `strum` dependency
+
+### Changed
+
+- `parameters/network_upgrade/NetworkUpgrade` now derives `strum::EnumIter`
+
+### Removed
+
+- All constants from `parameters::network::subsidy`.
+- `AtLeastOne<T>` struct (replaced with type alias to `BoundedVec`).
+
+## [4.0.0] - 2026-01-21
+
+### Breaking Changes
+
+All `ParametersBuilder` methods and `Parameters::new_regtest()` now return `Result` types instead of `Self`:
+
+- `Parameters::new_regtest()` - Returns `Result<Self, ParametersBuilderError>`
+- `ParametersBuilder::clear_checkpoints()` - Returns `Result<Self, ParametersBuilderError>`
+- `ParametersBuilder::to_network()` - Returns `Result<Network, ParametersBuilderError>`
+- `ParametersBuilder::with_activation_heights()` - Returns `Result<Self, ParametersBuilderError>`
+- `ParametersBuilder::with_checkpoints()` - Returns `Result<Self, ParametersBuilderError>`
+- `ParametersBuilder::with_genesis_hash()` - Returns `Result<Self, ParametersBuilderError>`
+- `ParametersBuilder::with_halving_interval()` - Returns `Result<Self, ParametersBuilderError>`
+- `ParametersBuilder::with_network_magic()` - Returns `Result<Self, ParametersBuilderError>`
+- `ParametersBuilder::with_network_name()` - Returns `Result<Self, ParametersBuilderError>`
+- `ParametersBuilder::with_target_difficulty_limit()` - Returns `Result<Self, ParametersBuilderError>`
+
+**Migration:**
+
+- Chain builder calls with `?` operator: `.with_network_name("test")?`
+- Or use `.expect()` if errors are unexpected: `.with_network_name("test").expect("valid name")`
+
+
+## [3.1.0] - 2025-11-28
+
+### Added
+
+- Added `Output::is_dust()`
+- Added `ONE_THIRD_DUST_THRESHOLD_RATE`
+
+## [3.0.1] - 2025-11-17
+
+### Added
+
+- Added `From<SerializationError>` implementation for `std::io::Error`
+- Added `InvalidMinFee` error variant to `zebra_chain::transaction::zip317::Error`
+- Added `Transaction::zip233_amount()` method
+
 ## [3.0.0] - 2025-10-15
 
 In this release we removed a significant amount of Sapling-related code in favor of upstream implementations.

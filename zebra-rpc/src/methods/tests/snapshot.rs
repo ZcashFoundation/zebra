@@ -26,7 +26,6 @@ use zebra_chain::{
     chain_tip::mock::MockChainTip,
     orchard,
     parameters::{
-        subsidy::FUNDING_STREAMS_TESTNET,
         testnet::{self, ConfiguredActivationHeights, Parameters},
         Network::{self, Mainnet},
         NetworkKind, NetworkUpgrade,
@@ -73,12 +72,15 @@ async fn test_rpc_response_data() {
     let default_testnet = Network::new_default_testnet();
     let nu6_testnet = testnet::Parameters::build()
         .with_network_name("NU6Testnet")
+        .expect("failed to set network name")
         .with_activation_heights(ConfiguredActivationHeights {
             blossom: Some(584_000),
-            nu6: Some(FUNDING_STREAMS_TESTNET[1].height_range().start.0),
+            nu6: Some(2_976_000),
             ..Default::default()
         })
-        .to_network();
+        .expect("failed to set activation heights")
+        .to_network()
+        .expect("failed to build configured network");
 
     tokio::join!(
         test_rpc_response_data_for_network(&Mainnet),
@@ -121,9 +123,12 @@ async fn test_z_get_treestate() {
             nu5: Some(11),
             ..Default::default()
         })
+        .expect("failed to set activation heights")
         .clear_funding_streams()
         .with_network_name("custom_testnet")
-        .to_network();
+        .expect("failed to set network name")
+        .to_network()
+        .expect("failed to build configured network");
 
     // Initiate the snapshots of the RPC responses.
     let mut settings = insta::Settings::clone_current();

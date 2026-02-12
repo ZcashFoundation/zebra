@@ -37,7 +37,8 @@ impl<T: ZcashDeserialize + TrustedPreallocate> ZcashDeserialize for Vec<T> {
 impl<T: ZcashDeserialize + TrustedPreallocate> ZcashDeserialize for AtLeastOne<T> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         let v: Vec<T> = (&mut reader).zcash_deserialize_into()?;
-        v.try_into()
+        let at_least_one: AtLeastOne<T> = v.try_into()?;
+        Ok(at_least_one)
     }
 }
 

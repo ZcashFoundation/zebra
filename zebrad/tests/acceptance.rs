@@ -3308,7 +3308,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     use zebra_chain::{
         chain_sync_status::MockSyncStatus,
         parameters::{
-            subsidy::{FundingStreamReceiver, FUNDING_STREAM_MG_ADDRESSES_TESTNET},
+            subsidy::FundingStreamReceiver,
             testnet::{
                 self, ConfiguredActivationHeights, ConfiguredFundingStreamRecipient,
                 ConfiguredFundingStreams,
@@ -3328,14 +3328,18 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     let base_network_params = testnet::Parameters::build()
         // Regtest genesis hash
         .with_genesis_hash("029f11d80ef9765602235e1bc9727e3eb6ba20839319f761fee920d63401e327")
+        .expect("failed to set genesis hash")
         .with_checkpoints(false)
+        .expect("failed to verify checkpoints")
         .with_target_difficulty_limit(U256::from_big_endian(&[0x0f; 32]))
+        .expect("failed to set target difficulty limit")
         .with_disable_pow(true)
         .with_slow_start_interval(Height::MIN)
         .with_activation_heights(ConfiguredActivationHeights {
             nu6: Some(1),
             ..Default::default()
-        });
+        })
+        .expect("failed to set activation heights");
 
     let network = base_network_params
         .clone()
@@ -3345,7 +3349,8 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
             // Use default post-NU6 recipients
             recipients: None,
         }])
-        .to_network();
+        .to_network()
+        .expect("failed to build configured network");
 
     tracing::info!("built configured Testnet, starting state service and block verifier");
 
@@ -3489,15 +3494,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
                 numerator,
                 addresses: None,
             },
-            ConfiguredFundingStreamRecipient {
-                receiver: FundingStreamReceiver::MajorGrants,
-                numerator: 8,
-                addresses: Some(
-                    FUNDING_STREAM_MG_ADDRESSES_TESTNET
-                        .map(ToString::to_string)
-                        .to_vec(),
-                ),
-            },
+            ConfiguredFundingStreamRecipient::new_for(FundingStreamReceiver::MajorGrants),
         ])
     };
 
@@ -3525,7 +3522,8 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
             height_range: Some(Height(1)..Height(100)),
             recipients: make_configured_recipients_with_lockbox_numerator(0),
         }])
-        .to_network();
+        .to_network()
+        .expect("failed to build configured network");
 
     let (coinbase_txn, default_roots) = generate_coinbase_and_roots(
         &network,
@@ -3585,7 +3583,8 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
             height_range: Some(Height(1)..Height(100)),
             recipients: make_configured_recipients_with_lockbox_numerator(20),
         }])
-        .to_network();
+        .to_network()
+        .expect("failed to build configured network");
 
     let (coinbase_txn, default_roots) = generate_coinbase_and_roots(
         &network,
@@ -4082,7 +4081,10 @@ async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
     tokio::time::sleep(Duration::from_secs(6)).await;
 
     child.kill(true)?;
-    // Wait for Zebra to shut down.
+    // Wait for zebrad to fully terminate to ensure database lock is released.
+    child
+        .wait_with_output()
+        .wrap_err("failed to wait for zebrad to fully terminate")?;
     tokio::time::sleep(Duration::from_secs(3)).await;
     // Prepare checkpoint heights/hashes
     let last_hash = *generated_block_hashes
@@ -4142,7 +4144,10 @@ async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
          the finalized tip is below the max checkpoint height"
     );
     child.kill(true)?;
-    // Wait for Zebra to shut down.
+    // Wait for zebrad to fully terminate to ensure database lock is released.
+    child
+        .wait_with_output()
+        .wrap_err("failed to wait for zebrad to fully terminate")?;
     tokio::time::sleep(Duration::from_secs(3)).await;
 
     // Check that the non-finalized state is not restored from backup when the finalized tip height is below the
@@ -4190,6 +4195,11 @@ async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
         .expect("should successfully commit more blocks to the state");
 
     child.kill(true)?;
+    // Wait for zebrad to fully terminate to ensure database lock is released.
+    child
+        .wait_with_output()
+        .wrap_err("failed to wait for zebrad process to exit after kill")?;
+    tokio::time::sleep(Duration::from_secs(3)).await;
 
     // Check that Zebra will can commit blocks to its state when its finalized tip is past the max checkpoint height
     // and the non-finalized backup cache is disabled or empty.
@@ -4241,11 +4251,15 @@ async fn disconnects_from_misbehaving_peers() -> Result<()> {
             nu6: Some(3),
             ..Default::default()
         })
+        .expect("failed to set activation heights")
         .with_slow_start_interval(Height::MIN)
         .with_disable_pow(true)
         .clear_checkpoints()
+        .expect("failed to clear checkpoints")
         .with_network_name("PoWDisabledTestnet")
-        .to_network();
+        .expect("failed to set network name")
+        .to_network()
+        .expect("failed to build configured network");
 
     let test_type = LaunchWithEmptyState {
         launches_lightwalletd: false,
@@ -4306,10 +4320,14 @@ async fn disconnects_from_misbehaving_peers() -> Result<()> {
             nu6: Some(3),
             ..Default::default()
         })
+        .expect("failed to set activation heights")
         .with_slow_start_interval(Height::MIN)
         .clear_checkpoints()
+        .expect("failed to clear checkpoints")
         .with_network_name("PoWEnabledTestnet")
-        .to_network();
+        .expect("failed to set network name")
+        .to_network()
+        .expect("failed to build configured network");
 
     config.network.network = network2;
     config.network.initial_testnet_peers = [config.network.listen_addr.to_string()].into();

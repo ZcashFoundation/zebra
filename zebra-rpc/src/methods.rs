@@ -62,15 +62,12 @@ use zcash_address::{unified::Encoding, TryFromAddress};
 use zcash_primitives::consensus::Parameters;
 
 use zebra_chain::{
-    amount::{self, Amount, NegativeAllowed, NonNegative},
+    amount::{Amount, NegativeAllowed},
     block::{self, Block, Commitment, Height, SerializedBlock, TryIntoHeight},
     chain_sync_status::ChainSyncStatus,
     chain_tip::{ChainTip, NetworkChainTipHeightEstimator},
     parameters::{
-        subsidy::{
-            block_subsidy, funding_stream_values, miner_subsidy, FundingStreamReceiver,
-            ParameterSubsidy,
-        },
+        subsidy::{block_subsidy, funding_stream_values, miner_subsidy, FundingStreamReceiver},
         ConsensusBranchId, Network, NetworkUpgrade, POW_AVERAGING_WINDOW,
     },
     serialization::{BytesInDisplayOrder, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
@@ -87,7 +84,7 @@ use zebra_consensus::{
     funding_stream_address, router::service_trait::BlockVerifierService, RouterError,
 };
 use zebra_network::{address_book_peers::AddressBookPeers, types::PeerServices, PeerSocketAddr};
-use zebra_node_services::mempool::{self, MempoolService};
+use zebra_node_services::mempool::{self, CreatedOrSpent, MempoolService};
 use zebra_state::{
     AnyTx, HashOrHeight, OutputLocation, ReadRequest, ReadResponse, ReadState as ReadStateService,
     State as StateService, TransactionLocation,
@@ -96,7 +93,9 @@ use zebra_state::{
 use crate::{
     client::Treestate,
     config,
-    methods::types::{validate_address::validate_address, z_validate_address::z_validate_address},
+    methods::types::{
+        validate_address::validate_address, z_validate_address::z_validate_address, zec::Zec,
+    },
     queue::Queue,
     server::{
         self,
@@ -165,6 +164,9 @@ pub(super) const PARAM_TXID_DESC: &str = "The transaction ID to return.";
 pub(super) const PARAM_HASH_OR_HEIGHT_DESC: &str = "The block hash or height to return.";
 pub(super) const PARAM_PARAMETERS_DESC: &str = "The parameters for the command.";
 pub(super) const PARAM_VERBOSITY_DESC: &str = "Whether to include verbose output.";
+pub(super) const PARAM_N_DESC: &str = "The output index in the transaction.";
+pub(super) const PARAM_INCLUDE_MEMPOOL_DESC: &str =
+    "Whether to include mempool transactions in the response.";
 
 #[cfg(test)]
 mod tests;
@@ -602,6 +604,17 @@ pub trait Rpc {
     #[method(name = "getpeerinfo")]
     async fn get_peer_info(&self) -> Result<Vec<PeerInfo>>;
 
+    /// Requests that a ping be sent to all other nodes, to measure ping time.
+    ///
+    /// Results provided in getpeerinfo, pingtime and pingwait fields are decimal seconds.
+    /// Ping command is handled in queue with all other commands, so it measures processing backlog, not just network ping.
+    ///
+    /// zcashd reference: [`ping`](https://zcash.github.io/rpc/ping.html)
+    /// method: post
+    /// tags: network
+    #[method(name = "ping")]
+    async fn ping(&self) -> Result<()>;
+
     /// Checks if a zcash transparent address of type P2PKH, P2SH or TEX is valid.
     /// Returns information about the given address if valid.
     ///
@@ -730,6 +743,24 @@ pub trait Rpc {
     /// Returns an OpenRPC schema as a description of this service.
     #[method(name = "rpc.discover")]
     fn openrpc(&self) -> openrpsee::openrpc::Response;
+    /// Returns details about an unspent transaction output.
+    ///
+    /// zcashd reference: [`gettxout`](https://zcash.github.io/rpc/gettxout.html)
+    /// method: post
+    /// tags: transaction
+    ///
+    /// # Parameters
+    ///
+    /// - `txid`: (string, required, example="mytxid") The transaction ID that contains the output.
+    /// - `n`: (number, required) The output index number.
+    /// - `include_mempool` (bool, optional, default=true) Whether to include the mempool in the search.
+    #[method(name = "gettxout")]
+    async fn get_tx_out(
+        &self,
+        txid: String,
+        n: u32,
+        include_mempool: Option<bool>,
+    ) -> Result<GetTxOutResponse>;
 }
 
 /// RPC method implementations.
@@ -956,7 +987,7 @@ where
             pay_tx_fee,
             relay_fee,
             errors: last_error_log,
-            errors_timestamp: last_error_log_time.to_string(),
+            errors_timestamp: last_error_log_time.timestamp(),
         };
 
         Ok(response)
@@ -2708,6 +2739,15 @@ where
             .collect())
     }
 
+    async fn ping(&self) -> Result<()> {
+        tracing::debug!("Receiving ping request via RPC");
+
+        // TODO: Send Message::Ping(nonce) to all connected peers,
+        // and track response round-trip time for getpeerinfo's pingtime/pingwait fields.
+
+        Ok(())
+    }
+
     async fn validate_address(&self, raw_address: String) -> Result<ValidateAddressResponse> {
         let network = self.network.clone();
 
@@ -2721,46 +2761,31 @@ where
     }
 
     async fn get_block_subsidy(&self, height: Option<u32>) -> Result<GetBlockSubsidyResponse> {
-        let latest_chain_tip = self.latest_chain_tip.clone();
-        let network = self.network.clone();
+        let net = self.network.clone();
 
-        let height = if let Some(height) = height {
-            Height(height)
-        } else {
-            best_chain_tip_height(&latest_chain_tip)?
+        let height = match height {
+            Some(h) => Height(h),
+            None => best_chain_tip_height(&self.latest_chain_tip)?,
         };
 
-        if height < network.height_for_first_halving() {
-            return Err(ErrorObject::borrowed(
-                0,
-                "Zebra does not support founders' reward subsidies, \
-                        use a block height that is after the first halving",
-                None,
-            ));
-        }
-
-        // Always zero for post-halving blocks
-        let founders = Amount::zero();
-
-        let total_block_subsidy =
-            block_subsidy(height, &network).map_error(server::error::LegacyCode::default())?;
-        let miner_subsidy = miner_subsidy(height, &network, total_block_subsidy)
-            .map_error(server::error::LegacyCode::default())?;
+        let subsidy = block_subsidy(height, &net).map_misc_error()?;
 
         let (lockbox_streams, mut funding_streams): (Vec<_>, Vec<_>) =
-            funding_stream_values(height, &network, total_block_subsidy)
-                .map_error(server::error::LegacyCode::default())?
+            funding_stream_values(height, &net, subsidy)
+                .map_misc_error()?
                 .into_iter()
                 // Separate the funding streams into deferred and non-deferred streams
                 .partition(|(receiver, _)| matches!(receiver, FundingStreamReceiver::Deferred));
 
-        let is_nu6 = NetworkUpgrade::current(&network, height) == NetworkUpgrade::Nu6;
-
-        let [lockbox_total, funding_streams_total]: [std::result::Result<
-            Amount<NonNegative>,
-            amount::Error,
-        >; 2] = [&lockbox_streams, &funding_streams]
-            .map(|streams| streams.iter().map(|&(_, amount)| amount).sum());
+        let [lockbox_total, funding_streams_total] =
+            [&lockbox_streams, &funding_streams].map(|streams| {
+                streams
+                    .iter()
+                    .map(|&(_, amount)| amount)
+                    .sum::<std::result::Result<Amount<_>, _>>()
+                    .map(Zec::from)
+                    .map_misc_error()
+            });
 
         // Use the same funding stream order as zcashd
         funding_streams.sort_by_key(|(receiver, _funding_stream)| {
@@ -2769,13 +2794,15 @@ where
                 .position(|zcashd_receiver| zcashd_receiver == receiver)
         });
 
+        let is_nu6 = NetworkUpgrade::current(&net, height) == NetworkUpgrade::Nu6;
+
         // Format the funding streams and lockbox streams
-        let [funding_streams, lockbox_streams]: [Vec<_>; 2] = [funding_streams, lockbox_streams]
-            .map(|streams| {
+        let [funding_streams, lockbox_streams] =
+            [funding_streams, lockbox_streams].map(|streams| {
                 streams
                     .into_iter()
                     .map(|(receiver, value)| {
-                        let address = funding_stream_address(height, &network, receiver);
+                        let address = funding_stream_address(height, &net, receiver);
                         types::subsidy::FundingStream::new_internal(
                             is_nu6, receiver, value, address,
                         )
@@ -2784,17 +2811,15 @@ where
             });
 
         Ok(GetBlockSubsidyResponse {
-            miner: miner_subsidy.into(),
-            founders: founders.into(),
+            miner: miner_subsidy(height, &net, subsidy)
+                .map_misc_error()?
+                .into(),
+            founders: Amount::zero().into(),
             funding_streams,
             lockbox_streams,
-            funding_streams_total: funding_streams_total
-                .map_error(server::error::LegacyCode::default())?
-                .into(),
-            lockbox_total: lockbox_total
-                .map_error(server::error::LegacyCode::default())?
-                .into(),
-            total_block_subsidy: total_block_subsidy.into(),
+            funding_streams_total: funding_streams_total?,
+            lockbox_total: lockbox_total?,
+            total_block_subsidy: subsidy.into(),
         })
     }
 
@@ -2999,6 +3024,125 @@ where
             components: generator.into_components(),
         })
     }
+    async fn get_tx_out(
+        &self,
+        txid: String,
+        n: u32,
+        include_mempool: Option<bool>,
+    ) -> Result<GetTxOutResponse> {
+        let txid = transaction::Hash::from_hex(txid)
+            .map_error(server::error::LegacyCode::InvalidParameter)?;
+
+        let outpoint = transparent::OutPoint {
+            hash: txid,
+            index: n,
+        };
+
+        // Optional mempool path
+        if include_mempool.unwrap_or(true) {
+            let rsp = self
+                .mempool
+                .clone()
+                .oneshot(mempool::Request::UnspentOutput(outpoint))
+                .await
+                .map_misc_error()?;
+
+            match rsp {
+                // Return the output found in the mempool
+                mempool::Response::TransparentOutput(Some(CreatedOrSpent::Created {
+                    output,
+                    tx_version,
+                    last_seen_hash,
+                })) => {
+                    return Ok(GetTxOutResponse(Some(
+                        types::transaction::OutputObject::from_output(
+                            &output,
+                            last_seen_hash.to_string(),
+                            0,
+                            tx_version,
+                            false,
+                            self.network(),
+                        ),
+                    )))
+                }
+                mempool::Response::TransparentOutput(Some(CreatedOrSpent::Spent)) => {
+                    return Ok(GetTxOutResponse(None))
+                }
+                mempool::Response::TransparentOutput(None) => {}
+                _ => unreachable!("unmatched response to an `UnspentOutput` request"),
+            };
+        }
+
+        // TODO: Ensure that the returned tip hash is always valid for the response, i.e. that Zebra can't return a tip that
+        //       hadn't yet included the queried transaction output.
+
+        // Get the best block tip hash
+        let tip_rsp = self
+            .read_state
+            .clone()
+            .oneshot(zebra_state::ReadRequest::Tip)
+            .await
+            .map_misc_error()?;
+
+        let best_block_hash = match tip_rsp {
+            zebra_state::ReadResponse::Tip(tip) => tip.ok_or_misc_error("No blocks in state")?.1,
+            _ => unreachable!("unmatched response to a `Tip` request"),
+        };
+
+        // State path
+        let rsp = self
+            .read_state
+            .clone()
+            .oneshot(zebra_state::ReadRequest::Transaction(txid))
+            .await
+            .map_misc_error()?;
+
+        match rsp {
+            zebra_state::ReadResponse::Transaction(Some(tx)) => {
+                let outputs = tx.tx.outputs();
+                let index: usize = n.try_into().expect("u32 always fits in usize");
+                let output = match outputs.get(index) {
+                    Some(output) => output,
+                    // return null if the output is not found
+                    None => return Ok(GetTxOutResponse(None)),
+                };
+
+                // Prune state outputs that are spent
+                let is_spent = {
+                    let rsp = self
+                        .read_state
+                        .clone()
+                        .oneshot(zebra_state::ReadRequest::IsTransparentOutputSpent(outpoint))
+                        .await
+                        .map_misc_error()?;
+
+                    match rsp {
+                        zebra_state::ReadResponse::IsTransparentOutputSpent(spent) => spent,
+                        _ => unreachable!(
+                            "unmatched response to an `IsTransparentOutputSpent` request"
+                        ),
+                    }
+                };
+
+                if is_spent {
+                    return Ok(GetTxOutResponse(None));
+                }
+
+                Ok(GetTxOutResponse(Some(
+                    types::transaction::OutputObject::from_output(
+                        output,
+                        best_block_hash.to_string(),
+                        tx.confirmations,
+                        tx.tx.version(),
+                        tx.tx.is_coinbase(),
+                        self.network(),
+                    ),
+                )))
+            }
+            zebra_state::ReadResponse::Transaction(None) => Ok(GetTxOutResponse(None)),
+            _ => unreachable!("unmatched response to a `Transaction` request"),
+        }
+    }
 }
 
 // TODO: Move the code below to separate modules.
@@ -3063,7 +3207,7 @@ pub struct GetInfoResponse {
 
     /// The time of the last error or warning message, or "no errors timestamp" if there are no errors
     #[serde(rename = "errorstimestamp")]
-    errors_timestamp: String,
+    errors_timestamp: i64,
 }
 
 #[deprecated(note = "Use `GetInfoResponse` instead")]
@@ -3084,7 +3228,7 @@ impl Default for GetInfoResponse {
             pay_tx_fee: 0.0,
             relay_fee: 0.0,
             errors: "no errors".to_string(),
-            errors_timestamp: "no errors timestamp".to_string(),
+            errors_timestamp: Utc::now().timestamp(),
         }
     }
 }
@@ -3106,7 +3250,7 @@ impl GetInfoResponse {
         pay_tx_fee: f64,
         relay_fee: f64,
         errors: String,
-        errors_timestamp: String,
+        errors_timestamp: i64,
     ) -> Self {
         Self {
             version,
@@ -3141,7 +3285,7 @@ impl GetInfoResponse {
         f64,
         f64,
         String,
-        String,
+        i64,
     ) {
         (
             self.version,
@@ -4526,3 +4670,10 @@ pub enum AddNodeCommand {
     #[serde(rename = "add")]
     Add,
 }
+
+/// Response to a `gettxout` RPC request.
+///
+/// See the notes for the [`Rpc::get_tx_out` method].
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
+pub struct GetTxOutResponse(Option<types::transaction::OutputObject>);

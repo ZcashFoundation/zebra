@@ -31,7 +31,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "qdDbj0Dnz"
+        "uid": "zebra-prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -81,7 +81,11 @@
           "hide": false,
           "interval": "",
           "legendFormat": "",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "title": "Block height",
@@ -90,7 +94,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "qdDbj0Dnz"
+        "uid": "zebra-prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -225,7 +229,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "qdDbj0Dnz"
+            "uid": "zebra-prometheus"
           },
           "editorMode": "code",
           "exemplar": false,
@@ -239,7 +243,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "qdDbj0Dnz"
+            "uid": "zebra-prometheus"
           },
           "editorMode": "code",
           "exemplar": false,
@@ -253,7 +257,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "qdDbj0Dnz"
+            "uid": "zebra-prometheus"
           },
           "editorMode": "code",
           "exemplar": false,
@@ -270,7 +274,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "qdDbj0Dnz"
+        "uid": "zebra-prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -319,7 +323,11 @@
           "expr": "rate(state_finalized_cumulative_transactions{}[$__interval])",
           "interval": "",
           "legendFormat": "Transactions finalized",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "title": "Transactions finalized",
@@ -328,7 +336,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "qdDbj0Dnz"
+        "uid": "zebra-prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -418,7 +426,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "qdDbj0Dnz"
+            "uid": "zebra-prometheus"
           },
           "exemplar": true,
           "expr": "rate(proofs_groth16_verified{}[$__interval])",
@@ -429,7 +437,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "qdDbj0Dnz"
+            "uid": "zebra-prometheus"
           },
           "editorMode": "code",
           "expr": "rate(proofs_halo2_verified{}[$__interval])",
@@ -445,7 +453,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "qdDbj0Dnz"
+        "uid": "zebra-prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -552,7 +560,11 @@
           "expr": "rate(state_finalized_cumulative_transparent_newouts{}[$__interval])",
           "interval": "",
           "legendFormat": "Transparent newOuts",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
@@ -560,7 +572,11 @@
           "hide": false,
           "interval": "",
           "legendFormat": "Transparent prevOuts",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "title": "Transparent Outpoints",
@@ -569,7 +585,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "qdDbj0Dnz"
+        "uid": "zebra-prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -689,7 +705,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "qdDbj0Dnz"
+            "uid": "zebra-prometheus"
           },
           "exemplar": true,
           "expr": "rate(state_finalized_cumulative_sprout_nullifiers{}[$__interval])",
@@ -701,7 +717,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "qdDbj0Dnz"
+            "uid": "zebra-prometheus"
           },
           "exemplar": true,
           "expr": "rate(state_finalized_cumulative_sapling_nullifiers{}[$__interval])",
@@ -713,7 +729,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "qdDbj0Dnz"
+            "uid": "zebra-prometheus"
           },
           "exemplar": true,
           "expr": "rate(state_finalized_cumulative_orchard_nullifiers{}[$__interval])",
@@ -725,6 +741,207 @@
         }
       ],
       "title": "Nullifiers revealed",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 25
+      },
+      "id": 100,
+      "options": {
+        "legend": {
+          "calcs": ["mean", "max"],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          },
+          "expr": "zebra_consensus_batch_duration_seconds{quantile=\"0.5\"}",
+          "legendFormat": "{{verifier}} p50",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          },
+          "expr": "zebra_consensus_batch_duration_seconds{quantile=\"0.95\"}",
+          "legendFormat": "{{verifier}} p95",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          },
+          "expr": "zebra_consensus_batch_duration_seconds{quantile=\"0.99\"}",
+          "legendFormat": "{{verifier}} p99",
+          "refId": "C"
+        }
+      ],
+      "title": "Batch Verification Duration by Verifier",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 25
+      },
+      "id": 101,
+      "options": {
+        "legend": {
+          "calcs": ["mean"],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          },
+          "expr": "sum(rate(zebra_consensus_batch_duration_seconds_count{result=\"success\"}[5m])) by (verifier)",
+          "legendFormat": "{{verifier}} success/s",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          },
+          "expr": "sum(rate(zebra_consensus_batch_duration_seconds_count{result=\"failure\"}[5m])) by (verifier)",
+          "legendFormat": "{{verifier}} failure/s",
+          "refId": "B"
+        }
+      ],
+      "title": "Verification Throughput by Verifier",
       "type": "timeseries"
     }
   ],

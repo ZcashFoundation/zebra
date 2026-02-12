@@ -31,7 +31,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fieldConfig": {
         "defaults": {},
         "overrides": [
@@ -118,7 +121,11 @@
           "expr": "zcash_mempool_size_transactions{job=\"$job\"}",
           "interval": "",
           "legendFormat": "transactions",
-          "refId": "Transactions"
+          "refId": "Transactions",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
@@ -126,7 +133,11 @@
           "hide": false,
           "interval": "",
           "legendFormat": " serialized bytes",
-          "refId": "Serialized Bytes"
+          "refId": "Serialized Bytes",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
@@ -134,7 +145,11 @@
           "hide": false,
           "interval": "",
           "legendFormat": "queued transactions",
-          "refId": "Queued Transactions"
+          "refId": "Queued Transactions",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -186,7 +201,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fieldConfig": {
         "defaults": {},
         "overrides": [
@@ -273,7 +291,11 @@
           "hide": false,
           "interval": "",
           "legendFormat": "rejected transactions",
-          "refId": "Rejected Transactions IDs"
+          "refId": "Rejected Transactions IDs",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
@@ -281,7 +303,11 @@
           "hide": false,
           "interval": "",
           "legendFormat": "rejected serialized bytes",
-          "refId": "Rejected Serialized TXID Bytes"
+          "refId": "Rejected Serialized TXID Bytes",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -333,7 +359,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
@@ -377,14 +406,22 @@
           "instant": false,
           "interval": "",
           "legendFormat": "sync download",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
           "expr": "rate(zcash_chain_verified_block_total{job=\"$job\"}[1m])",
           "interval": "",
           "legendFormat": "state commit",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -435,7 +472,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "description": "",
       "fill": 1,
       "fillGradient": 1,
@@ -490,14 +530,22 @@
           "hide": false,
           "interval": "",
           "legendFormat": "queued",
-          "refId": "Queued"
+          "refId": "Queued",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
           "expr": "mempool_downloaded_transactions_total{job=\"$job\"}",
           "interval": "",
           "legendFormat": "downloaded",
-          "refId": "Downloaded"
+          "refId": "Downloaded",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
@@ -505,7 +553,11 @@
           "hide": false,
           "interval": "",
           "legendFormat": "pushed",
-          "refId": "Pushed"
+          "refId": "Pushed",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
@@ -513,7 +565,11 @@
           "hide": false,
           "interval": "",
           "legendFormat": "verified",
-          "refId": "Verified"
+          "refId": "Verified",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
@@ -521,7 +577,11 @@
           "hide": false,
           "interval": "",
           "legendFormat": "cancelled",
-          "refId": "Cancelled"
+          "refId": "Cancelled",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
@@ -529,7 +589,11 @@
           "hide": false,
           "interval": "",
           "legendFormat": "failed - {{reason}}",
-          "refId": "Failed"
+          "refId": "Failed",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
@@ -537,7 +601,11 @@
           "hide": false,
           "interval": "",
           "legendFormat": "gossiped",
-          "refId": "Gossiped"
+          "refId": "Gossiped",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -589,7 +657,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
@@ -631,21 +702,33 @@
           "expr": "rate(mempool_downloaded_transactions_total{job=\"$job\"}[1m]) * 60",
           "interval": "",
           "legendFormat": "downloaded per min",
-          "refId": "Downloaded"
+          "refId": "Downloaded",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
           "expr": "rate(mempool_verified_transactions_total{job=\"$job\"}[1m]) * 60",
           "interval": "",
           "legendFormat": "verified per min",
-          "refId": "Verified"
+          "refId": "Verified",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         },
         {
           "exemplar": true,
           "expr": "rate(mempool_queued_transactions_total{job=\"$job\"}[1m]) * 60",
           "interval": "",
           "legendFormat": "queued per min",
-          "refId": "Queued"
+          "refId": "Queued",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
@@ -696,7 +779,10 @@
       "bars": false,
       "dashLength": 10,
       "dashes": false,
-      "datasource": null,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "zebra-prometheus"
+      },
       "description": "",
       "fill": 1,
       "fillGradient": 1,
@@ -751,7 +837,11 @@
           "hide": false,
           "interval": "",
           "legendFormat": "{{version}}",
-          "refId": "Downloaded"
+          "refId": "Downloaded",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "zebra-prometheus"
+          }
         }
       ],
       "thresholds": [],
