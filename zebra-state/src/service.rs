@@ -659,8 +659,7 @@ impl StateService {
             let _ = rsp_tx.send(Err(CommitBlockError::new_duplicate(
                 Some(semantically_verified.hash.into()),
                 KnownBlock::WriteChannel,
-            )
-            .into()));
+            )));
             return rsp_rx;
         }
 
@@ -673,8 +672,7 @@ impl StateService {
             let _ = rsp_tx.send(Err(CommitBlockError::new_duplicate(
                 Some(semantically_verified.height.into()),
                 KnownBlock::Finalized,
-            )
-            .into()));
+            )));
             return rsp_rx;
         }
 
@@ -691,8 +689,7 @@ impl StateService {
             let _ = rsp_tx.send(Err(CommitBlockError::new_duplicate(
                 Some(semantically_verified.hash.into()),
                 KnownBlock::Queue,
-            )
-            .into()));
+            )));
             rsp_rx
         } else {
             let (rsp_tx, rsp_rx) = oneshot::channel();
@@ -1020,7 +1017,7 @@ impl Service<Request> for StateService {
                 async move {
                     rsp_rx
                         .await
-                        .map_err(|_recv_error| CommitBlockError::WriteTaskExited.into())
+                        .map_err(|_recv_error| CommitBlockError::WriteTaskExited)
                         .flatten()
                         .map_err(BoxError::from)
                         .map(Response::Committed)
@@ -1069,7 +1066,7 @@ impl Service<Request> for StateService {
                 async move {
                     rsp_rx
                         .await
-                        .map_err(|_recv_error| CommitBlockError::WriteTaskExited.into())
+                        .map_err(|_recv_error| CommitBlockError::WriteTaskExited)
                         .flatten()
                         .map_err(BoxError::from)
                         .map(Response::Committed)

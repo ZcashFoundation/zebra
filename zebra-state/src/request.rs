@@ -660,6 +660,11 @@ pub trait MappedRequest: Sized + Send + 'static + Into<Request> {
         Ok(Self::map_rsp(s.ready().await?.call(self.into()).await?))
     }
 
+    /// Accepts a state service to call and a function to convert [LayeredStateError::Layer] errors to the expected error
+    /// type, maps this request to a [`Request`], waits for the state to be ready, calls the state with the mapped request,
+    /// then maps the success or error response to the expected response or error type for this request.
+    ///
+    /// Returns a `Result<MappedResponse, LayeredServicesError<E>>`.
     #[allow(async_fn_in_trait)]
     async fn map_err<State, E>(
         self,

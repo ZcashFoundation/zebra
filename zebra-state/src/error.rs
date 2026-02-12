@@ -78,10 +78,14 @@ impl From<ValidateContextError> for CommitBlockError {
     }
 }
 
+/// Error type used by [`MappedRequest`](super::request::MappedRequest) trait.
 #[derive(Debug, Error)]
 pub enum LayeredStateError<E: std::error::Error + std::fmt::Display> {
+    /// An error that originated in the state or read state service.
     #[error("{0}")]
     State(E),
+
+    /// An error that originated in a tower layer, such as a buffer or timeout layer.
     #[error("{0}")]
     Layer(BoxError),
 }

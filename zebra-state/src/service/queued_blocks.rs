@@ -148,8 +148,7 @@ impl QueuedBlocks {
             let _ = expired_sender.send(Err(CommitBlockError::new_duplicate(
                 Some(expired_block.height.into()),
                 KnownBlock::Finalized,
-            )
-            .into()));
+            )));
 
             // TODO: only remove UTXOs if there are no queued blocks with that UTXO
             //       (known_utxos is best-effort, so this is ok for now)
