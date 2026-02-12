@@ -37,8 +37,8 @@ impl Prepare for Arc<Block> {
             height,
             new_outputs,
             transaction_hashes,
-            // FIXME: Do we need to (and can we) genereate real arbitrary transaction_sighashes?
-            transaction_sighashes: Arc::from([]),
+            // FIXME: Do we need to (and can we) generate real arbitrary transaction_sighashes?
+            transaction_sighashes: None,
             deferred_balance: None,
         }
     }

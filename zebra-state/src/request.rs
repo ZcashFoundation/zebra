@@ -166,7 +166,7 @@ pub struct SemanticallyVerifiedBlock {
     pub transaction_hashes: Arc<[transaction::Hash]>,
     /// A precomputed list of the sighashes of the transactions in this block,
     /// in the same order as `block.transactions`.
-    pub transaction_sighashes: Arc<[transaction::SigHash]>,
+    pub transaction_sighashes: Option<Arc<[transaction::SigHash]>>,
     /// This block's contribution to the deferred pool.
     pub deferred_balance: Option<Amount<NonNegative>>,
 }
@@ -229,7 +229,7 @@ pub struct ContextuallyVerifiedBlock {
 
     /// A precomputed list of the sighashes of the transactions in this block,
     /// in the same order as `block.transactions`.
-    pub transaction_sighashes: Arc<[transaction::SigHash]>,
+    pub transaction_sighashes: Option<Arc<[transaction::SigHash]>>,
 
     /// The sum of the chain value pool changes of all transactions in this block.
     pub(crate) chain_value_pool_change: ValueBalance<NegativeAllowed>,
@@ -450,8 +450,6 @@ impl ContextuallyVerifiedBlock {
             spent_outputs: spent_outputs.clone(),
             transaction_hashes,
             transaction_sighashes,
-            // FIXME: should we add transaction_sighashes to SemanticallyVerifiedBlock?
-            //transaction_sighashes,
             chain_value_pool_change: block.chain_value_pool_change(
                 &utxos_from_ordered_utxos(spent_outputs),
                 deferred_balance,
@@ -502,7 +500,7 @@ impl SemanticallyVerifiedBlock {
             transaction_hashes,
             // Not used in checkpoint paths.
             // FIXME: Is this correct?
-            transaction_sighashes: Arc::from([]),
+            transaction_sighashes: None,
             deferred_balance: None,
         }
     }
@@ -537,7 +535,7 @@ impl From<Arc<Block>> for SemanticallyVerifiedBlock {
             transaction_hashes,
             // Not used in checkpoint paths.
             // FIXME: Is this correct?
-            transaction_sighashes: Arc::from([]),
+            transaction_sighashes: None,
             deferred_balance: None,
         }
     }

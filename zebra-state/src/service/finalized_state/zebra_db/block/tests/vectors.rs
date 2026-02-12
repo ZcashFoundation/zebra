@@ -137,7 +137,7 @@ fn test_block_db_round_trip_with(
                 new_outputs,
                 transaction_hashes,
                 // FIXME: Do we need to (and can we) genereate real arbitrary transaction_sighashes?
-                transaction_sighashes: Arc::from([]),
+                transaction_sighashes: None,
                 deferred_balance: None,
             })
         };

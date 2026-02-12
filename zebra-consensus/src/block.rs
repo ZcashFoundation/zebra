@@ -343,7 +343,7 @@ where
                 height,
                 new_outputs,
                 transaction_hashes,
-                transaction_sighashes,
+                transaction_sighashes: Some(transaction_sighashes),
                 deferred_balance: Some(expected_deferred_amount),
             };
 
