@@ -25,13 +25,6 @@ pub struct CloneError {
     source: Arc<dyn std::error::Error + Send + Sync + 'static>,
 }
 
-impl From<CommitSemanticallyVerifiedError> for CloneError {
-    fn from(source: CommitSemanticallyVerifiedError) -> Self {
-        let source = Arc::new(source);
-        Self { source }
-    }
-}
-
 impl From<BoxError> for CloneError {
     fn from(source: BoxError) -> Self {
         let source = Arc::from(source);
