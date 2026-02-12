@@ -664,7 +664,7 @@ pub trait MappedRequest: Sized + Send + 'static + Into<Request> {
     /// type, maps this request to a [`Request`], waits for the state to be ready, calls the state with the mapped request,
     /// then maps the success or error response to the expected response or error type for this request.
     ///
-    /// Returns a `Result<MappedResponse, LayeredServicesError<E>>`.
+    /// Returns a `Result<MappedResponse, E>`.
     #[allow(async_fn_in_trait)]
     async fn map_err<State, E>(
         self,
