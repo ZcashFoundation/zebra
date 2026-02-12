@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `get_tx_out` method and `OutputObject` response. ([#10235](https://github.com/ZcashFoundation/zebra/pull/10235))
 
+### Removed
+
+- Removed `methods::best_chain_tip_height()` function 
+
 ## [5.0.0] - 2026-02-05
 
 ### Breaking Changes

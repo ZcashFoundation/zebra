@@ -890,6 +890,16 @@ where
     pub fn network(&self) -> &Network {
         &self.network
     }
+
+    fn tip(&self) -> Result<(block::Height, block::Hash)> {
+        self.latest_chain_tip
+            .best_tip_height_and_hash()
+            .ok_or_misc_error("No blocks in state")
+    }
+
+    fn tip_height(&self) -> Result<block::Height> {
+        self.tip().map(|(height, _)| height)
+    }
 }
 
 #[async_trait]
@@ -917,10 +927,7 @@ where
             Utc::now(),
         ));
 
-        let tip_height = self
-            .latest_chain_tip
-            .best_tip_height()
-            .unwrap_or(Height::MIN);
+        let tip_height = self.tip_height().unwrap_or(Height::MIN);
         let testnet = self.network.is_a_test_network();
 
         // This field is behind the `ENABLE_WALLET` feature flag in zcashd:
@@ -1192,11 +1199,10 @@ where
             None
         };
 
-        let hash_or_height =
-            HashOrHeight::new(&hash_or_height, self.latest_chain_tip.best_tip_height())
-                // Reference for the legacy error code:
-                // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
-                .map_error(server::error::LegacyCode::InvalidParameter)?;
+        let hash_or_height = HashOrHeight::new(&hash_or_height, self.tip_height().ok())
+            // Reference for the legacy error code:
+            // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
+            .map_error(server::error::LegacyCode::InvalidParameter)?;
 
         if verbosity == 0 {
             let request = zebra_state::ReadRequest::Block(hash_or_height);
@@ -1405,11 +1411,10 @@ where
         let verbose = verbose.unwrap_or(true);
         let network = self.network.clone();
 
-        let hash_or_height =
-            HashOrHeight::new(&hash_or_height, self.latest_chain_tip.best_tip_height())
-                // Reference for the legacy error code:
-                // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
-                .map_error(server::error::LegacyCode::InvalidParameter)?;
+        let hash_or_height = HashOrHeight::new(&hash_or_height, self.tip_height().ok())
+            // Reference for the legacy error code:
+            // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
+            .map_error(server::error::LegacyCode::InvalidParameter)?;
         let zebra_state::ReadResponse::BlockHeader {
             header,
             hash,
@@ -1525,17 +1530,12 @@ where
     }
 
     fn get_best_block_hash(&self) -> Result<GetBlockHashResponse> {
-        self.latest_chain_tip
-            .best_tip_hash()
-            .map(GetBlockHashResponse)
-            .ok_or_misc_error("No blocks in state")
+        self.tip().map(|(_, hash)| GetBlockHashResponse(hash))
     }
 
     fn get_best_block_height_and_hash(&self) -> Result<GetBlockHeightAndHashResponse> {
-        self.latest_chain_tip
-            .best_tip_height_and_hash()
-            .map(|(height, hash)| GetBlockHeightAndHashResponse { height, hash })
-            .ok_or_misc_error("No blocks in state")
+        let (height, hash) = self.tip()?;
+        Ok(GetBlockHeightAndHashResponse { height, hash })
     }
 
     async fn get_mempool_info(&self) -> Result<GetMempoolInfoResponse> {
@@ -1800,11 +1800,10 @@ where
         let mut read_state = self.read_state.clone();
         let network = self.network.clone();
 
-        let hash_or_height =
-            HashOrHeight::new(&hash_or_height, self.latest_chain_tip.best_tip_height())
-                // Reference for the legacy error code:
-                // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
-                .map_error(server::error::LegacyCode::InvalidParameter)?;
+        let hash_or_height = HashOrHeight::new(&hash_or_height, self.tip_height().ok())
+            // Reference for the legacy error code:
+            // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
+            .map_error(server::error::LegacyCode::InvalidParameter)?;
 
         // Fetch the block referenced by [`hash_or_height`] from the state.
         //
@@ -1968,13 +1967,8 @@ where
 
     async fn get_address_tx_ids(&self, request: GetAddressTxIdsRequest) -> Result<Vec<String>> {
         let mut read_state = self.read_state.clone();
-        let latest_chain_tip = self.latest_chain_tip.clone();
 
-        let height_range = build_height_range(
-            request.start,
-            request.end,
-            best_chain_tip_height(&latest_chain_tip)?,
-        )?;
+        let height_range = build_height_range(request.start, request.end, self.tip_height()?)?;
 
         let valid_addresses = request.valid_addresses()?;
 
@@ -2112,15 +2106,14 @@ where
     }
 
     fn get_block_count(&self) -> Result<u32> {
-        best_chain_tip_height(&self.latest_chain_tip).map(|height| height.0)
+        self.tip_height().map(|height| height.0)
     }
 
     async fn get_block_hash(&self, index: i32) -> Result<GetBlockHashResponse> {
         let mut read_state = self.read_state.clone();
-        let latest_chain_tip = self.latest_chain_tip.clone();
 
         // TODO: look up this height as part of the state request?
-        let tip_height = best_chain_tip_height(&latest_chain_tip)?;
+        let tip_height = self.tip_height()?;
 
         let height = height_from_signed_int(index, tip_height)?;
 
@@ -2725,9 +2718,10 @@ where
     async fn get_block_subsidy(&self, height: Option<u32>) -> Result<GetBlockSubsidyResponse> {
         let net = self.network.clone();
 
-        let height = height.map_or(best_chain_tip_height(&self.latest_chain_tip)?, |h| {
-            Height(h)
-        });
+        let height = match height {
+            Some(h) => Height(h),
+            None => self.tip_height()?,
+        };
 
         let subsidy = block_subsidy(height, &net).map_misc_error()?;
 
@@ -2771,17 +2765,17 @@ where
                     .collect()
             });
 
-        Ok(GetBlockSubsidyResponse {
-            miner: miner_subsidy(height, &net, subsidy)
-                .map_misc_error()?
-                .into(),
-            founders: Amount::zero().into(),
+        Ok(GetBlockSubsidyResponse::new(
             funding_streams,
             lockbox_streams,
-            funding_streams_total: funding_streams_total?,
-            lockbox_total: lockbox_total?,
-            total_block_subsidy: subsidy.into(),
-        })
+            miner_subsidy(height, &net, subsidy)
+                .map_misc_error()?
+                .into(),
+            Amount::zero().into(),
+            funding_streams_total?,
+            lockbox_total?,
+            subsidy.into(),
+        ))
     }
 
     async fn get_difficulty(&self) -> Result<f64> {
@@ -3088,17 +3082,6 @@ where
 }
 
 // TODO: Move the code below to separate modules.
-
-/// Returns the best chain tip height of `latest_chain_tip`,
-/// or an RPC error if there are no blocks in the state.
-pub fn best_chain_tip_height<Tip>(latest_chain_tip: &Tip) -> Result<Height>
-where
-    Tip: ChainTip + Clone + Send + Sync + 'static,
-{
-    latest_chain_tip
-        .best_tip_height()
-        .ok_or_misc_error("No blocks in state")
-}
 
 /// Response to a `getinfo` RPC request.
 ///
