@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `amount::Amount::is_zero`
+- `parameters::network::subsidy::constants` module.
+- `impl From<block::Height> for u64`
+- `impl From<block::Height> for u32`
+- `parameters::network::testnet::founder_address_list`
+- `parameters::network::subsidy::founders_reward`
+- `parameters::network::subsidy::founders_reward_address`
+
+### Changed
+
+- `parameters::network::subsidy::SubsidyError::` has new variants:
+  `FoundersRewardNotFound` and ` Underflow`, and the variant `SumOverflow` was
+  renamed to `Overflow`.
+- `parameters::network::subsidy::num_halvings` was renamed to `halving`.
+- `transparent::Output::new_coinbase` was renamed to `new`.
+
 ## [5.0.0] - 2026-02-05
 
 ### Breaking Changes

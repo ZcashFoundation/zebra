@@ -99,8 +99,6 @@ pub(crate) const FUNDING_STREAM_ECC_ADDRESSES: [&str; FUNDING_STREAMS_NUM_ADDRES
 pub(crate) const NUM_FOUNDER_ADDRESSES: usize = 48;
 
 /// List of founder addresses on Mainnet.
-// TODO: Remove this attribute once the constant is used.
-#[allow(unused)]
 pub(crate) const FOUNDER_ADDRESS_LIST: [&str; NUM_FOUNDER_ADDRESSES] = [
     "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd",
     "t3cL9AucCajm3HXDhb5jBnJK2vapVoXsop3",

@@ -1212,4 +1212,12 @@ impl Network {
             false
         }
     }
+
+    /// Returns the list of founders' reward addresses for this network.
+    pub fn founder_address_list(&self) -> &[&str] {
+        match self {
+            Network::Mainnet => &mainnet::FOUNDER_ADDRESS_LIST,
+            Network::Testnet(_) => &testnet::FOUNDER_ADDRESS_LIST,
+        }
+    }
 }

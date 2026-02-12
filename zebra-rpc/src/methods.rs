@@ -61,15 +61,12 @@ use zcash_address::{unified::Encoding, TryFromAddress};
 use zcash_primitives::consensus::Parameters;
 
 use zebra_chain::{
-    amount::{self, Amount, NegativeAllowed, NonNegative},
+    amount::{Amount, NegativeAllowed},
     block::{self, Block, Commitment, Height, SerializedBlock, TryIntoHeight},
     chain_sync_status::ChainSyncStatus,
     chain_tip::{ChainTip, NetworkChainTipHeightEstimator},
     parameters::{
-        subsidy::{
-            block_subsidy, funding_stream_values, miner_subsidy, FundingStreamReceiver,
-            ParameterSubsidy,
-        },
+        subsidy::{block_subsidy, funding_stream_values, miner_subsidy, FundingStreamReceiver},
         ConsensusBranchId, Network, NetworkUpgrade, POW_AVERAGING_WINDOW,
     },
     serialization::{BytesInDisplayOrder, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
@@ -95,7 +92,9 @@ use zebra_state::{
 use crate::{
     client::Treestate,
     config,
-    methods::types::{validate_address::validate_address, z_validate_address::z_validate_address},
+    methods::types::{
+        validate_address::validate_address, z_validate_address::z_validate_address, zec::Zec,
+    },
     queue::Queue,
     server::{
         self,
@@ -2724,46 +2723,31 @@ where
     }
 
     async fn get_block_subsidy(&self, height: Option<u32>) -> Result<GetBlockSubsidyResponse> {
-        let latest_chain_tip = self.latest_chain_tip.clone();
-        let network = self.network.clone();
+        let net = self.network.clone();
 
-        let height = if let Some(height) = height {
-            Height(height)
-        } else {
-            best_chain_tip_height(&latest_chain_tip)?
+        let height = match height {
+            Some(h) => Height(h),
+            None => best_chain_tip_height(&self.latest_chain_tip)?,
         };
 
-        if height < network.height_for_first_halving() {
-            return Err(ErrorObject::borrowed(
-                0,
-                "Zebra does not support founders' reward subsidies, \
-                        use a block height that is after the first halving",
-                None,
-            ));
-        }
-
-        // Always zero for post-halving blocks
-        let founders = Amount::zero();
-
-        let total_block_subsidy =
-            block_subsidy(height, &network).map_error(server::error::LegacyCode::default())?;
-        let miner_subsidy = miner_subsidy(height, &network, total_block_subsidy)
-            .map_error(server::error::LegacyCode::default())?;
+        let subsidy = block_subsidy(height, &net).map_misc_error()?;
 
         let (lockbox_streams, mut funding_streams): (Vec<_>, Vec<_>) =
-            funding_stream_values(height, &network, total_block_subsidy)
-                .map_error(server::error::LegacyCode::default())?
+            funding_stream_values(height, &net, subsidy)
+                .map_misc_error()?
                 .into_iter()
                 // Separate the funding streams into deferred and non-deferred streams
                 .partition(|(receiver, _)| matches!(receiver, FundingStreamReceiver::Deferred));
 
-        let is_nu6 = NetworkUpgrade::current(&network, height) == NetworkUpgrade::Nu6;
-
-        let [lockbox_total, funding_streams_total]: [std::result::Result<
-            Amount<NonNegative>,
-            amount::Error,
-        >; 2] = [&lockbox_streams, &funding_streams]
-            .map(|streams| streams.iter().map(|&(_, amount)| amount).sum());
+        let [lockbox_total, funding_streams_total] =
+            [&lockbox_streams, &funding_streams].map(|streams| {
+                streams
+                    .iter()
+                    .map(|&(_, amount)| amount)
+                    .sum::<std::result::Result<Amount<_>, _>>()
+                    .map(Zec::from)
+                    .map_misc_error()
+            });
 
         // Use the same funding stream order as zcashd
         funding_streams.sort_by_key(|(receiver, _funding_stream)| {
@@ -2772,13 +2756,15 @@ where
                 .position(|zcashd_receiver| zcashd_receiver == receiver)
         });
 
+        let is_nu6 = NetworkUpgrade::current(&net, height) == NetworkUpgrade::Nu6;
+
         // Format the funding streams and lockbox streams
-        let [funding_streams, lockbox_streams]: [Vec<_>; 2] = [funding_streams, lockbox_streams]
-            .map(|streams| {
+        let [funding_streams, lockbox_streams] =
+            [funding_streams, lockbox_streams].map(|streams| {
                 streams
                     .into_iter()
                     .map(|(receiver, value)| {
-                        let address = funding_stream_address(height, &network, receiver);
+                        let address = funding_stream_address(height, &net, receiver);
                         types::subsidy::FundingStream::new_internal(
                             is_nu6, receiver, value, address,
                         )
@@ -2787,17 +2773,15 @@ where
             });
 
         Ok(GetBlockSubsidyResponse {
-            miner: miner_subsidy.into(),
-            founders: founders.into(),
+            miner: miner_subsidy(height, &net, subsidy)
+                .map_misc_error()?
+                .into(),
+            founders: Amount::zero().into(),
             funding_streams,
             lockbox_streams,
-            funding_streams_total: funding_streams_total
-                .map_error(server::error::LegacyCode::default())?
-                .into(),
-            lockbox_total: lockbox_total
-                .map_error(server::error::LegacyCode::default())?
-                .into(),
-            total_block_subsidy: total_block_subsidy.into(),
+            funding_streams_total: funding_streams_total?,
+            lockbox_total: lockbox_total?,
+            total_block_subsidy: subsidy.into(),
         })
     }
 
