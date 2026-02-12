@@ -83,7 +83,7 @@ serde = { workspace = true, features = ["serde_derive"] }
 nix = { workspace = true, features = ["signal"] }
 
 # For openrpc
-openrpsee = { git = "https://github.com/oxarbitrage/openrpsee.git", branch = "main" }
+openrpsee = "0.1.0"
 phf = { workspace = true, features = ["macros"] }
 schemars = { workspace = true }
 
@@ -111,7 +111,7 @@ zebra-script = { path = "../zebra-script", version = "3.0.1" }
 zebra-state = { path = "../zebra-state", version = "3.1.1" }
 
 [build-dependencies]
-openrpsee = { git = "https://github.com/oxarbitrage/openrpsee.git", branch = "main" }
+openrpsee = "0.1.0"
 tonic-prost-build = { workspace = true }
 which = { workspace = true }
 
