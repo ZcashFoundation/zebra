@@ -411,7 +411,13 @@ pub fn are_inputs_standard(
                     // Non-standard redeemed script: accept if sigops <= limit.
                     // Matches zcashd: "Any other Script with less than 15 sigops OK:
                     // ... extra data left on the stack after execution is OK, too"
-                    return redeemed_code.sig_op_count(true) <= MAX_P2SH_SIGOPS;
+                    let sigops = redeemed_code.sig_op_count(true);
+                    if sigops > MAX_P2SH_SIGOPS {
+                        return false;
+                    }
+
+                    // This input is acceptable; move on to the next input.
+                    continue;
                 }
             }
         }
