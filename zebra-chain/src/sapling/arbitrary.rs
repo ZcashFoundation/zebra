@@ -10,9 +10,8 @@ use proptest::{collection::vec, prelude::*};
 use crate::primitives::Groth16Proof;
 
 use super::{
-    keys::{self, ValidatingKey},
-    note, tree, FieldNotPresent, Output, OutputInTransactionV4, PerSpendAnchor, SharedAnchor,
-    Spend,
+    keys::ValidatingKey, note, tree, FieldNotPresent, Output, OutputInTransactionV4,
+    PerSpendAnchor, SharedAnchor, Spend,
 };
 
 impl Arbitrary for Spend<PerSpendAnchor> {
@@ -85,7 +84,7 @@ impl Arbitrary for Output {
                 cv: ExtendedPoint::generator().into(),
                 cm_u: sapling_crypto::note::ExtractedNoteCommitment::from_bytes(&[0u8; 32])
                     .unwrap(),
-                ephemeral_key: keys::EphemeralPublicKey(ExtendedPoint::generator().into()),
+                ephemeral_key: jubjub::AffinePoint::from(ExtendedPoint::generator()).into(),
                 enc_ciphertext,
                 out_ciphertext,
                 zkproof,

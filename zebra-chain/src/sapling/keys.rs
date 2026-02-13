@@ -17,9 +17,7 @@ use rand_core::{CryptoRng, RngCore};
 use crate::{
     error::{AddressError, RandError},
     primitives::redjubjub::SpendAuth,
-    serialization::{
-        serde_helpers, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
-    },
+    serialization::{SerializationError, ZcashDeserialize, ZcashSerialize},
 };
 
 #[cfg(test)]
@@ -240,6 +238,11 @@ impl PartialEq<[u8; 32]> for TransmissionKey {
 
 /// An [ephemeral public key][1] for Sapling key agreement.
 ///
+/// Stores raw bytes and lazily converts to the validated Jubjub point on first
+/// access via [`inner()`](EphemeralPublicKey::inner). This avoids expensive
+/// Jubjub curve point decompression during deserialization from the finalized
+/// state database.
+///
 /// Public keys containing points of small order are not allowed.
 ///
 /// It is denoted by `epk` in the specification. (This type does _not_
@@ -248,37 +251,60 @@ impl PartialEq<[u8; 32]> for TransmissionKey {
 ///
 /// [1]: https://zips.z.cash/protocol/protocol.pdf#outputdesc
 /// [2]: https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement
-#[derive(Copy, Clone, Deserialize, PartialEq, Serialize)]
-pub struct EphemeralPublicKey(
-    #[serde(with = "serde_helpers::AffinePoint")] pub(crate) jubjub::AffinePoint,
-);
+#[derive(Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct EphemeralPublicKey([u8; 32]);
 
 impl fmt::Debug for EphemeralPublicKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("EphemeralPublicKey")
-            .field("u", &hex::encode(self.0.get_u().to_bytes()))
-            .field("v", &hex::encode(self.0.get_v().to_bytes()))
+        f.debug_tuple("EphemeralPublicKey")
+            .field(&hex::encode(self.0))
             .finish()
     }
 }
 
-impl Eq for EphemeralPublicKey {}
+impl EphemeralPublicKey {
+    /// Return the raw serialized bytes of this ephemeral public key.
+    pub fn to_bytes(&self) -> [u8; 32] {
+        self.0
+    }
+
+    /// Decode the inner `jubjub::AffinePoint` type.
+    ///
+    /// This performs Jubjub curve point decompression, which is expensive.
+    /// Only call when the decoded point is actually needed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the bytes do not represent a valid Jubjub point.
+    pub fn inner(&self) -> jubjub::AffinePoint {
+        jubjub::AffinePoint::from_bytes(self.0)
+            .into_option()
+            .expect("previously validated or from trusted storage")
+    }
+}
+
+#[cfg(any(test, feature = "proptest-impl"))]
+impl From<jubjub::AffinePoint> for EphemeralPublicKey {
+    fn from(point: jubjub::AffinePoint) -> Self {
+        EphemeralPublicKey(point.to_bytes())
+    }
+}
 
 impl From<EphemeralPublicKey> for [u8; 32] {
-    fn from(nk: EphemeralPublicKey) -> [u8; 32] {
-        nk.0.to_bytes()
+    fn from(epk: EphemeralPublicKey) -> [u8; 32] {
+        epk.0
     }
 }
 
 impl From<&EphemeralPublicKey> for [u8; 32] {
-    fn from(nk: &EphemeralPublicKey) -> [u8; 32] {
-        nk.0.to_bytes()
+    fn from(epk: &EphemeralPublicKey) -> [u8; 32] {
+        epk.0
     }
 }
 
 impl PartialEq<[u8; 32]> for EphemeralPublicKey {
     fn eq(&self, other: &[u8; 32]) -> bool {
-        &self.0.to_bytes() == other
+        &self.0 == other
     }
 }
 
@@ -304,25 +330,32 @@ impl TryFrom<[u8; 32]> for EphemeralPublicKey {
         if possible_point.unwrap().is_small_order().into() {
             Err("jubjub::AffinePoint value for Sapling EphemeralPublicKey point is of small order")
         } else {
-            Ok(Self(possible_point.unwrap()))
+            Ok(Self(bytes))
         }
     }
 }
 
 impl ZcashSerialize for EphemeralPublicKey {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        writer.write_all(&<[u8; 32]>::from(self)[..])?;
+        writer.write_all(&self.0)?;
         Ok(())
     }
 }
 
 impl ZcashDeserialize for EphemeralPublicKey {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        Self::try_from(reader.read_32_bytes()?).map_err(SerializationError::Parse)
+        let mut bytes = [0u8; 32];
+        reader.read_exact(&mut bytes)?;
+        Ok(EphemeralPublicKey(bytes))
     }
 }
 
 /// A randomized [validating key][1] that should be used to validate `spendAuthSig`.
+///
+/// Stores raw bytes and lazily converts to the validated `redjubjub` type on
+/// first access via [`inner()`](ValidatingKey::inner). This avoids expensive
+/// Jubjub curve point decompression during deserialization from the finalized
+/// state database.
 ///
 /// It is denoted by `rk` in the specification. (This type does _not_
 /// represent [SpendAuthSig^{Sapling}.Public][2], which allows any points, including
@@ -330,19 +363,47 @@ impl ZcashDeserialize for EphemeralPublicKey {
 ///
 /// [1]: https://zips.z.cash/protocol/protocol.pdf#spenddesc
 /// [2]: https://zips.z.cash/protocol/protocol.pdf#concretereddsa
-#[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
-pub struct ValidatingKey(redjubjub::VerificationKey<SpendAuth>);
+#[derive(Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ValidatingKey([u8; 32]);
+
+impl fmt::Debug for ValidatingKey {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("ValidatingKey")
+            .field(&hex::encode(self.0))
+            .finish()
+    }
+}
+
+impl ValidatingKey {
+    /// Return the raw serialized bytes of this validating key.
+    pub fn to_bytes(&self) -> [u8; 32] {
+        self.0
+    }
+
+    /// Decode the inner `redjubjub::VerificationKey<SpendAuth>` type.
+    ///
+    /// This performs Jubjub curve point decompression, which is expensive.
+    /// Only call when the decoded key is actually needed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the bytes do not represent a valid verification key.
+    pub fn inner(&self) -> redjubjub::VerificationKey<SpendAuth> {
+        redjubjub::VerificationKey::<SpendAuth>::try_from(self.0)
+            .expect("previously validated or from trusted storage")
+    }
+}
 
 impl From<ValidatingKey> for redjubjub::VerificationKey<SpendAuth> {
     fn from(rk: ValidatingKey) -> Self {
-        rk.0
+        rk.inner()
     }
 }
 
 impl TryFrom<redjubjub::VerificationKey<SpendAuth>> for ValidatingKey {
     type Error = &'static str;
 
-    /// Convert an array into a ValidatingKey.
+    /// Convert a verification key into a ValidatingKey.
     ///
     /// Returns an error if the key is malformed or [is of small order][1].
     ///
@@ -353,14 +414,15 @@ impl TryFrom<redjubjub::VerificationKey<SpendAuth>> for ValidatingKey {
     ///
     /// [1]: https://zips.z.cash/protocol/protocol.pdf#spenddesc
     fn try_from(key: redjubjub::VerificationKey<SpendAuth>) -> Result<Self, Self::Error> {
+        let bytes: [u8; 32] = key.into();
         if bool::from(
-            jubjub::AffinePoint::from_bytes(key.into())
+            jubjub::AffinePoint::from_bytes(bytes)
                 .unwrap()
                 .is_small_order(),
         ) {
             Err("jubjub::AffinePoint value for Sapling ValidatingKey is of small order")
         } else {
-            Ok(Self(key))
+            Ok(Self(bytes))
         }
     }
 }
@@ -377,12 +439,12 @@ impl TryFrom<[u8; 32]> for ValidatingKey {
 
 impl From<ValidatingKey> for [u8; 32] {
     fn from(key: ValidatingKey) -> Self {
-        key.0.into()
+        key.0
     }
 }
 
 impl From<ValidatingKey> for redjubjub::VerificationKeyBytes<SpendAuth> {
     fn from(key: ValidatingKey) -> Self {
-        key.0.into()
+        redjubjub::VerificationKeyBytes::from(key.0)
     }
 }

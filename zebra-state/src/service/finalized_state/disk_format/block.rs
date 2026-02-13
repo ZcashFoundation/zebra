@@ -292,8 +292,9 @@ impl FromDisk for Transaction {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
         let bytes = bytes.as_ref();
 
-        // TODO: skip cryptography verification during transaction deserialization from storage,
-        //       or do it in a rayon thread (ideally in parallel with other transactions)
+        // Sapling types (ValueCommitment, EphemeralPublicKey, ValidatingKey) now use
+        // lazy deserialization -- raw bytes are stored and expensive Jubjub curve point
+        // decompression is deferred until first access via inner(). See issue #7939.
         bytes
             .as_ref()
             .zcash_deserialize_into()

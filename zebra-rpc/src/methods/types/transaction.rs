@@ -457,11 +457,10 @@ pub struct ShieldedSpend {
     spend_auth_sig: [u8; 64],
 }
 
-// We can't use `#[getter(copy)]` as upstream `sapling_crypto::note::ValueCommitment` is not `Copy`.
 impl ShieldedSpend {
     /// The value commitment to the input note.
     pub fn cv(&self) -> ValueCommitment {
-        self.cv.clone()
+        self.cv
     }
 }
 
@@ -489,11 +488,10 @@ pub struct ShieldedOutput {
     proof: [u8; 192],
 }
 
-// We can't use `#[getter(copy)]` as upstream `sapling_crypto::note::ValueCommitment` is not `Copy`.
 impl ShieldedOutput {
     /// The value commitment to the output note.
     pub fn cv(&self) -> ValueCommitment {
-        self.cv.clone()
+        self.cv
     }
 }
 
@@ -722,13 +720,13 @@ impl TransactionObject {
                     let mut nullifier = spend.nullifier.as_bytes();
                     nullifier.reverse();
 
-                    let mut rk: [u8; 32] = spend.clone().rk.into();
+                    let mut rk: [u8; 32] = spend.rk.to_bytes();
                     rk.reverse();
 
                     let spend_auth_sig: [u8; 64] = spend.spend_auth_sig.into();
 
                     ShieldedSpend {
-                        cv: spend.cv.clone(),
+                        cv: spend.cv,
                         anchor,
                         nullifier,
                         rk,
@@ -742,13 +740,13 @@ impl TransactionObject {
                 .map(|output| {
                     let mut cm_u: [u8; 32] = output.cm_u.to_bytes();
                     cm_u.reverse();
-                    let mut ephemeral_key: [u8; 32] = output.ephemeral_key.into();
+                    let mut ephemeral_key: [u8; 32] = output.ephemeral_key.to_bytes();
                     ephemeral_key.reverse();
                     let enc_ciphertext: [u8; 580] = output.enc_ciphertext.into();
                     let out_ciphertext: [u8; 80] = output.out_ciphertext.into();
 
                     ShieldedOutput {
-                        cv: output.cv.clone(),
+                        cv: output.cv,
                         cm_u,
                         ephemeral_key,
                         enc_ciphertext,

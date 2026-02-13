@@ -162,6 +162,11 @@ harness = false
 required-features = ["bench"]
 
 [[bench]]
+name = "sapling"
+harness = false
+required-features = ["bench"]
+
+[[bench]]
 name = "redpallas"
 harness = false
 

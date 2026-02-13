@@ -1,10 +1,10 @@
 //! Note and value commitments.
 
-use std::io;
+use std::{fmt, io};
 
 use hex::{FromHex, FromHexError, ToHex};
 
-use crate::serialization::{serde_helpers, SerializationError, ZcashDeserialize, ZcashSerialize};
+use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize};
 
 #[cfg(test)]
 mod test_vectors;
@@ -16,30 +16,57 @@ mod test_vectors;
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct CommitmentRandomness(jubjub::Fr);
 
-/// A wrapper for the `sapling_crypto::value::ValueCommitment` type.
+/// A Sapling value commitment.
 ///
-/// We need the wrapper to derive Serialize, Deserialize and Equality.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct ValueCommitment(
-    #[serde(with = "serde_helpers::ValueCommitment")] pub sapling_crypto::value::ValueCommitment,
-);
+/// Stores raw bytes and lazily converts to the validated `sapling_crypto` type
+/// on first access via [`inner()`](ValueCommitment::inner). This avoids expensive
+/// Jubjub curve point decompression during deserialization from the finalized
+/// state database.
+///
+/// Consensus safety is preserved because `zebra-consensus` independently
+/// re-validates all curve points through `librustzcash`'s `Transaction::read()`.
+#[derive(Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ValueCommitment([u8; 32]);
 
-impl PartialEq for ValueCommitment {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.as_inner() == other.0.as_inner()
+impl fmt::Debug for ValueCommitment {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("ValueCommitment")
+            .field(&hex::encode(self.0))
+            .finish()
     }
 }
-impl Eq for ValueCommitment {}
 
 impl ValueCommitment {
+    /// Return the raw serialized bytes of this value commitment.
+    pub fn to_bytes(&self) -> [u8; 32] {
+        self.0
+    }
+
     /// Return the hash bytes in big-endian byte-order suitable for printing out byte by byte.
     ///
     /// Zebra displays commitment value in big-endian byte-order,
     /// following the convention set by zcashd.
     pub fn bytes_in_display_order(&self) -> [u8; 32] {
-        let mut reversed_bytes = self.0.to_bytes();
+        let mut reversed_bytes = self.0;
         reversed_bytes.reverse();
         reversed_bytes
+    }
+
+    /// Decode the inner `sapling_crypto::value::ValueCommitment` type.
+    ///
+    /// This performs Jubjub curve point decompression and small-order checks,
+    /// which is expensive. Only call when the decoded point is actually needed
+    /// (e.g. for binding verification key computation).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the bytes do not represent a valid, non-small-order Jubjub point.
+    /// This is safe because bytes were either validated before storage or come from
+    /// trusted (already-validated) sources.
+    pub fn inner(&self) -> sapling_crypto::value::ValueCommitment {
+        sapling_crypto::value::ValueCommitment::from_bytes_not_small_order(&self.0)
+            .into_option()
+            .expect("previously validated or from trusted storage")
     }
 }
 
@@ -62,52 +89,30 @@ impl FromHex for ValueCommitment {
         // Convert from big-endian (display) to little-endian (internal)
         bytes.reverse();
 
-        Self::zcash_deserialize(io::Cursor::new(&bytes))
-            .map_err(|_| FromHexError::InvalidStringLength)
+        Ok(ValueCommitment(bytes))
     }
 }
 
 #[cfg(any(test, feature = "proptest-impl"))]
 impl From<jubjub::ExtendedPoint> for ValueCommitment {
     /// Convert a Jubjub point into a ValueCommitment.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the given point does not correspond to a valid ValueCommitment.
     fn from(extended_point: jubjub::ExtendedPoint) -> Self {
         let bytes = jubjub::AffinePoint::from(extended_point).to_bytes();
-
-        let value_commitment =
-            sapling_crypto::value::ValueCommitment::from_bytes_not_small_order(&bytes)
-                .into_option()
-                .expect("invalid ValueCommitment bytes");
-
-        ValueCommitment(value_commitment)
-    }
-}
-
-impl ZcashDeserialize for sapling_crypto::value::ValueCommitment {
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let mut buf = [0u8; 32];
-        reader.read_exact(&mut buf)?;
-
-        let value_commitment: Option<sapling_crypto::value::ValueCommitment> =
-            sapling_crypto::value::ValueCommitment::from_bytes_not_small_order(&buf).into_option();
-
-        value_commitment.ok_or(SerializationError::Parse("invalid ValueCommitment bytes"))
+        ValueCommitment(bytes)
     }
 }
 
 impl ZcashDeserialize for ValueCommitment {
-    fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
-        let value_commitment = sapling_crypto::value::ValueCommitment::zcash_deserialize(reader)?;
-        Ok(Self(value_commitment))
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let mut bytes = [0u8; 32];
+        reader.read_exact(&mut bytes)?;
+        Ok(ValueCommitment(bytes))
     }
 }
 
 impl ZcashSerialize for ValueCommitment {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        writer.write_all(&self.0.to_bytes())?;
+        writer.write_all(&self.0)?;
         Ok(())
     }
 }
