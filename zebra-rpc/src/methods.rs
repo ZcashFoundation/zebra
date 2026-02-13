@@ -136,8 +136,8 @@ use types::{
 
 include!(concat!(env!("OUT_DIR"), "/rpc_openrpc.rs"));
 
-// TODO: Parameter descriptions has to be revised, argument docs in the methods should use
-// these constants where needed.
+// TODO: Review the parameter descriptions below, and update them as needed:
+// https://github.com/ZcashFoundation/zebra/issues/10320
 pub(super) const PARAM_VERBOSE_DESC: &str =
     "Boolean flag to indicate verbosity, true for a json object, false for hex encoded data.";
 pub(super) const PARAM_POOL_DESC: &str =
