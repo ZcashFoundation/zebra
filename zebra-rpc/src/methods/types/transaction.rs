@@ -278,7 +278,9 @@ pub struct TransactionObject {
     #[serde(rename = "locktime")]
     pub(crate) lock_time: u32,
 
-    /// The block height after which the transaction expires
+    /// The block height after which the transaction expires.
+    /// Included for Overwinter+ transactions (matching zcashd), omitted for V1/V2.
+    /// See: <https://github.com/zcash/zcash/blob/v6.11.0/src/rpc/rawtransaction.cpp#L224-L226>
     #[serde(rename = "expiryheight", skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
     pub(crate) expiry_height: Option<Height>,
@@ -715,8 +717,9 @@ impl TransactionObject {
                         txid: outpoint.hash.encode_hex(),
                         vout: outpoint.index,
                         script_sig: ScriptSig {
+                            // https://github.com/zcash/zcash/blob/v6.11.0/src/rpc/rawtransaction.cpp#L240
                             asm: zcash_script::script::Code(unlock_script.as_raw_bytes().to_vec())
-                                .to_asm(false),
+                                .to_asm(true),
                             hex: unlock_script.clone(),
                         },
                         sequence: *sequence,
@@ -743,6 +746,8 @@ impl TransactionObject {
                         value_zat: output.1.value.zatoshis(),
                         n: output.0 as u32,
                         script_pub_key: ScriptPubKey {
+                            // https://github.com/zcash/zcash/blob/v6.11.0/src/rpc/rawtransaction.cpp#L271
+                            // https://github.com/zcash/zcash/blob/v6.11.0/src/rpc/rawtransaction.cpp#L45
                             asm: zcash_script::script::Code(
                                 output.1.lock_script.as_raw_bytes().to_vec(),
                             )
@@ -928,7 +933,13 @@ impl TransactionObject {
             version: tx.version(),
             version_group_id: tx.version_group_id().map(|id| id.to_be_bytes().to_vec()),
             lock_time: tx.raw_lock_time(),
-            expiry_height: tx.expiry_height(),
+            // zcashd includes expiryheight only for Overwinter+ transactions.
+            // For those, expiry_height of 0 means "no expiry" per ZIP-203.
+            expiry_height: if tx.is_overwintered() {
+                Some(tx.expiry_height().unwrap_or(Height(0)))
+            } else {
+                None
+            },
             block_hash,
             block_time,
         }
