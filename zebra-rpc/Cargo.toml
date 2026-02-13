@@ -87,7 +87,7 @@ serde = { workspace = true, features = ["serde_derive"] }
 nix = { workspace = true, features = ["signal"] }
 
 # For openrpc
-openrpsee = "0.1.0"
+openrpsee = { workspace = true }
 phf = { workspace = true, features = ["macros"] }
 schemars = { workspace = true }
 
@@ -115,7 +115,7 @@ zebra-script = { path = "../zebra-script", version = "4.0.0" }
 zebra-state = { path = "../zebra-state", version = "4.0.0" }
 
 [build-dependencies]
-openrpsee = "0.1.0"
+openrpsee = { workspace = true }
 tonic-prost-build = { workspace = true }
 which = { workspace = true }
 
