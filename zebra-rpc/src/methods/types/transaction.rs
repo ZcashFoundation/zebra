@@ -280,7 +280,7 @@ pub struct TransactionObject {
 
     /// The block height after which the transaction expires.
     /// Included for Overwinter+ transactions (matching zcashd), omitted for V1/V2.
-    /// See: https://github.com/zcash/zcash/blob/v6.11.0/src/rpc/rawtransaction.cpp#L224-L226
+    /// See: <https://github.com/zcash/zcash/blob/v6.11.0/src/rpc/rawtransaction.cpp#L224-L226>
     #[serde(rename = "expiryheight", skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
     pub(crate) expiry_height: Option<Height>,
