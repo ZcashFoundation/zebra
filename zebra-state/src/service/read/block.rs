@@ -38,6 +38,28 @@ use crate::{
 use crate::request::Spend;
 
 /// Returns the [`Block`] with [`block::Hash`] or
+/// [`Height`], if it exists in the non-finalized state or finalized `db`.
+///
+/// Checks all non-finalized chain for block hashes or the best chain for heights.
+pub fn any_chain_block(
+    non_finalized: NonFinalizedState,
+    db: &ZebraDb,
+    hash_or_height: HashOrHeight,
+) -> Option<Arc<Block>> {
+    let unchecked_best_chain = if let HashOrHeight::Hash(hash) = hash_or_height {
+        if let Some(block) = non_finalized.any_block_by_hash(hash) {
+            return Some(block);
+        }
+
+        None
+    } else {
+        non_finalized.best_chain()
+    };
+
+    block(unchecked_best_chain, db, hash_or_height)
+}
+
+/// Returns the [`Block`] with [`block::Hash`] or
 /// [`Height`], if it exists in the non-finalized `chain` or finalized `db`.
 pub fn block<C>(chain: Option<C>, db: &ZebraDb, hash_or_height: HashOrHeight) -> Option<Arc<Block>>
 where

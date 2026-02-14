@@ -1239,6 +1239,7 @@ impl Service<Request> for StateService {
             | Request::AnyChainTransaction(_)
             | Request::UnspentBestChainUtxo(_)
             | Request::Block(_)
+            | Request::AnyChainBlock(_)
             | Request::BlockAndSize(_)
             | Request::BlockHeader(_)
             | Request::FindBlockHashes { .. }
@@ -1477,6 +1478,30 @@ impl Service<ReadRequest> for ReadStateService {
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::Block");
+
+                        Ok(ReadResponse::Block(block))
+                    })
+                })
+                .wait_for_panics()
+            }
+
+            ReadRequest::AnyChainBlock(hash_or_height) => {
+                let state = self.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let block = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::any_chain_block(
+                                    non_finalized_state,
+                                    &state.db,
+                                    hash_or_height,
+                                )
+                            },
+                        );
+
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::AnyChainBlock");
 
                         Ok(ReadResponse::Block(block))
                     })
