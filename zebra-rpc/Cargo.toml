@@ -86,6 +86,11 @@ serde = { workspace = true, features = ["serde_derive"] }
 # For the `stop` RPC method.
 nix = { workspace = true, features = ["signal"] }
 
+# For openrpc
+openrpsee = { workspace = true }
+phf = { workspace = true, features = ["macros"] }
+schemars = { workspace = true }
+
 zcash_address = { workspace = true }
 zcash_keys = { workspace = true }
 zcash_primitives = { workspace = true, features = ["transparent-inputs"] }
@@ -110,6 +115,7 @@ zebra-script = { path = "../zebra-script", version = "4.0.0" }
 zebra-state = { path = "../zebra-state", version = "4.0.0" }
 
 [build-dependencies]
+openrpsee = { workspace = true }
 tonic-prost-build = { workspace = true }
 which = { workspace = true }
 
