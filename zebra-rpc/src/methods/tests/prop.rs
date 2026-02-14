@@ -36,6 +36,7 @@ use crate::methods::{
     types::{
         get_blockchain_info::GetBlockchainInfoBalance,
         get_raw_mempool::{GetRawMempoolResponse, MempoolObject},
+        submit_block::MinedBlocksCounter,
     },
 };
 
@@ -991,6 +992,7 @@ where
         MockAddressBookPeers::default(),
         rx,
         None,
+        MinedBlocksCounter::new().0,
     );
 
     (mempool, read_state, rpc, mempool_tx_queue)

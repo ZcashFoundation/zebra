@@ -71,6 +71,7 @@ pub async fn show_block_chain_progress(
     latest_chain_tip: impl ChainTip,
     sync_status: SyncStatus,
     chain_tip_metrics_sender: watch::Sender<ChainTipMetrics>,
+    mined_blocks_receiver: watch::Receiver<u64>,
 ) -> ! {
     // The minimum number of extra blocks after the highest checkpoint, based on:
     // - the non-finalized state limit, and
@@ -284,17 +285,24 @@ pub async fn show_block_chain_progress(
             } else if is_syncer_stopped {
                 // We've stayed near the tip for a while, and we've stopped syncing lots of blocks.
                 // So we're mostly using gossiped blocks now.
+                let mined_count = *mined_blocks_receiver.borrow();
+
                 info!(
                     %sync_percent,
                     ?current_height,
                     ?network_upgrade,
                     ?remaining_sync_blocks,
+                    ?mined_count,
                     %time_since_last_state_block,
                     "finished initial sync to chain tip, using gossiped blocks",
                 );
 
                 #[cfg(feature = "progress-bar")]
-                block_bar.desc(format!("{network_upgrade}: waiting for next block"));
+                if mined_count > 0 {
+                    block_bar.desc(format!("{network_upgrade}: mined {mined_count} blocks"));
+                } else {
+                    block_bar.desc(format!("{network_upgrade}: waiting for next block"));
+                }
             } else if remaining_sync_blocks <= MAX_CLOSE_TO_TIP_BLOCKS {
                 // We estimate we're near the tip, but we have been syncing lots of blocks recently.
                 // We might also be using some gossiped blocks.

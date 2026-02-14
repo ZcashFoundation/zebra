@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `MinedBlocksCounter` struct and `mining.blocks_mined` metric for tracking blocks submitted via `submit_block` RPC.
 - Added `get_tx_out` method and `OutputObject` response. ([#10235](https://github.com/ZcashFoundation/zebra/pull/10235))
 
 ## [5.0.0] - 2026-02-05
