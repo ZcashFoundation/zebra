@@ -896,7 +896,8 @@ pub enum Request {
     ///
     /// Returns
     ///
-    /// * [`Response::Block(Some(Arc<Block>))`](Response::Block) if the block is in the best chain;
+    /// * [`Response::Block(Some(Arc<Block>))`](Response::Block) if the block hash is in any chain, or
+    ///   if the block height is in the best chain;
     /// * [`Response::Block(None)`](Response::Block) otherwise.
     ///
     /// Note: the [`HashOrHeight`] can be constructed from a [`block::Hash`] or
@@ -1124,7 +1125,8 @@ pub enum ReadRequest {
     ///
     /// Returns
     ///
-    /// * [`ReadResponse::Block(Some(Arc<Block>))`](ReadResponse::Block) if the block is in the best chain;
+    /// * [`ReadResponse::Block(Some(Arc<Block>))`](ReadResponse::Block) if the block hash is in any chain, or
+    ///   if the block height is in the best chain;
     /// * [`ReadResponse::Block(None)`](ReadResponse::Block) otherwise.
     ///
     /// Note: the [`HashOrHeight`] can be constructed from a [`block::Hash`] or

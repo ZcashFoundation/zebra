@@ -922,9 +922,7 @@ impl ReadStateService {
     /// Gets a clone of the latest, best non-finalized chain from the `non_finalized_state_receiver`
     fn latest_best_chain(&self) -> Option<Arc<Chain>> {
         self.non_finalized_state_receiver
-            .cloned_mapped_watch_data(|non_finalized_state| {
-                non_finalized_state.best_chain().cloned()
-            })
+            .borrow_mapped(|non_finalized_state| non_finalized_state.best_chain().cloned())
     }
 
     /// Test-only access to the inner database.
@@ -1464,8 +1462,8 @@ impl Service<ReadRequest> for ReadStateService {
 
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let block = read::any_chain_block(
-                            state.latest_non_finalized_state(),
+                        let block = read::any_block(
+                            state.latest_non_finalized_state().chain_iter(),
                             &state.db,
                             hash_or_height,
                         );

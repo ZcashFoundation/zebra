@@ -38,25 +38,21 @@ use crate::{
 use crate::request::Spend;
 
 /// Returns the [`Block`] with [`block::Hash`] or
-/// [`Height`], if it exists in the non-finalized state or finalized `db`.
-///
-/// Checks all non-finalized chain for block hashes or the best chain for heights.
-pub fn any_chain_block(
-    non_finalized: NonFinalizedState,
+/// [`Height`], if it exists in the non-finalized `chains` or finalized `db`.
+pub fn any_block<'a, C: AsRef<Chain> + 'a>(
+    mut chains: impl Iterator<Item = &'a C>,
     db: &ZebraDb,
     hash_or_height: HashOrHeight,
 ) -> Option<Arc<Block>> {
-    let unchecked_best_chain = if let HashOrHeight::Hash(hash) = hash_or_height {
-        if let Some(block) = non_finalized.any_block_by_hash(hash) {
-            return Some(block);
-        }
-
-        None
-    } else {
-        non_finalized.best_chain()
-    };
-
-    block(unchecked_best_chain, db, hash_or_height)
+    // # Correctness
+    //
+    // Since blocks are the same in the finalized and non-finalized state, we
+    // check the most efficient alternative first. (`chain` is always in memory,
+    // but `db` stores blocks on disk, with a memory cache.)
+    chains
+        .find_map(|c| c.as_ref().block(hash_or_height))
+        .map(|contextual| contextual.block.clone())
+        .or_else(|| db.block(hash_or_height))
 }
 
 /// Returns the [`Block`] with [`block::Hash`] or
@@ -65,16 +61,7 @@ pub fn block<C>(chain: Option<C>, db: &ZebraDb, hash_or_height: HashOrHeight) ->
 where
     C: AsRef<Chain>,
 {
-    // # Correctness
-    //
-    // Since blocks are the same in the finalized and non-finalized state, we
-    // check the most efficient alternative first. (`chain` is always in memory,
-    // but `db` stores blocks on disk, with a memory cache.)
-    chain
-        .as_ref()
-        .and_then(|chain| chain.as_ref().block(hash_or_height))
-        .map(|contextual| contextual.block.clone())
-        .or_else(|| db.block(hash_or_height))
+    any_block(chain.iter(), db, hash_or_height)
 }
 
 /// Returns the [`Block`] with [`block::Hash`] or
