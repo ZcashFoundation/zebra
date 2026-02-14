@@ -951,6 +951,7 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
                     transaction,
                     Amount::try_from(1_000_000).expect("invalid value"),
                     0,
+                    true,
                 )
                 .expect("verification should pass"),
             ));
@@ -1011,6 +1012,7 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
                     transaction,
                     Amount::try_from(1_000_000).expect("invalid value"),
                     0,
+                    true,
                 )
                 .expect("verification should pass"),
             ));
@@ -1614,6 +1616,92 @@ async fn mempool_reject_non_push_only_scriptsig() -> Result<(), Report> {
         insert_err,
         MempoolError::NonStandardTransaction(
             storage::NonStandardTransactionError::ScriptSigNotPushOnly
+        )
+    );
+
+    Ok(())
+}
+
+/// Check that transactions with too many sigops are rejected.
+#[tokio::test(flavor = "multi_thread")]
+async fn mempool_reject_too_many_sigops() -> Result<(), Report> {
+    let network = Network::Mainnet;
+
+    let mut last_transaction = network
+        .unmined_transactions_in_blocks(1..=10)
+        .next()
+        .expect("missing transaction");
+
+    last_transaction.height = Some(Height(100_000));
+
+    // Set the sigops count above the MAX_STANDARD_TX_SIGOPS limit of 4000.
+    last_transaction.sigops = 4001;
+
+    let cost_limit = last_transaction.cost();
+
+    let (
+        mut service,
+        _peer_set,
+        _state_service,
+        _chain_tip_change,
+        _tx_verifier,
+        mut recent_syncs,
+        _mempool_transaction_receiver,
+    ) = setup(&network, cost_limit, true).await;
+
+    service.enable(&mut recent_syncs).await;
+
+    let insert_err = service
+        .storage()
+        .insert(last_transaction.clone(), Vec::new(), None)
+        .expect_err("expected insert to fail for too many sigops");
+
+    assert_eq!(
+        insert_err,
+        MempoolError::NonStandardTransaction(storage::NonStandardTransactionError::TooManySigops)
+    );
+
+    Ok(())
+}
+
+/// Check that transactions with non-standard P2SH inputs are rejected.
+#[tokio::test(flavor = "multi_thread")]
+async fn mempool_reject_non_standard_p2sh_sigops() -> Result<(), Report> {
+    let network = Network::Mainnet;
+
+    let mut last_transaction = network
+        .unmined_transactions_in_blocks(1..=10)
+        .next()
+        .expect("missing transaction");
+
+    last_transaction.height = Some(Height(100_000));
+
+    // Set inputs_are_standard to false to simulate a P2SH input with too many sigops.
+    last_transaction.inputs_are_standard = false;
+
+    let cost_limit = last_transaction.cost();
+
+    let (
+        mut service,
+        _peer_set,
+        _state_service,
+        _chain_tip_change,
+        _tx_verifier,
+        mut recent_syncs,
+        _mempool_transaction_receiver,
+    ) = setup(&network, cost_limit, true).await;
+
+    service.enable(&mut recent_syncs).await;
+
+    let insert_err = service
+        .storage()
+        .insert(last_transaction.clone(), Vec::new(), None)
+        .expect_err("expected insert to fail for non-standard P2SH inputs");
+
+    assert_eq!(
+        insert_err,
+        MempoolError::NonStandardTransaction(
+            storage::NonStandardTransactionError::NonStandardP2shSigops
         )
     );
 
