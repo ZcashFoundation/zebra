@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [4.0.0] - 2026-02-05
 
+## [Unreleased]
+
+### Added
+
+- Added new Prometheus gauges `zcash.net.peers.outbound` and `zcash.net.peers.inbound` (#10248).
+
+### Fixed
+
+- Fixed the "Outbound Connections" progress bar spiking to the connection limit during peer crawl cycles (#7981).
+
 ### Breaking Changes
 
 - `zebra-chain` dependency bumped to `5.0.0`.

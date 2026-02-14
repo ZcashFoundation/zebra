@@ -53,6 +53,16 @@ impl LoadTrackedClient {
     pub fn remote_version(&self) -> Version {
         self.connection_info.remote.version
     }
+
+    /// Returns true if this client is connected via an outbound connection.
+    pub fn is_outbound(&self) -> bool {
+        self.connection_info.connected_addr.is_outbound()
+    }
+
+    /// Returns true if this client is connected via an inbound connection.
+    pub fn is_inbound(&self) -> bool {
+        self.connection_info.connected_addr.is_inbound()
+    }
 }
 
 impl<Request> Service<Request> for LoadTrackedClient
