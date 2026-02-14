@@ -920,9 +920,11 @@ impl ReadStateService {
     }
 
     /// Gets a clone of the latest, best non-finalized chain from the `non_finalized_state_receiver`
-    #[allow(dead_code)]
     fn latest_best_chain(&self) -> Option<Arc<Chain>> {
-        self.latest_non_finalized_state().best_chain().cloned()
+        self.non_finalized_state_receiver
+            .cloned_mapped_watch_data(|non_finalized_state| {
+                non_finalized_state.best_chain().cloned()
+            })
     }
 
     /// Test-only access to the inner database.
@@ -1343,11 +1345,7 @@ impl Service<ReadRequest> for ReadStateService {
 
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let tip = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::tip(non_finalized_state.best_chain(), &state.db)
-                            },
-                        );
+                        let tip = read::tip(state.latest_best_chain(), &state.db);
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::Tip");
@@ -1364,14 +1362,8 @@ impl Service<ReadRequest> for ReadStateService {
 
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let tip_with_value_balance = state
-                            .non_finalized_state_receiver
-                            .with_watch_data(|non_finalized_state| {
-                                read::tip_with_value_balance(
-                                    non_finalized_state.best_chain(),
-                                    &state.db,
-                                )
-                            });
+                        let tip_with_value_balance =
+                            read::tip_with_value_balance(state.latest_best_chain(), &state.db);
 
                         // The work is done in the future.
                         // TODO: Do this in the Drop impl with the variant name?
@@ -1396,15 +1388,8 @@ impl Service<ReadRequest> for ReadStateService {
 
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let value_balance = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::block_info(
-                                    non_finalized_state.best_chain(),
-                                    &state.db,
-                                    hash_or_height,
-                                )
-                            },
-                        );
+                        let value_balance =
+                            read::block_info(state.latest_best_chain(), &state.db, hash_or_height);
 
                         // The work is done in the future.
                         // TODO: Do this in the Drop impl with the variant name?
@@ -1422,11 +1407,7 @@ impl Service<ReadRequest> for ReadStateService {
 
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let depth = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::depth(non_finalized_state.best_chain(), &state.db, hash)
-                            },
-                        );
+                        let depth = read::depth(state.latest_best_chain(), &state.db, hash);
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::Depth");
@@ -1466,15 +1447,8 @@ impl Service<ReadRequest> for ReadStateService {
 
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let block = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::block(
-                                    non_finalized_state.best_chain(),
-                                    &state.db,
-                                    hash_or_height,
-                                )
-                            },
-                        );
+                        let block =
+                            read::block(state.latest_best_chain(), &state.db, hash_or_height);
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::Block");
@@ -1490,14 +1464,10 @@ impl Service<ReadRequest> for ReadStateService {
 
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let block = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::any_chain_block(
-                                    non_finalized_state,
-                                    &state.db,
-                                    hash_or_height,
-                                )
-                            },
+                        let block = read::any_chain_block(
+                            state.latest_non_finalized_state(),
+                            &state.db,
+                            hash_or_height,
                         );
 
                         // The work is done in the future.
@@ -1515,14 +1485,10 @@ impl Service<ReadRequest> for ReadStateService {
 
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let block_and_size = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::block_and_size(
-                                    non_finalized_state.best_chain(),
-                                    &state.db,
-                                    hash_or_height,
-                                )
-                            },
+                        let block_and_size = read::block_and_size(
+                            state.latest_best_chain(),
+                            &state.db,
+                            hash_or_height,
                         );
 
                         // The work is done in the future.
@@ -1598,14 +1564,10 @@ impl Service<ReadRequest> for ReadStateService {
 
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let tx = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::any_transaction(
-                                    non_finalized_state.chain_iter(),
-                                    &state.db,
-                                    hash,
-                                )
-                            },
+                        let tx = read::any_transaction(
+                            state.latest_non_finalized_state().chain_iter(),
+                            &state.db,
+                            hash,
                         );
 
                         // The work is done in the future.
@@ -1623,14 +1585,10 @@ impl Service<ReadRequest> for ReadStateService {
 
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let transaction_ids = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::transaction_hashes_for_block(
-                                    non_finalized_state.best_chain(),
-                                    &state.db,
-                                    hash_or_height,
-                                )
-                            },
+                        let transaction_ids = read::transaction_hashes_for_block(
+                            state.latest_best_chain(),
+                            &state.db,
+                            hash_or_height,
                         );
 
                         // The work is done in the future.
@@ -1651,14 +1609,10 @@ impl Service<ReadRequest> for ReadStateService {
 
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let transaction_ids = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::transaction_hashes_for_any_block(
-                                    non_finalized_state.chain_iter(),
-                                    &state.db,
-                                    hash_or_height,
-                                )
-                            },
+                        let transaction_ids = read::transaction_hashes_for_any_block(
+                            state.latest_non_finalized_state().chain_iter(),
+                            &state.db,
+                            hash_or_height,
                         );
 
                         // The work is done in the future.
@@ -1682,15 +1636,11 @@ impl Service<ReadRequest> for ReadStateService {
 
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let spending_transaction_id = state
-                            .non_finalized_state_receiver
-                            .with_watch_data(|non_finalized_state| {
-                                read::spending_transaction_hash(
-                                    non_finalized_state.best_chain(),
-                                    &state.db,
-                                    spend,
-                                )
-                            });
+                        let spending_transaction_id = read::spending_transaction_hash(
+                            state.latest_best_chain(),
+                            &state.db,
+                            spend,
+                        );
 
                         // The work is done in the future.
                         timer.finish(
@@ -1710,15 +1660,8 @@ impl Service<ReadRequest> for ReadStateService {
 
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let utxo = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::unspent_utxo(
-                                    non_finalized_state.best_chain(),
-                                    &state.db,
-                                    outpoint,
-                                )
-                            },
-                        );
+                        let utxo =
+                            read::unspent_utxo(state.latest_best_chain(), &state.db, outpoint);
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::UnspentBestChainUtxo");
@@ -1735,11 +1678,8 @@ impl Service<ReadRequest> for ReadStateService {
 
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let utxo = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::any_utxo(non_finalized_state, &state.db, outpoint)
-                            },
-                        );
+                        let utxo =
+                            read::any_utxo(state.latest_non_finalized_state(), &state.db, outpoint);
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::AnyChainUtxo");
@@ -1756,11 +1696,8 @@ impl Service<ReadRequest> for ReadStateService {
 
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let block_locator = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::block_locator(non_finalized_state.best_chain(), &state.db)
-                            },
-                        );
+                        let block_locator =
+                            read::block_locator(state.latest_best_chain(), &state.db);
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::BlockLocator");
@@ -1779,16 +1716,12 @@ impl Service<ReadRequest> for ReadStateService {
 
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let block_hashes = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::find_chain_hashes(
-                                    non_finalized_state.best_chain(),
-                                    &state.db,
-                                    known_blocks,
-                                    stop,
-                                    MAX_FIND_BLOCK_HASHES_RESULTS,
-                                )
-                            },
+                        let block_hashes = read::find_chain_hashes(
+                            state.latest_best_chain(),
+                            &state.db,
+                            known_blocks,
+                            stop,
+                            MAX_FIND_BLOCK_HASHES_RESULTS,
                         );
 
                         // The work is done in the future.
@@ -1806,16 +1739,12 @@ impl Service<ReadRequest> for ReadStateService {
 
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let block_headers = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::find_chain_headers(
-                                    non_finalized_state.best_chain(),
-                                    &state.db,
-                                    known_blocks,
-                                    stop,
-                                    MAX_FIND_BLOCK_HEADERS_RESULTS,
-                                )
-                            },
+                        let block_headers = read::find_chain_headers(
+                            state.latest_best_chain(),
+                            &state.db,
+                            known_blocks,
+                            stop,
+                            MAX_FIND_BLOCK_HEADERS_RESULTS,
                         );
 
                         let block_headers = block_headers
@@ -1837,14 +1766,10 @@ impl Service<ReadRequest> for ReadStateService {
 
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let sapling_tree = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::sapling_tree(
-                                    non_finalized_state.best_chain(),
-                                    &state.db,
-                                    hash_or_height,
-                                )
-                            },
+                        let sapling_tree = read::sapling_tree(
+                            state.latest_best_chain(),
+                            &state.db,
+                            hash_or_height,
                         );
 
                         // The work is done in the future.
@@ -1861,14 +1786,10 @@ impl Service<ReadRequest> for ReadStateService {
 
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let orchard_tree = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::orchard_tree(
-                                    non_finalized_state.best_chain(),
-                                    &state.db,
-                                    hash_or_height,
-                                )
-                            },
+                        let orchard_tree = read::orchard_tree(
+                            state.latest_best_chain(),
+                            &state.db,
+                            hash_or_height,
                         );
 
                         // The work is done in the future.
@@ -2049,8 +1970,7 @@ impl Service<ReadRequest> for ReadStateService {
 
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let latest_non_finalized_best_chain =
-                            state.latest_non_finalized_state().best_chain().cloned();
+                        let latest_non_finalized_best_chain = state.latest_best_chain();
 
                         check::nullifier::tx_no_duplicates_in_chain(
                             &state.db,

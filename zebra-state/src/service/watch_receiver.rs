@@ -89,6 +89,21 @@ where
         f(cloned_data)
     }
 
+    /// Returns a clone of the output of the provided closure when
+    /// called with the watch data in the channel.
+    /// Cloning the watched data helps avoid deadlocks.
+    ///
+    /// Does not mark the watched data as seen.
+    ///
+    /// This method is meant to be used with quick accessor closures
+    /// and should not be called with computationally expensive closures.
+    pub fn cloned_mapped_watch_data<U: 'static, F>(&self, f: F) -> U
+    where
+        F: FnOnce(watch::Ref<T>) -> U,
+    {
+        f(self.receiver.borrow())
+    }
+
     /// Returns a clone of the watch data in the channel.
     /// Cloning the watched data helps avoid deadlocks.
     ///
