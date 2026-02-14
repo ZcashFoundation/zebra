@@ -23,7 +23,7 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/ZcashFoundation/zebra"
 homepage = "https://zfnd.org/zebra/"
 keywords = ["zebra", "zcash"]
-rust-version = "1.85.0"
+rust-version = "1.89.0"
 edition = "2021"
 
 # `cargo release` settings

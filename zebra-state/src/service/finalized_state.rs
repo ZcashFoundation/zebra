@@ -27,7 +27,7 @@ use zebra_db::{
 
 use crate::{
     constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
-    error::CommitCheckpointVerifiedError,
+    error::CommitBlockError,
     request::{FinalizableBlock, FinalizedBlock, Treestate},
     service::{check, QueuedCheckpointVerified},
     CheckpointVerifiedBlock, Config, ValidateContextError,
@@ -275,7 +275,7 @@ impl FinalizedState {
         &mut self,
         ordered_block: QueuedCheckpointVerified,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
-    ) -> Result<(CheckpointVerifiedBlock, NoteCommitmentTrees), CommitCheckpointVerifiedError> {
+    ) -> Result<(CheckpointVerifiedBlock, NoteCommitmentTrees), CommitBlockError> {
         let (checkpoint_verified, rsp_tx) = ordered_block;
         let result = self.commit_finalized_direct(
             checkpoint_verified.clone().into(),
@@ -324,7 +324,7 @@ impl FinalizedState {
         finalizable_block: FinalizableBlock,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
         source: &str,
-    ) -> Result<(block::Hash, NoteCommitmentTrees), CommitCheckpointVerifiedError> {
+    ) -> Result<(block::Hash, NoteCommitmentTrees), CommitBlockError> {
         let (height, hash, finalized, prev_note_commitment_trees) = match finalizable_block {
             FinalizableBlock::Checkpoint {
                 checkpoint_verified,

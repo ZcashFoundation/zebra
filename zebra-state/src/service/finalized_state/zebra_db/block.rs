@@ -32,7 +32,7 @@ use zebra_chain::{
 };
 
 use crate::{
-    error::CommitCheckpointVerifiedError,
+    error::CommitBlockError,
     request::FinalizedBlock,
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
@@ -435,7 +435,7 @@ impl ZebraDb {
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
         network: &Network,
         source: &str,
-    ) -> Result<block::Hash, CommitCheckpointVerifiedError> {
+    ) -> Result<block::Hash, CommitBlockError> {
         let tx_hash_indexes: HashMap<transaction::Hash, usize> = finalized
             .transaction_hashes
             .iter()
@@ -632,7 +632,7 @@ impl DiskWriteBatch {
         address_balances: AddressBalanceLocationUpdates,
         value_pool: ValueBalance<NonNegative>,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
-    ) -> Result<(), CommitCheckpointVerifiedError> {
+    ) -> Result<(), CommitBlockError> {
         let db = &zebra_db.db;
 
         // Commit block, transaction, and note commitment tree data.
