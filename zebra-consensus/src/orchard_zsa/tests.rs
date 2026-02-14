@@ -156,7 +156,7 @@ fn build_asset_records<'a, I: IntoIterator<Item = &'a TranscriptItem>>(
         .flatten()
         .try_fold(HashMap::new(), |mut asset_records, tx| {
             if let Some(burns) = tx.orchard_burns() {
-                process_burns(&mut asset_records, burns.into_iter())?;
+                process_burns(&mut asset_records, burns.iter())?;
             }
 
             if let Some(issue_data) = tx.orchard_issue_data() {

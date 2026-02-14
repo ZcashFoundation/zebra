@@ -168,6 +168,7 @@ impl IssuedAssetChanges {
     /// - **Without `transaction_sighashes` (None)**: Trusted validation for Checkpoint Verified Blocks
     ///   loaded during bootstrap/startup from disk. These blocks are within checkpoint ranges and
     ///   are considered trusted, so signature verification is skipped using `verify_trusted_issue_bundle`.
+    #[allow(clippy::unwrap_in_result)]
     pub fn validate_and_get_changes(
         transactions: &[Arc<Transaction>],
         transaction_sighashes: Option<&[SigHash]>,
@@ -375,7 +376,7 @@ mod tests {
         let bytes = state.to_bytes().unwrap();
         let decoded = AssetState::from_bytes(&bytes).unwrap();
 
-        assert_eq!(decoded.is_finalized(), true);
+        assert!(decoded.is_finalized());
         assert_eq!(decoded.total_supply(), 5000);
     }
 
