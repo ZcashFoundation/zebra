@@ -965,20 +965,11 @@ impl Chain {
         issued_asset_changes: &IssuedAssetChanges,
     ) {
         if position == RevertPosition::Root {
-            trace!(?position, "removing issued assets modified by root block");
-            // Remove assets that still have their new state (they haven't been modified by later blocks)
-            for (asset_base, (_old_state, new_state)) in issued_asset_changes.iter() {
-                // FIXME: Purge/evict assets only if they were modified exclusively by the
-                // current root block. Do NOT use value equality; later blocks can issue/burn
-                // back to the same value. Instead, rely on a history marker stored in the
-                // state (e.g., `last_modified_height`) that we persist and restore on tip pops.
-                // On root eviction at H_root, purge only when `last_modified_height == H_root`.
-                // Add debug asserts/tests to enforce that the marker is updated/restored
-                // consistently along all pop/apply paths.
-                if self.issued_assets.get(asset_base) == Some(new_state) {
-                    self.issued_assets.remove(asset_base);
-                }
-            }
+            // TODO: Consider evicting issued-asset entries from the non-finalized in-memory cache.
+            // We may add `updated_at_height` to track last update and drop “old” entries occasionally.
+            // Doing that here on root reverts might be too aggressive (happens ~every 100 blocks ≈ 2 hours).
+            // Eviction would only move reads to disk (DB); issuance/burn verification must still work,
+            // just with slightly worse performance due to extra DB reads.
         } else {
             trace!(
                 ?position,
@@ -1515,11 +1506,6 @@ impl Chain {
                         "issued asset state mismatch for {:?}",
                         asset_base
                     );
-                    // or apply_seq), set/update it on `*new_state` here before writing.
-                    // FIXME: Once we add a per-asset history marker (e.g., last_modified_height)
-                    // set/update it here in `new_state`. That will let root eviction decide
-                    // purge/evict by history instead of value equality. Until then, revert logic
-                    // must not rely on value comparisons.
                     *current_state = *new_state;
                 })
                 .or_insert_with(|| {
@@ -1533,7 +1519,6 @@ impl Chain {
                     //    "issued asset state mismatch for {:?}",
                     //    asset_base
                     //);
-                    // FIXME: Also set the history marker on `*new_state` here.
                     *new_state
                 });
         }

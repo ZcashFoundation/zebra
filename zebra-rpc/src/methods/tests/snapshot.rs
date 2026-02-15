@@ -14,7 +14,7 @@ use zebra_chain::{
     block::Block,
     chain_tip::mock::MockChainTip,
     orchard,
-    orchard_zsa::asset_state::testing::{mock_asset_base, mock_asset_state},
+    orchard_zsa::{mock_asset_base, mock_asset_state},
     parameters::{
         subsidy::POST_NU6_FUNDING_STREAMS_TESTNET,
         testnet::{self, ConfiguredActivationHeights, Parameters},

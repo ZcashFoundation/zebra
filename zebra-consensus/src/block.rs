@@ -255,7 +255,7 @@ where
             let mut legacy_sigop_count = 0;
             let mut block_miner_fees = Ok(Amount::zero());
 
-            // FIXME: add a short comment
+            // Collect tx sighashes during verification and later emit them in block order (for ZSA issuance auth).
             let mut tx_sighash_by_tx_id: HashMap<UnminedTxId, SigHash> =
                 HashMap::with_capacity(block.transactions.len());
 
@@ -282,7 +282,6 @@ where
                     block_miner_fees += miner_fee;
                 }
 
-                // FIXME: add a short comment
                 tx_sighash_by_tx_id.insert(tx_id, tx_sighash);
             }
 
@@ -326,7 +325,7 @@ where
             let new_outputs = Arc::into_inner(known_utxos)
                 .expect("all verification tasks using known_utxos are complete");
 
-            // FIXME: add a short comment
+            // Rebuild sighashes in block order to align with `block.transactions` indexing.
             let transaction_sighashes: Arc<[SigHash]> = block
                 .transactions
                 .iter()

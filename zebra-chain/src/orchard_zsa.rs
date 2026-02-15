@@ -3,7 +3,7 @@
 #[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;
 
-pub mod asset_state;
+mod asset_state;
 mod burn;
 mod issuance;
 
@@ -12,5 +12,7 @@ pub(crate) use issuance::IssueData;
 
 pub use burn::BurnItem;
 
-// FIXME: should asset_state mod be pub and these structs be pub as well?
 pub use asset_state::{AssetBase, AssetState, AssetStateError, IssuedAssetChanges};
+
+#[cfg(any(test, feature = "proptest-impl"))]
+pub use asset_state::testing::{mock_asset_base, mock_asset_state};

@@ -1379,7 +1379,7 @@ where
         let include_non_finalized = include_non_finalized.unwrap_or(true);
 
         async move {
-            let asset_base = zebra_chain::orchard_zsa::asset_state::AssetBase::from_bytes(
+            let asset_base = zebra_chain::orchard_zsa::AssetBase::from_bytes(
                 &hex::decode(asset_base).map_server_error()?[..]
                     .try_into()
                     .map_server_error()?,
