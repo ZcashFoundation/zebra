@@ -44,7 +44,6 @@ pub use error::{
 pub use request::{
     CheckpointVerifiedBlock, HashOrHeight, ReadRequest, Request, SemanticallyVerifiedBlock,
 };
-
 pub use response::{KnownBlock, MinedTx, ReadResponse, Response};
 pub use service::{
     chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip, TipAction},
