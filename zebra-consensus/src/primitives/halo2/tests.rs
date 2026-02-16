@@ -68,7 +68,11 @@ where
                     .unwrap();
             }
 
-            let bundle: Bundle<_, i64, Flavor> = builder.build(rng).unwrap().0;
+            let bundle: Bundle<_, i64, Flavor> = builder
+                .build(rng)
+                .unwrap()
+                .expect("Bundle should not be None")
+                .0;
 
             let bundle = bundle
                 .create_proof(&proving_key, rng)

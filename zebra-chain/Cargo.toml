@@ -72,7 +72,7 @@ tx_v6 = [
 bitvec = "1.0.1"
 bitflags = "2.5.0"
 bitflags-serde-legacy = "0.1.1"
-blake2b_simd = "1.0.2"
+blake2b_simd = "=1.0.1"
 blake2s_simd = "1.0.2"
 bridgetree = "0.7.0"
 bs58 = { version = "0.5.1", features = ["check"] }
