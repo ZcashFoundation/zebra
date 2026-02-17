@@ -10,6 +10,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Added `get_tx_out` method and `OutputObject` response. ([#10235](https://github.com/ZcashFoundation/zebra/pull/10235))
+- OpenRPC support (#10201):
+  - `openrpsee` dependency
+  - Added `build_rpc_schema()` to generate a map of the node's supported RPC interface at build time
+  - Use the generated OpenRPC schema to serve the `rpc.discover` RPC method.
+
+### Changed
+
+- `GetBlockTemplateRequestMode`, `GetBlockTemplateCapability`, `GetBlockTemplateParameters`, `LongPollId`,
+  `SubmitBlockParameters`, `GetAddressBalanceRequest`, `DGetAddressBalanceRequest`, `GetAddressUtxosRequest`,
+  `DGetAddressUtxosRequest`, `DGetAddressTxIdsRequest` and `AddNodeCommand` now derives `schemars::JsonSchema` (#10201)
 
 ## [5.0.0] - 2026-02-05
 
