@@ -892,6 +892,18 @@ pub enum Request {
     /// [`block::Height`] using `.into()`.
     Block(HashOrHeight),
 
+    /// Looks up a block by hash in any current chain or by height in the current best chain.
+    ///
+    /// Returns
+    ///
+    /// * [`Response::Block(Some(Arc<Block>))`](Response::Block) if the block hash is in any chain, or,
+    ///   if the block height is in the best chain;
+    /// * [`Response::Block(None)`](Response::Block) otherwise.
+    ///
+    /// Note: the [`HashOrHeight`] can be constructed from a [`block::Hash`] or
+    /// [`block::Height`] using `.into()`.
+    AnyChainBlock(HashOrHeight),
+
     //// Same as Block, but also returns serialized block size.
     ////
     /// Returns
@@ -1032,7 +1044,6 @@ impl Request {
         match self {
             Request::CommitSemanticallyVerifiedBlock(_) => "commit_semantically_verified_block",
             Request::CommitCheckpointVerifiedBlock(_) => "commit_checkpoint_verified_block",
-
             Request::AwaitUtxo(_) => "await_utxo",
             Request::Depth(_) => "depth",
             Request::Tip => "tip",
@@ -1041,6 +1052,7 @@ impl Request {
             Request::AnyChainTransaction(_) => "any_chain_transaction",
             Request::UnspentBestChainUtxo { .. } => "unspent_best_chain_utxo",
             Request::Block(_) => "block",
+            Request::AnyChainBlock(_) => "any_chain_block",
             Request::BlockAndSize(_) => "block_and_size",
             Request::BlockHeader(_) => "block_header",
             Request::FindBlockHashes { .. } => "find_block_hashes",
@@ -1108,6 +1120,19 @@ pub enum ReadRequest {
     /// Note: the [`HashOrHeight`] can be constructed from a [`block::Hash`] or
     /// [`block::Height`] using `.into()`.
     Block(HashOrHeight),
+
+    /// Looks up a block by hash in any current chain or by height in the current best chain.
+    ///
+    /// Returns
+    ///
+    /// * [`ReadResponse::Block(Some(Arc<Block>))`](ReadResponse::Block) if the block hash is in any chain, or
+    ///   if the block height is in any chain, checking the best chain first
+    ///   followed by side chains in order from most to least work.
+    /// * [`ReadResponse::Block(None)`](ReadResponse::Block) otherwise.
+    ///
+    /// Note: the [`HashOrHeight`] can be constructed from a [`block::Hash`] or
+    /// [`block::Height`] using `.into()`.
+    AnyChainBlock(HashOrHeight),
 
     //// Same as Block, but also returns serialized block size.
     ////
@@ -1393,6 +1418,7 @@ impl ReadRequest {
             ReadRequest::BlockInfo(_) => "block_info",
             ReadRequest::Depth(_) => "depth",
             ReadRequest::Block(_) => "block",
+            ReadRequest::AnyChainBlock(_) => "any_chain_block",
             ReadRequest::BlockAndSize(_) => "block_and_size",
             ReadRequest::BlockHeader(_) => "block_header",
             ReadRequest::Transaction(_) => "transaction",
@@ -1452,6 +1478,9 @@ impl TryFrom<Request> for ReadRequest {
             Request::BestChainBlockHash(hash) => Ok(ReadRequest::BestChainBlockHash(hash)),
 
             Request::Block(hash_or_height) => Ok(ReadRequest::Block(hash_or_height)),
+            Request::AnyChainBlock(hash_or_height) => {
+                Ok(ReadRequest::AnyChainBlock(hash_or_height))
+            }
             Request::BlockAndSize(hash_or_height) => Ok(ReadRequest::BlockAndSize(hash_or_height)),
             Request::BlockHeader(hash_or_height) => Ok(ReadRequest::BlockHeader(hash_or_height)),
             Request::Transaction(tx_hash) => Ok(ReadRequest::Transaction(tx_hash)),
