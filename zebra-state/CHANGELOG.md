@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Added `ReadRequest::IsTransparentOutputSpent` and `ReadResponse::IsTransparentOutputSpent` to the read state service ([#10235](https://github.com/ZcashFoundation/zebra/pull/10235))
+- Added `{ReadRequest, Request}::AnyChainBlock` to the read state service ([#10325](https://github.com/ZcashFoundation/zebra/pull/10325))
 
 
 ## [4.0.0] - 2026-02-05

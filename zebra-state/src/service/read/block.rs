@@ -38,21 +38,30 @@ use crate::{
 use crate::request::Spend;
 
 /// Returns the [`Block`] with [`block::Hash`] or
-/// [`Height`], if it exists in the non-finalized `chain` or finalized `db`.
-pub fn block<C>(chain: Option<C>, db: &ZebraDb, hash_or_height: HashOrHeight) -> Option<Arc<Block>>
-where
-    C: AsRef<Chain>,
-{
+/// [`Height`], if it exists in the non-finalized `chains` or finalized `db`.
+pub fn any_block<'a, C: AsRef<Chain> + 'a>(
+    mut chains: impl Iterator<Item = &'a C>,
+    db: &ZebraDb,
+    hash_or_height: HashOrHeight,
+) -> Option<Arc<Block>> {
     // # Correctness
     //
     // Since blocks are the same in the finalized and non-finalized state, we
     // check the most efficient alternative first. (`chain` is always in memory,
     // but `db` stores blocks on disk, with a memory cache.)
-    chain
-        .as_ref()
-        .and_then(|chain| chain.as_ref().block(hash_or_height))
+    chains
+        .find_map(|c| c.as_ref().block(hash_or_height))
         .map(|contextual| contextual.block.clone())
         .or_else(|| db.block(hash_or_height))
+}
+
+/// Returns the [`Block`] with [`block::Hash`] or
+/// [`Height`], if it exists in the non-finalized `chain` or finalized `db`.
+pub fn block<C>(chain: Option<C>, db: &ZebraDb, hash_or_height: HashOrHeight) -> Option<Arc<Block>>
+where
+    C: AsRef<Chain>,
+{
+    any_block(chain.iter(), db, hash_or_height)
 }
 
 /// Returns the [`Block`] with [`block::Hash`] or
