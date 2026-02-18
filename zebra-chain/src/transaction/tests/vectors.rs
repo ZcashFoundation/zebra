@@ -30,8 +30,10 @@ lazy_static! {
         sapling_shielded_data: None,
         orchard_shielded_data: None,
     };
+}
 
-    #[cfg(feature = "tx_v6")]
+#[cfg(feature = "tx_v6")]
+lazy_static! {
     pub static ref EMPTY_V6_TX: Transaction = Transaction::V6 {
         network_upgrade: NetworkUpgrade::Nu7,
         lock_time: LockTime::min_lock_time_timestamp(),

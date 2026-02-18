@@ -158,7 +158,11 @@ impl ZcashDeserialize for Burn {
 pub(crate) fn compute_burn_value_commitment(burn: &[BurnItem]) -> ValueCommitment {
     burn.iter()
         .map(|&BurnItem(asset, amount)| {
-            ValueCommitment::new(pallas::Scalar::zero(), amount.into(), asset)
+            ValueCommitment::new(
+                pallas::Scalar::zero(),
+                amount - NoteValue::from_raw(0),
+                asset,
+            )
         })
         .sum()
 }
