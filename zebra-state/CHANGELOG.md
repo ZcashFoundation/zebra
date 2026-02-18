@@ -27,7 +27,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `CommitBlockError` enum with `Duplicate`, `ValidateContextError`, `WriteTaskExited` variants.
 - `KnownBlock::Finalized` and `KnownBlock::WriteChannel` variants.
 - `impl From<ValidateContextError> for CommitSemanticallyVerifiedError`.
+- Added the concrete error type `CommitCheckpointVerifiedBlock` for handling failed state requests during checkpoint verification ([#9979](https://github.com/ZcashFoundation/zebra/pull/9979)) *(documented after release)*
+- Added `MappedRequest` for `CommitCheckpointVerifiedBlockRequest` ([#9979](https://github.com/ZcashFoundation/zebra/pull/9979)) *(documented after release)*
 
+### Changed
+
+- `AdjustedDifficulty` now uses `BoundedVec` in `relevant_difficulty_thresholds` and `relevant_times` to enforce fixed upper bounds ([#10056](https://github.com/ZcashFoundation/zebra/pull/10056)) *(documented after release)*
+- Updated the `KnownBlock` struct and state request to record when blocks are found in the sent hashes, tracking which blocks have been sent to the block write channel ([#9999](https://github.com/ZcashFoundation/zebra/pull/9999)) *(documented after release)*
+
+### Fixed
+
+- Fixed return types of infallible `DiskWriteBatch` methods ([#9999](https://github.com/ZcashFoundation/zebra/pull/9999)) *(documented after release)*
+- Fixed an issue where Zebra could incorrectly add a non-finalized chain segment that was a duplicate of another non-finalized chain ([#9999](https://github.com/ZcashFoundation/zebra/pull/9999)) *(documented after release)*
 
 ## [3.1.2] - 2026-01-21 - Yanked
 
