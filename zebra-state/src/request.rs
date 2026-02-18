@@ -641,13 +641,13 @@ pub trait MappedRequest: Sized + Send + 'static + Into<Request> {
     type Error: std::error::Error + std::fmt::Display + 'static;
 
     /// Maps the expected [`Response`] variant for this request to the mapped response type.
-    fn map_rsp(response: Response) -> Self::MappedResponse;
+    fn map_response(response: Response) -> Self::MappedResponse;
 
     /// Accepts a state service to call, maps this request to a [`Request`], waits for the state to be ready,
     /// calls the state with the mapped request, then maps the success or error response to the expected response
     /// or error type for this request.
     ///
-    /// Returns a [`Result<MappedResponse, LayeredServicesError<RequestError>>`].
+    /// Returns a [`Result<MappedResponse, LayeredStateError<RequestError>>`].
     #[allow(async_fn_in_trait)]
     async fn run<State>(
         self,
@@ -657,7 +657,9 @@ pub trait MappedRequest: Sized + Send + 'static + Into<Request> {
         State: Service<Request, Response = Response, Error = BoxError>,
         State::Future: Send,
     {
-        Ok(Self::map_rsp(s.ready().await?.call(self.into()).await?))
+        Ok(Self::map_response(
+            s.ready().await?.call(self.into()).await?,
+        ))
     }
 
     /// Accepts a state service to call and a function to convert [LayeredStateError::Layer] errors to the expected error
@@ -701,7 +703,7 @@ impl MappedRequest for CommitSemanticallyVerifiedBlockRequest {
     type MappedResponse = block::Hash;
     type Error = CommitBlockError;
 
-    fn map_rsp(response: Response) -> Self::MappedResponse {
+    fn map_response(response: Response) -> Self::MappedResponse {
         match response {
             Response::Committed(hash) => hash,
             _ => unreachable!("wrong response variant for request"),
@@ -725,7 +727,7 @@ impl MappedRequest for CommitCheckpointVerifiedBlockRequest {
     type MappedResponse = block::Hash;
     type Error = CommitBlockError;
 
-    fn map_rsp(response: Response) -> Self::MappedResponse {
+    fn map_response(response: Response) -> Self::MappedResponse {
         match response {
             Response::Committed(hash) => hash,
             _ => unreachable!("wrong response variant for request"),
@@ -749,7 +751,7 @@ impl MappedRequest for InvalidateBlockRequest {
     type MappedResponse = block::Hash;
     type Error = InvalidateError;
 
-    fn map_rsp(response: Response) -> Self::MappedResponse {
+    fn map_response(response: Response) -> Self::MappedResponse {
         match response {
             Response::Invalidated(hash) => hash,
             _ => unreachable!("wrong response variant for request"),
@@ -773,7 +775,7 @@ impl MappedRequest for ReconsiderBlockRequest {
     type MappedResponse = Vec<block::Hash>;
     type Error = ReconsiderError;
 
-    fn map_rsp(response: Response) -> Self::MappedResponse {
+    fn map_response(response: Response) -> Self::MappedResponse {
         match response {
             Response::Reconsidered(hashes) => hashes,
             _ => unreachable!("wrong response variant for request"),
