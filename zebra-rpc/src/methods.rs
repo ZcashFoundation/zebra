@@ -49,7 +49,6 @@ use indexmap::IndexMap;
 use jsonrpsee::core::{async_trait, RpcResult as Result};
 use jsonrpsee_proc_macros::rpc;
 use jsonrpsee_types::{ErrorCode, ErrorObject};
-use rand::{rngs::OsRng, RngCore};
 use schemars::JsonSchema;
 use tokio::{
     sync::{broadcast, mpsc, watch},
