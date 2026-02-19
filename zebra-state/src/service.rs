@@ -1308,11 +1308,12 @@ impl Service<ReadRequest> for ReadStateService {
 
         match req {
             // Used by the `getblockchaininfo` RPC.
-            ReadRequest::UsageInfo => timed_span
-                .spawn_blocking_in_scope(move || Ok(ReadResponse::UsageInfo(state.db.size()))),
+            ReadRequest::UsageInfo => {
+                timed_span.spawn_blocking(move || Ok(ReadResponse::UsageInfo(state.db.size())))
+            }
 
             // Used by the StateService.
-            ReadRequest::Tip => timed_span.spawn_blocking_in_scope(move || {
+            ReadRequest::Tip => timed_span.spawn_blocking(move || {
                 Ok(ReadResponse::Tip(read::tip(
                     state.latest_best_chain(),
                     &state.db,
@@ -1320,7 +1321,7 @@ impl Service<ReadRequest> for ReadStateService {
             }),
 
             // Used by `getblockchaininfo` RPC method.
-            ReadRequest::TipPoolValues => timed_span.spawn_blocking_in_scope(move || {
+            ReadRequest::TipPoolValues => timed_span.spawn_blocking(move || {
                 let (tip_height, tip_hash, value_balance) =
                     read::tip_with_value_balance(state.latest_best_chain(), &state.db)?
                         .ok_or(BoxError::from("no chain tip available yet"))?;
@@ -1333,18 +1334,16 @@ impl Service<ReadRequest> for ReadStateService {
             }),
 
             // Used by getblock
-            ReadRequest::BlockInfo(hash_or_height) => {
-                timed_span.spawn_blocking_in_scope(move || {
-                    Ok(ReadResponse::BlockInfo(read::block_info(
-                        state.latest_best_chain(),
-                        &state.db,
-                        hash_or_height,
-                    )))
-                })
-            }
+            ReadRequest::BlockInfo(hash_or_height) => timed_span.spawn_blocking(move || {
+                Ok(ReadResponse::BlockInfo(read::block_info(
+                    state.latest_best_chain(),
+                    &state.db,
+                    hash_or_height,
+                )))
+            }),
 
             // Used by the StateService.
-            ReadRequest::Depth(hash) => timed_span.spawn_blocking_in_scope(move || {
+            ReadRequest::Depth(hash) => timed_span.spawn_blocking(move || {
                 Ok(ReadResponse::Depth(read::depth(
                     state.latest_best_chain(),
                     &state.db,
@@ -1353,19 +1352,14 @@ impl Service<ReadRequest> for ReadStateService {
             }),
 
             // Used by the StateService.
-            ReadRequest::BestChainNextMedianTimePast => {
-                timed_span.spawn_blocking_in_scope(move || {
-                    Ok(ReadResponse::BestChainNextMedianTimePast(
-                        read::next_median_time_past(
-                            &state.latest_non_finalized_state(),
-                            &state.db,
-                        )?,
-                    ))
-                })
-            }
+            ReadRequest::BestChainNextMedianTimePast => timed_span.spawn_blocking(move || {
+                Ok(ReadResponse::BestChainNextMedianTimePast(
+                    read::next_median_time_past(&state.latest_non_finalized_state(), &state.db)?,
+                ))
+            }),
 
             // Used by the get_block (raw) RPC and the StateService.
-            ReadRequest::Block(hash_or_height) => timed_span.spawn_blocking_in_scope(move || {
+            ReadRequest::Block(hash_or_height) => timed_span.spawn_blocking(move || {
                 Ok(ReadResponse::Block(read::block(
                     state.latest_best_chain(),
                     &state.db,
@@ -1373,62 +1367,56 @@ impl Service<ReadRequest> for ReadStateService {
                 )))
             }),
 
-            ReadRequest::AnyChainBlock(hash_or_height) => {
-                timed_span.spawn_blocking_in_scope(move || {
-                    Ok(ReadResponse::Block(read::any_block(
-                        state.latest_non_finalized_state().chain_iter(),
-                        &state.db,
-                        hash_or_height,
-                    )))
-                })
-            }
+            ReadRequest::AnyChainBlock(hash_or_height) => timed_span.spawn_blocking(move || {
+                Ok(ReadResponse::Block(read::any_block(
+                    state.latest_non_finalized_state().chain_iter(),
+                    &state.db,
+                    hash_or_height,
+                )))
+            }),
 
             // Used by the get_block (raw) RPC and the StateService.
-            ReadRequest::BlockAndSize(hash_or_height) => {
-                timed_span.spawn_blocking_in_scope(move || {
-                    Ok(ReadResponse::BlockAndSize(read::block_and_size(
-                        state.latest_best_chain(),
-                        &state.db,
-                        hash_or_height,
-                    )))
-                })
-            }
+            ReadRequest::BlockAndSize(hash_or_height) => timed_span.spawn_blocking(move || {
+                Ok(ReadResponse::BlockAndSize(read::block_and_size(
+                    state.latest_best_chain(),
+                    &state.db,
+                    hash_or_height,
+                )))
+            }),
 
             // Used by the get_block (verbose) RPC and the StateService.
-            ReadRequest::BlockHeader(hash_or_height) => {
-                timed_span.spawn_blocking_in_scope(move || {
-                    let best_chain = state.latest_best_chain();
+            ReadRequest::BlockHeader(hash_or_height) => timed_span.spawn_blocking(move || {
+                let best_chain = state.latest_best_chain();
 
-                    let height = hash_or_height
-                        .height_or_else(|hash| {
-                            read::find::height_by_hash(best_chain.clone(), &state.db, hash)
-                        })
-                        .ok_or_else(|| BoxError::from("block hash or height not found"))?;
-
-                    let hash = hash_or_height
-                        .hash_or_else(|height| {
-                            read::find::hash_by_height(best_chain.clone(), &state.db, height)
-                        })
-                        .ok_or_else(|| BoxError::from("block hash or height not found"))?;
-
-                    let next_height = height.next()?;
-                    let next_block_hash =
-                        read::find::hash_by_height(best_chain.clone(), &state.db, next_height);
-
-                    let header = read::block_header(best_chain, &state.db, height.into())
-                        .ok_or_else(|| BoxError::from("block hash or height not found"))?;
-
-                    Ok(ReadResponse::BlockHeader {
-                        header,
-                        hash,
-                        height,
-                        next_block_hash,
+                let height = hash_or_height
+                    .height_or_else(|hash| {
+                        read::find::height_by_hash(best_chain.clone(), &state.db, hash)
                     })
+                    .ok_or_else(|| BoxError::from("block hash or height not found"))?;
+
+                let hash = hash_or_height
+                    .hash_or_else(|height| {
+                        read::find::hash_by_height(best_chain.clone(), &state.db, height)
+                    })
+                    .ok_or_else(|| BoxError::from("block hash or height not found"))?;
+
+                let next_height = height.next()?;
+                let next_block_hash =
+                    read::find::hash_by_height(best_chain.clone(), &state.db, next_height);
+
+                let header = read::block_header(best_chain, &state.db, height.into())
+                    .ok_or_else(|| BoxError::from("block hash or height not found"))?;
+
+                Ok(ReadResponse::BlockHeader {
+                    header,
+                    hash,
+                    height,
+                    next_block_hash,
                 })
-            }
+            }),
 
             // For the get_raw_transaction RPC and the StateService.
-            ReadRequest::Transaction(hash) => timed_span.spawn_blocking_in_scope(move || {
+            ReadRequest::Transaction(hash) => timed_span.spawn_blocking(move || {
                 Ok(ReadResponse::Transaction(read::mined_transaction(
                     state.latest_best_chain(),
                     &state.db,
@@ -1436,19 +1424,17 @@ impl Service<ReadRequest> for ReadStateService {
                 )))
             }),
 
-            ReadRequest::AnyChainTransaction(hash) => {
-                timed_span.spawn_blocking_in_scope(move || {
-                    Ok(ReadResponse::AnyChainTransaction(read::any_transaction(
-                        state.latest_non_finalized_state().chain_iter(),
-                        &state.db,
-                        hash,
-                    )))
-                })
-            }
+            ReadRequest::AnyChainTransaction(hash) => timed_span.spawn_blocking(move || {
+                Ok(ReadResponse::AnyChainTransaction(read::any_transaction(
+                    state.latest_non_finalized_state().chain_iter(),
+                    &state.db,
+                    hash,
+                )))
+            }),
 
             // Used by the getblock (verbose) RPC.
-            ReadRequest::TransactionIdsForBlock(hash_or_height) => timed_span
-                .spawn_blocking_in_scope(move || {
+            ReadRequest::TransactionIdsForBlock(hash_or_height) => {
+                timed_span.spawn_blocking(move || {
                     Ok(ReadResponse::TransactionIdsForBlock(
                         read::transaction_hashes_for_block(
                             state.latest_best_chain(),
@@ -1456,10 +1442,11 @@ impl Service<ReadRequest> for ReadStateService {
                             hash_or_height,
                         ),
                     ))
-                }),
+                })
+            }
 
             ReadRequest::AnyChainTransactionIdsForBlock(hash_or_height) => timed_span
-                .spawn_blocking_in_scope(move || {
+                .spawn_blocking(move || {
                     Ok(ReadResponse::AnyChainTransactionIdsForBlock(
                         read::transaction_hashes_for_any_block(
                             state.latest_non_finalized_state().chain_iter(),
@@ -1470,30 +1457,22 @@ impl Service<ReadRequest> for ReadStateService {
                 }),
 
             #[cfg(feature = "indexer")]
-            ReadRequest::SpendingTransactionId(spend) => {
-                timed_span.spawn_blocking_in_scope(move || {
-                    Ok(ReadResponse::TransactionId(
-                        read::spending_transaction_hash(
-                            state.latest_best_chain(),
-                            &state.db,
-                            spend,
-                        ),
-                    ))
-                })
-            }
+            ReadRequest::SpendingTransactionId(spend) => timed_span.spawn_blocking(move || {
+                Ok(ReadResponse::TransactionId(
+                    read::spending_transaction_hash(state.latest_best_chain(), &state.db, spend),
+                ))
+            }),
 
-            ReadRequest::UnspentBestChainUtxo(outpoint) => {
-                timed_span.spawn_blocking_in_scope(move || {
-                    Ok(ReadResponse::UnspentBestChainUtxo(read::unspent_utxo(
-                        state.latest_best_chain(),
-                        &state.db,
-                        outpoint,
-                    )))
-                })
-            }
+            ReadRequest::UnspentBestChainUtxo(outpoint) => timed_span.spawn_blocking(move || {
+                Ok(ReadResponse::UnspentBestChainUtxo(read::unspent_utxo(
+                    state.latest_best_chain(),
+                    &state.db,
+                    outpoint,
+                )))
+            }),
 
             // Manually used by the StateService to implement part of AwaitUtxo.
-            ReadRequest::AnyChainUtxo(outpoint) => timed_span.spawn_blocking_in_scope(move || {
+            ReadRequest::AnyChainUtxo(outpoint) => timed_span.spawn_blocking(move || {
                 Ok(ReadResponse::AnyChainUtxo(read::any_utxo(
                     state.latest_non_finalized_state(),
                     &state.db,
@@ -1502,15 +1481,15 @@ impl Service<ReadRequest> for ReadStateService {
             }),
 
             // Used by the StateService.
-            ReadRequest::BlockLocator => timed_span.spawn_blocking_in_scope(move || {
+            ReadRequest::BlockLocator => timed_span.spawn_blocking(move || {
                 Ok(ReadResponse::BlockLocator(
                     read::block_locator(state.latest_best_chain(), &state.db).unwrap_or_default(),
                 ))
             }),
 
             // Used by the StateService.
-            ReadRequest::FindBlockHashes { known_blocks, stop } => timed_span
-                .spawn_blocking_in_scope(move || {
+            ReadRequest::FindBlockHashes { known_blocks, stop } => {
+                timed_span.spawn_blocking(move || {
                     Ok(ReadResponse::BlockHashes(read::find_chain_hashes(
                         state.latest_best_chain(),
                         &state.db,
@@ -1518,11 +1497,12 @@ impl Service<ReadRequest> for ReadStateService {
                         stop,
                         MAX_FIND_BLOCK_HASHES_RESULTS,
                     )))
-                }),
+                })
+            }
 
             // Used by the StateService.
-            ReadRequest::FindBlockHeaders { known_blocks, stop } => timed_span
-                .spawn_blocking_in_scope(move || {
+            ReadRequest::FindBlockHeaders { known_blocks, stop } => {
+                timed_span.spawn_blocking(move || {
                     Ok(ReadResponse::BlockHeaders(
                         read::find_chain_headers(
                             state.latest_best_chain(),
@@ -1535,30 +1515,27 @@ impl Service<ReadRequest> for ReadStateService {
                         .map(|header| CountedHeader { header })
                         .collect(),
                     ))
-                }),
-
-            ReadRequest::SaplingTree(hash_or_height) => {
-                timed_span.spawn_blocking_in_scope(move || {
-                    Ok(ReadResponse::SaplingTree(read::sapling_tree(
-                        state.latest_best_chain(),
-                        &state.db,
-                        hash_or_height,
-                    )))
                 })
             }
 
-            ReadRequest::OrchardTree(hash_or_height) => {
-                timed_span.spawn_blocking_in_scope(move || {
-                    Ok(ReadResponse::OrchardTree(read::orchard_tree(
-                        state.latest_best_chain(),
-                        &state.db,
-                        hash_or_height,
-                    )))
-                })
-            }
+            ReadRequest::SaplingTree(hash_or_height) => timed_span.spawn_blocking(move || {
+                Ok(ReadResponse::SaplingTree(read::sapling_tree(
+                    state.latest_best_chain(),
+                    &state.db,
+                    hash_or_height,
+                )))
+            }),
+
+            ReadRequest::OrchardTree(hash_or_height) => timed_span.spawn_blocking(move || {
+                Ok(ReadResponse::OrchardTree(read::orchard_tree(
+                    state.latest_best_chain(),
+                    &state.db,
+                    hash_or_height,
+                )))
+            }),
 
             ReadRequest::SaplingSubtrees { start_index, limit } => {
-                timed_span.spawn_blocking_in_scope(move || {
+                timed_span.spawn_blocking(move || {
                     let end_index = limit
                         .and_then(|limit| start_index.0.checked_add(limit.0))
                         .map(NoteCommitmentSubtreeIndex);
@@ -1591,7 +1568,7 @@ impl Service<ReadRequest> for ReadStateService {
             }
 
             ReadRequest::OrchardSubtrees { start_index, limit } => {
-                timed_span.spawn_blocking_in_scope(move || {
+                timed_span.spawn_blocking(move || {
                     let end_index = limit
                         .and_then(|limit| start_index.0.checked_add(limit.0))
                         .map(NoteCommitmentSubtreeIndex);
@@ -1624,19 +1601,17 @@ impl Service<ReadRequest> for ReadStateService {
             }
 
             // For the get_address_balance RPC.
-            ReadRequest::AddressBalance(addresses) => {
-                timed_span.spawn_blocking_in_scope(move || {
-                    let (balance, received) =
-                        read::transparent_balance(state.latest_best_chain(), &state.db, addresses)?;
-                    Ok(ReadResponse::AddressBalance { balance, received })
-                })
-            }
+            ReadRequest::AddressBalance(addresses) => timed_span.spawn_blocking(move || {
+                let (balance, received) =
+                    read::transparent_balance(state.latest_best_chain(), &state.db, addresses)?;
+                Ok(ReadResponse::AddressBalance { balance, received })
+            }),
 
             // For the get_address_tx_ids RPC.
             ReadRequest::TransactionIdsByAddresses {
                 addresses,
                 height_range,
-            } => timed_span.spawn_blocking_in_scope(move || {
+            } => timed_span.spawn_blocking(move || {
                 read::transparent_tx_ids(
                     state.latest_best_chain(),
                     &state.db,
@@ -1647,20 +1622,18 @@ impl Service<ReadRequest> for ReadStateService {
             }),
 
             // For the get_address_utxos RPC.
-            ReadRequest::UtxosByAddresses(addresses) => {
-                timed_span.spawn_blocking_in_scope(move || {
-                    read::address_utxos(
-                        &state.network,
-                        state.latest_best_chain(),
-                        &state.db,
-                        addresses,
-                    )
-                    .map(ReadResponse::AddressUtxos)
-                })
-            }
+            ReadRequest::UtxosByAddresses(addresses) => timed_span.spawn_blocking(move || {
+                read::address_utxos(
+                    &state.network,
+                    state.latest_best_chain(),
+                    &state.db,
+                    addresses,
+                )
+                .map(ReadResponse::AddressUtxos)
+            }),
 
             ReadRequest::CheckBestChainTipNullifiersAndAnchors(unmined_tx) => timed_span
-                .spawn_blocking_in_scope(move || {
+                .spawn_blocking(move || {
                     let latest_non_finalized_best_chain = state.latest_best_chain();
 
                     check::nullifier::tx_no_duplicates_in_chain(
@@ -1679,19 +1652,17 @@ impl Service<ReadRequest> for ReadStateService {
                 }),
 
             // Used by the get_block and get_block_hash RPCs.
-            ReadRequest::BestChainBlockHash(height) => {
-                timed_span.spawn_blocking_in_scope(move || {
-                    Ok(ReadResponse::BlockHash(read::hash_by_height(
-                        state.latest_best_chain(),
-                        &state.db,
-                        height,
-                    )))
-                })
-            }
+            ReadRequest::BestChainBlockHash(height) => timed_span.spawn_blocking(move || {
+                Ok(ReadResponse::BlockHash(read::hash_by_height(
+                    state.latest_best_chain(),
+                    &state.db,
+                    height,
+                )))
+            }),
 
             // Used by get_block_template and getblockchaininfo RPCs.
             ReadRequest::ChainInfo => {
-                timed_span.spawn_blocking_in_scope(move || {
+                timed_span.spawn_blocking(move || {
                     // # Correctness
                     //
                     // It is ok to do these lookups using multiple database calls. Finalized state updates
@@ -1714,7 +1685,7 @@ impl Service<ReadRequest> for ReadStateService {
 
             // Used by getmininginfo, getnetworksolps, and getnetworkhashps RPCs.
             ReadRequest::SolutionRate { num_blocks, height } => {
-                timed_span.spawn_blocking_in_scope(move || {
+                timed_span.spawn_blocking(move || {
                     let latest_non_finalized_state = state.latest_non_finalized_state();
                     // # Correctness
                     //
@@ -1753,7 +1724,7 @@ impl Service<ReadRequest> for ReadStateService {
             }
 
             ReadRequest::CheckBlockProposalValidity(semantically_verified) => {
-                timed_span.spawn_blocking_in_scope(move || {
+                timed_span.spawn_blocking(move || {
                     tracing::debug!(
                         "attempting to validate and commit block proposal \
                          onto a cloned non-finalized state"
@@ -1794,7 +1765,7 @@ impl Service<ReadRequest> for ReadStateService {
             }
 
             ReadRequest::TipBlockSize => {
-                timed_span.spawn_blocking_in_scope(move || {
+                timed_span.spawn_blocking(move || {
                     // Respond with the length of the obtained block if any.
                     Ok(ReadResponse::TipBlockSize(
                         find::tip_block(state.latest_best_chain(), &state.db)
@@ -1821,9 +1792,9 @@ impl Service<ReadRequest> for ReadStateService {
 
             // Used by `gettxout` RPC method.
             ReadRequest::IsTransparentOutputSpent(outpoint) => {
-                timed_span.spawn_blocking_in_scope(move || {
+                timed_span.spawn_blocking(move || {
                     let is_spent =
-                        read::block::unspent_utxo(state.latest_best_chain(), &state.db, outpoint);
+                        read::unspent_utxo(state.latest_best_chain(), &state.db, outpoint);
                     Ok(ReadResponse::IsTransparentOutputSpent(is_spent.is_none()))
                 })
             }

@@ -1538,7 +1538,7 @@ impl TimedSpan {
 
     /// Spawns a blocking tokio task in scope of the `span` field.
     #[track_caller]
-    pub fn spawn_blocking_in_scope<T: Send + 'static>(
+    pub fn spawn_blocking<T: Send + 'static>(
         mut self,
         f: impl FnOnce() -> Result<T, BoxError> + Send + 'static,
     ) -> Pin<Box<dyn futures::Future<Output = Result<T, BoxError>> + Send>> {
