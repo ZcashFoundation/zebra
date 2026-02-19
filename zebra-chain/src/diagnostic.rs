@@ -56,7 +56,7 @@ impl CodeTimer {
     /// Start timing the execution of a function, method, or other code region.
     ///
     /// Returns a guard that finishes timing the code when dropped,
-    /// or when [`CodeTimer::finish()`] is called.
+    /// or when [`CodeTimer::finish_inner()`] is called with an empty description.
     #[track_caller]
     pub fn start_desc(description: &'static str) -> Self {
         let start = Instant::now();
