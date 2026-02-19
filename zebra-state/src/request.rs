@@ -1413,6 +1413,7 @@ pub enum ReadRequest {
 }
 
 impl ReadRequest {
+    /// Returns a [`&'static str`](str) name of the variant representing this value.
     pub fn variant_name(&self) -> &'static str {
         match self {
             ReadRequest::UsageInfo => "usage_info",
