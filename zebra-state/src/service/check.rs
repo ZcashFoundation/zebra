@@ -413,7 +413,7 @@ where
 pub(crate) fn initial_contextual_validity(
     finalized_state: &ZebraDb,
     non_finalized_state: &NonFinalizedState,
-    semantically_verified: &mut SemanticallyVerifiedBlock,
+    semantically_verified: &SemanticallyVerifiedBlock,
 ) -> Result<(), ValidateContextError> {
     let relevant_chain = any_ancestor_blocks(
         non_finalized_state,

@@ -548,10 +548,10 @@ impl CheckpointVerifiedBlock {
     ///
     /// Note: a [`CheckpointVerifiedBlock`] isn't actually finalized
     /// until [`Request::CommitCheckpointVerifiedBlock`] returns success.
-    pub fn with_hash(block: Arc<Block>, hash: block::Hash) -> Self {
+    pub fn with_hash(block: Arc<Block>, hash: block::Hash, deferred_pool_balance_change: Option<DeferredPoolBalanceChange>) -> Self {
         Self {
             block: SemanticallyVerifiedBlock::with_hash(block, hash),
-            deferred_pool_balance_change: None,
+            deferred_pool_balance_change,
         }
     }
 }
@@ -578,7 +578,7 @@ impl SemanticallyVerifiedBlock {
 
 impl From<Arc<Block>> for CheckpointVerifiedBlock {
     fn from(block: Arc<Block>) -> Self {
-        CheckpointVerifiedBlock::with_hash(block.clone(), block.hash())
+        CheckpointVerifiedBlock::with_hash(block.clone(), block.hash(), None)
     }
 }
 

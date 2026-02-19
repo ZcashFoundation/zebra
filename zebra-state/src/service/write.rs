@@ -52,7 +52,7 @@ const PARENT_ERROR_MAP_LIMIT: usize = MAX_BLOCK_REORG_HEIGHT as usize * 2;
 pub(crate) fn validate_and_commit_non_finalized(
     finalized_state: &ZebraDb,
     non_finalized_state: &mut NonFinalizedState,
-    prepared: &mut SemanticallyVerifiedBlock,
+    prepared: &SemanticallyVerifiedBlock,
 ) -> Result<(), ValidateContextError> {
     initial_contextual_validity(finalized_state, non_finalized_state, prepared)?;
     let parent_hash = prepared.block.header.previous_block_hash;
