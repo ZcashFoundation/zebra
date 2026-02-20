@@ -12,7 +12,7 @@ pub use orchard::note::AssetBase;
 use orchard::{
     bundle::burn_validation::{validate_bundle_burn, BurnError},
     issuance::{
-        verify_issue_bundle, verify_trusted_issue_bundle, AssetRecord, Error as IssueError,
+        check_issue_bundle_without_sighash, verify_issue_bundle, AssetRecord, Error as IssueError,
     },
     note::Nullifier,
     value::NoteValue,
@@ -167,7 +167,7 @@ impl IssuedAssetChanges {
     ///
     /// - **Without `transaction_sighashes` (None)**: Trusted validation for Checkpoint Verified Blocks
     ///   loaded during bootstrap/startup from disk. These blocks are within checkpoint ranges and
-    ///   are considered trusted, so signature verification is skipped using `verify_trusted_issue_bundle`.
+    ///   are considered trusted, so signature verification is skipped using `check_issue_bundle_without_sighash`.
     #[allow(clippy::unwrap_in_result)]
     pub fn validate_and_get_changes(
         transactions: &[Arc<Transaction>],
@@ -232,7 +232,7 @@ impl IssuedAssetChanges {
                     }
                     None => {
                         // Trusted verification without signature check (Checkpoint Verified Block)
-                        verify_trusted_issue_bundle(
+                        check_issue_bundle_without_sighash(
                             issue_data.inner(),
                             |asset| Self::get_or_cache_record(&mut states, asset, &get_state),
                             first_nullifier,
@@ -289,14 +289,15 @@ pub mod testing {
     use super::AssetState;
 
     use orchard::{
-        issuance::compute_asset_desc_hash,
-        issuance_auth::{IssueAuthKey, IssueValidatingKey, ZSASchnorr},
-        note::{AssetBase, RandomSeed, Rho},
+        issuance::{
+            auth::{IssueAuthKey, IssueValidatingKey, ZSASchnorr},
+            compute_asset_desc_hash, create_test_reference_note as create_reference_note,
+        },
+        note::{AssetBase, AssetId},
         value::NoteValue,
-        Note, ReferenceKeys,
     };
 
-    use rand::{RngCore, SeedableRng};
+    use rand::SeedableRng;
     use rand_chacha::ChaChaRng;
 
     /// Deterministic "random" AssetBase for tests.
@@ -314,32 +315,7 @@ pub mod testing {
                 .into(),
         );
 
-        AssetBase::derive(&ik, &desc_hash)
-    }
-
-    /// Creates a reference note.
-    // TODO: Consider making create_reference_note function pub in orchard and remove this
-    // implementation.
-    fn create_reference_note(asset: AssetBase, mut rng: impl RngCore) -> Note {
-        let rho = Rho::from_bytes(&[0u8; 32]).expect("Rho note must be valid");
-
-        let rseed = loop {
-            let mut bytes = [0u8; 32];
-            rng.fill_bytes(&mut bytes);
-
-            if let Some(rseed) = Option::from(RandomSeed::from_bytes(bytes, &rho)) {
-                break rseed;
-            }
-        };
-
-        Note::from_parts(
-            ReferenceKeys::recipient(),
-            NoteValue::from_raw(0),
-            asset,
-            rho,
-            rseed,
-        )
-        .expect("Reference note must be valid")
+        AssetBase::custom(&AssetId::new_v0(&ik, &desc_hash))
     }
 
     /// Mock AssetState for tests.

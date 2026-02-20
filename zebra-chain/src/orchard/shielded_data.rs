@@ -134,7 +134,7 @@ impl<Flavor: ShieldedDataFlavor> ShieldedData<Flavor> {
             let cv_balance = ValueCommitment::new(
                 pallas::Scalar::zero(),
                 ValueSum::from_raw(self.value_balance.into()),
-                AssetBase::native(),
+                AssetBase::zatoshi(),
             );
             let burn_value_commitment = compute_burn_value_commitment(self.burn.as_ref());
             cv - cv_balance - burn_value_commitment

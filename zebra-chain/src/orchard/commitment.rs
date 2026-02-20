@@ -243,7 +243,7 @@ impl ValueCommitment {
         let rcv = generate_trapdoor(csprng)?;
 
         #[cfg(feature = "tx_v6")]
-        let vc = Self::new(rcv, ValueSum::from_raw(value.into()), AssetBase::native());
+        let vc = Self::new(rcv, ValueSum::from_raw(value.into()), AssetBase::zatoshi());
 
         #[cfg(not(feature = "tx_v6"))]
         let vc = Self::new(rcv, value);
