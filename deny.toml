@@ -96,7 +96,6 @@ skip-tree = [
 
     # wait for librustzcash to update tonic
     { name = "tonic", version = "0.12" },
-    { name = "prost-types", version = "0.13" },
 
     { name = "windows-sys", version = "=0.52.0" },
 
@@ -119,8 +118,6 @@ skip-tree = [
 
     # wait until `config` updates `convert_case`
     { name = "convert_case", version = "0.6.0" },
-    # wait until `config` updates `hashbrown`
-    { name = "hashbrown", version = "0.14.5" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
