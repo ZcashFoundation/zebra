@@ -2952,7 +2952,7 @@ where
                 SubmitBlockResponse::ErrorResponse(response) => {
                     return Err(ErrorObject::owned(
                         server::error::LegacyCode::Misc.into(),
-                        format!("block was rejected: {:?}", response),
+                        format!("block was rejected: {response:?}",),
                         None::<()>,
                     ));
                 }
