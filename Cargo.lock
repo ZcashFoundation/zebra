@@ -2823,7 +2823,7 @@ dependencies = [
 [[package]]
 name = "libzcash_script"
 version = "0.1.0"
-source = "git+https://github.com/ZcashFoundation/zcash_script?branch=make-parse-pub#de82a93c9ede37620b54adbc3cdbe8b9a37de64f"
+source = "git+https://github.com/ZcashFoundation/zcash_script?branch=master#193193766ca13e92930d974b7ee51263822a19d8"
 dependencies = [
  "bindgen 0.72.1",
  "cc",
@@ -6952,7 +6952,7 @@ dependencies = [
 [[package]]
 name = "zcash_script"
 version = "0.5.1"
-source = "git+https://github.com/ZcashFoundation/zcash_script?branch=make-parse-pub#de82a93c9ede37620b54adbc3cdbe8b9a37de64f"
+source = "git+https://github.com/ZcashFoundation/zcash_script?branch=master#193193766ca13e92930d974b7ee51263822a19d8"
 dependencies = [
  "bip32",
  "bitflags 2.10.0",

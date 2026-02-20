@@ -189,8 +189,8 @@ zcash_proofs = { git = "https://github.com/zcash/librustzcash", branch = "bump-z
 zcash_transparent = { git = "https://github.com/zcash/librustzcash", branch = "bump-zcash_script" }
 zcash_protocol = { git = "https://github.com/zcash/librustzcash", branch = "bump-zcash_script" }
 
-zcash_script = { git = "https://github.com/ZcashFoundation/zcash_script", branch = "make-parse-pub" }
-libzcash_script = { git = "https://github.com/ZcashFoundation/zcash_script", branch = "make-parse-pub" }
+zcash_script = { git = "https://github.com/ZcashFoundation/zcash_script", branch = "master" }
+libzcash_script = { git = "https://github.com/ZcashFoundation/zcash_script", branch = "master" }
 
 [workspace.metadata.release]
 
