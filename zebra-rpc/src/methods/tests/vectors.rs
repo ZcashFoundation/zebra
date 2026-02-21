@@ -2322,6 +2322,7 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
         fee_weight_ratio: 1.0,
         time: None,
         height: None,
+        inputs_are_standard: true,
     };
 
     let next_fake_tip_hash =

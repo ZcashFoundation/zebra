@@ -302,9 +302,7 @@ fn are_inputs_standard_rejects_over_limit() -> Result<()> {
             sequence: 0xffffffff,
         }],
         outputs: vec![],
-        lock_time: zebra_chain::transaction::LockTime::Height(
-            zebra_chain::block::Height(0),
-        ),
+        lock_time: zebra_chain::transaction::LockTime::Height(zebra_chain::block::Height(0)),
         expiry_height: zebra_chain::block::Height(0),
         joinsplit_data: None,
         sapling_shielded_data: None,
@@ -340,9 +338,7 @@ fn are_inputs_standard_accepts_at_limit() -> Result<()> {
             sequence: 0xffffffff,
         }],
         outputs: vec![],
-        lock_time: zebra_chain::transaction::LockTime::Height(
-            zebra_chain::block::Height(0),
-        ),
+        lock_time: zebra_chain::transaction::LockTime::Height(zebra_chain::block::Height(0)),
         expiry_height: zebra_chain::block::Height(0),
         joinsplit_data: None,
         sapling_shielded_data: None,
@@ -363,8 +359,7 @@ fn are_inputs_standard_accepts_non_p2sh() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     // Non-P2SH standard inputs (P2PKH) should pass.
-    let tx =
-        SCRIPT_TX.zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()?;
+    let tx = SCRIPT_TX.zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()?;
 
     let output = Output {
         value: (212 * u64::pow(10, 8)).try_into()?,
@@ -394,9 +389,7 @@ fn are_inputs_standard_rejects_non_standard_script() -> Result<()> {
             sequence: 0xffffffff,
         }],
         outputs: vec![],
-        lock_time: zebra_chain::transaction::LockTime::Height(
-            zebra_chain::block::Height(0),
-        ),
+        lock_time: zebra_chain::transaction::LockTime::Height(zebra_chain::block::Height(0)),
         expiry_height: zebra_chain::block::Height(0),
         joinsplit_data: None,
         sapling_shielded_data: None,
@@ -436,8 +429,7 @@ fn p2sh_sigop_count_sums_across_inputs() -> Result<()> {
 fn p2sh_sigop_count_zero_for_non_p2sh() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let tx =
-        SCRIPT_TX.zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()?;
+    let tx = SCRIPT_TX.zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()?;
 
     let output = Output {
         value: (212 * u64::pow(10, 8)).try_into()?,
@@ -482,9 +474,7 @@ fn are_inputs_standard_rejects_extra_scriptsig_data() -> Result<()> {
             sequence: 0xffffffff,
         }],
         outputs: vec![],
-        lock_time: zebra_chain::transaction::LockTime::Height(
-            zebra_chain::block::Height(0),
-        ),
+        lock_time: zebra_chain::transaction::LockTime::Height(zebra_chain::block::Height(0)),
         expiry_height: zebra_chain::block::Height(0),
         joinsplit_data: None,
         sapling_shielded_data: None,
@@ -531,9 +521,7 @@ fn are_inputs_standard_accepts_correct_p2pkh_args() -> Result<()> {
             sequence: 0xffffffff,
         }],
         outputs: vec![],
-        lock_time: zebra_chain::transaction::LockTime::Height(
-            zebra_chain::block::Height(0),
-        ),
+        lock_time: zebra_chain::transaction::LockTime::Height(zebra_chain::block::Height(0)),
         expiry_height: zebra_chain::block::Height(0),
         joinsplit_data: None,
         sapling_shielded_data: None,

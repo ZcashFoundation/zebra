@@ -238,7 +238,7 @@ impl Sigops for CachedFfiTransaction {
 }
 
 /// Maximum sigops allowed in a P2SH redeemed script (zcashd MAX_P2SH_SIGOPS).
-/// https://github.com/zcash/zcash/blob/v6.10.0/src/policy/policy.h
+/// <https://github.com/zcash/zcash/blob/v6.11.0/src/policy/policy.h#L20>
 pub const MAX_P2SH_SIGOPS: u32 = 15;
 
 /// Classify a script using zcashd's `Solver()`.
@@ -278,7 +278,7 @@ fn count_script_push_ops(script_bytes: &[u8]) -> usize {
 /// Returns the expected number of scriptSig arguments for a given script kind.
 ///
 /// Mirrors zcashd's `ScriptSigArgsExpected()`:
-/// https://github.com/zcash/zcash/blob/v6.10.0/src/policy/policy.cpp#L108
+/// <https://github.com/zcash/zcash/blob/v6.11.0/src/script/standard.cpp#L135>
 ///
 /// Returns `None` for non-standard types (TX_NONSTANDARD, TX_NULL_DATA).
 fn script_sig_args_expected(kind: &solver::ScriptKind) -> Option<usize> {
@@ -317,7 +317,7 @@ fn p2sh_redeemed_script_sigop_count(
 /// Returns the total number of P2SH sigops across all inputs of the transaction.
 ///
 /// Mirrors zcashd's `GetP2SHSigOpCount()`:
-/// https://github.com/zcash/zcash/blob/v6.10.0/src/main.cpp#L1342
+/// <https://github.com/zcash/zcash/blob/v6.11.0/src/main.cpp#L1191>
 ///
 /// # Panics
 ///
@@ -343,7 +343,7 @@ pub fn p2sh_sigop_count(
 /// Returns `true` if all transparent inputs are standard.
 ///
 /// Mirrors zcashd's `AreInputsStandard()`:
-/// https://github.com/zcash/zcash/blob/v6.10.0/src/policy/policy.cpp#L137
+/// <https://github.com/zcash/zcash/blob/v6.11.0/src/policy/policy.cpp#L136>
 ///
 /// For each input:
 /// 1. The spent output's scriptPubKey must be a known standard type (via `Solver()`).
