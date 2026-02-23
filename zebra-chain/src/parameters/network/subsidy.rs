@@ -478,16 +478,15 @@ pub fn block_subsidy(height: Height, net: &Network) -> Result<Amount<NonNegative
 ///
 /// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 pub fn miner_subsidy(
-    height: Height,
-    network: &Network,
     expected_block_subsidy: Amount<NonNegative>,
+    founders_reward: Amount<NonNegative>,
+    funding_streams: &HashMap<FundingStreamReceiver, Amount<NonNegative>>,
 ) -> Result<Amount<NonNegative>, amount::Error> {
-    let total_funding_stream_amount: Result<Amount<NonNegative>, _> =
-        funding_stream_values(height, network, expected_block_subsidy)?
-            .values()
-            .sum();
+    let funding_streams_sum = funding_streams
+        .values()
+        .sum::<Result<Amount<NonNegative>, _>>()?;
 
-    expected_block_subsidy - total_funding_stream_amount?
+    expected_block_subsidy - founders_reward - funding_streams_sum
 }
 
 /// Returns the founders reward address for a given height and network as described in [§7.9].
