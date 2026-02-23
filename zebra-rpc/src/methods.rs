@@ -67,7 +67,10 @@ use zebra_chain::{
     chain_sync_status::ChainSyncStatus,
     chain_tip::{ChainTip, NetworkChainTipHeightEstimator},
     parameters::{
-        subsidy::{block_subsidy, funding_stream_values, miner_subsidy, FundingStreamReceiver},
+        subsidy::{
+            block_subsidy, founders_reward, funding_stream_values, miner_subsidy,
+            FundingStreamReceiver,
+        },
         ConsensusBranchId, Network, NetworkUpgrade, POW_AVERAGING_WINDOW,
     },
     serialization::{BytesInDisplayOrder, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
@@ -2769,13 +2772,15 @@ where
         };
 
         let subsidy = block_subsidy(height, &net).map_misc_error()?;
+        let funding_streams = funding_stream_values(height, &net, subsidy).map_misc_error()?;
+        let founders_reward = founders_reward(&net, height);
+        let miner_subsidy =
+            miner_subsidy(subsidy, founders_reward, &funding_streams).map_misc_error()?;
 
-        let (lockbox_streams, mut funding_streams): (Vec<_>, Vec<_>) =
-            funding_stream_values(height, &net, subsidy)
-                .map_misc_error()?
-                .into_iter()
-                // Separate the funding streams into deferred and non-deferred streams
-                .partition(|(receiver, _)| matches!(receiver, FundingStreamReceiver::Deferred));
+        let (lockbox_streams, mut funding_streams): (Vec<_>, Vec<_>) = funding_streams
+            .into_iter()
+            // Separate the funding streams into deferred and non-deferred streams
+            .partition(|(receiver, _)| matches!(receiver, FundingStreamReceiver::Deferred));
 
         let [lockbox_total, funding_streams_total] =
             [&lockbox_streams, &funding_streams].map(|streams| {
@@ -2811,10 +2816,8 @@ where
             });
 
         Ok(GetBlockSubsidyResponse {
-            miner: miner_subsidy(height, &net, subsidy)
-                .map_misc_error()?
-                .into(),
-            founders: Amount::zero().into(),
+            miner: miner_subsidy.into(),
+            founders: founders_reward.into(),
             funding_streams,
             lockbox_streams,
             funding_streams_total: funding_streams_total?,

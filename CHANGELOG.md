@@ -13,6 +13,10 @@ This release adds the `gettxout` RPC method.
 
 - Added `UnspentOutput` to mempool component service ([#10235](https://github.com/ZcashFoundation/zebra/pull/10235))
 
+### Fixed
+
+- Subtract Founders' Reward from block subsidy ([#10338](https://github.com/ZcashFoundation/zebra/pull/10338))
+
 ### Removed
 
 - Removed the Python QA RPC test framework (`zebra-rpc/qa/`) in favour of the new [integration-tests](https://github.com/zcash/integration-tests) project, which captures all previous work in [zcash/integration-tests#1](https://github.com/zcash/integration-tests/pull/1) ([#10363](https://github.com/ZcashFoundation/zebra/pull/10363))
