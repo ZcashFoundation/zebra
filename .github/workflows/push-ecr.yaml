@@ -12,10 +12,14 @@ on:
         description: 'Version to tag the Docker image'
         required: false
         type: string
+      ecr_repository:
+        description: 'ECR repository name (overrides vars.ECR_REPOSITORY)'
+        required: false
+        type: string
 
 env:
   AWS_REGION: ${{ vars.AWS_REGION || 'eu-central-1' }}
-  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY || 'dev-zebra-server' }}
+  ECR_REPOSITORY: ${{ inputs.ecr_repository || vars.ECR_REPOSITORY || 'dev-zebra-server' }}
   DOCKERFILE_PATH: ${{ vars.DOCKERFILE_PATH }}
 
 jobs:
