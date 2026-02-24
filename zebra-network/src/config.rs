@@ -29,6 +29,7 @@ use crate::{
     constants::{
         DEFAULT_CRAWL_NEW_PEER_INTERVAL, DEFAULT_MAX_CONNS_PER_IP,
         DEFAULT_PEERSET_INITIAL_TARGET_SIZE, DNS_LOOKUP_TIMEOUT, INBOUND_PEER_LIMIT_MULTIPLIER,
+        REGTEST_MAX_CONNS_PER_IP,
         MAX_PEER_DISK_CACHE_SIZE, OUTBOUND_PEER_LIMIT_MULTIPLIER,
     },
     protocol::external::{canonical_peer_addr, canonical_socket_addr},
@@ -177,7 +178,8 @@ pub struct Config {
     /// The maximum number of peer connections Zebra will keep for a given IP address
     /// before it drops any additional peer connections with that IP.
     ///
-    /// The default and minimum value are 1.
+    /// The default and minimum value are 1. On regtest, if not explicitly configured,
+    /// this defaults to unlimited to allow multiple localhost nodes to connect.
     ///
     /// # Security
     ///
@@ -926,6 +928,14 @@ impl<'de> Deserialize<'de> for Config {
             }?
         } else {
             None
+        };
+
+        // On regtest, default to allowing many connections per IP so that
+        // multiple nodes on localhost can connect to each other.
+        let max_connections_per_ip = if network.is_regtest() && max_connections_per_ip.is_none() {
+            Some(REGTEST_MAX_CONNS_PER_IP)
+        } else {
+            max_connections_per_ip
         };
 
         let [max_connections_per_ip, peerset_initial_target_size] = [

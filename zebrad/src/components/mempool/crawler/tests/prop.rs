@@ -263,7 +263,7 @@ fn setup_crawler() -> (
 ) {
     let peer_set = MockService::build().for_prop_tests();
     let mempool = MockService::build().for_prop_tests();
-    let (sync_status, recent_sync_lengths) = SyncStatus::new();
+    let (sync_status, recent_sync_lengths) = SyncStatus::new(&Network::Mainnet);
 
     // the network should be irrelevant here
     let (chain_tip_sender, _latest_chain_tip, chain_tip_change) =

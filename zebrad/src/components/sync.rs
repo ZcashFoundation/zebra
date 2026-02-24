@@ -487,7 +487,7 @@ where
         // We apply a timeout to the verifier to avoid hangs due to missing earlier blocks.
         let verifier = Timeout::new(verifier, BLOCK_VERIFY_TIMEOUT);
 
-        let (sync_status, recent_syncs) = SyncStatus::new();
+        let (sync_status, recent_syncs) = SyncStatus::new(&config.network.network);
 
         let (past_lookahead_limit_sender, past_lookahead_limit_receiver) = watch::channel(false);
         let past_lookahead_limit_receiver = zs::WatchReceiver::new(past_lookahead_limit_receiver);

@@ -277,7 +277,7 @@ fn setup(
     let state_service = MockService::build().for_prop_tests();
     let tx_verifier = MockService::build().for_prop_tests();
 
-    let (sync_status, recent_syncs) = SyncStatus::new();
+    let (sync_status, recent_syncs) = SyncStatus::new(&Network::Mainnet);
     let (mut chain_tip_sender, latest_chain_tip, chain_tip_change) =
         ChainTipSender::new(None, network);
 

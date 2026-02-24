@@ -80,6 +80,12 @@ pub const OUTBOUND_PEER_LIMIT_MULTIPLIER: usize = 3;
 ///       connections to an IP.
 pub const DEFAULT_MAX_CONNS_PER_IP: usize = 1;
 
+/// The default maximum number of peer connections per IP on regtest.
+///
+/// On regtest, multiple nodes typically run on localhost, so the per-IP
+/// connection limit is effectively disabled.
+pub const REGTEST_MAX_CONNS_PER_IP: usize = usize::MAX;
+
 /// The default peerset target size.
 ///
 /// This will be used as `Config.peerset_initial_target_size` if no valid value is provided.

@@ -1,7 +1,7 @@
 //! Syncer chain tip status, based on recent block locator responses from peers.
 
 use tokio::sync::watch;
-use zebra_chain::chain_sync_status::ChainSyncStatus;
+use zebra_chain::{chain_sync_status::ChainSyncStatus, parameters::Network};
 
 use super::RecentSyncLengths;
 
@@ -16,6 +16,10 @@ mod tests;
 #[derive(Clone, Debug)]
 pub struct SyncStatus {
     latest_sync_length: watch::Receiver<Vec<usize>>,
+    /// Whether the node is running in regtest mode.
+    /// When true, `is_close_to_tip()` always returns true so that blocks
+    /// are rebroadcast immediately without waiting for sync.
+    is_regtest: bool,
 }
 
 impl SyncStatus {
@@ -30,9 +34,15 @@ impl SyncStatus {
     ///
     /// The status is determined based on the latest counts of synchronized blocks, observed
     /// through `latest_sync_length`.
-    pub fn new() -> (Self, RecentSyncLengths) {
+    ///
+    /// On regtest, `is_close_to_tip()` always returns true so that blocks are
+    /// rebroadcast to peers without waiting for sync completion.
+    pub fn new(network: &Network) -> (Self, RecentSyncLengths) {
         let (recent_sync_lengths, latest_sync_length) = RecentSyncLengths::new();
-        let status = SyncStatus { latest_sync_length };
+        let status = SyncStatus {
+            latest_sync_length,
+            is_regtest: network.is_regtest(),
+        };
 
         (status, recent_sync_lengths)
     }
@@ -52,6 +62,12 @@ impl SyncStatus {
 impl ChainSyncStatus for SyncStatus {
     /// Check if the synchronization is likely close to the chain tip.
     fn is_close_to_tip(&self) -> bool {
+        // In regtest mode, always consider the node close to the tip so that
+        // received blocks are rebroadcast to peers immediately.
+        if self.is_regtest {
+            return true;
+        }
+
         let sync_lengths = self.latest_sync_length.borrow();
 
         // Return early if sync_lengths is empty.

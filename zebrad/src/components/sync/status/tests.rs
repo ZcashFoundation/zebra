@@ -7,6 +7,8 @@ use proptest::prelude::*;
 use tokio::{sync::Semaphore, time::timeout};
 use zebra_chain::chain_sync_status::ChainSyncStatus;
 
+use zebra_chain::parameters::Network;
+
 use super::{super::RecentSyncLengths, SyncStatus};
 
 /// The default number of test cases to run.
@@ -48,7 +50,7 @@ proptest! {
             let update_events = Arc::new(Semaphore::new(0));
             let wake_events = Arc::new(Semaphore::new(0));
 
-            let (status, recent_sync_lengths) = SyncStatus::new();
+            let (status, recent_sync_lengths) = SyncStatus::new(&Network::Mainnet);
 
             let mut wait_task_handle = tokio::spawn(wait_task(
                 status.clone(),
@@ -144,7 +146,7 @@ proptest! {
 /// Test if totally empty sync lengths array is not near tip.
 #[test]
 fn empty_sync_lengths() {
-    let (status, _recent_sync_lengths) = SyncStatus::new();
+    let (status, _recent_sync_lengths) = SyncStatus::new(&Network::Mainnet);
 
     assert!(!status.is_close_to_tip());
 }
@@ -152,7 +154,7 @@ fn empty_sync_lengths() {
 /// Test if sync lengths array with all zeroes is near tip.
 #[test]
 fn zero_sync_lengths() {
-    let (status, mut recent_sync_lengths) = SyncStatus::new();
+    let (status, mut recent_sync_lengths) = SyncStatus::new(&Network::Mainnet);
 
     for _ in 0..RecentSyncLengths::MAX_RECENT_LENGTHS {
         recent_sync_lengths.push_extend_tips_length(0);
@@ -164,7 +166,7 @@ fn zero_sync_lengths() {
 /// Test if sync lengths array with high values is not near tip.
 #[test]
 fn high_sync_lengths() {
-    let (status, mut recent_sync_lengths) = SyncStatus::new();
+    let (status, mut recent_sync_lengths) = SyncStatus::new(&Network::Mainnet);
 
     // The value 500 is based on the fact that sync lengths are around 500
     // blocks long when Zebra is syncing.
@@ -173,4 +175,41 @@ fn high_sync_lengths() {
     }
 
     assert!(!status.is_close_to_tip());
+}
+
+/// Test that regtest mode always reports close to tip, even with empty sync lengths.
+#[test]
+fn regtest_always_close_to_tip_when_empty() {
+    let (status, _recent_sync_lengths) = SyncStatus::new(&Network::new_regtest(Default::default()));
+
+    assert!(status.is_close_to_tip());
+}
+
+/// Test that regtest mode always reports close to tip, even with high sync lengths.
+#[test]
+fn regtest_always_close_to_tip_when_syncing() {
+    let (status, mut recent_sync_lengths) = SyncStatus::new(&Network::new_regtest(Default::default()));
+
+    for _ in 0..RecentSyncLengths::MAX_RECENT_LENGTHS {
+        recent_sync_lengths.push_extend_tips_length(500);
+    }
+
+    assert!(status.is_close_to_tip());
+}
+
+/// Test that `wait_until_close_to_tip()` returns immediately on regtest,
+/// without needing any sync length updates.
+#[tokio::test]
+async fn regtest_wait_until_close_to_tip_returns_immediately() {
+    let (mut status, _recent_sync_lengths) = SyncStatus::new(&Network::new_regtest(Default::default()));
+
+    // This should return immediately without blocking, because regtest
+    // always considers itself close to the tip.
+    tokio::time::timeout(
+        Duration::from_millis(100),
+        status.wait_until_close_to_tip(),
+    )
+    .await
+    .expect("wait_until_close_to_tip should return immediately on regtest")
+    .expect("wait_until_close_to_tip should not return an error");
 }

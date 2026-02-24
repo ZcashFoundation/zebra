@@ -1742,7 +1742,7 @@ async fn setup_with_mempool_config(
 
     let tx_verifier = MockService::build().for_unit_tests();
 
-    let (sync_status, recent_syncs) = SyncStatus::new();
+    let (sync_status, recent_syncs) = SyncStatus::new(&Network::Mainnet);
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
     let (mempool, mempool_transaction_subscriber) = Mempool::new(
         &mempool_config,

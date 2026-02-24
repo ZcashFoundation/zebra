@@ -684,7 +684,7 @@ async fn setup(
     );
 
     // Fake syncer
-    let (sync_status, mut recent_syncs) = SyncStatus::new();
+    let (sync_status, mut recent_syncs) = SyncStatus::new(&Network::Mainnet);
 
     // Fake verifiers
     let mock_block_verifier = MockService::build().for_unit_tests();
@@ -835,7 +835,7 @@ mod submitblock_test {
 
         let _guard = tracing::subscriber::set_default(subscriber);
 
-        let (sync_status, _recent_syncs) = SyncStatus::new();
+        let (sync_status, _recent_syncs) = SyncStatus::new(&Network::Mainnet);
 
         // State
         let state_config = StateConfig::ephemeral();
