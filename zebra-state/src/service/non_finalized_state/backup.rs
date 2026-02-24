@@ -80,7 +80,7 @@ pub(super) async fn run_backup_task(
 ) {
     let err = loop {
         let rate_limit = tokio::time::sleep(MIN_DURATION_BETWEEN_BACKUP_UPDATES);
-        let mut backup_blocks: HashMap<block::Hash, PathBuf> = {
+        let backup_blocks: HashMap<block::Hash, PathBuf> = {
             let backup_dir_path = backup_dir_path.clone();
             tokio::task::spawn_blocking(move || list_backup_dir_entries(&backup_dir_path))
                 .await
@@ -96,23 +96,7 @@ pub(super) async fn run_backup_task(
 
         let backup_dir_path = backup_dir_path.clone();
         tokio::task::spawn_blocking(move || {
-            for block in latest_non_finalized_state
-                .chain_iter()
-                .flat_map(|chain| chain.blocks.values())
-                // Remove blocks from `backup_blocks` that are present in the non-finalized state
-                .filter(|block| backup_blocks.remove(&block.hash).is_none())
-            {
-                // This loop will typically iterate only once, but may write multiple blocks if it misses
-                // some non-finalized state changes while waiting for I/O ops.
-                write_backup_block(&backup_dir_path, block);
-            }
-
-            // Remove any backup blocks that are not present in the non-finalized state
-            for (_, outdated_backup_block_path) in backup_blocks {
-                if let Err(delete_error) = std::fs::remove_file(outdated_backup_block_path) {
-                    tracing::warn!(?delete_error, "failed to delete backup block file");
-                }
-            }
+            write_backup(&backup_dir_path, &latest_non_finalized_state, backup_blocks);
         })
         .await
         .expect("failed to join blocking task when writing in backup task");
@@ -121,7 +105,70 @@ pub(super) async fn run_backup_task(
     tracing::warn!(
         ?err,
         "got recv error waiting on non-finalized state change, is Zebra shutting down?"
-    )
+    );
+
+    // Perform one final backup write so that non-finalized blocks are not lost on shutdown.
+    // The watch receiver retains the last value after the sender is dropped.
+    let final_non_finalized_state = non_finalized_state_receiver.cloned_watch_data();
+    let final_backup_dir_path = backup_dir_path.clone();
+    let final_backup_blocks: HashMap<block::Hash, PathBuf> = {
+        match tokio::task::spawn_blocking(move || list_backup_dir_entries(&backup_dir_path))
+            .await
+        {
+            Ok(entries) => entries.collect(),
+            Err(join_err) => {
+                tracing::warn!(
+                    ?join_err,
+                    "failed to list backup dir during final shutdown write"
+                );
+                return;
+            }
+        }
+    };
+
+    if let Err(join_err) = tokio::task::spawn_blocking(move || {
+        write_backup(
+            &final_backup_dir_path,
+            &final_non_finalized_state,
+            final_backup_blocks,
+        );
+    })
+    .await
+    {
+        tracing::warn!(
+            ?join_err,
+            "failed to join blocking task during final shutdown backup write"
+        );
+        return;
+    }
+
+    tracing::info!("completed final non-finalized state backup write on shutdown");
+}
+
+/// Diffs the backup files against the current non-finalized state, writes any missing blocks,
+/// and deletes any outdated backup files.
+fn write_backup(
+    backup_dir_path: &Path,
+    non_finalized_state: &NonFinalizedState,
+    mut backup_blocks: HashMap<block::Hash, PathBuf>,
+) {
+    for block in non_finalized_state
+        .chain_iter()
+        .flat_map(|chain| chain.blocks.values())
+        // Remove blocks from `backup_blocks` that are present in the non-finalized state
+        .filter(|block| backup_blocks.remove(&block.hash).is_none())
+    {
+        // This loop will typically iterate only once, but may write multiple blocks if it misses
+        // some non-finalized state changes while waiting for I/O ops.
+        write_backup_block(backup_dir_path, block);
+    }
+
+    // Remove any backup blocks that are not present in the non-finalized state
+    for (_, outdated_backup_block_path) in backup_blocks {
+        if let Err(delete_error) = std::fs::remove_file(outdated_backup_block_path) {
+            tracing::warn!(?delete_error, "failed to delete backup block file");
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

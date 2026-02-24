@@ -820,3 +820,71 @@ async fn non_finalized_state_writes_blocks_to_and_restores_blocks_from_backup_ca
         to the previous non-finalized state"
     );
 }
+
+/// Tests that non-finalized blocks are written to the backup cache when the
+/// watch channel closes (simulating shutdown).
+///
+/// Uses `start_paused = true` so the backup task's 5-second rate-limit sleeps
+/// are auto-advanced by the tokio test runtime, keeping the test fast.
+#[tokio::test(start_paused = true)]
+async fn non_finalized_state_backup_on_shutdown() {
+    let network = Network::Mainnet;
+
+    let finalized_state = FinalizedState::new(
+        &Config::ephemeral(),
+        &network,
+        #[cfg(feature = "elasticsearch")]
+        false,
+    );
+
+    let backup_dir_path = tempfile::Builder::new()
+        .prefix("zebra-non-finalized-state-backup-shutdown")
+        .tempdir()
+        .expect("temporary directory is created successfully")
+        .keep();
+
+    let (mut non_finalized_state, non_finalized_state_sender, _receiver) =
+        NonFinalizedState::new(&network)
+            .with_backup(Some(backup_dir_path.clone()), &finalized_state.db, false)
+            .await;
+
+    let blocks = network.block_map();
+    let height = NetworkUpgrade::Heartwood
+        .activation_height(&network)
+        .unwrap()
+        .0;
+    let block = Arc::new(
+        blocks
+            .get(&(height - 1))
+            .expect("test vector exists")
+            .zcash_deserialize_into::<Block>()
+            .expect("block is structurally valid"),
+    );
+
+    non_finalized_state
+        .commit_new_chain(block.into(), &finalized_state.db)
+        .expect("committing test block should succeed");
+
+    non_finalized_state_sender
+        .send(non_finalized_state.clone())
+        .expect("backup task should have a receiver, channel should be open");
+
+    // Drop the sender to simulate shutdown. The backup task should detect the
+    // channel closure and perform a final backup write.
+    drop(non_finalized_state_sender);
+
+    // Wait for the backup task to run through its rate-limited loop iterations
+    // and complete the final shutdown write. With `start_paused = true`, the
+    // 5-second sleeps are auto-advanced so this resolves quickly in wall time.
+    tokio::time::sleep(MIN_DURATION_BETWEEN_BACKUP_UPDATES * 3).await;
+
+    let (non_finalized_state, _sender, _receiver) = NonFinalizedState::new(&network)
+        .with_backup(Some(backup_dir_path), &finalized_state.db, true)
+        .await;
+
+    assert_eq!(
+        non_finalized_state.best_chain_len(),
+        Some(1),
+        "non-finalized state should have been written to backup on shutdown"
+    );
+}
