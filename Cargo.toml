@@ -23,14 +23,14 @@ resolver = "2"
 incrementalmerkletree = { version = "0.8.2", features = ["legacy-api"] }
 orchard = "0.11"
 sapling-crypto = "0.5"
-zcash_address = "0.10"
-zcash_encoding = "0.3"
-zcash_history = "0.4"
-zcash_keys = "0.12"
-zcash_primitives = "0.26"
-zcash_proofs = "0.26"
-zcash_transparent = "0.6"
-zcash_protocol = "0.7"
+zcash_address = {path = "../librustzcash/components/zcash_address"}
+zcash_encoding = {path = "../librustzcash/components/zcash_encoding"}
+zcash_history = {path = "../librustzcash/zcash_history"}
+zcash_keys = {path = "../librustzcash/zcash_keys"}
+zcash_primitives = {path = "../librustzcash/zcash_primitives"}
+zcash_proofs = {path = "../librustzcash/zcash_proofs"}
+zcash_transparent = {path = "../librustzcash/zcash_transparent"}
+zcash_protocol = {path = "../librustzcash/components/zcash_protocol"}
 zip32 = "0.2"
 abscissa_core = "0.7"
 atty = "0.2.14"
