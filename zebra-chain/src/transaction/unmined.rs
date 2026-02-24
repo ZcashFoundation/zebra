@@ -373,9 +373,8 @@ pub struct VerifiedUnminedTx {
     /// it has not reached the mempool yet.
     pub height: Option<Height>,
 
-    /// Whether all P2SH inputs have redeemed scripts within the sigops limit.
-    /// Computed by the consensus verifier which has access to spent outputs.
-    /// Corresponds to zcashd's `AreInputsStandard()`.
+    /// Whether all transparent inputs pass zcashd's `AreInputsStandard()` checks:
+    /// standard scriptPubKey types, correct scriptSig stack depth, and P2SH sigops within limit.
     pub inputs_are_standard: bool,
 }
 

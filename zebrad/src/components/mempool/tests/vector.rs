@@ -1701,7 +1701,7 @@ async fn mempool_reject_non_standard_p2sh_sigops() -> Result<(), Report> {
     assert_eq!(
         insert_err,
         MempoolError::NonStandardTransaction(
-            storage::NonStandardTransactionError::NonStandardP2shSigops
+            storage::NonStandardTransactionError::NonStandardInputs
         )
     );
 

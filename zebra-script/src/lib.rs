@@ -237,9 +237,21 @@ impl Sigops for CachedFfiTransaction {
     }
 }
 
-/// Maximum sigops allowed in a P2SH redeemed script (zcashd MAX_P2SH_SIGOPS).
+/// Maximum sigops allowed in a P2SH redeemed script (zcashd `MAX_P2SH_SIGOPS`).
 /// <https://github.com/zcash/zcash/blob/v6.11.0/src/policy/policy.h#L20>
 pub const MAX_P2SH_SIGOPS: u32 = 15;
+
+/// Maximum number of signature operations allowed per standard transaction (zcashd `MAX_STANDARD_TX_SIGOPS`).
+/// <https://github.com/zcash/zcash/blob/v6.11.0/src/policy/policy.h#L22>
+pub const MAX_STANDARD_TX_SIGOPS: u32 = 4000;
+
+/// Maximum size in bytes of a standard transaction's scriptSig (zcashd `MAX_STANDARD_SCRIPTSIG_SIZE`).
+/// <https://github.com/zcash/zcash/blob/v6.11.0/src/policy/policy.cpp#L92-L99>
+pub const MAX_STANDARD_SCRIPTSIG_SIZE: usize = 1650;
+
+/// Maximum number of public keys allowed in a standard multisig script.
+/// <https://github.com/zcash/zcash/blob/v6.11.0/src/policy/policy.cpp#L46-L48>
+pub const MAX_STANDARD_MULTISIG_PUBKEYS: usize = 3;
 
 /// Classify a script using zcashd's `Solver()`.
 ///
@@ -276,6 +288,8 @@ fn count_script_push_ops(script_bytes: &[u8]) -> usize {
 }
 
 /// Returns the expected number of scriptSig arguments for a given script kind.
+///
+/// TODO: Consider upstreaming to `zcash_script` crate alongside `ScriptKind::req_sigs()`.
 ///
 /// Mirrors zcashd's `ScriptSigArgsExpected()`:
 /// <https://github.com/zcash/zcash/blob/v6.11.0/src/script/standard.cpp#L135>
@@ -321,13 +335,12 @@ fn p2sh_redeemed_script_sigop_count(
 ///
 /// # Panics
 ///
-/// Panics in debug builds if `spent_outputs.len()` does not equal the number of
-/// transparent inputs.
+/// Panics if `spent_outputs.len()` does not equal the number of transparent inputs.
 pub fn p2sh_sigop_count(
     tx: &zebra_chain::transaction::Transaction,
     spent_outputs: &[transparent::Output],
 ) -> u32 {
-    debug_assert_eq!(
+    assert_eq!(
         tx.inputs().len(),
         spent_outputs.len(),
         "spent_outputs length must match inputs length"
@@ -355,13 +368,12 @@ pub fn p2sh_sigop_count(
 ///
 /// # Panics
 ///
-/// Panics in debug builds if `spent_outputs.len()` does not equal the number of
-/// transparent inputs.
+/// Panics if `spent_outputs.len()` does not equal the number of transparent inputs.
 pub fn are_inputs_standard(
     tx: &zebra_chain::transaction::Transaction,
     spent_outputs: &[transparent::Output],
 ) -> bool {
-    debug_assert_eq!(
+    assert_eq!(
         tx.inputs().len(),
         spent_outputs.len(),
         "spent_outputs length must match inputs length"

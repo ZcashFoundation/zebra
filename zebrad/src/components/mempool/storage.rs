@@ -18,6 +18,7 @@ use thiserror::Error;
 
 use zcash_script::script::Evaluable as ScriptEvaluable;
 use zcash_script::{script, solver};
+use zebra_script::{MAX_STANDARD_MULTISIG_PUBKEYS, MAX_STANDARD_SCRIPTSIG_SIZE, MAX_STANDARD_TX_SIGOPS};
 use zebra_chain::{
     block::Height,
     transaction::{self, Hash, Transaction, UnminedTx, UnminedTxId, VerifiedUnminedTx},
@@ -149,8 +150,8 @@ pub enum NonStandardTransactionError {
     DataCarrierTooLarge,
     #[error("transaction has too many signature operations")]
     TooManySigops,
-    #[error("transaction has a P2SH input with too many signature operations")]
-    NonStandardP2shSigops,
+    #[error("transaction has non-standard inputs")]
+    NonStandardInputs,
 }
 
 /// Represents a set of transactions that have been removed from the mempool, either because
@@ -244,33 +245,26 @@ impl Storage {
     /// Check and reject non-standard transaction.
     ///
     /// Zcashd defines non-consensus standard transaction checks in
-    /// <https://github.com/zcash/zcash/blob/v6.10.0/src/policy/policy.cpp#L58-L135>
+    /// <https://github.com/zcash/zcash/blob/v6.11.0/src/policy/policy.cpp#L58-L135>
     ///
     /// This checks are applied before inserting a transaction in `AcceptToMemoryPool`:
-    /// <https://github.com/zcash/zcash/blob/v6.10.0/src/main.cpp#L1819>
+    /// <https://github.com/zcash/zcash/blob/v6.11.0/src/main.cpp#L1819>
     ///
     /// Currently, we implement: per-transaction sigops limit, P2SH sigops limit
     /// (`AreInputsStandard`), input scriptSig size/push-only checks, standard
     /// output script checks (including OP_RETURN limits), and dust checks.
     fn reject_if_non_standard_tx(&mut self, tx: &VerifiedUnminedTx) -> Result<(), MempoolError> {
-        // https://github.com/zcash/zcash/blob/v6.10.0/src/policy/policy.h
-        const MAX_STANDARD_TX_SIGOPS: u32 = 4000;
-        // https://github.com/zcash/zcash/blob/v6.10.0/src/policy/policy.cpp#L92-L99
-        const MAX_STANDARD_SCRIPTSIG_SIZE: usize = 1650;
-        // https://github.com/zcash/zcash/blob/v6.10.0/src/policy/policy.cpp#L46-L48
-        const MAX_STANDARD_MULTISIG_PUBKEYS: usize = 3;
-
         // Rule: per-transaction sigops must not exceed the limit.
-        // https://github.com/zcash/zcash/blob/v6.10.0/src/main.cpp#L1819
+        // https://github.com/zcash/zcash/blob/v6.11.0/src/main.cpp#L1819
         if tx.sigops > MAX_STANDARD_TX_SIGOPS {
             return self.reject_non_standard(tx, NonStandardTransactionError::TooManySigops);
         }
 
         // Rule: P2SH redeemed scripts must not exceed MAX_P2SH_SIGOPS per input.
-        // https://github.com/zcash/zcash/blob/v6.10.0/src/policy/policy.cpp#L137
+        // https://github.com/zcash/zcash/blob/v6.11.0/src/policy/policy.cpp#L137
         if !tx.inputs_are_standard {
             return self
-                .reject_non_standard(tx, NonStandardTransactionError::NonStandardP2shSigops);
+                .reject_non_standard(tx, NonStandardTransactionError::NonStandardInputs);
         }
 
         let transaction = tx.transaction.transaction.as_ref();
