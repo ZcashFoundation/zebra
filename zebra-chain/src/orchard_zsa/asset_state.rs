@@ -291,52 +291,110 @@ pub mod testing {
     use orchard::{
         issuance::{
             auth::{IssueAuthKey, IssueValidatingKey, ZSASchnorr},
-            compute_asset_desc_hash, create_test_reference_note as create_reference_note,
+            compute_asset_desc_hash, IssueBundle,
         },
-        note::{AssetBase, AssetId},
+        note::{AssetBase, AssetId, Nullifier},
         value::NoteValue,
     };
 
-    use rand::SeedableRng;
+    use group::{ff::PrimeField, Curve, Group};
+    use halo2::{arithmetic::CurveAffine, pasta::pallas};
+    use rand::{RngCore, SeedableRng};
     use rand_chacha::ChaChaRng;
 
-    /// Deterministic "random" AssetBase for tests.
-    pub fn mock_asset_base(desc: &[u8]) -> AssetBase {
-        let mut rng = ChaChaRng::seed_from_u64(0);
+    const TEST_RNG_SEED: u64 = 0;
 
-        let isk = IssueAuthKey::<ZSASchnorr>::random(&mut rng);
-        let ik = IssueValidatingKey::<ZSASchnorr>::from(&isk);
-
-        let desc_hash = compute_asset_desc_hash(
-            &desc
-                .split_first()
-                .map(|(first, rest)| (*first, rest.to_vec()))
-                .expect("Asset description must be non-empty")
-                .into(),
-        );
-
-        AssetBase::custom(&AssetId::new_v0(&ik, &desc_hash))
+    fn hash_asset_desc(desc: &[u8]) -> [u8; 32] {
+        let (first, rest) = desc
+            .split_first()
+            .expect("asset description must be non-empty");
+        compute_asset_desc_hash(&(*first, rest.to_vec()).into())
     }
 
-    /// Mock AssetState for tests.
-    pub fn mock_asset_state(asset: AssetBase, total_supply: u64, is_finalized: bool) -> AssetState {
-        let reference_note = create_reference_note(asset, ChaChaRng::seed_from_u64(0));
-        let amount = NoteValue::from_bytes(total_supply.to_le_bytes());
-        AssetState::new(amount, is_finalized, reference_note)
+    fn random_bytes<const N: usize>(rng: &mut impl RngCore) -> [u8; N] {
+        let mut bytes = [0u8; N];
+        rng.fill_bytes(&mut bytes);
+        bytes
+    }
+
+    // Coordinate extractor for Pallas (nu5.pdf, § 5.4.9.7), used to create a nullifier.
+    fn extract_p(point: &pallas::Point) -> pallas::Base {
+        point
+            .to_affine()
+            .coordinates()
+            .map(|c| *c.x())
+            .unwrap_or_else(pallas::Base::zero)
+    }
+
+    fn dummy_nullifier(rng: impl RngCore) -> Nullifier {
+        Nullifier::from_bytes(&extract_p(&pallas::Point::random(rng)).to_repr())
+            .expect("pallas x-coordinate is a valid nullifier")
+    }
+
+    fn create_issue_keys(
+        rng: &mut (impl RngCore + rand::CryptoRng),
+    ) -> (IssueAuthKey<ZSASchnorr>, IssueValidatingKey<ZSASchnorr>) {
+        let isk = IssueAuthKey::<ZSASchnorr>::random(rng);
+        let ik = IssueValidatingKey::<ZSASchnorr>::from(&isk);
+        (isk, ik)
+    }
+
+    // Creates a reference note whose `rho` is set, making it serializable via `AssetState::to_bytes`.
+    fn create_reference_note_with_rho(
+        asset_desc: &[u8],
+        rng: &mut (impl RngCore + rand::CryptoRng),
+    ) -> orchard::Note {
+        let (isk, ik) = create_issue_keys(&mut *rng);
+        let desc_hash = hash_asset_desc(asset_desc);
+
+        let sighash = random_bytes::<32>(rng);
+        let first_nullifier = dummy_nullifier(&mut *rng);
+        let (bundle, _) = IssueBundle::new(ik, desc_hash, None, true, &mut *rng);
+
+        let signed_bundle = bundle
+            .update_rho(&first_nullifier, rng)
+            .prepare(sighash)
+            .sign(&isk)
+            .expect("signing a freshly-created bundle must succeed");
+
+        signed_bundle
+            .actions()
+            .first()
+            .get_reference_note()
+            .expect("first action of IssueBundle always has a reference note")
+            .clone()
+    }
+
+    /// Returns a deterministic [`AssetBase`] for the given description.
+    pub fn mock_asset_base(desc: &[u8]) -> AssetBase {
+        let mut rng = ChaChaRng::seed_from_u64(TEST_RNG_SEED);
+        let (_, ik) = create_issue_keys(&mut rng);
+        AssetBase::custom(&AssetId::new_v0(&ik, &hash_asset_desc(desc)))
+    }
+
+    /// Returns a deterministic [`AssetState`] for use in tests.
+    pub fn mock_asset_state(
+        asset_desc: &[u8],
+        total_supply: u64,
+        is_finalized: bool,
+    ) -> AssetState {
+        let mut rng = ChaChaRng::seed_from_u64(TEST_RNG_SEED);
+        let reference_note = create_reference_note_with_rho(asset_desc, &mut rng);
+        AssetState::new(
+            NoteValue::from_bytes(total_supply.to_le_bytes()),
+            is_finalized,
+            reference_note,
+        )
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        testing::{mock_asset_base, mock_asset_state},
-        *,
-    };
+    use super::{testing::mock_asset_state, *};
 
     #[test]
     fn asset_state_roundtrip_serialization() {
-        let asset = mock_asset_base(b"test_asset");
-        let state = mock_asset_state(asset, 1000, false);
+        let state = mock_asset_state(b"test_asset", 1000, false);
 
         let bytes = state.to_bytes().unwrap();
         let decoded = AssetState::from_bytes(&bytes).unwrap();
@@ -346,8 +404,7 @@ mod tests {
 
     #[test]
     fn asset_state_finalized_roundtrip() {
-        let asset = mock_asset_base(b"finalized");
-        let state = mock_asset_state(asset, 5000, true);
+        let state = mock_asset_state(b"finalized", 5000, true);
 
         let bytes = state.to_bytes().unwrap();
         let decoded = AssetState::from_bytes(&bytes).unwrap();
