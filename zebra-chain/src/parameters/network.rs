@@ -10,7 +10,7 @@ use crate::{
     parameters::NetworkUpgrade,
     transparent,
 };
-use zcash_protocol::constants::{mainnet, testnet as testnet_constants};
+use zcash_protocol::constants::{mainnet as mainnet_constants, testnet as testnet_constants};
 
 mod error;
 pub mod magic;
@@ -67,7 +67,7 @@ impl NetworkKind {
     /// pay-to-public-key-hash payment addresses for the network.
     pub fn b58_pubkey_address_prefix(self) -> [u8; 2] {
         match self {
-            Self::Mainnet => mainnet::B58_PUBKEY_ADDRESS_PREFIX,
+            Self::Mainnet => mainnet_constants::B58_PUBKEY_ADDRESS_PREFIX,
             Self::Testnet | Self::Regtest => {
                 testnet_constants::B58_PUBKEY_ADDRESS_PREFIX
             }
@@ -78,7 +78,7 @@ impl NetworkKind {
     /// payment addresses for the network.
     pub fn b58_script_address_prefix(self) -> [u8; 2] {
         match self {
-            Self::Mainnet => mainnet::B58_SCRIPT_ADDRESS_PREFIX,
+            Self::Mainnet => mainnet_constants::B58_SCRIPT_ADDRESS_PREFIX,
             Self::Testnet | Self::Regtest => {
                 testnet_constants::B58_SCRIPT_ADDRESS_PREFIX
             }
