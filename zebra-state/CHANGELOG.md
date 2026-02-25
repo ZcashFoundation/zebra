@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `CommitBlockError` enum with `Duplicate`, `ValidateContextError`, `WriteTaskExited` variants.
 - `KnownBlock::Finalized` and `KnownBlock::WriteChannel` variants.
 - `impl From<ValidateContextError> for CommitSemanticallyVerifiedError`.
+- Added the concrete error type `CommitCheckpointVerifiedError` for handling failed state requests during checkpoint verification ([#9979](https://github.com/ZcashFoundation/zebra/pull/9979)) *(documented after release)*
+- Added `MappedRequest` for `CommitCheckpointVerifiedBlockRequest` ([#9979](https://github.com/ZcashFoundation/zebra/pull/9979)) *(documented after release)*
 
 
 ## [3.1.2] - 2026-01-21 - Yanked
