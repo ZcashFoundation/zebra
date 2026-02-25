@@ -11,7 +11,7 @@ use crate::{
 #[cfg(test)]
 use proptest::prelude::*;
 use zcash_address::{ToAddress, ZcashAddress};
-use zcash_protocol::constants::{mainnet, testnet};
+use zcash_protocol::constants::{mainnet as mainnet_constants, testnet as testnet_constants};
 
 /// Transparent Zcash Addresses
 ///
@@ -143,12 +143,12 @@ impl std::str::FromStr for Address {
         hash_bytes.copy_from_slice(&payload);
 
         match hrp.as_str() {
-            mainnet::HRP_TEX_ADDRESS => Ok(Address::Tex {
+            mainnet_constants::HRP_TEX_ADDRESS => Ok(Address::Tex {
                 network_kind: NetworkKind::Mainnet,
                 validating_key_hash: hash_bytes,
             }),
 
-            testnet::HRP_TEX_ADDRESS => Ok(Address::Tex {
+            testnet_constants::HRP_TEX_ADDRESS => Ok(Address::Tex {
                 network_kind: NetworkKind::Testnet,
                 validating_key_hash: hash_bytes,
             }),
@@ -197,25 +197,25 @@ impl ZcashDeserialize for Address {
         reader.read_exact(&mut hash_bytes)?;
 
         match version_bytes {
-            mainnet::B58_SCRIPT_ADDRESS_PREFIX => {
+            mainnet_constants::B58_SCRIPT_ADDRESS_PREFIX => {
                 Ok(Address::PayToScriptHash {
                     network_kind: NetworkKind::Mainnet,
                     script_hash: hash_bytes,
                 })
             }
-            testnet::B58_SCRIPT_ADDRESS_PREFIX => {
+            testnet_constants::B58_SCRIPT_ADDRESS_PREFIX => {
                 Ok(Address::PayToScriptHash {
                     network_kind: NetworkKind::Testnet,
                     script_hash: hash_bytes,
                 })
             }
-            mainnet::B58_PUBKEY_ADDRESS_PREFIX => {
+            mainnet_constants::B58_PUBKEY_ADDRESS_PREFIX => {
                 Ok(Address::PayToPublicKeyHash {
                     network_kind: NetworkKind::Mainnet,
                     pub_key_hash: hash_bytes,
                 })
             }
-            testnet::B58_PUBKEY_ADDRESS_PREFIX => {
+            testnet_constants::B58_PUBKEY_ADDRESS_PREFIX => {
                 Ok(Address::PayToPublicKeyHash {
                     network_kind: NetworkKind::Testnet,
                     pub_key_hash: hash_bytes,
