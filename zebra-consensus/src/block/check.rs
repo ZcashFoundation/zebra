@@ -324,6 +324,22 @@ pub fn miner_fees_are_valid(
     let sapling_value_balance = coinbase_tx.sapling_value_balance().sapling_amount();
     let orchard_value_balance = coinbase_tx.orchard_value_balance().orchard_amount();
 
+    // Coinbase transaction can still have a NSM deposit
+    let zip233_amount: Amount<NegativeAllowed> = coinbase_tx
+        .zip233_amount()
+        .constrain()
+        .map_err(|_| SubsidyError::InvalidZip233Amount)?;
+
+    #[cfg(zcash_unstable = "zip235")]
+    if let Some(nsm_activation_height) = NetworkUpgrade::Nu7.activation_height(network) {
+        if height >= nsm_activation_height {
+            let minimum_zip233_amount = ((block_miner_fees * 6).unwrap() / 10).unwrap();
+            if zip233_amount < minimum_zip233_amount {
+                Err(SubsidyError::InvalidZip233Amount)?
+            }
+        }
+    }
+
     // # Consensus
     //
     // > - define the total output value of its coinbase transaction to be the total value in zatoshi of its transparent
@@ -337,8 +353,9 @@ pub fn miner_fees_are_valid(
     // from the block subsidy value plus the transaction fees paid by transactions in this block.
     let total_output_value =
         (transparent_value_balance - sapling_value_balance - orchard_value_balance
-            + expected_deferred_pool_balance_change.value())
-        .map_err(|_| SubsidyError::Overflow)?;
+            + expected_deferred_pool_balance_change.value()
+            + zip233_amount)
+            .map_err(|_| SubsidyError::Overflow)?;
 
     let total_input_value =
         (expected_block_subsidy + block_miner_fees).map_err(|_| SubsidyError::Overflow)?;
