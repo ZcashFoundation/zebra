@@ -7,13 +7,16 @@ use std::{fmt, sync::Arc};
 
 use tokio::sync::mpsc;
 
-/// A signal sent by a [`Connection`][1] when it closes.
+/// A signal sent by a [`Connection`][1] when it opens or closes.
 ///
 /// Used to count the number of open connections.
 ///
 /// [1]: crate::peer::Connection
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct ConnectionClosed;
+enum ConnectionStatus {
+    Opened,
+    Closed,
+}
 
 /// A counter for active connections.
 ///
@@ -33,17 +36,11 @@ pub struct ActiveConnectionCounter {
     /// The label for this connection counter, typically its type.
     label: Arc<str>,
 
-    /// The channel used to send opened connection notifications.
-    open_notification_tx: mpsc::UnboundedSender<()>,
+    /// The channel used to send opened or closed connection notifications.
+    status_notification_tx: mpsc::UnboundedSender<ConnectionStatus>,
 
-    /// The channel used to receive opened connection notifications.
-    open_notification_rx: mpsc::UnboundedReceiver<()>,
-
-    /// The channel used to send closed connection notifications.
-    close_notification_tx: mpsc::UnboundedSender<ConnectionClosed>,
-
-    /// The channel used to receive closed connection notifications.
-    close_notification_rx: mpsc::UnboundedReceiver<ConnectionClosed>,
+    /// The channel used to receive opened or closed connection notifications.
+    status_notification_rx: mpsc::UnboundedReceiver<ConnectionStatus>,
 
     /// Active connection count progress transmitter.
     #[cfg(feature = "progress-bar")]
@@ -71,8 +68,7 @@ impl ActiveConnectionCounter {
     /// The caller must check and enforce limits using [`update_count()`](Self::update_count).
     pub fn new_counter_with<S: ToString>(limit: usize, label: S) -> Self {
         // The number of items in this channel is bounded by the connection limit.
-        let (close_notification_tx, close_notification_rx) = mpsc::unbounded_channel();
-        let (open_notification_tx, open_notification_rx) = mpsc::unbounded_channel();
+        let (status_notification_tx, status_notification_rx) = mpsc::unbounded_channel();
 
         let label = label.to_string();
 
@@ -84,10 +80,8 @@ impl ActiveConnectionCounter {
             reserved_count: 0,
             limit,
             label: label.into(),
-            open_notification_rx,
-            open_notification_tx,
-            close_notification_rx,
-            close_notification_tx,
+            status_notification_rx,
+            status_notification_tx,
             #[cfg(feature = "progress-bar")]
             connection_bar,
         }
@@ -107,29 +101,32 @@ impl ActiveConnectionCounter {
         // We ignore errors here:
         // - TryRecvError::Empty means that there are no pending close notifications
         // - TryRecvError::Closed is unreachable, because we hold a sender
-        while let Ok(()) = self.open_notification_rx.try_recv() {
-            self.reserved_count -= 1;
-            self.count += 1;
+        while let Ok(status) = self.status_notification_rx.try_recv() {
+            match status {
+                ConnectionStatus::Opened => {
+                    self.reserved_count -= 1;
+                    self.count += 1;
 
-            debug!(
-                open_connections = ?self.count,
-                ?previous_connections,
-                limit = ?self.limit,
-                label = ?self.label,
-                "a peer connection was opened",
-            );
-        }
+                    debug!(
+                        open_connections = ?self.count,
+                        ?previous_connections,
+                        limit = ?self.limit,
+                        label = ?self.label,
+                        "a peer connection was opened",
+                    );
+                }
+                ConnectionStatus::Closed => {
+                    self.count -= 1;
 
-        while let Ok(ConnectionClosed) = self.close_notification_rx.try_recv() {
-            self.count -= 1;
-
-            debug!(
-                open_connections = ?self.count,
-                ?previous_connections,
-                limit = ?self.limit,
-                label = ?self.label,
-                "a peer connection was closed",
-            );
+                    debug!(
+                        open_connections = ?self.count,
+                        ?previous_connections,
+                        limit = ?self.limit,
+                        label = ?self.label,
+                        "a peer connection was closed",
+                    );
+                }
+            }
         }
 
         trace!(
@@ -161,11 +158,13 @@ impl Drop for ActiveConnectionCounter {
 /// [`ActiveConnectionCounter`] creates a tracker instance for each active connection.
 /// When these trackers are dropped, the counter gets notified.
 pub struct ConnectionTracker {
-    /// The channel used to send closed connection notifications on drop.
-    close_notification_tx: mpsc::UnboundedSender<ConnectionClosed>,
+    /// The channel used to send open connection status notifications on first response or
+    /// closed connection notifications on drop.
+    status_notification_tx: mpsc::UnboundedSender<ConnectionStatus>,
 
-    /// The channel used to send open connection notifications on first response.
-    open_notification_tx: Option<mpsc::UnboundedSender<()>>,
+    /// A flag indicating whether this connection tracker has sent a notification that the
+    /// connection has been opened and that another notification should not be sent on drop.
+    has_marked_open: bool,
 
     /// The label for this connection counter, typically its type.
     label: Arc<str>,
@@ -181,8 +180,9 @@ impl fmt::Debug for ConnectionTracker {
 
 impl ConnectionTracker {
     pub fn mark_open(&mut self) {
-        if let Some(open_notification_tx) = self.open_notification_tx.take() {
-            let _ = open_notification_tx.send(());
+        if !self.has_marked_open {
+            let _ = self.status_notification_tx.send(ConnectionStatus::Opened);
+            self.has_marked_open = true;
         }
     }
 
@@ -201,8 +201,8 @@ impl ConnectionTracker {
         );
 
         Self {
-            open_notification_tx: Some(counter.open_notification_tx.clone()),
-            close_notification_tx: counter.close_notification_tx.clone(),
+            status_notification_tx: counter.status_notification_tx.clone(),
+            has_marked_open: false,
             label: counter.label.clone(),
         }
     }
@@ -219,6 +219,6 @@ impl Drop for ConnectionTracker {
         //
         // This channel is actually bounded by the inbound and outbound connection limit.
         self.mark_open();
-        let _ = self.close_notification_tx.send(ConnectionClosed);
+        let _ = self.status_notification_tx.send(ConnectionStatus::Closed);
     }
 }
