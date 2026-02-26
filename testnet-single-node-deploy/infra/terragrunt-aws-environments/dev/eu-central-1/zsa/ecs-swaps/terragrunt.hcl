@@ -24,11 +24,11 @@ dependency "vpc" {
 }
 
 dependency "ecr" {
-  config_path = "../ecr"
+  config_path = "../ecr-swaps"
 }
 
 inputs = {
-  name = "zebra"
+  name = "zebra-swaps"
   environment = local.env
   region = local.region_vars.locals.aws_region
   account_id = local.account_vars.locals.aws_account_id
@@ -46,7 +46,7 @@ inputs = {
   enable_backup = false
 
   enable_domain = true
-  domain = "zebra.zsa-test.net"
+  domain = "zebra-swaps.zsa-test.net"
   zone_name = "zsa-test.net"
 
   persistent_volume_size = 40

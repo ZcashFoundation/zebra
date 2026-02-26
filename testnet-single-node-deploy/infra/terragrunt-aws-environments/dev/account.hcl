@@ -3,5 +3,5 @@
 locals {
   account_name   = "qed-it"
   aws_profile    = "qed-it"
-  aws_account_id = run_cmd("--terragrunt-quiet", "aws", "sts", "get-caller-identity", "--profile", local.aws_profile, "--query", "Account", "--output", "text")
+  aws_account_id = "496038263219"
 }
