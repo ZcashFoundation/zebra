@@ -2316,13 +2316,13 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
     let verified_unmined_tx = VerifiedUnminedTx {
         transaction: unmined_tx,
         miner_fee: 0.try_into().unwrap(),
-        sigops: 0,
+        legacy_sigop_count: 0,
         conventional_actions,
         unpaid_actions: 0,
         fee_weight_ratio: 1.0,
         time: None,
         height: None,
-        inputs_are_standard: true,
+        spent_outputs: std::sync::Arc::new(vec![]),
     };
 
     let next_fake_tip_hash =

@@ -347,7 +347,7 @@ impl Response {
     pub fn sigops(&self) -> u32 {
         match self {
             Response::Block { sigops, .. } => *sigops,
-            Response::Mempool { transaction, .. } => transaction.sigops,
+            Response::Mempool { transaction, .. } => transaction.legacy_sigop_count,
         }
     }
 
@@ -407,7 +407,7 @@ where
                 return Ok(Response::Block {
                     tx_id,
                     miner_fee: Some(verified_tx.miner_fee),
-                    sigops: verified_tx.sigops
+                    sigops: verified_tx.legacy_sigop_count
                 });
             }
 
@@ -586,26 +586,17 @@ where
                     sigops,
                 },
                 Request::Mempool { transaction: tx, .. } => {
-                    let spent_outputs = cached_ffi_transaction.all_previous_outputs();
-
-                    let inputs_are_standard = zebra_script::are_inputs_standard(
-                        tx.transaction.as_ref(),
-                        spent_outputs,
-                    );
-
-                    // zcashd sums GetLegacySigOpCount + GetP2SHSigOpCount for the
-                    // per-tx sigops limit in AcceptToMemoryPool.
-                    let p2sh_sigops = zebra_script::p2sh_sigop_count(
-                        tx.transaction.as_ref(),
-                        spent_outputs,
-                    );
-                    let total_sigops = sigops + p2sh_sigops;
-
+                    // TODO: `spent_outputs` may not align with `tx.inputs()` when a transaction
+                    // spends both chain and mempool UTXOs (mempool outputs are appended last by
+                    // `spent_utxos()`), causing policy checks to pair the wrong input with
+                    // the wrong spent output.
+                    // https://github.com/ZcashFoundation/zebra/issues/10346
+                    let spent_outputs = cached_ffi_transaction.all_previous_outputs().clone();
                     let transaction = VerifiedUnminedTx::new(
                         tx,
                         miner_fee.expect("fee should have been checked earlier"),
-                        total_sigops,
-                        inputs_are_standard,
+                        sigops,
+                        spent_outputs.into(),
                     )?;
 
                     if let Some(mut mempool) = mempool {

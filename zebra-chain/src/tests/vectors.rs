@@ -74,7 +74,7 @@ impl Network {
                     transaction,
                     Amount::try_from(1_000_000).expect("valid amount"),
                     0,
-                    true,
+                    std::sync::Arc::new(vec![]),
                 )
                 .ok()
             })
