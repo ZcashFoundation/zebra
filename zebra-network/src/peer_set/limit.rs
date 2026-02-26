@@ -179,6 +179,8 @@ impl fmt::Debug for ConnectionTracker {
 }
 
 impl ConnectionTracker {
+    /// Sends a notification to the status notification channel to count the connection as open, and
+    /// marks this [`ConnectionTracker`] as having sent that open notification to avoid double-counting.
     pub fn mark_open(&mut self) {
         if !self.has_marked_open {
             let _ = self.status_notification_tx.send(ConnectionStatus::Opened);
@@ -215,9 +217,16 @@ impl Drop for ConnectionTracker {
 
         // We ignore disconnected errors, because the receiver can be dropped
         // before some connections are dropped.
+        //
         // # Security
         //
         // This channel is actually bounded by the inbound and outbound connection limit.
+        //
+        // # Correctness
+        //
+        // Unopened connections should be opened just before being closed to decrement both
+        // the count for pending connection attempts and the count for open connections in
+        // the active connection tracker.
         self.mark_open();
         let _ = self.status_notification_tx.send(ConnectionStatus::Closed);
     }
