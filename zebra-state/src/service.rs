@@ -1689,8 +1689,20 @@ impl Service<ReadRequest> for ReadStateService {
             ReadRequest::TipBlockSize => {
                 // Respond with the length of the obtained block if any.
                 Ok(ReadResponse::TipBlockSize(
-                    find::tip_block(state.latest_best_chain(), &state.db)
-                        .map(|b| b.zcash_serialized_size()),
+                    state
+                        .best_tip()
+                        .and_then(|(tip_height, _)| {
+                            read::block_info(
+                                state.latest_best_chain(),
+                                &state.db,
+                                tip_height.into(),
+                            )
+                        })
+                        .map(|info| info.size().try_into().expect("u32 should fit in usize"))
+                        .or_else(|| {
+                            find::tip_block(state.latest_best_chain(), &state.db)
+                                .map(|b| b.zcash_serialized_size())
+                        }),
                 ))
             }
 
