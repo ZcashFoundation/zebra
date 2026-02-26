@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `parameters::network::testnet::founder_address_list`
 - `parameters::network::subsidy::founders_reward`
 - `parameters::network::subsidy::founders_reward_address`
+- `diagnostics::CodeTimer::{start_desc, finish_desc, finish_inner}`
 
 ### Changed
 

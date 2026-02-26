@@ -1690,7 +1690,7 @@ impl Service<ReadRequest> for ReadStateService {
                 // Respond with the length of the obtained block if any.
                 Ok(ReadResponse::TipBlockSize(
                     find::tip_block(state.latest_best_chain(), &state.db)
-                        .map(|b| b.zcash_serialize_to_vec().unwrap().len()),
+                        .map(|b| b.zcash_serialized_size()),
                 ))
             }
 
