@@ -1,0 +1,77 @@
+# Lychee link checker configuration for Zebra
+# https://github.com/lycheeverse/lychee
+
+# Exclude patterns
+exclude = [
+    # GitHub compare links (often temporary)
+    "^https://github.com/.*/compare/",
+    # Local development URLs
+    "^https?://localhost",
+    "^https?://127\\.0\\.0\\.1",
+    "^https?://0\\.0\\.0\\.0",
+    # Local file references
+    "^file://",
+    # Placeholder URLs
+    "^https?://example\\.com",
+    # Rate-limited or auth-required
+    "^https://crates\\.io/crates/",
+    # GitHub pages requiring authentication
+    "^https://github.com/.*/settings",
+    "^https://github.com/organizations/.*/settings",
+    # GitHub old run IDs (change frequently)
+    "^https://github.com/.*/runs/",
+    # Template placeholder URLs (0000)
+    "^https://github.com/.*/issues/0000",
+    "^https://github.com/.*/pull/0000",
+    # Mergify dashboard (requires auth)
+    "^https://dashboard.mergify.com/",
+
+    # Dead upstream links in historical audit document (zebra-dependencies-for-audit.md)
+    "^https://github.com/iqlusioninc/abscissa/tree/develop",
+    "^https://github.com/servo/bincode/releases/tag/v1\\.3\\.3",
+]
+
+# Exclude paths
+exclude_path = [
+    "node_modules",
+    "target",
+    ".git",
+    "book/mermaid.min.js",
+    "zebra-rpc/qa/rpc-tests",
+    "supply-chain",
+    # CHANGELOG contains historical references to deprecated URLs
+    "CHANGELOG.md",
+]
+
+# Accept these HTTP status codes as valid
+accept = ["200", "204", "206", "301", "302", "307", "308"]
+
+# Timeout for requests (seconds)
+timeout = 30
+
+# Skip checking private/internal IP addresses
+exclude_private = true
+exclude_loopback = true
+
+# Cache results to avoid repeated checks
+cache = true
+
+# Maximum age of cached results
+max_cache_age = "1d"
+
+# Maximum concurrent requests
+max_concurrency = 16
+
+# User agent string
+user_agent = "lychee/0.14 (Zebra link checker; https://github.com/ZcashFoundation/zebra)"
+
+# Skip checking mail addresses
+include_mail = false
+
+# Retry configuration
+max_retries = 3
+retry_wait_time = 2
+
+# GitHub token environment variable (for higher rate limits)
+# Set GITHUB_TOKEN in your environment or CI
+github_token = ""

@@ -1,4 +1,4 @@
 [codespell]
-ignore-words-list = crate,Sur,inout,Groth,groth,re-use,abl,
+ignore-words-list = crate,Sur,inout,Groth,groth,re-use,abl,zcash,zcashd,zebrad,zebra,utxo,utxos,nullifier,nullifiers,sapling,orchard,sprout,backpressure,proptest,thiserror,rocksdb,libsecp,fullnode,peerset,threadsafe,unrepresentable,getblocktemplate,syncer,Actix,Akka,mermaid,println,eprintln,usize,nocapture,Parallelizable,invis,UTXO,Zcash,Zaino,Zallet,librustzcash,Mainnet,Testnet,mainnet,testnet,idents,reentrancy,serializable,deserializable,deserialization,zkSNARK,zkSNARKs,lightwalletd,statics,ser,endianity,aranges
 exclude-file = book/mermaid.min.js
-skip = ./zebra-rpc/qa/rpc-tests,./supply-chain
+skip = ./zebra-rpc/qa/rpc-tests,./supply-chain,./target

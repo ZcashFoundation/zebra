@@ -8,8 +8,8 @@ into the `main` branch, and on each Zebra `release`.
 
 The Continuous delivery pipeline is triggered when:
 
-* A PR is merged to `main` (technically, a `push` event)
-* A new release is published in GitHub
+- A PR is merged to `main` (technically, a `push` event)
+- A new release is published in GitHub
 
 ## Deployments
 
@@ -17,8 +17,8 @@ On each trigger Zebra is deployed using the branch or version references as part
 the deployment naming convention. Deployments are made using [Managed Instance Groups (MIGs)](https://cloud.google.com/compute/docs/instance-groups#managed_instance_groups)
 from Google Cloud Platform with, 2 nodes in the us-central1 region.
 
-**Note**: These *MIGs* are always replaced when PRs are merged to the `main` branch and
-when a release is published. If a new major version is released, a new *MIG* is also 
+**Note**: These _MIGs_ are always replaced when PRs are merged to the `main` branch and
+when a release is published. If a new major version is released, a new _MIG_ is also
 created, keeping the previous major version running until it's no longer needed.
 
 A single instance can also be deployed, on an on-demand basis, if required, when a

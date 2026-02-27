@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `parameters::network::subsidy::SubsidyError::` has new variants:
-  `FoundersRewardNotFound` and ` Underflow`, and the variant `SumOverflow` was
+  `FoundersRewardNotFound` and `Underflow`, and the variant `SumOverflow` was
   renamed to `Overflow`.
 - `parameters::network::subsidy::num_halvings` was renamed to `halving`.
 - `transparent::Output::new_coinbase` was renamed to `new`.
@@ -70,7 +70,6 @@ All `ParametersBuilder` methods and `Parameters::new_regtest()` now return `Resu
 - Chain builder calls with `?` operator: `.with_network_name("test")?`
 - Or use `.expect()` if errors are unexpected: `.with_network_name("test").expect("valid name")`
 
-
 ## [3.1.0] - 2025-11-28
 
 ### Added
@@ -95,7 +94,7 @@ These changes break the public API and may require updates in downstream crates.
 
 - The `ValueCommitment` type no longer derives `Copy`.
 - `zebra-chain::Errors` has new variants.
-- ` ValueCommitment::new` and `ValueCommitment::randomized` methods were removed.
+- `ValueCommitment::new` and `ValueCommitment::randomized` methods were removed.
 - Constant `NU6_1_ACTIVATION_HEIGHT_TESTNET` was removed as is now part of `activation_heights` module.
 - Structs `sapling::NoteCommitment`, `sapling::NotSmallOrderValueCommitment` and `sapling::tree::Node` were
   removed.

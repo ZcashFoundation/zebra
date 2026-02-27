@@ -1,10 +1,9 @@
 ---
-name: 'Hotfix Release Checklist Template'
-about: 'Checklist to create and publish a hotfix Zebra release'
-title: 'Release Zebra (version)'
-labels: 'A-release, C-exclude-from-changelog, P-Critical :ambulance:'
-assignees: ''
-
+name: "Hotfix Release Checklist Template"
+about: "Checklist to create and publish a hotfix Zebra release"
+title: "Release Zebra (version)"
+labels: "A-release, C-exclude-from-changelog, P-Critical :ambulance:"
+assignees: ""
 ---
 
 A hotfix release should only be created when a bug or critical issue is discovered in an existing release, and waiting for the next scheduled release is impractical or unacceptable.
@@ -55,7 +54,7 @@ follow semver, depending on the thing being fixed.
 ## Test the Pre-Release (if Zebra hotfix)
 
 - [ ] Wait until the Docker binaries have been built on the hotfix release branch, and the quick tests have passed:
-    - [ ] [ci-tests.yml](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-tests.yml)
+  - [ ] [ci-tests.yml](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-tests.yml)
 - [ ] Wait until the [pre-release deployment machines have successfully launched](https://github.com/ZcashFoundation/zebra/actions/workflows/zfnd-deploy-nodes-gcp.yml?query=event%3Arelease)
 
 ## Publish Release (if Zebra hotfix)

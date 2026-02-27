@@ -7,6 +7,11 @@ at each tier, see the [Platform Tier Policy](target-tier-policies.md).
 Platforms are identified by their Rust "target triple" which is a string composed by
 `<machine>-<vendor>-<operating system>`.
 
+## Minimum Supported Rust Version (MSRV)
+
+Zebra's minimum supported Rust version is **1.89**. We recommend using the latest
+stable Rust release for best performance and security.
+
 ## Tier 1
 
 Tier 1 platforms can be thought of as "guaranteed to work". The Zebra project
@@ -16,9 +21,12 @@ ensures that each tier 1 platform builds and passes tests after each change.
 For the full requirements, see [Tier 1 platform policy](target-tier-policies.md#tier-1-platform-policy) in the Platform Tier Policy.
 
 | platform                    | os                                                   | notes        | rust                                                                | artifacts |
-|-----------------------------|------------------------------------------------------|--------------|---------------------------------------------------------------------|-----------|
+| --------------------------- | ---------------------------------------------------- | ------------ | ------------------------------------------------------------------- | --------- |
 | `x86_64-unknown-linux-gnu`  | [Debian 13](https://www.debian.org/releases/trixie/) | 64-bit       | [latest stable release](https://github.com/rust-lang/rust/releases) | Docker    |
 | `aarch64-unknown-linux-gnu` | [Debian 13](https://www.debian.org/releases/trixie/) | 64-bit ARM64 | [latest stable release](https://github.com/rust-lang/rust/releases) | Docker    |
+
+> **Note:** Official Docker images are multi-architecture and support both AMD64 and ARM64.
+> The same image tag can be used on either platform.
 
 ## Tier 2
 
@@ -31,12 +39,14 @@ welcome!
 
 For the full requirements, see [Tier 2 platform policy](target-tier-policies.md#tier-2-platform-policy) in the Platform Tier Policy.
 
-| platform                   | os                                                                                              | notes  | rust                                                                           | artifacts |
-|----------------------------|-------------------------------------------------------------------------------------------------|--------|--------------------------------------------------------------------------------|-----------|
-| `x86_64-unknown-linux-gnu` | [GitHub ubuntu-latest](https://github.com/actions/virtual-environments#available-environments)  | 64-bit | [latest stable release](https://github.com/rust-lang/rust/releases)            | N/A       |
-| `x86_64-unknown-linux-gnu` | [GitHub ubuntu-latest](https://github.com/actions/virtual-environments#available-environments)  | 64-bit | [latest beta release](https://github.com/rust-lang/rust/blob/beta/src/version) | N/A       |
-| `x86_64-apple-darwin`      | [GitHub macos-latest](https://github.com/actions/virtual-environments#available-environments)   | 64-bit | [latest stable release](https://github.com/rust-lang/rust/releases)            | N/A       |
-| `x86_64-pc-windows-msvc`   | [GitHub windows-latest](https://github.com/actions/virtual-environments#available-environments) | 64-bit | [latest stable release](https://github.com/rust-lang/rust/releases)            | N/A       |
+| platform                   | os                                                                                              | notes       | rust                                                                           | artifacts |
+| -------------------------- | ----------------------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------ | --------- |
+| `x86_64-unknown-linux-gnu` | [GitHub ubuntu-latest](https://github.com/actions/virtual-environments#available-environments)  | 64-bit      | [latest stable release](https://github.com/rust-lang/rust/releases)            | N/A       |
+| `x86_64-unknown-linux-gnu` | [GitHub ubuntu-latest](https://github.com/actions/virtual-environments#available-environments)  | 64-bit beta | [latest beta release](https://github.com/rust-lang/rust/blob/beta/src/version) | N/A       |
+| `x86_64-apple-darwin`      | [GitHub macos-latest](https://github.com/actions/virtual-environments#available-environments)   | 64-bit      | [latest stable release](https://github.com/rust-lang/rust/releases)            | N/A       |
+| `x86_64-pc-windows-msvc`   | [GitHub windows-latest](https://github.com/actions/virtual-environments#available-environments) | 64-bit      | [latest stable release](https://github.com/rust-lang/rust/releases)            | N/A       |
+
+> **Note:** Linux is tested on both stable and beta Rust to catch potential regressions early.
 
 ## Tier 3
 
@@ -47,5 +57,5 @@ work. Official builds are not available.
 For the full requirements, see [Tier 3 platform policy](target-tier-policies.md#tier-3-platform-policy) in the Platform Tier Policy.
 
 | platform               | os           | notes                  | rust                                                                | artifacts |
-|------------------------|--------------|------------------------|---------------------------------------------------------------------|-----------|
+| ---------------------- | ------------ | ---------------------- | ------------------------------------------------------------------- | --------- |
 | `aarch64-apple-darwin` | latest macOS | 64-bit, Apple M1 or M2 | [latest stable release](https://github.com/rust-lang/rust/releases) | N/A       |

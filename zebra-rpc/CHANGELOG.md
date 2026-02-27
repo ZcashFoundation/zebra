@@ -62,7 +62,6 @@ for the `errors_timestamp` field, which was changed to `i64` to match `zcashd`.
 - Added `zebra_rpc::server::rpc_tracing` module
 - Added `RpcTracingMiddleware<S>` with `new()`, `call()`, and `RpcServiceT` implementation
 
-
 ## [3.1.0] - 2025-11-17
 
 ## Added
@@ -72,7 +71,6 @@ for the `errors_timestamp` field, which was changed to `i64` to match `zcashd`.
 ### Fixed
 
 - Republicized `valid_addresses` method ([#10021](https://github.com/ZcashFoundation/zebra/pull/10021))
-
 
 ## [3.0.0] - 2025-10-15
 
@@ -104,7 +102,6 @@ process and third-party integration improvements.
 
 - Use `STANDARD` Base64 for RPC auth encoding/decoding ([#9968](https://github.com/ZcashFoundation/zebra/pull/9968))
 - Fixed issue around copying generated files to output directory when `protoc` or `.proto` files are unavailable ([#10006](https://github.com/ZcashFoundation/zebra/pull/10006))
-
 
 ## [2.0.1] - 2025-08-22
 

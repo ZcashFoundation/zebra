@@ -15,7 +15,6 @@ use `orchard::bundle::BatchValidator` in the transaction verifier ([#9308](https
 - `MockService::expect_no_requests` now returns `()` (it previously returned a value).
 - Removed now-unused test data ([#9308](https://github.com/ZcashFoundation/zebra/pull/9308))
 
-
 ## [1.0.1] - 2025-08-07
 
 ## Changed

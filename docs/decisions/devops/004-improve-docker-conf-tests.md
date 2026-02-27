@@ -82,8 +82,16 @@ The `sub-test-zebra-config.yml` workflow will be modified to remove its specific
 
 - GitHub Actions: Reusing Workflows: [https://docs.github.com/en/actions/using-workflows/reusing-workflows](https://docs.github.com/en/actions/using-workflows/reusing-workflows)
 - Relevant files:
-  - `.github/workflows/sub-test-zebra-config.yml` (To be modified)
-  - `.github/workflows/zfnd-deploy-nodes-gcp.yml` (To be modified)
-  - `.github/workflows/sub-ci-unit-tests-docker.yml` (To be modified)
+  - `.github/workflows/test-docker.yml` (Centralized Docker config tests with matrix strategy)
+  - `.github/workflows/zfnd-deploy-nodes-gcp.yml` (CD workflow for GCP deployments)
   - `docker/entrypoint.sh` (Script processing configurations)
   - `docker/.env` (Example environment variables)
+
+### Implementation Note (December 2025)
+
+The decision was implemented using a different approach than originally described:
+
+- Instead of modifying `sub-test-zebra-config.yml`, a new `test-docker.yml` workflow was created
+- The workflow uses GitHub Actions matrix strategy to define multiple test scenarios
+- Each scenario specifies environment variables and grep patterns for validation
+- This achieves the ADR's goals of centralization, DRY, and scalability

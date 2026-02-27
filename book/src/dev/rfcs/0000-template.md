@@ -4,28 +4,32 @@
 - Zebra Issue: [ZcashFoundation/zebra#0000](https://github.com/ZcashFoundation/zebra/issues/0000)
 
 # Summary
+
 [summary]: #summary
 
 One paragraph explanation of the feature.
 
 # Motivation
+
 [motivation]: #motivation
 
 Why are we doing this? What use cases does it support? What is the expected outcome?
 
 # Definitions
+
 [definitions]: #definitions
 
 Lay out explicit definitions of any terms that are newly introduced or which cause confusion during the RFC design process.
 
 # Guide-level explanation
+
 [guide-level-explanation]: #guide-level-explanation
 
 Explain the proposal as if it was already included in the project and you were teaching it to another Zebra programmer. That generally means:
 
 - Introducing new named concepts.
 - Explaining the feature largely in terms of examples.
-- Explaining how Zebra users should *think* about the feature, and how it should impact the way they use Zebra. It should explain the impact as concretely as possible.
+- Explaining how Zebra users should _think_ about the feature, and how it should impact the way they use Zebra. It should explain the impact as concretely as possible.
 - If applicable, provide sample error messages or test strategies.
 
 For implementation-oriented RFCs (e.g. for Zebra internals), this section should focus on how Zebra contributors should think about the change, and give examples of its concrete impact.
@@ -33,6 +37,7 @@ For implementation-oriented RFCs (e.g. for Zebra internals), this section should
 For policy RFCs, this section should provide an example-driven introduction to the policy, and explain its impact in concrete terms.
 
 # Reference-level explanation
+
 [reference-level-explanation]: #reference-level-explanation
 
 This is the technical portion of the RFC. Explain the design in sufficient detail that:
@@ -44,47 +49,54 @@ This is the technical portion of the RFC. Explain the design in sufficient detai
 The section should return to the examples given in the previous section, and explain more fully how the detailed proposal makes those examples work.
 
 ## Specifications
+
 [specifications]: #specifications
 
 If this design is based on Zcash consensus rules, quote them, and link to the Zcash spec or ZIP:
-https://zips.z.cash/protocol/nu5.pdf#contents
-https://zips.z.cash/#nu5-zips
+<https://zips.z.cash/protocol/nu5.pdf#contents>
+<https://zips.z.cash/#nu5-zips>
 
 If this design changes network behaviour, quote and link to the Bitcoin network reference or wiki:
-https://developer.bitcoin.org/reference/p2p_networking.html
-https://en.bitcoin.it/wiki/Protocol_documentation
+<https://developer.bitcoin.org/reference/p2p_networking.html>
+<https://en.bitcoin.it/wiki/Protocol_documentation>
 
 ## Module Structure
+
 [module-structure]: #module-structure
 
 Describe the crate and modules that will implement the feature.
 
 ## Test Plan
+
 [test-plan]: #test-plan
 
 Explain how the feature will be tested, including:
-* tests for consensus-critical functionality
-* existing test vectors, if available
-* Zcash blockchain block test vectors (specify the network upgrade, feature, or block height and network)
-* property testing or fuzzing
+
+- tests for consensus-critical functionality
+- existing test vectors, if available
+- Zcash blockchain block test vectors (specify the network upgrade, feature, or block height and network)
+- property testing or fuzzing
 
 The tests should cover:
-* positive cases: make sure the feature accepts valid inputs
-  * using block test vectors for each network upgrade provides some coverage of valid inputs
-* negative cases: make sure the feature rejects invalid inputs
-  * make sure there is a test case for each error condition in the code
-  * if there are lots of potential errors, prioritise:
-    * consensus-critical errors
-    * security-critical errors, and
-    * likely errors
-* edge cases: make sure that boundary conditions are correctly handled
+
+- positive cases: make sure the feature accepts valid inputs
+  - using block test vectors for each network upgrade provides some coverage of valid inputs
+- negative cases: make sure the feature rejects invalid inputs
+  - make sure there is a test case for each error condition in the code
+  - if there are lots of potential errors, prioritise:
+    - consensus-critical errors
+    - security-critical errors, and
+    - likely errors
+- edge cases: make sure that boundary conditions are correctly handled
 
 # Drawbacks
+
 [drawbacks]: #drawbacks
 
-Why should we *not* do this?
+Why should we _not_ do this?
 
 # Rationale and alternatives
+
 [rationale-and-alternatives]: #rationale-and-alternatives
 
 - What makes this design a good design?
@@ -93,6 +105,7 @@ Why should we *not* do this?
 - What is the impact of not doing this?
 
 # Prior art
+
 [prior-art]: #prior-art
 
 Discuss prior art, both the good and the bad, in relation to this proposal.
@@ -109,6 +122,7 @@ Note that while precedent set by other projects is some motivation, it does not 
 Please also take into consideration that Zebra sometimes intentionally diverges from common Zcash features and designs.
 
 # Unresolved questions
+
 [unresolved-questions]: #unresolved-questions
 
 - What parts of the design do you expect to resolve through the RFC process before this gets merged?
@@ -116,6 +130,7 @@ Please also take into consideration that Zebra sometimes intentionally diverges 
 - What related issues do you consider out of scope for this RFC that could be addressed in the future independently of the solution that comes out of this RFC?
 
 # Future possibilities
+
 [future-possibilities]: #future-possibilities
 
 Think about what the natural extension and evolution of your proposal would
