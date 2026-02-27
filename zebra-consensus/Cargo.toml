@@ -31,6 +31,7 @@ tx_v6 = ["zebra-chain/tx_v6", "zebra-state/tx_v6"]
 proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl", "zebra-state/proptest-impl"]
 
 [dependencies]
+derive-new.workspace=true
 blake2b_simd = { workspace = true }
 bellman = { workspace = true }
 bls12_381 = { workspace = true }

@@ -3827,7 +3827,10 @@ async fn has_spending_transaction_ids() -> Result<()> {
     use std::sync::Arc;
     use tower::Service;
     use zebra_chain::{chain_tip::ChainTip, transparent::Input};
-    use zebra_state::{ReadRequest, ReadResponse, SemanticallyVerifiedBlock, Spend};
+    use zebra_state::{
+        CommitSemanticallyVerifiedBlockRequest, MappedRequest, ReadRequest, ReadResponse,
+        SemanticallyVerifiedBlock, Spend,
+    };
 
     use common::cached_state::future_blocks;
 
@@ -3852,14 +3855,11 @@ async fn has_spending_transaction_ids() -> Result<()> {
     tracing::info!("committing blocks to non-finalized state");
 
     for block in non_finalized_blocks {
-        use zebra_state::{CommitSemanticallyVerifiedBlockRequest, MappedRequest};
-
         let expected_hash = block.hash();
         let block = SemanticallyVerifiedBlock::with_hash(Arc::new(block), expected_hash);
-        let block_hash = CommitSemanticallyVerifiedBlockRequest(block)
-            .mapped_oneshot(&mut state)
-            .await
-            .map_err(|err| eyre!(err))?;
+        let block_hash = CommitSemanticallyVerifiedBlockRequest::new(block)
+            .map_err(&mut state, |err| eyre!(err))
+            .await?;
 
         assert_eq!(
             expected_hash, block_hash,
