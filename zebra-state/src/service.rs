@@ -1018,7 +1018,9 @@ impl Service<Request> for StateService {
                     rsp_rx
                         .await
                         .map_err(|_recv_error| CommitBlockError::WriteTaskExited)
-                        .flatten()
+                        // TODO: replace with Result::flatten once it stabilises
+                        // https://github.com/rust-lang/rust/issues/70142
+                        .and_then(|id| id)
                         .map_err(BoxError::from)
                         .map(Response::Committed)
                 }
@@ -1067,7 +1069,9 @@ impl Service<Request> for StateService {
                     rsp_rx
                         .await
                         .map_err(|_recv_error| CommitBlockError::WriteTaskExited)
-                        .flatten()
+                        // TODO: replace with Result::flatten once it stabilises
+                        // https://github.com/rust-lang/rust/issues/70142
+                        .and_then(|id| id)
                         .map_err(BoxError::from)
                         .map(Response::Committed)
                 }
