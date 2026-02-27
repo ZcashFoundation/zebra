@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The `zebra_chain::parameters::network::subsidy::miner_subsidy` function now
+  takes different parameters:
+  - `expected_block_subsidy: Amount<NonNegative>`,
+  - `founders_reward: Amount<NonNegative>`,
+  - `funding_streams: &HashMap<FundingStreamReceiver, Amount<NonNegative>>`.
 - `parameters::network::subsidy::SubsidyError::` has new variants:
   `FoundersRewardNotFound` and ` Underflow`, and the variant `SumOverflow` was
   renamed to `Overflow`.

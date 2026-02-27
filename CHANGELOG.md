@@ -13,6 +13,10 @@ This release adds the `gettxout` RPC method.
 
 - Added `UnspentOutput` to mempool component service ([#10235](https://github.com/ZcashFoundation/zebra/pull/10235))
 
+### Fixed
+
+- Subtract Founders' Reward from block subsidy ([#10338](https://github.com/ZcashFoundation/zebra/pull/10338))
+
 ## [Zebra 4.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v4.1.0) - 2026-02-05
 
 This release has no breaking changes for node operators. It expands Zebra's
