@@ -90,7 +90,7 @@ impl fmt::Display for Response {
 
             Response::Peers(peers) => format!("Peers {{ peers: {} }}", peers.len()),
 
-            Response::Pong(duration) => format!("Pong {{ latency: {:?} }}", duration),
+            Response::Pong(duration) => format!("Pong {{ latency: {duration:?} }}"),
 
             Response::BlockHashes(hashes) => format!("BlockHashes {{ hashes: {} }}", hashes.len()),
             Response::BlockHeaders(headers) => {

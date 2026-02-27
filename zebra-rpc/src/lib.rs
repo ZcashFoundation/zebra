@@ -17,8 +17,8 @@ mod tests;
 
 pub use methods::types::{
     get_block_template::{
-        fetch_state_tip_and_local_time, generate_coinbase_and_roots,
-        proposal::proposal_block_from_template,
+        fetch_state_tip_and_local_time, new_coinbase_with_roots,
+        proposal::proposal_block_from_template, MinerParams,
     },
     submit_block::SubmitBlockChannel,
 };

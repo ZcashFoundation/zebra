@@ -927,7 +927,7 @@ async fn connection_ping_pong_round_trip() {
 
     let ping_nonce = match outbound_msg {
         Message::Ping(nonce) => nonce,
-        msg => panic!("expected Ping message, but got: {:?}", msg),
+        msg => panic!("expected Ping message, but got: {msg:?}",),
     };
 
     assert_eq!(

@@ -526,7 +526,7 @@ impl ZebraDb {
         ) -> HashMap<transparent::Address, T> {
             changed_addresses
                 .into_iter()
-                .filter_map(|address| Some((address.clone(), f(&address)?)))
+                .filter_map(|address| Some((address, f(&address)?)))
                 .collect()
         }
 

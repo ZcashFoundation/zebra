@@ -49,7 +49,6 @@ use indexmap::IndexMap;
 use jsonrpsee::core::{async_trait, RpcResult as Result};
 use jsonrpsee_proc_macros::rpc;
 use jsonrpsee_types::{ErrorCode, ErrorObject};
-use rand::{rngs::OsRng, RngCore};
 use schemars::JsonSchema;
 use tokio::{
     sync::{broadcast, mpsc, watch},
@@ -59,8 +58,7 @@ use tower::ServiceExt;
 use tracing::Instrument;
 
 use zcash_address::{unified::Encoding, TryFromAddress};
-use zcash_primitives::consensus::Parameters;
-
+use zcash_protocol::consensus::{self, Parameters};
 use zebra_chain::{
     amount::{Amount, NegativeAllowed},
     block::{self, Block, Commitment, Height, SerializedBlock, TryIntoHeight},
@@ -1879,8 +1877,7 @@ where
         let time = u32::try_from(block.header.time.timestamp())
             .expect("Timestamps of valid blocks always fit into u32.");
 
-        let sapling_nu = zcash_primitives::consensus::NetworkUpgrade::Sapling;
-        let sapling = if network.is_nu_active(sapling_nu, height.into()) {
+        let sapling = if network.is_nu_active(consensus::NetworkUpgrade::Sapling, height.into()) {
             match read_state
                 .ready()
                 .and_then(|service| {
@@ -1900,8 +1897,7 @@ where
         let (sapling_tree, sapling_root) =
             sapling.map_or((None, None), |(tree, root)| (Some(tree), Some(root)));
 
-        let orchard_nu = zcash_primitives::consensus::NetworkUpgrade::Nu5;
-        let orchard = if network.is_nu_active(orchard_nu, height.into()) {
+        let orchard = if network.is_nu_active(consensus::NetworkUpgrade::Nu5, height.into()) {
             match read_state
                 .ready()
                 .and_then(|service| {
@@ -2190,10 +2186,6 @@ where
             zip317::select_mempool_transactions,
         };
 
-        // Clone Configs
-        let network = self.network.clone();
-        let extra_coinbase_data = self.gbt.extra_coinbase_data();
-
         // Clone Services
         let mempool = self.mempool.clone();
         let mut latest_chain_tip = self.latest_chain_tip.clone();
@@ -2207,7 +2199,7 @@ where
             return validate_block_proposal(
                 self.gbt.block_verifier_router(),
                 block_proposal_bytes,
-                network,
+                &self.network,
                 latest_chain_tip,
                 sync_status,
             )
@@ -2218,11 +2210,6 @@ where
         check_parameters(&parameters)?;
 
         let client_long_poll_id = parameters.as_ref().and_then(|params| params.long_poll_id);
-
-        let miner_address = self
-            .gbt
-            .miner_address()
-            .ok_or_misc_error("miner_address not configured")?;
 
         // - Checks and fetches that can change during long polling
         //
@@ -2243,7 +2230,7 @@ where
             //
             // Optional TODO:
             // - add `async changed()` method to ChainSyncStatus (like `ChainTip`)
-            check_synced_to_tip(&network, latest_chain_tip.clone(), sync_status.clone())?;
+            check_synced_to_tip(&self.network, latest_chain_tip.clone(), sync_status.clone())?;
             // TODO: return an error if we have no peers, like `zcashd` does,
             //       and add a developer config that mines regardless of how many peers we have.
             // https://github.com/zcash/zcash/blob/6fdd9f1b81d3b228326c9826fa10696fc516444b/src/miner.cpp#L865-L880
@@ -2460,10 +2447,6 @@ where
         // the template only depends on the previously fetched data.
         // This processing never fails.
 
-        // Calculate the next block height.
-        let next_block_height =
-            (chain_tip_and_local_time.tip_height + 1).expect("tip is far below Height::MAX");
-
         tracing::debug!(
             mempool_tx_hashes = ?mempool_txs
                 .iter()
@@ -2472,14 +2455,24 @@ where
             "selecting transactions for the template from the mempool"
         );
 
+        let miner_params = self.gbt.miner_params().ok_or_error(
+            0,
+            "miner parameters must be present to generate a coinbase transaction",
+        )?;
+
+        // Determine the next block height.
+        let height = chain_tip_and_local_time
+            .tip_height
+            .next()
+            .expect("chain tip must be below Height::MAX");
+
         // Randomly select some mempool transactions.
         let mempool_txs = select_mempool_transactions(
-            &network,
-            next_block_height,
-            &miner_address,
+            &self.network,
+            height,
+            miner_params,
             mempool_txs,
             mempool_tx_deps,
-            extra_coinbase_data.clone(),
             #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             None,
         );
@@ -2495,13 +2488,12 @@ where
         // - After this point, the template only depends on the previously fetched data.
 
         let response = BlockTemplateResponse::new_internal(
-            &network,
-            &miner_address,
+            &self.network,
+            miner_params,
             &chain_tip_and_local_time,
             server_long_poll_id,
             mempool_txs,
             submit_old,
-            extra_coinbase_data,
             #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             None,
         );
@@ -2920,14 +2912,10 @@ where
 
         let mut block_hashes = Vec::new();
         for _ in 0..num_blocks {
-            // Use random coinbase data in order to ensure the coinbase
-            // transaction is unique. This is useful for tests that exercise
-            // forks, since otherwise the coinbase txs of blocks with the same
-            // height across different forks would be identical.
-            let mut extra_coinbase_data = [0u8; 32];
-            OsRng.fill_bytes(&mut extra_coinbase_data);
-            rpc.gbt
-                .set_extra_coinbase_data(extra_coinbase_data.to_vec());
+            // Use random coinbase data in order to ensure the coinbase transaction is unique. This
+            // is useful for tests that exercise forks, since otherwise the coinbase txs of blocks
+            // with the same height across different forks would be identical.
+            rpc.gbt.randomize_coinbase_data();
 
             let block_template = rpc
                 .get_block_template(None)
@@ -2964,7 +2952,7 @@ where
                 SubmitBlockResponse::ErrorResponse(response) => {
                     return Err(ErrorObject::owned(
                         server::error::LegacyCode::Misc.into(),
-                        format!("block was rejected: {:?}", response),
+                        format!("block was rejected: {response:?}",),
                         None::<()>,
                     ));
                 }
@@ -4240,7 +4228,7 @@ impl Utxo {
         Height,
     ) {
         (
-            self.address.clone(),
+            self.address,
             self.txid,
             self.output_index,
             self.script.clone(),
