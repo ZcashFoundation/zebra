@@ -3,6 +3,7 @@
 use std::{
     collections::{HashMap, HashSet},
     ops::{Add, Deref, DerefMut, RangeInclusive},
+    pin::Pin,
     sync::Arc,
 };
 
@@ -10,6 +11,7 @@ use tower::{BoxError, Service, ServiceExt};
 use zebra_chain::{
     amount::{DeferredPoolBalanceChange, NegativeAllowed},
     block::{self, Block, HeightDiff},
+    diagnostic::{task::WaitForPanics, CodeTimer},
     history_tree::HistoryTree,
     orchard,
     parallel::tree::NoteCommitmentTrees,
@@ -1040,7 +1042,8 @@ pub enum Request {
 }
 
 impl Request {
-    fn variant_name(&self) -> &'static str {
+    /// Returns a [`&'static str`](str) name of the variant representing this value.
+    pub fn variant_name(&self) -> &'static str {
         match self {
             Request::CommitSemanticallyVerifiedBlock(_) => "commit_semantically_verified_block",
             Request::CommitCheckpointVerifiedBlock(_) => "commit_checkpoint_verified_block",
@@ -1410,7 +1413,8 @@ pub enum ReadRequest {
 }
 
 impl ReadRequest {
-    fn variant_name(&self) -> &'static str {
+    /// Returns a [`&'static str`](str) name of the variant representing this value.
+    pub fn variant_name(&self) -> &'static str {
         match self {
             ReadRequest::UsageInfo => "usage_info",
             ReadRequest::Tip => "tip",
@@ -1516,5 +1520,43 @@ impl TryFrom<Request> for ReadRequest {
                 ReadRequest::CheckBlockProposalValidity(semantically_verified),
             ),
         }
+    }
+}
+
+#[derive(Debug)]
+/// A convenience type for spawning blocking tokio tasks with
+/// a timer in the scope of a provided span.
+pub struct TimedSpan {
+    timer: CodeTimer,
+    span: tracing::Span,
+}
+
+impl TimedSpan {
+    /// Creates a new [`TimedSpan`].
+    pub fn new(timer: CodeTimer, span: tracing::Span) -> Self {
+        Self { timer, span }
+    }
+
+    /// Spawns a blocking tokio task in scope of the `span` field.
+    #[track_caller]
+    pub fn spawn_blocking<T: Send + 'static>(
+        mut self,
+        f: impl FnOnce() -> Result<T, BoxError> + Send + 'static,
+    ) -> Pin<Box<dyn futures::Future<Output = Result<T, BoxError>> + Send>> {
+        let location = std::panic::Location::caller();
+        // # Performance
+        //
+        // Allow other async tasks to make progress while concurrently reading blocks from disk.
+
+        // The work is done in the future.
+        tokio::task::spawn_blocking(move || {
+            self.span.in_scope(move || {
+                let result = f();
+                self.timer
+                    .finish_inner(Some(location.file()), Some(location.line()), "");
+                result
+            })
+        })
+        .wait_for_panics()
     }
 }
