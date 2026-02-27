@@ -52,7 +52,7 @@ front end that you can visualize:
    2. Enter the HTTP URL: `127.0.0.1:9090`
    3. Save the configuration
 
-7. Now you can add the grafana dashboards from `zebra/grafana` (Create > Import > Upload JSON File), or create your own.
+7. Now you can add the grafana dashboards from `zebra/docker/observability/grafana/dashboards/` (Create > Import > Upload JSON File), or create your own.
 
 ![image info](grafana.png)
 
