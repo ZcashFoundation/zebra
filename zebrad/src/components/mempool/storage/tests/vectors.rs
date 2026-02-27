@@ -13,6 +13,8 @@ use zebra_chain::{
     parameters::Network,
 };
 
+use zebra_chain::transparent;
+
 use crate::components::mempool::{storage::*, Mempool};
 
 /// Eviction memory time used for tests. Most tests won't care about this
@@ -275,6 +277,7 @@ fn mempool_expired_basic_for_network(network: Network) -> Result<()> {
             tx.into(),
             Amount::try_from(1_000_000).expect("valid amount"),
             0,
+            std::sync::Arc::new(vec![]),
         )
         .expect("verification should pass"),
         Vec::new(),
@@ -400,4 +403,168 @@ fn mempool_removes_dependent_transactions() -> Result<()> {
     );
 
     Ok(())
+}
+
+// ---- Policy function unit tests ----
+
+/// Build a P2PKH lock script: OP_DUP OP_HASH160 <20-byte hash> OP_EQUALVERIFY OP_CHECKSIG
+fn p2pkh_script(hash: &[u8; 20]) -> transparent::Script {
+    let mut s = vec![0x76, 0xa9, 0x14];
+    s.extend_from_slice(hash);
+    s.push(0x88);
+    s.push(0xac);
+    transparent::Script::new(&s)
+}
+
+/// Build a P2SH lock script: OP_HASH160 <20-byte hash> OP_EQUAL
+fn p2sh_lock_script(hash: &[u8; 20]) -> transparent::Script {
+    let mut s = vec![0xa9, 0x14];
+    s.extend_from_slice(hash);
+    s.push(0x87);
+    transparent::Script::new(&s)
+}
+
+#[test]
+fn standard_script_kind_classifies_p2pkh() {
+    let _init_guard = zebra_test::init();
+    let script = p2pkh_script(&[0xaa; 20]);
+    let kind = super::super::standard_script_kind(&script);
+    assert!(
+        matches!(
+            kind,
+            Some(zcash_script::solver::ScriptKind::PubKeyHash { .. })
+        ),
+        "P2PKH script should be classified as PubKeyHash"
+    );
+}
+
+#[test]
+fn standard_script_kind_classifies_p2sh() {
+    let _init_guard = zebra_test::init();
+    let script = p2sh_lock_script(&[0xbb; 20]);
+    let kind = super::super::standard_script_kind(&script);
+    assert!(
+        matches!(
+            kind,
+            Some(zcash_script::solver::ScriptKind::ScriptHash { .. })
+        ),
+        "P2SH script should be classified as ScriptHash"
+    );
+}
+
+#[test]
+fn standard_script_kind_classifies_op_return() {
+    let _init_guard = zebra_test::init();
+    // OP_RETURN followed by data
+    let script = transparent::Script::new(&[0x6a, 0x04, 0xde, 0xad, 0xbe, 0xef]);
+    let kind = super::super::standard_script_kind(&script);
+    assert!(
+        matches!(
+            kind,
+            Some(zcash_script::solver::ScriptKind::NullData { .. })
+        ),
+        "OP_RETURN script should be classified as NullData"
+    );
+}
+
+#[test]
+fn standard_script_kind_rejects_nonstandard() {
+    let _init_guard = zebra_test::init();
+    // Random garbage bytes should not be a standard script
+    let script = transparent::Script::new(&[0xff, 0xfe, 0xfd]);
+    let kind = super::super::standard_script_kind(&script);
+    assert!(
+        kind.is_none(),
+        "non-standard script should be classified as None"
+    );
+}
+
+#[test]
+fn count_script_push_ops_counts_pushes() {
+    let _init_guard = zebra_test::init();
+    // Script with 3 push operations: OP_0 <push 1 byte> <push 1 byte>
+    let script_bytes = vec![0x00, 0x01, 0xaa, 0x01, 0xbb];
+    let count = super::super::count_script_push_ops(&script_bytes);
+    assert_eq!(count, 3, "should count 3 push operations");
+}
+
+#[test]
+fn count_script_push_ops_empty_script() {
+    let _init_guard = zebra_test::init();
+    let count = super::super::count_script_push_ops(&[]);
+    assert_eq!(count, 0, "empty script should have 0 push ops");
+}
+
+#[test]
+fn extract_p2sh_redeemed_script_extracts_last_push() {
+    let _init_guard = zebra_test::init();
+    // scriptSig: <sig> <redeemed_script>
+    // OP_PUSHDATA with 3 bytes "abc" then OP_PUSHDATA with 2 bytes "de"
+    let unlock_script = transparent::Script::new(&[0x03, 0x61, 0x62, 0x63, 0x02, 0x64, 0x65]);
+    let redeemed = super::super::extract_p2sh_redeemed_script(&unlock_script);
+    assert_eq!(
+        redeemed,
+        Some(vec![0x64, 0x65]),
+        "should extract the last push data"
+    );
+}
+
+#[test]
+fn extract_p2sh_redeemed_script_empty_script() {
+    let _init_guard = zebra_test::init();
+    let unlock_script = transparent::Script::new(&[]);
+    let redeemed = super::super::extract_p2sh_redeemed_script(&unlock_script);
+    assert!(redeemed.is_none(), "empty scriptSig should return None");
+}
+
+#[test]
+fn p2sh_sigop_count_length_mismatch_returns_zero() {
+    let _init_guard = zebra_test::init();
+
+    // Deserialize a real transaction to get the Transaction type
+    let network = Network::Mainnet;
+    let block: Block = network.test_block(982681, 925483).unwrap();
+    let tx = block.transactions[1].as_ref();
+
+    // Provide wrong number of spent outputs (empty instead of matching inputs)
+    let spent_outputs: Vec<transparent::Output> = vec![];
+    let count = super::super::p2sh_sigop_count(tx, &spent_outputs);
+    assert_eq!(
+        count, 0,
+        "p2sh_sigop_count should return 0 on length mismatch instead of panicking"
+    );
+}
+
+#[test]
+fn are_inputs_standard_length_mismatch_returns_false() {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let block: Block = network.test_block(982681, 925483).unwrap();
+    let tx = block.transactions[1].as_ref();
+
+    // Provide wrong number of spent outputs
+    let spent_outputs: Vec<transparent::Output> = vec![];
+    let result = super::super::are_inputs_standard(tx, &spent_outputs);
+    assert!(
+        !result,
+        "are_inputs_standard should return false on length mismatch instead of panicking"
+    );
+}
+
+#[test]
+fn script_sig_args_expected_values() {
+    let _init_guard = zebra_test::init();
+
+    // P2PKH expects 2 args (sig + pubkey)
+    let pkh_kind = zcash_script::solver::ScriptKind::PubKeyHash { hash: [0xaa; 20] };
+    assert_eq!(super::super::script_sig_args_expected(&pkh_kind), Some(2));
+
+    // P2SH expects 1 arg (the redeemed script)
+    let sh_kind = zcash_script::solver::ScriptKind::ScriptHash { hash: [0xbb; 20] };
+    assert_eq!(super::super::script_sig_args_expected(&sh_kind), Some(1));
+
+    // NullData expects None (non-standard to spend)
+    let nd_kind = zcash_script::solver::ScriptKind::NullData { data: vec![] };
+    assert_eq!(super::super::script_sig_args_expected(&nd_kind), None);
 }

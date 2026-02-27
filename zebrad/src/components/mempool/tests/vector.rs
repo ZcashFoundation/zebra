@@ -951,6 +951,7 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
                     transaction,
                     Amount::try_from(1_000_000).expect("invalid value"),
                     0,
+                    std::sync::Arc::new(vec![]),
                 )
                 .expect("verification should pass"),
             ));
@@ -1011,6 +1012,7 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
                     transaction,
                     Amount::try_from(1_000_000).expect("invalid value"),
                     0,
+                    std::sync::Arc::new(vec![]),
                 )
                 .expect("verification should pass"),
             ));
@@ -1614,6 +1616,100 @@ async fn mempool_reject_non_push_only_scriptsig() -> Result<(), Report> {
         insert_err,
         MempoolError::NonStandardTransaction(
             storage::NonStandardTransactionError::ScriptSigNotPushOnly
+        )
+    );
+
+    Ok(())
+}
+
+/// Check that transactions with too many sigops are rejected.
+#[tokio::test(flavor = "multi_thread")]
+async fn mempool_reject_too_many_sigops() -> Result<(), Report> {
+    let network = Network::Mainnet;
+
+    let mut last_transaction = network
+        .unmined_transactions_in_blocks(1..=10)
+        .next()
+        .expect("missing transaction");
+
+    last_transaction.height = Some(Height(100_000));
+
+    // Set the legacy sigop count above the MAX_STANDARD_TX_SIGOPS limit of 4000.
+    last_transaction.legacy_sigop_count = 4001;
+
+    let cost_limit = last_transaction.cost();
+
+    let (
+        mut service,
+        _peer_set,
+        _state_service,
+        _chain_tip_change,
+        _tx_verifier,
+        mut recent_syncs,
+        _mempool_transaction_receiver,
+    ) = setup(&network, cost_limit, true).await;
+
+    service.enable(&mut recent_syncs).await;
+
+    let insert_err = service
+        .storage()
+        .insert(last_transaction.clone(), Vec::new(), None)
+        .expect_err("expected insert to fail for too many sigops");
+
+    assert_eq!(
+        insert_err,
+        MempoolError::NonStandardTransaction(storage::NonStandardTransactionError::TooManySigops)
+    );
+
+    Ok(())
+}
+
+/// Check that transactions with non-standard inputs (non-standard spent output script)
+/// are rejected.
+#[tokio::test(flavor = "multi_thread")]
+async fn mempool_reject_non_standard_inputs() -> Result<(), Report> {
+    let network = Network::Mainnet;
+
+    // Use a transaction that has at least one transparent PrevOut input.
+    let mut last_transaction = pick_transaction_with_prevout(&network);
+
+    last_transaction.height = Some(Height(100_000));
+
+    // Provide a non-standard spent output script so are_inputs_standard() returns false.
+    // Use a script that doesn't match any known template (OP_1 OP_2 OP_ADD).
+    let non_standard_script = transparent::Script::new(&[0x51, 0x52, 0x93]);
+    let non_standard_output = transparent::Output {
+        value: 0u64.try_into().unwrap(),
+        lock_script: non_standard_script,
+    };
+    // Provide one spent output per transparent input (including coinbase inputs in the count,
+    // since are_inputs_standard expects spent_outputs.len() == tx.inputs().len()).
+    let input_count = last_transaction.transaction.transaction.inputs().len();
+    last_transaction.spent_outputs = std::sync::Arc::new(vec![non_standard_output; input_count]);
+
+    let cost_limit = last_transaction.cost();
+
+    let (
+        mut service,
+        _peer_set,
+        _state_service,
+        _chain_tip_change,
+        _tx_verifier,
+        mut recent_syncs,
+        _mempool_transaction_receiver,
+    ) = setup(&network, cost_limit, true).await;
+
+    service.enable(&mut recent_syncs).await;
+
+    let insert_err = service
+        .storage()
+        .insert(last_transaction.clone(), Vec::new(), None)
+        .expect_err("expected insert to fail for non-standard inputs");
+
+    assert_eq!(
+        insert_err,
+        MempoolError::NonStandardTransaction(
+            storage::NonStandardTransactionError::NonStandardInputs
         )
     );
 

@@ -490,6 +490,7 @@ impl SpendConflictTestInput {
                 // make sure miner fee is big enough for all cases
                 Amount::try_from(1_000_000).expect("valid amount"),
                 0,
+                std::sync::Arc::new(vec![]),
             )
             .expect("verification should pass"),
             VerifiedUnminedTx::new(
@@ -497,6 +498,7 @@ impl SpendConflictTestInput {
                 // make sure miner fee is big enough for all cases
                 Amount::try_from(1_000_000).expect("valid amount"),
                 0,
+                std::sync::Arc::new(vec![]),
             )
             .expect("verification should pass"),
         )
@@ -523,6 +525,7 @@ impl SpendConflictTestInput {
                 // make sure miner fee is big enough for all cases
                 Amount::try_from(1_000_000).expect("valid amount"),
                 0,
+                std::sync::Arc::new(vec![]),
             )
             .expect("verification should pass"),
             VerifiedUnminedTx::new(
@@ -530,6 +533,7 @@ impl SpendConflictTestInput {
                 // make sure miner fee is big enough for all cases
                 Amount::try_from(1_000_000).expect("valid amount"),
                 0,
+                std::sync::Arc::new(vec![]),
             )
             .expect("verification should pass"),
         )
