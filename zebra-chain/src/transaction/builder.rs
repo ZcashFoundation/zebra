@@ -156,7 +156,7 @@ impl Transaction {
         // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
         let outputs: Vec<_> = outputs
             .into_iter()
-            .map(|(amount, lock_script)| transparent::Output::new_coinbase(amount, lock_script))
+            .map(|(amount, lock_script)| transparent::Output::new(amount, lock_script))
             .collect();
 
         assert!(
@@ -222,7 +222,7 @@ impl Transaction {
         // > and nJoinSplit MUST be nonzero.
         let outputs: Vec<_> = outputs
             .into_iter()
-            .map(|(amount, lock_script)| transparent::Output::new_coinbase(amount, lock_script))
+            .map(|(amount, lock_script)| transparent::Output::new(amount, lock_script))
             .collect();
 
         assert!(

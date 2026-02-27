@@ -339,11 +339,14 @@ pub fn funding_stream_values(
     height: Height,
     network: &Network,
     expected_block_subsidy: Amount<NonNegative>,
-) -> Result<HashMap<FundingStreamReceiver, Amount<NonNegative>>, crate::amount::Error> {
-    let canopy_height = NetworkUpgrade::Canopy.activation_height(network).unwrap();
+) -> Result<HashMap<FundingStreamReceiver, Amount<NonNegative>>, amount::Error> {
     let mut results = HashMap::new();
 
-    if height >= canopy_height {
+    if expected_block_subsidy.is_zero() {
+        return Ok(results);
+    }
+
+    if NetworkUpgrade::current(network, height) >= NetworkUpgrade::Canopy {
         let funding_streams = network.funding_streams(height);
         if let Some(funding_streams) = funding_streams {
             for (&receiver, recipient) in funding_streams.recipients() {
@@ -373,14 +376,20 @@ pub enum SubsidyError {
     #[error("funding stream expected output not found")]
     FundingStreamNotFound,
 
+    #[error("founders reward output not found")]
+    FoundersRewardNotFound,
+
     #[error("one-time lockbox disbursement output not found")]
     OneTimeLockboxDisbursementNotFound,
 
     #[error("miner fees are invalid")]
     InvalidMinerFees,
 
-    #[error("a sum of amounts overflowed")]
-    SumOverflow,
+    #[error("addition of amounts overflowed")]
+    Overflow,
+
+    #[error("subtraction of amounts underflowed")]
+    Underflow,
 
     #[error("unsupported height")]
     UnsupportedHeight,
@@ -398,7 +407,7 @@ pub enum SubsidyError {
 /// Returns `None` if the divisor would overflow a `u64`.
 pub fn halving_divisor(height: Height, network: &Network) -> Option<u64> {
     // Some far-future shifts can be more than 63 bits
-    1u64.checked_shl(num_halvings(height, network))
+    1u64.checked_shl(halving(height, network))
 }
 
 /// The halving index for a block height and network.
@@ -406,7 +415,7 @@ pub fn halving_divisor(height: Height, network: &Network) -> Option<u64> {
 /// `Halving(height)`, as described in [protocol specification §7.8][7.8]
 ///
 /// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
-pub fn num_halvings(height: Height, network: &Network) -> u32 {
+pub fn halving(height: Height, network: &Network) -> u32 {
     let slow_start_shift = network.slow_start_shift();
     let blossom_height = NetworkUpgrade::Blossom
         .activation_height(network)
@@ -435,37 +444,34 @@ pub fn num_halvings(height: Height, network: &Network) -> u32 {
 /// `BlockSubsidy(height)` as described in [protocol specification §7.8][7.8]
 ///
 /// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
-pub fn block_subsidy(
-    height: Height,
-    network: &Network,
-) -> Result<Amount<NonNegative>, SubsidyError> {
-    let blossom_height = NetworkUpgrade::Blossom
-        .activation_height(network)
-        .expect("blossom activation height should be available");
-
-    // If the halving divisor is larger than u64::MAX, the block subsidy is zero,
-    // because amounts fit in an i64.
-    //
-    // Note: bitcoind incorrectly wraps here, which restarts large block rewards.
-    let Some(halving_div) = halving_divisor(height, network) else {
+pub fn block_subsidy(height: Height, net: &Network) -> Result<Amount<NonNegative>, SubsidyError> {
+    let Some(halving_div) = halving_divisor(height, net) else {
         return Ok(Amount::zero());
     };
 
-    // Zebra doesn't need to calculate block subsidies for blocks with heights in the slow start
-    // interval because it handles those blocks through checkpointing.
-    if height < network.slow_start_interval() {
-        Err(SubsidyError::UnsupportedHeight)
-    } else if height < blossom_height {
-        // this calculation is exact, because the halving divisor is 1 here
-        Ok(Amount::try_from(MAX_BLOCK_SUBSIDY / halving_div)?)
+    let slow_start_interval = net.slow_start_interval();
+
+    // The `floor` fn used in the spec is implicit in Rust's division of primitive integer types.
+
+    let amount = if height < slow_start_interval {
+        let slow_start_rate = MAX_BLOCK_SUBSIDY / u64::from(slow_start_interval);
+
+        if height < net.slow_start_shift() {
+            slow_start_rate * u64::from(height)
+        } else {
+            slow_start_rate * (u64::from(height) + 1)
+        }
     } else {
-        let scaled_max_block_subsidy =
-            MAX_BLOCK_SUBSIDY / u64::from(BLOSSOM_POW_TARGET_SPACING_RATIO);
-        // in future halvings, this calculation might not be exact
-        // Amount division is implemented using integer division,
-        // which truncates (rounds down) the result, as specified
-        Ok(Amount::try_from(scaled_max_block_subsidy / halving_div)?)
-    }
+        let base_subsidy = if NetworkUpgrade::current(net, height) < NetworkUpgrade::Blossom {
+            MAX_BLOCK_SUBSIDY
+        } else {
+            MAX_BLOCK_SUBSIDY / u64::from(BLOSSOM_POW_TARGET_SPACING_RATIO)
+        };
+
+        base_subsidy / halving_div
+    };
+
+    Ok(Amount::try_from(amount)?)
 }
 
 /// `MinerSubsidy(height)` as described in [protocol specification §7.8][7.8]
@@ -482,4 +488,55 @@ pub fn miner_subsidy(
             .sum();
 
     expected_block_subsidy - total_funding_stream_amount?
+}
+
+/// Returns the founders reward address for a given height and network as described in [§7.9].
+///
+/// [§7.9]: <https://zips.z.cash/protocol/protocol.pdf#foundersreward>
+pub fn founders_reward_address(net: &Network, height: Height) -> Option<transparent::Address> {
+    let founders_address_list = net.founder_address_list();
+    let num_founder_addresses = u32::try_from(founders_address_list.len()).ok()?;
+    let slow_start_shift = u32::from(net.slow_start_shift());
+    let pre_blossom_halving_interval = u32::try_from(net.pre_blossom_halving_interval()).ok()?;
+
+    let founder_address_change_interval = slow_start_shift
+        .checked_add(pre_blossom_halving_interval)?
+        .div_ceil(num_founder_addresses);
+
+    let founder_address_adjusted_height =
+        if NetworkUpgrade::current(net, height) < NetworkUpgrade::Blossom {
+            u32::from(height)
+        } else {
+            NetworkUpgrade::Blossom
+                .activation_height(net)
+                .and_then(|h| {
+                    let blossom_activation_height = u32::from(h);
+                    let height = u32::from(height);
+
+                    blossom_activation_height.checked_add(
+                        height.checked_sub(blossom_activation_height)?
+                            / BLOSSOM_POW_TARGET_SPACING_RATIO,
+                    )
+                })?
+        };
+
+    let founder_address_index =
+        usize::try_from(founder_address_adjusted_height / founder_address_change_interval).ok()?;
+
+    founders_address_list
+        .get(founder_address_index)
+        .and_then(|a| a.parse().ok())
+}
+
+/// `FoundersReward(height)` as described in [§7.8].
+///
+/// [§7.8]: <https://zips.z.cash/protocol/protocol.pdf#subsidies>
+pub fn founders_reward(net: &Network, height: Height) -> Amount<NonNegative> {
+    if halving(height, net) < 1 {
+        block_subsidy(height, net)
+            .map(|subsidy| subsidy.div_exact(5))
+            .expect("block subsidy must be valid for founders rewards")
+    } else {
+        Amount::zero()
+    }
 }

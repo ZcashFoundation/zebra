@@ -384,6 +384,12 @@ impl From<SubsidyError> for BlockError {
     }
 }
 
+impl From<amount::Error> for BlockError {
+    fn from(e: amount::Error) -> Self {
+        Self::from(SubsidyError::from(e))
+    }
+}
+
 impl BlockError {
     /// Returns `true` if this is definitely a duplicate request.
     /// Some duplicate requests might not be detected, and therefore return `false`.

@@ -57,6 +57,7 @@ pin-project = { workspace = true }
 rand = { workspace = true }
 rayon = { workspace = true }
 regex = { workspace = true }
+schemars = { workspace = true }
 serde = { workspace = true, features = ["serde_derive"] }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
