@@ -1,0 +1,102 @@
+services:
+  zebra:
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile
+    container_name: zebra
+    environment:
+      - ZEBRA_NETWORK__NETWORK=${NETWORK:-Testnet}
+      - ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:${RPC_PORT:-18232}
+      - ZEBRA_RPC__ENABLE_COOKIE_AUTH=false
+      - ZEBRA_SYNC__PARALLEL_CPU_THREADS=12
+      - ZEBRA_MINING__MINER_ADDRESS=${MINER_ADDRESS:?MINER_ADDRESS is required}
+      - ZEBRA_MINING__MINER_DATA=${MINER_DATA:-}
+      - ZEBRA_MINING__MINER_MEMO=${MINER_MEMO:-}
+    volumes:
+      - zebra-data:/home/zebra/.cache/zebra
+    ports:
+      - "${PEER_PORT:-18233}:${PEER_PORT:-18233}"
+    networks:
+      - mining
+    restart: unless-stopped
+    tty: true
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    networks:
+      - mining
+    restart: unless-stopped
+
+  s-nomp:
+    build:
+      context: https://github.com/ZcashFoundation/s-nomp.git
+      dockerfile: Dockerfile.arch
+    container_name: s-nomp
+    environment:
+      - ZEBRA_HOST=zebra
+      - ZEBRA_RPC_PORT=${RPC_PORT:-18232}
+      - REDIS_HOST=redis
+      - STRATUM_PORT=${STRATUM_PORT:-3333}
+      - NETWORK=${NETWORK:-Testnet}
+      - POOL_ADDRESS=${MINER_ADDRESS}
+    ports:
+      - "${STRATUM_PORT:-3333}:${STRATUM_PORT:-3333}"
+      - "8080:8080"
+    depends_on:
+      - zebra
+      - redis
+    networks:
+      - mining
+    restart: unless-stopped
+    entrypoint: >
+      /bin/bash -c '
+        /app/docker-entrypoint.sh true &&
+        sed -i "s/}$$/,\"switching\":{}}/g" /app/config.json &&
+        sed -i "s/\"diff\": 0.05/\"tls\": false, \"diff\": 0.05/g" /app/pool_configs/zcash.json &&
+        if [ "$$NETWORK" = "Mainnet" ]; then
+          sed -i "s|tmRGc4CD1UyUdbSJmTUzcB6oDqk4qUaHnnh|t1Hsc1LR8yKnbbe3twRp88p6vFfC5t7DLbs|g" /app/pool_configs/zcash.json
+          sed -i "s|blockRefreshInterval\": 500|blockRefreshInterval\": 2000|g" /app/config.json
+        fi &&
+        echo "Waiting for Zebra RPC to be ready..." &&
+        while true; do
+          RESP=$$(curl -s http://$$ZEBRA_HOST:$$ZEBRA_RPC_PORT -X POST -H "content-type: application/json" -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"getinfo\",\"params\":[]}" 2>/dev/null)
+          if echo "$$RESP" | grep -q result; then
+            echo "Zebra is ready, starting s-nomp..."
+            break
+          fi
+          echo "Zebra not ready, waiting 5s..."
+          sleep 5
+        done &&
+        exec node init.js
+      '
+
+  nheqminer:
+    build:
+      context: https://github.com/ZcashFoundation/nheqminer.git
+      dockerfile: Dockerfile
+    container_name: nheqminer
+    environment:
+      - POOL_HOST=s-nomp
+      - POOL_PORT=${STRATUM_PORT:-3333}
+      - WORKER_ADDRESS=${MINER_ADDRESS}
+      - WORKER_NAME=${WORKER_NAME:-docker}
+      - CPU_THREADS=${CPU_THREADS:-1}
+    command: >
+      -l ${POOL_HOST:-s-nomp}:${STRATUM_PORT:-3333}
+      -u ${MINER_ADDRESS}.${WORKER_NAME:-docker}
+      -t ${CPU_THREADS:-1}
+    depends_on:
+      - s-nomp
+    networks:
+      - mining
+    restart: unless-stopped
+    profiles:
+      - miner
+
+networks:
+  mining:
+    driver: bridge
+
+volumes:
+  zebra-data:
