@@ -65,6 +65,23 @@ where
         .or_else(|| db.tip())
 }
 
+/// Returns the tip block of `chain`.
+/// If there is no chain, returns the tip of `db`.
+pub fn tip_block<C>(chain: Option<C>, db: &ZebraDb) -> Option<Arc<Block>>
+where
+    C: AsRef<Chain>,
+{
+    // # Correctness
+    //
+    // If there is an overlap between the non-finalized and finalized states,
+    // where the finalized tip is above the non-finalized tip,
+    // Zebra is receiving a lot of blocks, or this request has been delayed for a long time,
+    // so it is acceptable to return either tip.
+    chain
+        .and_then(|chain| chain.as_ref().tip_block().map(|b| b.block.clone()))
+        .or_else(|| db.tip_block())
+}
+
 /// Returns the tip [`Height`] of `chain`.
 /// If there is no chain, returns the tip of `db`.
 pub fn tip_height<C>(chain: Option<C>, db: &ZebraDb) -> Option<Height>
