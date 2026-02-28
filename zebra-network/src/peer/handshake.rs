@@ -880,7 +880,7 @@ where
         let HandshakeRequest {
             data_stream,
             connected_addr,
-            connection_tracker,
+            mut connection_tracker,
         } = req;
 
         let negotiator_span = debug_span!("negotiator", peer = ?connected_addr);
@@ -911,6 +911,9 @@ where
                 "negotiating protocol version with remote peer"
             );
 
+            // Start timing the handshake for metrics
+            let handshake_start = Instant::now();
+
             let mut peer_conn = Framed::new(
                 data_stream,
                 Codec::builder()
@@ -919,7 +922,7 @@ where
                     .finish(),
             );
 
-            let connection_info = negotiate_version(
+            let connection_info = match negotiate_version(
                 &mut peer_conn,
                 &connected_addr,
                 config,
@@ -929,12 +932,50 @@ where
                 relay,
                 minimum_peer_version,
             )
-            .await?;
+            .await
+            {
+                Ok(info) => {
+                    // Record successful handshake duration
+                    let duration = handshake_start.elapsed().as_secs_f64();
+                    metrics::histogram!(
+                        "zcash.net.peer.handshake.duration_seconds",
+                        "result" => "success"
+                    )
+                    .record(duration);
+                    info
+                }
+                Err(err) => {
+                    // Record failed handshake duration and failure reason
+                    let duration = handshake_start.elapsed().as_secs_f64();
+                    let reason = match &err {
+                        HandshakeError::UnexpectedMessage(_) => "unexpected_message",
+                        HandshakeError::RemoteNonceReuse => "nonce_reuse",
+                        HandshakeError::LocalDuplicateNonce => "duplicate_nonce",
+                        HandshakeError::ConnectionClosed => "connection_closed",
+                        HandshakeError::Io(_) => "io_error",
+                        HandshakeError::Serialization(_) => "serialization",
+                        HandshakeError::ObsoleteVersion(_) => "obsolete_version",
+                        HandshakeError::Timeout => "timeout",
+                    };
+                    metrics::histogram!(
+                        "zcash.net.peer.handshake.duration_seconds",
+                        "result" => "failure"
+                    )
+                    .record(duration);
+                    metrics::counter!(
+                        "zcash.net.peer.handshake.failures.total",
+                        "reason" => reason
+                    )
+                    .increment(1);
+                    return Err(err);
+                }
+            };
 
             let remote_services = connection_info.remote.services;
 
             // The handshake succeeded: update the peer status from AttemptPending to Responded,
-            // and send initial connection info.
+            // send initial connection info, and update the active connection counter.
+            connection_tracker.mark_open();
             if let Some(book_addr) = connected_addr.get_address_book_addr() {
                 // the collector doesn't depend on network activity,
                 // so this await should not hang

@@ -1,11 +1,12 @@
-# Zebra Observability Stack: Prometheus + Grafana + AlertManager
+# Zebra Observability Stack: Prometheus + Grafana + Jaeger + AlertManager
 # Usage: docker compose -f docker/docker-compose.observability.yml up
 #
 # Services:
-#   - Zebra: Zcash node with metrics endpoint
-#   - Prometheus: Metrics collection and storage
+#   - Zebra: Zcash node with metrics and tracing
+#   - Prometheus: Metrics collection and storage (http://localhost:9094)
 #   - Grafana: Dashboards and visualization (http://localhost:3000)
-#   - AlertManager: Alert routing and notifications
+#   - Jaeger: Distributed tracing and Service Performance Monitoring (http://localhost:16686)
+#   - AlertManager: Alert routing and notifications (http://localhost:9093)
 
 services:
   zebra:
@@ -14,15 +15,54 @@ services:
       context: ../
       dockerfile: docker/Dockerfile
       target: runtime
+      args:
+        # Enable OpenTelemetry feature for tracing
+        FEATURES: "default-release-binaries opentelemetry"
     volumes:
       - zebrad-cache:/home/zebra/.cache/zebra
     tty: true
     environment:
+      # Prometheus metrics endpoint
       - ZEBRA_METRICS__ENDPOINT_ADDR=0.0.0.0:9999
+      # RPC server configuration (required for testing)
+      - ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:8232
+      - ZEBRA_RPC__ENABLE_COOKIE_AUTH=false
+      # OpenTelemetry tracing configuration
+      - ZEBRA_TRACING__OPENTELEMETRY_ENDPOINT=http://jaeger:4318
+      - ZEBRA_TRACING__OPENTELEMETRY_SERVICE_NAME=zebra
+      - ZEBRA_TRACING__OPENTELEMETRY_SAMPLE_PERCENT=100
     ports:
       - "9999:9999"
+      - "8232:8232"
     networks:
       - observability
+    depends_on:
+      jaeger:
+        condition: service_healthy
+
+  jaeger:
+    container_name: jaeger
+    image: jaegertracing/jaeger:2.1.0
+    volumes:
+      - ./observability/jaeger/config.yaml:/etc/jaeger/config.yaml:ro
+    command:
+      - --config=/etc/jaeger/config.yaml
+    ports:
+      # Jaeger UI and API
+      - "16686:16686"
+      # OTLP gRPC receiver
+      - "4317:4317"
+      # OTLP HTTP receiver
+      - "4318:4318"
+      # Prometheus metrics from spanmetrics
+      - "8889:8889"
+    networks:
+      - observability
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:16686/ || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   prometheus:
     container_name: prometheus
@@ -42,6 +82,9 @@ services:
       - "9094:9090"
     networks:
       - observability
+    depends_on:
+      jaeger:
+        condition: service_healthy
 
   grafana:
     container_name: grafana
@@ -53,13 +96,14 @@ services:
     environment:
       # Default login: admin/admin (Grafana prompts to change on first login)
       # To set a custom password, create a .env file with GF_SECURITY_ADMIN_PASSWORD=yourpassword
-      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/network_health.json
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/zebra_overview.json
     ports:
       - "3000:3000"
     networks:
       - observability
     depends_on:
       - prometheus
+      - jaeger
 
   alertmanager:
     container_name: alertmanager

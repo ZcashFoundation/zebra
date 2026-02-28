@@ -58,3 +58,92 @@ groups:
         annotations:
           summary: "High error rate"
           description: "Zebra is experiencing elevated error rates (> 0.1/s for 5 minutes)."
+
+  # Value Pool Alerts (Monitoring)
+  - name: zebra-value-pools
+    rules:
+      # Critical: Negative value pool would indicate a bug (should never happen - Zebra rejects such blocks)
+      - alert: ValuePoolNegative
+        expr: state_finalized_value_pool_transparent < 0 or state_finalized_value_pool_sprout < 0 or state_finalized_value_pool_sapling < 0 or state_finalized_value_pool_orchard < 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Negative value pool detected"
+          description: "A pool has a negative balance in metrics. Zebra enforces ZIP-209 internally, so this should not occur in normal operation."
+
+      # Warning: Value pool not updating (may indicate sync issues)
+      - alert: ValuePoolStale
+        expr: changes(state_finalized_chain_supply_total[15m]) == 0 and state_finalized_block_height > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Value pool not updating"
+          description: "Chain supply has not changed in 15 minutes while blocks exist. Sync may be stalled."
+
+  # RPC Alerts
+  - name: zebra-rpc
+    rules:
+      # High RPC latency
+      - alert: RPCHighLatency
+        expr: histogram_quantile(0.99, sum(rate(rpc_request_duration_seconds_bucket[5m])) by (le, method)) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High RPC latency detected"
+          description: "RPC method {{ $labels.method }} has p99 latency > 2 seconds for 5 minutes."
+
+      # High RPC error rate
+      - alert: RPCHighErrorRate
+        expr: sum(rate(rpc_errors_total[5m])) by (method) / sum(rate(rpc_requests_total[5m])) by (method) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High RPC error rate"
+          description: "RPC method {{ $labels.method }} has error rate > 10% for 5 minutes."
+
+      # RPC endpoint overloaded
+      - alert: RPCOverloaded
+        expr: rpc_active_requests > 100
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "RPC endpoint overloaded"
+          description: "More than 100 concurrent RPC requests for 2 minutes. Consider rate limiting."
+
+  # Peer Health Alerts
+  - name: zebra-peer-health
+    rules:
+      # High handshake failure rate
+      - alert: HandshakeFailureRateHigh
+        expr: sum(rate(zcash_net_peer_handshake_failures_total[5m])) / (sum(rate(zcash_net_peer_handshake_duration_seconds_count[5m])) + 0.001) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High peer handshake failure rate"
+          description: "More than 50% of peer handshakes are failing for 5 minutes. Check network connectivity."
+
+      # Specific failure reason spike (e.g., obsolete version)
+      - alert: ObsoleteVersionHandshakes
+        expr: rate(zcash_net_peer_handshake_failures_total{reason="obsolete_version"}[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: info
+        annotations:
+          summary: "Many obsolete version handshakes"
+          description: "Elevated rate of peer handshake failures due to obsolete protocol versions. May indicate network upgrade in progress."
+
+      # Slow handshakes
+      - alert: SlowHandshakes
+        expr: histogram_quantile(0.95, sum(rate(zcash_net_peer_handshake_duration_seconds_bucket{result="success"}[5m])) by (le)) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Slow peer handshakes"
+          description: "p95 handshake duration exceeds 10 seconds. Network latency may be high."

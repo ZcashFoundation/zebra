@@ -16,7 +16,6 @@
 
 use std::{
     collections::HashMap,
-    convert,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -34,18 +33,18 @@ use tower::buffer::Buffer;
 
 use zebra_chain::{
     block::{self, CountedHeader, HeightDiff},
-    diagnostic::{task::WaitForPanics, CodeTimer},
+    diagnostic::CodeTimer,
     parameters::{Network, NetworkUpgrade},
+    serialization::ZcashSerialize,
     subtree::NoteCommitmentSubtreeIndex,
 };
-
-use zebra_chain::{block::Height, serialization::ZcashSerialize};
 
 use crate::{
     constants::{
         MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS, MAX_LEGACY_CHAIN_BLOCKS,
     },
-    error::{InvalidateError, QueueAndCommitError, ReconsiderError},
+    error::{CommitBlockError, CommitCheckpointVerifiedError, InvalidateError, ReconsiderError},
+    request::TimedSpan,
     response::NonFinalizedBlocksListener,
     service::{
         block_iter::any_ancestor_blocks,
@@ -54,10 +53,11 @@ use crate::{
         non_finalized_state::{Chain, NonFinalizedState},
         pending_utxos::PendingUtxos,
         queued_blocks::QueuedBlocks,
+        read::find,
         watch_receiver::WatchReceiver,
     },
-    BoxError, CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, Config, ReadRequest,
-    ReadResponse, Request, Response, SemanticallyVerifiedBlock,
+    BoxError, CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, Config, KnownBlock,
+    ReadRequest, ReadResponse, Request, Response, SemanticallyVerifiedBlock,
 };
 
 pub mod block_iter;
@@ -235,10 +235,8 @@ impl Drop for StateService {
         std::mem::drop(self.block_write_sender.finalized.take());
         std::mem::drop(self.block_write_sender.non_finalized.take());
 
-        self.clear_finalized_block_queue(
-            "dropping the state: dropped unused finalized state queue block",
-        );
-        self.clear_non_finalized_block_queue(CommitSemanticallyVerifiedError::WriteTaskExited);
+        self.clear_finalized_block_queue(CommitBlockError::WriteTaskExited);
+        self.clear_non_finalized_block_queue(CommitBlockError::WriteTaskExited);
 
         // Log database metrics before shutting down
         info!("dropping the state: logging database metrics");
@@ -315,7 +313,7 @@ impl StateService {
                     #[cfg(feature = "elasticsearch")]
                     true,
                 );
-                timer.finish(module_path!(), line!(), "opening finalized state database");
+                timer.finish_desc("opening finalized state database");
 
                 let timer = CodeTimer::start();
                 let finalized_tip = finalized_state.db.tip_block();
@@ -408,7 +406,7 @@ impl StateService {
             read_service: read_service.clone(),
             max_finalized_queue_height: f64::NAN,
         };
-        timer.finish(module_path!(), line!(), "initializing state service");
+        timer.finish_desc("initializing state service");
 
         tracing::info!("starting legacy chain check");
         let timer = CodeTimer::start();
@@ -445,7 +443,17 @@ impl StateService {
         }
 
         tracing::info!("cached state consensus branch is valid: no legacy chain found");
-        timer.finish(module_path!(), line!(), "legacy chain check");
+        timer.finish_desc("legacy chain check");
+
+        // Spawn a background task to periodically export RocksDB metrics to Prometheus
+        let db_for_metrics = read_service.db.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(30));
+            loop {
+                interval.tick().await;
+                db_for_metrics.export_metrics();
+            }
+        });
 
         (state, read_service, latest_chain_tip, chain_tip_change)
     }
@@ -461,7 +469,7 @@ impl StateService {
     fn queue_and_commit_to_finalized_state(
         &mut self,
         checkpoint_verified: CheckpointVerifiedBlock,
-    ) -> oneshot::Receiver<Result<block::Hash, BoxError>> {
+    ) -> oneshot::Receiver<Result<block::Hash, CommitCheckpointVerifiedError>> {
         // # Correctness & Performance
         //
         // This method must not block, access the database, or perform CPU-intensive tasks,
@@ -488,7 +496,10 @@ impl StateService {
             {
                 Self::send_checkpoint_verified_block_error(
                     duplicate_queued,
-                    "dropping older checkpoint verified block: got newer duplicate block",
+                    CommitBlockError::new_duplicate(
+                        Some(queued_prev_hash.into()),
+                        KnownBlock::Queue,
+                    ),
                 );
             }
 
@@ -501,14 +512,13 @@ impl StateService {
             //       every time we send some blocks (like QueuedSemanticallyVerifiedBlocks)
             Self::send_checkpoint_verified_block_error(
                 queued,
-                "already finished committing checkpoint verified blocks: dropped duplicate block, \
-                 block is already committed to the state",
+                CommitBlockError::new_duplicate(None, KnownBlock::Finalized),
             );
 
-            self.clear_finalized_block_queue(
-                "already finished committing checkpoint verified blocks: dropped duplicate block, \
-                 block is already committed to the state",
-            );
+            self.clear_finalized_block_queue(CommitBlockError::new_duplicate(
+                None,
+                KnownBlock::Finalized,
+            ));
         }
 
         if self.finalized_state_queued_blocks.is_empty() {
@@ -575,12 +585,10 @@ impl StateService {
                     // If Zebra is shutting down, drop blocks and return an error.
                     Self::send_checkpoint_verified_block_error(
                         queued,
-                        "block commit task exited. Is Zebra shutting down?",
+                        CommitBlockError::WriteTaskExited,
                     );
 
-                    self.clear_finalized_block_queue(
-                        "block commit task exited. Is Zebra shutting down?",
-                    );
+                    self.clear_finalized_block_queue(CommitBlockError::WriteTaskExited);
                 } else {
                     metrics::gauge!("state.checkpoint.sent.block.height")
                         .set(last_sent_finalized_block_height.0 as f64);
@@ -590,7 +598,10 @@ impl StateService {
     }
 
     /// Drops all finalized state queue blocks, and sends an error on their result channels.
-    fn clear_finalized_block_queue(&mut self, error: impl Into<BoxError> + Clone) {
+    fn clear_finalized_block_queue(
+        &mut self,
+        error: impl Into<CommitCheckpointVerifiedError> + Clone,
+    ) {
         for (_hash, queued) in self.finalized_state_queued_blocks.drain() {
             Self::send_checkpoint_verified_block_error(queued, error.clone());
         }
@@ -599,7 +610,7 @@ impl StateService {
     /// Send an error on a `QueuedCheckpointVerified` block's result channel, and drop the block
     fn send_checkpoint_verified_block_error(
         queued: QueuedCheckpointVerified,
-        error: impl Into<BoxError>,
+        error: impl Into<CommitCheckpointVerifiedError>,
     ) {
         let (finalized, rsp_tx) = queued;
 
@@ -610,7 +621,10 @@ impl StateService {
     }
 
     /// Drops all non-finalized state queue blocks, and sends an error on their result channels.
-    fn clear_non_finalized_block_queue(&mut self, error: CommitSemanticallyVerifiedError) {
+    fn clear_non_finalized_block_queue(
+        &mut self,
+        error: impl Into<CommitSemanticallyVerifiedError> + Clone,
+    ) {
         for (_hash, queued) in self.non_finalized_state_queued_blocks.drain() {
             Self::send_semantically_verified_block_error(queued, error.clone());
         }
@@ -619,13 +633,13 @@ impl StateService {
     /// Send an error on a `QueuedSemanticallyVerified` block's result channel, and drop the block
     fn send_semantically_verified_block_error(
         queued: QueuedSemanticallyVerified,
-        error: CommitSemanticallyVerifiedError,
+        error: impl Into<CommitSemanticallyVerifiedError>,
     ) {
         let (finalized, rsp_tx) = queued;
 
         // The block sender might have already given up on this block,
         // so ignore any channel send errors.
-        let _ = rsp_tx.send(Err(error));
+        let _ = rsp_tx.send(Err(error.into()));
         std::mem::drop(finalized);
     }
 
@@ -649,8 +663,9 @@ impl StateService {
             .contains(&semantically_verified.hash)
         {
             let (rsp_tx, rsp_rx) = oneshot::channel();
-            let _ = rsp_tx.send(Err(QueueAndCommitError::new_duplicate(
-                semantically_verified.hash,
+            let _ = rsp_tx.send(Err(CommitBlockError::new_duplicate(
+                Some(semantically_verified.hash.into()),
+                KnownBlock::WriteChannel,
             )
             .into()));
             return rsp_rx;
@@ -662,8 +677,9 @@ impl StateService {
             .contains_height(semantically_verified.height)
         {
             let (rsp_tx, rsp_rx) = oneshot::channel();
-            let _ = rsp_tx.send(Err(QueueAndCommitError::new_already_finalized(
-                semantically_verified.height,
+            let _ = rsp_tx.send(Err(CommitBlockError::new_duplicate(
+                Some(semantically_verified.height.into()),
+                KnownBlock::Finalized,
             )
             .into()));
             return rsp_rx;
@@ -679,8 +695,9 @@ impl StateService {
             tracing::debug!("replacing older queued request with new request");
             let (mut rsp_tx, rsp_rx) = oneshot::channel();
             std::mem::swap(old_rsp_tx, &mut rsp_tx);
-            let _ = rsp_tx.send(Err(QueueAndCommitError::new_replaced(
-                semantically_verified.hash,
+            let _ = rsp_tx.send(Err(CommitBlockError::new_duplicate(
+                Some(semantically_verified.hash.into()),
+                KnownBlock::Queue,
             )
             .into()));
             rsp_rx
@@ -717,10 +734,10 @@ impl StateService {
             // Send blocks from non-finalized queue
             self.send_ready_non_finalized_queued(self.finalized_block_write_last_sent_hash);
             // We've finished committing checkpoint verified blocks to finalized state, so drop any repeated queued blocks.
-            self.clear_finalized_block_queue(
-                "already finished committing checkpoint verified blocks: dropped duplicate block, \
-                 block is already committed to the state",
-            );
+            self.clear_finalized_block_queue(CommitBlockError::new_duplicate(
+                None,
+                KnownBlock::Finalized,
+            ));
         } else if !self.can_fork_chain_at(&parent_hash) {
             tracing::trace!("unready to verify, returning early");
         } else if self.block_write_sender.finalized.is_none() {
@@ -783,12 +800,10 @@ impl StateService {
                         // If Zebra is shutting down, drop blocks and return an error.
                         Self::send_semantically_verified_block_error(
                             queued,
-                            CommitSemanticallyVerifiedError::WriteTaskExited,
+                            CommitBlockError::WriteTaskExited,
                         );
 
-                        self.clear_non_finalized_block_queue(
-                            CommitSemanticallyVerifiedError::WriteTaskExited,
-                        );
+                        self.clear_non_finalized_block_queue(CommitBlockError::WriteTaskExited);
 
                         return;
                     };
@@ -864,6 +879,12 @@ impl StateService {
             blocks"
         );
     }
+
+    fn known_sent_hash(&self, hash: &block::Hash) -> Option<KnownBlock> {
+        self.non_finalized_block_write_sent_hashes
+            .contains(hash)
+            .then_some(KnownBlock::WriteChannel)
+    }
 }
 
 impl ReadStateService {
@@ -900,9 +921,9 @@ impl ReadStateService {
     }
 
     /// Gets a clone of the latest, best non-finalized chain from the `non_finalized_state_receiver`
-    #[allow(dead_code)]
     fn latest_best_chain(&self) -> Option<Arc<Chain>> {
-        self.latest_non_finalized_state().best_chain().cloned()
+        self.non_finalized_state_receiver
+            .borrow_mapped(|non_finalized_state| non_finalized_state.best_chain().cloned())
     }
 
     /// Test-only access to the inner database.
@@ -961,7 +982,6 @@ impl Service<Request> for StateService {
     #[instrument(name = "state", skip(self, req))]
     fn call(&mut self, req: Request) -> Self::Future {
         req.count_metric();
-        let timer = CodeTimer::start();
         let span = Span::current();
 
         match req {
@@ -970,6 +990,7 @@ impl Service<Request> for StateService {
             //
             // The expected error type for this request is `CommitSemanticallyVerifiedError`.
             Request::CommitSemanticallyVerifiedBlock(semantically_verified) => {
+                let timer = CodeTimer::start();
                 self.assert_block_can_be_validated(&semantically_verified);
 
                 self.pending_utxos
@@ -997,7 +1018,7 @@ impl Service<Request> for StateService {
                 //     as well as in poll_ready()
 
                 // The work is all done, the future just waits on a channel for the result
-                timer.finish(module_path!(), line!(), "CommitSemanticallyVerifiedBlock");
+                timer.finish_desc("CommitSemanticallyVerifiedBlock");
 
                 // Await the channel response, flatten the result, map receive errors to
                 // `CommitSemanticallyVerifiedError::WriteTaskExited`.
@@ -1006,8 +1027,8 @@ impl Service<Request> for StateService {
                 async move {
                     rsp_rx
                         .await
-                        .map_err(|_recv_error| CommitSemanticallyVerifiedError::WriteTaskExited)
-                        .flatten()
+                        .map_err(|_recv_error| CommitBlockError::WriteTaskExited.into())
+                        .and_then(|result| result)
                         .map_err(BoxError::from)
                         .map(Response::Committed)
                 }
@@ -1017,7 +1038,10 @@ impl Service<Request> for StateService {
 
             // Uses finalized_state_queued_blocks and pending_utxos in the StateService.
             // Accesses shared writeable state in the StateService.
+            //
+            // The expected error type for this request is `CommitCheckpointVerifiedError`.
             Request::CommitCheckpointVerifiedBlock(finalized) => {
+                let timer = CodeTimer::start();
                 // # Consensus
                 //
                 // A semantic block verification could have called AwaitUtxo
@@ -1045,17 +1069,17 @@ impl Service<Request> for StateService {
                 //     as well as in poll_ready()
 
                 // The work is all done, the future just waits on a channel for the result
-                timer.finish(module_path!(), line!(), "CommitCheckpointVerifiedBlock");
+                timer.finish_desc("CommitCheckpointVerifiedBlock");
 
+                // Await the channel response, flatten the result, map receive errors to
+                // `CommitCheckpointVerifiedError::WriteTaskExited`.
+                // Then flatten the nested Result and convert any errors to a BoxError.
                 async move {
                     rsp_rx
                         .await
-                        .map_err(|_recv_error| {
-                            BoxError::from("block was dropped from the queue of finalized blocks")
-                        })
-                        // TODO: replace with Result::flatten once it stabilises
-                        // https://github.com/rust-lang/rust/issues/70142
-                        .and_then(convert::identity)
+                        .map_err(|_recv_error| CommitBlockError::WriteTaskExited.into())
+                        .and_then(|result| result)
+                        .map_err(BoxError::from)
                         .map(Response::Committed)
                 }
                 .instrument(span)
@@ -1065,6 +1089,7 @@ impl Service<Request> for StateService {
             // Uses pending_utxos and non_finalized_state_queued_blocks in the StateService.
             // If the UTXO isn't in the queued blocks, runs concurrently using the ReadStateService.
             Request::AwaitUtxo(outpoint) => {
+                let timer = CodeTimer::start();
                 // Prepare the AwaitUtxo future from PendingUxtos.
                 let response_fut = self.pending_utxos.queue(outpoint);
                 // Only instrument `response_fut`, the ReadStateService already
@@ -1078,7 +1103,7 @@ impl Service<Request> for StateService {
                     self.pending_utxos.respond(&outpoint, utxo);
 
                     // We're finished, the returned future gets the UTXO from the respond() channel.
-                    timer.finish(module_path!(), line!(), "AwaitUtxo/queued-non-finalized");
+                    timer.finish_desc("AwaitUtxo/queued-non-finalized");
 
                     return response_fut;
                 }
@@ -1088,7 +1113,7 @@ impl Service<Request> for StateService {
                     self.pending_utxos.respond(&outpoint, utxo);
 
                     // We're finished, the returned future gets the UTXO from the respond() channel.
-                    timer.finish(module_path!(), line!(), "AwaitUtxo/sent-non-finalized");
+                    timer.finish_desc("AwaitUtxo/sent-non-finalized");
 
                     return response_fut;
                 }
@@ -1123,13 +1148,13 @@ impl Service<Request> for StateService {
                     // that's rare enough that a retry is ok.
                     if let ReadResponse::AnyChainUtxo(Some(utxo)) = rsp {
                         // We got a UTXO, so we replace the response future with the result own.
-                        timer.finish(module_path!(), line!(), "AwaitUtxo/any-chain");
+                        timer.finish_desc("AwaitUtxo/any-chain");
 
                         return Ok(Response::Utxo(utxo));
                     }
 
                     // We're finished, but the returned future is waiting on the respond() channel.
-                    timer.finish(module_path!(), line!(), "AwaitUtxo/waiting");
+                    timer.finish_desc("AwaitUtxo/waiting");
 
                     response_fut.await
                 }
@@ -1140,18 +1165,22 @@ impl Service<Request> for StateService {
             // before downloading or validating it.
             Request::KnownBlock(hash) => {
                 let timer = CodeTimer::start();
-
+                let sent_hash_response = self.known_sent_hash(&hash);
                 let read_service = self.read_service.clone();
 
                 async move {
+                    if sent_hash_response.is_some() {
+                        return Ok(Response::KnownBlock(sent_hash_response));
+                    };
+
                     let response = read::non_finalized_state_contains_block_hash(
                         &read_service.latest_non_finalized_state(),
                         hash,
                     )
+                    // TODO: Move this to a blocking task, perhaps by moving some of this logic to the ReadStateService.
                     .or_else(|| read::finalized_state_contains_block_hash(&read_service.db, hash));
 
-                    // The work is done in the future.
-                    timer.finish(module_path!(), line!(), "Request::KnownBlock");
+                    timer.finish_desc("Request::KnownBlock");
 
                     Ok(Response::KnownBlock(response))
                 }
@@ -1172,7 +1201,7 @@ impl Service<Request> for StateService {
                     rsp_rx
                         .await
                         .map_err(|_recv_error| InvalidateError::InvalidateRequestDropped)
-                        .flatten()
+                        .and_then(|result| result)
                         .map_err(BoxError::from)
                         .map(Response::Invalidated)
                 }
@@ -1194,7 +1223,7 @@ impl Service<Request> for StateService {
                     rsp_rx
                         .await
                         .map_err(|_recv_error| ReconsiderError::ReconsiderResponseDropped)
-                        .flatten()
+                        .and_then(|result| result)
                         .map_err(BoxError::from)
                         .map(Response::Reconsidered)
                 }
@@ -1212,28 +1241,13 @@ impl Service<Request> for StateService {
             | Request::AnyChainTransaction(_)
             | Request::UnspentBestChainUtxo(_)
             | Request::Block(_)
+            | Request::AnyChainBlock(_)
             | Request::BlockAndSize(_)
             | Request::BlockHeader(_)
             | Request::FindBlockHashes { .. }
             | Request::FindBlockHeaders { .. }
-            | Request::CheckBestChainTipNullifiersAndAnchors(_) => {
-                // Redirect the request to the concurrent ReadStateService
-                let read_service = self.read_service.clone();
-
-                async move {
-                    let req = req
-                        .try_into()
-                        .expect("ReadRequest conversion should not fail");
-
-                    let rsp = read_service.oneshot(req).await?;
-                    let rsp = rsp.try_into().expect("Response conversion should not fail");
-
-                    Ok(rsp)
-                }
-                .boxed()
-            }
-
-            Request::CheckBlockProposalValidity(_) => {
+            | Request::CheckBestChainTipNullifiersAndAnchors(_)
+            | Request::CheckBlockProposalValidity(_) => {
                 // Redirect the request to the concurrent ReadStateService
                 let read_service = self.read_service.clone();
 
@@ -1287,971 +1301,423 @@ impl Service<ReadRequest> for ReadStateService {
     #[instrument(name = "read_state", skip(self, req))]
     fn call(&mut self, req: ReadRequest) -> Self::Future {
         req.count_metric();
-        let timer = CodeTimer::start();
+        let timer = CodeTimer::start_desc(req.variant_name());
         let span = Span::current();
+        let timed_span = TimedSpan::new(timer, span);
+        let state = self.clone();
 
-        match req {
-            // Used by the `getblockchaininfo` RPC.
-            ReadRequest::UsageInfo => {
-                let db = self.db.clone();
+        if req == ReadRequest::NonFinalizedBlocksListener {
+            // The non-finalized blocks listener is used to notify the state service
+            // about new blocks that have been added to the non-finalized state.
+            let non_finalized_blocks_listener = NonFinalizedBlocksListener::spawn(
+                self.network.clone(),
+                self.non_finalized_state_receiver.clone(),
+            );
 
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        // The work is done in the future.
-
-                        let db_size = db.size();
-
-                        timer.finish(module_path!(), line!(), "ReadRequest::UsageInfo");
-
-                        Ok(ReadResponse::UsageInfo(db_size))
-                    })
-                })
-                .wait_for_panics()
+            return async move {
+                Ok(ReadResponse::NonFinalizedBlocksListener(
+                    non_finalized_blocks_listener,
+                ))
             }
+            .boxed();
+        };
+
+        let request_handler = move || match req {
+            // Used by the `getblockchaininfo` RPC.
+            ReadRequest::UsageInfo => Ok(ReadResponse::UsageInfo(state.db.size())),
 
             // Used by the StateService.
-            ReadRequest::Tip => {
-                let state = self.clone();
-
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        let tip = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::tip(non_finalized_state.best_chain(), &state.db)
-                            },
-                        );
-
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "ReadRequest::Tip");
-
-                        Ok(ReadResponse::Tip(tip))
-                    })
-                })
-                .wait_for_panics()
-            }
+            ReadRequest::Tip => Ok(ReadResponse::Tip(read::tip(
+                state.latest_best_chain(),
+                &state.db,
+            ))),
 
             // Used by `getblockchaininfo` RPC method.
             ReadRequest::TipPoolValues => {
-                let state = self.clone();
+                let (tip_height, tip_hash, value_balance) =
+                    read::tip_with_value_balance(state.latest_best_chain(), &state.db)?
+                        .ok_or(BoxError::from("no chain tip available yet"))?;
 
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        let tip_with_value_balance = state
-                            .non_finalized_state_receiver
-                            .with_watch_data(|non_finalized_state| {
-                                read::tip_with_value_balance(
-                                    non_finalized_state.best_chain(),
-                                    &state.db,
-                                )
-                            });
-
-                        // The work is done in the future.
-                        // TODO: Do this in the Drop impl with the variant name?
-                        timer.finish(module_path!(), line!(), "ReadRequest::TipPoolValues");
-
-                        let (tip_height, tip_hash, value_balance) = tip_with_value_balance?
-                            .ok_or(BoxError::from("no chain tip available yet"))?;
-
-                        Ok(ReadResponse::TipPoolValues {
-                            tip_height,
-                            tip_hash,
-                            value_balance,
-                        })
-                    })
+                Ok(ReadResponse::TipPoolValues {
+                    tip_height,
+                    tip_hash,
+                    value_balance,
                 })
-                .wait_for_panics()
             }
 
             // Used by getblock
-            ReadRequest::BlockInfo(hash_or_height) => {
-                let state = self.clone();
-
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        let value_balance = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::block_info(
-                                    non_finalized_state.best_chain(),
-                                    &state.db,
-                                    hash_or_height,
-                                )
-                            },
-                        );
-
-                        // The work is done in the future.
-                        // TODO: Do this in the Drop impl with the variant name?
-                        timer.finish(module_path!(), line!(), "ReadRequest::BlockInfo");
-
-                        Ok(ReadResponse::BlockInfo(value_balance))
-                    })
-                })
-                .wait_for_panics()
-            }
+            ReadRequest::BlockInfo(hash_or_height) => Ok(ReadResponse::BlockInfo(
+                read::block_info(state.latest_best_chain(), &state.db, hash_or_height),
+            )),
 
             // Used by the StateService.
-            ReadRequest::Depth(hash) => {
-                let state = self.clone();
-
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        let depth = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::depth(non_finalized_state.best_chain(), &state.db, hash)
-                            },
-                        );
-
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "ReadRequest::Depth");
-
-                        Ok(ReadResponse::Depth(depth))
-                    })
-                })
-                .wait_for_panics()
-            }
+            ReadRequest::Depth(hash) => Ok(ReadResponse::Depth(read::depth(
+                state.latest_best_chain(),
+                &state.db,
+                hash,
+            ))),
 
             // Used by the StateService.
             ReadRequest::BestChainNextMedianTimePast => {
-                let state = self.clone();
-
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        let non_finalized_state = state.latest_non_finalized_state();
-                        let median_time_past =
-                            read::next_median_time_past(&non_finalized_state, &state.db);
-
-                        // The work is done in the future.
-                        timer.finish(
-                            module_path!(),
-                            line!(),
-                            "ReadRequest::BestChainNextMedianTimePast",
-                        );
-
-                        Ok(ReadResponse::BestChainNextMedianTimePast(median_time_past?))
-                    })
-                })
-                .wait_for_panics()
+                Ok(ReadResponse::BestChainNextMedianTimePast(
+                    read::next_median_time_past(&state.latest_non_finalized_state(), &state.db)?,
+                ))
             }
 
             // Used by the get_block (raw) RPC and the StateService.
-            ReadRequest::Block(hash_or_height) => {
-                let state = self.clone();
+            ReadRequest::Block(hash_or_height) => Ok(ReadResponse::Block(read::block(
+                state.latest_best_chain(),
+                &state.db,
+                hash_or_height,
+            ))),
 
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        let block = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::block(
-                                    non_finalized_state.best_chain(),
-                                    &state.db,
-                                    hash_or_height,
-                                )
-                            },
-                        );
-
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "ReadRequest::Block");
-
-                        Ok(ReadResponse::Block(block))
-                    })
-                })
-                .wait_for_panics()
-            }
+            ReadRequest::AnyChainBlock(hash_or_height) => Ok(ReadResponse::Block(read::any_block(
+                state.latest_non_finalized_state().chain_iter(),
+                &state.db,
+                hash_or_height,
+            ))),
 
             // Used by the get_block (raw) RPC and the StateService.
-            ReadRequest::BlockAndSize(hash_or_height) => {
-                let state = self.clone();
-
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        let block_and_size = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::block_and_size(
-                                    non_finalized_state.best_chain(),
-                                    &state.db,
-                                    hash_or_height,
-                                )
-                            },
-                        );
-
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "ReadRequest::BlockAndSize");
-
-                        Ok(ReadResponse::BlockAndSize(block_and_size))
-                    })
-                })
-                .wait_for_panics()
-            }
+            ReadRequest::BlockAndSize(hash_or_height) => Ok(ReadResponse::BlockAndSize(
+                read::block_and_size(state.latest_best_chain(), &state.db, hash_or_height),
+            )),
 
             // Used by the get_block (verbose) RPC and the StateService.
             ReadRequest::BlockHeader(hash_or_height) => {
-                let state = self.clone();
+                let best_chain = state.latest_best_chain();
 
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        let best_chain = state.latest_best_chain();
-
-                        let height = hash_or_height
-                            .height_or_else(|hash| {
-                                read::find::height_by_hash(best_chain.clone(), &state.db, hash)
-                            })
-                            .ok_or_else(|| BoxError::from("block hash or height not found"))?;
-
-                        let hash = hash_or_height
-                            .hash_or_else(|height| {
-                                read::find::hash_by_height(best_chain.clone(), &state.db, height)
-                            })
-                            .ok_or_else(|| BoxError::from("block hash or height not found"))?;
-
-                        let next_height = height.next()?;
-                        let next_block_hash =
-                            read::find::hash_by_height(best_chain.clone(), &state.db, next_height);
-
-                        let header = read::block_header(best_chain, &state.db, height.into())
-                            .ok_or_else(|| BoxError::from("block hash or height not found"))?;
-
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "ReadRequest::Block");
-
-                        Ok(ReadResponse::BlockHeader {
-                            header,
-                            hash,
-                            height,
-                            next_block_hash,
-                        })
+                let height = hash_or_height
+                    .height_or_else(|hash| {
+                        read::find::height_by_hash(best_chain.clone(), &state.db, hash)
                     })
+                    .ok_or_else(|| BoxError::from("block hash or height not found"))?;
+
+                let hash = hash_or_height
+                    .hash_or_else(|height| {
+                        read::find::hash_by_height(best_chain.clone(), &state.db, height)
+                    })
+                    .ok_or_else(|| BoxError::from("block hash or height not found"))?;
+
+                let next_height = height.next()?;
+                let next_block_hash =
+                    read::find::hash_by_height(best_chain.clone(), &state.db, next_height);
+
+                let header = read::block_header(best_chain, &state.db, height.into())
+                    .ok_or_else(|| BoxError::from("block hash or height not found"))?;
+
+                Ok(ReadResponse::BlockHeader {
+                    header,
+                    hash,
+                    height,
+                    next_block_hash,
                 })
-                .wait_for_panics()
             }
 
             // For the get_raw_transaction RPC and the StateService.
-            ReadRequest::Transaction(hash) => {
-                let state = self.clone();
-
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        let response =
-                            read::mined_transaction(state.latest_best_chain(), &state.db, hash);
-
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "ReadRequest::Transaction");
-
-                        Ok(ReadResponse::Transaction(response))
-                    })
-                })
-                .wait_for_panics()
-            }
+            ReadRequest::Transaction(hash) => Ok(ReadResponse::Transaction(
+                read::mined_transaction(state.latest_best_chain(), &state.db, hash),
+            )),
 
             ReadRequest::AnyChainTransaction(hash) => {
-                let state = self.clone();
-
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        let tx = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::any_transaction(
-                                    non_finalized_state.chain_iter(),
-                                    &state.db,
-                                    hash,
-                                )
-                            },
-                        );
-
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "ReadRequest::AnyChainTransaction");
-
-                        Ok(ReadResponse::AnyChainTransaction(tx))
-                    })
-                })
-                .wait_for_panics()
+                Ok(ReadResponse::AnyChainTransaction(read::any_transaction(
+                    state.latest_non_finalized_state().chain_iter(),
+                    &state.db,
+                    hash,
+                )))
             }
 
             // Used by the getblock (verbose) RPC.
-            ReadRequest::TransactionIdsForBlock(hash_or_height) => {
-                let state = self.clone();
-
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        let transaction_ids = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::transaction_hashes_for_block(
-                                    non_finalized_state.best_chain(),
-                                    &state.db,
-                                    hash_or_height,
-                                )
-                            },
-                        );
-
-                        // The work is done in the future.
-                        timer.finish(
-                            module_path!(),
-                            line!(),
-                            "ReadRequest::TransactionIdsForBlock",
-                        );
-
-                        Ok(ReadResponse::TransactionIdsForBlock(transaction_ids))
-                    })
-                })
-                .wait_for_panics()
-            }
+            ReadRequest::TransactionIdsForBlock(hash_or_height) => Ok(
+                ReadResponse::TransactionIdsForBlock(read::transaction_hashes_for_block(
+                    state.latest_best_chain(),
+                    &state.db,
+                    hash_or_height,
+                )),
+            ),
 
             ReadRequest::AnyChainTransactionIdsForBlock(hash_or_height) => {
-                let state = self.clone();
-
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        let transaction_ids = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::transaction_hashes_for_any_block(
-                                    non_finalized_state.chain_iter(),
-                                    &state.db,
-                                    hash_or_height,
-                                )
-                            },
-                        );
-
-                        // The work is done in the future.
-                        timer.finish(
-                            module_path!(),
-                            line!(),
-                            "ReadRequest::AnyChainTransactionIdsForBlock",
-                        );
-
-                        Ok(ReadResponse::AnyChainTransactionIdsForBlock(
-                            transaction_ids,
-                        ))
-                    })
-                })
-                .wait_for_panics()
+                Ok(ReadResponse::AnyChainTransactionIdsForBlock(
+                    read::transaction_hashes_for_any_block(
+                        state.latest_non_finalized_state().chain_iter(),
+                        &state.db,
+                        hash_or_height,
+                    ),
+                ))
             }
 
             #[cfg(feature = "indexer")]
-            ReadRequest::SpendingTransactionId(spend) => {
-                let state = self.clone();
+            ReadRequest::SpendingTransactionId(spend) => Ok(ReadResponse::TransactionId(
+                read::spending_transaction_hash(state.latest_best_chain(), &state.db, spend),
+            )),
 
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        let spending_transaction_id = state
-                            .non_finalized_state_receiver
-                            .with_watch_data(|non_finalized_state| {
-                                read::spending_transaction_hash(
-                                    non_finalized_state.best_chain(),
-                                    &state.db,
-                                    spend,
-                                )
-                            });
-
-                        // The work is done in the future.
-                        timer.finish(
-                            module_path!(),
-                            line!(),
-                            "ReadRequest::TransactionIdForSpentOutPoint",
-                        );
-
-                        Ok(ReadResponse::TransactionId(spending_transaction_id))
-                    })
-                })
-                .wait_for_panics()
-            }
-
-            ReadRequest::UnspentBestChainUtxo(outpoint) => {
-                let state = self.clone();
-
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        let utxo = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::unspent_utxo(
-                                    non_finalized_state.best_chain(),
-                                    &state.db,
-                                    outpoint,
-                                )
-                            },
-                        );
-
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "ReadRequest::UnspentBestChainUtxo");
-
-                        Ok(ReadResponse::UnspentBestChainUtxo(utxo))
-                    })
-                })
-                .wait_for_panics()
-            }
+            ReadRequest::UnspentBestChainUtxo(outpoint) => Ok(ReadResponse::UnspentBestChainUtxo(
+                read::unspent_utxo(state.latest_best_chain(), &state.db, outpoint),
+            )),
 
             // Manually used by the StateService to implement part of AwaitUtxo.
-            ReadRequest::AnyChainUtxo(outpoint) => {
-                let state = self.clone();
-
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        let utxo = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::any_utxo(non_finalized_state, &state.db, outpoint)
-                            },
-                        );
-
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "ReadRequest::AnyChainUtxo");
-
-                        Ok(ReadResponse::AnyChainUtxo(utxo))
-                    })
-                })
-                .wait_for_panics()
-            }
+            ReadRequest::AnyChainUtxo(outpoint) => Ok(ReadResponse::AnyChainUtxo(read::any_utxo(
+                state.latest_non_finalized_state(),
+                &state.db,
+                outpoint,
+            ))),
 
             // Used by the StateService.
-            ReadRequest::BlockLocator => {
-                let state = self.clone();
-
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        let block_locator = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::block_locator(non_finalized_state.best_chain(), &state.db)
-                            },
-                        );
-
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "ReadRequest::BlockLocator");
-
-                        Ok(ReadResponse::BlockLocator(
-                            block_locator.unwrap_or_default(),
-                        ))
-                    })
-                })
-                .wait_for_panics()
-            }
+            ReadRequest::BlockLocator => Ok(ReadResponse::BlockLocator(
+                read::block_locator(state.latest_best_chain(), &state.db).unwrap_or_default(),
+            )),
 
             // Used by the StateService.
             ReadRequest::FindBlockHashes { known_blocks, stop } => {
-                let state = self.clone();
-
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        let block_hashes = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::find_chain_hashes(
-                                    non_finalized_state.best_chain(),
-                                    &state.db,
-                                    known_blocks,
-                                    stop,
-                                    MAX_FIND_BLOCK_HASHES_RESULTS,
-                                )
-                            },
-                        );
-
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "ReadRequest::FindBlockHashes");
-
-                        Ok(ReadResponse::BlockHashes(block_hashes))
-                    })
-                })
-                .wait_for_panics()
+                Ok(ReadResponse::BlockHashes(read::find_chain_hashes(
+                    state.latest_best_chain(),
+                    &state.db,
+                    known_blocks,
+                    stop,
+                    MAX_FIND_BLOCK_HASHES_RESULTS,
+                )))
             }
 
             // Used by the StateService.
-            ReadRequest::FindBlockHeaders { known_blocks, stop } => {
-                let state = self.clone();
+            ReadRequest::FindBlockHeaders { known_blocks, stop } => Ok(ReadResponse::BlockHeaders(
+                read::find_chain_headers(
+                    state.latest_best_chain(),
+                    &state.db,
+                    known_blocks,
+                    stop,
+                    MAX_FIND_BLOCK_HEADERS_RESULTS,
+                )
+                .into_iter()
+                .map(|header| CountedHeader { header })
+                .collect(),
+            )),
 
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        let block_headers = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::find_chain_headers(
-                                    non_finalized_state.best_chain(),
-                                    &state.db,
-                                    known_blocks,
-                                    stop,
-                                    MAX_FIND_BLOCK_HEADERS_RESULTS,
-                                )
-                            },
-                        );
+            ReadRequest::SaplingTree(hash_or_height) => Ok(ReadResponse::SaplingTree(
+                read::sapling_tree(state.latest_best_chain(), &state.db, hash_or_height),
+            )),
 
-                        let block_headers = block_headers
-                            .into_iter()
-                            .map(|header| CountedHeader { header })
-                            .collect();
-
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "ReadRequest::FindBlockHeaders");
-
-                        Ok(ReadResponse::BlockHeaders(block_headers))
-                    })
-                })
-                .wait_for_panics()
-            }
-
-            ReadRequest::SaplingTree(hash_or_height) => {
-                let state = self.clone();
-
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        let sapling_tree = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::sapling_tree(
-                                    non_finalized_state.best_chain(),
-                                    &state.db,
-                                    hash_or_height,
-                                )
-                            },
-                        );
-
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "ReadRequest::SaplingTree");
-
-                        Ok(ReadResponse::SaplingTree(sapling_tree))
-                    })
-                })
-                .wait_for_panics()
-            }
-
-            ReadRequest::OrchardTree(hash_or_height) => {
-                let state = self.clone();
-
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        let orchard_tree = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::orchard_tree(
-                                    non_finalized_state.best_chain(),
-                                    &state.db,
-                                    hash_or_height,
-                                )
-                            },
-                        );
-
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "ReadRequest::OrchardTree");
-
-                        Ok(ReadResponse::OrchardTree(orchard_tree))
-                    })
-                })
-                .wait_for_panics()
-            }
+            ReadRequest::OrchardTree(hash_or_height) => Ok(ReadResponse::OrchardTree(
+                read::orchard_tree(state.latest_best_chain(), &state.db, hash_or_height),
+            )),
 
             ReadRequest::SaplingSubtrees { start_index, limit } => {
-                let state = self.clone();
+                let end_index = limit
+                    .and_then(|limit| start_index.0.checked_add(limit.0))
+                    .map(NoteCommitmentSubtreeIndex);
 
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        let end_index = limit
-                            .and_then(|limit| start_index.0.checked_add(limit.0))
-                            .map(NoteCommitmentSubtreeIndex);
+                let best_chain = state.latest_best_chain();
+                let sapling_subtrees = if let Some(end_index) = end_index {
+                    read::sapling_subtrees(best_chain, &state.db, start_index..end_index)
+                } else {
+                    // If there is no end bound, just return all the trees.
+                    // If the end bound would overflow, just returns all the trees, because that's what
+                    // `zcashd` does. (It never calculates an end bound, so it just keeps iterating until
+                    // the trees run out.)
+                    read::sapling_subtrees(best_chain, &state.db, start_index..)
+                };
 
-                        let sapling_subtrees = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                if let Some(end_index) = end_index {
-                                    read::sapling_subtrees(
-                                        non_finalized_state.best_chain(),
-                                        &state.db,
-                                        start_index..end_index,
-                                    )
-                                } else {
-                                    // If there is no end bound, just return all the trees.
-                                    // If the end bound would overflow, just returns all the trees, because that's what
-                                    // `zcashd` does. (It never calculates an end bound, so it just keeps iterating until
-                                    // the trees run out.)
-                                    read::sapling_subtrees(
-                                        non_finalized_state.best_chain(),
-                                        &state.db,
-                                        start_index..,
-                                    )
-                                }
-                            },
-                        );
-
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "ReadRequest::SaplingSubtrees");
-
-                        Ok(ReadResponse::SaplingSubtrees(sapling_subtrees))
-                    })
-                })
-                .wait_for_panics()
+                Ok(ReadResponse::SaplingSubtrees(sapling_subtrees))
             }
 
             ReadRequest::OrchardSubtrees { start_index, limit } => {
-                let state = self.clone();
+                let end_index = limit
+                    .and_then(|limit| start_index.0.checked_add(limit.0))
+                    .map(NoteCommitmentSubtreeIndex);
 
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        let end_index = limit
-                            .and_then(|limit| start_index.0.checked_add(limit.0))
-                            .map(NoteCommitmentSubtreeIndex);
+                let best_chain = state.latest_best_chain();
+                let orchard_subtrees = if let Some(end_index) = end_index {
+                    read::orchard_subtrees(best_chain, &state.db, start_index..end_index)
+                } else {
+                    // If there is no end bound, just return all the trees.
+                    // If the end bound would overflow, just returns all the trees, because that's what
+                    // `zcashd` does. (It never calculates an end bound, so it just keeps iterating until
+                    // the trees run out.)
+                    read::orchard_subtrees(best_chain, &state.db, start_index..)
+                };
 
-                        let orchard_subtrees = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                if let Some(end_index) = end_index {
-                                    read::orchard_subtrees(
-                                        non_finalized_state.best_chain(),
-                                        &state.db,
-                                        start_index..end_index,
-                                    )
-                                } else {
-                                    // If there is no end bound, just return all the trees.
-                                    // If the end bound would overflow, just returns all the trees, because that's what
-                                    // `zcashd` does. (It never calculates an end bound, so it just keeps iterating until
-                                    // the trees run out.)
-                                    read::orchard_subtrees(
-                                        non_finalized_state.best_chain(),
-                                        &state.db,
-                                        start_index..,
-                                    )
-                                }
-                            },
-                        );
-
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "ReadRequest::OrchardSubtrees");
-
-                        Ok(ReadResponse::OrchardSubtrees(orchard_subtrees))
-                    })
-                })
-                .wait_for_panics()
+                Ok(ReadResponse::OrchardSubtrees(orchard_subtrees))
             }
 
             // For the get_address_balance RPC.
             ReadRequest::AddressBalance(addresses) => {
-                let state = self.clone();
-
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        let (balance, received) = state
-                            .non_finalized_state_receiver
-                            .with_watch_data(|non_finalized_state| {
-                                read::transparent_balance(
-                                    non_finalized_state.best_chain().cloned(),
-                                    &state.db,
-                                    addresses,
-                                )
-                            })?;
-
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "ReadRequest::AddressBalance");
-
-                        Ok(ReadResponse::AddressBalance { balance, received })
-                    })
-                })
-                .wait_for_panics()
+                let (balance, received) =
+                    read::transparent_balance(state.latest_best_chain(), &state.db, addresses)?;
+                Ok(ReadResponse::AddressBalance { balance, received })
             }
 
             // For the get_address_tx_ids RPC.
             ReadRequest::TransactionIdsByAddresses {
                 addresses,
                 height_range,
-            } => {
-                let state = self.clone();
-
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        let tx_ids = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::transparent_tx_ids(
-                                    non_finalized_state.best_chain(),
-                                    &state.db,
-                                    addresses,
-                                    height_range,
-                                )
-                            },
-                        );
-
-                        // The work is done in the future.
-                        timer.finish(
-                            module_path!(),
-                            line!(),
-                            "ReadRequest::TransactionIdsByAddresses",
-                        );
-
-                        tx_ids.map(ReadResponse::AddressesTransactionIds)
-                    })
-                })
-                .wait_for_panics()
-            }
+            } => read::transparent_tx_ids(
+                state.latest_best_chain(),
+                &state.db,
+                addresses,
+                height_range,
+            )
+            .map(ReadResponse::AddressesTransactionIds),
 
             // For the get_address_utxos RPC.
-            ReadRequest::UtxosByAddresses(addresses) => {
-                let state = self.clone();
-
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        let utxos = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::address_utxos(
-                                    &state.network,
-                                    non_finalized_state.best_chain(),
-                                    &state.db,
-                                    addresses,
-                                )
-                            },
-                        );
-
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "ReadRequest::UtxosByAddresses");
-
-                        utxos.map(ReadResponse::AddressUtxos)
-                    })
-                })
-                .wait_for_panics()
-            }
+            ReadRequest::UtxosByAddresses(addresses) => read::address_utxos(
+                &state.network,
+                state.latest_best_chain(),
+                &state.db,
+                addresses,
+            )
+            .map(ReadResponse::AddressUtxos),
 
             ReadRequest::CheckBestChainTipNullifiersAndAnchors(unmined_tx) => {
-                let state = self.clone();
+                let latest_non_finalized_best_chain = state.latest_best_chain();
 
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        let latest_non_finalized_best_chain =
-                            state.latest_non_finalized_state().best_chain().cloned();
+                check::nullifier::tx_no_duplicates_in_chain(
+                    &state.db,
+                    latest_non_finalized_best_chain.as_ref(),
+                    &unmined_tx.transaction,
+                )?;
 
-                        check::nullifier::tx_no_duplicates_in_chain(
-                            &state.db,
-                            latest_non_finalized_best_chain.as_ref(),
-                            &unmined_tx.transaction,
-                        )?;
+                check::anchors::tx_anchors_refer_to_final_treestates(
+                    &state.db,
+                    latest_non_finalized_best_chain.as_ref(),
+                    &unmined_tx,
+                )?;
 
-                        check::anchors::tx_anchors_refer_to_final_treestates(
-                            &state.db,
-                            latest_non_finalized_best_chain.as_ref(),
-                            &unmined_tx,
-                        )?;
-
-                        // The work is done in the future.
-                        timer.finish(
-                            module_path!(),
-                            line!(),
-                            "ReadRequest::CheckBestChainTipNullifiersAndAnchors",
-                        );
-
-                        Ok(ReadResponse::ValidBestChainTipNullifiersAndAnchors)
-                    })
-                })
-                .wait_for_panics()
+                Ok(ReadResponse::ValidBestChainTipNullifiersAndAnchors)
             }
 
             // Used by the get_block and get_block_hash RPCs.
-            ReadRequest::BestChainBlockHash(height) => {
-                let state = self.clone();
-
-                // # Performance
-                //
-                // Allow other async tasks to make progress while concurrently reading blocks from disk.
-
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        let hash = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::hash_by_height(
-                                    non_finalized_state.best_chain(),
-                                    &state.db,
-                                    height,
-                                )
-                            },
-                        );
-
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "ReadRequest::BestChainBlockHash");
-
-                        Ok(ReadResponse::BlockHash(hash))
-                    })
-                })
-                .wait_for_panics()
-            }
+            ReadRequest::BestChainBlockHash(height) => Ok(ReadResponse::BlockHash(
+                read::hash_by_height(state.latest_best_chain(), &state.db, height),
+            )),
 
             // Used by get_block_template and getblockchaininfo RPCs.
             ReadRequest::ChainInfo => {
-                let state = self.clone();
-                let latest_non_finalized_state = self.latest_non_finalized_state();
-
-                // # Performance
+                // # Correctness
                 //
-                // Allow other async tasks to make progress while concurrently reading blocks from disk.
-
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        // # Correctness
-                        //
-                        // It is ok to do these lookups using multiple database calls. Finalized state updates
-                        // can only add overlapping blocks, and block hashes are unique across all chain forks.
-                        //
-                        // If there is a large overlap between the non-finalized and finalized states,
-                        // where the finalized tip is above the non-finalized tip,
-                        // Zebra is receiving a lot of blocks, or this request has been delayed for a long time.
-                        //
-                        // In that case, the `getblocktemplate` RPC will return an error because Zebra
-                        // is not synced to the tip. That check happens before the RPC makes this request.
-                        let get_block_template_info =
-                            read::difficulty::get_block_template_chain_info(
-                                &latest_non_finalized_state,
-                                &state.db,
-                                &state.network,
-                            );
-
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "ReadRequest::ChainInfo");
-
-                        get_block_template_info.map(ReadResponse::ChainInfo)
-                    })
-                })
-                .wait_for_panics()
+                // It is ok to do these lookups using multiple database calls. Finalized state updates
+                // can only add overlapping blocks, and block hashes are unique across all chain forks.
+                //
+                // If there is a large overlap between the non-finalized and finalized states,
+                // where the finalized tip is above the non-finalized tip,
+                // Zebra is receiving a lot of blocks, or this request has been delayed for a long time.
+                //
+                // In that case, the `getblocktemplate` RPC will return an error because Zebra
+                // is not synced to the tip. That check happens before the RPC makes this request.
+                read::difficulty::get_block_template_chain_info(
+                    &state.latest_non_finalized_state(),
+                    &state.db,
+                    &state.network,
+                )
+                .map(ReadResponse::ChainInfo)
             }
 
             // Used by getmininginfo, getnetworksolps, and getnetworkhashps RPCs.
             ReadRequest::SolutionRate { num_blocks, height } => {
-                let state = self.clone();
-
-                // # Performance
+                let latest_non_finalized_state = state.latest_non_finalized_state();
+                // # Correctness
                 //
-                // Allow other async tasks to make progress while concurrently reading blocks from disk.
+                // It is ok to do these lookups using multiple database calls. Finalized state updates
+                // can only add overlapping blocks, and block hashes are unique across all chain forks.
+                //
+                // The worst that can happen here is that the default `start_hash` will be below
+                // the chain tip.
+                let (tip_height, tip_hash) =
+                    match read::tip(latest_non_finalized_state.best_chain(), &state.db) {
+                        Some(tip_hash) => tip_hash,
+                        None => return Ok(ReadResponse::SolutionRate(None)),
+                    };
 
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        let latest_non_finalized_state = state.latest_non_finalized_state();
-                        // # Correctness
-                        //
-                        // It is ok to do these lookups using multiple database calls. Finalized state updates
-                        // can only add overlapping blocks, and block hashes are unique across all chain forks.
-                        //
-                        // The worst that can happen here is that the default `start_hash` will be below
-                        // the chain tip.
-                        let (tip_height, tip_hash) =
-                            match read::tip(latest_non_finalized_state.best_chain(), &state.db) {
-                                Some(tip_hash) => tip_hash,
-                                None => return Ok(ReadResponse::SolutionRate(None)),
-                            };
+                let start_hash = match height {
+                    Some(height) if height < tip_height => read::hash_by_height(
+                        latest_non_finalized_state.best_chain(),
+                        &state.db,
+                        height,
+                    ),
+                    // use the chain tip hash if height is above it or not provided.
+                    _ => Some(tip_hash),
+                };
 
-                        let start_hash = match height {
-                            Some(height) if height < tip_height => read::hash_by_height(
-                                latest_non_finalized_state.best_chain(),
-                                &state.db,
-                                height,
-                            ),
-                            // use the chain tip hash if height is above it or not provided.
-                            _ => Some(tip_hash),
-                        };
+                let solution_rate = start_hash.and_then(|start_hash| {
+                    read::difficulty::solution_rate(
+                        &latest_non_finalized_state,
+                        &state.db,
+                        num_blocks,
+                        start_hash,
+                    )
+                });
 
-                        let solution_rate = start_hash.and_then(|start_hash| {
-                            read::difficulty::solution_rate(
-                                &latest_non_finalized_state,
-                                &state.db,
-                                num_blocks,
-                                start_hash,
-                            )
-                        });
-
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "ReadRequest::SolutionRate");
-
-                        Ok(ReadResponse::SolutionRate(solution_rate))
-                    })
-                })
-                .wait_for_panics()
+                Ok(ReadResponse::SolutionRate(solution_rate))
             }
 
             ReadRequest::CheckBlockProposalValidity(semantically_verified) => {
-                let state = self.clone();
+                tracing::debug!(
+                    "attempting to validate and commit block proposal \
+                         onto a cloned non-finalized state"
+                );
+                let mut latest_non_finalized_state = state.latest_non_finalized_state();
 
-                // # Performance
+                // The previous block of a valid proposal must be on the best chain tip.
+                let Some((_best_tip_height, best_tip_hash)) =
+                    read::best_tip(&latest_non_finalized_state, &state.db)
+                else {
+                    return Err(
+                        "state is empty: wait for Zebra to sync before submitting a proposal"
+                            .into(),
+                    );
+                };
+
+                if semantically_verified.block.header.previous_block_hash != best_tip_hash {
+                    return Err("proposal is not based on the current best chain tip: \
+                                    previous block hash must be the best chain tip"
+                        .into());
+                }
+
+                // This clone of the non-finalized state is dropped when this closure returns.
+                // The non-finalized state that's used in the rest of the state (including finalizing
+                // blocks into the db) is not mutated here.
                 //
-                // Allow other async tasks to make progress while concurrently reading blocks from disk.
+                // TODO: Convert `CommitSemanticallyVerifiedError` to a new `ValidateProposalError`?
+                latest_non_finalized_state.disable_metrics();
 
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        tracing::debug!("attempting to validate and commit block proposal onto a cloned non-finalized state");
-                        let mut latest_non_finalized_state = state.latest_non_finalized_state();
+                write::validate_and_commit_non_finalized(
+                    &state.db,
+                    &mut latest_non_finalized_state,
+                    semantically_verified,
+                )?;
 
-                        // The previous block of a valid proposal must be on the best chain tip.
-                        let Some((_best_tip_height, best_tip_hash)) = read::best_tip(&latest_non_finalized_state, &state.db) else {
-                            return Err("state is empty: wait for Zebra to sync before submitting a proposal".into());
-                        };
-
-                        if semantically_verified.block.header.previous_block_hash != best_tip_hash {
-                            return Err("proposal is not based on the current best chain tip: previous block hash must be the best chain tip".into());
-                        }
-
-                        // This clone of the non-finalized state is dropped when this closure returns.
-                        // The non-finalized state that's used in the rest of the state (including finalizing
-                        // blocks into the db) is not mutated here.
-                        //
-                        // TODO: Convert `CommitSemanticallyVerifiedError` to a new `ValidateProposalError`?
-                        latest_non_finalized_state.disable_metrics();
-
-                        write::validate_and_commit_non_finalized(
-                            &state.db,
-                            &mut latest_non_finalized_state,
-                            semantically_verified,
-                        )?;
-
-                        // The work is done in the future.
-                        timer.finish(
-                            module_path!(),
-                            line!(),
-                            "ReadRequest::CheckBlockProposalValidity",
-                        );
-
-                        Ok(ReadResponse::ValidBlockProposal)
-                    })
-                })
-                .wait_for_panics()
+                Ok(ReadResponse::ValidBlockProposal)
             }
 
             ReadRequest::TipBlockSize => {
-                let state = self.clone();
-
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        // Get the best chain tip height.
-                        let tip_height = state
-                            .non_finalized_state_receiver
-                            .with_watch_data(|non_finalized_state| {
-                                read::tip_height(non_finalized_state.best_chain(), &state.db)
-                            })
-                            .unwrap_or(Height(0));
-
-                        // Get the block at the best chain tip height.
-                        let block = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::block(
-                                    non_finalized_state.best_chain(),
-                                    &state.db,
-                                    tip_height.into(),
-                                )
-                            },
-                        );
-
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "ReadRequest::TipBlockSize");
-
-                        // Respond with the length of the obtained block if any.
-                        match block {
-                            Some(b) => Ok(ReadResponse::TipBlockSize(Some(
-                                b.zcash_serialize_to_vec()?.len(),
-                            ))),
-                            None => Ok(ReadResponse::TipBlockSize(None)),
-                        }
-                    })
-                })
-                .wait_for_panics()
+                // Respond with the length of the obtained block if any.
+                Ok(ReadResponse::TipBlockSize(
+                    state
+                        .best_tip()
+                        .and_then(|(tip_height, _)| {
+                            read::block_info(
+                                state.latest_best_chain(),
+                                &state.db,
+                                tip_height.into(),
+                            )
+                        })
+                        .map(|info| info.size().try_into().expect("u32 should fit in usize"))
+                        .or_else(|| {
+                            find::tip_block(state.latest_best_chain(), &state.db)
+                                .map(|b| b.zcash_serialized_size())
+                        }),
+                ))
             }
 
             ReadRequest::NonFinalizedBlocksListener => {
-                // The non-finalized blocks listener is used to notify the state service
-                // about new blocks that have been added to the non-finalized state.
-                let non_finalized_blocks_listener = NonFinalizedBlocksListener::spawn(
-                    self.network.clone(),
-                    self.non_finalized_state_receiver.clone(),
-                );
-
-                async move {
-                    timer.finish(
-                        module_path!(),
-                        line!(),
-                        "ReadRequest::NonFinalizedBlocksListener",
-                    );
-
-                    Ok(ReadResponse::NonFinalizedBlocksListener(
-                        non_finalized_blocks_listener,
-                    ))
-                }
-                .boxed()
+                unreachable!("should return early");
             }
-        }
+
+            // Used by `gettxout` RPC method.
+            ReadRequest::IsTransparentOutputSpent(outpoint) => {
+                let is_spent = read::unspent_utxo(state.latest_best_chain(), &state.db, outpoint);
+                Ok(ReadResponse::IsTransparentOutputSpent(is_spent.is_none()))
+            }
+        };
+
+        timed_span.spawn_blocking(request_handler)
     }
 }
 

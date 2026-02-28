@@ -671,6 +671,8 @@ where
     /// multiple peers
     #[instrument(skip(self))]
     async fn obtain_tips(&mut self) -> Result<IndexSet<block::Hash>, Report> {
+        let stage_start = std::time::Instant::now();
+
         let block_locator = self
             .state
             .ready()
@@ -825,11 +827,16 @@ where
 
         let response = self.request_blocks(download_set).await;
 
+        metrics::histogram!("sync.stage.duration_seconds", "stage" => "obtain_tips")
+            .record(stage_start.elapsed().as_secs_f64());
+
         Self::handle_hash_response(response).map_err(Into::into)
     }
 
     #[instrument(skip(self))]
     async fn extend_tips(&mut self) -> Result<IndexSet<block::Hash>, Report> {
+        let stage_start = std::time::Instant::now();
+
         let tips = std::mem::take(&mut self.prospective_tips);
 
         let mut download_set = IndexSet::new();
@@ -962,6 +969,9 @@ where
         self.recent_syncs.push_extend_tips_length(new_downloads);
 
         let response = self.request_blocks(download_set).await;
+
+        metrics::histogram!("sync.stage.duration_seconds", "stage" => "extend_tips")
+            .record(stage_start.elapsed().as_secs_f64());
 
         Self::handle_hash_response(response).map_err(Into::into)
     }
@@ -1181,7 +1191,7 @@ where
         match e {
             // Structural matches: downcasts
             BlockDownloadVerifyError::Invalid { error, .. } if error.is_duplicate_request() => {
-                debug!(error = ?e, "block was already verified, possibly from a previous sync run, continuing");
+                debug!(error = ?e, "block was already verified or committed, possibly from a previous sync run, continuing");
                 false
             }
 
@@ -1208,21 +1218,6 @@ where
                 false
             }
 
-            // String matches
-            //
-            // We want to match VerifyChainError::Block(VerifyBlockError::Commit(ref source)),
-            // but that type is boxed.
-            // TODO:
-            // - turn this check into a function on VerifyChainError, like is_duplicate_request()
-            BlockDownloadVerifyError::Invalid { error, .. }
-                if format!("{error:?}").contains("block is already committed to the state")
-                    || format!("{error:?}")
-                        .contains("block has already been sent to be committed to the state") =>
-            {
-                // TODO: improve this by checking the type (#2908)
-                debug!(error = ?e, "block is already committed or pending a commit, possibly from a previous sync run, continuing");
-                false
-            }
             BlockDownloadVerifyError::DownloadFailed { ref error, .. }
                 if format!("{error:?}").contains("NotFound") =>
             {
@@ -1247,12 +1242,7 @@ where
                 // TODO: add a proper test and remove this
                 // https://github.com/ZcashFoundation/zebra/issues/2909
                 let err_str = format!("{e:?}");
-                if err_str.contains("AlreadyVerified")
-                    || err_str.contains("AlreadyInChain")
-                    || err_str.contains("block is already committed to the state")
-                    || err_str.contains("block has already been sent to be committed to the state")
-                    || err_str.contains("NotFound")
-                {
+                if err_str.contains("NotFound") {
                     error!(?e,
                         "a BlockDownloadVerifyError that should have been filtered out was detected, \
                         which possibly indicates a programming error in the downcast inside \

@@ -5,6 +5,92 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+This release adds the `gettxout` RPC method.
+
+### Added
+
+- Added `UnspentOutput` to mempool component service ([#10235](https://github.com/ZcashFoundation/zebra/pull/10235))
+
+## [Zebra 4.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v4.1.0) - 2026-02-05
+
+This release has no breaking changes for node operators. It expands Zebra's
+observability with new Prometheus metrics and Grafana dashboards. It also adds
+mempool checks for standard transparent scripts to match zcashd.
+
+Listed below are all user-visible changes.
+
+### Changed
+
+- Check that `SENTRY_DSN` env variable is present before initializing sentry ([#10256](https://github.com/ZcashFoundation/zebra/pull/10256))
+
+### Added
+
+- Add RocksDB I/O latency and sync distance metrics ([#10181](https://github.com/ZcashFoundation/zebra/pull/10181))
+- Add performance histograms for bottleneck identification ([#10179](https://github.com/ZcashFoundation/zebra/pull/10179))
+- Add value pool, RPC, and peer health metrics ([#10175](https://github.com/ZcashFoundation/zebra/pull/10175))
+- Add standardness checks and configurable `OP_RETURN` policy ([#10224](https://github.com/ZcashFoundation/zebra/pull/10224))
+- Add zaino to the qa rpc framework ([#10199](https://github.com/ZcashFoundation/zebra/pull/10199))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@Bashmunta, @MozirDmitriy, @gustavovalverde, @mpguerra, @oxarbitrage, @syszery, @upbqdn and @zlyzol
+
+## [Zebra 4.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v4.0.0) - 2026-01-20
+
+This release fixes the type of a field in the `getinfo` RPC and adds support for
+the `pingtime` and `pingwait` fields of the `getpeerinfo` RPC.
+
+It also changes the Grafana dashboards to add auto-provisioning and AlertManager
+support.
+
+This release also adds a new mainnet DNS seeder from Shielded Labs to the default
+configuration. However, if you already have a config in place, you will need
+to add it manually; add `"mainnet.seeder.shieldedinfra.net:8233"` to
+`initial_mainnet_peers`.
+
+The new OpenTelemetry support must be enabled at compile time with the
+`opentelemetry` feature, e.g. `cargo build --features=opentelemetry --release`.
+
+### Breaking Changes
+
+This release has the following breaking changes:
+
+- Changed the `getinfo` RPC `errorstimestamp` field from a string timestamp (ISO
+  UTC timestamp) to a i64 (seconds from Unix epoch) to match zcashd
+  ([#10079](https://github.com/ZcashFoundation/zebra/pull/10079)). If you rely
+  on this field, you will need to change your code to be able to interpret
+  the i64 result.
+- Always parse Zebra's config file as TOML (#10222). This allows using a config
+  file with an extension different than `.toml`. Previously, it would use the
+  format detected from the extension, so in the unlikely case you were using
+  a format different than TOML you will need to change your config to TOML.
+
+
+### Added
+
+- Added `pingtime` and `pingwait` to `getpeerinfo` RPC ([#9880](https://github.com/ZcashFoundation/zebra/pull/9880))
+- Added Grafana auto-provisioning and AlertManager ([#10171](https://github.com/ZcashFoundation/zebra/pull/10171))
+- Added OpenTelemetry distributed tracing support ([#10174](https://github.com/ZcashFoundation/zebra/pull/10174))
+- Added new Shielded Labs mainnet seeder ([#10228](https://github.com/ZcashFoundation/zebra/pull/10228))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@conradoplg, @gustavovalverde and @syszery
+
+### Added
+
+- Value pool metrics exposing transparent, sprout, sapling, orchard, and deferred pool balances plus total chain supply ([#10175](https://github.com/ZcashFoundation/zebra/pull/10175))
+- Peer handshake metrics for duration histograms and failure tracking by reason ([#10175](https://github.com/ZcashFoundation/zebra/pull/10175))
+- Prometheus alert rules and Grafana dashboards for value pools and RPC monitoring ([#10175](https://github.com/ZcashFoundation/zebra/pull/10175))
+- Sync pipeline, consensus verification, and RocksDB performance histograms ([#10179](https://github.com/ZcashFoundation/zebra/pull/10179))
+- RocksDB I/O latency, sync distance metrics, and Zebra Overview dashboard ([#10181](https://github.com/ZcashFoundation/zebra/pull/10181))
+- Added mempool standardness policy checks for transparent scripts (scriptSig size/push-only, standard script kinds, bare multisig rejection, OP_RETURN size/count limits).
+- Added mempool configuration option `max_datacarrier_bytes` for OP_RETURN policy.
+
 
 ## [Zebra 3.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v3.1.0) - 2025-11-28
 
