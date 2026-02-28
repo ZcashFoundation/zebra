@@ -5,9 +5,12 @@
 //! implement, and ensures that we don't reject blocks or transactions
 //! for a non-enumerated reason.
 
+use std::{array::TryFromSliceError, convert::Infallible};
+
 use chrono::{DateTime, Utc};
 use thiserror::Error;
 
+use zcash_protocol::value::BalanceError;
 use zebra_chain::{
     amount, block, orchard,
     parameters::subsidy::SubsidyError,
@@ -75,6 +78,9 @@ pub enum TransactionError {
         block_height: zebra_chain::block::Height,
         transaction_hash: zebra_chain::transaction::Hash,
     },
+
+    #[error("could not construct coinbase tx: {0}")]
+    CoinbaseConstruction(String),
 
     #[error(
         "expiry {expiry_height:?} must be less than the maximum {MAX_EXPIRY_HEIGHT:?} \
@@ -223,11 +229,68 @@ pub enum TransactionError {
 
     #[error("wrong tx format: tx version is ≥ 5, but `nConsensusBranchId` is missing")]
     MissingConsensusBranchId,
+
+    #[error("input/output error")]
+    Io(String),
+
+    #[error("failed to convert a slice")]
+    TryFromSlice(String),
+
+    #[error("invalid amount")]
+    Amount(String),
+
+    #[error("invalid balance")]
+    Balance(String),
+
+    #[error("unexpected error")]
+    Other(String),
 }
 
 impl From<ValidateContextError> for TransactionError {
     fn from(err: ValidateContextError) -> Self {
         TransactionError::ValidateContextError(Box::new(err))
+    }
+}
+
+impl From<zcash_transparent::builder::Error> for TransactionError {
+    fn from(err: zcash_transparent::builder::Error) -> Self {
+        TransactionError::CoinbaseConstruction(err.to_string())
+    }
+}
+
+impl From<zcash_primitives::transaction::builder::Error<Infallible>> for TransactionError {
+    fn from(err: zcash_primitives::transaction::builder::Error<Infallible>) -> Self {
+        TransactionError::CoinbaseConstruction(err.to_string())
+    }
+}
+
+impl From<BalanceError> for TransactionError {
+    fn from(err: BalanceError) -> Self {
+        TransactionError::Balance(err.to_string())
+    }
+}
+
+impl From<libzcash_script::Error> for TransactionError {
+    fn from(err: libzcash_script::Error) -> Self {
+        TransactionError::Script(zebra_script::Error::from(err))
+    }
+}
+
+impl From<std::io::Error> for TransactionError {
+    fn from(err: std::io::Error) -> Self {
+        TransactionError::Io(err.to_string())
+    }
+}
+
+impl From<TryFromSliceError> for TransactionError {
+    fn from(err: TryFromSliceError) -> Self {
+        TransactionError::TryFromSlice(err.to_string())
+    }
+}
+
+impl From<amount::Error> for TransactionError {
+    fn from(err: amount::Error) -> Self {
+        TransactionError::Amount(err.to_string())
     }
 }
 

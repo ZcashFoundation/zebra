@@ -7,24 +7,35 @@ use chrono::{DateTime, Utc};
 use derive_getters::Getters;
 use derive_new::new;
 use hex::ToHex;
-
+use rand::rngs::OsRng;
 use zcash_script::script::Asm;
+
+use zcash_keys::address::Address;
+use zcash_primitives::transaction::{
+    builder::{BuildConfig, Builder},
+    fees::fixed::FeeRule,
+};
+use zcash_protocol::{consensus::BlockHeight, memo::MemoBytes, value::Zatoshis};
 use zebra_chain::{
     amount::{self, Amount, NegativeOrZero, NonNegative},
     block::{self, merkle::AUTH_DIGEST_PLACEHOLDER, Height},
     orchard,
-    parameters::Network,
+    parameters::{
+        subsidy::{block_subsidy, funding_stream_values, miner_subsidy},
+        Network,
+    },
     primitives::ed25519,
     sapling::ValueCommitment,
     serialization::ZcashSerialize,
-    transaction::{self, SerializedTransaction, Transaction, UnminedTx, VerifiedUnminedTx},
+    transaction::{self, SerializedTransaction, Transaction, VerifiedUnminedTx},
     transparent::Script,
 };
+use zebra_consensus::{error::TransactionError, funding_stream_address, groth16};
 use zebra_script::Sigops;
 use zebra_state::IntoDisk;
 
-use super::super::opthex;
 use super::zec::Zec;
+use super::{super::opthex, get_block_template::MinerParams};
 
 /// Transaction data and fields needed to generate blocks using the `getblocktemplate` RPC.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
@@ -110,37 +121,139 @@ impl From<VerifiedUnminedTx> for TransactionTemplate<NonNegative> {
 }
 
 impl TransactionTemplate<NegativeOrZero> {
-    /// Convert from a generated coinbase transaction into a coinbase transaction template.
-    ///
-    /// `miner_fee` is the total miner fees for the block, excluding newly created block rewards.
-    //
-    // TODO: use a different type for generated coinbase transactions?
-    pub fn from_coinbase(tx: &UnminedTx, miner_fee: Amount<NonNegative>) -> Self {
-        assert!(
-            tx.transaction.is_coinbase(),
-            "invalid generated coinbase transaction: \
-             must have exactly one input, which must be a coinbase input",
+    /// Constructs a transaction template for a coinbase transaction.
+    pub fn new_coinbase(
+        net: &Network,
+        height: Height,
+        miner_params: &MinerParams,
+        txs_fee: Amount<NonNegative>,
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))] zip233_amount: Option<
+            Amount<NonNegative>,
+        >,
+    ) -> Result<Self, TransactionError> {
+        let block_subsidy = block_subsidy(height, net)?;
+        let miner_reward = miner_subsidy(height, net, block_subsidy)? + txs_fee;
+        let miner_reward = Zatoshis::try_from(miner_reward?)?;
+
+        let mut builder = Builder::new(
+            net,
+            BlockHeight::from(height),
+            BuildConfig::Coinbase {
+                miner_data: miner_params.data().clone(),
+            },
         );
 
-        let miner_fee = (-miner_fee)
-            .constrain()
-            .expect("negating a NonNegative amount always results in a valid NegativeOrZero");
+        let default_memo = MemoBytes::empty();
+        let memo = miner_params.memo().unwrap_or(&default_memo);
 
-        Self {
-            data: tx.transaction.as_ref().into(),
-            hash: tx.id.mined_id(),
-            auth_digest: tx.id.auth_digest().unwrap_or(AUTH_DIGEST_PLACEHOLDER),
-
-            // Always empty, coinbase transactions never have inputs.
-            depends: Vec::new(),
-
-            fee: miner_fee,
-
-            sigops: tx.sigops().expect("sigops count should be valid"),
-
-            // Zcash requires a coinbase transaction.
-            required: true,
+        macro_rules! trace_err {
+            ($res:expr, $type:expr) => {
+                $res.map_err(|err| tracing::error!("Failed to add {} output: {err}", $type))
+                    .ok()
+            };
         }
+
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+        if let Some(zip233_amount) = zip233_amount {
+            builder.set_zip233_amount(Zatoshis::try_from(zip233_amount)?);
+        }
+
+        let add_orchard_reward = |builder: &mut Builder<'_, _, _>, addr: &_| {
+            trace_err!(
+                builder.add_orchard_output::<String>(
+                    Some(::orchard::keys::OutgoingViewingKey::from([0u8; 32])),
+                    *addr,
+                    miner_reward,
+                    memo.clone(),
+                ),
+                "Orchard"
+            )
+        };
+
+        let add_sapling_reward = |builder: &mut Builder<'_, _, _>, addr: &_| {
+            trace_err!(
+                builder.add_sapling_output::<String>(
+                    Some(sapling_crypto::keys::OutgoingViewingKey([0u8; 32])),
+                    *addr,
+                    miner_reward,
+                    memo.clone(),
+                ),
+                "Sapling"
+            )
+        };
+
+        let add_transparent_reward = |builder: &mut Builder<'_, _, _>, addr| {
+            trace_err!(
+                builder.add_transparent_output(addr, miner_reward),
+                "transparent"
+            )
+        };
+
+        match miner_params.addr() {
+            Address::Unified(addr) => addr
+                .orchard()
+                .and_then(|addr| add_orchard_reward(&mut builder, addr))
+                .or_else(|| {
+                    addr.sapling()
+                        .and_then(|addr| add_sapling_reward(&mut builder, addr))
+                })
+                .or_else(|| {
+                    addr.transparent()
+                        .and_then(|addr| add_transparent_reward(&mut builder, addr))
+                }),
+
+            Address::Sapling(addr) => add_sapling_reward(&mut builder, addr),
+
+            Address::Transparent(addr) => add_transparent_reward(&mut builder, addr),
+
+            _ => Err(TransactionError::CoinbaseConstruction(
+                "Address not supported for miner rewards".to_string(),
+            ))?,
+        }
+        .ok_or(TransactionError::CoinbaseConstruction(
+            "Could not construct output with miner reward".to_string(),
+        ))?;
+
+        let mut funding_streams = funding_stream_values(height, net, block_subsidy)?
+            .into_iter()
+            .filter_map(|(receiver, amount)| {
+                Some((*funding_stream_address(height, net, receiver)?, amount))
+            })
+            .chain(net.lockbox_disbursements(height))
+            .filter_map(|(addr, amount)| {
+                Some((Zatoshis::try_from(amount).ok()?, addr.try_into().ok()?))
+            })
+            .collect::<Vec<_>>();
+
+        funding_streams.sort();
+
+        for (fs_amount, fs_addr) in funding_streams {
+            builder.add_transparent_output(&fs_addr, fs_amount)?;
+        }
+
+        let build_result = builder.build(
+            &Default::default(),
+            Default::default(),
+            Default::default(),
+            OsRng,
+            &*groth16::SAPLING,
+            &*groth16::SAPLING,
+            &FeeRule::non_standard(Zatoshis::ZERO),
+        )?;
+
+        let tx = build_result.transaction();
+        let mut data = vec![];
+        tx.write(&mut data)?;
+
+        Ok(Self {
+            data: data.into(),
+            hash: tx.txid().as_ref().into(),
+            auth_digest: tx.auth_commitment().as_ref().try_into()?,
+            depends: Vec::new(),
+            fee: (-txs_fee).constrain()?,
+            sigops: tx.sigops()?,
+            required: true,
+        })
     }
 }
 

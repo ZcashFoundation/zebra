@@ -154,9 +154,8 @@ use semver::Version;
 use serde_json::Value;
 use tower::ServiceExt;
 
-use zcash_keys::address::Address;
-
 use zebra_chain::{
+    amount::Amount,
     block::{self, genesis::regtest_genesis_block, ChainHistoryBlockTxAuthCommitmentHash, Height},
     parameters::{
         testnet::{ConfiguredActivationHeights, ConfiguredCheckpoints, RegtestParameters},
@@ -168,14 +167,15 @@ use zebra_chain::{
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::{
     client::{
-        BlockTemplateResponse, GetBlockTemplateParameters, GetBlockTemplateRequestMode,
-        GetBlockTemplateResponse, SubmitBlockErrorResponse, SubmitBlockResponse,
+        BlockTemplateResponse, DefaultRoots, GetBlockTemplateParameters,
+        GetBlockTemplateRequestMode, GetBlockTemplateResponse, SubmitBlockErrorResponse,
+        SubmitBlockResponse, TransactionTemplate,
     },
-    fetch_state_tip_and_local_time, generate_coinbase_and_roots,
+    fetch_chain_info,
     methods::{RpcImpl, RpcServer},
     proposal_block_from_template,
     server::OPENED_RPC_ENDPOINT_MSG,
-    SubmitBlockChannel,
+    MinerParams, SubmitBlockChannel,
 };
 use zebra_state::{constants::LOCK_FILE_ERROR, state_database_format_version_in_code};
 use zebra_test::{
@@ -227,7 +227,7 @@ fn generate_no_args() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     let child = testdir()?
-        .with_config(&mut default_test_config(&Mainnet)?)?
+        .with_config(&mut default_test_config(&Mainnet))?
         .spawn_child(args!["generate"])?;
 
     let output = child.wait_with_output()?;
@@ -289,7 +289,7 @@ fn generate_args() -> Result<()> {
 fn help_no_args() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let testdir = testdir()?.with_config(&mut default_test_config(&Mainnet)?)?;
+    let testdir = testdir()?.with_config(&mut default_test_config(&Mainnet))?;
 
     let child = testdir.spawn_child(args!["help"])?;
     let output = child.wait_with_output()?;
@@ -361,7 +361,7 @@ fn start_no_args() -> Result<()> {
 fn start_args() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let testdir = testdir()?.with_config(&mut default_test_config(&Mainnet)?)?;
+    let testdir = testdir()?.with_config(&mut default_test_config(&Mainnet))?;
     let testdir = &testdir;
 
     let mut child = testdir.spawn_child(args!["start"])?;
@@ -386,7 +386,7 @@ fn start_args() -> Result<()> {
 #[tokio::test]
 async fn db_init_outside_future_executor() -> Result<()> {
     let _init_guard = zebra_test::init();
-    let config = default_test_config(&Mainnet)?;
+    let config = default_test_config(&Mainnet);
 
     let start = Instant::now();
 
@@ -487,7 +487,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
 
     let _init_guard = zebra_test::init();
 
-    let mut config = default_test_config(&Mainnet)?;
+    let mut config = default_test_config(&Mainnet);
     let run_dir = testdir()?;
 
     let ignored_cache_dir = run_dir.path().join("state");
@@ -590,7 +590,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
 fn version_no_args() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let testdir = testdir()?.with_config(&mut default_test_config(&Mainnet)?)?;
+    let testdir = testdir()?.with_config(&mut default_test_config(&Mainnet))?;
 
     let child = testdir.spawn_child(args!["--version"])?;
     let output = child.wait_with_output()?;
@@ -611,7 +611,7 @@ fn version_no_args() -> Result<()> {
 fn version_args() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let testdir = testdir()?.with_config(&mut default_test_config(&Mainnet)?)?;
+    let testdir = testdir()?.with_config(&mut default_test_config(&Mainnet))?;
     let testdir = &testdir;
 
     // unrecognized option `-f`
@@ -1413,7 +1413,7 @@ async fn metrics_endpoint() -> Result<()> {
     let url = format!("http://{endpoint}");
 
     // Write a configuration that has metrics endpoint_addr set
-    let mut config = default_test_config(&Mainnet)?;
+    let mut config = default_test_config(&Mainnet);
     config.metrics.endpoint_addr = Some(endpoint.parse().unwrap());
 
     let dir = testdir()?.with_config(&mut config)?;
@@ -1482,7 +1482,7 @@ async fn tracing_endpoint() -> Result<()> {
     let url_filter = format!("{url_default}/filter");
 
     // Write a configuration that has tracing endpoint_addr option set
-    let mut config = default_test_config(&Mainnet)?;
+    let mut config = default_test_config(&Mainnet);
     config.tracing.endpoint_addr = Some(endpoint.parse().unwrap());
 
     let dir = testdir()?.with_config(&mut config)?;
@@ -2204,7 +2204,7 @@ fn zebra_zcash_listener_conflict() -> Result<()> {
     let listen_addr = format!("127.0.0.1:{port}");
 
     // Write a configuration that has our created network listen_addr
-    let mut config = default_test_config(&Mainnet)?;
+    let mut config = default_test_config(&Mainnet);
     config.network.listen_addr = listen_addr.parse().unwrap();
     let dir1 = testdir()?.with_config(&mut config)?;
     let regex1 = regex::escape(&format!("Opened Zcash protocol endpoint at {listen_addr}"));
@@ -2233,7 +2233,7 @@ fn zebra_metrics_conflict() -> Result<()> {
     let listen_addr = format!("127.0.0.1:{port}");
 
     // Write a configuration that has our created metrics endpoint_addr
-    let mut config = default_test_config(&Mainnet)?;
+    let mut config = default_test_config(&Mainnet);
     config.metrics.endpoint_addr = Some(listen_addr.parse().unwrap());
     let dir1 = testdir()?.with_config(&mut config)?;
     let regex1 = regex::escape(&format!(r"Opened metrics endpoint at {listen_addr}"));
@@ -2262,7 +2262,7 @@ fn zebra_tracing_conflict() -> Result<()> {
     let listen_addr = format!("127.0.0.1:{port}");
 
     // Write a configuration that has our created tracing endpoint_addr
-    let mut config = default_test_config(&Mainnet)?;
+    let mut config = default_test_config(&Mainnet);
     config.tracing.endpoint_addr = Some(listen_addr.parse().unwrap());
     let dir1 = testdir()?.with_config(&mut config)?;
     let regex1 = regex::escape(&format!(r"Opened tracing endpoint at {listen_addr}"));
@@ -2489,7 +2489,7 @@ fn delete_old_databases() -> Result<()> {
         return Ok(());
     }
 
-    let mut config = default_test_config(&Mainnet)?;
+    let mut config = default_test_config(&Mainnet);
     let run_dir = testdir()?;
     let cache_dir = run_dir.path().join("state");
 
@@ -2602,7 +2602,7 @@ async fn rpc_submit_block() -> Result<()> {
 #[test]
 fn end_of_support_is_checked_at_start() -> Result<()> {
     let _init_guard = zebra_test::init();
-    let testdir = testdir()?.with_config(&mut default_test_config(&Mainnet)?)?;
+    let testdir = testdir()?.with_config(&mut default_test_config(&Mainnet))?;
     let mut child = testdir.spawn_child(args!["start"])?;
 
     // Give enough time to start up the eos task.
@@ -3002,11 +3002,15 @@ fn external_address() -> Result<()> {
 /// Test successful `getblocktemplate` and `submitblock` RPC calls on Regtest on Canopy.
 ///
 /// See [`common::regtest::submit_blocks`] for more information.
-// TODO: Test this with an NU5 activation height too once config can be serialized.
 #[tokio::test]
 async fn regtest_block_templates_are_valid_block_submissions() -> Result<()> {
     common::regtest::submit_blocks_test().await?;
     Ok(())
+}
+
+#[tokio::test]
+async fn regtest_coinbase() -> Result<()> {
+    common::coinbase::regtest_coinbase().await
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -3354,16 +3358,9 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 
     tracing::info!("built configured Testnet, starting state service and block verifier");
 
-    let default_test_config = default_test_config(&network)?;
-    let mining_config = default_test_config.mining;
-    let miner_address = Address::try_from_zcash_address(
-        &network,
-        mining_config
-            .miner_address
-            .clone()
-            .expect("mining address should be configured"),
-    )
-    .expect("configured mining address should be valid");
+    let default_test_config = default_test_config(&network);
+    let mining_conf = default_test_config.mining;
+    let miner_params = MinerParams::new(&network, mining_conf.clone())?;
 
     let (state, read_state, latest_chain_tip, _chain_tip_change) =
         zebra_state::init_test_services(&network).await;
@@ -3400,7 +3397,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 
     let (rpc, _) = RpcImpl::new(
         network.clone(),
-        mining_config,
+        mining_conf,
         false,
         "0.0.1",
         "Zebra tests",
@@ -3514,9 +3511,9 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 
     let zebra_state::GetBlockTemplateChainInfo {
         chain_history_root, ..
-    } = fetch_state_tip_and_local_time(read_state.clone()).await?;
+    } = fetch_chain_info(read_state.clone()).await?;
 
-    let network = base_network_params
+    let net = base_network_params
         .clone()
         .with_funding_streams(vec![ConfiguredFundingStreams {
             height_range: Some(Height(1)..Height(100)),
@@ -3525,17 +3522,23 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         .to_network()
         .expect("failed to build configured network");
 
-    let (coinbase_txn, default_roots) = generate_coinbase_and_roots(
-        &network,
+    let coinbase_txn = TransactionTemplate::new_coinbase(
+        &net,
         Height(block_template.height()),
-        &miner_address,
-        &[],
-        chain_history_root,
-        vec![],
+        &miner_params,
+        Amount::zero(),
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         None,
     )
     .expect("coinbase transaction should be valid under the given parameters");
+
+    let default_roots = DefaultRoots::from_coinbase(
+        &net,
+        Height(block_template.height()),
+        &coinbase_txn,
+        chain_history_root,
+        &[],
+    );
 
     let block_template = BlockTemplateResponse::new(
         block_template.capabilities().clone(),
@@ -3561,7 +3564,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         block_template.submit_old(),
     );
 
-    let proposal_block = proposal_block_from_template(&block_template, None, &network)?;
+    let proposal_block = proposal_block_from_template(&block_template, None, &net)?;
 
     // Submit the invalid block with an excessive coinbase output value
     let submit_block_response = rpc
@@ -3577,7 +3580,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     );
 
     // Use an invalid coinbase transaction (with an output value less than the `block_subsidy + miner_fees - expected_lockbox_funding_stream`)
-    let network = base_network_params
+    let net = base_network_params
         .clone()
         .with_funding_streams(vec![ConfiguredFundingStreams {
             height_range: Some(Height(1)..Height(100)),
@@ -3586,17 +3589,23 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         .to_network()
         .expect("failed to build configured network");
 
-    let (coinbase_txn, default_roots) = generate_coinbase_and_roots(
-        &network,
+    let coinbase_txn = TransactionTemplate::new_coinbase(
+        &net,
         Height(block_template.height()),
-        &miner_address,
-        &[],
-        chain_history_root,
-        vec![],
+        &miner_params,
+        Amount::zero(),
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         None,
     )
     .expect("coinbase transaction should be valid under the given parameters");
+
+    let default_roots = DefaultRoots::from_coinbase(
+        &net,
+        Height(block_template.height()),
+        &coinbase_txn,
+        chain_history_root,
+        &[],
+    );
 
     let block_template = BlockTemplateResponse::new(
         block_template.capabilities().clone(),
@@ -3622,7 +3631,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         block_template.submit_old(),
     );
 
-    let proposal_block = proposal_block_from_template(&block_template, None, &network)?;
+    let proposal_block = proposal_block_from_template(&block_template, None, &net)?;
 
     // Submit the invalid block with an excessive coinbase input value
     let submit_block_response = rpc
@@ -3638,8 +3647,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     );
 
     // Check that the original block template can be submitted successfully
-    let proposal_block =
-        proposal_block_from_template(&valid_original_block_template, None, &network)?;
+    let proposal_block = proposal_block_from_template(&valid_original_block_template, None, &net)?;
 
     let submit_block_response = rpc
         .submit_block(HexData(proposal_block.zcash_serialize_to_vec()?), None)
@@ -3700,7 +3708,7 @@ async fn nu7_nsm_transactions() -> Result<()> {
 
     tracing::info!("built configured Testnet, starting state service and block verifier");
 
-    let default_test_config = default_test_config(&network)?;
+    let default_test_config = default_test_config(&network);
     let mining_config = default_test_config.mining;
 
     let (state, read_state, latest_chain_tip, _chain_tip_change) =

@@ -671,7 +671,7 @@ impl DiskDb {
 
         // Level-by-level file counts (RocksDB typically has up to 7 levels)
         for level in 0..7 {
-            let prop = format!("rocksdb.num-files-at-level{}", level);
+            let prop = format!("rocksdb.num-files-at-level{level}");
             if let Ok(Some(count)) = db.property_int_value(&prop) {
                 metrics::gauge!("zebra.state.rocksdb.num_files_at_level", "level" => level.to_string())
                     .set(count as f64);

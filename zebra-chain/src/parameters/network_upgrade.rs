@@ -198,11 +198,11 @@ impl fmt::Display for ConsensusBranchId {
     }
 }
 
-impl TryFrom<ConsensusBranchId> for zcash_primitives::consensus::BranchId {
+impl TryFrom<ConsensusBranchId> for zcash_protocol::consensus::BranchId {
     type Error = crate::Error;
 
     fn try_from(id: ConsensusBranchId) -> Result<Self, Self::Error> {
-        zcash_primitives::consensus::BranchId::try_from(u32::from(id))
+        zcash_protocol::consensus::BranchId::try_from(u32::from(id))
             .map_err(|_| Self::Error::InvalidConsensusBranchId)
     }
 }
