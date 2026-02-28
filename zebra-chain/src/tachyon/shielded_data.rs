@@ -2,7 +2,7 @@ use crate::{
     amount::{Amount, NegativeAllowed},
 };
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct ShieldedData {
     /// The actions (cv, rk, sig for each).
     pub actions: Vec<super::Action>,

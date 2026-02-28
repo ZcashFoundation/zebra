@@ -23,6 +23,9 @@ use crate::{
 #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
 use crate::parameters::TX_V6_VERSION_GROUP_ID;
 
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+use crate::tachyon;
+
 use super::*;
 use crate::sapling;
 
@@ -453,6 +456,58 @@ impl ZcashDeserialize for Option<orchard::ShieldedData> {
     }
 }
 
+impl ZcashSerialize for Option<tachyon::ShieldedData> {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        match self {
+            None => {
+                zcash_serialize_empty_list(writer)?;
+            }
+            Some(tachyon_shielded_data) => {
+                tachyon_shielded_data.zcash_serialize(&mut writer)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl ZcashDeserialize for Option<tachyon::ShieldedData> {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let actions: Vec<tachyon::Action> = (&mut reader).zcash_deserialize_into()?;
+
+        if actions.is_empty() {
+            return Ok(None);
+        }
+
+        let value_balance: Amount<NegativeAllowed> = (&mut reader).zcash_deserialize_into()?;
+        let binding_sig: Option<tachyon::BindingSignature> = Some((&mut reader).zcash_deserialize_into()?);
+        let stamp: Option<tachyon::Stamp> = Some((&mut reader).zcash_deserialize_into()?);
+
+        Ok(Some(tachyon::ShieldedData {
+            actions,
+            value_balance,
+            binding_sig,
+            stamp,
+        }))
+    }
+}
+
+impl ZcashSerialize for tachyon::ShieldedData {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        self.actions.zcash_serialize(&mut writer)?;
+        self.value_balance.zcash_serialize(&mut writer)?;
+
+        if let Some(binding_sig) = &self.binding_sig {
+            binding_sig.zcash_serialize(&mut writer)?;
+        }
+
+        if let Some(stamp) = &self.stamp {
+            stamp.zcash_serialize(&mut writer)?;
+        }
+
+        Ok(())
+    }
+}
+
 impl<T: reddsa::SigType> ZcashSerialize for reddsa::Signature<T> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_all(&<[u8; 64]>::from(*self)[..])?;
@@ -686,6 +741,7 @@ impl ZcashSerialize for Transaction {
                 outputs,
                 sapling_shielded_data,
                 orchard_shielded_data,
+                tachyon_shielded_data
             } => {
                 // Transaction V6 spec:
                 // https://zips.z.cash/zip-0230#specification
@@ -725,6 +781,9 @@ impl ZcashSerialize for Transaction {
                 // `flagsOrchard`,`valueBalanceOrchard`, `anchorOrchard`, `sizeProofsOrchard`,
                 // `proofsOrchard`, `vSpendAuthSigsOrchard`, and `bindingSigOrchard`.
                 orchard_shielded_data.zcash_serialize(&mut writer)?;
+
+                // Tachyon shielded data
+                tachyon_shielded_data.zcash_serialize(&mut writer)?;
             }
         }
         Ok(())
@@ -1015,6 +1074,9 @@ impl ZcashDeserialize for Transaction {
                 // `proofsOrchard`, `vSpendAuthSigsOrchard`, and `bindingSigOrchard`.
                 let orchard_shielded_data = (&mut limited_reader).zcash_deserialize_into()?;
 
+                // Tachyon shielded data
+                let tachyon_shielded_data = (&mut limited_reader).zcash_deserialize_into()?;
+
                 Ok(Transaction::V6 {
                     network_upgrade,
                     lock_time,
@@ -1024,6 +1086,7 @@ impl ZcashDeserialize for Transaction {
                     outputs,
                     sapling_shielded_data,
                     orchard_shielded_data,
+                    tachyon_shielded_data,
                 })
             }
             (_, _) => Err(SerializationError::Parse("bad tx header")),

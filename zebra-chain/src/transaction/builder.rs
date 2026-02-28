@@ -101,6 +101,7 @@ impl Transaction {
             // See the Zcash spec for additional shielded coinbase consensus rules.
             sapling_shielded_data: None,
             orchard_shielded_data: None,
+            tachyon_shielded_data: None,
         }
     }
 
