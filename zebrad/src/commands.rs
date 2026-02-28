@@ -10,13 +10,17 @@ use crate::config::ZebradConfig;
 
 pub use self::{entry_point::EntryPoint, start::StartCmd};
 
-use self::{copy_state::CopyStateCmd, generate::GenerateCmd, tip_height::TipHeightCmd};
+use self::{
+    copy_state::CopyStateCmd, generate::GenerateCmd, migrate_from_zcashd::MigrateFromZcashdCmd,
+    tip_height::TipHeightCmd,
+};
 
 pub mod start;
 
 mod copy_state;
 mod entry_point;
 mod generate;
+mod migrate_from_zcashd;
 mod tip_height;
 
 #[cfg(test)]
@@ -33,6 +37,9 @@ pub enum ZebradCmd {
     /// The `copy-state` subcommand, used to debug cached chain state (expert users only)
     // TODO: hide this command from users in release builds (#3279)
     CopyState(CopyStateCmd),
+
+    /// Create a new Zebra state from an existing `zcashd` datadir
+    MigrateFromZcashd(MigrateFromZcashdCmd),
 
     /// Generate a default `zebrad.toml` configuration
     Generate(GenerateCmd),
@@ -54,7 +61,7 @@ impl ZebradCmd {
         // List all the commands, so new commands have to make a choice here
         match self {
             // Commands that run as a configured server
-            CopyState(_) | Start(_) => true,
+            CopyState(_) | MigrateFromZcashd(_) | Start(_) => true,
 
             // Utility commands that don't use server components
             Generate(_) | TipHeight(_) => false,
@@ -71,7 +78,7 @@ impl ZebradCmd {
             Start(_) => true,
 
             // Utility commands
-            CopyState(_) | Generate(_) | TipHeight(_) => false,
+            CopyState(_) | MigrateFromZcashd(_) | Generate(_) | TipHeight(_) => false,
         }
     }
 
@@ -93,7 +100,7 @@ impl ZebradCmd {
             Generate(_) | TipHeight(_) => true,
 
             // Commands that generate informative logging output by default.
-            CopyState(_) | Start(_) => false,
+            CopyState(_) | MigrateFromZcashd(_) | Start(_) => false,
         };
 
         if only_show_warnings && !verbose {
@@ -110,6 +117,7 @@ impl Runnable for ZebradCmd {
     fn run(&self) {
         match self {
             CopyState(cmd) => cmd.run(),
+            MigrateFromZcashd(cmd) => cmd.run(),
             Generate(cmd) => cmd.run(),
             Start(cmd) => cmd.run(),
             TipHeight(cmd) => cmd.run(),
