@@ -33,6 +33,7 @@ pub mod parallel;
 pub mod parameters;
 pub mod primitives;
 pub mod sapling;
+pub mod tachyon;
 pub mod serialization;
 pub mod shutdown;
 pub mod sprout;
