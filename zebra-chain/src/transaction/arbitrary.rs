@@ -254,6 +254,8 @@ impl Transaction {
                         network_upgrade,
                         lock_time,
                         expiry_height,
+                        // TODO: Consider generating a real arbitrary zip233_amount
+                        zip233_amount: Default::default(),
                         inputs,
                         outputs,
                         sapling_shielded_data,
