@@ -101,7 +101,7 @@ skip-tree = [
     # TODO: Bump `hashbrown` to 0.16 in ed25519-zebra.
     { name = "hashbrown", version = "0.15" },
 
-    { name = "getrandom", version = "0.2" },
+    { name = "getrandom", version = "0.3" },
 
     { name = "rand", version = "0.8" },
     { name = "rand_core", version = "0.6" },
