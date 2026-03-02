@@ -160,6 +160,8 @@ pub enum Transaction {
         lock_time: LockTime,
         /// The latest block height that this transaction can be added to the chain.
         expiry_height: block::Height,
+        /// The burn amount for this transaction, if any.
+        zip233_amount: Amount<NonNegative>,
         /// The transparent inputs to the transaction.
         inputs: Vec<transparent::Input>,
         /// The transparent outputs from the transaction.
@@ -190,6 +192,8 @@ impl fmt::Display for Transaction {
         if let Some(expiry_height) = self.expiry_height() {
             fmter.field("expiry_height", &expiry_height);
         }
+
+        // TODO: add zip233_amount formatting here
 
         fmter.field("transparent_inputs", &self.inputs().len());
         fmter.field("transparent_outputs", &self.outputs().len());
