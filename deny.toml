@@ -143,7 +143,6 @@ allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # TODO: Remove the URLs once the patch table in Cargo.toml is removed.
 allow-git = [
     "https://github.com/zcash/librustzcash.git",
-    "https://github.com/ZcashFoundation/zcash_script",
 ]
 
 [sources.allow-org]
