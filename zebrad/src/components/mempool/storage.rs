@@ -58,7 +58,10 @@ pub(crate) const MAX_EVICTION_MEMORY_ENTRIES: usize = 40_000;
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 #[allow(dead_code)]
 pub enum ExactTipRejectionError {
+    /// Skip this variant in proptest because `TransactionError` is a large enum
+    /// that causes stack overflow during arbitrary value generation.
     #[error("transaction did not pass consensus validation: {0}")]
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     FailedVerification(#[from] zebra_consensus::error::TransactionError),
     #[error("transaction did not pass standard validation: {0}")]
     FailedStandard(#[from] NonStandardTransactionError),
