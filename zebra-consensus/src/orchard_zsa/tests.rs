@@ -123,7 +123,7 @@ fn process_issue_actions<'a, I: Iterator<Item = &'a IssueAction>>(
                         .amount
                         .inner()
                         .checked_add(amount.inner())
-                        .map(|raw| NoteValue::from_raw(raw))
+                        .map(NoteValue::from_raw)
                         .ok_or(AssetRecordsError::AmountOverflow)?;
                     if asset_record.is_finalized {
                         return Err(AssetRecordsError::ModifyFinalized);

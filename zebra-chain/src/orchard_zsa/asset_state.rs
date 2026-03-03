@@ -357,12 +357,11 @@ pub mod testing {
             .sign(&isk)
             .expect("signing a freshly-created bundle must succeed");
 
-        signed_bundle
+        *signed_bundle
             .actions()
             .first()
             .get_reference_note()
             .expect("first action of IssueBundle always has a reference note")
-            .clone()
     }
 
     /// Returns a deterministic [`AssetBase`] for the given description.
