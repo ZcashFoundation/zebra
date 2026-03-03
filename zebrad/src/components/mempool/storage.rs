@@ -16,9 +16,7 @@ use std::{
 
 use thiserror::Error;
 
-use zcash_script::opcode::PossiblyBad;
-use zcash_script::script::Evaluable as _;
-use zcash_script::{script, solver, Opcode};
+use zcash_script::solver;
 use zebra_chain::{
     block::Height,
     transaction::{self, Hash, Transaction, UnminedTx, UnminedTxId, VerifiedUnminedTx},
@@ -39,6 +37,7 @@ use proptest_derive::Arbitrary;
 pub mod tests;
 
 mod eviction_list;
+mod policy;
 mod verified_set;
 
 /// The size limit for mempool transaction rejection lists per [ZIP-401].
@@ -254,26 +253,10 @@ impl Storage {
     /// input scriptSig size/push-only checks, standard output script checks (including OP_RETURN
     /// limits), and dust checks.
     fn reject_if_non_standard_tx(&mut self, tx: &VerifiedUnminedTx) -> Result<(), MempoolError> {
+        use zcash_script::script::{self, Evaluable as _};
+
         let transaction = tx.transaction.transaction.as_ref();
         let spent_outputs = &tx.spent_outputs;
-
-        // Rule: per-transaction sigops (legacy + P2SH) must not exceed the limit.
-        // zcashd sums GetLegacySigOpCount + GetP2SHSigOpCount for AcceptToMemoryPool:
-        // https://github.com/zcash/zcash/blob/v6.11.0/src/main.cpp#L1819
-        let total_sigops = if spent_outputs.is_empty() {
-            tx.legacy_sigop_count
-        } else {
-            tx.legacy_sigop_count + p2sh_sigop_count(transaction, spent_outputs)
-        };
-        if total_sigops > MAX_STANDARD_TX_SIGOPS {
-            return self.reject_non_standard(tx, NonStandardTransactionError::TooManySigops);
-        }
-
-        // Rule: all transparent inputs must pass `AreInputsStandard()` checks:
-        // https://github.com/zcash/zcash/blob/v6.11.0/src/policy/policy.cpp#L137
-        if !spent_outputs.is_empty() && !are_inputs_standard(transaction, spent_outputs) {
-            return self.reject_non_standard(tx, NonStandardTransactionError::NonStandardInputs);
-        }
 
         for input in transaction.inputs() {
             let unlock_script = match input {
@@ -282,7 +265,7 @@ impl Storage {
             };
 
             // Rule: scriptSig size must be within the standard limit.
-            if unlock_script.as_raw_bytes().len() > MAX_STANDARD_SCRIPTSIG_SIZE {
+            if unlock_script.as_raw_bytes().len() > policy::MAX_STANDARD_SCRIPTSIG_SIZE {
                 return self
                     .reject_non_standard(tx, NonStandardTransactionError::ScriptSigTooLarge);
             }
@@ -295,13 +278,53 @@ impl Storage {
             }
         }
 
+        if !spent_outputs.is_empty() {
+            // Validate that spent_outputs aligns with transparent inputs.
+            // TODO: `spent_outputs` may not align with `tx.inputs()` when a transaction
+            // spends both chain and mempool UTXOs (mempool outputs are appended last by
+            // `spent_utxos()`), causing `are_inputs_standard` and `p2sh_sigop_count`
+            // to pair the wrong input with the wrong spent output.
+            // https://github.com/ZcashFoundation/zebra/issues/10346
+            if transaction.inputs().len() != spent_outputs.len() {
+                tracing::warn!(
+                    inputs = transaction.inputs().len(),
+                    spent_outputs = spent_outputs.len(),
+                    "spent_outputs length mismatch, rejecting as non-standard"
+                );
+                return self
+                    .reject_non_standard(tx, NonStandardTransactionError::NonStandardInputs);
+            }
+
+            // Rule: all transparent inputs must pass `AreInputsStandard()` checks:
+            // https://github.com/zcash/zcash/blob/v6.11.0/src/policy/policy.cpp#L137
+            if !policy::are_inputs_standard(transaction, spent_outputs) {
+                return self
+                    .reject_non_standard(tx, NonStandardTransactionError::NonStandardInputs);
+            }
+
+            // Rule: per-transaction sigops (legacy + P2SH) must not exceed the limit.
+            // zcashd sums GetLegacySigOpCount + GetP2SHSigOpCount for AcceptToMemoryPool:
+            // https://github.com/zcash/zcash/blob/v6.11.0/src/main.cpp#L1819
+            let total_sigops =
+                tx.legacy_sigop_count + policy::p2sh_sigop_count(transaction, spent_outputs);
+            if total_sigops > policy::MAX_STANDARD_TX_SIGOPS {
+                return self.reject_non_standard(tx, NonStandardTransactionError::TooManySigops);
+            }
+        } else {
+            // No spent outputs available (e.g. shielded-only transaction).
+            // Only check legacy sigops.
+            if tx.legacy_sigop_count > policy::MAX_STANDARD_TX_SIGOPS {
+                return self.reject_non_standard(tx, NonStandardTransactionError::TooManySigops);
+            }
+        }
+
         // Rule: outputs must be standard script kinds, with special handling for OP_RETURN.
         let mut data_out_count = 0u32;
 
         for output in transaction.outputs() {
             let lock_script = &output.lock_script;
             let script_len = lock_script.as_raw_bytes().len();
-            let script_kind = standard_script_kind(lock_script);
+            let script_kind = policy::standard_script_kind(lock_script);
 
             match script_kind {
                 None => {
@@ -324,7 +347,7 @@ impl Storage {
                 }
                 Some(solver::ScriptKind::MultiSig { pubkeys, .. }) => {
                     // Rule: multisig must be at most 3-of-3 for standardness.
-                    if pubkeys.len() > MAX_STANDARD_MULTISIG_PUBKEYS {
+                    if pubkeys.len() > policy::MAX_STANDARD_MULTISIG_PUBKEYS {
                         return self.reject_non_standard(
                             tx,
                             NonStandardTransactionError::ScriptPubKeyNonStandard,
@@ -908,221 +931,4 @@ impl Storage {
         metrics::gauge!("mempool.rejected.transaction.ids.bytes",)
             .set((self.rejected_transaction_count() * item_size) as f64);
     }
-}
-
-/// Maximum sigops allowed in a P2SH redeemed script (zcashd `MAX_P2SH_SIGOPS`).
-/// <https://github.com/zcash/zcash/blob/v6.11.0/src/policy/policy.h#L20>
-const MAX_P2SH_SIGOPS: u32 = 15;
-
-/// Maximum number of signature operations allowed per standard transaction (zcashd `MAX_STANDARD_TX_SIGOPS`).
-/// <https://github.com/zcash/zcash/blob/v6.11.0/src/policy/policy.h#L22>
-const MAX_STANDARD_TX_SIGOPS: u32 = 4000;
-
-/// Maximum size in bytes of a standard transaction's scriptSig (zcashd `MAX_STANDARD_SCRIPTSIG_SIZE`).
-/// <https://github.com/zcash/zcash/blob/v6.11.0/src/policy/policy.cpp#L92-L99>
-const MAX_STANDARD_SCRIPTSIG_SIZE: usize = 1650;
-
-/// Maximum number of public keys allowed in a standard multisig script.
-/// <https://github.com/zcash/zcash/blob/v6.11.0/src/policy/policy.cpp#L46-L48>
-const MAX_STANDARD_MULTISIG_PUBKEYS: usize = 3;
-
-/// Classify a script using zcashd's `Solver()`.
-///
-/// Returns `Some(kind)` for standard script types, `None` for non-standard.
-fn standard_script_kind(lock_script: &transparent::Script) -> Option<solver::ScriptKind> {
-    standard_script_kind_from_bytes(lock_script.as_raw_bytes())
-}
-
-/// Classify a script::Code using zcashd's `Solver()`.
-///
-/// Returns `Some(kind)` for standard script types, `None` for non-standard.
-fn standard_script_kind_from_bytes(script_bytes: &[u8]) -> Option<solver::ScriptKind> {
-    let code = script::Code(script_bytes.to_vec());
-    let component = code.to_component().ok()?.refine().ok()?;
-    solver::standard(&component)
-}
-
-/// Extract the redeemed script bytes from a P2SH scriptSig.
-///
-/// The redeemed script is the last data push in the scriptSig.
-/// Returns `None` if the scriptSig has no push operations.
-fn extract_p2sh_redeemed_script(unlock_script: &transparent::Script) -> Option<Vec<u8>> {
-    let code = script::Code(unlock_script.as_raw_bytes().to_vec());
-    let mut last_push_data: Option<Vec<u8>> = None;
-    for opcode in code.parse() {
-        if let Ok(PossiblyBad::Good(Opcode::PushValue(pv))) = opcode {
-            last_push_data = Some(pv.value());
-        }
-    }
-    last_push_data
-}
-
-/// Count the number of push operations in a script.
-///
-/// For a push-only script (already enforced for mempool scriptSigs),
-/// this equals the stack depth after evaluation.
-fn count_script_push_ops(script_bytes: &[u8]) -> usize {
-    let code = script::Code(script_bytes.to_vec());
-    code.parse()
-        .filter(|op| matches!(op, Ok(PossiblyBad::Good(Opcode::PushValue(_)))))
-        .count()
-}
-
-/// Returns the expected number of scriptSig arguments for a given script kind.
-///
-/// TODO: Consider upstreaming to `zcash_script` crate alongside `ScriptKind::req_sigs()`.
-///
-/// Mirrors zcashd's `ScriptSigArgsExpected()`:
-/// <https://github.com/zcash/zcash/blob/v6.11.0/src/script/standard.cpp#L135>
-///
-/// Returns `None` for non-standard types (TX_NONSTANDARD, TX_NULL_DATA).
-fn script_sig_args_expected(kind: &solver::ScriptKind) -> Option<usize> {
-    match kind {
-        solver::ScriptKind::PubKey { .. } => Some(1),
-        solver::ScriptKind::PubKeyHash { .. } => Some(2),
-        solver::ScriptKind::ScriptHash { .. } => Some(1),
-        solver::ScriptKind::MultiSig { required, .. } => Some(*required as usize + 1),
-        solver::ScriptKind::NullData { .. } => None,
-    }
-}
-
-/// Extracts the P2SH redeemed script's sigop count for a single input.
-///
-/// Returns `Some(count)` for P2SH inputs where a redeemed script was found,
-/// `None` for non-P2SH, coinbase, or P2SH inputs with an empty scriptSig.
-fn p2sh_redeemed_script_sigop_count(
-    input: &transparent::Input,
-    spent_output: &transparent::Output,
-) -> Option<u32> {
-    let unlock_script = match input {
-        transparent::Input::PrevOut { unlock_script, .. } => unlock_script,
-        transparent::Input::Coinbase { .. } => return None,
-    };
-
-    let lock_code = script::Code(spent_output.lock_script.as_raw_bytes().to_vec());
-    if !lock_code.is_pay_to_script_hash() {
-        return None;
-    }
-
-    let redeemed_bytes = extract_p2sh_redeemed_script(unlock_script)?;
-    let redeemed = script::Code(redeemed_bytes);
-    Some(redeemed.sig_op_count(true))
-}
-
-/// Returns the total number of P2SH sigops across all inputs of the transaction.
-///
-/// Mirrors zcashd's `GetP2SHSigOpCount()`:
-/// <https://github.com/zcash/zcash/blob/v6.11.0/src/main.cpp#L1191>
-///
-/// Returns 0 if `spent_outputs.len()` does not match the number of transparent inputs
-/// (defensive: avoids panic in policy code on misaligned data).
-fn p2sh_sigop_count(tx: &Transaction, spent_outputs: &[transparent::Output]) -> u32 {
-    if tx.inputs().len() != spent_outputs.len() {
-        tracing::warn!(
-            inputs = tx.inputs().len(),
-            spent_outputs = spent_outputs.len(),
-            "spent_outputs length mismatch in p2sh_sigop_count, skipping P2SH sigop counting"
-        );
-        return 0;
-    }
-
-    tx.inputs()
-        .iter()
-        .zip(spent_outputs.iter())
-        .filter_map(|(input, spent_output)| p2sh_redeemed_script_sigop_count(input, spent_output))
-        .sum()
-}
-
-/// Returns `true` if all transparent inputs are standard.
-///
-/// Mirrors zcashd's `AreInputsStandard()`:
-/// <https://github.com/zcash/zcash/blob/v6.11.0/src/policy/policy.cpp#L136>
-///
-/// For each input:
-/// 1. The spent output's scriptPubKey must be a known standard type (via `Solver()`).
-///    Non-standard scripts and OP_RETURN outputs are rejected.
-/// 2. The scriptSig stack depth must match `ScriptSigArgsExpected()`.
-/// 3. For P2SH inputs:
-///    - If the redeemed script is standard, its expected args are added to the total.
-///    - If the redeemed script is non-standard, it must have <= [`MAX_P2SH_SIGOPS`] sigops.
-///
-/// Returns `false` if `spent_outputs.len()` does not match the number of transparent inputs
-/// (defensive: avoids panic in policy code on misaligned data).
-fn are_inputs_standard(tx: &Transaction, spent_outputs: &[transparent::Output]) -> bool {
-    if tx.inputs().len() != spent_outputs.len() {
-        tracing::warn!(
-            inputs = tx.inputs().len(),
-            spent_outputs = spent_outputs.len(),
-            "spent_outputs length mismatch in are_inputs_standard, rejecting as non-standard"
-        );
-        return false;
-    }
-
-    for (input, spent_output) in tx.inputs().iter().zip(spent_outputs.iter()) {
-        let unlock_script = match input {
-            transparent::Input::PrevOut { unlock_script, .. } => unlock_script,
-            transparent::Input::Coinbase { .. } => continue,
-        };
-
-        // Step 1: Classify the spent output's scriptPubKey via Solver().
-        let script_kind = match standard_script_kind(&spent_output.lock_script) {
-            Some(kind) => kind,
-            None => return false,
-        };
-
-        // Step 2: Get expected number of scriptSig arguments.
-        // Returns None for TX_NONSTANDARD and TX_NULL_DATA.
-        let mut n_args_expected = match script_sig_args_expected(&script_kind) {
-            Some(n) => n,
-            None => return false,
-        };
-
-        // Step 3: Count actual push operations in scriptSig.
-        // For push-only scripts (enforced by IsStandardTx), this equals the stack depth.
-        let stack_size = count_script_push_ops(unlock_script.as_raw_bytes());
-
-        // Step 4: P2SH-specific checks.
-        if matches!(script_kind, solver::ScriptKind::ScriptHash { .. }) {
-            let Some(redeemed_bytes) = extract_p2sh_redeemed_script(unlock_script) else {
-                return false;
-            };
-
-            let redeemed_code = script::Code(redeemed_bytes);
-
-            match standard_script_kind_from_code(&redeemed_code) {
-                Some(ref inner_kind) => {
-                    // Standard redeemed script: add its expected args.
-                    match script_sig_args_expected(inner_kind) {
-                        Some(inner) => n_args_expected += inner,
-                        None => return false,
-                    }
-                }
-                None => {
-                    // Non-standard redeemed script: accept if sigops <= limit.
-                    // Matches zcashd: "Any other Script with less than 15 sigops OK:
-                    // ... extra data left on the stack after execution is OK, too"
-                    let sigops = redeemed_code.sig_op_count(true);
-                    if sigops > MAX_P2SH_SIGOPS {
-                        return false;
-                    }
-
-                    // This input is acceptable; move on to the next input.
-                    continue;
-                }
-            }
-        }
-
-        // Step 5: Reject if scriptSig has wrong number of stack items.
-        if stack_size != n_args_expected {
-            return false;
-        }
-    }
-    true
-}
-
-/// Classify a script::Code using zcashd's `Solver()`.
-///
-/// Returns `Some(kind)` for standard script types, `None` for non-standard.
-fn standard_script_kind_from_code(code: &script::Code) -> Option<solver::ScriptKind> {
-    standard_script_kind_from_bytes(&code.0)
 }
