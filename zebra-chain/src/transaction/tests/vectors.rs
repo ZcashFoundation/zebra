@@ -38,7 +38,6 @@ lazy_static! {
         network_upgrade: NetworkUpgrade::Nu7,
         lock_time: LockTime::min_lock_time_timestamp(),
         expiry_height: block::Height(0),
-        zip233_amount: Default::default(),
         inputs: Vec::new(),
         outputs: Vec::new(),
         sapling_shielded_data: None,
