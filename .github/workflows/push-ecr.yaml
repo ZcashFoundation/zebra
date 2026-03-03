@@ -9,13 +9,17 @@ on:
   workflow_dispatch:
     inputs:
       image_tag_version:
-        description: 'Version to tag the Docker image'
+        description: 'Version to tag the Docker image ()'
+        required: true
+        type: string
+      ecr_repository:
+        description: 'ECR repository name (dev-zebra-server)'
         required: false
         type: string
 
 env:
   AWS_REGION: ${{ vars.AWS_REGION || 'eu-central-1' }}
-  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY || 'dev-zebra-server' }}
+  ECR_REPOSITORY: ${{ inputs.ecr_repository || vars.ECR_REPOSITORY || 'dev-zebra-server' }}
   DOCKERFILE_PATH: ${{ vars.DOCKERFILE_PATH }}
 
 jobs:
@@ -130,9 +134,10 @@ jobs:
             echo "image_exact_tag=$ECR_REGISTRY/$ECR_REPOSITORY:$GIT_TAG" >> $GITHUB_OUTPUT
           fi
           
-          # Print the public repository URL
           echo ""
           echo "====================================="
-          echo "Public ECR Repository URL:"
-          echo "https://gallery.ecr.aws/$ECR_REPOSITORY"
+          echo "Successfully pushed to ECR:"
+          echo "  Registry:   $ECR_REGISTRY"
+          echo "  Repository: $ECR_REPOSITORY"
+          echo "  Tags:       $IMAGE_TAG_LATEST ${IMAGE_TAG_VERSION:+$IMAGE_TAG_VERSION }${GIT_TAG:+$GIT_TAG}"
           echo "====================================="
