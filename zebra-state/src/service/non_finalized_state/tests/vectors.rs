@@ -782,7 +782,12 @@ async fn non_finalized_state_writes_blocks_to_and_restores_blocks_from_backup_ca
 
     let (mut non_finalized_state, non_finalized_state_sender, _receiver) =
         NonFinalizedState::new(&network)
-            .with_backup(Some(backup_dir_path.clone()), &finalized_state.db, false, false)
+            .with_backup(
+                Some(backup_dir_path.clone()),
+                &finalized_state.db,
+                false,
+                false,
+            )
             .await;
 
     let blocks = network.block_map();
