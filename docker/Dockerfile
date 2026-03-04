@@ -174,7 +174,7 @@ ENV FEATURES=${FEATURES}
 #
 # We do not use the `--system` flag for user creation since:
 # 1. System user ranges (100-999) can collide with host system users
-#   (see: https://github.com/nginxinc/docker-nginx/issues/490)
+#   (see: https://github.com/nginx/docker-nginx/issues/490)
 # 2. There's no value added and warning messages can be raised at build time
 #   (see: https://github.com/dotnet/dotnet-docker/issues/4624)
 #

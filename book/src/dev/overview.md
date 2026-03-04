@@ -6,37 +6,38 @@ This document sketches the design for Zebra.
 
 The following are general desiderata for Zebra:
 
-* [George's list..]
+- [George's list..]
 
-* As much as reasonably possible, it and its dependencies should be
+- As much as reasonably possible, it and its dependencies should be
   implemented in Rust.  While it may not make sense to require this in
   every case (for instance, it probably doesn't make sense to rewrite
   libsecp256k1 in Rust, instead of using the same upstream library as
   Bitcoin), we should generally aim for it.
 
-* As much as reasonably possible, Zebra should minimize trust in
+- As much as reasonably possible, Zebra should minimize trust in
   required dependencies.  Note that "minimize number of dependencies"
   is usually a proxy for this desideratum, but is not exactly the same:
   for instance, a collection of crates like the tokio crates are all
   developed together and have one trust boundary.
 
-* Zebra should be well-factored internally into a collection of
+- Zebra should be well-factored internally into a collection of
   component libraries which can be used by other applications to
   perform Zcash-related tasks.  Implementation details of each
   component should not leak into all other components.
 
-* Zebra should checkpoint on Canopy activation and drop all
+- Zebra should checkpoint on Canopy activation and drop all
   Sprout-related functionality not required post-Canopy.
 
 ## Non-Goals
 
-* Zebra keeps a copy of the chain state, so it isn't intended for
+- Zebra keeps a copy of the chain state, so it isn't intended for
   lightweight applications like light wallets. Those applications
   should use a light client protocol.
 
 ## Notable Blog Posts
+
 - [A New Network Stack For Zcash](https://www.zfnd.org/blog/a-new-network-stack-for-zcash)
-- [Composable Futures-based Batch Verification](https://www.zfnd.org/blog/futures-batch-verification)
+- [Composable Futures-based Batch Verification](https://zfnd.org/composable-futures-based-batch-verification/)
 - [Decoding Bitcoin Messages with Tokio Codecs](https://www.zfnd.org/blog/decoding-bitcoin-messages-with-tokio-codecs)
 
 ## Service Dependencies
@@ -91,7 +92,7 @@ into several components:
   addresses, etc., and related functionality.  It also contains the
   implementation of the consensus-critical serialization formats used in Zcash.
   The data structures in `zebra-chain` are defined to enforce
-  [*structural validity*](https://zebra.zfnd.org/dev/rfcs/0002-parallel-verification.html#verification-stages)
+  [_structural validity_](https://zebra.zfnd.org/dev/rfcs/0002-parallel-verification.html#verification-stages)
   by making invalid states unrepresentable. For instance, the
   `Transaction` enum has variants for each transaction version, and it's
   impossible to construct a transaction with, e.g., spend or output
@@ -119,7 +120,7 @@ into several components:
   pure-Rust script implementation.
 
 - [`zebra-consensus`](https://docs.rs/zebra_consensus)
-  performs [*semantic validation*](https://zebra.zfnd.org/dev/rfcs/0002-parallel-verification.html#verification-stages)
+  performs [_semantic validation_](https://zebra.zfnd.org/dev/rfcs/0002-parallel-verification.html#verification-stages)
   of blocks and transactions: all consensus
   rules that can be checked independently of the chain state, such as
   verification of signatures, proofs, and scripts. Internally, the library
@@ -129,7 +130,7 @@ into several components:
 
 - [`zebra-state`](https://docs.rs/zebra_state) is
   responsible for storing, updating, and querying the chain state. The state
-  service is responsible for [*contextual verification*](https://zebra.zfnd.org/dev/rfcs/0002-parallel-verification.html#verification-stages):
+  service is responsible for [_contextual verification_](https://zebra.zfnd.org/dev/rfcs/0002-parallel-verification.html#verification-stages):
   all consensus rules
   that check whether a new block is a valid extension of an existing chain,
   such as updating the nullifier set or checking that transaction inputs remain

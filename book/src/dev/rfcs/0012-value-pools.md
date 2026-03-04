@@ -4,14 +4,17 @@
 - Zebra Issue: [ZcashFoundation/zebra#2152](https://github.com/ZcashFoundation/zebra/issues/2152)
 
 # Summary
+
 [summary]: #summary
 
 This document describes how to verify the Zcash chain and transaction value pools in Zebra.
 
 # Motivation
+
 [motivation]: #motivation
 
 In the Zcash protocol there are consensus rules that:
+
 - prohibit negative chain value pools [ZIP-209], and
 - restrict the creation of new money to a specific number of coins in each coinbase transaction. [Spec Section 3.4](https://zips.z.cash/protocol/protocol.pdf#transactions)
 
@@ -22,12 +25,14 @@ These rules make sure that a fixed amount of Zcash is created by each block, eve
 [ZIP-209]: https://zips.z.cash/zip-0209
 
 # Definitions
+
 [definitions]: #definitions
 
 ## Transaction Value Balances
+
 [definitions-transaction]: #definitions-transaction
 
-- `transaction value pool` - The unspent *input* value in a transaction. Inputs add value, outputs remove value, and value balances modify value. The pool represents the sum of transparent and shielded inputs, minus the sum of transparent and shielded outputs.
+- `transaction value pool` - The unspent _input_ value in a transaction. Inputs add value, outputs remove value, and value balances modify value. The pool represents the sum of transparent and shielded inputs, minus the sum of transparent and shielded outputs.
 - `value balance` - The change in a transaction's value pool. There is a separate value balance for each transparent and shielded pool.
 - `transparent value balance` - The change in the transaction value pool, due to transparent inputs and outputs. The sum of the UTXOs spent by transparent inputs in `tx_in` fields, minus the sum of newly created outputs in `tx_out` fields.
 - `sprout value balance` - The change in the transaction value pool, due to sprout JoinSplits. The sum of all `v_sprout_new` fields, minus the sum of all `v_sprout_old` fields.
@@ -37,20 +42,23 @@ These rules make sure that a fixed amount of Zcash is created by each block, eve
 - `coinbase transaction` - A transaction which spends newly created value (coinbase), and the remaining value of other transactions in its block (miner fees). Coinbase transactions do not have any other inputs, so they can't spend the outputs of other transactions.
 
 ## Chain Value Pools
+
 [definitions-chain]: #definitions-chain
 
 **Note: chain value pools and transaction value balances have opposite signs.**
 
-- `chain value pool balance` - The total value of unspent *outputs* in the chain, for each transparent and shielded pool. The sum of all block chain value pool changes in the chain. Each of the transparent, sprout, sapling, and orchard chain value pool balances must be non-negative.
-- `block chain value pool change` - The change in the chain value pools caused by a block. The *negative* sum of all the value balances in each block.
+- `chain value pool balance` - The total value of unspent _outputs_ in the chain, for each transparent and shielded pool. The sum of all block chain value pool changes in the chain. Each of the transparent, sprout, sapling, and orchard chain value pool balances must be non-negative.
+- `block chain value pool change` - The change in the chain value pools caused by a block. The _negative_ sum of all the value balances in each block.
 
 # Guide-level explanation
+
 [guide-level-explanation]: #guide-level-explanation
 
 ## Transaction Value Balances
+
 [guide-transaction]: #guide-transaction
 
-Each transaction has an individual value pool, containing its unspent *input* value.
+Each transaction has an individual value pool, containing its unspent _input_ value.
 
 Spent transparent inputs add value to this pool, and newly created transparent outputs remove value.
 Similarly, Sprout JoinSplits have a field that adds value to the transaction pool, and a field that removes value.
@@ -67,18 +75,19 @@ In the spec, this is called the remaining value in the transparent transaction v
 But in Zebra, we don't assign this value to a specific pool. We just call it the transaction value pool.
 
 ## Chain Value Pools
+
 [guide-chain]: #guide-chain
 
-There is one chain value pool for transparent funds, and one for each kind of shielded transfer, containing their unspent *outputs*.
+There is one chain value pool for transparent funds, and one for each kind of shielded transfer, containing their unspent _outputs_.
 
-These value pools are updated using chain value pool changes, which are the *negation* of transaction value balances.
-(Transaction value balances use unspent *input* value, but chain value balances use unspent *outputs*.)
+These value pools are updated using chain value pool changes, which are the _negation_ of transaction value balances.
+(Transaction value balances use unspent _input_ value, but chain value balances use unspent _outputs_.)
 
 Each of the chain value pools can change its value with every block added to the chain. This is a state feature and Zebra handle this in the `zebra-state` crate. We propose to store the pool values for the finalized tip height on disk.
 
 We need to check each chain value pool as blocks are added to the chain, to make sure that chain balances never go negative.
 
-## Summary of the implementation:
+## Summary of the implementation
 
 - Create a new type `ValueBalance` that will contain `Amount`s for each pool(transparent, sprout, sapling, orchard).
 - Create `value_pool()` methods on each relevant submodule (transparent, joinsplit, sapling and orchard).
@@ -89,9 +98,11 @@ We need to check each chain value pool as blocks are added to the chain, to make
 - Update the saved values for the new tip.
 
 # Reference-level explanation
+
 [reference-level-explanation]: #reference-level-explanation
 
 ## Consensus rules
+
 [consensus-rules]: #consensus-rules
 
 ### Shielded Chain Value Pools
@@ -102,11 +113,11 @@ If any of the "Sprout chain value pool balance", "Sapling chain value pool balan
 
 Nodes MAY relay transactions even if one or more of them cannot be mined due to the aforementioned restriction.
 
-https://zips.z.cash/zip-0209#specification
+<https://zips.z.cash/zip-0209#specification>
 
 ### Transparent Transaction Value Pool & Remaining Value
 
-The unspent *input value* in a transaction: the sum of the transaction value balances.
+The unspent _input value_ in a transaction: the sum of the transaction value balances.
 
 Consensus rules:
 
@@ -117,7 +128,7 @@ The remaining value in the transparent transaction value pool of a coinbase tran
 
 The remaining value in the transparent transaction value pool MUST be nonnegative.
 
-https://zips.z.cash/protocol/protocol.pdf#transactions
+<https://zips.z.cash/protocol/protocol.pdf#transactions>
 
 In Zebra, the remaining value in non-coinbase transactions is not assigned to any particular pool, until a miner spends it as part of a coinbase output.
 
@@ -133,7 +144,7 @@ As defined in [ZIP-209], the Sprout chain value pool balance for a given block c
 
 If the Sprout chain value pool balance would become negative in the block chain created as a result of accepting a block, then all nodes MUST reject the block as invalid.
 
-https://zips.z.cash/protocol/protocol.pdf#joinsplitbalance
+<https://zips.z.cash/protocol/protocol.pdf#joinsplitbalance>
 
 ### Sapling Chain Value Pool
 
@@ -145,7 +156,7 @@ As defined in [ZIP-209], the Sapling chain value pool balance for a given block 
 
 If the Sapling chain value pool balance would become negative in the block chain created as a result of accepting a block, then all nodes MUST reject the block as invalid.
 
-https://zips.z.cash/protocol/protocol.pdf#saplingbalance
+<https://zips.z.cash/protocol/protocol.pdf#saplingbalance>
 
 ### Orchard Chain Value Pool
 
@@ -161,7 +172,7 @@ Similarly to the Sapling chain value pool balance defined in [ZIP-209], the Orch
 
 If the Orchard chain value pool balance would become negative in the block chain created as a result of accepting a block , then all nodes MUST reject the block as invalid.
 
-https://zips.z.cash/protocol/protocol.pdf#orchardbalance
+<https://zips.z.cash/protocol/protocol.pdf#orchardbalance>
 
 ### Transparent Chain Value Pool
 
@@ -169,12 +180,13 @@ Consensus rule:
 
 Transfers of transparent value work essentially as in Bitcoin
 
-https://zips.z.cash/protocol/protocol.pdf#overview
+<https://zips.z.cash/protocol/protocol.pdf#overview>
 
 There is no explicit Zcash consensus rule that the transparent chain value pool balance must be non-negative.
 But an equivalent rule must be enforced by Zcash implementations, so that each block only creates a fixed amount of coins.
 
 Specifically, this rule can be derived from other consensus rules:
+
 - a transparent output must have a non-negative value,
 - a transparent input can only spend an unspent transparent output,
 - so, there must be a non-negative remaining value in the transparent transaction value pool.
@@ -192,16 +204,19 @@ The coinbase value and miner fee rules will be checked as part of a future desig
 Value pools and value balances include the value of all unspent outputs, regardless of whether they can actually be spent.
 
 For example:
-* transparent outputs which have unsatisfiable lock scripts
-* shielded outputs which have invalid private keys
+
+- transparent outputs which have unsatisfiable lock scripts
+- shielded outputs which have invalid private keys
 
 However, some value is not part of any output:
-* if created value or miner fees are not spent in a coinbase transaction, they are destroyed
-* since coinbase transaction output values are rounded to the nearest zatoshi, any fractional part of miner-controlled or funding stream outputs is destroyed by rounding
+
+- if created value or miner fees are not spent in a coinbase transaction, they are destroyed
+- since coinbase transaction output values are rounded to the nearest zatoshi, any fractional part of miner-controlled or funding stream outputs is destroyed by rounding
 
 Therefore:
-* the total of all chain value pools will always be strictly less than `MAX_MONEY`, and
-* the current total of all chain value pools will always be less than or equal to the number of coins created in coinbase transactions.
+
+- the total of all chain value pools will always be strictly less than `MAX_MONEY`, and
+- the current total of all chain value pools will always be less than or equal to the number of coins created in coinbase transactions.
 
 These properties are implied by other consensus rules, and do not need to be checked separately.
 
@@ -392,6 +407,7 @@ pub struct PreparedBlock {
     pub block_value_balance: ValuePool<NegativeAllowed>,
 }
 ```
+
 - In `zebra-consensus/src/block.rs` pass the value balance to the zebra-state:
 
 ```rust
@@ -414,6 +430,7 @@ pub struct Chain {
     value_pool: ValueBalance<NonNegative>,
 }
 ```
+
 - Add a new argument `finalized_tip_value_balance` to the `commit_new_chain()` method located in the same file.
 - Pass the new argument to the Chain in:
 
@@ -492,6 +509,7 @@ impl FromDisk for Amount {
     }
 }
 ```
+
 The above code is going to need a `Amount::from_bytes` new method.
 
 #### Add a `from_bytes` method in `Amount`
@@ -573,36 +591,40 @@ pub fn current_value_pool(&self) -> ValuePool<NonNegative> {
 ```
 
 ## Test Plan
+
 [test-plan]: #test-plan
 
 ### Unit tests
- - Create a transaction that has a negative remaining value.
-   - Test that the transaction fails the verification in `Transaction::value_balance()`
-   - To avoid passing the utxo we can have `0` as the amount of the transparent pool and some negative shielded pool.
+
+- Create a transaction that has a negative remaining value.
+  - Test that the transaction fails the verification in `Transaction::value_balance()`
+  - To avoid passing the utxo we can have `0` as the amount of the transparent pool and some negative shielded pool.
 
 ### Prop tests
 
- - Create a chain strategy that ends up with a valid value balance for all the pools (transparent, sprout, sapling, orchard)
-   - Test that the amounts are all added to disk.
- - Add new blocks that will make each pool became negative.
-   - Test for constraint violations in the value balances for each case.
-   - Failures should be at `update_chain_state_with()`.
- - Test consensus rules success and failures in `revert_chain_state_with()`
-   - TODO: how?
- - serialize and deserialize `ValueBalance` using `IntoDisk` and `FromDisk`
+- Create a chain strategy that ends up with a valid value balance for all the pools (transparent, sprout, sapling, orchard)
+  - Test that the amounts are all added to disk.
+- Add new blocks that will make each pool became negative.
+  - Test for constraint violations in the value balances for each case.
+  - Failures should be at `update_chain_state_with()`.
+- Test consensus rules success and failures in `revert_chain_state_with()`
+  - TODO: how?
+- serialize and deserialize `ValueBalance` using `IntoDisk` and `FromDisk`
 
- ### Manual tests
+### Manual tests
 
- - Zebra must sync up to tip computing all value balances and never breaking the value pool rules.
+- Zebra must sync up to tip computing all value balances and never breaking the value pool rules.
 
 ## Future Work
+
 [future-work]: #future-work
 
 Add an extra state request to verify the speculative chain balance after applying a Mempool transaction. (This is out of scope for our current NU5 and mempool work.)
 
 Note: The chain value pool balance rules apply to Block transactions, but they are optional for Mempool transactions:
+
 > Nodes MAY relay transactions even if one or more of them cannot be mined due to the aforementioned restriction.
 
-https://zips.z.cash/zip-0209#specification
+<https://zips.z.cash/zip-0209#specification>
 
 Since Zebra does chain value pool balance validation in the state, we want to skip verifying the speculative chain balance of Mempool transactions.
