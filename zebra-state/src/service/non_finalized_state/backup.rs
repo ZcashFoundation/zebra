@@ -33,7 +33,7 @@ pub(crate) const MIN_DURATION_BETWEEN_BACKUP_UPDATES: Duration = Duration::from_
 /// Returns the resulting non-finalized state.
 pub(super) fn restore_backup(
     mut non_finalized_state: NonFinalizedState,
-    backup_dir_path: &PathBuf,
+    backup_dir_path: &Path,
     finalized_state: &ZebraDb,
 ) -> NonFinalizedState {
     let mut store: BTreeMap<Height, Vec<SemanticallyVerifiedBlock>> = BTreeMap::new();
