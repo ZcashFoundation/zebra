@@ -666,12 +666,6 @@ where
     *header.nonce.first_mut().unwrap() = solver_id;
     *header.nonce.last_mut().unwrap() = solver_id;
 
-    #[cfg(feature = "viz_gui")]
-    {
-        header.nonce[30] = *zebra_crosslink::viz::MINER_NONCE_BYTE.lock().unwrap();
-        println!("PoW Block Nonce: {:?}", header.nonce);
-    }
-
     // Mine one or more blocks using the solver, in a low-priority blocking thread.
     let span = Span::current();
     let solved_headers =

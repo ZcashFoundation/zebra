@@ -1,10 +1,24 @@
+#![allow(unused, missing_docs)]
+
 use static_assertions::*;
-use std::{io::Write, mem::align_of, mem::size_of};
-use zebra_chain::serialization::{ZcashDeserialize, ZcashSerialize};
+use std::{io::Write, mem::align_of, mem::size_of, sync::Arc, time::Duration};
+use tracing::error;
 use zerocopy::*;
 use zerocopy_derive::*;
 
-use super::ZcashCrosslinkParameters;
+use zebra_chain::block::{Block, FatPointerToBftBlock, Hash as BlockHash};
+use zebra_chain::crosslink::*;
+use zebra_chain::serialization::{ZcashDeserialize, ZcashSerialize};
+use zebra_state::{crosslink::*, Request as StateRequest, Response as StateResponse};
+
+use ed25519_zebra::VerificationKeyBytes as MalPublicKey;
+
+use super::{
+    block_height_from_hash, tfl_block_finality_from_height_hash, TFLServiceInternal,
+    TEST_CHECK_ASSERT, TEST_FAILED_INSTR_IDXS, TEST_INSTR_BYTES, TEST_INSTR_C, TEST_INSTR_PATH,
+    TEST_INSTRS, TEST_NAME, TEST_SHUTDOWN_FN,
+};
+use super::service::TFLServiceHandle;
 
 #[repr(C)]
 #[derive(Immutable, KnownLayout, IntoBytes, FromBytes)]
@@ -12,7 +26,7 @@ pub struct TFHdr {
     pub magic: [u8; 8],
     pub instrs_o: u64,
     pub instrs_n: u32,
-    pub instr_size: u32, // used as stride
+    pub instr_size: u32,
 }
 
 #[repr(C)]
@@ -70,9 +84,6 @@ static TF_INSTR_KIND_STRS: [&str; TFInstr::COUNT as usize] = {
 };
 
 impl TFInstr {
-    // NOTE: we want to deal with unknown values at the *application* layer, not the
-    // (de)serialization layer.
-    // TODO: there may be a crate that makes an enum feasible here
     pub const LOAD_POW: TFInstrKind = 0;
     pub const LOAD_POS: TFInstrKind = 1;
     pub const SET_PARAMS: TFInstrKind = 2;
@@ -96,7 +107,7 @@ impl TFInstr {
         let mut str = Self::str_from_kind(instr.kind).to_string();
         str += " (";
 
-        match tf_read_instr(&bytes, instr) {
+        match tf_read_instr(bytes, instr) {
             Some(TestInstr::LoadPoW(block)) => {
                 str += &format!(
                     "{} - {}, parent: {}",
@@ -105,7 +116,7 @@ impl TFInstr {
                     block.header.previous_block_hash
                 )
             }
-            Some(TestInstr::LoadPoS((block, fat_ptr))) => {
+            Some(TestInstr::LoadPoS((block, _fat_ptr))) => {
                 str += &format!(
                     "{}, hdrs: [{} .. {}]",
                     block.blake3_hash(),
@@ -120,10 +131,10 @@ impl TFInstr {
                 str += &format!("{} => {:?}", hash, f)
             }
             Some(TestInstr::ExpectRosterIncludes(pub_key, stake)) => {
-                str += &format!("{} => {}", crate::MalPublicKey2(pub_key.into()), stake)
+                str += &format!("{} => {}", BftValidatorAddress(pub_key.into()), stake)
             }
             Some(TestInstr::RosterForceInclude(pub_key, stake)) => {
-                str += &format!("{} => {}", crate::MalPublicKey2(pub_key.into()), stake)
+                str += &format!("{} => {}", BftValidatorAddress(pub_key.into()), stake)
             }
             None => {}
         }
@@ -159,58 +170,40 @@ pub const TF_FINALIZED: u64 = 1;
 pub const TF_CANT_BE_FINALIZED: u64 = 2;
 
 pub fn finality_from_val(val: &[u64; 2]) -> Option<TFLBlockFinality> {
-    if (val[0] == 0) {
+    if val[0] == 0 {
         None
     } else {
-        match (val[1]) {
-            test_format::TF_NOT_YET_FINALIZED => Some(TFLBlockFinality::NotYetFinalized),
-            test_format::TF_FINALIZED => Some(TFLBlockFinality::Finalized),
-            test_format::TF_CANT_BE_FINALIZED => Some(TFLBlockFinality::CantBeFinalized),
+        match val[1] {
+            TF_NOT_YET_FINALIZED => Some(TFLBlockFinality::NotYetFinalized),
+            TF_FINALIZED => Some(TFLBlockFinality::Finalized),
+            TF_CANT_BE_FINALIZED => Some(TFLBlockFinality::CantBeFinalized),
             _ => panic!("unexpected finality value"),
         }
     }
 }
 
 pub fn val_from_finality(val: Option<TFLBlockFinality>) -> [u64; 2] {
-    match (val) {
-        Some(TFLBlockFinality::NotYetFinalized) => [1u64, test_format::TF_NOT_YET_FINALIZED],
-        Some(TFLBlockFinality::Finalized) => [1u64, test_format::TF_FINALIZED],
-        Some(TFLBlockFinality::CantBeFinalized) => [1u64, test_format::TF_CANT_BE_FINALIZED],
+    match val {
+        Some(TFLBlockFinality::NotYetFinalized) => [1u64, TF_NOT_YET_FINALIZED],
+        Some(TFLBlockFinality::Finalized) => [1u64, TF_FINALIZED],
+        Some(TFLBlockFinality::CantBeFinalized) => [1u64, TF_CANT_BE_FINALIZED],
         None => [0u64; 2],
     }
 }
 
 impl TF {
     pub fn new(params: &ZcashCrosslinkParameters) -> TF {
-        let mut tf = TF {
+        let tf = TF {
             instrs: Vec::new(),
             data: Vec::new(),
         };
-
-        // ALT: push as data & determine available info by size if we add more
-        const_assert!(size_of::<ZcashCrosslinkParameters>() == 16);
-        // enforce only 2 param members
-        let ZcashCrosslinkParameters {
-            bc_confirmation_depth_sigma,
-            finalization_gap_bound,
-        } = *params;
-        let val = [bc_confirmation_depth_sigma, finalization_gap_bound];
-
-        // NOTE:
-        // This empty data slice results in a 0-length data at the current data offset... We could
-        // also set it to 0-offset to clearly indicate there is no data intended to be used.
-        // (Because the offset is from the beginning of the file, nothing will refer to valid
-        // data at offset 0, which is the magic of the header)
-        // TODO (once handled): tf.push_instr_ex(TFInstr::SET_PARAMS, 0, &[], val);
-
         tf
     }
 
     pub fn push_serialize<Z: ZcashSerialize>(&mut self, z: &Z) -> TFSlice {
         let bgn = (size_of::<TFHdr>() + self.data.len()) as u64;
-        z.zcash_serialize(&mut self.data);
+        z.zcash_serialize(&mut self.data).ok();
         let end = (size_of::<TFHdr>() + self.data.len()) as u64;
-
         TFSlice {
             o: bgn,
             size: end - bgn,
@@ -222,7 +215,7 @@ impl TF {
             o: (size_of::<TFHdr>() + self.data.len()) as u64,
             size: bytes.len() as u64,
         };
-        self.data.write_all(bytes);
+        self.data.write_all(bytes).ok();
         result
     }
 
@@ -241,7 +234,7 @@ impl TF {
     }
 
     pub fn push_instr_val(&mut self, kind: TFInstrKind, val: [u64; 2]) {
-        self.push_instr_ex(kind, 0, &[0; 0], val)
+        self.push_instr_ex(kind, 0, &[], val)
     }
 
     pub fn push_instr_serialize_ex<Z: ZcashSerialize>(
@@ -267,6 +260,7 @@ impl TF {
     pub fn push_instr_load_pow(&mut self, data: &Block, flags: u32) {
         self.push_instr_serialize_ex(TFInstr::LOAD_POW, flags, data, [0; 2])
     }
+
     pub fn push_instr_load_pow_bytes(&mut self, data: &[u8], flags: u32) {
         self.push_instr_ex(TFInstr::LOAD_POW, flags, data, [0; 2])
     }
@@ -274,6 +268,7 @@ impl TF {
     pub fn push_instr_load_pos(&mut self, data: &BftBlockAndFatPointerToIt, flags: u32) {
         self.push_instr_serialize_ex(TFInstr::LOAD_POS, flags, data, [0; 2])
     }
+
     pub fn push_instr_load_pos_bytes(&mut self, data: &[u8], flags: u32) {
         self.push_instr_ex(TFInstr::LOAD_POS, flags, data, [0; 2])
     }
@@ -282,7 +277,7 @@ impl TF {
         self.push_instr_ex(
             TFInstr::EXPECT_POW_CHAIN_LENGTH,
             flags,
-            &[0; 0],
+            &[],
             [length as u64, 0],
         )
     }
@@ -291,7 +286,7 @@ impl TF {
         self.push_instr_ex(
             TFInstr::EXPECT_POS_CHAIN_LENGTH,
             flags,
-            &[0; 0],
+            &[],
             [length as u64, 0],
         )
     }
@@ -306,7 +301,7 @@ impl TF {
             TFInstr::EXPECT_POW_BLOCK_FINALITY,
             flags,
             &pow_hash.0,
-            test_format::val_from_finality(finality),
+            val_from_finality(finality),
         )
     }
 
@@ -314,7 +309,12 @@ impl TF {
         self.push_instr_ex(TFInstr::ROSTER_FORCE_INCLUDE, flags, &pub_key, [stake, 0])
     }
 
-    pub fn push_instr_expect_roster_includes(&mut self, pub_key: [u8; 32], stake: u64, flags: u32) {
+    pub fn push_instr_expect_roster_includes(
+        &mut self,
+        pub_key: [u8; 32],
+        stake: u64,
+        flags: u32,
+    ) {
         self.push_instr_ex(TFInstr::EXPECT_ROSTER_INCLUDES, flags, &pub_key, [stake, 0])
     }
 
@@ -337,32 +337,16 @@ impl TF {
             instrs_n: self.instrs.len() as u32,
             instr_size: size_of::<TFInstr>() as u32,
         };
-        writer
-            .write_all(hdr.as_bytes())
-            .expect("writing shouldn't fail");
-        writer
-            .write_all(&self.data)
-            .expect("writing shouldn't fail");
+        writer.write_all(hdr.as_bytes()).expect("writing shouldn't fail");
+        writer.write_all(&self.data).expect("writing shouldn't fail");
 
         if instrs_o > instrs_o_unaligned {
             const ALIGN_0S: [u8; align_of::<TFInstr>()] = [0u8; align_of::<TFInstr>()];
             let align_size = instrs_o - instrs_o_unaligned;
-            let align_bytes = &ALIGN_0S[..align_size];
-            writer.write_all(align_bytes);
+            writer.write_all(&ALIGN_0S[..align_size]).ok();
         }
-        writer
-            .write_all(self.instrs.as_bytes())
-            .expect("writing shouldn't fail");
-
+        writer.write_all(self.instrs.as_bytes()).expect("writing shouldn't fail");
         true
-    }
-
-    pub fn write_to_file(&self, path: &std::path::Path) -> bool {
-        if let Ok(mut file) = std::fs::File::create(path) {
-            self.write(&mut file)
-        } else {
-            false
-        }
     }
 
     pub fn write_to_bytes(&self) -> Vec<u8> {
@@ -371,8 +355,6 @@ impl TF {
         bytes
     }
 
-    // Simple version, all in one go... for large files we'll want to break this up; get hdr &
-    // get/stream instrs, then read data as needed
     pub fn read_from_bytes(bytes: &[u8]) -> Result<Self, String> {
         let tf_hdr = match TFHdr::ref_from_prefix(&bytes[0..]) {
             Ok((hdr, _)) => hdr,
@@ -391,13 +373,10 @@ impl TF {
 
         let data = &bytes[size_of::<TFHdr>()..tf_hdr.instrs_o as usize];
 
-        // TODO: just use slices, don't copy to vectors
-        let tf = TF {
+        Ok(TF {
             instrs: instrs.to_vec(),
             data: data.to_vec(),
-        };
-
-        Ok(tf)
+        })
     }
 
     pub fn read_from_file(path: &std::path::Path) -> Result<(Vec<u8>, Self), String> {
@@ -405,12 +384,10 @@ impl TF {
             Ok(bytes) => bytes,
             Err(err) => return Err(err.to_string()),
         };
-
         Self::read_from_bytes(&bytes).map(|tf| (bytes, tf))
     }
 }
 
-// TODO: macro for a stringified condition
 fn test_check(flags: u32, condition: bool, message: &str) {
     let should_succeed = (flags & SHOULD_FAIL) == 0;
     const SUCCESS_STRS: [&str; 2] = ["fail", "succeed"];
@@ -421,7 +398,7 @@ fn test_check(flags: u32, condition: bool, message: &str) {
 
         if *TEST_CHECK_ASSERT.lock().unwrap() {
             panic!(
-                "test check should {} but actually {}ed (and TEST_CHECK_ASSERT == true), message:\n{}",
+                "test check should {} but actually {}ed, message:\n{}",
                 SUCCESS_STRS[should_succeed as usize],
                 SUCCESS_STRS[!should_succeed as usize],
                 message
@@ -436,8 +413,6 @@ fn test_check(flags: u32, condition: bool, message: &str) {
         }
     }
 }
-
-use crate::*;
 
 pub(crate) fn tf_read_instr(bytes: &[u8], instr: &TFInstr) -> Option<TestInstr> {
     const_assert!(TFInstr::COUNT == 8);
@@ -487,7 +462,6 @@ pub(crate) fn tf_read_instr(bytes: &[u8], instr: &TFInstr) -> Option<TestInstr> 
 
         _ => {
             panic!("Unrecognized instruction {}", instr.kind);
-            None
         }
     }
 }
@@ -495,13 +469,13 @@ pub(crate) fn tf_read_instr(bytes: &[u8], instr: &TFInstr) -> Option<TestInstr> 
 #[derive(Clone)]
 pub(crate) enum TestInstr {
     LoadPoW(Block),
-    LoadPoS((BftBlock, FatPointerToBftBlock2)),
+    LoadPoS((BftBlock, FatPointerToBftBlock)),
     SetParams(ZcashCrosslinkParameters),
     ExpectPoWChainLength(u32),
     ExpectPoSChainLength(u64),
     ExpectPoWBlockFinality(BlockHash, Option<TFLBlockFinality>),
-    RosterForceInclude([u8; 32], u64),   // public address
-    ExpectRosterIncludes([u8; 32], u64), // public address
+    RosterForceInclude([u8; 32], u64),
+    ExpectRosterIncludes([u8; 32], u64),
 }
 
 pub(crate) async fn handle_instr(
@@ -513,21 +487,11 @@ pub(crate) async fn handle_instr(
 ) {
     match instr {
         TestInstr::LoadPoW(block) => {
-            // let path = format!("../crosslink-test-data/test_pow_block_{}.bin", instr_i);
-            // info!("writing binary at {}", path);
-            // let mut file = std::fs::File::create(&path).expect("valid file");
-            // file.write_all(instr.data_slice(bytes));
-
             let force_feed_ok = (internal_handle.call.force_feed_pow)(Arc::new(block)).await;
             test_check(flags, force_feed_ok, "PoW force feed ok");
         }
 
         TestInstr::LoadPoS((block, fat_ptr)) => {
-            // let path = format!("../crosslink-test-data/test_pos_block_{}.bin", instr_i);
-            // info!("writing binary at {}", path);
-            // let mut file = std::fs::File::create(&path).expect("valid file");
-            // file.write_all(instr.data_slice(bytes)).expect("write success");
-
             let force_feed_ok =
                 (internal_handle.call.force_feed_pos)(Arc::new(block), fat_ptr).await;
             test_check(flags, force_feed_ok, "PoS force feed ok");
@@ -539,7 +503,7 @@ pub(crate) async fn handle_instr(
         }
 
         TestInstr::ExpectPoWChainLength(h) => {
-            if let StateResponse::Tip(Some((height, hash))) =
+            if let StateResponse::Tip(Some((height, _hash))) =
                 (internal_handle.call.state)(StateRequest::Tip)
                     .await
                     .expect("can read tip")
@@ -550,7 +514,7 @@ pub(crate) async fn handle_instr(
                     flags,
                     expect == actual,
                     &format!("PoW chain length: expected {}, actually {}", expect, actual),
-                ); // TODO: maybe assert in test but recoverable error in-GUI
+                );
             }
         }
 
@@ -561,12 +525,13 @@ pub(crate) async fn handle_instr(
                 flags,
                 expect == actual,
                 &format!("PoS chain length: expected {}, actually {}", expect, actual),
-            ); // TODO: maybe assert in test but recoverable error in-GUI
+            );
         }
 
         TestInstr::ExpectPoWBlockFinality(hash, f) => {
             let expect = f;
-            let height = block_height_from_hash(&internal_handle.call.clone(), hash).await;
+            let height =
+                block_height_from_hash(&internal_handle.call.clone(), hash).await;
             let actual = if let Some(height) = height {
                 tfl_block_finality_from_height_hash(internal_handle.clone(), height, hash).await
             } else {
@@ -580,7 +545,7 @@ pub(crate) async fn handle_instr(
                     "PoW block finality at hash={}, height={:?}: expected {:?}, actually {:?}",
                     hash, height, expect, actual
                 ),
-            ); // TODO: maybe assert in test but recoverable error in-GUI
+            );
         }
 
         TestInstr::ExpectRosterIncludes(pub_key, stake) => {
@@ -604,7 +569,10 @@ pub(crate) async fn handle_instr(
                 test_check(
                     flags,
                     false,
-                    &format!("Finalizer found: {:?}", MalPublicKey2(pub_key.into())),
+                    &format!(
+                        "Finalizer found: {:?}",
+                        BftValidatorAddress(pub_key.into())
+                    ),
                 );
             }
         }
@@ -613,7 +581,7 @@ pub(crate) async fn handle_instr(
             let mut internal = internal_handle.internal.lock().await;
             internal
                 .validators_at_current_height
-                .push(crate::MalValidator::new(pub_key.into(), stake));
+                .push(BftValidator::new(pub_key.into(), stake));
         }
     }
 }
@@ -621,40 +589,25 @@ pub(crate) async fn handle_instr(
 pub async fn read_instrs(internal_handle: TFLServiceHandle, bytes: &[u8], instrs: &[TFInstr]) {
     for instr_i in 0..instrs.len() {
         let instr_val = &instrs[instr_i];
-        // info!(
-        //     "Loading instruction {}: {} ({})",
-        //     instr_i,
-        //     TFInstr::string_from_instr(bytes, instr_val),
-        //     instr_val.kind
-        // );
 
         if let Some(instr) = tf_read_instr(bytes, &instrs[instr_i]) {
-            handle_instr(
-                &internal_handle,
-                bytes,
-                instr,
-                instrs[instr_i].flags,
-                instr_i,
-            )
-            .await;
+            handle_instr(&internal_handle, bytes, instr, instrs[instr_i].flags, instr_i).await;
         } else {
             panic!("Failed to read {}", TFInstr::str_from_kind(instr_val.kind));
         }
 
-        *TEST_INSTR_C.lock().unwrap() = instr_i + 1; // accounts for end
+        *TEST_INSTR_C.lock().unwrap() = instr_i + 1;
     }
 }
 
 pub(crate) async fn instr_reader(internal_handle: TFLServiceHandle) {
-    use zebra_chain::serialization::{ZcashDeserialize, ZcashSerialize};
     let call = internal_handle.call.clone();
     println!("waiting for tip before starting the test...");
-    let before_time = Instant::now();
+    let before_time = tokio::time::Instant::now();
     loop {
         if let Ok(StateResponse::Tip(Some(_))) = (call.state)(StateRequest::Tip).await {
             break;
         } else {
-            // warn!("Failed to read tip");
             if before_time.elapsed().as_secs() > 30 {
                 panic!("Timeout waiting for test to start.");
             }
@@ -666,7 +619,7 @@ pub(crate) async fn instr_reader(internal_handle: TFLServiceHandle) {
     if let Some(path) = TEST_INSTR_PATH.lock().unwrap().clone() {
         *TEST_INSTR_BYTES.lock().unwrap() = match std::fs::read(&path) {
             Ok(bytes) => bytes,
-            Err(err) => panic!("Invalid test file: {:?}: {}", path, err), // TODO: specifics
+            Err(err) => panic!("Invalid test file: {:?}: {}", path, err),
         };
     }
 
@@ -674,29 +627,24 @@ pub(crate) async fn instr_reader(internal_handle: TFLServiceHandle) {
 
     let tf = match TF::read_from_bytes(&bytes) {
         Ok(tf) => tf,
-        Err(err) => panic!("Invalid test data: {}", err), // TODO: specifics
+        Err(err) => panic!("Invalid test data: {}", err),
     };
 
     *TEST_INSTRS.lock().unwrap() = tf.instrs.clone();
 
     read_instrs(internal_handle, &bytes, &tf.instrs).await;
 
-    // make sure tests completed
     assert_eq!(
         *TEST_INSTR_C.lock().unwrap(),
         tf.instrs.len(),
         "didn't complete test {}",
         TEST_NAME.lock().unwrap()
     );
-    // make sure the test as a whole actually fails for failed instructions
     assert!(
         TEST_FAILED_INSTR_IDXS.lock().unwrap().is_empty(),
         "failed test {}",
         TEST_NAME.lock().unwrap()
     );
     println!("Test done, shutting down");
-    // #[cfg(feature = "viz_gui")]
-    // tokio::time::sleep(Duration::from_secs(120)).await;
-
     TEST_SHUTDOWN_FN.lock().unwrap()();
 }

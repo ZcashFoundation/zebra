@@ -113,6 +113,9 @@ futures = { workspace = true }
 itertools = { workspace = true }
 rayon = { workspace = true }
 
+# Crosslink / BFT
+blake3 = "1.8.2"
+
 # ZF deps
 ed25519-zebra = { workspace = true }
 redjubjub = { workspace = true }

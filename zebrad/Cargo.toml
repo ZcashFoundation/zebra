@@ -54,8 +54,6 @@ features = [
 [features]
 # In release builds, don't compile debug logging code, to improve performance.
 default-release-binaries = ["release_max_level_info", "progress-bar", "prometheus", "sentry"]
-viz_gui = ["zebra-crosslink/viz_gui"]
-
 # Default features for official ZF binary release builds
 default = ["default-release-binaries", "internal-miner"]
 
@@ -162,8 +160,6 @@ zebra-state = { path = "../zebra-state", version = "2.0.0" }
 # "comparison-interpreter" feature. (Feature unification will take care of
 # enabling it in the other imports of zcash-script.)
 zebra-script = { path = "../zebra-script", version = "2.0.0" }
-zebra-crosslink = { path = "../zebra-crosslink", version = "1.0.0-beta.45" }
-
 # Required for crates.io publishing, but it's only used in tests
 zebra-utils = { path = "../zebra-utils", version = "2.0.0", optional = true }
 
@@ -207,6 +203,13 @@ config = { workspace = true }
 
 num-integer = { workspace = true }
 rand = { workspace = true }
+
+# Crosslink / BFT dependencies
+ed25519-zebra = { workspace = true }
+static_assertions = { workspace = true }
+zerocopy = { workspace = true }
+zerocopy-derive = { workspace = true }
+zcash_primitives = { workspace = true }
 
 # prod feature internal-miner
 thread-priority = { workspace = true, optional = true }

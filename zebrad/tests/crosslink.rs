@@ -8,7 +8,7 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 use zcash_keys::address::Address;
 use zebra_chain::{
     block::{
-        Block, CommandBuf, FatPointerToBftBlock, Hash as BlockHash, Header as BlockHeader,
+        Block, FatPointerToBftBlock, Hash as BlockHash, Header as BlockHeader,
         Height as BlockHeight,
     },
     fmt::HexDebug,
@@ -19,10 +19,9 @@ use zebra_chain::{
     serialization::*,
     work::{self, difficulty::CompactDifficulty},
 };
-use zebra_crosslink::chain::*;
-use zebra_crosslink::test_format::*;
-use zebra_crosslink::FatPointerToBftBlock2;
+use zebra_chain::crosslink::*;
 use zebra_state::crosslink::*;
+use zebrad::components::crosslink::test_format::*;
 use zebrad::application::CROSSLINK_TEST_CONFIG_OVERRIDE;
 use zebrad::config::ZebradConfig;
 use zebrad::prelude::Application;
@@ -44,7 +43,7 @@ macro_rules! function_name {
 
 /// Set the global state TEST_NAME
 pub fn set_test_name(name: &'static str) {
-    *zebra_crosslink::TEST_NAME.lock().unwrap() = name;
+    *zebrad::components::crosslink::TEST_NAME.lock().unwrap() = name;
 }
 
 /// Crosslink Test entrypoint
@@ -60,11 +59,12 @@ pub fn test_start() {
 
             Some(std::sync::Arc::new(base))
         };
-        *zebra_crosslink::TEST_MODE.lock().unwrap() = true;
-        *zebra_crosslink::TEST_SHUTDOWN_FN.lock().unwrap() = || {
-            zebra_crosslink::dump_test_instrs();
+        *zebrad::components::crosslink::TEST_MODE.lock().unwrap() = true;
+        *zebra_chain::crosslink::BFT_HASH_USE_UNKEYED.lock().unwrap() = true;
+        *zebrad::components::crosslink::TEST_SHUTDOWN_FN.lock().unwrap() = || {
+            zebrad::components::crosslink::dump_test_instrs();
             // APPLICATION.shutdown(abscissa_core::Shutdown::Graceful);
-            std::process::exit(*zebra_crosslink::TEST_FAILED.lock().unwrap());
+            std::process::exit(*zebrad::components::crosslink::TEST_FAILED.lock().unwrap());
         }
     }
 
@@ -79,31 +79,18 @@ pub fn test_start() {
     ];
     // println!("args: {:?}", args);
 
-    #[cfg(feature = "viz_gui")]
-    {
-        // TODO: gate behind feature-flag
-        // TODO: only open the visualization window for the `start` command.
-        // i.e.: can we move it to that code without major refactor to make compiler happy?
-        let tokio_root_thread_handle = std::thread::spawn(move || {
-            ZebradApp::run(&APPLICATION, args);
-        });
-
-        zebra_crosslink::viz::main(Some(tokio_root_thread_handle));
-    }
-
-    #[cfg(not(feature = "viz_gui"))]
     ZebradApp::run(&APPLICATION, args);
 }
 
 /// Run a Crosslink Test from a dynamic byte array.
 pub fn test_bytes(bytes: Vec<u8>) {
-    *zebra_crosslink::TEST_INSTR_BYTES.lock().unwrap() = bytes;
+    *zebrad::components::crosslink::TEST_INSTR_BYTES.lock().unwrap() = bytes;
     test_start();
 }
 
 /// Run a Crosslink Test from a file path.
 pub fn test_path(path: PathBuf) {
-    *zebra_crosslink::TEST_INSTR_PATH.lock().unwrap() = Some(path);
+    *zebrad::components::crosslink::TEST_INSTR_PATH.lock().unwrap() = Some(path);
     test_start();
 }
 
@@ -687,7 +674,7 @@ fn create_pos_and_ptr_to_finalize_pow(
     let block = BftBlock::try_from(
         &PROTOTYPE_PARAMETERS,
         bft_height,
-        FatPointerToBftBlock2::null(),
+        FatPointerToBftBlock::null(),
         pow_blocks[0].coinbase_height().expect("valid height").0,
         vec![
             pow_blocks[0].header.as_ref().clone(),
@@ -699,7 +686,7 @@ fn create_pos_and_ptr_to_finalize_pow(
 
     BftBlockAndFatPointerToIt {
         block,
-        fat_ptr: FatPointerToBftBlock2::null(), // TODO
+        fat_ptr: FatPointerToBftBlock::null(), // TODO
     }
 }
 
@@ -786,7 +773,7 @@ fn crosslink_add_newcomer_to_roster_via_pow() {
     tf.push_instr_load_pos(&bft, 0);
 
     let (_, _prv_key, pub_key) =
-        zebra_crosslink::rng_private_public_key_from_address("some_pub_key".as_bytes());
+        zebrad::components::crosslink::rng_private_public_key_from_address("some_pub_key".as_bytes());
     tf.push_instr_expect_roster_includes(pub_key.into(), 1234, 0);
 
     test_bytes(tf.write_to_bytes());

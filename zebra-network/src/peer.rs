@@ -3,6 +3,8 @@
 mod client;
 mod connection;
 mod connector;
+/// Crosslink BFT peer transport (stub).
+pub mod crosslink_transport;
 mod error;
 mod handshake;
 mod load_tracked_client;

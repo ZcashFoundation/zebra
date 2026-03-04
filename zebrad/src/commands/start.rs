@@ -285,7 +285,7 @@ impl StartCmd {
         info!("spawning tfl service task");
         let (tfl, tfl_service_task_handle) = {
             let state = state.clone();
-            zebra_crosslink::service::spawn_new_tfl_service(
+            crate::components::crosslink::service::spawn_new_tfl_service(
                 is_regtest,
                 Arc::new(move |req| {
                     let state = state.clone();

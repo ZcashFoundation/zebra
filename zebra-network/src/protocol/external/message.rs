@@ -11,7 +11,15 @@ use zebra_chain::{
 
 use crate::{meta_addr::MetaAddr, BoxError};
 
-use super::{addr::AddrInVersion, inv::InventoryHash, types::*};
+use super::{
+    addr::AddrInVersion,
+    crosslink::{
+        CrosslinkDecided, CrosslinkProposal, CrosslinkStatus, CrosslinkSyncRequest,
+        CrosslinkSyncResponse, CrosslinkVote,
+    },
+    inv::InventoryHash,
+    types::*,
+};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -295,6 +303,50 @@ pub enum Message {
     ///
     /// [BIP37]: https://github.com/bitcoin/bips/blob/master/bip-0037.mediawiki
     FilterClear,
+
+    // -- Crosslink BFT consensus messages --
+
+    /// A BFT block proposal from a validator.
+    #[cfg_attr(
+        any(test, feature = "proptest-impl"),
+        proptest(skip)
+    )]
+    CrosslinkProposal(CrosslinkProposal),
+
+    /// A BFT vote (prevote or precommit) from a validator.
+    #[cfg_attr(
+        any(test, feature = "proptest-impl"),
+        proptest(skip)
+    )]
+    CrosslinkVote(CrosslinkVote),
+
+    /// A decided BFT block with commit certificate.
+    #[cfg_attr(
+        any(test, feature = "proptest-impl"),
+        proptest(skip)
+    )]
+    CrosslinkDecided(CrosslinkDecided),
+
+    /// BFT peer status announcement.
+    #[cfg_attr(
+        any(test, feature = "proptest-impl"),
+        proptest(skip)
+    )]
+    CrosslinkStatus(CrosslinkStatus),
+
+    /// Request a decided BFT block at a specific height.
+    #[cfg_attr(
+        any(test, feature = "proptest-impl"),
+        proptest(skip)
+    )]
+    CrosslinkSyncReq(CrosslinkSyncRequest),
+
+    /// Response with a decided BFT block.
+    #[cfg_attr(
+        any(test, feature = "proptest-impl"),
+        proptest(skip)
+    )]
+    CrosslinkSyncResp(CrosslinkSyncResponse),
 }
 
 /// The maximum size of the user agent string.
@@ -524,6 +576,31 @@ impl fmt::Display for Message {
             Message::FilterLoad { .. } => "filterload".to_string(),
             Message::FilterAdd { .. } => "filteradd".to_string(),
             Message::FilterClear => "filterclear".to_string(),
+
+            Message::CrosslinkProposal(p) => {
+                format!("clproposal {{ height: {}, round: {} }}", p.height, p.round)
+            }
+            Message::CrosslinkVote(v) => {
+                format!(
+                    "clvote {{ height: {}, round: {} }}",
+                    v.vote.height, v.vote.round
+                )
+            }
+            Message::CrosslinkDecided(d) => {
+                format!(
+                    "cldecided {{ height: {} }}",
+                    d.decided.block.height
+                )
+            }
+            Message::CrosslinkStatus(s) => {
+                format!("clstatus {{ tip: {} }}", s.bft_tip_height)
+            }
+            Message::CrosslinkSyncReq(r) => {
+                format!("clsyncreq {{ height: {} }}", r.height)
+            }
+            Message::CrosslinkSyncResp(r) => {
+                format!("clsyncresp {{ height: {} }}", r.height)
+            }
         })
     }
 }
@@ -551,6 +628,12 @@ impl Message {
             Message::FilterLoad { .. } => "filterload",
             Message::FilterAdd { .. } => "filteradd",
             Message::FilterClear => "filterclear",
+            Message::CrosslinkProposal(_) => "clproposal",
+            Message::CrosslinkVote(_) => "clvote",
+            Message::CrosslinkDecided(_) => "cldecided",
+            Message::CrosslinkStatus(_) => "clstatus",
+            Message::CrosslinkSyncReq(_) => "clsyncreq",
+            Message::CrosslinkSyncResp(_) => "clsyncresp",
         }
     }
 }

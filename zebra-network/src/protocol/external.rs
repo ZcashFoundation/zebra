@@ -4,6 +4,8 @@
 mod addr;
 /// A Tokio codec that transforms an `AsyncRead` into a `Stream` of `Message`s.
 pub mod codec;
+/// Crosslink BFT consensus message types.
+pub mod crosslink;
 /// Inventory items.
 mod inv;
 /// An enum of all supported Bitcoin message types.

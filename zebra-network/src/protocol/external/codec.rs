@@ -156,6 +156,12 @@ impl Encoder<Message> for Codec {
             FilterLoad { .. } => b"filterload\0\0",
             FilterAdd { .. } => b"filteradd\0\0\0",
             FilterClear => b"filterclear\0",
+            CrosslinkProposal { .. } => b"clproposal\0\0",
+            CrosslinkVote { .. } => b"clvote\0\0\0\0\0\0",
+            CrosslinkDecided { .. } => b"cldecided\0\0\0",
+            CrosslinkStatus { .. } => b"clstatus\0\0\0\0",
+            CrosslinkSyncReq { .. } => b"clsyncreq\0\0\0",
+            CrosslinkSyncResp { .. } => b"clsyncresp\0\0",
         };
         trace!(?item, len = body_length);
 
@@ -316,6 +322,12 @@ impl Codec {
                 writer.write_all(data)?;
             }
             Message::FilterClear => { /* Empty payload -- no-op */ }
+            Message::CrosslinkProposal(p) => p.zcash_serialize(&mut writer)?,
+            Message::CrosslinkVote(v) => v.zcash_serialize(&mut writer)?,
+            Message::CrosslinkDecided(d) => d.zcash_serialize(&mut writer)?,
+            Message::CrosslinkStatus(s) => s.zcash_serialize(&mut writer)?,
+            Message::CrosslinkSyncReq(r) => r.zcash_serialize(&mut writer)?,
+            Message::CrosslinkSyncResp(r) => r.zcash_serialize(&mut writer)?,
         }
         Ok(())
     }
@@ -458,6 +470,12 @@ impl Decoder for Codec {
                     b"filterload\0\0" => self.read_filterload(&mut body_reader, body_len),
                     b"filteradd\0\0\0" => self.read_filteradd(&mut body_reader, body_len),
                     b"filterclear\0" => self.read_filterclear(&mut body_reader),
+                    b"clproposal\0\0" => self.read_crosslink_proposal(&mut body_reader),
+                    b"clvote\0\0\0\0\0\0" => self.read_crosslink_vote(&mut body_reader),
+                    b"cldecided\0\0\0" => self.read_crosslink_decided(&mut body_reader),
+                    b"clstatus\0\0\0\0" => self.read_crosslink_status(&mut body_reader),
+                    b"clsyncreq\0\0\0" => self.read_crosslink_sync_req(&mut body_reader),
+                    b"clsyncresp\0\0" => self.read_crosslink_sync_resp(&mut body_reader),
                     _ => {
                         let command_string = String::from_utf8_lossy(&command);
 
@@ -803,5 +821,49 @@ impl Codec {
         });
 
         result.expect("scope has already finished")
+    }
+
+    // -- Crosslink BFT message readers --
+
+    fn read_crosslink_proposal<R: Read>(&self, reader: R) -> Result<Message, Error> {
+        use super::crosslink::CrosslinkProposal;
+        Ok(Message::CrosslinkProposal(
+            CrosslinkProposal::zcash_deserialize(reader)?,
+        ))
+    }
+
+    fn read_crosslink_vote<R: Read>(&self, reader: R) -> Result<Message, Error> {
+        use super::crosslink::CrosslinkVote;
+        Ok(Message::CrosslinkVote(
+            CrosslinkVote::zcash_deserialize(reader)?,
+        ))
+    }
+
+    fn read_crosslink_decided<R: Read>(&self, reader: R) -> Result<Message, Error> {
+        use super::crosslink::CrosslinkDecided;
+        Ok(Message::CrosslinkDecided(
+            CrosslinkDecided::zcash_deserialize(reader)?,
+        ))
+    }
+
+    fn read_crosslink_status<R: Read>(&self, reader: R) -> Result<Message, Error> {
+        use super::crosslink::CrosslinkStatus;
+        Ok(Message::CrosslinkStatus(
+            CrosslinkStatus::zcash_deserialize(reader)?,
+        ))
+    }
+
+    fn read_crosslink_sync_req<R: Read>(&self, reader: R) -> Result<Message, Error> {
+        use super::crosslink::CrosslinkSyncRequest;
+        Ok(Message::CrosslinkSyncReq(
+            CrosslinkSyncRequest::zcash_deserialize(reader)?,
+        ))
+    }
+
+    fn read_crosslink_sync_resp<R: Read>(&self, reader: R) -> Result<Message, Error> {
+        use super::crosslink::CrosslinkSyncResponse;
+        Ok(Message::CrosslinkSyncResp(
+            CrosslinkSyncResponse::zcash_deserialize(reader)?,
+        ))
     }
 }

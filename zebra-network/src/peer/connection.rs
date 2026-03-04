@@ -1339,6 +1339,18 @@ where
             }
             .into(),
             Message::Mempool => Request::MempoolTransactionIds.into(),
+
+            // Crosslink BFT messages are logged and consumed for now.
+            // TODO: route these to the BFT consensus service once Phase 3 is implemented.
+            Message::CrosslinkProposal(_)
+            | Message::CrosslinkVote(_)
+            | Message::CrosslinkDecided(_)
+            | Message::CrosslinkStatus(_)
+            | Message::CrosslinkSyncReq(_)
+            | Message::CrosslinkSyncResp(_) => {
+                debug!(%msg, "got crosslink BFT message (not yet handled)");
+                Consumed
+            }
         };
 
         // Handle the request, and return unused messages.

@@ -20,9 +20,8 @@ members = [
         "zebra-node-services",
         "zebra-test",
         "zebra-utils",
-        "zebra-crosslink",
         "tower-batch-control",
-        "tower-fallback", "zebra-crosslink"
+        "tower-fallback"
 ]
 
 # Use the edition 2021 dependency resolver in the workspace, to match the crates
@@ -131,6 +130,8 @@ sha2 = "0.10"
 spandoc = "0.2"
 static_assertions = "1.1"
 structopt = "0.3"
+zerocopy = "0.8.25"
+zerocopy-derive = "0.8.25"
 syn = "2.0.100"
 tempfile = "3.20"
 thiserror = "2.0"

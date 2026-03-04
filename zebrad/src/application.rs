@@ -617,19 +617,6 @@ pub fn boot(app_cell: &'static AppCell<ZebradApp>) -> ! {
     let args =
         EntryPoint::process_cli_args(env::args_os().collect()).unwrap_or_else(|err| err.exit());
 
-    #[cfg(feature = "viz_gui")]
-    {
-        // TODO: gate behind feature-flag
-        // TODO: only open the visualization window for the `start` command.
-        // i.e.: can we move it to that code without major refactor to make compiler happy?
-        let tokio_root_thread_handle = std::thread::spawn(move || {
-            ZebradApp::run(app_cell, args);
-        });
-
-        zebra_crosslink::viz::main(Some(tokio_root_thread_handle));
-    }
-
-    #[cfg(not(feature = "viz_gui"))]
     ZebradApp::run(app_cell, args);
 
     process::exit(0);
