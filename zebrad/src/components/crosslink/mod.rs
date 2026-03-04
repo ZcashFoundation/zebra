@@ -36,20 +36,19 @@ use zebra_chain::block::{
 use zebra_node_services::mempool::{Request as MempoolRequest, Response as MempoolResponse};
 use zebra_state::{Request as StateRequest, Response as StateResponse};
 
-use std::sync::Mutex;
-use tokio::sync::Mutex as TokioMutex;
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
+use std::sync::{Mutex, OnceLock};
 
-pub static TEST_INSTR_C: Mutex<usize> = Mutex::new(0);
-pub static TEST_MODE: Mutex<bool> = Mutex::new(false);
-pub static TEST_FAILED: Mutex<i32> = Mutex::new(0);
+pub static TEST_INSTR_C: AtomicUsize = AtomicUsize::new(0);
+pub static TEST_MODE: AtomicBool = AtomicBool::new(false);
+pub static TEST_FAILED: AtomicI32 = AtomicI32::new(0);
 pub static TEST_FAILED_INSTR_IDXS: Mutex<Vec<usize>> = Mutex::new(Vec::new());
-pub static TEST_CHECK_ASSERT: Mutex<bool> = Mutex::new(false);
-pub static TEST_INSTR_PATH: Mutex<Option<std::path::PathBuf>> = Mutex::new(None);
-pub static TEST_INSTR_BYTES: Mutex<Vec<u8>> = Mutex::new(Vec::new());
-pub static TEST_INSTRS: Mutex<Vec<test_format::TFInstr>> = Mutex::new(Vec::new());
-pub static TEST_SHUTDOWN_FN: Mutex<fn()> = Mutex::new(|| ());
-pub static TEST_PARAMS: Mutex<Option<ZcashCrosslinkParameters>> = Mutex::new(None);
-pub static TEST_NAME: Mutex<&'static str> = Mutex::new("‰‰TEST_NAME_NOT_SET‰‰");
+pub static TEST_CHECK_ASSERT: AtomicBool = AtomicBool::new(false);
+pub static TEST_INSTR_PATH: OnceLock<std::path::PathBuf> = OnceLock::new();
+pub static TEST_INSTR_BYTES: OnceLock<Vec<u8>> = OnceLock::new();
+pub static TEST_INSTRS: OnceLock<Vec<test_format::TFInstr>> = OnceLock::new();
+pub static TEST_SHUTDOWN_FN: OnceLock<fn()> = OnceLock::new();
+pub static TEST_NAME: OnceLock<&'static str> = OnceLock::new();
 
 pub fn dump_test_instrs() {
     #![allow(clippy::print_stderr)]
@@ -62,13 +61,13 @@ pub fn dump_test_instrs() {
         );
     }
 
-    let done_instr_c = *TEST_INSTR_C.lock().unwrap();
+    let done_instr_c = TEST_INSTR_C.load(Ordering::Relaxed);
 
     let mut failed_instr_idx_i = 0;
-    let instrs_lock = TEST_INSTRS.lock().unwrap();
-    let instrs: &Vec<test_format::TFInstr> = instrs_lock.as_ref();
-    let bytes_lock = TEST_INSTR_BYTES.lock().unwrap();
-    let bytes = bytes_lock.as_ref();
+    let default_instrs = Vec::new();
+    let instrs = TEST_INSTRS.get().unwrap_or(&default_instrs);
+    let default_bytes = Vec::new();
+    let bytes = TEST_INSTR_BYTES.get().unwrap_or(&default_bytes);
     for instr_i in 0..instrs.len() {
         let col = if failed_instr_idx_i < failed_instr_idxs.len()
             && instr_i == failed_instr_idxs[failed_instr_idx_i]
@@ -612,7 +611,7 @@ pub fn run_tfl_test(internal_handle: TFLServiceHandle) {
     std::panic::set_hook(Box::new(|panic_info| {
         #[allow(clippy::print_stderr)]
         {
-            *TEST_FAILED.lock().unwrap() = -1;
+            TEST_FAILED.store(-1, Ordering::Relaxed);
 
             use std::backtrace::*;
             let bt = Backtrace::force_capture();
@@ -733,7 +732,7 @@ pub(crate) async fn tfl_service_main_loop(
     let config = internal_handle.config.clone();
     let params = &PROTOTYPE_PARAMETERS;
 
-    if *TEST_MODE.lock().unwrap() {
+    if TEST_MODE.load(Ordering::Relaxed) {
         run_tfl_test(internal_handle.clone());
     }
 

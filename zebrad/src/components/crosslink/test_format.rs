@@ -13,6 +13,8 @@ use zebra_state::{crosslink::*, Request as StateRequest, Response as StateRespon
 
 use ed25519_zebra::VerificationKeyBytes as MalPublicKey;
 
+use std::sync::atomic::Ordering;
+
 use super::{
     block_height_from_hash, tfl_block_finality_from_height_hash, TFLServiceInternal,
     TEST_CHECK_ASSERT, TEST_FAILED_INSTR_IDXS, TEST_INSTR_BYTES, TEST_INSTR_C, TEST_INSTR_PATH,
@@ -393,10 +395,10 @@ fn test_check(flags: u32, condition: bool, message: &str) {
     const SUCCESS_STRS: [&str; 2] = ["fail", "succeed"];
 
     if condition != should_succeed {
-        let test_instr_i = *TEST_INSTR_C.lock().unwrap();
+        let test_instr_i = TEST_INSTR_C.load(Ordering::Relaxed);
         TEST_FAILED_INSTR_IDXS.lock().unwrap().push(test_instr_i);
 
-        if *TEST_CHECK_ASSERT.lock().unwrap() {
+        if TEST_CHECK_ASSERT.load(Ordering::Relaxed) {
             panic!(
                 "test check should {} but actually {}ed, message:\n{}",
                 SUCCESS_STRS[should_succeed as usize],
@@ -596,7 +598,7 @@ pub async fn read_instrs(internal_handle: TFLServiceHandle, bytes: &[u8], instrs
             panic!("Failed to read {}", TFInstr::str_from_kind(instr_val.kind));
         }
 
-        *TEST_INSTR_C.lock().unwrap() = instr_i + 1;
+        TEST_INSTR_C.store(instr_i + 1, Ordering::Relaxed);
     }
 }
 
@@ -616,35 +618,39 @@ pub(crate) async fn instr_reader(internal_handle: TFLServiceHandle) {
     }
     println!("Starting test!");
 
-    if let Some(path) = TEST_INSTR_PATH.lock().unwrap().clone() {
-        *TEST_INSTR_BYTES.lock().unwrap() = match std::fs::read(&path) {
-            Ok(bytes) => bytes,
-            Err(err) => panic!("Invalid test file: {:?}: {}", path, err),
-        };
-    }
+    let bytes = TEST_INSTR_BYTES.get_or_init(|| {
+        if let Some(path) = TEST_INSTR_PATH.get() {
+            match std::fs::read(path) {
+                Ok(bytes) => bytes,
+                Err(err) => panic!("Invalid test file: {:?}: {}", path, err),
+            }
+        } else {
+            panic!("Neither TEST_INSTR_BYTES nor TEST_INSTR_PATH was set")
+        }
+    });
 
-    let bytes = TEST_INSTR_BYTES.lock().unwrap().clone();
-
-    let tf = match TF::read_from_bytes(&bytes) {
+    let tf = match TF::read_from_bytes(bytes) {
         Ok(tf) => tf,
         Err(err) => panic!("Invalid test data: {}", err),
     };
 
-    *TEST_INSTRS.lock().unwrap() = tf.instrs.clone();
+    let _ = TEST_INSTRS.set(tf.instrs.clone());
 
-    read_instrs(internal_handle, &bytes, &tf.instrs).await;
+    read_instrs(internal_handle, bytes, &tf.instrs).await;
 
     assert_eq!(
-        *TEST_INSTR_C.lock().unwrap(),
+        TEST_INSTR_C.load(Ordering::Relaxed),
         tf.instrs.len(),
         "didn't complete test {}",
-        TEST_NAME.lock().unwrap()
+        TEST_NAME.get().copied().unwrap_or("‰‰TEST_NAME_NOT_SET‰‰")
     );
     assert!(
         TEST_FAILED_INSTR_IDXS.lock().unwrap().is_empty(),
         "failed test {}",
-        TEST_NAME.lock().unwrap()
+        TEST_NAME.get().copied().unwrap_or("‰‰TEST_NAME_NOT_SET‰‰")
     );
     println!("Test done, shutting down");
-    TEST_SHUTDOWN_FN.lock().unwrap()();
+    if let Some(shutdown_fn) = TEST_SHUTDOWN_FN.get() {
+        shutdown_fn();
+    }
 }

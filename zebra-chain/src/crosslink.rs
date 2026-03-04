@@ -30,7 +30,8 @@ pub fn bft_value_id_hash_key() -> [u8; 32] {
 ///
 /// The existing test data was generated with the unkeyed hasher.
 /// TODO: Regenerate test data with the keyed hasher and remove this flag.
-pub static BFT_HASH_USE_UNKEYED: std::sync::Mutex<bool> = std::sync::Mutex::new(false);
+pub static BFT_HASH_USE_UNKEYED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 /// The BFT block content for Crosslink.
 ///
@@ -173,7 +174,7 @@ impl BftBlock {
 
 impl<'a> From<&'a BftBlock> for Blake3Hash {
     fn from(block: &'a BftBlock) -> Self {
-        let mut hash_writer = if *BFT_HASH_USE_UNKEYED.lock().unwrap() {
+        let mut hash_writer = if BFT_HASH_USE_UNKEYED.load(std::sync::atomic::Ordering::Relaxed) {
             // Test data was generated with the unkeyed hasher.
             // TODO: Regenerate test data with the keyed hasher and remove this branch.
             blake3::Hasher::new()

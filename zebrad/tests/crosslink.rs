@@ -43,7 +43,7 @@ macro_rules! function_name {
 
 /// Set the global state TEST_NAME
 pub fn set_test_name(name: &'static str) {
-    *zebrad::components::crosslink::TEST_NAME.lock().unwrap() = name;
+    let _ = zebrad::components::crosslink::TEST_NAME.set(name);
 }
 
 /// Crosslink Test entrypoint
@@ -59,13 +59,16 @@ pub fn test_start() {
 
             Some(std::sync::Arc::new(base))
         };
-        *zebrad::components::crosslink::TEST_MODE.lock().unwrap() = true;
-        *zebra_chain::crosslink::BFT_HASH_USE_UNKEYED.lock().unwrap() = true;
-        *zebrad::components::crosslink::TEST_SHUTDOWN_FN.lock().unwrap() = || {
+        zebrad::components::crosslink::TEST_MODE.store(true, std::sync::atomic::Ordering::Relaxed);
+        zebra_chain::crosslink::BFT_HASH_USE_UNKEYED
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        let _ = zebrad::components::crosslink::TEST_SHUTDOWN_FN.set(|| {
             zebrad::components::crosslink::dump_test_instrs();
-            // APPLICATION.shutdown(abscissa_core::Shutdown::Graceful);
-            std::process::exit(*zebrad::components::crosslink::TEST_FAILED.lock().unwrap());
-        }
+            std::process::exit(
+                zebrad::components::crosslink::TEST_FAILED
+                    .load(std::sync::atomic::Ordering::Relaxed),
+            );
+        });
     }
 
     use zebrad::application::{ZebradApp, APPLICATION};
@@ -84,13 +87,13 @@ pub fn test_start() {
 
 /// Run a Crosslink Test from a dynamic byte array.
 pub fn test_bytes(bytes: Vec<u8>) {
-    *zebrad::components::crosslink::TEST_INSTR_BYTES.lock().unwrap() = bytes;
+    let _ = zebrad::components::crosslink::TEST_INSTR_BYTES.set(bytes);
     test_start();
 }
 
 /// Run a Crosslink Test from a file path.
 pub fn test_path(path: PathBuf) {
-    *zebrad::components::crosslink::TEST_INSTR_PATH.lock().unwrap() = Some(path);
+    let _ = zebrad::components::crosslink::TEST_INSTR_PATH.set(path);
     test_start();
 }
 

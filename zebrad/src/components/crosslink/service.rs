@@ -145,11 +145,11 @@ pub fn spawn_new_tfl_service(
         current_bc_final: None,
     }));
 
-    let handle_mtx = Arc::new(std::sync::Mutex::new(None));
+    let handle_once: Arc<std::sync::OnceLock<TFLServiceHandle>> = Arc::new(std::sync::OnceLock::new());
 
-    let handle_mtx2 = handle_mtx.clone();
+    let handle_once2 = handle_once.clone();
     let force_feed_pos: ForceFeedPoSBlockProcedure = Arc::new(move |block, fat_pointer| {
-        let handle = handle_mtx2.lock().unwrap().clone().unwrap();
+        let handle = handle_once2.get().expect("TFLServiceHandle not yet initialized").clone();
         Box::pin(async move {
             let fp_hash = fat_pointer.points_at_blake3_hash();
             let block_hash = block.blake3_hash();
@@ -179,7 +179,7 @@ pub fn spawn_new_tfl_service(
         config,
     };
 
-    *handle_mtx.lock().unwrap() = Some(handle1.clone());
+    let _ = handle_once.set(handle1.clone());
 
     let handle2 = handle1.clone();
 
