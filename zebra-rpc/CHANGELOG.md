@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- Python QA RPC test framework folder.
+
 ### Added
 
 - Added `get_tx_out` method and `OutputObject` response. ([#10235](https://github.com/ZcashFoundation/zebra/pull/10235))
