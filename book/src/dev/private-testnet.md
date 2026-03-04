@@ -1,7 +1,7 @@
 # Private Testnet Test
 
 The objective of a private Testnet test is to test Testnet activation of an upcoming
-network upgrade in an isolated fashion, before the actual Testnet activation. 
+network upgrade in an isolated fashion, before the actual Testnet activation.
 It is usually done using the current state of the existing Testnet. For NU6, it was done
 by ZF and ECC engineers over a call.
 
@@ -69,7 +69,6 @@ And monitor logs for behaviour.
 Do tests, including sending transactions if possible (which will require the
 lightwalletd server). Check if whatever activated in the upgrade works.
 
-
 ## Zebra
 
 Relevant information about Zebra for the testing process.
@@ -87,7 +86,6 @@ testnet test.
 Zebra redacts IPs when logging for privacy reasons. However, for a test like
 this it can be annoying. You can disable that by editing `peer_addr.rs`
 with something like
-
 
 ```diff
 --- a/zebra-network/src/meta_addr/peer_addr.rs
@@ -107,7 +105,7 @@ with something like
 Note: Zebra's db path will end in "unknowntestnet" instead of "testnet" with
 this configuration.
 
-```
+```toml
 [consensus]
 checkpoint_sync = true
 

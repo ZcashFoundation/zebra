@@ -174,10 +174,12 @@ S::Future: Send + 'static,
 
 - Use `thiserror` with `#[from]` / `#[source]` for error chaining
 - `expect()` messages must explain **why** the invariant holds, not what happens if it fails:
+
   ```rust
   .expect("block hash exists because we just inserted it")  // good
   .expect("failed to get block")                            // bad
   ```
+
 - Don't turn invariant violations into misleading `None`/default values
 
 ### Numeric Safety

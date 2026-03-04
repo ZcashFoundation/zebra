@@ -1,4 +1,6 @@
-```
+# Zebra Network Architecture
+
+```text
   ┌───────────┐     ┌───────────┐     ┌───────────┐     ┌───────────┐
   │PeerServer │     │PeerServer │     │PeerServer │     │PeerServer │
   │ ┌───────┐ │     │ ┌───────┐ │     │ ┌───────┐ │     │ ┌───────┐ │
