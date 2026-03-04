@@ -1173,3 +1173,232 @@ impl FromHex for SerializedTransaction {
         Ok(bytes.into())
     }
 }
+
+// Tachyon Bundle serialization implementations
+impl<S, V> ZcashSerialize for Option<zcash_tachyon::Bundle<S, V>>
+where 
+    S: ZcashSerialize,
+    V: ZcashSerialize,
+    zcash_tachyon::Bundle<S, V>: ZcashSerialize,
+{
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        match self {
+            None => {
+                // Denoted as `nActionsTachyon` in the spec (not yet finalized)
+                zcash_serialize_empty_list(writer)?;
+            }
+            Some(tachyon_bundle) => {
+                tachyon_bundle.zcash_serialize(&mut writer)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl<S, V> ZcashSerialize for zcash_tachyon::Bundle<S, V>
+where
+    S: ZcashSerialize,
+    V: ZcashSerialize,
+{
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        // Denoted as `nActionsTachyon` and `vActionsTachyon` in the spec
+        self.actions.zcash_serialize(&mut writer)?;
+        
+        // Denoted as `valueBalanceTachyon` in the spec
+        self.value_balance.zcash_serialize(&mut writer)?;
+        
+        // Denoted as `bindingSigTachyon` in the spec
+        self.binding_sig.zcash_serialize(&mut writer)?;
+        
+        // Denoted as stamp data (stamp present or stripped)
+        self.stamp.zcash_serialize(&mut writer)?;
+        
+        Ok(())
+    }
+}
+
+impl<S, V> ZcashDeserialize for Option<zcash_tachyon::Bundle<S, V>>
+where
+    S: ZcashDeserialize,
+    V: ZcashDeserialize,
+    zcash_tachyon::Bundle<S, V>: ZcashDeserialize,
+{
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        // Read actions count to determine if bundle is present
+        let actions: Vec<zcash_tachyon::Action> = (&mut reader).zcash_deserialize_into()?;
+        
+        if actions.is_empty() {
+            return Ok(None);
+        }
+
+        // Read remaining bundle fields
+        let value_balance: V = (&mut reader).zcash_deserialize_into()?;
+        let binding_sig = (&mut reader).zcash_deserialize_into()?;
+        let stamp: S = (&mut reader).zcash_deserialize_into()?;
+
+        Ok(Some(zcash_tachyon::Bundle {
+            actions,
+            value_balance,
+            binding_sig,
+            stamp,
+        }))
+    }
+}
+
+// Individual tachyon component serializations
+impl ZcashSerialize for zcash_tachyon::Action {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        // Serialize cv (value commitment)
+        self.cv.zcash_serialize(&mut writer)?;
+        // Serialize rk (randomized verification key) 
+        self.rk.zcash_serialize(&mut writer)?;
+        // Serialize sig (spend auth signature)
+        self.sig.zcash_serialize(&mut writer)?;
+        Ok(())
+    }
+}
+
+impl ZcashDeserialize for zcash_tachyon::Action {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let cv = (&mut reader).zcash_deserialize_into()?;
+        let rk = (&mut reader).zcash_deserialize_into()?;
+        let sig = (&mut reader).zcash_deserialize_into()?;
+        
+        Ok(zcash_tachyon::Action { cv, rk, sig })
+    }
+}
+
+impl ZcashSerialize for zcash_tachyon::Stamp {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        // Serialize tachygrams list
+        self.tachygrams.zcash_serialize(&mut writer)?;
+        // Serialize anchor
+        self.anchor.zcash_serialize(&mut writer)?;
+        // Serialize proof
+        self.proof.zcash_serialize(&mut writer)?;
+        Ok(())
+    }
+}
+
+impl ZcashDeserialize for zcash_tachyon::Stamp {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let tachygrams = (&mut reader).zcash_deserialize_into()?;
+        let anchor = (&mut reader).zcash_deserialize_into()?;
+        let proof = (&mut reader).zcash_deserialize_into()?;
+        
+        Ok(zcash_tachyon::Stamp {
+            tachygrams,
+            anchor,
+            proof,
+        })
+    }
+}
+
+impl ZcashSerialize for zcash_tachyon::stamp::Stampless {
+    fn zcash_serialize<W: io::Write>(&self, _writer: W) -> Result<(), io::Error> {
+        // Stampless is a zero-sized marker type, nothing to serialize
+        Ok(())
+    }
+}
+
+impl ZcashDeserialize for zcash_tachyon::stamp::Stampless {
+    fn zcash_deserialize<R: io::Read>(_reader: R) -> Result<Self, SerializationError> {
+        // Stampless is a zero-sized marker type, nothing to deserialize
+        Ok(zcash_tachyon::stamp::Stampless)
+    }
+}
+
+// Individual primitive serializations
+impl ZcashSerialize for zcash_tachyon::primitives::Tachygram {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        use ff::PrimeField;
+        let fp: pasta_curves::Fp = (*self).into();
+        let bytes = fp.to_repr();
+        writer.write_all(&bytes)
+    }
+}
+
+impl ZcashDeserialize for zcash_tachyon::primitives::Tachygram {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        use ff::PrimeField;
+        let bytes = reader.read_32_bytes()?;
+        let fp_option = pasta_curves::Fp::from_repr(bytes);
+        if fp_option.is_some().into() {
+            Ok(fp_option.unwrap().into())
+        } else {
+            Err(SerializationError::Parse("invalid tachygram field element"))
+        }
+    }
+}
+
+impl ZcashSerialize for zcash_tachyon::primitives::Anchor {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        use ff::PrimeField;
+        let fp: pasta_curves::Fp = (*self).into();
+        let bytes = fp.to_repr();
+        writer.write_all(&bytes)
+    }
+}
+
+impl ZcashDeserialize for zcash_tachyon::primitives::Anchor {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        use ff::PrimeField;
+        let bytes = reader.read_32_bytes()?;
+        let fp_option = pasta_curves::Fp::from_repr(bytes);
+        if fp_option.is_some().into() {
+            Ok(fp_option.unwrap().into())
+        } else {
+            Err(SerializationError::Parse("invalid anchor field element"))
+        }
+    }
+}
+
+impl ZcashSerialize for zcash_tachyon::Proof {
+    fn zcash_serialize<W: io::Write>(&self, _writer: W) -> Result<(), io::Error> {
+        // Proof is currently a stub, no serialization needed yet
+        Ok(())
+    }
+}
+
+impl ZcashDeserialize for zcash_tachyon::Proof {
+    fn zcash_deserialize<R: io::Read>(_reader: R) -> Result<Self, SerializationError> {
+        // Proof is currently a stub, no deserialization needed yet  
+        Ok(zcash_tachyon::Proof)
+    }
+}
+
+impl ZcashSerialize for zcash_tachyon::value::Commitment {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        use group::GroupEncoding;
+        let point: pasta_curves::EpAffine = (*self).into(); 
+        let bytes = point.to_bytes();
+        writer.write_all(&bytes)
+    }
+}
+
+impl ZcashDeserialize for zcash_tachyon::value::Commitment {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        use group::GroupEncoding;
+        let bytes = reader.read_32_bytes()?;
+        let point_option = pasta_curves::EpAffine::from_bytes(&bytes);
+        if point_option.is_some().into() {
+            Ok(point_option.unwrap().into())
+        } else {
+            Err(SerializationError::Parse("invalid value commitment point"))
+        }
+    }
+}
+
+impl ZcashSerialize for zcash_tachyon::keys::public::ActionVerificationKey {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        let bytes: [u8; 32] = (*self).into();
+        writer.write_all(&bytes)
+    }
+}
+
+impl ZcashDeserialize for zcash_tachyon::keys::public::ActionVerificationKey {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let bytes = reader.read_32_bytes()?;
+        Self::try_from(bytes).map_err(|_| SerializationError::Parse("invalid action verification key"))
+    }
+}
