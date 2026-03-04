@@ -749,10 +749,13 @@ where
 
         let inputs = tx.inputs();
         let mut spent_utxos = HashMap::new();
-        let mut spent_outputs = Vec::new();
-        let mut spent_mempool_outpoints = Vec::new();
+        // Pre-allocate with None so we can fill each slot by input index, preserving input order
+        // even when chain and mempool UTXOs are fetched in separate passes.
+        let mut spent_outputs: Vec<Option<transparent::Output>> = vec![None; inputs.len()];
+        // Stores (input_idx, outpoint) for UTXOs not found in the best chain (fetched from mempool later).
+        let mut spent_mempool_outpoints: Vec<(usize, transparent::OutPoint)> = Vec::new();
 
-        for input in inputs {
+        for (input_idx, input) in inputs.iter().enumerate() {
             if let transparent::Input::PrevOut { outpoint, .. } = input {
                 tracing::trace!("awaiting outpoint lookup");
                 let utxo = if let Some(output) = known_utxos.get(outpoint) {
@@ -771,7 +774,7 @@ where
                     };
 
                     let Some(utxo) = utxo else {
-                        spent_mempool_outpoints.push(*outpoint);
+                        spent_mempool_outpoints.push((input_idx, *outpoint));
                         continue;
                     };
 
@@ -787,7 +790,7 @@ where
                     }
                 };
                 tracing::trace!(?utxo, "got UTXO");
-                spent_outputs.push(utxo.output.clone());
+                spent_outputs[input_idx] = Some(utxo.output.clone());
                 spent_utxos.insert(*outpoint, utxo);
             } else {
                 continue;
@@ -795,7 +798,7 @@ where
         }
 
         if let Some(mempool) = mempool {
-            for &spent_mempool_outpoint in &spent_mempool_outpoints {
+            for &(input_idx, spent_mempool_outpoint) in &spent_mempool_outpoints {
                 let query = mempool
                     .clone()
                     .oneshot(mempool::Request::AwaitOutput(spent_mempool_outpoint));
@@ -811,7 +814,7 @@ where
                     }
                 };
 
-                spent_outputs.push(output.clone());
+                spent_outputs[input_idx] = Some(output.clone());
                 spent_utxos.insert(
                     spent_mempool_outpoint,
                     // Assume the Utxo height will be next height after the best chain tip height
@@ -826,6 +829,13 @@ where
         } else if !spent_mempool_outpoints.is_empty() {
             return Err(TransactionError::TransparentInputNotFound);
         }
+
+        // Convert back to return types; slots are in input order.
+        let spent_outputs: Vec<transparent::Output> = spent_outputs.into_iter().flatten().collect();
+        let spent_mempool_outpoints: Vec<transparent::OutPoint> = spent_mempool_outpoints
+            .into_iter()
+            .map(|(_, op)| op)
+            .collect();
 
         Ok((spent_utxos, spent_outputs, spent_mempool_outpoints))
     }
