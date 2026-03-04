@@ -171,6 +171,8 @@ pub enum Transaction {
         sapling_shielded_data: Option<sapling::ShieldedData<sapling::SharedAnchor>>,
         /// The orchard data for this transaction, if any.
         orchard_shielded_data: Option<orchard::ShieldedData>,
+        /// The tachyon data for this transaction, if any.
+        tachyon_shielded_data: Option<zcash_tachyon::Bundle<Option<zcash_tachyon::Stamp>, Amount>>,
     },
 }
 

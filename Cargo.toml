@@ -22,6 +22,7 @@ resolver = "2"
 [workspace.dependencies]
 incrementalmerkletree = { version = "0.8.2", features = ["legacy-api"] }
 orchard = "0.12"
+zcash_tachyon = {path = "../tachyon/crates/tachyon"}
 sapling-crypto = "0.6"
 zcash_address = {path = "../librustzcash/components/zcash_address"}
 zcash_encoding = {path = "../librustzcash/components/zcash_encoding"}
