@@ -218,7 +218,7 @@ fn write_backup_block(backup_dir_path: &Path, block: &ContextuallyVerifiedBlock)
 ///
 /// Returns any blocks that are valid and not present in the finalized state.
 fn read_non_finalized_blocks_from_backup<'a>(
-    backup_dir_path: &PathBuf,
+    backup_dir_path: &Path,
     finalized_state: &'a ZebraDb,
 ) -> impl Iterator<Item = SemanticallyVerifiedBlock> + 'a {
     list_backup_dir_entries(backup_dir_path)
@@ -277,7 +277,7 @@ fn read_non_finalized_blocks_from_backup<'a>(
 /// If the provided path cannot be opened as a directory.
 /// See [`read_backup_dir`] for more details.
 pub(super) fn list_backup_dir_entries(
-    backup_dir_path: &PathBuf,
+    backup_dir_path: &Path,
 ) -> impl Iterator<Item = (block::Hash, PathBuf)> {
     read_backup_dir(backup_dir_path).filter_map(process_backup_dir_entry)
 }
@@ -289,7 +289,7 @@ pub(super) fn list_backup_dir_entries(
 /// # Panics
 ///
 /// If the provided path cannot be opened as a directory.
-fn read_backup_dir(backup_dir_path: &PathBuf) -> impl Iterator<Item = DirEntry> {
+fn read_backup_dir(backup_dir_path: &Path) -> impl Iterator<Item = DirEntry> {
     std::fs::read_dir(backup_dir_path)
         .expect("failed to read non-finalized state backup directory")
         .filter_map(|entry| match entry {

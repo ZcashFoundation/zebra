@@ -138,7 +138,7 @@ impl NonFinalizedState {
     /// This method performs blocking I/O and should only be called from a blocking context.
     pub(crate) fn write_to_backup(&self, backup_dir_path: &Path) {
         let backup_blocks: HashMap<block::Hash, PathBuf> =
-            backup::list_backup_dir_entries(&backup_dir_path.to_path_buf()).collect();
+            backup::list_backup_dir_entries(backup_dir_path).collect();
         backup::update_non_finalized_state_backup(backup_dir_path, self, backup_blocks);
     }
 
@@ -171,11 +171,17 @@ impl NonFinalizedState {
             return with_watch_channel(self);
         };
 
-        tracing::info!(
-            ?backup_dir_path,
-            skip_backup_task,
-            "restoring non-finalized blocks from backup and spawning backup task"
-        );
+        if skip_backup_task {
+            tracing::info!(
+                ?backup_dir_path,
+                "restoring non-finalized blocks from backup (sync write mode, backup task skipped)"
+            );
+        } else {
+            tracing::info!(
+                ?backup_dir_path,
+                "restoring non-finalized blocks from backup and spawning backup task"
+            );
+        }
 
         let non_finalized_state = {
             let backup_dir_path = backup_dir_path.clone();

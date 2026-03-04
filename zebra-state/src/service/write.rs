@@ -1,6 +1,9 @@
 //! Writing blocks to the finalized and non-finalized states.
 
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use indexmap::IndexMap;
 use tokio::sync::{
@@ -96,7 +99,7 @@ fn update_latest_chain_channels(
     chain_tip_sender: &mut ChainTipSender,
     non_finalized_state_sender: &watch::Sender<NonFinalizedState>,
     last_zebra_mined_log_height: &mut Option<Height>,
-    backup_dir_path: Option<&PathBuf>,
+    backup_dir_path: Option<&Path>,
 ) -> block::Height {
     let best_chain = non_finalized_state.best_chain().expect("unexpected empty non-finalized state: must commit at least one block before updating channels");
 
@@ -370,7 +373,7 @@ impl WriteBlockWorkerTask {
                     chain_tip_sender,
                     non_finalized_state_sender,
                     &mut last_zebra_mined_log_height,
-                    backup_dir_path.as_ref(),
+                    backup_dir_path.as_deref(),
                 );
                 continue;
             };
@@ -427,7 +430,7 @@ impl WriteBlockWorkerTask {
                 chain_tip_sender,
                 non_finalized_state_sender,
                 &mut last_zebra_mined_log_height,
-                backup_dir_path.as_ref(),
+                backup_dir_path.as_deref(),
             );
 
             // Update the caller with the result.
