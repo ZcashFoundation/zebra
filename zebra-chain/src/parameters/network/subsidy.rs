@@ -478,11 +478,13 @@ pub fn block_subsidy(height: Height, net: &Network) -> Result<Amount<NonNegative
 ///
 /// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 pub fn miner_subsidy(
+    height: Height,
+    network: &Network,
     expected_block_subsidy: Amount<NonNegative>,
-    founders_reward: Amount<NonNegative>,
-    funding_streams: &HashMap<FundingStreamReceiver, Amount<NonNegative>>,
 ) -> Result<Amount<NonNegative>, amount::Error> {
-    let funding_streams_sum = funding_streams
+    let founders_reward = founders_reward(network, height);
+
+    let funding_streams_sum = funding_stream_values(height, network, expected_block_subsidy)?
         .values()
         .sum::<Result<Amount<NonNegative>, _>>()?;
 
@@ -531,7 +533,12 @@ pub fn founders_reward_address(net: &Network, height: Height) -> Option<transpar
 ///
 /// [§7.8]: <https://zips.z.cash/protocol/protocol.pdf#subsidies>
 pub fn founders_reward(net: &Network, height: Height) -> Amount<NonNegative> {
-    if halving(height, net) < 1 {
+    // The founders reward is 20% of the block subsidy before the first halving, and 0 afterwards.
+    //
+    // On custom testnets, the first halving can occur later than Canopy, which causes an
+    // inconsistency in the definition of the founders reward, which should occur only before
+    // Canopy, so we check if Canopy is active as well.
+    if halving(height, net) < 1 && NetworkUpgrade::current(net, height) < NetworkUpgrade::Canopy {
         block_subsidy(height, net)
             .map(|subsidy| subsidy.div_exact(5))
             .expect("block subsidy must be valid for founders rewards")

@@ -29,10 +29,7 @@ use zebra_chain::{
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     parameters::{
-        subsidy::{
-            block_subsidy, founders_reward, funding_stream_values, miner_subsidy,
-            FundingStreamReceiver,
-        },
+        subsidy::{block_subsidy, funding_stream_values, miner_subsidy, FundingStreamReceiver},
         Network, NetworkUpgrade,
     },
     serialization::{DateTime32, ZcashDeserializeInto},
@@ -870,9 +867,8 @@ pub fn standard_coinbase_outputs(
     let expected_block_subsidy = block_subsidy(height, network).expect("valid block subsidy");
     let funding_streams = funding_stream_values(height, network, expected_block_subsidy)
         .expect("funding stream value calculations are valid for reasonable chain heights");
-    let founders_reward = founders_reward(network, height);
 
-    let miner_reward = miner_subsidy(expected_block_subsidy, founders_reward, &funding_streams)
+    let miner_reward = miner_subsidy(height, network, expected_block_subsidy)
         .expect("reward calculations are valid for reasonable chain heights")
         + miner_fee;
     let miner_reward =
