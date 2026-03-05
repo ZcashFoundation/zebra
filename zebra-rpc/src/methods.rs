@@ -2772,15 +2772,13 @@ where
         };
 
         let subsidy = block_subsidy(height, &net).map_misc_error()?;
-        let funding_streams = funding_stream_values(height, &net, subsidy).map_misc_error()?;
-        let founders_reward = founders_reward(&net, height);
-        let miner_subsidy =
-            miner_subsidy(subsidy, founders_reward, &funding_streams).map_misc_error()?;
 
-        let (lockbox_streams, mut funding_streams): (Vec<_>, Vec<_>) = funding_streams
-            .into_iter()
-            // Separate the funding streams into deferred and non-deferred streams
-            .partition(|(receiver, _)| matches!(receiver, FundingStreamReceiver::Deferred));
+        let (lockbox_streams, mut funding_streams): (Vec<_>, Vec<_>) =
+            funding_stream_values(height, &net, subsidy)
+                .map_misc_error()?
+                .into_iter()
+                // Separate the funding streams into deferred and non-deferred streams
+                .partition(|(receiver, _)| matches!(receiver, FundingStreamReceiver::Deferred));
 
         let [lockbox_total, funding_streams_total] =
             [&lockbox_streams, &funding_streams].map(|streams| {
@@ -2816,8 +2814,10 @@ where
             });
 
         Ok(GetBlockSubsidyResponse {
-            miner: miner_subsidy.into(),
-            founders: founders_reward.into(),
+            miner: miner_subsidy(height, &net, subsidy)
+                .map_misc_error()?
+                .into(),
+            founders: founders_reward(&net, height).into(),
             funding_streams,
             lockbox_streams,
             funding_streams_total: funding_streams_total?,
