@@ -168,7 +168,7 @@ uint = "0.10"
 vergen-git2 = { version = "9", default-features = false }
 x25519-dalek = "2.0.1"
 zcash_note_encryption = "0.4.1"
-zcash_script = "0.4.2"
+zcash_script = "0.4.3"
 config = { version = "0.15.14", features = ["toml"] }
 which = "8.0.0"
 

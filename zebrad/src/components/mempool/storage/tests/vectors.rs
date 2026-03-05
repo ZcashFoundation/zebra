@@ -13,6 +13,8 @@ use zebra_chain::{
     parameters::Network,
 };
 
+use zebra_chain::transparent;
+
 use crate::components::mempool::{storage::*, Mempool};
 
 /// Eviction memory time used for tests. Most tests won't care about this
@@ -275,6 +277,7 @@ fn mempool_expired_basic_for_network(network: Network) -> Result<()> {
             tx.into(),
             Amount::try_from(1_000_000).expect("valid amount"),
             0,
+            std::sync::Arc::new(vec![]),
         )
         .expect("verification should pass"),
         Vec::new(),
@@ -400,4 +403,78 @@ fn mempool_removes_dependent_transactions() -> Result<()> {
     );
 
     Ok(())
+}
+
+// ---- Policy function unit tests ----
+
+/// Build a P2PKH lock script: OP_DUP OP_HASH160 <20-byte hash> OP_EQUALVERIFY OP_CHECKSIG
+fn p2pkh_script(hash: &[u8; 20]) -> transparent::Script {
+    let mut s = vec![0x76, 0xa9, 0x14];
+    s.extend_from_slice(hash);
+    s.push(0x88);
+    s.push(0xac);
+    transparent::Script::new(&s)
+}
+
+/// Build a P2SH lock script: OP_HASH160 <20-byte hash> OP_EQUAL
+fn p2sh_lock_script(hash: &[u8; 20]) -> transparent::Script {
+    let mut s = vec![0xa9, 0x14];
+    s.extend_from_slice(hash);
+    s.push(0x87);
+    transparent::Script::new(&s)
+}
+
+#[test]
+fn standard_script_kind_classifies_p2pkh() {
+    let _init_guard = zebra_test::init();
+    let script = p2pkh_script(&[0xaa; 20]);
+    let kind = super::super::policy::standard_script_kind(&script);
+    assert!(
+        matches!(
+            kind,
+            Some(zcash_script::solver::ScriptKind::PubKeyHash { .. })
+        ),
+        "P2PKH script should be classified as PubKeyHash"
+    );
+}
+
+#[test]
+fn standard_script_kind_classifies_p2sh() {
+    let _init_guard = zebra_test::init();
+    let script = p2sh_lock_script(&[0xbb; 20]);
+    let kind = super::super::policy::standard_script_kind(&script);
+    assert!(
+        matches!(
+            kind,
+            Some(zcash_script::solver::ScriptKind::ScriptHash { .. })
+        ),
+        "P2SH script should be classified as ScriptHash"
+    );
+}
+
+#[test]
+fn standard_script_kind_classifies_op_return() {
+    let _init_guard = zebra_test::init();
+    // OP_RETURN followed by data
+    let script = transparent::Script::new(&[0x6a, 0x04, 0xde, 0xad, 0xbe, 0xef]);
+    let kind = super::super::policy::standard_script_kind(&script);
+    assert!(
+        matches!(
+            kind,
+            Some(zcash_script::solver::ScriptKind::NullData { .. })
+        ),
+        "OP_RETURN script should be classified as NullData"
+    );
+}
+
+#[test]
+fn standard_script_kind_rejects_nonstandard() {
+    let _init_guard = zebra_test::init();
+    // Random garbage bytes should not be a standard script
+    let script = transparent::Script::new(&[0xff, 0xfe, 0xfd]);
+    let kind = super::super::policy::standard_script_kind(&script);
+    assert!(
+        kind.is_none(),
+        "non-standard script should be classified as None"
+    );
 }

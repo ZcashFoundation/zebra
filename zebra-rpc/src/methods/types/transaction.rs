@@ -95,7 +95,7 @@ impl From<&VerifiedUnminedTx> for TransactionTemplate<NonNegative> {
 
             fee: tx.miner_fee,
 
-            sigops: tx.sigops,
+            sigops: tx.legacy_sigop_count,
 
             // Zebra does not require any transactions except the coinbase transaction.
             required: false,
