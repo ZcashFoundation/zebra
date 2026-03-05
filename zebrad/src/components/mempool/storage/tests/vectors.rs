@@ -407,8 +407,11 @@ fn mempool_removes_dependent_transactions() -> Result<()> {
 
 // ---- Policy function unit tests ----
 
+// Note: p2pkh_lock_script and p2sh_lock_script are intentionally duplicated from
+// policy::tests because Rust's #[cfg(test)] module boundaries prevent sharing.
+
 /// Build a P2PKH lock script: OP_DUP OP_HASH160 <20-byte hash> OP_EQUALVERIFY OP_CHECKSIG
-fn p2pkh_script(hash: &[u8; 20]) -> transparent::Script {
+fn p2pkh_lock_script(hash: &[u8; 20]) -> transparent::Script {
     let mut s = vec![0x76, 0xa9, 0x14];
     s.extend_from_slice(hash);
     s.push(0x88);
@@ -427,7 +430,7 @@ fn p2sh_lock_script(hash: &[u8; 20]) -> transparent::Script {
 #[test]
 fn standard_script_kind_classifies_p2pkh() {
     let _init_guard = zebra_test::init();
-    let script = p2pkh_script(&[0xaa; 20]);
+    let script = p2pkh_lock_script(&[0xaa; 20]);
     let kind = super::super::policy::standard_script_kind(&script);
     assert!(
         matches!(
@@ -464,6 +467,29 @@ fn standard_script_kind_classifies_op_return() {
             Some(zcash_script::solver::ScriptKind::NullData { .. })
         ),
         "OP_RETURN script should be classified as NullData"
+    );
+}
+
+/// Build a P2PK lock script: <33-byte compressed pubkey> OP_CHECKSIG
+fn p2pk_lock_script(pubkey: &[u8; 33]) -> transparent::Script {
+    let mut s = Vec::with_capacity(1 + 33 + 1);
+    s.push(0x21); // OP_PUSHBYTES_33
+    s.extend_from_slice(pubkey);
+    s.push(0xac); // OP_CHECKSIG
+    transparent::Script::new(&s)
+}
+
+#[test]
+fn standard_script_kind_classifies_p2pk() {
+    let _init_guard = zebra_test::init();
+    // Compressed pubkey starts with 0x02 or 0x03
+    let mut pubkey = [0x02; 33];
+    pubkey[1..].fill(0xaa);
+    let script = p2pk_lock_script(&pubkey);
+    let kind = super::super::policy::standard_script_kind(&script);
+    assert!(
+        matches!(kind, Some(zcash_script::solver::ScriptKind::PubKey { .. })),
+        "P2PK script should be classified as PubKey"
     );
 }
 
