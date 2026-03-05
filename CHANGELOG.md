@@ -13,6 +13,10 @@ This release adds the `gettxout` RPC method.
 
 - Added `UnspentOutput` to mempool component service ([#10235](https://github.com/ZcashFoundation/zebra/pull/10235))
 
+### Removed
+
+- Removed the Python QA RPC test framework (`zebra-rpc/qa/`) in favour of the new [integration-tests](https://github.com/zcash/integration-tests) project, which captures all previous work in [zcash/integration-tests#1](https://github.com/zcash/integration-tests/pull/1) ([#10363](https://github.com/ZcashFoundation/zebra/pull/10363))
+
 ## [Zebra 4.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v4.1.0) - 2026-02-05
 
 This release has no breaking changes for node operators. It expands Zebra's
