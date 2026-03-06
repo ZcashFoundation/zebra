@@ -196,7 +196,6 @@ impl DiskFormatUpgrade for AddHistoryNodes {
         }
         
         let height = tip_height_option.expect("Tip height must exist here");
-        let upgrades_with_history = upgrades_with_history(zebra_db);
 
         // Iterate through all blocks from Heartwood activation up to the chain tip.
         // For each block, build the history tree from its peaks, and check the hash
