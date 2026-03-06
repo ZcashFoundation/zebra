@@ -124,7 +124,7 @@
 //! - [zebrad](https://docs.rs/zebrad/latest/zebrad/)
 //!
 //! The links in the list above point to the documentation of the public APIs of the crates. For
-//! the documentation of the internal APIs, follow <https://doc-internal.zebra.zfnd.org> that lists
+//! the documentation of the internal APIs, follow <https://zebra.zfnd.org/internal> that lists
 //! all Zebra crates as well in the left sidebar.
 
 #![doc(html_favicon_url = "https://zfnd.org/wp-content/uploads/2022/03/zebra-favicon-128.png")]

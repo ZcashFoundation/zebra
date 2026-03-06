@@ -140,7 +140,7 @@ impl QueuedBlocks {
         let mut by_height = self.by_height.split_off(&split_height);
         mem::swap(&mut self.by_height, &mut by_height);
 
-        for hash in by_height.into_iter().flat_map(|(_, hashes)| hashes) {
+        for hash in by_height.into_values().flatten() {
             let (expired_block, expired_sender) =
                 self.blocks.remove(&hash).expect("block is present");
             let parent_hash = &expired_block.block.header.previous_block_hash;

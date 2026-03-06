@@ -3,33 +3,37 @@
 Zebra has support for Prometheus, configured using the `prometheus` compile-time feature,
 and the [`MetricsSection`][metrics_section] runtime configuration.
 
-The following steps can be used to send real time Zebra metrics data into a grafana 
+The following steps can be used to send real time Zebra metrics data into a grafana
 front end that you can visualize:
 
 1. Build zebra with `prometheus` feature:
-   ```
+
+   ```bash
    cargo install --features prometheus --locked --git https://github.com/ZcashFoundation/zebra zebrad
    ```
 
 2. Create a `zebrad.toml` file that we can edit:
-   ```
+
+   ```bash
    zebrad generate -o zebrad.toml
    ```
 
 3. Add `endpoint_addr` to the `metrics` section:
-   ```
+
+   ```toml
    [metrics]
    endpoint_addr = "127.0.0.1:9999"
    ```
 
 4. Run Zebra, and specify the path to the `zebrad.toml` file, for example:
-   ```
+
+   ```bash
    zebrad -c zebrad.toml start
    ```
 
 5. Install and run Prometheus and Grafana via Docker:
 
-   ```
+   ```bash
    # create a storage volume for grafana (once)
    sudo docker volume create grafana-storage
    # create a storage volume for prometheus (once)

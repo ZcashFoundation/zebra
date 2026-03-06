@@ -847,12 +847,13 @@ impl Arbitrary for VerifiedUnminedTx {
                     Self {
                         transaction,
                         miner_fee,
-                        sigops,
+                        legacy_sigop_count: sigops,
                         conventional_actions,
                         unpaid_actions,
                         fee_weight_ratio,
                         time: Some(time),
                         height: Some(height),
+                        spent_outputs: std::sync::Arc::new(vec![]),
                     }
                 },
             )

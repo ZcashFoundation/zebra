@@ -1,0 +1,47 @@
+# Markdownlint config for Zebra
+# Most rules enabled - fix issues rather than disable rules
+
+# Default: enable all rules
+default: true
+
+# Disable rules with legitimate exceptions for this project
+MD001: false  # Heading increment - existing docs have intentional heading structures
+MD024: false  # Duplicate headings - often intentional in documentation
+MD028: false  # Blank lines in blockquote - RFC files use this for readability
+MD033: false  # Inline HTML - needed for mdBook admonitions and formatting
+MD036: false  # Emphasis as heading - existing docs use emphasis for subheadings
+MD013: false  # Line length - Prettier handles this
+MD060: false  # Table column style - conflicts with GFM table formatting
+MD053: false  # Unused link references - RFC files use this pattern intentionally
+MD041: false  # First-line heading - mdBook includes and some files have valid exceptions
+MD025: false  # Single title - RFC format uses multiple top-level headings intentionally
+MD051: false  # Link fragments - RFC files use link anchors that may not resolve
+MD056: false  # Table column count - existing docs have intentional varying column counts
+MD055: false  # Table pipe style - existing audit docs use trailing pipes in tables
+MD040: false  # Fenced code language - CHANGELOGs have unlabeled code blocks
+MD059: false  # Descriptive link text - existing docs use "here" links
+
+# Configure rules that need customization
+MD004:
+  style: "dash"  # Use dashes for unordered lists consistently
+
+MD007:
+  indent: 2  # 2-space indentation for nested lists
+
+MD029:
+  style: "ordered"  # Use 1. 2. 3. for ordered lists
+
+MD035:
+  style: "---"  # Use --- for horizontal rules
+
+MD046:
+  style: "fenced"  # Use fenced code blocks
+
+MD048:
+  style: "backtick"  # Use backticks for code fences
+
+MD049:
+  style: "underscore"  # Use underscores for emphasis
+
+MD050:
+  style: "asterisk"  # Use asterisks for strong
