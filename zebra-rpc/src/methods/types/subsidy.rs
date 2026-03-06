@@ -33,8 +33,7 @@ pub struct GetBlockSubsidyResponse {
 
     /// The founders' reward amount in ZEC.
     ///
-    /// Zebra returns an error when asked for founders reward heights,
-    /// because it checkpoints those blocks instead.
+    /// This is non-zero for pre-Canopy blocks (before the first halving).
     #[getter(copy)]
     pub(crate) founders: Zec<NonNegative>,
 
