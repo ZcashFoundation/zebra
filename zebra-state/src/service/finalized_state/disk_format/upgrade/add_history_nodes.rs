@@ -321,6 +321,15 @@ fn upgrades_with_history(db: &ZebraDb) -> Vec<(NetworkUpgrade, Option<Height>)> 
     let network = db.network();
     let tip_height = db.finalized_tip_height().unwrap_or(Height::MIN);
     let current_upgrade = NetworkUpgrade::current(&network, tip_height);
+
+    // Return an empty Vec if the chaintip has not reached Heartwood yet.
+    let is_before_heartwood = NetworkUpgrade::iter()
+        .take_while(|u| *u != NetworkUpgrade::Heartwood)
+        .any(|u| u == current_upgrade);
+    if is_before_heartwood {
+        return Vec::new();
+    }
+
     let history_tree_upgrades: Vec<NetworkUpgrade> = NetworkUpgrade::iter()
         .skip_while(|u| *u != NetworkUpgrade::Heartwood)
         .take_while(|u| *u != current_upgrade)
