@@ -67,7 +67,10 @@ use zebra_chain::{
     chain_sync_status::ChainSyncStatus,
     chain_tip::{ChainTip, NetworkChainTipHeightEstimator},
     parameters::{
-        subsidy::{block_subsidy, funding_stream_values, miner_subsidy, FundingStreamReceiver},
+        subsidy::{
+            block_subsidy, founders_reward, funding_stream_values, miner_subsidy,
+            FundingStreamReceiver,
+        },
         ConsensusBranchId, Network, NetworkUpgrade, POW_AVERAGING_WINDOW,
     },
     serialization::{BytesInDisplayOrder, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
@@ -646,7 +649,6 @@ pub trait Rpc {
     async fn z_validate_address(&self, address: String) -> Result<ZValidateAddressResponse>;
 
     /// Returns the block subsidy reward of the block at `height`, taking into account the mining slow start.
-    /// Returns an error if `height` is less than the height of the first halving for the current network.
     ///
     /// zcashd reference: [`getblocksubsidy`](https://zcash.github.io/rpc/getblocksubsidy.html)
     /// method: post
@@ -2810,11 +2812,13 @@ where
                     .collect()
             });
 
+        let founders = founders_reward(&net, height);
+
         Ok(GetBlockSubsidyResponse {
-            miner: miner_subsidy(height, &net, subsidy)
+            miner: (miner_subsidy(height, &net, subsidy).map_misc_error()? - founders)
                 .map_misc_error()?
                 .into(),
-            founders: Amount::zero().into(),
+            founders: founders.into(),
             funding_streams,
             lockbox_streams,
             funding_streams_total: funding_streams_total?,

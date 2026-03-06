@@ -1126,6 +1126,14 @@ pub async fn test_mining_rpcs<State, ReadState>(
         .expect("We should have a success response");
     snapshot_rpc_getblocksubsidy("excessive_height", get_block_subsidy, &settings);
 
+    // Pre-Canopy height: founders' reward should be non-zero
+    let pre_canopy_height = NetworkUpgrade::Canopy.activation_height(network).unwrap().0 - 1;
+    let get_block_subsidy = rpc
+        .get_block_subsidy(Some(pre_canopy_height))
+        .await
+        .expect("We should have a success response");
+    snapshot_rpc_getblocksubsidy("pre_canopy_height", get_block_subsidy, &settings);
+
     // `getnetworkinfo`
     let get_network_info = rpc
         .get_network_info()
