@@ -72,6 +72,10 @@ impl DiskFormatUpgrade for AddHistoryNodes {
 
         let network = zebra_db.network();
         let upgrades_with_history = upgrades_with_history(zebra_db);
+        if upgrades_with_history.len() == 0 {
+            // There is nothing to do
+            return Ok(());
+        }
 
         // Iterate over all network upgrades with history nodes
         for (upgrade, activation_height_option) in upgrades_with_history.iter() {
@@ -182,6 +186,10 @@ impl DiskFormatUpgrade for AddHistoryNodes {
 
         let network = zebra_db.network().clone();
         let upgrades_with_history = upgrades_with_history(zebra_db);
+        if upgrades_with_history.len() == 0 {
+            // There is nothing to do
+            return Ok(Ok(()));
+        }
 
         let tip_height_option = zebra_db.finalized_tip_height();
         if tip_height_option.is_none() {
@@ -218,12 +226,13 @@ impl DiskFormatUpgrade for AddHistoryNodes {
                 break;
             }
 
-            let activation_node = zebra_db
+            let Some(activation_node) = zebra_db
                 .history_node(HistoryNodeIndex {
                     upgrade: *upgrade,
                     index: 0,
-                })
-                .expect("history node should exist");
+                }) else {
+                    return Ok(Err(format!("No history node found for the activation block of {upgrade}")))
+                };
 
             let peaks_at_activation = BTreeMap::from([(0, activation_node)]);
 
