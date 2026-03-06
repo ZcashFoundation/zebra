@@ -194,7 +194,7 @@ impl DiskFormatUpgrade for AddHistoryNodes {
                 return Ok(Ok(()));
             }
         }
-        
+
         let height = tip_height_option.expect("Tip height must exist here");
 
         // Iterate through all blocks from Heartwood activation up to the chain tip.
