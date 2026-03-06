@@ -2,7 +2,7 @@
 
 The Regtest network in Zebra enables testing of custom functionalities in a private Testnet environment with configurable network upgrade activation heights. It allows for starting an isolated node which won't connect to any peers and currently allows for committing blocks without validating their Proof of Work (in the future, it may use a very low target difficulty and easier Equihash parameters instead of skipping Proof of Work validation altogether).
 
-Zebra always activates the Canopy network upgrade at block height 1 due to limitations on its block construction.
+By default, Zebra activates network upgrades at height 1 on Regtest, but activation heights are configurable via the `[network.testnet_parameters.activation_heights]` section. Block height 0 is reserved for the Genesis network upgrade.
 
 ## Usage
 
@@ -35,10 +35,11 @@ listen_addr = "0.0.0.0:18232"
 Zebra should now include the Regtest network name in its logs, for example:
 
 ```console
-2024-05-15T21:33:57.044156Z  INFO {zebrad="01633af" net="Regtest"}: zebrad::commands::start: initializing mempool
+...  INFO {zebrad="..." net="Regtest"}: zebrad::commands::start: initializing mempool
 ```
 
 There are two ways to commit blocks to Zebra's state on Regtest:
+
 - Using the `getblocktemplate` and `submitblock` RPC methods directly
 - Using Zebra's experimental `internal-miner` feature
 
@@ -94,4 +95,4 @@ let was_submission_successful = submit_block_response.contains(r#""result":null"
 
 See the `regtest_submit_blocks()` acceptance test as a more detailed example for using Zebra's RPC methods to submit blocks on Regtest.
 
-When Proof of Work validation is enabled for Regtest with a low target difficulty and easy Equihash parameters, Zebra may have a `network.testnet_parameters.disable_pow` field in its configuration so that this would continue working.
+Note: Proof of Work validation is currently disabled on Regtest. If PoW validation is enabled in the future with a low target difficulty and easier Equihash parameters, a configuration option may be added to disable it.

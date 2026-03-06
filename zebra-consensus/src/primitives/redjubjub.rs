@@ -144,7 +144,22 @@ impl Verifier {
     /// This function returns a future that becomes ready when the batch is completed.
     async fn flush_spawning(batch: BatchVerifier, tx: Sender) {
         // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
-        let _ = tx.send(spawn_fifo(move || batch.verify(thread_rng())).await.ok());
+        let start = std::time::Instant::now();
+        let result = spawn_fifo(move || batch.verify(thread_rng())).await;
+        let duration = start.elapsed().as_secs_f64();
+
+        let result_label = match &result {
+            Ok(Ok(())) => "success",
+            _ => "failure",
+        };
+        metrics::histogram!(
+            "zebra.consensus.batch.duration_seconds",
+            "verifier" => "redjubjub",
+            "result" => result_label
+        )
+        .record(duration);
+
+        let _ = tx.send(result.ok());
     }
 
     /// Verify a single item using a thread pool, and return the result.

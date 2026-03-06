@@ -51,11 +51,11 @@ jobs:
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
 
-      - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 #v1.15.1
+      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
         with:
           toolchain: stable
           components: clippy
@@ -102,11 +102,11 @@ jobs:
       matrix: ${{ fromJson(needs.matrix.outputs.matrix) }}
 
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
 
-      - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 #v1.15.1
+      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
         with:
           toolchain: stable
           components: clippy
@@ -142,6 +142,52 @@ jobs:
           cargo clippy --package ${{ matrix.crate }} --all-features --all-targets -- -D warnings
           cargo build --package ${{ matrix.crate }} --all-features --all-targets
 
+  build-msrv:
+    name: Build ${{ matrix.crate }} crate with MSRV
+    permissions:
+      id-token: write
+      statuses: write
+    timeout-minutes: 90
+    needs: [matrix]
+    runs-on: ubuntu-latest
+    strategy:
+      # avoid rate-limit errors by only launching a few of these jobs at a time,
+      # but still finish in a similar time to the longest tests
+      max-parallel: 4
+      fail-fast: true
+      matrix: ${{ fromJson(needs.matrix.outputs.matrix) }}
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Extract MSRV from Cargo.toml
+        id: msrv
+        run: |
+          MSRV=$(grep 'rust-version' Cargo.toml | head -n1 | cut -d'"' -f2)
+          echo "version=$MSRV" >> "$GITHUB_OUTPUT"
+          echo "Extracted MSRV: $MSRV"
+
+      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+          components: clippy
+          cache-key: crate-build-msrv-${{ matrix.crate }}
+          cache-on-failure: true
+
+      - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3.0.0
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build ${{ matrix.crate }} crate with MSRV, all features and all targets
+        # zebrad can have a higher MSRV than the other crates since it is a binary, so we skip the MSRV build for it.
+        if: matrix.crate != 'zebrad'
+        run: |
+          cargo clippy --package ${{ matrix.crate }} --all-features --all-targets -- -D warnings
+          cargo build --package ${{ matrix.crate }} --all-features --all-targets
+
+
   test-crate-build-success:
     name: test crate build success
     runs-on: ubuntu-latest
@@ -149,6 +195,7 @@ jobs:
     needs:
       - matrix
       - build
+      - build-msrv
     timeout-minutes: 30
     steps:
       - name: Decide whether the needed jobs succeeded or failed

@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use tower::ServiceExt;
 use zebra_chain::{
     block::{Block, Height},
     orchard,
@@ -380,4 +381,185 @@ fn new_ephemeral_db() -> ZebraDb {
             .map(ToString::to_string),
         false,
     )
+}
+
+/// Test that AnyChainBlock can find blocks by hash and height.
+#[tokio::test(flavor = "multi_thread")]
+async fn any_chain_block_test() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    // Create a continuous chain of mainnet blocks from genesis
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .values()
+        .map(|block_bytes| block_bytes.zcash_deserialize_into().unwrap())
+        .collect();
+
+    let (_state, read_state, _latest_chain_tip, _chain_tip_change) =
+        populated_state(blocks.clone(), &Mainnet).await;
+
+    // Test: AnyChainBlock should find blocks by hash (same as Block)
+    for block in &blocks {
+        let request = ReadRequest::AnyChainBlock(block.hash().into());
+        let response = read_state
+            .clone()
+            .oneshot(request)
+            .await
+            .expect("request should succeed");
+        assert!(
+            matches!(
+                response,
+                ReadResponse::Block(Some(found_block)) if found_block.hash() == block.hash()
+            ),
+            "AnyChainBlock should find block by hash"
+        );
+    }
+
+    // Test: AnyChainBlock should find blocks by height (same as Block)
+    for block in &blocks {
+        let height = block.coinbase_height().unwrap();
+        let request = ReadRequest::AnyChainBlock(height.into());
+        let response = read_state
+            .clone()
+            .oneshot(request)
+            .await
+            .expect("request should succeed");
+        assert!(
+            matches!(
+                response,
+                ReadResponse::Block(Some(found_block)) if found_block.hash() == block.hash()
+            ),
+            "AnyChainBlock should find block by height"
+        );
+    }
+
+    // Test: Non-existent block should return None
+    let fake_hash = zebra_chain::block::Hash([0xff; 32]);
+    let request = ReadRequest::AnyChainBlock(fake_hash.into());
+    let response = read_state
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("request should succeed");
+    assert!(
+        matches!(response, ReadResponse::Block(None)),
+        "AnyChainBlock should return None for non-existent block"
+    );
+
+    Ok(())
+}
+
+/// Test that AnyChainBlock finds blocks in side chains, while Block does not.
+#[tokio::test(flavor = "multi_thread")]
+async fn any_chain_block_finds_side_chain_blocks() -> Result<()> {
+    use crate::{
+        arbitrary::Prepare,
+        service::{finalized_state::FinalizedState, non_finalized_state::NonFinalizedState},
+        tests::FakeChainHelper,
+    };
+    use zebra_chain::{amount::NonNegative, value_balance::ValueBalance};
+
+    let _init_guard = zebra_test::init();
+
+    let network = Mainnet;
+
+    // Use pre-Heartwood blocks to avoid history tree complications
+    let genesis: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+
+    // Create two different blocks from genesis
+    // They have the same parent but different work, making them compete
+    let best_chain_block = genesis.make_fake_child().set_work(100);
+    let side_chain_block = genesis.make_fake_child().set_work(50);
+
+    // Even though they have the same structure, changing work changes the header hash
+    // because difficulty_threshold is part of the header
+    let best_hash = best_chain_block.hash();
+    let side_hash = side_chain_block.hash();
+
+    // If hashes are the same, we can't test side chains properly
+    // This would mean our fake block generation isn't working as expected
+    if best_hash == side_hash {
+        println!("WARNING: Unable to create different block hashes, skipping side chain test");
+        return Ok(());
+    }
+
+    // Create state with a finalized and non-finalized component
+    let mut non_finalized_state = NonFinalizedState::new(&network);
+    let finalized_state = FinalizedState::new(
+        &Config::ephemeral(),
+        &network,
+        #[cfg(feature = "elasticsearch")]
+        false,
+    );
+
+    let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
+    finalized_state.set_finalized_value_pool(fake_value_pool);
+
+    // Commit genesis as the first chain
+    non_finalized_state.commit_new_chain(genesis.prepare(), &finalized_state)?;
+
+    // Commit best chain block (higher work) - extends the genesis chain
+    non_finalized_state.commit_block(best_chain_block.clone().prepare(), &finalized_state)?;
+
+    // Commit side chain block (lower work) - also tries to extend genesis, creating a fork
+    non_finalized_state.commit_block(side_chain_block.clone().prepare(), &finalized_state)?;
+
+    // Verify we have 2 chains (genesis extended by best_chain_block, and genesis extended by side_chain_block)
+    assert_eq!(
+        non_finalized_state.chain_count(),
+        2,
+        "Should have 2 competing chains"
+    );
+
+    // Now test with the read interface
+    // We'll use the low-level block lookup functions directly
+    use crate::service::read::block::{any_block, block};
+
+    // Test 1: any_block with all chains should find the side chain block by hash
+    let found = any_block(
+        non_finalized_state.chain_iter(),
+        &finalized_state.db,
+        side_hash.into(),
+    );
+    assert!(
+        found.is_some(),
+        "any_block should find side chain block by hash"
+    );
+    assert_eq!(found.unwrap().hash(), side_hash);
+
+    // Test 2: block with only best chain should NOT find the side chain block by hash
+    let found = block(
+        non_finalized_state.best_chain(),
+        &finalized_state.db,
+        side_hash.into(),
+    );
+    assert!(
+        found.is_none(),
+        "block should NOT find side chain block by hash"
+    );
+
+    // Test 3: any_block should find the best chain block by hash
+    let found = any_block(
+        non_finalized_state.chain_iter(),
+        &finalized_state.db,
+        best_hash.into(),
+    );
+    assert!(
+        found.is_some(),
+        "any_block should find best chain block by hash"
+    );
+    assert_eq!(found.unwrap().hash(), best_hash);
+
+    // Test 4: block should also find the best chain block by hash
+    let found = block(
+        non_finalized_state.best_chain(),
+        &finalized_state.db,
+        best_hash.into(),
+    );
+    assert!(
+        found.is_some(),
+        "block should find best chain block by hash"
+    );
+    assert_eq!(found.unwrap().hash(), best_hash);
+
+    Ok(())
 }

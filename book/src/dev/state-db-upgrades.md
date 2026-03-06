@@ -10,12 +10,14 @@ If we type the column family name out every time, a typo can lead to a panic, be
 family doesn't exist.
 
 Instead:
+
 - define the name and type of each column family at the top of the implementation module,
 - add a method on the database that returns that type, and
 - add the column family name to the list of column families in the database
   (in the `STATE_COLUMN_FAMILIES_IN_CODE` array):
 
 For example:
+
 ```rust
 /// The name of the sapling transaction IDs result column family.
 pub const SAPLING_TX_IDS: &str = "sapling_tx_ids";
@@ -40,6 +42,7 @@ impl Storage {
 
 Then, every read of the column family uses that method, which enforces the correct types:
 (These methods have the same name as the low-level methods, but are easier to call.)
+
 ```rust
 impl Storage {
     /// Returns the result for a specific database index (key, block height, transaction index).
@@ -65,6 +68,7 @@ This simplifies the implementation compared with the raw `ReadDisk` methods.
 To write to the database, use the `new_batch_for_writing()` method on the column family type.
 This returns a batch that enforces the correct types. Use `write_batch()` to write it to the
 database:
+
 ```rust
 impl Storage {
     /// Insert a sapling scanning `key`, and mark all heights before `birthday_height` so they
@@ -87,6 +91,7 @@ impl Storage {
 
 To write to an existing batch in legacy code, use `with_batch_for_writing()` instead.
 This relies on the caller to write the batch to the database:
+
 ```rust
 impl DiskWriteBatch {
     /// Updates the history tree for the tip, if it is not empty.
@@ -118,9 +123,11 @@ are in [PR #8112](https://github.com/ZcashFoundation/zebra/pull/8112/files) and
 ## Current Implementation
 
 ### Verification Modes
+
 [verification]: #verification
 
 Zebra's state has two verification modes:
+
 - block hash checkpoints, and
 - full verification.
 
@@ -134,6 +141,7 @@ When Zebra gets more checkpoints in each new release, it checks the previously v
 state against those checkpoints. This checks that the two codepaths produce the same results.
 
 ## Upgrading the State Database
+
 [upgrades]: #upgrades
 
 For most state upgrades, we want to modify the database format of the existing database. If we
@@ -141,6 +149,7 @@ change the major database version, every user needs to re-download and re-verify
 which can take days.
 
 ### Writing Blocks to the State
+
 [write-block]: #write-block
 
 Blocks can be written to the database via two different code paths, and both must produce the same results:
@@ -159,13 +168,16 @@ When Zebra starts up and shuts down (and periodically in CI tests), we run check
 format. This makes sure that the two codepaths produce the same state on disk.
 
 To reduce code and testing complexity:
+
 - when a previous Zebra version opens a newer state, the entire state is considered to have that lower version, and
 - when a newer Zebra version opens an older state, each required upgrade is run on the entire state.
 
 ### In-Place Upgrade Goals
+
 [upgrade-goals]: #upgrade-goals
 
 Here are the goals of in-place upgrades:
+
 - avoid a full download and rebuild of the state
 - Zebra must be able to upgrade the format from previous minor or patch versions of its disk format
   (Major disk format versions are breaking changes. They create a new empty state and re-sync the whole chain.)
@@ -181,11 +193,13 @@ Here are the goals of in-place upgrades:
 - best-effort compatibility between newer states and older supported Zebra versions
 
 ### Design Constraints
+
 [design]: #design
 
 Upgrades run concurrently with state verification and RPC requests.
 
 This means that:
+
 - the state must be able to read the old and new formats
   - it can't panic if the data is missing
   - it can't give incorrect results, because that can affect verification or wallets
@@ -210,21 +224,25 @@ If there is an upgrade failure, panic and tell the user to delete their cached s
 Zebra.
 
 #### Performance Constraints
+
 [performance]: #performance
 
 Some column family access patterns can lead to very poor performance.
 
 Known performance issues include:
+
 - using an iterator on a column family which also deletes keys
 - creating large numbers of iterators
 - holding an iterator for a long time
 
 See the performance notes and bug reports in:
-- https://github.com/facebook/rocksdb/wiki/Iterator#iterating-upper-bound-and-lower-bound
-- https://tracker.ceph.com/issues/55324
-- https://jira.mariadb.org/browse/MDEV-19670
+
+- <https://github.com/facebook/rocksdb/wiki/Iterator#iterating-upper-bound-and-lower-bound>
+- <https://tracker.ceph.com/issues/55324>
+- <https://jira.mariadb.org/browse/MDEV-19670>
 
 But we need to use iterators for some operations, so our alternatives are (in preferred order):
+
 1. Minimise the number of keys we delete, and how often we delete them
 2. Avoid using iterators on column families where we delete keys
 3. If we must use iterators on those column families, set read bounds to minimise the amount of deleted data that is read
@@ -233,6 +251,7 @@ Currently only UTXOs require key deletion, and only `utxo_loc_by_transparent_add
 deletion and iterators.
 
 ### Required Tests
+
 [testing]: #testing
 
 State upgrades are a high-risk change. They permanently modify the state format on production Zebra
@@ -244,6 +263,7 @@ Some format bugs can't be fixed, and require an entire rebuild of the state. For
 or corrupting transactions or block headers.
 
 So testing format upgrades is extremely important. Every state format upgrade should test:
+
 - new format serializations
 - new calculations or data processing
 - the upgrade produces a valid format
@@ -256,10 +276,12 @@ Each test should be followed by a restart, a sync of 200+ blocks, and another re
 simulates typical user behaviour.
 
 And ideally:
+
 - An upgrade from the earliest supported Zebra version
   (the CI sync-past-mandatory-checkpoint tests do this on every PR)
 
 #### Manually Triggering a Format Upgrade
+
 [manual-upgrade]: #manual-upgrade
 
 Zebra stores the current state minor and patch versions in a `version` file in the database
@@ -278,6 +300,7 @@ new code skips blocks, the validity checks won't find that bug.
 So it is better to test with a full sync, and an older cached state.
 
 ## Current State Database Format
+
 [current]: #current
 
 rocksdb provides a persistent, thread-safe `BTreeMap<&[u8], &[u8]>`. Each map is
@@ -296,34 +319,34 @@ We use the following rocksdb column families:
 
 | Column Family                      | Keys                   | Values                        | Changes |
 | ---------------------------------- | ---------------------- | ----------------------------- | ------- |
-| *Blocks*                           |                        |                               |         |
+| _Blocks_                           |                        |                               |         |
 | `hash_by_height`                   | `block::Height`        | `block::Hash`                 | Create  |
 | `height_by_hash`                   | `block::Hash`          | `block::Height`               | Create  |
 | `block_header_by_height`           | `block::Height`        | `block::Header`               | Create  |
-| *Transactions*                     |                        |                               |         |
+| _Transactions_                     |                        |                               |         |
 | `tx_by_loc`                        | `TransactionLocation`  | `Transaction`                 | Create  |
 | `hash_by_tx_loc`                   | `TransactionLocation`  | `transaction::Hash`           | Create  |
 | `tx_loc_by_hash`                   | `transaction::Hash`    | `TransactionLocation`         | Create  |
-| *Transparent*                      |                        |                               |         |
+| _Transparent_                      |                        |                               |         |
 | `balance_by_transparent_addr`      | `transparent::Address` | `AddressBalanceLocation`      | Update  |
 | `tx_loc_by_transparent_addr_loc`   | `AddressTransaction`   | `()`                          | Create  |
 | `utxo_by_out_loc`                  | `OutputLocation`       | `transparent::Output`         | Delete  |
 | `utxo_loc_by_transparent_addr_loc` | `AddressUnspentOutput` | `()`                          | Delete  |
-| *Sprout*                           |                        |                               |         |
+| _Sprout_                           |                        |                               |         |
 | `sprout_nullifiers`                | `sprout::Nullifier`    | `()`                          | Create  |
 | `sprout_anchors`                   | `sprout::tree::Root`   | `sprout::NoteCommitmentTree`  | Create  |
 | `sprout_note_commitment_tree`      | `()`                   | `sprout::NoteCommitmentTree`  | Update  |
-| *Sapling*                          |                        |                               |         |
+| _Sapling_                          |                        |                               |         |
 | `sapling_nullifiers`               | `sapling::Nullifier`   | `()`                          | Create  |
 | `sapling_anchors`                  | `sapling::tree::Root`  | `()`                          | Create  |
 | `sapling_note_commitment_tree`     | `block::Height`        | `sapling::NoteCommitmentTree` | Create  |
 | `sapling_note_commitment_subtree`  | `block::Height`        | `NoteCommitmentSubtreeData`   | Create  |
-| *Orchard*                          |                        |                               |         |
+| _Orchard_                          |                        |                               |         |
 | `orchard_nullifiers`               | `orchard::Nullifier`   | `()`                          | Create  |
 | `orchard_anchors`                  | `orchard::tree::Root`  | `()`                          | Create  |
 | `orchard_note_commitment_tree`     | `block::Height`        | `orchard::NoteCommitmentTree` | Create  |
 | `orchard_note_commitment_subtree`  | `block::Height`        | `NoteCommitmentSubtreeData`   | Create  |
-| *Chain*                            |                        |                               |         |
+| _Chain_                            |                        |                               |         |
 | `history_tree`                     | `()`                   | `NonEmptyHistoryTree`         | Update  |
 | `tip_chain_value_pool`             | `()`                   | `ValueBalance`                | Update  |
 | `block_info`                       | `block::Height`        | `BlockInfo`                   | Create  |
@@ -332,16 +355,17 @@ With the following additional modifications when compiled with the `indexer` fea
 
 | Column Family             | Keys                 | Values                | Changes |
 | ------------------------- | -------------------- | --------------------- | ------- |
-| *Transparent*             |                      |                       |         |
+| _Transparent_             |                      |                       |         |
 | `tx_loc_by_spent_out_loc` | `OutputLocation`     | `TransactionLocation` | Create  |
-| *Sprout*                  |                      |                       |         |
+| _Sprout_                  |                      |                       |         |
 | `sprout_nullifiers`       | `sprout::Nullifier`  | `TransactionLocation` | Create  |
-| *Sapling*                 |                      |                       |         |
+| _Sapling_                 |                      |                       |         |
 | `sapling_nullifiers`      | `sapling::Nullifier` | `TransactionLocation` | Create  |
-| *Orchard*                 |                      |                       |         |
+| _Orchard_                 |                      |                       |         |
 | `orchard_nullifiers`      | `orchard::Nullifier` | `TransactionLocation` | Create  |
 
 ### Data Formats
+
 [rocksdb-data-format]: #rocksdb-data-format
 
 We use big-endian encoding for keys, to allow database index prefix searches.
@@ -350,6 +374,7 @@ Most Zcash protocol structures are encoded using `ZcashSerialize`/`ZcashDeserial
 Other structures are encoded using custom `IntoDisk`/`FromDisk` implementations.
 
 Block and Transaction Data:
+
 - `Height`: 24 bits, big-endian, unsigned (allows for ~30 years worth of blocks)
 - `TransactionIndex`: 16 bits, big-endian, unsigned (max ~23,000 transactions in the 2 MB block limit)
 - `TransactionCount`: same as `TransactionIndex`
@@ -369,10 +394,12 @@ Block and Transaction Data:
 - `NoteCommitmentSubtreeData<{sapling, orchard}::tree::Node>`: `Height \|\| {sapling, orchard}::tree::Node`
 
 Amounts:
+
 - `Amount`: 64 bits, little-endian, signed
 - `ValueBalance`: `[Amount; 4]`
 
 Derived Formats (legacy):
+
 - `*::NoteCommitmentTree`: `bincode` using `serde`
   - stored note commitment trees always have cached roots
 - `NonEmptyHistoryTree`: `bincode` using `serde`, using our copy of an old `zcash_history` `serde`
@@ -382,6 +409,7 @@ Derived Formats (legacy):
 Do not use it for new column families.
 
 #### Address Format
+
 [rocksdb-address-format]: #rocksdb-address-format
 
 The following figure helps visualizing the address index, which is the most complicated part.
@@ -417,9 +445,11 @@ graph TD;
 ```
 
 ### Implementing consensus rules using rocksdb
+
 [rocksdb-consensus-rules]: #rocksdb-consensus-rules
 
 Each column family handles updates differently, based on its specific consensus rules:
+
 - Create:
   - Each key-value entry is created once.
   - Keys are never deleted, values are never updated.
@@ -435,6 +465,7 @@ Each column family handles updates differently, based on its specific consensus 
   - Code called by ReadStateService must handle old or new values, or use a read lock.
 
 We can't do some kinds of value updates, because they cause RocksDB performance issues:
+
 - Append:
   - Keys are never deleted.
   - Existing values are never updated.
@@ -450,6 +481,7 @@ We can't do some kinds of value updates, because they cause RocksDB performance 
 Avoid using large sets of values as RocksDB keys or values.
 
 ### RocksDB read locks
+
 [rocksdb-read-locks]: #rocksdb-read-locks
 
 The read-only ReadStateService needs to handle concurrent writes and deletes of the finalized
@@ -467,16 +499,16 @@ Most queries do this by default.
 For more complex queries, there are several options:
 
 Reading across multiple column families:
-1. Ignore deleted values using custom Rust code
-2. Take a database snapshot - https://docs.rs/rocksdb/latest/rocksdb/struct.DBWithThreadMode.html#method.snapshot
 
-Reading a single column family:
-3. multi_get - https://docs.rs/rocksdb/latest/rocksdb/struct.DBWithThreadMode.html#method.multi_get_cf
-4. iterator - https://docs.rs/rocksdb/latest/rocksdb/struct.DBWithThreadMode.html#method.iterator_cf
+1. Ignore deleted values using custom Rust code
+2. Take a database snapshot - <https://docs.rs/rocksdb/latest/rocksdb/struct.DBCommon.html#method.snapshot>
+
+Reading a single column family: 3. multi_get - <https://docs.rs/rocksdb/latest/rocksdb/struct.DBCommon.html#method.multi_get_cf> 4. iterator - <https://docs.rs/rocksdb/latest/rocksdb/struct.DBCommon.html#method.iterator_cf>
 
 RocksDB also has read transactions, but they don't seem to be exposed in the Rust crate.
 
 ### Low-Level Implementation Details
+
 [rocksdb-low-level]: #rocksdb-low-level
 
 RocksDB ignores duplicate puts and deletes, preserving the latest values.
@@ -485,11 +517,13 @@ check [`db.get_cf(cf, key)?`](https://docs.rs/rocksdb/0.16.0/rocksdb/struct.DBWi
 before putting or deleting any values in a batch.
 
 Currently, these restrictions should be enforced by code review:
+
 - multiple `zs_insert`s are only allowed on Update column families, and
 - [`delete_cf`](https://docs.rs/rocksdb/0.16.0/rocksdb/struct.WriteBatch.html#method.delete_cf)
   is only allowed on Delete column families.
 
 In future, we could enforce these restrictions by:
+
 - creating traits for Never, Delete, and Update
 - doing different checks in `zs_insert` depending on the trait
 - wrapping `delete_cf` in a trait, and only implementing that trait for types that use Delete column families.
@@ -499,10 +533,11 @@ and merge operators are unreliable (or have undocumented behaviour).
 So they should not be used for consensus-critical checks.
 
 ### Notes on rocksdb column families
+
 [rocksdb-column-families]: #rocksdb-column-families
 
 - The `hash_by_height` and `height_by_hash` column families provide a bijection between
-  block heights and block hashes.  (Since the rocksdb state only stores finalized
+  block heights and block hashes. (Since the rocksdb state only stores finalized
   state, they are actually a bijection).
 
 - Similarly, the `tx_loc_by_hash` and `hash_by_tx_loc` column families provide a bijection between
@@ -524,11 +559,11 @@ So they should not be used for consensus-critical checks.
     to get each transaction with `height` from `tx_by_loc`,
     stopping when there are no more transactions in the block
 
-- Block headers are stored by height, not by hash.  This has the downside that looking
-  up a block by hash requires an extra level of indirection.  The upside is
+- Block headers are stored by height, not by hash. This has the downside that looking
+  up a block by hash requires an extra level of indirection. The upside is
   that blocks with adjacent heights are adjacent in the database, and many
   common access patterns, such as helping a client sync the chain or doing
-  analysis, access blocks in (potentially sparse) height order.  In addition,
+  analysis, access blocks in (potentially sparse) height order. In addition,
   the fact that we commit blocks in order means we're writing only to the end
   of the rocksdb column family, which may help save space.
 
@@ -538,7 +573,7 @@ So they should not be used for consensus-critical checks.
 
 - `TransactionLocation`s are stored as a `(height, index)` pair referencing the
   height of the transaction's parent block and the transaction's index in that
-  block.  This would more traditionally be a `(hash, index)` pair, but because
+  block. This would more traditionally be a `(hash, index)` pair, but because
   we store blocks by height, storing the height saves one level of indirection.
   Transaction hashes can be looked up using `hash_by_tx_loc`.
 
