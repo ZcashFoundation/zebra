@@ -33,7 +33,7 @@ pub(crate) const MIN_DURATION_BETWEEN_BACKUP_UPDATES: Duration = Duration::from_
 /// Returns the resulting non-finalized state.
 pub(super) fn restore_backup(
     mut non_finalized_state: NonFinalizedState,
-    backup_dir_path: &PathBuf,
+    backup_dir_path: &Path,
     finalized_state: &ZebraDb,
 ) -> NonFinalizedState {
     let mut store: BTreeMap<Height, Vec<SemanticallyVerifiedBlock>> = BTreeMap::new();
@@ -71,6 +71,39 @@ pub(super) fn restore_backup(
     non_finalized_state
 }
 
+/// Updates the non-finalized state backup cache by writing any blocks that are in the
+/// non-finalized state but missing in the backup cache, and deleting any backup files
+/// that are no longer present in the non-finalized state.
+///
+/// `backup_blocks` should be the current contents of the backup directory, obtained by
+/// calling [`list_backup_dir_entries`] before the non-finalized state was updated.
+///
+/// This function performs blocking I/O and should be called from a blocking context,
+/// or wrapped in [`tokio::task::spawn_blocking`].
+pub(super) fn update_non_finalized_state_backup(
+    backup_dir_path: &Path,
+    non_finalized_state: &NonFinalizedState,
+    mut backup_blocks: HashMap<block::Hash, PathBuf>,
+) {
+    for block in non_finalized_state
+        .chain_iter()
+        .flat_map(|chain| chain.blocks.values())
+        // Remove blocks from `backup_blocks` that are present in the non-finalized state
+        .filter(|block| backup_blocks.remove(&block.hash).is_none())
+    {
+        // This loop will typically iterate only once, but may write multiple blocks if it misses
+        // some non-finalized state changes while waiting for I/O ops.
+        write_backup_block(backup_dir_path, block);
+    }
+
+    // Remove any backup blocks that are not present in the non-finalized state
+    for (_, outdated_backup_block_path) in backup_blocks {
+        if let Err(delete_error) = std::fs::remove_file(outdated_backup_block_path) {
+            tracing::warn!(?delete_error, "failed to delete backup block file");
+        }
+    }
+}
+
 /// Updates the non-finalized state backup cache whenever the non-finalized state changes,
 /// deleting any outdated backup files and writing any blocks that are in the non-finalized
 /// state but missing in the backup cache.
@@ -80,7 +113,7 @@ pub(super) async fn run_backup_task(
 ) {
     let err = loop {
         let rate_limit = tokio::time::sleep(MIN_DURATION_BETWEEN_BACKUP_UPDATES);
-        let mut backup_blocks: HashMap<block::Hash, PathBuf> = {
+        let backup_blocks: HashMap<block::Hash, PathBuf> = {
             let backup_dir_path = backup_dir_path.clone();
             tokio::task::spawn_blocking(move || list_backup_dir_entries(&backup_dir_path))
                 .await
@@ -96,23 +129,11 @@ pub(super) async fn run_backup_task(
 
         let backup_dir_path = backup_dir_path.clone();
         tokio::task::spawn_blocking(move || {
-            for block in latest_non_finalized_state
-                .chain_iter()
-                .flat_map(|chain| chain.blocks.values())
-                // Remove blocks from `backup_blocks` that are present in the non-finalized state
-                .filter(|block| backup_blocks.remove(&block.hash).is_none())
-            {
-                // This loop will typically iterate only once, but may write multiple blocks if it misses
-                // some non-finalized state changes while waiting for I/O ops.
-                write_backup_block(&backup_dir_path, block);
-            }
-
-            // Remove any backup blocks that are not present in the non-finalized state
-            for (_, outdated_backup_block_path) in backup_blocks {
-                if let Err(delete_error) = std::fs::remove_file(outdated_backup_block_path) {
-                    tracing::warn!(?delete_error, "failed to delete backup block file");
-                }
-            }
+            update_non_finalized_state_backup(
+                &backup_dir_path,
+                &latest_non_finalized_state,
+                backup_blocks,
+            );
         })
         .await
         .expect("failed to join blocking task when writing in backup task");
@@ -197,7 +218,7 @@ fn write_backup_block(backup_dir_path: &Path, block: &ContextuallyVerifiedBlock)
 ///
 /// Returns any blocks that are valid and not present in the finalized state.
 fn read_non_finalized_blocks_from_backup<'a>(
-    backup_dir_path: &PathBuf,
+    backup_dir_path: &Path,
     finalized_state: &'a ZebraDb,
 ) -> impl Iterator<Item = SemanticallyVerifiedBlock> + 'a {
     list_backup_dir_entries(backup_dir_path)
@@ -255,8 +276,8 @@ fn read_non_finalized_blocks_from_backup<'a>(
 ///
 /// If the provided path cannot be opened as a directory.
 /// See [`read_backup_dir`] for more details.
-fn list_backup_dir_entries(
-    backup_dir_path: &PathBuf,
+pub(super) fn list_backup_dir_entries(
+    backup_dir_path: &Path,
 ) -> impl Iterator<Item = (block::Hash, PathBuf)> {
     read_backup_dir(backup_dir_path).filter_map(process_backup_dir_entry)
 }
@@ -268,7 +289,7 @@ fn list_backup_dir_entries(
 /// # Panics
 ///
 /// If the provided path cannot be opened as a directory.
-fn read_backup_dir(backup_dir_path: &PathBuf) -> impl Iterator<Item = DirEntry> {
+fn read_backup_dir(backup_dir_path: &Path) -> impl Iterator<Item = DirEntry> {
     std::fs::read_dir(backup_dir_path)
         .expect("failed to read non-finalized state backup directory")
         .filter_map(|entry| match entry {
