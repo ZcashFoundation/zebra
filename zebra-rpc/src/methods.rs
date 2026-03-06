@@ -170,6 +170,9 @@ pub(super) const PARAM_VERBOSITY_DESC: &str = "Whether to include verbose output
 pub(super) const PARAM_N_DESC: &str = "The output index in the transaction.";
 pub(super) const PARAM_INCLUDE_MEMPOOL_DESC: &str =
     "Whether to include mempool transactions in the response.";
+pub(super) const PARAM_THRESHOLD_DESC: &str =
+    "The minimum total work of the block height to return.";
+pub(super) const PARAM_UPGRADE_DESC: &str = "The network upgrade of the history node to return.";
 
 #[cfg(test)]
 mod tests;
