@@ -319,9 +319,7 @@ impl DiskFormatUpgrade for AddHistoryNodes {
 
 fn upgrades_with_history(db: &ZebraDb) -> Vec<(NetworkUpgrade, Option<Height>)> {
     let network = db.network();
-    let tip_height = db
-        .finalized_tip_height()
-        .expect("The finalized state is not empty");
+    let tip_height = db.finalized_tip_height().unwrap_or(Height::MIN);
     let current_upgrade = NetworkUpgrade::current(&network, tip_height);
     let history_tree_upgrades: Vec<NetworkUpgrade> = NetworkUpgrade::iter()
         .skip_while(|u| *u != NetworkUpgrade::Heartwood)
