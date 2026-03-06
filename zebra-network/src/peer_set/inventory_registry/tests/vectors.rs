@@ -211,7 +211,16 @@ async fn inv_registry_limit_for(status: InventoryMarker) {
         test_hash.resize(32, 0);
         let test_hash = InventoryHash::Tx(transaction::Hash(test_hash.try_into().unwrap()));
 
-        let test_change = status.map(|()| (AtLeastOne::from_one(test_hash), single_test_peer));
+        let test_change = status.map(|()| {
+            let at_least_one = AtLeastOne::from_vec(vec![test_hash]);
+
+            match at_least_one {
+                Ok(at_least_one) => (at_least_one, single_test_peer),
+                Err(_) => {
+                    panic!("failed to create AtLeastOne")
+                }
+            }
+        });
 
         let receiver_count = inv_stream_tx
             .send(test_change)
@@ -249,7 +258,16 @@ async fn inv_registry_limit_for(status: InventoryMarker) {
         )
         .into();
 
-        let test_change = status.map(|()| (AtLeastOne::from_one(single_test_hash), test_peer));
+        let test_change = status.map(|()| {
+            let at_least_one = AtLeastOne::from_vec(vec![single_test_hash]);
+
+            match at_least_one {
+                Ok(at_least_one) => (at_least_one, test_peer),
+                Err(_) => {
+                    panic!("failed to create AtLeastOne")
+                }
+            }
+        });
 
         let receiver_count = inv_stream_tx
             .send(test_change)

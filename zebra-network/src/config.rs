@@ -546,8 +546,9 @@ impl Config {
 impl Default for Config {
     fn default() -> Config {
         let mainnet_peers = [
-            "dnsseed.z.cash:8233",
             "dnsseed.str4d.xyz:8233",
+            "dnsseed.z.cash:8233",
+            "mainnet.seeder.shieldedinfra.net:8233",
             "mainnet.seeder.zfnd.org:8233",
         ]
         .iter()

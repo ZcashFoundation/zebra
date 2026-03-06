@@ -10,8 +10,9 @@ description = "Tower middleware for batch request processing"
 # This code was modified from a 2019 version of:
 # https://github.com/tower-rs/tower/tree/master/tower/src/buffer
 license = "MIT"
-repository = "https://github.com/ZcashFoundation/zebra"
-edition = "2021"
+repository.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 
 # TODO: decide if we want to use the Zebra readme and home page
 #readme = "../README.md"

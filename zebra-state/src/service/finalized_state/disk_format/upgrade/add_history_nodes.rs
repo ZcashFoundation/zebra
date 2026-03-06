@@ -181,7 +181,8 @@ impl DiskFormatUpgrade for AddHistoryNodes {
         info!("Checking history nodes database upgrade");
 
         let network = zebra_db.network().clone();
-        
+        let upgrades_with_history = upgrades_with_history(zebra_db);
+
         let tip_height_option = zebra_db.finalized_tip_height();
         if tip_height_option.is_none() {
             if zebra_db.last_history_node_index().is_some() {

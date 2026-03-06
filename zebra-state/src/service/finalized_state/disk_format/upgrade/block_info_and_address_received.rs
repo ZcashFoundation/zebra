@@ -157,7 +157,7 @@ impl DiskFormatUpgrade for Upgrade {
         for result in seq_iter {
             let (h, load_result) = result?;
             let height = Height(h);
-            if height.0.is_multiple_of(1000) {
+            if height.0 % 1000 == 0 {
                 tracing::info!(height = ?height, "adding block info for height");
             }
             // Get the data loaded from the parallel iterator

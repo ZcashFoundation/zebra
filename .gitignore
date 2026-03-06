@@ -162,5 +162,8 @@ $RECYCLE.BIN/
 # Python pycache
 __pycache__/
 
-# RPC tests cache 
+# RPC tests cache
 zebra-rpc/qa/cache/
+
+# Lychee link checker cache
+.lycheecache
