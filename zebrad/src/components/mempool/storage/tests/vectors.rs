@@ -407,25 +407,7 @@ fn mempool_removes_dependent_transactions() -> Result<()> {
 
 // ---- Policy function unit tests ----
 
-// Note: p2pkh_lock_script and p2sh_lock_script are intentionally duplicated from
-// policy::tests because Rust's #[cfg(test)] module boundaries prevent sharing.
-
-/// Build a P2PKH lock script: OP_DUP OP_HASH160 <20-byte hash> OP_EQUALVERIFY OP_CHECKSIG
-fn p2pkh_lock_script(hash: &[u8; 20]) -> transparent::Script {
-    let mut s = vec![0x76, 0xa9, 0x14];
-    s.extend_from_slice(hash);
-    s.push(0x88);
-    s.push(0xac);
-    transparent::Script::new(&s)
-}
-
-/// Build a P2SH lock script: OP_HASH160 <20-byte hash> OP_EQUAL
-fn p2sh_lock_script(hash: &[u8; 20]) -> transparent::Script {
-    let mut s = vec![0xa9, 0x14];
-    s.extend_from_slice(hash);
-    s.push(0x87);
-    transparent::Script::new(&s)
-}
+use super::super::policy::{p2pkh_lock_script, p2pk_lock_script, p2sh_lock_script};
 
 #[test]
 fn standard_script_kind_classifies_p2pkh() {
@@ -468,15 +450,6 @@ fn standard_script_kind_classifies_op_return() {
         ),
         "OP_RETURN script should be classified as NullData"
     );
-}
-
-/// Build a P2PK lock script: <33-byte compressed pubkey> OP_CHECKSIG
-fn p2pk_lock_script(pubkey: &[u8; 33]) -> transparent::Script {
-    let mut s = Vec::with_capacity(1 + 33 + 1);
-    s.push(0x21); // OP_PUSHBYTES_33
-    s.extend_from_slice(pubkey);
-    s.push(0xac); // OP_CHECKSIG
-    transparent::Script::new(&s)
 }
 
 #[test]

@@ -226,6 +226,37 @@ pub(super) fn are_inputs_standard(tx: &Transaction, spent_outputs: &[transparent
     true
 }
 
+// -- Test helper functions shared across test modules --
+
+/// Build a P2PKH lock script: OP_DUP OP_HASH160 <20-byte hash> OP_EQUALVERIFY OP_CHECKSIG
+#[cfg(test)]
+pub(super) fn p2pkh_lock_script(hash: &[u8; 20]) -> transparent::Script {
+    let mut s = vec![0x76, 0xa9, 0x14];
+    s.extend_from_slice(hash);
+    s.push(0x88);
+    s.push(0xac);
+    transparent::Script::new(&s)
+}
+
+/// Build a P2SH lock script: OP_HASH160 <20-byte hash> OP_EQUAL
+#[cfg(test)]
+pub(super) fn p2sh_lock_script(hash: &[u8; 20]) -> transparent::Script {
+    let mut s = vec![0xa9, 0x14];
+    s.extend_from_slice(hash);
+    s.push(0x87);
+    transparent::Script::new(&s)
+}
+
+/// Build a P2PK lock script: <compressed_pubkey> OP_CHECKSIG
+#[cfg(test)]
+pub(super) fn p2pk_lock_script(pubkey: &[u8; 33]) -> transparent::Script {
+    let mut s = Vec::with_capacity(1 + 33 + 1);
+    s.push(0x21); // OP_PUSHBYTES_33
+    s.extend_from_slice(pubkey);
+    s.push(0xac); // OP_CHECKSIG
+    transparent::Script::new(&s)
+}
+
 #[cfg(test)]
 mod tests {
     use zebra_chain::{
@@ -236,34 +267,6 @@ mod tests {
     use super::*;
 
     // -- Helper functions --
-
-    /// Build a P2PKH lock script: OP_DUP OP_HASH160 <20-byte hash> OP_EQUALVERIFY OP_CHECKSIG
-    fn p2pkh_lock_script(hash: &[u8; 20]) -> transparent::Script {
-        let mut s = vec![0x76, 0xa9, 0x14];
-        s.extend_from_slice(hash);
-        s.push(0x88);
-        s.push(0xac);
-        transparent::Script::new(&s)
-    }
-
-    /// Build a P2SH lock script: OP_HASH160 <20-byte hash> OP_EQUAL
-    fn p2sh_lock_script(hash: &[u8; 20]) -> transparent::Script {
-        let mut s = vec![0xa9, 0x14];
-        s.extend_from_slice(hash);
-        s.push(0x87);
-        transparent::Script::new(&s)
-    }
-
-    /// Build a P2PK lock script: <compressed_pubkey> OP_CHECKSIG
-    fn p2pk_lock_script(pubkey: &[u8; 33]) -> transparent::Script {
-        let mut s = Vec::with_capacity(1 + 33 + 1);
-        // OP_PUSHBYTES_33
-        s.push(0x21);
-        s.extend_from_slice(pubkey);
-        // OP_CHECKSIG
-        s.push(0xac);
-        transparent::Script::new(&s)
-    }
 
     /// Build a bare multisig lock script: OP_<required> <pubkeys...> OP_<total> OP_CHECKMULTISIG
     fn multisig_lock_script(required: u8, pubkeys: &[&[u8; 33]]) -> transparent::Script {

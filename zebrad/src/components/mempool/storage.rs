@@ -130,7 +130,7 @@ pub enum RejectionError {
 }
 
 /// Non-standard transaction error.
-#[derive(Error, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Error, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum NonStandardTransactionError {
     #[error("transaction is dust")]
