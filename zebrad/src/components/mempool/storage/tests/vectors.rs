@@ -407,27 +407,12 @@ fn mempool_removes_dependent_transactions() -> Result<()> {
 
 // ---- Policy function unit tests ----
 
-/// Build a P2PKH lock script: OP_DUP OP_HASH160 <20-byte hash> OP_EQUALVERIFY OP_CHECKSIG
-fn p2pkh_script(hash: &[u8; 20]) -> transparent::Script {
-    let mut s = vec![0x76, 0xa9, 0x14];
-    s.extend_from_slice(hash);
-    s.push(0x88);
-    s.push(0xac);
-    transparent::Script::new(&s)
-}
-
-/// Build a P2SH lock script: OP_HASH160 <20-byte hash> OP_EQUAL
-fn p2sh_lock_script(hash: &[u8; 20]) -> transparent::Script {
-    let mut s = vec![0xa9, 0x14];
-    s.extend_from_slice(hash);
-    s.push(0x87);
-    transparent::Script::new(&s)
-}
+use super::super::policy::{p2pkh_lock_script, p2pk_lock_script, p2sh_lock_script};
 
 #[test]
 fn standard_script_kind_classifies_p2pkh() {
     let _init_guard = zebra_test::init();
-    let script = p2pkh_script(&[0xaa; 20]);
+    let script = p2pkh_lock_script(&[0xaa; 20]);
     let kind = super::super::policy::standard_script_kind(&script);
     assert!(
         matches!(
@@ -464,6 +449,20 @@ fn standard_script_kind_classifies_op_return() {
             Some(zcash_script::solver::ScriptKind::NullData { .. })
         ),
         "OP_RETURN script should be classified as NullData"
+    );
+}
+
+#[test]
+fn standard_script_kind_classifies_p2pk() {
+    let _init_guard = zebra_test::init();
+    // Compressed pubkey starts with 0x02 or 0x03
+    let mut pubkey = [0x02; 33];
+    pubkey[1..].fill(0xaa);
+    let script = p2pk_lock_script(&pubkey);
+    let kind = super::super::policy::standard_script_kind(&script);
+    assert!(
+        matches!(kind, Some(zcash_script::solver::ScriptKind::PubKey { .. })),
+        "P2PK script should be classified as PubKey"
     );
 }
 
