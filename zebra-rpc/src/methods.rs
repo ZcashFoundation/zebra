@@ -2253,7 +2253,13 @@ where
                 )
             })?;
 
-        let branch_id = network_upgrade.branch_id().unwrap();
+        let Some(branch_id) = network_upgrade.branch_id() else {
+            return Err(ErrorObject::owned(
+                server::error::LegacyCode::Misc.into(),
+                "The network upgrade has no associated branch id",
+                None::<()>,
+            ));
+        };
 
         let zebra_state::ReadResponse::HistoryNode(entry) = self
             .read_state
@@ -2274,16 +2280,35 @@ where
             } else {
                 let response_object = match network_upgrade {
                     NetworkUpgrade::Heartwood | NetworkUpgrade::Canopy => {
-                        let entry_object =
-                            zcash_history::Entry::<V1>::from_bytes(branch_id.into(), entry.inner())
-                                .expect("entry object should be valid");
+                        let entry_object = match zcash_history::Entry::<V1>::from_bytes(
+                            branch_id.into(),
+                            entry.inner(),
+                        ) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                return Err(ErrorObject::owned(
+                                    server::error::LegacyCode::Misc.into(),
+                                    "Error reading inner entry data: ".to_owned() + &e.to_string(),
+                                    None::<()>,
+                                ))
+                            }
+                        };
+
                         let node_bytes = match entry_object.leaf() {
                             true => entry.inner().split_at(1).1,
                             false => entry.inner().split_at(9).1,
                         };
                         let mut cursor = Cursor::new(&node_bytes);
-                        let node = V1::read(branch_id.into(), &mut cursor)
-                            .expect("node data should be valid");
+                        let node = match V1::read(branch_id.into(), &mut cursor) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                return Err(ErrorObject::owned(
+                                    server::error::LegacyCode::Misc.into(),
+                                    "Error reading inner node data: ".to_owned() + &e.to_string(),
+                                    None::<()>,
+                                ))
+                            }
+                        };
                         let mut total_work: [u8; 32] = bytemuck::cast(node.subtree_total_work.0);
                         total_work.reverse();
                         GetHistoryNodeObject {
@@ -2307,16 +2332,34 @@ where
                         }
                     }
                     _ => {
-                        let entry_object =
-                            zcash_history::Entry::<V2>::from_bytes(branch_id.into(), entry.inner())
-                                .expect("entry object should be valid");
+                        let entry_object = match zcash_history::Entry::<V2>::from_bytes(
+                            branch_id.into(),
+                            entry.inner(),
+                        ) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                return Err(ErrorObject::owned(
+                                    server::error::LegacyCode::Misc.into(),
+                                    "Error reading inner entry data: ".to_owned() + &e.to_string(),
+                                    None::<()>,
+                                ))
+                            }
+                        };
                         let node_bytes = match entry_object.leaf() {
                             true => entry.inner().split_at(1).1,
                             false => entry.inner().split_at(9).1,
                         };
                         let mut cursor = Cursor::new(&node_bytes);
-                        let node = V2::read(branch_id.into(), &mut cursor)
-                            .expect("node data should be valid");
+                        let node = match V2::read(branch_id.into(), &mut cursor) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                return Err(ErrorObject::owned(
+                                    server::error::LegacyCode::Misc.into(),
+                                    "Error reading inner node data: ".to_owned() + &e.to_string(),
+                                    None::<()>,
+                                ))
+                            }
+                        };
                         let mut total_work: [u8; 32] = bytemuck::cast(node.v1.subtree_total_work.0);
                         total_work.reverse();
                         GetHistoryNodeObject {
@@ -2365,7 +2408,7 @@ where
             .await
             .map_misc_error()?
         else {
-            panic!("unexpected response to HistoryNode request")
+            panic!("unexpected response to AuthDataRoot request")
         };
 
         if let Some(auth_data_root) = auth_data_root {
@@ -2445,7 +2488,7 @@ where
             .await
             .map_misc_error()?
         else {
-            panic!("unexpected response to HistoryNode request")
+            panic!("unexpected response to FirstBlockWithTotalWork request")
         };
 
         if let Some(block_index) = block_index {

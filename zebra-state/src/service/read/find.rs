@@ -744,7 +744,11 @@ pub fn first_block_with_total_work(db: &ZebraDb, threshold: U256) -> Option<(Hei
 
             // Binary search over subtree_total_work within this upgrade
             while start_height != end_height {
-                let middle = Height(((start_height.as_usize() + end_height.as_usize()) / 2) as u32);
+                let middle = Height(
+                    (start_height.as_usize()
+                        + (end_height.as_usize() - start_height.as_usize()) / 2)
+                        as u32,
+                );
                 let local_work = db
                     .history_tree_by_height(middle)?
                     .root_node()?

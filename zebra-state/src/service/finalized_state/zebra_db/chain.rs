@@ -203,12 +203,8 @@ impl ZebraDb {
         let block = self.block(HashOrHeight::Height(
             Height::try_from(temp_tree_height.as_usize() as u32).ok()?,
         ))?;
-        let sapling_root = self
-            .sapling_tree_by_height(&Height::try_from(temp_tree_height.as_usize() as u32).ok()?)?
-            .root();
-        let orchard_root = self
-            .orchard_tree_by_height(&Height::try_from(temp_tree_height.as_usize() as u32).ok()?)?
-            .root();
+        let sapling_root = self.sapling_tree_by_height(&temp_tree_height)?.root();
+        let orchard_root = self.orchard_tree_by_height(&temp_tree_height)?.root();
         let temp_tree =
             HistoryTree::from_block(&network, block, &sapling_root, &orchard_root).ok()?;
 
