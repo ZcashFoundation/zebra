@@ -226,13 +226,12 @@ impl DiskFormatUpgrade for AddHistoryNodes {
                 break;
             }
 
-            let Some(activation_node) = zebra_db
+            let activation_node = zebra_db
                 .history_node(HistoryNodeIndex {
                     upgrade: *upgrade,
                     index: 0,
-                }) else {
-                    return Ok(Err(format!("No history node found for the activation block of {upgrade}")))
-                };
+                })
+                .expect("The activation height history node should exist");
 
             let peaks_at_activation = BTreeMap::from([(0, activation_node)]);
 
