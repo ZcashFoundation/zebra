@@ -563,7 +563,7 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::HistoryTree(_)
             | ReadResponse::HistoryNode(_)
             | ReadResponse::AuthDataRoot(_)
-            | ReadResponse:: FirstBlockWithTotalWork(_)
+            | ReadResponse::FirstBlockWithTotalWork(_)
             | ReadResponse::TotalWork(_)
             | ReadResponse::AddressBalance { .. }
             | ReadResponse::AddressesTransactionIds(_)

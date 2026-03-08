@@ -72,6 +72,10 @@ impl DiskFormatUpgrade for AddHistoryNodes {
 
         let network = zebra_db.network();
         let upgrades_with_history = upgrades_with_history(zebra_db);
+        if upgrades_with_history.is_empty() {
+            // There is nothing to do
+            return Ok(());
+        }
 
         // Iterate over all network upgrades with history nodes
         for (upgrade, activation_height_option) in upgrades_with_history.iter() {
@@ -182,6 +186,10 @@ impl DiskFormatUpgrade for AddHistoryNodes {
 
         let network = zebra_db.network().clone();
         let upgrades_with_history = upgrades_with_history(zebra_db);
+        if upgrades_with_history.is_empty() {
+            // There is nothing to do
+            return Ok(Ok(()));
+        }
 
         let tip_height_option = zebra_db.finalized_tip_height();
         if tip_height_option.is_none() {
@@ -223,7 +231,7 @@ impl DiskFormatUpgrade for AddHistoryNodes {
                     upgrade: *upgrade,
                     index: 0,
                 })
-                .expect("history node should exist");
+                .expect("The activation height history node should exist");
 
             let peaks_at_activation = BTreeMap::from([(0, activation_node)]);
 
@@ -319,10 +327,17 @@ impl DiskFormatUpgrade for AddHistoryNodes {
 
 fn upgrades_with_history(db: &ZebraDb) -> Vec<(NetworkUpgrade, Option<Height>)> {
     let network = db.network();
-    let tip_height = db
-        .finalized_tip_height()
-        .expect("The finalized state is not empty");
+    let tip_height = db.finalized_tip_height().unwrap_or(Height::MIN);
     let current_upgrade = NetworkUpgrade::current(&network, tip_height);
+
+    // Return an empty Vec if the chaintip has not reached Heartwood yet.
+    let is_before_heartwood = NetworkUpgrade::iter()
+        .take_while(|u| *u != NetworkUpgrade::Heartwood)
+        .any(|u| u == current_upgrade);
+    if is_before_heartwood {
+        return Vec::new();
+    }
+
     let history_tree_upgrades: Vec<NetworkUpgrade> = NetworkUpgrade::iter()
         .skip_while(|u| *u != NetworkUpgrade::Heartwood)
         .take_while(|u| *u != current_upgrade)

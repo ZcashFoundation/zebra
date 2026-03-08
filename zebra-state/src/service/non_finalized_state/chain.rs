@@ -1218,17 +1218,17 @@ impl Chain {
     ///
     /// Returns `None` if the chain has no history nodes.
     fn history_nodes_at_chain_tip(&self) -> Option<Vec<Entry>> {
-        let mut result = Vec::<Entry>::new();
-
         if self.history_nodes_by_height.is_empty() {
             return None;
         }
 
-        for (_key, mut entries) in self.history_nodes_by_height.clone() {
-            result.append(&mut entries);
-        }
-
-        Some(result)
+        Some(
+            self.history_nodes_by_height
+                .values()
+                .flatten()
+                .cloned()
+                .collect(),
+        )
     }
 
     /// Returns the root of the authorizing Merkle tree for the block at the given hash or height.
