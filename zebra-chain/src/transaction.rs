@@ -172,7 +172,7 @@ pub enum Transaction {
         /// The orchard data for this transaction, if any.
         orchard_shielded_data: Option<orchard::ShieldedData>,
         /// The tachyon data for this transaction, if any.
-        tachyon_shielded_data: Option<zcash_tachyon::Bundle<Option<zcash_tachyon::Stamp>, Amount>>,
+        tachyon_shielded_data: Option<zcash_tachyon::Bundle<Option<zcash_tachyon::Stamp>>>,
     },
 }
 
