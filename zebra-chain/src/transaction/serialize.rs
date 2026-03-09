@@ -4,7 +4,8 @@
 use std::{borrow::Borrow, io, sync::Arc};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use halo2::pasta::group::ff::PrimeField;
+use ff::PrimeField;
+use group::GroupEncoding;
 use hex::FromHex;
 use reddsa::{orchard::Binding, orchard::SpendAuth, Signature};
 
@@ -1311,7 +1312,6 @@ impl ZcashDeserialize for zcash_tachyon::stamp::Stampless {
 // Individual primitive serializations
 impl ZcashSerialize for zcash_tachyon::primitives::Tachygram {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        use ff::PrimeField;
         let fp: pasta_curves::Fp = (*self).into();
         let bytes = fp.to_repr();
         writer.write_all(&bytes)
@@ -1320,7 +1320,6 @@ impl ZcashSerialize for zcash_tachyon::primitives::Tachygram {
 
 impl ZcashDeserialize for zcash_tachyon::Tachygram {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        use ff::PrimeField;
         let bytes = reader.read_32_bytes()?;
         let fp_option = pasta_curves::Fp::from_repr(bytes);
         if fp_option.is_some().into() {
@@ -1333,7 +1332,6 @@ impl ZcashDeserialize for zcash_tachyon::Tachygram {
 
 impl ZcashSerialize for zcash_tachyon::primitives::Anchor {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        use ff::PrimeField;
         let fp: pasta_curves::Fp = (*self).into();
         let bytes = fp.to_repr();
         writer.write_all(&bytes)
@@ -1342,7 +1340,6 @@ impl ZcashSerialize for zcash_tachyon::primitives::Anchor {
 
 impl ZcashDeserialize for zcash_tachyon::primitives::Anchor {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        use ff::PrimeField;
         let bytes = reader.read_32_bytes()?;
         let fp_option = pasta_curves::Fp::from_repr(bytes);
         if fp_option.is_some().into() {
@@ -1369,8 +1366,7 @@ impl ZcashDeserialize for zcash_tachyon::Proof {
 
 impl ZcashSerialize for zcash_tachyon::value::Commitment {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        use group::GroupEncoding;
-        let point: pasta_curves::EpAffine = (*self).into(); 
+        let point: pasta_curves::EpAffine = (*self).into();
         let bytes = point.to_bytes();
         writer.write_all(&bytes)
     }
@@ -1378,7 +1374,6 @@ impl ZcashSerialize for zcash_tachyon::value::Commitment {
 
 impl ZcashDeserialize for zcash_tachyon::value::Commitment {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        use group::GroupEncoding;
         let bytes = reader.read_32_bytes()?;
         let point_option = pasta_curves::EpAffine::from_bytes(&bytes);
         if point_option.is_some().into() {
