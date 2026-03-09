@@ -72,7 +72,7 @@ impl DiskFormatUpgrade for AddHistoryNodes {
 
         let network = zebra_db.network();
         let upgrades_with_history = upgrades_with_history(zebra_db);
-        if upgrades_with_history.len() == 0 {
+        if upgrades_with_history.is_empty() {
             // There is nothing to do
             return Ok(());
         }
@@ -186,7 +186,7 @@ impl DiskFormatUpgrade for AddHistoryNodes {
 
         let network = zebra_db.network().clone();
         let upgrades_with_history = upgrades_with_history(zebra_db);
-        if upgrades_with_history.len() == 0 {
+        if upgrades_with_history.is_empty() {
             // There is nothing to do
             return Ok(Ok(()));
         }
