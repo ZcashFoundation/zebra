@@ -687,6 +687,7 @@ impl ZcashSerialize for Transaction {
                 outputs,
                 sapling_shielded_data,
                 orchard_shielded_data,
+                tachyon_shielded_data,
             } => {
                 // Transaction V6 spec:
                 // https://zips.z.cash/zip-0230#specification
@@ -726,6 +727,8 @@ impl ZcashSerialize for Transaction {
                 // `flagsOrchard`,`valueBalanceOrchard`, `anchorOrchard`, `sizeProofsOrchard`,
                 // `proofsOrchard`, `vSpendAuthSigsOrchard`, and `bindingSigOrchard`.
                 orchard_shielded_data.zcash_serialize(&mut writer)?;
+
+                tachyon_shielded_data.zcash_serialize(&mut writer)?;
             }
         }
         Ok(())
@@ -1016,6 +1019,8 @@ impl ZcashDeserialize for Transaction {
                 // `proofsOrchard`, `vSpendAuthSigsOrchard`, and `bindingSigOrchard`.
                 let orchard_shielded_data = (&mut limited_reader).zcash_deserialize_into()?;
 
+                let tachyon_shielded_data = (&mut limited_reader).zcash_deserialize_into()?;
+
                 Ok(Transaction::V6 {
                     network_upgrade,
                     lock_time,
@@ -1025,6 +1030,7 @@ impl ZcashDeserialize for Transaction {
                     outputs,
                     sapling_shielded_data,
                     orchard_shielded_data,
+                    tachyon_shielded_data
                 })
             }
             (_, _) => Err(SerializationError::Parse("bad tx header")),
@@ -1176,11 +1182,10 @@ impl FromHex for SerializedTransaction {
 }
 
 // Tachyon Bundle serialization implementations
-impl<S, V> ZcashSerialize for Option<zcash_tachyon::Bundle<S, V>>
+impl<S> ZcashSerialize for Option<zcash_tachyon::Bundle<S>>
 where 
-    S: ZcashSerialize,
-    V: ZcashSerialize,
-    zcash_tachyon::Bundle<S, V>: ZcashSerialize,
+    S: ZcashSerialize + zcash_tachyon::bundle::StampState,
+    zcash_tachyon::Bundle<S>: ZcashSerialize,
 {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         match self {
@@ -1196,17 +1201,16 @@ where
     }
 }
 
-impl<S, V> ZcashSerialize for zcash_tachyon::Bundle<S, V>
+impl<S> ZcashSerialize for zcash_tachyon::Bundle<S>
 where
-    S: ZcashSerialize,
-    V: ZcashSerialize,
+    S: ZcashSerialize + zcash_tachyon::bundle::StampState,
 {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         // Denoted as `nActionsTachyon` and `vActionsTachyon` in the spec
         self.actions.zcash_serialize(&mut writer)?;
         
         // Denoted as `valueBalanceTachyon` in the spec
-        self.value_balance.zcash_serialize(&mut writer)?;
+        writer.write_i64::<LittleEndian>(self.value_balance)?;
         
         // Denoted as `bindingSigTachyon` in the spec
         self.binding_sig.zcash_serialize(&mut writer)?;
@@ -1218,22 +1222,20 @@ where
     }
 }
 
-impl<S, V> ZcashDeserialize for Option<zcash_tachyon::Bundle<S, V>>
+impl<S> ZcashDeserialize for Option<zcash_tachyon::Bundle<S>>
 where
-    S: ZcashDeserialize,
-    V: ZcashDeserialize,
-    zcash_tachyon::Bundle<S, V>: ZcashDeserialize,
+    S: ZcashDeserialize + zcash_tachyon::bundle::StampState,
 {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         // Read actions count to determine if bundle is present
         let actions: Vec<zcash_tachyon::Action> = (&mut reader).zcash_deserialize_into()?;
-        
+
         if actions.is_empty() {
             return Ok(None);
         }
 
         // Read remaining bundle fields
-        let value_balance: V = (&mut reader).zcash_deserialize_into()?;
+        let value_balance = (&mut reader).read_i64::<LittleEndian>()?;
         let binding_sig = (&mut reader).zcash_deserialize_into()?;
         let stamp: S = (&mut reader).zcash_deserialize_into()?;
 
@@ -1243,6 +1245,46 @@ where
             binding_sig,
             stamp,
         }))
+    }
+}
+
+// Tachyon signature serializations
+impl ZcashSerialize for zcash_tachyon::action::Signature {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        writer.write_all(&<[u8; 64]>::from(*self)[..])
+    }
+}
+
+impl ZcashDeserialize for zcash_tachyon::action::Signature {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        Ok(reader.read_64_bytes()?.into())
+    }
+}
+
+impl ZcashSerialize for zcash_tachyon::bundle::Signature {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        writer.write_all(&<[u8; 64]>::from(*self)[..])
+    }
+}
+
+impl ZcashDeserialize for zcash_tachyon::bundle::Signature {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        Ok(reader.read_64_bytes()?.into())
+    }
+}
+
+// Tachyon TrustedPreallocate implementations
+impl TrustedPreallocate for zcash_tachyon::Action {
+    // Action = 32 (cv) + 32 (rk) + 64 (sig) = 128 bytes
+    fn max_allocation() -> u64 {
+        (MAX_BLOCK_BYTES - 1) / 128
+    }
+}
+
+impl TrustedPreallocate for zcash_tachyon::Tachygram {
+    // Tachygram = 32 bytes (Fp field element)
+    fn max_allocation() -> u64 {
+        (MAX_BLOCK_BYTES - 1) / 32
     }
 }
 
@@ -1309,8 +1351,32 @@ impl ZcashDeserialize for zcash_tachyon::stamp::Stampless {
     }
 }
 
+impl ZcashSerialize for Option<zcash_tachyon::Stamp> {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        match self {
+            None => writer.write_u8(0)?,
+            Some(stamp) => {
+                writer.write_u8(1)?;
+                stamp.zcash_serialize(&mut writer)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl ZcashDeserialize for Option<zcash_tachyon::Stamp> {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let flag = reader.read_u8()?;
+        match flag {
+            0 => Ok(None),
+            1 => Ok(Some(zcash_tachyon::Stamp::zcash_deserialize(&mut reader)?)),
+            _ => Err(SerializationError::Parse("invalid tachyon stamp flag")),
+        }
+    }
+}
+
 // Individual primitive serializations
-impl ZcashSerialize for zcash_tachyon::primitives::Tachygram {
+impl ZcashSerialize for zcash_tachyon::Tachygram {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         let fp: pasta_curves::Fp = (*self).into();
         let bytes = fp.to_repr();
@@ -1330,7 +1396,7 @@ impl ZcashDeserialize for zcash_tachyon::Tachygram {
     }
 }
 
-impl ZcashSerialize for zcash_tachyon::primitives::Anchor {
+impl ZcashSerialize for zcash_tachyon::Anchor {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         let fp: pasta_curves::Fp = (*self).into();
         let bytes = fp.to_repr();
@@ -1338,7 +1404,7 @@ impl ZcashSerialize for zcash_tachyon::primitives::Anchor {
     }
 }
 
-impl ZcashDeserialize for zcash_tachyon::primitives::Anchor {
+impl ZcashDeserialize for zcash_tachyon::Anchor {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         let bytes = reader.read_32_bytes()?;
         let fp_option = pasta_curves::Fp::from_repr(bytes);
