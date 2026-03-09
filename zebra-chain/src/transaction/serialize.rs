@@ -1318,7 +1318,7 @@ impl ZcashSerialize for zcash_tachyon::primitives::Tachygram {
     }
 }
 
-impl ZcashDeserialize for zcash_tachyon::primitives::Tachygram {
+impl ZcashDeserialize for zcash_tachyon::Tachygram {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         use ff::PrimeField;
         let bytes = reader.read_32_bytes()?;

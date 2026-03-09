@@ -82,6 +82,8 @@ bech32 = { workspace = true }
 zcash_script.workspace = true
 
 # ECC deps
+ff.workspace = true
+pasta_curves.workspace = true
 halo2 = { package = "halo2_proofs", version = "0.3" }
 orchard.workspace = true
 zcash_tachyon = { workspace = true, features = ["serde"] }
