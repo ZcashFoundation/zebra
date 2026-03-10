@@ -34,6 +34,7 @@ pub fn test_transaction_serialization() {
         version: 2,
         version_group_id: None,
         lock_time: 0,
+        // Pre-Overwinter V2 transaction: expiryheight should be omitted (matches zcashd)
         expiry_height: None,
         block_hash: None,
         block_time: None,
@@ -68,6 +69,7 @@ pub fn test_transaction_serialization() {
         version: 4,
         version_group_id: None,
         lock_time: 0,
+        // Pre-Overwinter V4 transaction: expiryheight should be omitted (matches zcashd)
         expiry_height: None,
         block_hash: None,
         block_time: None,

@@ -122,16 +122,24 @@ pub fn lock_time_has_passed(
 ///
 /// This check counts both `Coinbase` and `PrevOut` transparent inputs.
 pub fn has_inputs_and_outputs(tx: &Transaction) -> Result<(), TransactionError> {
+<<<<<<< HEAD
     if let Transaction::VCrosslink { staking_action, .. } = tx {
         // TODO: real staking transactions with inputs/outputs
         if staking_action.is_some() {
             return Ok(());
         }
     }
+=======
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+    let has_other_circulation_effects = tx.has_zip233_amount();
+
+    #[cfg(not(all(zcash_unstable = "nu7", feature = "tx_v6")))]
+    let has_other_circulation_effects = false;
+>>>>>>> origin/main
 
     if !tx.has_transparent_or_shielded_inputs() {
         Err(TransactionError::NoInputs)
-    } else if !tx.has_transparent_or_shielded_outputs() {
+    } else if !tx.has_transparent_or_shielded_outputs() && !has_other_circulation_effects {
         Err(TransactionError::NoOutputs)
     } else {
         Ok(())
@@ -194,7 +202,7 @@ pub fn coinbase_tx_no_prevout_joinsplit_spend(tx: &Transaction) -> Result<(), Tr
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc>
 pub fn joinsplit_has_vpub_zero(tx: &Transaction) -> Result<(), TransactionError> {
-    let zero = Amount::<NonNegative>::try_from(0).expect("an amount of 0 is always valid");
+    let zero = Amount::<NonNegative>::zero();
 
     let vpub_pairs = tx
         .output_values_to_sprout()
@@ -233,7 +241,7 @@ pub fn disabled_add_to_sprout_pool(
     //
     // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
     if height >= canopy_activation_height {
-        let zero = Amount::<NonNegative>::try_from(0).expect("an amount of 0 is always valid");
+        let zero = Amount::<NonNegative>::zero();
 
         let tx_sprout_pool = tx.output_values_to_sprout();
         for vpub_old in tx_sprout_pool {

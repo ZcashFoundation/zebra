@@ -378,9 +378,9 @@ fn roundtrip_sapling_tree_root() {
 fn roundtrip_sapling_subtree_data() {
     let _init_guard = zebra_test::init();
 
-    proptest!(|(mut val in any::<NoteCommitmentSubtreeData<sapling::tree::Node>>())| {
+    proptest!(|(mut val in any::<NoteCommitmentSubtreeData<sapling::tree::legacy::Node>>())| {
         val.end_height.0 %= MAX_ON_DISK_HEIGHT.0 + 1;
-        assert_value_properties(val)
+        assert_value_properties(val.root.0)
     });
 }
 

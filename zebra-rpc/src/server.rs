@@ -12,22 +12,26 @@ use std::{fmt, panic};
 use cookie::Cookie;
 use jsonrpsee::server::{middleware::rpc::RpcServiceBuilder, Server, ServerHandle};
 use tokio::task::JoinHandle;
-use tower::Service;
 use tracing::*;
 
-use zebra_chain::{
-    block, chain_sync_status::ChainSyncStatus, chain_tip::ChainTip, parameters::Network,
-};
+use zebra_chain::{chain_sync_status::ChainSyncStatus, chain_tip::ChainTip, parameters::Network};
+use zebra_consensus::router::service_trait::BlockVerifierService;
 use zebra_network::AddressBookPeers;
+<<<<<<< HEAD
 use zebra_node_services::mempool;
 use zebra_state::crosslink::{TFLServiceRequest, TFLServiceResponse};
+=======
+use zebra_node_services::mempool::MempoolService;
+use zebra_state::{ReadState as ReadStateService, State as StateService};
+>>>>>>> origin/main
 
 use crate::{
     config,
     methods::{RpcImpl, RpcServer as _},
     server::{
         http_request_compatibility::HttpRequestMiddlewareLayer,
-        rpc_call_compatibility::FixRpcResponseMiddleware,
+        rpc_call_compatibility::FixRpcResponseMiddleware, rpc_metrics::RpcMetricsMiddleware,
+        rpc_tracing::RpcTracingMiddleware,
     },
 };
 
@@ -35,6 +39,8 @@ pub mod cookie;
 pub mod error;
 pub mod http_request_compatibility;
 pub mod rpc_call_compatibility;
+pub mod rpc_metrics;
+pub mod rpc_tracing;
 
 #[cfg(test)]
 mod tests;
@@ -114,6 +120,7 @@ impl RpcServer {
         conf: config::rpc::Config,
     ) -> Result<ServerTask, tower::BoxError>
     where
+<<<<<<< HEAD
         Mempool: tower::Service<
                 mempool::Request,
                 Response = mempool::Response,
@@ -150,17 +157,14 @@ impl RpcServer {
             + Sync
             + 'static,
         ReadState::Future: Send,
+=======
+        Mempool: MempoolService,
+        State: StateService,
+        ReadState: ReadStateService,
+>>>>>>> origin/main
         Tip: ChainTip + Clone + Send + Sync + 'static,
         AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
-        BlockVerifierRouter: Service<
-                zebra_consensus::Request,
-                Response = block::Hash,
-                Error = zebra_consensus::BoxError,
-            > + Clone
-            + Send
-            + Sync
-            + 'static,
-        <BlockVerifierRouter as Service<zebra_consensus::Request>>::Future: Send,
+        BlockVerifierRouter: BlockVerifierService,
         SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
     {
         let listen_addr = conf
@@ -180,12 +184,19 @@ impl RpcServer {
 
         let rpc_middleware = RpcServiceBuilder::new()
             .rpc_logger(1024)
-            .layer_fn(FixRpcResponseMiddleware::new);
+            .layer_fn(FixRpcResponseMiddleware::new)
+            .layer_fn(RpcMetricsMiddleware::new)
+            .layer_fn(RpcTracingMiddleware::new);
 
         let server = Server::builder()
             .http_only()
             .set_http_middleware(http_middleware)
             .set_rpc_middleware(rpc_middleware)
+            .max_response_body_size(
+                conf.max_response_body_size
+                    .try_into()
+                    .expect("should be valid"),
+            )
             .build(listen_addr)
             .await?;
 

@@ -168,8 +168,7 @@ proptest! {
             Err(DuplicateSproutNullifier {
                 nullifier: duplicate_nullifier,
                 in_finalized_state: false,
-            }
-            .into())
+            })
         );
         // block was rejected
         prop_assert_eq!(Some((Height(0), genesis.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
@@ -227,8 +226,7 @@ proptest! {
             Err(DuplicateSproutNullifier {
                 nullifier: duplicate_nullifier,
                 in_finalized_state: false,
-            }
-            .into())
+            })
         );
         prop_assert_eq!(Some((Height(0), genesis.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
         prop_assert!(non_finalized_state.eq_internal_state(&previous_mem));
@@ -288,8 +286,7 @@ proptest! {
             Err(DuplicateSproutNullifier {
                 nullifier: duplicate_nullifier,
                 in_finalized_state: false,
-            }
-            .into())
+            })
         );
         prop_assert_eq!(Some((Height(0), genesis.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
         prop_assert!(non_finalized_state.eq_internal_state(&previous_mem));
@@ -395,8 +392,7 @@ proptest! {
             Err(DuplicateSproutNullifier {
                 nullifier: duplicate_nullifier,
                 in_finalized_state: duplicate_in_finalized_state,
-            }
-            .into())
+            })
         );
 
         let check_tx_no_duplicates_in_chain =
@@ -520,8 +516,7 @@ proptest! {
             Err(DuplicateSaplingNullifier {
                 nullifier: duplicate_nullifier,
                 in_finalized_state: false,
-            }
-            .into())
+            })
         );
         prop_assert_eq!(Some((Height(0), genesis.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
         prop_assert!(non_finalized_state.eq_internal_state(&previous_mem));
@@ -576,8 +571,7 @@ proptest! {
             Err(DuplicateSaplingNullifier {
                 nullifier: duplicate_nullifier,
                 in_finalized_state: false,
-            }
-            .into())
+            })
         );
         prop_assert_eq!(Some((Height(0), genesis.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
         prop_assert!(non_finalized_state.eq_internal_state(&previous_mem));
@@ -673,8 +667,7 @@ proptest! {
             Err(DuplicateSaplingNullifier {
                 nullifier: duplicate_nullifier,
                 in_finalized_state: duplicate_in_finalized_state,
-            }
-            .into())
+            })
         );
 
         let check_tx_no_duplicates_in_chain =
@@ -801,8 +794,7 @@ proptest! {
             Err(DuplicateOrchardNullifier {
                 nullifier: duplicate_nullifier,
                 in_finalized_state: false,
-            }
-            .into())
+            })
         );
         prop_assert_eq!(Some((Height(0), genesis.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
         prop_assert!(non_finalized_state.eq_internal_state(&previous_mem));
@@ -861,8 +853,7 @@ proptest! {
             Err(DuplicateOrchardNullifier {
                 nullifier: duplicate_nullifier,
                 in_finalized_state: false,
-            }
-            .into())
+            })
         );
         prop_assert_eq!(Some((Height(0), genesis.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
         prop_assert!(non_finalized_state.eq_internal_state(&previous_mem));
@@ -961,8 +952,7 @@ proptest! {
             Err(DuplicateOrchardNullifier {
                 nullifier: duplicate_nullifier,
                 in_finalized_state: duplicate_in_finalized_state,
-            }
-            .into())
+            })
         );
 
         let check_tx_no_duplicates_in_chain =

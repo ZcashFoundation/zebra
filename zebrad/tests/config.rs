@@ -4,6 +4,8 @@
 //! `ZEBRA_`-prefixed environment variable mappings used in Docker or
 //! other environments.
 
+#![allow(clippy::unwrap_in_result)]
+
 use std::{env, fs, io::Write, path::PathBuf, sync::Mutex};
 
 use tempfile::{Builder, TempDir};

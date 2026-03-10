@@ -1,7 +1,7 @@
 //! Randomised data generation for sapling types.
 
 use group::Group;
-use jubjub::{AffinePoint, ExtendedPoint};
+use jubjub::ExtendedPoint;
 use rand::SeedableRng;
 use rand_chacha::ChaChaRng;
 
@@ -11,8 +11,8 @@ use crate::primitives::Groth16Proof;
 
 use super::{
     keys::{self, ValidatingKey},
-    note, tree, FieldNotPresent, NoteCommitment, Output, OutputInTransactionV4, PerSpendAnchor,
-    SharedAnchor, Spend,
+    note, tree, FieldNotPresent, Output, OutputInTransactionV4, PerSpendAnchor, SharedAnchor,
+    Spend,
 };
 
 impl Arbitrary for Spend<PerSpendAnchor> {
@@ -28,7 +28,7 @@ impl Arbitrary for Spend<PerSpendAnchor> {
         )
             .prop_map(|(per_spend_anchor, nullifier, rk, proof, sig_bytes)| Self {
                 per_spend_anchor,
-                cv: ExtendedPoint::generator().try_into().unwrap(),
+                cv: ExtendedPoint::generator().into(),
                 nullifier,
                 rk,
                 zkproof: proof,
@@ -56,7 +56,7 @@ impl Arbitrary for Spend<SharedAnchor> {
         )
             .prop_map(|(nullifier, rk, proof, sig_bytes)| Self {
                 per_spend_anchor: FieldNotPresent,
-                cv: ExtendedPoint::generator().try_into().unwrap(),
+                cv: ExtendedPoint::generator().into(),
                 nullifier,
                 rk,
                 zkproof: proof,
@@ -82,8 +82,9 @@ impl Arbitrary for Output {
             any::<Groth16Proof>(),
         )
             .prop_map(|(enc_ciphertext, out_ciphertext, zkproof)| Self {
-                cv: ExtendedPoint::generator().try_into().unwrap(),
-                cm_u: NoteCommitment(AffinePoint::identity()).extract_u(),
+                cv: ExtendedPoint::generator().into(),
+                cm_u: sapling_crypto::note::ExtractedNoteCommitment::from_bytes(&[0u8; 32])
+                    .unwrap(),
                 ephemeral_key: keys::EphemeralPublicKey(ExtendedPoint::generator().into()),
                 enc_ciphertext,
                 out_ciphertext,
@@ -136,12 +137,25 @@ impl Arbitrary for tree::Root {
     type Strategy = BoxedStrategy<Self>;
 }
 
-impl Arbitrary for tree::Node {
+impl Arbitrary for tree::legacy::Node {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        jubjub_base_strat().prop_map(tree::Node::from).boxed()
+        jubjub_base_strat()
+            .prop_map(tree::legacy::Node::from)
+            .boxed()
     }
 
     type Strategy = BoxedStrategy<Self>;
+}
+
+impl From<jubjub::Fq> for tree::legacy::Node {
+    fn from(x: jubjub::Fq) -> Self {
+        let node = sapling_crypto::Node::from_bytes(x.to_bytes());
+        if node.is_some().into() {
+            tree::legacy::Node(node.unwrap())
+        } else {
+            sapling_crypto::Node::from_bytes([0; 32]).unwrap().into()
+        }
+    }
 }

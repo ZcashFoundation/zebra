@@ -1,6 +1,6 @@
 [package]
 name = "tower-batch-control"
-version = "0.2.41"
+version = "1.0.1"
 authors = ["Zcash Foundation <zebra@zfnd.org>", "Tower Maintainers <team@tower-rs.com>"]
 description = "Tower middleware for batch request processing"
 # # Legal
@@ -10,8 +10,9 @@ description = "Tower middleware for batch request processing"
 # This code was modified from a 2019 version of:
 # https://github.com/tower-rs/tower/tree/master/tower/src/buffer
 license = "MIT"
-repository = "https://github.com/ZcashFoundation/zebra"
-edition = "2021"
+repository.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 
 # TODO: decide if we want to use the Zebra readme and home page
 #readme = "../README.md"
@@ -34,10 +35,6 @@ tracing-futures = { workspace = true }
 
 [dev-dependencies]
 color-eyre = { workspace = true }
-# This is a transitive dependency via color-eyre.
-# Enable a feature that makes tinyvec compile much faster.
-tinyvec = { workspace = true, features = ["rustc_1_55"] }
-
 ed25519-zebra = { workspace = true }
 rand = { workspace = true }
 
@@ -46,7 +43,7 @@ tokio-test = { workspace = true }
 tower-fallback = { path = "../tower-fallback/", version = "0.2.41" }
 tower-test = { workspace = true }
 
-zebra-test = { path = "../zebra-test/", version = "1.0.1" }
+zebra-test = { path = "../zebra-test/", version = "2.0.1" }
 
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tokio_unstable)'] }
+[lints]
+workspace = true

@@ -1,0 +1,12 @@
+backend = "fetch"
+network = "Regtest"
+
+[json_server_settings]
+json_rpc_listen_address = "127.0.0.1:0"
+
+[grpc_settings]
+grpc_listen_address = "127.0.0.1:0"
+
+[validator_settings]
+validator_grpc_listen_address =  "127.0.0.1:0"
+validator_jsonrpc_listen_address = "127.0.0.1:0"

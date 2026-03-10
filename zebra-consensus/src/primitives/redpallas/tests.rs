@@ -1,5 +1,7 @@
 //! Tests for redpallas signature verification
 
+#![allow(clippy::unwrap_in_result)]
+
 use super::*;
 
 use std::time::Duration;

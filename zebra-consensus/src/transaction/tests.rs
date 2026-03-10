@@ -1,4 +1,7 @@
 //! Tests for Zcash transaction consensus checks.
+
+#![allow(clippy::unwrap_in_result)]
+
 //
 // TODO: split fixed test vectors into a `vectors` module?
 
@@ -21,7 +24,7 @@ use zebra_chain::{
     parameters::{testnet::ConfiguredActivationHeights, Network, NetworkUpgrade},
     primitives::{ed25519, x25519, Groth16Proof},
     sapling,
-    serialization::{DateTime32, ZcashDeserialize, ZcashDeserializeInto},
+    serialization::{AtLeastOne, DateTime32, ZcashDeserialize, ZcashDeserializeInto},
     sprout,
     transaction::{
         arbitrary::{
@@ -43,6 +46,18 @@ use super::{check, Request, Verifier};
 
 #[cfg(test)]
 mod prop;
+
+/// Returns the timeout duration for tests, extended when running under coverage
+/// instrumentation to account for the performance overhead.
+fn test_timeout() -> std::time::Duration {
+    // Check if we're running under cargo-llvm-cov by looking for its environment variables
+    if std::env::var("LLVM_COV_FLAGS").is_ok() || std::env::var("CARGO_LLVM_COV").is_ok() {
+        // Use a 5x longer timeout when running with coverage (150 seconds)
+        std::time::Duration::from_secs(150)
+    } else {
+        std::time::Duration::from_secs(30)
+    }
+}
 
 #[test]
 fn v5_transactions_basic_check() -> Result<(), Report> {
@@ -2245,7 +2260,7 @@ async fn v5_transaction_with_exceeding_expiry_height() {
         expiry_height,
         sapling_shielded_data: None,
         orchard_shielded_data: None,
-        network_upgrade: NetworkUpgrade::Nu6,
+        network_upgrade: NetworkUpgrade::Nu6_1,
     };
 
     let transaction_hash = transaction.hash();
@@ -2605,7 +2620,7 @@ fn v4_with_sapling_spends() {
 
         // Test the transaction verifier
         let result = timeout(
-            std::time::Duration::from_secs(30),
+            test_timeout(),
             verifier.oneshot(Request::Block {
                 transaction_hash: transaction.hash(),
                 transaction,
@@ -2741,7 +2756,7 @@ async fn v5_with_sapling_spends() {
 
         assert_eq!(
             timeout(
-                std::time::Duration::from_secs(30),
+                test_timeout(),
                 verifier.oneshot(Request::Block {
                     transaction_hash: tx.hash(),
                     transaction: Arc::new(tx),
@@ -2831,7 +2846,10 @@ async fn v5_with_duplicate_orchard_action() {
         let duplicate_nullifier = duplicate_action.action.nullifier;
 
         // Duplicate the first action
-        orchard_shielded_data.actions.push(duplicate_action);
+        let mut actions_vec = orchard_shielded_data.actions.as_slice().to_vec();
+        actions_vec.push(duplicate_action.clone());
+        orchard_shielded_data.actions = AtLeastOne::from_vec(actions_vec)
+            .expect("pushing one element never breaks at least one constraints");
 
         let verifier = Verifier::new_for_tests(
             &net,
@@ -3262,7 +3280,10 @@ fn duplicate_sapling_spend_in_shielded_data<A: sapling::AnchorVariant + Clone>(
             let duplicate_spend = spends.first().clone();
             let duplicate_nullifier = duplicate_spend.nullifier;
 
-            spends.push(duplicate_spend);
+            let mut spends_vec = spends.as_slice().to_vec();
+            spends_vec.push(duplicate_spend);
+            *spends = AtLeastOne::from_vec(spends_vec)
+                .expect("pushing one element never breaks at least one constraints");
 
             duplicate_nullifier
         }
@@ -3461,9 +3482,11 @@ fn coinbase_outputs_are_decryptable_for_fake_v5_blocks() {
             let shielded_data = insert_fake_orchard_shielded_data(&mut transaction);
             shielded_data.flags = Flags::ENABLE_OUTPUTS;
 
-            let action =
-                fill_action_with_note_encryption_test_vector(&shielded_data.actions[0].action, v);
-            let sig = shielded_data.actions[0].spend_auth_sig;
+            let action = fill_action_with_note_encryption_test_vector(
+                &shielded_data.actions.first().action,
+                v,
+            );
+            let sig = shielded_data.actions.first().spend_auth_sig;
             shielded_data.actions = vec![AuthorizedAction::from_parts(action, sig)]
                 .try_into()
                 .unwrap();
@@ -3492,9 +3515,11 @@ fn shielded_outputs_are_not_decryptable_for_fake_v5_blocks() {
             let shielded_data = insert_fake_orchard_shielded_data(&mut tx);
             shielded_data.flags = Flags::ENABLE_OUTPUTS;
 
-            let action =
-                fill_action_with_note_encryption_test_vector(&shielded_data.actions[0].action, v);
-            let sig = shielded_data.actions[0].spend_auth_sig;
+            let action = fill_action_with_note_encryption_test_vector(
+                &shielded_data.actions.first().action,
+                v,
+            );
+            let sig = shielded_data.actions.first().spend_auth_sig;
             shielded_data.actions = vec![AuthorizedAction::from_parts(action, sig)]
                 .try_into()
                 .unwrap();

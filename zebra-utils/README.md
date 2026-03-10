@@ -7,7 +7,6 @@ Tools for maintaining and testing Zebra:
 - [zebrad-log-filter](#zebrad-log-filter)
 - [zcash-rpc-diff](#zcash-rpc-diff)
 - [scanning-results-reader](#scanning-results-reader)
-- [openapi-generator](#openapi-generator)
 
 Binaries are easier to use if they are located in your system execution path.
 
@@ -27,7 +26,7 @@ To find the latest checkpoints on the `main` branch:
 2. From the list on the left, go to the `Integration tests` and find the `Run checkpoints-mainnet test`, then click in the
    `Result of checkpoints-mainnet` step.
 3. Scroll down until you see the list of checkpoints.
-4. Add those checkpoints to the end of `zebra-consensus/src/checkpoint/main-checkpoints.txt`
+4. Add those checkpoints to the end of `zebra-chain/src/parameters/checkpoint/main-checkpoints.txt`
 5. Repeat steps 2 to 4 for `Generate checkpoints testnet`
 6. Open a pull request at https://github.com/ZcashFoundation/zebra/pulls
 
@@ -54,8 +53,8 @@ cargo install --locked --features zebra-checkpoints --git https://github.com/Zca
 
 You can update the checkpoints using these commands:
 ```sh
-zebra-checkpoints --last-checkpoint $(tail -1 zebra-consensus/src/checkpoint/main-checkpoints.txt | cut -d" " -f1) | tee --append zebra-consensus/src/checkpoint/main-checkpoints.txt &
-zebra-checkpoints --last-checkpoint $(tail -1 zebra-consensus/src/checkpoint/test-checkpoints.txt | cut -d" " -f1) -- -testnet | tee --append zebra-consensus/src/checkpoint/test-checkpoints.txt &
+zebra-checkpoints --last-checkpoint $(tail -1 zebra-chain/src/parameters/checkpoint/main-checkpoints.txt | cut -d" " -f1) | tee --append zebra-chain/src/parameters/checkpoint/main-checkpoints.txt &
+zebra-checkpoints --last-checkpoint $(tail -1 zebra-chain/src/parameters/checkpoint/test-checkpoints.txt | cut -d" " -f1) -- -testnet | tee --append zebra-chain/src/parameters/checkpoint/test-checkpoints.txt &
 wait
 ```
 
@@ -74,7 +73,7 @@ You can see all the `zebra-checkpoints` options using:
 target/release/zebra-checkpoints --help
 ```
 
-For more details about checkpoint lists, see the [`zebra-checkpoints` README.](https://github.com/ZcashFoundation/zebra/tree/main/zebra-consensus/src/checkpoint/README.md)
+For more details about checkpoint lists, see the [`zebra-checkpoints` README.](https://github.com/ZcashFoundation/zebra/tree/main/zebra-chain/src/parameters/checkpoint/README.md)
 
 #### Checkpoint Generation for Testnet
 
@@ -188,81 +187,3 @@ You can override the binaries the script calls using these environmental variabl
 - `$ZCASH_CLI`
 - `$DIFF`
 - `$JQ`
-
-
-## OpenAPI generator
-
-This utility generates an `openapi.yaml` specification by extracting information from RPC method documentation in the `zebra-rpc` crate code.
-
-### Usage
-
-To use the generator tool, build and run it with the following command:
-
-```console
-cargo run --bin openapi-generator --features="openapi-generator"
-```
-
-This command will create or update an `openapi.yaml` file at the root of the Zebra project repository.
-
-The latest specification generated using this utility can be found [here](https://github.com/ZcashFoundation/zebra/blob/main/openapi.yaml).
-
-### Documentation standard
-
-In order for the script to work, each RPC method documentation needs to follow a specific well-defined format. For example, here is the in-code documentation for the `getblock` method, which takes arguments:
-
-```rust
-/// Returns the requested block by hash or height, as a [`GetBlock`] JSON string.
-/// If the block is not in Zebra's state, returns
-/// [error code `-8`.](https://github.com/zcash/zcash/issues/5758)
-///
-/// zcashd reference: [`getblock`](https://zcash.github.io/rpc/getblock.html)
-/// method: post
-/// tags: blockchain
-///
-/// # Parameters
-///
-/// - `hash_or_height`: (string, required, example="1") The hash or height for the block to be returned.
-/// - `verbosity`: (number, optional, default=1, example=1) 0 for hex encoded data, 1 for a json object, and 2 for json object with transaction data.
-///
-/// # Notes
-///
-/// With verbosity=1, [`lightwalletd` only reads the `tx` field of the
-/// result](https://github.com/zcash/lightwalletd/blob/dfac02093d85fb31fb9a8475b884dd6abca966c7/common/common.go#L152),
-/// and other clients only read the `hash` and `confirmations` fields,
-/// so we only return a few fields for now.
-///
-/// `lightwalletd` and mining clients also do not use verbosity=2, so we don't support it.
-#[rpc(name = "getblock")]
-fn get_block(
-   &self,
-   hash_or_height: String,
-   verbosity: Option<u8>,
-) -> BoxFuture<Result<GetBlock>>;
-```
-
-An example of a method with no arguments can be the `getinfo` call:
-
-
-```rust
-#[rpc(name = "getinfo")]
-/// Returns software information from the RPC server, as a [`GetInfo`] JSON struct.
-///
-/// zcashd reference: [`getinfo`](https://zcash.github.io/rpc/getinfo.html)
-/// method: post
-/// tags: control
-///
-/// # Notes
-///
-/// [The zcashd reference](https://zcash.github.io/rpc/getinfo.html) might not show some fields
-/// in Zebra's [`GetInfo`]. Zebra uses the field names and formats from the
-/// [zcashd code](https://github.com/zcash/zcash/blob/v4.6.0-1/src/rpc/misc.cpp#L86-L87).
-///
-/// Some fields from the zcashd reference are missing from Zebra's [`GetInfo`]. It only contains the fields
-/// [required for lightwalletd support.](https://github.com/zcash/lightwalletd/blob/v0.4.9/common/common.go#L91-L95)
-fn get_info(&self) -> Result<GetInfo>;
-```
-
-Find more examples inside the `zebra-rpc/src/methods.rs` and the `zebra-rpc/src/methods/get_block_template_rpcs.rs` files.
-
-The generator will detect new methods added if they are members of the `Rpc` trait for the `zebra-rpc/src/methods.rs` file and inside the `GetBlockTemplateRpc` in the file `zebra-rpc/src/methods/get_block_template_rpcs.rs`.
-

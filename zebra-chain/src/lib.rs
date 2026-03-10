@@ -43,6 +43,7 @@ pub mod transparent;
 pub mod value_balance;
 pub mod work;
 
+pub use bounded_vec::BoundedVec;
 pub use error::Error;
 
 #[cfg(any(test, feature = "proptest-impl"))]

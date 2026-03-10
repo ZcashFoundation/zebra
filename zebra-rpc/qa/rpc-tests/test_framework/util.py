@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) 2014-2016 The Bitcoin Core developers
-# Copyright (c) 2016-2022 The Zcash developers
+# Copyright (c) 2016-2024 The Zcash developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or https://www.opensource.org/licenses/mit-license.php .
 
@@ -23,13 +23,15 @@ import subprocess
 import tarfile
 import tempfile
 import time
+import toml
 import re
 import errno
 
 from . import coverage
 from .proxy import ServiceProxy, JSONRPCException
+from .authproxy import AuthServiceProxy
 
-LEGACY_DEFAULT_FEE = Decimal('0.00001')
+from test_framework.config import ZainoConfig, ZebraConfig, ZebraExtraArgs
 
 COVERAGE_DIR = None
 PRE_BLOSSOM_BLOCK_TARGET_SPACING = 150
@@ -63,6 +65,16 @@ def zebrad_config(datadir):
     shutil.copyfile(base_location, new_location)
     return new_location
 
+def zaino_binary():
+    return os.path.join("..", "target", "debug", "zainod")
+
+def zainod_config(datadir):
+    base_location = os.path.join('qa', 'zindexer.toml')
+    new_location = os.path.join(datadir, "zaino_config.toml")
+    os.makedirs(datadir, exist_ok=True)
+    shutil.copyfile(base_location, new_location)
+    return new_location
+
 class PortSeed:
     # Must be initialized with a unique integer for each process
     n = None
@@ -83,7 +95,7 @@ def get_rpc_proxy(url, node_number, timeout=None):
         timeout (int): HTTP timeout in seconds
 
     Returns:
-        AuthServiceProxy. convenience object for making RPC calls.
+        ServiceProxy. convenience object for making RPC calls.
 
     """
     proxy_kwargs = {}
@@ -109,6 +121,14 @@ def rpc_port(n):
 def wallet_rpc_port(n):
     return PORT_MIN + (PORT_RANGE * 2) + n + (MAX_NODES * PortSeed.n) % (PORT_RANGE - 1 - MAX_NODES)
 
+def indexer_rpc_port(n):
+    return PORT_MIN + (PORT_RANGE * 3) + n + (MAX_NODES * PortSeed.n) % (PORT_RANGE - 1 - MAX_NODES)
+
+def zaino_rpc_port(n):
+    return PORT_MIN + (PORT_RANGE * 4) + n + (MAX_NODES * PortSeed.n) % (PORT_RANGE - 1 - MAX_NODES)
+
+def zaino_grpc_port(n):
+    return PORT_MIN + (PORT_RANGE * 5) + n + (MAX_NODES * PortSeed.n) % (PORT_RANGE - 1 - MAX_NODES)
 
 def check_json_precision():
     """Make sure json library being used does not lose precision converting ZEC values"""
@@ -143,19 +163,6 @@ def sync_blocks(rpc_connections, wait=0.125, timeout=60, allow_different_tips=Fa
             break
         time.sleep(wait)
         timeout -= wait
-
-    """ Zebra does not support the `fullyNotified` field in the `blockchaininfo` RPC
-    # Now that the block counts are in sync, wait for the internal
-    # notifications to finish
-    while timeout > 0:
-        notified = [ x.getblockchaininfo()['fullyNotified'] for x in rpc_connections ]
-        if notified == [ True ] * len(notified):
-            return True
-        time.sleep(wait)
-        timeout -= wait
-
-    raise AssertionError("Block sync failed")
-    """
     return True
 
 def sync_mempools(rpc_connections, wait=0.5, timeout=60):
@@ -173,19 +180,6 @@ def sync_mempools(rpc_connections, wait=0.5, timeout=60):
             break
         time.sleep(wait)
         timeout -= wait
-
-    """ Zebra does not support the `fullyNotified` field in the `getmempoolinfo` RPC
-    # Now that the mempools are in sync, wait for the internal
-    # notifications to finish
-    while timeout > 0:
-        notified = [ x.getmempoolinfo()['fullyNotified'] for x in rpc_connections ]
-        if notified == [ True ] * len(notified):
-            return True
-        time.sleep(wait)
-        timeout -= wait
-
-    raise AssertionError("Mempool sync failed")
-    """
     return True
 
 bitcoind_processes = {}
@@ -197,83 +191,27 @@ def initialize_datadir(dirname, n, clock_offset=0):
     rpc_u, rpc_p = rpc_auth_pair(n)
     config_rpc_port = rpc_port(n)
     config_p2p_port = p2p_port(n)
+    config_indexer_port = indexer_rpc_port(n)
 
-    with open(os.path.join(datadir, "zcash.conf"), 'w', encoding='utf8') as f:
-        f.write("regtest=1\n")
-        f.write("showmetrics=0\n")
-        f.write("rpcuser=" + rpc_u + "\n")
-        f.write("rpcpassword=" + rpc_p + "\n")
-        f.write("port="+str(config_p2p_port)+"\n")
-        f.write("rpcport="+str(config_rpc_port)+"\n")
-        f.write("listenonion=0\n")
-        if clock_offset != 0:
-            f.write('clockoffset='+str(clock_offset)+'\n')
-
-    update_zebrad_conf(datadir, config_rpc_port, config_p2p_port)
+    update_zebrad_conf(datadir, config_rpc_port, config_p2p_port, config_indexer_port, None)
 
     return datadir
 
-def update_zebrad_conf(datadir, rpc_port, p2p_port, funding_streams=False, miner_address = "tmSRd1r8gs77Ja67Fw1JcdoXytxsyrLTPJm"):
-    import toml
-
+def update_zebrad_conf(datadir, rpc_port, p2p_port, indexer_port, extra_args=None):
     config_path = zebrad_config(datadir)
 
     with open(config_path, 'r') as f:
         config_file = toml.load(f)
 
-    config_file['rpc']['listen_addr'] = '127.0.0.1:'+str(rpc_port)
-    config_file['network']['listen_addr'] = '127.0.0.1:'+str(p2p_port)
-    config_file['state']['cache_dir'] = datadir
+    zebra_config = ZebraConfig(
+        network_listen_address='127.0.0.1:'+str(p2p_port),
+        rpc_listen_address='127.0.0.1:'+str(rpc_port),
+        indexer_listen_address='127.0.0.1:'+str(indexer_port),
+        data_dir=datadir)
 
-    config_file['mining']['miner_address'] = miner_address
+    zebra_config.extra_args = extra_args or ZebraExtraArgs()
 
-    # TODO: Add More config options. zcashd uses extra arguments to pass options
-    # to the binary, but zebrad uses a config file.
-    # We want to make the config accept different options.
-    # For now, we hardcode the funding streams to be enabled.
-    if funding_streams == True:
-        config_file['network']['testnet_parameters']['pre_nu6_funding_streams'] = {
-            'recipients': [
-                {
-                    'receiver': 'ECC',
-                    'numerator': 7,
-                    'addresses': ['t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz']
-                },
-                {
-                    'receiver': 'ZcashFoundation',
-                    'numerator': 5,
-                    'addresses': ['t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v']
-                },
-                {
-                    'receiver': 'MajorGrants',
-                    'numerator': 8,
-                    'addresses': ['t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P']
-                },
-            ],
-            'height_range': {
-                'start': 290,
-                'end': 291
-            }
-        }
-
-        config_file['network']['testnet_parameters']['post_nu6_funding_streams'] = {
-            'recipients': [
-                {
-                    'receiver': 'MajorGrants',
-                    'numerator': 8,
-                    'addresses': ['t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P']
-                },
-                {
-                    'receiver': 'Deferred',
-                    'numerator': 12
-                    # No addresses field is valid for Deferred
-                }
-            ],
-            'height_range': {
-                'start': 291,
-                'end': 293
-            }
-        }
+    config_file = zebra_config.update(config_file)
 
     with open(config_path, 'w') as f:
         toml.dump(config_file, f)
@@ -284,7 +222,6 @@ def rpc_auth_pair(n):
     return 'rpcuser💻' + str(n), 'rpcpass🔑' + str(n)
 
 def rpc_url(i, rpchost=None):
-    rpc_u, rpc_p = rpc_auth_pair(i)
     host = '127.0.0.1'
     port = rpc_port(i)
     if rpchost:
@@ -295,17 +232,24 @@ def rpc_url(i, rpchost=None):
             host = rpchost
     # For zebra, we just use a non-authenticated endpoint.
     return "http://%s:%d" % (host, int(port))
-    # We might want to get back to authenticated endpoints after #8864:
-    #return "http://%s:%s@%s:%d" % (rpc_u, rpc_p, host, int(port))
+
+def rpc_zaino_url(i, rpchost=None):
+    host = '127.0.0.1'
+    port = zaino_rpc_port(i)
+    if rpchost:
+        parts = rpchost.split(':')
+        if len(parts) == 2:
+            host, port = parts
+        else:
+            host = rpchost
+    #
+    return "http://%s:%d" % (host, int(port))
 
 def wait_for_bitcoind_start(process, url, i):
     '''
     Wait for bitcoind to start. This means that RPC is accessible and fully initialized.
     Raise an exception if bitcoind exits during initialization.
     '''
-    # Zebra can do migration and other stuff at startup, even in regtest mode,
-    # giving 10 seconds for it to complete.
-    time.sleep(10)
     while True:
         if process.poll() is not None:
             raise Exception('%s node %d exited with status %i during initialization' % (zcashd_binary(), i, process.returncode))
@@ -317,7 +261,7 @@ def wait_for_bitcoind_start(process, url, i):
             if e.errno != errno.ECONNREFUSED: # Port not yet open?
                 raise # unknown IO error
         except JSONRPCException as e: # Initialization phase
-            if e.error['code'] != -28: # RPC in warmup?
+            if e.error['code'] != -343: # RPC in warmup?
                 raise # unknown JSON RPC exception
         time.sleep(0.25)
 
@@ -355,7 +299,7 @@ def initialize_chain(test_dir, num_nodes, cachedir, cache_behavior='current'):
         for i in range(MAX_NODES):
             datadir = initialize_datadir(cachedir, i)
 
-            config = update_zebrad_conf(datadir, rpc_port(i), p2p_port(i))
+            config = update_zebrad_conf(datadir, rpc_port(i), p2p_port(i), indexer_rpc_port(i))
             binary = zcashd_binary()
             args = [ binary, "-c="+config, "start" ]
 
@@ -385,8 +329,6 @@ def initialize_chain(test_dir, num_nodes, cachedir, cache_behavior='current'):
         for i in range(2):
             for peer in range(4):
                 for j in range(25):
-                    # Removed because zebrad does not has this RPC method:
-                    #set_node_times(rpcs, block_time)
                     rpcs[peer].generate(1)
                     block_time += PRE_BLOSSOM_BLOCK_TARGET_SPACING
                 # Must sync before next peer starts generating blocks
@@ -397,7 +339,6 @@ def initialize_chain(test_dir, num_nodes, cachedir, cache_behavior='current'):
         # Shut them down, and clean up cache directories:
         stop_nodes(rpcs)
         wait_bitcoinds()
-
         for i in range(MAX_NODES):
             # record the system time at which the cache was regenerated
             with open(node_file(cachedir, i, 'cache_config.json'), "w", encoding="utf8") as cache_conf_file:
@@ -405,18 +346,12 @@ def initialize_chain(test_dir, num_nodes, cachedir, cache_behavior='current'):
                 cache_conf_json = json.dumps(cache_config, indent=4)
                 cache_conf_file.write(cache_conf_json)
 
-            # Removed as zebrad do not created these files:
-            #os.remove(node_file(cachedir, i, "debug.log"))
-            #os.remove(node_file(cachedir, i, "db.log"))
-            #os.remove(node_file(cachedir, i, "peers.dat"))
-
-
     def init_from_cache():
         for i in range(num_nodes):
             from_dir = os.path.join(cachedir, "node"+str(i))
             to_dir = os.path.join(test_dir,  "node"+str(i))
             shutil.copytree(from_dir, to_dir)
-            with open(os.path.join(to_dir, 'cache_config.json'), "r", encoding="utf8") as cache_conf_file:
+            with open(os.path.join(to_dir, 'regtest', 'cache_config.json'), "r", encoding="utf8") as cache_conf_file:
                 cache_conf = json.load(cache_conf_file)
                 # obtain the clock offset as a negative number of seconds
                 offset = round(cache_conf['cache_time']) - round(time.time())
@@ -510,7 +445,7 @@ def persist_node_caches(tmpdir, cache_behavior, num_nodes):
     os.mkdir(cache_path)
 
     for i in range(num_nodes):
-        node_path = os.path.join(tmpdir, 'node' + str(i))
+        node_path = os.path.join(tmpdir, 'node' + str(i), 'regtest')
 
         # Clean up the files that we don't want to persist
         os.remove(os.path.join(node_path, 'debug.log'))
@@ -574,18 +509,16 @@ def start_node(i, dirname, extra_args=None, rpchost=None, timewait=None, binary=
     """
     Start a bitcoind and return RPC connection to it
     """
-
     datadir = os.path.join(dirname, "node"+str(i))
     if binary is None:
         binary = zcashd_binary()
 
     if extra_args is not None:
-        config = update_zebrad_conf(datadir, rpc_port(i), p2p_port(i), funding_streams = extra_args[i][0], miner_address = extra_args[i][1])
+        config = update_zebrad_conf(datadir, rpc_port(i), p2p_port(i), indexer_rpc_port(i), extra_args)
     else:
-        config = update_zebrad_conf(datadir, rpc_port(i), p2p_port(i))
+        config = update_zebrad_conf(datadir, rpc_port(i), p2p_port(i), indexer_rpc_port(i))
     args = [ binary, "-c="+config, "start" ]
 
-    #if extra_args is not None: args.extend(extra_args)
     bitcoind_processes[i] = subprocess.Popen(args, stderr=stderr)
     if os.getenv("PYTHON_DEBUG", ""):
         print("start_node: bitcoind started, waiting for RPC to come up")
@@ -628,14 +561,14 @@ def start_nodes(num_nodes, dirname, extra_args=None, rpchost=None, binary=None):
     rpcs = []
     try:
         for i in range(num_nodes):
-            rpcs.append(start_node(i, dirname, extra_args, rpchost, binary=binary[i]))
+            rpcs.append(start_node(i, dirname, extra_args[i], rpchost, binary=binary[i]))
     except: # If one node failed to start, stop the others
         stop_nodes(rpcs)
         raise
     return rpcs
 
 def node_file(dirname, n_node, filename):
-    return os.path.join(dirname, "node"+str(n_node), filename)
+    return os.path.join(dirname, "node"+str(n_node), "regtest", filename)
 
 def check_node(i):
     bitcoind_processes[i].poll()
@@ -681,7 +614,6 @@ def connect_nodes(from_connection, node_num):
 
 def connect_nodes_bi(nodes, a, b):
     connect_nodes(nodes[a], b)
-    connect_nodes(nodes[b], a)
 
 def find_output(node, txid, amount):
     """
@@ -872,6 +804,34 @@ def tarfile_extractall(tarfile, path):
 
 zallet_processes = {}
 
+ZALLET_RPC_DEFAULT_USERNAME = "zebra"
+ZALLET_RPC_DEFAULT_PASSWORD = "zebra"
+
+def get_rpc_auth_proxy(url, node_number, timeout=None):
+    """
+    Args:
+        url (str): URL of the RPC server to call
+        node_number (int): the node number (or id) that this calls to
+
+    Kwargs:
+        timeout (int): HTTP timeout in seconds
+
+    Returns:
+        AuthServiceProxy. convenience object for making RPC calls.
+
+    """
+    proxy_kwargs = {}
+    if timeout is not None:
+        proxy_kwargs['timeout'] = timeout
+
+    proxy = AuthServiceProxy(url, **proxy_kwargs)
+    proxy.url = url  # store URL on proxy for info
+
+    coverage_logfile = coverage.get_filename(
+        COVERAGE_DIR, node_number) if COVERAGE_DIR else None
+
+    return coverage.AuthServiceProxyWrapper(proxy, coverage_logfile)
+
 def start_wallets(num_wallets, dirname, extra_args=None, rpchost=None, binary=None):
     """
     Start multiple wallets, return RPC connections to them
@@ -882,7 +842,7 @@ def start_wallets(num_wallets, dirname, extra_args=None, rpchost=None, binary=No
     try:
         for i in range(num_wallets):
             rpcs.append(start_wallet(i, dirname, extra_args[i], rpchost, binary=binary[i]))
-    except: # If one node failed to start, stop the others
+    except: # If one wallet failed to start, stop the others
         stop_wallets(rpcs)
         raise
     return rpcs
@@ -928,15 +888,13 @@ def start_wallet(i, dirname, extra_args=None, rpchost=None, timewait=None, binar
     wait_for_wallet_start(zallet_processes[i], url, i)
     if os.getenv("PYTHON_DEBUG", ""):
         print("start_wallet: RPC successfully started for wallet {} with pid {}".format(i, zallet_processes[i].pid))
-    proxy = get_rpc_proxy(url, i, timeout=timewait)
+    proxy = get_rpc_auth_proxy(url, i, timeout=timewait)
     if COVERAGE_DIR:
         coverage.write_all_rpc_commands(COVERAGE_DIR, proxy)
 
     return proxy
 
 def update_zallet_conf(datadir, validator_port, zallet_port):
-    import toml
-
     config_path = zallet_config(datadir)
 
     with open(config_path, 'r') as f:
@@ -957,7 +915,6 @@ def update_zallet_conf(datadir, validator_port, zallet_port):
 def stop_wallets(wallets):
     for wallet in wallets:
         try:
-            # TODO: Implement `stop` in zallet: https://github.com/zcash/wallet/issues/153
             wallet.stop()
         except http.client.CannotSendRequest as e:
             print("WARN: Unable to stop wallet: " + repr(e))
@@ -976,12 +933,11 @@ def wait_for_wallet_start(process, url, i):
     Wait for the wallet to start. This means that RPC is accessible and fully initialized.
     Raise an exception if zallet exits during initialization.
     '''
-    time.sleep(1) # give the wallet a moment to start
     while True:
         if process.poll() is not None:
             raise Exception('%s wallet %d exited with status %i during initialization' % (zallet_binary(), i, process.returncode))
         try:
-            rpc = get_rpc_proxy(url, i)
+            rpc = get_rpc_auth_proxy(url, i)
             rpc.getwalletinfo()
             break # break out of loop on success
         except IOError as e:
@@ -1001,5 +957,110 @@ def rpc_url_wallet(i, rpchost=None):
             host, port = parts
         else:
             host = rpchost
-    # For zallet, we just use a non-authenticated endpoint.
-    return "http://%s:%d" % (host, int(port))
+    return "http://%s:%s@%s:%d" % (ZALLET_RPC_DEFAULT_USERNAME, ZALLET_RPC_DEFAULT_PASSWORD, host, int(port))
+
+
+# Zaino utilities
+
+zaino_processes = {}
+
+def start_zainos(num_nodes, dirname, extra_args=None, rpchost=None, binary=None):
+    """
+    Start multiple zainod's, return RPC connections to them
+    """
+    if extra_args is None: extra_args = [ None for _ in range(num_nodes) ]
+    if binary is None: binary = [ None for _ in range(num_nodes) ]
+    rpcs = []
+    try:
+        for i in range(num_nodes):
+            rpcs.append(start_zaino(i, dirname, extra_args[i], rpchost, binary=binary[i]))
+    except: # If one node failed to start, stop the others
+        stop_zainos(rpcs)
+        raise
+    return rpcs
+
+def start_zaino(i, dirname, extra_args=None, rpchost=None, timewait=None, binary=None, stderr=None):
+    """
+    Start a zainod and return RPC connection to it
+    """
+    datadir = os.path.join(dirname, "zaino"+str(i))
+    if binary is None:
+        binary = zaino_binary()
+
+    if extra_args is not None:
+        config = update_zainod_conf(datadir, rpc_port(i), p2p_port(i), indexer_rpc_port(i), zaino_rpc_port(i), zaino_grpc_port(i), extra_args)
+    else:
+        config = update_zainod_conf(datadir, rpc_port(i), p2p_port(i), indexer_rpc_port(i), zaino_rpc_port(i), zaino_grpc_port(i))
+
+    args = [ binary, "-c="+config ]
+
+    zaino_processes[i] = subprocess.Popen(args, stderr=stderr)
+    if os.getenv("PYTHON_DEBUG", ""):
+        print("start_node: zainod started, waiting for RPC to come up")
+    url = rpc_zaino_url(i, rpchost)
+    wait_for_zainod_start(zaino_processes[i], url, i)
+    if os.getenv("PYTHON_DEBUG", ""):
+        print("start_node: RPC successfully started for node {} with pid {}".format(i, zaino_processes[i].pid))
+    proxy = get_rpc_proxy(url, i, timeout=timewait)
+
+    if COVERAGE_DIR:
+        coverage.write_all_rpc_commands(COVERAGE_DIR, proxy)
+
+    return proxy
+
+def wait_for_zainod_start(process, url, i):
+    '''
+    Wait for zainod to start. This means that RPC is accessible and fully initialized.
+    Raise an exception if zainod exits during initialization.
+    '''
+    while True:
+        if process.poll() is not None:
+            raise Exception('%s node %d exited with status %i during initialization' % (zaino_binary(), i, process.returncode))
+        try:
+            rpc = get_rpc_proxy(url, i)
+            rpc.getblockcount()
+            break # break out of loop on success
+        except IOError as e:
+            if e.errno != errno.ECONNREFUSED: # Port not yet open?
+                raise # unknown IO error
+        except JSONRPCException as e: # Initialization phase
+            if e.error['code'] != -343: # RPC in warmup?
+                raise # unknown JSON RPC exception
+        time.sleep(0.25)
+
+def update_zainod_conf(datadir, rpc_port, p2p_port, indexer_port, zaino_rpc_port, zaino_grpc_port, extra_args=None):
+    config_path = zainod_config(datadir)
+
+    with open(config_path, 'r') as f:
+        config_file = toml.load(f)
+
+    zaino_config = ZainoConfig(
+        json_rpc_listen_address='127.0.0.1:'+str(zaino_rpc_port),
+        grpc_listen_address='127.0.0.1:'+str(zaino_grpc_port),
+        validator_grpc_listen_address='127.0.0.1:'+str(indexer_port),
+        validator_jsonrpc_listen_address='127.0.0.1:'+str(rpc_port)
+    )
+
+    config_file = zaino_config.update(config_file)
+
+    with open(config_path, 'w') as f:
+        toml.dump(config_file, f)
+
+    return config_path
+
+def stop_zainos(zainos):
+    # Wait for all zainod processes to exit and clear the process table
+    for proc in list(zaino_processes.values()):
+        # TODO: Add a `stop` RPC method to zainod
+        try:
+            proc.terminate()
+            proc.wait()
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+        continue
+    zaino_processes.clear()
+
+    del zainos[:] # Emptying array closes connections as a side effect

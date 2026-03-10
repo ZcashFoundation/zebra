@@ -8,19 +8,18 @@ use derive_getters::Getters;
 use derive_new::new;
 use hex::ToHex;
 
-use serde_with::serde_as;
+use zcash_script::script::Asm;
 use zebra_chain::{
     amount::{self, Amount, NegativeOrZero, NonNegative},
     block::{self, merkle::AUTH_DIGEST_PLACEHOLDER, Height},
     orchard,
     parameters::Network,
     primitives::ed25519,
-    sapling::NotSmallOrderValueCommitment,
+    sapling::ValueCommitment,
     serialization::ZcashSerialize,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx, VerifiedUnminedTx},
     transparent::Script,
 };
-use zebra_consensus::groth16::Description;
 use zebra_script::Sigops;
 use zebra_state::IntoDisk;
 
@@ -158,13 +157,14 @@ pub struct TransactionObject {
     /// The raw transaction, encoded as hex bytes.
     #[serde(with = "hex")]
     pub(crate) hex: SerializedTransaction,
-    /// The height of the block in the best chain that contains the tx or `None` if the tx is in
-    /// the mempool.
+    /// The height of the block in the best chain that contains the tx, -1 if
+    /// it's in a side chain block, or `None` if the tx is in the mempool.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
-    pub(crate) height: Option<u32>,
-    /// The height diff between the block containing the tx and the best chain tip + 1 or `None`
-    /// if the tx is in the mempool.
+    pub(crate) height: Option<i32>,
+    /// The height diff between the block containing the tx and the best chain
+    /// tip + 1, 0 if it's in a side chain, or `None` if the tx is in the
+    /// mempool.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
     pub(crate) confirmations: Option<u32>,
@@ -278,7 +278,9 @@ pub struct TransactionObject {
     #[serde(rename = "locktime")]
     pub(crate) lock_time: u32,
 
-    /// The block height after which the transaction expires
+    /// The block height after which the transaction expires.
+    /// Included for Overwinter+ transactions (matching zcashd), omitted for V1/V2.
+    /// See: <https://github.com/zcash/zcash/blob/v6.11.0/src/rpc/rawtransaction.cpp#L224-L226>
     #[serde(rename = "expiryheight", skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
     pub(crate) expiry_height: Option<Height>,
@@ -349,11 +351,67 @@ pub struct Output {
     script_pub_key: ScriptPubKey,
 }
 
+/// The output object returned by `gettxout` RPC requests.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+pub struct OutputObject {
+    #[serde(rename = "bestblock")]
+    best_block: String,
+    confirmations: u32,
+    value: f64,
+    #[serde(rename = "scriptPubKey")]
+    script_pub_key: ScriptPubKey,
+    version: u32,
+    coinbase: bool,
+}
+impl OutputObject {
+    pub fn from_output(
+        output: &zebra_chain::transparent::Output,
+        best_block: String,
+        confirmations: u32,
+        version: u32,
+        coinbase: bool,
+        network: &Network,
+    ) -> Self {
+        let lock_script = &output.lock_script;
+        let addresses = output.address(network).map(|addr| vec![addr.to_string()]);
+        let req_sigs = addresses.as_ref().map(|a| a.len() as u32);
+
+        let script_pub_key = ScriptPubKey::new(
+            zcash_script::script::Code(lock_script.as_raw_bytes().to_vec()).to_asm(false),
+            lock_script.clone(),
+            req_sigs,
+            zcash_script::script::Code(lock_script.as_raw_bytes().to_vec())
+                .to_component()
+                .ok()
+                .and_then(|c| c.refine().ok())
+                .and_then(|component| zcash_script::solver::standard(&component))
+                .map(|kind| match kind {
+                    zcash_script::solver::ScriptKind::PubKeyHash { .. } => "pubkeyhash",
+                    zcash_script::solver::ScriptKind::ScriptHash { .. } => "scripthash",
+                    zcash_script::solver::ScriptKind::MultiSig { .. } => "multisig",
+                    zcash_script::solver::ScriptKind::NullData { .. } => "nulldata",
+                    zcash_script::solver::ScriptKind::PubKey { .. } => "pubkey",
+                })
+                .unwrap_or("nonstandard")
+                .to_string(),
+            addresses,
+        );
+
+        Self {
+            best_block,
+            confirmations,
+            value: crate::methods::types::zec::Zec::from(output.value()).lossy_zec(),
+            script_pub_key,
+            version,
+            coinbase,
+        }
+    }
+}
+
 /// The scriptPubKey of a transaction output.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
 pub struct ScriptPubKey {
     /// the asm.
-    // #9330: The `asm` field is not currently populated.
     asm: String,
     /// the hex.
     #[serde(with = "hex")]
@@ -365,7 +423,6 @@ pub struct ScriptPubKey {
     #[getter(copy)]
     req_sigs: Option<u32>,
     /// The type, eg 'pubkeyhash'.
-    // #9330: The `type` field is not currently populated.
     r#type: String,
     /// The addresses.
     #[serde(default)]
@@ -377,7 +434,6 @@ pub struct ScriptPubKey {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
 pub struct ScriptSig {
     /// The asm.
-    // #9330: The `asm` field is not currently populated.
     asm: String,
     /// The hex.
     hex: Script,
@@ -436,8 +492,8 @@ pub struct JoinSplit {
 pub struct ShieldedSpend {
     /// Value commitment to the input note.
     #[serde(with = "hex")]
-    #[getter(copy)]
-    cv: NotSmallOrderValueCommitment,
+    #[getter(skip)]
+    cv: ValueCommitment,
     /// Merkle root of the Sapling note commitment tree.
     #[serde(with = "hex")]
     #[getter(copy)]
@@ -460,13 +516,21 @@ pub struct ShieldedSpend {
     spend_auth_sig: [u8; 64],
 }
 
+// We can't use `#[getter(copy)]` as upstream `sapling_crypto::note::ValueCommitment` is not `Copy`.
+impl ShieldedSpend {
+    /// The value commitment to the input note.
+    pub fn cv(&self) -> ValueCommitment {
+        self.cv.clone()
+    }
+}
+
 /// A Sapling output of a transaction.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
 pub struct ShieldedOutput {
     /// Value commitment to the input note.
     #[serde(with = "hex")]
-    #[getter(copy)]
-    cv: NotSmallOrderValueCommitment,
+    #[getter(skip)]
+    cv: ValueCommitment,
     /// The u-coordinate of the note commitment for the output note.
     #[serde(rename = "cmu", with = "hex")]
     cm_u: [u8; 32],
@@ -482,6 +546,14 @@ pub struct ShieldedOutput {
     /// A zero-knowledge proof using the Sapling Output circuit.
     #[serde(with = "hex")]
     proof: [u8; 192],
+}
+
+// We can't use `#[getter(copy)]` as upstream `sapling_crypto::note::ValueCommitment` is not `Copy`.
+impl ShieldedOutput {
+    /// The value commitment to the output note.
+    pub fn cv(&self) -> ValueCommitment {
+        self.cv.clone()
+    }
 }
 
 /// Object with Orchard-specific information.
@@ -609,8 +681,24 @@ impl TransactionObject {
         let block_time = block_time.map(|bt| bt.timestamp());
         Self {
             hex: tx.clone().into(),
-            height: height.map(|height| height.0),
-            confirmations,
+            height: if in_active_chain.unwrap_or_default() {
+                height.map(|height| height.0 as i32)
+            } else if block_hash.is_some() {
+                // Side chain
+                Some(-1)
+            } else {
+                // Mempool
+                None
+            },
+            confirmations: if in_active_chain.unwrap_or_default() {
+                confirmations
+            } else if block_hash.is_some() {
+                // Side chain
+                Some(0)
+            } else {
+                // Mempool
+                None
+            },
             inputs: tx
                 .inputs()
                 .iter()
@@ -629,7 +717,9 @@ impl TransactionObject {
                         txid: outpoint.hash.encode_hex(),
                         vout: outpoint.index,
                         script_sig: ScriptSig {
-                            asm: "".to_string(),
+                            // https://github.com/zcash/zcash/blob/v6.11.0/src/rpc/rawtransaction.cpp#L240
+                            asm: zcash_script::script::Code(unlock_script.as_raw_bytes().to_vec())
+                                .to_asm(true),
                             hex: unlock_script.clone(),
                         },
                         sequence: *sequence,
@@ -656,12 +746,30 @@ impl TransactionObject {
                         value_zat: output.1.value.zatoshis(),
                         n: output.0 as u32,
                         script_pub_key: ScriptPubKey {
-                            // TODO: Fill this out.
-                            asm: "".to_string(),
+                            // https://github.com/zcash/zcash/blob/v6.11.0/src/rpc/rawtransaction.cpp#L271
+                            // https://github.com/zcash/zcash/blob/v6.11.0/src/rpc/rawtransaction.cpp#L45
+                            asm: zcash_script::script::Code(
+                                output.1.lock_script.as_raw_bytes().to_vec(),
+                            )
+                            .to_asm(false),
                             hex: output.1.lock_script.clone(),
                             req_sigs,
-                            // TODO: Fill this out.
-                            r#type: "".to_string(),
+                            r#type: zcash_script::script::Code(
+                                output.1.lock_script.as_raw_bytes().to_vec(),
+                            )
+                            .to_component()
+                            .ok()
+                            .and_then(|c| c.refine().ok())
+                            .and_then(|component| zcash_script::solver::standard(&component))
+                            .map(|kind| match kind {
+                                zcash_script::solver::ScriptKind::PubKeyHash { .. } => "pubkeyhash",
+                                zcash_script::solver::ScriptKind::ScriptHash { .. } => "scripthash",
+                                zcash_script::solver::ScriptKind::MultiSig { .. } => "multisig",
+                                zcash_script::solver::ScriptKind::NullData { .. } => "nulldata",
+                                zcash_script::solver::ScriptKind::PubKey { .. } => "pubkey",
+                            })
+                            .unwrap_or("nonstandard")
+                            .to_string(),
                             addresses,
                         },
                     }
@@ -682,11 +790,11 @@ impl TransactionObject {
                     let spend_auth_sig: [u8; 64] = spend.spend_auth_sig.into();
 
                     ShieldedSpend {
-                        cv: spend.cv,
+                        cv: spend.cv.clone(),
                         anchor,
                         nullifier,
                         rk,
-                        proof: spend.proof().0,
+                        proof: spend.zkproof.0,
                         spend_auth_sig,
                     }
                 })
@@ -702,12 +810,12 @@ impl TransactionObject {
                     let out_ciphertext: [u8; 80] = output.out_ciphertext.into();
 
                     ShieldedOutput {
-                        cv: output.cv,
+                        cv: output.cv.clone(),
                         cm_u,
                         ephemeral_key,
                         enc_ciphertext,
                         out_ciphertext,
-                        proof: output.proof().0,
+                        proof: output.zkproof.0,
                     }
                 })
                 .collect(),
@@ -825,7 +933,13 @@ impl TransactionObject {
             version: tx.version(),
             version_group_id: tx.version_group_id().map(|id| id.to_be_bytes().to_vec()),
             lock_time: tx.raw_lock_time(),
-            expiry_height: tx.expiry_height(),
+            // zcashd includes expiryheight only for Overwinter+ transactions.
+            // For those, expiry_height of 0 means "no expiry" per ZIP-203.
+            expiry_height: if tx.is_overwintered() {
+                Some(tx.expiry_height().unwrap_or(Height(0)))
+            } else {
+                None
+            },
             block_hash,
             block_time,
         }

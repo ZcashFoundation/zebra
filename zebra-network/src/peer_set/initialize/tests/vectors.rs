@@ -1382,7 +1382,7 @@ async fn add_initial_peers_deadlock() {
     // still some extra peers left.
     const PEER_COUNT: usize = 200;
     const PEERSET_INITIAL_TARGET_SIZE: usize = 2;
-    const TIME_LIMIT: Duration = Duration::from_secs(10);
+    const TIME_LIMIT: Duration = Duration::from_secs(20);
 
     let _init_guard = zebra_test::init();
 
@@ -1424,7 +1424,9 @@ async fn add_initial_peers_deadlock() {
         "Test user agent".to_string(),
     );
 
-    assert!(tokio::time::timeout(TIME_LIMIT, init_future).await.is_ok());
+    tokio::time::timeout(TIME_LIMIT, init_future)
+        .await
+        .expect("should not timeout");
 }
 
 /// Open a local listener on `listen_addr` for `network`.

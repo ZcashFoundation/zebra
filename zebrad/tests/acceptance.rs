@@ -133,6 +133,8 @@
 //! ```
 #![cfg(not(test))] // [DISABLE ZEBRAD TESTS]
 
+#![allow(clippy::unwrap_in_result)]
+
 mod common;
 
 use std::{
@@ -140,6 +142,7 @@ use std::{
     collections::HashSet,
     env, fs, panic,
     path::PathBuf,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -147,6 +150,7 @@ use color_eyre::{
     eyre::{eyre, WrapErr},
     Help,
 };
+use futures::{stream::FuturesUnordered, StreamExt};
 use semver::Version;
 use serde_json::Value;
 use tower::ServiceExt;
@@ -159,12 +163,12 @@ use zebra_chain::{
         FatPointerToBftBlock, Height,
     },
     parameters::{
-        testnet::ConfiguredActivationHeights,
+        testnet::{ConfiguredActivationHeights, ConfiguredCheckpoints, RegtestParameters},
         Network::{self, *},
         NetworkUpgrade,
     },
+    serialization::BytesInDisplayOrder,
 };
-use zebra_consensus::ParameterCheckpoint;
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::{
     client::{
@@ -212,6 +216,8 @@ use common::{
     },
     test_type::TestType::{self, *},
 };
+
+use crate::common::regtest::MiningRpcMethods;
 
 /// The maximum amount of time that we allow the creation of a future to block the `tokio` executor.
 ///
@@ -389,12 +395,18 @@ async fn db_init_outside_future_executor() -> Result<()> {
     let start = Instant::now();
 
     // This test doesn't need UTXOs to be verified efficiently, because it uses an empty state.
-    let db_init_handle = zebra_state::spawn_init(
-        config.state.clone(),
-        &config.network.network,
-        Height::MAX,
-        0,
-    );
+    let db_init_handle = {
+        let config = config.clone();
+        tokio::spawn(async move {
+            zebra_state::init(
+                config.state.clone(),
+                &config.network.network,
+                Height::MAX,
+                0,
+            )
+            .await
+        })
+    };
 
     // it's faster to panic if it takes longer than expected, since the executor
     // will wait indefinitely for blocking operation to finish once started
@@ -404,7 +416,7 @@ async fn db_init_outside_future_executor() -> Result<()> {
         "futures executor was blocked longer than expected ({block_duration:?})",
     );
 
-    db_init_handle.await?;
+    db_init_handle.await.map_err(|e| eyre!(e))?;
 
     Ok(())
 }
@@ -505,7 +517,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
     // Make sure the command was killed
     output.assert_was_killed()?;
 
-    let expected_run_dir_file_names = match cache_dir_check {
+    let (expected_run_dir_file_names, optional_run_dir_file_names) = match cache_dir_check {
         // we created the state directory, so it should still exist
         EphemeralCheck::ExistingDirectory => {
             assert_with_context!(
@@ -520,8 +532,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
                 cache_dir_check,
                 ignored_cache_dir.read_dir().unwrap().collect::<Vec<_>>()
             );
-
-            ["state", "network", "zebrad.toml"].iter()
+            (["state", "zebrad.toml"].iter(), ["network"].iter())
         }
 
         // we didn't create the state directory, so it should not exist
@@ -539,11 +550,16 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
                 ignored_cache_dir.read_dir().unwrap().collect::<Vec<_>>()
             );
 
-            ["network", "zebrad.toml"].iter()
+            (["zebrad.toml"].iter(), ["network"].iter())
         }
     };
 
-    let expected_run_dir_file_names = expected_run_dir_file_names.map(Into::into).collect();
+    let expected_run_dir_file_names: HashSet<std::ffi::OsString> =
+        expected_run_dir_file_names.map(Into::into).collect();
+
+    let optional_run_dir_file_names: HashSet<std::ffi::OsString> =
+        optional_run_dir_file_names.map(Into::into).collect();
+
     let run_dir_file_names = run_dir
         .path()
         .read_dir()
@@ -552,8 +568,17 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
         // ignore directory list order, because it can vary based on the OS and filesystem
         .collect::<HashSet<_>>();
 
+    let has_expected_file_paths = expected_run_dir_file_names
+        .iter()
+        .all(|expected_file_name| run_dir_file_names.contains(expected_file_name));
+
+    let has_only_allowed_file_paths = run_dir_file_names.iter().all(|file_name| {
+        optional_run_dir_file_names.contains(file_name)
+            || expected_run_dir_file_names.contains(file_name)
+    });
+
     assert_with_context!(
-        run_dir_file_names == expected_run_dir_file_names,
+        has_expected_file_paths && has_only_allowed_file_paths,
         &output,
         "run_dir not empty for ephemeral {:?} {:?}: expected {:?}, actual: {:?}",
         cache_dir_config,
@@ -726,6 +751,7 @@ fn valid_generated_config(command: &str, expect_stdout_line_contains: &str) -> R
 }
 
 /// Check if the config produced by current zebrad is stored.
+#[cfg(not(target_os = "windows"))]
 #[tracing::instrument]
 #[allow(clippy::print_stdout)]
 fn last_config_is_stored() -> Result<()> {
@@ -1796,6 +1822,7 @@ fn lwd_integration() -> Result<()> {
 ///
 /// This test might work on Windows.
 #[test]
+#[ignore]
 fn sync_update_mainnet() -> Result<()> {
     lwd_integration_test(UpdateZebraCachedStateNoRpc)
 }
@@ -2451,6 +2478,7 @@ async fn lwd_rpc_test() -> Result<()> {
 }
 
 #[test]
+#[cfg(not(target_os = "windows"))]
 fn delete_old_databases() -> Result<()> {
     use std::fs::{canonicalize, create_dir};
 
@@ -2560,6 +2588,7 @@ async fn get_peer_info() -> Result<()> {
 ///
 /// See [`common::get_block_template_rpcs::get_block_template`] for more information.
 #[tokio::test]
+#[ignore]
 async fn rpc_get_block_template() -> Result<()> {
     common::get_block_template_rpcs::get_block_template::run().await
 }
@@ -2568,6 +2597,7 @@ async fn rpc_get_block_template() -> Result<()> {
 ///
 /// See [`common::get_block_template_rpcs::submit_block`] for more information.
 #[tokio::test]
+#[ignore]
 async fn rpc_submit_block() -> Result<()> {
     common::get_block_template_rpcs::submit_block::run().await
 }
@@ -2925,7 +2955,7 @@ async fn validate_regtest_genesis_block() {
     let _init_guard = zebra_test::init();
 
     let network = Network::new_regtest(Default::default());
-    let state = zebra_state::init_test(&network);
+    let state = zebra_state::init_test(&network).await;
     let (
         block_verifier_router,
         _transaction_verifier,
@@ -3282,7 +3312,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     use zebra_chain::{
         chain_sync_status::MockSyncStatus,
         parameters::{
-            subsidy::{FundingStreamReceiver, FUNDING_STREAM_MG_ADDRESSES_TESTNET},
+            subsidy::FundingStreamReceiver,
             testnet::{
                 self, ConfiguredActivationHeights, ConfiguredFundingStreamRecipient,
                 ConfiguredFundingStreams,
@@ -3302,13 +3332,18 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     let base_network_params = testnet::Parameters::build()
         // Regtest genesis hash
         .with_genesis_hash("029f11d80ef9765602235e1bc9727e3eb6ba20839319f761fee920d63401e327")
+        .expect("failed to set genesis hash")
+        .with_checkpoints(false)
+        .expect("failed to verify checkpoints")
         .with_target_difficulty_limit(U256::from_big_endian(&[0x0f; 32]))
+        .expect("failed to set target difficulty limit")
         .with_disable_pow(true)
         .with_slow_start_interval(Height::MIN)
         .with_activation_heights(ConfiguredActivationHeights {
             nu6: Some(1),
             ..Default::default()
-        });
+        })
+        .expect("failed to set activation heights");
 
     let network = base_network_params
         .clone()
@@ -3318,7 +3353,8 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
             // Use default post-NU6 recipients
             recipients: None,
         }])
-        .to_network();
+        .to_network()
+        .expect("failed to build configured network");
 
     tracing::info!("built configured Testnet, starting state service and block verifier");
 
@@ -3334,7 +3370,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     .expect("configured mining address should be valid");
 
     let (state, read_state, latest_chain_tip, _chain_tip_change) =
-        zebra_state::init_test_services(&network);
+        zebra_state::init_test_services(&network).await;
 
     let (
         block_verifier_router,
@@ -3444,7 +3480,8 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     );
 
     // Check that the submitblock channel received the submitted block
-    let submit_block_channel_data = *submitblock_channel.receiver().borrow_and_update();
+    let mut submit_block_receiver = submitblock_channel.receiver();
+    let submit_block_channel_data = submit_block_receiver.recv().await.expect("channel is open");
     assert_eq!(
         submit_block_channel_data,
         (
@@ -3463,15 +3500,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
                 numerator,
                 addresses: None,
             },
-            ConfiguredFundingStreamRecipient {
-                receiver: FundingStreamReceiver::MajorGrants,
-                numerator: 8,
-                addresses: Some(
-                    FUNDING_STREAM_MG_ADDRESSES_TESTNET
-                        .map(ToString::to_string)
-                        .to_vec(),
-                ),
-            },
+            ConfiguredFundingStreamRecipient::new_for(FundingStreamReceiver::MajorGrants),
         ])
     };
 
@@ -3499,7 +3528,8 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
             height_range: Some(Height(1)..Height(100)),
             recipients: make_configured_recipients_with_lockbox_numerator(0),
         }])
-        .to_network();
+        .to_network()
+        .expect("failed to build configured network");
 
     let (coinbase_txn, default_roots) = generate_coinbase_and_roots(
         &network,
@@ -3508,6 +3538,8 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         &[],
         chain_history_root,
         vec![],
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+        None,
     )
     .expect("coinbase transaction should be valid under the given parameters");
 
@@ -3559,7 +3591,8 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
             height_range: Some(Height(1)..Height(100)),
             recipients: make_configured_recipients_with_lockbox_numerator(20),
         }])
-        .to_network();
+        .to_network()
+        .expect("failed to build configured network");
 
     let (coinbase_txn, default_roots) = generate_coinbase_and_roots(
         &network,
@@ -3568,6 +3601,8 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         &[],
         chain_history_root,
         vec![],
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+        None,
     )
     .expect("coinbase transaction should be valid under the given parameters");
 
@@ -3629,6 +3664,164 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     Ok(())
 }
 
+/// Test successful block template submission as a block proposal.
+///
+/// This test can be run locally with:
+/// `RUSTFLAGS='--cfg zcash_unstable="nu7"' cargo test --package zebrad --test acceptance --features tx_v6 -- nu7_nsm_transactions --exact --show-output`
+#[tokio::test(flavor = "multi_thread")]
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+async fn nu7_nsm_transactions() -> Result<()> {
+    use zebra_chain::{
+        chain_sync_status::MockSyncStatus,
+        parameters::testnet::{self, ConfiguredActivationHeights, ConfiguredFundingStreams},
+        serialization::ZcashSerialize,
+        work::difficulty::U256,
+    };
+    use zebra_network::address_book_peers::MockAddressBookPeers;
+    use zebra_node_services::mempool;
+    use zebra_rpc::client::HexData;
+    use zebra_test::mock_service::MockService;
+    let _init_guard = zebra_test::init();
+
+    tracing::info!("running nu7_nsm_transactions test");
+
+    let base_network_params = testnet::Parameters::build()
+        // Regtest genesis hash
+        .with_genesis_hash("029f11d80ef9765602235e1bc9727e3eb6ba20839319f761fee920d63401e327")
+        .with_checkpoints(false)
+        .with_target_difficulty_limit(U256::from_big_endian(&[0x0f; 32]))
+        .with_disable_pow(true)
+        .with_slow_start_interval(Height::MIN)
+        .with_lockbox_disbursements(vec![])
+        .with_activation_heights(ConfiguredActivationHeights {
+            nu7: Some(1),
+            ..Default::default()
+        });
+
+    let network = base_network_params
+        .clone()
+        .with_funding_streams(vec![ConfiguredFundingStreams {
+            // Start checking funding streams from block height 1
+            height_range: Some(Height(1)..Height(100)),
+            // Use default post-NU6 recipients
+            recipients: None,
+        }])
+        .to_network();
+
+    tracing::info!("built configured Testnet, starting state service and block verifier");
+
+    let default_test_config = default_test_config(&network)?;
+    let mining_config = default_test_config.mining;
+
+    let (state, read_state, latest_chain_tip, _chain_tip_change) =
+        zebra_state::init_test_services(&network).await;
+
+    let (
+        block_verifier_router,
+        _transaction_verifier,
+        _parameter_download_task_handle,
+        _max_checkpoint_height,
+    ) = zebra_consensus::router::init_test(
+        zebra_consensus::Config::default(),
+        &network,
+        state.clone(),
+    )
+    .await;
+
+    tracing::info!("started state service and block verifier, committing Regtest genesis block");
+
+    let genesis_hash = block_verifier_router
+        .clone()
+        .oneshot(zebra_consensus::Request::Commit(regtest_genesis_block()))
+        .await
+        .expect("should validate Regtest genesis block");
+
+    let mut mempool = MockService::build()
+        .with_max_request_delay(Duration::from_secs(5))
+        .for_unit_tests();
+    let mut mock_sync_status = MockSyncStatus::default();
+    mock_sync_status.set_is_close_to_tip(true);
+
+    let submitblock_channel = SubmitBlockChannel::new();
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+
+    let (rpc, _) = RpcImpl::new(
+        network.clone(),
+        mining_config,
+        false,
+        "0.0.1",
+        "Zebra tests",
+        mempool.clone(),
+        state.clone(),
+        read_state.clone(),
+        block_verifier_router,
+        mock_sync_status,
+        latest_chain_tip,
+        MockAddressBookPeers::default(),
+        rx,
+        Some(submitblock_channel.sender()),
+    );
+
+    let make_mock_mempool_request_handler = || async move {
+        mempool
+            .expect_request(mempool::Request::FullTransactions)
+            .await
+            .respond(mempool::Response::FullTransactions {
+                transactions: vec![],
+                transaction_dependencies: Default::default(),
+                // tip hash needs to match chain info for long poll requests
+                last_seen_tip_hash: genesis_hash,
+            });
+    };
+
+    let block_template_fut = rpc.get_block_template(None);
+    let mock_mempool_request_handler = make_mock_mempool_request_handler.clone()();
+    let (block_template, _) = tokio::join!(block_template_fut, mock_mempool_request_handler);
+    let GetBlockTemplateResponse::TemplateMode(block_template) =
+        block_template.expect("unexpected error in getblocktemplate RPC call")
+    else {
+        panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
+    };
+
+    let proposal_block = proposal_block_from_template(&block_template, None, &network)?;
+    let hex_proposal_block = HexData(proposal_block.zcash_serialize_to_vec()?);
+
+    // Check that the block template is a valid block proposal
+    let GetBlockTemplateResponse::ProposalMode(block_proposal_result) = rpc
+        .get_block_template(Some(GetBlockTemplateParameters::new(
+            GetBlockTemplateRequestMode::Proposal,
+            Some(hex_proposal_block),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+        )))
+        .await?
+    else {
+        panic!(
+            "this getblocktemplate call should return the `ProposalMode` variant of the response"
+        )
+    };
+
+    assert!(
+        block_proposal_result.is_valid(),
+        "block proposal should succeed"
+    );
+
+    // Submit the same block
+    let submit_block_response = rpc
+        .submit_block(HexData(proposal_block.zcash_serialize_to_vec()?), None)
+        .await?;
+
+    assert_eq!(
+        submit_block_response,
+        SubmitBlockResponse::Accepted,
+        "valid block should be accepted"
+    );
+
+    Ok(())
+}
+
 /// Checks that the cached finalized state has the spending transaction ids for every
 /// spent outpoint and revealed nullifier in the last 100 blocks of a cached state.
 //
@@ -3644,9 +3837,7 @@ async fn has_spending_transaction_ids() -> Result<()> {
     use std::sync::Arc;
     use tower::Service;
     use zebra_chain::{chain_tip::ChainTip, transparent::Input};
-    use zebra_state::{
-        ReadRequest, ReadResponse, Request, Response, SemanticallyVerifiedBlock, Spend,
-    };
+    use zebra_state::{ReadRequest, ReadResponse, SemanticallyVerifiedBlock, Spend};
 
     use common::cached_state::future_blocks;
 
@@ -3671,18 +3862,14 @@ async fn has_spending_transaction_ids() -> Result<()> {
     tracing::info!("committing blocks to non-finalized state");
 
     for block in non_finalized_blocks {
+        use zebra_state::{CommitSemanticallyVerifiedBlockRequest, MappedRequest};
+
         let expected_hash = block.hash();
         let block = SemanticallyVerifiedBlock::with_hash(Arc::new(block), expected_hash);
-        let Response::Committed(block_hash) = state
-            .ready()
+        let block_hash = CommitSemanticallyVerifiedBlockRequest(block)
+            .mapped_oneshot(&mut state)
             .await
-            .map_err(|err| eyre!(err))?
-            .call(Request::CommitSemanticallyVerifiedBlock(block))
-            .await
-            .map_err(|err| eyre!(err))?
-        else {
-            panic!("unexpected response to Block request");
-        };
+            .map_err(|err| eyre!(err))?;
 
         assert_eq!(
             expected_hash, block_hash,
@@ -3828,7 +4015,11 @@ async fn invalidate_and_reconsider_block() -> Result<()> {
     tracing::info!("invalidating blocks");
 
     // Note: This is the block at height 7, it's the 6th generated block.
-    let block_6_hash = blocks.get(5).expect("should have 50 blocks").hash();
+    let block_6_hash = blocks
+        .get(5)
+        .expect("should have 50 blocks")
+        .hash()
+        .to_string();
     let params = serde_json::to_string(&vec![block_6_hash]).expect("should serialize successfully");
 
     let _: () = rpc_client
@@ -3877,175 +4068,378 @@ fn check_no_git_dependencies() {
     }
 }
 
-// /// Check that Zebra will disconnect from misbehaving peers.
-// #[tokio::test]
-// #[cfg(not(target_os = "windows"))]
-// async fn disconnects_from_misbehaving_peers() -> Result<()> {
-//     use std::sync::{atomic::AtomicBool, Arc};
+#[tokio::test]
+async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
+    let network = Network::new_regtest(Default::default());
 
-//     use common::regtest::MiningRpcMethods;
-//     use zebra_chain::parameters::testnet::{self, ConfiguredActivationHeights};
-//     use zebra_rpc::methods::get_block_template_rpcs::types::peer_info::PeerInfo;
+    let mut config = os_assigned_rpc_port_config(false, &network)?;
+    config.state.ephemeral = false;
+    let test_dir = testdir()?.with_config(&mut config)?;
 
-//     let _init_guard = zebra_test::init();
-//     let network = testnet::Parameters::build()
-//         .with_activation_heights(ConfiguredActivationHeights {
-//             canopy: Some(1),
-//             nu5: Some(2),
-//             nu6: Some(3),
-//             ..Default::default()
-//         })
-//         .with_slow_start_interval(Height::MIN)
-//         .with_disable_pow(true)
-//         .to_network();
+    // Start Zebra and generate some blocks.
 
-//     let test_type = LaunchWithEmptyState {
-//         launches_lightwalletd: false,
-//     };
-//     let test_name = "disconnects_from_misbehaving_peers_test";
+    tracing::info!("starting Zebra and generating some blocks");
+    let mut child = test_dir.spawn_child(args!["start"])?;
+    // Avoid dropping the test directory and cleanup of the state cache needed by the next zebrad instance.
+    let test_dir = child.dir.take().expect("should have test directory");
+    let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
+    // Wait for Zebra to load its state cache
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    let rpc_client = RpcRequestClient::new(rpc_address);
+    let generated_block_hashes = rpc_client.generate(50).await?;
+    // Wait for non-finalized backup task to make a second write to the backup cache
+    tokio::time::sleep(Duration::from_secs(6)).await;
 
-//     if !common::launch::can_spawn_zebrad_for_test_type(test_name, test_type, false) {
-//         tracing::warn!("skipping disconnects_from_misbehaving_peers test");
-//         return Ok(());
-//     }
+    child.kill(true)?;
+    // Wait for zebrad to fully terminate to ensure database lock is released.
+    child
+        .wait_with_output()
+        .wrap_err("failed to wait for zebrad to fully terminate")?;
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    // Prepare checkpoint heights/hashes
+    let last_hash = *generated_block_hashes
+        .last()
+        .expect("should have at least one block hash");
+    let configured_checkpoints = ConfiguredCheckpoints::HeightsAndHashes(vec![
+        (Height(0), network.genesis_hash()),
+        (Height(50), last_hash),
+    ]);
 
-//     // Get the zebrad config
-//     let mut config = test_type
-//         .zebrad_config(test_name, false, None, &network)
-//         .expect("already checked config")?;
+    // Check that Zebra will restore its non-finalized state from backup when the finalized tip is past the
+    // max checkpoint height and that it can still commit more blocks to its state.
 
-//     config.network.cache_dir = false.into();
-//     config.network.listen_addr = format!("127.0.0.1:{}", random_known_port()).parse()?;
+    tracing::info!("restarting Zebra to check that non-finalized state is restored");
+    let mut child = test_dir.spawn_child(args!["start"])?;
+    let test_dir = child.dir.take().expect("should have test directory");
+    let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
+    let rpc_client = RpcRequestClient::new(rpc_address);
 
-//     let rpc_listen_addr = config.rpc.listen_addr.unwrap();
-//     let rpc_client_1 = RpcRequestClient::new(rpc_listen_addr);
+    // Wait for Zebra to load its state cache
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    let blockchain_info = rpc_client.blockchain_info().await?;
+    tracing::info!(
+        ?blockchain_info,
+        "got blockchain info after restarting Zebra"
+    );
 
-//     tracing::info!(
-//         ?rpc_listen_addr,
-//         network_listen_addr = ?config.network.listen_addr,
-//         "starting a zebrad child on incompatible custom Testnet"
-//     );
+    assert_eq!(
+        blockchain_info.best_block_hash(),
+        last_hash,
+        "tip block hash should match tip hash of previous zebrad instance"
+    );
 
-//     let is_finished = Arc::new(AtomicBool::new(false));
+    tracing::info!("checking that Zebra can commit blocks after restoring non-finalized state");
+    rpc_client
+        .generate(10)
+        .await
+        .expect("should successfully commit more blocks to the state");
 
-//     {
-//         let is_finished = Arc::clone(&is_finished);
-//         let config = config.clone();
-//         let (zebrad_failure_messages, zebrad_ignore_messages) = test_type.zebrad_failure_messages();
-//         tokio::task::spawn_blocking(move || -> Result<()> {
-//             let mut zebrad_child = testdir()?
-//                 .with_exact_config(&config)?
-//                 .spawn_child(args!["start"])?
-//                 .bypass_test_capture(true)
-//                 .with_timeout(test_type.zebrad_timeout())
-//                 .with_failure_regex_iter(zebrad_failure_messages, zebrad_ignore_messages);
+    tracing::info!("retrieving blocks to be used with configured checkpoints");
+    let checkpointed_blocks = {
+        let mut blocks = Vec::new();
+        for height in 1..=50 {
+            blocks.push(
+                rpc_client
+                    .get_block(height)
+                    .await
+                    .map_err(|err| eyre!(err))?
+                    .expect("should have block at height"),
+            )
+        }
+        blocks
+    };
 
-//             while !is_finished.load(std::sync::atomic::Ordering::SeqCst) {
-//                 zebrad_child.wait_for_stdout_line(Some("zebraA1".to_string()));
-//             }
+    tracing::info!(
+        "restarting Zebra to check that non-finalized state is _not_ restored when \
+         the finalized tip is below the max checkpoint height"
+    );
+    child.kill(true)?;
+    // Wait for zebrad to fully terminate to ensure database lock is released.
+    child
+        .wait_with_output()
+        .wrap_err("failed to wait for zebrad to fully terminate")?;
+    tokio::time::sleep(Duration::from_secs(3)).await;
 
-//             Ok(())
-//         });
-//     }
+    // Check that the non-finalized state is not restored from backup when the finalized tip height is below the
+    // max checkpoint height and that it can still commit more blocks to its state
 
-//     config.network.initial_testnet_peers = [config.network.listen_addr.to_string()].into();
-//     config.network.network = Network::new_default_testnet();
-//     config.network.listen_addr = "127.0.0.1:0".parse()?;
-//     config.rpc.listen_addr = Some(format!("127.0.0.1:{}", random_known_port()).parse()?);
+    tracing::info!("restarting Zebra with configured checkpoints to check that non-finalized state is not restored");
+    let network = Network::new_regtest(RegtestParameters {
+        checkpoints: Some(configured_checkpoints),
+        ..Default::default()
+    });
+    let mut config = os_assigned_rpc_port_config(false, &network)?;
+    config.state.ephemeral = false;
+    let mut child = test_dir
+        .with_config(&mut config)?
+        .spawn_child(args!["start"])?;
+    let test_dir = child.dir.take().expect("should have test directory");
+    let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
+    // Wait for Zebra to load its state cache
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    let rpc_client = RpcRequestClient::new(rpc_address);
 
-//     let rpc_listen_addr = config.rpc.listen_addr.unwrap();
-//     let rpc_client_2 = RpcRequestClient::new(rpc_listen_addr);
+    assert_eq!(
+        rpc_client.blockchain_info().await?.best_block_hash(),
+        network.genesis_hash(),
+        "Zebra should not restore blocks from non-finalized backup if \
+         its finalized tip is below the max checkpoint height"
+    );
 
-//     tracing::info!(
-//         ?rpc_listen_addr,
-//         network_listen_addr = ?config.network.listen_addr,
-//         "starting a zebrad child on the default Testnet"
-//     );
+    let mut submit_block_futs: FuturesUnordered<_> = checkpointed_blocks
+        .into_iter()
+        .map(Arc::unwrap_or_clone)
+        .map(|block| rpc_client.submit_block(block))
+        .collect();
 
-//     {
-//         let is_finished = Arc::clone(&is_finished);
-//         tokio::task::spawn_blocking(move || -> Result<()> {
-//             let (zebrad_failure_messages, zebrad_ignore_messages) =
-//                 test_type.zebrad_failure_messages();
-//             let mut zebrad_child = testdir()?
-//                 .with_exact_config(&config)?
-//                 .spawn_child(args!["start"])?
-//                 .bypass_test_capture(true)
-//                 .with_timeout(test_type.zebrad_timeout())
-//                 .with_failure_regex_iter(zebrad_failure_messages, zebrad_ignore_messages);
+    while let Some(result) = submit_block_futs.next().await {
+        result?
+    }
 
-//             while !is_finished.load(std::sync::atomic::Ordering::SeqCst) {
-//                 zebrad_child.wait_for_stdout_line(Some("zebraB2".to_string()));
-//             }
+    // Commit some blocks to check that Zebra's state will still commit blocks, and generate enough blocks
+    // for Zebra's finalized tip to pass the max checkpoint height.
 
-//             Ok(())
-//         });
-//     }
+    rpc_client
+        .generate(200)
+        .await
+        .expect("should successfully commit more blocks to the state");
 
-//     tracing::info!("waiting for zebrad nodes to connect");
+    child.kill(true)?;
+    // Wait for zebrad to fully terminate to ensure database lock is released.
+    child
+        .wait_with_output()
+        .wrap_err("failed to wait for zebrad process to exit after kill")?;
+    tokio::time::sleep(Duration::from_secs(3)).await;
 
-//     // Wait a few seconds for Zebra to start up and make outbound peer connections
-//     tokio::time::sleep(LAUNCH_DELAY).await;
+    // Check that Zebra will can commit blocks to its state when its finalized tip is past the max checkpoint height
+    // and the non-finalized backup cache is disabled or empty.
 
-//     tracing::info!("checking for peers");
+    tracing::info!(
+        "restarting Zebra to check that blocks are committed when the non-finalized state \
+         is initially empty and the finalized tip is past the max checkpoint height"
+    );
+    config.state.should_backup_non_finalized_state = false;
+    let mut child = test_dir
+        .with_config(&mut config)?
+        .spawn_child(args!["start"])?;
+    let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
+    let rpc_client = RpcRequestClient::new(rpc_address);
 
-//     // Call `getpeerinfo` to check that the zebrad instances have connected
-//     let peer_info: Vec<PeerInfo> = rpc_client_2
-//         .json_result_from_call("getpeerinfo", "[]")
-//         .await
-//         .map_err(|err| eyre!(err))?;
+    // Wait for Zebra to load its state cache
+    tokio::time::sleep(Duration::from_secs(5)).await;
 
-//     assert!(!peer_info.is_empty(), "should have outbound peer");
+    tracing::info!("checking that Zebra commits blocks with empty non-finalized state");
+    rpc_client
+        .generate(10)
+        .await
+        .expect("should successfully commit more blocks to the state");
 
-//     tracing::info!(
-//         ?peer_info,
-//         "found peer connection, committing genesis block"
-//     );
+    child.kill(true)
+}
 
-//     let genesis_block = network.block_parsed_iter().next().unwrap();
-//     rpc_client_1.submit_block(genesis_block.clone()).await?;
-//     rpc_client_2.submit_block(genesis_block).await?;
+/// Check that Zebra will disconnect from misbehaving peers.
+///
+/// In order to simulate a misbehaviour peer we start two zebrad instances:
+/// - The first one is started with a custom Testnet where PoW is disabled.
+/// - The second one is started with the default Testnet where PoW is enabled.
+/// The second zebrad instance will connect to the first one, and when the first one mines
+/// blocks with invalid PoW the second one should disconnect from it.
+#[tokio::test]
+#[cfg(not(target_os = "windows"))]
+async fn disconnects_from_misbehaving_peers() -> Result<()> {
+    use std::sync::{atomic::AtomicBool, Arc};
 
-//     // Call the `generate` method to mine blocks in the zebrad instance where PoW is disabled
-//     tracing::info!("committed genesis block, mining blocks with invalid PoW");
-//     tokio::time::sleep(Duration::from_secs(2)).await;
+    use common::regtest::MiningRpcMethods;
+    use zebra_chain::parameters::testnet::{self, ConfiguredActivationHeights};
+    use zebra_rpc::client::PeerInfo;
 
-//     rpc_client_1.call("generate", "[500]").await?;
+    let _init_guard = zebra_test::init();
+    let network1 = testnet::Parameters::build()
+        .with_activation_heights(ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(2),
+            nu6: Some(3),
+            ..Default::default()
+        })
+        .expect("failed to set activation heights")
+        .with_slow_start_interval(Height::MIN)
+        .with_disable_pow(true)
+        .clear_checkpoints()
+        .expect("failed to clear checkpoints")
+        .with_network_name("PoWDisabledTestnet")
+        .expect("failed to set network name")
+        .to_network()
+        .expect("failed to build configured network");
 
-//     tracing::info!("wait for misbehavior messages to flush into address updater channel");
+    let test_type = LaunchWithEmptyState {
+        launches_lightwalletd: false,
+    };
+    let test_name = "disconnects_from_misbehaving_peers_test";
 
-//     tokio::time::sleep(Duration::from_secs(30)).await;
+    if !common::launch::can_spawn_zebrad_for_test_type(test_name, test_type, false) {
+        tracing::warn!("skipping disconnects_from_misbehaving_peers test");
+        return Ok(());
+    }
 
-//     tracing::info!("calling getpeerinfo to confirm Zebra has dropped the peer connection");
+    // Get the zebrad config
+    let mut config = test_type
+        .zebrad_config(test_name, false, None, &network1)
+        .expect("already checked config")?;
 
-//     // Call `getpeerinfo` to check that the zebrad instances have disconnected
-//     for i in 0..600 {
-//         let peer_info: Vec<PeerInfo> = rpc_client_2
-//             .json_result_from_call("getpeerinfo", "[]")
-//             .await
-//             .map_err(|err| eyre!(err))?;
+    config.network.cache_dir = false.into();
+    config.network.listen_addr = format!("127.0.0.1:{}", random_known_port()).parse()?;
+    config.state.ephemeral = true;
+    config.network.initial_testnet_peers = [].into();
+    config.network.crawl_new_peer_interval = Duration::from_secs(5);
 
-//         if peer_info.is_empty() {
-//             break;
-//         } else if i % 10 == 0 {
-//             tracing::info!(?peer_info, "has not yet disconnected from misbehaving peer");
-//         }
+    let rpc_listen_addr = config.rpc.listen_addr.unwrap();
+    let rpc_client_1 = RpcRequestClient::new(rpc_listen_addr);
 
-//         rpc_client_1.call("generate", "[1]").await?;
+    tracing::info!(
+        ?rpc_listen_addr,
+        network_listen_addr = ?config.network.listen_addr,
+        "starting a zebrad child on incompatible custom Testnet"
+    );
 
-//         tokio::time::sleep(Duration::from_secs(1)).await;
-//     }
+    let is_finished = Arc::new(AtomicBool::new(false));
 
-//     let peer_info: Vec<PeerInfo> = rpc_client_2
-//         .json_result_from_call("getpeerinfo", "[]")
-//         .await
-//         .map_err(|err| eyre!(err))?;
+    {
+        let is_finished = Arc::clone(&is_finished);
+        let config = config.clone();
+        let (zebrad_failure_messages, zebrad_ignore_messages) = test_type.zebrad_failure_messages();
+        tokio::task::spawn_blocking(move || -> Result<()> {
+            let mut zebrad_child = testdir()?
+                .with_exact_config(&config)?
+                .spawn_child(args!["start"])?
+                .bypass_test_capture(true)
+                .with_timeout(test_type.zebrad_timeout())
+                .with_failure_regex_iter(zebrad_failure_messages, zebrad_ignore_messages);
 
-//     tracing::info!(?peer_info, "called getpeerinfo");
+            while !is_finished.load(std::sync::atomic::Ordering::SeqCst) {
+                zebrad_child.wait_for_stdout_line(Some("zebraA1".to_string()));
+            }
 
-//     assert!(peer_info.is_empty(), "should have no peers");
+            Ok(())
+        });
+    }
 
-//     is_finished.store(true, std::sync::atomic::Ordering::SeqCst);
+    let network2 = testnet::Parameters::build()
+        .with_activation_heights(ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(2),
+            nu6: Some(3),
+            ..Default::default()
+        })
+        .expect("failed to set activation heights")
+        .with_slow_start_interval(Height::MIN)
+        .clear_checkpoints()
+        .expect("failed to clear checkpoints")
+        .with_network_name("PoWEnabledTestnet")
+        .expect("failed to set network name")
+        .to_network()
+        .expect("failed to build configured network");
 
-//     Ok(())
-// }
+    config.network.network = network2;
+    config.network.initial_testnet_peers = [config.network.listen_addr.to_string()].into();
+    config.network.listen_addr = "127.0.0.1:0".parse()?;
+    config.rpc.listen_addr = Some(format!("127.0.0.1:{}", random_known_port()).parse()?);
+    config.network.crawl_new_peer_interval = Duration::from_secs(5);
+    config.network.cache_dir = false.into();
+    config.state.ephemeral = true;
+
+    let rpc_listen_addr = config.rpc.listen_addr.unwrap();
+    let rpc_client_2 = RpcRequestClient::new(rpc_listen_addr);
+
+    tracing::info!(
+        ?rpc_listen_addr,
+        network_listen_addr = ?config.network.listen_addr,
+        "starting a zebrad child on the default Testnet"
+    );
+
+    {
+        let is_finished = Arc::clone(&is_finished);
+        tokio::task::spawn_blocking(move || -> Result<()> {
+            let (zebrad_failure_messages, zebrad_ignore_messages) =
+                test_type.zebrad_failure_messages();
+            let mut zebrad_child = testdir()?
+                .with_exact_config(&config)?
+                .spawn_child(args!["start"])?
+                .bypass_test_capture(true)
+                .with_timeout(test_type.zebrad_timeout())
+                .with_failure_regex_iter(zebrad_failure_messages, zebrad_ignore_messages);
+
+            while !is_finished.load(std::sync::atomic::Ordering::SeqCst) {
+                zebrad_child.wait_for_stdout_line(Some("zebraB2".to_string()));
+            }
+
+            Ok(())
+        });
+    }
+
+    tracing::info!("waiting for zebrad nodes to connect");
+
+    // Wait a few seconds for Zebra to start up and make outbound peer connections
+    tokio::time::sleep(LAUNCH_DELAY).await;
+
+    tracing::info!("checking for peers");
+
+    // Call `getpeerinfo` to check that the zebrad instances have connected
+    let peer_info: Vec<PeerInfo> = rpc_client_2
+        .json_result_from_call("getpeerinfo", "[]")
+        .await
+        .map_err(|err| eyre!(err))?;
+
+    assert!(!peer_info.is_empty(), "should have outbound peer");
+
+    tracing::info!(
+        ?peer_info,
+        "found peer connection, committing genesis block"
+    );
+
+    let genesis_block = network1.block_parsed_iter().next().unwrap();
+    rpc_client_1.submit_block(genesis_block.clone()).await?;
+    rpc_client_2.submit_block(genesis_block).await?;
+
+    // Call the `generate` method to mine blocks in the zebrad instance where PoW is disabled
+    tracing::info!("committed genesis block, mining blocks with invalid PoW");
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    rpc_client_1.call("generate", "[500]").await?;
+
+    tracing::info!("wait for misbehavior messages to flush into address updater channel");
+
+    tokio::time::sleep(Duration::from_secs(30)).await;
+
+    tracing::info!("calling getpeerinfo to confirm Zebra has dropped the peer connection");
+
+    // Call `getpeerinfo` to check that the zebrad instances have disconnected
+    for i in 0..600 {
+        let peer_info: Vec<PeerInfo> = rpc_client_2
+            .json_result_from_call("getpeerinfo", "[]")
+            .await
+            .map_err(|err| eyre!(err))?;
+
+        if peer_info.is_empty() {
+            break;
+        } else if i % 10 == 0 {
+            tracing::info!(?peer_info, "has not yet disconnected from misbehaving peer");
+        }
+
+        rpc_client_1.call("generate", "[1]").await?;
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+
+    let peer_info: Vec<PeerInfo> = rpc_client_2
+        .json_result_from_call("getpeerinfo", "[]")
+        .await
+        .map_err(|err| eyre!(err))?;
+
+    tracing::info!(?peer_info, "called getpeerinfo");
+
+    assert!(peer_info.is_empty(), "should have no peers");
+
+    is_finished.store(true, std::sync::atomic::Ordering::SeqCst);
+
+    Ok(())
+}

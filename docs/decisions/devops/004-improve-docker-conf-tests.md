@@ -10,7 +10,7 @@ story: Need a scalable and maintainable way to test various Docker image configu
 
 ## Context and Problem Statement
 
-Currently, tests verifying Zebra's Docker image configuration (based on environment variables processed by `docker/entrypoint.sh`) are implemented using a reusable workflow (`sub-test-zebra-config.yml`). However, the _invocation_ of these tests, including the specific scenarios (environment variables, grep patterns), is duplicated and scattered across different workflows, notably the CI workflow (`sub-ci-unit-tests-docker.yml`) and the CD workflow (`cd-deploy-nodes-gcp.yml`).
+Currently, tests verifying Zebra's Docker image configuration (based on environment variables processed by `docker/entrypoint.sh`) are implemented using a reusable workflow (`sub-test-zebra-config.yml`). However, the _invocation_ of these tests, including the specific scenarios (environment variables, grep patterns), is duplicated and scattered across different workflows, notably the CI workflow (`sub-ci-unit-tests-docker.yml`) and the CD workflow (`zfnd-deploy-nodes-gcp.yml`).
 
 This leads to:
 
@@ -32,7 +32,7 @@ We need a centralized, scalable, and maintainable approach to define and run the
 
 ## Considered Options
 
-1. **Status Quo:** Continue defining and invoking configuration tests within the respective CI (`sub-ci-unit-tests-docker.yml`) and CD (`cd-deploy-nodes-gcp.yml`) workflows, using `sub-test-zebra-config.yml` for the core run/grep logic.
+1. **Status Quo:** Continue defining and invoking configuration tests within the respective CI (`sub-ci-unit-tests-docker.yml`) and CD (`zfnd-deploy-nodes-gcp.yml`) workflows, using `sub-test-zebra-config.yml` for the core run/grep logic.
 2. **Modify and Extend `sub-test-zebra-config.yml`:** Convert the existing `sub-test-zebra-config.yml` workflow. Remove its specific test inputs (`test_id`, `grep_patterns`, `test_variables`). Add multiple jobs _inside_ this workflow, each hardcoding a specific test scenario (run container + grep logs). The workflow would only take `docker_image` as input.
 3. **Use `docker-compose.test.yml`:** Define test scenarios as services within a dedicated `docker-compose.test.yml` file. The CI/CD workflows would call a script (like `sub-test-zebra-config.yml`) that uses `docker compose` to run specific services and performs log grepping.
 4. **Create a _New_ Dedicated Reusable Workflow:** Create a _new_ reusable workflow (e.g., `sub-test-all-configs.yml`) that takes a Docker image digest as input and contains multiple jobs, each defining and executing a specific configuration test scenario (run container + grep logs).
@@ -75,7 +75,7 @@ The `sub-test-zebra-config.yml` workflow will be modified to remove its specific
 - Easier addition of new configuration test scenarios by adding jobs to `sub-test-zebra-config.yml`.
 - Clearer separation between image building and configuration testing logic.
 - `sub-test-zebra-config.yml` will fundamentally change its structure and inputs.
-- CI/CD workflows (`cd-deploy-nodes-gcp.yml`, parent of `sub-ci-unit-tests-docker.yml`) will need modification to remove old test jobs and add calls to the modified reusable workflow, passing the correct image digest.
+- CI/CD workflows (`zfnd-deploy-nodes-gcp.yml`, parent of `sub-ci-unit-tests-docker.yml`) will need modification to remove old test jobs and add calls to the modified reusable workflow, passing the correct image digest.
 - Debugging might involve tracing execution across workflow calls and within the multiple jobs of `sub-test-zebra-config.yml`.
 
 ## More Information <!-- optional -->
@@ -83,7 +83,7 @@ The `sub-test-zebra-config.yml` workflow will be modified to remove its specific
 - GitHub Actions: Reusing Workflows: [https://docs.github.com/en/actions/using-workflows/reusing-workflows](https://docs.github.com/en/actions/using-workflows/reusing-workflows)
 - Relevant files:
   - `.github/workflows/sub-test-zebra-config.yml` (To be modified)
-  - `.github/workflows/cd-deploy-nodes-gcp.yml` (To be modified)
+  - `.github/workflows/zfnd-deploy-nodes-gcp.yml` (To be modified)
   - `.github/workflows/sub-ci-unit-tests-docker.yml` (To be modified)
   - `docker/entrypoint.sh` (Script processing configurations)
   - `docker/.env` (Example environment variables)

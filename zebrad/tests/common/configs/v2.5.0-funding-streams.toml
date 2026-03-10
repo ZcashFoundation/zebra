@@ -65,11 +65,11 @@ genesis_hash = "00040fe8ec8471911baa1db1266ea15dd06b4a8a5c453883c000b031973dce08
 
 [network.testnet_parameters.activation_heights]
 BeforeOverwinter = 1
-Overwinter = 207_500
-Sapling = 280_000
-Blossom = 584_000
-Heartwood = 903_800
-Canopy = 1_028_500
+Overwinter = 1
+Sapling = 1
+Blossom = 1
+Heartwood = 1
+Canopy = 1
 NU5 = 1_842_420
 NU6 = 2_000_000
 "NU6.1" = 2_000_001

@@ -44,7 +44,7 @@ impl Script {
 
 impl From<zcash_transparent::address::Script> for Script {
     fn from(script: zcash_transparent::address::Script) -> Self {
-        Script(script.0)
+        Script(script.0 .0)
     }
 }
 

@@ -1,14 +1,22 @@
 //! Fixed test vectors for the mempool.
 
+#![allow(clippy::unwrap_in_result)]
+
 use std::{sync::Arc, time::Duration};
 
 use color_eyre::Report;
 use tokio::time::{self, timeout};
 use tower::{ServiceBuilder, ServiceExt};
 
+use rand::{seq::SliceRandom, thread_rng};
 use zebra_chain::{
-    amount::Amount, block::Block, fmt::humantime_seconds, parameters::Network,
-    serialization::ZcashDeserializeInto, transaction::VerifiedUnminedTx, transparent::OutPoint,
+    amount::Amount,
+    block::Block,
+    fmt::humantime_seconds,
+    parameters::Network,
+    serialization::ZcashDeserializeInto,
+    transaction::{Transaction, VerifiedUnminedTx},
+    transparent::{self, OutPoint},
 };
 use zebra_consensus::transaction as tx;
 use zebra_state::{Config as StateConfig, CHAIN_TIP_UPDATE_WAIT_LIMIT};
@@ -176,6 +184,41 @@ async fn mempool_service_basic_single() -> Result<(), Report> {
     assert_eq!(queued_responses.len(), 1);
     assert!(queued_responses[0].is_ok());
     assert_eq!(service.tx_downloads().in_flight(), 1);
+
+    // Test `Request::QueueStats`
+    let response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::QueueStats)
+        .await
+        .unwrap();
+
+    let (actual_size, actual_bytes, actual_usage) = match response {
+        Response::QueueStats {
+            size,
+            bytes,
+            usage,
+            fully_notified: None,
+        } => (size, bytes, usage),
+        _ => unreachable!("expected QueueStats response"),
+    };
+
+    // Expected values based on storage contents
+    let expected_size = service.storage().transaction_count();
+    let expected_bytes: usize = service
+        .storage()
+        .transactions()
+        .values()
+        .map(|tx| tx.transaction.size)
+        .sum();
+
+    // TODO: Derive memory usage when available
+    let expected_usage = expected_bytes;
+
+    assert_eq!(actual_size, expected_size, "QueueStats size mismatch");
+    assert_eq!(actual_bytes, expected_bytes, "QueueStats bytes mismatch");
+    assert_eq!(actual_usage, expected_usage, "QueueStats usage mismatch");
 
     Ok(())
 }
@@ -397,6 +440,33 @@ async fn mempool_service_disabled() -> Result<(), Report> {
             .unwrap()
             .unbox_mempool_error(),
         MempoolError::Disabled
+    );
+
+    // Test if mempool returns to QueueStats request correctly when disabled
+    let response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::QueueStats)
+        .await
+        .unwrap();
+
+    let (size, bytes, usage, fully_notified) = match response {
+        Response::QueueStats {
+            size,
+            bytes,
+            usage,
+            fully_notified,
+        } => (size, bytes, usage, fully_notified),
+        _ => unreachable!("expected QueueStats response"),
+    };
+
+    assert_eq!(size, 0, "size should be zero when mempool is disabled");
+    assert_eq!(bytes, 0, "bytes should be zero when mempool is disabled");
+    assert_eq!(usage, 0, "usage should be zero when mempool is disabled");
+    assert_eq!(
+        fully_notified, None,
+        "fully_notified should be None when mempool is disabled"
     );
 
     Ok(())
@@ -1113,10 +1183,545 @@ async fn mempool_responds_to_await_output() -> Result<(), Report> {
     Ok(())
 }
 
+/// Check that verified transactions are rejected if non-standard
+#[tokio::test(flavor = "multi_thread")]
+async fn mempool_reject_non_standard() -> Result<(), Report> {
+    let network = Network::Mainnet;
+
+    // pick a random transaction from the dummy Zcash blockchain
+    let unmined_transactions = network.unmined_transactions_in_blocks(1..=10);
+    let transactions = unmined_transactions.collect::<Vec<_>>();
+    let mut rng = thread_rng();
+    let mut last_transaction = transactions
+        .choose(&mut rng)
+        .expect("Missing transaction")
+        .clone();
+
+    last_transaction.height = Some(Height(100_000));
+
+    // Modify the transaction to make it non-standard.
+    // This is done by replacing its outputs with a dust output.
+    let mut tx = last_transaction.transaction.transaction.clone();
+    let tx_mut = Arc::make_mut(&mut tx);
+    *tx_mut.outputs_mut() = vec![transparent::Output {
+        value: Amount::new(10), // this is below the dust threshold
+        lock_script: p2pkh_script([0u8; 20]),
+    }];
+    last_transaction.transaction.transaction = tx;
+
+    // Set cost limit to the cost of the transaction we will try to insert.
+    let cost_limit = last_transaction.cost();
+
+    let (
+        mut service,
+        _peer_set,
+        _state_service,
+        _chain_tip_change,
+        _tx_verifier,
+        mut recent_syncs,
+        _mempool_transaction_receiver,
+    ) = setup(&network, cost_limit, true).await;
+
+    // Enable the mempool
+    service.enable(&mut recent_syncs).await;
+
+    // Insert the modified transaction into the mempool storage.
+    // Expect insertion to fail for non-standard transaction.
+    let insert_err = service
+        .storage()
+        .insert(last_transaction.clone(), Vec::new(), None)
+        .expect_err("expected insert to fail for non-standard tx");
+
+    assert_eq!(
+        insert_err,
+        MempoolError::NonStandardTransaction(storage::NonStandardTransactionError::IsDust)
+    );
+
+    Ok(())
+}
+
+/// Check that standard OP_RETURN outputs are accepted when datacarrier is enabled.
+#[tokio::test(flavor = "multi_thread")]
+async fn mempool_accept_standard_op_return() -> Result<(), Report> {
+    let network = Network::Mainnet;
+
+    let mut last_transaction = network
+        .unmined_transactions_in_blocks(1..=10)
+        .next()
+        .expect("missing transaction");
+
+    last_transaction.height = Some(Height(100_000));
+
+    let mut tx = last_transaction.transaction.transaction.clone();
+    let tx_mut = Arc::make_mut(&mut tx);
+    *tx_mut.outputs_mut() = vec![transparent::Output {
+        value: Amount::new(0),
+        lock_script: op_return_script(&[0x01]),
+    }];
+    last_transaction.transaction.transaction = tx;
+
+    let cost_limit = last_transaction.cost();
+
+    let (
+        mut service,
+        _peer_set,
+        _state_service,
+        _chain_tip_change,
+        _tx_verifier,
+        mut recent_syncs,
+        _mempool_transaction_receiver,
+    ) = setup(&network, cost_limit, true).await;
+
+    service.enable(&mut recent_syncs).await;
+
+    service
+        .storage()
+        .insert(last_transaction.clone(), Vec::new(), None)?;
+
+    Ok(())
+}
+
+/// Check that oversized OP_RETURN scripts are rejected.
+#[tokio::test(flavor = "multi_thread")]
+async fn mempool_reject_op_return_too_large() -> Result<(), Report> {
+    let network = Network::Mainnet;
+
+    let mut last_transaction = network
+        .unmined_transactions_in_blocks(1..=10)
+        .next()
+        .expect("missing transaction");
+
+    last_transaction.height = Some(Height(100_000));
+
+    let mut tx = last_transaction.transaction.transaction.clone();
+    let tx_mut = Arc::make_mut(&mut tx);
+    *tx_mut.outputs_mut() = vec![transparent::Output {
+        value: Amount::new(0),
+        lock_script: op_return_script(&[0x03]),
+    }];
+    last_transaction.transaction.transaction = tx;
+
+    let cost_limit = last_transaction.cost();
+    // Shrink the OP_RETURN size limit to trigger the oversized rejection path.
+    let mempool_config = mempool::Config {
+        tx_cost_limit: cost_limit,
+        max_datacarrier_bytes: Some(2),
+        ..Default::default()
+    };
+
+    let (
+        mut service,
+        _peer_set,
+        _state_service,
+        _chain_tip_change,
+        _tx_verifier,
+        mut recent_syncs,
+        _mempool_transaction_receiver,
+    ) = setup_with_mempool_config(&network, mempool_config, true).await;
+
+    service.enable(&mut recent_syncs).await;
+
+    let insert_err = service
+        .storage()
+        .insert(last_transaction.clone(), Vec::new(), None)
+        .expect_err("expected insert to fail for non-standard tx");
+
+    assert_eq!(
+        insert_err,
+        MempoolError::NonStandardTransaction(
+            storage::NonStandardTransactionError::DataCarrierTooLarge
+        )
+    );
+
+    Ok(())
+}
+
+/// Check that multiple OP_RETURN outputs are rejected.
+#[tokio::test(flavor = "multi_thread")]
+async fn mempool_reject_multi_op_return() -> Result<(), Report> {
+    let network = Network::Mainnet;
+
+    let mut last_transaction = network
+        .unmined_transactions_in_blocks(1..=10)
+        .next()
+        .expect("missing transaction");
+
+    last_transaction.height = Some(Height(100_000));
+
+    let mut tx = last_transaction.transaction.transaction.clone();
+    let tx_mut = Arc::make_mut(&mut tx);
+    *tx_mut.outputs_mut() = vec![
+        transparent::Output {
+            value: Amount::new(0),
+            lock_script: op_return_script(&[0x04]),
+        },
+        transparent::Output {
+            value: Amount::new(0),
+            lock_script: op_return_script(&[0x05]),
+        },
+    ];
+    last_transaction.transaction.transaction = tx;
+
+    let cost_limit = last_transaction.cost();
+
+    let (
+        mut service,
+        _peer_set,
+        _state_service,
+        _chain_tip_change,
+        _tx_verifier,
+        mut recent_syncs,
+        _mempool_transaction_receiver,
+    ) = setup(&network, cost_limit, true).await;
+
+    service.enable(&mut recent_syncs).await;
+
+    let insert_err = service
+        .storage()
+        .insert(last_transaction.clone(), Vec::new(), None)
+        .expect_err("expected insert to fail for non-standard tx");
+
+    assert_eq!(
+        insert_err,
+        MempoolError::NonStandardTransaction(storage::NonStandardTransactionError::MultiOpReturn)
+    );
+
+    Ok(())
+}
+
+/// Check that non-standard scriptPubKeys are rejected.
+#[tokio::test(flavor = "multi_thread")]
+async fn mempool_reject_non_standard_scriptpubkey() -> Result<(), Report> {
+    let network = Network::Mainnet;
+
+    let mut last_transaction = network
+        .unmined_transactions_in_blocks(1..=10)
+        .next()
+        .expect("missing transaction");
+
+    last_transaction.height = Some(Height(100_000));
+
+    let mut tx = last_transaction.transaction.transaction.clone();
+    let tx_mut = Arc::make_mut(&mut tx);
+    *tx_mut.outputs_mut() = vec![transparent::Output {
+        value: Amount::new(1000),
+        lock_script: transparent::Script::new(&[0x00]),
+    }];
+    last_transaction.transaction.transaction = tx;
+
+    let cost_limit = last_transaction.cost();
+
+    let (
+        mut service,
+        _peer_set,
+        _state_service,
+        _chain_tip_change,
+        _tx_verifier,
+        mut recent_syncs,
+        _mempool_transaction_receiver,
+    ) = setup(&network, cost_limit, true).await;
+
+    service.enable(&mut recent_syncs).await;
+
+    let insert_err = service
+        .storage()
+        .insert(last_transaction.clone(), Vec::new(), None)
+        .expect_err("expected insert to fail for non-standard tx");
+
+    assert_eq!(
+        insert_err,
+        MempoolError::NonStandardTransaction(
+            storage::NonStandardTransactionError::ScriptPubKeyNonStandard
+        )
+    );
+
+    Ok(())
+}
+
+/// Check that bare multisig outputs are rejected.
+#[tokio::test(flavor = "multi_thread")]
+async fn mempool_reject_bare_multisig() -> Result<(), Report> {
+    let network = Network::Mainnet;
+
+    let mut last_transaction = network
+        .unmined_transactions_in_blocks(1..=10)
+        .next()
+        .expect("missing transaction");
+
+    last_transaction.height = Some(Height(100_000));
+
+    let mut tx = last_transaction.transaction.transaction.clone();
+    let tx_mut = Arc::make_mut(&mut tx);
+    *tx_mut.outputs_mut() = vec![transparent::Output {
+        value: Amount::new(1000),
+        lock_script: multisig_script(1, 1),
+    }];
+    last_transaction.transaction.transaction = tx;
+
+    let cost_limit = last_transaction.cost();
+
+    let (
+        mut service,
+        _peer_set,
+        _state_service,
+        _chain_tip_change,
+        _tx_verifier,
+        mut recent_syncs,
+        _mempool_transaction_receiver,
+    ) = setup(&network, cost_limit, true).await;
+
+    service.enable(&mut recent_syncs).await;
+
+    let insert_err = service
+        .storage()
+        .insert(last_transaction.clone(), Vec::new(), None)
+        .expect_err("expected insert to fail for non-standard tx");
+
+    assert_eq!(
+        insert_err,
+        MempoolError::NonStandardTransaction(storage::NonStandardTransactionError::BareMultiSig)
+    );
+
+    Ok(())
+}
+
+/// Check that oversized bare multisig outputs are rejected as non-standard.
+#[tokio::test(flavor = "multi_thread")]
+async fn mempool_reject_large_multisig() -> Result<(), Report> {
+    let network = Network::Mainnet;
+
+    let mut last_transaction = network
+        .unmined_transactions_in_blocks(1..=10)
+        .next()
+        .expect("missing transaction");
+
+    last_transaction.height = Some(Height(100_000));
+
+    let mut tx = last_transaction.transaction.transaction.clone();
+    let tx_mut = Arc::make_mut(&mut tx);
+    *tx_mut.outputs_mut() = vec![transparent::Output {
+        value: Amount::new(1000),
+        lock_script: multisig_script(1, 4),
+    }];
+    last_transaction.transaction.transaction = tx;
+
+    let cost_limit = last_transaction.cost();
+
+    let (
+        mut service,
+        _peer_set,
+        _state_service,
+        _chain_tip_change,
+        _tx_verifier,
+        mut recent_syncs,
+        _mempool_transaction_receiver,
+    ) = setup(&network, cost_limit, true).await;
+
+    service.enable(&mut recent_syncs).await;
+
+    let insert_err = service
+        .storage()
+        .insert(last_transaction.clone(), Vec::new(), None)
+        .expect_err("expected insert to fail for non-standard tx");
+
+    assert_eq!(
+        insert_err,
+        MempoolError::NonStandardTransaction(
+            storage::NonStandardTransactionError::ScriptPubKeyNonStandard
+        )
+    );
+
+    Ok(())
+}
+
+/// Check that oversized scriptSig inputs are rejected.
+#[tokio::test(flavor = "multi_thread")]
+async fn mempool_reject_large_scriptsig() -> Result<(), Report> {
+    let network = Network::Mainnet;
+
+    let mut last_transaction = pick_transaction_with_prevout(&network);
+
+    last_transaction.height = Some(Height(100_000));
+
+    let mut tx = last_transaction.transaction.transaction.clone();
+    let tx_mut = Arc::make_mut(&mut tx);
+    set_first_prevout_unlock_script(tx_mut, transparent::Script::new(&vec![0u8; 1651]));
+    last_transaction.transaction.transaction = tx;
+
+    let cost_limit = last_transaction.cost();
+
+    let (
+        mut service,
+        _peer_set,
+        _state_service,
+        _chain_tip_change,
+        _tx_verifier,
+        mut recent_syncs,
+        _mempool_transaction_receiver,
+    ) = setup(&network, cost_limit, true).await;
+
+    service.enable(&mut recent_syncs).await;
+
+    let insert_err = service
+        .storage()
+        .insert(last_transaction.clone(), Vec::new(), None)
+        .expect_err("expected insert to fail for non-standard tx");
+
+    assert_eq!(
+        insert_err,
+        MempoolError::NonStandardTransaction(
+            storage::NonStandardTransactionError::ScriptSigTooLarge
+        )
+    );
+
+    Ok(())
+}
+
+/// Check that non-push-only scriptSig inputs are rejected.
+#[tokio::test(flavor = "multi_thread")]
+async fn mempool_reject_non_push_only_scriptsig() -> Result<(), Report> {
+    let network = Network::Mainnet;
+
+    let mut last_transaction = pick_transaction_with_prevout(&network);
+
+    last_transaction.height = Some(Height(100_000));
+
+    let mut tx = last_transaction.transaction.transaction.clone();
+    let tx_mut = Arc::make_mut(&mut tx);
+    set_first_prevout_unlock_script(tx_mut, transparent::Script::new(&[0xac]));
+    last_transaction.transaction.transaction = tx;
+
+    let cost_limit = last_transaction.cost();
+
+    let (
+        mut service,
+        _peer_set,
+        _state_service,
+        _chain_tip_change,
+        _tx_verifier,
+        mut recent_syncs,
+        _mempool_transaction_receiver,
+    ) = setup(&network, cost_limit, true).await;
+
+    service.enable(&mut recent_syncs).await;
+
+    let insert_err = service
+        .storage()
+        .insert(last_transaction.clone(), Vec::new(), None)
+        .expect_err("expected insert to fail for non-standard tx");
+
+    assert_eq!(
+        insert_err,
+        MempoolError::NonStandardTransaction(
+            storage::NonStandardTransactionError::ScriptSigNotPushOnly
+        )
+    );
+
+    Ok(())
+}
+
+fn op_return_script(data: &[u8]) -> transparent::Script {
+    // Build a minimal OP_RETURN script using small pushdata (<= 75 bytes).
+    assert!(data.len() <= 75, "test helper only supports small pushdata");
+
+    let mut bytes = Vec::with_capacity(2 + data.len());
+    bytes.push(0x6a);
+    bytes.push(data.len() as u8);
+    bytes.extend_from_slice(data);
+    transparent::Script::new(&bytes)
+}
+
+fn multisig_script(required: u8, key_count: usize) -> transparent::Script {
+    // Construct a bare multisig output: OP_M <pubkeys> OP_N OP_CHECKMULTISIG.
+    assert!(required >= 1 && required <= key_count as u8);
+    assert!(key_count <= 16);
+
+    let mut bytes = Vec::new();
+    bytes.push(op_n(required));
+
+    for i in 0..key_count {
+        bytes.push(33u8);
+        let mut pubkey = vec![0u8; 33];
+        pubkey[0] = 0x02;
+        pubkey[1] = i as u8;
+        bytes.extend_from_slice(&pubkey);
+    }
+
+    bytes.push(op_n(key_count as u8));
+    bytes.push(0xae);
+
+    transparent::Script::new(&bytes)
+}
+
+fn p2pkh_script(pubkey_hash: [u8; 20]) -> transparent::Script {
+    let mut bytes = Vec::with_capacity(25);
+    bytes.push(0x76);
+    bytes.push(0xa9);
+    bytes.push(20);
+    bytes.extend_from_slice(&pubkey_hash);
+    bytes.push(0x88);
+    bytes.push(0xac);
+    transparent::Script::new(&bytes)
+}
+
+fn op_n(n: u8) -> u8 {
+    if n == 0 {
+        0x00
+    } else {
+        0x50 + n
+    }
+}
+
+fn set_first_prevout_unlock_script(tx: &mut Transaction, script: transparent::Script) {
+    for input in tx.inputs_mut() {
+        if let transparent::Input::PrevOut { unlock_script, .. } = input {
+            *unlock_script = script;
+            return;
+        }
+    }
+
+    panic!("missing prevout input");
+}
+
+fn pick_transaction_with_prevout(network: &Network) -> VerifiedUnminedTx {
+    network
+        .unmined_transactions_in_blocks(..)
+        .find(|transaction| {
+            transaction
+                .transaction
+                .transaction
+                .inputs()
+                .iter()
+                .any(|input| matches!(input, transparent::Input::PrevOut { .. }))
+        })
+        .expect("missing non-coinbase transaction")
+}
+
 /// Create a new [`Mempool`] instance using mocked services.
 async fn setup(
     network: &Network,
     tx_cost_limit: u64,
+    should_commit_genesis_block: bool,
+) -> (
+    Mempool,
+    MockPeerSet,
+    StateService,
+    ChainTipChange,
+    MockTxVerifier,
+    RecentSyncLengths,
+    tokio::sync::broadcast::Receiver<MempoolChange>,
+) {
+    let mempool_config = mempool::Config {
+        tx_cost_limit,
+        ..Default::default()
+    };
+
+    setup_with_mempool_config(network, mempool_config, should_commit_genesis_block).await
+}
+
+async fn setup_with_mempool_config(
+    network: &Network,
+    mempool_config: mempool::Config,
     should_commit_genesis_block: bool,
 ) -> (
     Mempool,
@@ -1132,7 +1737,7 @@ async fn setup(
     // UTXO verification doesn't matter here.
     let state_config = StateConfig::ephemeral();
     let (state, _read_only_state_service, latest_chain_tip, mut chain_tip_change) =
-        zebra_state::init(state_config, network, Height::MAX, 0);
+        zebra_state::init(state_config, network, Height::MAX, 0).await;
     let mut state_service = ServiceBuilder::new().buffer(10).service(state);
 
     let tx_verifier = MockService::build().for_unit_tests();
@@ -1140,10 +1745,7 @@ async fn setup(
     let (sync_status, recent_syncs) = SyncStatus::new();
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
     let (mempool, mempool_transaction_subscriber) = Mempool::new(
-        &mempool::Config {
-            tx_cost_limit,
-            ..Default::default()
-        },
+        &mempool_config,
         Buffer::new(BoxService::new(peer_set.clone()), 1),
         state_service.clone(),
         Buffer::new(BoxService::new(tx_verifier.clone()), 1),

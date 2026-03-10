@@ -33,7 +33,7 @@ use crate::{
         disk_format::RawBytes,
         zebra_db::ZebraDb,
     },
-    BoxError, TransactionLocation,
+    TransactionLocation,
 };
 
 // Doc-only items
@@ -271,13 +271,13 @@ impl ZebraDb {
     pub(in super::super) fn sapling_subtree_by_index(
         &self,
         index: impl Into<NoteCommitmentSubtreeIndex> + Copy,
-    ) -> Option<NoteCommitmentSubtree<sapling::tree::Node>> {
+    ) -> Option<NoteCommitmentSubtree<sapling_crypto::Node>> {
         let sapling_subtrees = self
             .db
             .cf_handle("sapling_note_commitment_subtree")
             .unwrap();
 
-        let subtree_data: NoteCommitmentSubtreeData<sapling::tree::Node> =
+        let subtree_data: NoteCommitmentSubtreeData<sapling_crypto::Node> =
             self.db.zs_get(&sapling_subtrees, &index.into())?;
 
         Some(subtree_data.with_index(index))
@@ -288,7 +288,7 @@ impl ZebraDb {
     pub fn sapling_subtree_list_by_index_range(
         &self,
         range: impl std::ops::RangeBounds<NoteCommitmentSubtreeIndex>,
-    ) -> BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<sapling::tree::Node>> {
+    ) -> BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<sapling_crypto::Node>> {
         let sapling_subtrees = self
             .db
             .cf_handle("sapling_note_commitment_subtree")
@@ -301,7 +301,7 @@ impl ZebraDb {
 
     /// Get the sapling note commitment subtress for the finalized tip.
     #[allow(clippy::unwrap_in_result)]
-    fn sapling_subtree_for_tip(&self) -> Option<NoteCommitmentSubtree<sapling::tree::Node>> {
+    fn sapling_subtree_for_tip(&self) -> Option<NoteCommitmentSubtree<sapling_crypto::Node>> {
         let sapling_subtrees = self
             .db
             .cf_handle("sapling_note_commitment_subtree")
@@ -309,7 +309,7 @@ impl ZebraDb {
 
         let (index, subtree_data): (
             NoteCommitmentSubtreeIndex,
-            NoteCommitmentSubtreeData<sapling::tree::Node>,
+            NoteCommitmentSubtreeData<sapling_crypto::Node>,
         ) = self.db.zs_last_key_value(&sapling_subtrees)?;
 
         let tip_height = self.finalized_tip_height()?;
@@ -467,15 +467,11 @@ impl DiskWriteBatch {
     ///
     /// If this method returns an error, it will be propagated,
     /// and the batch should not be written to the database.
-    ///
-    /// # Errors
-    ///
-    /// - Propagates any errors from updating note commitment trees
     pub fn prepare_shielded_transaction_batch(
         &mut self,
         zebra_db: &ZebraDb,
         finalized: &FinalizedBlock,
-    ) -> Result<(), BoxError> {
+    ) {
         #[cfg(feature = "indexer")]
         let FinalizedBlock { block, height, .. } = finalized;
 
@@ -483,15 +479,13 @@ impl DiskWriteBatch {
         #[cfg(feature = "indexer")]
         for (tx_index, transaction) in block.transactions.iter().enumerate() {
             let tx_loc = TransactionLocation::from_usize(*height, tx_index);
-            self.prepare_nullifier_batch(zebra_db, transaction, tx_loc)?;
+            self.prepare_nullifier_batch(zebra_db, transaction, tx_loc);
         }
 
         #[cfg(not(feature = "indexer"))]
         for transaction in &finalized.block.transactions {
-            self.prepare_nullifier_batch(zebra_db, transaction)?;
+            self.prepare_nullifier_batch(zebra_db, transaction);
         }
-
-        Ok(())
     }
 
     /// Prepare a database batch containing `finalized.block`'s nullifiers,
@@ -506,7 +500,7 @@ impl DiskWriteBatch {
         zebra_db: &ZebraDb,
         transaction: &Transaction,
         #[cfg(feature = "indexer")] transaction_location: TransactionLocation,
-    ) -> Result<(), BoxError> {
+    ) {
         let db = &zebra_db.db;
         let sprout_nullifiers = db.cf_handle("sprout_nullifiers").unwrap();
         let sapling_nullifiers = db.cf_handle("sapling_nullifiers").unwrap();
@@ -527,8 +521,6 @@ impl DiskWriteBatch {
         for orchard_nullifier in transaction.orchard_nullifiers() {
             self.zs_insert(&orchard_nullifiers, orchard_nullifier, insert_value);
         }
-
-        Ok(())
     }
 
     /// Prepare a database batch containing the note commitment and history tree updates
@@ -536,17 +528,13 @@ impl DiskWriteBatch {
     ///
     /// If this method returns an error, it will be propagated,
     /// and the batch should not be written to the database.
-    ///
-    /// # Errors
-    ///
-    /// - Propagates any errors from updating the history tree
     #[allow(clippy::unwrap_in_result)]
     pub fn prepare_trees_batch(
         &mut self,
         zebra_db: &ZebraDb,
         finalized: &FinalizedBlock,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
-    ) -> Result<(), BoxError> {
+    ) {
         let FinalizedBlock {
             height,
             treestate:
@@ -594,8 +582,6 @@ impl DiskWriteBatch {
         }
 
         self.update_history_tree(zebra_db, history_tree);
-
-        Ok(())
     }
 
     // Sprout tree methods
@@ -664,7 +650,7 @@ impl DiskWriteBatch {
     pub fn insert_sapling_subtree(
         &mut self,
         zebra_db: &ZebraDb,
-        subtree: &NoteCommitmentSubtree<sapling::tree::Node>,
+        subtree: &NoteCommitmentSubtree<sapling_crypto::Node>,
     ) {
         let sapling_subtree_cf = zebra_db
             .db

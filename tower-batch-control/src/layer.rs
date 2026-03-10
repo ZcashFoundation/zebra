@@ -67,7 +67,7 @@ where
 
 impl<Request> fmt::Debug for BatchLayer<Request> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("BufferLayer")
+        f.debug_struct("BatchLayer")
             .field("max_items_weight_in_batch", &self.max_items_weight_in_batch)
             .field("max_batches", &self.max_batches)
             .field("max_latency", &self.max_latency)

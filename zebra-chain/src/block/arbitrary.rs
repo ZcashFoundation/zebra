@@ -8,7 +8,7 @@ use crate::{
     fmt::{HexDebug, SummaryDebug},
     history_tree::HistoryTree,
     parameters::{NetworkUpgrade::*, GENESIS_PREVIOUS_BLOCK_HASH},
-    serialization,
+    serialization::{self, BytesInDisplayOrder},
     transaction::arbitrary::MAX_ARBITRARY_ITEMS,
     transparent::{
         new_transaction_ordered_outputs, CoinbaseSpendRestriction,
@@ -602,9 +602,7 @@ where
                 input.set_outpoint(selected_outpoint);
                 new_inputs.push(input);
 
-                let spent_utxo = utxos
-                    .remove(&selected_outpoint)
-                    .expect("selected outpoint must have a UTXO");
+                let spent_utxo = utxos.remove(&selected_outpoint)?;
                 spent_outputs.insert(selected_outpoint, spent_utxo.utxo.output);
             }
             // otherwise, drop the invalid input, because it has no valid UTXOs to spend

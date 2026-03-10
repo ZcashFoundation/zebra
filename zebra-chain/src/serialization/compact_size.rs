@@ -111,7 +111,7 @@ use proptest_derive::Arbitrary;
 /// let bytes = Cursor::new(b"\xff\xfd\xaa\xbb\xcc\x22\x00\x00\x00");
 /// assert!(CompactSizeMessage::zcash_deserialize(bytes).is_err());
 /// ```
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Default)]
 pub struct CompactSizeMessage(
     /// The number of items in a Zcash message.
     ///
@@ -241,7 +241,7 @@ impl TryFrom<usize> for CompactSizeMessage {
         let size: u32 = size.try_into()?;
 
         // # Security
-        // Defence-in-depth for memory DoS via preallocation.
+        // Defense-in-depth for memory DoS via preallocation.
         if size
             > MAX_PROTOCOL_MESSAGE_LEN
                 .try_into()

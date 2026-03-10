@@ -9,6 +9,7 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
+    time::Duration,
 };
 
 use chrono::{TimeZone, Utc};
@@ -879,7 +880,7 @@ where
         let HandshakeRequest {
             data_stream,
             connected_addr,
-            connection_tracker,
+            mut connection_tracker,
         } = req;
 
         let negotiator_span = debug_span!("negotiator", peer = ?connected_addr);
@@ -910,6 +911,9 @@ where
                 "negotiating protocol version with remote peer"
             );
 
+            // Start timing the handshake for metrics
+            let handshake_start = Instant::now();
+
             let mut peer_conn = Framed::new(
                 data_stream,
                 Codec::builder()
@@ -918,7 +922,7 @@ where
                     .finish(),
             );
 
-            let connection_info = negotiate_version(
+            let connection_info = match negotiate_version(
                 &mut peer_conn,
                 &connected_addr,
                 config,
@@ -928,12 +932,50 @@ where
                 relay,
                 minimum_peer_version,
             )
-            .await?;
+            .await
+            {
+                Ok(info) => {
+                    // Record successful handshake duration
+                    let duration = handshake_start.elapsed().as_secs_f64();
+                    metrics::histogram!(
+                        "zcash.net.peer.handshake.duration_seconds",
+                        "result" => "success"
+                    )
+                    .record(duration);
+                    info
+                }
+                Err(err) => {
+                    // Record failed handshake duration and failure reason
+                    let duration = handshake_start.elapsed().as_secs_f64();
+                    let reason = match &err {
+                        HandshakeError::UnexpectedMessage(_) => "unexpected_message",
+                        HandshakeError::RemoteNonceReuse => "nonce_reuse",
+                        HandshakeError::LocalDuplicateNonce => "duplicate_nonce",
+                        HandshakeError::ConnectionClosed => "connection_closed",
+                        HandshakeError::Io(_) => "io_error",
+                        HandshakeError::Serialization(_) => "serialization",
+                        HandshakeError::ObsoleteVersion(_) => "obsolete_version",
+                        HandshakeError::Timeout => "timeout",
+                    };
+                    metrics::histogram!(
+                        "zcash.net.peer.handshake.duration_seconds",
+                        "result" => "failure"
+                    )
+                    .record(duration);
+                    metrics::counter!(
+                        "zcash.net.peer.handshake.failures.total",
+                        "reason" => reason
+                    )
+                    .increment(1);
+                    return Err(err);
+                }
+            };
 
             let remote_services = connection_info.remote.services;
 
             // The handshake succeeded: update the peer status from AttemptPending to Responded,
-            // and send initial connection info.
+            // send initial connection info, and update the active connection counter.
+            connection_tracker.mark_open();
             if let Some(book_addr) = connected_addr.get_address_book_addr() {
                 // the collector doesn't depend on network activity,
                 // so this await should not hang
@@ -1312,8 +1354,15 @@ async fn send_periodic_heartbeats_run_loop(
     while let Some(_instant) = interval_stream.next().await {
         // We've reached another heartbeat interval without
         // shutting down, so do a heartbeat request.
+        let ping_sent_at = Instant::now();
+        if let Some(book_addr) = connected_addr.get_address_book_addr() {
+            let _ = heartbeat_ts_collector
+                .send(MetaAddr::new_ping_sent(book_addr, ping_sent_at.into()))
+                .await;
+        }
+
         let heartbeat = send_one_heartbeat(&mut server_tx);
-        heartbeat_timeout(heartbeat, &heartbeat_ts_collector, &connected_addr).await?;
+        let rtt = heartbeat_timeout(heartbeat, &heartbeat_ts_collector, &connected_addr).await?;
 
         // # Security
         //
@@ -1322,11 +1371,13 @@ async fn send_periodic_heartbeats_run_loop(
         // - the number of connections is limited
         // - Zebra initiates each heartbeat using a timer
         if let Some(book_addr) = connected_addr.get_address_book_addr() {
-            // the collector doesn't depend on network activity,
-            // so this await should not hang
-            let _ = heartbeat_ts_collector
-                .send(MetaAddr::new_responded(book_addr))
-                .await;
+            if let Some(rtt) = rtt {
+                // the collector doesn't depend on network activity,
+                // so this await should not hang
+                let _ = heartbeat_ts_collector
+                    .send(MetaAddr::new_responded(book_addr, Some(rtt)))
+                    .await;
+            }
         }
     }
 
@@ -1336,7 +1387,7 @@ async fn send_periodic_heartbeats_run_loop(
 /// Send one heartbeat using `server_tx`.
 async fn send_one_heartbeat(
     server_tx: &mut futures::channel::mpsc::Sender<ClientRequest>,
-) -> Result<(), BoxError> {
+) -> Result<Response, BoxError> {
     // We just reached a heartbeat interval, so start sending
     // a heartbeat.
     let (tx, rx) = oneshot::channel();
@@ -1376,23 +1427,20 @@ async fn send_one_heartbeat(
     // Heartbeats are checked internally to the
     // connection logic, but we need to wait on the
     // response to avoid canceling the request.
-    rx.await??;
-    tracing::trace!("got heartbeat response");
+    let response = rx.await??;
+    tracing::trace!(?response, "got heartbeat response");
 
-    Ok(())
+    Ok(response)
 }
 
 /// Wrap `fut` in a timeout, handing any inner or outer errors using
 /// `handle_heartbeat_error`.
-async fn heartbeat_timeout<F, T>(
-    fut: F,
+async fn heartbeat_timeout(
+    fut: impl Future<Output = Result<Response, BoxError>>,
     address_book_updater: &tokio::sync::mpsc::Sender<MetaAddrChange>,
     connected_addr: &ConnectedAddr,
-) -> Result<T, BoxError>
-where
-    F: Future<Output = Result<T, BoxError>>,
-{
-    let t = match timeout(constants::HEARTBEAT_INTERVAL, fut).await {
+) -> Result<Option<Duration>, BoxError> {
+    let response = match timeout(constants::HEARTBEAT_INTERVAL, fut).await {
         Ok(inner_result) => {
             handle_heartbeat_error(inner_result, address_book_updater, connected_addr).await?
         }
@@ -1401,7 +1449,12 @@ where
         }
     };
 
-    Ok(t)
+    let rtt = match response {
+        Response::Pong(rtt) => Some(rtt),
+        _ => None,
+    };
+
+    Ok(rtt)
 }
 
 /// If `result.is_err()`, mark `connected_addr` as failed using `address_book_updater`.

@@ -1,16 +1,17 @@
 [package]
 name = "zebra-chain"
-version = "2.0.0"
-authors = ["Zcash Foundation <zebra@zfnd.org>"]
+version = "5.0.0"
+authors.workspace = true
 description = "Core Zcash data structures"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/ZcashFoundation/zebra"
-edition = "2021"
+license.workspace = true
+repository.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 
 readme = "../README.md"
-homepage = "https://zfnd.org/zebra/"
+homepage.workspace = true
 # crates.io is limited to 5 keywords and categories
-keywords = ["zebra", "zcash"]
+keywords.workspace = true
 # Must be one of <https://crates.io/category_slugs>
 categories = ["asynchronous", "cryptography::cryptocurrencies", "encoding"]
 
@@ -76,9 +77,11 @@ ripemd = { workspace = true }
 # Matches version used by hdwallet
 secp256k1 = { workspace = true, features = ["serde"] }
 sha2 = { workspace = true, features = ["compress"] }
+schemars = { workspace = true }
 uint = { workspace = true }
 x25519-dalek = { workspace = true, features = ["serde"] }
 bech32 = { workspace = true }
+zcash_script.workspace = true
 
 # ECC deps
 halo2 = { package = "halo2_proofs", version = "0.3" }
@@ -112,6 +115,7 @@ serde-big-array = { workspace = true }
 futures = { workspace = true }
 itertools = { workspace = true }
 rayon = { workspace = true }
+strum = { version = "0.27.2", features = ["derive"] }
 
 # Crosslink / BFT
 blake3 = "1.8.2"
@@ -134,7 +138,8 @@ proptest-derive = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
 rand_chacha = { workspace = true, optional = true }
 
-zebra-test = { path = "../zebra-test/", version = "1.0.1", optional = true }
+zebra-test = { path = "../zebra-test/", version = "2.0.1", optional = true }
+bounded-vec = { version = "0.9.0", features = ["serde"] }
 
 [dev-dependencies]
 # Benchmarks
@@ -142,9 +147,6 @@ criterion = { workspace = true, features = ["html_reports"] }
 
 # Error Handling & Formatting
 color-eyre = { workspace = true }
-# This is a transitive dependency via color-eyre.
-# Enable a feature that makes tinyvec compile much faster.
-tinyvec = { workspace = true, features = ["rustc_1_55"] }
 spandoc = { workspace = true }
 tracing = { workspace = true }
 
@@ -157,7 +159,7 @@ rand_chacha = { workspace = true }
 
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 
-zebra-test = { path = "../zebra-test/", version = "1.0.1" }
+zebra-test = { path = "../zebra-test/", version = "2.0.1" }
 
 [[bench]]
 name = "block"
@@ -168,5 +170,5 @@ required-features = ["bench"]
 name = "redpallas"
 harness = false
 
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("zfuture"))'] }
+[lints]
+workspace = true

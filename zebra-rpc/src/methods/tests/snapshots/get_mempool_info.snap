@@ -1,0 +1,9 @@
+---
+source: zebra-rpc/src/methods/tests/snapshot.rs
+expression: inner
+---
+{
+  "size": 67,
+  "bytes": 32500,
+  "usage": 41000
+}

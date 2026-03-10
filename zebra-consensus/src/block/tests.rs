@@ -1,5 +1,7 @@
 //! Tests for block verification
 
+#![allow(clippy::unwrap_in_result)]
+
 use color_eyre::eyre::{eyre, Report};
 use once_cell::sync::Lazy;
 use tower::{buffer::Buffer, util::BoxService};
@@ -135,7 +137,7 @@ async fn check_transcripts() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
 
     let network = Network::Mainnet;
-    let state_service = zebra_state::init_test(&network);
+    let state_service = zebra_state::init_test(&network).await;
 
     let transaction = transaction::Verifier::new_for_tests(&network, state_service.clone());
     let transaction = Buffer::new(BoxService::new(transaction), 1);

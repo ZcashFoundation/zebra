@@ -4,7 +4,6 @@ authors = [
   "Daira-Emma Hopwood",
 ]
 language = "en"
-multilingual = false
 src = "src"
 title = "The Zebra Crosslink Book"
 

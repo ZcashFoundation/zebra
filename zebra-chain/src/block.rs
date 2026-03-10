@@ -35,6 +35,7 @@ pub mod tests;
 
 pub use commitment::{
     ChainHistoryBlockTxAuthCommitmentHash, ChainHistoryMmrRootHash, Commitment, CommitmentError,
+    CHAIN_HISTORY_ACTIVATION_RESERVED,
 };
 pub use hash::Hash;
 pub use header::{
@@ -170,8 +171,11 @@ impl Block {
             .flat_map(|transaction| transaction.sprout_note_commitments())
     }
 
-    /// Access the [sapling note commitments](jubjub::Fq) from all transactions in this block.
-    pub fn sapling_note_commitments(&self) -> impl Iterator<Item = &jubjub::Fq> {
+    /// Access the [sapling note commitments](`sapling_crypto::note::ExtractedNoteCommitment`)
+    /// from all transactions in this block.
+    pub fn sapling_note_commitments(
+        &self,
+    ) -> impl Iterator<Item = &sapling_crypto::note::ExtractedNoteCommitment> {
         self.transactions
             .iter()
             .flat_map(|transaction| transaction.sapling_note_commitments())

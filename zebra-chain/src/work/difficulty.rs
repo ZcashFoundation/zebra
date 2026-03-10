@@ -19,7 +19,7 @@ use std::{
 
 use hex::{FromHex, ToHex};
 
-use crate::{block, parameters::Network, BoxError};
+use crate::{block, parameters::Network, serialization::BytesInDisplayOrder, BoxError};
 
 pub use crate::work::u256::U256;
 
@@ -392,6 +392,16 @@ impl From<ExpandedDifficulty> for CompactDifficulty {
     }
 }
 
+impl BytesInDisplayOrder for ExpandedDifficulty {
+    fn bytes_in_serialized_order(&self) -> [u8; 32] {
+        self.0.to_big_endian()
+    }
+
+    fn from_bytes_in_serialized_order(bytes: [u8; 32]) -> Self {
+        ExpandedDifficulty(U256::from_big_endian(&bytes))
+    }
+}
+
 impl ExpandedDifficulty {
     /// Returns the difficulty of the hash.
     ///
@@ -473,29 +483,6 @@ impl ExpandedDifficulty {
             // should also be unreachable, but they aren't caught here.
             unreachable!("converted CompactDifficulty values must be valid")
         }
-    }
-
-    /// Return the difficulty bytes in big-endian byte-order,
-    /// suitable for printing out byte by byte.
-    ///
-    /// Zebra displays difficulties in big-endian byte-order,
-    /// following the u256 convention set by Bitcoin and zcashd.
-    pub fn bytes_in_display_order(&self) -> [u8; 32] {
-        self.0.to_big_endian()
-    }
-
-    /// Convert bytes in big-endian byte-order into an [`ExpandedDifficulty`].
-    ///
-    /// Zebra displays difficulties in big-endian byte-order,
-    /// following the u256 convention set by Bitcoin and zcashd.
-    ///
-    /// Preserves the exact difficulty value represented by the bytes,
-    /// even if it can't be generated from a [`CompactDifficulty`].
-    /// This means a round-trip conversion to [`CompactDifficulty`] can be lossy.
-    pub fn from_bytes_in_display_order(bytes_in_display_order: &[u8; 32]) -> ExpandedDifficulty {
-        let internal_byte_order = U256::from_big_endian(bytes_in_display_order);
-
-        ExpandedDifficulty(internal_byte_order)
     }
 }
 

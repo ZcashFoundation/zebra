@@ -11,6 +11,9 @@
 #![doc(html_favicon_url = "https://zfnd.org/wp-content/uploads/2022/03/zebra-favicon-128.png")]
 #![doc(html_logo_url = "https://zfnd.org/wp-content/uploads/2022/03/zebra-icon.png")]
 #![doc(html_root_url = "https://docs.rs/zebra_state")]
+// Remove if possible if MSRV is increased
+#![allow(unknown_lints)]
+#![allow(clippy::manual_is_multiple_of)]
 
 #[macro_use]
 extern crate tracing;
@@ -40,18 +43,24 @@ pub use config::{
 };
 pub use constants::{state_database_format_version_in_code, MAX_BLOCK_REORG_HEIGHT};
 pub use error::{
-    BoxError, CloneError, CommitSemanticallyVerifiedError, DuplicateNullifierError,
-    ValidateContextError,
+    BoxError, CloneError, CommitBlockError, CommitSemanticallyVerifiedError,
+    DuplicateNullifierError, ValidateContextError,
 };
 pub use request::{
-    CheckpointVerifiedBlock, HashOrHeight, ReadRequest, Request, SemanticallyVerifiedBlock,
+    CheckpointVerifiedBlock, CommitSemanticallyVerifiedBlockRequest, HashOrHeight, MappedRequest,
+    ReadRequest, Request, SemanticallyVerifiedBlock,
 };
 
 #[cfg(feature = "indexer")]
 pub use request::Spend;
 
 pub use response::{
+<<<<<<< HEAD
     GetBlockTemplateChainInfo, KnownBlock, KnownBlockLocation, MinedTx, ReadResponse, Response,
+=======
+    AnyTx, GetBlockTemplateChainInfo, KnownBlock, MinedTx, NonFinalizedBlocksListener,
+    ReadResponse, Response,
+>>>>>>> origin/main
 };
 pub use service::{
     chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip, TipAction},
@@ -59,9 +68,9 @@ pub use service::{
     finalized_state::FinalizedState,
     init, init_read_only,
     non_finalized_state::NonFinalizedState,
-    spawn_init, spawn_init_read_only,
+    spawn_init_read_only,
     watch_receiver::WatchReceiver,
-    OutputLocation, TransactionIndex, TransactionLocation,
+    OutputLocation, ReadState, State, TransactionIndex, TransactionLocation,
 };
 
 // Allow use in the scanner and external tests

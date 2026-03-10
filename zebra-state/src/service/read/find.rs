@@ -65,6 +65,23 @@ where
         .or_else(|| db.tip())
 }
 
+/// Returns the tip block of `chain`.
+/// If there is no chain, returns the tip of `db`.
+pub fn tip_block<C>(chain: Option<C>, db: &ZebraDb) -> Option<Arc<Block>>
+where
+    C: AsRef<Chain>,
+{
+    // # Correctness
+    //
+    // If there is an overlap between the non-finalized and finalized states,
+    // where the finalized tip is above the non-finalized tip,
+    // Zebra is receiving a lot of blocks, or this request has been delayed for a long time,
+    // so it is acceptable to return either tip.
+    chain
+        .and_then(|chain| chain.as_ref().tip_block().map(|b| b.block.clone()))
+        .or_else(|| db.tip_block())
+}
+
 /// Returns the tip [`Height`] of `chain`.
 /// If there is no chain, returns the tip of `db`.
 pub fn tip_height<C>(chain: Option<C>, db: &ZebraDb) -> Option<Height>
@@ -169,6 +186,7 @@ pub fn non_finalized_state_contains_block_hash(
 /// Returns the location of the block if present in the finalized state.
 /// Returns None if the block hash is not found in the finalized state.
 pub fn finalized_state_contains_block_hash(db: &ZebraDb, hash: block::Hash) -> Option<KnownBlock> {
+<<<<<<< HEAD
     if let Some(height) = db.height(hash) {
         Some(KnownBlock {
             location: KnownBlockLocation::BestChain,
@@ -177,6 +195,9 @@ pub fn finalized_state_contains_block_hash(db: &ZebraDb, hash: block::Hash) -> O
     } else {
         None
     }
+=======
+    db.contains_hash(hash).then_some(KnownBlock::Finalized)
+>>>>>>> origin/main
 }
 
 /// Return the height for the block at `hash`, if `hash` is in `chain` or `db`.

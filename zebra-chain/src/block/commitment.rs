@@ -7,8 +7,12 @@ use thiserror::Error;
 
 use crate::{
     block::{self, merkle::AuthDataRoot},
-    parameters::{Network, NetworkUpgrade, NetworkUpgrade::*},
+    parameters::{
+        Network,
+        NetworkUpgrade::{self, *},
+    },
     sapling,
+    serialization::BytesInDisplayOrder,
 };
 
 /// Zcash blocks contain different kinds of commitments to their contents,
@@ -95,7 +99,7 @@ pub enum Commitment {
 }
 
 /// The required value of reserved `Commitment`s.
-pub(crate) const CHAIN_HISTORY_ACTIVATION_RESERVED: [u8; 32] = [0; 32];
+pub const CHAIN_HISTORY_ACTIVATION_RESERVED: [u8; 32] = [0; 32];
 
 impl Commitment {
     /// Returns `bytes` as the Commitment variant for `network` and `height`.
@@ -122,13 +126,12 @@ impl Commitment {
                     Err(InvalidChainHistoryActivationReserved { actual: bytes })
                 }
             }
-            // NetworkUpgrade::current() returns the latest network upgrade that's activated at the provided height, so
-            // on Regtest for heights above height 0, it could return NU6, and it's possible for the current network upgrade
-            // to be NU6 (or Canopy, or any network upgrade above Heartwood) at the Heartwood activation height.
-            (Canopy | Nu5 | Nu6 | Nu6_1 | Nu7, activation_height)
-                if height == activation_height
-                    && Some(height) == Heartwood.activation_height(network) =>
-            {
+            // It's possible for the current network upgrade to be Heartwood or any network upgrade after Heartwood at
+            // the Heartwood activation height on Regtest or configured test networks. The reserved chain history root
+            // activation bytes should still be used pre-NU5.
+            //
+            // See <https://zips.z.cash/zip-0221> and the [protocol specification §7.6](https://zips.z.cash/protocol/protocol.pdf).
+            (Canopy, _) if Some(height) == Heartwood.activation_height(network) => {
                 if bytes == CHAIN_HISTORY_ACTIVATION_RESERVED {
                     Ok(ChainHistoryActivationReserved)
                 } else {
@@ -198,33 +201,13 @@ impl From<ChainHistoryMmrRootHash> for [u8; 32] {
     }
 }
 
-impl ChainHistoryMmrRootHash {
-    /// Return the hash bytes in big-endian byte-order suitable for printing out byte by byte.
-    ///
-    /// Zebra displays transaction and block hashes in big-endian byte-order,
-    /// following the u256 convention set by Bitcoin and zcashd.
-    pub fn bytes_in_display_order(&self) -> [u8; 32] {
-        let mut reversed_bytes = self.0;
-        reversed_bytes.reverse();
-        reversed_bytes
-    }
-
-    /// Convert bytes in big-endian byte-order into a `ChainHistoryMmrRootHash`.
-    ///
-    /// Zebra displays transaction and block hashes in big-endian byte-order,
-    /// following the u256 convention set by Bitcoin and zcashd.
-    pub fn from_bytes_in_display_order(
-        bytes_in_display_order: &[u8; 32],
-    ) -> ChainHistoryMmrRootHash {
-        let mut internal_byte_order = *bytes_in_display_order;
-        internal_byte_order.reverse();
-
-        ChainHistoryMmrRootHash(internal_byte_order)
-    }
-
-    /// Returns the serialized bytes for this Commitment.
-    pub fn bytes_in_serialized_order(&self) -> [u8; 32] {
+impl BytesInDisplayOrder<true> for ChainHistoryMmrRootHash {
+    fn bytes_in_serialized_order(&self) -> [u8; 32] {
         self.0
+    }
+
+    fn from_bytes_in_serialized_order(bytes: [u8; 32]) -> Self {
+        ChainHistoryMmrRootHash(bytes)
     }
 }
 
@@ -294,6 +277,16 @@ impl From<ChainHistoryBlockTxAuthCommitmentHash> for [u8; 32] {
     }
 }
 
+impl BytesInDisplayOrder<true> for ChainHistoryBlockTxAuthCommitmentHash {
+    fn bytes_in_serialized_order(&self) -> [u8; 32] {
+        self.0
+    }
+
+    fn from_bytes_in_serialized_order(bytes: [u8; 32]) -> Self {
+        ChainHistoryBlockTxAuthCommitmentHash(bytes)
+    }
+}
+
 impl ChainHistoryBlockTxAuthCommitmentHash {
     /// Compute the block commitment from the history tree root and the
     /// authorization data root, as specified in [ZIP-244].
@@ -325,34 +318,6 @@ impl ChainHistoryBlockTxAuthCommitmentHash {
             .try_into()
             .expect("32 byte array");
         Self(hash_block_commitments)
-    }
-
-    /// Return the hash bytes in big-endian byte-order suitable for printing out byte by byte.
-    ///
-    /// Zebra displays transaction and block hashes in big-endian byte-order,
-    /// following the u256 convention set by Bitcoin and zcashd.
-    pub fn bytes_in_display_order(&self) -> [u8; 32] {
-        let mut reversed_bytes = self.0;
-        reversed_bytes.reverse();
-        reversed_bytes
-    }
-
-    /// Convert bytes in big-endian byte-order into a `ChainHistoryBlockTxAuthCommitmentHash`.
-    ///
-    /// Zebra displays transaction and block hashes in big-endian byte-order,
-    /// following the u256 convention set by Bitcoin and zcashd.
-    pub fn from_bytes_in_display_order(
-        bytes_in_display_order: &[u8; 32],
-    ) -> ChainHistoryBlockTxAuthCommitmentHash {
-        let mut internal_byte_order = *bytes_in_display_order;
-        internal_byte_order.reverse();
-
-        ChainHistoryBlockTxAuthCommitmentHash(internal_byte_order)
-    }
-
-    /// Returns the serialized bytes for this Commitment.
-    pub fn bytes_in_serialized_order(&self) -> [u8; 32] {
-        self.0
     }
 }
 
