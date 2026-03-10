@@ -35,7 +35,6 @@ use std::{
     cmp,
     collections::{HashMap, HashSet},
     fmt,
-    io::Cursor,
     ops::RangeInclusive,
     sync::Arc,
     time::Duration,
@@ -67,6 +66,7 @@ use zebra_chain::{
     block::{self, Block, Commitment, Height, SerializedBlock, TryIntoHeight},
     chain_sync_status::ChainSyncStatus,
     chain_tip::{ChainTip, NetworkChainTipHeightEstimator},
+    history_tree::HistoryNodeData,
     parameters::{
         subsidy::{block_subsidy, funding_stream_values, miner_subsidy, FundingStreamReceiver},
         ConsensusBranchId, Network, NetworkUpgrade, POW_AVERAGING_WINDOW,
@@ -90,8 +90,6 @@ use zebra_state::{
     AnyTx, HashOrHeight, OutputLocation, ReadRequest, ReadResponse, ReadState as ReadStateService,
     State as StateService, TransactionLocation,
 };
-
-use zcash_history::{Version, V1, V2};
 
 use crate::{
     client::Treestate,
@@ -2253,14 +2251,6 @@ where
                 )
             })?;
 
-        let Some(branch_id) = network_upgrade.branch_id() else {
-            return Err(ErrorObject::owned(
-                server::error::LegacyCode::Misc.into(),
-                "The network upgrade has no associated branch id",
-                None::<()>,
-            ));
-        };
-
         let zebra_state::ReadResponse::HistoryNode(entry) = self
             .read_state
             .clone()
@@ -2278,114 +2268,28 @@ where
             let response = if verbose == 0 {
                 GetHistoryNode::Raw(HexData(entry.inner().to_vec()))
             } else {
-                let response_object = match network_upgrade {
-                    NetworkUpgrade::Heartwood | NetworkUpgrade::Canopy => {
-                        let entry_object = match zcash_history::Entry::<V1>::from_bytes(
-                            branch_id.into(),
-                            entry.inner(),
-                        ) {
-                            Ok(v) => v,
-                            Err(e) => {
-                                return Err(ErrorObject::owned(
-                                    server::error::LegacyCode::Misc.into(),
-                                    "Error reading inner entry data: ".to_owned() + &e.to_string(),
-                                    None::<()>,
-                                ))
-                            }
-                        };
-
-                        let node_bytes = match entry_object.leaf() {
-                            true => entry.inner().split_at(1).1,
-                            false => entry.inner().split_at(9).1,
-                        };
-                        let mut cursor = Cursor::new(&node_bytes);
-                        let node = match V1::read(branch_id.into(), &mut cursor) {
-                            Ok(v) => v,
-                            Err(e) => {
-                                return Err(ErrorObject::owned(
-                                    server::error::LegacyCode::Misc.into(),
-                                    "Error reading inner node data: ".to_owned() + &e.to_string(),
-                                    None::<()>,
-                                ))
-                            }
-                        };
-                        let mut total_work: [u8; 32] = bytemuck::cast(node.subtree_total_work.0);
-                        total_work.reverse();
-                        GetHistoryNodeObject {
-                            subtree_commitment: node.subtree_commitment,
-                            consensus_branch_id: ConsensusBranchIdHex(
-                                node.consensus_branch_id.into(),
-                            ),
-                            start_time: node.start_time,
-                            end_time: node.end_time,
-                            start_target: node.start_target,
-                            end_target: node.end_target,
-                            start_sapling_root: node.start_sapling_root,
-                            end_sapling_root: node.end_sapling_root,
-                            subtree_total_work: total_work,
-                            start_height: node.start_height,
-                            end_height: node.end_height,
-                            sapling_tx: node.sapling_tx,
-                            start_orchard_root: [0; 32],
-                            end_orchard_root: [0; 32],
-                            orchard_tx: 0,
-                        }
-                    }
-                    _ => {
-                        let entry_object = match zcash_history::Entry::<V2>::from_bytes(
-                            branch_id.into(),
-                            entry.inner(),
-                        ) {
-                            Ok(v) => v,
-                            Err(e) => {
-                                return Err(ErrorObject::owned(
-                                    server::error::LegacyCode::Misc.into(),
-                                    "Error reading inner entry data: ".to_owned() + &e.to_string(),
-                                    None::<()>,
-                                ))
-                            }
-                        };
-                        let node_bytes = match entry_object.leaf() {
-                            true => entry.inner().split_at(1).1,
-                            false => entry.inner().split_at(9).1,
-                        };
-                        let mut cursor = Cursor::new(&node_bytes);
-                        let node = match V2::read(branch_id.into(), &mut cursor) {
-                            Ok(v) => v,
-                            Err(e) => {
-                                return Err(ErrorObject::owned(
-                                    server::error::LegacyCode::Misc.into(),
-                                    "Error reading inner node data: ".to_owned() + &e.to_string(),
-                                    None::<()>,
-                                ))
-                            }
-                        };
-                        let mut total_work: [u8; 32] = bytemuck::cast(node.v1.subtree_total_work.0);
-                        total_work.reverse();
-                        GetHistoryNodeObject {
-                            consensus_branch_id: ConsensusBranchIdHex(
-                                node.v1.consensus_branch_id.into(),
-                            ),
-                            subtree_commitment: node.v1.subtree_commitment,
-                            start_time: node.v1.start_time,
-                            end_time: node.v1.end_time,
-                            start_target: node.v1.start_target,
-                            end_target: node.v1.end_target,
-                            start_sapling_root: node.v1.start_sapling_root,
-                            end_sapling_root: node.v1.end_sapling_root,
-                            subtree_total_work: total_work,
-                            start_height: node.v1.start_height,
-                            end_height: node.v1.end_height,
-                            sapling_tx: node.v1.sapling_tx,
-                            start_orchard_root: node.start_orchard_root,
-                            end_orchard_root: node.end_orchard_root,
-                            orchard_tx: node.orchard_tx,
-                        }
-                    }
+                let node = HistoryNodeData::from_entry(&network, &entry);
+                let mut total_work: [u8; 32] = bytemuck::cast(node.subtree_total_work().0);
+                total_work.reverse();
+                let response_object = GetHistoryNodeObject {
+                    subtree_commitment: node.subtree_commitment(),
+                    consensus_branch_id: ConsensusBranchIdHex(node.consensus_branch_id().into()),
+                    start_time: node.start_time(),
+                    end_time: node.end_time(),
+                    start_target: node.start_target(),
+                    end_target: node.end_target(),
+                    start_sapling_root: node.start_sapling_root(),
+                    end_sapling_root: node.end_sapling_root(),
+                    subtree_total_work: total_work,
+                    start_height: node.start_height(),
+                    end_height: node.end_height(),
+                    sapling_tx: node.sapling_tx(),
+                    start_orchard_root: node.start_orchard_root(),
+                    end_orchard_root: node.end_orchard_root(),
+                    orchard_tx: node.orchard_tx(),
                 };
                 GetHistoryNode::Object(Box::new(response_object))
             };
-
             Ok(response)
         } else {
             Err(ErrorObject::owned(

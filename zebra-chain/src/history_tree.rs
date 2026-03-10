@@ -54,6 +54,132 @@ pub enum HistoryNodeData {
 }
 
 impl HistoryNodeData {
+    /// Convert an Entry into HistoryNodeData.
+    pub fn from_entry(network: &Network, entry: &Entry) -> Self {
+        // TODO: when zcash_history is updated, remove workaround and get the inner data directly
+        let temp_tree = NonEmptyHistoryTree::from_cache(
+            network,
+            1,
+            BTreeMap::from([(0u32, entry.clone())]),
+            Height(0),
+        )
+        .expect("creating a temporary tree from a single entry should always work");
+
+        temp_tree.root()
+    }
+
+    /// Return the consensus branch id of this history node.
+    pub fn subtree_commitment(&self) -> [u8; 32] {
+        match self {
+            HistoryNodeData::PreOrchard(v1) => v1.subtree_commitment,
+            HistoryNodeData::OrchardOnward(v2) => v2.v1.subtree_commitment,
+        }
+    }
+
+    /// Return the consensus branch id of this history node.
+    pub fn consensus_branch_id(&self) -> u32 {
+        match self {
+            HistoryNodeData::PreOrchard(v1) => v1.consensus_branch_id,
+            HistoryNodeData::OrchardOnward(v2) => v2.v1.consensus_branch_id,
+        }
+    }
+
+    /// Return the start height of this history node.
+    pub fn start_height(&self) -> u64 {
+        match self {
+            HistoryNodeData::PreOrchard(v1) => v1.start_height,
+            HistoryNodeData::OrchardOnward(v2) => v2.v1.start_height,
+        }
+    }
+
+    /// Return the end height of this history node.
+    pub fn end_height(&self) -> u64 {
+        match self {
+            HistoryNodeData::PreOrchard(v1) => v1.end_height,
+            HistoryNodeData::OrchardOnward(v2) => v2.v1.end_height,
+        }
+    }
+
+    /// Return the start target bits of this history node.
+    pub fn start_target(&self) -> u32 {
+        match self {
+            HistoryNodeData::PreOrchard(v1) => v1.start_target,
+            HistoryNodeData::OrchardOnward(v2) => v2.v1.start_target,
+        }
+    }
+
+    /// Return the end target bits of this history node.
+    pub fn end_target(&self) -> u32 {
+        match self {
+            HistoryNodeData::PreOrchard(v1) => v1.end_target,
+            HistoryNodeData::OrchardOnward(v2) => v2.v1.end_target,
+        }
+    }
+
+    /// Return the start time of this history node.
+    pub fn start_time(&self) -> u32 {
+        match self {
+            HistoryNodeData::PreOrchard(v1) => v1.start_time,
+            HistoryNodeData::OrchardOnward(v2) => v2.v1.start_time,
+        }
+    }
+
+    /// Return the end time of this history node.
+    pub fn end_time(&self) -> u32 {
+        match self {
+            HistoryNodeData::PreOrchard(v1) => v1.end_time,
+            HistoryNodeData::OrchardOnward(v2) => v2.v1.end_time,
+        }
+    }
+
+    /// Return the start sapling root of this history node.
+    pub fn start_sapling_root(&self) -> [u8; 32] {
+        match self {
+            HistoryNodeData::PreOrchard(v1) => v1.start_sapling_root,
+            HistoryNodeData::OrchardOnward(v2) => v2.v1.start_sapling_root,
+        }
+    }
+
+    /// Return the end sapling root of this history node.
+    pub fn end_sapling_root(&self) -> [u8; 32] {
+        match self {
+            HistoryNodeData::PreOrchard(v1) => v1.end_sapling_root,
+            HistoryNodeData::OrchardOnward(v2) => v2.v1.end_sapling_root,
+        }
+    }
+
+    /// Return the start orchard root of this history node.
+    pub fn start_orchard_root(&self) -> [u8; 32] {
+        match self {
+            HistoryNodeData::PreOrchard(_) => [0u8; 32],
+            HistoryNodeData::OrchardOnward(v2) => v2.start_orchard_root,
+        }
+    }
+
+    /// Return the end orchard root of this history node.
+    pub fn end_orchard_root(&self) -> [u8; 32] {
+        match self {
+            HistoryNodeData::PreOrchard(_) => [0u8; 32],
+            HistoryNodeData::OrchardOnward(v2) => v2.end_orchard_root,
+        }
+    }
+
+    /// Return the number of sapling transactions of this history node.
+    pub fn sapling_tx(&self) -> u64 {
+        match self {
+            HistoryNodeData::PreOrchard(v1) => v1.sapling_tx,
+            HistoryNodeData::OrchardOnward(v2) => v2.v1.sapling_tx,
+        }
+    }
+
+    /// Return the number of orchard transactions of this history node.
+    pub fn orchard_tx(&self) -> u64 {
+        match self {
+            HistoryNodeData::PreOrchard(_) => 0,
+            HistoryNodeData::OrchardOnward(v2) => v2.orchard_tx,
+        }
+    }
+
     /// Return the total work of this history node.
     pub fn subtree_total_work(&self) -> U256 {
         match self {
