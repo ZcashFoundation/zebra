@@ -1190,10 +1190,10 @@ where
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         match self {
             None => {
-                // Denoted as `nActionsTachyon` in the spec (not yet finalized)
-                zcash_serialize_empty_list(writer)?;
+                writer.write_u8(0)?;
             }
             Some(tachyon_bundle) => {
+                writer.write_u8(1)?;
                 tachyon_bundle.zcash_serialize(&mut writer)?;
             }
         }
@@ -1227,24 +1227,29 @@ where
     S: ZcashDeserialize + zcash_tachyon::bundle::StampState,
 {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        // Read actions count to determine if bundle is present
-        let actions: Vec<zcash_tachyon::Action> = (&mut reader).zcash_deserialize_into()?;
+        // Read presence flag byte
+        let flag = (&mut reader).read_u8()?;
 
-        if actions.is_empty() {
-            return Ok(None);
+        match flag {
+            0 => Ok(None),
+            1 => {
+                let actions: Vec<zcash_tachyon::Action> =
+                    (&mut reader).zcash_deserialize_into()?;
+                let value_balance = (&mut reader).read_i64::<LittleEndian>()?;
+                let binding_sig = (&mut reader).zcash_deserialize_into()?;
+                let stamp: S = (&mut reader).zcash_deserialize_into()?;
+
+                Ok(Some(zcash_tachyon::Bundle {
+                    actions,
+                    value_balance,
+                    binding_sig,
+                    stamp,
+                }))
+            }
+            _ => Err(SerializationError::Parse(
+                "invalid tachyon bundle presence flag: expected 0 or 1",
+            )),
         }
-
-        // Read remaining bundle fields
-        let value_balance = (&mut reader).read_i64::<LittleEndian>()?;
-        let binding_sig = (&mut reader).zcash_deserialize_into()?;
-        let stamp: S = (&mut reader).zcash_deserialize_into()?;
-
-        Ok(Some(zcash_tachyon::Bundle {
-            actions,
-            value_balance,
-            binding_sig,
-            stamp,
-        }))
     }
 }
 
