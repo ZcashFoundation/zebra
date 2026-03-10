@@ -21,14 +21,14 @@ These checkpoints can be copied into the `main-checkpoints.txt` and `test-checkp
 
 To find the latest checkpoints on the `main` branch:
 
-1. Find the [latest completed `Run Tests` workflow run on `main`](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-tests.yml?query=branch%3Amain).
+1. Find the [latest completed integration tests workflow run on `main`](https://github.com/ZcashFoundation/zebra/actions/workflows/zfnd-ci-integration-tests-gcp.yml?query=branch%3Amain).
    Due to GitHub UI issues, some runs will show as waiting, cancelled, or failed,
    but the checkpoints have still been generated.
-2. From the list on the left, go to the `Integration tests` and find the `Run checkpoints-mainnet test`, then click in the
-   `Result of checkpoints-mainnet` step.
+2. From the list on the left, find the `Generate checkpoints mainnet` job, then click the
+   `Result of generate-checkpoints-mainnet` step.
 3. Scroll down until you see the list of checkpoints.
 4. Add those checkpoints to the end of `zebra-chain/src/parameters/checkpoint/main-checkpoints.txt`
-5. Repeat steps 2 to 4 for `Generate checkpoints testnet`
+5. Repeat steps 2 to 4 for the `Generate checkpoints testnet` job
 6. Open a pull request at <https://github.com/ZcashFoundation/zebra/pulls>
 
 #### Manual Checkpoint Generation
