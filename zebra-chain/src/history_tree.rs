@@ -55,17 +55,30 @@ pub enum HistoryNodeData {
 
 impl HistoryNodeData {
     /// Convert an Entry into HistoryNodeData.
-    pub fn from_entry(network: &Network, entry: &Entry) -> Self {
-        // TODO: when zcash_history is updated, remove workaround and get the inner data directly
-        let temp_tree = NonEmptyHistoryTree::from_cache(
-            network,
-            1,
-            BTreeMap::from([(0u32, entry.clone())]),
-            Height(0),
-        )
-        .expect("creating a temporary tree from a single entry should always work");
+    /// 
+    /// Returns None if the network upgrade has no activation height.
+    pub fn from_entry(
+        network: &Network,
+        entry: &Entry,
+        network_upgrade: NetworkUpgrade,
+    ) -> Option<Self> {
+        // TODO: for now the Entry is used to create a temporary tree from which the inner data
+        // can be taken. When zcash_history is updated, remove workaround and get the node data directly
+        if let Some(current_height) = network_upgrade.activation_height(network) {
+            let temp_tree = NonEmptyHistoryTree::from_cache(
+                network,
+                1,
+                BTreeMap::from([(0u32, entry.clone())]),
+                current_height
+                    .next()
+                    .expect("Next height of an activation height must exist"),
+            )
+            .expect("creating a temporary tree from a single entry should always work");
 
-        temp_tree.root()
+            Some(temp_tree.root())
+        } else {
+            None
+        }
     }
 
     /// Return the consensus branch id of this history node.

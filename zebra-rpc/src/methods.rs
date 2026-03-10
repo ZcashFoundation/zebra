@@ -2268,7 +2268,8 @@ where
             let response = if verbose == 0 {
                 GetHistoryNode::Raw(HexData(entry.inner().to_vec()))
             } else {
-                let node = HistoryNodeData::from_entry(&network, &entry);
+                let node = HistoryNodeData::from_entry(&network, &entry, network_upgrade)
+                    .expect("The network upgrade must be active here");
                 let mut total_work: [u8; 32] = bytemuck::cast(node.subtree_total_work().0);
                 total_work.reverse();
                 let response_object = GetHistoryNodeObject {
