@@ -72,6 +72,3 @@ include_mail = false
 max_retries = 3
 retry_wait_time = 2
 
-# GitHub token environment variable (for higher rate limits)
-# Set GITHUB_TOKEN in your environment or CI
-github_token = ""
