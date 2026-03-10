@@ -340,12 +340,15 @@ impl StateService {
         } else {
             false
         };
+        let backup_dir_path = config.non_finalized_state_backup_dir(network);
+        let skip_backup_task = config.debug_skip_non_finalized_state_backup_task;
         let (non_finalized_state, non_finalized_state_sender, non_finalized_state_receiver) =
             NonFinalizedState::new(network)
                 .with_backup(
-                    config.non_finalized_state_backup_dir(network),
+                    backup_dir_path.clone(),
                     &finalized_state.db,
                     is_finalized_tip_past_max_checkpoint,
+                    config.debug_skip_non_finalized_state_backup_task,
                 )
                 .await;
 
@@ -364,6 +367,7 @@ impl StateService {
 
         let finalized_state_for_writing = finalized_state.clone();
         let should_use_finalized_block_write_sender = non_finalized_state.is_chain_set_empty();
+        let sync_backup_dir_path = backup_dir_path.filter(|_| skip_backup_task);
         let (block_write_sender, invalid_block_write_reset_receiver, block_write_task) =
             write::BlockWriteSender::spawn(
                 finalized_state_for_writing,
@@ -371,6 +375,7 @@ impl StateService {
                 chain_tip_sender,
                 non_finalized_state_sender,
                 should_use_finalized_block_write_sender,
+                sync_backup_dir_path,
             );
 
         let read_service = ReadStateService::new(
