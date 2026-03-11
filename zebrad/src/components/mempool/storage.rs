@@ -300,8 +300,9 @@ impl Storage {
             // Rule: per-transaction sigops (legacy + P2SH) must not exceed the limit.
             // zcashd sums GetLegacySigOpCount + GetP2SHSigOpCount for AcceptToMemoryPool:
             // https://github.com/zcash/zcash/blob/v6.11.0/src/main.cpp#L1819
-            let total_sigops =
-                tx.legacy_sigop_count + policy::p2sh_sigop_count(transaction, spent_outputs);
+            let total_sigops = tx
+                .legacy_sigop_count
+                .saturating_add(policy::p2sh_sigop_count(transaction, spent_outputs));
             if total_sigops > policy::MAX_STANDARD_TX_SIGOPS {
                 return self.reject_non_standard(tx, NonStandardTransactionError::TooManySigops);
             }
@@ -331,6 +332,7 @@ impl Storage {
                 }
                 Some(solver::ScriptKind::NullData { .. }) => {
                     // Rule: OP_RETURN script size is limited.
+                    // Cast is safe: u32 always fits in usize on 32-bit and 64-bit platforms.
                     if script_len > self.max_datacarrier_bytes as usize {
                         return self.reject_non_standard(
                             tx,
@@ -342,13 +344,16 @@ impl Storage {
                 }
                 Some(solver::ScriptKind::MultiSig { pubkeys, .. }) => {
                     // Rule: multisig must be at most 3-of-3 for standardness.
+                    // Note: This check is technically subsumed by the unconditional BareMultiSig
+                    // rejection below, but we keep it to distinguish the two error reasons
+                    // (ScriptPubKeyNonStandard for >3 keys vs BareMultiSig for valid multisig).
                     if pubkeys.len() > policy::MAX_STANDARD_MULTISIG_PUBKEYS {
                         return self.reject_non_standard(
                             tx,
                             NonStandardTransactionError::ScriptPubKeyNonStandard,
                         );
                     }
-                    // Rule: bare multisig outputs are non-standard.
+                    // Rule: bare multisig outputs are non-standard (fIsBareMultisigStd = false).
                     return self.reject_non_standard(tx, NonStandardTransactionError::BareMultiSig);
                 }
                 Some(_) => {
@@ -369,6 +374,11 @@ impl Storage {
     }
 
     /// Rejects a transaction as non-standard, caches the rejection, and returns the mempool error.
+    ///
+    /// Note: The returned error is `MempoolError::NonStandardTransaction`, while the cached
+    /// rejection (via `reject()`) is stored as
+    /// `ExactTipRejectionError::FailedStandard`. Callers that later check
+    /// `rejection_error()` will get `MempoolError::StorageExactTip(FailedStandard(...))`.
     fn reject_non_standard(
         &mut self,
         tx: &VerifiedUnminedTx,
