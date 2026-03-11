@@ -258,8 +258,6 @@ pub struct SemanticallyVerifiedBlock {
     /// A precomputed list of the hashes of the transactions in this block,
     /// in the same order as `block.transactions`.
     pub transaction_hashes: Arc<[transaction::Hash]>,
-    /// This block's deferred pool value balance change.
-    pub deferred_pool_balance_change: Option<DeferredPoolBalanceChange>,
 }
 
 /// A block ready to be committed directly to the finalized state with
@@ -391,25 +389,42 @@ pub struct FinalizedBlock {
     /// The tresstate associated with the block.
     pub(super) treestate: Treestate,
     /// This block's deferred pool value balance change.
-    pub(super) deferred_pool_balance_change: Option<DeferredPoolBalanceChange>,
+    pub(super) deferred_pool_balance_change: DeferredPoolBalanceChange,
 }
 
 impl FinalizedBlock {
     /// Constructs [`FinalizedBlock`] from [`CheckpointVerifiedBlock`] and its [`Treestate`].
-    pub fn from_checkpoint_verified(block: CheckpointVerifiedBlock, treestate: Treestate) -> Self {
-        Self::from_semantically_verified(SemanticallyVerifiedBlock::from(block), treestate)
+    pub fn from_checkpoint_verified(
+        block: CheckpointVerifiedBlock,
+        treestate: Treestate,
+        deferred_pool_balance_change: DeferredPoolBalanceChange,
+    ) -> Self {
+        Self::from_semantically_verified(
+            SemanticallyVerifiedBlock::from(block),
+            treestate,
+            deferred_pool_balance_change,
+        )
     }
 
     /// Constructs [`FinalizedBlock`] from [`ContextuallyVerifiedBlock`] and its [`Treestate`].
     pub fn from_contextually_verified(
         block: ContextuallyVerifiedBlock,
         treestate: Treestate,
+        deferred_pool_balance_change: DeferredPoolBalanceChange,
     ) -> Self {
-        Self::from_semantically_verified(SemanticallyVerifiedBlock::from(block), treestate)
+        Self::from_semantically_verified(
+            SemanticallyVerifiedBlock::from(block),
+            treestate,
+            deferred_pool_balance_change,
+        )
     }
 
     /// Constructs [`FinalizedBlock`] from [`SemanticallyVerifiedBlock`] and its [`Treestate`].
-    fn from_semantically_verified(block: SemanticallyVerifiedBlock, treestate: Treestate) -> Self {
+    fn from_semantically_verified(
+        block: SemanticallyVerifiedBlock,
+        treestate: Treestate,
+        deferred_pool_balance_change: DeferredPoolBalanceChange,
+    ) -> Self {
         Self {
             block: block.block,
             hash: block.hash,
@@ -417,7 +432,7 @@ impl FinalizedBlock {
             new_outputs: block.new_outputs,
             transaction_hashes: block.transaction_hashes,
             treestate,
-            deferred_pool_balance_change: block.deferred_pool_balance_change,
+            deferred_pool_balance_change,
         }
     }
 }
@@ -490,7 +505,6 @@ impl ContextuallyVerifiedBlock {
             height,
             new_outputs,
             transaction_hashes,
-            deferred_pool_balance_change,
         } = semantically_verified;
 
         // This is redundant for the non-finalized state,
@@ -508,7 +522,7 @@ impl ContextuallyVerifiedBlock {
             transaction_hashes,
             chain_value_pool_change: block.chain_value_pool_change(
                 &utxos_from_ordered_utxos(spent_outputs),
-                deferred_pool_balance_change,
+                DeferredPoolBalanceChange::zero(),
             )?,
         })
     }
@@ -517,14 +531,8 @@ impl ContextuallyVerifiedBlock {
 impl CheckpointVerifiedBlock {
     /// Creates a [`CheckpointVerifiedBlock`] from [`Block`] with optional deferred balance and
     /// optional pre-computed hash.
-    pub fn new(
-        block: Arc<Block>,
-        hash: Option<block::Hash>,
-        deferred_pool_balance_change: Option<DeferredPoolBalanceChange>,
-    ) -> Self {
-        let mut block = Self::with_hash(block.clone(), hash.unwrap_or(block.hash()));
-        block.deferred_pool_balance_change = deferred_pool_balance_change;
-        block
+    pub fn new(block: Arc<Block>, hash: Option<block::Hash>) -> Self {
+        Self::with_hash(block.clone(), hash.unwrap_or(block.hash()))
     }
     /// Creates a block that's ready to be committed to the finalized state,
     /// using a precalculated [`block::Hash`].
@@ -551,17 +559,7 @@ impl SemanticallyVerifiedBlock {
             height,
             new_outputs,
             transaction_hashes,
-            deferred_pool_balance_change: None,
         }
-    }
-
-    /// Sets the deferred balance in the block.
-    pub fn with_deferred_pool_balance_change(
-        mut self,
-        deferred_pool_balance_change: Option<DeferredPoolBalanceChange>,
-    ) -> Self {
-        self.deferred_pool_balance_change = deferred_pool_balance_change;
-        self
     }
 }
 
@@ -586,7 +584,6 @@ impl From<Arc<Block>> for SemanticallyVerifiedBlock {
             height,
             new_outputs,
             transaction_hashes,
-            deferred_pool_balance_change: None,
         }
     }
 }
@@ -599,9 +596,6 @@ impl From<ContextuallyVerifiedBlock> for SemanticallyVerifiedBlock {
             height: valid.height,
             new_outputs: valid.new_outputs,
             transaction_hashes: valid.transaction_hashes,
-            deferred_pool_balance_change: Some(DeferredPoolBalanceChange::new(
-                valid.chain_value_pool_change.deferred_amount(),
-            )),
         }
     }
 }
@@ -614,7 +608,6 @@ impl From<FinalizedBlock> for SemanticallyVerifiedBlock {
             height: finalized.height,
             new_outputs: finalized.new_outputs,
             transaction_hashes: finalized.transaction_hashes,
-            deferred_pool_balance_change: finalized.deferred_pool_balance_change,
         }
     }
 }
