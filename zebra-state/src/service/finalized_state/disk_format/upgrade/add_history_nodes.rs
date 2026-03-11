@@ -6,6 +6,8 @@ use crossbeam_channel::{Receiver, TryRecvError};
 
 use semver::Version;
 
+use tap::tap::Tap;
+
 use zebra_chain::{
     block::{Block, ChainHistoryBlockTxAuthCommitmentHash, Commitment, Height},
     history_tree::{HistoryTree, NonEmptyHistoryTree},
@@ -344,10 +346,20 @@ fn upgrades_with_history(db: &ZebraDb) -> Vec<(NetworkUpgrade, Option<Height>)> 
         .chain(std::iter::once(current_upgrade))
         .collect();
 
+    // Remove upgrades with the same activation heights by keeping only the last one
+    // This can happen in tests and causes a confusing bug if not handled
     history_tree_upgrades
         .iter()
         .map(|upgrade| (*upgrade, upgrade.activation_height(&network)))
         .collect::<Vec<(_, _)>>()
+        .tap_mut(|v| {
+            v.dedup_by(|a, b| {
+                a.1 == b.1 && {
+                    *b = *a;
+                    true
+                }
+            })
+        })
 }
 
 fn update_inner_tree(
