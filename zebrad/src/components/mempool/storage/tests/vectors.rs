@@ -407,7 +407,7 @@ fn mempool_removes_dependent_transactions() -> Result<()> {
 
 // ---- Policy function unit tests ----
 
-use super::super::policy::{p2pkh_lock_script, p2pk_lock_script, p2sh_lock_script};
+use super::super::policy::{p2pk_lock_script, p2pkh_lock_script, p2sh_lock_script};
 
 #[test]
 fn standard_script_kind_classifies_p2pkh() {
