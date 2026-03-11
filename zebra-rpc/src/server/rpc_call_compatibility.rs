@@ -3,106 +3,82 @@
 //! These fixes are applied at the JSON-RPC call level,
 //! after the RPC request is parsed and split into calls.
 
-use std::future::Future;
-
-use futures::future::{Either, FutureExt};
-use jsonrpc_core::{
-    middleware::Middleware,
-    types::{Call, Failure, Output, Response},
-    BoxFuture, ErrorCode, Metadata, MethodCall, Notification,
+use jsonrpsee::{
+    server::middleware::rpc::{layer::ResponseFuture, RpcServiceT},
+    MethodResponse,
 };
+use jsonrpsee_types::ErrorObject;
 
-use crate::constants::{INVALID_PARAMETERS_ERROR_CODE, MAX_PARAMS_LOG_LENGTH};
-
-/// JSON-RPC [`Middleware`] with compatibility workarounds.
+/// JSON-RPC [`FixRpcResponseMiddleware`] with compatibility workarounds.
 ///
 /// This middleware makes the following changes to JSON-RPC calls:
 ///
 /// ## Make RPC framework response codes match `zcashd`
 ///
-/// [`jsonrpc_core`] returns specific error codes while parsing requests:
-/// <https://docs.rs/jsonrpc-core/18.0.0/jsonrpc_core/types/error/enum.ErrorCode.html#variants>
+/// [`jsonrpsee_types`] returns specific error codes while parsing requests:
+/// <https://docs.rs/jsonrpsee-types/latest/jsonrpsee_types/error/enum.ErrorCode.html>
 ///
 /// But these codes are different from `zcashd`, and some RPC clients rely on the exact code.
-///
-/// ## Read-Only Functionality
-///
-/// This middleware also logs unrecognized RPC requests.
-pub struct FixRpcResponseMiddleware;
+/// Specifically, the [`jsonrpsee_types::error::INVALID_PARAMS_CODE`] is different:
+/// <https://docs.rs/jsonrpsee-types/latest/jsonrpsee_types/error/constant.INVALID_PARAMS_CODE.html>
+#[derive(Clone)]
+pub struct FixRpcResponseMiddleware<S> {
+    service: S,
+}
 
-impl<M: Metadata> Middleware<M> for FixRpcResponseMiddleware {
-    type Future = BoxFuture<Option<Response>>;
-    type CallFuture = BoxFuture<Option<Output>>;
-
-    fn on_call<Next, NextFuture>(
-        &self,
-        call: Call,
-        meta: M,
-        next: Next,
-    ) -> Either<Self::CallFuture, NextFuture>
-    where
-        Next: Fn(Call, M) -> NextFuture + Send + Sync,
-        NextFuture: Future<Output = Option<Output>> + Send + 'static,
-    {
-        Either::Left(
-            next(call.clone(), meta)
-                .map(|mut output| {
-                    Self::fix_error_codes(&mut output);
-                    output
-                })
-                .inspect(|output| Self::log_if_error(output, call))
-                .boxed(),
-        )
+impl<S> FixRpcResponseMiddleware<S> {
+    /// Create a new `FixRpcResponseMiddleware` with the given `service`.
+    pub fn new(service: S) -> Self {
+        Self { service }
     }
 }
 
-impl FixRpcResponseMiddleware {
-    /// Replace [`jsonrpc_core`] server error codes in `output` with the `zcashd` equivalents.
-    fn fix_error_codes(output: &mut Option<Output>) {
-        if let Some(Output::Failure(Failure { ref mut error, .. })) = output {
-            if matches!(error.code, ErrorCode::InvalidParams) {
-                let original_code = error.code.clone();
+impl<'a, S> RpcServiceT<'a> for FixRpcResponseMiddleware<S>
+where
+    S: RpcServiceT<'a> + Send + Sync + Clone + 'static,
+{
+    type Future = ResponseFuture<futures::future::BoxFuture<'a, jsonrpsee::MethodResponse>>;
 
-                error.code = INVALID_PARAMETERS_ERROR_CODE;
-                tracing::debug!("Replacing RPC error: {original_code:?} with {error}");
-            }
-        }
-    }
+    fn call(&self, request: jsonrpsee::types::Request<'a>) -> Self::Future {
+        let service = self.service.clone();
+        ResponseFuture::future(Box::pin(async move {
+            let response = service.call(request).await;
+            if response.is_error() {
+                let original_error_code = response
+                    .as_error_code()
+                    .expect("response should have an error code");
+                if original_error_code == jsonrpsee_types::ErrorCode::InvalidParams.code() {
+                    let new_error_code = crate::server::error::LegacyCode::Misc.into();
+                    tracing::debug!(
+                        "Replacing RPC error: {original_error_code} with {new_error_code}"
+                    );
+                    let json: serde_json::Value =
+                        serde_json::from_str(response.into_parts().0.as_str())
+                            .expect("response string should be valid json");
+                    let id = match &json["id"] {
+                        serde_json::Value::Null => Some(jsonrpsee::types::Id::Null),
+                        serde_json::Value::Number(n) => {
+                            n.as_u64().map(jsonrpsee::types::Id::Number)
+                        }
+                        serde_json::Value::String(s) => Some(jsonrpsee::types::Id::Str(s.into())),
+                        _ => None,
+                    }
+                    .expect("response json should have an id");
 
-    /// Obtain a description string for a received request.
-    ///
-    /// Prints out only the method name and the received parameters.
-    fn call_description(call: &Call) -> String {
-        match call {
-            Call::MethodCall(MethodCall { method, params, .. }) => {
-                let mut params = format!("{params:?}");
-                if params.len() >= MAX_PARAMS_LOG_LENGTH {
-                    params.truncate(MAX_PARAMS_LOG_LENGTH);
-                    params.push_str("...");
+                    return MethodResponse::error(
+                        id,
+                        ErrorObject::borrowed(
+                            new_error_code,
+                            json.get("error")
+                                .and_then(|v| v.get("message"))
+                                .and_then(|m| m.as_str())
+                                .unwrap_or("Invalid params"),
+                            None,
+                        ),
+                    );
                 }
-
-                format!(r#"method = {method:?}, params = {params}"#)
             }
-            Call::Notification(Notification { method, params, .. }) => {
-                let mut params = format!("{params:?}");
-                if params.len() >= MAX_PARAMS_LOG_LENGTH {
-                    params.truncate(MAX_PARAMS_LOG_LENGTH);
-                    params.push_str("...");
-                }
-
-                format!(r#"notification = {method:?}, params = {params}"#)
-            }
-            Call::Invalid { .. } => "invalid request".to_owned(),
-        }
-    }
-
-    /// Check RPC output and log any errors.
-    //
-    // TODO: do we want to ignore ErrorCode::ServerError(_), or log it at debug?
-    fn log_if_error(output: &Option<Output>, call: Call) {
-        if let Some(Output::Failure(Failure { error, .. })) = output {
-            let call_description = Self::call_description(&call);
-            tracing::info!("RPC error: {error} in call: {call_description}");
-        }
+            response
+        }))
     }
 }

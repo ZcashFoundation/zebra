@@ -9,26 +9,27 @@
 //! [`crate::constants::state_database_format_version_in_code()`] must be incremented
 //! each time the database format (column, serialization, etc) changes.
 
-use std::{
-    path::Path,
-    sync::{mpsc, Arc},
-};
+use std::{path::Path, sync::Arc};
 
+use crossbeam_channel::bounded;
 use semver::Version;
-use zebra_chain::parameters::Network;
+
+use zebra_chain::{block::Height, diagnostic::task::WaitForPanics, parameters::Network};
 
 use crate::{
     config::database_format_version_on_disk,
-    constants::RESTORABLE_DB_VERSIONS,
     service::finalized_state::{
         disk_db::DiskDb,
         disk_format::{
             block::MAX_ON_DISK_HEIGHT,
+            transparent::AddressLocation,
             upgrade::{DbFormatChange, DbFormatChangeThreadHandle},
         },
     },
     write_database_format_version_to_disk, BoxError, Config,
 };
+
+use super::disk_format::upgrade::restorable_db_versions;
 
 pub mod block;
 pub mod chain;
@@ -36,7 +37,7 @@ pub mod metrics;
 pub mod shielded;
 pub mod transparent;
 
-#[cfg(any(test, feature = "proptest-impl", feature = "shielded-scan"))]
+#[cfg(any(test, feature = "proptest-impl"))]
 // TODO: when the database is split out of zebra-state, always expose these methods.
 pub mod arbitrary;
 
@@ -99,34 +100,26 @@ impl ZebraDb {
         column_families_in_code: impl IntoIterator<Item = String>,
         read_only: bool,
     ) -> ZebraDb {
-        let disk_version = database_format_version_on_disk(
-            config,
-            &db_kind,
-            format_version_in_code.major,
-            network,
-        )
-        .expect("unable to read database format version file");
-
-        DiskDb::try_reusing_previous_db_after_major_upgrade(
-            &RESTORABLE_DB_VERSIONS,
+        let disk_version = DiskDb::try_reusing_previous_db_after_major_upgrade(
+            &restorable_db_versions(),
             format_version_in_code,
             config,
             &db_kind,
             network,
-        );
+        )
+        .or_else(|| {
+            database_format_version_on_disk(config, &db_kind, format_version_in_code.major, network)
+                .expect("unable to read database format version file")
+        });
 
         // Log any format changes before opening the database, in case opening fails.
         let format_change = DbFormatChange::open_database(format_version_in_code, disk_version);
 
-        // Format upgrades try to write to the database, so we always skip them if `read_only` is
-        // `true`.
+        // Format upgrades try to write to the database, so we always skip them
+        // if `read_only` is `true`.
         //
-        // We allow skipping the upgrades by the scanner because it doesn't support them yet and we
-        // also allow skipping them when we are running tests.
-        //
-        // TODO: Make scanner support format upgrades, then remove `shielded-scan` here.
-        let debug_skip_format_upgrades = read_only
-            || ((cfg!(test) || cfg!(feature = "shielded-scan")) && debug_skip_format_upgrades);
+        // We also allow skipping them when we are running tests.
+        let debug_skip_format_upgrades = read_only || (cfg!(test) && debug_skip_format_upgrades);
 
         // Open the database and do initial checks.
         let mut db = ZebraDb {
@@ -146,6 +139,17 @@ impl ZebraDb {
                 read_only,
             ),
         };
+
+        let zero_location_utxos =
+            db.address_utxo_locations(AddressLocation::from_usize(Height(0), 0, 0));
+        if !zero_location_utxos.is_empty() {
+            warn!(
+                "You have been impacted by the Zebra 2.4.0 address indexer corruption bug. \
+                If you rely on the data from the RPC interface, you will need to recover your database. \
+                Follow the instructions in the 2.4.1 release notes: https://github.com/ZcashFoundation/zebra/releases/tag/v2.4.1 \
+                If you just run the node for consensus and don't use data from the RPC interface, you can ignore this warning."
+            )
+        }
 
         db.spawn_format_change(format_change);
 
@@ -173,6 +177,18 @@ impl ZebraDb {
             format_change.spawn_format_change(upgrade_db, initial_tip_height);
 
         self.format_change_handle = Some(format_change_handle);
+    }
+
+    /// Sets `finished_format_upgrades` to true on the inner [`DiskDb`] to indicate that Zebra has
+    /// finished applying any required db format upgrades.
+    pub fn mark_finished_format_upgrades(&self) {
+        self.db.mark_finished_format_upgrades();
+    }
+
+    /// Returns true if the `finished_format_upgrades` flag has been set to true on the inner [`DiskDb`] to
+    /// indicate that Zebra has finished applying any required db format upgrades.
+    pub fn finished_format_upgrades(&self) -> bool {
+        self.db.finished_format_upgrades()
     }
 
     /// Returns config for this database.
@@ -217,6 +233,7 @@ impl ZebraDb {
         write_database_format_version_to_disk(
             self.config(),
             self.db_kind(),
+            self.major_version(),
             new_version,
             &self.network(),
         )
@@ -245,6 +262,20 @@ impl ZebraDb {
     /// When called with a secondary DB instance, tries to catch up with the primary DB instance
     pub fn try_catch_up_with_primary(&self) -> Result<(), rocksdb::Error> {
         self.db.try_catch_up_with_primary()
+    }
+
+    /// Spawns a blocking task to try catching up with the primary DB instance.
+    pub async fn spawn_try_catch_up_with_primary(&self) -> Result<(), rocksdb::Error> {
+        let db = self.clone();
+        tokio::task::spawn_blocking(move || {
+            let result = db.try_catch_up_with_primary();
+            if let Err(catch_up_error) = &result {
+                tracing::warn!(?catch_up_error, "failed to catch up to primary");
+            }
+            result
+        })
+        .wait_for_panics()
+        .await
     }
 
     /// Shut down the database, cleaning up background tasks and ephemeral data.
@@ -292,7 +323,7 @@ impl ZebraDb {
             if let Some(disk_version) = disk_version {
                 // We need to keep the cancel handle until the format check has finished,
                 // because dropping it cancels the format check.
-                let (_never_cancel_handle, never_cancel_receiver) = mpsc::sync_channel(1);
+                let (_never_cancel_handle, never_cancel_receiver) = bounded(1);
 
                 // We block here because the checks are quick and database validity is
                 // consensus-critical.
@@ -343,6 +374,19 @@ impl ZebraDb {
     /// such as disk usage, memory usage, and other performance-related metrics.
     pub fn print_db_metrics(&self) {
         self.db.print_db_metrics();
+    }
+
+    /// Exports RocksDB metrics to Prometheus.
+    ///
+    /// This function collects database statistics and exposes them as Prometheus metrics.
+    /// Call this periodically (e.g., every 30 seconds) from a background task.
+    pub(crate) fn export_metrics(&self) {
+        self.db.export_metrics();
+    }
+
+    /// Returns the estimated total disk space usage of the database.
+    pub fn size(&self) -> u64 {
+        self.db.size()
     }
 }
 

@@ -1,0 +1,19 @@
+apiVersion: 1
+
+datasources:
+  # Prometheus for metrics (Zebra metrics + Jaeger spanmetrics)
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    uid: zebra-prometheus
+
+  # Jaeger for distributed tracing
+  - name: Jaeger
+    type: jaeger
+    access: proxy
+    url: http://jaeger:16686
+    editable: false
+    uid: zebra-jaeger

@@ -1,16 +1,17 @@
 [package]
 name = "zebra-node-services"
-version = "1.0.0-beta.41"
-authors = ["Zcash Foundation <zebra@zfnd.org>"]
+version = "3.0.0"
+authors.workspace = true
 description = "The interfaces of some Zebra node services"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/ZcashFoundation/zebra"
-edition = "2021"
+license.workspace = true
+repository.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 
 readme = "../README.md"
-homepage = "https://zfnd.org/zebra/"
+homepage.workspace = true
 # crates.io is limited to 5 keywords and categories
-keywords = ["zebra", "zcash"]
+keywords.workspace = true
 # Must be one of <https://crates.io/category_slugs>
 categories = ["asynchronous", "cryptography::cryptocurrencies", "network-programming"]
 
@@ -19,41 +20,38 @@ default = []
 
 # Production features that activate extra dependencies, or extra features in dependencies
 
-# Mining RPC support
-getblocktemplate-rpcs = [
-    "zebra-chain/getblocktemplate-rpcs",
-]
-
 # Tool and test features
 
 rpc-client = [
     "color-eyre",
-    "jsonrpc-core",
+    "jsonrpsee-types",
     "reqwest",
     "serde",
     "serde_json",
 ]
 
-shielded-scan = []
-
 [dependencies]
-zebra-chain = { path = "../zebra-chain" , version = "1.0.0-beta.41" }
+zebra-chain = { path = "../zebra-chain" , version = "5.0.0" }
+tower = { workspace = true }
 
 # Optional dependencies
 
 # Tool and test feature rpc-client
-color-eyre = { version = "0.6.3", optional = true }
-jsonrpc-core = { version = "18.0.0", optional = true }
+color-eyre = { workspace = true, optional = true }
+jsonrpsee-types = { workspace = true, optional = true }
 # Security: avoid default dependency on openssl
-reqwest = { version = "0.11.26", default-features = false, features = ["rustls-tls"], optional = true }
-serde = { version = "1.0.211", optional = true }
-serde_json = { version = "1.0.132", optional = true }
-tokio = { version = "1.41.0", features = ["time", "sync"] }
+reqwest = { workspace = true, features = ["rustls-tls"], optional = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["time", "sync"] }
 
 [dev-dependencies]
 
-color-eyre = "0.6.3"
-jsonrpc-core = "18.0.0"
-reqwest = { version = "0.11.26", default-features = false, features = ["rustls-tls"] }
-serde = "1.0.211"
-serde_json = "1.0.132"
+color-eyre = { workspace = true }
+reqwest = { workspace = true, features = ["rustls-tls"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+jsonrpsee-types = { workspace = true }
+
+[lints]
+workspace = true

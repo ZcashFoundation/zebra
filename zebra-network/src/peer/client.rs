@@ -509,23 +509,11 @@ impl Client {
                 self.set_task_exited_error("connection", PeerError::ConnectionTaskExited)
             }
             Err(error) => {
-                // Connection task panicked.
-                let error = error.panic_if_task_has_panicked();
+                // Connection task panicked or was cancelled.
+                let _ = error.panic_if_task_has_panicked();
 
-                // Connection task was cancelled.
-                if error.is_cancelled() {
-                    self.set_task_exited_error(
-                        "connection",
-                        PeerError::HeartbeatTaskExited("Task was cancelled".to_string()),
-                    )
-                }
-                // Connection task stopped with another kind of task error.
-                else {
-                    self.set_task_exited_error(
-                        "connection",
-                        PeerError::HeartbeatTaskExited(error.to_string()),
-                    )
-                }
+                // Any unexpected termination of the connection task is reported as ConnectionTaskExited.
+                self.set_task_exited_error("connection", PeerError::ConnectionTaskExited)
             }
         };
 

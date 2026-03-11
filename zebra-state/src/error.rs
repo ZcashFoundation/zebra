@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use derive_new::new;
 use thiserror::Error;
 
 use zebra_chain::{
@@ -14,7 +15,7 @@ use zebra_chain::{
     work::difficulty::CompactDifficulty,
 };
 
-use crate::constants::MIN_TRANSPARENT_COINBASE_MATURITY;
+use crate::{constants::MIN_TRANSPARENT_COINBASE_MATURITY, HashOrHeight, KnownBlock};
 
 /// A wrapper for type erased errors that is itself clonable and implements the
 /// Error trait
@@ -41,16 +42,134 @@ impl From<BoxError> for CloneError {
 /// A boxed [`std::error::Error`].
 pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
-/// An error describing the reason a semantically verified block could not be committed to the state.
-#[derive(Debug, Error, PartialEq, Eq)]
-#[error("block is not contextually valid: {}", .0)]
-pub struct CommitSemanticallyVerifiedError(#[from] ValidateContextError);
+/// An error describing why a block could not be queued to be committed to the state.
+#[derive(Debug, Error, Clone, PartialEq, Eq, new)]
+pub enum CommitBlockError {
+    #[error("block hash is a duplicate: already in {location}")]
+    /// The block is a duplicate: it is already queued or committed in the state.
+    Duplicate {
+        /// Hash or height of the duplicated block.
+        hash_or_height: Option<HashOrHeight>,
+        /// Location in the state where the block can be found.
+        location: KnownBlock,
+    },
+
+    /// Contextual validation failed.
+    #[error("could not contextually validate semantically verified block")]
+    ValidateContextError(#[from] Box<ValidateContextError>),
+
+    /// The write task exited (likely during shutdown).
+    #[error("block commit task exited. Is Zebra shutting down?")]
+    #[non_exhaustive]
+    WriteTaskExited,
+}
+
+impl CommitBlockError {
+    /// Returns `true` if this is definitely a duplicate commit request.
+    /// Some duplicate requests might not be detected, and therefore return `false`.
+    pub fn is_duplicate_request(&self) -> bool {
+        matches!(self, CommitBlockError::Duplicate { .. })
+    }
+}
+
+/// An error describing why a `CommitSemanticallyVerified` request failed.
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[error("could not commit semantically-verified block")]
+pub struct CommitSemanticallyVerifiedError(#[from] CommitBlockError);
+
+impl From<ValidateContextError> for CommitSemanticallyVerifiedError {
+    fn from(value: ValidateContextError) -> Self {
+        Self(CommitBlockError::ValidateContextError(Box::new(value)))
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum LayeredStateError<E: std::error::Error + std::fmt::Display> {
+    #[error("{0}")]
+    State(E),
+    #[error("{0}")]
+    Layer(BoxError),
+}
+
+impl<E: std::error::Error + 'static> From<BoxError> for LayeredStateError<E> {
+    fn from(err: BoxError) -> Self {
+        match err.downcast::<E>() {
+            Ok(state_err) => Self::State(*state_err),
+            Err(layer_error) => Self::Layer(layer_error),
+        }
+    }
+}
+
+/// An error describing why a `CommitCheckpointVerifiedBlock` request failed.
+#[derive(Debug, Error, Clone)]
+#[error("could not commit checkpoint-verified block")]
+pub struct CommitCheckpointVerifiedError(#[from] CommitBlockError);
+
+impl From<ValidateContextError> for CommitCheckpointVerifiedError {
+    fn from(value: ValidateContextError) -> Self {
+        Self(CommitBlockError::ValidateContextError(Box::new(value)))
+    }
+}
+
+/// An error describing why a `InvalidateBlock` request failed.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum InvalidateError {
+    /// The state is currently checkpointing blocks and cannot accept invalidation requests.
+    #[error("cannot invalidate blocks while still committing checkpointed blocks")]
+    ProcessingCheckpointedBlocks,
+
+    /// Sending the invalidate request to the block write task failed.
+    #[error("failed to send invalidate block request to block write task")]
+    SendInvalidateRequestFailed,
+
+    /// The invalidate request was dropped before processing.
+    #[error("invalidate block request was unexpectedly dropped")]
+    InvalidateRequestDropped,
+
+    /// The block hash was not found in any non-finalized chain.
+    #[error("block hash {0} not found in any non-finalized chain")]
+    BlockNotFound(block::Hash),
+}
+
+/// An error describing why a `ReconsiderBlock` request failed.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum ReconsiderError {
+    /// The block is not found in the list of invalidated blocks.
+    #[error("Block with hash {0} was not previously invalidated")]
+    MissingInvalidatedBlock(block::Hash),
+
+    /// The block's parent is missing from the non-finalized state.
+    #[error("Parent chain not found for block {0}")]
+    ParentChainNotFound(block::Hash),
+
+    /// There were no invalidated blocks when at least one was expected.
+    #[error("Invalidated blocks list is empty when it should contain at least one block")]
+    InvalidatedBlocksEmpty,
+
+    /// The state is currently checkpointing blocks and cannot accept reconsider requests.
+    #[error("cannot reconsider blocks while still committing checkpointed blocks")]
+    CheckpointCommitInProgress,
+
+    /// Sending the reconsider request to the block write task failed.
+    #[error("failed to send reconsider block request to block write task")]
+    ReconsiderSendFailed,
+
+    /// The reconsider request was dropped before processing.
+    #[error("reconsider block request was unexpectedly dropped")]
+    ReconsiderResponseDropped,
+}
 
 /// An error describing why a block failed contextual validation.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 #[allow(missing_docs)]
 pub enum ValidateContextError {
+    #[error("block hash {block_hash} was previously invalidated")]
+    #[non_exhaustive]
+    BlockPreviouslyInvalidated { block_hash: block::Hash },
+
     #[error("block parent not found in any chain, or not enough blocks in chain")]
     #[non_exhaustive]
     NotReadyToBeCommitted,
@@ -215,18 +334,18 @@ pub enum ValidateContextError {
     #[non_exhaustive]
     AddValuePool {
         value_balance_error: ValueBalanceError,
-        chain_value_pools: ValueBalance<NonNegative>,
-        block_value_pool_change: ValueBalance<NegativeAllowed>,
+        chain_value_pools: Box<ValueBalance<NonNegative>>,
+        block_value_pool_change: Box<ValueBalance<NegativeAllowed>>,
         height: Option<block::Height>,
     },
 
-    #[error("error updating a note commitment tree")]
+    #[error("error updating a note commitment tree: {0}")]
     NoteCommitmentTreeError(#[from] zebra_chain::parallel::tree::NoteCommitmentTreeError),
 
-    #[error("error building the history tree")]
+    #[error("error building the history tree: {0}")]
     HistoryTreeError(#[from] Arc<HistoryTreeError>),
 
-    #[error("block contains an invalid commitment")]
+    #[error("block contains an invalid commitment: {0}")]
     InvalidBlockCommitment(#[from] block::CommitmentError),
 
     #[error(
@@ -267,6 +386,12 @@ pub enum ValidateContextError {
 
     #[error("error updating issued asset state")]
     InvalidIssuedAsset(#[from] orchard_zsa::AssetStateError),
+}
+
+impl From<sprout::tree::NoteCommitmentTreeError> for ValidateContextError {
+    fn from(value: sprout::tree::NoteCommitmentTreeError) -> Self {
+        ValidateContextError::NoteCommitmentTreeError(value.into())
+    }
 }
 
 /// Trait for creating the corresponding duplicate nullifier error from a nullifier.

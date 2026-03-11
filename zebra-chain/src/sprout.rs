@@ -13,6 +13,6 @@ pub mod note;
 pub mod tree;
 
 pub use commitment::NoteCommitment;
-pub use joinsplit::JoinSplit;
 pub use joinsplit::RandomSeed;
+pub use joinsplit::{GenericJoinSplit, JoinSplit};
 pub use note::{EncryptedNote, Note, Nullifier};

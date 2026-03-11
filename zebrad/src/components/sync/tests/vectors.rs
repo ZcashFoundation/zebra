@@ -1,5 +1,7 @@
 //! Fixed test vectors for the syncer.
 
+#![allow(clippy::unwrap_in_result)]
+
 use std::{collections::HashMap, iter, sync::Arc, time::Duration};
 
 use color_eyre::Report;
@@ -10,7 +12,7 @@ use zebra_chain::{
     chain_tip::mock::{MockChainTip, MockChainTipSender},
     serialization::ZcashDeserializeInto,
 };
-use zebra_consensus::Config as ConsensusConfig;
+use zebra_consensus::{Config as ConsensusConfig, RouterError, VerifyBlockError};
 use zebra_network::InventoryResponse;
 use zebra_state::Config as StateConfig;
 use zebra_test::mock_service::{MockService, PanicAssertion};
@@ -20,7 +22,7 @@ use zebra_state as zs;
 
 use crate::{
     components::{
-        sync::{self, SyncStatus},
+        sync::{self, downloads::BlockDownloadVerifyError, SyncStatus},
         ChainSync,
     },
     config::ZebradConfig,
@@ -86,7 +88,10 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
     peer_set
         .expect_request(zn::Request::BlocksByHash(iter::once(block0_hash).collect()))
         .await
-        .respond(zn::Response::Blocks(vec![Available(block0.clone())]));
+        .respond(zn::Response::Blocks(vec![Available((
+            block0.clone(),
+            None,
+        ))]));
 
     block_verifier_router
         .expect_request(zebra_consensus::Request::Commit(block0))
@@ -160,11 +165,17 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
     peer_set
         .expect_request(zn::Request::BlocksByHash(iter::once(block1_hash).collect()))
         .await
-        .respond(zn::Response::Blocks(vec![Available(block1.clone())]));
+        .respond(zn::Response::Blocks(vec![Available((
+            block1.clone(),
+            None,
+        ))]));
     peer_set
         .expect_request(zn::Request::BlocksByHash(iter::once(block2_hash).collect()))
         .await
-        .respond(zn::Response::Blocks(vec![Available(block2.clone())]));
+        .respond(zn::Response::Blocks(vec![Available((
+            block2.clone(),
+            None,
+        ))]));
 
     // We can't guarantee the verification request order
     let mut remaining_blocks: HashMap<block::Hash, Arc<Block>> =
@@ -224,11 +235,17 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
     peer_set
         .expect_request(zn::Request::BlocksByHash(iter::once(block3_hash).collect()))
         .await
-        .respond(zn::Response::Blocks(vec![Available(block3.clone())]));
+        .respond(zn::Response::Blocks(vec![Available((
+            block3.clone(),
+            None,
+        ))]));
     peer_set
         .expect_request(zn::Request::BlocksByHash(iter::once(block4_hash).collect()))
         .await
-        .respond(zn::Response::Blocks(vec![Available(block4.clone())]));
+        .respond(zn::Response::Blocks(vec![Available((
+            block4.clone(),
+            None,
+        ))]));
 
     // We can't guarantee the verification request order
     let mut remaining_blocks: HashMap<block::Hash, Arc<Block>> =
@@ -313,7 +330,10 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
     peer_set
         .expect_request(zn::Request::BlocksByHash(iter::once(block0_hash).collect()))
         .await
-        .respond(zn::Response::Blocks(vec![Available(block0.clone())]));
+        .respond(zn::Response::Blocks(vec![Available((
+            block0.clone(),
+            None,
+        ))]));
 
     block_verifier_router
         .expect_request(zebra_consensus::Request::Commit(block0))
@@ -389,11 +409,17 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
     peer_set
         .expect_request(zn::Request::BlocksByHash(iter::once(block1_hash).collect()))
         .await
-        .respond(zn::Response::Blocks(vec![Available(block1.clone())]));
+        .respond(zn::Response::Blocks(vec![Available((
+            block1.clone(),
+            None,
+        ))]));
     peer_set
         .expect_request(zn::Request::BlocksByHash(iter::once(block2_hash).collect()))
         .await
-        .respond(zn::Response::Blocks(vec![Available(block2.clone())]));
+        .respond(zn::Response::Blocks(vec![Available((
+            block2.clone(),
+            None,
+        ))]));
 
     // We can't guarantee the verification request order
     let mut remaining_blocks: HashMap<block::Hash, Arc<Block>> =
@@ -455,11 +481,17 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
     peer_set
         .expect_request(zn::Request::BlocksByHash(iter::once(block3_hash).collect()))
         .await
-        .respond(zn::Response::Blocks(vec![Available(block3.clone())]));
+        .respond(zn::Response::Blocks(vec![Available((
+            block3.clone(),
+            None,
+        ))]));
     peer_set
         .expect_request(zn::Request::BlocksByHash(iter::once(block4_hash).collect()))
         .await
-        .respond(zn::Response::Blocks(vec![Available(block4.clone())]));
+        .respond(zn::Response::Blocks(vec![Available((
+            block4.clone(),
+            None,
+        ))]));
 
     // We can't guarantee the verification request order
     let mut remaining_blocks: HashMap<block::Hash, Arc<Block>> =
@@ -530,7 +562,10 @@ async fn sync_block_lookahead_drop() -> Result<(), crate::BoxError> {
     peer_set
         .expect_request(zn::Request::BlocksByHash(iter::once(block0_hash).collect()))
         .await
-        .respond(zn::Response::Blocks(vec![Available(block982k.clone())]));
+        .respond(zn::Response::Blocks(vec![Available((
+            block982k.clone(),
+            None,
+        ))]));
 
     // Block is dropped because it is too far ahead of the tip.
     // We expect more requests to the state service, because the syncer keeps on running.
@@ -595,7 +630,10 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
     peer_set
         .expect_request(zn::Request::BlocksByHash(iter::once(block0_hash).collect()))
         .await
-        .respond(zn::Response::Blocks(vec![Available(block0.clone())]));
+        .respond(zn::Response::Blocks(vec![Available((
+            block0.clone(),
+            None,
+        ))]));
 
     block_verifier_router
         .expect_request(zebra_consensus::Request::Commit(block0))
@@ -677,15 +715,24 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
             iter::once(block982k_hash).collect(),
         ))
         .await
-        .respond(zn::Response::Blocks(vec![Available(block982k.clone())]));
+        .respond(zn::Response::Blocks(vec![Available((
+            block982k.clone(),
+            None,
+        ))]));
     peer_set
         .expect_request(zn::Request::BlocksByHash(iter::once(block1_hash).collect()))
         .await
-        .respond(zn::Response::Blocks(vec![Available(block1.clone())]));
+        .respond(zn::Response::Blocks(vec![Available((
+            block1.clone(),
+            None,
+        ))]));
     peer_set
         .expect_request(zn::Request::BlocksByHash(iter::once(block2_hash).collect()))
         .await
-        .respond(zn::Response::Blocks(vec![Available(block2.clone())]));
+        .respond(zn::Response::Blocks(vec![Available((
+            block2.clone(),
+            None,
+        ))]));
 
     // At this point, the following tasks race:
     // - The valid chain verifier requests
@@ -756,7 +803,10 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
     peer_set
         .expect_request(zn::Request::BlocksByHash(iter::once(block0_hash).collect()))
         .await
-        .respond(zn::Response::Blocks(vec![Available(block0.clone())]));
+        .respond(zn::Response::Blocks(vec![Available((
+            block0.clone(),
+            None,
+        ))]));
 
     block_verifier_router
         .expect_request(zebra_consensus::Request::Commit(block0))
@@ -830,11 +880,17 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
     peer_set
         .expect_request(zn::Request::BlocksByHash(iter::once(block1_hash).collect()))
         .await
-        .respond(zn::Response::Blocks(vec![Available(block1.clone())]));
+        .respond(zn::Response::Blocks(vec![Available((
+            block1.clone(),
+            None,
+        ))]));
     peer_set
         .expect_request(zn::Request::BlocksByHash(iter::once(block2_hash).collect()))
         .await
-        .respond(zn::Response::Blocks(vec![Available(block2.clone())]));
+        .respond(zn::Response::Blocks(vec![Available((
+            block2.clone(),
+            None,
+        ))]));
 
     // We can't guarantee the verification request order
     let mut remaining_blocks: HashMap<block::Hash, Arc<Block>> =
@@ -896,17 +952,26 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
     peer_set
         .expect_request(zn::Request::BlocksByHash(iter::once(block3_hash).collect()))
         .await
-        .respond(zn::Response::Blocks(vec![Available(block3.clone())]));
+        .respond(zn::Response::Blocks(vec![Available((
+            block3.clone(),
+            None,
+        ))]));
     peer_set
         .expect_request(zn::Request::BlocksByHash(iter::once(block4_hash).collect()))
         .await
-        .respond(zn::Response::Blocks(vec![Available(block4.clone())]));
+        .respond(zn::Response::Blocks(vec![Available((
+            block4.clone(),
+            None,
+        ))]));
     peer_set
         .expect_request(zn::Request::BlocksByHash(
             iter::once(block982k_hash).collect(),
         ))
         .await
-        .respond(zn::Response::Blocks(vec![Available(block982k.clone())]));
+        .respond(zn::Response::Blocks(vec![Available((
+            block982k.clone(),
+            None,
+        ))]));
 
     // At this point, the following tasks race:
     // - The valid chain verifier requests
@@ -920,6 +985,39 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
     );
 
     Ok(())
+}
+
+/// Tests that a `BlockDownloadVerifyError::Invalid` wrapping a
+/// `CommitBlockError::Duplicate` error does NOT trigger a sync restart.
+#[tokio::test]
+async fn should_restart_sync_returns_false() {
+    let commit_error = zs::CommitBlockError::Duplicate {
+        hash_or_height: None,
+        location: zebra_state::KnownBlock::BestChain,
+    };
+
+    let verify_block_error = VerifyBlockError::Commit(commit_error);
+    let router_error = RouterError::Block {
+        source: Box::new(verify_block_error),
+    };
+
+    let err = BlockDownloadVerifyError::Invalid {
+        error: router_error,
+        height: block::Height(42),
+        hash: block::Hash::from([0xAA; 32]),
+        advertiser_addr: None,
+    };
+
+    let restart = ChainSync::<
+        MockService<zn::Request, zn::Response, PanicAssertion>,
+        MockService<zs::Request, zs::Response, PanicAssertion>,
+        MockService<zebra_consensus::Request, block::Hash, PanicAssertion>,
+        MockChainTip,
+    >::should_restart_sync(&err);
+    assert!(
+        !restart,
+        "duplicate commit block errors should NOT trigger sync restart"
+    );
 }
 
 fn setup() -> (
@@ -961,6 +1059,7 @@ fn setup() -> (
 
     let (mock_chain_tip, mock_chain_tip_sender) = MockChainTip::new();
 
+    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
     let (chain_sync, sync_status) = ChainSync::new(
         &config,
         Height(0),
@@ -968,6 +1067,7 @@ fn setup() -> (
         block_verifier_router.clone(),
         state_service.clone(),
         mock_chain_tip,
+        misbehavior_tx,
     );
 
     let chain_sync_future = chain_sync.sync();

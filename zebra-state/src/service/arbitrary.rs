@@ -117,6 +117,16 @@ impl PreparedChain {
         self.generate_valid_commitments = true;
         self
     }
+
+    /// Set the ledger strategy for the prepared chain.
+    #[allow(dead_code)]
+    pub(crate) fn with_ledger_strategy(
+        mut self,
+        ledger_strategy: BoxedStrategy<LedgerState>,
+    ) -> Self {
+        self.ledger_strategy = Some(ledger_strategy);
+        self
+    }
 }
 
 impl Strategy for PreparedChain {
@@ -129,7 +139,7 @@ impl Strategy for PreparedChain {
         if chain.is_none() {
             // TODO: use the latest network upgrade (#1974)
             let default_ledger_strategy =
-                LedgerState::genesis_strategy(NetworkUpgrade::Nu5, None, false);
+                LedgerState::genesis_strategy(None, NetworkUpgrade::Nu5, None, false);
             let ledger_strategy = self
                 .ledger_strategy
                 .as_ref()
@@ -208,7 +218,7 @@ pub async fn populated_state(
     // TODO: write a test that checks the finalized to non-finalized transition with UTXOs,
     //       and set max_checkpoint_height and checkpoint_verify_concurrency_limit correctly.
     let (state, read_state, latest_chain_tip, mut chain_tip_change) =
-        StateService::new(Config::ephemeral(), network, Height::MAX, 0);
+        StateService::new(Config::ephemeral(), network, Height::MAX, 0).await;
     let mut state = Buffer::new(BoxService::new(state), 1);
 
     let mut responses = FuturesUnordered::new();

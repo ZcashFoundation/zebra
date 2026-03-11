@@ -4,23 +4,20 @@
 //!
 //! For usage please refer to the program help: `block-template-to-proposal --help`
 
+mod args;
+
 use std::io::Read;
 
 use color_eyre::eyre::Result;
 use serde_json::Value;
 use structopt::StructOpt;
 
-use zebra_chain::{
-    parameters::NetworkUpgrade,
-    serialization::{DateTime32, ZcashSerialize},
-};
-use zebra_rpc::methods::get_block_template_rpcs::{
-    get_block_template::proposal_block_from_template,
-    types::{get_block_template::GetBlockTemplate, long_poll::LONG_POLL_ID_LENGTH},
+use zebra_chain::serialization::{DateTime32, ZcashSerialize};
+use zebra_rpc::{
+    client::{BlockTemplateResponse, LONG_POLL_ID_LENGTH},
+    proposal_block_from_template,
 };
 use zebra_utils::init_tracing;
-
-mod args;
 
 /// The minimum number of characters in a valid `getblocktemplate JSON response.
 ///
@@ -53,10 +50,7 @@ fn main() -> Result<()> {
 
     // parse string to generic json
     let mut template: Value = serde_json::from_str(&template)?;
-    eprintln!(
-        "{}",
-        serde_json::to_string_pretty(&template).expect("re-serialization never fails")
-    );
+    eprintln!("{}", serde_json::to_string_pretty(&template)?);
 
     let template_obj = template
         .as_object_mut()
@@ -82,10 +76,7 @@ fn main() -> Result<()> {
 
     // the maxtime field is used by this tool
     // if it is missing, substitute a valid value
-    let current_time: DateTime32 = template_obj["curtime"]
-        .to_string()
-        .parse()
-        .expect("curtime is always a valid DateTime32");
+    let current_time: DateTime32 = template_obj["curtime"].to_string().parse()?;
 
     template_obj.entry("maxtime").or_insert_with(|| {
         if time_source.uses_max_time() {
@@ -96,15 +87,13 @@ fn main() -> Result<()> {
     });
 
     // parse the modified json to template type
-    let template: GetBlockTemplate = serde_json::from_value(template)?;
+    let template: BlockTemplateResponse = serde_json::from_value(template)?;
 
     // generate proposal according to arguments
-    let proposal = proposal_block_from_template(&template, time_source, NetworkUpgrade::Nu5)?;
+    let proposal = proposal_block_from_template(&template, time_source, &args.net)?;
     eprintln!("{proposal:#?}");
 
-    let proposal = proposal
-        .zcash_serialize_to_vec()
-        .expect("serialization to Vec never fails");
+    let proposal = proposal.zcash_serialize_to_vec()?;
 
     println!("{}", hex::encode(proposal));
 

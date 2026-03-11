@@ -93,6 +93,16 @@ lazy_static! {
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct Root([u8; 32]);
 
+impl Root {
+    /// Return the bytes in big-endian byte order as required
+    /// by RPCs such as `getrawtransaction`.
+    pub fn bytes_in_display_order(&self) -> [u8; 32] {
+        let mut root: [u8; 32] = self.into();
+        root.reverse();
+        root
+    }
+}
+
 impl fmt::Debug for Root {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("Root").field(&hex::encode(self.0)).finish()
@@ -197,7 +207,7 @@ pub enum NoteCommitmentTreeError {
 /// job of this tree to protect against double-spending, as it is append-only; double-spending
 /// is prevented by maintaining the [nullifier set] for each shielded pool.
 ///
-/// Internally this wraps [`bridgetree::Frontier`], so that we can maintain and increment
+/// Internally this wraps [`incrementalmerkletree::frontier::Frontier`], so that we can maintain and increment
 /// the full tree with only the minimal amount of non-empty nodes/leaves required.
 ///
 /// Note that the default value of the [`Root`] type is `[0, 0, 0, 0]`. However, this value differs
@@ -210,9 +220,9 @@ pub enum NoteCommitmentTreeError {
 #[serde(into = "LegacyNoteCommitmentTree")]
 #[serde(from = "LegacyNoteCommitmentTree")]
 pub struct NoteCommitmentTree {
-    /// The tree represented as a [`bridgetree::Frontier`].
+    /// The tree represented as a [`incrementalmerkletree::frontier::Frontier`].
     ///
-    /// A [`bridgetree::Frontier`] is a subset of the tree that allows to fully specify it. It
+    /// A [`incrementalmerkletree::frontier::Frontier`] is a subset of the tree that allows to fully specify it. It
     /// consists of nodes along the rightmost (newer) branch of the tree that
     /// has non-empty nodes. Upper (near root) empty nodes of the branch are not
     /// stored.

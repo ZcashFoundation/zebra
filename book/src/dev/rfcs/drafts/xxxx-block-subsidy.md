@@ -70,7 +70,7 @@ In Zebra the consensus related code lives in the `zebra-consensus` crate. The bl
 Inside `zebra-consensus/src/block/subsidy/` the following submodules will be created:
 
 - `general.rs`: General block reward functions and utilities.
-- `founders_reward.rs`: Specific functions related to funders reward.
+- `founders_reward.rs`: Specific functions related to founders reward.
 - `funding_streams.rs`: Specific functions for funding streams.
 
 In addition to calculations the block subsidy requires constants defined in the protocol. The implementation will also create additional constants, all of them will live at:

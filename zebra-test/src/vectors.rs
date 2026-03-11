@@ -5,7 +5,6 @@ use lazy_static::lazy_static;
 
 mod block;
 mod orchard_note_encryption;
-mod orchard_shielded_data;
 
 #[cfg(feature = "tx_v6")]
 mod orchard_zsa_shielded_data;
@@ -15,7 +14,6 @@ mod orchard_zsa_workflow_blocks;
 
 pub use block::*;
 pub use orchard_note_encryption::*;
-pub use orchard_shielded_data::*;
 
 #[cfg(feature = "tx_v6")]
 pub use orchard_zsa_shielded_data::*;

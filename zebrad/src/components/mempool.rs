@@ -27,8 +27,7 @@ use std::{
 };
 
 use futures::{future::FutureExt, stream::Stream};
-use tokio::sync::{broadcast, oneshot};
-use tokio_stream::StreamExt;
+use tokio::sync::{broadcast, mpsc, oneshot};
 use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service};
 
 use zebra_chain::{
@@ -38,18 +37,19 @@ use zebra_chain::{
     transaction::UnminedTxId,
 };
 use zebra_consensus::{error::TransactionError, transaction};
-use zebra_network as zn;
-use zebra_node_services::mempool::{Gossip, Request, Response};
+use zebra_network::{self as zn, PeerSocketAddr};
+use zebra_node_services::mempool::{Gossip, MempoolChange, MempoolTxSubscriber, Request, Response};
 use zebra_state as zs;
 use zebra_state::{ChainTipChange, TipAction};
 
-use crate::components::{mempool::crawler::RATE_LIMIT_DELAY, sync::SyncStatus};
+use crate::components::sync::SyncStatus;
 
 pub mod config;
 mod crawler;
 pub mod downloads;
 mod error;
 pub mod gossip;
+mod pending_outputs;
 mod queue_checker;
 mod storage;
 
@@ -68,10 +68,11 @@ pub use storage::{
 };
 
 #[cfg(test)]
-pub use self::{storage::tests::unmined_transactions_in_blocks, tests::UnboxMempoolError};
+pub use self::tests::UnboxMempoolError;
 
 use downloads::{
-    Downloads as TxDownloads, TRANSACTION_DOWNLOAD_TIMEOUT, TRANSACTION_VERIFY_TIMEOUT,
+    Downloads as TxDownloads, TransactionDownloadVerifyError, TRANSACTION_DOWNLOAD_TIMEOUT,
+    TRANSACTION_VERIFY_TIMEOUT,
 };
 
 type Outbound = Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
@@ -132,7 +133,10 @@ impl ActiveState {
             } => {
                 let mut transactions = Vec::new();
 
-                let storage = storage.transactions().map(|tx| tx.clone().into());
+                let storage = storage
+                    .transactions()
+                    .values()
+                    .map(|tx| tx.transaction.clone().into());
                 transactions.extend(storage);
 
                 let pending = tx_downloads.transaction_requests().cloned();
@@ -234,7 +238,10 @@ pub struct Mempool {
 
     /// Sender part of a gossip transactions channel.
     /// Used to broadcast transaction ids to peers.
-    transaction_sender: broadcast::Sender<HashSet<UnminedTxId>>,
+    transaction_sender: broadcast::Sender<MempoolChange>,
+
+    /// Sender for reporting peer addresses that advertised unexpectedly invalid transactions.
+    misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
 
     // Diagnostics
     //
@@ -260,6 +267,7 @@ pub struct Mempool {
 }
 
 impl Mempool {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         config: &Config,
         outbound: Outbound,
@@ -268,9 +276,11 @@ impl Mempool {
         sync_status: SyncStatus,
         latest_chain_tip: zs::LatestChainTip,
         chain_tip_change: ChainTipChange,
-    ) -> (Self, broadcast::Receiver<HashSet<UnminedTxId>>) {
-        let (transaction_sender, transaction_receiver) =
+        misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
+    ) -> (Self, MempoolTxSubscriber) {
+        let (transaction_sender, _) =
             tokio::sync::broadcast::channel(gossip::MAX_CHANGES_BEFORE_SEND * 2);
+        let transaction_subscriber = MempoolTxSubscriber::new(transaction_sender.clone());
 
         let mut service = Mempool {
             config: config.clone(),
@@ -283,6 +293,7 @@ impl Mempool {
             state,
             tx_verifier,
             transaction_sender,
+            misbehavior_sender,
             #[cfg(feature = "progress-bar")]
             queued_count_bar: None,
             #[cfg(feature = "progress-bar")]
@@ -297,7 +308,7 @@ impl Mempool {
         // Otherwise, it is only updated in `poll_ready`, right before each service call.
         service.update_state(None);
 
-        (service, transaction_receiver)
+        (service, transaction_subscriber)
     }
 
     /// Is the mempool enabled by a debug config option?
@@ -390,7 +401,8 @@ impl Mempool {
         expired_transactions: &HashSet<UnminedTxId>,
     ) -> HashSet<UnminedTxId> {
         send_to_peers_ids
-            .difference(expired_transactions)
+            .iter()
+            .filter(|id| !expired_transactions.contains(id))
             .copied()
             .collect()
     }
@@ -513,6 +525,8 @@ impl Service<Request> for Mempool {
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let tip_action = self.chain_tip_change.last_tip_change();
+
+        // TODO: Consider broadcasting a `MempoolChange` when the mempool is disabled.
         let is_state_changed = self.update_state(tip_action.as_ref());
 
         tracing::trace!(is_enabled = ?self.is_enabled(), ?is_state_changed, "started polling the mempool...");
@@ -577,15 +591,15 @@ impl Service<Request> for Mempool {
         {
             // Collect inserted transaction ids.
             let mut send_to_peers_ids = HashSet::<_>::new();
+            let mut invalidated_ids = HashSet::<_>::new();
+            let mut mined_mempool_ids = HashSet::<_>::new();
 
             let best_tip_height = self.latest_chain_tip.best_tip_height();
 
             // Clean up completed download tasks and add to mempool if successful.
-            while let Poll::Ready(Some(r)) =
-                pin!(tx_downloads.timeout(RATE_LIMIT_DELAY)).poll_next(cx)
-            {
-                match r {
-                    Ok(Ok((tx, expected_tip_height))) => {
+            while let Poll::Ready(Some(result)) = pin!(&mut *tx_downloads).poll_next(cx) {
+                match result {
+                    Ok(Ok((tx, spent_mempool_outpoints, expected_tip_height, rsp_tx))) => {
                         // # Correctness:
                         //
                         // It's okay to use tip height here instead of the tip hash since
@@ -593,7 +607,9 @@ impl Service<Request> for Mempool {
                         // the best chain changes (which is the only way to stay at the same height), and the
                         // mempool re-verifies all pending tx_downloads when there's a `TipAction::Reset`.
                         if best_tip_height == expected_tip_height {
-                            let insert_result = storage.insert(tx.clone());
+                            let tx_id = tx.transaction.id;
+                            let insert_result =
+                                storage.insert(tx, spent_mempool_outpoints, best_tip_height);
 
                             tracing::trace!(
                                 ?insert_result,
@@ -603,26 +619,52 @@ impl Service<Request> for Mempool {
                             if let Ok(inserted_id) = insert_result {
                                 // Save transaction ids that we will send to peers
                                 send_to_peers_ids.insert(inserted_id);
+                            } else {
+                                invalidated_ids.insert(tx_id);
+                            }
+
+                            // Send the result to responder channel if one was provided.
+                            if let Some(rsp_tx) = rsp_tx {
+                                let _ = rsp_tx
+                                    .send(insert_result.map(|_| ()).map_err(|err| err.into()));
                             }
                         } else {
                             tracing::trace!("chain grew during tx verification, retrying ..",);
 
                             // We don't care if re-queueing the transaction request fails.
                             let _result = tx_downloads
-                                .download_if_needed_and_verify(tx.transaction.into(), None);
+                                .download_if_needed_and_verify(tx.transaction.into(), rsp_tx);
                         }
                     }
-                    Ok(Err((txid, error))) => {
-                        tracing::debug!(?txid, ?error, "mempool transaction failed to verify");
+                    Ok(Err(boxed_err)) => {
+                        let (tx_id, error) = *boxed_err;
+                        if let TransactionDownloadVerifyError::Invalid {
+                            error,
+                            advertiser_addr: Some(advertiser_addr),
+                        } = &error
+                        {
+                            if error.mempool_misbehavior_score() != 0 {
+                                let _ = self.misbehavior_sender.try_send((
+                                    *advertiser_addr,
+                                    error.mempool_misbehavior_score(),
+                                ));
+                            }
+                        };
+
+                        tracing::debug!(?tx_id, ?error, "mempool transaction failed to verify");
 
                         metrics::counter!("mempool.failed.verify.tasks.total", "reason" => error.to_string()).increment(1);
-                        storage.reject_if_needed(txid, error);
+
+                        invalidated_ids.insert(tx_id);
+                        storage.reject_if_needed(tx_id, error);
                     }
                     Err(_elapsed) => {
                         // A timeout happens when the stream hangs waiting for another service,
                         // so there is no specific transaction ID.
 
-                        tracing::info!("mempool transaction failed to verify due to timeout");
+                        // TODO: Return the transaction id that timed out during verification so it can be
+                        //       included in the list of invalidated transactions and change `warn!` to `info!`.
+                        tracing::warn!("mempool transaction failed to verify due to timeout");
 
                         metrics::counter!("mempool.failed.verify.tasks.total", "reason" => "timeout").increment(1);
                     }
@@ -638,11 +680,17 @@ impl Service<Request> for Mempool {
                 // with the same mined IDs as recently mined transactions.
                 let mined_ids = block.transaction_hashes.iter().cloned().collect();
                 tx_downloads.cancel(&mined_ids);
-                storage.reject_and_remove_same_effects(&mined_ids, block.transactions);
+                storage.clear_mined_dependencies(&mined_ids);
+
+                let storage::RemovedTransactionIds { mined, invalidated } =
+                    storage.reject_and_remove_same_effects(&mined_ids, block.transactions);
 
                 // Clear any transaction rejections if they might have become valid after
                 // the new block was added to the tip.
                 storage.clear_tip_rejections();
+
+                mined_mempool_ids.extend(mined);
+                invalidated_ids.extend(invalidated);
             }
 
             // Remove expired transactions from the mempool.
@@ -660,14 +708,42 @@ impl Service<Request> for Mempool {
                         ?expired_transactions,
                         "removed expired transactions from the mempool",
                     );
+
+                    invalidated_ids.extend(expired_transactions);
                 }
             }
 
-            // Send transactions that were not rejected nor expired to peers
+            // Send transactions that were not rejected nor expired to peers and RPC listeners.
             if !send_to_peers_ids.is_empty() {
-                tracing::trace!(?send_to_peers_ids, "sending new transactions to peers");
+                tracing::trace!(
+                    ?send_to_peers_ids,
+                    "sending new transactions to peers and RPC listeners"
+                );
 
-                self.transaction_sender.send(send_to_peers_ids)?;
+                self.transaction_sender
+                    .send(MempoolChange::added(send_to_peers_ids))?;
+            }
+
+            // Send transactions that were rejected to RPC listeners.
+            if !invalidated_ids.is_empty() {
+                tracing::trace!(
+                    ?invalidated_ids,
+                    "sending invalidated transactions to RPC listeners"
+                );
+
+                self.transaction_sender
+                    .send(MempoolChange::invalidated(invalidated_ids))?;
+            }
+
+            // Send transactions that were mined onto the best chain to RPC listeners.
+            if !mined_mempool_ids.is_empty() {
+                tracing::trace!(
+                    ?mined_mempool_ids,
+                    "sending mined transactions to RPC listeners"
+                );
+
+                self.transaction_sender
+                    .send(MempoolChange::mined(mined_mempool_ids))?;
             }
         }
 
@@ -686,10 +762,7 @@ impl Service<Request> for Mempool {
             ActiveState::Enabled {
                 storage,
                 tx_downloads,
-                #[cfg(feature = "getblocktemplate-rpcs")]
                 last_seen_tip_hash,
-                #[cfg(not(feature = "getblocktemplate-rpcs"))]
-                    last_seen_tip_hash: _,
             } => match req {
                 // Queries
                 Request::TransactionIds => {
@@ -697,11 +770,7 @@ impl Service<Request> for Mempool {
 
                     let res: HashSet<_> = storage.tx_ids().collect();
 
-                    // This log line is checked by tests,
-                    // because lightwalletd doesn't return mempool transactions at the moment.
-                    //
-                    // TODO: downgrade to trace level when we can check transactions via gRPC
-                    info!(?req, res_count = ?res.len(), "answered mempool request");
+                    trace!(?req, res_count = ?res.len(), "answered mempool request");
 
                     async move { Ok(Response::TransactionIds(res)) }.boxed()
                 }
@@ -727,17 +796,50 @@ impl Service<Request> for Mempool {
 
                     async move { Ok(Response::Transactions(res)) }.boxed()
                 }
+                Request::TransactionWithDepsByMinedId(tx_id) => {
+                    trace!(?req, "got mempool request");
 
-                #[cfg(feature = "getblocktemplate-rpcs")]
+                    let res = if let Some((transaction, dependencies)) =
+                        storage.transaction_with_deps(tx_id)
+                    {
+                        Ok(Response::TransactionWithDeps {
+                            transaction,
+                            dependencies,
+                        })
+                    } else {
+                        Err("transaction not found in mempool".into())
+                    };
+
+                    trace!(?req, ?res, "answered mempool request");
+
+                    async move { res }.boxed()
+                }
+
+                Request::AwaitOutput(outpoint) => {
+                    trace!(?req, "got mempool request");
+
+                    let response_fut = storage.pending_outputs.queue(outpoint);
+
+                    if let Some(output) = storage.created_output(&outpoint) {
+                        storage.pending_outputs.respond(&outpoint, output)
+                    }
+
+                    trace!("answered mempool request");
+
+                    response_fut.boxed()
+                }
+
                 Request::FullTransactions => {
                     trace!(?req, "got mempool request");
 
-                    let transactions: Vec<_> = storage.full_transactions().cloned().collect();
+                    let transactions: Vec<_> = storage.transactions().values().cloned().collect();
+                    let transaction_dependencies = storage.transaction_dependencies().clone();
 
                     trace!(?req, transactions_count = ?transactions.len(), "answered mempool request");
 
                     let response = Response::FullTransactions {
                         transactions,
+                        transaction_dependencies,
                         last_seen_tip_hash: *last_seen_tip_hash,
                     };
 
@@ -790,6 +892,34 @@ impl Service<Request> for Mempool {
                     // all the work for this request is done in poll_ready
                     async move { Ok(Response::CheckedForVerifiedTransactions) }.boxed()
                 }
+
+                // Summary statistics for the mempool: count, total size, and memory usage.
+                //
+                // Used by the `getmempoolinfo` RPC method
+                Request::QueueStats => {
+                    trace!(?req, "got mempool request");
+
+                    let size = storage.transaction_count();
+
+                    let bytes = storage.total_serialized_size();
+
+                    let usage = bytes; // TODO: Placeholder, should be fixed later
+
+                    // TODO: Set to Some(true) on regtest once network info is available.
+                    let fully_notified = None;
+
+                    trace!(size, bytes, usage, "answered mempool request");
+
+                    async move {
+                        Ok(Response::QueueStats {
+                            size,
+                            bytes,
+                            usage,
+                            fully_notified,
+                        })
+                    }
+                    .boxed()
+                }
             },
             ActiveState::Disabled => {
                 // TODO: add the name of the request, but not the content,
@@ -806,7 +936,13 @@ impl Service<Request> for Mempool {
 
                     Request::TransactionsById(_) => Response::Transactions(Default::default()),
                     Request::TransactionsByMinedId(_) => Response::Transactions(Default::default()),
-                    #[cfg(feature = "getblocktemplate-rpcs")]
+                    Request::TransactionWithDepsByMinedId(_) | Request::AwaitOutput(_) => {
+                        return async move {
+                            Err("mempool is not active: wait for Zebra to sync to the tip".into())
+                        }
+                        .boxed()
+                    }
+
                     Request::FullTransactions => {
                         return async move {
                             Err("mempool is not active: wait for Zebra to sync to the tip".into())
@@ -822,8 +958,7 @@ impl Service<Request> for Mempool {
                     Request::Queue(gossiped_txs) => Response::Queued(
                         // Special case; we can signal the error inside the response,
                         // because the inbound service ignores inner errors.
-                        iter::repeat(MempoolError::Disabled)
-                            .take(gossiped_txs.len())
+                        iter::repeat_n(MempoolError::Disabled, gossiped_txs.len())
                             .map(BoxError::from)
                             .map(Err)
                             .collect(),
@@ -835,6 +970,14 @@ impl Service<Request> for Mempool {
                         // all the work for this request is done in poll_ready
                         Response::CheckedForVerifiedTransactions
                     }
+
+                    // Return empty mempool stats
+                    Request::QueueStats => Response::QueueStats {
+                        size: 0,
+                        bytes: 0,
+                        usage: 0,
+                        fully_notified: None,
+                    },
                 };
 
                 async move { Ok(resp) }.boxed()

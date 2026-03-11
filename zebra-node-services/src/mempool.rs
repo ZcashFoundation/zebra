@@ -5,16 +5,24 @@
 use std::collections::HashSet;
 
 use tokio::sync::oneshot;
-use zebra_chain::transaction::{self, UnminedTx, UnminedTxId};
-
-#[cfg(feature = "getblocktemplate-rpcs")]
-use zebra_chain::transaction::VerifiedUnminedTx;
+use zebra_chain::{
+    transaction::{self, UnminedTx, UnminedTxId, VerifiedUnminedTx},
+    transparent,
+};
 
 use crate::BoxError;
 
 mod gossip;
+mod mempool_change;
+mod service_trait;
+mod transaction_dependencies;
 
-pub use self::gossip::Gossip;
+pub use self::{
+    gossip::Gossip,
+    mempool_change::{MempoolChange, MempoolChangeKind, MempoolTxSubscriber},
+    service_trait::MempoolService,
+    transaction_dependencies::TransactionDependencies,
+};
 
 /// A mempool service request.
 ///
@@ -39,6 +47,24 @@ pub enum Request {
     /// the [`AuthDigest`](zebra_chain::transaction::AuthDigest).
     TransactionsByMinedId(HashSet<transaction::Hash>),
 
+    /// Request a [`transparent::Output`] identified by the given [`OutPoint`](transparent::OutPoint),
+    /// waiting until it becomes available if it is unknown.
+    ///
+    /// This request is purely informational, and there are no guarantees about
+    /// whether the UTXO remains unspent or is on the best chain, or any chain.
+    /// Its purpose is to allow orphaned mempool transaction verification.
+    ///
+    /// # Correctness
+    ///
+    /// Output requests should be wrapped in a timeout, so that
+    /// out-of-order and invalid requests do not hang indefinitely.
+    ///
+    /// Outdated requests are pruned on a regular basis.
+    AwaitOutput(transparent::OutPoint),
+
+    /// Request a [`VerifiedUnminedTx`] and its dependencies by its mined id.
+    TransactionWithDepsByMinedId(transaction::Hash),
+
     /// Get all the [`VerifiedUnminedTx`] in the mempool.
     ///
     /// Equivalent to `TransactionsById(TransactionIds)`,
@@ -46,7 +72,6 @@ pub enum Request {
     //
     // TODO: make the Transactions response return VerifiedUnminedTx,
     //       and remove the FullTransactions variant
-    #[cfg(feature = "getblocktemplate-rpcs")]
     FullTransactions,
 
     /// Query matching cached rejected transaction IDs in the mempool,
@@ -79,6 +104,9 @@ pub enum Request {
     /// when too many slots are reserved but unused:
     /// <https://docs.rs/tower/0.4.10/tower/buffer/struct.Buffer.html#a-note-on-choosing-a-bound>
     CheckForVerifiedTransactions,
+
+    /// Request summary statistics from the mempool for `getmempoolinfo`.
+    QueueStats,
 }
 
 /// A response to a mempool service request.
@@ -99,14 +127,27 @@ pub enum Response {
     /// different transactions with different mined IDs.
     Transactions(Vec<UnminedTx>),
 
+    /// Response to [`Request::AwaitOutput`] with the transparent output
+    UnspentOutput(transparent::Output),
+
+    /// Response to [`Request::TransactionWithDepsByMinedId`].
+    TransactionWithDeps {
+        /// The queried transaction
+        transaction: VerifiedUnminedTx,
+        /// A list of dependencies of the queried transaction.
+        dependencies: HashSet<transaction::Hash>,
+    },
+
     /// Returns all [`VerifiedUnminedTx`] in the mempool.
     //
     // TODO: make the Transactions response return VerifiedUnminedTx,
     //       and remove the FullTransactions variant
-    #[cfg(feature = "getblocktemplate-rpcs")]
     FullTransactions {
         /// All [`VerifiedUnminedTx`]s in the mempool
         transactions: Vec<VerifiedUnminedTx>,
+
+        /// All transaction dependencies in the mempool
+        transaction_dependencies: TransactionDependencies,
 
         /// Last seen chain tip hash by mempool service
         last_seen_tip_hash: zebra_chain::block::Hash,
@@ -123,4 +164,16 @@ pub enum Response {
 
     /// Confirms that the mempool has checked for recently verified transactions.
     CheckedForVerifiedTransactions,
+
+    /// Summary statistics for the mempool: count, total size, memory usage, and regtest info.
+    QueueStats {
+        /// Number of transactions currently in the mempool
+        size: usize,
+        /// Total size in bytes of all transactions
+        bytes: usize,
+        /// Estimated memory usage in bytes
+        usage: usize,
+        /// Whether all transactions have been fully notified (regtest only)
+        fully_notified: Option<bool>,
+    },
 }

@@ -19,7 +19,7 @@ use std::{
 
 use hex::{FromHex, ToHex};
 
-use crate::{block, parameters::Network, BoxError};
+use crate::{block, parameters::Network, serialization::BytesInDisplayOrder, BoxError};
 
 pub use crate::work::u256::U256;
 
@@ -290,6 +290,30 @@ impl CompactDifficulty {
 
         Ok(difficulty)
     }
+
+    /// Returns a floating-point number representing a difficulty as a multiple
+    /// of the minimum difficulty for the provided network.
+    // Copied from <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L34-L74>
+    // TODO: Explain here what this ported code is doing and why, request help to do so with the ECC team.
+    pub fn relative_to_network(&self, network: &Network) -> f64 {
+        let network_difficulty = network.target_difficulty_limit().to_compact();
+
+        let [mut n_shift, ..] = self.0.to_be_bytes();
+        let [n_shift_amount, ..] = network_difficulty.0.to_be_bytes();
+        let mut d_diff = f64::from(network_difficulty.0 << 8) / f64::from(self.0 << 8);
+
+        while n_shift < n_shift_amount {
+            d_diff *= 256.0;
+            n_shift += 1;
+        }
+
+        while n_shift > n_shift_amount {
+            d_diff /= 256.0;
+            n_shift -= 1;
+        }
+
+        d_diff
+    }
 }
 
 impl fmt::Debug for CompactDifficulty {
@@ -365,6 +389,16 @@ impl TryFrom<ExpandedDifficulty> for Work {
 impl From<ExpandedDifficulty> for CompactDifficulty {
     fn from(value: ExpandedDifficulty) -> Self {
         value.to_compact()
+    }
+}
+
+impl BytesInDisplayOrder for ExpandedDifficulty {
+    fn bytes_in_serialized_order(&self) -> [u8; 32] {
+        self.0.to_big_endian()
+    }
+
+    fn from_bytes_in_serialized_order(bytes: [u8; 32]) -> Self {
+        ExpandedDifficulty(U256::from_big_endian(&bytes))
     }
 }
 
@@ -449,29 +483,6 @@ impl ExpandedDifficulty {
             // should also be unreachable, but they aren't caught here.
             unreachable!("converted CompactDifficulty values must be valid")
         }
-    }
-
-    /// Return the difficulty bytes in big-endian byte-order,
-    /// suitable for printing out byte by byte.
-    ///
-    /// Zebra displays difficulties in big-endian byte-order,
-    /// following the u256 convention set by Bitcoin and zcashd.
-    pub fn bytes_in_display_order(&self) -> [u8; 32] {
-        self.0.to_big_endian()
-    }
-
-    /// Convert bytes in big-endian byte-order into an [`ExpandedDifficulty`].
-    ///
-    /// Zebra displays difficulties in big-endian byte-order,
-    /// following the u256 convention set by Bitcoin and zcashd.
-    ///
-    /// Preserves the exact difficulty value represented by the bytes,
-    /// even if it can't be generated from a [`CompactDifficulty`].
-    /// This means a round-trip conversion to [`CompactDifficulty`] can be lossy.
-    pub fn from_bytes_in_display_order(bytes_in_display_order: &[u8; 32]) -> ExpandedDifficulty {
-        let internal_byte_order = U256::from_big_endian(bytes_in_display_order);
-
-        ExpandedDifficulty(internal_byte_order)
     }
 }
 

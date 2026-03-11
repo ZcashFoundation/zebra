@@ -96,25 +96,36 @@ impl Version {
             (Testnet(params), Sapling) if params.is_default_testnet() => 170_007,
             (Testnet(params), Sapling) if params.is_regtest() => 170_006,
             (Mainnet, Sapling) => 170_007,
-            (Testnet(params), Blossom) if params.is_default_testnet() => 170_008,
+            (Testnet(params), Blossom) if params.is_default_testnet() || params.is_regtest() => {
+                170_008
+            }
             (Mainnet, Blossom) => 170_009,
-            (Testnet(params), Heartwood) if params.is_default_testnet() => 170_010,
+            (Testnet(params), Heartwood) if params.is_default_testnet() || params.is_regtest() => {
+                170_010
+            }
             (Mainnet, Heartwood) => 170_011,
-            (Testnet(params), Canopy) if params.is_default_testnet() => 170_012,
+            (Testnet(params), Canopy) if params.is_default_testnet() || params.is_regtest() => {
+                170_012
+            }
             (Mainnet, Canopy) => 170_013,
-            (Testnet(params), Nu5) if params.is_default_testnet() => 170_050,
+            (Testnet(params), Nu5) if params.is_default_testnet() || params.is_regtest() => 170_050,
             (Mainnet, Nu5) => 170_100,
-            (Testnet(params), Nu6) if params.is_default_testnet() => 170_110,
+            (Testnet(params), Nu6) if params.is_default_testnet() || params.is_regtest() => 170_110,
             (Mainnet, Nu6) => 170_120,
-            (Testnet(params), Nu6_1) if params.is_default_testnet() => 170_130,
+            (Testnet(params), Nu6_1) if params.is_default_testnet() || params.is_regtest() => {
+                170_130
+            }
             (Mainnet, Nu6_1) => 170_140,
-            #[cfg(zcash_unstable = "nu7")]
-            (Testnet(params), Nu7) if params.is_default_testnet() => 170_150,
-            #[cfg(zcash_unstable = "nu7")]
+            (Testnet(params), Nu7) if params.is_default_testnet() || params.is_regtest() => 170_150,
             (Mainnet, Nu7) => 170_160,
 
             // It should be fine to reject peers with earlier network protocol versions on custom testnets for now.
             (Testnet(_), _) => CURRENT_NETWORK_PROTOCOL_VERSION.0,
+
+            #[cfg(zcash_unstable = "zfuture")]
+            (Mainnet, ZFuture) => {
+                panic!("ZFuture network upgrade should not be active on Mainnet")
+            }
         })
     }
 }
@@ -212,8 +223,10 @@ mod test {
 
         let highest_network_upgrade = NetworkUpgrade::current(network, block::Height::MAX);
         assert!(
-            highest_network_upgrade == Nu7 || highest_network_upgrade == Nu6 || highest_network_upgrade == Nu5,
-            "expected coverage of all network upgrades: add the new network upgrade to the list in this test");
+            matches!(highest_network_upgrade, Nu6 | Nu6_1 | Nu7),
+            "expected coverage of all network upgrades: \
+            add the new network upgrade to the list in this test"
+        );
 
         for &network_upgrade in &[
             BeforeOverwinter,
@@ -224,6 +237,7 @@ mod test {
             Canopy,
             Nu5,
             Nu6,
+            Nu6_1,
             Nu7,
         ] {
             let height = network_upgrade.activation_height(network);

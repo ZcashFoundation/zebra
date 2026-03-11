@@ -29,7 +29,7 @@ impl Network {
 }
 
 #[cfg(test)]
-mod proptest {
+mod magic_proptest {
 
     use proptest::prelude::*;
 

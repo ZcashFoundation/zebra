@@ -13,15 +13,15 @@ Relevant parts of the configuration file:
 ```toml
 [mining]
 miner_address = 't27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v'
-    
+
 [network]
 network = "Regtest"
 
 # This section may be omitted when testing only Canopy
 [network.testnet_parameters.activation_heights]
-# Configured activation heights must be greater than or equal to 1, 
+# Configured activation heights must be greater than or equal to 1,
 # block height 0 is reserved for the Genesis network upgrade in Zebra
-NU5 = 1 
+NU5 = 1
 
 # This section may be omitted if a persistent Regtest chain state is desired
 [state]
@@ -80,14 +80,8 @@ let block_template: GetBlockTemplate = client
     .await
     .expect("response should be success output with a serialized `GetBlockTemplate`");
 
-let network_upgrade = if block_template.height < NU5_ACTIVATION_HEIGHT {
-    NetworkUpgrade::Canopy
-} else {
-    NetworkUpgrade::Nu5
-};
-
 let block_data = hex::encode(
-    proposal_block_from_template(&block_template, TimeSource::default(), network_upgrade)?
+    proposal_block_from_template(&block_template, TimeSource::default(), Network::Mainnet)?
         .zcash_serialize_to_vec()?,
 );
 

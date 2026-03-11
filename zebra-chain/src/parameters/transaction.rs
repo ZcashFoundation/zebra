@@ -13,9 +13,5 @@ pub const SAPLING_VERSION_GROUP_ID: u32 = 0x892F_2085;
 pub const TX_V5_VERSION_GROUP_ID: u32 = 0x26A7_270A;
 
 /// The version group ID for version 6 transactions.
-///
-/// OrchardZSA transactions must use transaction version 6 and this version
-/// group ID.
-// TODO: FIXME: use a proper value!
-#[cfg(feature = "tx_v6")]
-pub const TX_V6_VERSION_GROUP_ID: u32 = 0x7777_7777;
+/// TODO: update this after it's chosen
+pub const TX_V6_VERSION_GROUP_ID: u32 = 0xFFFF_FFFF;

@@ -32,7 +32,7 @@ pub fn wait_for_zebrad_and_lightwalletd_sync<
     wait_for_zebrad_mempool: bool,
     wait_for_zebrad_tip: bool,
 ) -> Result<(TestChild<TempDir>, TestChild<P>)> {
-    let is_zebrad_finished = AtomicBool::new(false);
+    let is_zebrad_finished = AtomicBool::new(!wait_for_zebrad_tip);
     let is_lightwalletd_finished = AtomicBool::new(false);
 
     let is_zebrad_finished = &is_zebrad_finished;
@@ -193,7 +193,7 @@ pub fn are_zebrad_and_lightwalletd_tips_synced(
             // Block number is the last word of the message. We rely on that specific for this to work.
             let last = msg
                 .split(' ')
-                .last()
+                .next_back()
                 .expect("always possible to get the last word of a separated by space string");
             lightwalletd_next_height = last
                 .parse()
@@ -213,6 +213,22 @@ pub fn are_zebrad_and_lightwalletd_tips_synced(
         let zebrad_tip_height = zebrad_blockchain_info["result"]["blocks"]
             .as_u64()
             .expect("unexpected block height: doesn't fit in u64");
+
+        if lightwalletd_tip_height != zebrad_tip_height {
+            tracing::info!(
+                lightwalletd_tip_height,
+                zebrad_tip_height,
+                zebra_rpc_address = ?zebra_rpc_address,
+                "lightwalletd tip is behind Zebra tip, waiting for sync",
+            );
+        } else {
+            tracing::debug!(
+                lightwalletd_tip_height,
+                zebrad_tip_height,
+                zebra_rpc_address = ?zebra_rpc_address,
+                "lightwalletd tip matches Zebra tip",
+            );
+        }
 
         Ok(lightwalletd_tip_height == zebrad_tip_height)
     })

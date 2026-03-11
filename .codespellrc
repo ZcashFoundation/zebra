@@ -1,4 +1,4 @@
 [codespell]
-ignore-words-list = crate,Sur,inout,Groth,groth,re-use,
+ignore-words-list = crate,Sur,inout,Groth,groth,re-use,abl,
 exclude-file = book/mermaid.min.js
 skip = ./zebra-rpc/qa/rpc-tests,./supply-chain

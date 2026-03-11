@@ -17,8 +17,8 @@ use std::{
 };
 
 use zebra_chain::{
-    amount::NonNegative, block::Height, history_tree::HistoryTree, transparent,
-    value_balance::ValueBalance,
+    amount::NonNegative, block::Height, block_info::BlockInfo, history_tree::HistoryTree,
+    serialization::ZcashSerialize as _, transparent, value_balance::ValueBalance,
 };
 
 use crate::{
@@ -26,10 +26,10 @@ use crate::{
     service::finalized_state::{
         disk_db::DiskWriteBatch,
         disk_format::{chain::HistoryTreeParts, RawBytes},
-        zebra_db::ZebraDb,
+        zebra_db::{metrics::value_pool_metrics, ZebraDb},
         TypedColumnFamily,
     },
-    BoxError,
+    HashOrHeight, ValidateContextError,
 };
 
 /// The name of the History Tree column family.
@@ -51,7 +51,7 @@ pub type LegacyHistoryTreePartsCf<'cf> = TypedColumnFamily<'cf, Height, HistoryT
 /// This type should not be used in new code.
 pub type RawHistoryTreePartsCf<'cf> = TypedColumnFamily<'cf, RawBytes, HistoryTreeParts>;
 
-/// The name of the chain value pools column family.
+/// The name of the tip-only chain value pools column family.
 ///
 /// This constant should be used so the compiler can detect typos.
 pub const CHAIN_VALUE_POOLS: &str = "tip_chain_value_pool";
@@ -62,32 +62,49 @@ pub const CHAIN_VALUE_POOLS: &str = "tip_chain_value_pool";
 /// column family.
 pub type ChainValuePoolsCf<'cf> = TypedColumnFamily<'cf, (), ValueBalance<NonNegative>>;
 
+/// The name of the block info column family.
+///
+/// This constant should be used so the compiler can detect typos.
+pub const BLOCK_INFO: &str = "block_info";
+
+/// The type for reading value pools from the database.
+///
+/// This constant should be used so the compiler can detect incorrectly typed accesses to the
+/// column family.
+pub type BlockInfoCf<'cf> = TypedColumnFamily<'cf, Height, BlockInfo>;
+
 impl ZebraDb {
     // Column family convenience methods
 
     /// Returns a typed handle to the `history_tree` column family.
-    pub(crate) fn history_tree_cf(&self) -> HistoryTreePartsCf {
+    pub(crate) fn history_tree_cf(&self) -> HistoryTreePartsCf<'_> {
         HistoryTreePartsCf::new(&self.db, HISTORY_TREE)
             .expect("column family was created when database was created")
     }
 
     /// Returns a legacy typed handle to the `history_tree` column family.
     /// This should not be used in new code.
-    pub(crate) fn legacy_history_tree_cf(&self) -> LegacyHistoryTreePartsCf {
+    pub(crate) fn legacy_history_tree_cf(&self) -> LegacyHistoryTreePartsCf<'_> {
         LegacyHistoryTreePartsCf::new(&self.db, HISTORY_TREE)
             .expect("column family was created when database was created")
     }
 
     /// Returns a generic raw key typed handle to the `history_tree` column family.
     /// This should not be used in new code.
-    pub(crate) fn raw_history_tree_cf(&self) -> RawHistoryTreePartsCf {
+    pub(crate) fn raw_history_tree_cf(&self) -> RawHistoryTreePartsCf<'_> {
         RawHistoryTreePartsCf::new(&self.db, HISTORY_TREE)
             .expect("column family was created when database was created")
     }
 
     /// Returns a typed handle to the chain value pools column family.
-    pub(crate) fn chain_value_pools_cf(&self) -> ChainValuePoolsCf {
+    pub(crate) fn chain_value_pools_cf(&self) -> ChainValuePoolsCf<'_> {
         ChainValuePoolsCf::new(&self.db, CHAIN_VALUE_POOLS)
+            .expect("column family was created when database was created")
+    }
+
+    /// Returns a typed handle to the block data column family.
+    pub(crate) fn block_info_cf(&self) -> BlockInfoCf<'_> {
+        BlockInfoCf::new(&self.db, BLOCK_INFO)
             .expect("column family was created when database was created")
     }
 
@@ -162,6 +179,15 @@ impl ZebraDb {
             .zs_get(&())
             .unwrap_or_else(ValueBalance::zero)
     }
+
+    /// Returns the stored `BlockInfo` for the given block.
+    pub fn block_info(&self, hash_or_height: HashOrHeight) -> Option<BlockInfo> {
+        let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
+
+        let block_info_cf = self.block_info_cf();
+
+        block_info_cf.zs_get(&height)
+    }
 }
 
 impl DiskWriteBatch {
@@ -226,19 +252,50 @@ impl DiskWriteBatch {
         finalized: &FinalizedBlock,
         utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
         value_pool: ValueBalance<NonNegative>,
-    ) -> Result<(), BoxError> {
+    ) -> Result<(), ValidateContextError> {
+        let block_value_pool_change = finalized
+            .block
+            .chain_value_pool_change(
+                &utxos_spent_by_block,
+                finalized.deferred_pool_balance_change,
+            )
+            .map_err(|value_balance_error| {
+                ValidateContextError::CalculateBlockChainValueChange {
+                    value_balance_error,
+                    height: finalized.height,
+                    block_hash: finalized.hash,
+                    transaction_count: finalized.transaction_hashes.len(),
+                    spent_utxo_count: utxos_spent_by_block.len(),
+                }
+            })?;
+
+        let new_value_pool = value_pool
+            .add_chain_value_pool_change(block_value_pool_change)
+            .map_err(|value_balance_error| ValidateContextError::AddValuePool {
+                value_balance_error,
+                chain_value_pools: Box::new(value_pool),
+                block_value_pool_change: Box::new(block_value_pool_change),
+                height: Some(finalized.height),
+            })?;
+
+        // Update value pool metrics for observability (ZIP-209 compliance monitoring)
+        value_pool_metrics(&new_value_pool);
+
         let _ = db
             .chain_value_pools_cf()
             .with_batch_for_writing(self)
-            .zs_insert(
-                &(),
-                &value_pool.add_chain_value_pool_change(
-                    finalized.block.chain_value_pool_change(
-                        &utxos_spent_by_block,
-                        finalized.deferred_balance,
-                    )?,
-                )?,
-            );
+            .zs_insert(&(), &new_value_pool);
+
+        // Get the block size to store with the BlockInfo. This is a bit wasteful
+        // since the block header and txs were serialized previously when writing
+        // them to the DB, and we could get the size if we modified the database
+        // code to return the size of data written; but serialization should be cheap.
+        let block_size = finalized.block.zcash_serialized_size();
+
+        let _ = db.block_info_cf().with_batch_for_writing(self).zs_insert(
+            &finalized.height,
+            &BlockInfo::new(new_value_pool, block_size as u32),
+        );
 
         Ok(())
     }

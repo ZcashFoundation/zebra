@@ -73,33 +73,6 @@ fn jubjub_group_hash(d: [u8; 8], m: &[u8]) -> Option<jubjub::ExtendedPoint> {
     }
 }
 
-/// FindGroupHash for JubJub, from [zcash_primitives][0]
-///
-/// d is an 8-byte domain separator ("personalization"), m is the hash
-/// input.
-///
-/// [0]: https://github.com/zcash/librustzcash/blob/master/zcash_primitives/src/jubjub/mod.rs#L409
-/// <https://zips.z.cash/protocol/protocol.pdf#concretegrouphashjubjub>
-// TODO: move common functions like these out of the keys module into
-// a more appropriate location
-pub(super) fn find_group_hash(d: [u8; 8], m: &[u8]) -> jubjub::ExtendedPoint {
-    let mut tag = m.to_vec();
-    let i = tag.len();
-    tag.push(0u8);
-
-    loop {
-        let gh = jubjub_group_hash(d, &tag[..]);
-
-        // We don't want to overflow and start reusing generators
-        assert!(tag[i] != u8::MAX);
-        tag[i] += 1;
-
-        if let Some(gh) = gh {
-            break gh;
-        }
-    }
-}
-
 /// Used to derive a diversified base point from a diversifier value.
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#concretediversifyhash>
@@ -359,6 +332,12 @@ impl ZcashDeserialize for EphemeralPublicKey {
 /// [2]: https://zips.z.cash/protocol/protocol.pdf#concretereddsa
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
 pub struct ValidatingKey(redjubjub::VerificationKey<SpendAuth>);
+
+impl From<ValidatingKey> for redjubjub::VerificationKey<SpendAuth> {
+    fn from(rk: ValidatingKey) -> Self {
+        rk.0
+    }
+}
 
 impl TryFrom<redjubjub::VerificationKey<SpendAuth>> for ValidatingKey {
     type Error = &'static str;

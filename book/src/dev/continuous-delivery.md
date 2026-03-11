@@ -1,6 +1,6 @@
 # Zebra Continuous Delivery
 
-Zebra has an extension of it's continuous integration since it automatically deploys all
+Zebra has an extension of its continuous integration since it automatically deploys all
 code changes to a testing and/or pre-production environment after each PR gets merged
 into the `main` branch, and on each Zebra `release`.
 
@@ -25,4 +25,4 @@ A single instance can also be deployed, on an on-demand basis, if required, when
 long-lived instance, with specific changes, is needed to be tested in the Mainnet with
 the same infrastructure used for CI & CD.
 
-Further validations of the actual process can be done on our continuous delivery [workflow file](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/cd-deploy-nodes-gcp.yml).
+Further validations of the actual process can be done on our continuous delivery [workflow file](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/zfnd-deploy-nodes-gcp.yml).

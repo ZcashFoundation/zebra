@@ -4,6 +4,7 @@ expression: parsed
 ---
 {
   "jsonrpc": "2.0",
+  "id": 123,
   "result": {
     "pool": "orchard",
     "start_index": 338,
@@ -13,6 +14,5 @@ expression: parsed
         "end_height": 1888929
       }
     ]
-  },
-  "id": 123
+  }
 }

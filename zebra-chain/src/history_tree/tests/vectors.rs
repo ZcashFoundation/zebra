@@ -55,7 +55,7 @@ fn push_and_prune_for_network_upgrade(
         assert_eq!(first_commitment, ChainHistoryActivationReserved);
     }
 
-    // Build initial history tree tree with only the first block
+    // Build initial history tree with only the first block
     let first_sapling_root =
         sapling::tree::Root::try_from(**sapling_roots.get(&height).expect("test vector exists"))?;
     let mut tree = NonEmptyHistoryTree::from_block(
@@ -94,7 +94,7 @@ fn push_and_prune_for_network_upgrade(
     tree.push(second_block, &second_sapling_root, &Default::default())
         .unwrap();
 
-    // Adding a second block will produce a 3-node tree (one parent and two leafs).
+    // Adding a second block will produce a 3-node tree (one parent and two leaves).
     assert_eq!(tree.size(), 3);
     // The tree must have been pruned, resulting in a single peak (the parent).
     assert_eq!(tree.peaks().len(), 1);

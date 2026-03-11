@@ -82,6 +82,7 @@ pub fn get_block_template_chain_info(
 ///
 /// Returns the solution rate per second for the current best chain, or `None` if
 /// the `start_hash` and at least 1 block below it are not found in the chain.
+#[allow(unused)]
 pub fn solution_rate(
     non_finalized_state: &NonFinalizedState,
     db: &ZebraDb,
@@ -249,7 +250,7 @@ fn difficulty_time_and_history_tree(
     let mut result = GetBlockTemplateChainInfo {
         tip_hash,
         tip_height,
-        history_tree,
+        chain_history_root: history_tree.hash(),
         expected_difficulty,
         cur_time,
         min_time,

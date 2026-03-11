@@ -1,5 +1,7 @@
 //! Randomised property tests for the mempool.
 
+#![allow(clippy::unwrap_in_result)]
+
 use std::{env, fmt, sync::Arc};
 
 use proptest::{collection::vec, prelude::*};
@@ -23,6 +25,7 @@ use zebra_test::mock_service::{MockService, PropTestAssertion};
 use zs::CheckpointVerifiedBlock;
 
 use crate::components::{
+    mempool::tests::standard_verified_unmined_tx_strategy,
     mempool::{config::Config, Mempool},
     sync::{RecentSyncLengths, SyncStatus},
 };
@@ -40,6 +43,13 @@ const CHAIN_LENGTH: usize = 5;
 
 const DEFAULT_MEMPOOL_PROPTEST_CASES: u32 = 8;
 
+fn standard_verified_unmined_tx_display_strategy(
+) -> BoxedStrategy<DisplayToDebug<VerifiedUnminedTx>> {
+    standard_verified_unmined_tx_strategy()
+        .prop_map(DisplayToDebug)
+        .boxed()
+}
+
 proptest! {
     // The mempool tests can generate very verbose logs, so we use fewer cases by
     // default. Set the PROPTEST_CASES env var to override this default.
@@ -52,7 +62,7 @@ proptest! {
     #[test]
     fn storage_is_cleared_on_single_chain_reset(
         network in any::<Network>(),
-        transaction in any::<DisplayToDebug<VerifiedUnminedTx>>(),
+        transaction in standard_verified_unmined_tx_display_strategy(),
         chain_tip in any::<DisplayToDebug<ChainTipBlock>>(),
     ) {
         let (runtime, _init_guard) = zebra_test::init_async();
@@ -74,7 +84,7 @@ proptest! {
             // Insert a dummy transaction.
             mempool
                 .storage()
-                .insert(transaction.0)
+                .insert(transaction.0, Vec::new(), None)
                 .expect("Inserting a transaction should succeed");
 
             // The first call to `poll_ready` shouldn't clear the storage yet.
@@ -102,7 +112,7 @@ proptest! {
     fn storage_is_cleared_on_multiple_chain_resets(
         network in any::<Network>(),
         mut previous_chain_tip in any::<DisplayToDebug<ChainTipBlock>>(),
-        mut transactions in vec(any::<DisplayToDebug<VerifiedUnminedTx>>(), 0..CHAIN_LENGTH),
+        mut transactions in vec(standard_verified_unmined_tx_display_strategy(), 0..CHAIN_LENGTH),
         fake_chain_tips in vec(any::<TypeNameToDebug<FakeChainTip>>(), 0..CHAIN_LENGTH),
     ) {
         let (runtime, _init_guard) = zebra_test::init_async();
@@ -148,7 +158,7 @@ proptest! {
                 // Insert the dummy transaction into the mempool.
                 mempool
                     .storage()
-                    .insert(transaction.0.clone())
+                    .insert(transaction.0.clone(), Vec::new(), None)
                     .expect("Inserting a transaction should succeed");
 
                 // Set the new chain tip.
@@ -184,7 +194,7 @@ proptest! {
     #[test]
     fn storage_is_cleared_if_syncer_falls_behind(
         network in any::<Network>(),
-        transaction in any::<VerifiedUnminedTx>(),
+        transaction in standard_verified_unmined_tx_strategy(),
     ) {
         let (runtime, _init_guard) = zebra_test::init_async();
 
@@ -205,7 +215,7 @@ proptest! {
             // Insert a dummy transaction.
             mempool
                 .storage()
-                .insert(transaction)
+                .insert(transaction, Vec::new(), None)
                 .expect("Inserting a transaction should succeed");
 
             // The first call to `poll_ready` shouldn't clear the storage yet.
@@ -271,7 +281,8 @@ fn setup(
     let (mut chain_tip_sender, latest_chain_tip, chain_tip_change) =
         ChainTipSender::new(None, network);
 
-    let (mempool, _transaction_receiver) = Mempool::new(
+    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
+    let (mempool, mempool_transaction_subscriber) = Mempool::new(
         &Config {
             tx_cost_limit: 160_000_000,
             ..Default::default()
@@ -282,7 +293,11 @@ fn setup(
         sync_status,
         latest_chain_tip,
         chain_tip_change,
+        misbehavior_tx,
     );
+
+    let mut transaction_receiver = mempool_transaction_subscriber.subscribe();
+    tokio::spawn(async move { while transaction_receiver.recv().await.is_ok() {} });
 
     // sends a fake chain tip so that the mempool can be enabled
     chain_tip_sender.set_finalized_tip(genesis_chain_tip());

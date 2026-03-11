@@ -1,17 +1,24 @@
 //! Network methods for fetching blockchain vectors.
 //!
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, ops::RangeBounds};
 
-use crate::{block::Block, parameters::Network, serialization::ZcashDeserializeInto};
+use crate::{
+    amount::Amount,
+    block::Block,
+    parameters::Network,
+    serialization::ZcashDeserializeInto,
+    transaction::{UnminedTx, VerifiedUnminedTx},
+};
 
 use zebra_test::vectors::{
     BLOCK_MAINNET_1046400_BYTES, BLOCK_MAINNET_653599_BYTES, BLOCK_MAINNET_982681_BYTES,
     BLOCK_TESTNET_1116000_BYTES, BLOCK_TESTNET_583999_BYTES, BLOCK_TESTNET_925483_BYTES,
     CONTINUOUS_MAINNET_BLOCKS, CONTINUOUS_TESTNET_BLOCKS, MAINNET_BLOCKS,
-    MAINNET_FINAL_SAPLING_ROOTS, MAINNET_FINAL_SPROUT_ROOTS,
+    MAINNET_FINAL_ORCHARD_ROOTS, MAINNET_FINAL_SAPLING_ROOTS, MAINNET_FINAL_SPROUT_ROOTS,
     SAPLING_FINAL_ROOT_MAINNET_1046400_BYTES, SAPLING_FINAL_ROOT_TESTNET_1116000_BYTES,
-    TESTNET_BLOCKS, TESTNET_FINAL_SAPLING_ROOTS, TESTNET_FINAL_SPROUT_ROOTS,
+    TESTNET_BLOCKS, TESTNET_FINAL_ORCHARD_ROOTS, TESTNET_FINAL_SAPLING_ROOTS,
+    TESTNET_FINAL_SPROUT_ROOTS,
 };
 
 /// Network methods for fetching blockchain vectors.
@@ -28,6 +35,48 @@ impl Network {
         } else {
             TESTNET_BLOCKS.iter()
         }
+    }
+
+    /// Returns iterator over deserialized blocks.
+    pub fn block_parsed_iter(&self) -> impl Iterator<Item = Block> {
+        self.block_iter().map(|(_, block_bytes)| {
+            block_bytes
+                .zcash_deserialize_into::<Block>()
+                .expect("block is structurally valid")
+        })
+    }
+
+    /// Returns iterator over verified unmined transactions in the provided block height range.
+    pub fn unmined_transactions_in_blocks(
+        &self,
+        block_height_range: impl RangeBounds<u32>,
+    ) -> impl DoubleEndedIterator<Item = VerifiedUnminedTx> {
+        let blocks = self.block_iter();
+
+        // Deserialize the blocks that are selected based on the specified `block_height_range`.
+        let selected_blocks = blocks
+            .filter(move |(&height, _)| block_height_range.contains(&height))
+            .map(|(_, block)| {
+                block
+                    .zcash_deserialize_into::<Block>()
+                    .expect("block test vector is structurally valid")
+            });
+
+        // Extract the transactions from the blocks and wrap each one as an unmined transaction.
+        // Use a fake zero miner fee and sigops, because we don't have the UTXOs to calculate
+        // the correct fee.
+        selected_blocks
+            .flat_map(|block| block.transactions)
+            .map(UnminedTx::from)
+            // Skip transactions that fail ZIP-317 mempool checks
+            .filter_map(|transaction| {
+                VerifiedUnminedTx::new(
+                    transaction,
+                    Amount::try_from(1_000_000).expect("valid amount"),
+                    0,
+                )
+                .ok()
+            })
     }
 
     /// Returns blocks indexed by height in a [`BTreeMap`].
@@ -79,17 +128,21 @@ impl Network {
         }
     }
 
-    /// Returns iterator over blocks and sapling roots.
-    pub fn block_sapling_roots_iter(
-        &self,
-    ) -> (
-        std::collections::btree_map::Iter<'_, u32, &[u8]>,
-        std::collections::BTreeMap<u32, &[u8; 32]>,
-    ) {
+    /// Returns a [`BTreeMap`] of heights and Sapling anchors for this network.
+    pub fn sapling_anchors(&self) -> std::collections::BTreeMap<u32, &[u8; 32]> {
         if self.is_mainnet() {
-            (MAINNET_BLOCKS.iter(), MAINNET_FINAL_SAPLING_ROOTS.clone())
+            MAINNET_FINAL_SAPLING_ROOTS.clone()
         } else {
-            (TESTNET_BLOCKS.iter(), TESTNET_FINAL_SAPLING_ROOTS.clone())
+            TESTNET_FINAL_SAPLING_ROOTS.clone()
+        }
+    }
+
+    /// Returns a [`BTreeMap`] of heights and Orchard anchors for this network.
+    pub fn orchard_anchors(&self) -> std::collections::BTreeMap<u32, &[u8; 32]> {
+        if self.is_mainnet() {
+            MAINNET_FINAL_ORCHARD_ROOTS.clone()
+        } else {
+            TESTNET_FINAL_ORCHARD_ROOTS.clone()
         }
     }
 

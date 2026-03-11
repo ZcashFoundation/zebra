@@ -8,18 +8,22 @@ use std::{
     sync::Arc,
 };
 
+use chrono::{DateTime, Utc};
 use mset::MultiSet;
 use tracing::instrument;
 
 use zebra_chain::{
     amount::{Amount, NegativeAllowed, NonNegative},
     block::{self, Height},
+    block_info::BlockInfo,
     history_tree::HistoryTree,
     orchard,
     parallel::tree::NoteCommitmentTrees,
     parameters::Network,
     primitives::Groth16Proof,
-    sapling, sprout,
+    sapling,
+    serialization::ZcashSerialize as _,
+    sprout,
     subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
     transaction::{
         self,
@@ -30,13 +34,16 @@ use zebra_chain::{
     work::difficulty::PartialCumulativeWork,
 };
 
-#[cfg(feature = "tx_v6")]
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
 use zebra_chain::orchard_zsa::{AssetBase, AssetState, IssuedAssetChanges};
 
 use crate::{
     request::Treestate, service::check, ContextuallyVerifiedBlock, HashOrHeight, OutputLocation,
     TransactionLocation, ValidateContextError,
 };
+
+#[cfg(feature = "indexer")]
+use crate::request::Spend;
 
 use self::index::TransparentTransfers;
 
@@ -72,6 +79,14 @@ pub struct Chain {
     pub(super) last_fork_height: Option<Height>,
 }
 
+/// Spending transaction id type when the `indexer` feature is selected.
+#[cfg(feature = "indexer")]
+pub(crate) type SpendingTransactionId = transaction::Hash;
+
+/// Spending transaction id type when the `indexer` feature is not selected.
+#[cfg(not(feature = "indexer"))]
+pub(crate) type SpendingTransactionId = ();
+
 /// The internal state of [`Chain`].
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct ChainInner {
@@ -95,9 +110,11 @@ pub struct ChainInner {
     //
     // TODO: replace OutPoint with OutputLocation?
     pub(crate) created_utxos: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
-    /// The [`transparent::OutPoint`]s spent by `blocks`,
-    /// including those created by earlier transactions or blocks in the chain.
-    pub(crate) spent_utxos: HashSet<transparent::OutPoint>,
+    /// The spending transaction ids by [`transparent::OutPoint`]s spent by `blocks`,
+    /// including spent outputs created by earlier transactions or blocks in the chain.
+    ///
+    /// Note: Spending transaction ids are only tracked when the `indexer` feature is selected.
+    pub(crate) spent_utxos: HashMap<transparent::OutPoint, SpendingTransactionId>,
 
     // Note commitment trees
     //
@@ -163,7 +180,7 @@ pub struct ChainInner {
     pub(crate) sapling_anchors_by_height: BTreeMap<block::Height, sapling::tree::Root>,
     /// A list of Sapling subtrees completed in the non-finalized state
     pub(crate) sapling_subtrees:
-        BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<sapling::tree::Node>>,
+        BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<sapling_crypto::Node>>,
 
     /// The Orchard anchors created by `blocks`.
     ///
@@ -179,7 +196,7 @@ pub struct ChainInner {
     pub(crate) orchard_subtrees:
         BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<orchard::tree::Node>>,
 
-    #[cfg(feature = "tx_v6")]
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
     /// A partial map of `issued_assets` with entries for asset states that were updated in
     /// this chain.
     // TODO: Add reference to ZIP
@@ -187,12 +204,15 @@ pub struct ChainInner {
 
     // Nullifiers
     //
-    /// The Sprout nullifiers revealed by `blocks`.
-    pub(crate) sprout_nullifiers: HashSet<sprout::Nullifier>,
-    /// The Sapling nullifiers revealed by `blocks`.
-    pub(crate) sapling_nullifiers: HashSet<sapling::Nullifier>,
-    /// The Orchard nullifiers revealed by `blocks`.
-    pub(crate) orchard_nullifiers: HashSet<orchard::Nullifier>,
+    /// The Sprout nullifiers revealed by `blocks` and, if the `indexer` feature is selected,
+    /// the id of the transaction that revealed them.
+    pub(crate) sprout_nullifiers: HashMap<sprout::Nullifier, SpendingTransactionId>,
+    /// The Sapling nullifiers revealed by `blocks` and, if the `indexer` feature is selected,
+    /// the id of the transaction that revealed them.
+    pub(crate) sapling_nullifiers: HashMap<sapling::Nullifier, SpendingTransactionId>,
+    /// The Orchard nullifiers revealed by `blocks` and, if the `indexer` feature is selected,
+    /// the id of the transaction that revealed them.
+    pub(crate) orchard_nullifiers: HashMap<orchard::Nullifier, SpendingTransactionId>,
 
     // Transparent Transfers
     // TODO: move to the transparent section
@@ -217,6 +237,8 @@ pub struct ChainInner {
     /// When a new chain is created from the finalized tip, it is initialized with the finalized tip
     /// chain value pool balances.
     pub(crate) chain_value_pools: ValueBalance<NonNegative>,
+    /// The block info after the given block height.
+    pub(crate) block_info_by_height: BTreeMap<block::Height, BlockInfo>,
 }
 
 impl Chain {
@@ -248,7 +270,7 @@ impl Chain {
             orchard_anchors_by_height: Default::default(),
             orchard_trees_by_height: Default::default(),
             orchard_subtrees: Default::default(),
-            #[cfg(feature = "tx_v6")]
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             issued_assets: Default::default(),
             sprout_nullifiers: Default::default(),
             sapling_nullifiers: Default::default(),
@@ -257,6 +279,7 @@ impl Chain {
             partial_cumulative_work: Default::default(),
             history_trees_by_height: Default::default(),
             chain_value_pools: finalized_tip_chain_value_pools,
+            block_info_by_height: Default::default(),
         };
 
         let mut chain = Self {
@@ -356,6 +379,26 @@ impl Chain {
         (block, treestate)
     }
 
+    /// Returns the block at the provided height and all of its descendant blocks.
+    pub fn child_blocks(&self, block_height: &block::Height) -> Vec<ContextuallyVerifiedBlock> {
+        self.blocks
+            .range(block_height..)
+            .map(|(_h, b)| b.clone())
+            .collect()
+    }
+
+    /// Returns a new chain without the invalidated block or its descendants.
+    pub fn invalidate_block(
+        &self,
+        block_hash: block::Hash,
+    ) -> Option<(Self, Vec<ContextuallyVerifiedBlock>)> {
+        let block_height = self.height_by_hash(block_hash)?;
+        let mut new_chain = self.fork(block_hash)?;
+        new_chain.pop_tip();
+        new_chain.last_fork_height = self.last_fork_height.min(Some(block_height));
+        Some((new_chain, self.child_blocks(&block_height)))
+    }
+
     /// Returns the height of the chain root.
     pub fn non_finalized_root_height(&self) -> block::Height {
         self.blocks
@@ -402,11 +445,12 @@ impl Chain {
     pub fn transaction(
         &self,
         hash: transaction::Hash,
-    ) -> Option<(&Arc<Transaction>, block::Height)> {
+    ) -> Option<(&Arc<Transaction>, block::Height, DateTime<Utc>)> {
         self.tx_loc_by_hash.get(&hash).map(|tx_loc| {
             (
                 &self.blocks[&tx_loc.height].block.transactions[tx_loc.index.as_usize()],
                 tx_loc.height,
+                self.blocks[&tx_loc.height].block.header.time,
             )
         })
     }
@@ -506,6 +550,15 @@ impl Chain {
         )
     }
 
+    /// Returns the total pool balance after the block specified by
+    /// [`HashOrHeight`], if it exists in the non-finalized [`Chain`].
+    pub fn block_info(&self, hash_or_height: HashOrHeight) -> Option<BlockInfo> {
+        let height =
+            hash_or_height.height_or_else(|hash| self.height_by_hash.get(&hash).cloned())?;
+
+        self.block_info_by_height.get(&height).cloned()
+    }
+
     /// Returns the Sprout note commitment tree of the tip of this [`Chain`],
     /// including all finalized notes, and the non-finalized notes in this chain.
     ///
@@ -564,16 +617,14 @@ impl Chain {
         let anchor = tree.root();
         trace!(?height, ?anchor, "adding sprout tree");
 
-        // Don't add a new tree unless it differs from the previous one or there's no previous tree.
+        // Add the new tree only if:
+        //
+        // - it differs from the previous one, or
+        // - there's no previous tree.
         if height.is_min()
             || self
-                .sprout_tree(
-                    height
-                        .previous()
-                        .expect("Already checked for underflow.")
-                        .into(),
-                )
-                .map_or(true, |prev_tree| prev_tree != tree)
+                .sprout_tree(height.previous().expect("prev height").into())
+                .is_none_or(|prev_tree| prev_tree != tree)
         {
             assert_eq!(
                 self.sprout_trees_by_height.insert(height, tree.clone()),
@@ -710,7 +761,7 @@ impl Chain {
     pub fn sapling_subtree(
         &self,
         hash_or_height: HashOrHeight,
-    ) -> Option<NoteCommitmentSubtree<sapling::tree::Node>> {
+    ) -> Option<NoteCommitmentSubtree<sapling_crypto::Node>> {
         let height =
             hash_or_height.height_or_else(|hash| self.height_by_hash.get(&hash).cloned())?;
 
@@ -731,7 +782,7 @@ impl Chain {
     pub fn sapling_subtrees_in_range(
         &self,
         range: impl std::ops::RangeBounds<NoteCommitmentSubtreeIndex>,
-    ) -> BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<sapling::tree::Node>> {
+    ) -> BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<sapling_crypto::Node>> {
         self.sapling_subtrees
             .range(range)
             .map(|(index, subtree)| (*index, *subtree))
@@ -739,7 +790,7 @@ impl Chain {
     }
 
     /// Returns the Sapling [`NoteCommitmentSubtree`] if it was completed at the tip height.
-    pub fn sapling_subtree_for_tip(&self) -> Option<NoteCommitmentSubtree<sapling::tree::Node>> {
+    pub fn sapling_subtree_for_tip(&self) -> Option<NoteCommitmentSubtree<sapling_crypto::Node>> {
         if !self.is_empty() {
             let tip = self.non_finalized_tip_height();
             self.sapling_subtree(tip.into())
@@ -769,16 +820,14 @@ impl Chain {
         let anchor = tree.root();
         trace!(?height, ?anchor, "adding sapling tree");
 
-        // Don't add a new tree unless it differs from the previous one or there's no previous tree.
+        // Add the new tree only if:
+        //
+        // - it differs from the previous one, or
+        // - there's no previous tree.
         if height.is_min()
             || self
-                .sapling_tree(
-                    height
-                        .previous()
-                        .expect("Already checked for underflow.")
-                        .into(),
-                )
-                .map_or(true, |prev_tree| prev_tree != tree)
+                .sapling_tree(height.previous().expect("prev height").into())
+                .is_none_or(|prev_tree| prev_tree != tree)
         {
             assert_eq!(
                 self.sapling_trees_by_height.insert(height, tree),
@@ -950,14 +999,14 @@ impl Chain {
         }
     }
 
-    #[cfg(feature = "tx_v6")]
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
     /// Returns the Orchard issued asset state if one is present in
     /// the chain for the provided asset base.
     pub fn issued_asset(&self, asset_base: &AssetBase) -> Option<AssetState> {
         self.issued_assets.get(asset_base).cloned()
     }
 
-    #[cfg(feature = "tx_v6")]
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
     /// Remove the History tree index at `height`.
     fn revert_issued_assets(
         &mut self,
@@ -1017,16 +1066,14 @@ impl Chain {
         let anchor = tree.root();
         trace!(?height, ?anchor, "adding orchard tree");
 
-        // Don't add a new tree unless it differs from the previous one or there's no previous tree.
+        // Add the new tree only if:
+        //
+        // - it differs from the previous one, or
+        // - there's no previous tree.
         if height.is_min()
             || self
-                .orchard_tree(
-                    height
-                        .previous()
-                        .expect("Already checked for underflow.")
-                        .into(),
-                )
-                .map_or(true, |prev_tree| prev_tree != tree)
+                .orchard_tree(height.previous().expect("prev height").into())
+                .is_none_or(|prev_tree| prev_tree != tree)
         {
             assert_eq!(
                 self.orchard_trees_by_height.insert(height, tree),
@@ -1294,7 +1341,7 @@ impl Chain {
     /// and removed from the relevant chain(s).
     pub fn unspent_utxos(&self) -> HashMap<transparent::OutPoint, transparent::OrderedUtxo> {
         let mut unspent_utxos = self.created_utxos.clone();
-        unspent_utxos.retain(|outpoint, _utxo| !self.spent_utxos.contains(outpoint));
+        unspent_utxos.retain(|outpoint, _utxo| !self.spent_utxos.contains_key(outpoint));
 
         unspent_utxos
     }
@@ -1304,11 +1351,23 @@ impl Chain {
     ///
     /// UTXOs are returned regardless of whether they have been spent.
     pub fn created_utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
-        if let Some(utxo) = self.created_utxos.get(outpoint) {
-            return Some(utxo.utxo.clone());
-        }
+        self.created_utxos
+            .get(outpoint)
+            .map(|utxo| utxo.utxo.clone())
+    }
 
-        None
+    /// Returns the [`Hash`](transaction::Hash) of the transaction that spent an output at
+    /// the provided [`transparent::OutPoint`] or revealed the provided nullifier, if it exists
+    /// and is spent or revealed by this chain.
+    #[cfg(feature = "indexer")]
+    pub fn spending_transaction_hash(&self, spend: &Spend) -> Option<transaction::Hash> {
+        match spend {
+            Spend::OutPoint(outpoint) => self.spent_utxos.get(outpoint),
+            Spend::Sprout(nullifier) => self.sprout_nullifiers.get(nullifier),
+            Spend::Sapling(nullifier) => self.sapling_nullifiers.get(nullifier),
+            Spend::Orchard(nullifier) => self.orchard_nullifiers.get(nullifier),
+        }
+        .cloned()
     }
 
     // Address index queries
@@ -1326,13 +1385,14 @@ impl Chain {
     pub fn partial_transparent_indexes<'a>(
         &'a self,
         addresses: &'a HashSet<transparent::Address>,
-    ) -> impl Iterator<Item = &TransparentTransfers> {
+    ) -> impl Iterator<Item = &'a TransparentTransfers> {
         addresses
             .iter()
             .flat_map(|address| self.partial_transparent_transfers.get(address))
     }
 
-    /// Returns the transparent balance change for `addresses` in this non-finalized chain.
+    /// Returns a tuple of the transparent balance change and the total received funds for
+    /// `addresses` in this non-finalized chain.
     ///
     /// If the balance doesn't change for any of the addresses, returns zero.
     ///
@@ -1345,15 +1405,16 @@ impl Chain {
     pub fn partial_transparent_balance_change(
         &self,
         addresses: &HashSet<transparent::Address>,
-    ) -> Amount<NegativeAllowed> {
-        let balance_change: Result<Amount<NegativeAllowed>, _> = self
-            .partial_transparent_indexes(addresses)
-            .map(|transfers| transfers.balance())
-            .sum();
+    ) -> (Amount<NegativeAllowed>, u64) {
+        let (balance, received) = self.partial_transparent_indexes(addresses).fold(
+            (Ok(Amount::zero()), 0),
+            |(balance, received), transfers| {
+                let balance = balance + transfers.balance();
+                (balance, received + transfers.received())
+            },
+        );
 
-        balance_change.expect(
-            "unexpected amount overflow: value balances are valid, so partial sum should be valid",
-        )
+        (balance.expect("unexpected amount overflow"), received)
     }
 
     /// Returns the transparent UTXO changes for `addresses` in this non-finalized chain.
@@ -1493,7 +1554,7 @@ impl Chain {
 
         self.add_history_tree(height, history_tree);
 
-        #[cfg(feature = "tx_v6")]
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         for (asset_base, (old_state_from_block, new_state)) in
             contextually_valid.issued_asset_changes.iter()
         {
@@ -1590,7 +1651,7 @@ impl Chain {
                     sapling_shielded_data,
                     &None,
                     &None,
-                    #[cfg(feature ="tx_v6")]
+                    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
                     &None
                     ),
                 V5 {
@@ -1606,10 +1667,10 @@ impl Chain {
                     &None,
                     sapling_shielded_data,
                     orchard_shielded_data,
-                    #[cfg(feature ="tx_v6")]
+                    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
                     &None,
                 ),
-                #[cfg(feature ="tx_v6")]
+                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
                 V6 {
                     inputs,
                     outputs,
@@ -1625,12 +1686,13 @@ impl Chain {
                     &None,
                     orchard_shielded_data,
                 ),
+
                 V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
                     "older transaction versions only exist in finalized blocks, because of the mandatory canopy checkpoint",
                 ),
             };
 
-            #[cfg(not(feature = "tx_v6"))]
+            #[cfg(not(all(zcash_unstable = "nu7", feature = "tx_v6")))]
             let (
                 inputs,
                 outputs,
@@ -1640,7 +1702,7 @@ impl Chain {
                 orchard_shielded_data_vanilla,
             ) = transaction_data;
 
-            #[cfg(feature = "tx_v6")]
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             let (
                 inputs,
                 outputs,
@@ -1667,16 +1729,24 @@ impl Chain {
             self.update_chain_tip_with(&(inputs, &transaction_hash, spent_outputs))?;
 
             // add the shielded data
-            self.update_chain_tip_with(joinsplit_data)?;
-            self.update_chain_tip_with(sapling_shielded_data_per_spend_anchor)?;
-            self.update_chain_tip_with(sapling_shielded_data_shared_anchor)?;
-            self.update_chain_tip_with(orchard_shielded_data_vanilla)?;
-            #[cfg(feature = "tx_v6")]
-            self.update_chain_tip_with(orchard_shielded_data_zsa)?;
+
+            #[cfg(not(feature = "indexer"))]
+            let transaction_hash = ();
+
+            self.update_chain_tip_with(&(joinsplit_data, &transaction_hash))?;
+            self.update_chain_tip_with(&(
+                sapling_shielded_data_per_spend_anchor,
+                &transaction_hash,
+            ))?;
+            self.update_chain_tip_with(&(sapling_shielded_data_shared_anchor, &transaction_hash))?;
+            self.update_chain_tip_with(&(orchard_shielded_data_vanilla, &transaction_hash))?;
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            self.update_chain_tip_with(&(orchard_shielded_data_zsa, &transaction_hash))?;
         }
 
         // update the chain value pool balances
-        self.update_chain_tip_with(chain_value_pool_change)?;
+        let size = block.zcash_serialized_size();
+        self.update_chain_tip_with(&(*chain_value_pool_change, height, size))?;
 
         Ok(())
     }
@@ -1698,7 +1768,7 @@ impl DerefMut for Chain {
 
 /// The revert position being performed on a chain.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-enum RevertPosition {
+pub(crate) enum RevertPosition {
     /// The chain root is being reverted via [`Chain::pop_root`], when a block
     /// is finalized.
     Root,
@@ -1717,7 +1787,7 @@ enum RevertPosition {
 /// and [`Chain::pop_tip`] functions, and fear that it would be easy to
 /// introduce bugs when updating them, unless the code was reorganized to keep
 /// related operations adjacent to each other.
-trait UpdateWith<T> {
+pub(crate) trait UpdateWith<T> {
     /// When `T` is added to the chain tip,
     /// update [`Chain`] cumulative data members to add data that are derived from `T`.
     fn update_chain_tip_with(&mut self, _: &T) -> Result<(), ValidateContextError>;
@@ -1761,7 +1831,7 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
             &contextually_valid.chain_value_pool_change,
         );
 
-        #[cfg(feature = "tx_v6")]
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         let issued_asset_changes = &contextually_valid.issued_asset_changes;
 
         // remove the blocks hash from `height_by_hash`
@@ -1797,7 +1867,7 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                     sapling_shielded_data,
                     &None,
                     &None,
-                    #[cfg(feature = "tx_v6")]
+                    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
                     &None),
                 V5 {
                     inputs,
@@ -1812,10 +1882,10 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                     &None,
                     sapling_shielded_data,
                     orchard_shielded_data,
-                    #[cfg(feature = "tx_v6")]
+                    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
                     &None,
                 ),
-                #[cfg(feature = "tx_v6")]
+                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
                 V6 {
                     inputs,
                     outputs,
@@ -1831,12 +1901,13 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                     &None,
                     orchard_shielded_data,
                 ),
+
                 V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
                     "older transaction versions only exist in finalized blocks, because of the mandatory canopy checkpoint",
                 ),
             };
 
-            #[cfg(not(feature = "tx_v6"))]
+            #[cfg(not(all(zcash_unstable = "nu7", feature = "tx_v6")))]
             let (
                 inputs,
                 outputs,
@@ -1846,7 +1917,7 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                 orchard_shielded_data_vanilla,
             ) = transaction_data;
 
-            #[cfg(feature = "tx_v6")]
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             let (
                 inputs,
                 outputs,
@@ -1870,12 +1941,22 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
             );
 
             // remove the shielded data
-            self.revert_chain_with(joinsplit_data, position);
-            self.revert_chain_with(sapling_shielded_data_per_spend_anchor, position);
-            self.revert_chain_with(sapling_shielded_data_shared_anchor, position);
-            self.revert_chain_with(orchard_shielded_data_vanilla, position);
-            #[cfg(feature = "tx_v6")]
-            self.revert_chain_with(orchard_shielded_data_zsa, position);
+
+            #[cfg(not(feature = "indexer"))]
+            let transaction_hash = &();
+
+            self.revert_chain_with(&(joinsplit_data, transaction_hash), position);
+            self.revert_chain_with(
+                &(sapling_shielded_data_per_spend_anchor, transaction_hash),
+                position,
+            );
+            self.revert_chain_with(
+                &(sapling_shielded_data_shared_anchor, transaction_hash),
+                position,
+            );
+            self.revert_chain_with(&(orchard_shielded_data_vanilla, transaction_hash), position);
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            self.revert_chain_with(&(orchard_shielded_data_zsa, transaction_hash), position);
         }
 
         // TODO: move these to the shielded UpdateWith.revert...()?
@@ -1886,12 +1967,13 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
         // TODO: move this to the history tree UpdateWith.revert...()?
         self.remove_history_tree(position, height);
 
-        #[cfg(feature = "tx_v6")]
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         // In revert_chain_with for ContextuallyVerifiedBlock:
         self.revert_issued_assets(position, issued_asset_changes);
 
         // revert the chain value pool balances, if needed
-        self.revert_chain_with(chain_value_pool_change, position);
+        // note that size is 0 because it isn't need for reverting
+        self.revert_chain_with(&(*chain_value_pool_change, height, 0), position);
     }
 }
 
@@ -2020,10 +2102,18 @@ impl
                 continue;
             };
 
+            #[cfg(feature = "indexer")]
+            let insert_value = *spending_tx_hash;
+            #[cfg(not(feature = "indexer"))]
+            let insert_value = ();
+
             // Index the spent outpoint in the chain
-            let first_spend = self.spent_utxos.insert(spent_outpoint);
+            let was_spend_newly_inserted = self
+                .spent_utxos
+                .insert(spent_outpoint, insert_value)
+                .is_none();
             assert!(
-                first_spend,
+                was_spend_newly_inserted,
                 "unexpected duplicate spent output: should be checked earlier"
             );
 
@@ -2071,9 +2161,9 @@ impl
             };
 
             // Revert the spent outpoint in the chain
-            let spent_outpoint_was_removed = self.spent_utxos.remove(&spent_outpoint);
+            let was_spent_outpoint_removed = self.spent_utxos.remove(&spent_outpoint).is_some();
             assert!(
-                spent_outpoint_was_removed,
+                was_spent_outpoint_removed,
                 "spent_utxos must be present if block was added to chain"
             );
 
@@ -2108,11 +2198,19 @@ impl
     }
 }
 
-impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
+impl
+    UpdateWith<(
+        &Option<transaction::JoinSplitData<Groth16Proof>>,
+        &SpendingTransactionId,
+    )> for Chain
+{
     #[instrument(skip(self, joinsplit_data))]
     fn update_chain_tip_with(
         &mut self,
-        joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
+        &(joinsplit_data, revealing_tx_id): &(
+            &Option<transaction::JoinSplitData<Groth16Proof>>,
+            &SpendingTransactionId,
+        ),
     ) -> Result<(), ValidateContextError> {
         if let Some(joinsplit_data) = joinsplit_data {
             // We do note commitment tree updates in parallel rayon threads.
@@ -2120,6 +2218,7 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
             check::nullifier::add_to_non_finalized_chain_unique(
                 &mut self.sprout_nullifiers,
                 joinsplit_data.nullifiers(),
+                *revealing_tx_id,
             )?;
         }
         Ok(())
@@ -2133,7 +2232,10 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
     #[instrument(skip(self, joinsplit_data))]
     fn revert_chain_with(
         &mut self,
-        joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
+        &(joinsplit_data, _revealing_tx_id): &(
+            &Option<transaction::JoinSplitData<Groth16Proof>>,
+            &SpendingTransactionId,
+        ),
         _position: RevertPosition,
     ) {
         if let Some(joinsplit_data) = joinsplit_data {
@@ -2149,14 +2251,21 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
     }
 }
 
-impl<AnchorV> UpdateWith<Option<sapling::ShieldedData<AnchorV>>> for Chain
+impl<AnchorV>
+    UpdateWith<(
+        &Option<sapling::ShieldedData<AnchorV>>,
+        &SpendingTransactionId,
+    )> for Chain
 where
     AnchorV: sapling::AnchorVariant + Clone,
 {
     #[instrument(skip(self, sapling_shielded_data))]
     fn update_chain_tip_with(
         &mut self,
-        sapling_shielded_data: &Option<sapling::ShieldedData<AnchorV>>,
+        &(sapling_shielded_data, revealing_tx_id): &(
+            &Option<sapling::ShieldedData<AnchorV>>,
+            &SpendingTransactionId,
+        ),
     ) -> Result<(), ValidateContextError> {
         if let Some(sapling_shielded_data) = sapling_shielded_data {
             // We do note commitment tree updates in parallel rayon threads.
@@ -2164,6 +2273,7 @@ where
             check::nullifier::add_to_non_finalized_chain_unique(
                 &mut self.sapling_nullifiers,
                 sapling_shielded_data.nullifiers(),
+                *revealing_tx_id,
             )?;
         }
         Ok(())
@@ -2177,7 +2287,10 @@ where
     #[instrument(skip(self, sapling_shielded_data))]
     fn revert_chain_with(
         &mut self,
-        sapling_shielded_data: &Option<sapling::ShieldedData<AnchorV>>,
+        &(sapling_shielded_data, _revealing_tx_id): &(
+            &Option<sapling::ShieldedData<AnchorV>>,
+            &SpendingTransactionId,
+        ),
         _position: RevertPosition,
     ) {
         if let Some(sapling_shielded_data) = sapling_shielded_data {
@@ -2193,13 +2306,19 @@ where
     }
 }
 
-impl<Flavor: orchard::ShieldedDataFlavor> UpdateWith<Option<orchard::ShieldedData<Flavor>>>
-    for Chain
+impl<Flavor: orchard::ShieldedDataFlavor>
+    UpdateWith<(
+        &Option<orchard::ShieldedData<Flavor>>,
+        &SpendingTransactionId,
+    )> for Chain
 {
     #[instrument(skip(self, orchard_shielded_data))]
     fn update_chain_tip_with(
         &mut self,
-        orchard_shielded_data: &Option<orchard::ShieldedData<Flavor>>,
+        &(orchard_shielded_data, revealing_tx_id): &(
+            &Option<orchard::ShieldedData<Flavor>>,
+            &SpendingTransactionId,
+        ),
     ) -> Result<(), ValidateContextError> {
         if let Some(orchard_shielded_data) = orchard_shielded_data {
             // We do note commitment tree updates in parallel rayon threads.
@@ -2207,6 +2326,7 @@ impl<Flavor: orchard::ShieldedDataFlavor> UpdateWith<Option<orchard::ShieldedDat
             check::nullifier::add_to_non_finalized_chain_unique(
                 &mut self.orchard_nullifiers,
                 orchard_shielded_data.nullifiers(),
+                *revealing_tx_id,
             )?;
         }
         Ok(())
@@ -2220,7 +2340,10 @@ impl<Flavor: orchard::ShieldedDataFlavor> UpdateWith<Option<orchard::ShieldedDat
     #[instrument(skip(self, orchard_shielded_data))]
     fn revert_chain_with(
         &mut self,
-        orchard_shielded_data: &Option<orchard::ShieldedData<Flavor>>,
+        (orchard_shielded_data, _revealing_tx_id): &(
+            &Option<orchard::ShieldedData<Flavor>>,
+            &SpendingTransactionId,
+        ),
         _position: RevertPosition,
     ) {
         if let Some(orchard_shielded_data) = orchard_shielded_data {
@@ -2236,22 +2359,26 @@ impl<Flavor: orchard::ShieldedDataFlavor> UpdateWith<Option<orchard::ShieldedDat
     }
 }
 
-impl UpdateWith<ValueBalance<NegativeAllowed>> for Chain {
+impl UpdateWith<(ValueBalance<NegativeAllowed>, Height, usize)> for Chain {
+    #[allow(clippy::unwrap_in_result)]
     fn update_chain_tip_with(
         &mut self,
-        block_value_pool_change: &ValueBalance<NegativeAllowed>,
+        (block_value_pool_change, height, size): &(ValueBalance<NegativeAllowed>, Height, usize),
     ) -> Result<(), ValidateContextError> {
         match self
             .chain_value_pools
             .add_chain_value_pool_change(*block_value_pool_change)
         {
-            Ok(chain_value_pools) => self.chain_value_pools = chain_value_pools,
+            Ok(chain_value_pools) => {
+                self.chain_value_pools = chain_value_pools;
+                self.block_info_by_height
+                    .insert(*height, BlockInfo::new(chain_value_pools, *size as u32));
+            }
             Err(value_balance_error) => Err(ValidateContextError::AddValuePool {
                 value_balance_error,
-                chain_value_pools: self.chain_value_pools,
-                block_value_pool_change: *block_value_pool_change,
-                // assume that the current block is added to `blocks` after `update_chain_tip_with`
-                height: self.max_block_height().and_then(|height| height + 1),
+                chain_value_pools: Box::new(self.chain_value_pools),
+                block_value_pool_change: Box::new(*block_value_pool_change),
+                height: Some(*height),
             })?,
         };
 
@@ -2273,7 +2400,7 @@ impl UpdateWith<ValueBalance<NegativeAllowed>> for Chain {
     /// change.
     fn revert_chain_with(
         &mut self,
-        block_value_pool_change: &ValueBalance<NegativeAllowed>,
+        (block_value_pool_change, height, _size): &(ValueBalance<NegativeAllowed>, Height, usize),
         position: RevertPosition,
     ) {
         use std::ops::Neg;
@@ -2284,6 +2411,7 @@ impl UpdateWith<ValueBalance<NegativeAllowed>> for Chain {
                 .add_chain_value_pool_change(block_value_pool_change.neg())
                 .expect("reverting the tip will leave the pools in a previously valid state");
         }
+        self.block_info_by_height.remove(height);
     }
 }
 
@@ -2396,7 +2524,7 @@ impl Chain {
     /// Inserts the supplied Sapling note commitment subtree into the chain.
     pub(crate) fn insert_sapling_subtree(
         &mut self,
-        subtree: NoteCommitmentSubtree<sapling::tree::Node>,
+        subtree: NoteCommitmentSubtree<sapling_crypto::Node>,
     ) {
         self.inner
             .sapling_subtrees

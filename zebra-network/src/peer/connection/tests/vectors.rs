@@ -28,6 +28,7 @@ use crate::{
         ClientRequest, ErrorSlot,
     },
     protocol::external::Message,
+    types::Nonce,
     PeerError, Request, Response,
 };
 
@@ -883,6 +884,81 @@ async fn connection_is_randomly_disconnected_on_overload() {
         connection_continues > 0,
         "some overloaded errors must be ignored at random"
     );
+}
+
+#[tokio::test]
+async fn connection_ping_pong_round_trip() {
+    let _init_guard = zebra_test::init();
+
+    // The real stream and sink are from a split TCP connection,
+    // but that doesn't change how the state machine behaves.
+    let (peer_tx, peer_rx) = mpsc::channel(1);
+
+    let (
+        connection,
+        mut client_tx,
+        _inbound_service,
+        mut peer_outbound_messages,
+        _shared_error_slot,
+    ) = new_test_connection();
+
+    let connection = tokio::spawn(connection.run(peer_rx));
+
+    // === Client sends Ping request ===
+    let (response_tx, response_rx) = oneshot::channel();
+    let nonce = Nonce::default();
+
+    client_tx
+        .send(ClientRequest {
+            request: Request::Ping(nonce),
+            tx: response_tx,
+            inv_collector: None,
+            transient_addr: None,
+            span: Span::none(),
+        })
+        .await
+        .expect("send to connection should succeed");
+
+    // === Peer receives Ping message ===
+    let outbound_msg = peer_outbound_messages
+        .next()
+        .await
+        .expect("expected outbound Ping message");
+
+    let ping_nonce = match outbound_msg {
+        Message::Ping(nonce) => nonce,
+        msg => panic!("expected Ping message, but got: {:?}", msg),
+    };
+
+    assert_eq!(
+        nonce, ping_nonce,
+        "Ping nonce in request must match message sent to peer"
+    );
+
+    // === Peer sends matching Pong ===
+    let pong_rtt = Duration::from_millis(42);
+    tokio::time::sleep(pong_rtt).await;
+
+    peer_tx
+        .clone()
+        .send(Ok(Message::Pong(ping_nonce)))
+        .await
+        .expect("sending Pong to connection should succeed");
+
+    // === Client receives Pong response and verifies RTT ===
+    match response_rx.await.expect("response channel must succeed") {
+        Ok(Response::Pong(rtt)) => {
+            assert!(
+                rtt >= pong_rtt,
+                "measured RTT {rtt:?} must be >= simulated RTT {pong_rtt:?}"
+            );
+        }
+        Ok(resp) => panic!("unexpected response: {resp:?}"),
+        Err(err) => panic!("unexpected error: {err:?}"),
+    }
+
+    drop(peer_tx);
+    let _ = connection.await;
 }
 
 /// Creates a new [`Connection`] instance for unit tests.

@@ -1,11 +1,13 @@
 //! Inbound service tests with a fake peer set.
 
+#![allow(clippy::unwrap_in_result)]
+
 use std::{collections::HashSet, iter, net::SocketAddr, str::FromStr, sync::Arc, time::Duration};
 
 use futures::FutureExt;
 use tokio::{sync::oneshot, task::JoinHandle, time::timeout};
 use tower::{buffer::Buffer, builder::ServiceBuilder, util::BoxService, Service, ServiceExt};
-use tracing::Span;
+use tracing::{Instrument, Span};
 
 use zebra_chain::{
     amount::Amount,
@@ -24,6 +26,7 @@ use zebra_network::{
     AddressBook, InventoryResponse, Request, Response,
 };
 use zebra_node_services::mempool;
+use zebra_rpc::SubmitBlockChannel;
 use zebra_state::{ChainTipChange, Config as StateConfig, CHAIN_TIP_UPDATE_WAIT_LIMIT};
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
@@ -31,8 +34,8 @@ use crate::{
     components::{
         inbound::{downloads::MAX_INBOUND_CONCURRENCY, Inbound, InboundSetupData},
         mempool::{
-            gossip_mempool_transaction_id, unmined_transactions_in_blocks, Config as MempoolConfig,
-            Mempool, MempoolError, SameEffectsChainRejectionError, UnboxMempoolError,
+            gossip_mempool_transaction_id, Config as MempoolConfig, Mempool, MempoolError,
+            SameEffectsChainRejectionError, UnboxMempoolError,
         },
         sync::{self, BlockGossipError, SyncStatus, PEER_GOSSIP_DELAY},
     },
@@ -104,7 +107,7 @@ async fn mempool_requests_for_transactions() {
                 response,
                 added_transactions
                     .into_iter()
-                    .map(Available)
+                    .map(|tx| Available((tx, None)))
                     .collect::<Vec<_>>(),
             )
         }
@@ -166,7 +169,7 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
         responder.respond(transaction::Response::from(
             VerifiedUnminedTx::new(
                 transaction,
-                Amount::try_from(1_000_000).expect("invalid value"),
+                Amount::try_from(1_000_000).expect("valid amount"),
                 0,
             )
             .expect("verification should pass"),
@@ -257,7 +260,10 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
             .expect_request(Request::TransactionsById(txs))
             .map(|responder| {
                 let unmined_transaction = UnminedTx::from(test_transaction.clone());
-                responder.respond(Response::Transactions(vec![Available(unmined_transaction)]))
+                responder.respond(Response::Transactions(vec![Available((
+                    unmined_transaction,
+                    None,
+                ))]))
             });
     // Simulate a successful transaction verification
     let verification = tx_verifier.expect_request_that(|_| true).map(|responder| {
@@ -271,7 +277,7 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
         responder.respond(transaction::Response::from(
             VerifiedUnminedTx::new(
                 transaction,
-                Amount::try_from(1_000_000).expect("invalid value"),
+                Amount::try_from(1_000_000).expect("valid amount"),
                 0,
             )
             .expect("verification should pass"),
@@ -373,7 +379,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         responder.respond(transaction::Response::from(
             VerifiedUnminedTx::new(
                 transaction,
-                Amount::try_from(1_000_000).expect("invalid value"),
+                Amount::try_from(1_000_000).expect("valid amount"),
                 0,
             )
             .expect("verification should pass"),
@@ -512,7 +518,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         responder.respond(transaction::Response::from(
             VerifiedUnminedTx::new(
                 transaction,
-                Amount::try_from(1_000_000).expect("invalid value"),
+                Amount::try_from(1_000_000).expect("valid amount"),
                 0,
             )
             .expect("verification should pass"),
@@ -674,7 +680,7 @@ async fn inbound_block_height_lookahead_limit() -> Result<(), crate::BoxError> {
     peer_set
         .expect_request(Request::BlocksByHash(iter::once(block_hash).collect()))
         .await
-        .respond(Response::Blocks(vec![Available(block)]));
+        .respond(Response::Blocks(vec![Available((block, None))]));
 
     // Wait for the chain tip update
     if let Err(timeout_error) = timeout(
@@ -710,7 +716,7 @@ async fn inbound_block_height_lookahead_limit() -> Result<(), crate::BoxError> {
     peer_set
         .expect_request(Request::BlocksByHash(iter::once(block_hash).collect()))
         .await
-        .respond(Response::Blocks(vec![Available(block)]));
+        .respond(Response::Blocks(vec![Available((block, None))]));
 
     let response = state_service
         .clone()
@@ -775,7 +781,7 @@ async fn caches_getaddr_response() {
 
         // UTXO verification doesn't matter for these tests.
         let (state, _read_only_state_service, latest_chain_tip, _chain_tip_change) =
-            zebra_state::init(state_config.clone(), &network, Height::MAX, 0);
+            zebra_state::init(state_config.clone(), &network, Height::MAX, 0).await;
 
         let state_service = ServiceBuilder::new().buffer(1).service(state);
 
@@ -785,7 +791,7 @@ async fn caches_getaddr_response() {
             _transaction_verifier,
             _groth16_download_handle,
             _max_checkpoint_height,
-        ) = zebra_consensus::router::init(
+        ) = zebra_consensus::router::init_test(
             consensus_config.clone(),
             &network,
             state_service.clone(),
@@ -806,6 +812,7 @@ async fn caches_getaddr_response() {
             .service(Inbound::new(MAX_INBOUND_CONCURRENCY, setup_rx));
         let inbound_service = BoxService::new(inbound_service);
         let inbound_service = ServiceBuilder::new().buffer(1).service(inbound_service);
+        let (misbehavior_sender, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
 
         let setup_data = InboundSetupData {
             address_book: address_book.clone(),
@@ -814,6 +821,7 @@ async fn caches_getaddr_response() {
             mempool: buffered_mempool_service.clone(),
             state: state_service.clone(),
             latest_chain_tip,
+            misbehavior_sender,
         };
         let r = setup_tx.send(setup_data);
         // We can't expect or unwrap because the returned Result does not implement Debug
@@ -842,8 +850,7 @@ async fn caches_getaddr_response() {
         };
 
         assert_eq!(
-            peers,
-            first_result,
+            peers, first_result,
             "inbound service should return the same result for every Peers request until the refresh time",
         );
     }
@@ -888,14 +895,18 @@ async fn setup(
 
     // UTXO verification doesn't matter for these tests.
     let (state, _read_only_state_service, latest_chain_tip, mut chain_tip_change) =
-        zebra_state::init(state_config.clone(), &network, Height::MAX, 0);
+        zebra_state::init(state_config.clone(), &network, Height::MAX, 0).await;
 
     let mut state_service = ServiceBuilder::new().buffer(1).service(state);
 
     // Download task panics and timeouts are propagated to the tests that use Groth16 verifiers.
     let (block_verifier, _transaction_verifier, _groth16_download_handle, _max_checkpoint_height) =
-        zebra_consensus::router::init(consensus_config.clone(), &network, state_service.clone())
-            .await;
+        zebra_consensus::router::init_test(
+            consensus_config.clone(),
+            &network,
+            state_service.clone(),
+        )
+        .await;
 
     let mut peer_set = MockService::build()
         .with_max_request_delay(MAX_PEER_SET_REQUEST_DELAY)
@@ -957,7 +968,8 @@ async fn setup(
     // Don't wait for the chain tip update here, we wait for expect_request(AdvertiseBlock) below,
     // which is called by the gossip_best_tip_block_hashes task once the chain tip changes.
 
-    let (mut mempool_service, transaction_receiver) = Mempool::new(
+    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
+    let (mut mempool_service, transaction_subscriber) = Mempool::new(
         &MempoolConfig::default(),
         buffered_peer_set.clone(),
         state_service.clone(),
@@ -965,19 +977,25 @@ async fn setup(
         sync_status.clone(),
         latest_chain_tip.clone(),
         chain_tip_change.clone(),
+        misbehavior_tx,
     );
 
     // Pretend we're close to tip
     SyncStatus::sync_close_to_tip(&mut recent_syncs);
 
-    let sync_gossip_task_handle = tokio::spawn(sync::gossip_best_tip_block_hashes(
-        sync_status.clone(),
-        chain_tip_change.clone(),
-        peer_set.clone(),
-    ));
+    let submitblock_channel = SubmitBlockChannel::new();
+    let sync_gossip_task_handle = tokio::spawn(
+        sync::gossip_best_tip_block_hashes(
+            sync_status.clone(),
+            chain_tip_change.clone(),
+            peer_set.clone(),
+            Some(submitblock_channel.receiver()),
+        )
+        .in_current_span(),
+    );
 
     let tx_gossip_task_handle = tokio::spawn(gossip_mempool_transaction_id(
-        transaction_receiver,
+        transaction_subscriber.subscribe(),
         peer_set.clone(),
     ));
 
@@ -986,6 +1004,8 @@ async fn setup(
     //
     // (The genesis block gets skipped, because block 1 is committed before the task is spawned.)
     for block in committed_blocks.iter().skip(1) {
+        tokio::time::sleep(PEER_GOSSIP_DELAY).await;
+
         peer_set
             .expect_request(Request::AdvertiseBlock(block.hash()))
             .await
@@ -1016,6 +1036,7 @@ async fn setup(
     let inbound_service = BoxService::new(inbound_service);
     let inbound_service = ServiceBuilder::new().buffer(1).service(inbound_service);
 
+    let (misbehavior_sender, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
     let setup_data = InboundSetupData {
         address_book,
         block_download_peer_set: buffered_peer_set,
@@ -1023,6 +1044,7 @@ async fn setup(
         mempool: mempool_service.clone(),
         state: state_service.clone(),
         latest_chain_tip,
+        misbehavior_sender,
     };
     let r = setup_tx.send(setup_data);
     // We can't expect or unwrap because the returned Result does not implement Debug
@@ -1049,16 +1071,17 @@ fn add_some_stuff_to_mempool(
     mempool_service: &mut Mempool,
     network: Network,
 ) -> Vec<VerifiedUnminedTx> {
-    // get the genesis block coinbase transaction from the Zcash blockchain.
-    let genesis_transactions: Vec<_> = unmined_transactions_in_blocks(..=0, &network)
-        .take(1)
-        .collect();
-
-    // Insert the genesis block coinbase transaction into the mempool storage.
-    mempool_service
-        .storage()
-        .insert(genesis_transactions[0].clone())
+    // get the last transaction from the Zcash blockchain.
+    let last_transaction = network
+        .unmined_transactions_in_blocks(..=10)
+        .last()
         .unwrap();
 
-    genesis_transactions
+    // Insert the last transaction into the mempool storage.
+    mempool_service
+        .storage()
+        .insert(last_transaction.clone(), Vec::new(), None)
+        .unwrap();
+
+    vec![last_transaction]
 }

@@ -31,7 +31,6 @@ tx_cost_limit = 80000000
 [metrics]
 
 [mining]
-debug_like_zcashd = true
 
 [network]
 crawl_new_peer_interval = "1m 1s"

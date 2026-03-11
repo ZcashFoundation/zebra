@@ -1,11 +1,14 @@
 //! Signature hashes for Zcash transactions
 
+use std::sync::Arc;
+
+use zcash_protocol::value::ZatBalance;
 use zcash_transparent::sighash::SighashType;
 
 use super::Transaction;
 
-use crate::parameters::ConsensusBranchId;
-use crate::transparent;
+use crate::parameters::NetworkUpgrade;
+use crate::{transparent, Error};
 
 use crate::primitives::zcash_primitives::{sighash, PrecomputedTxData};
 
@@ -31,9 +34,6 @@ bitflags::bitflags! {
     }
 }
 
-// FIXME (for future reviewers): Copied from upstream Zebra v2.4.2 to fix a librustzcash
-// breaking change. Keep the code (or update it accordingly) and remove this note when we
-// merge with upstream Zebra.
 impl TryFrom<HashType> for SighashType {
     type Error = ();
 
@@ -67,23 +67,37 @@ impl AsRef<[u8]> for SigHash {
     }
 }
 
-/// A SigHasher context which stores precomputed data that is reused
-/// between sighash computations for the same transaction.
-pub struct SigHasher<'a> {
-    precomputed_tx_data: PrecomputedTxData<'a>,
+impl From<SigHash> for [u8; 32] {
+    fn from(sighash: SigHash) -> Self {
+        sighash.0
+    }
 }
 
-impl<'a> SigHasher<'a> {
+/// A SigHasher context which stores precomputed data that is reused
+/// between sighash computations for the same transaction.
+#[derive(Debug)]
+pub struct SigHasher {
+    precomputed_tx_data: PrecomputedTxData,
+}
+
+impl SigHasher {
     /// Create a new SigHasher for the given transaction.
+    ///
+    /// # Panics
+    ///
+    /// - If `trans` can't be converted to its `librustzcash` equivalent. This could happen, for
+    ///   example, if `trans` contains the `nConsensusBranchId` field, and `nu` doesn't match it.
+    ///   More details in [`PrecomputedTxData::new`].
+    /// - If `nu` doesn't contain a consensus branch id convertible to its `librustzcash`
+    ///   equivalent.
     pub fn new(
-        trans: &'a Transaction,
-        branch_id: ConsensusBranchId,
-        all_previous_outputs: &'a [transparent::Output],
-    ) -> Self {
-        let precomputed_tx_data = PrecomputedTxData::new(trans, branch_id, all_previous_outputs);
-        SigHasher {
-            precomputed_tx_data,
-        }
+        trans: &Transaction,
+        nu: NetworkUpgrade,
+        all_previous_outputs: Arc<Vec<transparent::Output>>,
+    ) -> Result<Self, Error> {
+        Ok(SigHasher {
+            precomputed_tx_data: PrecomputedTxData::new(trans, nu, all_previous_outputs)?,
+        })
     }
 
     /// Calculate the sighash for the current transaction.
@@ -108,5 +122,19 @@ impl<'a> SigHasher<'a> {
             hash_type,
             input_index_script_code,
         )
+    }
+
+    /// Returns the Orchard bundle in the precomputed transaction data.
+    pub fn orchard_bundle(
+        &self,
+    ) -> Option<zcash_primitives::transaction::OrchardBundle<::orchard::bundle::Authorized>> {
+        self.precomputed_tx_data.orchard_bundle()
+    }
+
+    /// Returns the Sapling bundle in the precomputed transaction data.
+    pub fn sapling_bundle(
+        &self,
+    ) -> Option<sapling_crypto::Bundle<sapling_crypto::bundle::Authorized, ZatBalance>> {
+        self.precomputed_tx_data.sapling_bundle()
     }
 }

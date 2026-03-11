@@ -192,7 +192,7 @@ specific inventory request is ready, because until we get the request, we
 can't determine which peers might be required to process it.
 
 We could attempt to ensure that the peer set would be ready to process a
-specific inventory request would be to pre-emptively "reserve" a peer as soon
+specific inventory request would be to preemptively "reserve" a peer as soon
 as it advertises an inventory item. But this doesn't actually work to ensure
 readiness, because a peer could advertise two inventory items, and only be
 able to service one request at a time. It also potentially locks the peer

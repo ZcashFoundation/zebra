@@ -278,20 +278,24 @@ impl Version for zcash_history::V1 {
             | NetworkUpgrade::Nu5
             | NetworkUpgrade::Nu6
             | NetworkUpgrade::Nu6_1
-            | NetworkUpgrade::Nu7 => zcash_history::NodeData {
-                consensus_branch_id: branch_id.into(),
-                subtree_commitment: block_hash,
-                start_time: time,
-                end_time: time,
-                start_target: target,
-                end_target: target,
-                start_sapling_root: sapling_root,
-                end_sapling_root: sapling_root,
-                subtree_total_work: work,
-                start_height: height.0 as u64,
-                end_height: height.0 as u64,
-                sapling_tx: sapling_tx_count,
-            },
+            | NetworkUpgrade::Nu7 => {}
+            #[cfg(zcash_unstable = "zfuture")]
+            NetworkUpgrade::ZFuture => {}
+        };
+
+        zcash_history::NodeData {
+            consensus_branch_id: branch_id.into(),
+            subtree_commitment: block_hash,
+            start_time: time,
+            end_time: time,
+            start_target: target,
+            end_target: target,
+            start_sapling_root: sapling_root,
+            end_sapling_root: sapling_root,
+            subtree_total_work: work,
+            start_height: height.0 as u64,
+            end_height: height.0 as u64,
+            sapling_tx: sapling_tx_count,
         }
     }
 }

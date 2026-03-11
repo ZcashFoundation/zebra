@@ -5,76 +5,73 @@
 // We allow unsafe code, so we can call zcash_script
 #![allow(unsafe_code)]
 
+#[cfg(test)]
+mod tests;
+
 use core::fmt;
-use std::{
-    ffi::{c_int, c_uint, c_void},
-    sync::Arc,
-};
+use std::sync::Arc;
 
 use thiserror::Error;
 
-use zcash_script::{
-    zcash_script_error_t, zcash_script_error_t_zcash_script_ERR_OK,
-    zcash_script_error_t_zcash_script_ERR_TX_DESERIALIZE,
-    zcash_script_error_t_zcash_script_ERR_TX_INDEX,
-    zcash_script_error_t_zcash_script_ERR_TX_SIZE_MISMATCH,
-};
+use libzcash_script::ZcashScript;
 
+use zcash_script::script;
 use zebra_chain::{
-    parameters::ConsensusBranchId,
-    transaction::{HashType, SigHasher, Transaction},
+    parameters::NetworkUpgrade,
+    transaction::{HashType, SigHasher},
     transparent,
 };
 
 /// An Error type representing the error codes returned from zcash_script.
-#[derive(Copy, Clone, Debug, Error, PartialEq, Eq)]
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Error {
     /// script verification failed
-    #[non_exhaustive]
     ScriptInvalid,
-    /// could not deserialize tx
-    #[non_exhaustive]
-    TxDeserialize,
     /// input index out of bounds
-    #[non_exhaustive]
     TxIndex,
-    /// tx has an invalid size
-    #[non_exhaustive]
-    TxSizeMismatch,
     /// tx is a coinbase transaction and should not be verified
-    #[non_exhaustive]
     TxCoinbase,
     /// unknown error from zcash_script: {0}
-    #[non_exhaustive]
-    Unknown(zcash_script_error_t),
+    Unknown(libzcash_script::Error),
+    /// transaction is invalid according to zebra_chain (not a zcash_script error)
+    TxInvalid(#[from] zebra_chain::Error),
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&match self {
             Error::ScriptInvalid => "script verification failed".to_owned(),
-            Error::TxDeserialize => "could not deserialize tx".to_owned(),
             Error::TxIndex => "input index out of bounds".to_owned(),
-            Error::TxSizeMismatch => "tx has an invalid size".to_owned(),
             Error::TxCoinbase => {
                 "tx is a coinbase transaction and should not be verified".to_owned()
             }
-            Error::Unknown(e) => format!("unknown error from zcash_script: {e}"),
+            Error::Unknown(e) => format!("unknown error from zcash_script: {e:?}"),
+            Error::TxInvalid(e) => format!("tx is invalid: {e}"),
         })
     }
 }
 
-impl From<zcash_script_error_t> for Error {
+impl From<libzcash_script::Error> for Error {
     #[allow(non_upper_case_globals)]
-    fn from(err_code: zcash_script_error_t) -> Error {
-        match err_code {
-            zcash_script_error_t_zcash_script_ERR_OK => Error::ScriptInvalid,
-            zcash_script_error_t_zcash_script_ERR_TX_DESERIALIZE => Error::TxDeserialize,
-            zcash_script_error_t_zcash_script_ERR_TX_INDEX => Error::TxIndex,
-            zcash_script_error_t_zcash_script_ERR_TX_SIZE_MISMATCH => Error::TxSizeMismatch,
-            unknown => Error::Unknown(unknown),
-        }
+    fn from(err_code: libzcash_script::Error) -> Error {
+        Error::Unknown(err_code)
+    }
+}
+
+/// Get the interpreter according to the feature flag
+fn get_interpreter(
+    sighash: zcash_script::interpreter::SighashCalculator<'_>,
+    lock_time: u32,
+    is_final: bool,
+) -> impl ZcashScript + use<'_> {
+    #[cfg(feature = "comparison-interpreter")]
+    return libzcash_script::cxx_rust_comparison_interpreter(sighash, lock_time, is_final);
+    #[cfg(not(feature = "comparison-interpreter"))]
+    libzcash_script::CxxInterpreter {
+        sighash,
+        lock_time,
+        is_final,
     }
 }
 
@@ -85,60 +82,31 @@ pub struct CachedFfiTransaction {
     /// The deserialized Zebra transaction.
     ///
     /// This field is private so that `transaction`, and `all_previous_outputs` always match.
-    transaction: Arc<Transaction>,
+    transaction: Arc<zebra_chain::transaction::Transaction>,
 
     /// The outputs from previous transactions that match each input in the transaction
     /// being verified.
-    all_previous_outputs: Vec<transparent::Output>,
-}
+    all_previous_outputs: Arc<Vec<transparent::Output>>,
 
-/// A sighash context used for the zcash_script sighash callback.
-struct SigHashContext<'a> {
-    /// The index of the input being verified.
-    input_index: usize,
-    /// The SigHasher for the transaction being verified.
-    sighasher: SigHasher<'a>,
-}
-
-/// The sighash callback to use with zcash_script.
-extern "C" fn sighash(
-    sighash_out: *mut u8,
-    sighash_out_len: c_uint,
-    ctx: *const c_void,
-    script_code: *const u8,
-    script_code_len: c_uint,
-    hash_type: c_int,
-) {
-    // SAFETY: `ctx` is a valid SigHashContext because it is always passed to
-    // `zcash_script_verify_callback` which simply forwards it to the callback.
-    // `script_code` and `sighash_out` are valid buffers since they are always
-    //  specified when the callback is called.
-    unsafe {
-        let ctx = ctx as *const SigHashContext;
-        let script_code_vec =
-            std::slice::from_raw_parts(script_code, script_code_len as usize).to_vec();
-        let sighash = (*ctx).sighasher.sighash(
-            HashType::from_bits_truncate(hash_type as u32),
-            Some(((*ctx).input_index, script_code_vec)),
-        );
-        // Sanity check; must always be true.
-        assert_eq!(sighash_out_len, sighash.0.len() as c_uint);
-        std::ptr::copy_nonoverlapping(sighash.0.as_ptr(), sighash_out, sighash.0.len());
-    }
+    /// The sighasher context to use to compute sighashes.
+    sighasher: SigHasher,
 }
 
 impl CachedFfiTransaction {
-    /// Construct a `PrecomputedTransaction` from a `Transaction` and the outputs
+    /// Construct a `CachedFfiTransaction` from a `Transaction` and the outputs
     /// from previous transactions that match each input in the transaction
     /// being verified.
     pub fn new(
-        transaction: Arc<Transaction>,
-        all_previous_outputs: Vec<transparent::Output>,
-    ) -> Self {
-        Self {
+        transaction: Arc<zebra_chain::transaction::Transaction>,
+        all_previous_outputs: Arc<Vec<transparent::Output>>,
+        nu: NetworkUpgrade,
+    ) -> Result<Self, Error> {
+        let sighasher = transaction.sighasher(nu, all_previous_outputs.clone())?;
+        Ok(Self {
             transaction,
             all_previous_outputs,
-        }
+            sighasher,
+        })
     }
 
     /// Returns the transparent inputs for this transaction.
@@ -152,11 +120,15 @@ impl CachedFfiTransaction {
         &self.all_previous_outputs
     }
 
-    /// Verify if the script in the input at `input_index` of a transaction correctly
-    /// spends the matching [`transparent::Output`] it refers to, with the [`ConsensusBranchId`]
-    /// of the block containing the transaction.
+    /// Return the sighasher being used for this transaction.
+    pub fn sighasher(&self) -> &SigHasher {
+        &self.sighasher
+    }
+
+    /// Verify if the script in the input at `input_index` of a transaction correctly spends the
+    /// matching [`transparent::Output`] it refers to.
     #[allow(clippy::unwrap_in_result)]
-    pub fn is_valid(&self, branch_id: ConsensusBranchId, input_index: usize) -> Result<(), Error> {
+    pub fn is_valid(&self, input_index: usize) -> Result<(), Error> {
         let previous_output = self
             .all_previous_outputs
             .get(input_index)
@@ -168,27 +140,11 @@ impl CachedFfiTransaction {
         } = previous_output;
         let script_pub_key: &[u8] = lock_script.as_raw_bytes();
 
-        // This conversion is useful on some platforms, but not others.
-        #[allow(clippy::useless_conversion)]
-        let n_in = input_index
-            .try_into()
-            .expect("transaction indexes are much less than c_uint::MAX");
+        let flags = zcash_script::interpreter::Flags::P2SH
+            | zcash_script::interpreter::Flags::CHECKLOCKTIMEVERIFY;
 
-        let flags = zcash_script::zcash_script_SCRIPT_FLAGS_VERIFY_P2SH
-            | zcash_script::zcash_script_SCRIPT_FLAGS_VERIFY_CHECKLOCKTIMEVERIFY;
-        // This conversion is useful on some platforms, but not others.
-        #[allow(clippy::useless_conversion)]
-        let flags = flags
-            .try_into()
-            .expect("zcash_script_SCRIPT_FLAGS_VERIFY_* enum values fit in a c_uint");
-
-        let mut err = 0;
-        let lock_time = self.transaction.raw_lock_time() as i64;
-        let is_final = if self.transaction.inputs()[input_index].sequence() == u32::MAX {
-            1
-        } else {
-            0
-        };
+        let lock_time = self.transaction.raw_lock_time();
+        let is_final = self.transaction.inputs()[input_index].sequence() == u32::MAX;
         let signature_script = match &self.transaction.inputs()[input_index] {
             transparent::Input::PrevOut {
                 outpoint: _,
@@ -198,285 +154,100 @@ impl CachedFfiTransaction {
             transparent::Input::Coinbase { .. } => Err(Error::TxCoinbase)?,
         };
 
-        let ctx = Box::new(SigHashContext {
-            input_index: n_in,
-            sighasher: SigHasher::new(&self.transaction, branch_id, &self.all_previous_outputs),
-        });
-        // SAFETY: The `script_*` fields are created from a valid Rust `slice`.
-        let ret = unsafe {
-            zcash_script::zcash_script_verify_callback(
-                (&*ctx as *const SigHashContext) as *const c_void,
-                Some(sighash),
-                lock_time,
-                is_final,
-                script_pub_key.as_ptr(),
-                script_pub_key.len() as u32,
-                signature_script.as_ptr(),
-                signature_script.len() as u32,
-                flags,
-                &mut err,
-            )
-        };
+        let script =
+            script::Raw::from_raw_parts(signature_script.to_vec(), script_pub_key.to_vec());
 
-        if ret == 1 {
-            Ok(())
-        } else {
-            Err(Error::from(err))
-        }
-    }
-
-    /// Returns the number of transparent signature operations in the
-    /// transparent inputs and outputs of this transaction.
-    #[allow(clippy::unwrap_in_result)]
-    pub fn legacy_sigop_count(&self) -> Result<u64, Error> {
-        let mut count: u64 = 0;
-
-        for input in self.transaction.inputs() {
-            count += match input {
-                transparent::Input::PrevOut {
-                    outpoint: _,
-                    unlock_script,
-                    sequence: _,
-                } => {
-                    let script = unlock_script.as_raw_bytes();
-                    // SAFETY: `script` is created from a valid Rust `slice`.
-                    unsafe {
-                        zcash_script::zcash_script_legacy_sigop_count_script(
-                            script.as_ptr(),
-                            script.len() as u32,
-                        )
-                    }
+        let calculate_sighash =
+            |script_code: &script::Code, hash_type: &zcash_script::signature::HashType| {
+                let script_code_vec = script_code.0.clone();
+                let mut our_hash_type = match hash_type.signed_outputs() {
+                    zcash_script::signature::SignedOutputs::All => HashType::ALL,
+                    zcash_script::signature::SignedOutputs::Single => HashType::SINGLE,
+                    zcash_script::signature::SignedOutputs::None => HashType::NONE,
+                };
+                if hash_type.anyone_can_pay() {
+                    our_hash_type |= HashType::ANYONECANPAY;
                 }
-                transparent::Input::Coinbase { .. } => 0,
-            } as u64;
-        }
-
-        for output in self.transaction.outputs() {
-            let script = output.lock_script.as_raw_bytes();
-            // SAFETY: `script` is created from a valid Rust `slice`.
-            let ret = unsafe {
-                zcash_script::zcash_script_legacy_sigop_count_script(
-                    script.as_ptr(),
-                    script.len() as u32,
+                Some(
+                    self.sighasher()
+                        .sighash(our_hash_type, Some((input_index, script_code_vec)))
+                        .0,
                 )
             };
-            count += ret as u64;
-        }
-        Ok(count)
+        let interpreter = get_interpreter(&calculate_sighash, lock_time, is_final);
+        interpreter
+            .verify_callback(&script, flags)
+            .map_err(|(_, e)| Error::from(e))
+            .and_then(|res| {
+                if res {
+                    Ok(())
+                } else {
+                    Err(Error::ScriptInvalid)
+                }
+            })
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use hex::FromHex;
-    use std::sync::Arc;
-    use zebra_chain::{
-        parameters::{ConsensusBranchId, NetworkUpgrade::*},
-        serialization::{ZcashDeserialize, ZcashDeserializeInto},
-        transaction::Transaction,
-        transparent::{self, Output},
-    };
-    use zebra_test::prelude::*;
+/// Trait for counting the number of transparent signature operations
+/// in the transparent inputs and outputs of a transaction.
+pub trait Sigops {
+    /// Returns the number of transparent signature operations in the
+    /// transparent inputs and outputs of the given transaction.
+    fn sigops(&self) -> Result<u32, libzcash_script::Error> {
+        let interpreter = get_interpreter(&|_, _| None, 0, true);
 
-    lazy_static::lazy_static! {
-        pub static ref SCRIPT_PUBKEY: Vec<u8> = <Vec<u8>>::from_hex("76a914f47cac1e6fec195c055994e8064ffccce0044dd788ac")
-            .unwrap();
-        pub static ref SCRIPT_TX: Vec<u8> = <Vec<u8>>::from_hex("0400008085202f8901fcaf44919d4a17f6181a02a7ebe0420be6f7dad1ef86755b81d5a9567456653c010000006a473044022035224ed7276e61affd53315eca059c92876bc2df61d84277cafd7af61d4dbf4002203ed72ea497a9f6b38eb29df08e830d99e32377edb8a574b8a289024f0241d7c40121031f54b095eae066d96b2557c1f99e40e967978a5fd117465dbec0986ca74201a6feffffff020050d6dc0100000017a9141b8a9bda4b62cd0d0582b55455d0778c86f8628f870d03c812030000001976a914e4ff5512ffafe9287992a1cd177ca6e408e0300388ac62070d0095070d000000000000000000000000")
-            .expect("Block bytes are in valid hex representation");
+        Ok(self.scripts().try_fold(0, |acc, s| {
+            interpreter
+                .legacy_sigop_count_script(&script::Code(s.to_vec()))
+                .map(|n| acc + n)
+        })?)
     }
 
-    fn verify_valid_script(
-        branch_id: ConsensusBranchId,
-        tx: &[u8],
-        amount: u64,
-        pubkey: &[u8],
-    ) -> Result<()> {
-        let transaction =
-            tx.zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()?;
-        let output = transparent::Output {
-            value: amount.try_into()?,
-            lock_script: transparent::Script::new(pubkey),
-        };
-        let input_index = 0;
+    /// Returns an iterator over the input and output scripts in the transaction.
+    ///
+    /// The number of input scripts in a coinbase tx is zero.
+    fn scripts(&self) -> impl Iterator<Item = &[u8]>;
+}
 
-        let previous_output = vec![output];
-        let verifier = super::CachedFfiTransaction::new(transaction, previous_output);
-        verifier.is_valid(branch_id, input_index)?;
-
-        Ok(())
+impl Sigops for zebra_chain::transaction::Transaction {
+    fn scripts(&self) -> impl Iterator<Item = &[u8]> {
+        self.inputs()
+            .iter()
+            .filter_map(|input| match input {
+                transparent::Input::PrevOut { unlock_script, .. } => {
+                    Some(unlock_script.as_raw_bytes())
+                }
+                transparent::Input::Coinbase { .. } => None,
+            })
+            .chain(self.outputs().iter().map(|o| o.lock_script.as_raw_bytes()))
     }
+}
 
-    #[test]
-    fn verify_valid_script_v4() -> Result<()> {
-        let _init_guard = zebra_test::init();
-
-        verify_valid_script(
-            Blossom.branch_id().unwrap(),
-            &SCRIPT_TX,
-            212 * u64::pow(10, 8),
-            &SCRIPT_PUBKEY,
-        )
+impl Sigops for zebra_chain::transaction::UnminedTx {
+    fn scripts(&self) -> impl Iterator<Item = &[u8]> {
+        self.transaction.scripts()
     }
+}
 
-    #[test]
-    fn count_legacy_sigops() -> Result<()> {
-        let _init_guard = zebra_test::init();
-
-        let transaction =
-            SCRIPT_TX.zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()?;
-
-        let cached_tx = super::CachedFfiTransaction::new(transaction, Vec::new());
-        assert_eq!(cached_tx.legacy_sigop_count()?, 1);
-
-        Ok(())
+impl Sigops for CachedFfiTransaction {
+    fn scripts(&self) -> impl Iterator<Item = &[u8]> {
+        self.transaction.scripts()
     }
+}
 
-    #[test]
-    fn fail_invalid_script() -> Result<()> {
-        let _init_guard = zebra_test::init();
-
-        let transaction =
-            SCRIPT_TX.zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()?;
-        let coin = u64::pow(10, 8);
-        let amount = 211 * coin;
-        let output = transparent::Output {
-            value: amount.try_into()?,
-            lock_script: transparent::Script::new(&SCRIPT_PUBKEY.clone()[..]),
-        };
-        let input_index = 0;
-        let branch_id = Blossom
-            .branch_id()
-            .expect("Blossom has a ConsensusBranchId");
-
-        let verifier = super::CachedFfiTransaction::new(transaction, vec![output]);
-        verifier.is_valid(branch_id, input_index).unwrap_err();
-
-        Ok(())
-    }
-
-    #[test]
-    fn reuse_script_verifier_pass_pass() -> Result<()> {
-        let _init_guard = zebra_test::init();
-
-        let coin = u64::pow(10, 8);
-        let transaction =
-            SCRIPT_TX.zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()?;
-        let amount = 212 * coin;
-        let output = transparent::Output {
-            value: amount.try_into()?,
-            lock_script: transparent::Script::new(&SCRIPT_PUBKEY.clone()),
-        };
-
-        let verifier = super::CachedFfiTransaction::new(transaction, vec![output]);
-
-        let input_index = 0;
-        let branch_id = Blossom
-            .branch_id()
-            .expect("Blossom has a ConsensusBranchId");
-
-        verifier.is_valid(branch_id, input_index)?;
-
-        verifier.is_valid(branch_id, input_index)?;
-
-        Ok(())
-    }
-
-    #[test]
-    fn reuse_script_verifier_pass_fail() -> Result<()> {
-        let _init_guard = zebra_test::init();
-
-        let coin = u64::pow(10, 8);
-        let amount = 212 * coin;
-        let output = transparent::Output {
-            value: amount.try_into()?,
-            lock_script: transparent::Script::new(&SCRIPT_PUBKEY.clone()),
-        };
-        let transaction =
-            SCRIPT_TX.zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()?;
-
-        let verifier = super::CachedFfiTransaction::new(transaction, vec![output]);
-
-        let input_index = 0;
-        let branch_id = Blossom
-            .branch_id()
-            .expect("Blossom has a ConsensusBranchId");
-
-        verifier.is_valid(branch_id, input_index)?;
-
-        verifier.is_valid(branch_id, input_index + 1).unwrap_err();
-
-        Ok(())
-    }
-
-    #[test]
-    fn reuse_script_verifier_fail_pass() -> Result<()> {
-        let _init_guard = zebra_test::init();
-
-        let coin = u64::pow(10, 8);
-        let amount = 212 * coin;
-        let output = transparent::Output {
-            value: amount.try_into()?,
-            lock_script: transparent::Script::new(&SCRIPT_PUBKEY.clone()),
-        };
-        let transaction =
-            SCRIPT_TX.zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()?;
-
-        let verifier = super::CachedFfiTransaction::new(transaction, vec![output]);
-
-        let input_index = 0;
-        let branch_id = Blossom
-            .branch_id()
-            .expect("Blossom has a ConsensusBranchId");
-
-        verifier.is_valid(branch_id, input_index + 1).unwrap_err();
-
-        verifier.is_valid(branch_id, input_index)?;
-
-        Ok(())
-    }
-
-    #[test]
-    fn reuse_script_verifier_fail_fail() -> Result<()> {
-        let _init_guard = zebra_test::init();
-
-        let coin = u64::pow(10, 8);
-        let amount = 212 * coin;
-        let output = transparent::Output {
-            value: amount.try_into()?,
-            lock_script: transparent::Script::new(&SCRIPT_PUBKEY.clone()),
-        };
-        let transaction =
-            SCRIPT_TX.zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()?;
-
-        let verifier = super::CachedFfiTransaction::new(transaction, vec![output]);
-
-        let input_index = 0;
-        let branch_id = Blossom
-            .branch_id()
-            .expect("Blossom has a ConsensusBranchId");
-
-        verifier.is_valid(branch_id, input_index + 1).unwrap_err();
-
-        verifier.is_valid(branch_id, input_index + 1).unwrap_err();
-
-        Ok(())
-    }
-
-    #[test]
-    fn p2sh() -> Result<()> {
-        let _init_guard = zebra_test::init();
-
-        // real tx with txid 51ded0b026f1ff56639447760bcd673b9f4e44a8afbf3af1dbaa6ca1fd241bea
-        let serialized_tx = "0400008085202f8901c21354bf2305e474ad695382e68efc06e2f8b83c512496f615d153c2e00e688b00000000fdfd0000483045022100d2ab3e6258fe244fa442cfb38f6cef9ac9a18c54e70b2f508e83fa87e20d040502200eead947521de943831d07a350e45af8e36c2166984a8636f0a8811ff03ed09401473044022013e15d865010c257eef133064ef69a780b4bc7ebe6eda367504e806614f940c3022062fdbc8c2d049f91db2042d6c9771de6f1ef0b3b1fea76c1ab5542e44ed29ed8014c69522103b2cc71d23eb30020a4893982a1e2d352da0d20ee657fa02901c432758909ed8f21029d1e9a9354c0d2aee9ffd0f0cea6c39bbf98c4066cf143115ba2279d0ba7dabe2103e32096b63fd57f3308149d238dcbb24d8d28aad95c0e4e74e3e5e6a11b61bcc453aeffffffff0250954903000000001976a914a5a4e1797dac40e8ce66045d1a44c4a63d12142988acccf41c590000000017a9141c973c68b2acc6d6688eff9c7a9dd122ac1346ab8786c72400000000000000000000000000000000";
-        let serialized_output = "4065675c0000000017a914c117756dcbe144a12a7c33a77cfa81aa5aeeb38187";
-        let tx = Transaction::zcash_deserialize(&hex::decode(serialized_tx).unwrap().to_vec()[..])
-            .unwrap();
-        let previous_output =
-            Output::zcash_deserialize(&hex::decode(serialized_output).unwrap().to_vec()[..])
-                .unwrap();
-
-        let verifier = super::CachedFfiTransaction::new(Arc::new(tx), vec![previous_output]);
-        verifier.is_valid(Nu5.branch_id().unwrap(), 0)?;
-        Ok(())
+impl Sigops for zcash_primitives::transaction::Transaction {
+    fn scripts(&self) -> impl Iterator<Item = &[u8]> {
+        self.transparent_bundle().into_iter().flat_map(|bundle| {
+            (!bundle.is_coinbase())
+                .then(|| bundle.vin.iter().map(|i| i.script_sig().0 .0.as_slice()))
+                .into_iter()
+                .flatten()
+                .chain(
+                    bundle
+                        .vout
+                        .iter()
+                        .map(|o| o.script_pubkey().0 .0.as_slice()),
+                )
+        })
     }
 }

@@ -1,10 +1,6 @@
 The [pull-tester](/pull-tester/) folder contains a script to call
 multiple tests from the [rpc-tests](/rpc-tests/) folder.
 
-Every pull request to the zebra repository is built and run through
-the regression test suite. You can also run all or only individual
-tests locally.
-
 Test dependencies
 =================
 
@@ -33,6 +29,11 @@ Make sure `zebrad` binary exists in the `../target/debug/` folder or set the bin
 ```
 export CARGO_BIN_EXE_zebrad=/path/to/zebrad
 ```
+
+For wallet tests, make sure `zallet` binary exists in the `../target/debug/` folder.
+You can build `zebrad` and `zallet` with the following command:
+
+    ZALLET=1 cargo build
 
 You can run any single test by calling
 
@@ -64,22 +65,23 @@ Possible options, which apply to each individual test run:
 If you set the environment variable `PYTHON_DEBUG=1` you will get some debug
 output (example: `PYTHON_DEBUG=1 qa/pull-tester/rpc-tests.py wallet`).
 
-A 200-block -regtest blockchain and wallets for four nodes
-is created the first time a regression test is run and
-is stored in the cache/ directory.  Each node has the miner
-subsidy from 25 mature blocks (25*10=250 ZEC) in its wallet.
+To get real-time output during a test you can run it using the
+`python3` binary such as:
 
-After the first run, the cache/ blockchain and wallets are
-copied into a temporary directory and used as the initial
-test state.
+```
+python3 qa/rpc-tests/wallet.py
+```
 
-If you get into a bad state, you should be able
-to recover with:
+If a test gets stuck, you can stop the underlying binaries with:
 
 ```bash
-rm -rf cache
-killall zcashd
+killall zebrad
+killall zallet
 ```
+
+Zcashd's test framework includes a [cache mechanism](https://github.com/zcash/zcash/blob/v6.10.0/qa/README.md?plain=1#L73-L88)
+to speed up certain tests.
+This version of the framework currently has that functionality disabled.
 
 Writing tests
 =============

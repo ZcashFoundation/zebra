@@ -11,7 +11,7 @@
 //!
 //! If this test fails, run:
 //! ```sh
-//! cargo insta test --review
+//! cargo insta test --review --release -p zebra-state --lib -- test_raw_rocksdb_column_families
 //! ```
 //! to update the test snapshots, then commit the `test_*.snap` files using git.
 //!

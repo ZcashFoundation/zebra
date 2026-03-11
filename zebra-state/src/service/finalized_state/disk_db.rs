@@ -16,22 +16,29 @@ use std::{
     fs,
     ops::RangeBounds,
     path::Path,
-    sync::Arc,
+    sync::{
+        atomic::{self, AtomicBool},
+        Arc,
+    },
 };
 
 use itertools::Itertools;
 use rlimit::increase_nofile_limit;
 
-use rocksdb::{ColumnFamilyDescriptor, Options, ReadOptions};
+use rocksdb::{ColumnFamilyDescriptor, ErrorKind, Options, ReadOptions};
 use semver::Version;
 use zebra_chain::{parameters::Network, primitives::byte_array::increment_big_endian};
 
 use crate::{
-    constants::DATABASE_FORMAT_VERSION_FILE_NAME,
+    database_format_version_on_disk,
     service::finalized_state::disk_format::{FromDisk, IntoDisk},
-    Config,
+    write_database_format_version_to_disk, Config,
 };
 
+use super::zebra_db::transparent::{
+    fetch_add_balance_and_received, BALANCE_BY_TRANSPARENT_ADDR,
+    BALANCE_BY_TRANSPARENT_ADDR_MERGE_OP,
+};
 // Doc-only imports
 #[allow(unused_imports)]
 use super::{TypedColumnFamily, WriteTypedBatch};
@@ -85,6 +92,10 @@ pub struct DiskDb {
     ///
     /// If true, the database files are deleted on drop.
     ephemeral: bool,
+
+    /// A boolean flag indicating whether the db format change task has finished
+    /// applying any format changes that may have been required.
+    finished_format_upgrades: Arc<AtomicBool>,
 
     // Owned State
     //
@@ -146,6 +157,14 @@ pub trait WriteDisk {
         K: IntoDisk + Debug,
         V: IntoDisk;
 
+    /// Serialize and merge the given key and value into a rocksdb column family,
+    /// merging with any existing `value` for `key`.
+    fn zs_merge<C, K, V>(&mut self, cf: &C, key: K, value: V)
+    where
+        C: rocksdb::AsColumnFamilyRef,
+        K: IntoDisk + Debug,
+        V: IntoDisk;
+
     /// Remove the given key from a rocksdb column family, if it exists.
     fn zs_delete<C, K>(&mut self, cf: &C, key: K)
     where
@@ -179,6 +198,17 @@ impl WriteDisk for DiskWriteBatch {
         let key_bytes = key.as_bytes();
         let value_bytes = value.as_bytes();
         self.batch.put_cf(cf, key_bytes, value_bytes);
+    }
+
+    fn zs_merge<C, K, V>(&mut self, cf: &C, key: K, value: V)
+    where
+        C: rocksdb::AsColumnFamilyRef,
+        K: IntoDisk + Debug,
+        V: IntoDisk,
+    {
+        let key_bytes = key.as_bytes();
+        let value_bytes = value.as_bytes();
+        self.batch.merge_cf(cf, key_bytes, value_bytes);
     }
 
     fn zs_delete<C, K>(&mut self, cf: &C, key: K)
@@ -216,6 +246,15 @@ where
         V: IntoDisk,
     {
         (*self).zs_insert(cf, key, value)
+    }
+
+    fn zs_merge<C, K, V>(&mut self, cf: &C, key: K, value: V)
+    where
+        C: rocksdb::AsColumnFamilyRef,
+        K: IntoDisk + Debug,
+        V: IntoDisk,
+    {
+        (*self).zs_merge(cf, key, value)
     }
 
     fn zs_delete<C, K>(&mut self, cf: &C, key: K)
@@ -521,12 +560,12 @@ impl DiskDb {
         let mut total_size_in_mem = 0;
         let db: &Arc<DB> = &self.db;
         let db_options = DiskDb::options();
-        let column_families = DiskDb::construct_column_families(&db_options, db.path(), &[]);
+        let column_families = DiskDb::construct_column_families(db_options, db.path(), []);
         let mut column_families_log_string = String::from("");
 
         write!(column_families_log_string, "Column families and sizes: ").unwrap();
 
-        for cf_descriptor in column_families.iter() {
+        for cf_descriptor in column_families {
             let cf_name = &cf_descriptor.name();
             let cf_handle = db
                 .cf_handle(cf_name)
@@ -568,6 +607,110 @@ impl DiskDb {
             "Total Database Memory Size: {}",
             human_bytes::human_bytes(total_size_in_mem as f64)
         );
+    }
+
+    /// Exports RocksDB metrics to Prometheus.
+    ///
+    /// This function collects database statistics and exposes them as Prometheus metrics.
+    /// Call this periodically (e.g., every 30 seconds) from a background task.
+    pub(crate) fn export_metrics(&self) {
+        let db: &Arc<DB> = &self.db;
+        let db_options = DiskDb::options();
+        let column_families = DiskDb::construct_column_families(db_options, db.path(), []);
+
+        let mut total_disk: u64 = 0;
+        let mut total_live: u64 = 0;
+        let mut total_mem: u64 = 0;
+
+        for cf_descriptor in column_families {
+            let cf_name = cf_descriptor.name().to_string();
+            if let Some(cf_handle) = db.cf_handle(&cf_name) {
+                let disk = db
+                    .property_int_value_cf(cf_handle, "rocksdb.total-sst-files-size")
+                    .ok()
+                    .flatten()
+                    .unwrap_or(0);
+                let live = db
+                    .property_int_value_cf(cf_handle, "rocksdb.estimate-live-data-size")
+                    .ok()
+                    .flatten()
+                    .unwrap_or(0);
+                let mem = db
+                    .property_int_value_cf(cf_handle, "rocksdb.size-all-mem-tables")
+                    .ok()
+                    .flatten()
+                    .unwrap_or(0);
+
+                total_disk += disk;
+                total_live += live;
+                total_mem += mem;
+
+                metrics::gauge!("zebra.state.rocksdb.cf_disk_size_bytes", "cf" => cf_name.clone())
+                    .set(disk as f64);
+                metrics::gauge!("zebra.state.rocksdb.cf_memory_size_bytes", "cf" => cf_name)
+                    .set(mem as f64);
+            }
+        }
+
+        metrics::gauge!("zebra.state.rocksdb.total_disk_size_bytes").set(total_disk as f64);
+        metrics::gauge!("zebra.state.rocksdb.live_data_size_bytes").set(total_live as f64);
+        metrics::gauge!("zebra.state.rocksdb.total_memory_size_bytes").set(total_mem as f64);
+
+        // Compaction metrics - these use database-wide properties (not per-column-family)
+        if let Ok(Some(pending)) = db.property_int_value("rocksdb.compaction-pending") {
+            metrics::gauge!("zebra.state.rocksdb.compaction.pending_bytes").set(pending as f64);
+        }
+
+        if let Ok(Some(running)) = db.property_int_value("rocksdb.num-running-compactions") {
+            metrics::gauge!("zebra.state.rocksdb.compaction.running").set(running as f64);
+        }
+
+        if let Ok(Some(cache)) = db.property_int_value("rocksdb.block-cache-usage") {
+            metrics::gauge!("zebra.state.rocksdb.block_cache_usage_bytes").set(cache as f64);
+        }
+
+        // Level-by-level file counts (RocksDB typically has up to 7 levels)
+        for level in 0..7 {
+            let prop = format!("rocksdb.num-files-at-level{}", level);
+            if let Ok(Some(count)) = db.property_int_value(&prop) {
+                metrics::gauge!("zebra.state.rocksdb.num_files_at_level", "level" => level.to_string())
+                    .set(count as f64);
+            }
+        }
+    }
+
+    /// Returns the estimated total disk space usage of the database.
+    pub fn size(&self) -> u64 {
+        let db: &Arc<DB> = &self.db;
+        let db_options = DiskDb::options();
+        let mut total_size_on_disk = 0;
+        for cf_descriptor in DiskDb::construct_column_families(db_options, db.path(), []) {
+            let cf_name = &cf_descriptor.name();
+            let cf_handle = db
+                .cf_handle(cf_name)
+                .expect("Column family handle must exist");
+
+            total_size_on_disk += db
+                .property_int_value_cf(cf_handle, "rocksdb.total-sst-files-size")
+                .ok()
+                .flatten()
+                .unwrap_or(0);
+        }
+
+        total_size_on_disk
+    }
+
+    /// Sets `finished_format_upgrades` to true to indicate that Zebra has
+    /// finished applying any required db format upgrades.
+    pub fn mark_finished_format_upgrades(&self) {
+        self.finished_format_upgrades
+            .store(true, atomic::Ordering::SeqCst);
+    }
+
+    /// Returns true if the `finished_format_upgrades` flag has been set to true to
+    /// indicate that Zebra has finished applying any required db format upgrades.
+    pub fn finished_format_upgrades(&self) -> bool {
+        self.finished_format_upgrades.load(atomic::Ordering::SeqCst)
     }
 
     /// When called with a secondary DB instance, tries to catch up with the primary DB instance
@@ -723,7 +866,7 @@ impl DiskDb {
     ///
     /// RocksDB iterators are ordered by increasing key bytes by default.
     /// Otherwise, if `reverse` is `true`, the iterator is ordered by decreasing key bytes.
-    fn zs_iter_mode<R>(range: &R, reverse: bool) -> rocksdb::IteratorMode
+    fn zs_iter_mode<R>(range: &R, reverse: bool) -> rocksdb::IteratorMode<'_>
     where
         R: RangeBounds<Vec<u8>>,
     {
@@ -786,10 +929,10 @@ impl DiskDb {
     /// Build a vector of current column families on the disk and optionally any new column families.
     /// Returns an iterable collection of all column families.
     fn construct_column_families(
-        db_options: &Options,
+        db_options: Options,
         path: &Path,
-        column_families_in_code: &[String],
-    ) -> Vec<ColumnFamilyDescriptor> {
+        column_families_in_code: impl IntoIterator<Item = String>,
+    ) -> impl Iterator<Item = ColumnFamilyDescriptor> {
         // When opening the database in read/write mode, all column families must be opened.
         //
         // To make Zebra forward-compatible with databases updated by later versions,
@@ -797,21 +940,35 @@ impl DiskDb {
         // from the current implementation.
         //
         // <https://github.com/facebook/rocksdb/wiki/Column-Families#reference>
-        let column_families_on_disk = DB::list_cf(db_options, path).unwrap_or_default();
-        let column_families = column_families_on_disk
+        let column_families_on_disk = DB::list_cf(&db_options, path).unwrap_or_default();
+        let column_families_in_code = column_families_in_code.into_iter();
+
+        column_families_on_disk
             .into_iter()
-            .chain(column_families_in_code.iter().cloned())
+            .chain(column_families_in_code)
             .unique()
-            .collect::<Vec<_>>();
-        column_families
-            .into_iter()
-            .map(|cf_name| ColumnFamilyDescriptor::new(cf_name, db_options.clone()))
-            .collect()
+            .map(move |cf_name: String| {
+                let mut cf_options = db_options.clone();
+
+                if cf_name == BALANCE_BY_TRANSPARENT_ADDR {
+                    cf_options.set_merge_operator_associative(
+                        BALANCE_BY_TRANSPARENT_ADDR_MERGE_OP,
+                        fetch_add_balance_and_received,
+                    );
+                }
+
+                rocksdb::ColumnFamilyDescriptor::new(cf_name, cf_options.clone())
+            })
     }
 
     /// Opens or creates the database at a path based on the kind, major version and network,
     /// with the supplied column families, preserving any existing column families,
     /// and returns a shared low-level database wrapper.
+    ///
+    /// # Panics
+    ///
+    /// - If the cache directory does not exist and can't be created.
+    /// - If the database cannot be opened for whatever reason.
     pub fn new(
         config: &Config,
         db_kind: impl AsRef<str>,
@@ -820,26 +977,18 @@ impl DiskDb {
         column_families_in_code: impl IntoIterator<Item = String>,
         read_only: bool,
     ) -> DiskDb {
+        // If the database is ephemeral, we don't need to check the cache directory.
+        if !config.ephemeral {
+            DiskDb::validate_cache_dir(&config.cache_dir);
+        }
+
         let db_kind = db_kind.as_ref();
         let path = config.db_path(db_kind, format_version_in_code.major, network);
 
         let db_options = DiskDb::options();
 
-        // When opening the database in read/write mode, all column families must be opened.
-        //
-        // To make Zebra forward-compatible with databases updated by later versions,
-        // we read any existing column families off the disk, then add any new column families
-        // from the current implementation.
-        //
-        // <https://github.com/facebook/rocksdb/wiki/Column-Families#reference>
-        let column_families_on_disk = DB::list_cf(&db_options, &path).unwrap_or_default();
-        let column_families_in_code = column_families_in_code.into_iter();
-
-        let column_families = column_families_on_disk
-            .into_iter()
-            .chain(column_families_in_code)
-            .unique()
-            .map(|cf_name| rocksdb::ColumnFamilyDescriptor::new(cf_name, db_options.clone()));
+        let column_families =
+            DiskDb::construct_column_families(db_options.clone(), &path, column_families_in_code);
 
         let db_result = if read_only {
             // Use a tempfile for the secondary instance cache directory
@@ -873,6 +1022,7 @@ impl DiskDb {
                     network: network.clone(),
                     ephemeral: config.ephemeral,
                     db: Arc::new(db),
+                    finished_format_upgrades: Arc::new(AtomicBool::new(false)),
                 };
 
                 db.assert_default_cf_is_empty();
@@ -880,11 +1030,15 @@ impl DiskDb {
                 db
             }
 
-            // TODO: provide a different hint if the disk is full, see #1623
+            Err(e) if matches!(e.kind(), ErrorKind::Busy | ErrorKind::IOError) => panic!(
+                "Database likely already open {path:?} \
+                         Hint: Check if another zebrad process is running."
+            ),
+
             Err(e) => panic!(
-                "Opening database {path:?} failed: {e:?}. \
-                 Hint: Check if another zebrad process is running. \
-                 Try changing the state cache_dir in the Zebra config.",
+                "Opening database {path:?} failed. \
+                        Hint: Try changing the state cache_dir in the Zebra config. \
+                        Error: {e}",
             ),
         }
     }
@@ -949,27 +1103,37 @@ impl DiskDb {
     /// db to a new path so it can be used again. It does so by merely trying to rename the path
     /// corresponding to the db version directly preceding the current version to the path that is
     /// used by the current db. If successful, it also deletes the db version file.
+    ///
+    /// Returns the old disk version if one existed and the db directory was renamed, or None otherwise.
+    // TODO: Update this function to rename older major db format version to the current version (#9565).
+    #[allow(clippy::unwrap_in_result)]
     pub(crate) fn try_reusing_previous_db_after_major_upgrade(
         restorable_db_versions: &[u64],
         format_version_in_code: &Version,
         config: &Config,
         db_kind: impl AsRef<str>,
         network: &Network,
-    ) {
+    ) -> Option<Version> {
         if let Some(&major_db_ver) = restorable_db_versions
             .iter()
             .find(|v| **v == format_version_in_code.major)
         {
             let db_kind = db_kind.as_ref();
 
-            let old_path = config.db_path(db_kind, major_db_ver - 1, network);
+            let old_major_db_ver = major_db_ver - 1;
+            let old_path = config.db_path(db_kind, old_major_db_ver, network);
+            // Exit early if the path doesn't exist or there's an error checking it.
+            if !fs::exists(&old_path).unwrap_or(false) {
+                return None;
+            }
+
             let new_path = config.db_path(db_kind, major_db_ver, network);
 
             let old_path = match fs::canonicalize(&old_path) {
                 Ok(canonicalized_old_path) => canonicalized_old_path,
                 Err(e) => {
                     warn!("could not canonicalize {old_path:?}: {e}");
-                    return;
+                    return None;
                 }
             };
 
@@ -977,7 +1141,7 @@ impl DiskDb {
                 Ok(canonicalized_cache_path) => canonicalized_cache_path,
                 Err(e) => {
                     warn!("could not canonicalize {:?}: {e}", config.cache_dir);
-                    return;
+                    return None;
                 }
             };
 
@@ -992,7 +1156,7 @@ impl DiskDb {
             // (TOCTOU attacks). Zebra should not be run with elevated privileges.
             if !old_path.starts_with(&cache_path) {
                 info!("skipped reusing previous state cache: state is outside cache directory");
-                return;
+                return None;
             }
 
             let opts = DiskDb::options();
@@ -1013,7 +1177,7 @@ impl DiskDb {
                         warn!(
                             "could not create new directory for state cache at {new_path:?}: {e}"
                         );
-                        return;
+                        return None;
                     }
                 };
 
@@ -1021,12 +1185,21 @@ impl DiskDb {
                     Ok(()) => {
                         info!("moved state cache from {old_path:?} to {new_path:?}");
 
-                        match fs::remove_file(new_path.join(DATABASE_FORMAT_VERSION_FILE_NAME)) {
-                            Ok(()) => info!("removed version file at {new_path:?}"),
-                            Err(e) => {
-                                warn!("could not remove version file at {new_path:?}: {e}")
-                            }
-                        }
+                        let mut disk_version =
+                            database_format_version_on_disk(config, db_kind, major_db_ver, network)
+                                .expect("unable to read database format version file")
+                                .expect("unable to parse database format version");
+
+                        disk_version.major = old_major_db_ver;
+
+                        write_database_format_version_to_disk(
+                            config,
+                            db_kind,
+                            major_db_ver,
+                            &disk_version,
+                            network,
+                        )
+                        .expect("unable to write database format version file to disk");
 
                         // Get the parent of the old path, e.g. `state/v25/` and delete it if it is
                         // empty.
@@ -1051,13 +1224,17 @@ impl DiskDb {
                                 }
                             }
                         }
+
+                        return Some(disk_version);
                     }
                     Err(e) => {
-                        warn!("could not move state cache from {old_path:?} to {new_path:?}: {e}")
+                        warn!("could not move state cache from {old_path:?} to {new_path:?}: {e}");
                     }
-                }
+                };
             }
-        }
+        };
+
+        None
     }
 
     /// Returns the database options for the finalized state database.
@@ -1202,7 +1379,7 @@ impl DiskDb {
             );
         } else {
             #[cfg(not(test))]
-            info!(
+            debug!(
                 ?current_limit,
                 min_limit = ?DiskDb::MIN_OPEN_FILE_LIMIT,
                 ideal_limit = ?DiskDb::IDEAL_OPEN_FILE_LIMIT,
@@ -1487,6 +1664,24 @@ impl DiskDb {
                 self.zs_is_empty(&default_cf),
                 "Zebra should not store data in the 'default' column family"
             );
+        }
+    }
+
+    // Validates a cache directory and creates it if it doesn't exist.
+    // If the directory cannot be created, it panics with a specific error message.
+    fn validate_cache_dir(cache_dir: &std::path::PathBuf) {
+        if let Err(e) = fs::create_dir_all(cache_dir) {
+            match e.kind() {
+                std::io::ErrorKind::PermissionDenied => panic!(
+                    "Permission denied creating {cache_dir:?}. \
+                     Hint: check if cache directory exist and has write permissions."
+                ),
+                std::io::ErrorKind::StorageFull => panic!(
+                    "No space left on device creating {cache_dir:?}. \
+                     Hint: check if the disk is full."
+                ),
+                _ => panic!("Could not create cache dir {cache_dir:?}: {e}"),
+            }
         }
     }
 }

@@ -2,7 +2,7 @@ use std::{future::Future, pin::Pin, sync::Arc};
 
 use tracing::Instrument;
 
-use zebra_chain::{parameters::NetworkUpgrade, transparent};
+use zebra_chain::transparent;
 use zebra_script::CachedFfiTransaction;
 
 use crate::BoxError;
@@ -30,11 +30,6 @@ pub struct Request {
     ///
     /// Coinbase inputs are rejected by the script verifier, because they do not spend a UTXO.
     pub input_index: usize,
-    /// The network upgrade active in the context of this verification request.
-    ///
-    /// Because the consensus branch ID changes with each network upgrade,
-    /// it has to be specified on a per-request basis.
-    pub upgrade: NetworkUpgrade,
 }
 
 impl tower::Service<Request> for Verifier {
@@ -56,13 +51,8 @@ impl tower::Service<Request> for Verifier {
         let Request {
             cached_ffi_transaction,
             input_index,
-            upgrade,
         } = req;
         let input = &cached_ffi_transaction.inputs()[input_index];
-        let branch_id = upgrade
-            .branch_id()
-            .expect("post-Sapling NUs have a consensus branch ID");
-
         match input {
             transparent::Input::PrevOut { outpoint, .. } => {
                 let outpoint = *outpoint;
@@ -71,7 +61,7 @@ impl tower::Service<Request> for Verifier {
                 let span = tracing::trace_span!("script", ?outpoint);
 
                 async move {
-                    cached_ffi_transaction.is_valid(branch_id, input_index)?;
+                    cached_ffi_transaction.is_valid(input_index)?;
                     tracing::trace!("script verification succeeded");
 
                     Ok(())

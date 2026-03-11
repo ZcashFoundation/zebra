@@ -1,5 +1,7 @@
 //! Tests for peer connections
 
+#![allow(clippy::unwrap_in_result)]
+
 use std::{
     io,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},

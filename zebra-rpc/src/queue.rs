@@ -203,7 +203,7 @@ impl Runner {
                     self.remove_committed(in_state);
 
                     // retry what is left in the queue
-                    let _retried = Self::retry(mempool.clone(), self.transactions_as_vec()).await;
+                    Self::retry(mempool.clone(), self.transactions_as_vec()).await;
                 }
             }
         }
@@ -211,7 +211,7 @@ impl Runner {
 
     /// Remove transactions that are expired according to number of blocks and current spacing between blocks.
     fn remove_expired(&mut self, spacing: Duration) {
-        // Have some extra time to to make sure we re-submit each transaction `NUMBER_OF_BLOCKS_TO_EXPIRE`
+        // Have some extra time to make sure we re-submit each transaction `NUMBER_OF_BLOCKS_TO_EXPIRE`
         // times, as the main loop also takes some time to run.
         let extra_time = Duration::seconds(5);
 

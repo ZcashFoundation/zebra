@@ -1,10 +1,13 @@
 //! Randomised property tests for transaction verification.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use chrono::{DateTime, Duration, Utc};
 use proptest::{collection::vec, prelude::*};
-use tower::ServiceExt;
+use tower::{buffer::Buffer, ServiceExt};
 
 use zebra_chain::{
     amount::Amount,
@@ -300,6 +303,9 @@ fn mock_transparent_transaction(
     // Create the mock transaction
     let expiry_height = block_height;
 
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+    let zip233_amount = Amount::zero();
+
     let transaction = match transaction_version {
         4 => Transaction::V4 {
             inputs,
@@ -316,6 +322,18 @@ fn mock_transparent_transaction(
             expiry_height,
             sapling_shielded_data: None,
             orchard_shielded_data: None,
+            network_upgrade,
+        },
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+        6 => Transaction::V6 {
+            inputs,
+            outputs,
+            lock_time,
+            expiry_height,
+            zip233_amount,
+            sapling_shielded_data: None,
+            orchard_shielded_data: None,
+            orchard_zsa_issue_data: None,
             network_upgrade,
         },
         invalid_version => unreachable!("invalid transaction version: {}", invalid_version),
@@ -346,6 +364,9 @@ fn sanitize_transaction_version(
             Sapling | Blossom | Heartwood | Canopy => 4,
             // FIXME: Use 6 for Nu7
             Nu5 | Nu6 | Nu6_1 | Nu7 => 5,
+
+            #[cfg(zcash_unstable = "zfuture")]
+            NetworkUpgrade::ZFuture => u8::MAX,
         }
     };
 
@@ -451,17 +472,25 @@ fn validate(
         // Initialize the verifier
         let state_service =
             tower::service_fn(|_| async { unreachable!("State service should not be called") });
-        let verifier = transaction::Verifier::new(&network, state_service);
+        let verifier = transaction::Verifier::new_for_tests(&network, state_service);
+        let verifier = Buffer::new(verifier, 10);
+        let transaction_hash = transaction.hash();
 
         // Test the transaction verifier
         verifier
             .clone()
             .oneshot(transaction::Request::Block {
+                transaction_hash,
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(known_utxos),
+                known_outpoint_hashes: Arc::new(HashSet::new()),
                 height,
                 time: block_time,
             })
             .await
+            .map_err(|err| {
+                *err.downcast()
+                    .expect("error type should be TransactionError")
+            })
     })
 }

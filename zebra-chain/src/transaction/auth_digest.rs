@@ -7,7 +7,8 @@ use hex::{FromHex, ToHex};
 use crate::{
     primitives::zcash_primitives::auth_digest,
     serialization::{
-        ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
+        BytesInDisplayOrder, ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize,
+        ZcashSerialize,
     },
 };
 
@@ -22,30 +23,17 @@ use proptest_derive::Arbitrary;
 /// following the u256 convention set by Bitcoin and zcashd.
 ///
 /// [ZIP-244]: https://zips.z.cash/zip-0244
-#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, serde::Deserialize, serde::Serialize)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct AuthDigest(pub [u8; 32]);
 
-impl AuthDigest {
-    /// Return the hash bytes in big-endian byte-order suitable for printing out byte by byte.
-    ///
-    /// Zebra displays transaction and block hashes in big-endian byte-order,
-    /// following the u256 convention set by Bitcoin and zcashd.
-    pub fn bytes_in_display_order(&self) -> [u8; 32] {
-        let mut reversed_bytes = self.0;
-        reversed_bytes.reverse();
-        reversed_bytes
+impl BytesInDisplayOrder<true> for AuthDigest {
+    fn bytes_in_serialized_order(&self) -> [u8; 32] {
+        self.0
     }
 
-    /// Convert bytes in big-endian byte-order into a [`transaction::AuthDigest`](crate::transaction::AuthDigest).
-    ///
-    /// Zebra displays transaction and block hashes in big-endian byte-order,
-    /// following the u256 convention set by Bitcoin and zcashd.
-    pub fn from_bytes_in_display_order(bytes_in_display_order: &[u8; 32]) -> AuthDigest {
-        let mut internal_byte_order = *bytes_in_display_order;
-        internal_byte_order.reverse();
-
-        AuthDigest(internal_byte_order)
+    fn from_bytes_in_serialized_order(bytes: [u8; 32]) -> Self {
+        AuthDigest(bytes)
     }
 }
 

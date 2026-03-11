@@ -47,13 +47,17 @@ use tracing_futures::Instrument;
 use zebra_chain::{
     block::Height,
     transaction::{self, UnminedTxId, VerifiedUnminedTx},
+    transparent,
 };
 use zebra_consensus::transaction as tx;
-use zebra_network as zn;
+use zebra_network::{self as zn, PeerSocketAddr};
 use zebra_node_services::mempool::Gossip;
 use zebra_state::{self as zs, CloneError};
 
-use crate::components::sync::{BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT};
+use crate::components::{
+    mempool::crawler::RATE_LIMIT_DELAY,
+    sync::{BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT},
+};
 
 use super::MempoolError;
 
@@ -111,17 +115,20 @@ pub enum TransactionDownloadVerifyError {
     #[error("transaction is already in state")]
     InState,
 
-    #[error("error in state service")]
+    #[error("error in state service: {0}")]
     StateError(#[source] CloneError),
 
-    #[error("error downloading transaction")]
+    #[error("error downloading transaction: {0}")]
     DownloadFailed(#[source] CloneError),
 
     #[error("transaction download / verification was cancelled")]
     Cancelled,
 
-    #[error("transaction did not pass consensus validation")]
-    Invalid(#[from] zebra_consensus::error::TransactionError),
+    #[error("transaction did not pass consensus validation: {error}")]
+    Invalid {
+        error: zebra_consensus::error::TransactionError,
+        advertiser_addr: Option<PeerSocketAddr>,
+    },
 }
 
 /// Represents a [`Stream`] of download and verification tasks.
@@ -153,8 +160,16 @@ where
     pending: FuturesUnordered<
         JoinHandle<
             Result<
-                (VerifiedUnminedTx, Option<Height>),
-                (TransactionDownloadVerifyError, UnminedTxId),
+                Result<
+                    (
+                        VerifiedUnminedTx,
+                        Vec<transparent::OutPoint>,
+                        Option<Height>,
+                        Option<oneshot::Sender<Result<(), BoxError>>>,
+                    ),
+                    Box<(TransactionDownloadVerifyError, UnminedTxId)>,
+                >,
+                tokio::time::error::Elapsed,
             >,
         >,
     >,
@@ -173,8 +188,18 @@ where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
 {
-    type Item =
-        Result<(VerifiedUnminedTx, Option<Height>), (UnminedTxId, TransactionDownloadVerifyError)>;
+    type Item = Result<
+        Result<
+            (
+                VerifiedUnminedTx,
+                Vec<transparent::OutPoint>,
+                Option<Height>,
+                Option<oneshot::Sender<Result<(), BoxError>>>,
+            ),
+            Box<(UnminedTxId, TransactionDownloadVerifyError)>,
+        >,
+        tokio::time::error::Elapsed,
+    >;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         let this = self.project();
@@ -187,20 +212,27 @@ where
         // task is scheduled for wakeup when the next task becomes ready.
         //
         // TODO: this would be cleaner with poll_map (#2693)
-        if let Some(join_result) = ready!(this.pending.poll_next(cx)) {
-            match join_result.expect("transaction download and verify tasks must not panic") {
-                Ok((tx, tip_height)) => {
+        let item = if let Some(join_result) = ready!(this.pending.poll_next(cx)) {
+            let result = join_result.expect("transaction download and verify tasks must not panic");
+            let result = match result {
+                Ok(Ok((tx, spent_mempool_outpoints, tip_height, rsp_tx))) => {
                     this.cancel_handles.remove(&tx.transaction.id);
-                    Poll::Ready(Some(Ok((tx, tip_height))))
+                    Ok(Ok((tx, spent_mempool_outpoints, tip_height, rsp_tx)))
                 }
-                Err((e, hash)) => {
+                Ok(Err(boxed_err)) => {
+                    let (e, hash) = *boxed_err;
                     this.cancel_handles.remove(&hash);
-                    Poll::Ready(Some(Err((hash, e))))
+                    Ok(Err(Box::new((hash, e))))
                 }
-            }
+                Err(elapsed) => Err(elapsed),
+            };
+
+            Some(result)
         } else {
-            Poll::Ready(None)
-        }
+            None
+        };
+
+        Poll::Ready(item)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -244,7 +276,7 @@ where
     pub fn download_if_needed_and_verify(
         &mut self,
         gossiped_tx: Gossip,
-        rsp_tx: Option<oneshot::Sender<Result<(), BoxError>>>,
+        mut rsp_tx: Option<oneshot::Sender<Result<(), BoxError>>>,
     ) -> Result<(), MempoolError> {
         let txid = gossiped_tx.id();
 
@@ -302,7 +334,7 @@ where
 
             trace!(?txid, ?next_height, "got next height");
 
-            let tx = match gossiped_tx {
+            let (tx, advertiser_addr) = match gossiped_tx {
                 Gossip::Id(txid) => {
                     let req = zn::Request::TransactionsById(std::iter::once(txid).collect());
 
@@ -320,7 +352,7 @@ where
                         _ => unreachable!("wrong response to transaction request"),
                     };
 
-                    let tx = tx.available().expect(
+                    let (tx, advertiser_addr) = tx.available().expect(
                         "unexpected missing tx status: single tx failures should be errors",
                     );
 
@@ -328,14 +360,14 @@ where
                         "mempool.downloaded.transactions.total",
                         "version" => format!("{}",tx.transaction.version()),
                     ).increment(1);
-                    tx
+                    (tx, advertiser_addr)
                 }
                 Gossip::Tx(tx) => {
                     metrics::counter!(
                         "mempool.pushed.transactions.total",
                         "version" => format!("{}",tx.transaction.version()),
                     ).increment(1);
-                    tx
+                    (tx, None)
                 }
             };
 
@@ -347,54 +379,76 @@ where
                     height: next_height,
                 })
                 .map_ok(|rsp| {
-                    (rsp.into_mempool_transaction()
-                        .expect("unexpected non-mempool response to mempool request"), tip_height)
+                    let tx::Response::Mempool { transaction, spent_mempool_outpoints } = rsp else {
+                        panic!("unexpected non-mempool response to mempool request")
+                    };
+
+                    (transaction, spent_mempool_outpoints, tip_height)
                 })
                 .await;
 
             // Hide the transaction data to avoid filling the logs
             trace!(?txid, result = ?result.as_ref().map(|_tx| ()), "verified transaction for the mempool");
 
-            result.map_err(|e| TransactionDownloadVerifyError::Invalid(e.into()))
+            result.map_err(|e| TransactionDownloadVerifyError::Invalid { error: e.into(), advertiser_addr } )
         }
-        .map_ok(|(tx, tip_height)| {
+        .map_ok(|(tx, spent_mempool_outpoints, tip_height)| {
             metrics::counter!(
                 "mempool.verified.transactions.total",
                 "version" => format!("{}", tx.transaction.transaction.version()),
             ).increment(1);
-            (tx, tip_height)
+            (tx, spent_mempool_outpoints, tip_height)
         })
         // Tack the hash onto the error so we can remove the cancel handle
         // on failure as well as on success.
-        .map_err(move |e| (e, txid))
-            .inspect(move |result| {
-                // Hide the transaction data to avoid filling the logs
-                let result = result.as_ref().map(|_tx| txid);
-                debug!("mempool transaction result: {result:?}");
-            })
+        .map_err(move |e| Box::new((e, txid)))
+        .inspect(move |result| {
+            // Hide the transaction data to avoid filling the logs
+            let result = result.as_ref().map(|_tx| txid);
+            debug!("mempool transaction result: {result:?}");
+        })
         .in_current_span();
 
         let task = tokio::spawn(async move {
+            let fut = tokio::time::timeout(RATE_LIMIT_DELAY, fut);
+
             // Prefer the cancel handle if both are ready.
             let result = tokio::select! {
                 biased;
                 _ = &mut cancel_rx => {
                     trace!("task cancelled prior to completion");
                     metrics::counter!("mempool.cancelled.verify.tasks.total").increment(1);
-                    Err((TransactionDownloadVerifyError::Cancelled, txid))
-                }
-                verification = fut => verification,
-            };
+                    if let Some(rsp_tx) = rsp_tx.take() {
+                        let _ = rsp_tx.send(Err("verification cancelled".into()));
+                    }
 
-            // Send the result to responder channel if one was provided.
-            if let Some(rsp_tx) = rsp_tx {
-                let _ = rsp_tx.send(
-                    result
-                        .as_ref()
-                        .map(|_| ())
-                        .map_err(|(err, _)| err.clone().into()),
-                );
-            }
+                    Ok(Err(Box::new((TransactionDownloadVerifyError::Cancelled, txid))))
+                }
+                verification = fut => {
+                    verification
+                        .inspect_err(|_elapsed| {
+                            if let Some(rsp_tx) = rsp_tx.take() {
+                                let _ = rsp_tx.send(Err("timeout waiting for verification result".into()));
+                            }
+                        })
+                        .map(|inner_result| {
+                            match inner_result {
+                                Ok((transaction, spent_mempool_outpoints, tip_height)) => Ok((transaction, spent_mempool_outpoints, tip_height, rsp_tx)),
+                                Err(boxed_err) => {
+                                    let (tx_verifier_error, tx_id) = *boxed_err;
+                                    if let Some(rsp_tx) = rsp_tx.take() {
+                                        let error_msg = format!(
+                                            "failed to validate tx: {tx_id}, error: {tx_verifier_error}"
+                                        );
+                                        let _ = rsp_tx.send(Err(error_msg.into()));
+                                    };
+
+                                    Err(Box::new((tx_verifier_error, tx_id)))
+                                }
+                            }
+                        })
+                },
+            };
 
             result
         });

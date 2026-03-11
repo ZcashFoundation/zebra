@@ -5,29 +5,38 @@
 use std::{
     collections::{BTreeSet, HashMap},
     mem,
+    path::PathBuf,
     sync::Arc,
 };
 
+use indexmap::IndexMap;
+use tokio::sync::watch;
 use zebra_chain::{
-    block::{self, Block},
+    block::{self, Block, Hash, Height},
     orchard_zsa::{AssetBase, IssuedAssetChanges},
     parameters::Network,
-    sprout, transparent,
+    sprout::{self},
+    transparent,
 };
 
 use crate::{
-    constants::MAX_NON_FINALIZED_CHAIN_FORKS,
+    constants::{MAX_INVALIDATED_BLOCKS, MAX_NON_FINALIZED_CHAIN_FORKS},
+    error::ReconsiderError,
     request::{ContextuallyVerifiedBlock, FinalizableBlock},
-    service::{check, finalized_state::ZebraDb, read},
-    SemanticallyVerifiedBlock, ValidateContextError,
+    service::{check, finalized_state::ZebraDb, read, InvalidateError},
+    SemanticallyVerifiedBlock, ValidateContextError, WatchReceiver,
 };
 
+mod backup;
 mod chain;
+
+#[cfg(test)]
+pub(crate) use backup::MIN_DURATION_BETWEEN_BACKUP_UPDATES;
 
 #[cfg(test)]
 mod tests;
 
-pub(crate) use chain::Chain;
+pub(crate) use chain::{Chain, SpendingTransactionId};
 
 /// The state of the chains in memory, including queued blocks.
 ///
@@ -46,6 +55,10 @@ pub struct NonFinalizedState {
     /// callers should migrate to `chain_iter().next()`.
     chain_set: BTreeSet<Arc<Chain>>,
 
+    /// Blocks that have been invalidated in, and removed from, the non finalized
+    /// state.
+    invalidated_blocks: IndexMap<Height, Arc<Vec<ContextuallyVerifiedBlock>>>,
+
     // Configuration
     //
     /// The configured Zcash network.
@@ -59,7 +72,6 @@ pub struct NonFinalizedState {
     /// with a commit to a cloned non-finalized state.
     //
     // TODO: make this field private and set it via an argument to NonFinalizedState::new()
-    #[cfg(feature = "getblocktemplate-rpcs")]
     should_count_metrics: bool,
 
     /// Number of chain forks transmitter.
@@ -81,7 +93,6 @@ impl std::fmt::Debug for NonFinalizedState {
         f.field("chain_set", &self.chain_set)
             .field("network", &self.network);
 
-        #[cfg(feature = "getblocktemplate-rpcs")]
         f.field("should_count_metrics", &self.should_count_metrics);
 
         f.finish()
@@ -93,14 +104,11 @@ impl Clone for NonFinalizedState {
         Self {
             chain_set: self.chain_set.clone(),
             network: self.network.clone(),
-
-            #[cfg(feature = "getblocktemplate-rpcs")]
+            invalidated_blocks: self.invalidated_blocks.clone(),
             should_count_metrics: self.should_count_metrics,
-
             // Don't track progress in clones.
             #[cfg(feature = "progress-bar")]
             chain_count_bar: None,
-
             #[cfg(feature = "progress-bar")]
             chain_fork_length_bars: Vec::new(),
         }
@@ -113,13 +121,83 @@ impl NonFinalizedState {
         NonFinalizedState {
             chain_set: Default::default(),
             network: network.clone(),
-            #[cfg(feature = "getblocktemplate-rpcs")]
+            invalidated_blocks: Default::default(),
             should_count_metrics: true,
             #[cfg(feature = "progress-bar")]
             chain_count_bar: None,
             #[cfg(feature = "progress-bar")]
             chain_fork_length_bars: Vec::new(),
         }
+    }
+
+    /// Accepts an optional path to the non-finalized state backup directory and a handle to the database.
+    ///
+    /// If a backup directory path is provided:
+    /// - Creates a new backup directory at the provided path if none exists,
+    /// - Restores non-finalized blocks from the backup directory, if any, and
+    /// - Spawns a task that updates the non-finalized backup cache with
+    ///   the latest non-finalized state sent to the returned watch channel.
+    ///
+    /// Returns the non-finalized state with a watch channel sender and receiver.
+    pub async fn with_backup(
+        self,
+        backup_dir_path: Option<PathBuf>,
+        finalized_state: &ZebraDb,
+        should_restore_backup: bool,
+    ) -> (
+        Self,
+        watch::Sender<NonFinalizedState>,
+        WatchReceiver<NonFinalizedState>,
+    ) {
+        let with_watch_channel = |non_finalized_state: NonFinalizedState| {
+            let (sender, receiver) = watch::channel(non_finalized_state.clone());
+            (non_finalized_state, sender, WatchReceiver::new(receiver))
+        };
+
+        let Some(backup_dir_path) = backup_dir_path else {
+            return with_watch_channel(self);
+        };
+
+        tracing::info!(
+            ?backup_dir_path,
+            "restoring non-finalized blocks from backup and spawning backup task"
+        );
+
+        let non_finalized_state = {
+            let backup_dir_path = backup_dir_path.clone();
+            let finalized_state = finalized_state.clone();
+            tokio::task::spawn_blocking(move || {
+                // Create a new backup directory if none exists
+                std::fs::create_dir_all(&backup_dir_path)
+                    .expect("failed to create non-finalized state backup directory");
+
+                if should_restore_backup {
+                    backup::restore_backup(self, &backup_dir_path, &finalized_state)
+                } else {
+                    self
+                }
+            })
+            .await
+            .expect("failed to join blocking task")
+        };
+
+        let (non_finalized_state, sender, receiver) = with_watch_channel(non_finalized_state);
+
+        tokio::spawn(backup::run_backup_task(receiver.clone(), backup_dir_path));
+
+        if !non_finalized_state.is_chain_set_empty() {
+            let num_blocks_restored = non_finalized_state
+                .best_chain()
+                .expect("must have best chain if chain set is not empty")
+                .len();
+
+            tracing::info!(
+                ?num_blocks_restored,
+                "restored blocks from non-finalized backup cache"
+            );
+        }
+
+        (non_finalized_state, sender, receiver)
     }
 
     /// Is the internal state of `self` the same as `other`?
@@ -228,6 +306,10 @@ impl NonFinalizedState {
             self.insert(side_chain);
         }
 
+        // Remove all invalidated_blocks at or below the finalized height
+        self.invalidated_blocks
+            .retain(|height, _blocks| *height >= best_chain_root.height);
+
         self.update_metrics_for_chains();
 
         // Add the treestate to the finalized block.
@@ -263,6 +345,140 @@ impl NonFinalizedState {
         self.update_metrics_for_committed_block(height, hash);
 
         Ok(())
+    }
+
+    /// Invalidate block with hash `block_hash` and all descendants from the non-finalized state. Insert
+    /// the new chain into the chain_set and discard the previous.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn invalidate_block(&mut self, block_hash: Hash) -> Result<block::Hash, InvalidateError> {
+        let Some(chain) = self.find_chain(|chain| chain.contains_block_hash(block_hash)) else {
+            return Err(InvalidateError::BlockNotFound(block_hash));
+        };
+
+        let invalidated_blocks = if chain.non_finalized_root_hash() == block_hash {
+            self.chain_set.remove(&chain);
+            chain.blocks.values().cloned().collect()
+        } else {
+            let (new_chain, invalidated_blocks) = chain
+                .invalidate_block(block_hash)
+                .expect("already checked that chain contains hash");
+
+            // Add the new chain fork or updated chain to the set of recent chains, and
+            // remove the chain containing the hash of the block from chain set
+            self.insert_with(Arc::new(new_chain.clone()), |chain_set| {
+                chain_set.retain(|c| !c.contains_block_hash(block_hash))
+            });
+
+            invalidated_blocks
+        };
+
+        // TODO: Allow for invalidating multiple block hashes at a given height (#9552).
+        self.invalidated_blocks.insert(
+            invalidated_blocks
+                .first()
+                .expect("should not be empty")
+                .clone()
+                .height,
+            Arc::new(invalidated_blocks),
+        );
+
+        while self.invalidated_blocks.len() > MAX_INVALIDATED_BLOCKS {
+            self.invalidated_blocks.shift_remove_index(0);
+        }
+
+        self.update_metrics_for_chains();
+        self.update_metrics_bars();
+
+        Ok(block_hash)
+    }
+
+    /// Reconsiders a previously invalidated block and its descendants into the non-finalized state
+    /// based on a block_hash. Reconsidered blocks are inserted into the previous chain and re-inserted
+    /// into the chain_set.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn reconsider_block(
+        &mut self,
+        block_hash: block::Hash,
+        finalized_state: &ZebraDb,
+    ) -> Result<Vec<block::Hash>, ReconsiderError> {
+        // Get the invalidated blocks that were invalidated by the given block_hash
+        let height = self
+            .invalidated_blocks
+            .iter()
+            .find_map(|(height, blocks)| {
+                if blocks.first()?.hash == block_hash {
+                    Some(height)
+                } else {
+                    None
+                }
+            })
+            .ok_or(ReconsiderError::MissingInvalidatedBlock(block_hash))?;
+
+        let invalidated_blocks = Arc::unwrap_or_clone(
+            self.invalidated_blocks
+                .clone()
+                .shift_remove(height)
+                .ok_or(ReconsiderError::MissingInvalidatedBlock(block_hash))?,
+        );
+
+        let invalidated_block_hashes = invalidated_blocks
+            .iter()
+            .map(|block| block.hash)
+            .collect::<Vec<_>>();
+
+        // Find and fork the parent chain of the invalidated_root. Update the parent chain
+        // with the invalidated_descendants
+        let invalidated_root = invalidated_blocks
+            .first()
+            .ok_or(ReconsiderError::InvalidatedBlocksEmpty)?;
+
+        let root_parent_hash = invalidated_root.block.header.previous_block_hash;
+
+        // If the parent is the tip of the finalized_state we create a new chain and insert it
+        // into the non finalized state
+        let chain_result = if root_parent_hash == finalized_state.finalized_tip_hash() {
+            let chain = Chain::new(
+                &self.network,
+                finalized_state
+                    .finalized_tip_height()
+                    .ok_or(ReconsiderError::ParentChainNotFound(block_hash))?,
+                finalized_state.sprout_tree_for_tip(),
+                finalized_state.sapling_tree_for_tip(),
+                finalized_state.orchard_tree_for_tip(),
+                finalized_state.history_tree(),
+                finalized_state.finalized_value_pool(),
+            );
+            Arc::new(chain)
+        } else {
+            // The parent is not the finalized_tip and still exist in the NonFinalizedState
+            // or else we return an error due to the parent not existing in the NonFinalizedState
+            self.parent_chain(root_parent_hash)
+                .map_err(|_| ReconsiderError::ParentChainNotFound(block_hash))?
+        };
+
+        let mut modified_chain = Arc::unwrap_or_clone(chain_result);
+        for block in invalidated_blocks {
+            modified_chain = modified_chain
+                .push(block)
+                .expect("previously invalidated block should be valid for chain");
+        }
+
+        let (height, hash) = modified_chain.non_finalized_tip();
+
+        // Only track invalidated_blocks that are not yet finalized. Once blocks are finalized (below the best_chain_root_height)
+        // we can discard the block.
+        if let Some(best_chain_root_height) = finalized_state.finalized_tip_height() {
+            self.invalidated_blocks
+                .retain(|height, _blocks| *height >= best_chain_root_height);
+        }
+
+        self.insert_with(Arc::new(modified_chain), |chain_set| {
+            chain_set.retain(|chain| chain.non_finalized_tip_hash() != root_parent_hash)
+        });
+
+        self.update_metrics_for_committed_block(height, hash);
+
+        Ok(invalidated_block_hashes)
     }
 
     /// Commit block to the non-finalized state as a new chain where its parent
@@ -316,6 +532,16 @@ impl NonFinalizedState {
         prepared: SemanticallyVerifiedBlock,
         finalized_state: &ZebraDb,
     ) -> Result<Arc<Chain>, ValidateContextError> {
+        if self
+            .invalidated_blocks
+            .values()
+            .any(|blocks| blocks.iter().any(|block| block.hash == prepared.hash))
+        {
+            return Err(ValidateContextError::BlockPreviouslyInvalidated {
+                block_hash: prepared.hash,
+            });
+        }
+
         // Reads from disk
         //
         // TODO: if these disk reads show up in profiles, run them in parallel, using std::thread::spawn()
@@ -439,6 +665,12 @@ impl NonFinalizedState {
         Some(self.best_chain()?.blocks.len() as u32)
     }
 
+    /// Returns the root height of the non-finalized state, if the non-finalized state is not empty.
+    pub fn root_height(&self) -> Option<block::Height> {
+        self.best_chain()
+            .map(|chain| chain.non_finalized_root_height())
+    }
+
     /// Returns `true` if `hash` is contained in the non-finalized portion of any
     /// known chain.
     #[allow(dead_code)]
@@ -553,7 +785,7 @@ impl NonFinalizedState {
     #[allow(dead_code)]
     pub fn best_contains_sprout_nullifier(&self, sprout_nullifier: &sprout::Nullifier) -> bool {
         self.best_chain()
-            .map(|best_chain| best_chain.sprout_nullifiers.contains(sprout_nullifier))
+            .map(|best_chain| best_chain.sprout_nullifiers.contains_key(sprout_nullifier))
             .unwrap_or(false)
     }
 
@@ -565,7 +797,11 @@ impl NonFinalizedState {
         sapling_nullifier: &zebra_chain::sapling::Nullifier,
     ) -> bool {
         self.best_chain()
-            .map(|best_chain| best_chain.sapling_nullifiers.contains(sapling_nullifier))
+            .map(|best_chain| {
+                best_chain
+                    .sapling_nullifiers
+                    .contains_key(sapling_nullifier)
+            })
             .unwrap_or(false)
     }
 
@@ -577,7 +813,11 @@ impl NonFinalizedState {
         orchard_nullifier: &zebra_chain::orchard::Nullifier,
     ) -> bool {
         self.best_chain()
-            .map(|best_chain| best_chain.orchard_nullifiers.contains(orchard_nullifier))
+            .map(|best_chain| {
+                best_chain
+                    .orchard_nullifiers
+                    .contains_key(orchard_nullifier)
+            })
             .unwrap_or(false)
     }
 
@@ -589,6 +829,16 @@ impl NonFinalizedState {
     /// Return the number of chains.
     pub fn chain_count(&self) -> usize {
         self.chain_set.len()
+    }
+
+    /// Returns true if this [`NonFinalizedState`] contains no chains.
+    pub fn is_chain_set_empty(&self) -> bool {
+        self.chain_count() == 0
+    }
+
+    /// Return the invalidated blocks.
+    pub fn invalidated_blocks(&self) -> IndexMap<Height, Arc<Vec<ContextuallyVerifiedBlock>>> {
+        self.invalidated_blocks.clone()
     }
 
     /// Return the chain whose tip block hash is `parent_hash`.
@@ -616,13 +866,8 @@ impl NonFinalizedState {
     }
 
     /// Should this `NonFinalizedState` instance track metrics and progress bars?
-    #[allow(dead_code)]
     fn should_count_metrics(&self) -> bool {
-        #[cfg(feature = "getblocktemplate-rpcs")]
-        return self.should_count_metrics;
-
-        #[cfg(not(feature = "getblocktemplate-rpcs"))]
-        return true;
+        self.should_count_metrics
     }
 
     /// Update the metrics after `block` is committed
@@ -764,10 +1009,7 @@ impl NonFinalizedState {
 
     /// Stop tracking metrics for this non-finalized state and all its chains.
     pub fn disable_metrics(&mut self) {
-        #[cfg(feature = "getblocktemplate-rpcs")]
-        {
-            self.should_count_metrics = false;
-        }
+        self.should_count_metrics = false;
 
         #[cfg(feature = "progress-bar")]
         {

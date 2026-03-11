@@ -1,0 +1,43 @@
+# This workflow ensures required status checks pass when main workflows are skipped.
+# !CRITICAL: Uses paths-ignore to ensure mutual exclusion with main workflows.
+# Only runs when NO Rust/config files are modified.
+# See: https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks#handling-skipped-but-required-checks
+
+name: Status Check Patch
+
+on:
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      # This MUST be an exact inverse of paths in lint.yml, tests-unit.yml, and test-crates.yml
+      # to ensure mutual exclusion - only one set of workflows runs
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - .cargo/config.toml
+      - '**/clippy.toml'
+      - .github/workflows/lint.yml
+      - .github/workflows/tests-unit.yml
+      - .github/workflows/test-crates.yml
+
+permissions:
+  contents: read
+
+jobs:
+  lint-success:
+    name: lint success
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "No lint needed - no Rust files modified"
+
+  test-success:
+    name: test success
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "No tests needed - no Rust files modified"
+
+  test-crate-build-success:
+    name: test crate build success
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "No crate build needed - no Rust files modified"

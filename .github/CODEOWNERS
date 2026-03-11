@@ -2,7 +2,7 @@
 # this team will be requested for review when someone opens a pull request.
 #
 # We use a single team here, because if we use two teams, GitHub assigns two reviewers.
-*                                       @ZcashFoundation/general-rust-reviewers
+# *                                       @ZcashFoundation/general-rust-reviewers
 
 # Frequently Modified Code
 #
@@ -11,36 +11,36 @@
 # to stop GitHub assigning multiple reviewers
 #
 # lightwalletd epic
-/zebrad/src/commands/start.rs           @ZcashFoundation/general-rust-reviewers
+# /zebrad/src/commands/start.rs           @ZcashFoundation/general-rust-reviewers
 
 # Network and Async Code
-/tower-batch-control/                   @ZcashFoundation/network-reviewers
-/tower-fallback/                        @ZcashFoundation/network-reviewers
-/zebra-network/                         @ZcashFoundation/network-reviewers
-/zebra-node-services/                   @ZcashFoundation/network-reviewers
-/zebra-tests/src/mock_service.rs        @ZcashFoundation/network-reviewers
-/zebra-tests/src/service_extensions.rs  @ZcashFoundation/network-reviewers
-/zebra-tests/src/transcript.rs          @ZcashFoundation/network-reviewers
-/zebrad/src/components/                 @ZcashFoundation/network-reviewers
+# /tower-batch-control/                   @ZcashFoundation/network-reviewers
+# /tower-fallback/                        @ZcashFoundation/network-reviewers
+# /zebra-network/                         @ZcashFoundation/network-reviewers
+# /zebra-node-services/                   @ZcashFoundation/network-reviewers
+# /zebra-tests/src/mock_service.rs        @ZcashFoundation/network-reviewers
+# /zebra-tests/src/service_extensions.rs  @ZcashFoundation/network-reviewers
+# /zebra-tests/src/transcript.rs          @ZcashFoundation/network-reviewers
+# /zebrad/src/components/                 @ZcashFoundation/network-reviewers
 
 # Cryptographic Code
-/zebra-consensus/src/primitives/        @ZcashFoundation/cryptographic-reviewers
-/zebra-chain/src/primitives/            @ZcashFoundation/cryptographic-reviewers
-/zebra-chain/src/orchard/               @ZcashFoundation/cryptographic-reviewers
-/zebra-chain/src/sapling/               @ZcashFoundation/cryptographic-reviewers
-/zebra-chain/src/sprout/                @ZcashFoundation/cryptographic-reviewers
-/zebra-chain/src/transparent/           @ZcashFoundation/cryptographic-reviewers
-/zebra-chain/src/history_tree.rs        @ZcashFoundation/cryptographic-reviewers
-/zebra-chain/src/history_tree/          @ZcashFoundation/cryptographic-reviewers
+# /zebra-consensus/src/primitives/        @ZcashFoundation/cryptographic-reviewers
+# /zebra-chain/src/primitives/            @ZcashFoundation/cryptographic-reviewers
+# /zebra-chain/src/orchard/               @ZcashFoundation/cryptographic-reviewers
+# /zebra-chain/src/sapling/               @ZcashFoundation/cryptographic-reviewers
+# /zebra-chain/src/sprout/                @ZcashFoundation/cryptographic-reviewers
+# /zebra-chain/src/transparent/           @ZcashFoundation/cryptographic-reviewers
+# /zebra-chain/src/history_tree.rs        @ZcashFoundation/cryptographic-reviewers
+# /zebra-chain/src/history_tree/          @ZcashFoundation/cryptographic-reviewers
 
 # Devops Code
-/.github/workflows/                     @ZcashFoundation/devops-reviewers
-/.github/mergify.yml                    @ZcashFoundation/devops-reviewers
-/docker/                                @ZcashFoundation/devops-reviewers
-cloudbuild.yaml                         @ZcashFoundation/devops-reviewers
-codecov.yml                             @ZcashFoundation/devops-reviewers
-firebase.json                           @ZcashFoundation/devops-reviewers
-katex-header.html                       @ZcashFoundation/devops-reviewers
+# /.github/workflows/                     @ZcashFoundation/devops-reviewers
+# /.github/mergify.yml                    @ZcashFoundation/devops-reviewers
+# /docker/                                @ZcashFoundation/devops-reviewers
+# cloudbuild.yaml                         @ZcashFoundation/devops-reviewers
+# codecov.yml                             @ZcashFoundation/devops-reviewers
+# firebase.json                           @ZcashFoundation/devops-reviewers
+# katex-header.html                       @ZcashFoundation/devops-reviewers
 
 # Unsafe Code
-/zebra-script/                          @ZcashFoundation/unsafe-rust-reviewers
+# /zebra-script/                          @ZcashFoundation/unsafe-rust-reviewers

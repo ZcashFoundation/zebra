@@ -1,0 +1,41 @@
+{
+    "capabilities": [
+        "proposal"
+    ],
+    "version": 4,
+    "previousblockhash": "000000000091f6c52c116112e6ab784cd41550b5a0fbca1c84e6ab62f619eb2e",
+    "blockcommitmentshash": "c78325bc39115ce5bfdd75215e0104aacb674e2dc19d06a8fca4f963b52c462c",
+    "lightclientroothash": "c78325bc39115ce5bfdd75215e0104aacb674e2dc19d06a8fca4f963b52c462c",
+    "finalsaplingroothash": "c78325bc39115ce5bfdd75215e0104aacb674e2dc19d06a8fca4f963b52c462c",
+    "defaultroots": {
+        "merkleroot": "c9a6321293a3955b9970750b0fee21e89bc6f8938e51391410c3577ad9d03405",
+        "chainhistoryroot": "e1c60e427c655cf06400239bc0a42532a993995e7601ef8848c53fd6ea426055",
+        "authdataroot": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "blockcommitmentshash": "c78325bc39115ce5bfdd75215e0104aacb674e2dc19d06a8fca4f963b52c462c"
+    },
+    "transactions": [],
+    "coinbasetxn": {
+        "data": "0400008085202f89010000000000000000000000000000000000000000000000000000000000000000ffffffff05039bbc2c00ffffffff0240597307000000001976a914ba92ff06081d5ff6542af8d3b2d209d29ba6337c88ac20bcbe000000000017a914c20cd5bdf7964ca61764db66bc2531b1792a084d87000000009bbc2c000000000000000000000000",
+        "hash": "c9a6321293a3955b9970750b0fee21e89bc6f8938e51391410c3577ad9d03405",
+        "authdigest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "depends": [],
+        "fee": 0,
+        "sigops": 1,
+        "required": true
+    },
+    "longpollid": "0002931866cc3a357e1747853232000000000000000000",
+    "target": "0000000001da6700000000000000000000000000000000000000000000000000",
+    "mintime": 1747847833,
+    "mutable": [
+        "time",
+        "transactions",
+        "prevblock"
+    ],
+    "noncerange": "00000000ffffffff",
+    "sigoplimit": 20000,
+    "sizelimit": 2000000,
+    "curtime": 1747848159,
+    "bits": "1c01da67",
+    "height": 2931867,
+    "maxtime": 1747853232
+}

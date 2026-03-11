@@ -20,7 +20,7 @@ use crate::{
     },
 };
 
-#[cfg(feature = "tx_v6")]
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
 use crate::{
     orchard::OrchardZSA, orchard_zsa::NoBurn, parameters::TX_V6_VERSION_GROUP_ID,
     serialization::CompactSizeMessage,
@@ -828,7 +828,7 @@ impl ZcashSerialize for Transaction {
                 orchard_shielded_data.zcash_serialize(&mut writer)?;
             }
 
-            #[cfg(feature = "tx_v6")]
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             Transaction::V6 {
                 network_upgrade,
                 lock_time,
@@ -840,6 +840,9 @@ impl ZcashSerialize for Transaction {
                 orchard_shielded_data,
                 orchard_zsa_issue_data,
             } => {
+                // Transaction V6 spec:
+                // https://zips.z.cash/zip-0230#specification
+
                 // Denoted as `nVersionGroupId` in the spec.
                 writer.write_u32::<LittleEndian>(TX_V6_VERSION_GROUP_ID)?;
 
@@ -1102,12 +1105,7 @@ impl ZcashDeserialize for Transaction {
                 // Denoted as `nConsensusBranchId` in the spec.
                 // Convert it to a NetworkUpgrade
                 let network_upgrade =
-                    NetworkUpgrade::from_branch_id(limited_reader.read_u32::<LittleEndian>()?)
-                        .ok_or_else(|| {
-                            SerializationError::Parse(
-                                "expected a valid network upgrade from the consensus branch id",
-                            )
-                        })?;
+                    NetworkUpgrade::try_from(limited_reader.read_u32::<LittleEndian>()?)?;
 
                 // Denoted as `lock_time` in the spec.
                 let lock_time = LockTime::zcash_deserialize(&mut limited_reader)?;
@@ -1142,11 +1140,8 @@ impl ZcashDeserialize for Transaction {
                     orchard_shielded_data,
                 })
             }
-            #[cfg(feature = "tx_v6")]
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             (6, true) => {
-                // Transaction V6 spec:
-                // https://zips.z.cash/zip-0230#transaction-format
-
                 // Denoted as `nVersionGroupId` in the spec.
                 let id = limited_reader.read_u32::<LittleEndian>()?;
                 if id != TX_V6_VERSION_GROUP_ID {
@@ -1155,12 +1150,7 @@ impl ZcashDeserialize for Transaction {
                 // Denoted as `nConsensusBranchId` in the spec.
                 // Convert it to a NetworkUpgrade
                 let network_upgrade =
-                    NetworkUpgrade::from_branch_id(limited_reader.read_u32::<LittleEndian>()?)
-                        .ok_or_else(|| {
-                            SerializationError::Parse(
-                                "expected a valid network upgrade from the consensus branch id",
-                            )
-                        })?;
+                    NetworkUpgrade::try_from(limited_reader.read_u32::<LittleEndian>()?)?;
 
                 // Denoted as `lock_time` in the spec.
                 let lock_time = LockTime::zcash_deserialize(&mut limited_reader)?;

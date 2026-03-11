@@ -20,12 +20,17 @@ use std::{
 };
 
 use zebra_chain::{block, parallel::tree::NoteCommitmentTrees, parameters::Network};
+use zebra_db::{
+    chain::BLOCK_INFO,
+    transparent::{BALANCE_BY_TRANSPARENT_ADDR, TX_LOC_BY_SPENT_OUT_LOC},
+};
 
 use crate::{
     constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
+    error::CommitCheckpointVerifiedError,
     request::{FinalizableBlock, FinalizedBlock, Treestate},
     service::{check, QueuedCheckpointVerified},
-    BoxError, CheckpointVerifiedBlock, CloneError, Config,
+    CheckpointVerifiedBlock, Config, ValidateContextError,
 };
 
 pub mod column_family;
@@ -46,19 +51,15 @@ pub use column_family::{TypedColumnFamily, WriteTypedBatch};
 pub use disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk};
 #[allow(unused_imports)]
 pub use disk_format::{
-    FromDisk, IntoDisk, OutputIndex, OutputLocation, RawBytes, TransactionIndex,
-    TransactionLocation, MAX_ON_DISK_HEIGHT,
+    FromDisk, IntoDisk, OutputLocation, RawBytes, TransactionIndex, TransactionLocation,
+    MAX_ON_DISK_HEIGHT,
 };
 pub use zebra_db::ZebraDb;
 
-#[cfg(feature = "shielded-scan")]
-pub use disk_format::{
-    SaplingScannedDatabaseEntry, SaplingScannedDatabaseIndex, SaplingScannedResult,
-    SaplingScanningKey,
-};
-
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use disk_format::KV;
+
+pub use disk_format::upgrade::restorable_db_versions;
 
 /// The column families supported by the running `zebra-state` database code.
 ///
@@ -73,10 +74,11 @@ pub const STATE_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
     "hash_by_tx_loc",
     "tx_loc_by_hash",
     // Transparent
-    "balance_by_transparent_addr",
+    BALANCE_BY_TRANSPARENT_ADDR,
     "tx_loc_by_transparent_addr_loc",
     "utxo_by_out_loc",
     "utxo_loc_by_transparent_addr_loc",
+    TX_LOC_BY_SPENT_OUT_LOC,
     // Sprout
     "sprout_nullifiers",
     "sprout_anchors",
@@ -95,6 +97,7 @@ pub const STATE_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
     // Chain
     "history_tree",
     "tip_chain_value_pool",
+    BLOCK_INFO,
 ];
 
 /// The finalized part of the chain state, stored in the db.
@@ -257,8 +260,6 @@ impl FinalizedState {
             }
         }
 
-        tracing::info!(tip = ?new_state.db.tip(), "loaded Zebra state cache");
-
         new_state
     }
 
@@ -275,7 +276,7 @@ impl FinalizedState {
         &mut self,
         ordered_block: QueuedCheckpointVerified,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
-    ) -> Result<(CheckpointVerifiedBlock, NoteCommitmentTrees), BoxError> {
+    ) -> Result<(CheckpointVerifiedBlock, NoteCommitmentTrees), CommitCheckpointVerifiedError> {
         let (checkpoint_verified, rsp_tx) = ordered_block;
         let result = self.commit_finalized_direct(
             checkpoint_verified.clone().into(),
@@ -300,15 +301,9 @@ impl FinalizedState {
                 .set(checkpoint_verified.height.0 as f64);
         };
 
-        // Make the error cloneable, so we can send it to the block verify future,
-        // and the block write task.
-        let result = result.map_err(CloneError::from);
+        let _ = rsp_tx.send(result.clone().map(|(hash, _)| hash));
 
-        let _ = rsp_tx.send(result.clone().map(|(hash, _)| hash).map_err(BoxError::from));
-
-        result
-            .map(|(_hash, note_commitment_trees)| (checkpoint_verified, note_commitment_trees))
-            .map_err(BoxError::from)
+        result.map(|(_hash, note_commitment_trees)| (checkpoint_verified, note_commitment_trees))
     }
 
     /// Immediately commit a `finalized` block to the finalized state.
@@ -330,7 +325,7 @@ impl FinalizedState {
         finalizable_block: FinalizableBlock,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
         source: &str,
-    ) -> Result<(block::Hash, NoteCommitmentTrees), BoxError> {
+    ) -> Result<(block::Hash, NoteCommitmentTrees), CommitCheckpointVerifiedError> {
         let (height, hash, finalized, prev_note_commitment_trees) = match finalizable_block {
             FinalizableBlock::Checkpoint {
                 checkpoint_verified,
@@ -348,7 +343,9 @@ impl FinalizedState {
 
                 // Update the note commitment trees.
                 let mut note_commitment_trees = prev_note_commitment_trees.clone();
-                note_commitment_trees.update_trees_parallel(&block)?;
+                note_commitment_trees
+                    .update_trees_parallel(&block)
+                    .map_err(ValidateContextError::from)?;
 
                 // Check the block commitment if the history tree was not
                 // supplied by the non-finalized state. Note that we don't do
@@ -380,12 +377,11 @@ impl FinalizedState {
                 let history_tree_mut = Arc::make_mut(&mut history_tree);
                 let sapling_root = note_commitment_trees.sapling.root();
                 let orchard_root = note_commitment_trees.orchard.root();
-                history_tree_mut.push(
-                    &self.network(),
-                    block.clone(),
-                    &sapling_root,
-                    &orchard_root,
-                )?;
+                history_tree_mut
+                    .push(&self.network(), block.clone(), &sapling_root, &orchard_root)
+                    .map_err(Arc::new)
+                    .map_err(ValidateContextError::from)?;
+
                 let treestate = Treestate {
                     note_commitment_trees,
                     history_tree,

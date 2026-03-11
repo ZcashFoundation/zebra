@@ -1,6 +1,6 @@
 //! Fixed test cases for MetaAddr and MetaAddrChange.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use chrono::Utc;
 
@@ -33,9 +33,13 @@ fn sanitize_extremes() {
         services: Default::default(),
         untrusted_last_seen: Some(u32::MIN.into()),
         last_response: Some(u32::MIN.into()),
+        rtt: Some(Duration::ZERO),
+        ping_sent_at: None,
         last_attempt: None,
         last_failure: None,
         last_connection_state: Default::default(),
+        misbehavior_score: Default::default(),
+        is_inbound: false,
     };
 
     let max_time_entry = MetaAddr {
@@ -43,9 +47,13 @@ fn sanitize_extremes() {
         services: Default::default(),
         untrusted_last_seen: Some(u32::MAX.into()),
         last_response: Some(u32::MAX.into()),
+        rtt: Some(Duration::ZERO),
+        ping_sent_at: None,
         last_attempt: None,
         last_failure: None,
         last_connection_state: Default::default(),
+        misbehavior_score: Default::default(),
+        is_inbound: false,
     };
 
     if let Some(min_sanitized) = min_time_entry.sanitize(&Mainnet) {
@@ -150,7 +158,7 @@ fn recently_responded_peer_is_gossipable() {
     let peer_seed = MetaAddr::new_initial_peer(address).into_new_meta_addr(instant_now, local_now);
 
     // Create a peer that has responded
-    let peer = MetaAddr::new_responded(address)
+    let peer = MetaAddr::new_responded(address, None)
         .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
         .expect("Failed to create MetaAddr for responded peer");
 
@@ -170,7 +178,7 @@ fn not_so_recently_responded_peer_is_still_gossipable() {
     let peer_seed = MetaAddr::new_initial_peer(address).into_new_meta_addr(instant_now, local_now);
 
     // Create a peer that has responded
-    let mut peer = MetaAddr::new_responded(address)
+    let mut peer = MetaAddr::new_responded(address, None)
         .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
         .expect("Failed to create MetaAddr for responded peer");
 
@@ -200,7 +208,7 @@ fn responded_long_ago_peer_is_not_gossipable() {
     let peer_seed = MetaAddr::new_initial_peer(address).into_new_meta_addr(instant_now, local_now);
 
     // Create a peer that has responded
-    let mut peer = MetaAddr::new_responded(address)
+    let mut peer = MetaAddr::new_responded(address, None)
         .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
         .expect("Failed to create MetaAddr for responded peer");
 
@@ -230,7 +238,7 @@ fn long_delayed_change_is_not_applied() {
     let peer_seed = MetaAddr::new_initial_peer(address).into_new_meta_addr(instant_now, local_now);
 
     // Create a peer that has responded
-    let peer = MetaAddr::new_responded(address)
+    let peer = MetaAddr::new_responded(address, None)
         .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
         .expect("Failed to create MetaAddr for responded peer");
 
@@ -273,7 +281,7 @@ fn later_revert_change_is_applied() {
     let peer_seed = MetaAddr::new_initial_peer(address).into_new_meta_addr(instant_now, local_now);
 
     // Create a peer that has responded
-    let peer = MetaAddr::new_responded(address)
+    let peer = MetaAddr::new_responded(address, None)
         .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
         .expect("Failed to create MetaAddr for responded peer");
 
@@ -315,7 +323,7 @@ fn concurrent_state_revert_change_is_not_applied() {
     let peer_seed = MetaAddr::new_initial_peer(address).into_new_meta_addr(instant_now, local_now);
 
     // Create a peer that has responded
-    let peer = MetaAddr::new_responded(address)
+    let peer = MetaAddr::new_responded(address, None)
         .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
         .expect("Failed to create MetaAddr for responded peer");
 
@@ -374,7 +382,7 @@ fn concurrent_state_progress_change_is_applied() {
     let peer_seed = MetaAddr::new_initial_peer(address).into_new_meta_addr(instant_now, local_now);
 
     // Create a peer that has responded
-    let peer = MetaAddr::new_responded(address)
+    let peer = MetaAddr::new_responded(address, None)
         .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
         .expect("Failed to create MetaAddr for responded peer");
 
@@ -418,4 +426,25 @@ fn concurrent_state_progress_change_is_applied() {
          times: {instant_late:?} {chrono_late}\n\
          peer: {peer:?}"
     );
+}
+
+#[test]
+fn rtt_is_stored_correctly_in_meta_addr() {
+    let _init_guard = zebra_test::init();
+
+    let instant_now = Instant::now();
+    let chrono_now = Utc::now();
+    let local_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
+
+    let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
+    let peer_seed = MetaAddr::new_initial_peer(address).into_new_meta_addr(instant_now, local_now);
+
+    let rtt = Duration::from_millis(128);
+
+    // Create a peer that has responded
+    let peer = MetaAddr::new_responded(address, Some(rtt))
+        .apply_to_meta_addr(peer_seed, instant_now, chrono_now)
+        .expect("Failed to create MetaAddr for responded peer");
+
+    assert_eq!(peer.rtt, Some(rtt));
 }

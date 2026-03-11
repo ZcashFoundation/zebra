@@ -16,11 +16,9 @@ use crate::service;
 
 pub mod address;
 pub mod block;
+pub mod difficulty;
 pub mod find;
 pub mod tree;
-
-#[cfg(feature = "getblocktemplate-rpcs")]
-pub mod difficulty;
 
 #[cfg(test)]
 mod tests;
@@ -31,8 +29,13 @@ pub use address::{
     utxo::{address_utxos, AddressUtxos},
 };
 pub use block::{
-    any_utxo, block, block_header, mined_transaction, transaction_hashes_for_block, unspent_utxo,
+    any_transaction, any_utxo, block, block_and_size, block_header, block_info, mined_transaction,
+    transaction_hashes_for_any_block, transaction_hashes_for_block, unspent_utxo,
 };
+
+#[cfg(feature = "indexer")]
+pub use block::spending_transaction_hash;
+
 pub use find::{
     best_tip, block_locator, depth, finalized_state_contains_block_hash, find_chain_hashes,
     find_chain_headers, hash_by_height, height_by_hash, next_median_time_past,

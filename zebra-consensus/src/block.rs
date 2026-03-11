@@ -8,7 +8,7 @@
 //! verification, where it may be accepted or rejected.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -25,9 +25,8 @@ use tracing::Instrument;
 use zebra_chain::{
     amount::Amount,
     block,
-    parameters::{subsidy::FundingStreamReceiver, Network},
-    transaction::{SigHash, UnminedTxId},
-    transparent,
+    parameters::{subsidy::SubsidyError, Network},
+    transaction, transparent,
     work::equihash,
 };
 use zebra_state as zs;
@@ -76,20 +75,24 @@ pub enum VerifyBlockError {
     #[error(transparent)]
     Time(zebra_chain::block::BlockTimeError),
 
-    #[error("unable to commit block after semantic verification")]
-    // TODO: make this into a concrete type, and add it to is_duplicate_request() (#2908)
-    Commit(#[source] BoxError),
+    /// Error when attempting to commit a block after semantic verification.
+    #[error("unable to commit block after semantic verification: {0}")]
+    Commit(#[from] zs::CommitBlockError),
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
-    #[error("unable to validate block proposal: failed semantic verification (proof of work is not checked for proposals)")]
+    #[error("unable to validate block proposal: failed semantic verification (proof of work is not checked for proposals): {0}")]
     // TODO: make this into a concrete type (see #5732)
     ValidateProposal(#[source] BoxError),
 
-    #[error("invalid transaction")]
+    #[error("invalid transaction: {0}")]
     Transaction(#[from] TransactionError),
 
-    #[error("invalid block subsidy")]
+    #[error("invalid block subsidy: {0}")]
     Subsidy(#[from] SubsidyError),
+
+    /// Errors originating from the state service, which may arise from general failures in interacting with the state.
+    /// This is for errors that are not specifically related to block depth or commit failures.
+    #[error("state service error for block {hash}: {source}")]
+    StateService { source: BoxError, hash: block::Hash },
 }
 
 impl VerifyBlockError {
@@ -98,7 +101,19 @@ impl VerifyBlockError {
     pub fn is_duplicate_request(&self) -> bool {
         match self {
             VerifyBlockError::Block { source, .. } => source.is_duplicate_request(),
+            VerifyBlockError::Commit(commit_err) => commit_err.is_duplicate_request(),
             _ => false,
+        }
+    }
+
+    /// Returns a suggested misbehaviour score increment for a certain error.
+    pub fn misbehavior_score(&self) -> u32 {
+        // TODO: Adjust these values based on zcashd (#9258).
+        use VerifyBlockError::*;
+        match self {
+            Block { source } => source.misbehavior_score(),
+            Equihash { .. } => 100,
+            _other => 0,
         }
     }
 }
@@ -110,7 +125,7 @@ impl VerifyBlockError {
 ///
 /// See:
 /// <https://github.com/zcash/zcash/blob/bad7f7eadbbb3466bebe3354266c7f69f607fcfd/src/consensus/consensus.h#L30>
-pub const MAX_BLOCK_SIGOPS: u64 = 20_000;
+pub const MAX_BLOCK_SIGOPS: u32 = 20_000;
 
 impl<S, V> SemanticBlockVerifier<S, V>
 where
@@ -218,9 +233,12 @@ where
                 .map_err(VerifyBlockError::Time)?;
             let coinbase_tx = check::coinbase_is_first(&block)?;
 
-            let expected_block_subsidy = subsidy::general::block_subsidy(height, &network)?;
+            let expected_block_subsidy =
+                zebra_chain::parameters::subsidy::block_subsidy(height, &network)?;
 
-            check::subsidy_is_valid(&block, &network, expected_block_subsidy)?;
+            // See [ZIP-1015](https://zips.z.cash/zip-1015).
+            let deferred_pool_balance_change =
+                check::subsidy_is_valid(&block, &network, expected_block_subsidy)?;
 
             // Now do the slower checks
 
@@ -234,13 +252,21 @@ where
                 &block,
                 &transaction_hashes,
             ));
-            for transaction in &block.transactions {
+
+            let known_outpoint_hashes: Arc<HashSet<transaction::Hash>> =
+                Arc::new(known_utxos.keys().map(|outpoint| outpoint.hash).collect());
+
+            for (&transaction_hash, transaction) in
+                transaction_hashes.iter().zip(block.transactions.iter())
+            {
                 let rsp = transaction_verifier
                     .ready()
                     .await
                     .expect("transaction verifier is always ready")
                     .call(tx::Request::Block {
+                        transaction_hash,
                         transaction: transaction.clone(),
+                        known_outpoint_hashes: known_outpoint_hashes.clone(),
                         known_utxos: known_utxos.clone(),
                         height,
                         time: block.header.time,
@@ -252,11 +278,11 @@ where
             // Get the transaction results back from the transaction verifier.
 
             // Sum up some block totals from the transaction responses.
-            let mut legacy_sigop_count = 0;
+            let mut sigops = 0;
             let mut block_miner_fees = Ok(Amount::zero());
 
             // Collect tx sighashes during verification and later emit them in block order (for ZSA issuance auth).
-            let mut tx_sighash_by_tx_id: HashMap<UnminedTxId, SigHash> =
+            let mut tx_sighash_by_tx_id: HashMap<transaction::UnminedTxId, transaction::SigHash> =
                 HashMap::with_capacity(block.transactions.len());
 
             use futures::StreamExt;
@@ -274,7 +300,12 @@ where
                     panic!("unexpected response from transaction verifier");
                 };
 
-                legacy_sigop_count += tx_legacy_sigop_count;
+                assert!(
+                    matches!(response, tx::Response::Block { .. }),
+                    "unexpected response from transaction verifier: {response:?}"
+                );
+
+                sigops += response.sigops();
 
                 // Coinbase transactions consume the miner fee,
                 // so they don't add any value to the block's total miner fee.
@@ -287,23 +318,13 @@ where
 
             // Check the summed block totals
 
-            if legacy_sigop_count > MAX_BLOCK_SIGOPS {
+            if sigops > MAX_BLOCK_SIGOPS {
                 Err(BlockError::TooManyTransparentSignatureOperations {
                     height,
                     hash,
-                    legacy_sigop_count,
+                    sigops,
                 })?;
             }
-
-            // See [ZIP-1015](https://zips.z.cash/zip-1015).
-            let expected_deferred_amount = subsidy::funding_streams::funding_stream_values(
-                height,
-                &network,
-                expected_block_subsidy,
-            )
-            .expect("we always expect a funding stream hashmap response even if empty")
-            .remove(&FundingStreamReceiver::Deferred)
-            .unwrap_or_default();
 
             let block_miner_fees =
                 block_miner_fees.map_err(|amount_error| BlockError::SummingMinerFees {
@@ -317,7 +338,7 @@ where
                 height,
                 block_miner_fees,
                 expected_block_subsidy,
-                expected_deferred_amount,
+                deferred_pool_balance_change,
                 &network,
             )?;
 
@@ -326,7 +347,7 @@ where
                 .expect("all verification tasks using known_utxos are complete");
 
             // Rebuild sighashes in block order to align with `block.transactions` indexing.
-            let transaction_sighashes: Arc<[SigHash]> = block
+            let transaction_sighashes: Arc<[transaction::SigHash]> = block
                 .transactions
                 .iter()
                 .map(|tx| {
@@ -343,11 +364,10 @@ where
                 new_outputs,
                 transaction_hashes,
                 transaction_sighashes: Some(transaction_sighashes),
-                deferred_balance: Some(expected_deferred_amount),
+                deferred_pool_balance_change: Some(deferred_pool_balance_change),
             };
 
-            // Return early for proposal requests when getblocktemplate-rpcs feature is enabled
-            #[cfg(feature = "getblocktemplate-rpcs")]
+            // Return early for proposal requests.
             if request.is_proposal() {
                 return match state_service
                     .ready()
@@ -365,15 +385,23 @@ where
             match state_service
                 .ready()
                 .await
-                .map_err(VerifyBlockError::Commit)?
+                .map_err(|source| VerifyBlockError::StateService { source, hash })?
                 .call(zs::Request::CommitSemanticallyVerifiedBlock(prepared_block))
                 .await
-                .map_err(VerifyBlockError::Commit)?
             {
-                zs::Response::Committed(committed_hash) => {
+                Ok(zs::Response::Committed(committed_hash)) => {
                     assert_eq!(committed_hash, hash, "state must commit correct hash");
                     Ok(hash)
                 }
+
+                Err(source) => {
+                    if let Some(commit_err) = source.downcast_ref::<zs::CommitBlockError>() {
+                        return Err(VerifyBlockError::Commit(commit_err.clone()));
+                    }
+
+                    Err(VerifyBlockError::StateService { source, hash })
+                }
+
                 _ => unreachable!("wrong response for CommitSemanticallyVerifiedBlock"),
             }
         }

@@ -11,9 +11,11 @@
 
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
+    ops::RangeBounds,
     sync::Arc,
 };
 
+use chrono::{DateTime, Utc};
 use itertools::Itertools;
 
 use zebra_chain::{
@@ -23,24 +25,29 @@ use zebra_chain::{
     parallel::tree::NoteCommitmentTrees,
     parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
     sapling,
-    serialization::TrustedPreallocate,
+    serialization::{CompactSizeMessage, TrustedPreallocate, ZcashSerialize as _},
     transaction::{self, Transaction},
     transparent,
     value_balance::ValueBalance,
 };
 
 use crate::{
+    error::CommitCheckpointVerifiedError,
     request::FinalizedBlock,
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
         disk_format::{
             block::TransactionLocation,
-            transparent::{AddressBalanceLocation, OutputLocation},
+            transparent::{AddressBalanceLocationUpdates, OutputLocation},
         },
         zebra_db::{metrics::block_precommit_metrics, ZebraDb},
+        FromDisk, RawBytes,
     },
-    BoxError, HashOrHeight,
+    HashOrHeight,
 };
+
+#[cfg(feature = "indexer")]
+use crate::request::Spend;
 
 #[cfg(test)]
 mod tests;
@@ -128,6 +135,19 @@ impl ZebraDb {
         Some(header)
     }
 
+    /// Returns the raw [`block::Header`] with [`block::Hash`] or [`Height`], if
+    /// it exists in the finalized chain.
+    #[allow(clippy::unwrap_in_result)]
+    fn raw_block_header(&self, hash_or_height: HashOrHeight) -> Option<RawBytes> {
+        // Block Header
+        let block_header_by_height = self.db.cf_handle("block_header_by_height").unwrap();
+
+        let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
+        let header: RawBytes = self.db.zs_get(&block_header_by_height, &height)?;
+
+        Some(header)
+    }
+
     /// Returns the [`Block`] with [`block::Hash`] or
     /// [`Height`], if it exists in the finalized chain.
     //
@@ -139,30 +159,75 @@ impl ZebraDb {
         let header = self.block_header(height.into())?;
 
         // Transactions
-        let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
-
-        // Manually fetch the entire block's transactions
-        let mut transactions = Vec::new();
 
         // TODO:
         // - split disk reads from deserialization, and run deserialization in parallel,
         //   this improves performance for blocks with multiple large shielded transactions
         // - is this loop more efficient if we store the number of transactions?
         // - is the difference large enough to matter?
-        for tx_index in 0..=Transaction::max_allocation() {
-            let tx_loc = TransactionLocation::from_u64(height, tx_index);
-
-            if let Some(tx) = self.db.zs_get(&tx_by_loc, &tx_loc) {
-                transactions.push(tx);
-            } else {
-                break;
-            }
-        }
+        let transactions = self
+            .transactions_by_height(height)
+            .map(|(_, tx)| tx)
+            .map(Arc::new)
+            .collect();
 
         Some(Arc::new(Block {
             header,
             transactions,
         }))
+    }
+
+    /// Returns the [`Block`] with [`block::Hash`] or [`Height`], if it exists
+    /// in the finalized chain, and its serialized size.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn block_and_size(&self, hash_or_height: HashOrHeight) -> Option<(Arc<Block>, usize)> {
+        let (raw_header, raw_txs) = self.raw_block(hash_or_height)?;
+
+        let header = Arc::<block::Header>::from_bytes(raw_header.raw_bytes());
+        let txs: Vec<_> = raw_txs
+            .iter()
+            .map(|raw_tx| Arc::<Transaction>::from_bytes(raw_tx.raw_bytes()))
+            .collect();
+
+        // Compute the size of the block from the size of header and size of
+        // transactions. This requires summing them all and also adding the
+        // size of the CompactSize-encoded transaction count.
+        // See https://developer.bitcoin.org/reference/block_chain.html#serialized-blocks
+        let tx_count = CompactSizeMessage::try_from(txs.len())
+            .expect("must work for a previously serialized block");
+        let tx_raw = tx_count
+            .zcash_serialize_to_vec()
+            .expect("must work for a previously serialized block");
+        let size = raw_header.raw_bytes().len()
+            + raw_txs
+                .iter()
+                .map(|raw_tx| raw_tx.raw_bytes().len())
+                .sum::<usize>()
+            + tx_raw.len();
+
+        let block = Block {
+            header,
+            transactions: txs,
+        };
+        Some((Arc::new(block), size))
+    }
+
+    /// Returns the raw [`Block`] with [`block::Hash`] or
+    /// [`Height`], if it exists in the finalized chain.
+    #[allow(clippy::unwrap_in_result)]
+    fn raw_block(&self, hash_or_height: HashOrHeight) -> Option<(RawBytes, Vec<RawBytes>)> {
+        // Block
+        let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
+        let header = self.raw_block_header(height.into())?;
+
+        // Transactions
+
+        let transactions = self
+            .raw_transactions_by_height(height)
+            .map(|(_, tx)| tx)
+            .collect();
+
+        Some((header, transactions))
     }
 
     /// Returns the Sapling [`note commitment tree`](sapling::tree::NoteCommitmentTree) specified by
@@ -212,6 +277,79 @@ impl ZebraDb {
 
     // Read transaction methods
 
+    /// Returns the [`Transaction`] with [`transaction::Hash`], and its [`Height`],
+    /// if a transaction with that hash exists in the finalized chain.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn transaction(
+        &self,
+        hash: transaction::Hash,
+    ) -> Option<(Arc<Transaction>, Height, DateTime<Utc>)> {
+        let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
+
+        let transaction_location = self.transaction_location(hash)?;
+
+        let block_time = self
+            .block_header(transaction_location.height.into())
+            .map(|header| header.time);
+
+        self.db
+            .zs_get(&tx_by_loc, &transaction_location)
+            .and_then(|tx| block_time.map(|time| (tx, transaction_location.height, time)))
+    }
+
+    /// Returns an iterator of all [`Transaction`]s for a provided block height in finalized state.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn transactions_by_height(
+        &self,
+        height: Height,
+    ) -> impl Iterator<Item = (TransactionLocation, Transaction)> + '_ {
+        self.transactions_by_location_range(
+            TransactionLocation::min_for_height(height)
+                ..=TransactionLocation::max_for_height(height),
+        )
+    }
+
+    /// Returns an iterator of all raw [`Transaction`]s for a provided block
+    /// height in finalized state.
+    #[allow(clippy::unwrap_in_result)]
+    fn raw_transactions_by_height(
+        &self,
+        height: Height,
+    ) -> impl Iterator<Item = (TransactionLocation, RawBytes)> + '_ {
+        self.raw_transactions_by_location_range(
+            TransactionLocation::min_for_height(height)
+                ..=TransactionLocation::max_for_height(height),
+        )
+    }
+
+    /// Returns an iterator of all [`Transaction`]s in the provided range
+    /// of [`TransactionLocation`]s in finalized state.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn transactions_by_location_range<R>(
+        &self,
+        range: R,
+    ) -> impl Iterator<Item = (TransactionLocation, Transaction)> + '_
+    where
+        R: RangeBounds<TransactionLocation>,
+    {
+        let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
+        self.db.zs_forward_range_iter(tx_by_loc, range)
+    }
+
+    /// Returns an iterator of all raw [`Transaction`]s in the provided range
+    /// of [`TransactionLocation`]s in finalized state.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn raw_transactions_by_location_range<R>(
+        &self,
+        range: R,
+    ) -> impl Iterator<Item = (TransactionLocation, RawBytes)> + '_
+    where
+        R: RangeBounds<TransactionLocation>,
+    {
+        let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
+        self.db.zs_forward_range_iter(tx_by_loc, range)
+    }
+
     /// Returns the [`TransactionLocation`] for [`transaction::Hash`],
     /// if it exists in the finalized chain.
     #[allow(clippy::unwrap_in_result)]
@@ -229,19 +367,18 @@ impl ZebraDb {
         self.db.zs_get(&hash_by_tx_loc, &location)
     }
 
-    /// Returns the [`Transaction`] with [`transaction::Hash`], and its [`Height`],
-    /// if a transaction with that hash exists in the finalized chain.
-    //
-    // TODO: move this method to the start of the section
-    #[allow(clippy::unwrap_in_result)]
-    pub fn transaction(&self, hash: transaction::Hash) -> Option<(Arc<Transaction>, Height)> {
-        let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
+    /// Returns the [`transaction::Hash`] of the transaction that spent or revealed the given
+    /// [`transparent::OutPoint`] or nullifier, if it is spent or revealed in the finalized state.
+    #[cfg(feature = "indexer")]
+    pub fn spending_transaction_hash(&self, spend: &Spend) -> Option<transaction::Hash> {
+        let tx_loc = match spend {
+            Spend::OutPoint(outpoint) => self.spending_tx_loc(outpoint)?,
+            Spend::Sprout(nullifier) => self.sprout_revealing_tx_loc(nullifier)?,
+            Spend::Sapling(nullifier) => self.sapling_revealing_tx_loc(nullifier)?,
+            Spend::Orchard(nullifier) => self.orchard_revealing_tx_loc(nullifier)?,
+        };
 
-        let transaction_location = self.transaction_location(hash)?;
-
-        self.db
-            .zs_get(&tx_by_loc, &transaction_location)
-            .map(|tx| (tx, transaction_location.height))
+        self.transaction_hash(tx_loc)
     }
 
     /// Returns the [`transaction::Hash`]es in the block with `hash_or_height`,
@@ -289,7 +426,8 @@ impl ZebraDb {
     /// # Errors
     ///
     /// - Propagates any errors from writing to the DB
-    /// - Propagates any errors from updating history and note commitment trees
+    /// - Propagates any errors from computing the block's chain value balance change or
+    ///   from applying the change to the chain value balance
     #[allow(clippy::unwrap_in_result)]
     pub(in super::super) fn write_block(
         &mut self,
@@ -297,7 +435,7 @@ impl ZebraDb {
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
         network: &Network,
         source: &str,
-    ) -> Result<block::Hash, BoxError> {
+    ) -> Result<block::Hash, CommitCheckpointVerifiedError> {
         let tx_hash_indexes: HashMap<transaction::Hash, usize> = finalized
             .transaction_hashes
             .iter()
@@ -355,6 +493,13 @@ impl ZebraDb {
                 .iter()
                 .map(|(outpoint, _output_loc, utxo)| (*outpoint, utxo.clone()))
                 .collect();
+
+        // TODO: Add `OutputLocation`s to the values in `spent_utxos_by_outpoint` to avoid creating a second hashmap with the same keys
+        #[cfg(feature = "indexer")]
+        let out_loc_by_outpoint: HashMap<transparent::OutPoint, OutputLocation> = spent_utxos
+            .iter()
+            .map(|(outpoint, out_loc, _utxo)| (*outpoint, *out_loc))
+            .collect();
         let spent_utxos_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo> = spent_utxos
             .into_iter()
             .map(|(_outpoint, out_loc, utxo)| (out_loc, utxo))
@@ -374,13 +519,36 @@ impl ZebraDb {
             .collect();
 
         // Get the current address balances, before the transactions in this block
-        let address_balances: HashMap<transparent::Address, AddressBalanceLocation> =
+
+        fn read_addr_locs<T, F: Fn(&transparent::Address) -> Option<T>>(
+            changed_addresses: HashSet<transparent::Address>,
+            f: F,
+        ) -> HashMap<transparent::Address, T> {
             changed_addresses
                 .into_iter()
-                .filter_map(|address| {
-                    Some((address.clone(), self.address_balance_location(&address)?))
-                })
-                .collect();
+                .filter_map(|address| Some((address.clone(), f(&address)?)))
+                .collect()
+        }
+
+        // # Performance
+        //
+        // It's better to update entries in RocksDB with insertions over merge operations when there is no risk that
+        // insertions may overwrite values that are updated concurrently in database format upgrades as inserted values
+        // are quicker to read and require less background compaction.
+        //
+        // Reading entries that have been updated with merge ops often requires reading the latest fully-merged value,
+        // reading all of the pending merge operands (potentially hundreds), and applying pending merge operands to the
+        // fully-merged value such that it's much faster to read entries that have been updated with insertions than it
+        // is to read entries that have been updated with merge operations.
+        let address_balances: AddressBalanceLocationUpdates = if self.finished_format_upgrades() {
+            AddressBalanceLocationUpdates::Insert(read_addr_locs(changed_addresses, |addr| {
+                self.address_balance_location(addr)
+            }))
+        } else {
+            AddressBalanceLocationUpdates::Merge(read_addr_locs(changed_addresses, |addr| {
+                Some(self.address_balance_location(addr)?.into_new_change())
+            }))
+        };
 
         let mut batch = DiskWriteBatch::new();
 
@@ -392,12 +560,20 @@ impl ZebraDb {
             new_outputs_by_out_loc,
             spent_utxos_by_outpoint,
             spent_utxos_by_out_loc,
+            #[cfg(feature = "indexer")]
+            out_loc_by_outpoint,
             address_balances,
             self.finalized_value_pool(),
             prev_note_commitment_trees,
         )?;
 
-        self.db.write(batch)?;
+        // Track batch commit latency for observability
+        let batch_start = std::time::Instant::now();
+        self.db
+            .write(batch)
+            .expect("unexpected rocksdb error while writing block");
+        metrics::histogram!("zebra.state.rocksdb.batch_commit.duration_seconds")
+            .record(batch_start.elapsed().as_secs_f64());
 
         tracing::trace!(?source, "committed block from");
 
@@ -438,7 +614,8 @@ impl DiskWriteBatch {
     ///
     /// # Errors
     ///
-    /// - Propagates any errors from updating history tree, note commitment trees, or value pools
+    /// - Propagates any errors from computing the block's chain value balance change or
+    ///   from applying the change to the chain value balance
     #[allow(clippy::too_many_arguments)]
     pub fn prepare_block_batch(
         &mut self,
@@ -448,14 +625,18 @@ impl DiskWriteBatch {
         new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
         spent_utxos_by_outpoint: HashMap<transparent::OutPoint, transparent::Utxo>,
         spent_utxos_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
-        address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
+        #[cfg(feature = "indexer")] out_loc_by_outpoint: HashMap<
+            transparent::OutPoint,
+            OutputLocation,
+        >,
+        address_balances: AddressBalanceLocationUpdates,
         value_pool: ValueBalance<NonNegative>,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
-    ) -> Result<(), BoxError> {
+    ) -> Result<(), CommitCheckpointVerifiedError> {
         let db = &zebra_db.db;
 
         // Commit block, transaction, and note commitment tree data.
-        self.prepare_block_header_and_transaction_data_batch(db, finalized)?;
+        self.prepare_block_header_and_transaction_data_batch(db, finalized);
 
         // The consensus rules are silent on shielded transactions in the genesis block,
         // because there aren't any in the mainnet or testnet genesis blocks.
@@ -463,8 +644,8 @@ impl DiskWriteBatch {
         // which is already present from height 1 to the first shielded transaction.
         //
         // In Zebra we include the nullifiers and note commitments in the genesis block because it simplifies our code.
-        self.prepare_shielded_transaction_batch(zebra_db, finalized)?;
-        self.prepare_trees_batch(zebra_db, finalized, prev_note_commitment_trees)?;
+        self.prepare_shielded_transaction_batch(zebra_db, finalized);
+        self.prepare_trees_batch(zebra_db, finalized, prev_note_commitment_trees);
 
         // # Consensus
         //
@@ -479,23 +660,25 @@ impl DiskWriteBatch {
         if !finalized.height.is_min() {
             // Commit transaction indexes
             self.prepare_transparent_transaction_batch(
-                db,
+                zebra_db,
                 network,
                 finalized,
                 &new_outputs_by_out_loc,
                 &spent_utxos_by_outpoint,
                 &spent_utxos_by_out_loc,
+                #[cfg(feature = "indexer")]
+                &out_loc_by_outpoint,
                 address_balances,
-            )?;
-
-            // Commit UTXOs and value pools
-            self.prepare_chain_value_pools_batch(
-                zebra_db,
-                finalized,
-                spent_utxos_by_outpoint,
-                value_pool,
-            )?;
+            );
         }
+
+        // Commit UTXOs and value pools
+        self.prepare_chain_value_pools_batch(
+            zebra_db,
+            finalized,
+            spent_utxos_by_outpoint,
+            value_pool,
+        )?;
 
         // The block has passed contextual validation, so update the metrics
         block_precommit_metrics(&finalized.block, finalized.hash, finalized.height);
@@ -505,16 +688,12 @@ impl DiskWriteBatch {
 
     /// Prepare a database batch containing the block header and transaction data
     /// from `finalized.block`, and return it (without actually writing anything).
-    ///
-    /// # Errors
-    ///
-    /// - This method does not currently return any errors.
     #[allow(clippy::unwrap_in_result)]
     pub fn prepare_block_header_and_transaction_data_batch(
         &mut self,
         db: &DiskDb,
         finalized: &FinalizedBlock,
-    ) -> Result<(), BoxError> {
+    ) {
         // Blocks
         let block_header_by_height = db.cf_handle("block_header_by_height").unwrap();
         let hash_by_height = db.cf_handle("hash_by_height").unwrap();
@@ -555,7 +734,5 @@ impl DiskWriteBatch {
             self.zs_insert(&hash_by_tx_loc, transaction_location, transaction_hash);
             self.zs_insert(&tx_loc_by_hash, transaction_hash, transaction_location);
         }
-
-        Ok(())
     }
 }

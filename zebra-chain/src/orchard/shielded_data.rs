@@ -159,9 +159,20 @@ impl<Flavor: ShieldedDataFlavor> ShieldedData<Flavor> {
     }
 }
 
-impl<Flavor: ShieldedDataFlavor> AtLeastOne<AuthorizedAction<Flavor>> {
+/// A trait for types that can provide Orchard actions.
+pub trait OrchardActions<Flavor: ShieldedDataFlavor> {
+    /// Returns an iterator over the actions in this type.
+    fn actions<'a>(&'a self) -> impl Iterator<Item = &'a Action<Flavor>> + 'a
+    where
+        Flavor: 'a;
+}
+
+impl<Flavor: ShieldedDataFlavor> OrchardActions<Flavor> for AtLeastOne<AuthorizedAction<Flavor>> {
     /// Iterate over the [`Action`]s of each [`AuthorizedAction`].
-    pub fn actions(&self) -> impl Iterator<Item = &Action<Flavor>> {
+    fn actions<'a>(&'a self) -> impl Iterator<Item = &'a Action<Flavor>> + 'a
+    where
+        Flavor: 'a,
+    {
         self.iter()
             .map(|authorized_action| &authorized_action.action)
     }
@@ -336,6 +347,6 @@ impl ZcashDeserialize for Flags {
         // the reserved bits 2..7 of the flagsOrchard field MUST be zero."
         // https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
         Flags::from_bits(reader.read_u8()?)
-            .ok_or_else(|| SerializationError::Parse("invalid reserved orchard flags"))
+            .ok_or(SerializationError::Parse("invalid reserved orchard flags"))
     }
 }

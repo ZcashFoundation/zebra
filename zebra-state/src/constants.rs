@@ -46,7 +46,7 @@ pub const STATE_DATABASE_KIND: &str = "state";
 ///
 /// Instead of using this constant directly, use [`constants::state_database_format_version_in_code()`]
 /// or [`config::database_format_version_on_disk()`] to get the full semantic format version.
-const DATABASE_FORMAT_VERSION: u64 = 26;
+const DATABASE_FORMAT_VERSION: u64 = 27;
 
 /// The database format minor version, incremented each time the on-disk database format has a
 /// significant data format change.
@@ -64,23 +64,23 @@ const DATABASE_FORMAT_PATCH_VERSION: u64 = 0;
 /// Returns the full semantic version of the currently running state database format code.
 ///
 /// This is the version implemented by the Zebra code that's currently running,
-/// the minor and patch versions on disk can be different.
+/// the version on disk can be different.
 pub fn state_database_format_version_in_code() -> Version {
-    Version::new(
-        DATABASE_FORMAT_VERSION,
-        DATABASE_FORMAT_MINOR_VERSION,
-        DATABASE_FORMAT_PATCH_VERSION,
-    )
+    Version {
+        major: DATABASE_FORMAT_VERSION,
+        minor: DATABASE_FORMAT_MINOR_VERSION,
+        patch: DATABASE_FORMAT_PATCH_VERSION,
+        pre: semver::Prerelease::EMPTY,
+        #[cfg(feature = "indexer")]
+        build: semver::BuildMetadata::new("indexer").expect("hard-coded value should be valid"),
+        #[cfg(not(feature = "indexer"))]
+        build: semver::BuildMetadata::EMPTY,
+    }
 }
 
-/// Returns the highest database version that modifies the subtree index format.
+/// The name of the file containing the database version.
 ///
-/// This version is used by tests to wait for the subtree upgrade to finish.
-pub fn latest_version_for_adding_subtrees() -> Version {
-    Version::parse("25.2.2").expect("Hardcoded version string should be valid.")
-}
-
-/// The name of the file containing the minor and patch database versions.
+/// Note: This file has historically omitted the major database version.
 ///
 /// Use [`Config::version_file_path()`] to get the path to this file.
 pub(crate) const DATABASE_FORMAT_VERSION_FILE_NAME: &str = "version";
@@ -109,10 +109,13 @@ pub const MAX_FIND_BLOCK_HASHES_RESULTS: u32 = 500;
 /// The maximum number of block headers allowed in `getheaders` responses in the Zcash network protocol.
 pub const MAX_FIND_BLOCK_HEADERS_RESULTS: u32 = 160;
 
-/// These database versions can be recreated from their directly preceding versions.
-pub const RESTORABLE_DB_VERSIONS: [u64; 1] = [26];
+/// The maximum number of invalidated block records.
+///
+/// This limits the memory use to around:
+/// `100 entries * up to 99 blocks * 2 MB per block = 20 GB`
+pub const MAX_INVALIDATED_BLOCKS: usize = 100;
 
 lazy_static! {
     /// Regex that matches the RocksDB error when its lock file is already open.
-    pub static ref LOCK_FILE_ERROR: Regex = Regex::new("(lock file).*(temporarily unavailable)|(in use)|(being used by another process)").expect("regex is valid");
+    pub static ref LOCK_FILE_ERROR: Regex = Regex::new("(lock file).*(temporarily unavailable)|(in use)|(being used by another process)|(Database likely already open)").expect("regex is valid");
 }

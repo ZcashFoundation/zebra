@@ -25,7 +25,7 @@ pub const ZEBRA_FAILURE_MESSAGES: &[&str] = &[
     // Rust-specific panics
     "The application panicked",
     // RPC port errors
-    "Unable to start RPC server",
+    "Address already in use",
     // TODO: disable if this actually happens during test zebrad shutdown
     "Stopping RPC endpoint",
     // Missing RPCs in zebrad logs (this log is from PR #3860)
@@ -42,7 +42,6 @@ pub const ZEBRA_FAILURE_MESSAGES: &[&str] = &[
     "Method not found",
     // Logs related to end of support halting feature.
     zebrad::components::sync::end_of_support::EOS_PANIC_MESSAGE_HEADER,
-    zebrad::components::sync::end_of_support::EOS_WARN_MESSAGE_HEADER,
 ];
 
 /// Failure log messages from lightwalletd.
@@ -81,6 +80,8 @@ pub const LIGHTWALLETD_FAILURE_MESSAGES: &[&str] = &[
     "error with",
     // Block error messages
     "error requesting block: 0: Block not found",
+    // This shouldn't happen unless lwd starts calling getblock with `verbosity = 2`
+    "error requesting block: 0: block hash or height not found",
     "error zcashd getblock rpc",
     "received overlong message",
     "received unexpected height block",
@@ -133,7 +134,7 @@ pub const ZEBRA_CHECKPOINTS_FAILURE_MESSAGES: &[&str] = &[
     // Rust-specific panics
     "The application panicked",
     // RPC port errors
-    "Unable to start RPC server",
+    "Address already in use",
     // RPC argument errors: parsing and data
     //
     // These logs are produced by jsonrpc_core inside Zebra,

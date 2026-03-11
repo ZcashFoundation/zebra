@@ -9,10 +9,8 @@ use crate::{
     block::{
         serialize::MAX_BLOCK_BYTES, Block, BlockTimeError, Commitment::*, Hash, Header, Height,
     },
-    parameters::{
-        Network::{self, *},
-        NetworkUpgrade::*,
-    },
+    parameters::{Network, NetworkUpgrade::*},
+    sapling,
     serialization::{
         sha256d, SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
     },
@@ -191,88 +189,80 @@ fn block_test_vectors_unique() {
     );
 }
 
+/// Checks that:
+///
+/// - the block test vector indexes match the heights in the block data;
+/// - each post-Sapling block has a corresponding final Sapling root;
+/// - each post-Orchard block has a corresponding final Orchard root.
 #[test]
-fn block_test_vectors_height_mainnet() {
+fn block_test_vectors() {
     let _init_guard = zebra_test::init();
 
-    block_test_vectors_height(Mainnet);
-}
+    for net in Network::iter() {
+        let sapling_anchors = net.sapling_anchors();
+        let orchard_anchors = net.orchard_anchors();
 
-#[test]
-fn block_test_vectors_height_testnet() {
-    let _init_guard = zebra_test::init();
-
-    block_test_vectors_height(Network::new_default_testnet());
-}
-
-/// Test that the block test vector indexes match the heights in the block data,
-/// and that each post-sapling block has a corresponding final sapling root.
-fn block_test_vectors_height(network: Network) {
-    let (block_iter, sapling_roots) = network.block_sapling_roots_iter();
-
-    for (&height, block) in block_iter {
-        let block = block
-            .zcash_deserialize_into::<Block>()
-            .expect("block is structurally valid");
-        assert_eq!(
-            block.coinbase_height().expect("block height is valid").0,
-            height,
-            "deserialized height must match BTreeMap key height"
-        );
-
-        if height
-            >= Sapling
-                .activation_height(&network)
-                .expect("sapling activation height is set")
-                .0
-        {
-            assert!(
-                sapling_roots.contains_key(&height),
-                "post-sapling block test vectors must have matching sapling root test vectors: missing {network} {height}"
+        for (&height, block) in net.block_iter() {
+            let block = block
+                .zcash_deserialize_into::<Block>()
+                .expect("block is structurally valid");
+            assert_eq!(
+                block.coinbase_height().expect("block height is valid").0,
+                height,
+                "deserialized height must match BTreeMap key height"
             );
+
+            if height
+                >= Sapling
+                    .activation_height(&net)
+                    .expect("activation height")
+                    .0
+            {
+                assert!(
+                sapling_anchors.contains_key(&height),
+                "post-sapling block test vectors must have matching sapling root test vectors: \
+                 missing {net} {height}"
+            );
+            }
+
+            if height >= Nu5.activation_height(&net).expect("activation height").0 {
+                assert!(
+                    orchard_anchors.contains_key(&height),
+                    "post-nu5 block test vectors must have matching orchard root test vectors: \
+                 missing {net} {height}"
+                );
+            }
         }
     }
 }
 
-#[test]
-fn block_commitment_mainnet() {
-    let _init_guard = zebra_test::init();
-
-    block_commitment(Mainnet);
-}
-
-#[test]
-fn block_commitment_testnet() {
-    let _init_guard = zebra_test::init();
-
-    block_commitment(Network::new_default_testnet());
-}
-
-/// Check that the block commitment field parses without errors.
+/// Checks that the block commitment field parses without errors.
 /// For sapling and blossom blocks, also check the final sapling root value.
 ///
 /// TODO: add chain history test vectors?
-fn block_commitment(network: Network) {
-    let (block_iter, sapling_roots) = network.block_sapling_roots_iter();
+#[test]
+fn block_commitment() {
+    let _init_guard = zebra_test::init();
 
-    for (height, block) in block_iter {
-        let block = block
-            .zcash_deserialize_into::<Block>()
-            .expect("block is structurally valid");
+    for net in Network::iter() {
+        let sapling_anchors = net.sapling_anchors();
 
-        let commitment = block.commitment(&network).unwrap_or_else(|_| {
-            panic!("unexpected structurally invalid block commitment at {network} {height}")
-        });
-
-        if let FinalSaplingRoot(final_sapling_root) = commitment {
-            let expected_final_sapling_root = *sapling_roots
-                .get(height)
-                .expect("unexpected missing final sapling root test vector");
-            assert_eq!(
-                final_sapling_root,
-                crate::sapling::tree::Root::try_from(*expected_final_sapling_root).unwrap(),
-                "unexpected invalid final sapling root commitment at {network} {height}"
-            );
+        for (height, block) in net.block_iter() {
+            if let FinalSaplingRoot(anchor) = block
+                .zcash_deserialize_into::<Block>()
+                .expect("block is structurally valid")
+                .commitment(&net)
+                .expect("unexpected structurally invalid block commitment at {net} {height}")
+            {
+                let expected_anchor = *sapling_anchors
+                    .get(height)
+                    .expect("unexpected missing final sapling root test vector");
+                assert_eq!(
+                    anchor,
+                    sapling::tree::Root::try_from(*expected_anchor).unwrap(),
+                    "unexpected invalid final sapling root commitment at {net} {height}"
+                );
+            }
         }
     }
 }

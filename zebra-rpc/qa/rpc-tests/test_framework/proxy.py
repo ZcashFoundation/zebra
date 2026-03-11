@@ -121,7 +121,7 @@ class ServiceProxy():
 
         log.debug("-%s-> %s %s"%(ServiceProxy.__id_count, self._service_name,
                                  json.dumps(args, default=EncodeDecimal)))
-        postdata = json.dumps({'jsonrpc': '1.0',
+        postdata = json.dumps({'jsonrpc': '2.0',
                                'method': self._service_name,
                                'params': args,
                                'id': ServiceProxy.__id_count}, default=EncodeDecimal)

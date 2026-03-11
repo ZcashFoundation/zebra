@@ -6,47 +6,58 @@
 //! When compiling the `lightwalletd` gRPC tests, also builds a gRPC client
 //! Rust API for `lightwalletd`.
 
-use vergen::EmitBuilder;
-
-/// Returns a new `vergen` builder, configured for everything except for `git` env vars.
-/// This builder fails the build on error.
-fn base_vergen_builder() -> EmitBuilder {
-    let mut vergen = EmitBuilder::builder();
-
-    vergen.all_cargo().all_rustc();
-
-    vergen
-}
+use vergen_git2::{CargoBuilder, Emitter, Git2Builder, RustcBuilder};
 
 /// Process entry point for `zebrad`'s build script
 #[allow(clippy::print_stderr)]
 fn main() {
-    let mut vergen = base_vergen_builder();
+    let mut emitter = Emitter::default();
 
-    vergen.all_git().git_sha(true);
-    // git adds a "-dirty" flag if there are uncommitted changes.
-    // This doesn't quite match the  SemVer 2.0 format, which uses dot separators.
-    vergen.git_describe(true, true, Some("v*.*.*"));
+    // Configures an [`Emitter`] for everything except for `git` env vars.
+    // This builder fails the build on error.
+    emitter
+        .fail_on_error()
+        .add_instructions(
+            &CargoBuilder::all_cargo().expect("all_cargo() should build successfully"),
+        )
+        .expect("adding all_cargo() instructions should succeed")
+        .add_instructions(
+            &RustcBuilder::all_rustc().expect("all_rustc() should build successfully"),
+        )
+        .expect("adding all_rustc() instructions should succeed");
 
-    // Disable git if we're building with an invalid `zebra/.git`
-    match vergen.fail_on_error().emit() {
-        Ok(_) => {}
-        Err(e) => {
-            eprintln!("git error in vergen build script: skipping git env vars: {e:?}",);
-            base_vergen_builder()
-                .emit()
-                .expect("non-git vergen should succeed");
-        }
+    // Get git information. This is used by e.g. ZebradApp::register_components()
+    // to log the commit hash
+    let all_git = Git2Builder::default()
+        .branch(true)
+        .commit_author_email(true)
+        .commit_author_name(true)
+        .commit_count(true)
+        .commit_date(true)
+        .commit_message(true)
+        .commit_timestamp(true)
+        .describe(false, false, None)
+        .sha(true)
+        .dirty(false)
+        .describe(true, true, Some("v*.*.*"))
+        .build()
+        .expect("all_git + describe + sha should build successfully");
+
+    if let Err(e) = emitter.add_instructions(&all_git) {
+        // The most common failure here is due to a missing `.git` directory,
+        // e.g., when building from `cargo install zebrad`. We simply
+        // proceed with the build.
+        // Note that this won't be printed unless in cargo very verbose mode (-vv).
+        // We could emit a build warning, but that might scare users.
+        println!("git error in vergen build script: skipping git env vars: {e:?}",);
     }
 
+    emitter.emit().expect("base emit should succeed");
+
     #[cfg(feature = "lightwalletd-grpc-tests")]
-    tonic_build::configure()
+    tonic_prost_build::configure()
         .build_client(true)
         .build_server(false)
-        // The lightwalletd gRPC types don't use floats or complex collections,
-        // so we can derive `Eq` as well as the default generated `PartialEq` derive.
-        // This fixes `clippy::derive_partial_eq_without_eq` warnings.
-        .message_attribute(".", "#[derive(Eq)]")
         .compile_protos(
             &["tests/common/lightwalletd/proto/service.proto"],
             &["tests/common/lightwalletd/proto"],

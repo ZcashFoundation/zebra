@@ -1,7 +1,8 @@
 //! Test code for RPC methods
 
+#![allow(clippy::unwrap_in_result)]
+
 mod prop;
 mod snapshot;
-#[cfg(feature = "getblocktemplate-rpcs")]
 pub mod utils;
 mod vectors;

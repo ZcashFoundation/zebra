@@ -1,5 +1,7 @@
 //! Randomised property tests for mempool storage.
 
+#![allow(clippy::unwrap_in_result)]
+
 use std::{collections::HashSet, env, fmt::Debug, thread, time::Duration};
 
 use proptest::{collection::vec, prelude::*};
@@ -18,6 +20,9 @@ use zebra_chain::{
     transparent, LedgerState,
 };
 
+use crate::components::mempool::tests::{
+    standard_verified_unmined_tx_strategy, standardize_transaction,
+};
 use crate::components::mempool::{
     config::Config,
     storage::{
@@ -72,7 +77,7 @@ proptest! {
         for (transaction_to_accept, transaction_to_reject) in input_permutations {
             let id_to_accept = transaction_to_accept.transaction.id;
 
-            prop_assert_eq!(storage.insert(transaction_to_accept), Ok(id_to_accept));
+            prop_assert_eq!(storage.insert(transaction_to_accept, Vec::new(), None), Ok(id_to_accept));
 
             // Make unique IDs by converting the index to bytes, and writing it to each ID
             let unique_ids = (0..MAX_EVICTION_MEMORY_ENTRIES as u32).map(move |index| {
@@ -96,7 +101,7 @@ proptest! {
             // - transaction_to_accept, or
             // - a rejection from rejections
             prop_assert_eq!(
-                storage.insert(transaction_to_reject),
+                storage.insert(transaction_to_reject, Vec::new(), None),
                 Err(MempoolError::StorageEffectsTip(SameEffectsTipRejectionError::SpendConflict))
             );
 
@@ -111,7 +116,8 @@ proptest! {
     /// Test that the reject list length limits are applied when evicting transactions.
     #[test]
     fn reject_lists_are_limited_insert_eviction(
-        transactions in vec(any::<VerifiedUnminedTx>(), MEMPOOL_TX_COUNT + 1).prop_map(SummaryDebug),
+        transactions in vec(standard_verified_unmined_tx_strategy(), MEMPOOL_TX_COUNT + 1)
+            .prop_map(SummaryDebug),
         mut rejection_template in any::<UnminedTxId>()
     ) {
         // Use as cost limit the costs of all transactions except one
@@ -147,13 +153,13 @@ proptest! {
             if i < transactions.len() - 1 {
                 // The initial transactions should be successful
                 prop_assert_eq!(
-                    storage.insert(transaction.clone()),
+                    storage.insert(transaction.clone(), Vec::new(), None),
                     Ok(tx_id)
                 );
             } else {
                 // The final transaction will cause a random eviction,
                 // which might return an error if this transaction is chosen
-                let result = storage.insert(transaction.clone());
+                let result = storage.insert(transaction.clone(), Vec::new(), None);
 
                 if result.is_ok() {
                     prop_assert_eq!(
@@ -215,6 +221,7 @@ proptest! {
                 // used.
                 match rejection_error {
                     RejectionError::ExactTip(_) |
+                    RejectionError::NonStandardTransaction(_) |
                     RejectionError::SameEffectsTip(_) => {
                         prop_assert_eq!(storage.rejected_transaction_count(), 0);
                     },
@@ -281,10 +288,10 @@ proptest! {
             let id_to_accept = transaction_to_accept.transaction.id;
             let id_to_reject = transaction_to_reject.transaction.id;
 
-            prop_assert_eq!(storage.insert(transaction_to_accept), Ok(id_to_accept));
+            prop_assert_eq!(storage.insert(transaction_to_accept, Vec::new(), None), Ok(id_to_accept));
 
             prop_assert_eq!(
-                storage.insert(transaction_to_reject),
+                storage.insert(transaction_to_reject, Vec::new(), None),
                 Err(MempoolError::StorageEffectsTip(SameEffectsTipRejectionError::SpendConflict))
             );
 
@@ -332,19 +339,19 @@ proptest! {
             let id_to_reject = transaction_to_reject.transaction.id;
 
             prop_assert_eq!(
-                storage.insert(first_transaction_to_accept),
+                storage.insert(first_transaction_to_accept, Vec::new(), None),
                 Ok(first_id_to_accept)
             );
 
             prop_assert_eq!(
-                storage.insert(transaction_to_reject),
+                storage.insert(transaction_to_reject, Vec::new(), None),
                 Err(MempoolError::StorageEffectsTip(SameEffectsTipRejectionError::SpendConflict))
             );
 
             prop_assert!(storage.contains_rejected(&id_to_reject));
 
             prop_assert_eq!(
-                storage.insert(second_transaction_to_accept),
+                storage.insert(second_transaction_to_accept, Vec::new(), None),
                 Ok(second_id_to_accept)
             );
 
@@ -371,26 +378,26 @@ proptest! {
             .filter_map(|transaction| {
                 let id = transaction.transaction.id;
 
-                storage.insert(transaction.clone()).ok().map(|_| id)
+                storage.insert(transaction.clone(), Vec::new(), None).ok().map(|_| id)
             })
             .collect();
 
         // Check that the inserted transactions are still there.
         for transaction_id in &inserted_transactions {
-            prop_assert!(storage.contains_transaction_exact(transaction_id));
+            prop_assert!(storage.contains_transaction_exact(&transaction_id.mined_id()));
         }
 
         // Remove some transactions.
         match &input {
             RemoveExact { wtx_ids_to_remove, .. } => storage.remove_exact(wtx_ids_to_remove),
             RejectAndRemoveSameEffects { mined_ids_to_remove, .. } => {
-                let num_removals = storage.reject_and_remove_same_effects(mined_ids_to_remove, vec![]);
-                    for &removed_transaction_id in mined_ids_to_remove.iter() {
-                        prop_assert_eq!(
-                            storage.rejection_error(&UnminedTxId::Legacy(removed_transaction_id)),
-                            Some(SameEffectsChainRejectionError::Mined.into())
-                        );
-                    }
+                let num_removals = storage.reject_and_remove_same_effects(mined_ids_to_remove, vec![]).total_len();
+                for &removed_transaction_id in mined_ids_to_remove.iter() {
+                    prop_assert_eq!(
+                        storage.rejection_error(&UnminedTxId::Legacy(removed_transaction_id)),
+                        Some(SameEffectsChainRejectionError::Mined.into())
+                    );
+                }
                 num_removals
             },
         };
@@ -399,14 +406,14 @@ proptest! {
         let removed_transactions = input.removed_transaction_ids();
 
         for removed_transaction_id in &removed_transactions {
-            prop_assert!(!storage.contains_transaction_exact(removed_transaction_id));
+            prop_assert!(!storage.contains_transaction_exact(&removed_transaction_id.mined_id()));
         }
 
         // Check that the remaining transactions are still in the storage.
         let remaining_transactions = inserted_transactions.difference(&removed_transactions);
 
         for remaining_transaction_id in remaining_transactions {
-            prop_assert!(storage.contains_transaction_exact(remaining_transaction_id));
+            prop_assert!(storage.contains_transaction_exact(&remaining_transaction_id.mined_id()));
         }
     }
 }
@@ -446,28 +453,12 @@ enum SpendConflictTestInput {
 
         conflict: SpendConflictForTransactionV5,
     },
-
-    /// Test V6 transactions to include OrchardZSA nullifier conflicts.
-    #[cfg(feature = "tx_v6")]
-    V6 {
-        #[proptest(
-            strategy = "Transaction::v6_strategy(LedgerState::default()).prop_map(DisplayToDebug)"
-        )]
-        first: DisplayToDebug<Transaction>,
-
-        #[proptest(
-            strategy = "Transaction::v6_strategy(LedgerState::default()).prop_map(DisplayToDebug)"
-        )]
-        second: DisplayToDebug<Transaction>,
-
-        conflict: SpendConflictForTransactionV6,
-    },
 }
 
 impl SpendConflictTestInput {
     /// Return two transactions that have a spend conflict.
     pub fn conflicting_transactions(self) -> (VerifiedUnminedTx, VerifiedUnminedTx) {
-        let (first, second) = match self {
+        let (mut first, mut second) = match self {
             SpendConflictTestInput::V4 {
                 mut first,
                 mut second,
@@ -488,31 +479,23 @@ impl SpendConflictTestInput {
 
                 (first, second)
             }
-            #[cfg(feature = "tx_v6")]
-            SpendConflictTestInput::V6 {
-                mut first,
-                mut second,
-                conflict,
-            } => {
-                conflict.clone().apply_to(&mut first);
-                conflict.apply_to(&mut second);
-
-                (first, second)
-            }
         };
+
+        standardize_transaction(&mut first.0);
+        standardize_transaction(&mut second.0);
 
         (
             VerifiedUnminedTx::new(
                 first.0.into(),
                 // make sure miner fee is big enough for all cases
-                Amount::try_from(1_000_000).expect("invalid value"),
+                Amount::try_from(1_000_000).expect("valid amount"),
                 0,
             )
             .expect("verification should pass"),
             VerifiedUnminedTx::new(
                 second.0.into(),
                 // make sure miner fee is big enough for all cases
-                Amount::try_from(1_000_000).expect("invalid value"),
+                Amount::try_from(1_000_000).expect("valid amount"),
                 0,
             )
             .expect("verification should pass"),
@@ -524,8 +507,6 @@ impl SpendConflictTestInput {
         let (mut first, mut second) = match self {
             SpendConflictTestInput::V4 { first, second, .. } => (first, second),
             SpendConflictTestInput::V5 { first, second, .. } => (first, second),
-            #[cfg(feature = "tx_v6")]
-            SpendConflictTestInput::V6 { first, second, .. } => (first, second),
         };
 
         Self::remove_transparent_conflicts(&mut first, &mut second);
@@ -533,18 +514,21 @@ impl SpendConflictTestInput {
         Self::remove_sapling_conflicts(&mut first, &mut second);
         Self::remove_orchard_conflicts(&mut first, &mut second);
 
+        standardize_transaction(&mut first.0);
+        standardize_transaction(&mut second.0);
+
         (
             VerifiedUnminedTx::new(
                 first.0.into(),
                 // make sure miner fee is big enough for all cases
-                Amount::try_from(1_000_000).expect("invalid value"),
+                Amount::try_from(1_000_000).expect("valid amount"),
                 0,
             )
             .expect("verification should pass"),
             VerifiedUnminedTx::new(
                 second.0.into(),
                 // make sure miner fee is big enough for all cases
-                Amount::try_from(1_000_000).expect("invalid value"),
+                Amount::try_from(1_000_000).expect("valid amount"),
                 0,
             )
             .expect("verification should pass"),
@@ -597,9 +581,7 @@ impl SpendConflictTestInput {
 
                 // No JoinSplits
                 Transaction::V1 { .. } | Transaction::V5 { .. } => {}
-
-                // No JoinSplits
-                #[cfg(feature = "tx_v6")]
+                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
                 Transaction::V6 { .. } => {}
             }
         }
@@ -671,7 +653,7 @@ impl SpendConflictTestInput {
                     Self::remove_sapling_transfers_with_conflicts(sapling_shielded_data, &conflicts)
                 }
 
-                #[cfg(feature = "tx_v6")]
+                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
                 Transaction::V6 {
                     sapling_shielded_data,
                     ..
@@ -707,7 +689,7 @@ impl SpendConflictTestInput {
                     maybe_outputs,
                 } => {
                     let updated_spends: Vec<_> = spends
-                        .into_vec()
+                        .to_vec()
                         .into_iter()
                         .filter(|spend| !conflicts.contains(&spend.nullifier))
                         .collect();
@@ -750,7 +732,7 @@ impl SpendConflictTestInput {
                     ..
                 } => Self::remove_orchard_actions_with_conflicts(orchard_shielded_data, &conflicts),
 
-                #[cfg(feature = "tx_v6")]
+                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
                 Transaction::V6 {
                     orchard_shielded_data,
                     ..
@@ -769,14 +751,14 @@ impl SpendConflictTestInput {
     /// present in the `conflicts` set.
     ///
     /// This may clear the entire shielded data.
-    fn remove_orchard_actions_with_conflicts<Flavor: orchard::ShieldedDataFlavor>(
-        maybe_shielded_data: &mut Option<orchard::ShieldedData<Flavor>>,
+    fn remove_orchard_actions_with_conflicts(
+        maybe_shielded_data: &mut Option<orchard::ShieldedData>,
         conflicts: &HashSet<orchard::Nullifier>,
     ) {
         if let Some(shielded_data) = maybe_shielded_data.take() {
             let updated_actions: Vec<_> = shielded_data
                 .actions
-                .into_vec()
+                .to_vec()
                 .into_iter()
                 .filter(|action| !conflicts.contains(&action.action.nullifier))
                 .collect();
@@ -804,16 +786,7 @@ enum SpendConflictForTransactionV4 {
 enum SpendConflictForTransactionV5 {
     Transparent(Box<TransparentSpendConflict>),
     Sapling(Box<SaplingSpendConflict<sapling::SharedAnchor>>),
-    Orchard(Box<OrchardSpendConflict<orchard::OrchardVanilla>>),
-}
-
-/// A spend conflict valid for V6 transactions.
-#[cfg(feature = "tx_v6")]
-#[derive(Arbitrary, Clone, Debug)]
-enum SpendConflictForTransactionV6 {
-    Transparent(Box<TransparentSpendConflict>),
-    Sapling(Box<SaplingSpendConflict<sapling::SharedAnchor>>),
-    Orchard(Box<OrchardSpendConflict<orchard::OrchardZSA>>),
+    Orchard(Box<OrchardSpendConflict>),
 }
 
 /// A conflict caused by spending the same UTXO.
@@ -838,9 +811,8 @@ struct SaplingSpendConflict<A: sapling::AnchorVariant + Clone> {
 
 /// A conflict caused by revealing the same Orchard nullifier.
 #[derive(Arbitrary, Clone, Debug)]
-#[proptest(no_bound)]
-struct OrchardSpendConflict<Flavor: orchard::ShieldedDataFlavor + 'static> {
-    new_shielded_data: DisplayToDebug<orchard::ShieldedData<Flavor>>,
+struct OrchardSpendConflict {
+    new_shielded_data: DisplayToDebug<orchard::ShieldedData>,
 }
 
 impl SpendConflictForTransactionV4 {
@@ -883,31 +855,6 @@ impl SpendConflictForTransactionV5 {
         };
 
         use SpendConflictForTransactionV5::*;
-        match self {
-            Transparent(transparent_conflict) => transparent_conflict.apply_to(inputs),
-            Sapling(sapling_conflict) => sapling_conflict.apply_to(sapling_shielded_data),
-            Orchard(orchard_conflict) => orchard_conflict.apply_to(orchard_shielded_data),
-        }
-    }
-}
-
-#[cfg(feature = "tx_v6")]
-impl SpendConflictForTransactionV6 {
-    /// Apply a spend conflict to a V6 transaction.
-    ///
-    /// Changes the `transaction_v6` to include the spend that will result in a conflict.
-    pub fn apply_to(self, transaction_v6: &mut Transaction) {
-        let (inputs, sapling_shielded_data, orchard_shielded_data) = match transaction_v6 {
-            Transaction::V6 {
-                inputs,
-                sapling_shielded_data,
-                orchard_shielded_data,
-                ..
-            } => (inputs, sapling_shielded_data, orchard_shielded_data),
-            _ => unreachable!("incorrect transaction version generated for test"),
-        };
-
-        use SpendConflictForTransactionV6::*;
         match self {
             Transparent(transparent_conflict) => transparent_conflict.apply_to(inputs),
             Sapling(sapling_conflict) => sapling_conflict.apply_to(sapling_shielded_data),
@@ -988,21 +935,26 @@ impl<A: sapling::AnchorVariant + Clone> SaplingSpendConflict<A> {
         let shielded_data = sapling_shielded_data.get_or_insert(self.fallback_shielded_data.0);
 
         match &mut shielded_data.transfers {
-            SpendsAndMaybeOutputs { ref mut spends, .. } => spends.push(self.new_spend.0),
+            SpendsAndMaybeOutputs { ref mut spends, .. } => {
+                let mut spends_vec = spends.as_slice().to_vec();
+                spends_vec.push(self.new_spend.0);
+                *spends = AtLeastOne::from_vec(spends_vec)
+                    .expect("pushing one element never breaks at least one constraints");
+            }
             JustOutputs { ref mut outputs } => {
                 let new_outputs = outputs.clone();
 
                 shielded_data.transfers = SpendsAndMaybeOutputs {
                     shared_anchor: self.new_shared_anchor,
                     spends: at_least_one![self.new_spend.0],
-                    maybe_outputs: new_outputs.into_vec(),
+                    maybe_outputs: new_outputs.to_vec(),
                 };
             }
         }
     }
 }
 
-impl<Flavor: orchard::ShieldedDataFlavor> OrchardSpendConflict<Flavor> {
+impl OrchardSpendConflict {
     /// Apply a Orchard spend conflict.
     ///
     /// Ensures that a transaction's `orchard_shielded_data` has a nullifier used to represent a
@@ -1011,10 +963,15 @@ impl<Flavor: orchard::ShieldedDataFlavor> OrchardSpendConflict<Flavor> {
     /// the new action is inserted in the transaction.
     ///
     /// The transaction will then conflict with any other transaction with the same new nullifier.
-    pub fn apply_to(self, orchard_shielded_data: &mut Option<orchard::ShieldedData<Flavor>>) {
+    pub fn apply_to(self, orchard_shielded_data: &mut Option<orchard::ShieldedData>) {
         if let Some(shielded_data) = orchard_shielded_data.as_mut() {
-            shielded_data.actions.first_mut().action.nullifier =
-                self.new_shielded_data.actions.first().action.nullifier;
+            shielded_data
+                .actions
+                .iter_mut()
+                .next()
+                .unwrap()
+                .action
+                .nullifier = self.new_shielded_data.actions.first().action.nullifier;
         } else {
             *orchard_shielded_data = Some(self.new_shielded_data.0);
         }
@@ -1042,7 +999,7 @@ impl Arbitrary for MultipleTransactionRemovalTestInput {
     type Parameters = ();
 
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-        vec(any::<VerifiedUnminedTx>(), 1..MEMPOOL_TX_COUNT)
+        vec(standard_verified_unmined_tx_strategy(), 1..MEMPOOL_TX_COUNT)
             .prop_flat_map(|transactions| {
                 let indices_to_remove =
                     vec(any::<bool>(), 1..=transactions.len()).prop_map(|removal_markers| {

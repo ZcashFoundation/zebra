@@ -131,9 +131,8 @@ fn multi_transaction_block(oversized: bool) -> Block {
     }
 
     // Create transactions to be just below or just above the limit
-    let transactions = std::iter::repeat(Arc::new(transaction))
-        .take(max_transactions_in_block)
-        .collect::<Vec<_>>();
+    let transactions =
+        std::iter::repeat_n(Arc::new(transaction), max_transactions_in_block).collect::<Vec<_>>();
 
     // Add the transactions into a block
     let block = Block {
@@ -193,9 +192,7 @@ fn single_transaction_block_many_inputs(oversized: bool) -> Block {
     let mut outputs = Vec::new();
 
     // Create inputs to be just below the limit
-    let inputs = std::iter::repeat(input)
-        .take(max_inputs_in_tx)
-        .collect::<Vec<_>>();
+    let inputs = std::iter::repeat_n(input, max_inputs_in_tx).collect::<Vec<_>>();
 
     // 1 single output
     outputs.push(output);
@@ -268,9 +265,7 @@ fn single_transaction_block_many_outputs(oversized: bool) -> Block {
     let inputs = vec![input];
 
     // Create outputs to be just below the limit
-    let outputs = std::iter::repeat(output)
-        .take(max_outputs_in_tx)
-        .collect::<Vec<_>>();
+    let outputs = std::iter::repeat_n(output, max_outputs_in_tx).collect::<Vec<_>>();
 
     // Create a big transaction
     let big_transaction = Transaction::V1 {

@@ -2,8 +2,9 @@
 //!
 //! This avoids a potential concurrency bug, and a known database performance issue.
 
-use std::sync::{mpsc, Arc};
+use std::sync::Arc;
 
+use crossbeam_channel::{Receiver, TryRecvError};
 use zebra_chain::{block::Height, history_tree::HistoryTree, sprout};
 
 use crate::service::finalized_state::{
@@ -20,7 +21,7 @@ use super::CancelFormatChange;
 pub fn run(
     _initial_tip_height: Height,
     upgrade_db: &ZebraDb,
-    cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
+    cancel_receiver: &Receiver<CancelFormatChange>,
 ) -> Result<(), CancelFormatChange> {
     let sprout_tip_tree = upgrade_db.sprout_tree_for_tip();
     let history_tip_tree = upgrade_db.history_tree();
@@ -33,7 +34,7 @@ pub fn run(
     batch.update_history_tree(upgrade_db, &history_tip_tree);
 
     // Return before we write if the upgrade is cancelled.
-    if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+    if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
         return Err(CancelFormatChange);
     }
 
@@ -51,7 +52,7 @@ pub fn run(
     batch.delete_range_history_tree(upgrade_db, &Height(0), &MAX_ON_DISK_HEIGHT);
 
     // Return before we write if the upgrade is cancelled.
-    if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+    if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
         return Err(CancelFormatChange);
     }
 
@@ -86,14 +87,14 @@ pub fn quick_check(db: &ZebraDb) -> Result<(), String> {
         }
 
         // There should only be one tip tree in this column family.
-        if prev_tree.is_some() {
+        if let Some(prev_tree) = prev_tree {
             result = Err(format!(
                 "found duplicate sprout trees after running key format upgrade\n\
                  key: {key:?}, tree: {:?}\n\
                  prev key: {prev_key:?}, prev_tree: {:?}\n\
                  ",
                 tree.root(),
-                prev_tree.unwrap().root(),
+                prev_tree.root(),
             ));
             error!(?result);
         }
@@ -117,14 +118,14 @@ pub fn quick_check(db: &ZebraDb) -> Result<(), String> {
         }
 
         // There should only be one tip tree in this column family.
-        if prev_tree.is_some() {
+        if let Some(prev_tree) = prev_tree {
             result = Err(format!(
                 "found duplicate history trees after running key format upgrade\n\
                  key: {key:?}, tree: {:?}\n\
                  prev key: {prev_key:?}, prev_tree: {:?}\n\
                  ",
                 tree.hash(),
-                prev_tree.unwrap().hash(),
+                prev_tree.hash(),
             ));
             error!(?result);
         }
@@ -144,7 +145,7 @@ pub fn quick_check(db: &ZebraDb) -> Result<(), String> {
 /// If the state is empty.
 pub fn detailed_check(
     db: &ZebraDb,
-    _cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
+    _cancel_receiver: &Receiver<CancelFormatChange>,
 ) -> Result<Result<(), String>, CancelFormatChange> {
     // This upgrade only changes two key-value pairs, so checking it is always quick.
     Ok(quick_check(db))

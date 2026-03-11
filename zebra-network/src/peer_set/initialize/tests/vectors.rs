@@ -8,10 +8,10 @@
 //! ## Failures due to Configured Network Interfaces
 //!
 //! If your test environment does not have any IPv6 interfaces configured, skip IPv6 tests
-//! by setting the `ZEBRA_SKIP_IPV6_TESTS` environmental variable.
+//! by setting the `SKIP_IPV6_TESTS` environmental variable.
 //!
 //! If it does not have any IPv4 interfaces, or IPv4 localhost is not on `127.0.0.1`,
-//! skip all the network tests by setting the `ZEBRA_SKIP_NETWORK_TESTS` environmental variable.
+//! skip all the network tests by setting the `SKIP_NETWORK_TESTS` environmental variable.
 
 use std::{
     net::{Ipv4Addr, SocketAddr},
@@ -1382,7 +1382,7 @@ async fn add_initial_peers_deadlock() {
     // still some extra peers left.
     const PEER_COUNT: usize = 200;
     const PEERSET_INITIAL_TARGET_SIZE: usize = 2;
-    const TIME_LIMIT: Duration = Duration::from_secs(10);
+    const TIME_LIMIT: Duration = Duration::from_secs(20);
 
     let _init_guard = zebra_test::init();
 
@@ -1424,7 +1424,9 @@ async fn add_initial_peers_deadlock() {
         "Test user agent".to_string(),
     );
 
-    assert!(tokio::time::timeout(TIME_LIMIT, init_future).await.is_ok());
+    tokio::time::timeout(TIME_LIMIT, init_future)
+        .await
+        .expect("should not timeout");
 }
 
 /// Open a local listener on `listen_addr` for `network`.
@@ -1444,7 +1446,7 @@ async fn local_listener_port_with(listen_addr: SocketAddr, network: Network) {
     let inbound_service =
         service_fn(|_| async { unreachable!("inbound service should never be called") });
 
-    let (_peer_service, address_book) = init(
+    let (_peer_service, address_book, _) = init(
         config,
         inbound_service,
         NoChainTip,
@@ -1510,7 +1512,7 @@ where
         ..default_config
     };
 
-    let (_peer_service, address_book) = init(
+    let (_peer_service, address_book, _) = init(
         config,
         inbound_service,
         NoChainTip,
@@ -1547,8 +1549,13 @@ where
         config.peerset_initial_target_size = peerset_initial_target_size;
     }
 
-    let (address_book, address_book_updater, _address_metrics, _address_book_updater_guard) =
-        AddressBookUpdater::spawn(&config, config.listen_addr);
+    let (
+        address_book,
+        _bans_receiver,
+        address_book_updater,
+        _address_metrics,
+        _address_book_updater_guard,
+    ) = AddressBookUpdater::spawn(&config, config.listen_addr);
 
     // Add enough fake peers to go over the limit, even if the limit is zero.
     let over_limit_peers = config.peerset_outbound_connection_limit() * 2 + 1;
@@ -1575,7 +1582,7 @@ where
     let nil_peer_set = service_fn(move |req| async move {
         let rsp = match req {
             // Return the correct response variant for Peers requests,
-            // re-using one of the peers we already provided.
+            // reusing one of the peers we already provided.
             Request::Peers => Response::Peers(vec![fake_peer.unwrap()]),
             _ => unreachable!("unexpected request: {:?}", req),
         };
@@ -1678,6 +1685,8 @@ where
     let over_limit_connections = config.peerset_inbound_connection_limit() * 2 + 1;
     let (peerset_tx, peerset_rx) = mpsc::channel::<DiscoveredPeer>(over_limit_connections);
 
+    let (_bans_tx, bans_rx) = tokio::sync::watch::channel(Default::default());
+
     // Start listening for connections.
     let listen_fut = accept_inbound_connections(
         config.clone(),
@@ -1685,6 +1694,7 @@ where
         MIN_INBOUND_PEER_CONNECTION_INTERVAL_FOR_TESTS,
         listen_handshaker,
         peerset_tx.clone(),
+        bans_rx,
     );
     let listen_task_handle = tokio::spawn(listen_fut);
 
@@ -1789,8 +1799,13 @@ where
 
     let (peerset_tx, peerset_rx) = mpsc::channel::<DiscoveredPeer>(peer_count + 1);
 
-    let (_address_book, address_book_updater, _address_metrics, address_book_updater_guard) =
-        AddressBookUpdater::spawn(&config, unused_v4);
+    let (
+        _address_book,
+        _bans_receiver,
+        address_book_updater,
+        _address_metrics,
+        address_book_updater_guard,
+    ) = AddressBookUpdater::spawn(&config, unused_v4);
 
     let add_fut = add_initial_peers(config, outbound_connector, peerset_tx, address_book_updater);
     let add_task_handle = tokio::spawn(add_fut);

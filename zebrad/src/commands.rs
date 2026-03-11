@@ -1,5 +1,7 @@
 //! Zebrad Subcommands
 
+#![allow(non_local_definitions)]
+
 use std::path::PathBuf;
 
 use abscissa_core::{config::Override, Command, Configurable, FrameworkError, Runnable};

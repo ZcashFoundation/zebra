@@ -1,10 +1,11 @@
 ---
 source: zebra-rpc/src/methods/tests/snapshot.rs
 expression: treestate
+snapshot_kind: text
 ---
 {
   "Err": {
     "code": -8,
-    "message": "the requested block was not found"
+    "message": "the requested block is not in the main chain"
   }
 }

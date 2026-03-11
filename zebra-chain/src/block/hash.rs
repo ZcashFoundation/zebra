@@ -4,7 +4,8 @@ use hex::{FromHex, ToHex};
 use serde::{Deserialize, Serialize};
 
 use crate::serialization::{
-    sha256d, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize,
+    sha256d, BytesInDisplayOrder, ReadZcashExt, SerializationError, ZcashDeserialize,
+    ZcashSerialize,
 };
 
 use super::Header;
@@ -24,26 +25,13 @@ use proptest_derive::Arbitrary;
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary, Default))]
 pub struct Hash(pub [u8; 32]);
 
-impl Hash {
-    /// Return the hash bytes in big-endian byte-order suitable for printing out byte by byte.
-    ///
-    /// Zebra displays transaction and block hashes in big-endian byte-order,
-    /// following the u256 convention set by Bitcoin and zcashd.
-    pub fn bytes_in_display_order(&self) -> [u8; 32] {
-        let mut reversed_bytes = self.0;
-        reversed_bytes.reverse();
-        reversed_bytes
+impl BytesInDisplayOrder<true> for Hash {
+    fn bytes_in_serialized_order(&self) -> [u8; 32] {
+        self.0
     }
 
-    /// Convert bytes in big-endian byte-order into a [`block::Hash`](crate::block::Hash).
-    ///
-    /// Zebra displays transaction and block hashes in big-endian byte-order,
-    /// following the u256 convention set by Bitcoin and zcashd.
-    pub fn from_bytes_in_display_order(bytes_in_display_order: &[u8; 32]) -> Hash {
-        let mut internal_byte_order = *bytes_in_display_order;
-        internal_byte_order.reverse();
-
-        Hash(internal_byte_order)
+    fn from_bytes_in_serialized_order(bytes: [u8; 32]) -> Self {
+        Hash(bytes)
     }
 }
 

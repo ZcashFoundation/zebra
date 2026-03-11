@@ -16,7 +16,12 @@ use std::{
     ops::RangeInclusive,
 };
 
-use zebra_chain::{block::Height, parameters::Network, transaction, transparent};
+use derive_getters::Getters;
+use zebra_chain::{
+    block::{self, Height},
+    parameters::Network,
+    transaction, transparent,
+};
 
 use crate::{
     service::{
@@ -33,16 +38,23 @@ pub const ADDRESS_HEIGHTS_FULL_RANGE: RangeInclusive<Height> = Height(1)..=Heigh
 
 /// A convenience wrapper that efficiently stores unspent transparent outputs,
 /// and the corresponding transaction IDs.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Getters)]
 pub struct AddressUtxos {
     /// A set of unspent transparent outputs.
+    #[getter(skip)]
     utxos: BTreeMap<OutputLocation, transparent::Output>,
 
     /// The transaction IDs for each [`OutputLocation`] in `utxos`.
+    #[getter(skip)]
     tx_ids: BTreeMap<TransactionLocation, transaction::Hash>,
 
     /// The configured network for this state.
+    #[getter(skip)]
     network: Network,
+
+    /// The last height and hash that was queried to produce these UTXOs, if any.
+    /// It will be None if the state is empty.
+    last_height_and_hash: Option<(block::Height, block::Hash)>,
 }
 
 impl AddressUtxos {
@@ -51,11 +63,13 @@ impl AddressUtxos {
         network: &Network,
         utxos: BTreeMap<OutputLocation, transparent::Output>,
         tx_ids: BTreeMap<TransactionLocation, transaction::Hash>,
+        last_height_and_hash: Option<(block::Height, block::Hash)>,
     ) -> Self {
         Self {
             utxos,
             tx_ids,
             network: network.clone(),
+            last_height_and_hash,
         }
     }
 
@@ -129,7 +143,7 @@ where
 
         // If the UTXOs are valid, return them, otherwise, retry or return an error.
         match chain_utxo_changes {
-            Ok((created_chain_utxos, spent_chain_utxos)) => {
+            Ok((created_chain_utxos, spent_chain_utxos, last_height)) => {
                 debug!(
                     chain_utxo_count = ?created_chain_utxos.len(),
                     chain_utxo_spent = ?spent_chain_utxos.len(),
@@ -140,7 +154,7 @@ where
 
                 let utxos =
                     apply_utxo_changes(finalized_utxos, created_chain_utxos, spent_chain_utxos);
-                let tx_ids = lookup_tx_ids_for_utxos(chain, db, &addresses, &utxos);
+                let tx_ids = lookup_tx_ids_for_utxos(chain.as_ref(), db, &addresses, &utxos);
 
                 debug!(
                     full_utxo_count = ?utxos.len(),
@@ -150,7 +164,21 @@ where
                     "full address UTXO response",
                 );
 
-                return Ok(AddressUtxos::new(network, utxos, tx_ids));
+                // Get the matching hash for the given height, if any
+                let last_height_and_hash = last_height.and_then(|height| {
+                    chain
+                        .as_ref()
+                        .and_then(|c| c.as_ref().hash_by_height(height))
+                        .or_else(|| db.hash(height))
+                        .map(|hash| (height, hash))
+                });
+
+                return Ok(AddressUtxos::new(
+                    network,
+                    utxos,
+                    tx_ids,
+                    last_height_and_hash,
+                ));
             }
 
             Err(chain_utxo_error) => {
@@ -205,10 +233,13 @@ fn finalized_address_utxos(
     (finalized_utxos, finalized_tip_range)
 }
 
-/// Returns the UTXO changes for `addresses` in the non-finalized chain,
-/// matching or overlapping the UTXOs for the `finalized_tip_range`.
+/// Returns the UTXO changes (created and spent) for `addresses` in the
+/// non-finalized chain, matching or overlapping the UTXOs for the
+/// `finalized_tip_range`. Also returns the height of the last block in which
+/// the changes were located, or None if the state is empty.
 ///
-/// If the addresses do not exist in the non-finalized `chain`, returns an empty list.
+/// If the addresses do not exist in the non-finalized `chain`, returns an empty
+/// list.
 //
 // TODO: turn the return type into a struct?
 fn chain_transparent_utxo_changes<C>(
@@ -219,6 +250,7 @@ fn chain_transparent_utxo_changes<C>(
     (
         BTreeMap<OutputLocation, transparent::Output>,
         BTreeSet<OutputLocation>,
+        Option<Height>,
     ),
     BoxError,
 >
@@ -265,7 +297,7 @@ where
     };
 
     if chain.is_none() {
-        if finalized_tip_status.is_ok() {
+        if let Ok(finalized_tip_height) = finalized_tip_status {
             debug!(
                 ?finalized_tip_status,
                 ?required_min_non_finalized_root,
@@ -275,7 +307,11 @@ where
                  finalized chain is consistent, and non-finalized chain is empty",
             );
 
-            return Ok(Default::default());
+            return Ok((
+                Default::default(),
+                Default::default(),
+                Some(finalized_tip_height),
+            ));
         } else {
             // We can't compensate for inconsistent database queries,
             // because the non-finalized chain is empty.
@@ -320,7 +356,11 @@ where
                      non-finalized blocks have all been finalized, no new UTXO changes",
                 );
 
-                return Ok(Default::default());
+                return Ok((
+                    Default::default(),
+                    Default::default(),
+                    Some(finalized_tip_height),
+                ));
             }
         }
 
@@ -355,8 +395,8 @@ where
             );
         }
     }
-
-    Ok(chain.partial_transparent_utxo_changes(addresses))
+    let (created, spent) = chain.partial_transparent_utxo_changes(addresses);
+    Ok((created, spent, Some(non_finalized_tip)))
 }
 
 /// Combines the supplied finalized and non-finalized UTXOs,

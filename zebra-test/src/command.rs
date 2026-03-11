@@ -292,10 +292,8 @@ pub fn check_failure_regexes(
     }
 
     // Otherwise, if the process logged a failure message, return an error
-    let error = std::io::Error::new(
-        ErrorKind::Other,
-        format!(
-            "test command:\n\
+    let error = std::io::Error::other(format!(
+        "test command:\n\
              {cmd}\n\n\
              Logged a failure message:\n\
              {line}\n\n\
@@ -303,9 +301,8 @@ pub fn check_failure_regexes(
              {failure_matches:#?}\n\n\
              All Failure regexes: \
              {:#?}\n",
-            failure_regexes.patterns(),
-        ),
-    );
+        failure_regexes.patterns(),
+    ));
 
     Err(error)
 }

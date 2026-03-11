@@ -65,7 +65,7 @@ We let you preview what's coming by providing Release Candidate \(`rc`\) pre-rel
 
 ### Distribution tags
 
-Zebras's tagging relates directly to versions published on Docker. We will reference these [Docker Hub distribution tags](https://hub.docker.com/r/zfnd/zebra/tags) throughout:
+Zebra's tagging relates directly to versions published on Docker. We will reference these [Docker Hub distribution tags](https://hub.docker.com/r/zfnd/zebra/tags) throughout:
 
 | Tag    | Description |
 |:---    |:---         |

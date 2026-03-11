@@ -113,7 +113,7 @@ proptest! {
             );
             let response = response_result.unwrap();
 
-            prop_assert_eq!(response, Response::Blocks(vec![Available(second_block.0)]));
+            prop_assert_eq!(response, Response::Blocks(vec![Available((second_block.0, None))]));
 
             // Check the state after the response
             let error = shared_error_slot.try_get_error();

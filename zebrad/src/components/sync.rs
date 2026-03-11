@@ -9,7 +9,7 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
 use tokio::{
-    sync::watch,
+    sync::{mpsc, watch},
     task::JoinError,
     time::{sleep, timeout},
 };
@@ -22,8 +22,7 @@ use zebra_chain::{
     block::{self, Height, HeightDiff},
     chain_tip::ChainTip,
 };
-use zebra_consensus::ParameterCheckpoint as _;
-use zebra_network as zn;
+use zebra_network::{self as zn, PeerSocketAddr};
 use zebra_state as zs;
 
 use crate::{
@@ -380,6 +379,9 @@ where
     /// Receiver that is `true` when the downloader is past the lookahead limit.
     /// This is based on the downloaded block height and the state tip height.
     past_lookahead_limit_receiver: zs::WatchReceiver<bool>,
+
+    /// Sender for reporting peer addresses that advertised unexpectedly invalid transactions.
+    misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
 }
 
 /// Polls the network to determine whether further blocks are available and
@@ -425,6 +427,7 @@ where
         verifier: ZV,
         state: ZS,
         latest_chain_tip: ZSTip,
+        misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
     ) -> (Self, SyncStatus) {
         let mut download_concurrency_limit = config.sync.download_concurrency_limit;
         let mut checkpoint_verify_concurrency_limit =
@@ -463,7 +466,7 @@ where
         // The Hedge middleware is the outermost layer, hedging requests
         // between two retry-wrapped networks.  The innermost timeout
         // layer is relatively unimportant, because slow requests will
-        // probably be pre-emptively hedged.
+        // probably be preemptively hedged.
         //
         // The Hedge goes outside the Retry, because the Retry layer
         // abstracts away spurious failures from individual peers
@@ -513,6 +516,7 @@ where
             prospective_tips: HashSet::new(),
             recent_syncs,
             past_lookahead_limit_receiver,
+            misbehavior_sender,
         };
 
         (new_syncer, sync_status)
@@ -593,7 +597,7 @@ where
     /// Returns `Ok(extra_hashes)` if it was able to extend once and synchronize sone of the chain.
     /// Returns `Err` if there was an unrecoverable error and restarting the synchronization is
     /// necessary.
-    #[instrument(skip(self))]
+    #[instrument(skip(self, extra_hashes))]
     async fn try_to_sync_once(
         &mut self,
         mut extra_hashes: IndexSet<block::Hash>,
@@ -667,6 +671,8 @@ where
     /// multiple peers
     #[instrument(skip(self))]
     async fn obtain_tips(&mut self) -> Result<IndexSet<block::Hash>, Report> {
+        let stage_start = std::time::Instant::now();
+
         let block_locator = self
             .state
             .ready()
@@ -821,11 +827,16 @@ where
 
         let response = self.request_blocks(download_set).await;
 
+        metrics::histogram!("sync.stage.duration_seconds", "stage" => "obtain_tips")
+            .record(stage_start.elapsed().as_secs_f64());
+
         Self::handle_hash_response(response).map_err(Into::into)
     }
 
     #[instrument(skip(self))]
     async fn extend_tips(&mut self) -> Result<IndexSet<block::Hash>, Report> {
+        let stage_start = std::time::Instant::now();
+
         let tips = std::mem::take(&mut self.prospective_tips);
 
         let mut download_set = IndexSet::new();
@@ -958,6 +969,9 @@ where
         self.recent_syncs.push_extend_tips_length(new_downloads);
 
         let response = self.request_blocks(download_set).await;
+
+        metrics::histogram!("sync.stage.duration_seconds", "stage" => "extend_tips")
+            .record(stage_start.elapsed().as_secs_f64());
 
         Self::handle_hash_response(response).map_err(Into::into)
     }
@@ -1094,10 +1108,23 @@ where
             Ok((height, hash)) => {
                 trace!(?height, ?hash, "verified and committed block to state");
 
-                Ok(())
+                return Ok(());
             }
-            Err(_) => Self::handle_response(response),
-        }
+
+            Err(BlockDownloadVerifyError::Invalid {
+                ref error,
+                advertiser_addr: Some(advertiser_addr),
+                ..
+            }) if error.misbehavior_score() != 0 => {
+                let _ = self
+                    .misbehavior_sender
+                    .try_send((advertiser_addr, error.misbehavior_score()));
+            }
+
+            Err(_) => {}
+        };
+
+        Self::handle_response(response)
     }
 
     /// Handles a response to block hash submission, passing through any extra hashes.
@@ -1164,7 +1191,7 @@ where
         match e {
             // Structural matches: downcasts
             BlockDownloadVerifyError::Invalid { error, .. } if error.is_duplicate_request() => {
-                debug!(error = ?e, "block was already verified, possibly from a previous sync run, continuing");
+                debug!(error = ?e, "block was already verified or committed, possibly from a previous sync run, continuing");
                 false
             }
 
@@ -1191,21 +1218,6 @@ where
                 false
             }
 
-            // String matches
-            //
-            // We want to match VerifyChainError::Block(VerifyBlockError::Commit(ref source)),
-            // but that type is boxed.
-            // TODO:
-            // - turn this check into a function on VerifyChainError, like is_duplicate_request()
-            BlockDownloadVerifyError::Invalid { error, .. }
-                if format!("{error:?}").contains("block is already committed to the state")
-                    || format!("{error:?}")
-                        .contains("block has already been sent to be committed to the state") =>
-            {
-                // TODO: improve this by checking the type (#2908)
-                debug!(error = ?e, "block is already committed or pending a commit, possibly from a previous sync run, continuing");
-                false
-            }
             BlockDownloadVerifyError::DownloadFailed { ref error, .. }
                 if format!("{error:?}").contains("NotFound") =>
             {
@@ -1230,12 +1242,7 @@ where
                 // TODO: add a proper test and remove this
                 // https://github.com/ZcashFoundation/zebra/issues/2909
                 let err_str = format!("{e:?}");
-                if err_str.contains("AlreadyVerified")
-                    || err_str.contains("AlreadyInChain")
-                    || err_str.contains("block is already committed to the state")
-                    || err_str.contains("block has already been sent to be committed to the state")
-                    || err_str.contains("NotFound")
-                {
+                if err_str.contains("NotFound") {
                     error!(?e,
                         "a BlockDownloadVerifyError that should have been filtered out was detected, \
                         which possibly indicates a programming error in the downcast inside \

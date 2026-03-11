@@ -1,5 +1,7 @@
 //! Peer set unit tests, and test setup code.
 
+#![allow(clippy::unwrap_in_result)]
+
 use std::{net::SocketAddr, sync::Arc};
 
 use futures::{channel::mpsc, stream, Stream, StreamExt};
@@ -211,6 +213,7 @@ where
             .unwrap_or_else(|| guard.create_inventory_receiver());
 
         let address_metrics = guard.prepare_address_book(self.address_book);
+        let (_bans_sender, bans_receiver) = tokio::sync::watch::channel(Default::default());
 
         let peer_set = PeerSet::new(
             &config,
@@ -218,6 +221,7 @@ where
             demand_signal,
             handle_rx,
             inv_stream,
+            bans_receiver,
             address_metrics,
             minimum_peer_version,
             max_conns_per_ip,

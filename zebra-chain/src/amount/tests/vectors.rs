@@ -180,12 +180,12 @@ fn deserialize_checks_bounds() -> Result<()> {
     let mut big_bytes = Vec::new();
     (&mut big_bytes)
         .write_u64::<LittleEndian>(big)
-        .expect("unexpected serialization failure: vec should be infalliable");
+        .expect("unexpected serialization failure: vec should be infallible");
 
     let mut neg_bytes = Vec::new();
     (&mut neg_bytes)
         .write_i64::<LittleEndian>(neg)
-        .expect("unexpected serialization failure: vec should be infalliable");
+        .expect("unexpected serialization failure: vec should be infallible");
 
     Amount::<NonNegative>::zcash_deserialize(big_bytes.as_slice())
         .expect_err("deserialization should reject too large values");
@@ -335,9 +335,7 @@ fn test_sum() -> Result<()> {
     let times: usize = (i64::MAX / MAX_MONEY)
         .try_into()
         .expect("4392 can always be converted to usize");
-    let amounts: Vec<Amount> = std::iter::repeat(MAX_MONEY.try_into()?)
-        .take(times + 1)
-        .collect();
+    let amounts: Vec<Amount> = std::iter::repeat_n(MAX_MONEY.try_into()?, times + 1).collect();
 
     let sum_ref = amounts.iter().sum::<Result<Amount, Error>>();
     let sum_value = amounts.into_iter().sum::<Result<Amount, Error>>();
@@ -357,7 +355,7 @@ fn test_sum() -> Result<()> {
         .expect("4392 can always be converted to usize");
     let neg_max_money: Amount<NegativeAllowed> = (-MAX_MONEY).try_into()?;
     let amounts: Vec<Amount<NegativeAllowed>> =
-        std::iter::repeat(neg_max_money).take(times + 1).collect();
+        std::iter::repeat_n(neg_max_money, times + 1).collect();
 
     let sum_ref = amounts.iter().sum::<Result<Amount, Error>>();
     let sum_value = amounts.into_iter().sum::<Result<Amount, Error>>();

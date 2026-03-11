@@ -448,11 +448,13 @@ pub fn wait_for_zebra_checkpoints_generation<
         //
         // We know that checkpoints are always less than 1000 blocks apart, but they can happen
         // anywhere in that range due to block sizes. So we ignore the last 3 digits of the height.
-        let expected_final_checkpoint_prefix = expected_final_checkpoint_height.0 / 1000;
+        let expected_final_checkpoint_prefix1 = expected_final_checkpoint_height.0 / 1000;
+        // To ensure it also works on corner cases, we also consider the next possible checkpoint.
+        let expected_final_checkpoint_prefix2 = expected_final_checkpoint_prefix1 + 1;
 
         // Mainnet and testnet checkpoints always have at least one leading zero in their hash.
         let expected_final_checkpoint =
-            format!("{expected_final_checkpoint_prefix}[0-9][0-9][0-9] 0");
+            format!("({expected_final_checkpoint_prefix1}[0-9][0-9][0-9]|{expected_final_checkpoint_prefix2}[0-9][0-9][0-9]) 0");
         zebra_checkpoints_mut.expect_stdout_line_matches(&expected_final_checkpoint)?;
 
         // Write the rest of the checkpoints: there can be 0-2 more checkpoints.

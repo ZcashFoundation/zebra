@@ -15,7 +15,8 @@ use tracing::Span;
 use zebra_chain::{common::default_cache_dir, parameters::Network};
 
 use crate::{
-    constants::{DATABASE_FORMAT_VERSION_FILE_NAME, RESTORABLE_DB_VERSIONS, STATE_DATABASE_KIND},
+    constants::{DATABASE_FORMAT_VERSION_FILE_NAME, STATE_DATABASE_KIND},
+    service::finalized_state::restorable_db_versions,
     state_database_format_version_in_code, BoxError,
 };
 
@@ -81,6 +82,17 @@ pub struct Config {
     /// [`cache_dir`]: struct.Config.html#structfield.cache_dir
     pub ephemeral: bool,
 
+    /// Whether to cache non-finalized blocks on disk to be restored when Zebra restarts.
+    ///
+    /// Set to `true` by default. If this is set to `false`, Zebra will irrecoverably drop
+    /// non-finalized blocks when the process exits and will have to re-download them from
+    /// the network when it restarts, if those blocks are still available in the network.
+    ///
+    /// Note: The non-finalized state will be written to a backup cache once per 5 seconds at most.
+    ///       If blocks are added to the non-finalized state more frequently, the backup may not reflect
+    ///       Zebra's last non-finalized state before it shut down.
+    pub should_backup_non_finalized_state: bool,
+
     /// Whether to delete the old database directories when present.
     ///
     /// Set to `true` by default. If this is set to `false`,
@@ -121,7 +133,7 @@ fn gen_temp_path(prefix: &str) -> PathBuf {
         .prefix(prefix)
         .tempdir()
         .expect("temporary directory is created successfully")
-        .into_path()
+        .keep()
 }
 
 impl Config {
@@ -134,7 +146,7 @@ impl Config {
         network: &Network,
     ) -> PathBuf {
         let db_kind = db_kind.as_ref();
-        let major_version = format!("v{}", major_version);
+        let major_version = format!("v{major_version}");
         let net_dir = network.lowercase_name();
 
         if self.ephemeral {
@@ -145,6 +157,20 @@ impl Config {
                 .join(major_version)
                 .join(net_dir)
         }
+    }
+
+    /// Returns the path for the non-finalized state backup directory, based on the network.
+    /// Non-finalized state backup files are encoded in the network protocol format and remain
+    /// valid across db format upgrades.
+    pub fn non_finalized_state_backup_dir(&self, network: &Network) -> Option<PathBuf> {
+        if self.ephemeral || !self.should_backup_non_finalized_state {
+            // Ephemeral databases are intended to be irrecoverable across restarts and don't
+            // require a backup for the non-finalized state.
+            return None;
+        }
+
+        let net_dir = network.lowercase_name();
+        Some(self.cache_dir.join("non_finalized_state").join(net_dir))
     }
 
     /// Returns the path for the database format minor/patch version file,
@@ -176,6 +202,7 @@ impl Default for Config {
         Self {
             cache_dir: default_cache_dir(),
             ephemeral: false,
+            should_backup_non_finalized_state: true,
             delete_old_database: true,
             debug_stop_at_height: None,
             debug_validity_check_interval: None,
@@ -250,6 +277,8 @@ fn delete_old_databases(config: Config, db_kind: String, major_version: u64, net
 
     info!(db_kind, "checking for old database versions");
 
+    let restorable_db_versions = restorable_db_versions();
+
     let mut db_path = config.db_path(&db_kind, major_version, network);
     // Check and remove the network path.
     assert_eq!(
@@ -276,7 +305,8 @@ fn delete_old_databases(config: Config, db_kind: String, major_version: u64, net
 
     if let Some(db_kind_dir) = read_dir(&db_path) {
         for entry in db_kind_dir.flatten() {
-            let deleted_db = check_and_delete_database(&config, major_version, &entry);
+            let deleted_db =
+                check_and_delete_database(&config, major_version, &restorable_db_versions, &entry);
 
             if let Some(deleted_db) = deleted_db {
                 info!(?deleted_db, "deleted outdated {db_kind} database directory");
@@ -304,6 +334,7 @@ fn read_dir(dir: &Path) -> Option<ReadDir> {
 fn check_and_delete_database(
     config: &Config,
     major_version: u64,
+    restorable_db_versions: &[u64],
     entry: &DirEntry,
 ) -> Option<PathBuf> {
     let dir_name = parse_dir_name(entry)?;
@@ -314,7 +345,7 @@ fn check_and_delete_database(
     }
 
     // Don't delete databases that can be reused.
-    if RESTORABLE_DB_VERSIONS
+    if restorable_db_versions
         .iter()
         .map(|v| v - 1)
         .any(|v| v == dir_major_version)
@@ -398,7 +429,7 @@ pub fn state_database_format_version_on_disk(
 ///
 /// If there is no existing on-disk database, returns `Ok(None)`.
 ///
-/// This is the format of the data on disk, the minor and patch versions
+/// This is the format of the data on disk, the version
 /// implemented by the running Zebra code can be different.
 pub fn database_format_version_on_disk(
     config: &Config,
@@ -431,15 +462,16 @@ pub(crate) fn database_format_version_at_path(
 
     // The database has a version file on disk
     if let Some(version) = disk_version_file {
-        let (minor, patch) = version
-            .split_once('.')
-            .ok_or("invalid database format version file")?;
-
-        return Ok(Some(Version::new(
-            major_version,
-            minor.parse()?,
-            patch.parse()?,
-        )));
+        return Ok(Some(
+            version
+                .parse()
+                // Try to parse the previous format of the disk version file if it cannot be parsed as a `Version` directly.
+                .or_else(|err| {
+                    format!("{major_version}.{version}")
+                        .parse()
+                        .map_err(|err2| format!("failed to parse format version: {err}, {err2}"))
+                })?,
+        ));
     }
 
     // There's no version file on disk, so we need to guess the version
@@ -480,13 +512,19 @@ pub(crate) mod hidden {
         changed_version: &Version,
         network: &Network,
     ) -> Result<(), BoxError> {
-        write_database_format_version_to_disk(config, STATE_DATABASE_KIND, changed_version, network)
+        write_database_format_version_to_disk(
+            config,
+            STATE_DATABASE_KIND,
+            state_database_format_version_in_code().major,
+            changed_version,
+            network,
+        )
     }
 
     /// Writes `changed_version` to the on-disk database after the format is changed.
     /// (Or a new database is created.)
     ///
-    /// The database path is based on its kind, `changed_version.major`, and network.
+    /// The database path is based on its kind, `major_version_in_code`, and network.
     ///
     /// # Correctness
     ///
@@ -503,16 +541,16 @@ pub(crate) mod hidden {
     pub fn write_database_format_version_to_disk(
         config: &Config,
         db_kind: impl AsRef<str>,
+        major_version_in_code: u64,
         changed_version: &Version,
         network: &Network,
     ) -> Result<(), BoxError> {
-        let version_path = config.version_file_path(db_kind, changed_version.major, network);
-
-        let version = format!("{}.{}", changed_version.minor, changed_version.patch);
-
         // Write the version file atomically so the cache is not corrupted if Zebra shuts down or
         // crashes.
-        atomic_write(version_path, version.as_bytes())??;
+        atomic_write(
+            config.version_file_path(db_kind, major_version_in_code, network),
+            changed_version.to_string().as_bytes(),
+        )??;
 
         Ok(())
     }

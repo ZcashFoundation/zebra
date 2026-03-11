@@ -3,6 +3,7 @@
 //! Usage: <https://docs.rs/zcash_address/0.2.0/zcash_address/trait.TryFromAddress.html#examples>
 
 use zcash_address::unified::{self, Container};
+use zcash_primitives::consensus::NetworkType;
 
 use crate::{parameters::NetworkKind, transparent, BoxError};
 
@@ -44,7 +45,7 @@ impl zcash_address::TryFromAddress for Address {
     type Error = BoxError;
 
     fn try_from_transparent_p2pkh(
-        network: zcash_protocol::consensus::NetworkType,
+        network: NetworkType,
         data: [u8; 20],
     ) -> Result<Self, zcash_address::ConversionError<Self::Error>> {
         Ok(Self::Transparent(transparent::Address::from_pub_key_hash(
@@ -54,7 +55,7 @@ impl zcash_address::TryFromAddress for Address {
     }
 
     fn try_from_transparent_p2sh(
-        network: zcash_protocol::consensus::NetworkType,
+        network: NetworkType,
         data: [u8; 20],
     ) -> Result<Self, zcash_address::ConversionError<Self::Error>> {
         Ok(Self::Transparent(transparent::Address::from_script_hash(
@@ -64,7 +65,7 @@ impl zcash_address::TryFromAddress for Address {
     }
 
     fn try_from_sapling(
-        network: zcash_protocol::consensus::NetworkType,
+        network: NetworkType,
         data: [u8; 43],
     ) -> Result<Self, zcash_address::ConversionError<Self::Error>> {
         let network = network.into();
@@ -74,7 +75,7 @@ impl zcash_address::TryFromAddress for Address {
     }
 
     fn try_from_unified(
-        network: zcash_protocol::consensus::NetworkType,
+        network: NetworkType,
         unified_address: zcash_address::unified::Address,
     ) -> Result<Self, zcash_address::ConversionError<Self::Error>> {
         let network = network.into();
@@ -128,6 +129,16 @@ impl zcash_address::TryFromAddress for Address {
             transparent,
         })
     }
+
+    fn try_from_tex(
+        network: NetworkType,
+        data: [u8; 20],
+    ) -> Result<Self, zcash_address::ConversionError<Self::Error>> {
+        Ok(Self::Transparent(transparent::Address::from_tex(
+            network.into(),
+            data,
+        )))
+    }
 }
 
 impl Address {
@@ -170,27 +181,27 @@ impl Address {
     }
 }
 
-impl From<zcash_protocol::consensus::NetworkType> for NetworkKind {
-    fn from(network: zcash_protocol::consensus::NetworkType) -> Self {
+impl From<NetworkType> for NetworkKind {
+    fn from(network: NetworkType) -> Self {
         match network {
-            zcash_protocol::consensus::NetworkType::Main => NetworkKind::Mainnet,
-            zcash_protocol::consensus::NetworkType::Test => NetworkKind::Testnet,
-            zcash_protocol::consensus::NetworkType::Regtest => NetworkKind::Regtest,
+            NetworkType::Main => NetworkKind::Mainnet,
+            NetworkType::Test => NetworkKind::Testnet,
+            NetworkType::Regtest => NetworkKind::Regtest,
         }
     }
 }
 
-impl From<NetworkKind> for zcash_protocol::consensus::NetworkType {
+impl From<NetworkKind> for NetworkType {
     fn from(network: NetworkKind) -> Self {
         match network {
-            NetworkKind::Mainnet => zcash_protocol::consensus::NetworkType::Main,
-            NetworkKind::Testnet => zcash_protocol::consensus::NetworkType::Test,
-            NetworkKind::Regtest => zcash_protocol::consensus::NetworkType::Regtest,
+            NetworkKind::Mainnet => NetworkType::Main,
+            NetworkKind::Testnet => NetworkType::Test,
+            NetworkKind::Regtest => NetworkType::Regtest,
         }
     }
 }
 
-impl From<&NetworkKind> for zcash_protocol::consensus::NetworkType {
+impl From<&NetworkKind> for NetworkType {
     fn from(network: &NetworkKind) -> Self {
         (*network).into()
     }

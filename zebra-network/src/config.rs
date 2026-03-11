@@ -4,6 +4,7 @@ use std::{
     collections::HashSet,
     io::{self, ErrorKind},
     net::{IpAddr, SocketAddr},
+    sync::Arc,
     time::Duration,
 };
 
@@ -15,7 +16,10 @@ use tracing::Span;
 use zebra_chain::{
     common::atomic_write,
     parameters::{
-        testnet::{self, ConfiguredActivationHeights, ConfiguredFundingStreams},
+        testnet::{
+            self, ConfiguredActivationHeights, ConfiguredCheckpoints, ConfiguredFundingStreams,
+            ConfiguredLockboxDisbursement, RegtestParameters,
+        },
         Magic, Network, NetworkKind,
     },
     work::difficulty::U256,
@@ -51,7 +55,7 @@ const MAX_SINGLE_SEED_PEER_DNS_RETRIES: usize = 0;
 
 /// Configuration for networking code.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, default)]
+#[serde(deny_unknown_fields, default, into = "DConfig")]
 pub struct Config {
     /// The address on which this node should listen for connections.
     ///
@@ -61,9 +65,12 @@ pub struct Config {
     /// `address` can be an IP address or a DNS name. DNS names are
     /// only resolved once, when Zebra starts up.
     ///
+    /// By default, Zebra listens on `[::]` (all IPv6 and IPv4 addresses).
+    /// This enables dual-stack support, accepting both IPv4 and IPv6 connections.
+    ///
     /// If a specific listener address is configured, Zebra will advertise
     /// it to other nodes. But by default, Zebra uses an unspecified address
-    /// ("0.0.0.0" or "\[::\]"), which is not advertised to other nodes.
+    /// ("\[::\]:port"), which is not advertised to other nodes.
     ///
     /// Zebra does not currently support:
     /// - [Advertising a different external IP address #1890](https://github.com/ZcashFoundation/zebra/issues/1890), or
@@ -237,9 +244,7 @@ impl Config {
     pub fn initial_peer_hostnames(&self) -> IndexSet<String> {
         match &self.network {
             Network::Mainnet => self.initial_mainnet_peers.clone(),
-            Network::Testnet(params) if !params.is_regtest() => self.initial_testnet_peers.clone(),
-            // TODO: Add a `disable_peers` field to `Network` to check instead of `is_regtest()` (#8361)
-            Network::Testnet(_params) => IndexSet::new(),
+            Network::Testnet(_params) => self.initial_testnet_peers.clone(),
         }
     }
 
@@ -250,19 +255,22 @@ impl Config {
     ///
     /// If a configured address is an invalid [`SocketAddr`] or DNS name.
     pub async fn initial_peers(&self) -> HashSet<PeerSocketAddr> {
-        // Return early if network is regtest in case there are somehow any entries in the peer cache
-        if self.network.is_regtest() {
-            return HashSet::new();
-        }
-
         // TODO: do DNS and disk in parallel if startup speed becomes important
         let dns_peers =
             Config::resolve_peers(&self.initial_peer_hostnames().iter().cloned().collect()).await;
 
-        // Ignore disk errors because the cache is optional and the method already logs them.
-        let disk_peers = self.load_peer_cache().await.unwrap_or_default();
+        if self.network.is_regtest() {
+            // Only return local peer addresses and skip loading the peer cache on Regtest.
+            dns_peers
+                .into_iter()
+                .filter(PeerSocketAddr::is_localhost)
+                .collect()
+        } else {
+            // Ignore disk errors because the cache is optional and the method already logs them.
+            let disk_peers = self.load_peer_cache().await.unwrap_or_default();
 
-        dns_peers.into_iter().chain(disk_peers).collect()
+            dns_peers.into_iter().chain(disk_peers).collect()
+        }
     }
 
     /// Concurrently resolves `peers` into zero or more IP addresses, with a
@@ -538,10 +546,10 @@ impl Config {
 impl Default for Config {
     fn default() -> Config {
         let mainnet_peers = [
-            "dnsseed.z.cash:8233",
             "dnsseed.str4d.xyz:8233",
+            "dnsseed.z.cash:8233",
+            "mainnet.seeder.shieldedinfra.net:8233",
             "mainnet.seeder.zfnd.org:8233",
-            "mainnet.is.yolo.money:8233",
         ]
         .iter()
         .map(|&s| String::from(s))
@@ -550,14 +558,13 @@ impl Default for Config {
         let testnet_peers = [
             "dnsseed.testnet.z.cash:18233",
             "testnet.seeder.zfnd.org:18233",
-            "testnet.is.yolo.money:18233",
         ]
         .iter()
         .map(|&s| String::from(s))
         .collect();
 
         Config {
-            listen_addr: "0.0.0.0:8233"
+            listen_addr: "[::]:8233"
                 .parse()
                 .expect("Hardcoded address should be parseable"),
             external_addr: None,
@@ -580,60 +587,137 @@ impl Default for Config {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DTestnetParameters {
+    network_name: Option<String>,
+    network_magic: Option<[u8; 4]>,
+    slow_start_interval: Option<u32>,
+    target_difficulty_limit: Option<String>,
+    disable_pow: Option<bool>,
+    genesis_hash: Option<String>,
+    activation_heights: Option<ConfiguredActivationHeights>,
+    pre_nu6_funding_streams: Option<ConfiguredFundingStreams>,
+    post_nu6_funding_streams: Option<ConfiguredFundingStreams>,
+    funding_streams: Option<Vec<ConfiguredFundingStreams>>,
+    pre_blossom_halving_interval: Option<u32>,
+    lockbox_disbursements: Option<Vec<ConfiguredLockboxDisbursement>>,
+    #[serde(default)]
+    checkpoints: ConfiguredCheckpoints,
+    /// If `true`, automatically repeats configured funding stream addresses to fill
+    /// all required periods.
+    extend_funding_stream_addresses_as_required: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+struct DConfig {
+    listen_addr: String,
+    external_addr: Option<String>,
+    network: NetworkKind,
+    testnet_parameters: Option<DTestnetParameters>,
+    initial_mainnet_peers: IndexSet<String>,
+    initial_testnet_peers: IndexSet<String>,
+    cache_dir: CacheDir,
+    peerset_initial_target_size: usize,
+    #[serde(alias = "new_peer_interval", with = "humantime_serde")]
+    crawl_new_peer_interval: Duration,
+    max_connections_per_ip: Option<usize>,
+}
+
+impl Default for DConfig {
+    fn default() -> Self {
+        let config = Config::default();
+        Self {
+            listen_addr: "[::]".to_string(),
+            external_addr: None,
+            network: Default::default(),
+            testnet_parameters: None,
+            initial_mainnet_peers: config.initial_mainnet_peers,
+            initial_testnet_peers: config.initial_testnet_peers,
+            cache_dir: config.cache_dir,
+            peerset_initial_target_size: config.peerset_initial_target_size,
+            crawl_new_peer_interval: config.crawl_new_peer_interval,
+            max_connections_per_ip: Some(config.max_connections_per_ip),
+        }
+    }
+}
+
+impl From<Arc<testnet::Parameters>> for DTestnetParameters {
+    fn from(params: Arc<testnet::Parameters>) -> Self {
+        Self {
+            network_name: Some(params.network_name().to_string()),
+            network_magic: Some(params.network_magic().0),
+            slow_start_interval: Some(params.slow_start_interval().0),
+            target_difficulty_limit: Some(params.target_difficulty_limit().to_string()),
+            disable_pow: Some(params.disable_pow()),
+            genesis_hash: Some(params.genesis_hash().to_string()),
+            activation_heights: Some(params.activation_heights().into()),
+            pre_nu6_funding_streams: None,
+            post_nu6_funding_streams: None,
+            funding_streams: Some(params.funding_streams().iter().map(Into::into).collect()),
+            pre_blossom_halving_interval: Some(
+                params
+                    .pre_blossom_halving_interval()
+                    .try_into()
+                    .expect("should convert"),
+            ),
+            lockbox_disbursements: Some(
+                params
+                    .lockbox_disbursements()
+                    .into_iter()
+                    .map(Into::into)
+                    .collect(),
+            ),
+            checkpoints: if params.checkpoints() == testnet::Parameters::default().checkpoints() {
+                ConfiguredCheckpoints::Default(true)
+            } else {
+                params.checkpoints().into()
+            },
+            extend_funding_stream_addresses_as_required: None,
+        }
+    }
+}
+
+impl From<Config> for DConfig {
+    fn from(
+        Config {
+            listen_addr,
+            external_addr,
+            network,
+            initial_mainnet_peers,
+            initial_testnet_peers,
+            cache_dir,
+            peerset_initial_target_size,
+            crawl_new_peer_interval,
+            max_connections_per_ip,
+        }: Config,
+    ) -> Self {
+        let testnet_parameters = network
+            .parameters()
+            .filter(|params| !params.is_default_testnet())
+            .map(Into::into);
+
+        DConfig {
+            listen_addr: listen_addr.to_string(),
+            external_addr: external_addr.map(|addr| addr.to_string()),
+            network: network.into(),
+            testnet_parameters,
+            initial_mainnet_peers,
+            initial_testnet_peers,
+            cache_dir,
+            peerset_initial_target_size,
+            crawl_new_peer_interval,
+            max_connections_per_ip: Some(max_connections_per_ip),
+        }
+    }
+}
+
 impl<'de> Deserialize<'de> for Config {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct DTestnetParameters {
-            network_name: Option<String>,
-            network_magic: Option<[u8; 4]>,
-            slow_start_interval: Option<u32>,
-            target_difficulty_limit: Option<String>,
-            disable_pow: Option<bool>,
-            genesis_hash: Option<String>,
-            activation_heights: Option<ConfiguredActivationHeights>,
-            pre_nu6_funding_streams: Option<ConfiguredFundingStreams>,
-            post_nu6_funding_streams: Option<ConfiguredFundingStreams>,
-            pre_blossom_halving_interval: Option<u32>,
-        }
-
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields, default)]
-        struct DConfig {
-            listen_addr: String,
-            external_addr: Option<String>,
-            network: NetworkKind,
-            testnet_parameters: Option<DTestnetParameters>,
-            initial_mainnet_peers: IndexSet<String>,
-            initial_testnet_peers: IndexSet<String>,
-            cache_dir: CacheDir,
-            peerset_initial_target_size: usize,
-            #[serde(alias = "new_peer_interval", with = "humantime_serde")]
-            crawl_new_peer_interval: Duration,
-            max_connections_per_ip: Option<usize>,
-        }
-
-        impl Default for DConfig {
-            fn default() -> Self {
-                let config = Config::default();
-                Self {
-                    listen_addr: "0.0.0.0".to_string(),
-                    external_addr: None,
-                    network: Default::default(),
-                    testnet_parameters: None,
-                    initial_mainnet_peers: config.initial_mainnet_peers,
-                    initial_testnet_peers: config.initial_testnet_peers,
-                    cache_dir: config.cache_dir,
-                    peerset_initial_target_size: config.peerset_initial_target_size,
-                    crawl_new_peer_interval: config.crawl_new_peer_interval,
-                    max_connections_per_ip: Some(config.max_connections_per_ip),
-                }
-            }
-        }
-
         let DConfig {
             listen_addr,
             external_addr,
@@ -668,17 +752,38 @@ impl<'de> Deserialize<'de> for Config {
             (NetworkKind::Mainnet, _) => Network::Mainnet,
             (NetworkKind::Testnet, None) => Network::new_default_testnet(),
             (NetworkKind::Regtest, testnet_parameters) => {
-                let (nu5_activation_height, nu6_activation_height, nu7_activation_height) =
-                    testnet_parameters
-                        .and_then(|params| params.activation_heights)
-                        .map(|ConfiguredActivationHeights { nu5, nu6, nu7, .. }| (nu5, nu6, nu7))
-                        .unwrap_or_default();
+                let params = testnet_parameters
+                    .map(
+                        |DTestnetParameters {
+                             activation_heights,
+                             pre_nu6_funding_streams,
+                             post_nu6_funding_streams,
+                             funding_streams,
+                             lockbox_disbursements,
+                             checkpoints,
+                             extend_funding_stream_addresses_as_required,
+                             ..
+                         }| {
+                            let mut funding_streams_vec = funding_streams.unwrap_or_default();
+                            if let Some(funding_streams) = post_nu6_funding_streams {
+                                funding_streams_vec.insert(0, funding_streams);
+                            }
+                            if let Some(funding_streams) = pre_nu6_funding_streams {
+                                funding_streams_vec.insert(0, funding_streams);
+                            }
 
-                Network::new_regtest(
-                    nu5_activation_height,
-                    nu6_activation_height,
-                    nu7_activation_height,
-                )
+                            RegtestParameters {
+                                activation_heights: activation_heights.unwrap_or_default(),
+                                funding_streams: Some(funding_streams_vec),
+                                lockbox_disbursements,
+                                checkpoints: Some(checkpoints),
+                                extend_funding_stream_addresses_as_required,
+                            }
+                        },
+                    )
+                    .unwrap_or_default();
+
+                Network::new_regtest(params)
             }
             (
                 NetworkKind::Testnet,
@@ -692,21 +797,31 @@ impl<'de> Deserialize<'de> for Config {
                     activation_heights,
                     pre_nu6_funding_streams,
                     post_nu6_funding_streams,
+                    funding_streams,
                     pre_blossom_halving_interval,
+                    lockbox_disbursements,
+                    checkpoints,
+                    extend_funding_stream_addresses_as_required,
                 }),
             ) => {
                 let mut params_builder = testnet::Parameters::build();
 
                 if let Some(network_name) = network_name.clone() {
-                    params_builder = params_builder.with_network_name(network_name)
+                    params_builder = params_builder
+                        .with_network_name(network_name)
+                        .map_err(de::Error::custom)?
                 }
 
                 if let Some(network_magic) = network_magic {
-                    params_builder = params_builder.with_network_magic(Magic(network_magic));
+                    params_builder = params_builder
+                        .with_network_magic(Magic(network_magic))
+                        .map_err(de::Error::custom)?;
                 }
 
                 if let Some(genesis_hash) = genesis_hash {
-                    params_builder = params_builder.with_genesis_hash(genesis_hash);
+                    params_builder = params_builder
+                        .with_genesis_hash(genesis_hash)
+                        .map_err(de::Error::custom)?;
                 }
 
                 if let Some(slow_start_interval) = slow_start_interval {
@@ -716,11 +831,13 @@ impl<'de> Deserialize<'de> for Config {
                 }
 
                 if let Some(target_difficulty_limit) = target_difficulty_limit.clone() {
-                    params_builder = params_builder.with_target_difficulty_limit(
-                        target_difficulty_limit
-                            .parse::<U256>()
-                            .map_err(de::Error::custom)?,
-                    );
+                    params_builder = params_builder
+                        .with_target_difficulty_limit(
+                            target_difficulty_limit
+                                .parse::<U256>()
+                                .map_err(de::Error::custom)?,
+                        )
+                        .map_err(de::Error::custom)?;
                 }
 
                 if let Some(disable_pow) = disable_pow {
@@ -728,22 +845,44 @@ impl<'de> Deserialize<'de> for Config {
                 }
 
                 // Retain default Testnet activation heights unless there's an empty [testnet_parameters.activation_heights] section.
-                if let Some(activation_heights) = activation_heights.clone() {
-                    params_builder = params_builder.with_activation_heights(activation_heights)
+                if let Some(activation_heights) = activation_heights {
+                    params_builder = params_builder
+                        .with_activation_heights(activation_heights)
+                        .map_err(de::Error::custom)?
                 }
 
                 if let Some(halving_interval) = pre_blossom_halving_interval {
-                    params_builder = params_builder.with_halving_interval(halving_interval.into())
+                    params_builder = params_builder
+                        .with_halving_interval(halving_interval.into())
+                        .map_err(de::Error::custom)?
                 }
 
                 // Set configured funding streams after setting any parameters that affect the funding stream address period.
-
-                if let Some(funding_streams) = pre_nu6_funding_streams {
-                    params_builder = params_builder.with_pre_nu6_funding_streams(funding_streams);
-                }
+                let mut funding_streams_vec = funding_streams.unwrap_or_default();
 
                 if let Some(funding_streams) = post_nu6_funding_streams {
-                    params_builder = params_builder.with_post_nu6_funding_streams(funding_streams);
+                    funding_streams_vec.insert(0, funding_streams);
+                }
+
+                if let Some(funding_streams) = pre_nu6_funding_streams {
+                    funding_streams_vec.insert(0, funding_streams);
+                }
+
+                if !funding_streams_vec.is_empty() {
+                    params_builder = params_builder.with_funding_streams(funding_streams_vec);
+                }
+
+                if let Some(lockbox_disbursements) = lockbox_disbursements {
+                    params_builder =
+                        params_builder.with_lockbox_disbursements(lockbox_disbursements);
+                }
+
+                params_builder = params_builder
+                    .with_checkpoints(checkpoints)
+                    .map_err(de::Error::custom)?;
+
+                if let Some(true) = extend_funding_stream_addresses_as_required {
+                    params_builder = params_builder.extend_funding_streams();
                 }
 
                 // Return an error if the initial testnet peers includes any of the default initial Mainnet or Testnet
@@ -760,7 +899,7 @@ impl<'de> Deserialize<'de> for Config {
                 if network_name.is_none() && params_builder == testnet::Parameters::build() {
                     Network::new_default_testnet()
                 } else {
-                    params_builder.to_network()
+                    params_builder.to_network().map_err(de::Error::custom)?
                 }
             }
         };
@@ -790,7 +929,7 @@ impl<'de> Deserialize<'de> for Config {
         };
 
         let [max_connections_per_ip, peerset_initial_target_size] = [
-            ("max_connections_per_ip", max_connections_per_ip, DEFAULT_MAX_CONNS_PER_IP), 
+            ("max_connections_per_ip", max_connections_per_ip, DEFAULT_MAX_CONNS_PER_IP),
             // If we want Zebra to operate with no network,
             // we should implement a `zebrad` command that doesn't use `zebra-network`.
             ("peerset_initial_target_size", Some(peerset_initial_target_size), DEFAULT_PEERSET_INITIAL_TARGET_SIZE)

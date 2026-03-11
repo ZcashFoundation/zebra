@@ -14,7 +14,7 @@ use zebra_chain::parameters::Network;
 use zebra_node_services::rpc_client::RpcRequestClient;
 
 use crate::common::{
-    cached_state::get_raw_future_blocks,
+    cached_state::raw_future_blocks,
     launch::{can_spawn_zebrad_for_test_type, spawn_zebrad_for_rpc},
     test_type::TestType,
 };
@@ -42,7 +42,7 @@ pub(crate) async fn run() -> Result<()> {
     );
 
     let raw_blocks: Vec<String> =
-        get_raw_future_blocks(&network, test_type, test_name, MAX_NUM_FUTURE_BLOCKS).await?;
+        raw_future_blocks(&network, test_type, test_name, MAX_NUM_FUTURE_BLOCKS).await?;
 
     tracing::info!("got raw future blocks, spawning isolated zebrad...",);
 

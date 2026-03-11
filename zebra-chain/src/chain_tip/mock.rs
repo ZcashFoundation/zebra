@@ -3,15 +3,10 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use futures::{future, FutureExt, TryFutureExt};
+use futures::TryFutureExt;
 use tokio::sync::watch;
 
-use crate::{
-    block,
-    chain_tip::{BestTipChanged, ChainTip},
-    parameters::Network,
-    transaction,
-};
+use crate::{block, chain_tip::ChainTip, parameters::Network, transaction, BoxError};
 
 /// A sender to sets the values read by a [`MockChainTip`].
 //
@@ -127,23 +122,16 @@ impl ChainTip for MockChainTip {
     /// Marks the changed channel as seen when the returned future completes.
     //
     // Update this method when each new mock field is added.
-    fn best_tip_changed(&mut self) -> BestTipChanged {
-        // A future that returns when the first watch channel has changed
-        let select_changed = future::select_all([
-            // Erase the differing future types for each channel, and map their error types
-            BestTipChanged::new(self.best_tip_height.changed().err_into()),
-            BestTipChanged::new(self.best_tip_hash.changed().err_into()),
-            BestTipChanged::new(self.best_tip_block_time.changed().err_into()),
-            BestTipChanged::new(
-                self.estimated_distance_to_network_chain_tip
-                    .changed()
-                    .err_into(),
-            ),
-        ])
-        // Map the select result to the expected type, dropping the unused channels
-        .map(|(changed_result, _changed_index, _remaining_futures)| changed_result);
-
-        BestTipChanged::new(select_changed)
+    async fn best_tip_changed(&mut self) -> Result<(), BoxError> {
+        // A future that returns when the first watch channel has changed.
+        // Erase the differing future types for each channel, and map their error types, and
+        // map the select result to the expected type, dropping the unused channels
+        tokio::select! {
+            result = self.best_tip_height.changed().err_into() => result.map(|_| ()),
+            result = self.best_tip_hash.changed().err_into() => result.map(|_| ()),
+            result = self.best_tip_block_time.changed().err_into() => result.map(|_| ()),
+            result = self.estimated_distance_to_network_chain_tip.changed().err_into() => result.map(|_| ()),
+        }
     }
 
     /// Marks all sender channels as seen.

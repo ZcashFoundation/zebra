@@ -45,7 +45,6 @@ use zebra_state as old_zs;
 use zebra_state as new_zs;
 
 use crate::{
-    application::ZebradApp,
     components::tokio::{RuntimeRun, TokioComponent},
     config::ZebradConfig,
     prelude::*,
@@ -86,11 +85,17 @@ impl CopyStateCmd {
         let base_config = APPLICATION.config();
         let source_config = base_config.state.clone();
 
-        // The default load_config impl doesn't actually modify the app config.
+        // Load the target config if a target config path was provided, or use an ephemeral config otherwise.
+        //
+        // Use the `ZEBRA_TARGET_` environment prefix for target overrides to avoid
+        // conflicting with the source/base config (`ZEBRA_...`).
+        // Example: `ZEBRA_TARGET_STATE__CACHE_DIR=/dst/cache`.
         let target_config = self
             .target_config_path
             .as_ref()
-            .map(|path| ZebradApp::default().load_config(path))
+            .map(|path| {
+                crate::config::ZebradConfig::load_with_env(Some(path.clone()), "ZEBRA_TARGET")
+            })
             .transpose()?
             .map(|app_config| app_config.state)
             .unwrap_or_else(new_zs::Config::ephemeral);
@@ -118,14 +123,8 @@ impl CopyStateCmd {
         let source_start_time = Instant::now();
 
         // We're not verifying UTXOs here, so we don't need the maximum checkpoint height.
-        //
-        // TODO: use ReadStateService for the source?
-        let (
-            mut source_state,
-            _source_read_only_state_service,
-            _source_latest_chain_tip,
-            _source_chain_tip_change,
-        ) = old_zs::spawn_init(source_config.clone(), network, Height::MAX, 0).await?;
+        let (mut source_read_only_state_service, _source_db, _source_latest_non_finalized_state) =
+            old_zs::spawn_init_read_only(source_config.clone(), network).await?;
 
         let elapsed = source_start_time.elapsed();
         info!(?elapsed, "finished initializing source state service");
@@ -146,21 +145,21 @@ impl CopyStateCmd {
             _target_read_only_state_service,
             _target_latest_chain_tip,
             _target_chain_tip_change,
-        ) = new_zs::spawn_init(target_config.clone(), network, Height::MAX, 0).await?;
+        ) = new_zs::init(target_config.clone(), network, Height::MAX, 0).await;
 
         let elapsed = target_start_time.elapsed();
         info!(?elapsed, "finished initializing target state service");
 
         info!("fetching source and target tip heights");
 
-        let source_tip = source_state
+        let source_tip = source_read_only_state_service
             .ready()
             .await?
-            .call(old_zs::Request::Tip)
+            .call(old_zs::ReadRequest::Tip)
             .await?;
         let source_tip = match source_tip {
-            old_zs::Response::Tip(Some(source_tip)) => source_tip,
-            old_zs::Response::Tip(None) => Err("empty source state: no blocks to copy")?,
+            old_zs::ReadResponse::Tip(Some(source_tip)) => source_tip,
+            old_zs::ReadResponse::Tip(None) => Err("empty source state: no blocks to copy")?,
 
             response => Err(format!("unexpected response to Tip request: {response:?}",))?,
         };
@@ -210,17 +209,17 @@ impl CopyStateCmd {
         let copy_start_time = Instant::now();
         for height in min_target_height..=max_copy_height {
             // Read block from source
-            let source_block = source_state
+            let source_block = source_read_only_state_service
                 .ready()
                 .await?
-                .call(old_zs::Request::Block(Height(height).into()))
+                .call(old_zs::ReadRequest::Block(Height(height).into()))
                 .await?;
             let source_block = match source_block {
-                old_zs::Response::Block(Some(source_block)) => {
+                old_zs::ReadResponse::Block(Some(source_block)) => {
                     trace!(?height, %source_block, "read source block");
                     source_block
                 }
-                old_zs::Response::Block(None) => {
+                old_zs::ReadResponse::Block(None) => {
                     Err(format!("unexpected missing source block, height: {height}",))?
                 }
 
@@ -280,7 +279,7 @@ impl CopyStateCmd {
             // then deserializes bytes into new `Block` structs when reading.
             // So these checks are sufficient to detect block data corruption.
             //
-            // If Zebra starts re-using cached `Block` structs after writing them,
+            // If Zebra starts reusing cached `Block` structs after writing them,
             // we'll also need to check `Block` structs created from the actual database bytes.
             if source_block_hash != target_block_commit_hash
                 || source_block_hash != target_block_data_hash
@@ -328,13 +327,13 @@ impl CopyStateCmd {
         let final_target_tip_height = final_target_tip.0 .0;
         let final_target_tip_hash = final_target_tip.1;
 
-        let target_tip_source_depth = source_state
+        let target_tip_source_depth = source_read_only_state_service
             .ready()
             .await?
-            .call(old_zs::Request::Depth(final_target_tip_hash))
+            .call(old_zs::ReadRequest::Depth(final_target_tip_hash))
             .await?;
         let target_tip_source_depth = match target_tip_source_depth {
-            old_zs::Response::Depth(source_depth) => source_depth,
+            old_zs::ReadResponse::Depth(source_depth) => source_depth,
 
             response => Err(format!(
                 "unexpected response to Depth request: {response:?}",

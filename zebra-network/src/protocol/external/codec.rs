@@ -138,12 +138,12 @@ impl Encoder<Message> for Codec {
         // of length 12, as they must be &[u8; 12].
         let command = match item {
             Version { .. } => b"version\0\0\0\0\0",
-            Verack { .. } => b"verack\0\0\0\0\0\0",
+            Verack => b"verack\0\0\0\0\0\0",
             Ping { .. } => b"ping\0\0\0\0\0\0\0\0",
             Pong { .. } => b"pong\0\0\0\0\0\0\0\0",
             Reject { .. } => b"reject\0\0\0\0\0\0",
             Addr { .. } => b"addr\0\0\0\0\0\0\0\0",
-            GetAddr { .. } => b"getaddr\0\0\0\0\0",
+            GetAddr => b"getaddr\0\0\0\0\0",
             Block { .. } => b"block\0\0\0\0\0\0\0",
             GetBlocks { .. } => b"getblocks\0\0\0",
             Headers { .. } => b"headers\0\0\0\0\0",
@@ -152,10 +152,10 @@ impl Encoder<Message> for Codec {
             GetData { .. } => b"getdata\0\0\0\0\0",
             NotFound { .. } => b"notfound\0\0\0\0",
             Tx { .. } => b"tx\0\0\0\0\0\0\0\0\0\0",
-            Mempool { .. } => b"mempool\0\0\0\0\0",
+            Mempool => b"mempool\0\0\0\0\0",
             FilterLoad { .. } => b"filterload\0\0",
             FilterAdd { .. } => b"filteradd\0\0\0",
-            FilterClear { .. } => b"filterclear\0",
+            FilterClear => b"filterclear\0",
         };
         trace!(?item, len = body_length);
 
@@ -224,7 +224,7 @@ impl Codec {
 
                 writer.write_u64::<LittleEndian>(nonce.0)?;
 
-                if user_agent.as_bytes().len() > MAX_USER_AGENT_LENGTH {
+                if user_agent.len() > MAX_USER_AGENT_LENGTH {
                     // zcashd won't accept this version message
                     return Err(Error::Parse(
                         "user agent too long: must be 256 bytes or less",
@@ -248,7 +248,7 @@ impl Codec {
                 reason,
                 data,
             } => {
-                if message.as_bytes().len() > MAX_REJECT_MESSAGE_LENGTH {
+                if message.len() > MAX_REJECT_MESSAGE_LENGTH {
                     // zcashd won't accept this reject message
                     return Err(Error::Parse(
                         "reject message too long: must be 12 bytes or less",
@@ -259,7 +259,7 @@ impl Codec {
 
                 writer.write_u8(*ccode as u8)?;
 
-                if reason.as_bytes().len() > MAX_REJECT_REASON_LENGTH {
+                if reason.len() > MAX_REJECT_REASON_LENGTH {
                     return Err(Error::Parse(
                         "reject reason too long: must be 111 bytes or less",
                     ));
@@ -508,7 +508,9 @@ impl Codec {
             timestamp: Utc
                 .timestamp_opt(reader.read_i64::<LittleEndian>()?, 0)
                 .single()
-                .ok_or_else(|| Error::Parse("version timestamp is out of range for DateTime"))?,
+                .ok_or(Error::Parse(
+                    "version timestamp is out of range for DateTime",
+                ))?,
             address_recv: AddrInVersion::zcash_deserialize(&mut reader)?,
             address_from: AddrInVersion::zcash_deserialize(&mut reader)?,
             nonce: Nonce(reader.read_u64::<LittleEndian>()?),

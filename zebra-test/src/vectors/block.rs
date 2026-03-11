@@ -113,6 +113,26 @@ lazy_static! {
             (1_046_400, BLOCK_MAINNET_1046400_BYTES.as_ref()),
             (1_046_401, BLOCK_MAINNET_1046401_BYTES.as_ref()),
             (1_180_900, BLOCK_MAINNET_1180900_BYTES.as_ref()),
+
+            // NU5
+            //
+            // Contains:
+            //
+            // - First Sapling to Sapling V5 txs.
+            // - First Sapling to Sapling V4 tx after NU5.
+            (1_687_106, BLOCK_MAINNET_1687106_BYTES.as_ref()),
+            // - First transparent to Sapling V5 tx.
+            // - First Sapling to Orchard tx.
+            (1_687_107, BLOCK_MAINNET_1687107_BYTES.as_ref()),
+            // - First transparent V5 txs.
+            // - First Sapling to transparent V5 txs.
+            (1_687_108, BLOCK_MAINNET_1687108_BYTES.as_ref()),
+            // - First transparent to (transparent + Sapling) V5 tx.
+            (1_687_113, BLOCK_MAINNET_1687113_BYTES.as_ref()),
+            // - First Sapling to (Sapling + Orchard) tx.
+            (1_687_118, BLOCK_MAINNET_1687118_BYTES.as_ref()),
+            // - First Orchard to Orchard tx.
+            (1_687_121, BLOCK_MAINNET_1687121_BYTES.as_ref()),
         ].iter().cloned().collect();
 
     /// Mainnet final Sprout roots, indexed by height.
@@ -160,6 +180,27 @@ lazy_static! {
             (1_046_400, SAPLING_FINAL_ROOT_MAINNET_1046400_BYTES.as_ref().try_into().unwrap()),
             (1_046_401, SAPLING_FINAL_ROOT_MAINNET_1046401_BYTES.as_ref().try_into().unwrap()),
             (1_180_900, SAPLING_FINAL_ROOT_MAINNET_1180900_BYTES.as_ref().try_into().unwrap()),
+            // NU5
+            (1_687_106, SAPLING_FINAL_ROOT_MAINNET_1687106_BYTES.as_ref().try_into().unwrap()),
+            (1_687_107, SAPLING_FINAL_ROOT_MAINNET_1687107_BYTES.as_ref().try_into().unwrap()),
+            (1_687_108, SAPLING_FINAL_ROOT_MAINNET_1687108_BYTES.as_ref().try_into().unwrap()),
+            (1_687_113, SAPLING_FINAL_ROOT_MAINNET_1687113_BYTES.as_ref().try_into().unwrap()),
+            (1_687_118, SAPLING_FINAL_ROOT_MAINNET_1687118_BYTES.as_ref().try_into().unwrap()),
+            (1_687_121, SAPLING_FINAL_ROOT_MAINNET_1687121_BYTES.as_ref().try_into().unwrap()),
+        ].iter().cloned().collect();
+
+    /// Mainnet final Orchard roots (anchors), indexed by height.
+    ///
+    /// Pre-Orchard anchors are all-zeroes. If there are no Orchard actions in a block, the anchor
+    /// is the same as the one for the previous block.
+    pub static ref MAINNET_FINAL_ORCHARD_ROOTS: BTreeMap<u32, &'static [u8; 32]> = [
+            // NU5
+            (1_687_106, ORCHARD_FINAL_ROOT_MAINNET_1687106_BYTES.as_ref().try_into().unwrap()),
+            (1_687_107, ORCHARD_FINAL_ROOT_MAINNET_1687107_BYTES.as_ref().try_into().unwrap()),
+            (1_687_108, ORCHARD_FINAL_ROOT_MAINNET_1687108_BYTES.as_ref().try_into().unwrap()),
+            (1_687_113, ORCHARD_FINAL_ROOT_MAINNET_1687113_BYTES.as_ref().try_into().unwrap()),
+            (1_687_118, ORCHARD_FINAL_ROOT_MAINNET_1687118_BYTES.as_ref().try_into().unwrap()),
+            (1_687_121, ORCHARD_FINAL_ROOT_MAINNET_1687121_BYTES.as_ref().try_into().unwrap()),
         ].iter().cloned().collect();
 
     /// Testnet blocks, indexed by height
@@ -223,7 +264,34 @@ lazy_static! {
             (1_116_000, BLOCK_TESTNET_1116000_BYTES.as_ref()),
             (1_116_001, BLOCK_TESTNET_1116001_BYTES.as_ref()),
             (1_326_100, BLOCK_TESTNET_1326100_BYTES.as_ref()),
-            (1_599_199, BLOCK_TESTNET_1599199_BYTES.as_ref()),
+
+            // NU5
+            //
+            // Contains:
+
+            // First V5 tx with:
+            //
+            // - 4 Sapling spends, and
+            // - 2 Orchard actions.
+            (1_842_421, BLOCK_TESTNET_1842421_BYTES.as_ref()),
+            // First V5 tx with:
+            //
+            // - 50 transparent inputs, and
+            // - 1 Sapling output.
+            (1_842_432, BLOCK_TESTNET_1842432_BYTES.as_ref()),
+            // First V5 tx with:
+            //
+            // - 2 transparent inputs, and
+            // - 2 Orchard actions.
+            (1_842_462, BLOCK_TESTNET_1842462_BYTES.as_ref()),
+            // First V5 tx with two Orchard actions and no other transfers.
+            (1_842_467, BLOCK_TESTNET_1842467_BYTES.as_ref()),
+            // First V5 tx with:
+            //
+            // - 1 transparent input,
+            // - 1 Sapling output, and
+            // - 2 Orchard actions.
+            (1_842_468, BLOCK_TESTNET_1842468_BYTES.as_ref()),
         ].iter().cloned().collect();
 
     /// Testnet final Sprout roots, indexed by height.
@@ -277,7 +345,25 @@ lazy_static! {
             (1_116_000, SAPLING_FINAL_ROOT_TESTNET_1116000_BYTES.as_ref().try_into().unwrap()),
             (1_116_001, SAPLING_FINAL_ROOT_TESTNET_1116001_BYTES.as_ref().try_into().unwrap()),
             (1_326_100, SAPLING_FINAL_ROOT_TESTNET_1326100_BYTES.as_ref().try_into().unwrap()),
-            (1_599_199, SAPLING_FINAL_ROOT_TESTNET_1599199_BYTES.as_ref().try_into().unwrap()),
+            // NU5
+            (1_842_421, SAPLING_FINAL_ROOT_TESTNET_1842421_BYTES.as_ref().try_into().unwrap()),
+            (1_842_432, SAPLING_FINAL_ROOT_TESTNET_1842432_BYTES.as_ref().try_into().unwrap()),
+            (1_842_462, SAPLING_FINAL_ROOT_TESTNET_1842462_BYTES.as_ref().try_into().unwrap()),
+            (1_842_467, SAPLING_FINAL_ROOT_TESTNET_1842467_BYTES.as_ref().try_into().unwrap()),
+            (1_842_468, SAPLING_FINAL_ROOT_TESTNET_1842468_BYTES.as_ref().try_into().unwrap()),
+        ].iter().cloned().collect();
+
+    /// Testnet final Orchard roots (anchors), indexed by height.
+    ///
+    /// Pre-Orchard anchors are all-zeroes. If there are no Orchard actions in a block, the anchor
+    /// is the same as the one for the previous block.
+    pub static ref TESTNET_FINAL_ORCHARD_ROOTS: BTreeMap<u32, &'static [u8; 32]> = [
+            // NU5
+            (1_842_421, ORCHARD_FINAL_ROOT_TESTNET_1842421_BYTES.as_ref().try_into().unwrap()),
+            (1_842_432, ORCHARD_FINAL_ROOT_TESTNET_1842432_BYTES.as_ref().try_into().unwrap()),
+            (1_842_462, ORCHARD_FINAL_ROOT_TESTNET_1842462_BYTES.as_ref().try_into().unwrap()),
+            (1_842_467, ORCHARD_FINAL_ROOT_TESTNET_1842467_BYTES.as_ref().try_into().unwrap()),
+            (1_842_468, ORCHARD_FINAL_ROOT_TESTNET_1842468_BYTES.as_ref().try_into().unwrap()),
         ].iter().cloned().collect();
 
     // Mainnet
@@ -549,6 +635,66 @@ lazy_static! {
     pub static ref SAPLING_FINAL_ROOT_MAINNET_1180900_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("4a51c1b879f49637873ac4b261e9c625e16d9400b22d8aa4f27cd6fd1138ddda")
         .expect("final root bytes are in valid hex representation").rev();
+
+    // NU5
+    pub static ref BLOCK_MAINNET_1687106_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-main-1-687-106.txt").trim())
+        .expect("Block bytes are in valid hex representation");
+    pub static ref SAPLING_FINAL_ROOT_MAINNET_1687106_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("41f3adfe94f336b6581923c9d20e07bccab0c47cd57ecb66cb9f35bb3e62066f")
+        .expect("final root bytes are in valid hex representation").rev();
+    pub static ref ORCHARD_FINAL_ROOT_MAINNET_1687106_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("ae2935f1dfd8a24aed7c70df7de3a668eb7a49b1319880dde2bbd9031ae5d82f")
+        .expect("final root bytes are in valid hex representation").rev();
+    pub static ref BLOCK_MAINNET_1687107_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-main-1-687-107.txt").trim())
+        .expect("Block bytes are in valid hex representation");
+    pub static ref SAPLING_FINAL_ROOT_MAINNET_1687107_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("4b013ee86a4a7b19871aa9b7a1dff0b29e0a737812c8970356c18340752957c7")
+        .expect("final root bytes are in valid hex representation").rev();
+    pub static ref ORCHARD_FINAL_ROOT_MAINNET_1687107_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("7b61fc613cea5c2c84c5e2c64d4fd4afb8c8c9d10dce9bcad49431c9cf32f131")
+        .expect("final root bytes are in valid hex representation").rev();
+    pub static ref BLOCK_MAINNET_1687108_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-main-1-687-108.txt").trim())
+        .expect("Block bytes are in valid hex representation");
+    pub static ref SAPLING_FINAL_ROOT_MAINNET_1687108_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("174d81c4d858ab7932c424ee44f5e47ceafc50fcc44fb39bfaf74258570eb9b2")
+        .expect("final root bytes are in valid hex representation").rev();
+    pub static ref ORCHARD_FINAL_ROOT_MAINNET_1687108_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("7b61fc613cea5c2c84c5e2c64d4fd4afb8c8c9d10dce9bcad49431c9cf32f131")
+        .expect("final root bytes are in valid hex representation").rev();
+    pub static ref BLOCK_MAINNET_1687113_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-main-1-687-113.txt").trim())
+        .expect("Block bytes are in valid hex representation");
+    pub static ref SAPLING_FINAL_ROOT_MAINNET_1687113_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("53189fd8855fb8d8f49a4cf505669ce6fd95e28abfe8f3def7c2493b1ae4fc1f")
+        .expect("final root bytes are in valid hex representation").rev();
+    pub static ref ORCHARD_FINAL_ROOT_MAINNET_1687113_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("ed17182c783c649f53c0ecfe900a58cd818e89d2784f750df6c906999337dc10")
+        .expect("final root bytes are in valid hex representation").rev();
+    pub static ref BLOCK_MAINNET_1687118_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-main-1-687-118.txt").trim())
+        .expect("Block bytes are in valid hex representation");
+    pub static ref SAPLING_FINAL_ROOT_MAINNET_1687118_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("50f2481034cb80ec7e3e56177981ab47739e5a0c650638b2ac29909468c5f225")
+        .expect("final root bytes are in valid hex representation").rev();
+    pub static ref ORCHARD_FINAL_ROOT_MAINNET_1687118_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("d5226e91ca7f9275d7f62711fa52875cdbae6cfc689815c9872aebfe64b60f34")
+        .expect("final root bytes are in valid hex representation").rev();
+    pub static ref BLOCK_MAINNET_1687121_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-main-1-687-121.txt").trim())
+        .expect("Block bytes are in valid hex representation");
+    pub static ref SAPLING_FINAL_ROOT_MAINNET_1687121_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("39e29473df7f0692ab6072d65389f6626611fea9f00aea14c0d80add9e9ef6e5")
+        .expect("final root bytes are in valid hex representation").rev();
+    pub static ref ORCHARD_FINAL_ROOT_MAINNET_1687121_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("09b17d8907236adea12b83ed69054f4996686d7c4ca76db25c4c48b90e272b0f")
+        .expect("final root bytes are in valid hex representation").rev();
+
+    // Sapling treestate.
+    pub static ref SAPLING_TREESTATE_MAINNET_419201_STRING: String =
+        String::from(include_str!("sapling-treestate-main-0-419-201.txt"));
 
     // Testnet
 
@@ -852,20 +998,52 @@ lazy_static! {
         <[u8; 32]>::from_hex("2b30b19f4254709fe365bd0b381b2e3d9d0c933eb4dba4dd1d07f0f6e196a183")
         .expect("final root bytes are in valid hex representation").rev();
 
-    // Nu5 transition
-    // for i in 1599199 1599200 1599201; do
-    //     zcash-cli -testnet getblock $i 0 > block-test-$[i/1000000]-$[i/1000%1000]-$[i%1000].txt
-    // done
-    pub static ref BLOCK_TESTNET_1599199_BYTES: Vec<u8> =
-        <Vec<u8>>::from_hex(include_str!("block-test-1-599-199.txt").trim())
+    // NU5
+    pub static ref BLOCK_TESTNET_1842421_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-test-1-842-421.txt").trim())
         .expect("Block bytes are in valid hex representation");
-    pub static ref SAPLING_FINAL_ROOT_TESTNET_1599199_BYTES: [u8; 32] =
-        <[u8; 32]>::from_hex("4de75d10def701ad22ecc17517a3adc8789ea8c214ac5bfc917b8924377e6c89")
+    pub static ref SAPLING_FINAL_ROOT_TESTNET_1842421_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("5cad695f17ae06cc165e01938fe95cac3ea0fbd236dc9c806f3411e0929309a6")
         .expect("final root bytes are in valid hex representation").rev();
-
-    // Sapling note commitment tree.
-    pub static ref SAPLING_TREESTATE_MAINNET_419201_STRING: String =
-        String::from(include_str!("sapling-treestate-main-0-419-201.txt"));
+    pub static ref ORCHARD_FINAL_ROOT_TESTNET_1842421_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("28dfaa94b74670863beb1088ee3d97b38960c6c297c9dcf3d57d5a9259616523")
+        .expect("final root bytes are in valid hex representation").rev();
+    pub static ref BLOCK_TESTNET_1842432_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-test-1-842-432.txt").trim())
+        .expect("Block bytes are in valid hex representation");
+    pub static ref SAPLING_FINAL_ROOT_TESTNET_1842432_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("68626c76ad774e3982450c20900415fd85b33d820627565d588c0c22437d8c62")
+        .expect("final root bytes are in valid hex representation").rev();
+    pub static ref ORCHARD_FINAL_ROOT_TESTNET_1842432_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("28dfaa94b74670863beb1088ee3d97b38960c6c297c9dcf3d57d5a9259616523")
+        .expect("final root bytes are in valid hex representation").rev();
+    pub static ref BLOCK_TESTNET_1842462_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-test-1-842-462.txt").trim())
+        .expect("Block bytes are in valid hex representation");
+    pub static ref SAPLING_FINAL_ROOT_TESTNET_1842462_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("4c06beb18bb0cb22879f04c2c80aa33450d8e02ddd3d2cbc441f40f8cd8ea0a8")
+        .expect("final root bytes are in valid hex representation").rev();
+    pub static ref ORCHARD_FINAL_ROOT_TESTNET_1842462_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("7750114ca6b95e44197e30ec98cadfb0dec1f1fb1a416eb4ef87f1dffb0f5937")
+        .expect("final root bytes are in valid hex representation").rev();
+    pub static ref BLOCK_TESTNET_1842467_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-test-1-842-467.txt").trim())
+        .expect("Block bytes are in valid hex representation");
+    pub static ref SAPLING_FINAL_ROOT_TESTNET_1842467_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("13a33099eb9b8dafc031271938f35b627eb0811f124847abbfb43b587c6e11ae")
+        .expect("final root bytes are in valid hex representation").rev();
+    pub static ref ORCHARD_FINAL_ROOT_TESTNET_1842467_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("580aceb586f30a5801a23414464aa8482add97b6d55c06483b4ffb725e0e793b")
+        .expect("final root bytes are in valid hex representation").rev();
+    pub static ref BLOCK_TESTNET_1842468_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-test-1-842-468.txt").trim())
+        .expect("Block bytes are in valid hex representation");
+    pub static ref SAPLING_FINAL_ROOT_TESTNET_1842468_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("555af4b0b2fa18162d6280c942fae6cdc846b9c4a3126df682821db250dc2bb3")
+        .expect("final root bytes are in valid hex representation").rev();
+    pub static ref ORCHARD_FINAL_ROOT_TESTNET_1842468_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("66c47f2160474363948150cbb5d53f3c17efa7456bd843dd9b851ddbcb6fb002")
+        .expect("final root bytes are in valid hex representation").rev();
 }
 
 #[cfg(test)]

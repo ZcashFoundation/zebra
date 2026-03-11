@@ -1,16 +1,17 @@
 [package]
 name = "zebra-rpc"
-version = "1.0.0-beta.41"
-authors = ["Zcash Foundation <zebra@zfnd.org>"]
+version = "5.0.0"
+authors.workspace = true
 description = "A Zebra JSON Remote Procedure Call (JSON-RPC) interface"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/ZcashFoundation/zebra"
-edition = "2021"
+license.workspace = true
+repository.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 
 readme = "../README.md"
-homepage = "https://zfnd.org/zebra/"
+homepage.workspace = true
 # crates.io is limited to 5 keywords and categories
-keywords = ["zebra", "zcash"]
+keywords.workspace = true
 # Must be one of <https://crates.io/category_slugs>
 categories = [
     "asynchronous",
@@ -19,26 +20,14 @@ categories = [
     "network-programming",
 ]
 
+# Exclude proto files so crates.io consumers don't need protoc.
+exclude = ["*.proto"]
+
 [features]
+tx_v6 = ["zebra-chain/tx_v6", "zebra-state/tx_v6", "zebra-consensus/tx_v6"]
 
-indexer-rpcs = [
-    "tonic-build",
-    "tonic",
-    "tonic-reflection",
-    "prost",
-    "tokio-stream",
-]
-
-# Production features that activate extra dependencies, or extra features in dependencies
-
-# Mining RPC support
-getblocktemplate-rpcs = [
-    "zcash_address",
-    "zebra-consensus/getblocktemplate-rpcs",
-    "zebra-state/getblocktemplate-rpcs",
-    "zebra-node-services/getblocktemplate-rpcs",
-    "zebra-chain/getblocktemplate-rpcs",
-]
+# Production features that activate extra dependencies, or extra features in
+# dependencies
 
 # Experimental internal miner support
 internal-miner = []
@@ -52,92 +41,100 @@ proptest-impl = [
     "zebra-chain/proptest-impl",
 ]
 
+
 [dependencies]
-chrono = { version = "0.4.38", default-features = false, features = [
-    "clock",
-    "std",
-] }
-futures = "0.3.31"
+chrono = { workspace = true, features = ["clock", "std"] }
+futures = { workspace = true }
 
-jsonrpc-core = "18.0.0"
-jsonrpc-derive = "18.0.0"
-jsonrpc-http-server = "18.0.0"
-
-# zebra-rpc needs the preserve_order feature in serde_json, which is a dependency of jsonrpc-core
-serde_json = { version = "1.0.132", features = ["preserve_order"] }
-indexmap = { version = "2.6.0", features = ["serde"] }
+jsonrpsee = { workspace = true, features = ["server"] }
+jsonrpsee-types = { workspace = true }
+jsonrpsee-proc-macros = { workspace = true }
+hyper = { workspace = true }
+http-body-util = { workspace = true }
+semver = { workspace = true }
+serde_json = { workspace = true, features = ["raw_value"] }
+serde_with = { workspace = true, features = ["hex"] }
+indexmap = { workspace = true, features = ["serde"] }
+derive-getters = { workspace = true, features = ["auto_copy_getters"] }
+derive-new = { workspace = true }
 
 # RPC endpoint basic auth
-base64 = "0.22.1"
-rand = "0.8.5"
+base64 = { workspace = true }
+rand = { workspace = true }
 
 # Error handling
-color-eyre = "0.6.3"
+color-eyre = { workspace = true }
 
-tokio = { version = "1.41.0", features = [
-    "time",
-    "rt-multi-thread",
-    "macros",
-    "tracing",
-] }
-tower = "0.4.13"
+tokio = { workspace = true, features = ["time", "rt-multi-thread", "macros", "tracing"] }
+tower = { workspace = true }
 
-# indexer-rpcs dependencies
-tonic = { version = "0.12.3", optional = true }
-tonic-reflection = { version = "0.12.3", optional = true }
-prost = { version = "0.13.3", optional = true }
-tokio-stream = { version = "0.1.16", optional = true }
+# gRPC server dependencies
+tonic = { workspace = true }
+tonic-reflection = { workspace = true }
+prost = { workspace = true }
+tonic-prost = { workspace = true }
+tokio-stream = { workspace = true }
 
-tracing = "0.1.39"
+tracing = { workspace = true }
 
-hex = { version = "0.4.3", features = ["serde"] }
-serde = { version = "1.0.211", features = ["serde_derive"] }
+# Metrics collection
+metrics = { workspace = true }
+
+hex = { workspace = true, features = ["serde"] }
+serde = { workspace = true, features = ["serde_derive"] }
 
 # For the `stop` RPC method.
-nix = { version = "0.29.0", features = ["signal"] }
+nix = { workspace = true, features = ["signal"] }
 
+zcash_address = { workspace = true }
+zcash_keys = { workspace = true }
 zcash_primitives = { workspace = true, features = ["transparent-inputs"] }
-zcash_protocol.workspace = true
+zcash_protocol = { workspace = true }
+zcash_script = { workspace = true }
+zcash_transparent = { workspace = true }
 
-# ECC deps used by getblocktemplate-rpcs feature
-zcash_address = { workspace = true, optional = true}
+sapling-crypto = { workspace = true }
 
 # Test-only feature proptest-impl
-proptest = { version = "1.4.0", optional = true }
+proptest = { workspace = true, optional = true }
 
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.41", features = [
+zebra-chain = { path = "../zebra-chain", version = "5.0.0", features = [
     "json-conversion",
 ] }
-zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.41" }
-zebra-network = { path = "../zebra-network", version = "1.0.0-beta.41" }
-zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.41", features = [
+zebra-consensus = { path = "../zebra-consensus", version = "4.0.0" }
+zebra-network = { path = "../zebra-network", version = "4.0.0" }
+zebra-node-services = { path = "../zebra-node-services", version = "3.0.0", features = [
     "rpc-client",
 ] }
-zebra-script = { path = "../zebra-script", version = "1.0.0-beta.41" }
-zebra-state = { path = "../zebra-state", version = "1.0.0-beta.41" }
+zebra-script = { path = "../zebra-script", version = "4.0.0" }
+zebra-state = { path = "../zebra-state", version = "4.0.0" }
 
 [build-dependencies]
-tonic-build = { version = "0.12.3", optional = true }
+tonic-prost-build = { workspace = true }
+which = { workspace = true }
 
 [dev-dependencies]
-insta = { version = "1.40.0", features = ["redactions", "json", "ron"] }
+insta = { workspace = true, features = ["redactions", "json", "ron"] }
 
-proptest = "1.4.0"
+proptest = { workspace = true }
 
-thiserror = "1.0.64"
-tokio = { version = "1.41.0", features = ["full", "tracing", "test-util"] }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.41", features = [
+zebra-chain = { path = "../zebra-chain", version = "5.0.0", features = [
     "proptest-impl",
 ] }
-zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.41", features = [
+zebra-consensus = { path = "../zebra-consensus", version = "4.0.0", features = [
     "proptest-impl",
 ] }
-zebra-network = { path = "../zebra-network", version = "1.0.0-beta.41", features = [
+zebra-network = { path = "../zebra-network", version = "4.0.0", features = [
     "proptest-impl",
 ] }
-zebra-state = { path = "../zebra-state", version = "1.0.0-beta.41", features = [
+zebra-state = { path = "../zebra-state", version = "4.0.0", features = [
     "proptest-impl",
 ] }
 
-zebra-test = { path = "../zebra-test", version = "1.0.0-beta.41" }
+zebra-test = { path = "../zebra-test", version = "2.0.1" }
+
+[lints]
+workspace = true

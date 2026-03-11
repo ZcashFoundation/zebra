@@ -10,6 +10,6 @@ pub(crate) use inventory_registry::InventoryChange;
 pub(crate) use limit::{ActiveConnectionCounter, ConnectionTracker};
 
 use inventory_registry::InventoryRegistry;
-use set::PeerSet;
+pub(crate) use set::PeerSet;
 
 pub use initialize::init;

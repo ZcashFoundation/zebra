@@ -119,13 +119,15 @@ impl std::fmt::Debug for InventoryRegistry {
 impl InventoryChange {
     /// Returns a new available inventory change from a single hash.
     pub fn new_available(hash: InventoryHash, peer: PeerSocketAddr) -> Self {
-        InventoryStatus::Available((AtLeastOne::from_one(hash), peer))
+        let bv = AtLeastOne::from_vec(vec![hash]).expect("bounded vec must fit");
+        InventoryStatus::Available((bv, peer))
     }
 
     /// Returns a new missing inventory change from a single hash.
     #[allow(dead_code)]
     pub fn new_missing(hash: InventoryHash, peer: PeerSocketAddr) -> Self {
-        InventoryStatus::Missing((AtLeastOne::from_one(hash), peer))
+        let bv = AtLeastOne::from_vec(vec![hash]).expect("bounded vec must fit");
+        InventoryStatus::Missing((bv, peer))
     }
 
     /// Returns a new available multiple inventory change, if `hashes` contains at least one change.
@@ -277,7 +279,7 @@ impl InventoryRegistry {
 
     /// Returns a future that waits for new registry updates.
     #[allow(dead_code)]
-    pub fn update(&mut self) -> Update {
+    pub fn update(&mut self) -> Update<'_> {
         Update::new(self)
     }
 

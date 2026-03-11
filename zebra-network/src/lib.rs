@@ -40,7 +40,7 @@
 //!
 //! ## `zebra-network` Structure
 //!
-//! [`zebra-network::init`] is the main entry point for `zebra-network`.
+//! [`init`] is the main entry point for `zebra-network`.
 //! It uses the following services, tasks, and endpoints:
 //!
 //! ### Low-Level Network Connections
@@ -99,7 +99,7 @@
 //!    * handles each message as a [`Request`] to the local node
 //!    * sends the [`Response`] to the [`peer::Connection`]
 //!
-//! Note: the inbound service is implemented by the [`zebra-network::init`] caller.
+//! Note: the inbound service is implemented by the [`init`] caller.
 //!
 //! Peer Inventory Service:
 //!  * tracks gossiped `inv` advertisements for each peer
@@ -162,6 +162,9 @@ mod peer_cache_updater;
 mod peer_set;
 mod policies;
 mod protocol;
+
+#[allow(unused)]
+pub(crate) use peer_set::PeerSet;
 
 // Wait until `arti-client`'s dependency `x25519-dalek v1.2.0` is updated to a higher version. (#5492)
 // #[cfg(feature = "tor")]

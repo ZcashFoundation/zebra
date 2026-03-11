@@ -10,26 +10,23 @@ use std::{
 
 use futures::{future::BoxFuture, FutureExt};
 use once_cell::sync::Lazy;
-use orchard::circuit::VerifyingKey;
-use rand::{thread_rng, CryptoRng, RngCore};
+use orchard::{
+    bundle::BatchValidator,
+    circuit::VerifyingKey,
+    flavor::{OrchardVanilla, OrchardZSA},
+};
+use rand::thread_rng;
+use zcash_primitives::transaction::OrchardBundle;
+use zebra_chain::transaction::SigHash;
 
+use crate::BoxError;
 use thiserror::Error;
 use tokio::sync::watch;
 use tower::{util::ServiceFn, Service};
-use tower_batch_control::{Batch, BatchControl};
+use tower_batch_control::{Batch, BatchControl, RequestWeight};
 use tower_fallback::Fallback;
 
-use zebra_chain::orchard::{OrchardVanilla, ShieldedData, ShieldedDataFlavor};
-
-#[cfg(feature = "tx_v6")]
-use zebra_chain::orchard::OrchardZSA;
-
-use crate::BoxError;
-
-use super::{spawn_fifo, spawn_fifo_and_convert};
-
-#[cfg(test)]
-mod tests;
+use super::spawn_fifo;
 
 /// Adjusted batch size for halo2 batches.
 ///
@@ -37,38 +34,16 @@ mod tests;
 /// This means that there can be hundreds of actions verified by some proofs,
 /// but just one action in others.
 ///
-/// To compensate for larger proofs, we decrease the batch size.
-///
-/// We also decrease the batch size for these reasons:
-/// - the default number of actions in `zcashd` is 2,
-/// - halo2 proofs take longer to verify than Sapling proofs, and
-/// - transactions with many actions generate very large proofs.
-///
-/// # TODO
-///
-/// Count each halo2 action as a batch item.
-/// We could increase the batch item count by the action count each time a batch request
-/// is received, which would reduce batch size, but keep the batch queue size larger.
-const HALO2_MAX_BATCH_SIZE: usize = 2;
-
-/* TODO: implement batch verification
-
-/// The type of the batch verifier.
-type BatchVerifier = plonk::BatchVerifier<vesta::Affine>;
- */
+/// To compensate for larger proofs, we process the batch once there are over
+/// [`HALO2_MAX_BATCH_SIZE`] total actions among pending items in the queue.
+const HALO2_MAX_BATCH_SIZE: usize = super::MAX_BATCH_SIZE;
 
 /// The type of verification results.
-type VerifyResult = Result<(), Halo2Error>;
+type VerifyResult = bool;
 
 /// The type of the batch sender channel.
 type Sender = watch::Sender<Option<VerifyResult>>;
 
-/* TODO: implement batch verification
-
-/// The type of a raw verifying key.
-/// This is the key used to verify batches.
-pub type BatchVerifyingKey = VerifyingKey<vesta::Affine>;
- */
 /// Temporary substitute type for fake batch verification.
 ///
 /// TODO: implement batch verification
@@ -79,97 +54,60 @@ pub type BatchVerifyingKey = ItemVerifyingKey;
 pub type ItemVerifyingKey = VerifyingKey;
 
 lazy_static::lazy_static! {
-    /// The halo2 proof verifying key for Orchard Vanilla
-    pub static ref VERIFYING_KEY_VANILLA: ItemVerifyingKey = ItemVerifyingKey::build::<OrchardVanilla>();
-}
+    /// The halo2 proof verifying key for OrchardVanilla.
+    pub static ref VERIFYING_KEY_VANILLA: ItemVerifyingKey =
+        ItemVerifyingKey::build::<OrchardVanilla>();
 
-#[cfg(feature = "tx_v6")]
-lazy_static::lazy_static! {
-    /// The halo2 proof verifying key for OrchardZSA
-    pub static ref VERIFYING_KEY_ZSA: ItemVerifyingKey = ItemVerifyingKey::build::<OrchardZSA>();
+    /// The halo2 proof verifying key for OrchardZSA.
+    #[cfg(zcash_unstable = "nu7")]
+    pub static ref VERIFYING_KEY_ZSA: ItemVerifyingKey =
+        ItemVerifyingKey::build::<OrchardZSA>();
 }
-
-// === TEMPORARY BATCH HALO2 SUBSTITUTE ===
-//
-// These types are meant to be API compatible with the batch verification APIs
-// in bellman::groth16::batch, reddsa::batch, redjubjub::batch, and
-// ed25519-zebra::batch. Once Halo2 batch proof verification math and
-// implementation is available, this code can be replaced with that.
 
 /// A Halo2 verification item, used as the request type of the service.
 #[derive(Clone, Debug)]
 pub struct Item {
-    instances: Vec<orchard::circuit::Instance>,
-    proof: orchard::circuit::Proof,
+    bundle: OrchardBundle<orchard::bundle::Authorized>,
+    sighash: SigHash,
+}
+
+impl RequestWeight for Item {
+    fn request_weight(&self) -> usize {
+        match &self.bundle {
+            OrchardBundle::OrchardVanilla(b) => b.actions().len(),
+            #[cfg(zcash_unstable = "nu7")]
+            OrchardBundle::OrchardZSA(b) => b.actions().len(),
+        }
+    }
 }
 
 impl Item {
-    /// Perform non-batched verification of this `Item`.
+    /// Creates a new [`Item`] from a bundle and sighash.
+    pub fn new(bundle: OrchardBundle<orchard::bundle::Authorized>, sighash: SigHash) -> Self {
+        Self { bundle, sighash }
+    }
+
+    /// Perform non-batched verification of this [`Item`].
     ///
     /// This is useful (in combination with `Item::clone`) for implementing
     /// fallback logic when batch verification fails.
-    pub fn verify_single(&self, vk: &ItemVerifyingKey) -> Result<(), halo2::plonk::Error> {
-        self.proof.verify(vk, &self.instances[..])
+    pub fn verify_single(self, vk: &ItemVerifyingKey) -> bool {
+        let mut batch = BatchValidator::default();
+        batch.queue(self);
+        batch.validate(vk, thread_rng())
     }
 }
 
-/// A fake batch verifier that queues and verifies halo2 proofs.
-#[derive(Default)]
-pub struct BatchVerifier {
-    queue: Vec<Item>,
+trait QueueBatchVerify {
+    fn queue(&mut self, item: Item);
 }
 
-impl BatchVerifier {
-    /// Queues an item for fake batch verification.
-    pub fn queue(&mut self, item: Item) {
-        self.queue.push(item);
-    }
-
-    /// Verifies the current fake batch.
-    pub fn verify<R: RngCore + CryptoRng>(
-        self,
-        _rng: R,
-        vk: &ItemVerifyingKey,
-    ) -> Result<(), halo2::plonk::Error> {
-        for item in self.queue {
-            item.verify_single(vk)?;
-        }
-
-        Ok(())
-    }
-}
-
-// === END TEMPORARY BATCH HALO2 SUBSTITUTE ===
-
-impl<V: OrchardVerifier> From<&ShieldedData<V>> for Item {
-    fn from(shielded_data: &ShieldedData<V>) -> Item {
-        use orchard::{circuit, note, primitives::redpallas, tree, value};
-
-        let anchor = tree::Anchor::from_bytes(shielded_data.shared_anchor.into()).unwrap();
-
-        let flags = orchard::bundle::Flags::from_byte(shielded_data.flags.bits())
-            .expect("failed to convert flags: shielded_data.flags contains unexpected bits that are not valid in orchard::bundle::Flags");
-
-        let instances = shielded_data
-            .actions()
-            .map(|action| {
-                circuit::Instance::from_parts(
-                    anchor,
-                    value::ValueCommitment::from_bytes(&action.cv.into()).unwrap(),
-                    note::Nullifier::from_bytes(&action.nullifier.into()).unwrap(),
-                    redpallas::VerificationKey::<redpallas::SpendAuth>::try_from(<[u8; 32]>::from(
-                        action.rk,
-                    ))
-                    .expect("should be a valid redpallas spendauth verification key"),
-                    note::ExtractedNoteCommitment::from_bytes(&action.cm_x.into()).unwrap(),
-                    flags,
-                )
-            })
-            .collect();
-
-        Item {
-            instances,
-            proof: orchard::circuit::Proof::new(shielded_data.proof.0.clone()),
+impl QueueBatchVerify for BatchValidator {
+    fn queue(&mut self, Item { bundle, sighash }: Item) {
+        match bundle {
+            OrchardBundle::OrchardVanilla(b) => self.add_bundle(&b, sighash.0),
+            #[cfg(zcash_unstable = "nu7")]
+            OrchardBundle::OrchardZSA(b) => self.add_bundle(&b, sighash.0),
         }
     }
 }
@@ -199,22 +137,23 @@ impl From<halo2::plonk::Error> for Halo2Error {
     }
 }
 
-type VerificationContext = Fallback<
-    Batch<Verifier, Item>,
-    ServiceFn<fn(Item) -> BoxFuture<'static, Result<(), BoxError>>>,
->;
-
-pub(crate) trait OrchardVerifier: ShieldedDataFlavor {
-    const ZSA_ENABLED: bool;
-
-    fn get_verifying_key() -> &'static ItemVerifyingKey;
-    fn get_verifier() -> &'static VerificationContext;
-}
-
-fn create_verification_context<V: OrchardVerifier>() -> VerificationContext {
+/// Global batch verification context for Halo2 proofs of Action statements.
+///
+/// This service transparently batches contemporaneous proof verifications,
+/// handling batch failures by falling back to individual verification.
+///
+/// Note that making a `Service` call requires mutable access to the service, so
+/// you should call `.clone()` on the global handle to create a local, mutable
+/// handle.
+pub static VERIFIER_VANILLA: Lazy<
+    Fallback<
+        Batch<Verifier, Item>,
+        ServiceFn<fn(Item) -> BoxFuture<'static, Result<(), BoxError>>>,
+    >,
+> = Lazy::new(|| {
     Fallback::new(
         Batch::new(
-            Verifier::new(V::get_verifying_key()),
+            Verifier::new(&VERIFYING_KEY_VANILLA),
             HALO2_MAX_BATCH_SIZE,
             None,
             super::MAX_BATCH_LATENCY,
@@ -229,52 +168,13 @@ fn create_verification_context<V: OrchardVerifier>() -> VerificationContext {
         // to erase the result type.
         // (We can't use BoxCloneService to erase the service type, because it is !Sync.)
         tower::service_fn(
-            (|item: Item| Verifier::verify_single_spawning(item, V::get_verifying_key()).boxed())
+            (|item: Item| Verifier::verify_single_spawning(item, &VERIFYING_KEY_VANILLA).boxed())
                 as fn(_) -> _,
         ),
     )
-}
+});
 
-/// Global batch verification context for Halo2 proofs of Action statements.
-///
-/// This service transparently batches contemporaneous proof verifications,
-/// handling batch failures by falling back to individual verification.
-///
-/// Note that making a `Service` call requires mutable access to the service, so
-/// you should call `.clone()` on the global handle to create a local, mutable
-/// handle.
-pub static VERIFIER_VANILLA: Lazy<VerificationContext> =
-    Lazy::new(create_verification_context::<OrchardVanilla>);
-
-/// FIXME: copy a doc from VERIFIER_VANILLA or just refer to its doc?
-#[cfg(feature = "tx_v6")]
-pub static VERIFIER_ZSA: Lazy<VerificationContext> =
-    Lazy::new(create_verification_context::<OrchardZSA>);
-
-impl OrchardVerifier for OrchardVanilla {
-    const ZSA_ENABLED: bool = false;
-
-    fn get_verifying_key() -> &'static ItemVerifyingKey {
-        &VERIFYING_KEY_VANILLA
-    }
-
-    fn get_verifier() -> &'static VerificationContext {
-        &VERIFIER_VANILLA
-    }
-}
-
-#[cfg(feature = "tx_v6")]
-impl OrchardVerifier for OrchardZSA {
-    const ZSA_ENABLED: bool = true;
-
-    fn get_verifying_key() -> &'static ItemVerifyingKey {
-        &VERIFYING_KEY_ZSA
-    }
-
-    fn get_verifier() -> &'static VerificationContext {
-        &VERIFIER_ZSA
-    }
-}
+/// Like [`VERIFIER_VANILLA`], but for OrchardZSA proofs.
 
 /// Halo2 proof verifier implementation
 ///
@@ -282,8 +182,8 @@ impl OrchardVerifier for OrchardZSA {
 /// Halo2 verifier. It handles batching incoming requests, driving batches to
 /// completion, and reporting results.
 pub struct Verifier {
-    /// The synchronous Halo2 batch verifier.
-    batch: BatchVerifier,
+    /// The synchronous Halo2 batch validator.
+    batch: BatchValidator,
 
     /// The halo2 proof verification key.
     ///
@@ -299,14 +199,14 @@ pub struct Verifier {
 
 impl Verifier {
     fn new(vk: &'static ItemVerifyingKey) -> Self {
-        let batch = BatchVerifier::default();
+        let batch = BatchValidator::default();
         let (tx, _) = watch::channel(None);
         Self { batch, vk, tx }
     }
 
     /// Returns the batch verifier and channel sender from `self`,
     /// replacing them with a new empty batch.
-    fn take(&mut self) -> (BatchVerifier, &'static BatchVerifyingKey, Sender) {
+    fn take(&mut self) -> (BatchValidator, &'static BatchVerifyingKey, Sender) {
         // Use a new verifier and channel for each batch.
         let batch = mem::take(&mut self.batch);
 
@@ -318,8 +218,8 @@ impl Verifier {
 
     /// Synchronously process the batch, and send the result using the channel sender.
     /// This function blocks until the batch is completed.
-    fn verify(batch: BatchVerifier, vk: &'static BatchVerifyingKey, tx: Sender) {
-        let result = batch.verify(thread_rng(), vk).map_err(Halo2Error::from);
+    fn verify(batch: BatchValidator, vk: &'static BatchVerifyingKey, tx: Sender) {
+        let result = batch.validate(vk, thread_rng());
         let _ = tx.send(Some(result));
     }
 
@@ -336,13 +236,24 @@ impl Verifier {
 
     /// Flush the batch using a thread pool, and return the result via the channel.
     /// This function returns a future that becomes ready when the batch is completed.
-    async fn flush_spawning(batch: BatchVerifier, vk: &'static BatchVerifyingKey, tx: Sender) {
+    async fn flush_spawning(batch: BatchValidator, vk: &'static BatchVerifyingKey, tx: Sender) {
         // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
-        let _ = tx.send(
-            spawn_fifo(move || batch.verify(thread_rng(), vk).map_err(Halo2Error::from))
-                .await
-                .ok(),
-        );
+        let start = std::time::Instant::now();
+        let result = spawn_fifo(move || batch.validate(vk, thread_rng())).await;
+        let duration = start.elapsed().as_secs_f64();
+
+        let result_label = match &result {
+            Ok(true) => "success",
+            _ => "failure",
+        };
+        metrics::histogram!(
+            "zebra.consensus.batch.duration_seconds",
+            "verifier" => "halo2",
+            "result" => result_label
+        )
+        .record(duration);
+
+        let _ = tx.send(result.ok());
     }
 
     /// Verify a single item using a thread pool, and return the result.
@@ -350,8 +261,13 @@ impl Verifier {
         item: Item,
         pvk: &'static ItemVerifyingKey,
     ) -> Result<(), BoxError> {
+        // TODO: Restore code for verifying single proofs or return a result from batch.validate()
         // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
-        spawn_fifo_and_convert(move || item.verify_single(pvk).map_err(Halo2Error::from)).await
+        if spawn_fifo(move || item.verify_single(pvk)).await? {
+            Ok(())
+        } else {
+            Err("could not validate orchard proof".into())
+        }
     }
 }
 
@@ -386,21 +302,20 @@ impl Service<BatchControl<Item>> for Verifier {
                         Ok(()) => {
                             // We use a new channel for each batch,
                             // so we always get the correct batch result here.
-                            let result = rx
+                            let is_valid = *rx
                                 .borrow()
                                 .as_ref()
-                                .ok_or("threadpool unexpectedly dropped response channel sender. Is Zebra shutting down?")?
-                                .clone();
+                                .ok_or("threadpool unexpectedly dropped response channel sender. Is Zebra shutting down?")?;
 
-                            if result.is_ok() {
-                                tracing::trace!(?result, "verified halo2 proof");
+                            if is_valid {
+                                tracing::trace!(?is_valid, "verified halo2 proof");
                                 metrics::counter!("proofs.halo2.verified").increment(1);
+                                Ok(())
                             } else {
-                                tracing::trace!(?result, "invalid halo2 proof");
+                                tracing::trace!(?is_valid, "invalid halo2 proof");
                                 metrics::counter!("proofs.halo2.invalid").increment(1);
+                                Err("could not validate halo2 proofs".into())
                             }
-
-                            result.map_err(BoxError::from)
                         }
                         Err(_recv_error) => panic!("verifier was dropped without flushing"),
                     }

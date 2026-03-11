@@ -1,5 +1,7 @@
 //! An HTTP endpoint for dynamically setting tracing filters.
 
+#![allow(non_local_definitions)]
+
 use std::net::SocketAddr;
 
 use abscissa_core::{Component, FrameworkError};
@@ -89,8 +91,6 @@ impl TracingEndpoint {
                             "Opening tracing endpoint listener {addr:?} failed: {err:?}. \
                             Hint: Check if another zebrad or zcashd process is running. \
                             Try changing the tracing endpoint_addr in the Zebra config.",
-                            addr = addr,
-                            err = err,
                         );
                     }
                 };

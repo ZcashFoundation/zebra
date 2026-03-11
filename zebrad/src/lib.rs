@@ -61,10 +61,6 @@
 //! features](https://doc.rust-lang.org/cargo/reference/features.html#command-line-feature-options)
 //! are available at compile time:
 //!
-//! ### JSON-RPC
-//!
-//! * `getblocktemplate-rpcs`: Mining pool RPC support, enabled by default in production builds.
-//!
 //! ### Metrics
 //!
 //! * configuring a `tracing.progress_bar`: shows key metrics in the terminal using progress bars,
@@ -105,8 +101,6 @@
 //!
 //! * `elasticsearch`: save block data into elasticsearch database. Read the [elasticsearch](https://zebra.zfnd.org/user/elasticsearch.html)
 //!   section of the book for more details.
-//! * `shielded-scan`: enable experimental support for scanning shielded transactions. Read the [shielded-scan](https://zebra.zfnd.org/user/shielded-scan.html)
-//!   section of the book for more details.
 //! * `internal-miner`: enable experimental support for mining inside Zebra, without an external
 //!   mining pool. This feature is only supported on testnet. Use a GPU or ASIC on mainnet for
 //!   efficient mining.
@@ -123,7 +117,6 @@
 //! - [zebra-network](https://docs.rs/zebra-network/latest/zebra_network/)
 //! - [zebra-node-services](https://docs.rs/zebra-node-services/latest/zebra_node_services/)
 //! - [zebra-rpc](https://docs.rs/zebra-rpc/latest/zebra_rpc/)
-//! - [zebra-scan](https://docs.rs/zebra-scan/latest/zebra_scan/)
 //! - [zebra-script](https://docs.rs/zebra-script/latest/zebra_script/)
 //! - [zebra-state](https://docs.rs/zebra-state/latest/zebra_state/)
 //! - [zebra-test](https://docs.rs/zebra-test/latest/zebra_test/)

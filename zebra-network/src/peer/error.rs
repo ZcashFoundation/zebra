@@ -251,10 +251,10 @@ pub enum HandshakeError {
     #[error("Peer closed connection")]
     ConnectionClosed,
     /// An error occurred while performing an IO operation.
-    #[error("Underlying IO error")]
+    #[error("Underlying IO error: {0}")]
     Io(#[from] std::io::Error),
     /// A serialization error occurred while reading or writing a message.
-    #[error("Serialization error")]
+    #[error("Serialization error: {0}")]
     Serialization(#[from] SerializationError),
     /// The remote peer offered a version older than our minimum version.
     #[error("Peer offered obsolete version: {0:?}")]

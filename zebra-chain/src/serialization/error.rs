@@ -1,17 +1,18 @@
 //! Errors for Zcash consensus-critical serialization.
 
-use std::{array::TryFromSliceError, io, num::TryFromIntError, str::Utf8Error};
+use std::{array::TryFromSliceError, io, num::TryFromIntError, str::Utf8Error, sync::Arc};
 
+use bounded_vec::BoundedVecOutOfBounds;
 use hex::FromHexError;
 use thiserror::Error;
 
 /// A serialization error.
 // TODO: refine error types -- better to use boxed errors?
-#[derive(Error, Debug)]
+#[derive(Clone, Error, Debug)]
 pub enum SerializationError {
     /// An io error that prevented deserialization
     #[error("io error: {0}")]
-    Io(#[from] io::Error),
+    Io(#[from] Arc<io::Error>),
 
     /// The data to be deserialized was malformed.
     // TODO: refine errors
@@ -50,4 +51,56 @@ pub enum SerializationError {
     /// rule](https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus).
     #[error("transaction balance is non-zero but doesn't have Sapling shielded spends or outputs")]
     BadTransactionBalance,
+}
+
+impl From<SerializationError> for io::Error {
+    fn from(e: SerializationError) -> Self {
+        match e {
+            SerializationError::Io(e) => {
+                Arc::try_unwrap(e).unwrap_or_else(|e| io::Error::new(e.kind(), e.to_string()))
+            }
+            SerializationError::Parse(msg) => io::Error::new(io::ErrorKind::InvalidData, msg),
+            SerializationError::Utf8Error(e) => io::Error::new(io::ErrorKind::InvalidData, e),
+            SerializationError::TryFromSliceError(e) => {
+                io::Error::new(io::ErrorKind::InvalidData, e)
+            }
+            SerializationError::TryFromIntError(e) => io::Error::new(io::ErrorKind::InvalidData, e),
+            SerializationError::FromHexError(e) => io::Error::new(io::ErrorKind::InvalidData, e),
+            SerializationError::Amount { source } => {
+                io::Error::new(io::ErrorKind::InvalidData, source)
+            }
+            SerializationError::BadTransactionBalance => io::Error::new(
+                io::ErrorKind::InvalidData,
+                "bad transaction balance: non-zero with no Sapling shielded spends or outputs",
+            ),
+        }
+    }
+}
+
+impl From<crate::Error> for SerializationError {
+    fn from(e: crate::Error) -> Self {
+        match e {
+            crate::Error::InvalidConsensusBranchId => Self::Parse("invalid consensus branch id"),
+            crate::Error::Io(e) => Self::Io(e),
+            crate::Error::MissingNetworkUpgrade => Self::Parse("missing network upgrade"),
+            crate::Error::Amount(_) => Self::BadTransactionBalance,
+            crate::Error::Conversion(_) => {
+                Self::Parse("Zebra's type could not be converted to its librustzcash equivalent")
+            }
+        }
+    }
+}
+
+/// Allow converting `io::Error` to `SerializationError`; we need this since we
+/// use `Arc<io::Error>` in `SerializationError::Io`.
+impl From<io::Error> for SerializationError {
+    fn from(value: io::Error) -> Self {
+        Arc::new(value).into()
+    }
+}
+
+impl From<BoundedVecOutOfBounds> for SerializationError {
+    fn from(_: BoundedVecOutOfBounds) -> Self {
+        SerializationError::Parse("vector length out of bounds")
+    }
 }

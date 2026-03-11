@@ -34,10 +34,10 @@ use std::{fmt, sync::Arc};
 use proptest_derive::Arbitrary;
 
 use hex::{FromHex, ToHex};
-use serde::{Deserialize, Serialize};
 
 use crate::serialization::{
-    ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize,
+    BytesInDisplayOrder, ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize,
+    ZcashSerialize,
 };
 
 use super::{txid::TxIdBuilder, AuthDigest, Transaction};
@@ -56,7 +56,9 @@ use super::{txid::TxIdBuilder, AuthDigest, Transaction};
 ///
 /// [ZIP-244]: https://zips.z.cash/zip-0244
 /// [Spec: Transaction Identifiers]: https://zips.z.cash/protocol/protocol.pdf#txnidentifiers
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(
+    Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, serde::Deserialize, serde::Serialize,
+)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct Hash(pub [u8; 32]);
 
@@ -100,26 +102,13 @@ impl From<&Hash> for [u8; 32] {
     }
 }
 
-impl Hash {
-    /// Return the hash bytes in big-endian byte-order suitable for printing out byte by byte.
-    ///
-    /// Zebra displays transaction and block hashes in big-endian byte-order,
-    /// following the u256 convention set by Bitcoin and zcashd.
-    pub fn bytes_in_display_order(&self) -> [u8; 32] {
-        let mut reversed_bytes = self.0;
-        reversed_bytes.reverse();
-        reversed_bytes
+impl BytesInDisplayOrder<true> for Hash {
+    fn bytes_in_serialized_order(&self) -> [u8; 32] {
+        self.0
     }
 
-    /// Convert bytes in big-endian byte-order into a [`transaction::Hash`](crate::transaction::Hash).
-    ///
-    /// Zebra displays transaction and block hashes in big-endian byte-order,
-    /// following the u256 convention set by Bitcoin and zcashd.
-    pub fn from_bytes_in_display_order(bytes_in_display_order: &[u8; 32]) -> Hash {
-        let mut internal_byte_order = *bytes_in_display_order;
-        internal_byte_order.reverse();
-
-        Hash(internal_byte_order)
+    fn from_bytes_in_serialized_order(bytes: [u8; 32]) -> Self {
+        Hash(bytes)
     }
 }
 
@@ -310,7 +299,7 @@ impl TryFrom<&Vec<u8>> for WtxId {
     type Error = SerializationError;
 
     fn try_from(bytes: &Vec<u8>) -> Result<Self, Self::Error> {
-        bytes.clone().try_into()
+        bytes.as_slice().try_into()
     }
 }
 

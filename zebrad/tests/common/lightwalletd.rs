@@ -41,16 +41,16 @@ pub mod wallet_grpc_test;
 ///
 /// This environmental variable is used to enable the lightwalletd tests.
 /// But the network tests are *disabled* by their environmental variables.
-pub const ZEBRA_TEST_LIGHTWALLETD: &str = "ZEBRA_TEST_LIGHTWALLETD";
+pub const TEST_LIGHTWALLETD: &str = "TEST_LIGHTWALLETD";
 
-/// Optional environment variable with the cached state for lightwalletd.
+/// Optional environment variable that points to a cached lightwalletd state directory.
 ///
-/// Required for [`TestType::UpdateCachedState`],
-/// so we can test lightwalletd RPC integration with a populated state.
-///
-/// Can also be used to speed up the [`sending_transactions_using_lightwalletd`] test,
-/// by skipping the lightwalletd initial sync.
-pub const LIGHTWALLETD_DATA_DIR: &str = "LIGHTWALLETD_DATA_DIR";
+/// - If unset, tests look for a platform-specific default (for example, `~/.cache/lwd` on Linux).
+/// - Tests that require a populated lightwalletd cache (currently [`TestType::UpdateCachedState`])
+///   will be skipped if neither an override nor an existing default cache is found.
+/// - Providing a populated cache can significantly speed up certain tests (for example,
+///   the sending-transactions-via-lightwalletd test), by avoiding the initial lightwalletd sync.
+pub const LWD_CACHE_DIR: &str = "LWD_CACHE_DIR";
 
 /// Should we skip Zebra lightwalletd integration tests?
 #[allow(clippy::print_stderr)]
@@ -60,12 +60,12 @@ pub fn zebra_skip_lightwalletd_tests() -> bool {
     //
     // See is_command_available() in zebra-test/src/tests/command.rs for one way to do this.
 
-    if env::var_os(ZEBRA_TEST_LIGHTWALLETD).is_none() {
+    if env::var_os(TEST_LIGHTWALLETD).is_none() {
         // This message is captured by the test runner, use
         // `cargo test -- --nocapture` to see it.
         eprintln!(
             "Skipped lightwalletd integration test, \
-             set the 'ZEBRA_TEST_LIGHTWALLETD' environmental variable to run the test",
+             set the 'TEST_LIGHTWALLETD' environmental variable to run the test",
         );
         return true;
     }
@@ -76,7 +76,7 @@ pub fn zebra_skip_lightwalletd_tests() -> bool {
 /// Spawns a lightwalletd instance on `network`, connected to `zebrad_rpc_address`,
 /// with its gRPC server functionality enabled.
 ///
-/// Expects cached state based on the `test_type`. Use the `LIGHTWALLETD_DATA_DIR`
+/// Expects cached state based on the `test_type`. Use the `LWD_CACHE_DIR`
 /// environmental variable to provide an initial state to the lightwalletd instance.
 ///
 /// Returns:
@@ -111,7 +111,7 @@ pub fn spawn_lightwalletd_for_rpc<S: AsRef<str> + std::fmt::Debug>(
         test_type.lightwalletd_failure_messages();
 
     let mut lightwalletd = lightwalletd_dir
-        .spawn_lightwalletd_child(lightwalletd_state_path, arguments)?
+        .spawn_lightwalletd_child(lightwalletd_state_path, test_type, arguments)?
         .with_timeout(test_type.lightwalletd_timeout())
         .with_failure_regex_iter(lightwalletd_failure_messages, lightwalletd_ignore_messages);
 
@@ -157,6 +157,8 @@ where
     /// as a child process in this test directory,
     /// potentially taking ownership of the tempdir for the duration of the child process.
     ///
+    /// Uses `test_type` to determine logging behavior for the state directory.
+    ///
     /// By default, launch a working test instance with logging, and avoid port conflicts.
     ///
     /// # Panics
@@ -165,6 +167,7 @@ where
     fn spawn_lightwalletd_child(
         self,
         lightwalletd_state_path: impl Into<Option<PathBuf>>,
+        test_type: TestType,
         extra_args: Arguments,
     ) -> Result<TestChild<Self>>;
 
@@ -184,6 +187,7 @@ where
     fn spawn_lightwalletd_child(
         self,
         lightwalletd_state_path: impl Into<Option<PathBuf>>,
+        test_type: TestType,
         extra_args: Arguments,
     ) -> Result<TestChild<Self>> {
         let test_dir = self.as_ref().to_owned();
@@ -207,6 +211,51 @@ where
 
         // the lightwalletd cache directory
         if let Some(lightwalletd_state_path) = lightwalletd_state_path.into() {
+            tracing::info!(?lightwalletd_state_path, "using lightwalletd state path");
+
+            // Only log the directory size if it's expected to exist already.
+            // FullSyncFromGenesis creates this directory, so we skip logging for it.
+            if !matches!(test_type, TestType::FullSyncFromGenesis { .. }) {
+                let lwd_cache_dir_path = lightwalletd_state_path.join("db/main");
+                let lwd_cache_entries: Vec<_> = std::fs::read_dir(&lwd_cache_dir_path)
+                    .unwrap_or_else(|error| {
+                        if error.kind() == std::io::ErrorKind::NotFound {
+                            panic!(
+                                "missing cached lightwalletd state at {path:?}.\n\
+                                 Populate the directory (for example by running the lwd-sync-full \n\
+                                 nextest profile) or set {env_var} to a populated cache.",
+                                path = lwd_cache_dir_path,
+                                env_var = LWD_CACHE_DIR,
+                            );
+                        }
+
+                        panic!(
+                            "unexpected failure opening lightwalletd cache dir {path:?}: {error:?}",
+                            path = lwd_cache_dir_path,
+                            error = error,
+                        );
+                    })
+                    .collect();
+
+                let lwd_cache_dir_size = lwd_cache_entries.iter().fold(0, |acc, entry_result| {
+                    acc + entry_result
+                        .as_ref()
+                        .map(|entry| entry.metadata().map(|meta| meta.len()).unwrap_or(0))
+                        .unwrap_or(0)
+                });
+
+                tracing::info!("{lwd_cache_dir_size} bytes in lightwalletd cache dir");
+
+                for entry_result in &lwd_cache_entries {
+                    match entry_result {
+                        Ok(entry) => tracing::info!("{entry:?} entry in lightwalletd cache dir"),
+                        Err(e) => {
+                            tracing::warn!(?e, "error reading entry in lightwalletd cache dir")
+                        }
+                    }
+                }
+            }
+
             args.set_parameter(
                 "--data-dir",
                 lightwalletd_state_path
@@ -214,6 +263,7 @@ where
                     .expect("path is valid Unicode"),
             );
         } else {
+            tracing::info!("using lightwalletd empty state path");
             let empty_state_path = test_dir.join("lightwalletd_state");
 
             std::fs::create_dir(&empty_state_path)

@@ -2,10 +2,11 @@
 
 use std::{
     cmp::Ordering,
-    sync::{mpsc, Arc},
+    sync::Arc,
     thread::{self, JoinHandle},
 };
 
+use crossbeam_channel::{bounded, Receiver, RecvTimeoutError, Sender};
 use semver::Version;
 use tracing::Span;
 
@@ -19,14 +20,104 @@ use zebra_chain::{
 
 use DbFormatChange::*;
 
-use crate::{
-    constants::latest_version_for_adding_subtrees,
-    service::finalized_state::{DiskWriteBatch, ZebraDb},
-};
+use crate::service::finalized_state::ZebraDb;
 
 pub(crate) mod add_subtrees;
+pub(crate) mod block_info_and_address_received;
 pub(crate) mod cache_genesis_roots;
 pub(crate) mod fix_tree_key_type;
+pub(crate) mod no_migration;
+pub(crate) mod prune_trees;
+pub(crate) mod tree_keys_and_caches_upgrade;
+
+#[cfg(not(feature = "indexer"))]
+pub(crate) mod drop_tx_locs_by_spends;
+
+#[cfg(feature = "indexer")]
+pub(crate) mod track_tx_locs_by_spends;
+
+/// Defines method signature for running disk format upgrades.
+pub trait DiskFormatUpgrade {
+    /// Returns the version at which this upgrade is applied.
+    fn version(&self) -> Version;
+
+    /// Returns the description of this upgrade.
+    fn description(&self) -> &'static str;
+
+    /// Runs disk format upgrade.
+    fn run(
+        &self,
+        initial_tip_height: Height,
+        db: &ZebraDb,
+        cancel_receiver: &Receiver<CancelFormatChange>,
+    ) -> Result<(), CancelFormatChange>;
+
+    /// Check that state has been upgraded to this format correctly.
+    ///
+    /// The outer `Result` indicates whether the validation was cancelled (due to e.g. node shutdown).
+    /// The inner `Result` indicates whether the validation itself failed or not.
+    fn validate(
+        &self,
+        _db: &ZebraDb,
+        _cancel_receiver: &Receiver<CancelFormatChange>,
+    ) -> Result<Result<(), String>, CancelFormatChange> {
+        Ok(Ok(()))
+    }
+
+    /// Prepare for disk format upgrade.
+    fn prepare(
+        &self,
+        _initial_tip_height: Height,
+        _upgrade_db: &ZebraDb,
+        _cancel_receiver: &Receiver<CancelFormatChange>,
+        _older_disk_version: &Version,
+    ) -> Result<(), CancelFormatChange> {
+        Ok(())
+    }
+
+    /// Returns true if the [`DiskFormatUpgrade`] needs to run a migration on existing data in the db.
+    fn needs_migration(&self) -> bool {
+        true
+    }
+
+    /// Returns true if the upgrade is a major upgrade that can reuse the cache in the previous major db format version.
+    fn is_reusable_major_upgrade(&self) -> bool {
+        let version = self.version();
+        version.minor == 0 && version.patch == 0
+    }
+}
+
+fn format_upgrades(
+    min_version: Option<Version>,
+) -> impl DoubleEndedIterator<Item = Box<dyn DiskFormatUpgrade>> {
+    let min_version = move || min_version.clone().unwrap_or(Version::new(0, 0, 0));
+
+    // Note: Disk format upgrades must be run in order of database version.
+    ([
+        Box::new(prune_trees::PruneTrees),
+        Box::new(add_subtrees::AddSubtrees),
+        Box::new(tree_keys_and_caches_upgrade::FixTreeKeyTypeAndCacheGenesisRoots),
+        Box::new(no_migration::NoMigration::new(
+            "add value balance upgrade",
+            Version::new(26, 0, 0),
+        )),
+        Box::new(block_info_and_address_received::Upgrade),
+    ] as [Box<dyn DiskFormatUpgrade>; 5])
+        .into_iter()
+        .filter(move |upgrade| upgrade.version() > min_version())
+}
+
+/// Returns a list of all the major db format versions that can restored from the
+/// previous major database format.
+pub fn restorable_db_versions() -> Vec<u64> {
+    format_upgrades(None)
+        .filter_map(|upgrade| {
+            upgrade
+                .is_reusable_major_upgrade()
+                .then_some(upgrade.version().major)
+        })
+        .collect()
+}
 
 /// The kind of database format change or validity check we're performing.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -96,7 +187,7 @@ pub struct DbFormatChangeThreadHandle {
     update_task: Option<Arc<JoinHandle<Result<(), CancelFormatChange>>>>,
 
     /// A channel that tells the running format thread to finish early.
-    cancel_handle: mpsc::SyncSender<CancelFormatChange>,
+    cancel_handle: Sender<CancelFormatChange>,
 }
 
 /// Marker type that is sent to cancel a format upgrade, and returned as an error on cancellation.
@@ -121,7 +212,7 @@ impl DbFormatChange {
             return NewlyCreated { running_version };
         };
 
-        match disk_version.cmp(&running_version) {
+        match disk_version.cmp_precedence(&running_version) {
             Ordering::Less => {
                 info!(
                     %running_version,
@@ -228,7 +319,7 @@ impl DbFormatChange {
         //
         // Cancel handles must use try_send() to avoid blocking waiting for the format change
         // thread to shut down.
-        let (cancel_handle, cancel_receiver) = mpsc::sync_channel(1);
+        let (cancel_handle, cancel_receiver) = bounded(1);
 
         let span = Span::current();
         let update_task = thread::spawn(move || {
@@ -256,7 +347,7 @@ impl DbFormatChange {
         self,
         db: ZebraDb,
         initial_tip_height: Option<Height>,
-        cancel_receiver: mpsc::Receiver<CancelFormatChange>,
+        cancel_receiver: Receiver<CancelFormatChange>,
     ) -> Result<(), CancelFormatChange> {
         self.run_format_change_or_check(&db, initial_tip_height, &cancel_receiver)?;
 
@@ -269,7 +360,7 @@ impl DbFormatChange {
             // But return early if there is a cancel signal.
             if !matches!(
                 cancel_receiver.recv_timeout(debug_validity_check_interval),
-                Err(mpsc::RecvTimeoutError::Timeout)
+                Err(RecvTimeoutError::Timeout)
             ) {
                 return Err(CancelFormatChange);
             }
@@ -288,11 +379,20 @@ impl DbFormatChange {
         &self,
         db: &ZebraDb,
         initial_tip_height: Option<Height>,
-        cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
+        cancel_receiver: &Receiver<CancelFormatChange>,
     ) -> Result<(), CancelFormatChange> {
+        // Mark the database as having finished applying any format upgrades if there are no
+        // format upgrades that need to be applied.
+        if !self.is_upgrade() {
+            db.mark_finished_format_upgrades();
+        }
+
         match self {
             // Perform any required upgrades, then mark the state as upgraded.
-            Upgrade { .. } => self.apply_format_upgrade(db, initial_tip_height, cancel_receiver)?,
+            Upgrade { .. } => {
+                self.apply_format_upgrade(db, initial_tip_height, cancel_receiver)?;
+                db.mark_finished_format_upgrades();
+            }
 
             NewlyCreated { .. } => {
                 Self::mark_as_newly_created(db);
@@ -337,6 +437,60 @@ impl DbFormatChange {
             }
         }
 
+        #[cfg(feature = "indexer")]
+        if let (
+            Upgrade { .. } | CheckOpenCurrent { .. } | Downgrade { .. },
+            Some(initial_tip_height),
+        ) = (self, initial_tip_height)
+        {
+            // Indexing transaction locations by their spent outpoints and revealed nullifiers.
+            let timer = CodeTimer::start();
+
+            // Add build metadata to on-disk version file just before starting to add indexes
+            let mut version = db
+                .format_version_on_disk()
+                .expect("unable to read database format version file")
+                .expect("should write database format version file above");
+            version.build = db.format_version_in_code().build;
+
+            db.update_format_version_on_disk(&version)
+                .expect("unable to write database format version file to disk");
+
+            info!("started checking/adding indexes for spending tx ids");
+            track_tx_locs_by_spends::run(initial_tip_height, db, cancel_receiver)?;
+            info!("finished checking/adding indexes for spending tx ids");
+
+            timer.finish(module_path!(), line!(), "indexing spending transaction ids");
+        };
+
+        #[cfg(not(feature = "indexer"))]
+        if let (
+            Upgrade { .. } | CheckOpenCurrent { .. } | Downgrade { .. },
+            Some(initial_tip_height),
+        ) = (self, initial_tip_height)
+        {
+            let mut version = db
+                .format_version_on_disk()
+                .expect("unable to read database format version file")
+                .expect("should write database format version file above");
+
+            if version.build.contains("indexer") {
+                // Indexing transaction locations by their spent outpoints and revealed nullifiers.
+                let timer = CodeTimer::start();
+
+                info!("started removing indexes for spending tx ids");
+                drop_tx_locs_by_spends::run(initial_tip_height, db, cancel_receiver)?;
+                info!("finished removing indexes for spending tx ids");
+
+                // Remove build metadata to on-disk version file after indexes have been dropped.
+                version.build = db.format_version_in_code().build;
+                db.update_format_version_on_disk(&version)
+                    .expect("unable to write database format version file to disk");
+
+                timer.finish(module_path!(), line!(), "removing spending transaction ids");
+            }
+        };
+
         // These checks should pass for all format changes:
         // - upgrades should produce a valid format (and they already do that check)
         // - an empty state should pass all the format checks
@@ -352,12 +506,12 @@ impl DbFormatChange {
             )
         });
 
-        let inital_disk_version = self
+        let initial_disk_version = self
             .initial_disk_version()
             .map_or_else(|| "None".to_string(), |version| version.to_string());
         info!(
             running_version = %self.running_version(),
-            %inital_disk_version,
+            %initial_disk_version,
             "database format is valid"
         );
 
@@ -381,7 +535,7 @@ impl DbFormatChange {
         &self,
         db: &ZebraDb,
         initial_tip_height: Option<Height>,
-        cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
+        cancel_receiver: &Receiver<CancelFormatChange>,
     ) -> Result<(), CancelFormatChange> {
         let Upgrade {
             newer_running_version,
@@ -413,154 +567,30 @@ impl DbFormatChange {
             return Ok(());
         };
 
-        // Note commitment tree de-duplication database upgrade task.
+        // Apply or validate format upgrades
+        for upgrade in format_upgrades(Some(older_disk_version.clone())) {
+            if upgrade.needs_migration() {
+                let timer = CodeTimer::start();
 
-        let version_for_pruning_trees =
-            Version::parse("25.1.1").expect("Hardcoded version string should be valid.");
+                upgrade.prepare(initial_tip_height, db, cancel_receiver, older_disk_version)?;
+                upgrade.run(initial_tip_height, db, cancel_receiver)?;
 
-        // Check if we need to prune the note commitment trees in the database.
-        if older_disk_version < &version_for_pruning_trees {
-            let timer = CodeTimer::start();
+                // Before marking the state as upgraded, check that the upgrade completed successfully.
+                upgrade
+                    .validate(db, cancel_receiver)?
+                    .expect("db should be valid after upgrade");
 
-            // Prune duplicate Sapling note commitment trees.
-
-            // The last tree we checked.
-            let mut last_tree = db
-                .sapling_tree_by_height(&Height(0))
-                .expect("Checked above that the genesis block is in the database.");
-
-            // Run through all the possible duplicate trees in the finalized chain.
-            // The block after genesis is the first possible duplicate.
-            for (height, tree) in db.sapling_tree_by_height_range(Height(1)..=initial_tip_height) {
-                // Return early if there is a cancel signal.
-                if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
-                    return Err(CancelFormatChange);
-                }
-
-                // Delete any duplicate trees.
-                if tree == last_tree {
-                    let mut batch = DiskWriteBatch::new();
-                    batch.delete_sapling_tree(db, &height);
-                    db.write_batch(batch)
-                        .expect("Deleting Sapling note commitment trees should always succeed.");
-                }
-
-                // Compare against the last tree to find unique trees.
-                last_tree = tree;
+                timer.finish(module_path!(), line!(), upgrade.description());
             }
-
-            // Prune duplicate Orchard note commitment trees.
-
-            // The last tree we checked.
-            let mut last_tree = db
-                .orchard_tree_by_height(&Height(0))
-                .expect("Checked above that the genesis block is in the database.");
-
-            // Run through all the possible duplicate trees in the finalized chain.
-            // The block after genesis is the first possible duplicate.
-            for (height, tree) in db.orchard_tree_by_height_range(Height(1)..=initial_tip_height) {
-                // Return early if there is a cancel signal.
-                if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
-                    return Err(CancelFormatChange);
-                }
-
-                // Delete any duplicate trees.
-                if tree == last_tree {
-                    let mut batch = DiskWriteBatch::new();
-                    batch.delete_orchard_tree(db, &height);
-                    db.write_batch(batch)
-                        .expect("Deleting Orchard note commitment trees should always succeed.");
-                }
-
-                // Compare against the last tree to find unique trees.
-                last_tree = tree;
-            }
-
-            // Before marking the state as upgraded, check that the upgrade completed successfully.
-            Self::check_for_duplicate_trees(db, cancel_receiver)?
-                .expect("database format is valid after upgrade");
 
             // Mark the database as upgraded. Zebra won't repeat the upgrade anymore once the
             // database is marked, so the upgrade MUST be complete at this point.
-            Self::mark_as_upgraded_to(db, &version_for_pruning_trees);
-
-            timer.finish(module_path!(), line!(), "deduplicate trees upgrade");
+            info!(
+                newer_running_version = ?upgrade.version(),
+                "Zebra automatically upgraded the database format"
+            );
+            Self::mark_as_upgraded_to(db, &upgrade.version());
         }
-
-        // Note commitment subtree creation database upgrade task.
-
-        let latest_version_for_adding_subtrees = latest_version_for_adding_subtrees();
-        let first_version_for_adding_subtrees =
-            Version::parse("25.2.0").expect("Hardcoded version string should be valid.");
-
-        // Check if we need to add or fix note commitment subtrees in the database.
-        if older_disk_version < &latest_version_for_adding_subtrees {
-            let timer = CodeTimer::start();
-
-            if older_disk_version >= &first_version_for_adding_subtrees {
-                // Clear previous upgrade data, because it was incorrect.
-                add_subtrees::reset(initial_tip_height, db, cancel_receiver)?;
-            }
-
-            add_subtrees::run(initial_tip_height, db, cancel_receiver)?;
-
-            // Before marking the state as upgraded, check that the upgrade completed successfully.
-            add_subtrees::subtree_format_validity_checks_detailed(db, cancel_receiver)?
-                .expect("database format is valid after upgrade");
-
-            // Mark the database as upgraded. Zebra won't repeat the upgrade anymore once the
-            // database is marked, so the upgrade MUST be complete at this point.
-            Self::mark_as_upgraded_to(db, &latest_version_for_adding_subtrees);
-
-            timer.finish(module_path!(), line!(), "add subtrees upgrade");
-        }
-
-        // Sprout & history tree key formats, and cached genesis tree roots database upgrades.
-
-        let version_for_tree_keys_and_caches =
-            Version::parse("25.3.0").expect("Hardcoded version string should be valid.");
-
-        // Check if we need to do the upgrade.
-        if older_disk_version < &version_for_tree_keys_and_caches {
-            let timer = CodeTimer::start();
-
-            // It shouldn't matter what order these are run in.
-            cache_genesis_roots::run(initial_tip_height, db, cancel_receiver)?;
-            fix_tree_key_type::run(initial_tip_height, db, cancel_receiver)?;
-
-            // Before marking the state as upgraded, check that the upgrade completed successfully.
-            cache_genesis_roots::detailed_check(db, cancel_receiver)?
-                .expect("database format is valid after upgrade");
-            fix_tree_key_type::detailed_check(db, cancel_receiver)?
-                .expect("database format is valid after upgrade");
-
-            // Mark the database as upgraded. Zebra won't repeat the upgrade anymore once the
-            // database is marked, so the upgrade MUST be complete at this point.
-            Self::mark_as_upgraded_to(db, &version_for_tree_keys_and_caches);
-
-            timer.finish(module_path!(), line!(), "tree keys and caches upgrade");
-        }
-
-        let version_for_upgrading_value_balance_format =
-            Version::parse("26.0.0").expect("hard-coded version string should be valid");
-
-        // Check if we need to do the upgrade.
-        if older_disk_version < &version_for_upgrading_value_balance_format {
-            Self::mark_as_upgraded_to(db, &version_for_upgrading_value_balance_format)
-        }
-
-        // # New Upgrades Usually Go Here
-        //
-        // New code goes above this comment!
-        //
-        // Run the latest format upgrade code after the other upgrades are complete,
-        // then mark the format as upgraded. The code should check `cancel_receiver`
-        // every time it runs its inner update loop.
-
-        info!(
-            %newer_running_version,
-            "Zebra automatically upgraded the database format to:"
-        );
 
         Ok(())
     }
@@ -598,7 +628,7 @@ impl DbFormatChange {
     #[allow(clippy::vec_init_then_push)]
     pub fn format_validity_checks_detailed(
         db: &ZebraDb,
-        cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
+        cancel_receiver: &Receiver<CancelFormatChange>,
     ) -> Result<Result<(), String>, CancelFormatChange> {
         let timer = CodeTimer::start();
         let mut results = Vec::new();
@@ -608,13 +638,9 @@ impl DbFormatChange {
         // Do the quick checks first, so we don't have to do this in every detailed check.
         results.push(Self::format_validity_checks_quick(db));
 
-        results.push(Self::check_for_duplicate_trees(db, cancel_receiver)?);
-        results.push(add_subtrees::subtree_format_validity_checks_detailed(
-            db,
-            cancel_receiver,
-        )?);
-        results.push(cache_genesis_roots::detailed_check(db, cancel_receiver)?);
-        results.push(fix_tree_key_type::detailed_check(db, cancel_receiver)?);
+        for upgrade in format_upgrades(None) {
+            results.push(upgrade.validate(db, cancel_receiver)?);
+        }
 
         // The work is done in the functions we just called.
         timer.finish(module_path!(), line!(), "format_validity_checks_detailed()");
@@ -626,66 +652,6 @@ impl DbFormatChange {
         }
 
         Ok(Ok(()))
-    }
-
-    /// Check that note commitment trees were correctly de-duplicated.
-    //
-    // TODO: move this method into an deduplication upgrade module file,
-    //       along with the upgrade code above.
-    #[allow(clippy::unwrap_in_result)]
-    fn check_for_duplicate_trees(
-        db: &ZebraDb,
-        cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
-    ) -> Result<Result<(), String>, CancelFormatChange> {
-        // Runtime test: make sure we removed all duplicates.
-        // We always run this test, even if the state has supposedly been upgraded.
-        let mut result = Ok(());
-
-        let mut prev_height = None;
-        let mut prev_tree = None;
-        for (height, tree) in db.sapling_tree_by_height_range(..) {
-            // Return early if the format check is cancelled.
-            if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
-                return Err(CancelFormatChange);
-            }
-
-            if prev_tree == Some(tree.clone()) {
-                result = Err(format!(
-                    "found duplicate sapling trees after running de-duplicate tree upgrade:\
-                     height: {height:?}, previous height: {:?}, tree root: {:?}",
-                    prev_height.unwrap(),
-                    tree.root()
-                ));
-                error!(?result);
-            }
-
-            prev_height = Some(height);
-            prev_tree = Some(tree);
-        }
-
-        let mut prev_height = None;
-        let mut prev_tree = None;
-        for (height, tree) in db.orchard_tree_by_height_range(..) {
-            // Return early if the format check is cancelled.
-            if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
-                return Err(CancelFormatChange);
-            }
-
-            if prev_tree == Some(tree.clone()) {
-                result = Err(format!(
-                    "found duplicate orchard trees after running de-duplicate tree upgrade:\
-                     height: {height:?}, previous height: {:?}, tree root: {:?}",
-                    prev_height.unwrap(),
-                    tree.root()
-                ));
-                error!(?result);
-            }
-
-            prev_height = Some(height);
-            prev_tree = Some(tree);
-        }
-
-        Ok(result)
     }
 
     /// Mark a newly created database with the current format version.
@@ -887,5 +853,14 @@ impl Drop for DbFormatChangeThreadHandle {
         } else {
             self.check_for_panics();
         }
+    }
+}
+
+#[test]
+fn format_upgrades_are_in_version_order() {
+    let mut last_version = Version::new(0, 0, 0);
+    for upgrade in format_upgrades(None) {
+        assert!(upgrade.version() > last_version);
+        last_version = upgrade.version();
     }
 }

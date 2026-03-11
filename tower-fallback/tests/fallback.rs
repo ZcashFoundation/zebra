@@ -1,3 +1,5 @@
+//! Tests for tower-fallback
+
 use tower::{service_fn, Service, ServiceExt};
 use tower_fallback::Fallback;
 

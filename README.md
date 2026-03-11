@@ -2,48 +2,29 @@
 
 ---
 
-[![Integration Tests](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-tests.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-tests.yml)
-[![CI OSes](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-unit-tests-os.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-unit-tests-os.yml)
-[![Continuous Delivery](https://github.com/ZcashFoundation/zebra/actions/workflows/cd-deploy-nodes-gcp.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/cd-deploy-nodes-gcp.yml)
+[![Unit Tests](https://github.com/ZcashFoundation/zebra/actions/workflows/tests-unit.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/tests-unit.yml)
+[![Lint](https://github.com/ZcashFoundation/zebra/actions/workflows/lint.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/lint.yml)
+[![Integration Tests (GCP)](https://github.com/ZcashFoundation/zebra/actions/workflows/zfnd-ci-integration-tests-gcp.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/zfnd-ci-integration-tests-gcp.yml)
 [![codecov](https://codecov.io/gh/ZcashFoundation/zebra/branch/main/graph/badge.svg)](https://codecov.io/gh/ZcashFoundation/zebra)
-[![Build docs](https://github.com/ZcashFoundation/zebra/actions/workflows/docs-deploy-firebase.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/docs-deploy-firebase.yml)
+[![Build docs](https://github.com/ZcashFoundation/zebra/actions/workflows/book.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/book.yml)
+[![Deploy Nodes (GCP)](https://github.com/ZcashFoundation/zebra/actions/workflows/zfnd-deploy-nodes-gcp.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/zfnd-deploy-nodes-gcp.yml)
 ![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)
 
-- [About](#about)
 - [Getting Started](#getting-started)
   - [Docker](#docker)
-  - [Manual Build](#manual-build)
+  - [Manual Install](#manual-install)
+- [CI/CD Architecture](#cicd-architecture)
 - [Documentation](#documentation)
 - [User support](#user-support)
 - [Security](#security)
 - [License](#license)
 
-## About
-
-[Zebra](https://zebra.zfnd.org/) is a Zcash full-node written in Rust.
-
-Zebra implements all the features required to reach Zcash network consensus, and
-the network stack is interoperable with `zcashd`.
-[Here](https://docs.rs/zebrad/latest/zebrad/index.html#zebra-advantages) are
-some benefits of Zebra.
-
-Zebra validates blocks and transactions, but needs extra software to generate
-them:
-
-- To generate transactions, [run Zebra with `lightwalletd`](https://zebra.zfnd.org/user/lightwalletd.html).
-- To generate blocks, use a mining pool or miner with Zebra's mining JSON-RPCs.
-  Currently Zebra can only send mining rewards to a single fixed address.
-  To distribute rewards, use mining software that creates its own distribution transactions,
-  a light wallet or the `zcashd` wallet.
-
-Please [join us on Discord](https://discord.gg/na6QZNd) if you'd like to find
-out more or get involved!
+[Zebra](https://zebra.zfnd.org/) is a Zcash full node written in Rust.
 
 ## Getting Started
 
-You can run Zebra using our Docker image or you can build it manually. Please
-see the [System Requirements](https://zebra.zfnd.org/user/requirements.html)
-section in the Zebra book for system requirements.
+You can run Zebra using our [Docker
+image](https://hub.docker.com/r/zfnd/zebra/tags) or you can install it manually.
 
 ### Docker
 
@@ -55,74 +36,86 @@ docker run zfnd/zebra:latest
 
 For more information, read our [Docker documentation](https://zebra.zfnd.org/user/docker.html).
 
-### Manual Build
+### Manual Install
 
 Building Zebra requires [Rust](https://www.rust-lang.org/tools/install),
 [libclang](https://clang.llvm.org/doxygen/group__CINDEX.html), and a C++
-compiler.
+compiler. Below are quick summaries for installing these dependencies.
 
-Zebra is tested with the latest `stable` Rust version. Earlier versions are not
-supported or tested. Any Zebra release can start depending on new features in the
-latest stable Rust.
-
-Around every 6 weeks, we release a [new Zebra version](https://github.com/ZcashFoundation/zebra/releases).
-
-Below are quick summaries for installing the dependencies on your machine.
-
-[//]: # "The empty line in the `summary` tag below is required for correct Markdown rendering."
+[//]: # "The empty lines in the `summary` tag below are required for correct Markdown rendering."
 <details><summary>
 
-#### General instructions for installing dependencies
+#### General Instructions for Installing Dependencies
+
 </summary>
 
 1. Install [`cargo` and `rustc`](https://www.rust-lang.org/tools/install).
-
 2. Install Zebra's build dependencies:
-
-   - **libclang** is a library that might have different names depending on your
-     package manager. Typical names are `libclang`, `libclang-dev`, `llvm`, or
-     `llvm-dev`.
-   - **clang** or another C++ compiler: `g++` (all platforms) or `Xcode` (macOS).
-   - **[`protoc`](https://grpc.io/docs/protoc-installation/)**
-
-> [!NOTE]
-> Zebra uses the `--experimental_allow_proto3_optional` flag with `protoc`
-> during compilation. This flag was introduced in [Protocol Buffers
-> v3.12.0](https://github.com/protocolbuffers/protobuf/releases/tag/v3.12.0)
-> released in May 16, 2020, so make sure you're not using a version of `protoc`
-> older than 3.12.
+   - **libclang**, which is a library that comes under various names, typically
+     `libclang`, `libclang-dev`, `llvm`, or `llvm-dev`;
+   - **clang** or another C++ compiler (`g++,` which is for all platforms or
+     `Xcode`, which is for macOS);
+   - **[`protoc`](https://grpc.io/docs/protoc-installation/)** (optional).
 
 </details>
 
-[//]: # "The empty line in the `summary` tag below is required for correct Markdown rendering."
+[//]: # "The empty lines in the `summary` tag below are required for correct Markdown rendering."
 <details><summary>
 
-#### Dependencies on Arch
+#### Dependencies on Arch Linux
+
 </summary>
 
 ```sh
 sudo pacman -S rust clang protobuf
 ```
 
-Note that the package `clang` includes `libclang` as well as the C++ compiler.
+Note that the package `clang` includes `libclang` as well. The GCC version on
+Arch Linux has a broken build script in a `rocksdb` dependency. A workaround is:
+
+```sh
+export CXXFLAGS="$CXXFLAGS -include cstdint"
+```
 
 </details>
 
-Once the dependencies are in place, you can build and install Zebra:
+Once you have the dependencies in place, you can install Zebra with:
 
 ```sh
 cargo install --locked zebrad
 ```
 
-You can start Zebra by
+Alternatively, you can install it from GitHub:
+
+```sh
+cargo install --git https://github.com/ZcashFoundation/zebra --tag v2.5.0 zebrad
+```
+
+You can start Zebra by running
 
 ```sh
 zebrad start
 ```
 
-Refer to the [Installing Zebra](https://zebra.zfnd.org/user/install.html) and
-[Running Zebra](https://zebra.zfnd.org/user/run.html) sections in the book for
-enabling optional features, detailed configuration and further details.
+Refer to the [Building and Installing
+Zebra](https://zebra.zfnd.org/user/install.html) and [Running
+Zebra](https://zebra.zfnd.org/user/run.html) sections in the book for enabling
+optional features, detailed configuration and further details.
+
+## CI/CD Architecture
+
+Zebra uses a comprehensive CI/CD system built on GitHub Actions to ensure code
+quality, maintain stability, and automate routine tasks. Our CI/CD
+infrastructure:
+
+- Runs automated tests on every PR and commit.
+- Manages deployments to various environments.
+- Handles cross-platform compatibility checks.
+- Automates release processes.
+
+For a detailed understanding of our CI/CD system, including workflow diagrams,
+infrastructure details, and best practices, see our [CI/CD Architecture
+Documentation](.github/workflows/README.md).
 
 ## Documentation
 
@@ -133,6 +126,9 @@ The Zcash Foundation maintains the following resources documenting Zebra:
   - [User Documentation](https://zebra.zfnd.org/user.html),
   - [Developer Documentation](https://zebra.zfnd.org/dev.html).
 
+  - User guides of note:
+    - [Zebra Health Endpoints](https://zebra.zfnd.org/user/health.html) — liveness/readiness checks for Kubernetes and load balancers
+
 - The [documentation of the public
   APIs](https://docs.rs/zebrad/latest/zebrad/#zebra-crates) for the latest
   releases of the individual Zebra crates.
@@ -142,27 +138,27 @@ The Zcash Foundation maintains the following resources documenting Zebra:
 
 ## User support
 
-For bug reports please [open a bug report ticket in the Zebra repository](https://github.com/ZcashFoundation/zebra/issues/new?assignees=&labels=C-bug%2C+S-needs-triage&projects=&template=bug_report.yml&title=%5BUser+reported+bug%5D%3A+).
-
-Alternatively by chat, [Join the Zcash Foundation Discord
-Server](https://discord.com/invite/aRgNRVwsM8) and find the #zebra-support
-channel.
-
-We maintain a list of known issues in the
+If Zebra doesn't behave the way you expected, [open an
+issue](https://github.com/ZcashFoundation/zebra/issues/new/choose). We regularly
+triage new issues and we will respond. We maintain a list of known issues in the
 [Troubleshooting](https://zebra.zfnd.org/user/troubleshooting.html) section of
 the book.
 
+If you want to chat with us, [Join the Zcash Foundation Discord
+Server](https://discord.com/invite/aRgNRVwsM8) and find the "zebra-support"
+channel.
+
 ## Security
 
-Zebra has a [responsible disclosure policy](https://github.com/ZcashFoundation/zebra/blob/main/SECURITY.md), which we encourage security researchers to follow.
+Zebra has a [responsible disclosure
+policy](https://github.com/ZcashFoundation/zebra/blob/main/SECURITY.md), which
+we encourage security researchers to follow.
 
 ## License
 
-Zebra is distributed under the terms of both the MIT license
-and the Apache License (Version 2.0).
+Zebra is distributed under the terms of both the MIT license and the Apache
+License (Version 2.0). Some Zebra crates are distributed under the [MIT license
+only](LICENSE-MIT), because some of their code was originally from MIT-licensed
+projects. See each crate's directory for details.
 
 See [LICENSE-APACHE](LICENSE-APACHE) and [LICENSE-MIT](LICENSE-MIT).
-
-Some Zebra crates are distributed under the [MIT license only](LICENSE-MIT),
-because some of their code was originally from MIT-licensed projects.
-See each crate's directory for details.

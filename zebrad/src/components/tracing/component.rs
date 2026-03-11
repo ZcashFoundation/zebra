@@ -6,6 +6,9 @@ use std::{
 };
 
 use abscissa_core::{Component, FrameworkError, Shutdown};
+
+use tokio::sync::watch;
+use tracing::{field::Visit, Level};
 use tracing_appender::non_blocking::{NonBlocking, NonBlockingBuilder, WorkerGuard};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{
@@ -13,7 +16,7 @@ use tracing_subscriber::{
     layer::SubscriberExt,
     reload::Handle,
     util::SubscriberInitExt,
-    EnvFilter,
+    EnvFilter, Layer,
 };
 use zebra_chain::parameters::Network;
 
@@ -65,6 +68,10 @@ pub struct Tracing {
     #[cfg(feature = "flamegraph")]
     flamegrapher: Option<flame::Grapher>,
 
+    /// The OpenTelemetry tracer provider, if enabled.
+    #[cfg(feature = "opentelemetry")]
+    otel_provider: Option<opentelemetry_sdk::trace::SdkTracerProvider>,
+
     /// Drop guard for worker thread of non-blocking logger,
     /// responsible for flushing any remaining logs when the program terminates.
     //
@@ -94,7 +101,8 @@ impl Tracing {
         let flame_root = &config.flamegraph;
 
         // Only show the intro for user-focused node server commands like `start`
-        if uses_intro {
+        // Also skip the intro for regtest, since it pollutes the QA test logs
+        if uses_intro && !network.is_regtest() {
             // If it's a terminal and color escaping is enabled: clear screen and
             // print Zebra logo (here `use_color` is being interpreted as
             // "use escape codes")
@@ -184,7 +192,13 @@ impl Tracing {
             #[cfg(not(feature = "filter-reload"))]
             let filter_handle = None;
 
-            let subscriber = logger.finish().with(ErrorLayer::default());
+            let warn_error_layer = LastWarnErrorLayer {
+                last_warn_error_sender: crate::application::LAST_WARN_ERROR_LOG_SENDER.clone(),
+            };
+            let subscriber = logger
+                .finish()
+                .with(warn_error_layer)
+                .with(ErrorLayer::default());
 
             (subscriber, filter_handle)
         };
@@ -257,6 +271,45 @@ impl Tracing {
         #[cfg(feature = "sentry")]
         let subscriber = subscriber.with(sentry::integrations::tracing::layer());
 
+        // OpenTelemetry layer - zero overhead when config.opentelemetry_endpoint is None
+        #[cfg(feature = "opentelemetry")]
+        let (otel_layer, otel_provider, otel_resolved_config) = {
+            // Check standard OTEL_* env vars as fallback (lower precedence than config/ZEBRA_*)
+            let endpoint = config
+                .opentelemetry_endpoint
+                .clone()
+                .or_else(|| std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok());
+            let service_name = config
+                .opentelemetry_service_name
+                .clone()
+                .or_else(|| std::env::var("OTEL_SERVICE_NAME").ok());
+            let sample_percent = config.opentelemetry_sample_percent.or_else(|| {
+                std::env::var("OTEL_TRACES_SAMPLER_ARG")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+            });
+
+            // Capture resolved values for logging
+            let resolved_config = (
+                endpoint.clone(),
+                service_name.clone().unwrap_or_else(|| "zebra".to_string()),
+                sample_percent.unwrap_or(100),
+            );
+
+            match super::otel::layer(endpoint.as_deref(), service_name.as_deref(), sample_percent) {
+                Ok((layer, provider)) => (layer, provider, resolved_config),
+                Err(e) => {
+                    tracing::warn!(
+                        ?e,
+                        "failed to initialize OpenTelemetry, traces will not be exported"
+                    );
+                    (None, None, resolved_config)
+                }
+            }
+        };
+        #[cfg(feature = "opentelemetry")]
+        let subscriber = subscriber.with(otel_layer);
+
         // spawn the console server in the background, and apply the console layer
         // TODO: set Builder::poll_duration_histogram_max() if needed
         #[cfg(all(feature = "tokio-console", tokio_unstable))]
@@ -306,6 +359,28 @@ impl Tracing {
             "installed tokio-console tracing layer",
         );
 
+        // Log OpenTelemetry status
+        #[cfg(feature = "opentelemetry")]
+        if otel_provider.is_some() {
+            let (ref endpoint, ref service_name, sample_percent) = otel_resolved_config;
+            info!(
+                ?endpoint,
+                %service_name,
+                sample_percent,
+                "installed OpenTelemetry tracing layer",
+            );
+        }
+
+        // Warning if OpenTelemetry is configured but feature not compiled
+        #[cfg(not(feature = "opentelemetry"))]
+        if config.opentelemetry_endpoint.is_some() {
+            warn!(
+                endpoint = ?config.opentelemetry_endpoint,
+                "unable to activate OpenTelemetry tracing: \
+                 enable the 'opentelemetry' feature when compiling zebrad",
+            );
+        }
+
         // Write any progress reports sent by other tasks to the terminal
         //
         // TODO: move this to its own module?
@@ -332,6 +407,8 @@ impl Tracing {
             initial_filter: filter,
             #[cfg(feature = "flamegraph")]
             flamegrapher,
+            #[cfg(feature = "opentelemetry")]
+            otel_provider,
             _guard: Some(worker_guard),
         })
     }
@@ -343,6 +420,13 @@ impl Tracing {
 
         #[cfg(feature = "flamegraph")]
         self.flamegrapher.take();
+
+        #[cfg(feature = "opentelemetry")]
+        if let Some(provider) = self.otel_provider.take() {
+            if let Err(e) = provider.shutdown() {
+                tracing::warn!(?e, "OpenTelemetry shutdown error");
+            }
+        }
 
         self._guard.take();
     }
@@ -424,5 +508,49 @@ impl Drop for Tracing {
     fn drop(&mut self) {
         #[cfg(feature = "progress-bar")]
         howudoin::disable();
+    }
+}
+
+// Visitor to extract only the "message" field from a log event.
+struct MessageVisitor {
+    message: Option<String>,
+}
+
+impl Visit for MessageVisitor {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        if field.name() == "message" {
+            self.message = Some(format!("{value:?}"));
+        }
+    }
+}
+
+// Layer to store the last WARN or ERROR log event.
+#[derive(Debug, Clone)]
+struct LastWarnErrorLayer {
+    last_warn_error_sender: watch::Sender<Option<(String, Level, chrono::DateTime<chrono::Utc>)>>,
+}
+
+impl<S> Layer<S> for LastWarnErrorLayer
+where
+    S: tracing::Subscriber + for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>,
+{
+    fn on_event(
+        &self,
+        event: &tracing::Event<'_>,
+        _ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        let level = *event.metadata().level();
+        let timestamp = chrono::Utc::now();
+
+        if level == Level::WARN || level == Level::ERROR {
+            let mut visitor = MessageVisitor { message: None };
+            event.record(&mut visitor);
+
+            if let Some(message) = visitor.message {
+                let _ = self
+                    .last_warn_error_sender
+                    .send(Some((message, level, timestamp)));
+            }
+        }
     }
 }

@@ -1,11 +1,12 @@
 //! Testing the end of support feature.
 
+#![allow(clippy::unwrap_in_result)]
+
 use std::time::Duration;
 
 use color_eyre::eyre::Result;
 
 use zebra_chain::{block::Height, chain_tip::mock::MockChainTip, parameters::Network};
-use zebra_consensus::ParameterCheckpoint as _;
 use zebrad::components::sync::end_of_support::{self, EOS_PANIC_AFTER, ESTIMATED_RELEASE_HEIGHT};
 
 // Estimated blocks per day with the current 75 seconds block spacing.
@@ -68,7 +69,7 @@ fn end_of_support_date() {
     ));
 }
 
-/// Check that the the end of support task is working.
+/// Check that the end of support task is working.
 #[tokio::test]
 #[tracing_test::traced_test]
 async fn end_of_support_task() -> Result<()> {

@@ -1,0 +1,7 @@
+---
+source: zebra-rpc/src/methods/tests/snapshot.rs
+expression: transactions
+---
+[
+  "5f2702708af1d8727ad3f0da3ba74de14019232499c0324ddce236cf97e32548"
+]

@@ -7,11 +7,12 @@ use thiserror::Error;
 
 use crate::{
     fmt::HexDebug,
+    parameters::Network,
     serialization::{TrustedPreallocate, MAX_PROTOCOL_MESSAGE_LEN},
     work::{difficulty::CompactDifficulty, equihash::Solution},
 };
 
-use super::{merkle, Hash, Height};
+use super::{merkle, Commitment, CommitmentError, Hash, Height};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -58,7 +59,7 @@ pub struct Header {
     /// without incrementing the block [`version`](Self::version). Therefore,
     /// this field cannot be parsed without the network and height. Use
     /// [`Block::commitment`](super::Block::commitment) to get the parsed
-    /// [`Commitment`](super::Commitment).
+    /// [`Commitment`].
     pub commitment_bytes: HexDebug<[u8; 32]>,
 
     /// The block timestamp is a Unix epoch time (UTC) when the miner
@@ -122,6 +123,16 @@ impl Header {
                 two_hours_in_the_future,
             ))?
         }
+    }
+
+    /// Get the parsed block [`Commitment`] for this header.
+    /// Its interpretation depends on the given `network` and block `height`.
+    pub fn commitment(
+        &self,
+        network: &Network,
+        height: Height,
+    ) -> Result<Commitment, CommitmentError> {
+        Commitment::from_bytes(*self.commitment_bytes, network, height)
     }
 
     /// Compute the hash of this header.

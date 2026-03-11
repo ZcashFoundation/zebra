@@ -2,7 +2,7 @@
 
 use std::{
     cmp::{max, Ordering},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use chrono::Utc;
@@ -163,11 +163,11 @@ pub struct MetaAddr {
     ///
     /// The exact meaning depends on `last_connection_state`:
     ///   - `Responded`: the services advertised by this peer, the last time we
-    ///      performed a handshake with it
+    ///     performed a handshake with it
     ///   - `NeverAttempted`: the unverified services advertised by another peer,
-    ///      then gossiped by the peer that sent us this address
+    ///     then gossiped by the peer that sent us this address
     ///   - `Failed` or `AttemptPending`: unverified services via another peer,
-    ///      or services advertised in a previous handshake
+    ///     or services advertised in a previous handshake
     ///
     /// ## Security
     ///
@@ -189,6 +189,17 @@ pub struct MetaAddr {
     /// See the [`MetaAddr::last_seen`] method for details.
     last_response: Option<DateTime32>,
 
+    /// The last measured round-trip time (RTT) for this peer, if available.
+    ///
+    /// This value is updated when the peer responds to a ping (Pong).
+    rtt: Option<Duration>,
+
+    /// The last time we sent a ping to this peer.
+    ///
+    /// This value is updated each time a heartbeat ping is sent,
+    /// even if we never receive a response.
+    ping_sent_at: Option<Instant>,
+
     /// The last time we tried to open an outbound connection to this peer.
     ///
     /// See the [`MetaAddr::last_attempt`] method for details.
@@ -199,11 +210,19 @@ pub struct MetaAddr {
     /// See the [`MetaAddr::last_failure`] method for details.
     last_failure: Option<Instant>,
 
+    /// The misbehavior score for this peer.
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(value = 0))]
+    misbehavior_score: u32,
+
     /// The outcome of our most recent communication attempt with this peer.
     //
     // TODO: move the time and services fields into PeerAddrState?
     //       then some fields could be required in some states
     pub(crate) last_connection_state: PeerAddrState,
+
+    /// Whether this peer address was added to the address book
+    /// when the peer made an inbound connection.
+    is_inbound: bool,
 }
 
 /// A change to an existing `MetaAddr`.
@@ -260,6 +279,17 @@ pub enum MetaAddrChange {
         )]
         addr: PeerSocketAddr,
         services: PeerServices,
+        is_inbound: bool,
+    },
+
+    /// Updates an existing `MetaAddr` when we send a ping to a peer.
+    UpdatePingSent {
+        #[cfg_attr(
+            any(test, feature = "proptest-impl"),
+            proptest(strategy = "canonical_peer_addr_strategy()")
+        )]
+        addr: PeerSocketAddr,
+        ping_sent_at: Instant,
     },
 
     /// Updates an existing `MetaAddr` when a peer responds with a message.
@@ -269,6 +299,7 @@ pub enum MetaAddrChange {
             proptest(strategy = "canonical_peer_addr_strategy()")
         )]
         addr: PeerSocketAddr,
+        rtt: Option<Duration>,
     },
 
     /// Updates an existing `MetaAddr` when a peer fails.
@@ -279,6 +310,14 @@ pub enum MetaAddrChange {
         )]
         addr: PeerSocketAddr,
         services: Option<PeerServices>,
+    },
+
+    /// Updates an existing `MetaAddr` when a peer misbehaves such as by advertising
+    /// semantically invalid blocks or transactions.
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    UpdateMisbehavior {
+        addr: PeerSocketAddr,
+        score_increment: u32,
     },
 }
 
@@ -303,9 +342,13 @@ impl MetaAddr {
             services: Some(untrusted_services),
             untrusted_last_seen: Some(untrusted_last_seen),
             last_response: None,
+            rtt: None,
+            ping_sent_at: None,
             last_attempt: None,
             last_failure: None,
             last_connection_state: NeverAttemptedGossiped,
+            misbehavior_score: 0,
+            is_inbound: false,
         }
     }
 
@@ -338,10 +381,23 @@ impl MetaAddr {
     /// - malicious peers could interfere with other peers' [`AddressBook`](crate::AddressBook)
     ///   state, or
     /// - Zebra could advertise unreachable addresses to its own peers.
-    pub fn new_connected(addr: PeerSocketAddr, services: &PeerServices) -> MetaAddrChange {
+    pub fn new_connected(
+        addr: PeerSocketAddr,
+        services: &PeerServices,
+        is_inbound: bool,
+    ) -> MetaAddrChange {
         UpdateConnected {
             addr: canonical_peer_addr(*addr),
             services: *services,
+            is_inbound,
+        }
+    }
+
+    /// Returns a [`MetaAddrChange::UpdatePingSent`] for a peer that we just sent a ping to.
+    pub fn new_ping_sent(addr: PeerSocketAddr, ping_sent_at: Instant) -> MetaAddrChange {
+        UpdatePingSent {
+            addr: canonical_peer_addr(*addr),
+            ping_sent_at,
         }
     }
 
@@ -356,9 +412,10 @@ impl MetaAddr {
     /// - malicious peers could interfere with other peers' [`AddressBook`](crate::AddressBook)
     ///   state, or
     /// - Zebra could advertise unreachable addresses to its own peers.
-    pub fn new_responded(addr: PeerSocketAddr) -> MetaAddrChange {
+    pub fn new_responded(addr: PeerSocketAddr, rtt: Option<Duration>) -> MetaAddrChange {
         UpdateResponded {
             addr: canonical_peer_addr(*addr),
+            rtt,
         }
     }
 
@@ -419,6 +476,21 @@ impl MetaAddr {
     /// incorrect due to clock skew, or buggy or malicious peers.
     pub fn last_seen(&self) -> Option<DateTime32> {
         self.last_response.or(self.untrusted_last_seen)
+    }
+
+    /// Returns whether the address is from an inbound peer connection
+    pub fn is_inbound(&self) -> bool {
+        self.is_inbound
+    }
+
+    /// Returns the round-trip time (RTT) for this peer, if available.
+    pub fn rtt(&self) -> Option<Duration> {
+        self.rtt
+    }
+
+    /// Returns the time this peer was last pinged, if available.
+    pub fn ping_sent_at(&self) -> Option<Instant> {
+        self.ping_sent_at
     }
 
     /// Returns the unverified "last seen time" gossiped by the remote peer that
@@ -623,12 +695,22 @@ impl MetaAddr {
         }
     }
 
+    /// Returns a score of misbehavior encountered in a peer at this address.
+    pub fn misbehavior(&self) -> u32 {
+        self.misbehavior_score
+    }
+
     /// Return a sanitized version of this `MetaAddr`, for sending to a remote peer.
     ///
     /// Returns `None` if this `MetaAddr` should not be sent to remote peers.
     #[allow(clippy::unwrap_in_result)]
     pub fn sanitize(&self, network: &Network) -> Option<MetaAddr> {
         if !self.last_known_info_is_valid_for_outbound(network) {
+            return None;
+        }
+
+        // Avoid responding to GetAddr requests with addresses of misbehaving peers.
+        if self.misbehavior_score != 0 || self.is_inbound {
             return None;
         }
 
@@ -652,9 +734,13 @@ impl MetaAddr {
             untrusted_last_seen: Some(last_seen),
             last_response: None,
             // these fields aren't sent to the remote peer, but sanitize them anyway
+            rtt: None,
+            ping_sent_at: None,
             last_attempt: None,
             last_failure: None,
             last_connection_state: NeverAttemptedGossiped,
+            misbehavior_score: 0,
+            is_inbound: false,
         })
     }
 }
@@ -678,8 +764,10 @@ impl MetaAddrChange {
             | NewLocal { addr, .. }
             | UpdateAttempt { addr }
             | UpdateConnected { addr, .. }
+            | UpdatePingSent { addr, .. }
             | UpdateResponded { addr, .. }
-            | UpdateFailed { addr, .. } => *addr,
+            | UpdateFailed { addr, .. }
+            | UpdateMisbehavior { addr, .. } => *addr,
         }
     }
 
@@ -694,8 +782,10 @@ impl MetaAddrChange {
             | NewLocal { addr, .. }
             | UpdateAttempt { addr }
             | UpdateConnected { addr, .. }
+            | UpdatePingSent { addr, .. }
             | UpdateResponded { addr, .. }
-            | UpdateFailed { addr, .. } => *addr = new_addr,
+            | UpdateFailed { addr, .. }
+            | UpdateMisbehavior { addr, .. } => *addr = new_addr,
         }
     }
 
@@ -711,8 +801,10 @@ impl MetaAddrChange {
             NewLocal { .. } => Some(PeerServices::NODE_NETWORK),
             UpdateAttempt { .. } => None,
             UpdateConnected { services, .. } => Some(*services),
+            UpdatePingSent { .. } => None,
             UpdateResponded { .. } => None,
             UpdateFailed { services, .. } => *services,
+            UpdateMisbehavior { .. } => None,
         }
     }
 
@@ -728,8 +820,10 @@ impl MetaAddrChange {
             NewLocal { .. } => Some(now),
             UpdateAttempt { .. }
             | UpdateConnected { .. }
+            | UpdatePingSent { .. }
             | UpdateResponded { .. }
-            | UpdateFailed { .. } => None,
+            | UpdateFailed { .. }
+            | UpdateMisbehavior { .. } => None,
         }
     }
 
@@ -760,7 +854,11 @@ impl MetaAddrChange {
             // peer address. So the attempt time is a lower bound for the actual
             // handshake time.
             UpdateAttempt { .. } => Some(now),
-            UpdateConnected { .. } | UpdateResponded { .. } | UpdateFailed { .. } => None,
+            UpdateConnected { .. }
+            | UpdatePingSent { .. }
+            | UpdateResponded { .. }
+            | UpdateFailed { .. }
+            | UpdateMisbehavior { .. } => None,
         }
     }
 
@@ -774,7 +872,32 @@ impl MetaAddrChange {
             // - the peer will appear to be live for longer, delaying future
             //   reconnection attempts.
             UpdateConnected { .. } | UpdateResponded { .. } => Some(now),
-            UpdateFailed { .. } => None,
+            UpdateFailed { .. } | UpdateMisbehavior { .. } => None,
+            UpdatePingSent { .. } => None,
+        }
+    }
+
+    /// Return the timestamp when a ping was last sent, if available.
+    pub fn ping_sent(&self) -> Option<Instant> {
+        match self {
+            UpdatePingSent { ping_sent_at, .. } => Some(*ping_sent_at),
+            _ => None,
+        }
+    }
+
+    /// Return the RTT for this change, if available
+    pub fn rtt(&self) -> Option<Duration> {
+        match self {
+            UpdateResponded { rtt, .. } => *rtt,
+            _ => None,
+        }
+    }
+
+    /// Returns the timestamp when a ping was last sent, if available.
+    pub fn ping_sent_at(&self) -> Option<Instant> {
+        match self {
+            UpdatePingSent { ping_sent_at, .. } => Some(*ping_sent_at),
+            _ => None,
         }
     }
 
@@ -786,13 +909,14 @@ impl MetaAddrChange {
             | NewLocal { .. }
             | UpdateAttempt { .. }
             | UpdateConnected { .. }
+            | UpdatePingSent { .. }
             | UpdateResponded { .. } => None,
             // If there is a large delay applying this change, then:
             // - the peer might stay in the `AttemptPending` or `Responded`
             //   states for longer, and
             // - the peer will appear to be used for longer, delaying future
             //   reconnection attempts.
-            UpdateFailed { .. } => Some(now),
+            UpdateFailed { .. } | UpdateMisbehavior { .. } => Some(now),
         }
     }
 
@@ -804,7 +928,12 @@ impl MetaAddrChange {
             // local listeners get sanitized, so the state doesn't matter here
             NewLocal { .. } => NeverAttemptedGossiped,
             UpdateAttempt { .. } => AttemptPending,
-            UpdateConnected { .. } | UpdateResponded { .. } => Responded,
+            UpdateConnected { .. }
+            // Sending a ping is an interaction with a connected peer, but does not indicate new liveness.
+            // Peers stay in Responded once connected, so we keep them in that state for UpdatePingSent.
+            | UpdatePingSent { .. }
+            | UpdateResponded { .. }
+            | UpdateMisbehavior { .. } => Responded,
             UpdateFailed { .. } => Failed,
         }
     }
@@ -816,9 +945,32 @@ impl MetaAddrChange {
             services: self.untrusted_services(),
             untrusted_last_seen: self.untrusted_last_seen(local_now),
             last_response: self.last_response(local_now),
+            rtt: self.rtt(),
+            ping_sent_at: self.ping_sent_at(),
             last_attempt: self.last_attempt(instant_now),
             last_failure: self.last_failure(instant_now),
             last_connection_state: self.peer_addr_state(),
+            misbehavior_score: self.misbehavior_score(),
+            is_inbound: self.is_inbound(),
+        }
+    }
+
+    /// Returns the misbehavior score increment for the current change.
+    pub fn misbehavior_score(&self) -> u32 {
+        match self {
+            MetaAddrChange::UpdateMisbehavior {
+                score_increment, ..
+            } => *score_increment,
+            _ => 0,
+        }
+    }
+
+    /// Returns whether this change was created for a new inbound connection.
+    pub fn is_inbound(&self) -> bool {
+        if let MetaAddrChange::UpdateConnected { is_inbound, .. } = self {
+            *is_inbound
+        } else {
+            false
         }
     }
 
@@ -838,9 +990,13 @@ impl MetaAddrChange {
             services: self.untrusted_services(),
             untrusted_last_seen: self.untrusted_last_seen(local_now),
             last_response: self.last_response(local_now),
+            rtt: None,
+            ping_sent_at: None,
             last_attempt: None,
             last_failure: None,
             last_connection_state: self.peer_addr_state(),
+            misbehavior_score: self.misbehavior_score(),
+            is_inbound: self.is_inbound(),
         }
     }
 
@@ -902,10 +1058,11 @@ impl MetaAddrChange {
 
         let previous_has_been_attempted = !previous.last_connection_state.is_never_attempted();
         let change_to_never_attempted = self.peer_addr_state().is_never_attempted();
+        let is_misbehavior_update = self.misbehavior_score() != 0;
 
         // Invalid changes
 
-        if change_to_never_attempted && previous_has_been_attempted {
+        if change_to_never_attempted && previous_has_been_attempted && !is_misbehavior_update {
             // Existing entry has been attempted, change is NeverAttempted
             // - ignore the change
             //
@@ -916,7 +1073,7 @@ impl MetaAddrChange {
             return None;
         }
 
-        if change_is_out_of_order && !change_is_concurrent {
+        if change_is_out_of_order && !change_is_concurrent && !is_misbehavior_update {
             // Change is significantly out of order: ignore it.
             //
             // # Security
@@ -926,7 +1083,7 @@ impl MetaAddrChange {
             return None;
         }
 
-        if change_is_concurrent && !connection_has_more_progress {
+        if change_is_concurrent && !connection_has_more_progress && !is_misbehavior_update {
             // Change is close together in time, and it would revert the connection to an earlier
             // state.
             //
@@ -989,9 +1146,13 @@ impl MetaAddrChange {
                     .or_else(|| self.untrusted_last_seen(local_now)),
                 // The peer has not been attempted, so these fields must be None
                 last_response: None,
+                rtt: None,
+                ping_sent_at: None,
                 last_attempt: None,
                 last_failure: None,
                 last_connection_state: self.peer_addr_state(),
+                misbehavior_score: previous.misbehavior_score + self.misbehavior_score(),
+                is_inbound: previous.is_inbound || self.is_inbound(),
             })
         } else {
             // Existing entry and change are both Attempt, Responded, Failed,
@@ -1009,11 +1170,15 @@ impl MetaAddrChange {
                 // This is a wall clock time, but we already checked that responses are in order.
                 // Even if the wall clock time has jumped, we want to use the latest time.
                 last_response: self.last_response(local_now).or(previous.last_response),
+                rtt: self.rtt(),
+                ping_sent_at: self.ping_sent_at(),
                 // These are monotonic times, we already checked the responses are in order.
                 last_attempt: self.last_attempt(instant_now).or(previous.last_attempt),
                 last_failure: self.last_failure(instant_now).or(previous.last_failure),
                 // Replace the state with the updated state.
                 last_connection_state: self.peer_addr_state(),
+                misbehavior_score: previous.misbehavior_score + self.misbehavior_score(),
+                is_inbound: previous.is_inbound || self.is_inbound(),
             })
         }
     }

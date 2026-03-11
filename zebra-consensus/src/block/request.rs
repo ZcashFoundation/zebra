@@ -9,8 +9,6 @@ use zebra_chain::block::Block;
 pub enum Request {
     /// Performs semantic validation, then asks the state to perform contextual validation and commit the block
     Commit(Arc<Block>),
-
-    #[cfg(feature = "getblocktemplate-rpcs")]
     /// Performs semantic validation but skips checking proof of work,
     /// then asks the state to perform contextual validation.
     /// Does not commit the block to the state.
@@ -22,8 +20,6 @@ impl Request {
     pub fn block(&self) -> Arc<Block> {
         Arc::clone(match self {
             Request::Commit(block) => block,
-
-            #[cfg(feature = "getblocktemplate-rpcs")]
             Request::CheckProposal(block) => block,
         })
     }
@@ -32,8 +28,6 @@ impl Request {
     pub fn is_proposal(&self) -> bool {
         match self {
             Request::Commit(_) => false,
-
-            #[cfg(feature = "getblocktemplate-rpcs")]
             Request::CheckProposal(_) => true,
         }
     }

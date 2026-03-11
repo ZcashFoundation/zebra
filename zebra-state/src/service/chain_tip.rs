@@ -14,13 +14,13 @@ use tracing::{field, instrument};
 
 use zebra_chain::{
     block,
-    chain_tip::{BestTipChanged, ChainTip},
+    chain_tip::ChainTip,
     parameters::{Network, NetworkUpgrade},
     transaction::{self, Transaction},
 };
 
 use crate::{
-    request::ContextuallyVerifiedBlock, service::watch_receiver::WatchReceiver,
+    request::ContextuallyVerifiedBlock, service::watch_receiver::WatchReceiver, BoxError,
     CheckpointVerifiedBlock, SemanticallyVerifiedBlock,
 };
 
@@ -117,7 +117,7 @@ impl From<SemanticallyVerifiedBlock> for ChainTipBlock {
             transaction_hashes,
             // FIXME: Is it correct not to use sighashes here? Should we add transaction_sighashes to ChainTipBlock?
             transaction_sighashes: _,
-            deferred_balance: _,
+            deferred_pool_balance_change: _,
         } = prepared;
 
         Self {
@@ -174,6 +174,15 @@ impl ChainTipSender {
         sender.update(initial_tip);
 
         (sender, current, change)
+    }
+
+    /// Returns a clone of itself for sending finalized tip changes,
+    /// used by `TrustedChainSync` in `zebra-rpc`.
+    pub fn finalized_sender(&self) -> Self {
+        Self {
+            use_non_finalized_tip: false,
+            sender: self.sender.clone(),
+        }
     }
 
     /// Update the latest finalized tip.
@@ -406,8 +415,8 @@ impl ChainTip for LatestChainTip {
     ///
     /// Marks the state tip as seen when the returned future completes.
     #[instrument(skip(self))]
-    fn best_tip_changed(&mut self) -> BestTipChanged {
-        BestTipChanged::new(self.receiver.changed().err_into())
+    async fn best_tip_changed(&mut self) -> Result<(), BoxError> {
+        self.receiver.changed().err_into().await
     }
 
     /// Mark the current best state tip as seen.
@@ -545,6 +554,11 @@ impl ChainTipChange {
         self.last_change_hash = Some(block_hash);
 
         Some(tip_action)
+    }
+
+    /// Sets the `last_change_hash` as the provided hash.
+    pub fn mark_last_change_hash(&mut self, hash: block::Hash) {
+        self.last_change_hash = Some(hash);
     }
 
     /// Return an action based on `block` and the last change we returned.

@@ -9,7 +9,8 @@ use thiserror::Error;
 use proptest_derive::Arbitrary;
 
 use super::storage::{
-    ExactTipRejectionError, SameEffectsChainRejectionError, SameEffectsTipRejectionError,
+    ExactTipRejectionError, NonStandardTransactionError, SameEffectsChainRejectionError,
+    SameEffectsTipRejectionError,
 };
 
 /// Mempool errors.
@@ -23,7 +24,9 @@ pub enum MempoolError {
     ///
     /// Note that the mempool caches this error. See [`super::storage::Storage`]
     /// for more details.
-    #[error("the transaction will be rejected from the mempool until the next chain tip block")]
+    #[error(
+        "the transaction will be rejected from the mempool until the next chain tip block: {0}"
+    )]
     StorageExactTip(#[from] ExactTipRejectionError),
 
     /// Transaction rejected based on its effects (spends, outputs, transaction
@@ -33,7 +36,7 @@ pub enum MempoolError {
     ///
     /// Note that the mempool caches this error. See [`super::storage::Storage`]
     /// for more details.
-    #[error("any transaction with the same effects will be rejected from the mempool until the next chain tip block")]
+    #[error("any transaction with the same effects will be rejected from the mempool until the next chain tip block: {0}")]
     StorageEffectsTip(#[from] SameEffectsTipRejectionError),
 
     /// Transaction rejected based on its effects (spends, outputs, transaction
@@ -44,7 +47,7 @@ pub enum MempoolError {
     ///
     /// Note that the mempool caches this error. See [`super::storage::Storage`]
     /// for more details.
-    #[error("any transaction with the same effects will be rejected from the mempool until a chain reset")]
+    #[error("any transaction with the same effects will be rejected from the mempool until a chain reset: {0}")]
     StorageEffectsChain(#[from] SameEffectsChainRejectionError),
 
     /// Transaction rejected because the mempool already contains another
@@ -72,4 +75,8 @@ pub enum MempoolError {
     /// Zebra enables the mempool when it is at the chain tip.
     #[error("mempool is disabled since synchronization is behind the chain tip")]
     Disabled,
+
+    /// The transaction is non-standard.
+    #[error("transaction is non-standard")]
+    NonStandardTransaction(#[from] NonStandardTransactionError),
 }
