@@ -255,7 +255,7 @@ fn test_get_block_1() -> Result<(), Box<dyn std::error::Error>> {
         block_commitments,
         final_sapling_root,
         final_orchard_root,
-        chain_history_root.clone(),
+        *chain_history_root,
         tx.iter()
             .map(|h| GetBlockTransaction::Hash(zebra_chain::transaction::Hash(*h)))
             .collect(),
@@ -333,7 +333,7 @@ fn test_get_block_2() -> Result<(), Box<dyn std::error::Error>> {
         block_commitments,
         final_sapling_root,
         final_orchard_root,
-        chain_history_root.clone(),
+        *chain_history_root,
         tx.iter()
             .cloned()
             .map(GetBlockTransaction::Object)

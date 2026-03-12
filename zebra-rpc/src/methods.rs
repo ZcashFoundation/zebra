@@ -66,11 +66,11 @@ use zebra_chain::{
     block::{self, Block, Commitment, Height, SerializedBlock, TryIntoHeight},
     chain_sync_status::ChainSyncStatus,
     chain_tip::{ChainTip, NetworkChainTipHeightEstimator},
-    history_tree::HistoryNodeData,
     parameters::{
         subsidy::{block_subsidy, funding_stream_values, miner_subsidy, FundingStreamReceiver},
         ConsensusBranchId, Network, NetworkUpgrade, POW_AVERAGING_WINDOW,
     },
+    primitives::zcash_history::HistoryNodeData,
     serialization::{BytesInDisplayOrder, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
     subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx},
@@ -2270,25 +2270,37 @@ where
             } else {
                 let node = HistoryNodeData::from_entry(&network, &entry, network_upgrade)
                     .expect("The network upgrade must be active here");
-                let mut total_work: [u8; 32] = bytemuck::cast(node.subtree_total_work().0);
-                total_work.reverse();
+                let mut subtree_total_work: [u8; 32] = bytemuck::cast(node.subtree_total_work().0);
+                let mut subtree_commitment = node.subtree_commitment();
+                let mut start_sapling_root = node.start_sapling_root();
+                let mut end_sapling_root = node.end_sapling_root();
+                let mut start_orchard_root = node.start_orchard_root();
+                let mut end_orchard_root = node.end_orchard_root();
+                subtree_total_work.reverse();
+                subtree_commitment.reverse();
+                start_sapling_root.reverse();
+                end_sapling_root.reverse();
+                start_orchard_root.reverse();
+                end_orchard_root.reverse();
+
                 let response_object = GetHistoryNodeObject {
-                    subtree_commitment: node.subtree_commitment(),
+                    subtree_commitment,
                     consensus_branch_id: ConsensusBranchIdHex(node.consensus_branch_id().into()),
                     start_time: node.start_time(),
                     end_time: node.end_time(),
                     start_target: node.start_target(),
                     end_target: node.end_target(),
-                    start_sapling_root: node.start_sapling_root(),
-                    end_sapling_root: node.end_sapling_root(),
-                    subtree_total_work: total_work,
+                    start_sapling_root,
+                    end_sapling_root,
+                    subtree_total_work,
                     start_height: node.start_height(),
                     end_height: node.end_height(),
                     sapling_tx: node.sapling_tx(),
-                    start_orchard_root: node.start_orchard_root(),
-                    end_orchard_root: node.end_orchard_root(),
+                    start_orchard_root,
+                    end_orchard_root,
                     orchard_tx: node.orchard_tx(),
                 };
+
                 GetHistoryNode::Object(Box::new(response_object))
             };
             Ok(response)
