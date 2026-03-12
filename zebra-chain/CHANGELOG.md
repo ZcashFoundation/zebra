@@ -9,32 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [6.0.0] - 2026-03-12
 
+### Breaking Changes
+
+- Removed `zebra_chain::diagnostic::CodeTimer::finish` — replaced by `finish_desc` and `finish_inner`
+- Removed `SubsidyError::SumOverflow` variant — replaced by `SubsidyError::Overflow` and `SubsidyError::Underflow`
+- Removed `zebra_chain::parameters::subsidy::num_halvings` — replaced by `halving`
+- Removed `VerifiedUnminedTx::sigops` field — replaced by `legacy_sigop_count`
+- Removed `transparent::Output::new_coinbase` — replaced by `Output::new`
+- Changed `block_subsidy` parameter renamed from `network` to `net` (no behavioral change)
+- Changed `VerifiedUnminedTx::new` — added required `spent_outputs: Arc<Vec<Output>>` parameter
+
 ### Added
 
-- `amount::Amount::is_zero`
-- `parameters::network::subsidy::constants` module.
-- `impl From<block::Height> for u64`
-- `impl From<block::Height> for u32`
-- `parameters::network::testnet::founder_address_list`
-- `parameters::network::subsidy::founders_reward`
-- `parameters::network::subsidy::founders_reward_address`
-- `diagnostics::CodeTimer::{start_desc, finish_desc, finish_inner}`
-
-### Changed
-
-- `parameters::network::subsidy::SubsidyError::` has new variants:
-  `FoundersRewardNotFound` and `Underflow`, and the variant `SumOverflow` was
-  renamed to `Overflow`.
-- `parameters::network::subsidy::num_halvings` was renamed to `halving`.
-- `transparent::Output::new_coinbase` was renamed to `new`.
-- `transaction::VerifiedUnminedTx::new` now takes 4 parameters instead of 3.
-- `transaction::VerifiedUnminedTx` replaced the public field `sigops` with
-  `legacy_sigop_count`, and added the public field `spent_outputs`.
-- `NoteCommitmentSubtreeIndex` now derives `schemars::JsonSchema`
-
-### Removed
-
-- `diagnostic::CodeTimer::finish`
+- Added `Amount::is_zero(&self) -> bool`
+- Added `From<Height> for u32` and `From<Height> for u64` conversions
+- Added `CodeTimer::start_desc(description: &'static str) -> Self`
+- Added `CodeTimer::finish_desc(self, description: &'static str)`
+- Added `CodeTimer::finish_inner` with optional file/line and description
+- Added `SubsidyError::FoundersRewardNotFound`, `SubsidyError::Overflow`, `SubsidyError::Underflow` variants
+- Added `founders_reward(net, height) -> Amount` — returns the founders reward amount for a given height
+- Added `founders_reward_address(net, height) -> Option<Address>` — returns the founders reward address for a given height
+- Added `halving(height, network) -> u32` — replaces removed `num_halvings`
+- Added `Network::founder_address_list(&self) -> &[&str]`
+- Added `NetworkUpgradeIter` struct
+- Added `VerifiedUnminedTx::legacy_sigop_count: u32` field
+- Added `VerifiedUnminedTx::spent_outputs: Arc<Vec<Output>>` field
+- Added `transparent::Output::new(amount, lock_script) -> Output` — replaces removed `new_coinbase`
 
 ## [5.0.0] - 2026-02-05
 
