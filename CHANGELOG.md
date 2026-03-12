@@ -10,9 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 ## [Zebra 4.2.0](https://github.com/ZcashFoundation/zebra/releases/tag/v4.2.0) - 2026-03-12
 
 This release expands Zebra’s RPC functionality, improves mempool policy,
-and add more state querying capabilities. It also replaces the legacy
-OpenAPI documentation with OpenRPC and migrates the Python QA framework
-to the standalone `integration-tests` repository.
+adds more state querying capabilities, and replaces the legacy OpenAPI
+documentation with OpenRPC.
 
 ### Added
 
@@ -20,7 +19,6 @@ to the standalone `integration-tests` repository.
 - Founders reward addresses ([#10188](https://github.com/ZcashFoundation/zebra/pull/10188))
 - Support for pre-Canopy block subsidies ([#10191](https://github.com/ZcashFoundation/zebra/pull/10191))
 - AI contribution policy and agent guidance files ([#10318](https://github.com/ZcashFoundation/zebra/pull/10318))
-- Documentation CI checks ([#10204](https://github.com/ZcashFoundation/zebra/pull/10204))
 - `rpc.discover` endpoint ([#10201](https://github.com/ZcashFoundation/zebra/pull/10201))
 - `gettxout` RPC method ([#10235](https://github.com/ZcashFoundation/zebra/pull/10235))
 - `AnyChainBlock` state request for querying blocks in side chains ([#10325](https://github.com/ZcashFoundation/zebra/pull/10325))
