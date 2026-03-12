@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.0.0] - 2026-03-12
+
 ### Added
 
 - `amount::Amount::is_zero`
@@ -25,7 +27,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   renamed to `Overflow`.
 - `parameters::network::subsidy::num_halvings` was renamed to `halving`.
 - `transparent::Output::new_coinbase` was renamed to `new`.
-- `NoteCommitmentSubtreeIndex` now derives `schemars::JsonSchema` (#10201)
+- `transaction::VerifiedUnminedTx::new` now takes 4 parameters instead of 3.
+- `transaction::VerifiedUnminedTx` replaced the public field `sigops` with
+  `legacy_sigop_count`, and added the public field `spent_outputs`.
+- `NoteCommitmentSubtreeIndex` now derives `schemars::JsonSchema`
+
+### Removed
+
+- `diagnostic::CodeTimer::finish`
 
 ## [5.0.0] - 2026-02-05
 

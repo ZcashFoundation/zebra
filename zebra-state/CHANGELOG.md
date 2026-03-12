@@ -7,10 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.0.0] - 2026-03-12
+
+### Breaking Changes
+
+- `zebra-chain` bumped to `6.0.0`
+- `Config` added the public field `debug_skip_non_finalized_state_backup_task`
+- `NonFinalizedState::with_backup` now takes 5 parameters instead of 4
+- Added new variants to public enums:
+  - `ReadRequest::IsTransparentOutputSpent`
+  - `ReadResponse::IsTransparentOutputSpent`
+  - `Request::AnyChainBlock`
+  - `ReadRequest::AnyChainBlock`
+
 ### Added
 
-- Added `ReadRequest::IsTransparentOutputSpent` and `ReadResponse::IsTransparentOutputSpent` to the read state service ([#10235](https://github.com/ZcashFoundation/zebra/pull/10235))
-- Added `{ReadRequest, Request}::AnyChainBlock` to the read state service ([#10325](https://github.com/ZcashFoundation/zebra/pull/10325))
+- Added `ReadRequest::IsTransparentOutputSpent` and `ReadResponse::IsTransparentOutputSpent` to the read state service
+- Added `{ReadRequest, Request}::AnyChainBlock` to the read state service
 
 ## [4.0.0] - 2026-02-05
 

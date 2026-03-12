@@ -7,7 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- The `openapi-generator` tool was removed in favor of OpenRPC (#10297, #10201).
+## [4.0.0] - 2026-03-12
+
+### Breaking Changes
+
+- `zebra-chain` was bumped to 6.0.0
+- `zebra-rpc` was bumped to 6.0.0
+- `zebra-node-services` bumped to 4.0.0
+
+### Removed
+
+- Removed Cargo features:
+  - `serde`
+  - `serde_yml`
+  - `openapi-generator`
+  - `quote`
+  - `syn`
+- The `openapi-generator` tool was removed in favor of OpenRPC.
 
 ## [4.0.0] - 2026-02-05
 
