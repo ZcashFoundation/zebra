@@ -1916,7 +1916,7 @@ async fn lightwalletd_test_suite() -> Result<()> {
 ///
 /// Set `FullSyncFromGenesis { allow_lightwalletd_cached_state: true }` to speed up manual full sync tests.
 ///
-/// # Relibility
+/// # Reliability
 ///
 /// The random ports in this test can cause [rare port conflicts.](#Note on port conflict)
 ///
