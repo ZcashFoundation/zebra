@@ -7,9 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Breaking Changes
-
 ## [4.0.0] - 2026-03-12
+
+### Breaking Changes
 
 - `zebra-chain` dependency bumped to `6.0.0`.
 
