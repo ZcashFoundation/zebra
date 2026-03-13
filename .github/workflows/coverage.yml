@@ -41,12 +41,12 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
+      - uses: actions-rust-lang/setup-rust-toolchain@a0b538fa0b742a6aa35d6e2c169b4bd06d225a98 #v1.15.3
         with:
           toolchain: stable
           components: llvm-tools-preview
           cache-on-failure: true
-      - uses: taiki-e/install-action@305bebabd4457bed9b82541755f034994382465b #v2.68.10
+      - uses: taiki-e/install-action@64c5c20c872907b6f7cd50994ac189e7274160f2 #v2.68.26
         with:
           tool: cargo-llvm-cov,nextest
       - uses: ./.github/actions/setup-zebra-build
