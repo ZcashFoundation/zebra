@@ -21,16 +21,18 @@ resolver = "2"
 
 [workspace.dependencies]
 incrementalmerkletree = { version = "0.8.2", features = ["legacy-api"] }
-orchard = "0.11"
-sapling-crypto = "0.5"
-zcash_address = "0.10"
-zcash_encoding = "0.3"
-zcash_history = "0.4"
-zcash_keys = "0.12"
-zcash_primitives = "0.26"
-zcash_proofs = "0.26"
-zcash_transparent = "0.6"
-zcash_protocol = "0.7"
+orchard = "0.12"
+zcash_tachyon = {git = "https://github.com/tachyon-zcash/tachyon.git", rev="0d5785925a7e4e8190609ae0b3d9797b0dd2512a"}
+sapling-crypto = "0.6"
+zcash_address = {git = "https://github.com/tachyon-zcash/librustzcash.git", branch = "main"}
+zcash_encoding = {git = "https://github.com/tachyon-zcash/librustzcash.git", branch = "main"}
+zcash_history = {git = "https://github.com/tachyon-zcash/librustzcash.git", branch = "main"}
+zcash_keys = {git = "https://github.com/tachyon-zcash/librustzcash.git", branch = "main"}
+zcash_primitives = {git = "https://github.com/tachyon-zcash/librustzcash.git", branch = "main"}
+zcash_proofs = {git = "https://github.com/tachyon-zcash/librustzcash.git", branch = "main"}
+zcash_transparent = {git = "https://github.com/tachyon-zcash/librustzcash.git", branch = "main"}
+zcash_protocol = {git = "https://github.com/tachyon-zcash/librustzcash.git", branch = "main"}
+equihash = {git = "https://github.com/tachyon-zcash/librustzcash.git", branch = "main"}
 zip32 = "0.2"
 abscissa_core = "0.7"
 atty = "0.2.14"
@@ -58,7 +60,6 @@ derive-new = "0.5"
 dirs = "6.0"
 ed25519-zebra = "4.0.3"
 elasticsearch = { version = "8.17.0-alpha.1", default-features = false }
-equihash = "0.2.2"
 ff = "0.13"
 futures = "0.3.31"
 futures-core = "0.3.31"
@@ -95,6 +96,7 @@ num-integer = "0.1.46"
 once_cell = "1.21"
 ordered-map = "0.4.2"
 owo-colors = "4.2.0"
+pasta_curves = "0.5.1"
 pin-project = "1.1.10"
 primitive-types = "0.12"
 proptest = "1.6"
