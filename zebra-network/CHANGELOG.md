@@ -7,9 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
+## [5.0.0] - 2026-03-12
 
-- `PeerSocketAddr` now derives `schemars::JsonSchema` (#10201)
+### Breaking Changes
+
+- `zebra-chain` dependency bumped to `6.0.0`.
+
+### Added
+
+- `PeerSocketAddr` now derives `schemars::JsonSchema`
 
 ## [4.0.0] - 2026-02-05
 
