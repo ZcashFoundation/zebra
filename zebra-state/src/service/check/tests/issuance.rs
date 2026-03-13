@@ -28,7 +28,7 @@ fn valid_issuance_blocks() -> Vec<Arc<Block>> {
 fn check_burns_and_issuance() {
     let _init_guard = zebra_test::init();
 
-    let network = Network::new_regtest(Some(1), None, Some(1));
+    let network = Network::new_regtest(Default::default());
 
     let mut finalized_state = FinalizedState::new_with_debug(
         &Config::ephemeral(),

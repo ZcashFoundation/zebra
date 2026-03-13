@@ -223,12 +223,12 @@ async fn request_asset_state(
 async fn check_orchard_zsa_workflow() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
 
-    let network = Network::new_regtest(Some(1), Some(1), Some(1));
+    let network = Network::new_regtest(Default::default());
 
-    let (state_service, read_state_service, _, _) = zebra_state::init_test_services(&network);
+    let (state_service, read_state_service, _, _) = zebra_state::init_test_services(&network).await;
 
     let (block_verifier_router, ..) =
-        crate::router::init(Config::default(), &network, state_service).await;
+        crate::router::init_test(Config::default(), &network, state_service).await;
 
     let transcript_data =
         create_transcript_data(ORCHARD_ZSA_WORKFLOW_BLOCKS.iter()).collect::<Vec<_>>();

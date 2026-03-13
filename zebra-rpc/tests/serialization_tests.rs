@@ -787,7 +787,7 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
                 let rk = action.rk();
                 let cm_x = action.cm_x();
                 let ephemeral_key = action.ephemeral_key();
-                let enc_ciphertext = action.enc_ciphertext();
+                let enc_ciphertext = action.enc_ciphertext().clone();
                 let spend_auth_sig = action.spend_auth_sig();
                 let out_ciphertext = action.out_ciphertext();
                 OrchardAction::new(

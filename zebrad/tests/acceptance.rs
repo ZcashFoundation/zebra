@@ -3678,15 +3678,19 @@ async fn nu7_nsm_transactions() -> Result<()> {
     let base_network_params = testnet::Parameters::build()
         // Regtest genesis hash
         .with_genesis_hash("029f11d80ef9765602235e1bc9727e3eb6ba20839319f761fee920d63401e327")
+        .expect("failed to set genesis hash")
         .with_checkpoints(false)
+        .expect("failed to verify checkpoints")
         .with_target_difficulty_limit(U256::from_big_endian(&[0x0f; 32]))
+        .expect("failed to set target difficulty limit")
         .with_disable_pow(true)
         .with_slow_start_interval(Height::MIN)
         .with_lockbox_disbursements(vec![])
         .with_activation_heights(ConfiguredActivationHeights {
             nu7: Some(1),
             ..Default::default()
-        });
+        })
+        .expect("failed to set activation heights");
 
     let network = base_network_params
         .clone()
@@ -3696,7 +3700,8 @@ async fn nu7_nsm_transactions() -> Result<()> {
             // Use default post-NU6 recipients
             recipients: None,
         }])
-        .to_network();
+        .to_network()
+        .expect("failed to build configured network");
 
     tracing::info!("built configured Testnet, starting state service and block verifier");
 

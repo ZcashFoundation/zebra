@@ -412,7 +412,8 @@ where
                 return Ok(Response::Block {
                     tx_id,
                     miner_fee: Some(verified_tx.miner_fee),
-                    sigops: verified_tx.sigops
+                    sigops: verified_tx.sigops,
+                    tx_sighash: SigHash([0u8; 32]) // FIXME: use verified_tx.tx_sighash instead
                 });
             }
 
@@ -976,7 +977,7 @@ where
         network: &Network,
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
-    ) -> Result<AsyncChecks, TransactionError> {
+    ) -> Result<(AsyncChecks, SigHash), TransactionError> {
         let transaction = request.transaction();
         let nu = request.upgrade(network);
 
@@ -1047,7 +1048,7 @@ where
         network: &Network,
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
-    ) -> Result<AsyncChecks, TransactionError> {
+    ) -> Result<(AsyncChecks, SigHash), TransactionError> {
         Self::verify_v5_transaction(request, network, script_verifier, cached_ffi_transaction)
     }
 

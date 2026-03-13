@@ -10,7 +10,7 @@ use hex::ToHex;
 
 use zcash_script::script::Asm;
 use zebra_chain::{
-    amount::{self, Amount, NegativeOrZero, NonNegative},
+    amount::{self, Amount, NegativeAllowed, NegativeOrZero, NonNegative},
     block::{self, merkle::AUTH_DIGEST_PLACEHOLDER, Height},
     orchard,
     parameters::Network,
@@ -529,6 +529,51 @@ pub struct Orchard {
     binding_sig: Option<[u8; 64]>,
 }
 
+impl Orchard {
+    /// Constructs an [`Orchard`] from [`orchard::ShieldedData`].
+    /// Works for both `OrchardVanilla` and `OrchardZSA`.
+    fn from_shielded_data<Flavor: orchard::ShieldedDataFlavor>(
+        shielded_data: &orchard::ShieldedData<Flavor>,
+        value_balance: Amount<NegativeAllowed>,
+    ) -> Self {
+        Self {
+            actions: shielded_data
+                .actions
+                .iter()
+                .map(|authorized| {
+                    let spend_auth_sig: [u8; 64] = authorized.spend_auth_sig.into();
+                    let cv: [u8; 32] = authorized.action.cv.into();
+                    let nullifier: [u8; 32] = authorized.action.nullifier.into();
+                    let rk: [u8; 32] = authorized.action.rk.into();
+                    let cm_x: [u8; 32] = authorized.action.cm_x.into();
+                    let ephemeral_key: [u8; 32] = authorized.action.ephemeral_key.into();
+                    let enc_ciphertext = authorized.action.enc_ciphertext.as_ref().to_vec();
+                    let out_ciphertext: [u8; 80] = authorized.action.out_ciphertext.into();
+                    OrchardAction {
+                        cv,
+                        nullifier,
+                        rk,
+                        cm_x,
+                        ephemeral_key,
+                        enc_ciphertext,
+                        spend_auth_sig,
+                        out_ciphertext,
+                    }
+                })
+                .collect(),
+            value_balance: Zec::from(value_balance).lossy_zec(),
+            value_balance_zat: value_balance.zatoshis(),
+            flags: Some(OrchardFlags::new(
+                shielded_data.flags.contains(orchard::Flags::ENABLE_OUTPUTS),
+                shielded_data.flags.contains(orchard::Flags::ENABLE_SPENDS),
+            )),
+            anchor: Some(shielded_data.shared_anchor.bytes_in_display_order()),
+            proof: Some(shielded_data.proof.bytes_in_display_order()),
+            binding_sig: Some(shielded_data.binding_sig.into()),
+        }
+    }
+}
+
 /// Object with Orchard-specific information.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
 pub struct OrchardFlags {
@@ -560,8 +605,8 @@ pub struct OrchardAction {
     #[serde(rename = "ephemeralKey", with = "hex")]
     ephemeral_key: [u8; 32],
     /// The output note encrypted to the recipient.
-    #[serde(rename = "encCiphertext", with = "arrayhex")]
-    enc_ciphertext: [u8; 580],
+    #[serde(rename = "encCiphertext")]
+    enc_ciphertext: Vec<u8>,
     /// A ciphertext enabling the sender to recover the output note.
     #[serde(rename = "spendAuthSig", with = "hex")]
     spend_auth_sig: [u8; 64],
@@ -797,63 +842,22 @@ impl TransactionObject {
                 .collect(),
             value_balance: Some(Zec::from(tx.sapling_value_balance().sapling_amount()).lossy_zec()),
             value_balance_zat: Some(tx.sapling_value_balance().sapling_amount().zatoshis()),
-            orchard: Some(Orchard {
-                actions: tx
-                    .orchard_actions()
-                    .collect::<Vec<_>>()
-                    .iter()
-                    .map(|action| {
-                        let spend_auth_sig: [u8; 64] = tx
-                            .orchard_shielded_data()
-                            .and_then(|shielded_data| {
-                                shielded_data
-                                    .actions
-                                    .iter()
-                                    .find(|authorized_action| authorized_action.action == **action)
-                                    .map(|authorized_action| {
-                                        authorized_action.spend_auth_sig.into()
-                                    })
-                            })
-                            .unwrap_or([0; 64]);
-
-                        let cv: [u8; 32] = action.cv.into();
-                        let nullifier: [u8; 32] = action.nullifier.into();
-                        let rk: [u8; 32] = action.rk.into();
-                        let cm_x: [u8; 32] = action.cm_x.into();
-                        let ephemeral_key: [u8; 32] = action.ephemeral_key.into();
-                        let enc_ciphertext: [u8; 580] = action.enc_ciphertext.into();
-                        let out_ciphertext: [u8; 80] = action.out_ciphertext.into();
-
-                        OrchardAction {
-                            cv,
-                            nullifier,
-                            rk,
-                            cm_x,
-                            ephemeral_key,
-                            enc_ciphertext,
-                            spend_auth_sig,
-                            out_ciphertext,
-                        }
-                    })
-                    .collect(),
-                value_balance: Zec::from(tx.orchard_value_balance().orchard_amount()).lossy_zec(),
-                value_balance_zat: tx.orchard_value_balance().orchard_amount().zatoshis(),
-                flags: tx.orchard_shielded_data().map(|data| {
-                    OrchardFlags::new(
-                        data.flags.contains(orchard::Flags::ENABLE_OUTPUTS),
-                        data.flags.contains(orchard::Flags::ENABLE_SPENDS),
-                    )
+            orchard: match tx.as_ref() {
+                Transaction::V5 {
+                    orchard_shielded_data,
+                    ..
+                } => orchard_shielded_data.as_ref().map(|data| {
+                    Orchard::from_shielded_data(data, tx.orchard_value_balance().orchard_amount())
                 }),
-                anchor: tx
-                    .orchard_shielded_data()
-                    .map(|data| data.shared_anchor.bytes_in_display_order()),
-                proof: tx
-                    .orchard_shielded_data()
-                    .map(|data| data.proof.bytes_in_display_order()),
-                binding_sig: tx
-                    .orchard_shielded_data()
-                    .map(|data| data.binding_sig.into()),
-            }),
+                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+                Transaction::V6 {
+                    orchard_shielded_data,
+                    ..
+                } => orchard_shielded_data.as_ref().map(|data| {
+                    Orchard::from_shielded_data(data, tx.orchard_value_balance().orchard_amount())
+                }),
+                _ => None,
+            },
             binding_sig: tx.sapling_binding_sig().map(|raw_sig| raw_sig.into()),
             joinsplit_pub_key: tx.joinsplit_pub_key().map(|raw_key| {
                 // Display order is reversed in the RPC output.

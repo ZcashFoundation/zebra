@@ -32,6 +32,12 @@ impl<const SIZE: usize> TryFrom<&[u8]> for EncryptedNote<SIZE> {
     }
 }
 
+impl<const SIZE: usize> AsRef<[u8]> for EncryptedNote<SIZE> {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
 impl<const SIZE: usize> ZcashSerialize for EncryptedNote<SIZE> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_all(&self.0[..])?;

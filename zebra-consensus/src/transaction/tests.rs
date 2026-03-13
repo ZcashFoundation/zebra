@@ -117,8 +117,7 @@ fn v5_transaction_with_orchard_actions_has_inputs_and_outputs() {
         );
 
         // Finally make it valid by adding both required flags
-        *tx.orchard_flags_mut().unwrap() =
-            Flags::ENABLE_SPENDS | Flags::ENABLE_OUTPUTS;
+        *tx.orchard_flags_mut().unwrap() = Flags::ENABLE_SPENDS | Flags::ENABLE_OUTPUTS;
 
         assert!(check::has_inputs_and_outputs(&tx).is_ok());
     }
@@ -158,8 +157,7 @@ fn v5_transaction_with_orchard_actions_has_flags() {
         *tx.orchard_flags_mut().unwrap() = Flags::empty();
 
         // If we add BOTH ENABLE_SPENDS and ENABLE_OUTPUTS flags it will pass.
-        *tx.orchard_flags_mut().unwrap() =
-            Flags::ENABLE_SPENDS | Flags::ENABLE_OUTPUTS;
+        *tx.orchard_flags_mut().unwrap() = Flags::ENABLE_SPENDS | Flags::ENABLE_OUTPUTS;
         assert!(check::has_enough_orchard_flags(&tx).is_ok());
     }
 }
@@ -2822,7 +2820,7 @@ async fn v5_with_duplicate_orchard_action() {
         let height = tx.expiry_height().expect("expiry height");
 
         let orchard_shielded_data = tx
-            .orchard_shielded_data_mut()
+            .v5_orchard_shielded_data_mut()
             .expect("tx without transparent, Sprout, or Sapling outputs must have Orchard actions");
 
         // Enable spends

@@ -220,7 +220,7 @@ impl Transaction {
 
     /// Compute the hash (mined transaction ID) of this transaction.
     ///
-    /// The hash uniquely identifies mined v5/v6 transactions,
+    /// The hash uniquely identifies mined v5 transactions,
     /// and all v1-v4 transactions, whether mined or unmined.
     pub fn hash(&self) -> Hash {
         Hash::from(self)
@@ -888,8 +888,8 @@ impl Transaction {
     /// returning `Spend<PerSpendAnchor>` regardless of the underlying
     /// transaction version.
     ///
-    /// Shared anchors in V5/V6 transactions are copied into each sapling spend.
-    /// This allows the same code to validate spends from V4 and V5/V6 transactions.
+    /// Shared anchors in V5 transactions are copied into each sapling spend.
+    /// This allows the same code to validate spends from V4 and V5 transactions.
     ///
     /// # Correctness
     ///
@@ -1792,6 +1792,16 @@ impl Transaction {
     /// See `orchard_value_balance` for details.
     pub fn orchard_value_balance_mut(&mut self) -> Option<&mut Amount<NegativeAllowed>> {
         match self {
+            Transaction::V5 {
+                orchard_shielded_data: Some(orchard_shielded_data),
+                ..
+            } => Some(&mut orchard_shielded_data.value_balance),
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            Transaction::V6 {
+                orchard_shielded_data: Some(orchard_shielded_data),
+                ..
+            } => Some(&mut orchard_shielded_data.value_balance),
+
             Transaction::V1 { .. }
             | Transaction::V2 { .. }
             | Transaction::V3 { .. }
@@ -1800,23 +1810,11 @@ impl Transaction {
                 orchard_shielded_data: None,
                 ..
             } => None,
-
             #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             Transaction::V6 {
                 orchard_shielded_data: None,
                 ..
             } => None,
-
-            Transaction::V5 {
-                orchard_shielded_data: Some(orchard_shielded_data),
-                ..
-            } => Some(&mut orchard_shielded_data.value_balance),
-
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 {
-                orchard_shielded_data: Some(orchard_shielded_data),
-                ..
-            } => Some(&mut orchard_shielded_data.value_balance),
         }
     }
 
@@ -1965,9 +1963,17 @@ impl Transaction {
             .map(|output| &mut output.value)
     }
 
-    /// Modify the Orchard flags in this transaction, regardless of version.
-    pub fn orchard_flags_mut(&mut self) -> Option<&mut orchard::shielded_data::Flags> {
+    /// Modify the [`orchard::ShieldedData`] in this transaction,
+    /// regardless of version.
+    pub fn v5_orchard_shielded_data_mut(
+        &mut self,
+    ) -> Option<&mut orchard::ShieldedData<orchard::OrchardVanilla>> {
         match self {
+            Transaction::V5 {
+                orchard_shielded_data: Some(orchard_shielded_data),
+                ..
+            } => Some(orchard_shielded_data),
+
             Transaction::V1 { .. }
             | Transaction::V2 { .. }
             | Transaction::V3 { .. }
@@ -1976,23 +1982,37 @@ impl Transaction {
                 orchard_shielded_data: None,
                 ..
             } => None,
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            Transaction::V6 { .. } => None,
+        }
+    }
 
+    /// Modify the Orchard flags in this transaction, regardless of version.
+    pub fn orchard_flags_mut(&mut self) -> Option<&mut orchard::shielded_data::Flags> {
+        match self {
+            Transaction::V5 {
+                orchard_shielded_data: Some(orchard_shielded_data),
+                ..
+            } => Some(&mut orchard_shielded_data.flags),
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            Transaction::V6 {
+                orchard_shielded_data: Some(orchard_shielded_data),
+                ..
+            } => Some(&mut orchard_shielded_data.flags),
+
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { .. }
+            | Transaction::V5 {
+                orchard_shielded_data: None,
+                ..
+            } => None,
             #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             Transaction::V6 {
                 orchard_shielded_data: None,
                 ..
             } => None,
-
-            Transaction::V5 {
-                orchard_shielded_data: Some(orchard_shielded_data),
-                ..
-            } => Some(&mut orchard_shielded_data.flags),
-
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 {
-                orchard_shielded_data: Some(orchard_shielded_data),
-                ..
-            } => Some(&mut orchard_shielded_data.flags),
         }
     }
 

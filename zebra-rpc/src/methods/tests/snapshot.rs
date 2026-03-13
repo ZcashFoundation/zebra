@@ -697,7 +697,7 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
 
     // Prepare the state response and make the RPC request.
     let asset_base = mock_asset_base(b"Asset1");
-    let rsp = state
+    let rsp = read_state
         .expect_request_that(|req| matches!(req, ReadRequest::AssetState { .. }))
         .map(|responder| responder.respond(ReadResponse::AssetState(None)));
     let req = rpc.get_asset_state(hex::encode(asset_base.to_bytes()), None);
@@ -713,7 +713,7 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
     // Prepare the state response and make the RPC request.
     let asset_base = mock_asset_base(b"Asset2");
     let asset_state = mock_asset_state(b"Asset2", 1000, true);
-    let rsp = state
+    let rsp = read_state
         .expect_request_that(|req| matches!(req, ReadRequest::AssetState { .. }))
         .map(|responder| responder.respond(ReadResponse::AssetState(Some(asset_state))));
     let req = rpc.get_asset_state(hex::encode(asset_base.to_bytes()), None);

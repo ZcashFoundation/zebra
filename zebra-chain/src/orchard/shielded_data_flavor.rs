@@ -46,6 +46,7 @@ pub trait ShieldedDataFlavor: OrchardFlavor {
         + Serialize
         + ZcashDeserialize
         + ZcashSerialize
+        + AsRef<[u8]>
         + for<'a> TryFrom<&'a [u8], Error = std::array::TryFromSliceError>
         + test_arbitrary::TestArbitrary;
 

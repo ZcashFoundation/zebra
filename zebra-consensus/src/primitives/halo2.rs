@@ -175,6 +175,26 @@ pub static VERIFIER_VANILLA: Lazy<
 });
 
 /// Like [`VERIFIER_VANILLA`], but for OrchardZSA proofs.
+#[cfg(zcash_unstable = "nu7")]
+pub static VERIFIER_ZSA: Lazy<
+    Fallback<
+        Batch<Verifier, Item>,
+        ServiceFn<fn(Item) -> BoxFuture<'static, Result<(), BoxError>>>,
+    >,
+> = Lazy::new(|| {
+    Fallback::new(
+        Batch::new(
+            Verifier::new(&VERIFYING_KEY_ZSA),
+            HALO2_MAX_BATCH_SIZE,
+            None,
+            super::MAX_BATCH_LATENCY,
+        ),
+        tower::service_fn(
+            (|item: Item| Verifier::verify_single_spawning(item, &VERIFYING_KEY_ZSA).boxed())
+                as fn(_) -> _,
+        ),
+    )
+});
 
 /// Halo2 proof verifier implementation
 ///

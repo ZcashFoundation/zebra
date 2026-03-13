@@ -877,9 +877,7 @@ impl Arbitrary for Transaction {
             NetworkUpgrade::Blossom | NetworkUpgrade::Heartwood | NetworkUpgrade::Canopy => {
                 Self::v4_strategy(ledger_state)
             }
-            NetworkUpgrade::Nu5
-            | NetworkUpgrade::Nu6
-            | NetworkUpgrade::Nu6_1 => prop_oneof![
+            NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 | NetworkUpgrade::Nu6_1 => prop_oneof![
                 Self::v4_strategy(ledger_state.clone()),
                 Self::v5_strategy(ledger_state)
             ]
@@ -903,13 +901,12 @@ impl Arbitrary for Transaction {
                     ]
                     .boxed()
                 }
-            },
+            }
 
             #[cfg(zcash_unstable = "zfuture")]
             NetworkUpgrade::ZFuture => prop_oneof![
                 Self::v4_strategy(ledger_state.clone()),
-                Self::v5_strategy(ledger_state)
-                // FIXME: Add v6_strategy here?
+                Self::v5_strategy(ledger_state) // FIXME: Add v6_strategy here?
             ]
             .boxed(),
         }
