@@ -63,6 +63,7 @@ rocksdb = { workspace = true, features = ["lz4"] }
 semver = { workspace = true }
 crossbeam-channel = { workspace = true }
 serde = { workspace = true, features = ["serde_derive"] }
+tap = { workspace = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
 
@@ -90,6 +91,8 @@ proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
 derive-getters.workspace = true
 derive-new.workspace = true
+
+zcash_history = { workspace = true }
 
 [dev-dependencies]
 color-eyre = { workspace = true }

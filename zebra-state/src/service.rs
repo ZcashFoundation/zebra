@@ -1504,6 +1504,28 @@ impl Service<ReadRequest> for ReadStateService {
                 read::orchard_tree(state.latest_best_chain(), &state.db, hash_or_height),
             )),
 
+            ReadRequest::HistoryTree(height) => Ok(ReadResponse::HistoryTree(
+                read::history_tree_by_height(state.latest_best_chain(), &state.db, height),
+            )),
+
+            ReadRequest::HistoryNode(upgrade, index) => Ok(ReadResponse::HistoryNode(
+                read::history_node(state.latest_best_chain(), &state.db, upgrade, index),
+            )),
+
+            ReadRequest::AuthDataRoot(hash_or_height) => Ok(ReadResponse::AuthDataRoot(
+                read::auth_data_root(state.latest_best_chain(), &state.db, hash_or_height),
+            )),
+
+            ReadRequest::FirstBlockWithTotalWork(threshold) => {
+                Ok(ReadResponse::FirstBlockWithTotalWork(
+                    read::first_block_with_total_work(&state.db, threshold),
+                ))
+            }
+
+            ReadRequest::TotalWork(hash_or_height) => Ok(ReadResponse::TotalWork(
+                read::total_work(&state.db, hash_or_height),
+            )),
+
             ReadRequest::SaplingSubtrees { start_index, limit } => {
                 let end_index = limit
                     .and_then(|limit| start_index.0.checked_add(limit.0))
