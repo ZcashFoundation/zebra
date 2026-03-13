@@ -7,9 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-03-12
+
+### Breaking Changes
+
+- `zebra-chain` dependency bumped to `6.0.0`.
+
 ### Added
 
-- Added `Request::UnspentOutput`, and `Response::TransparentOutput` and `CreatedOrSpent` to the mempool service ([#10235](https://github.com/ZcashFoundation/zebra/pull/10235)).
+- Added `Request::UnspentOutput`, `Response::TransparentOutput` and `CreatedOrSpent` to the mempool service.
 
 ## [3.0.0] - 2026-02-05
 

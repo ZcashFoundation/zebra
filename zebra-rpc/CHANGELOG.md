@@ -7,13 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.0.0] - 2026-03-12
+
+### Breaking Changes
+
+- `zebra-chain` bumped to `6.0.0`
+- `zebra-script` bumped to `5.0.0`
+- `zebra-state` bumped to `5.0.0`
+- `zebra-node-services` bumped to `4.0.0`
+- `zebra-consensus` bumped to `5.0.0`
+- `zebra-network` bumped to `5.0.0`
+
 ### Removed
 
 - Python QA RPC test framework folder.
 
 ### Added
 
-- Added `get_tx_out` method and `OutputObject` response. ([#10235](https://github.com/ZcashFoundation/zebra/pull/10235))
+- Added `get_tx_out` method and `OutputObject` response.
 - OpenRPC support (#10201):
   - `openrpsee` dependency
   - Added `build_rpc_schema()` to generate a map of the node's supported RPC interface at build time
@@ -23,7 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `GetBlockTemplateRequestMode`, `GetBlockTemplateCapability`, `GetBlockTemplateParameters`, `LongPollId`,
   `SubmitBlockParameters`, `GetAddressBalanceRequest`, `DGetAddressBalanceRequest`, `GetAddressUtxosRequest`,
-  `DGetAddressUtxosRequest`, `DGetAddressTxIdsRequest` and `AddNodeCommand` now derives `schemars::JsonSchema` (#10201)
+  `DGetAddressUtxosRequest`, `DGetAddressTxIdsRequest` and `AddNodeCommand` now derives `schemars::JsonSchema`
 
 ## [5.0.0] - 2026-02-05
 

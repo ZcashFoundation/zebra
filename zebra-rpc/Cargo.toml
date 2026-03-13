@@ -1,6 +1,6 @@
 [package]
 name = "zebra-rpc"
-version = "5.0.0"
+version = "6.0.0"
 authors.workspace = true
 description = "A Zebra JSON Remote Procedure Call (JSON-RPC) interface"
 license.workspace = true
@@ -103,16 +103,16 @@ sapling-crypto = { workspace = true }
 # Test-only feature proptest-impl
 proptest = { workspace = true, optional = true }
 
-zebra-chain = { path = "../zebra-chain", version = "5.0.0", features = [
+zebra-chain = { path = "../zebra-chain", version = "6.0.0", features = [
     "json-conversion",
 ] }
-zebra-consensus = { path = "../zebra-consensus", version = "4.0.0" }
-zebra-network = { path = "../zebra-network", version = "4.0.0" }
-zebra-node-services = { path = "../zebra-node-services", version = "3.0.0", features = [
+zebra-consensus = { path = "../zebra-consensus", version = "5.0.0" }
+zebra-network = { path = "../zebra-network", version = "5.0.0" }
+zebra-node-services = { path = "../zebra-node-services", version = "4.0.0", features = [
     "rpc-client",
 ] }
-zebra-script = { path = "../zebra-script", version = "4.0.0" }
-zebra-state = { path = "../zebra-state", version = "4.0.0" }
+zebra-script = { path = "../zebra-script", version = "5.0.0" }
+zebra-state = { path = "../zebra-state", version = "5.0.0" }
 
 [build-dependencies]
 openrpsee = { workspace = true }
@@ -127,20 +127,20 @@ proptest = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 
-zebra-chain = { path = "../zebra-chain", version = "5.0.0", features = [
+zebra-chain = { path = "../zebra-chain", version = "6.0.0", features = [
     "proptest-impl",
 ] }
-zebra-consensus = { path = "../zebra-consensus", version = "4.0.0", features = [
+zebra-consensus = { path = "../zebra-consensus", version = "5.0.0", features = [
     "proptest-impl",
 ] }
-zebra-network = { path = "../zebra-network", version = "4.0.0", features = [
+zebra-network = { path = "../zebra-network", version = "5.0.0", features = [
     "proptest-impl",
 ] }
-zebra-state = { path = "../zebra-state", version = "4.0.0", features = [
+zebra-state = { path = "../zebra-state", version = "5.0.0", features = [
     "proptest-impl",
 ] }
 
-zebra-test = { path = "../zebra-test", version = "2.0.1" }
+zebra-test = { path = "../zebra-test", version = "3.0.0" }
 
 [lints]
 workspace = true
