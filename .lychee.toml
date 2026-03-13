@@ -44,7 +44,7 @@ exclude_path = [
 ]
 
 # Accept these HTTP status codes as valid
-accept = ["200", "204", "206", "301", "302", "307", "308"]
+accept = ["200", "204", "206", "301", "302", "307", "308", "429"]
 
 # Timeout for requests (seconds)
 timeout = 30
@@ -57,10 +57,10 @@ exclude_loopback = true
 cache = true
 
 # Maximum age of cached results
-max_cache_age = "1d"
+max_cache_age = "7d"
 
 # Maximum concurrent requests
-max_concurrency = 16
+max_concurrency = 8
 
 # User agent string
 user_agent = "lychee/0.14 (Zebra link checker; https://github.com/ZcashFoundation/zebra)"
@@ -70,8 +70,4 @@ include_mail = false
 
 # Retry configuration
 max_retries = 3
-retry_wait_time = 2
-
-# GitHub token environment variable (for higher rate limits)
-# Set GITHUB_TOKEN in your environment or CI
-github_token = ""
+retry_wait_time = 10
