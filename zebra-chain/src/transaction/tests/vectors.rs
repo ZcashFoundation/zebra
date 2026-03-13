@@ -1032,3 +1032,190 @@ fn test_coinbase_script() -> Result<()> {
 
     Ok(())
 }
+
+// Transaction V6 test vectors
+
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+mod v6_tests {
+    use super::*;
+    use group::ff::FromUniformBytes;
+    use group::ff::PrimeField;
+    use group::prime::PrimeCurveAffine;
+    use halo2::pasta::pallas;
+    use reddsa::{orchard::SpendAuth, SigningKey, VerificationKey};
+
+    /// Helper: derive a valid ActionVerificationKey from a 64-byte seed.
+    fn rk_from_seed(seed: [u8; 64]) -> zcash_tachyon::keys::public::ActionVerificationKey {
+        let sk_scalar = pallas::Scalar::from_uniform_bytes(&seed);
+        let sk_bytes = sk_scalar.to_repr();
+        let sk = SigningKey::<SpendAuth>::try_from(sk_bytes).unwrap();
+        let pk = VerificationKey::<SpendAuth>::from(&sk);
+        zcash_tachyon::keys::public::ActionVerificationKey::try_from(<[u8; 32]>::from(pk)).unwrap()
+    }
+
+    /// Helper: derive Fp from a 64-byte seed.
+    fn fp_from_seed(seed: [u8; 64]) -> pasta_curves::Fp {
+        pasta_curves::Fp::from_uniform_bytes(&seed)
+    }
+
+    lazy_static! {
+        /// An empty V6 transaction with no bundles at all.
+        pub static ref EMPTY_V6_TX: Transaction = Transaction::V6 {
+            network_upgrade: NetworkUpgrade::Nu7,
+            lock_time: LockTime::min_lock_time_timestamp(),
+            expiry_height: block::Height(0),
+            zip233_amount: Amount::try_from(0).unwrap(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            sapling_shielded_data: None,
+            orchard_shielded_data: None,
+            tachyon_shielded_data: None,
+        };
+
+        /// V6 transaction with a tachyon bundle, stamp = None.
+        pub static ref V6_TX_TACHYON_NO_STAMP: Transaction = {
+            let rk = rk_from_seed([0x42u8; 64]);
+            let action = zcash_tachyon::Action {
+                cv: zcash_tachyon::value::Commitment::from(pasta_curves::EpAffine::identity()),
+                rk,
+                sig: zcash_tachyon::action::Signature::from([0x01u8; 64]),
+            };
+            Transaction::V6 {
+                network_upgrade: NetworkUpgrade::Nu7,
+                lock_time: LockTime::min_lock_time_timestamp(),
+                expiry_height: block::Height(0),
+                zip233_amount: Amount::try_from(0).unwrap(),
+                inputs: Vec::new(),
+                outputs: Vec::new(),
+                sapling_shielded_data: None,
+                orchard_shielded_data: None,
+                tachyon_shielded_data: Some(zcash_tachyon::Bundle {
+                    actions: vec![action],
+                    value_balance: 0i64,
+                    binding_sig: zcash_tachyon::bundle::Signature::from([0x02u8; 64]),
+                    stamp: None,
+                }),
+            }
+        };
+
+        /// V6 transaction with a tachyon bundle that includes a stamp with tachygrams.
+        pub static ref V6_TX_TACHYON_WITH_STAMP: Transaction = {
+            let rk = rk_from_seed([0x42u8; 64]);
+            let action = zcash_tachyon::Action {
+                cv: zcash_tachyon::value::Commitment::from(pasta_curves::EpAffine::identity()),
+                rk,
+                sig: zcash_tachyon::action::Signature::from([0x01u8; 64]),
+            };
+            let tachygram = zcash_tachyon::Tachygram::from(fp_from_seed([0xAAu8; 64]));
+            let anchor = zcash_tachyon::Anchor::from(fp_from_seed([0xBBu8; 64]));
+            Transaction::V6 {
+                network_upgrade: NetworkUpgrade::Nu7,
+                lock_time: LockTime::min_lock_time_timestamp(),
+                expiry_height: block::Height(0),
+                zip233_amount: Amount::try_from(0).unwrap(),
+                inputs: Vec::new(),
+                outputs: Vec::new(),
+                sapling_shielded_data: None,
+                orchard_shielded_data: None,
+                tachyon_shielded_data: Some(zcash_tachyon::Bundle {
+                    actions: vec![action],
+                    value_balance: 100i64,
+                    binding_sig: zcash_tachyon::bundle::Signature::from([0x02u8; 64]),
+                    stamp: Some(zcash_tachyon::Stamp {
+                        tachygrams: vec![tachygram],
+                        anchor,
+                        proof: zcash_tachyon::Proof,
+                    }),
+                }),
+            }
+        };
+
+        /// V6 transaction with multiple actions and multiple tachygrams.
+        pub static ref V6_TX_TACHYON_MULTI_ACTION: Transaction = {
+            let rk1 = rk_from_seed([0x42u8; 64]);
+            let rk2 = rk_from_seed([0x43u8; 64]);
+            let action1 = zcash_tachyon::Action {
+                cv: zcash_tachyon::value::Commitment::from(pasta_curves::EpAffine::identity()),
+                rk: rk1,
+                sig: zcash_tachyon::action::Signature::from([0x01u8; 64]),
+            };
+            let action2 = zcash_tachyon::Action {
+                cv: zcash_tachyon::value::Commitment::from(pasta_curves::EpAffine::identity()),
+                rk: rk2,
+                sig: zcash_tachyon::action::Signature::from([0x03u8; 64]),
+            };
+            let tg1 = zcash_tachyon::Tachygram::from(fp_from_seed([0xAAu8; 64]));
+            let tg2 = zcash_tachyon::Tachygram::from(fp_from_seed([0xCCu8; 64]));
+            let tg3 = zcash_tachyon::Tachygram::from(fp_from_seed([0xDDu8; 64]));
+            let anchor = zcash_tachyon::Anchor::from(fp_from_seed([0xBBu8; 64]));
+            Transaction::V6 {
+                network_upgrade: NetworkUpgrade::Nu7,
+                lock_time: LockTime::min_lock_time_timestamp(),
+                expiry_height: block::Height(0),
+                zip233_amount: Amount::try_from(500).unwrap(),
+                inputs: Vec::new(),
+                outputs: Vec::new(),
+                sapling_shielded_data: None,
+                orchard_shielded_data: None,
+                tachyon_shielded_data: Some(zcash_tachyon::Bundle {
+                    actions: vec![action1, action2],
+                    value_balance: 300i64,
+                    binding_sig: zcash_tachyon::bundle::Signature::from([0x02u8; 64]),
+                    stamp: Some(zcash_tachyon::Stamp {
+                        tachygrams: vec![tg1, tg2, tg3],
+                        anchor,
+                        proof: zcash_tachyon::Proof,
+                    }),
+                }),
+            }
+        };
+    }
+
+    /// An empty V6 transaction round-trip test.
+    #[test]
+    fn empty_v6_round_trip() {
+        let _init_guard = zebra_test::init();
+
+        let tx: &Transaction = &EMPTY_V6_TX;
+
+        let data = tx.zcash_serialize_to_vec().expect("tx should serialize");
+        let tx2: &Transaction = &data
+            .zcash_deserialize_into()
+            .expect("tx should deserialize");
+
+        assert_eq!(tx, tx2);
+
+        let data2 = tx2
+            .zcash_serialize_to_vec()
+            .expect("vec serialization is infallible");
+
+        assert_eq!(data, data2, "data must be equal if structs are equal");
+    }
+
+    /// Generate and print V6 tachyon test vectors as hex.
+    #[test]
+    fn generate_v6_tachyon_test_vectors() {
+        let _init_guard = zebra_test::init();
+
+        let test_cases: &[(&str, &Transaction)] = &[
+            ("EMPTY_V6_TX", &EMPTY_V6_TX),
+            ("V6_TX_TACHYON_NO_STAMP", &V6_TX_TACHYON_NO_STAMP),
+            ("V6_TX_TACHYON_WITH_STAMP", &V6_TX_TACHYON_WITH_STAMP),
+            ("V6_TX_TACHYON_MULTI_ACTION", &V6_TX_TACHYON_MULTI_ACTION),
+        ];
+
+        for (name, tx) in test_cases {
+            let bytes = tx
+                .zcash_serialize_to_vec()
+                .expect("tx should serialize");
+
+            let tx2: Transaction = bytes
+                .zcash_deserialize_into()
+                .expect("tx should deserialize");
+
+            assert_eq!(*tx, &tx2, "{name} round-trip failed");
+
+            println!("{name}: {}", hex::encode(&bytes));
+        }
+    }
+}

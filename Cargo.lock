@@ -1550,7 +1550,7 @@ dependencies = [
 [[package]]
 name = "equihash"
 version = "0.2.2"
-source = "git+https://github.com/tachyon-zcash/librustzcash.git?branch=main#79ef13ccaaf25d28a2b3fb356f2ef21185548e95"
+source = "git+https://github.com/S1nus/librustzcash.git?rev=3936d052035e66329f06665f891ebc2a3bc06b09#3936d052035e66329f06665f891ebc2a3bc06b09"
 dependencies = [
  "blake2b_simd",
  "cc",
@@ -1597,7 +1597,7 @@ dependencies = [
 [[package]]
 name = "f4jumble"
 version = "0.1.1"
-source = "git+https://github.com/tachyon-zcash/librustzcash.git?branch=main#79ef13ccaaf25d28a2b3fb356f2ef21185548e95"
+source = "git+https://github.com/S1nus/librustzcash.git?rev=3936d052035e66329f06665f891ebc2a3bc06b09#3936d052035e66329f06665f891ebc2a3bc06b09"
 dependencies = [
  "blake2b_simd",
 ]
@@ -6545,7 +6545,7 @@ dependencies = [
 [[package]]
 name = "zcash_address"
 version = "0.10.1"
-source = "git+https://github.com/tachyon-zcash/librustzcash.git?branch=main#79ef13ccaaf25d28a2b3fb356f2ef21185548e95"
+source = "git+https://github.com/S1nus/librustzcash.git?rev=3936d052035e66329f06665f891ebc2a3bc06b09#3936d052035e66329f06665f891ebc2a3bc06b09"
 dependencies = [
  "bech32",
  "bs58",
@@ -6558,7 +6558,7 @@ dependencies = [
 [[package]]
 name = "zcash_encoding"
 version = "0.3.0"
-source = "git+https://github.com/tachyon-zcash/librustzcash.git?branch=main#79ef13ccaaf25d28a2b3fb356f2ef21185548e95"
+source = "git+https://github.com/S1nus/librustzcash.git?rev=3936d052035e66329f06665f891ebc2a3bc06b09#3936d052035e66329f06665f891ebc2a3bc06b09"
 dependencies = [
  "core2",
  "hex",
@@ -6568,7 +6568,7 @@ dependencies = [
 [[package]]
 name = "zcash_history"
 version = "0.4.0"
-source = "git+https://github.com/tachyon-zcash/librustzcash.git?branch=main#79ef13ccaaf25d28a2b3fb356f2ef21185548e95"
+source = "git+https://github.com/S1nus/librustzcash.git?rev=3936d052035e66329f06665f891ebc2a3bc06b09#3936d052035e66329f06665f891ebc2a3bc06b09"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -6578,7 +6578,7 @@ dependencies = [
 [[package]]
 name = "zcash_keys"
 version = "0.12.0"
-source = "git+https://github.com/tachyon-zcash/librustzcash.git?branch=main#79ef13ccaaf25d28a2b3fb356f2ef21185548e95"
+source = "git+https://github.com/S1nus/librustzcash.git?rev=3936d052035e66329f06665f891ebc2a3bc06b09#3936d052035e66329f06665f891ebc2a3bc06b09"
 dependencies = [
  "bech32",
  "blake2b_simd",
@@ -6618,7 +6618,7 @@ dependencies = [
 [[package]]
 name = "zcash_primitives"
 version = "0.26.4"
-source = "git+https://github.com/tachyon-zcash/librustzcash.git?branch=main#79ef13ccaaf25d28a2b3fb356f2ef21185548e95"
+source = "git+https://github.com/S1nus/librustzcash.git?rev=3936d052035e66329f06665f891ebc2a3bc06b09#3936d052035e66329f06665f891ebc2a3bc06b09"
 dependencies = [
  "bip32",
  "blake2b_simd",
@@ -6638,6 +6638,7 @@ dependencies = [
  "memuse",
  "nonempty",
  "orchard",
+ "pasta_curves",
  "rand 0.8.5",
  "rand_core 0.6.4",
  "redjubjub",
@@ -6653,6 +6654,7 @@ dependencies = [
  "zcash_protocol",
  "zcash_script",
  "zcash_spec",
+ "zcash_tachyon 0.0.0 (git+https://github.com/tachyon-zcash/tachyon.git?rev=a441c0cba73c9accebac324abdbd28b2f9701dd5)",
  "zcash_transparent",
  "zip32",
 ]
@@ -6660,7 +6662,7 @@ dependencies = [
 [[package]]
 name = "zcash_proofs"
 version = "0.26.1"
-source = "git+https://github.com/tachyon-zcash/librustzcash.git?branch=main#79ef13ccaaf25d28a2b3fb356f2ef21185548e95"
+source = "git+https://github.com/S1nus/librustzcash.git?rev=3936d052035e66329f06665f891ebc2a3bc06b09#3936d052035e66329f06665f891ebc2a3bc06b09"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -6682,7 +6684,7 @@ dependencies = [
 [[package]]
 name = "zcash_protocol"
 version = "0.7.2"
-source = "git+https://github.com/tachyon-zcash/librustzcash.git?branch=main#79ef13ccaaf25d28a2b3fb356f2ef21185548e95"
+source = "git+https://github.com/S1nus/librustzcash.git?rev=3936d052035e66329f06665f891ebc2a3bc06b09#3936d052035e66329f06665f891ebc2a3bc06b09"
 dependencies = [
  "core2",
  "document-features",
@@ -6734,9 +6736,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "zcash_tachyon"
+version = "0.0.0"
+source = "git+https://github.com/tachyon-zcash/tachyon.git?rev=a441c0cba73c9accebac324abdbd28b2f9701dd5#a441c0cba73c9accebac324abdbd28b2f9701dd5"
+dependencies = [
+ "blake2b_simd",
+ "ff",
+ "group",
+ "lazy_static",
+ "pasta_curves",
+ "rand_core 0.6.4",
+ "reddsa",
+]
+
+[[package]]
 name = "zcash_transparent"
 version = "0.6.3"
-source = "git+https://github.com/tachyon-zcash/librustzcash.git?branch=main#79ef13ccaaf25d28a2b3fb356f2ef21185548e95"
+source = "git+https://github.com/S1nus/librustzcash.git?rev=3936d052035e66329f06665f891ebc2a3bc06b09#3936d052035e66329f06665f891ebc2a3bc06b09"
 dependencies = [
  "bip32",
  "blake2b_simd",
@@ -6823,7 +6839,7 @@ dependencies = [
  "zcash_primitives",
  "zcash_protocol",
  "zcash_script",
- "zcash_tachyon",
+ "zcash_tachyon 0.0.0 (git+https://github.com/tachyon-zcash/tachyon.git?rev=0d5785925a7e4e8190609ae0b3d9797b0dd2512a)",
  "zcash_transparent",
  "zebra-test",
 ]
