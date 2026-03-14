@@ -11,6 +11,7 @@ use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{Block, Height},
     parameters::Network,
+    transaction::SigHash,
 };
 
 use crate::components::mempool::{storage::*, Mempool};
@@ -275,6 +276,7 @@ fn mempool_expired_basic_for_network(network: Network) -> Result<()> {
             tx.into(),
             Amount::try_from(1_000_000).expect("valid amount"),
             0,
+            SigHash([0; 32]),
         )
         .expect("verification should pass"),
         Vec::new(),

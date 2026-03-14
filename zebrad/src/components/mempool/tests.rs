@@ -13,7 +13,7 @@ use crate::{
 use zebra_chain::{
     amount::{Amount, NonNegative},
     parameters::NetworkKind,
-    transaction::{Transaction, UnminedTx, VerifiedUnminedTx},
+    transaction::{SigHash, Transaction, UnminedTx, VerifiedUnminedTx},
     transparent::{self, Address},
 };
 
@@ -110,7 +110,7 @@ pub fn standard_verified_unmined_tx_strategy() -> BoxedStrategy<VerifiedUnminedT
             let unmined_tx = UnminedTx::from(transaction);
             let miner_fee = unmined_tx.conventional_fee;
 
-            VerifiedUnminedTx::new(unmined_tx, miner_fee, 0)
+            VerifiedUnminedTx::new(unmined_tx, miner_fee, 0, SigHash([0; 32]))
                 .expect("standardized transaction should pass ZIP-317 checks")
         })
         .boxed()

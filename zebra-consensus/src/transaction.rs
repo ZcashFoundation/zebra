@@ -413,7 +413,7 @@ where
                     tx_id,
                     miner_fee: Some(verified_tx.miner_fee),
                     sigops: verified_tx.sigops,
-                    tx_sighash: SigHash([0u8; 32]) // FIXME: use verified_tx.tx_sighash instead
+                    tx_sighash: verified_tx.tx_sighash,
                 });
             }
 
@@ -597,6 +597,7 @@ where
                         tx,
                         miner_fee.expect("fee should have been checked earlier"),
                         sigops,
+                        tx_sighash
                     )?;
 
                     if let Some(mut mempool) = mempool {

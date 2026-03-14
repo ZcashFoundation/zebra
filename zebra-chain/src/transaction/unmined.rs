@@ -22,7 +22,7 @@ use crate::{
     block::Height,
     serialization::ZcashSerialize,
     transaction::{
-        AuthDigest, Hash,
+        AuthDigest, Hash, SigHash,
         Transaction::{self, *},
         WtxId,
     },
@@ -369,6 +369,9 @@ pub struct VerifiedUnminedTx {
     /// The tip height when the transaction was added to the mempool, or None if
     /// it has not reached the mempool yet.
     pub height: Option<Height>,
+
+    /// The shielded sighash for this transaction.
+    pub tx_sighash: SigHash,
 }
 
 impl fmt::Debug for VerifiedUnminedTx {
@@ -396,6 +399,7 @@ impl VerifiedUnminedTx {
         transaction: UnminedTx,
         miner_fee: Amount<NonNegative>,
         legacy_sigop_count: u32,
+        tx_sighash: SigHash,
     ) -> Result<Self, zip317::Error> {
         let fee_weight_ratio = zip317::conventional_fee_weight_ratio(&transaction, miner_fee);
         let conventional_actions = zip317::conventional_actions(&transaction.transaction);
@@ -412,6 +416,7 @@ impl VerifiedUnminedTx {
             unpaid_actions,
             time: None,
             height: None,
+            tx_sighash,
         })
     }
 

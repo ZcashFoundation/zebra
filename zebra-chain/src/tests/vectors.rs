@@ -8,7 +8,7 @@ use crate::{
     block::Block,
     parameters::Network,
     serialization::ZcashDeserializeInto,
-    transaction::{UnminedTx, VerifiedUnminedTx},
+    transaction::{SigHash, UnminedTx, VerifiedUnminedTx},
 };
 
 use zebra_test::vectors::{
@@ -74,6 +74,7 @@ impl Network {
                     transaction,
                     Amount::try_from(1_000_000).expect("valid amount"),
                     0,
+                    SigHash([0; 32]),
                 )
                 .ok()
             })

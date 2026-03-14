@@ -16,7 +16,7 @@ use zebra_chain::{
     sapling,
     serialization::AtLeastOne,
     sprout,
-    transaction::{self, JoinSplitData, Transaction, UnminedTxId, VerifiedUnminedTx},
+    transaction::{self, JoinSplitData, SigHash, Transaction, UnminedTxId, VerifiedUnminedTx},
     transparent, LedgerState,
 };
 
@@ -490,6 +490,7 @@ impl SpendConflictTestInput {
                 // make sure miner fee is big enough for all cases
                 Amount::try_from(1_000_000).expect("valid amount"),
                 0,
+                SigHash([0; 32]),
             )
             .expect("verification should pass"),
             VerifiedUnminedTx::new(
@@ -497,6 +498,7 @@ impl SpendConflictTestInput {
                 // make sure miner fee is big enough for all cases
                 Amount::try_from(1_000_000).expect("valid amount"),
                 0,
+                SigHash([0; 32]),
             )
             .expect("verification should pass"),
         )
@@ -523,6 +525,7 @@ impl SpendConflictTestInput {
                 // make sure miner fee is big enough for all cases
                 Amount::try_from(1_000_000).expect("valid amount"),
                 0,
+                SigHash([0; 32]),
             )
             .expect("verification should pass"),
             VerifiedUnminedTx::new(
@@ -530,6 +533,7 @@ impl SpendConflictTestInput {
                 // make sure miner fee is big enough for all cases
                 Amount::try_from(1_000_000).expect("valid amount"),
                 0,
+                SigHash([0; 32]),
             )
             .expect("verification should pass"),
         )
@@ -966,7 +970,10 @@ impl OrchardSpendConflict {
     ///
     /// The transaction will then conflict with any other transaction with the same new nullifier.
     // TODO: Consider adding support of OrchardZSA.
-    pub fn apply_to(self, orchard_shielded_data: &mut Option<orchard::ShieldedData<orchard::OrchardVanilla>>) {
+    pub fn apply_to(
+        self,
+        orchard_shielded_data: &mut Option<orchard::ShieldedData<orchard::OrchardVanilla>>,
+    ) {
         if let Some(shielded_data) = orchard_shielded_data.as_mut() {
             shielded_data
                 .actions
