@@ -33,7 +33,7 @@ use orchard::{
 use zebra_chain::{
     block::{genesis::regtest_genesis_block, Block, Hash},
     orchard_zsa::{AssetState, BurnItem},
-    parameters::Network,
+    parameters::{testnet::ConfiguredActivationHeights, Network},
     serialization::ZcashDeserialize,
 };
 
@@ -223,7 +223,14 @@ async fn request_asset_state(
 async fn check_orchard_zsa_workflow() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
 
-    let network = Network::new_regtest(Default::default());
+    let network = Network::new_regtest(
+        ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu7: Some(1),
+            ..Default::default()
+        }
+        .into(),
+    );
 
     let (state_service, read_state_service, _, _) = zebra_state::init_test_services(&network).await;
 
