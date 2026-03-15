@@ -937,7 +937,8 @@ where
             | NetworkUpgrade::Canopy
             | NetworkUpgrade::Nu5
             | NetworkUpgrade::Nu6
-            | NetworkUpgrade::Nu6_1 => Ok(()),
+            | NetworkUpgrade::Nu6_1
+            | NetworkUpgrade::Nu7 => Ok(()),
 
             #[cfg(zcash_unstable = "zfuture")]
             NetworkUpgrade::ZFuture => Ok(()),
@@ -945,8 +946,9 @@ where
             // Does not support V4 transactions
             NetworkUpgrade::Genesis
             | NetworkUpgrade::BeforeOverwinter
-            | NetworkUpgrade::Overwinter
-            | NetworkUpgrade::Nu7 => Err(TransactionError::UnsupportedByNetworkUpgrade(
+            | NetworkUpgrade::Overwinter => Err(TransactionError::UnsupportedByNetworkUpgrade(
+            // FIXME: The upstream Zebra does not allow v4 transactions in Nu7 - is that correct?
+            //| NetworkUpgrade::Nu7 => Err(TransactionError::UnsupportedByNetworkUpgrade(
                 transaction.version(),
                 network_upgrade,
             )),

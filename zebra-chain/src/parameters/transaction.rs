@@ -14,4 +14,5 @@ pub const TX_V5_VERSION_GROUP_ID: u32 = 0x26A7_270A;
 
 /// The version group ID for version 6 transactions.
 /// TODO: update this after it's chosen
-pub const TX_V6_VERSION_GROUP_ID: u32 = 0xFFFF_FFFF;
+/// FIMXE: upstream Zebra uses 0xFFFF_FFFF
+pub const TX_V6_VERSION_GROUP_ID: u32 = 0x7777_7777;
