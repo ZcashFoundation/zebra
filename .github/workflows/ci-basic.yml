@@ -49,7 +49,7 @@ jobs:
           # TODO: remove this comment and these Clippy exceptions after syncing with updated upstream.
           cargo clippy --workspace --no-deps --all-features --all-targets --locked -- \
             -D warnings \
-            -A elided_named_lifetimes \
+            -A mismatched_lifetime_syntaxes \
             -A missing_docs \
             -A non_local_definitions \
             -A clippy::needless_lifetimes \
