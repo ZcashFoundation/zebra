@@ -16,6 +16,7 @@ mod tests;
 #[derive(Clone, Debug)]
 pub struct SyncStatus {
     latest_sync_length: watch::Receiver<Vec<usize>>,
+    is_regtest: bool,
 }
 
 impl SyncStatus {
@@ -26,13 +27,32 @@ impl SyncStatus {
     /// once Zebra reaches the tip.
     const MIN_DIST_FROM_TIP: usize = 20;
 
+    /// Create an instance of [`SyncStatus`] for a specific network.
+    ///
+    /// The status is determined based on the latest counts of synchronized blocks, observed
+    /// through `latest_sync_length`. In regtest, [`ChainSyncStatus::is_close_to_tip`] always returns `true`.
+    pub fn new_for_network(
+        network: &zebra_chain::parameters::Network,
+    ) -> (Self, RecentSyncLengths) {
+        let (recent_sync_lengths, latest_sync_length) = RecentSyncLengths::new();
+        let status = SyncStatus {
+            latest_sync_length,
+            is_regtest: network.is_regtest(),
+        };
+
+        (status, recent_sync_lengths)
+    }
+
     /// Create an instance of [`SyncStatus`].
     ///
     /// The status is determined based on the latest counts of synchronized blocks, observed
     /// through `latest_sync_length`.
     pub fn new() -> (Self, RecentSyncLengths) {
         let (recent_sync_lengths, latest_sync_length) = RecentSyncLengths::new();
-        let status = SyncStatus { latest_sync_length };
+        let status = SyncStatus {
+            latest_sync_length,
+            is_regtest: false,
+        };
 
         (status, recent_sync_lengths)
     }
@@ -52,6 +72,10 @@ impl SyncStatus {
 impl ChainSyncStatus for SyncStatus {
     /// Check if the synchronization is likely close to the chain tip.
     fn is_close_to_tip(&self) -> bool {
+        if self.is_regtest {
+            return true;
+        }
+
         let sync_lengths = self.latest_sync_length.borrow();
 
         // Return early if sync_lengths is empty.

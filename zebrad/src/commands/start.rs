@@ -370,28 +370,29 @@ impl StartCmd {
         );
 
         info!("spawning syncer task");
-        let syncer_task_handle = if is_regtest {
-            if !syncer
+        // In regtest, commit the genesis block directly (bypassing the syncer's genesis
+        // download, which requires a connected peer). Then run the syncer normally so
+        // that multi-hop block propagation works: gossiped blocks that arrive out of
+        // order (e.g. only the latest tip hash was gossiped) will be recovered by the
+        // syncer using block locators within REGTEST_SYNC_RESTART_DELAY (2 seconds).
+        if is_regtest
+            && !syncer
                 .state_contains(config.network.network.genesis_hash())
                 .await?
-            {
-                let genesis_hash = block_verifier_router
-                    .clone()
-                    .oneshot(zebra_consensus::Request::Commit(regtest_genesis_block()))
-                    .await
-                    .expect("should validate Regtest genesis block");
+        {
+            let genesis_hash = block_verifier_router
+                .clone()
+                .oneshot(zebra_consensus::Request::Commit(regtest_genesis_block()))
+                .await
+                .expect("should validate Regtest genesis block");
 
-                assert_eq!(
-                    genesis_hash,
-                    config.network.network.genesis_hash(),
-                    "validated block hash should match network genesis hash"
-                )
-            }
-
-            tokio::spawn(std::future::pending().in_current_span())
-        } else {
-            tokio::spawn(syncer.sync().in_current_span())
-        };
+            assert_eq!(
+                genesis_hash,
+                config.network.network.genesis_hash(),
+                "validated block hash should match network genesis hash"
+            )
+        }
+        let syncer_task_handle = tokio::spawn(syncer.sync().in_current_span());
 
         // And finally, spawn the internal Zcash miner, if it is enabled.
         //
