@@ -1,8 +1,9 @@
 ---
 source: zebra-rpc/src/methods/tests/snapshot.rs
+assertion_line: 711
 expression: asset_state
 ---
 {
-  "code": 0,
+  "code": -1,
   "message": "asset base not found"
 }

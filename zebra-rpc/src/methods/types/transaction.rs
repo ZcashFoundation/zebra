@@ -499,7 +499,7 @@ impl ShieldedOutput {
 
 /// Object with Orchard-specific information.
 #[serde_with::serde_as]
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+#[derive(Clone, Debug, PartialEq, Default, serde::Serialize, serde::Deserialize, Getters, new)]
 pub struct Orchard {
     /// Array of Orchard actions.
     actions: Vec<OrchardAction>,
@@ -842,22 +842,31 @@ impl TransactionObject {
                 .collect(),
             value_balance: Some(Zec::from(tx.sapling_value_balance().sapling_amount()).lossy_zec()),
             value_balance_zat: Some(tx.sapling_value_balance().sapling_amount().zatoshis()),
-            orchard: match tx.as_ref() {
-                Transaction::V5 {
-                    orchard_shielded_data,
-                    ..
-                } => orchard_shielded_data.as_ref().map(|data| {
-                    Orchard::from_shielded_data(data, tx.orchard_value_balance().orchard_amount())
-                }),
-                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-                Transaction::V6 {
-                    orchard_shielded_data,
-                    ..
-                } => orchard_shielded_data.as_ref().map(|data| {
-                    Orchard::from_shielded_data(data, tx.orchard_value_balance().orchard_amount())
-                }),
-                _ => None,
-            },
+            orchard: Some(
+                (match tx.as_ref() {
+                    Transaction::V5 {
+                        orchard_shielded_data,
+                        ..
+                    } => orchard_shielded_data.as_ref().map(|data| {
+                        Orchard::from_shielded_data(
+                            data,
+                            tx.orchard_value_balance().orchard_amount(),
+                        )
+                    }),
+                    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+                    Transaction::V6 {
+                        orchard_shielded_data,
+                        ..
+                    } => orchard_shielded_data.as_ref().map(|data| {
+                        Orchard::from_shielded_data(
+                            data,
+                            tx.orchard_value_balance().orchard_amount(),
+                        )
+                    }),
+                    _ => None,
+                })
+                .unwrap_or_default(),
+            ),
             binding_sig: tx.sapling_binding_sig().map(|raw_sig| raw_sig.into()),
             joinsplit_pub_key: tx.joinsplit_pub_key().map(|raw_key| {
                 // Display order is reversed in the RPC output.
