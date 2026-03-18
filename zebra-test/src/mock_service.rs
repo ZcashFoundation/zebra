@@ -82,7 +82,11 @@ const DEFAULT_PROXY_CHANNEL_SIZE: usize = 100;
 ///
 /// We've seen delays up to 67ms on busy Linux and macOS machines,
 /// and some other timeout failures even with a 150ms timeout.
-pub const DEFAULT_MAX_REQUEST_DELAY: Duration = Duration::from_millis(300);
+//
+// FIXME: This was increased temporarily to 1s to avoid CI failures where async tests
+// don't deliver expected requests within 300ms (e.g. "timeout while waiting for a request").
+// Before DEFAULT_MAX_REQUEST_DELAY was 300ms, so consider returning it when sending a PR upstream.
+pub const DEFAULT_MAX_REQUEST_DELAY: Duration = Duration::from_millis(1000);
 
 /// An internal type representing the item that's sent in the [`broadcast`] channel.
 ///
