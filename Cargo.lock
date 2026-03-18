@@ -6654,7 +6654,7 @@ dependencies = [
  "zcash_protocol",
  "zcash_script",
  "zcash_spec",
- "zcash_tachyon 0.0.0 (git+https://github.com/tachyon-zcash/tachyon.git?rev=a441c0cba73c9accebac324abdbd28b2f9701dd5)",
+ "zcash_tachyon",
  "zcash_transparent",
  "zip32",
 ]
@@ -6722,22 +6722,6 @@ dependencies = [
 [[package]]
 name = "zcash_tachyon"
 version = "0.0.0"
-source = "git+https://github.com/tachyon-zcash/tachyon.git?rev=0d5785925a7e4e8190609ae0b3d9797b0dd2512a#0d5785925a7e4e8190609ae0b3d9797b0dd2512a"
-dependencies = [
- "bitvec",
- "blake2b_simd",
- "ff",
- "group",
- "pasta_curves",
- "proptest",
- "rand 0.8.5",
- "reddsa",
- "serde",
-]
-
-[[package]]
-name = "zcash_tachyon"
-version = "0.0.0"
 source = "git+https://github.com/tachyon-zcash/tachyon.git?rev=a441c0cba73c9accebac324abdbd28b2f9701dd5#a441c0cba73c9accebac324abdbd28b2f9701dd5"
 dependencies = [
  "blake2b_simd",
@@ -6747,6 +6731,7 @@ dependencies = [
  "pasta_curves",
  "rand_core 0.6.4",
  "reddsa",
+ "serde",
 ]
 
 [[package]]
@@ -6839,7 +6824,7 @@ dependencies = [
  "zcash_primitives",
  "zcash_protocol",
  "zcash_script",
- "zcash_tachyon 0.0.0 (git+https://github.com/tachyon-zcash/tachyon.git?rev=0d5785925a7e4e8190609ae0b3d9797b0dd2512a)",
+ "zcash_tachyon",
  "zcash_transparent",
  "zebra-test",
 ]
