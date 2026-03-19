@@ -180,14 +180,14 @@ which = "8.0.0"
 # 1. Remove the whole patch table once the upstream changes land in a release.
 # 2. Also remove the corresponding URLs in the `allow-git` table in the `deny.toml` file.
 [patch.crates-io]
-zcash_primitives = { git = "https://github.com/zcash/librustzcash", branch = "bump-zcash_script" }
-zcash_address = { git = "https://github.com/zcash/librustzcash", branch = "bump-zcash_script" }
-zcash_encoding = { git = "https://github.com/zcash/librustzcash", branch = "bump-zcash_script" }
-zcash_history = { git = "https://github.com/zcash/librustzcash", branch = "bump-zcash_script" }
-zcash_keys = { git = "https://github.com/zcash/librustzcash", branch = "bump-zcash_script" }
-zcash_proofs = { git = "https://github.com/zcash/librustzcash", branch = "bump-zcash_script" }
-zcash_transparent = { git = "https://github.com/zcash/librustzcash", branch = "bump-zcash_script" }
-zcash_protocol = { git = "https://github.com/zcash/librustzcash", branch = "bump-zcash_script" }
+zcash_primitives = { git = "https://github.com/zcash/librustzcash", branch = "main" }
+zcash_address = { git = "https://github.com/zcash/librustzcash", branch = "main" }
+zcash_encoding = { git = "https://github.com/zcash/librustzcash", branch = "main" }
+zcash_history = { git = "https://github.com/zcash/librustzcash", branch = "main" }
+zcash_keys = { git = "https://github.com/zcash/librustzcash", branch = "main" }
+zcash_proofs = { git = "https://github.com/zcash/librustzcash", branch = "main" }
+zcash_transparent = { git = "https://github.com/zcash/librustzcash", branch = "main" }
+zcash_protocol = { git = "https://github.com/zcash/librustzcash", branch = "main" }
 
 [workspace.metadata.release]
 
