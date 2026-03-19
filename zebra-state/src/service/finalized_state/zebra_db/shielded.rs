@@ -541,7 +541,7 @@ impl DiskWriteBatch {
                 None, // No sighashes - uses trusted validation without signature checks
                 |asset_base| zebra_db.issued_asset(asset_base),
             )
-            .map_err(|_| BoxError::from("invalid issued assets changes"))?
+            .map_err(|e| BoxError::from(format!("invalid issued assets changes: {e:?}")))?
         };
         // Write only the new states to the database
         for (asset_base, (_old_state, new_state)) in asset_changes.iter() {

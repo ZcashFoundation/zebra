@@ -306,6 +306,7 @@ pub trait Rpc {
     ///
     /// method: post
     /// tags: blockchain
+    #[cfg(feature = "tx_v6")]
     #[rpc(name = "getassetstate")]
     fn get_asset_state(
         &self,
@@ -1369,7 +1370,7 @@ where
         .boxed()
     }
 
-    // FIXME: Add #[cfg(feature = "tx_v6")] here
+    #[cfg(feature = "tx_v6")]
     fn get_asset_state(
         &self,
         asset_base: String,
@@ -1379,13 +1380,30 @@ where
         let include_non_finalized = include_non_finalized.unwrap_or(true);
 
         async move {
-            let asset_base = zebra_chain::orchard_zsa::AssetBase::from_bytes(
-                &hex::decode(asset_base).map_server_error()?[..]
-                    .try_into()
-                    .map_server_error()?,
-            )
-            .into_option()
-            .ok_or_server_error("invalid asset base")?;
+            if asset_base.len() != 64 {
+                return Err(Error {
+                    code: INVALID_PARAMETERS_ERROR_CODE,
+                    message: "expected 32 bytes (64 hex chars)".to_string(),
+                    data: None,
+                });
+            }
+
+            let asset_base_bytes: [u8; 32] = hex::decode(&asset_base)
+                .map_err(|_| Error {
+                    code: INVALID_PARAMETERS_ERROR_CODE,
+                    message: "invalid hex encoding".to_string(),
+                    data: None,
+                })?
+                .try_into()
+                .expect("length already checked above");
+
+            let asset_base = zebra_chain::orchard_zsa::AssetBase::from_bytes(&asset_base_bytes)
+                .into_option()
+                .ok_or_else(|| Error {
+                    code: INVALID_PARAMETERS_ERROR_CODE,
+                    message: "invalid asset base".to_string(),
+                    data: None,
+                })?;
 
             let request = zebra_state::ReadRequest::AssetState {
                 asset_base,

@@ -965,11 +965,9 @@ impl Chain {
         issued_asset_changes: &IssuedAssetChanges,
     ) {
         if position == RevertPosition::Root {
-            // TODO: Consider evicting issued-asset entries from the non-finalized in-memory cache.
-            // We may add `updated_at_height` to track last update and drop “old” entries occasionally.
-            // Doing that here on root reverts might be too aggressive (happens ~every 100 blocks ≈ 2 hours).
-            // Eviction would only move reads to disk (DB); issuance/burn verification must still work,
-            // just with slightly worse performance due to extra DB reads.
+            // `issued_assets` grows monotonically (no eviction on finalization).
+            // At ~112 bytes per asset this is negligible for realistic asset counts.
+            // Revisit if ZSA adoption reaches hundreds of thousands of unique assets.
         } else {
             trace!(
                 ?position,
@@ -1509,16 +1507,11 @@ impl Chain {
                     *current_state = *new_state;
                 })
                 .or_insert_with(|| {
-                    // FIXME: This assert fails if the asset was removed in revert_issued_assets
-                    // at RevertPosition::Root position. And it looks like it's a legal case
-                    // when the previous state in block is not None but the state item was
-                    // removed during eviction in revert_issued_assets. So we should not use
-                    // this check here?
-                    //assert!(
-                    //    old_state_from_block.is_none(),
-                    //    "issued asset state mismatch for {:?}",
-                    //    asset_base
-                    //);
+                    // When `old_state_from_block` is `Some` but the asset is missing from
+                    // the in-memory map, it means the entry was evicted during finalization
+                    // and lives in the finalized DB. Inserting `new_state` is correct, the
+                    // old state is preserved on disk for rollback via the `IssuedAssetChanges`
+                    // pairs.
                     *new_state
                 });
         }

@@ -280,7 +280,7 @@ bitflags! {
     /// # Consensus
     ///
     /// > [NU5 onward] In a version 5 transaction, the reserved bits 2..7 of the flagsOrchard
-    /// > field MUST be zero.
+    /// > field MUST be zero. Bit 2 (ENABLE_ZSA) is introduced in V6 (NU7, ZIP 230).
     ///
     /// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
     ///
@@ -295,7 +295,7 @@ bitflags! {
         /// Enable creating new non-zero valued Orchard notes.
         const ENABLE_OUTPUTS = 0b00000010;
         /// Enable ZSA transaction (otherwise all notes within actions must use native asset).
-        // FIXME: Should we use this flag explicitly anywhere in Zebra?
+        #[cfg(feature = "tx_v6")]
         const ENABLE_ZSA = 0b00000100;
     }
 }
