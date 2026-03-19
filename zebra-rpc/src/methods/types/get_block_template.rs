@@ -868,6 +868,12 @@ pub fn standard_coinbase_outputs(
     let funding_streams = funding_stream_values(height, network, expected_block_subsidy)
         .expect("funding stream value calculations are valid for reasonable chain heights");
 
+    let miner_reward = miner_subsidy(height, network, expected_block_subsidy)
+        .expect("reward calculations are valid for reasonable chain heights")
+        + miner_fee;
+    let miner_reward =
+        miner_reward.expect("reward calculations are valid for reasonable chain heights");
+
     // Optional TODO: move this into a zebra_consensus function?
     let funding_streams: HashMap<
         FundingStreamReceiver,
@@ -881,12 +887,6 @@ pub fn standard_coinbase_outputs(
             ))
         })
         .collect();
-
-    let miner_reward = miner_subsidy(height, network, expected_block_subsidy)
-        .expect("reward calculations are valid for reasonable chain heights")
-        + miner_fee;
-    let miner_reward =
-        miner_reward.expect("reward calculations are valid for reasonable chain heights");
 
     // Collect all the funding streams and convert them to outputs.
     let funding_streams_outputs: Vec<(transparent::Address, Amount<NonNegative>)> = funding_streams
