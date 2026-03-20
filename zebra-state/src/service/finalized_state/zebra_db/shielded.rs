@@ -26,7 +26,7 @@ use zebra_chain::{
     transaction::Transaction,
 };
 
-#[cfg(feature = "tx_v6")]
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
 use zebra_chain::orchard_zsa::{AssetBase, AssetState, IssuedAssetChanges};
 
 use crate::{
@@ -39,20 +39,20 @@ use crate::{
     TransactionLocation,
 };
 
-#[cfg(feature = "tx_v6")]
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
 use crate::service::finalized_state::TypedColumnFamily;
 
 // Doc-only items
 #[allow(unused_imports)]
 use zebra_chain::subtree::NoteCommitmentSubtree;
 
-#[cfg(feature = "tx_v6")]
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
 /// The name of the chain value pools column family.
 ///
 /// This constant should be used so the compiler can detect typos.
 pub const ISSUED_ASSETS: &str = "orchard_issued_assets";
 
-#[cfg(feature = "tx_v6")]
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
 /// The type for reading value pools from the database.
 ///
 /// This constant should be used so the compiler can detect incorrectly typed accesses to the
@@ -60,7 +60,7 @@ pub const ISSUED_ASSETS: &str = "orchard_issued_assets";
 pub type IssuedAssetsCf<'cf> = TypedColumnFamily<'cf, AssetBase, AssetState>;
 
 impl ZebraDb {
-    #[cfg(feature = "tx_v6")]
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
     /// Returns a typed handle to the `history_tree` column family.
     pub(crate) fn issued_assets_cf(&self) -> IssuedAssetsCf<'_> {
         IssuedAssetsCf::new(&self.db, ISSUED_ASSETS)
@@ -472,7 +472,7 @@ impl ZebraDb {
         Some(subtree_data.with_index(index))
     }
 
-    #[cfg(feature = "tx_v6")]
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
     /// Get the orchard issued asset state for the finalized tip.
     pub fn issued_asset(&self, asset_base: &AssetBase) -> Option<AssetState> {
         self.issued_assets_cf().zs_get(asset_base)
@@ -519,7 +519,7 @@ impl DiskWriteBatch {
             self.prepare_nullifier_batch(zebra_db, transaction);
         }
 
-        #[cfg(feature = "tx_v6")]
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         self.prepare_issued_assets_batch(zebra_db, finalized);
     }
 
@@ -558,7 +558,7 @@ impl DiskWriteBatch {
         }
     }
 
-    #[cfg(feature = "tx_v6")]
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
     /// Prepare a database batch containing `finalized.block`'s asset issuance
     /// and return it (without actually writing anything).
     ///

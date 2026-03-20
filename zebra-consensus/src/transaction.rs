@@ -1247,7 +1247,7 @@ where
                     .clone()
                     .oneshot(item)
                     .boxed(),
-                #[cfg(zcash_unstable = "nu7")]
+                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
                 OrchardBundle::OrchardZSA(_) => primitives::halo2::VERIFIER_ZSA
                     .clone()
                     .oneshot(item)

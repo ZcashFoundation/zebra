@@ -18,7 +18,7 @@ use zebra_chain::{
     value_balance::ValueBalance,
 };
 
-#[cfg(feature = "tx_v6")]
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
 use zebra_chain::orchard_zsa::AssetState;
 
 use zebra_chain::work::difficulty::CompactDifficulty;
@@ -455,7 +455,7 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::NonFinalizedBlocksListener`]
     NonFinalizedBlocksListener(NonFinalizedBlocksListener),
 
-    #[cfg(feature = "tx_v6")]
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
     /// Response to [`ReadRequest::AssetState`]
     AssetState(Option<AssetState>),
 }
@@ -565,7 +565,7 @@ impl TryFrom<ReadResponse> for Response {
                 Err("there is no corresponding Response for this ReadResponse")
             }
 
-            #[cfg(feature = "tx_v6")]
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             ReadResponse::AssetState(_) => Err("there is no corresponding Response for this ReadResponse"),
         }
     }

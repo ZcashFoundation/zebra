@@ -1199,7 +1199,7 @@ pub fn insert_fake_orchard_shielded_data(
         proof: Halo2Proof(vec![]),
         actions: at_least_one![dummy_authorized_action],
         binding_sig: Signature::from([0u8; 64]),
-        #[cfg(feature = "tx_v6")]
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         burn: Default::default(),
     };
 

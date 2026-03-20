@@ -26,5 +26,5 @@ pub use note::{EncryptedNote, Note, Nullifier, WrappedNoteKey};
 pub use shielded_data::{AuthorizedAction, Flags, ShieldedData};
 pub use shielded_data_flavor::{OrchardVanilla, ShieldedDataFlavor};
 
-#[cfg(feature = "tx_v6")]
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
 pub use shielded_data_flavor::OrchardZSA;

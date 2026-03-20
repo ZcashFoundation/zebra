@@ -137,6 +137,15 @@ use types::{
 #[cfg(test)]
 mod tests;
 
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+use zebra_chain::orchard_zsa::AssetState;
+
+/// Dummy type to allow `get_asset_state` to be declared in the `Rpc` trait unconditionally,
+/// since `zebra_chain::orchard_zsa::AssetState` is not available without these flags.
+#[cfg(not(all(zcash_unstable = "nu7", feature = "tx_v6")))]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct AssetState;
+
 #[rpc(server)]
 /// RPC method signatures.
 pub trait Rpc {
@@ -434,7 +443,7 @@ pub trait Rpc {
         &self,
         asset_base: String,
         include_non_finalized: Option<bool>,
-    ) -> Result<zebra_chain::orchard_zsa::AssetState>;
+    ) -> Result<AssetState>;
 
     /// Stop the running zebrad process.
     ///
@@ -2078,7 +2087,7 @@ where
         }
     }
 
-    // FIXME: Add #[cfg(feature = "tx_v6")] here
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
     async fn get_asset_state(
         &self,
         asset_base: String,
@@ -2107,6 +2116,17 @@ where
         };
 
         asset_state.ok_or_misc_error("asset base not found")
+    }
+
+    // Dummy implementation required to satisfy the `Rpc` trait when the real
+    // `AssetState` type and implementation are not compiled in.
+    #[cfg(not(all(zcash_unstable = "nu7", feature = "tx_v6")))]
+    async fn get_asset_state(
+        &self,
+        _asset_base: String,
+        _include_non_finalized: Option<bool>,
+    ) -> Result<AssetState> {
+        Err(ErrorCode::MethodNotFound.into())
     }
 
     fn stop(&self) -> Result<String> {

@@ -49,6 +49,7 @@ pub fn decrypts_successfully(tx: &Transaction, network: &Network, height: Height
     if let Some(bundle) = tx.orchard_bundle() {
         let is_decrypted_successfully = match bundle {
             OrchardBundle::OrchardVanilla(bundle) => orchard_bundle_decrypts_successfully(bundle),
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             OrchardBundle::OrchardZSA(bundle) => orchard_bundle_decrypts_successfully(bundle),
         };
 

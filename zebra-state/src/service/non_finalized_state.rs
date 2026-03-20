@@ -13,19 +13,24 @@ use indexmap::IndexMap;
 use tokio::sync::watch;
 use zebra_chain::{
     block::{self, Block, Hash, Height},
-    orchard_zsa::{AssetBase, IssuedAssetChanges},
     parameters::Network,
     sprout::{self},
     transparent,
 };
 
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+use zebra_chain::orchard_zsa::{AssetBase, IssuedAssetChanges};
+
 use crate::{
     constants::{MAX_INVALIDATED_BLOCKS, MAX_NON_FINALIZED_CHAIN_FORKS},
     error::ReconsiderError,
     request::{ContextuallyVerifiedBlock, FinalizableBlock},
-    service::{check, finalized_state::ZebraDb, read, InvalidateError},
+    service::{check, finalized_state::ZebraDb, InvalidateError},
     SemanticallyVerifiedBlock, ValidateContextError, WatchReceiver,
 };
+
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+use crate::service::read;
 
 mod backup;
 mod chain;
@@ -552,7 +557,7 @@ impl NonFinalizedState {
             finalized_state,
         )?;
 
-        #[cfg(feature = "tx_v6")]
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         let issued_assets = IssuedAssetChanges::validate_and_get_changes(
             &prepared.block.transactions,
             prepared.transaction_sighashes.as_deref(),
@@ -580,7 +585,7 @@ impl NonFinalizedState {
             prepared.clone(),
             spent_utxos.clone(),
             // TODO: Refactor this into repeated `With::with()` calls, see http_request_compatibility module.
-            #[cfg(feature = "tx_v6")]
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             issued_assets,
         )
         .map_err(|value_balance_error| {
