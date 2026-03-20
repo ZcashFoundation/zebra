@@ -65,7 +65,7 @@ crossbeam-channel = "0.5.14"
 derive-getters = "0.5"
 derive-new = "0.5"
 dirs = "6.0"
-ed25519-zebra = "4.0.3"
+ed25519-zebra = "4.2"
 elasticsearch = { version = "8.17.0-alpha.1", default-features = false }
 equihash = "0.2.2"
 ff = "0.13"
