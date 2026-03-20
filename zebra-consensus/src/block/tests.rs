@@ -576,6 +576,192 @@ fn miner_fees_validation_failure() -> Result<(), Report> {
     Ok(())
 }
 
+#[cfg(all(feature = "tx_v6", zcash_unstable = "zip235"))]
+#[test]
+fn miner_fees_validation_fails_when_zip233_amount_is_zero() -> Result<(), Report> {
+    use zebra_chain::parameters::testnet::{
+        self, ConfiguredActivationHeights, ConfiguredFundingStreams,
+    };
+
+    let transparent_value_balance = 100_001_000.try_into().unwrap();
+    let zip233_amount = Amount::zero();
+    let expected_block_subsidy = 100_000_000.try_into().unwrap();
+    let block_miner_fees = 1000.try_into().unwrap();
+    let expected_deferred_amount = DeferredPoolBalanceChange::new(Amount::zero());
+
+    let regtest = testnet::Parameters::build()
+        .with_slow_start_interval(Height::MIN)
+        .with_activation_heights(ConfiguredActivationHeights {
+            nu7: Some(1),
+            ..Default::default()
+        })
+        .unwrap()
+        .with_funding_streams(vec![ConfiguredFundingStreams {
+            height_range: Some(Height(1)..Height(10)),
+            recipients: None,
+        }])
+        .to_network()
+        .unwrap();
+
+    let network_upgrade = NetworkUpgrade::Nu7;
+    let height = network_upgrade
+        .activation_height(&regtest)
+        .expect("failed to get the activation height for Nu7");
+
+    let coinbase_tx = Transaction::V6 {
+        network_upgrade,
+        lock_time: LockTime::unlocked(),
+        expiry_height: height,
+        zip233_amount,
+        inputs: vec![],
+        outputs: vec![transparent::Output::new(
+            transparent_value_balance,
+            zebra_chain::transparent::Script::new(&[]),
+        )],
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    };
+    assert_eq!(
+        check::miner_fees_are_valid(
+            &coinbase_tx,
+            height,
+            block_miner_fees,
+            expected_block_subsidy,
+            expected_deferred_amount,
+            &regtest,
+        ),
+        Err(BlockError::Transaction(TransactionError::Subsidy(
+            SubsidyError::InvalidZip233Amount
+        )))
+    );
+
+    Ok(())
+}
+
+#[cfg(all(feature = "tx_v6", zcash_unstable = "zip235"))]
+#[test]
+fn miner_fees_validation_succeeds_when_zip233_amount_is_correct() -> Result<(), Report> {
+    use zebra_chain::parameters::testnet::{
+        self, ConfiguredActivationHeights, ConfiguredFundingStreams,
+    };
+
+    let transparent_value_balance = 100_001_000.try_into().unwrap();
+    let zip233_amount = 600.try_into().unwrap();
+    let expected_block_subsidy = (100_000_600).try_into().unwrap();
+    let block_miner_fees = 1000.try_into().unwrap();
+    let expected_deferred_amount = DeferredPoolBalanceChange::new(Amount::zero());
+
+    let regtest = testnet::Parameters::build()
+        .with_slow_start_interval(Height::MIN)
+        .with_activation_heights(ConfiguredActivationHeights {
+            nu7: Some(1),
+            ..Default::default()
+        })
+        .unwrap()
+        .with_funding_streams(vec![ConfiguredFundingStreams {
+            height_range: Some(Height(1)..Height(10)),
+            recipients: None,
+        }])
+        .to_network()
+        .unwrap();
+
+    let network_upgrade = NetworkUpgrade::Nu7;
+    let height = network_upgrade
+        .activation_height(&regtest)
+        .expect("failed to get the activation height for Nu7");
+
+    let coinbase_tx = Transaction::V6 {
+        network_upgrade,
+        lock_time: LockTime::unlocked(),
+        expiry_height: height,
+        zip233_amount,
+        inputs: vec![],
+        outputs: vec![transparent::Output::new(
+            transparent_value_balance,
+            zebra_chain::transparent::Script::new(&[]),
+        )],
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    };
+
+    assert_eq!(
+        check::miner_fees_are_valid(
+            &coinbase_tx,
+            height,
+            block_miner_fees,
+            expected_block_subsidy,
+            expected_deferred_amount,
+            &regtest,
+        ),
+        Ok(())
+    );
+
+    Ok(())
+}
+
+#[cfg(all(feature = "tx_v6", zcash_unstable = "zip235"))]
+#[test]
+fn miner_fees_validation_fails_when_zip233_amount_is_incorrect() -> Result<(), Report> {
+    use zebra_chain::parameters::testnet::{
+        self, ConfiguredActivationHeights, ConfiguredFundingStreams,
+    };
+
+    let transparent_value_balance = 100_001_000.try_into().unwrap();
+    let zip233_amount = 500.try_into().unwrap();
+    let expected_block_subsidy = (100_000_500).try_into().unwrap();
+    let block_miner_fees = 1000.try_into().unwrap();
+    let expected_deferred_amount = DeferredPoolBalanceChange::new(Amount::zero());
+
+    let regtest = testnet::Parameters::build()
+        .with_slow_start_interval(Height::MIN)
+        .with_activation_heights(ConfiguredActivationHeights {
+            nu7: Some(1),
+            ..Default::default()
+        })
+        .unwrap()
+        .with_funding_streams(vec![ConfiguredFundingStreams {
+            height_range: Some(Height(1)..Height(10)),
+            recipients: None,
+        }])
+        .to_network()
+        .unwrap();
+
+    let network_upgrade = NetworkUpgrade::Nu7;
+    let height = network_upgrade
+        .activation_height(&regtest)
+        .expect("failed to get the activation height for Nu7");
+
+    let coinbase_tx = Transaction::V6 {
+        network_upgrade,
+        lock_time: LockTime::unlocked(),
+        expiry_height: height,
+        zip233_amount,
+        inputs: vec![],
+        outputs: vec![transparent::Output::new(
+            transparent_value_balance,
+            zebra_chain::transparent::Script::new(&[]),
+        )],
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    };
+
+    assert_eq!(
+        check::miner_fees_are_valid(
+            &coinbase_tx,
+            height,
+            block_miner_fees,
+            expected_block_subsidy,
+            expected_deferred_amount,
+            &regtest,
+        ),
+        Err(BlockError::Transaction(TransactionError::Subsidy(
+            SubsidyError::InvalidZip233Amount
+        )))
+    );
+
+    Ok(())
+}
+
 #[test]
 fn time_is_valid_for_historical_blocks() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
