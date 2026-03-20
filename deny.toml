@@ -62,9 +62,6 @@ skip-tree = [
     # wait for abscissa_core to upgrade
     {name = "tracing-log", version = "=0.1.4" },
 
-    # Multiple base64 versions through different dependencies
-    { name = "base64", version = "=0.21.7" },
-
     # wait for abscissa_core to update toml
     { name = "toml", version = "=0.5.11" },
 
@@ -91,15 +88,9 @@ skip-tree = [
     # wait for abscissa_core to update synstructure
     { name = "synstructure", version = "=0.12.6" },
 
-    # wait for librustzcash to update tonic
-    { name = "tonic", version = "0.12" },
-
     { name = "windows-sys", version = "=0.52.0" },
 
     { name = "indexmap", version = "1.9" },
-
-    # TODO: Bump `hashbrown` to 0.16 in ed25519-zebra.
-    { name = "hashbrown", version = "0.15" },
 
     { name = "getrandom", version = "0.3" },
 
@@ -116,9 +107,8 @@ skip-tree = [
     # wait until `config` updates `convert_case`
     { name = "convert_case", version = "0.6.0" },
 
-
-    #
-    { name = "getrandom", version = "0.3.4" },
+    # wait for hashlink/petgraph/metrics-util to update hashbrown and foldhash
+    { name = "hashbrown", version = "0.15" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
