@@ -2,10 +2,14 @@
 
 use jsonrpsee_types::ErrorCode;
 
+use zcash_transparent::coinbase::{MAX_COINBASE_HEIGHT_LEN, MAX_COINBASE_SCRIPT_LEN};
 use zebra_chain::{
     block,
     parameters::subsidy::FundingStreamReceiver::{self, *},
 };
+
+/// The maximum length of the optional, arbitrary data in the script sig field of a coinbase tx.
+pub const MAX_MINER_DATA_LEN: usize = MAX_COINBASE_SCRIPT_LEN - MAX_COINBASE_HEIGHT_LEN;
 
 /// When long polling, the amount of time we wait between mempool queries.
 /// (And sync status queries, which we do right before mempool queries.)
