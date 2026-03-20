@@ -97,7 +97,6 @@ impl ContextuallyVerifiedBlock {
             height,
             new_outputs,
             transaction_hashes,
-            deferred_pool_balance_change: _,
         } = block.into();
 
         Self {

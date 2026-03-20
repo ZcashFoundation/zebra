@@ -338,7 +338,6 @@ where
                 height,
                 new_outputs,
                 transaction_hashes,
-                deferred_pool_balance_change: Some(deferred_pool_balance_change),
             };
 
             // Return early for proposal requests.
