@@ -2087,13 +2087,25 @@ where
         let read_state = self.read_state.clone();
         let include_non_finalized = include_non_finalized.unwrap_or(true);
 
-        let asset_base = zebra_chain::orchard_zsa::AssetBase::from_bytes(
-            &hex::decode(asset_base).map_misc_error()?[..]
-                .try_into()
-                .map_misc_error()?,
-        )
-        .into_option()
-        .ok_or_misc_error("invalid asset base")?;
+        if asset_base.len() != 64 {
+            return Err("expected 32 bytes (64 hex chars)")
+                .map_error(server::error::LegacyCode::InvalidParameter);
+        }
+
+        let asset_base_bytes: [u8; 32] = hex::decode(&asset_base)
+            .map_error_with_prefix(
+                server::error::LegacyCode::InvalidParameter,
+                "invalid hex encoding",
+            )?
+            .try_into()
+            .expect("length already checked above");
+
+        let asset_base = zebra_chain::orchard_zsa::AssetBase::from_bytes(&asset_base_bytes)
+            .into_option()
+            .ok_or_error(
+                server::error::LegacyCode::InvalidParameter,
+                "invalid asset base",
+            )?;
 
         let request = zebra_state::ReadRequest::AssetState {
             asset_base,

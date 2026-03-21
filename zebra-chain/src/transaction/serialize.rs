@@ -475,6 +475,14 @@ impl ZcashDeserialize for Option<orchard::ShieldedData<OrchardVanilla>> {
         // in [`Flags::zcash_deserialized`].
         let flags: orchard::Flags = (&mut reader).zcash_deserialize_into()?;
 
+        // `ENABLE_ZSA` is introduced in V6 (ZIP 230) and must be zero in V5.
+        #[cfg(feature = "tx_v6")]
+        if flags.contains(orchard::Flags::ENABLE_ZSA) {
+            return Err(SerializationError::Parse(
+                "ENABLE_ZSA is not allowed in V5 transactions",
+            ));
+        }
+
         // Denoted as `valueBalanceOrchard` in the spec.
         let value_balance: Amount = (&mut reader).zcash_deserialize_into()?;
 
