@@ -59,7 +59,7 @@ lazy_static::lazy_static! {
         ItemVerifyingKey::build::<OrchardVanilla>();
 
     /// The halo2 proof verifying key for OrchardZSA.
-    #[cfg(zcash_unstable = "nu7")]
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
     pub static ref VERIFYING_KEY_ZSA: ItemVerifyingKey =
         ItemVerifyingKey::build::<OrchardZSA>();
 }
@@ -75,7 +75,7 @@ impl RequestWeight for Item {
     fn request_weight(&self) -> usize {
         match &self.bundle {
             OrchardBundle::OrchardVanilla(b) => b.actions().len(),
-            #[cfg(zcash_unstable = "nu7")]
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             OrchardBundle::OrchardZSA(b) => b.actions().len(),
         }
     }
@@ -106,7 +106,7 @@ impl QueueBatchVerify for BatchValidator {
     fn queue(&mut self, Item { bundle, sighash }: Item) {
         match bundle {
             OrchardBundle::OrchardVanilla(b) => self.add_bundle(&b, sighash.0),
-            #[cfg(zcash_unstable = "nu7")]
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             OrchardBundle::OrchardZSA(b) => self.add_bundle(&b, sighash.0),
         }
     }
@@ -175,7 +175,7 @@ pub static VERIFIER_VANILLA: Lazy<
 });
 
 /// Like [`VERIFIER_VANILLA`], but for OrchardZSA proofs.
-#[cfg(zcash_unstable = "nu7")]
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
 pub static VERIFIER_ZSA: Lazy<
     Fallback<
         Batch<Verifier, Item>,

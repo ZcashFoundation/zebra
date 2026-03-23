@@ -135,7 +135,7 @@ impl zp_tx::components::orchard::MapAuth<orchard::bundle::Authorized, orchard::b
     }
 }
 
-#[cfg(zcash_unstable = "nu7")]
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
 impl zp_tx::components::issuance::MapIssueAuth<orchard::issuance::Signed, orchard::issuance::Signed>
     for IdentityMap
 {
@@ -152,7 +152,7 @@ impl zp_tx::Authorization for PrecomputedAuth {
     type SaplingAuth = sapling_crypto::bundle::Authorized;
     type OrchardAuth = orchard::bundle::Authorized;
 
-    #[cfg(zcash_unstable = "nu7")]
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
     type IssueAuth = orchard::issuance::Signed;
 
     #[cfg(zcash_unstable = "zfuture")]
@@ -280,7 +280,7 @@ impl PrecomputedTxData {
             f_transparent,
             IdentityMap,
             IdentityMap,
-            #[cfg(zcash_unstable = "nu7")]
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             IdentityMap,
             #[cfg(zcash_unstable = "zfuture")]
             (),

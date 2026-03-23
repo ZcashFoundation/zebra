@@ -42,7 +42,7 @@ pub use find::{
     non_finalized_state_contains_block_hash, tip, tip_height, tip_with_value_balance,
 };
 
-#[cfg(feature = "tx_v6")]
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
 pub use find::asset_state;
 
 pub use tree::{orchard_subtrees, orchard_tree, sapling_subtrees, sapling_tree};

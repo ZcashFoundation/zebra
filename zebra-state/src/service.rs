@@ -2279,7 +2279,7 @@ impl Service<ReadRequest> for ReadStateService {
                 .boxed()
             }
 
-            #[cfg(feature = "tx_v6")]
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             ReadRequest::AssetState {
                 asset_base,
                 include_non_finalized,

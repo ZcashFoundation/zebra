@@ -2078,7 +2078,7 @@ where
         }
     }
 
-    // FIXME: Add #[cfg(feature = "tx_v6")] here
+    // FIXME: Add #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))] here
     async fn get_asset_state(
         &self,
         asset_base: String,

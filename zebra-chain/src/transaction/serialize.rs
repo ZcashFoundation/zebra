@@ -29,7 +29,7 @@ use crate::{
 use super::*;
 use crate::sapling;
 
-#[cfg(feature = "tx_v6")]
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
 use versioned_sig::{SighashInfoV0, VersionedSigV0};
 
 impl ZcashDeserialize for jubjub::Fq {
@@ -394,7 +394,7 @@ impl ZcashSerialize for orchard::ShieldedData<OrchardVanilla> {
     }
 }
 
-#[cfg(feature = "tx_v6")]
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
 #[allow(clippy::unwrap_in_result)]
 impl ZcashSerialize for orchard::ShieldedData<OrchardZSA> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
@@ -476,7 +476,7 @@ impl ZcashDeserialize for Option<orchard::ShieldedData<OrchardVanilla>> {
         let flags: orchard::Flags = (&mut reader).zcash_deserialize_into()?;
 
         // `ENABLE_ZSA` is introduced in V6 (ZIP 230) and must be zero in V5.
-        #[cfg(feature = "tx_v6")]
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         if flags.contains(orchard::Flags::ENABLE_ZSA) {
             return Err(SerializationError::Parse(
                 "ENABLE_ZSA is not allowed in V5 transactions",
@@ -521,7 +521,7 @@ impl ZcashDeserialize for Option<orchard::ShieldedData<OrchardVanilla>> {
         Ok(Some(orchard::ShieldedData::<OrchardVanilla> {
             flags,
             value_balance,
-            #[cfg(feature = "tx_v6")]
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             burn: NoBurn,
             shared_anchor,
             proof,
@@ -534,7 +534,7 @@ impl ZcashDeserialize for Option<orchard::ShieldedData<OrchardVanilla>> {
 // FIXME: Try to avoid duplication with OrchardVanilla version
 // we can't split ShieldedData out of Option<ShieldedData> deserialization,
 // because the counts are read along with the arrays.
-#[cfg(feature = "tx_v6")]
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
 impl ZcashDeserialize for Option<orchard::ShieldedData<OrchardZSA>> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         // Denoted as `nActionGroupsOrchard` in the spec (ZIP 230).
@@ -1357,7 +1357,7 @@ impl FromHex for SerializedTransaction {
 }
 
 // TODO: After tx-v6 merge, refactor to share common serialization logic with V5.
-#[cfg(feature = "tx_v6")]
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
 mod sapling_v6 {
     use super::*;
 
