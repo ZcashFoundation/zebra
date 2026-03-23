@@ -68,6 +68,78 @@ pub fn coinbase_is_first(block: &Block) -> Result<Arc<transaction::Transaction>,
     Ok(first.clone())
 }
 
+/// Verifies tachyon proof aggregation for a block.
+///
+/// Tachyon transactions in a block use proof aggregation: a stamped bundle's
+/// proof covers its own actions plus those of any immediately following
+/// unstamped (stripped) bundles. This function enforces that structure and
+/// verifies each aggregate proof.
+///
+/// Algorithm:
+/// 1. Iterate through block transactions.
+/// 2. For stamped tachyon txs: collect actions from self + following unstamped txs, verify proof.
+/// 3. For unstamped tachyon txs not preceded by a stamped tx: error.
+/// 4. Skip non-tachyon transactions.
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+pub fn verify_tachyon_aggregates(block: &Block) -> Result<(), BlockError> {
+    let mut i = 0;
+    let txs = &block.transactions;
+
+    while i < txs.len() {
+        // Extract tachyon bundle from this transaction, if any.
+        let bundle = match txs[i].as_ref() {
+            Transaction::V6 {
+                tachyon_shielded_data: Some(bundle),
+                ..
+            } => bundle,
+            _ => {
+                i += 1;
+                continue;
+            }
+        };
+
+        match &bundle.stamp {
+            Some(stamp) => {
+                // Stamped bundle: collect actions from this tx and following unstamped txs.
+                let mut all_actions: Vec<zcash_tachyon::Action> = bundle.actions.clone();
+
+                // Advance past this stamped tx and collect trailing unstamped tachyon txs.
+                i += 1;
+                while i < txs.len() {
+                    match txs[i].as_ref() {
+                        Transaction::V6 {
+                            tachyon_shielded_data: Some(adj_bundle),
+                            ..
+                        } if adj_bundle.stamp.is_none() => {
+                            all_actions.extend(adj_bundle.actions.iter().cloned());
+                            i += 1;
+                        }
+                        _ => break,
+                    }
+                }
+
+                // Verify the stamp proof against the accumulated actions.
+                stamp
+                    .proof
+                    .verify(all_actions, stamp.tachygrams.clone(), stamp.anchor)
+                    .map_err(|_| {
+                        BlockError::Other(
+                            "tachyon proof verification failed".to_string(),
+                        )
+                    })?;
+            }
+            None => {
+                // Unstamped tachyon tx not covered by a preceding stamped tx.
+                return Err(BlockError::Other(
+                    "unstamped tachyon bundle not preceded by a stamped bundle".to_string(),
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Returns `Ok(ExpandedDifficulty)` if the`difficulty_threshold` of `header` is at least as difficult as
 /// the target difficulty limit for `network` (PoWLimit)
 ///
