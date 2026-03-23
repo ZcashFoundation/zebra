@@ -396,6 +396,9 @@ pub enum SubsidyError {
 
     #[error("invalid amount")]
     InvalidAmount(#[from] amount::Error),
+
+    #[error("invalid zip233 amount")]
+    InvalidZip233Amount,
 }
 
 /// The divisor used for halvings.
