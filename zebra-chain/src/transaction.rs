@@ -1614,7 +1614,6 @@ impl Transaction {
         &self,
         outputs: &HashMap<transparent::OutPoint, transparent::Output>,
     ) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
-        // TODO: subtruct zip233_amount if zip233 is approved.
         self.transparent_value_balance_from_outputs(outputs)?
             + self.sprout_value_balance()?
             + self.sapling_value_balance()

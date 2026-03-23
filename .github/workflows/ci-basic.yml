@@ -7,6 +7,12 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
+    strategy:
+      matrix:
+        nu7:
+          - true
+          - false
+
     env:
       # Use system-installed RocksDB library instead of building from scratch
       ROCKSDB_LIB_DIR: /usr/lib
@@ -33,10 +39,18 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler librocksdb-dev
       - name: Install formatting & linting tools
         run: rustup component add rustfmt clippy
-      - name: Run tests
-        run: timeout --preserve-status 1h cargo test --verbose --locked
+
       - name: Verify working directory is clean
         run: git diff --exit-code
+
+      - name: Strip nu7/tx_v6 flags from config
+        if: ${{ !matrix.nu7 }}
+        run: |
+          sed -i 's|.*"--cfg", .feature="tx_v6".*|# &|' .cargo/config.toml
+          sed -i 's|.*"--cfg", "zcash_unstable=\\"nu7\\"".*|# &|' .cargo/config.toml
+
+      - name: Run tests
+        run: timeout --preserve-status 1h cargo test --verbose --locked
       - name: Run doc check
         run: cargo doc --workspace --no-deps --all-features --document-private-items --locked
       - name: Run format check

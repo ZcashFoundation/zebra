@@ -35,7 +35,7 @@ use super::{OrchardVanilla, ShieldedDataFlavor};
     serde(bound(serialize = "Flavor::EncryptedNote: serde::Serialize"))
 )]
 #[cfg_attr(
-    feature = "tx_v6",
+    all(zcash_unstable = "nu7", feature = "tx_v6"),
     serde(bound(
         serialize = "Flavor::EncryptedNote: serde::Serialize, Flavor::BurnType: serde::Serialize",
         deserialize = "Flavor::BurnType: serde::Deserialize<'de>"

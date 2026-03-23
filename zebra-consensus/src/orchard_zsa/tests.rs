@@ -32,10 +32,12 @@ use orchard::{
 
 use zebra_chain::{
     block::{genesis::regtest_genesis_block, Block, Hash},
-    orchard_zsa::{AssetState, BurnItem},
     parameters::{testnet::ConfiguredActivationHeights, Network},
     serialization::ZcashDeserialize,
 };
+
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+use zebra_chain::orchard_zsa::{AssetState, BurnItem};
 
 use zebra_state::{ReadRequest, ReadResponse, ReadStateService};
 

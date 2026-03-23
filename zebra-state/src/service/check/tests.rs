@@ -3,7 +3,9 @@
 #![allow(clippy::unwrap_in_result)]
 
 mod anchors;
-mod issuance;
 mod nullifier;
 mod utxo;
 mod vectors;
+
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+mod issuance;

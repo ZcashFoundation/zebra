@@ -128,8 +128,8 @@ impl Arbitrary for Flags {
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         (any::<u8>())
             .prop_map(|byte| {
-                // Clear ENABLE_ZSA: it is only valid in V6, but this strategy
-                // is also used for V5 transactions where it causes a deserialization error.
+                // Clear ENABLE_ZSA: it is only allowed in V6, and this generator is
+                // also used for V5 cases where the flag would make deserialization fail.
                 #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
                 let byte = byte & !(Flags::ENABLE_ZSA.bits());
                 Self::from_bits_truncate(byte)

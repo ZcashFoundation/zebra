@@ -13,11 +13,13 @@ use indexmap::IndexMap;
 use tokio::sync::watch;
 use zebra_chain::{
     block::{self, Block, Hash, Height},
-    orchard_zsa::{AssetBase, IssuedAssetChanges},
     parameters::Network,
     sprout::{self},
     transparent,
 };
+
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+use zebra_chain::orchard_zsa::{AssetBase, IssuedAssetChanges};
 
 use crate::{
     constants::{MAX_INVALIDATED_BLOCKS, MAX_NON_FINALIZED_CHAIN_FORKS},

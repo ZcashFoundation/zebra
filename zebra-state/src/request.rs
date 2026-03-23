@@ -444,7 +444,9 @@ impl FinalizedBlock {
     fn from_semantically_verified(
         block: SemanticallyVerifiedBlock,
         treestate: Treestate,
-        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))] issued_asset_changes: Option<IssuedAssetChanges>,
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))] issued_asset_changes: Option<
+            IssuedAssetChanges,
+        >,
     ) -> Self {
         Self {
             block: block.block,
@@ -521,7 +523,8 @@ impl ContextuallyVerifiedBlock {
     pub fn with_block_and_spent_utxos(
         semantically_verified: SemanticallyVerifiedBlock,
         mut spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
-        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))] issued_asset_changes: IssuedAssetChanges,
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+        issued_asset_changes: IssuedAssetChanges,
     ) -> Result<Self, ValueBalanceError> {
         let SemanticallyVerifiedBlock {
             block,

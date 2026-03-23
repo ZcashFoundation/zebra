@@ -10,10 +10,13 @@ use zebra_chain::{
     amount::{self, NegativeAllowed, NonNegative},
     block,
     history_tree::HistoryTreeError,
-    orchard, orchard_zsa, sapling, sprout, transaction, transparent,
+    orchard, sapling, sprout, transaction, transparent,
     value_balance::{ValueBalance, ValueBalanceError},
     work::difficulty::CompactDifficulty,
 };
+
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+use zebra_chain::orchard_zsa;
 
 use crate::{constants::MIN_TRANSPARENT_COINBASE_MATURITY, HashOrHeight, KnownBlock};
 
@@ -384,6 +387,7 @@ pub enum ValidateContextError {
         transaction_hash: transaction::Hash,
     },
 
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
     #[error("error updating issued asset state")]
     InvalidIssuedAsset(#[from] orchard_zsa::AssetStateError),
 }
