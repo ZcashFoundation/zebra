@@ -3661,3 +3661,101 @@ async fn mempool_zip317_ok() {
         "expected successful verification, got: {verifier_response:?}"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mempool_skip_accepts_block_with_garbage_orchard_proofs() {
+    use zebra_chain::{primitives::Halo2Proof, transaction::VerifiedUnminedTx};
+
+    let _init_guard = zebra_test::init();
+
+    let mempool: MockService<_, _, _, _> = MockService::build().for_prop_tests();
+    let state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
+    let (mempool_setup_tx, mempool_setup_rx) = tokio::sync::oneshot::channel();
+    let verifier = Verifier::new(&Network::Mainnet, state.clone(), mempool_setup_rx);
+    let verifier = Buffer::new(verifier, 1);
+
+    mempool_setup_tx
+        .send(mempool.clone())
+        .ok()
+        .expect("send should succeed");
+
+    let height = NetworkUpgrade::Nu6
+        .activation_height(&Network::Mainnet)
+        .expect("Nu6 activation height is specified");
+    let fund_height = (height - 1).expect("too small");
+    let (input, output, known_utxos) = mock_transparent_transfer(
+        fund_height,
+        true,
+        0,
+        Amount::try_from(10001).expect("invalid value"),
+    );
+
+    let mut tx = Transaction::V5 {
+        network_upgrade: NetworkUpgrade::Nu6,
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::min_lock_time_timestamp(),
+        expiry_height: height,
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    };
+    insert_fake_orchard_shielded_data(&mut tx);
+
+    let tx_hash = tx.hash();
+    let input_outpoint = match tx.inputs()[0] {
+        transparent::Input::PrevOut { outpoint, .. } => outpoint,
+        transparent::Input::Coinbase { .. } => panic!("not coinbase"),
+    };
+
+    // corrupt only auth data, txid stays the same (ZIP-244)
+    let mut garbage_tx = tx.clone();
+    let od = garbage_tx.orchard_shielded_data_mut().unwrap();
+    od.proof = Halo2Proof(vec![0xDE, 0xAD, 0xBE, 0xEF]);
+    od.binding_sig = [0xFF; 64].into();
+    for action in od.actions.iter_mut() {
+        action.spend_auth_sig = [0xFF; 64].into();
+    }
+    assert_eq!(tx.hash(), garbage_tx.hash());
+
+    // simulate valid version in mempool
+    let spent_output = known_utxos
+        .get(&input_outpoint)
+        .unwrap()
+        .utxo
+        .output
+        .clone();
+    let verified_tx = VerifiedUnminedTx::new(
+        tx.clone().into(),
+        Amount::try_from(10000).unwrap(),
+        0,
+        Arc::new(vec![spent_output]),
+    )
+    .unwrap();
+
+    let mut mc = mempool.clone();
+    tokio::spawn(async move {
+        mc.expect_request(mempool::Request::TransactionWithDepsByMinedId(tx_hash))
+            .await
+            .unwrap()
+            .respond(mempool::Response::TransactionWithDeps {
+                transaction: verified_tx,
+                dependencies: [input_outpoint.hash].into(),
+            });
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+
+    // submit garbage version as block tx, mempool skip fires, accepted
+    let resp = verifier
+        .clone()
+        .oneshot(Request::Block {
+            transaction_hash: tx_hash,
+            transaction: Arc::new(garbage_tx),
+            known_outpoint_hashes: Arc::new([input_outpoint.hash].into()),
+            known_utxos: Arc::new(HashMap::new()),
+            height,
+            time: Utc::now(),
+        })
+        .await;
+
+    assert!(resp.is_err(), "garbage proofs rejected via mempool skip");
+}
