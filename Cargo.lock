@@ -7253,7 +7253,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-chain"
-version = "6.0.0"
+version = "6.0.1"
 dependencies = [
  "bech32",
  "bitflags 2.11.0",
@@ -7323,7 +7323,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-consensus"
-version = "5.0.0"
+version = "5.0.1"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -7426,7 +7426,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-rpc"
-version = "6.0.0"
+version = "6.0.1"
 dependencies = [
  "base64 0.22.1",
  "chrono",

@@ -26,7 +26,7 @@ comparison-interpreter = []
 libzcash_script = { workspace = true }
 zcash_script = { workspace = true }
 zcash_primitives = { workspace = true }
-zebra-chain = { path = "../zebra-chain", version = "6.0.0" }
+zebra-chain = { path = "../zebra-chain", version = "6.0.1" }
 
 thiserror = { workspace = true }
 
