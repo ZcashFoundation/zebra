@@ -455,6 +455,9 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::NonFinalizedBlocksListener`]
     NonFinalizedBlocksListener(NonFinalizedBlocksListener),
 
+    /// Response to [`ReadRequest::IsTransparentOutputSpent`]
+    IsTransparentOutputSpent(bool),
+
     #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
     /// Response to [`ReadRequest::AssetState`]
     AssetState(Option<AssetState>),
@@ -552,7 +555,8 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::AddressesTransactionIds(_)
             | ReadResponse::AddressUtxos(_)
             | ReadResponse::ChainInfo(_)
-            | ReadResponse::NonFinalizedBlocksListener(_) => {
+            | ReadResponse::NonFinalizedBlocksListener(_)
+            | ReadResponse::IsTransparentOutputSpent(_) => {
                 Err("there is no corresponding Response for this ReadResponse")
             }
 

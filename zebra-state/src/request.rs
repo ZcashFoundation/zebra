@@ -3,6 +3,7 @@
 use std::{
     collections::{HashMap, HashSet},
     ops::{Add, Deref, DerefMut, RangeInclusive},
+    pin::Pin,
     sync::Arc,
 };
 
@@ -10,6 +11,7 @@ use tower::{BoxError, Service, ServiceExt};
 use zebra_chain::{
     amount::{DeferredPoolBalanceChange, NegativeAllowed},
     block::{self, Block, HeightDiff},
+    diagnostic::{task::WaitForPanics, CodeTimer},
     history_tree::HistoryTree,
     orchard,
     parallel::tree::NoteCommitmentTrees,
@@ -934,6 +936,18 @@ pub enum Request {
     /// [`block::Height`] using `.into()`.
     Block(HashOrHeight),
 
+    /// Looks up a block by hash in any current chain or by height in the current best chain.
+    ///
+    /// Returns
+    ///
+    /// * [`Response::Block(Some(Arc<Block>))`](Response::Block) if the block hash is in any chain, or,
+    ///   if the block height is in the best chain;
+    /// * [`Response::Block(None)`](Response::Block) otherwise.
+    ///
+    /// Note: the [`HashOrHeight`] can be constructed from a [`block::Hash`] or
+    /// [`block::Height`] using `.into()`.
+    AnyChainBlock(HashOrHeight),
+
     //// Same as Block, but also returns serialized block size.
     ////
     /// Returns
@@ -1070,11 +1084,11 @@ pub enum Request {
 }
 
 impl Request {
-    fn variant_name(&self) -> &'static str {
+    /// Returns a [`&'static str`](str) name of the variant representing this value.
+    pub fn variant_name(&self) -> &'static str {
         match self {
             Request::CommitSemanticallyVerifiedBlock(_) => "commit_semantically_verified_block",
             Request::CommitCheckpointVerifiedBlock(_) => "commit_checkpoint_verified_block",
-
             Request::AwaitUtxo(_) => "await_utxo",
             Request::Depth(_) => "depth",
             Request::Tip => "tip",
@@ -1083,6 +1097,7 @@ impl Request {
             Request::AnyChainTransaction(_) => "any_chain_transaction",
             Request::UnspentBestChainUtxo { .. } => "unspent_best_chain_utxo",
             Request::Block(_) => "block",
+            Request::AnyChainBlock(_) => "any_chain_block",
             Request::BlockAndSize(_) => "block_and_size",
             Request::BlockHeader(_) => "block_header",
             Request::FindBlockHashes { .. } => "find_block_hashes",
@@ -1150,6 +1165,19 @@ pub enum ReadRequest {
     /// Note: the [`HashOrHeight`] can be constructed from a [`block::Hash`] or
     /// [`block::Height`] using `.into()`.
     Block(HashOrHeight),
+
+    /// Looks up a block by hash in any current chain or by height in the current best chain.
+    ///
+    /// Returns
+    ///
+    /// * [`ReadResponse::Block(Some(Arc<Block>))`](ReadResponse::Block) if the block hash is in any chain, or
+    ///   if the block height is in any chain, checking the best chain first
+    ///   followed by side chains in order from most to least work.
+    /// * [`ReadResponse::Block(None)`](ReadResponse::Block) otherwise.
+    ///
+    /// Note: the [`HashOrHeight`] can be constructed from a [`block::Hash`] or
+    /// [`block::Height`] using `.into()`.
+    AnyChainBlock(HashOrHeight),
 
     //// Same as Block, but also returns serialized block size.
     ////
@@ -1421,6 +1449,10 @@ pub enum ReadRequest {
     /// allowing the caller to listen for new blocks in the non-finalized state.
     NonFinalizedBlocksListener,
 
+    /// Returns `true` if the transparent output is spent in the best chain,
+    /// or `false` if it is unspent.
+    IsTransparentOutputSpent(transparent::OutPoint),
+
     #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
     /// Returns [`ReadResponse::AssetState`] with an [`AssetState`](zebra_chain::orchard_zsa::AssetState)
     /// of the provided [`AssetBase`] if it exists for the best chain tip or finalized chain tip (depending
@@ -1434,7 +1466,8 @@ pub enum ReadRequest {
 }
 
 impl ReadRequest {
-    fn variant_name(&self) -> &'static str {
+    /// Returns a [`&'static str`](str) name of the variant representing this value.
+    pub fn variant_name(&self) -> &'static str {
         match self {
             ReadRequest::UsageInfo => "usage_info",
             ReadRequest::Tip => "tip",
@@ -1442,6 +1475,7 @@ impl ReadRequest {
             ReadRequest::BlockInfo(_) => "block_info",
             ReadRequest::Depth(_) => "depth",
             ReadRequest::Block(_) => "block",
+            ReadRequest::AnyChainBlock(_) => "any_chain_block",
             ReadRequest::BlockAndSize(_) => "block_and_size",
             ReadRequest::BlockHeader(_) => "block_header",
             ReadRequest::Transaction(_) => "transaction",
@@ -1472,6 +1506,7 @@ impl ReadRequest {
             ReadRequest::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
             ReadRequest::TipBlockSize => "tip_block_size",
             ReadRequest::NonFinalizedBlocksListener => "non_finalized_blocks_listener",
+            ReadRequest::IsTransparentOutputSpent(_) => "is_transparent_output_spent",
             #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             ReadRequest::AssetState { .. } => "asset_state",
         }
@@ -1502,6 +1537,9 @@ impl TryFrom<Request> for ReadRequest {
             Request::BestChainBlockHash(hash) => Ok(ReadRequest::BestChainBlockHash(hash)),
 
             Request::Block(hash_or_height) => Ok(ReadRequest::Block(hash_or_height)),
+            Request::AnyChainBlock(hash_or_height) => {
+                Ok(ReadRequest::AnyChainBlock(hash_or_height))
+            }
             Request::BlockAndSize(hash_or_height) => Ok(ReadRequest::BlockAndSize(hash_or_height)),
             Request::BlockHeader(hash_or_height) => Ok(ReadRequest::BlockHeader(hash_or_height)),
             Request::Transaction(tx_hash) => Ok(ReadRequest::Transaction(tx_hash)),
@@ -1537,5 +1575,43 @@ impl TryFrom<Request> for ReadRequest {
                 ReadRequest::CheckBlockProposalValidity(semantically_verified),
             ),
         }
+    }
+}
+
+#[derive(Debug)]
+/// A convenience type for spawning blocking tokio tasks with
+/// a timer in the scope of a provided span.
+pub struct TimedSpan {
+    timer: CodeTimer,
+    span: tracing::Span,
+}
+
+impl TimedSpan {
+    /// Creates a new [`TimedSpan`].
+    pub fn new(timer: CodeTimer, span: tracing::Span) -> Self {
+        Self { timer, span }
+    }
+
+    /// Spawns a blocking tokio task in scope of the `span` field.
+    #[track_caller]
+    pub fn spawn_blocking<T: Send + 'static>(
+        mut self,
+        f: impl FnOnce() -> Result<T, BoxError> + Send + 'static,
+    ) -> Pin<Box<dyn futures::Future<Output = Result<T, BoxError>> + Send>> {
+        let location = std::panic::Location::caller();
+        // # Performance
+        //
+        // Allow other async tasks to make progress while concurrently reading blocks from disk.
+
+        // The work is done in the future.
+        tokio::task::spawn_blocking(move || {
+            self.span.in_scope(move || {
+                let result = f();
+                self.timer
+                    .finish_inner(Some(location.file()), Some(location.line()), "");
+                result
+            })
+        })
+        .wait_for_panics()
     }
 }

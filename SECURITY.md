@@ -1,15 +1,17 @@
-This page is copyright Zcash Foundation, 2021. It is posted in order to conform to this standard: https://github.com/RD-Crypto-Spec/Responsible-Disclosure/tree/d47a5a3dafa5942c8849a93441745fdd186731e6
+This page is copyright Zcash Foundation, 2021. It is posted in order to conform to this standard: <https://github.com/RD-Crypto-Spec/Responsible-Disclosure/tree/d47a5a3dafa5942c8849a93441745fdd186731e6>
 
 # Security Disclosures
 
 ## Disclosure Principles
 
 The Zcash Foundation's security disclosure process aims to achieve the following goals:
+
 - protecting Zcash users and the wider Zcash ecosystem
 - respecting the work of security researchers
 - improving the ongoing health of the Zcash ecosystem
 
 Specifically, we will:
+
 - assume good faith from researchers and ecosystem partners
 - operate a no fault process, focusing on the technical issues
 - work with security researchers, regardless of how they choose to disclose issues
@@ -18,13 +20,13 @@ Specifically, we will:
 
 The Zcash Foundation is committed to working with researchers who submit security vulnerability notifications to us to resolve those issues on an appropriate timeline and perform a coordinated release, giving credit to the reporter if they would like.
 
-Our best contact for security issues is security@zfnd.org.
+Our best contact for security issues is <security@zfnd.org>.
 
 ## Sending Disclosures
 
 In the case where we become aware of security issues affecting other projects that has never affected Zebra or Zcash, our intention is to inform those projects of security issues on a best effort basis.
 
-In the case where we fix a security issue in Zebra or Zcash that also affects the following neighboring projects, our intention is to engage in responsible disclosures with them as described in https://github.com/RD-Crypto-Spec/Responsible-Disclosure, subject to the deviations described in the section at the bottom of this document.
+In the case where we fix a security issue in Zebra or Zcash that also affects the following neighboring projects, our intention is to engage in responsible disclosures with them as described in <https://github.com/RD-Crypto-Spec/Responsible-Disclosure>, subject to the deviations described in the section at the bottom of this document.
 
 ## Bilateral Responsible Disclosure Agreements
 
@@ -32,7 +34,7 @@ We have set up agreements with the following neighboring projects to share vulne
 
 Specifically, we have agreed to engage in responsible disclosures for security issues affecting Zebra or Zcash technology with the following contacts:
 
-- The Electric Coin Company - security@z.cash via PGP
+- The Electric Coin Company - <security@z.cash> via PGP
 
 ## Deviations from the Standard
 
@@ -46,4 +48,4 @@ In the case of a counterfeiting bug, we might decide not to include those detail
 
 ### Alpha Release Disclosures
 
-The Zcash Foundation will generate encryption keys for security disclosures for our first stable release. Until then, disclosures should be sent to security@zfnd.org unencrypted.
+The Zcash Foundation will generate encryption keys for security disclosures for our first stable release. Until then, disclosures should be sent to <security@zfnd.org> unencrypted.

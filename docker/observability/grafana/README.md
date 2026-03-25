@@ -9,7 +9,7 @@ Pre-built dashboards for monitoring Zebra nodes.
 docker compose -f docker/docker-compose.observability.yml up -d
 ```
 
-Access Grafana at http://localhost:3000 (admin/admin - you'll be prompted to change on first login).
+Access Grafana at <http://localhost:3000> (admin/admin - you'll be prompted to change on first login).
 
 For full stack documentation, see the [Observability README](../README.md).
 
@@ -41,16 +41,18 @@ Configuration: `provisioning/datasources/datasources.yml`
 ### Using Jaeger in Grafana
 
 The Jaeger datasource allows you to:
+
 - Search traces by service name
 - View trace details and span timelines
 - Correlate traces with metrics (via trace IDs)
 
 To explore traces:
+
 1. Go to **Explore** in Grafana
 2. Select **Jaeger** datasource
 3. Search for service `zebra`
 
-Or access Jaeger UI directly at http://localhost:16686 for full trace exploration.
+Or access Jaeger UI directly at <http://localhost:16686> for full trace exploration.
 See the [Jaeger README](../jaeger/README.md) for detailed tracing documentation.
 
 ## Dashboard Configuration

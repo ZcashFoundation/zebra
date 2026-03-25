@@ -113,6 +113,18 @@ pub struct Config {
     #[serde(with = "humantime_serde")]
     pub debug_validity_check_interval: Option<Duration>,
 
+    /// If true, skip spawning the non-finalized state backup task and instead write
+    /// the non-finalized state to the backup directory synchronously before each update
+    /// to the latest chain tip or non-finalized state channels.
+    ///
+    /// Set to `false` by default. When `true`, the non-finalized state is still restored
+    /// from the backup directory on startup, but updates are written synchronously on every
+    /// block commit rather than asynchronously every 5 seconds.
+    ///
+    /// This is intended for testing scenarios where blocks are committed rapidly and the
+    /// async backup task may not flush all blocks before shutdown.
+    pub debug_skip_non_finalized_state_backup_task: bool,
+
     // Elasticsearch configs
     //
     #[cfg(feature = "elasticsearch")]
@@ -206,6 +218,7 @@ impl Default for Config {
             delete_old_database: true,
             debug_stop_at_height: None,
             debug_validity_check_interval: None,
+            debug_skip_non_finalized_state_backup_task: false,
             #[cfg(feature = "elasticsearch")]
             elasticsearch_url: "https://localhost:9200".to_string(),
             #[cfg(feature = "elasticsearch")]

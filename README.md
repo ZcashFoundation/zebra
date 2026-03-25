@@ -43,6 +43,7 @@ Building Zebra requires [Rust](https://www.rust-lang.org/tools/install),
 compiler. Below are quick summaries for installing these dependencies.
 
 [//]: # "The empty lines in the `summary` tag below are required for correct Markdown rendering."
+
 <details><summary>
 
 #### General Instructions for Installing Dependencies
@@ -60,6 +61,7 @@ compiler. Below are quick summaries for installing these dependencies.
 </details>
 
 [//]: # "The empty lines in the `summary` tag below are required for correct Markdown rendering."
+
 <details><summary>
 
 #### Dependencies on Arch Linux
@@ -133,7 +135,7 @@ The Zcash Foundation maintains the following resources documenting Zebra:
   APIs](https://docs.rs/zebrad/latest/zebrad/#zebra-crates) for the latest
   releases of the individual Zebra crates.
 
-- The [documentation of the internal APIs](https://doc-internal.zebra.zfnd.org)
+- The [documentation of the internal APIs](https://zebra.zfnd.org/internal)
   for the `main` branch of the whole Zebra monorepo.
 
 ## User support

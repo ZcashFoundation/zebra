@@ -37,6 +37,9 @@ pub struct CodeTimer {
     /// The minimum duration for warning messages.
     min_warn_time: Duration,
 
+    /// The description configured when the timer is started.
+    description: &'static str,
+
     /// `true` if this timer has finished.
     has_finished: bool,
 }
@@ -44,10 +47,18 @@ pub struct CodeTimer {
 impl CodeTimer {
     /// Start timing the execution of a function, method, or other code region.
     ///
-    /// Returns a guard that finishes timing the code when dropped,
-    /// or when [`CodeTimer::finish()`] is called.
+    /// See [`CodeTimer::start_desc`] for more details.
     #[track_caller]
     pub fn start() -> Self {
+        Self::start_desc("")
+    }
+
+    /// Start timing the execution of a function, method, or other code region.
+    ///
+    /// Returns a guard that finishes timing the code when dropped,
+    /// or when [`CodeTimer::finish_inner()`] is called with an empty description.
+    #[track_caller]
+    pub fn start_desc(description: &'static str) -> Self {
         let start = Instant::now();
         trace!(
             target: "run time",
@@ -57,6 +68,7 @@ impl CodeTimer {
 
         Self {
             start,
+            description,
             min_info_time: DEFAULT_MIN_INFO_TIME,
             min_warn_time: DEFAULT_MIN_WARN_TIME,
             has_finished: false,
@@ -64,15 +76,10 @@ impl CodeTimer {
     }
 
     /// Finish timing the execution of a function, method, or other code region.
-    pub fn finish<S>(
-        mut self,
-        module_path: &'static str,
-        line: u32,
-        description: impl Into<Option<S>>,
-    ) where
-        S: ToString,
-    {
-        self.finish_inner(Some(module_path), Some(line), description);
+    #[track_caller]
+    pub fn finish_desc(mut self, description: &'static str) {
+        let location = std::panic::Location::caller();
+        self.finish_inner(Some(location.file()), Some(location.line()), description);
     }
 
     /// Ignore this timer: it will not check the elapsed time or log any warnings.
@@ -81,19 +88,21 @@ impl CodeTimer {
     }
 
     /// Finish timing the execution of a function, method, or other code region.
-    ///
-    /// This private method can be called from [`CodeTimer::finish()`] or `drop()`.
-    fn finish_inner<S>(
+    pub fn finish_inner(
         &mut self,
-        module_path: impl Into<Option<&'static str>>,
+        file: impl Into<Option<&'static str>>,
         line: impl Into<Option<u32>>,
-        description: impl Into<Option<S>>,
-    ) where
-        S: ToString,
-    {
+        description: &'static str,
+    ) {
         if self.has_finished {
             return;
         }
+
+        let description = if description.is_empty() {
+            self.description
+        } else {
+            description
+        };
 
         self.has_finished = true;
 
@@ -101,21 +110,16 @@ impl CodeTimer {
         let time = duration_short(execution);
         let time = time.as_str();
 
-        let module = module_path.into().unwrap_or_default();
+        let file = file.into().unwrap_or_default();
 
         let line = line.into().map(|line| line.to_string()).unwrap_or_default();
         let line = line.as_str();
-
-        let description = description
-            .into()
-            .map(|desc| desc.to_string())
-            .unwrap_or_default();
 
         if execution >= self.min_warn_time {
             warn!(
                 target: "run time",
                 %time,
-                %module,
+                %file,
                 %line,
                 "very long {description}",
             );
@@ -123,7 +127,7 @@ impl CodeTimer {
             info!(
                 target: "run time",
                 %time,
-                %module,
+                %file,
                 %line,
                 "long {description}",
             );
@@ -131,7 +135,7 @@ impl CodeTimer {
             trace!(
                 target: "run time",
                 %time,
-                %module,
+                %file,
                 %line,
                 "finished {description} code timer",
             );

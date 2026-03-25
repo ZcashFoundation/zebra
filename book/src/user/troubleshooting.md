@@ -4,7 +4,7 @@
 
 There are a few bugs in Zebra that we're still working on fixing:
 
-- [Progress bar estimates can become extremely large](https://github.com/console-rs/indicatif/issues/556). We're waiting on a fix in the progress bar library.
+- [Progress bar estimates can become extremely large](https://github.com/console-rs/indicatif/issues/556). This may be improved in recent versions of the progress bar library.
 
 - Zebra currently gossips and connects to [private IP addresses](https://en.wikipedia.org/wiki/IP_address#Private_addresses), we want to [disable private IPs but provide a config (#3117)](https://github.com/ZcashFoundation/zebra/issues/3117) in an upcoming release
 
@@ -37,9 +37,9 @@ defaults write com.apple.CrashReporter DialogType none
 
 ## Improving Performance
 
-Zebra usually syncs in around three days on Mainnet and half a day on
-Testnet. The sync speed depends on your network connection and the overall Zcash
-network load. The major constraint we've found on `zebrad` performance is the
+Zebra typically syncs in around three days on Mainnet and half a day on
+Testnet under optimal conditions. The actual sync speed depends on your network
+connection, hardware, and the overall Zcash network load. The major constraint we've found on `zebrad` performance is the
 network weather, especially the ability to make good connections to other Zcash
 network peers. If you're having trouble syncing, try the following config
 changes.
@@ -61,7 +61,7 @@ max_concurrent_block_requests = 25
 
 ### Peer Set Size
 
-If your connection is slow, try [connecting to fewer peers](https://docs.rs/zebra-network/latest/zebra_network/struct.Config.html#structfield.peerset_initial_target_size):
+If your connection is slow, try [connecting to fewer peers](https://docs.rs/zebra-network/latest/zebra_network/config/struct.Config.html#structfield.peerset_initial_target_size):
 
 ```toml
 [network]

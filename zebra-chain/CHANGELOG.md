@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [6.0.0] - 2026-03-12
+
+### Breaking Changes
+
+- Removed `zebra_chain::diagnostic::CodeTimer::finish` — replaced by `finish_desc` and `finish_inner`
+- Removed `SubsidyError::SumOverflow` variant — replaced by `SubsidyError::Overflow` and `SubsidyError::Underflow`
+- Removed `zebra_chain::parameters::subsidy::num_halvings` — replaced by `halving`
+- Removed `VerifiedUnminedTx::sigops` field — replaced by `legacy_sigop_count`
+- Removed `transparent::Output::new_coinbase` — replaced by `Output::new`
+- Changed `block_subsidy` parameter renamed from `network` to `net` (no behavioral change)
+- Changed `VerifiedUnminedTx::new` — added required `spent_outputs: Arc<Vec<Output>>` parameter
+
+### Added
+
+- Added `Amount::is_zero(&self) -> bool`
+- Added `From<Height> for u32` and `From<Height> for u64` conversions
+- Added `CodeTimer::start_desc(description: &'static str) -> Self`
+- Added `CodeTimer::finish_desc(self, description: &'static str)`
+- Added `CodeTimer::finish_inner` with optional file/line and description
+- Added `SubsidyError::FoundersRewardNotFound`, `SubsidyError::Overflow`, `SubsidyError::Underflow` variants
+- Added `founders_reward(net, height) -> Amount` — returns the founders reward amount for a given height
+- Added `founders_reward_address(net, height) -> Option<Address>` — returns the founders reward address for a given height
+- Added `halving(height, network) -> u32` — replaces removed `num_halvings`
+- Added `Network::founder_address_list(&self) -> &[&str]`
+- Added `NetworkUpgradeIter` struct
+- Added `VerifiedUnminedTx::legacy_sigop_count: u32` field
+- Added `VerifiedUnminedTx::spent_outputs: Arc<Vec<Output>>` field
+- Added `transparent::Output::new(amount, lock_script) -> Output` — replaces removed `new_coinbase`
+
 ## [5.0.0] - 2026-02-05
 
 ### Breaking Changes
@@ -16,6 +47,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `BoundedVec` re-export.
 - `OrchardActions` trait with `actions()` method.
 - `ConfiguredFundingStreamRecipient::new_for()` method.
+- `strum`, `bounded-vec` dependencies.
+
+### Changed
+
+- `parameters/network_upgrade/NetworkUpgrade` now derives `strum::EnumIter`
 
 ### Removed
 
@@ -44,7 +80,6 @@ All `ParametersBuilder` methods and `Parameters::new_regtest()` now return `Resu
 - Chain builder calls with `?` operator: `.with_network_name("test")?`
 - Or use `.expect()` if errors are unexpected: `.with_network_name("test").expect("valid name")`
 
-
 ## [3.1.0] - 2025-11-28
 
 ### Added
@@ -69,7 +104,7 @@ These changes break the public API and may require updates in downstream crates.
 
 - The `ValueCommitment` type no longer derives `Copy`.
 - `zebra-chain::Errors` has new variants.
-- ` ValueCommitment::new` and `ValueCommitment::randomized` methods were removed.
+- `ValueCommitment::new` and `ValueCommitment::randomized` methods were removed.
 - Constant `NU6_1_ACTIVATION_HEIGHT_TESTNET` was removed as is now part of `activation_heights` module.
 - Structs `sapling::NoteCommitment`, `sapling::NotSmallOrderValueCommitment` and `sapling::tree::Node` were
   removed.

@@ -2,7 +2,6 @@
 
 Zebra relies on numerous Electric Coin Company ([ECC](https://electriccoin.co/)) dependencies, and updating them can be a complex task. This guide will help you navigate the process.
 
-
 The main dependency that influences that is [zcash](https://github.com/zcash/zcash) itself. This is because [zebra_script](https://github.com/ZcashFoundation/zcash_script) links to specific files from it (zcash_script.cpp and all on which it depends). Due to the architecture of zcash, this requires linking to a lot of seemingly unrelated dependencies like orchard, halo2, etc (which are all Rust crates).
 
 ## Steps for upgrading
@@ -23,7 +22,7 @@ Let's dive into the details of each step required to perform an upgrade:
 
 - Use the `cargo upgrade` command to upgrade all the ECC dependency versions in Zebra. For example, in [this PR](https://github.com/ZcashFoundation/zebra/pull/7784), the following command was used:
 
-```
+```sh
 cargo upgrade --incompatible -p bridgetree -p incrementalmerkletree -p orchard -p zcash_primitives -p zcash_proofs -p zcash_address -p zcash_encoding -p zcash_note_encryption -p zcash_script
 ```
 
@@ -31,7 +30,7 @@ Notes:
 
 - Insert all the crate names to be updated to the command.
 
-- Use `crate-name@version` to upgrade to a specific version of that crate, instead of just the highest version. 
+- Use `crate-name@version` to upgrade to a specific version of that crate, instead of just the highest version.
 
 - You need to have [cargo upgrade](https://crates.io/crates/cargo-upgrades) and [cargo edit](https://crates.io/crates/cargo-edit) installed for this command to work.
 
@@ -43,13 +42,13 @@ Notes:
 
 - Build zebra and make sure it compiles.
 
-```
+```sh
 cargo build
 ```
 
 - Test Zebra and make sure all test code compiles and all tests pass:
 
-```
+```sh
 cargo test
 ```
 
@@ -65,6 +64,6 @@ cargo test
 
 ### Push the Pull Request (PR)
 
-- Push the pull request with all the changes and ensure that the full CI process passes. 
+- Push the pull request with all the changes and ensure that the full CI process passes.
 - Seek approval for the PR.
 - Merge to `main` branch.

@@ -238,8 +238,12 @@ pub fn sync_until(
         // make sure the child process is dead
         // if it has already exited, ignore that error
         child.kill(true)?;
+        let dir = child.dir.take().expect("dir was not already taken");
+        // Wait for zebrad to fully terminate to ensure database lock is released.
+        child.wait_with_output()?;
+        std::thread::sleep(std::time::Duration::from_secs(3));
 
-        Ok(child.dir.take().expect("dir was not already taken"))
+        Ok(dir)
     } else {
         // Require that the mempool didn't activate,
         // checking the entire `zebrad` output after it exits.

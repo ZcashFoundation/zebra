@@ -31,15 +31,19 @@
 <!--
 - If there's anything missing from the solution, describe it here.
 - List any follow-up issues or PRs.
-- If this PR blocks or depends on other issues or PRs, enumerate them here.
 -->
+
+### AI Disclosure
+
+<!-- If you used AI tools, let us know — it helps reviewers. -->
+
+- [ ] No AI tools were used in this PR
+- [ ] AI tools were used: <!-- tool name and what it was used for, e.g., "Claude for test boilerplate" -->
 
 ### PR Checklist
 
-<!-- Check as many boxes as possible. -->
-
 - [ ] The PR name is suitable for the release notes.
 - [ ] The PR follows the [contribution guidelines](https://github.com/ZcashFoundation/zebra/blob/main/CONTRIBUTING.md).
-- [ ] The library crate changelogs are up to date.
+- [ ] This change was discussed in an issue or with the team beforehand.
 - [ ] The solution is tested.
-- [ ] The documentation is up to date.
+- [ ] The documentation and changelogs are up to date.

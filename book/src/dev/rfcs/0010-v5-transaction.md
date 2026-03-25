@@ -4,16 +4,19 @@
 - Zebra Issue: [ZcashFoundation/zebra#1863](https://github.com/ZcashFoundation/zebra/issues/1863)
 
 # Summary
+
 [summary]: #summary
 
 Network Upgrade number 5 (`NU5`) introduces a new transaction type (transaction version 5). This document is a proposed design for implementing such a transaction version.
 
 # Motivation
+
 [motivation]: #motivation
 
 The Zebra software wants to be a protocol compatible Zcash implementation. One of the tasks to do this includes the support of the new version 5 transactions that will be implemented in Network Upgrade 5 (NU5).
 
 # Definitions
+
 [definitions]: #definitions
 
 - `NU5` - the 5th Zcash network upgrade, counting from the `Overwinter` upgrade as upgrade zero.
@@ -25,6 +28,7 @@ The Zebra software wants to be a protocol compatible Zcash implementation. One o
 - `sapling transaction version` - Transactions that support sapling data. Currently V4 and V5 but the data is implemented differently in them.
 
 # Guide-level explanation
+
 [guide-level-explanation]: #guide-level-explanation
 
 V5 transactions are described by the protocol in the second table of [Transaction Encoding and Consensus](https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus).
@@ -34,6 +38,7 @@ All of the changes proposed in this document are only to the `zebra-chain` crate
 To highlight changes most of the document comments from the code snippets in the [reference section](#reference-level-explanation) were removed.
 
 ## Sapling Changes Overview
+
 [sapling-changes-overview]: #sapling-changes-overview
 
 V4 and V5 transactions both support sapling, but the underlying data structures are different. So we need to make the sapling data types generic over the V4 and V5 structures.
@@ -43,6 +48,7 @@ In V4, anchors are per-spend, but in V5, they are per-transaction. In V5, the sh
 For consistency, we also move some fields into the `ShieldedData` type, and rename some fields and types.
 
 ## Orchard Additions Overview
+
 [orchard-additions-overview]: #orchard-additions-overview
 
 V5 transactions are the only ones that will support orchard transactions with `Orchard` data types.
@@ -50,6 +56,7 @@ V5 transactions are the only ones that will support orchard transactions with `O
 Orchard uses `Halo2Proof`s with corresponding signature type changes. Each Orchard `Action` contains a spend and an output. Placeholder values are substituted for unused spends and outputs.
 
 ## Other Transaction V5 Changes
+
 [other-transaction-v5-changes]: #other-transaction-v5-changes
 
 V5 transactions split `Spend`s, `Output`s, and `AuthorizedAction`s into multiple arrays,
@@ -68,14 +75,17 @@ We combine fields that occur together, to make it impossible to represent struct
 invalid Zcash data.
 
 In general:
-* Zebra enums and structs put fields in serialized order.
-* Composite structs and emnum variants are ordered based on **last** data
+
+- Zebra enums and structs put fields in serialized order.
+- Composite structs and emnum variants are ordered based on **last** data
   deserialized for the composite.
 
 # Reference-level explanation
+
 [reference-level-explanation]: #reference-level-explanation
 
 ## Sapling Changes
+
 [sapling-changes]: #sapling-changes
 
 We know by protocol (2nd table of [Transaction Encoding and Consensus](https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus)) that V5 transactions will support sapling data however we also know by protocol that spends ([Spend Description Encoding and Consensus](https://zips.z.cash/protocol/nu5.pdf#spendencodingandconsensus), See †) and outputs ([Output Description Encoding and Consensus](https://zips.z.cash/protocol/nu5.pdf#outputencodingandconsensus), See †) fields change from V4 to V5.
@@ -83,13 +93,15 @@ We know by protocol (2nd table of [Transaction Encoding and Consensus](https://z
 `ShieldedData` is currently defined and implemented in `zebra-chain/src/transaction/shielded_data.rs`. As this is Sapling specific we propose to move this file to `zebra-chain/src/sapling/shielded_data.rs`.
 
 ### Changes to V4 Transactions
+
 [changes-to-v4-transactions]: #changes-to-v4-transactions
 
 Here we have the proposed changes for V4 transactions:
-* make `sapling_shielded_data` use the `PerSpendAnchor` anchor variant
-* rename `shielded_data` to `sapling_shielded_data`
-* move `value_balance` into the `sapling::ShieldedData` type
-* order fields based on the **last** data deserialized for each field
+
+- make `sapling_shielded_data` use the `PerSpendAnchor` anchor variant
+- rename `shielded_data` to `sapling_shielded_data`
+- move `value_balance` into the `sapling::ShieldedData` type
+- order fields based on the **last** data deserialized for each field
 
 ```rust
 enum Transaction::V4 {
@@ -104,17 +116,19 @@ enum Transaction::V4 {
 
 The following types have `ZcashSerialize` and `ZcashDeserialize` implementations,
 because they can be serialized into a single byte vector:
-* `transparent::Input`
-* `transparent::Output`
-* `LockTime`
-* `block::Height`
-* `Option<JoinSplitData<Groth16Proof>>`
+
+- `transparent::Input`
+- `transparent::Output`
+- `LockTime`
+- `block::Height`
+- `Option<JoinSplitData<Groth16Proof>>`
 
 Note: `Option<sapling::ShieldedData<PerSpendAnchor>>` does not have serialize or deserialize implementations,
 because the binding signature is after the joinsplits. Its serialization and deserialization is handled as
 part of `Transaction::V4`.
 
 ### Anchor Variants
+
 [anchor-variants]: #anchor-variants
 
 We add an `AnchorVariant` generic type trait, because V4 transactions have a per-`Spend` anchor, but V5 transactions have a shared anchor. This trait can be added to `sapling/shielded_data.rs`:
@@ -143,16 +157,19 @@ trait AnchorVariant {
 ```
 
 ### Changes to Sapling ShieldedData
+
 [changes-to-sapling-shieldeddata]: #changes-to-sapling-shieldeddata
 
 We use `AnchorVariant` in `ShieldedData` to model the anchor differences between V4 and V5:
-* in V4, there is a per-spend anchor
-* in V5, there is a shared anchor, which is only present when there are spends
+
+- in V4, there is a per-spend anchor
+- in V5, there is a shared anchor, which is only present when there are spends
 
 If there are no spends and no outputs:
-* in v4, the value_balance is fixed to zero
-* in v5, the value balance field is not present
-* in both versions, the binding_sig field is not present
+
+- in v4, the value_balance is fixed to zero
+- in v5, the value balance field is not present
+- in both versions, the binding_sig field is not present
 
 ```rust
 /// ShieldedData ensures that value_balance and binding_sig are only present when
@@ -185,6 +202,7 @@ enum sapling::TransferData<AnchorV: AnchorVariant> {
 
 The `AtLeastOne` type is a vector wrapper which always contains at least one
 element. For more details, see [its documentation](https://github.com/ZcashFoundation/zebra/blob/673b95dea5f0b057c11f2f450943b012fec75c00/zebra-chain/src/serialization/constraint.rs).
+
 <!-- TODO: update link to main branch when PR #2021 merges -->
 
 Some of these fields are in a different order to the serialized data, see
@@ -193,11 +211,13 @@ for details.
 
 The following types have `ZcashSerialize` and `ZcashDeserialize` implementations,
 because they can be serialized into a single byte vector:
-* `Amount`
-* `sapling::tree::Root`
-* `redjubjub::Signature<Binding>`
+
+- `Amount`
+- `sapling::tree::Root`
+- `redjubjub::Signature<Binding>`
 
 ### Adding V5 Sapling Spend
+
 [adding-v5-sapling-spend]: #adding-v5-sapling-spend
 
 Sapling spend code is located at `zebra-chain/src/sapling/spend.rs`.
@@ -233,10 +253,11 @@ struct SpendPrefixInTransactionV5 {
 
 The following types have `ZcashSerialize` and `ZcashDeserialize` implementations,
 because they can be serialized into a single byte vector:
-* `Spend<PerSpendAnchor>` (moved from the pre-RFC `Spend`)
-* `SpendPrefixInTransactionV5` (new)
-* `Groth16Proof`
-* `redjubjub::Signature<redjubjub::SpendAuth>` (new - for v5 spend auth sig arrays)
+
+- `Spend<PerSpendAnchor>` (moved from the pre-RFC `Spend`)
+- `SpendPrefixInTransactionV5` (new)
+- `Groth16Proof`
+- `redjubjub::Signature<redjubjub::SpendAuth>` (new - for v5 spend auth sig arrays)
 
 Note: `Spend<SharedAnchor>` does not have serialize and deserialize implementations.
 It must be split using `into_v5_parts` before serialization, and
@@ -246,6 +267,7 @@ These convenience methods convert between `Spend<SharedAnchor>` and its v5 parts
 `SpendPrefixInTransactionV5`, the spend proof, and the spend auth signature.
 
 ### Changes to Sapling Output
+
 [changes-to-sapling-output]: #changes-to-sapling-output
 
 In Zcash the Sapling output fields are the same for V4 and V5 transactions,
@@ -254,6 +276,7 @@ outputs differently, so we create additional structs for serializing outputs in
 each transaction version.
 
 The output code is located at `zebra-chain/src/sapling/output.rs`:
+
 ```rust
 struct Output {
     cv: commitment::ValueCommitment,
@@ -287,9 +310,10 @@ struct OutputPrefixInTransactionV5 {
 
 The following fields have `ZcashSerialize` and `ZcashDeserialize` implementations,
 because they can be serialized into a single byte vector:
-* `OutputInTransactionV4` (moved from `Output`)
-* `OutputPrefixInTransactionV5` (new)
-* `Groth16Proof`
+
+- `OutputInTransactionV4` (moved from `Output`)
+- `OutputPrefixInTransactionV5` (new)
+- `Groth16Proof`
 
 Note: The serialize and deserialize implementations on `Output` are moved to
 `OutputInTransactionV4`. In v4 transactions, outputs must be wrapped using
@@ -299,10 +323,12 @@ must be split using `into_v5_parts` before serialization, and
 recombined using `from_v5_parts` after deserialization.
 
 These convenience methods convert `Output` to:
-* its v4 serialization wrapper `OutputInTransactionV4`, and
-* its v5 parts: `OutputPrefixInTransactionV5` and the output proof.
+
+- its v4 serialization wrapper `OutputInTransactionV4`, and
+- its v5 parts: `OutputPrefixInTransactionV5` and the output proof.
 
 ## Adding V5 Transactions
+
 [adding-v5-transactions]: #adding-v5-transactions
 
 Now lets see how the V5 transaction is specified in the protocol, this is the second table of [Transaction Encoding and Consensus](https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus) and how are we going to represent it based in the above changes for Sapling fields and the new Orchard fields.
@@ -324,17 +350,20 @@ To model the V5 anchor type, `sapling_shielded_data` uses the `SharedAnchor` var
 
 The following fields have `ZcashSerialize` and `ZcashDeserialize` implementations,
 because they can be serialized into a single byte vector:
-* `LockTime`
-* `block::Height`
-* `transparent::Input`
-* `transparent::Output`
-* `Option<sapling::ShieldedData<SharedAnchor>>` (new)
-* `Option<orchard::ShieldedData>` (new)
+
+- `LockTime`
+- `block::Height`
+- `transparent::Input`
+- `transparent::Output`
+- `Option<sapling::ShieldedData<SharedAnchor>>` (new)
+- `Option<orchard::ShieldedData>` (new)
 
 ## Orchard Additions
+
 [orchard-additions]: #orchard-additions
 
 ### Adding Orchard ShieldedData
+
 [adding-orchard-shieldeddata]: #adding-orchard-shieldeddata
 
 The new V5 structure will create a new `orchard::ShieldedData` type. This new type will be defined in a new `zebra-chain/src/orchard/shielded_data.rs` file:
@@ -354,12 +383,14 @@ The fields are ordered based on the **last** data deserialized for each field.
 
 The following types have `ZcashSerialize` and `ZcashDeserialize` implementations,
 because they can be serialized into a single byte vector:
-* `orchard::Flags` (new)
-* `Amount`
-* `Halo2Proof` (new)
-* `redpallas::Signature<Binding>` (new)
+
+- `orchard::Flags` (new)
+- `Amount`
+- `Halo2Proof` (new)
+- `redpallas::Signature<Binding>` (new)
 
 ### Adding Orchard AuthorizedAction
+
 [adding-orchard-authorizedaction]: #adding-orchard-authorizedaction
 
 In `V5` transactions, there is one `SpendAuth` signature for every `Action`. To ensure that this structural rule is followed, we create an `AuthorizedAction` type in `orchard/shielded_data.rs`:
@@ -381,8 +412,9 @@ Where `Action` is defined as [Action definition](https://github.com/ZcashFoundat
 
 The following types have `ZcashSerialize` and `ZcashDeserialize` implementations,
 because they can be serialized into a single byte vector:
-* `Action` (new)
-* `redpallas::Signature<SpendAuth>` (new)
+
+- `Action` (new)
+- `redpallas::Signature<SpendAuth>` (new)
 
 Note: `AuthorizedAction` does not have serialize and deserialize implementations.
 It must be split using `into_parts` before serialization, and
@@ -392,6 +424,7 @@ These convenience methods convert between `AuthorizedAction` and its parts:
 `Action` and the spend auth signature.
 
 ### Adding Orchard Flags
+
 [adding-orchard-flags]: #adding-orchard-flags
 
 Finally, in the V5 transaction we have a new `orchard::Flags` type. This is a bitfield type defined as:
@@ -417,9 +450,11 @@ bitflags! {
 This type is also defined in `orchard/shielded_data.rs`.
 
 Note: A [consensus rule](https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus) was added to the protocol specification stating that:
+
 > In a version 5 transaction, the reserved bits 2..7 of the flagsOrchard field MUST be zero.
 
 ## Test Plan
+
 [test-plan]: #test-plan
 
 - All renamed, modified and new types should serialize and deserialize.
@@ -440,6 +475,7 @@ Note: A [consensus rule](https://zips.z.cash/protocol/protocol.pdf#txnencodingan
 # Security
 
 To avoid parsing memory exhaustion attacks, we will make the following changes across all `Transaction`, `ShieldedData`, `Spend` and `Output` variants, V1 through to V5:
+
 - Check cardinality consensus rules at parse time, before deserializing any `Vec`s
   - In general, Zcash requires that each transaction has at least one Transparent/Sprout/Sapling/Orchard transfer, this rule is not currently encoded in our data structures (it is only checked during semantic verification)
 - Stop parsing as soon as the first error is detected

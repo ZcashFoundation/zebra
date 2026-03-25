@@ -1,6 +1,6 @@
 [package]
 name = "zebra-chain"
-version = "5.0.0"
+version = "6.0.0"
 authors.workspace = true
 description = "Core Zcash data structures"
 license.workspace = true
@@ -78,6 +78,7 @@ ripemd = { workspace = true }
 # Matches version used by hdwallet
 secp256k1 = { workspace = true, features = ["serde"] }
 sha2 = { workspace = true, features = ["compress"] }
+schemars = { workspace = true }
 uint = { workspace = true }
 x25519-dalek = { workspace = true, features = ["serde"] }
 bech32 = { workspace = true }
@@ -115,6 +116,7 @@ serde-big-array = { workspace = true }
 futures = { workspace = true }
 itertools = { workspace = true }
 rayon = { workspace = true }
+strum = { version = "0.27.2", features = ["derive"] }
 
 # ZF deps
 ed25519-zebra = { workspace = true }
@@ -134,7 +136,7 @@ proptest-derive = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
 rand_chacha = { workspace = true, optional = true }
 
-zebra-test = { path = "../zebra-test/", version = "2.0.1", optional = true }
+zebra-test = { path = "../zebra-test/", version = "3.0.0", optional = true }
 bounded-vec = { version = "0.9.0", features = ["serde"] }
 
 [dev-dependencies]
@@ -155,7 +157,7 @@ rand_chacha = { workspace = true }
 
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 
-zebra-test = { path = "../zebra-test/", version = "2.0.1" }
+zebra-test = { path = "../zebra-test/", version = "3.0.0" }
 
 [[bench]]
 name = "block"

@@ -1,5 +1,9 @@
 # Forking the Zcash Testnet with Zebra
 
+> **Note:** This tutorial uses s-nomp for mining, which has known compatibility issues with NU5+.
+> For current mining solutions, see [Mining Zcash with Zebra](mining.md). You may need to adapt
+> this guide to use alternative mining pool software.
+
 The Zcash blockchain community consistently explores upgrades to the Zcash protocol, introducing new features to the consensus layer. This tutorial guides teams or individuals through forking the Zcash Testnet locally using Zebra, enabling testing of custom functionalities in a private testnet environment.
 
 As of writing, the current network upgrade on the Zcash Testnet is `Nu5`. While a future upgrade (`Nu6`) activation height will be known later, for this tutorial, we aim to activate after `Nu5`, allowing us to observe our code crossing the network upgrade and continuing isolated.
@@ -27,7 +31,7 @@ Clone Zebra, create a config file, and use `state.debug_stop_at_height` to halt 
 
 The relevant parts of the config file are:
 
-```
+```toml
 [network]
 listen_addr = "0.0.0.0:18233"
 network = "Testnet"
@@ -39,22 +43,21 @@ cache_dir = "/home/user/.cache/zebra"
 
 Generate a Zebra config file:
 
-```
-zebrad generate -o myconf.toml`
+```bash
+zebrad generate -o myconf.toml
 ```
 
 Start Zebra with the modified config:
 
-```
+```bash
 zebrad -c myconf.toml start
 ```
 
 Wait for the sync to complete (this may take up to 24 hours, depending on testnet conditions), resulting in a state up to the desired block in `~/cache/zebra`.
 
-## Code changes 
+## Code changes
 
-We need to add the network upgrade variant to the `zcash_primitives` crate and Zebra. 
-
+We need to add the network upgrade variant to the `zcash_primitives` crate and Zebra.
 
 ### librustzcash / zcash_primitives
 
@@ -73,15 +76,16 @@ Here we are making changes to create an isolated network version of Zebra. In ad
 - Add consensus branch id, a random non-repeated string. We used `00000006` in our tests when writing this tutorial.
 - Point to the modified `zcash_primitives` in `zebra-chain/Cargo.toml`. In my case, I had to replace the dependency line with something like:
 
-  ```
+  ```toml
   zcash_primitives = { git = "https://github.com/oxarbitrage/librustzcash", branch = "nu6-test", features = ["transparent-inputs"] }
   ```
+
 - Make fixes needed to compile.
 - Ignore how far we are from the tip in get block template: `zebra-rpc/src/methods/get_block_template_rpcs/get_block_template.rs`
 
 Unclean test commit for Zebra: [Zebra commit](https://github.com/ZcashFoundation/zebra/commit/d05af154c897d4820999fcb968b7b62d10b26aa8)
 
-Make sure you can build the `zebrad` binary after the changes with `zebra build --release`
+Make sure you can build the `zebrad` binary after the changes with `cargo build --release`
 
 ## Configuration for isolated network
 
@@ -89,14 +93,14 @@ Now that you have a synced state and a modified Zebra version, it's time to run 
 
 Relevant parts of the configuration file:
 
-```
+```toml
 [mempool]
 debug_enable_at_height = 0
 max_datacarrier_bytes = 83
-    
+
 [mining]
 miner_address = 't27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v'
-    
+
 [network]
 cache_dir = false
 initial_testnet_peers = [
@@ -106,10 +110,10 @@ initial_testnet_peers = [
 ]
 listen_addr = "0.0.0.0:18233"
 network = "Testnet"
-    
+
 [rpc]
 listen_addr = "0.0.0.0:18232"
-    
+
 [state]
 cache_dir = "/home/oxarbitrage/.cache/zebra"
 ```
@@ -121,19 +125,19 @@ cache_dir = "/home/oxarbitrage/.cache/zebra"
 
 Start the chain with:
 
-```
+```bash
 zebrad -c myconf.toml start
 ```
 
 Start s-nomp:
 
-```
+```bash
 npm start
 ```
 
 Start the miner:
 
-```
+```bash
 nheqminer -l 127.0.0.1:1234 -u tmRGc4CD1UyUdbSJmTUzcB6oDqk4qUaHnnh.worker1 -t 1
 ```
 
@@ -143,21 +147,21 @@ After Zebra retrieves blocks up to your activation height from the network, the 
 
 After a while, in s-nomp, you should see submitted blocks from time to time after the fork height.
 
-```
+```text
 ...
-2023-11-24 16:32:05 [Pool]        [zcash_testnet] (Thread 1) Block notification via RPC after block submission
-2023-11-24 16:32:24 [Pool]        [zcash_testnet] (Thread 1) Submitted Block using submitblock successfully to daemon instance(s)
-2023-11-24 16:32:24 [Pool]        [zcash_testnet] (Thread 1) Block found: 0049f2daaaf9e90cd8b17041de0a47350e6811c2d0c9b0aed9420e91351abe43 by tmRGc4CD1UyUdbSJmTUzcB6oDqk4qUaHnnh.worker1
-2023-11-24 16:32:24 [Pool]        [zcash_testnet] (Thread 1) Block notification 
+[Pool]        [zcash_testnet] (Thread 1) Block notification via RPC after block submission
+[Pool]        [zcash_testnet] (Thread 1) Submitted Block using submitblock successfully to daemon instance(s)
+[Pool]        [zcash_testnet] (Thread 1) Block found: ... by tmRGc4CD1UyUdbSJmTUzcB6oDqk4qUaHnnh.worker1
+[Pool]        [zcash_testnet] (Thread 1) Block notification
 ...
 ```
 
 You'll also see this in Zebra:
 
-```
+```text
 ...
-2023-11-24T19:32:05.574715Z  INFO zebra_rpc::methods::get_block_template_rpcs: submit block accepted block_hash=block::Hash("0084e1df2369a1fd5f75ab2b8b24472c49812669c812c7d528b0f8f88a798578") block_height="2599968"
-2023-11-24T19:32:24.661758Z  INFO zebra_rpc::methods::get_block_template_rpcs: submit block accepted block_hash=block::Hash("0049f2daaaf9e90cd8b17041de0a47350e6811c2d0c9b0aed9420e91351abe43") block_height="2599969"
+INFO zebra_rpc::methods::get_block_template_rpcs: submit block accepted block_hash=block::Hash("...") block_height="..."
+INFO zebra_rpc::methods::get_block_template_rpcs: submit block accepted block_hash=block::Hash("...") block_height="..."
 ...
 ```
 
@@ -165,12 +169,11 @@ Ignore messages in Zebra related to how far you are from the tip or network/syst
 
 Check that you are in the right branch with the curl command:
 
-```
+```bash
 curl --silent --data-binary '{"jsonrpc": "1.0", "id":"curltest", "method": "getblockchaininfo", "params": [] }' -H 'Content-type: application/json' http://127.0.0.1:18232/ | jq
 ```
 
 In the result, verify the tip of the chain is after your activation height for `Nu6` and that you are in branch `00000006` as expected.
-
 
 ## Final words
 

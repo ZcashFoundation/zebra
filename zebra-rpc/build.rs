@@ -16,6 +16,7 @@ const ZAINO_COMMIT: Option<&str> = Some("559510ffcc62a5a6e7bb20db5e3329654542c8b
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     build_or_copy_proto()?;
     build_zallet_for_qa_tests();
+    build_rpc_schema()?;
 
     Ok(())
 }
@@ -114,4 +115,13 @@ fn build_zallet_for_qa_tests() {
             )
         });
     }
+}
+
+fn build_rpc_schema() -> Result<(), Box<dyn std::error::Error>> {
+    let out_dir = env::var("OUT_DIR").map(PathBuf::from)?;
+    let json_rpc_methods_rs = "src/methods.rs";
+    let trait_names = ["Rpc"];
+    openrpsee::generate_openrpc(json_rpc_methods_rs, &trait_names, false, &out_dir)?;
+
+    Ok(())
 }

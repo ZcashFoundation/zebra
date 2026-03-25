@@ -29,7 +29,7 @@ docker run \
 You can also use `docker compose`, which we recommend. First get the repo:
 
 ```shell
-git clone --depth 1 --branch v2.5.0 https://github.com/ZcashFoundation/zebra.git
+git clone --depth 1 https://github.com/ZcashFoundation/zebra.git
 cd zebra
 ```
 
@@ -91,23 +91,24 @@ You can verify your configuration by inspecting Zebra's logs at startup.
 
 Zebra's RPC server is disabled by default. Enable and configure it via the TOML configuration file, or configuration environment variables:
 
-* **Using a config file:** Add or uncomment the `[rpc]` section in your `zebrad.toml`. Set `listen_addr` (e.g., `"0.0.0.0:8232"` for Mainnet).
-* **Using environment variables:** Set `ZEBRA_RPC__LISTEN_ADDR` (e.g., `0.0.0.0:8232`). To disable cookie auth, set `ZEBRA_RPC__ENABLE_COOKIE_AUTH=false`. To change the cookie directory, set `ZEBRA_RPC__COOKIE_DIR=/path/inside/container`.
+- **Using a config file:** Add or uncomment the `[rpc]` section in your `zebrad.toml`. Set `listen_addr` (e.g., `"0.0.0.0:8232"` for Mainnet).
+- **Using environment variables:** Set `ZEBRA_RPC__LISTEN_ADDR` (e.g., `0.0.0.0:8232`). To disable cookie auth, set `ZEBRA_RPC__ENABLE_COOKIE_AUTH=false`. To change the cookie directory, set `ZEBRA_RPC__COOKIE_DIR=/path/inside/container`.
 
 **Cookie Authentication:**
 
 By default, Zebra uses cookie-based authentication for RPC requests (`enable_cookie_auth = true`). When enabled, Zebra generates a unique, random cookie file required for client authentication.
 
-* **Cookie Location:** By default, the cookie is stored at `<cache_dir>/.cookie`, where `<cache_dir>` is Zebra's cache directory (for the `zebra` user in the container this is typically `/home/zebra/.cache/zebra/.cookie`).
-* **Viewing the Cookie:** If the container is running and RPC is enabled with authentication, you can view the cookie content using:
+- **Cookie Location:** By default, the cookie is stored at `<cache_dir>/.cookie`, where `<cache_dir>` is Zebra's cache directory (for the `zebra` user in the container this is typically `/home/zebra/.cache/zebra/.cookie`).
+- **Viewing the Cookie:** If the container is running and RPC is enabled with authentication, you can view the cookie content using:
 
-    ```bash
-    docker exec <container_name> cat /home/zebra/.cache/zebra/.cookie
-    ```
+  ```bash
+  docker exec <container_name> cat /home/zebra/.cache/zebra/.cookie
+  ```
 
-    (Replace `<container_name>` with your container's name, typically `zebra` if using the default `docker-compose.yml`). Your RPC client will need this value.
-* **Disabling Authentication:** If you need to disable cookie authentication (e.g., for compatibility with tools like `lightwalletd`):
-  * If using a **config file**, set `enable_cookie_auth = false` within the `[rpc]` section:
+  (Replace `<container_name>` with your container's name, typically `zebra` if using the default `docker-compose.yml`). Your RPC client will need this value.
+
+- **Disabling Authentication:** If you need to disable cookie authentication (e.g., for compatibility with tools like `lightwalletd`):
+  - If using a **config file**, set `enable_cookie_auth = false` within the `[rpc]` section:
 
     ```toml
     [rpc]
@@ -115,23 +116,23 @@ By default, Zebra uses cookie-based authentication for RPC requests (`enable_coo
     enable_cookie_auth = false
     ```
 
-  * If using **environment variables**, set `ZEBRA_RPC__ENABLE_COOKIE_AUTH=false`.
+  - If using **environment variables**, set `ZEBRA_RPC__ENABLE_COOKIE_AUTH=false`.
 
-Remember that Zebra only generates the cookie file if the RPC server is enabled *and* `enable_cookie_auth` is set to `true` (or omitted, as `true` is the default).
+Remember that Zebra only generates the cookie file if the RPC server is enabled _and_ `enable_cookie_auth` is set to `true` (or omitted, as `true` is the default).
 
 Environment variable examples for health endpoints:
 
-* `ZEBRA_HEALTH__LISTEN_ADDR=0.0.0.0:8080`
-* `ZEBRA_HEALTH__MIN_CONNECTED_PEERS=1`
-* `ZEBRA_HEALTH__READY_MAX_BLOCKS_BEHIND=2`
-* `ZEBRA_HEALTH__ENFORCE_ON_TEST_NETWORKS=false`
+- `ZEBRA_HEALTH__LISTEN_ADDR=0.0.0.0:8080`
+- `ZEBRA_HEALTH__MIN_CONNECTED_PEERS=1`
+- `ZEBRA_HEALTH__READY_MAX_BLOCKS_BEHIND=2`
+- `ZEBRA_HEALTH__ENFORCE_ON_TEST_NETWORKS=false`
 
 ### Health Endpoints
 
 Zebra can expose two lightweight HTTP endpoints for liveness and readiness:
 
-* `GET /healthy`: returns `200 OK` when the process is up and has at least the configured number of recently live peers; otherwise `503`.
-* `GET /ready`: returns `200 OK` when the node is near the tip and within the configured lag threshold; otherwise `503`.
+- `GET /healthy`: returns `200 OK` when the process is up and has at least the configured number of recently live peers; otherwise `503`.
+- `GET /ready`: returns `200 OK` when the node is near the tip and within the configured lag threshold; otherwise `503`.
 
 Enable the endpoints by adding a `[health]` section to your config (see the default Docker config at `docker/default-zebra-config.toml`):
 
@@ -147,7 +148,7 @@ If you want to expose the endpoints to the host, add a port mapping to your comp
 
 ```yaml
 ports:
-  - "8080:8080"   # Health endpoints (/healthy, /ready)
+  - "8080:8080" # Health endpoints (/healthy, /ready)
 ```
 
 For Kubernetes, configure liveness and readiness probes against `/healthy` and `/ready` respectively. See the [Health Endpoints](./health.md) page for details.

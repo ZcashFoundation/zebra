@@ -6,14 +6,17 @@ Zcash Foundation crates are controlled by the [`ZcashFoundation/owners`](https:/
 The latest list of Zebra and FROST crates is [available on crates.io](https://crates.io/teams/github:zcashfoundation:owners).
 
 The Zebra repository can be used to publish the crates in this list that match these patterns:
+
 - starts with `zebra` (including `zebrad` and the `zebra` placeholder)
 - starts with `tower`
 
 We also depend on these separate ZF crates:
+
 - `zcash_script`
 - `ed25519-zebra`
 
 And these crates shared with ECC:
+
 - `reddsa`
 - `redjubjub`
 
@@ -28,6 +31,7 @@ Tokens that allow changing owners should have the shortest expiry possible.
 [Revoke the token](https://crates.io/me) after you're finished using it.
 
 Here is an example login command:
+
 ```sh
 $ cargo login
 please paste the token found on https://crates.io/me below
@@ -42,6 +46,7 @@ We publish a new placeholder crate as soon as we have a good idea for a crate na
 Before starting with the publishing, please clone zebra and use the `main` branch to create the placeholder crate, you need `cargo release` installed in the system and be logged to crates.io with `cargo login`.
 
 Next, execute the following commands to publish a new placeholder and set the owners:
+
 ```sh
 cargo new new-crate-name
 cd new-crate-name
@@ -57,6 +62,7 @@ crates.io has two kinds of owners: group owners and individual owners. All owner
 But [only individual owners can change crate owners](https://doc.rust-lang.org/cargo/reference/publishing.html#cargo-owner).
 
 Zcash Foundation crates should have:
+
 - at least 2 individual owners, who are typically engineers on the relevant project
 - a group owner that contains everyone who can publish the crate
 
@@ -67,6 +73,7 @@ New crate owners should go to [crates.io/me](https://crates.io/me) to accept the
 Here are some example commands for changing owners:
 
 To change owners of deleted/placeholder Zebra crates:
+
 ```sh
 $ mkdir placeholders
 $ cd placeholders
@@ -89,6 +96,7 @@ $ for crate in tower-batch-cpu zebra zebra-cli zebra-client; do cargo new $crate
 ```
 
 To change owners of `zcash_script`:
+
 ```sh
 $ git clone https://github.com/ZcashFoundation/zcash_script
 $ cd zcash_script
@@ -101,6 +109,7 @@ $ cargo owner --remove dconnolly
 ```
 
 To change owners of current Zebra crates:
+
 ```sh
 $ git clone https://github.com/ZcashFoundation/zebra
 $ cd zebra

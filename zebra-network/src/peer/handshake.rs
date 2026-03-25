@@ -880,7 +880,7 @@ where
         let HandshakeRequest {
             data_stream,
             connected_addr,
-            connection_tracker,
+            mut connection_tracker,
         } = req;
 
         let negotiator_span = debug_span!("negotiator", peer = ?connected_addr);
@@ -974,7 +974,8 @@ where
             let remote_services = connection_info.remote.services;
 
             // The handshake succeeded: update the peer status from AttemptPending to Responded,
-            // and send initial connection info.
+            // send initial connection info, and update the active connection counter.
+            connection_tracker.mark_open();
             if let Some(book_addr) = connected_addr.get_address_book_addr() {
                 // the collector doesn't depend on network activity,
                 // so this await should not hang

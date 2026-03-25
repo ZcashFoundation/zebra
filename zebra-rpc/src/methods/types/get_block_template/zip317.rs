@@ -27,10 +27,10 @@ use zebra_node_services::mempool::TransactionDependencies;
 use crate::methods::types::transaction::TransactionTemplate;
 
 #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-use crate::methods::{Amount, NonNegative};
+use crate::methods::Amount;
 
 #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-use zebra_chain::parameters::NetworkUpgrade;
+use zebra_chain::{amount::NonNegative, parameters::NetworkUpgrade};
 
 #[cfg(test)]
 mod tests;
@@ -382,11 +382,11 @@ impl TryUpdateBlockLimits for VerifiedUnminedTx {
         // Unpaid actions are always zero for transactions that pay the conventional fee,
         // so the unpaid action check always passes for those transactions.
         if self.transaction.size <= *remaining_block_bytes
-            && self.sigops <= *remaining_block_sigops
+            && self.legacy_sigop_count <= *remaining_block_sigops
             && self.unpaid_actions <= *remaining_block_unpaid_actions
         {
             *remaining_block_bytes -= self.transaction.size;
-            *remaining_block_sigops -= self.sigops;
+            *remaining_block_sigops -= self.legacy_sigop_count;
 
             // Unpaid actions are always zero for transactions that pay the conventional fee,
             // so this limit always remains the same after they are added.

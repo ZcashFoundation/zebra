@@ -7,6 +7,7 @@ The Zebra mempool handles unmined Zcash transactions: collecting them from peers
 The mempool is a fundamental component of the Zebra node, responsible for managing the lifecycle of unmined transactions. It provides an in-memory storage for valid transactions that haven't yet been included in a block, and offers interfaces for other components to interact with these transactions.
 
 Key responsibilities of the mempool include:
+
 - Accepting new transactions from the network
 - Verifying transactions against a subset of consensus rules
 - Storing verified transactions in memory
@@ -37,6 +38,7 @@ For a visual representation of the architecture and transaction flow, see the [M
 ## Activation
 
 The mempool is activated when:
+
 - The node is near the blockchain tip (determined by `SyncStatus`)
 - OR when the current chain height reaches a configured debug height (`debug_enable_at_height`)
 
@@ -57,6 +59,7 @@ The mempool has the following configurable parameters:
 ## State Management
 
 The mempool maintains an `ActiveState` which can be either:
+
 - `Disabled`: Mempool is not active
 - `Enabled`: Mempool is active and contains:
   - `storage`: The Storage instance for transactions
@@ -64,6 +67,7 @@ The mempool maintains an `ActiveState` which can be either:
   - `last_seen_tip_hash`: Hash of the last chain tip the mempool has seen
 
 The mempool responds to chain tip changes:
+
 - On new blocks: Updates verification context, removes mined transactions
 - On reorgs: Clears tip-specific rejections, retries all transactions
 
@@ -205,4 +209,4 @@ The mempool provides metrics for monitoring:
 2. **Total Cost**: Total size of all mempool transactions
 3. **Queued Count**: Number of transactions pending download or verification
 4. **Rejected Count**: Number of rejected transactions in memory
-5. **Background Task Status**: Health of crawler and queue checker tasks 
+5. **Background Task Status**: Health of crawler and queue checker tasks

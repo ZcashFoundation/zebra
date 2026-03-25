@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [5.0.0] - 2026-03-12
+
+- `zebra-chain` was bumped to `6.0.0`
+
 ## [4.0.0] - 2026-02-04
 
 - `zebra-chain` was bumped to 5.0.0, requiring a major release
@@ -25,12 +31,11 @@ No API changes; internal dependencies updated.
 
 - Updated to the last version of `zcash_script` ([#9927](https://github.com/ZcashFoundation/zebra/pull/9927))
 
-
 ## [2.0.0] - 2025-08-07
 
 ### Breaking Changes
 
-- Removed  `legacy_sigop_count`; use the `Sigops` trait instead.
+- Removed `legacy_sigop_count`; use the `Sigops` trait instead.
 
 ## [1.0.0] - 2025-07-11
 

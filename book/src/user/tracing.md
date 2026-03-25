@@ -12,8 +12,8 @@ If the `endpoint_addr` is specified, `zebrad` will open an HTTP endpoint
 allowing dynamic runtime configuration of the tracing filter. For instance,
 if the config had `endpoint_addr = '127.0.0.1:3000'`, then
 
-* `curl -X GET localhost:3000/filter` retrieves the current filter string;
-* `curl -X POST localhost:3000/filter -d "zebrad=trace"` sets the current filter string.
+- `curl -X GET localhost:3000/filter` retrieves the current filter string;
+- `curl -X POST localhost:3000/filter -d "zebrad=trace"` sets the current filter string.
 
 See the [`filter`][filter] documentation for more details.
 

@@ -71,8 +71,8 @@ async fn verify_sprout_groth16() {
 
     let transactions = zebra_test::vectors::MAINNET_BLOCKS
         .clone()
-        .iter()
-        .flat_map(|(_, bytes)| {
+        .into_values()
+        .flat_map(|bytes| {
             let block = bytes
                 .zcash_deserialize_into::<Block>()
                 .expect("a valid block");
