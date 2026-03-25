@@ -57,6 +57,10 @@ jobs:
         run: cargo fmt -- --check
       - name: Run clippy
         run: cargo clippy --workspace --all-targets --features "default-release-binaries proptest-impl lightwalletd-grpc-tests zebra-checkpoints"
+      - name: Restore cargo config
+        run: git checkout -- .cargo/config.toml
+      - name: Verify working directory is clean
+        run: git diff --exit-code
 
       - name: Show system resource summary
         run: |
