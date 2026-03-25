@@ -91,3 +91,7 @@ rustdocflags = [
 
 [env]
 RUST_BACKTRACE="1"
+
+[profile.profiling]
+inherits = "release"
+debug = true
