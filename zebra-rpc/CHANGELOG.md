@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.0.1] - 2026-03-26
+
+### Fixed
+
+- Fixed the computation of miner rewards in `getblocksubsidy` RPC
+
 ## [6.0.0] - 2026-03-12
 
 ### Breaking Changes

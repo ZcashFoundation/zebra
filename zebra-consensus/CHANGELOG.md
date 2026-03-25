@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.0.1] - 2026-03-25
+
+### Added
+
+- ZIP-235 support under the `zcash_unstable = "zip235"` flag
+
 ## [5.0.0] - 2026-03-12
 
 ### Added

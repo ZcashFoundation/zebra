@@ -325,10 +325,14 @@ pub fn miner_fees_are_valid(
     let orchard_value_balance = coinbase_tx.orchard_value_balance().orchard_amount();
 
     // Coinbase transaction can still have a NSM deposit
+    #[cfg(zcash_unstable = "zip235")]
     let zip233_amount: Amount<NegativeAllowed> = coinbase_tx
         .zip233_amount()
         .constrain()
         .map_err(|_| SubsidyError::InvalidZip233Amount)?;
+
+    #[cfg(not(zcash_unstable = "zip235"))]
+    let zip233_amount = Amount::zero();
 
     #[cfg(zcash_unstable = "zip235")]
     if let Some(nsm_activation_height) = NetworkUpgrade::Nu7.activation_height(network) {

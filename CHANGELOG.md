@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+## [Zebra 4.3](https://github.com/ZcashFoundation/zebra/releases/tag/v4.3) - 2026-03-12
+
+This release adds support for [ZIP-235](https://zips.z.cash/zip-0235) and
+extends the documentation on performance profiling. It also fixes issues with
+block propagation on Regtest, the computation of miner rewards for pre-Canopy
+blocks in the `getblocksubsidy` RPC, and a performance regression on Testnet
+where Zebra would hog a single CPU thread.
+
+### Added
+
+- Network Sustainability Mechanism: ZIP-235 ([#10357](https://github.com/ZcashFoundation/zebra/pull/10357))
+- Add `profiling` Cargo profile and use it in profiling docs ([#10411](https://github.com/ZcashFoundation/zebra/pull/10411))
+
+### Fixed
+
+- Fix block propagation on Regtest ([#10403](https://github.com/ZcashFoundation/zebra/pull/10403))
+- Subtract Founders' Reward from block subsidy ([#10338](https://github.com/ZcashFoundation/zebra/pull/10338))
+- Cache parsed checkpoints ([#10409](https://github.com/ZcashFoundation/zebra/pull/10409))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@gustavovalverde, @judah-caruso, @nuttycom, @oxarbitrage and @upbqdn.
+
 ## [Zebra 4.2.0](https://github.com/ZcashFoundation/zebra/releases/tag/v4.2.0) - 2026-03-12
 
 This release expands Zebra’s RPC functionality, improves mempool policy,
