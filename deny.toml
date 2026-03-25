@@ -118,8 +118,6 @@ skip-tree = [
     # wait until `config` updates `convert_case`
     { name = "convert_case", version = "0.6.0" },
 
-    # wait until `config` updates `toml`
-    { name = "toml_datetime", version = "0.7.5"},
 
     #
     { name = "getrandom", version = "0.3.4" },
