@@ -70,9 +70,6 @@ impl AssetState {
     pub fn to_bytes(&self) -> Result<Vec<u8>, io::Error> {
         use std::io::Write;
 
-        // FIXME: Consider writing a leading version byte here so we can change AssetState's
-        // on-disk format without silently mis-parsing old DB entries during upgrades (and fix
-        // from_bytes accordingly).
         let mut bytes = Vec::new();
         bytes.write_all(&self.0.amount.to_bytes())?;
         bytes.write_u8(self.0.is_finalized as u8)?;
@@ -133,6 +130,9 @@ pub enum AssetStateError {
 
     #[error("burn validation failed: {0}")]
     Burn(BurnError),
+
+    #[error("invalid input: {0}")]
+    InvalidInput(String),
 }
 
 /// A map of asset state changes for assets modified in a block or transaction set.
@@ -174,16 +174,14 @@ impl IssuedAssetChanges {
         transaction_sighashes: Option<&[SigHash]>,
         get_state: impl Fn(&AssetBase) -> Option<AssetState>,
     ) -> Result<Self, AssetStateError> {
-        // When sighashes are provided, transactions and sighashes must be equal length by design,
-        // so we use assert instead of returning error.
         if let Some(sighashes) = transaction_sighashes {
-            assert_eq!(
-                transactions.len(),
-                sighashes.len(),
-                "Bug in caller: {} transactions but {} sighashes. Caller must provide one sighash per transaction.",
-                transactions.len(),
-                sighashes.len()
-            );
+            if transactions.len() != sighashes.len() {
+                return Err(AssetStateError::InvalidInput(format!(
+                    "transaction count ({}) does not match sighash count ({})",
+                    transactions.len(),
+                    sighashes.len(),
+                )));
+            }
         }
 
         // Track old and current states - old_state is None for newly created assets
@@ -206,18 +204,17 @@ impl IssuedAssetChanges {
                 // ZIP-0227 defines issued-note rho as DeriveIssuedRho(nf_{0,0}, i_action, i_note),
                 // so we must pass the first Action nullifier (nf_{0,0}). We rely on
                 // `orchard_nullifiers()` preserving Action order, so `.next()` returns nf_{0,0}.
-                let first_nullifier =
-                    // FIXME: For now, the only way to convert Zebra's nullifier type to Orchard's nullifier type
-                    // is via bytes, although they both wrap pallas::Point. Consider a more direct conversion to
-                    // avoid this round-trip, if possible.
-                    &Nullifier::from_bytes(&<[u8; 32]>::from(
-                        *tx.orchard_nullifiers()
-                            .next()
-                            // ZIP-0227 requires an issuance bundle to contain at least one OrchardZSA Action Group.
-                            // `ShieldedData.actions` is `AtLeastOne<...>`, so nf_{0,0} must exist.
-                            .expect("issuance must have at least one nullifier"),
-                    ))
-                    .expect("Bytes can be converted to Nullifier");
+                // Nullifier type conversion via bytes: both types wrap pallas::Point
+                // but lack a direct conversion path in the current orchard API.
+                // TODO: Consider adding a test for the case where a V6 transaction has issuance data
+                // but has no nullifiers (the test may require constructing a proper mock V6 transaction).
+                let raw_nullifier = tx.orchard_nullifiers().next().ok_or_else(|| {
+                    AssetStateError::InvalidInput(
+                        "issuance bundle has no orchard actions".to_string(),
+                    )
+                })?;
+                let first_nullifier = &Nullifier::from_bytes(&<[u8; 32]>::from(*raw_nullifier))
+                    .expect("valid zebra nullifier bytes convert to orchard nullifier");
 
                 let issue_records = match transaction_sighashes {
                     Some(sighashes) => {
