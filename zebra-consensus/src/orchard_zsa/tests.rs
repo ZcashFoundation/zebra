@@ -31,7 +31,7 @@ use orchard::{
 };
 
 use zebra_chain::{
-    block::{genesis::regtest_genesis_block, Block, Hash},
+    block::{Block, Hash},
     parameters::{testnet::ConfiguredActivationHeights, Network},
     serialization::ZcashDeserialize,
 };
@@ -179,30 +179,24 @@ fn build_asset_records<'a, I: IntoIterator<Item = &'a TranscriptItem>>(
 fn create_transcript_data<'a, I: IntoIterator<Item = &'a OrchardWorkflowBlock>>(
     serialized_blocks: I,
 ) -> impl Iterator<Item = TranscriptItem> + use<'a, I> {
-    let workflow_blocks =
-        serialized_blocks
-            .into_iter()
-            .map(|OrchardWorkflowBlock { bytes, is_valid }| {
-                (
-                    Arc::new(
-                        Block::zcash_deserialize(&bytes[..]).expect("block should deserialize"),
-                    ),
-                    *is_valid,
-                )
-            });
-
-    std::iter::once((regtest_genesis_block(), true))
-        .chain(workflow_blocks)
-        .map(|(block, is_valid)| {
+    serialized_blocks.into_iter().map(
+        |OrchardWorkflowBlock {
+             height: _,
+             bytes,
+             is_valid,
+         }| {
+            let block =
+                Arc::new(Block::zcash_deserialize(&bytes[..]).expect("block should deserialize"));
             (
                 Request::Commit(block.clone()),
-                if is_valid {
+                if *is_valid {
                     Ok(block.hash())
                 } else {
                     Err(ExpectedTranscriptError::Any)
                 },
             )
-        })
+        },
+    )
 }
 
 /// Queries the state service for the asset state of the given asset.
