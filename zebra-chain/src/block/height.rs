@@ -2,7 +2,7 @@
 
 use std::ops::{Add, Sub};
 use thiserror::Error;
-use zcash_primitives::consensus::BlockHeight;
+use zcash_protocol::consensus::BlockHeight;
 
 use crate::{serialization::SerializationError, BoxError};
 

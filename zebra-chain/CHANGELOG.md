@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [7.0.0] - PLANNED
+
+### Breaking changes
+
+- Migrated to `zcash_primitives 0.27`.
+
 ## [6.0.1] - 2026-03-26
 
 This release fixes an important security issue:
@@ -21,7 +27,6 @@ update.
 ### Fixed
 
 - Fixed miner subsidy computation.
-
 
 ## [6.0.0] - 2026-03-12
 
