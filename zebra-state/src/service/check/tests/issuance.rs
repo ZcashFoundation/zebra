@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use zebra_chain::{
-    block::{self, genesis::regtest_genesis_block, Block},
+    block::{self, Block},
     orchard_zsa::{AssetBase, IssuedAssetChanges},
     parameters::Network,
     serialization::ZcashDeserialize,
@@ -14,15 +14,6 @@ use crate::{
     service::{finalized_state::FinalizedState, read, write::validate_and_commit_non_finalized},
     CheckpointVerifiedBlock, Config, NonFinalizedState,
 };
-
-fn valid_issuance_blocks() -> Vec<Arc<Block>> {
-    ORCHARD_ZSA_WORKFLOW_BLOCKS
-        .iter()
-        .map(|OrchardWorkflowBlock { bytes, .. }| {
-            Arc::new(Block::zcash_deserialize(&bytes[..]).expect("block should deserialize"))
-        })
-        .collect()
-}
 
 #[test]
 fn check_burns_and_issuance() {
@@ -41,23 +32,26 @@ fn check_burns_and_issuance() {
 
     let mut non_finalized_state = NonFinalizedState::new(&network);
 
-    let regtest_genesis_block = regtest_genesis_block();
-    let regtest_genesis_hash = regtest_genesis_block.hash();
+    let mut block_iter =
+        ORCHARD_ZSA_WORKFLOW_BLOCKS
+            .iter()
+            .map(|OrchardWorkflowBlock { bytes, .. }| {
+                Arc::new(Block::zcash_deserialize(&bytes[..]).expect("block should deserialize"))
+            });
+
+    let genesis_block = block_iter.next().expect("genesis block must exist").clone();
 
     finalized_state
-        .commit_finalized_direct(regtest_genesis_block.into(), None, "test")
+        .commit_finalized_direct(genesis_block.into(), None, "test")
         .expect("unexpected invalid genesis block test vector");
 
-    let block = valid_issuance_blocks().first().unwrap().clone();
-    let mut header = Arc::<block::Header>::unwrap_or_clone(block.header.clone());
-    header.previous_block_hash = regtest_genesis_hash;
-    header.commitment_bytes = [0; 32].into();
-    let block = Arc::new(Block {
-        header: Arc::new(header),
-        transactions: block.transactions.clone(),
-    });
+    let block_1 = {
+        let mut block = (*block_iter.next().expect("block 1 must exist")).clone();
+        Arc::make_mut(&mut block.header).commitment_bytes = [0; 32].into();
+        Arc::new(block)
+    };
 
-    let CheckpointVerifiedBlock(block) = CheckpointVerifiedBlock::new(block, None, None);
+    let CheckpointVerifiedBlock(block_1) = CheckpointVerifiedBlock::new(block_1, None, None);
 
     let empty_chain = Chain::new(
         &network,
@@ -73,7 +67,7 @@ fn check_burns_and_issuance() {
     );
 
     let block_1_issued_assets = IssuedAssetChanges::validate_and_get_changes(
-        &block.block.transactions,
+        &block_1.block.transactions,
         None,
         |asset_base: &AssetBase| {
             read::asset_state(
@@ -85,7 +79,7 @@ fn check_burns_and_issuance() {
     )
     .expect("test transactions should be valid");
 
-    validate_and_commit_non_finalized(&finalized_state.db, &mut non_finalized_state, block)
+    validate_and_commit_non_finalized(&finalized_state.db, &mut non_finalized_state, block_1)
         .expect("validation should succeed");
 
     let best_chain = non_finalized_state
