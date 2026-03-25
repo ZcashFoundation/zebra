@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.0.0] - PLANNED
+
+### Breaking changes
+
+- Migrated to `zcash_primitives 0.27`.
+
 ## [5.0.0] - 2026-03-12
 
 - `zebra-chain` was bumped to `6.0.0`
