@@ -12,11 +12,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::{
-    block::{self, Height},
-    parameters::{Network, NetworkUpgrade},
-    BoxError,
-};
+use crate::{block, parameters::Network, BoxError};
 
 #[cfg(test)]
 mod tests;
@@ -45,6 +41,16 @@ const MAINNET_CHECKPOINTS: &str = include_str!("main-checkpoints.txt");
 /// information.
 pub(crate) const TESTNET_CHECKPOINTS: &str = include_str!("test-checkpoints.txt");
 
+lazy_static::lazy_static! {
+    /// Parsed mainnet checkpoint list, cached to avoid re-parsing on every use.
+    static ref MAINNET_CHECKPOINT_LIST: Arc<CheckpointList> =
+        Arc::new(MAINNET_CHECKPOINTS.parse().expect("hard-coded mainnet checkpoint list parses"));
+
+    /// Parsed testnet checkpoint list, cached to avoid re-parsing on every use.
+    pub(crate) static ref TESTNET_CHECKPOINT_LIST: Arc<CheckpointList> =
+        Arc::new(TESTNET_CHECKPOINTS.parse().expect("hard-coded testnet checkpoint list parses"));
+}
+
 impl Network {
     /// Returns the hash for the genesis block in `network`.
     pub fn genesis_hash(&self) -> block::Hash {
@@ -59,41 +65,10 @@ impl Network {
     }
     /// Returns the hard-coded checkpoint list for `network`.
     pub fn checkpoint_list(&self) -> Arc<CheckpointList> {
-        let checkpoints_for_network = match self {
-            Network::Mainnet => MAINNET_CHECKPOINTS,
-            Network::Testnet(params) => return params.checkpoints(),
-        };
-
-        // Check that the list starts with the correct genesis block and parses checkpoint list.
-        let first_checkpoint_height = checkpoints_for_network
-            .lines()
-            .next()
-            .map(checkpoint_height_and_hash);
-
-        let checkpoints = match first_checkpoint_height {
-            // parse calls CheckpointList::from_list
-            Some(Ok((block::Height(0), hash))) if hash == self.genesis_hash() => {
-                checkpoints_for_network
-                    .parse()
-                    .expect("hard-coded checkpoint list parses and validates")
-            }
-            Some(Ok((block::Height(0), _))) => {
-                panic!("the genesis checkpoint does not match the {self} genesis hash")
-            }
-            Some(Ok(_)) => panic!("checkpoints must start at the genesis block height 0"),
-            Some(Err(err)) => panic!("{err}"),
-
-            None if NetworkUpgrade::Canopy.activation_height(self) == Some(Height(1)) => {
-                CheckpointList::from_list([(block::Height(0), self.genesis_hash())])
-                    .expect("hard-coded checkpoint list parses and validates")
-            }
-            None => panic!(
-                "Zebra requires checkpoints on networks which do not activate \
-                 the Canopy network upgrade at block height 1"
-            ),
-        };
-
-        Arc::new(checkpoints)
+        match self {
+            Network::Mainnet => MAINNET_CHECKPOINT_LIST.clone(),
+            Network::Testnet(params) => params.checkpoints(),
+        }
     }
 }
 
