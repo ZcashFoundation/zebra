@@ -1,6 +1,6 @@
 # Updating the ECC dependencies
 
-Zebra relies on numerous Electric Coin Company ([ECC](https://electriccoin.co/)) dependencies, and updating them can be a complex task. This guide will help you navigate the process.
+Zebra relies on numerous dependencies maintained by ZODL, and updating them can be a complex task. This guide will help you navigate the process.
 
 The main dependency that influences that is [zcash](https://github.com/zcash/zcash) itself. This is because [zebra_script](https://github.com/ZcashFoundation/zcash_script) links to specific files from it (zcash_script.cpp and all on which it depends). Due to the architecture of zcash, this requires linking to a lot of seemingly unrelated dependencies like orchard, halo2, etc (which are all Rust crates).
 
