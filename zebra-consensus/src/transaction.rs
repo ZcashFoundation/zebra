@@ -681,18 +681,24 @@ where
 
         let mempool = mempool?;
         let known_outpoint_hashes = req.known_outpoint_hashes();
-        let tx_id = req.tx_mined_id();
+        let tx_id = req.tx_id();
 
         let mempool::Response::TransactionWithDeps {
             transaction: verified_tx,
             dependencies,
         } = mempool
-            .oneshot(mempool::Request::TransactionWithDepsByMinedId(tx_id))
+            .oneshot(mempool::Request::TransactionWithDepsByMinedId(
+                tx_id.mined_id(),
+            ))
             .await
             .ok()?
         else {
             panic!("unexpected response to TransactionWithDepsByMinedId request");
         };
+
+        if verified_tx.transaction.id != tx_id {
+            return None;
+        }
 
         // Note: This does not verify that the spends are in order, the spend order
         //       should be verified during contextual validation in zebra-state.
