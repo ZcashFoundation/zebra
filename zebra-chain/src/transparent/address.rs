@@ -142,12 +142,12 @@ impl std::str::FromStr for Address {
         hash_bytes.copy_from_slice(&payload);
 
         match hrp.as_str() {
-            zcash_primitives::constants::mainnet::HRP_TEX_ADDRESS => Ok(Address::Tex {
+            zcash_protocol::constants::mainnet::HRP_TEX_ADDRESS => Ok(Address::Tex {
                 network_kind: NetworkKind::Mainnet,
                 validating_key_hash: hash_bytes,
             }),
 
-            zcash_primitives::constants::testnet::HRP_TEX_ADDRESS => Ok(Address::Tex {
+            zcash_protocol::constants::testnet::HRP_TEX_ADDRESS => Ok(Address::Tex {
                 network_kind: NetworkKind::Testnet,
                 validating_key_hash: hash_bytes,
             }),
