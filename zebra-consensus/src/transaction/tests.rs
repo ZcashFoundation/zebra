@@ -28,13 +28,16 @@ use zebra_chain::{
     sprout,
     transaction::{
         arbitrary::{
-            insert_fake_orchard_shielded_data, test_transactions, transactions_from_blocks,
+            insert_fake_v5_orchard_shielded_data, test_transactions, transactions_from_blocks,
             v5_transactions,
         },
         zip317, Hash, HashType, JoinSplitData, LockTime, Transaction,
     },
     transparent::{self, CoinbaseData, CoinbaseSpendRestriction},
 };
+
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+use zebra_chain::transaction::arbitrary::insert_fake_v6_orchard_shielded_data;
 
 use zebra_node_services::mempool;
 use zebra_state::ValidateContextError;
@@ -1218,7 +1221,7 @@ fn v5_coinbase_transaction_without_enable_spends_flag_passes_validation() {
             .find(|transaction| transaction.is_coinbase())
             .expect("V5 coinbase tx");
 
-        let shielded_data = insert_fake_orchard_shielded_data(&mut tx);
+        let shielded_data = insert_fake_v5_orchard_shielded_data(&mut tx);
 
         assert!(!shielded_data.flags.contains(Flags::ENABLE_SPENDS));
 
@@ -1233,7 +1236,7 @@ fn v5_coinbase_transaction_with_enable_spends_flag_fails_validation() {
             .find(|transaction| transaction.is_coinbase())
             .expect("V5 coinbase tx");
 
-        let shielded_data = insert_fake_orchard_shielded_data(&mut tx);
+        let shielded_data = insert_fake_v5_orchard_shielded_data(&mut tx);
 
         assert!(!shielded_data.flags.contains(Flags::ENABLE_SPENDS));
 
@@ -3461,7 +3464,7 @@ fn coinbase_outputs_are_decryptable_for_fake_v5_blocks() {
                 .find(|tx| tx.is_coinbase())
                 .expect("coinbase V5 tx");
 
-            let shielded_data = insert_fake_orchard_shielded_data(&mut transaction);
+            let shielded_data = insert_fake_v5_orchard_shielded_data(&mut transaction);
             shielded_data.flags = Flags::ENABLE_OUTPUTS;
 
             let action = fill_action_with_note_encryption_test_vector(
@@ -3494,7 +3497,7 @@ fn shielded_outputs_are_not_decryptable_for_fake_v5_blocks() {
                 .find(|tx| tx.is_coinbase())
                 .expect("V5 coinbase tx");
 
-            let shielded_data = insert_fake_orchard_shielded_data(&mut tx);
+            let shielded_data = insert_fake_v5_orchard_shielded_data(&mut tx);
             shielded_data.flags = Flags::ENABLE_OUTPUTS;
 
             let action = fill_action_with_note_encryption_test_vector(

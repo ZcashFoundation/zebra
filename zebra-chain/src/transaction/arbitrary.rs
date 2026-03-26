@@ -1162,22 +1162,13 @@ pub fn transactions_from_blocks<'a>(
     })
 }
 
-// FIXME: make it a generic to support V6?
-/// Modify a V5 transaction to insert fake Orchard shielded data.
-///
 /// Creates a fake instance of [`orchard::ShieldedData`] with one fake action. Note that both the
 /// action and the shielded data are invalid and shouldn't be used in tests that require them to be
 /// valid.
-///
-/// A mutable reference to the inserted shielded data is returned, so that the caller can further
-/// customize it if required.
-///
-/// # Panics
-///
-/// Panics if the transaction to be modified is not V5.
-pub fn insert_fake_orchard_shielded_data(
-    transaction: &mut Transaction,
-) -> &mut orchard::ShieldedData<orchard::OrchardVanilla> {
+pub fn create_fake_orchard_shielded_data<Flavor: orchard::ShieldedDataFlavor + 'static>(
+) -> orchard::ShieldedData<Flavor>
+//where <<Flavor as orchard::ShieldedDataFlavor>::EncryptedNote as Arbitrary>::Strategy: 'static
+{
     // Create a dummy action
     let mut runner = TestRunner::default();
     let dummy_action = orchard::Action::arbitrary()
@@ -1192,7 +1183,7 @@ pub fn insert_fake_orchard_shielded_data(
     };
 
     // Place the dummy action inside the Orchard shielded data
-    let dummy_shielded_data = orchard::ShieldedData::<orchard::OrchardVanilla> {
+    orchard::ShieldedData::<Flavor> {
         flags: orchard::Flags::empty(),
         value_balance: Amount::try_from(0).expect("invalid transaction amount"),
         shared_anchor: orchard::tree::Root::default(),
@@ -1201,20 +1192,60 @@ pub fn insert_fake_orchard_shielded_data(
         binding_sig: Signature::from([0u8; 64]),
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         burn: Default::default(),
-    };
+    }
+}
 
+/// Modify a V5 transaction to insert fake Orchard shielded data.
+///
+/// A mutable reference to the inserted shielded data is returned, so that the caller can further
+/// customize it if required.
+///
+/// # Panics
+///
+/// Panics if the transaction to be modified is not V5.
+pub fn insert_fake_v5_orchard_shielded_data(
+    transaction: &mut Transaction,
+) -> &mut orchard::ShieldedData<orchard::OrchardVanilla> {
     // Replace the shielded data in the transaction
     match transaction {
         Transaction::V5 {
             orchard_shielded_data,
             ..
         } => {
-            *orchard_shielded_data = Some(dummy_shielded_data);
+            *orchard_shielded_data = Some(create_fake_orchard_shielded_data());
 
             orchard_shielded_data
                 .as_mut()
                 .expect("shielded data was just inserted")
         }
         _ => panic!("Fake V5 transaction is not V5"),
+    }
+}
+
+/// Modify a V6 transaction to insert fake Orchard shielded data.
+///
+/// A mutable reference to the inserted shielded data is returned, so that the caller can further
+/// customize it if required.
+///
+/// # Panics
+///
+/// Panics if the transaction to be modified is not V6.
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+pub fn insert_fake_v6_orchard_shielded_data(
+    transaction: &mut Transaction,
+) -> &mut orchard::ShieldedData<orchard::OrchardZSA> {
+    // Replace the shielded data in the transaction
+    match transaction {
+        Transaction::V6 {
+            orchard_shielded_data,
+            ..
+        } => {
+            *orchard_shielded_data = Some(create_fake_orchard_shielded_data());
+
+            orchard_shielded_data
+                .as_mut()
+                .expect("shielded data was just inserted")
+        }
+        _ => panic!("Fake V6 transaction is not V6"),
     }
 }
