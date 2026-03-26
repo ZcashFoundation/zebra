@@ -1249,6 +1249,40 @@ fn v5_coinbase_transaction_with_enable_spends_flag_fails_validation() {
     }
 }
 
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+#[test]
+fn v6_coinbase_transaction_with_enable_zsa_flag_fails_validation() {
+    let network = Network::new_regtest(
+        ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu7: Some(1),
+            ..Default::default()
+        }
+        .into(),
+    );
+
+    let outputs = vec![(Amount::zero(), transparent::Script::new(Default::default()))];
+
+    let mut tx = Transaction::new_v6_coinbase(
+        &network,
+        Height(1),
+        outputs,
+        Vec::new(),
+        Some(Amount::zero()),
+    );
+
+    let shielded_data = insert_fake_v6_orchard_shielded_data(&mut tx);
+
+    assert!(!shielded_data.flags.contains(Flags::ENABLE_ZSA));
+
+    shielded_data.flags = Flags::ENABLE_ZSA;
+
+    assert_eq!(
+        check::coinbase_tx_no_prevout_joinsplit_spend(&tx),
+        Err(TransactionError::CoinbaseHasEnableZSA)
+    );
+}
+
 #[tokio::test]
 async fn v5_transaction_is_rejected_before_nu5_activation() {
     let sapling = NetworkUpgrade::Sapling;
