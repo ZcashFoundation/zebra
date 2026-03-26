@@ -53,6 +53,7 @@ pub trait ShieldedDataFlavor: OrchardFlavor {
     /// A type representing a burn field for this protocol version.
     #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
     type BurnType: Clone
+        + Default
         + Debug
         + ZcashDeserialize
         + ZcashSerialize
