@@ -18,7 +18,7 @@ use zebra_chain::{
     parameters::{
         testnet::{
             self, ConfiguredActivationHeights, ConfiguredCheckpoints, ConfiguredFundingStreams,
-            ConfiguredLockboxDisbursement, RegtestParameters,
+            ConfiguredLockboxDisbursement,
         },
         Magic, Network, NetworkKind,
     },
@@ -610,12 +610,29 @@ struct DTestnetParameters {
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+enum DNetwork {
+    DefaultForKind(NetworkKind),
+    TestnetWithParams(Box<DTestnetParameters>),
+}
+
+impl Default for DNetwork {
+    fn default() -> Self {
+        DNetwork::DefaultForKind(NetworkKind::Mainnet)
+    }
+}
+
+#[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 struct DConfig {
     listen_addr: String,
     external_addr: Option<String>,
-    network: NetworkKind,
+    network: DNetwork,
+
+    /// Legacy testnet parameters, kept for backwards compatibility.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     testnet_parameters: Option<DTestnetParameters>,
+
     initial_mainnet_peers: IndexSet<String>,
     initial_testnet_peers: IndexSet<String>,
     cache_dir: CacheDir,
@@ -693,16 +710,23 @@ impl From<Config> for DConfig {
             max_connections_per_ip,
         }: Config,
     ) -> Self {
-        let testnet_parameters = network
-            .parameters()
-            .filter(|params| !params.is_default_testnet())
-            .map(Into::into);
+        let dnetwork = match network.kind() {
+            NetworkKind::Testnet => match network
+                .parameters()
+                .filter(|params| !params.is_default_testnet())
+                .map(Into::into)
+            {
+                Some(params) => DNetwork::TestnetWithParams(Box::new(params)),
+                None => DNetwork::DefaultForKind(NetworkKind::Testnet),
+            },
+            other_kind => DNetwork::DefaultForKind(other_kind),
+        };
 
         DConfig {
             listen_addr: listen_addr.to_string(),
             external_addr: external_addr.map(|addr| addr.to_string()),
-            network: network.into(),
-            testnet_parameters,
+            network: dnetwork,
+            testnet_parameters: None,
             initial_mainnet_peers,
             initial_testnet_peers,
             cache_dir,
@@ -721,7 +745,7 @@ impl<'de> Deserialize<'de> for Config {
         let DConfig {
             listen_addr,
             external_addr,
-            network: network_kind,
+            network: dnetwork,
             testnet_parameters,
             initial_mainnet_peers,
             initial_testnet_peers,
@@ -748,46 +772,14 @@ impl<'de> Deserialize<'de> for Config {
                 .is_some()
         }
 
-        let network = match (network_kind, testnet_parameters) {
-            (NetworkKind::Mainnet, _) => Network::Mainnet,
-            (NetworkKind::Testnet, None) => Network::new_default_testnet(),
-            (NetworkKind::Regtest, testnet_parameters) => {
-                let params = testnet_parameters
-                    .map(
-                        |DTestnetParameters {
-                             activation_heights,
-                             pre_nu6_funding_streams,
-                             post_nu6_funding_streams,
-                             funding_streams,
-                             lockbox_disbursements,
-                             checkpoints,
-                             extend_funding_stream_addresses_as_required,
-                             ..
-                         }| {
-                            let mut funding_streams_vec = funding_streams.unwrap_or_default();
-                            if let Some(funding_streams) = post_nu6_funding_streams {
-                                funding_streams_vec.insert(0, funding_streams);
-                            }
-                            if let Some(funding_streams) = pre_nu6_funding_streams {
-                                funding_streams_vec.insert(0, funding_streams);
-                            }
-
-                            RegtestParameters {
-                                activation_heights: activation_heights.unwrap_or_default(),
-                                funding_streams: Some(funding_streams_vec),
-                                lockbox_disbursements,
-                                checkpoints: Some(checkpoints),
-                                extend_funding_stream_addresses_as_required,
-                            }
-                        },
-                    )
-                    .unwrap_or_default();
-
-                Network::new_regtest(params)
+        let network = match dnetwork {
+            DNetwork::DefaultForKind(NetworkKind::Mainnet) => Network::Mainnet,
+            DNetwork::DefaultForKind(NetworkKind::Testnet) => Network::new_default_testnet(),
+            DNetwork::DefaultForKind(NetworkKind::Regtest) => {
+                Network::new_regtest(Default::default())
             }
-            (
-                NetworkKind::Testnet,
-                Some(DTestnetParameters {
+            DNetwork::TestnetWithParams(params) => {
+                let DTestnetParameters {
                     network_name,
                     network_magic,
                     slow_start_interval,
@@ -802,8 +794,8 @@ impl<'de> Deserialize<'de> for Config {
                     lockbox_disbursements,
                     checkpoints,
                     extend_funding_stream_addresses_as_required,
-                }),
-            ) => {
+                } = *params;
+
                 let mut params_builder = testnet::Parameters::build();
 
                 if let Some(network_name) = network_name.clone() {
