@@ -55,6 +55,8 @@ pub use checkpoint::{VerifyCheckpointError, MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECK
 pub use config::Config;
 pub use error::BlockError;
 pub use primitives::{ed25519, groth16, halo2, redjubjub, redpallas};
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+pub use primitives::tachyon;
 pub use router::RouterError;
 
 /// A boxed [`std::error::Error`].
