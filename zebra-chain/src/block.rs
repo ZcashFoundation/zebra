@@ -228,7 +228,7 @@ impl Block {
     pub fn chain_value_pool_change(
         &self,
         utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
-        deferred_pool_balance_change: Option<DeferredPoolBalanceChange>,
+        deferred_pool_balance_change: DeferredPoolBalanceChange,
     ) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
         Ok(*self
             .transactions
@@ -236,11 +236,7 @@ impl Block {
             .flat_map(|t| t.value_balance(utxos))
             .sum::<Result<ValueBalance<NegativeAllowed>, _>>()?
             .neg()
-            .set_deferred_amount(
-                deferred_pool_balance_change
-                    .map(DeferredPoolBalanceChange::value)
-                    .unwrap_or_default(),
-            ))
+            .set_deferred_amount(deferred_pool_balance_change.value()))
     }
 
     /// Compute the root of the authorizing data Merkle tree,

@@ -7,16 +7,16 @@ use crossbeam_channel::TryRecvError;
 use itertools::Itertools;
 use rayon::iter::{IntoParallelIterator, ParallelIterator as _};
 use zebra_chain::{
-    amount::{DeferredPoolBalanceChange, NonNegative},
+    amount::NonNegative,
     block::{Block, Height},
     block_info::BlockInfo,
-    parameters::subsidy::{block_subsidy, funding_stream_values, FundingStreamReceiver},
     transparent::{self, OutPoint, Utxo},
     value_balance::ValueBalance,
 };
 
 use crate::{
     service::finalized_state::{
+        calculate_deferred_pool_balance_change,
         disk_format::transparent::{AddressBalanceLocationChange, AddressLocation},
         MAX_ON_DISK_HEIGHT,
     },
@@ -176,34 +176,13 @@ impl DiskFormatUpgrade for Upgrade {
                 } => (block, size, utxos, address_balance_changes),
             };
 
-            // Get the deferred amount which is required to update the value pool.
-            let deferred_pool_balance_change = if height > network.slow_start_interval() {
-                // See [ZIP-1015](https://zips.z.cash/zip-1015).
-                let deferred_pool_balance_change = funding_stream_values(
-                    height,
-                    &network,
-                    block_subsidy(height, &network).unwrap_or_default(),
-                )
-                .expect("should have valid funding stream values")
-                .remove(&FundingStreamReceiver::Deferred)
-                .unwrap_or_default()
-                .checked_sub(network.lockbox_disbursement_total_amount(height));
-
-                Some(
-                    deferred_pool_balance_change
-                        .expect("deferred pool balance change should be valid Amount"),
-                )
-            } else {
-                None
-            };
-
             // Add this block's value pool changes to the total value pool.
             value_pool = value_pool
                 .add_chain_value_pool_change(
                     block
                         .chain_value_pool_change(
                             &utxos,
-                            deferred_pool_balance_change.map(DeferredPoolBalanceChange::new),
+                            calculate_deferred_pool_balance_change(height, &network),
                         )
                         .unwrap_or_default(),
                 )
