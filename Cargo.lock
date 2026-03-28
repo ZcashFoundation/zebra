@@ -6880,6 +6880,7 @@ dependencies = [
  "num-integer",
  "once_cell",
  "orchard",
+ "pasta_curves",
  "proptest",
  "proptest-derive",
  "rand 0.8.5",

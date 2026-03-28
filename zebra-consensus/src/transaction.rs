@@ -1030,7 +1030,10 @@ where
         }
     }
 
-    /// Passthrough to verify_v5_transaction, but for V6 transactions.
+    /// Verify a V6 transaction.
+    ///
+    /// This verifies all V5 checks (transparent, sapling, orchard) plus
+    /// tachyon bundle signature verification (SpendAuth + binding).
     #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
     fn verify_v6_transaction(
         request: &Request,
@@ -1038,7 +1041,18 @@ where
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
     ) -> Result<AsyncChecks, TransactionError> {
-        Self::verify_v5_transaction(request, network, script_verifier, cached_ffi_transaction)
+        let transaction = request.transaction();
+        let sighash = cached_ffi_transaction
+            .sighasher()
+            .sighash(HashType::ALL, None);
+
+        Ok(Self::verify_v5_transaction(
+            request,
+            network,
+            script_verifier,
+            cached_ffi_transaction,
+        )?
+        .and(Self::verify_tachyon_bundle(&transaction, &sighash)))
     }
 
     /// Verifies if a transaction's transparent inputs are valid using the provided
@@ -1231,6 +1245,69 @@ where
                     .oneshot(primitives::halo2::Item::new(bundle, *sighash)),
             );
         }
+
+        async_checks
+    }
+
+    /// Verifies a transaction's Tachyon shielded data signatures.
+    ///
+    /// Queues per-action SpendAuth signatures and the bundle binding signature
+    /// for batch verification via the RedPallas batch verifier.
+    ///
+    /// Stamp proof verification is handled separately at the block level
+    /// in [`super::check::verify_tachyon_aggregates`].
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+    fn verify_tachyon_bundle(transaction: &Transaction, sighash: &SigHash) -> AsyncChecks {
+        use pasta_curves::group::GroupEncoding as _;
+
+        let mut async_checks = AsyncChecks::new();
+
+        let bundle = match transaction {
+            Transaction::V6 {
+                tachyon_shielded_data: Some(bundle),
+                ..
+            } => bundle,
+            _ => return async_checks,
+        };
+
+        // Verify per-action SpendAuth signatures.
+        //
+        // Each action's `rk` (randomized verification key) must validate the
+        // action's `sig` over the transaction sighash.
+        for action in &bundle.actions {
+            let rk_bytes: [u8; 32] = action.rk.into();
+            let sig_bytes: [u8; 64] = action.sig.into();
+            async_checks.push(
+                primitives::redpallas::VERIFIER.clone().oneshot(
+                    primitives::redpallas::Item::from_spendauth(
+                        rk_bytes.into(),
+                        sig_bytes.into(),
+                        sighash,
+                    ),
+                ),
+            );
+        }
+
+        // Verify the binding signature.
+        //
+        // The binding verification key is derived from value commitments:
+        //   bvk = (Σ cv_i) - ValueCommit_0(value_balance)
+        // and must validate the bundle's binding_sig over the sighash.
+        let bvk_point = zcash_tachyon::keys::public::derive_bvk(
+            bundle.actions.iter().map(|a| a.cv),
+            bundle.value_balance,
+        );
+        let bvk_bytes: [u8; 32] = bvk_point.to_bytes();
+        let binding_sig_bytes: [u8; 64] = bundle.binding_sig.into();
+        async_checks.push(
+            primitives::redpallas::VERIFIER.clone().oneshot(
+                primitives::redpallas::Item::from_binding(
+                    bvk_bytes.into(),
+                    binding_sig_bytes.into(),
+                    sighash,
+                ),
+            ),
+        );
 
         async_checks
     }
