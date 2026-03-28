@@ -73,17 +73,26 @@ pub fn coinbase_is_first(block: &Block) -> Result<Arc<transaction::Transaction>,
 /// Tachyon transactions in a block use proof aggregation: a stamped bundle's
 /// proof covers its own actions plus those of any immediately following
 /// unstamped (stripped) bundles. This function enforces that structure and
-/// verifies each aggregate proof.
+/// queues each aggregate proof for batch verification.
+///
+/// Returns futures that must be awaited to complete verification.
 ///
 /// Algorithm:
 /// 1. Iterate through block transactions.
-/// 2. For stamped tachyon txs: collect actions from self + following unstamped txs, verify proof.
+/// 2. For stamped tachyon txs: collect actions from self + following unstamped txs, queue proof.
 /// 3. For unstamped tachyon txs not preceded by a stamped tx: error.
 /// 4. Skip non-tachyon transactions.
 #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-pub fn verify_tachyon_aggregates(block: &Block) -> Result<(), BlockError> {
+pub fn verify_tachyon_aggregates(
+    block: &Block,
+) -> Result<Vec<futures::future::BoxFuture<'static, Result<(), crate::BoxError>>>, BlockError> {
+    use futures::FutureExt as _;
+    use tower::ServiceExt as _;
+
     let mut i = 0;
     let txs = &block.transactions;
+    let mut checks: Vec<futures::future::BoxFuture<'static, Result<(), crate::BoxError>>> =
+        Vec::new();
 
     while i < txs.len() {
         // Extract tachyon bundle from this transaction, if any.
@@ -118,16 +127,20 @@ pub fn verify_tachyon_aggregates(block: &Block) -> Result<(), BlockError> {
                     }
                 }
 
-                // Verify the stamp proof against the accumulated actions.
+                // Build the multiset and queue the stamp proof for batch verification.
                 let actions_multiset = zcash_tachyon::multiset::Multiset::try_from(
                     all_actions.as_slice(),
                 )
                 .map_err(|_| BlockError::Other("invalid tachyon action digest".to_string()))?;
-                stamp
-                    .verify(&actions_multiset, &mut rand::rngs::OsRng)
-                    .map_err(|_| {
-                        BlockError::Other("tachyon proof verification failed".to_string())
-                    })?;
+
+                let item =
+                    crate::primitives::tachyon::Item::new(stamp.clone(), actions_multiset);
+                checks.push(
+                    crate::primitives::tachyon::VERIFIER
+                        .clone()
+                        .oneshot(item)
+                        .boxed(),
+                );
             }
             None => {
                 // Unstamped tachyon tx not covered by a preceding stamped tx.
@@ -138,7 +151,7 @@ pub fn verify_tachyon_aggregates(block: &Block) -> Result<(), BlockError> {
         }
     }
 
-    Ok(())
+    Ok(checks)
 }
 
 /// Returns `Ok(ExpandedDifficulty)` if the`difficulty_threshold` of `header` is at least as difficult as

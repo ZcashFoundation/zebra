@@ -228,7 +228,7 @@ where
             let coinbase_tx = check::coinbase_is_first(&block)?;
 
             #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            check::verify_tachyon_aggregates(&block)?;
+            let tachyon_checks = check::verify_tachyon_aggregates(&block)?;
 
             let expected_block_subsidy =
                 zebra_chain::parameters::subsidy::block_subsidy(height, &network)?;
@@ -296,6 +296,17 @@ where
                 // so they don't add any value to the block's total miner fee.
                 if let Some(miner_fee) = response.miner_fee() {
                     block_miner_fees += miner_fee;
+                }
+            }
+
+            // Await tachyon batch verification futures.
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            {
+                use futures::stream::{FuturesUnordered, StreamExt as _};
+                let mut tachyon_async: FuturesUnordered<_> =
+                    tachyon_checks.into_iter().collect();
+                while let Some(result) = tachyon_async.next().await {
+                    result.map_err(|e| BlockError::Other(e.to_string()))?;
                 }
             }
 
