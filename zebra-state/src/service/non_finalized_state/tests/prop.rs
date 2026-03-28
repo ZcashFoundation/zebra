@@ -632,6 +632,7 @@ fn different_blocks_different_chains() -> Result<()> {
 
                 // history trees
                 chain1.history_trees_by_height = chain2.history_trees_by_height.clone();
+                chain1.history_nodes_by_height = chain2.history_nodes_by_height.clone();
 
                 // anchors
                 chain1.sprout_anchors = chain2.sprout_anchors.clone();
