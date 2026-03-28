@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [5.0.1] - 2026-03-25
 
+This release fixes an important security issue:
+
+- [CVE-2026-34377: Consensus Failure via Crafted V5 Authorization Data](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-3vmh-33xr-9cqh)
+
+The impact of the issue for crate users will depend on the particular usage;
+if you use it as a building block for a node, you should update.
+
 ### Added
 
 - ZIP-235 support under the `zcash_unstable = "zip235"` flag

@@ -7,7 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
-## [Zebra 4.3](https://github.com/ZcashFoundation/zebra/releases/tag/v4.3) - 2026-03-12
+## [Zebra 4.3.0](https://github.com/ZcashFoundation/zebra/releases/tag/v4.3) - 2026-03-12
+
+This release fixes **two important security issues**:
+
+- [CVE-2026-34202: Remote Denial of Service via Crafted V5 Transactions](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-qp6f-w4r3-h8wg)
+- [CVE-2026-34377: Consensus Failure via Crafted V5 Authorization Data](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-3vmh-33xr-9cqh)
+
+We recommend node operators to update to 4.3.0 as soon as possible. All previous
+Zebra versions are vulnerable to these issues.
 
 This release adds support for [ZIP-235](https://zips.z.cash/zip-0235) and
 extends the documentation on performance profiling. It also fixes issues with
