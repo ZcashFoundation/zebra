@@ -34,9 +34,13 @@ ARG BUILDPLATFORM
 # Install zebra build deps
 RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
+    librocksdb-dev \
     libclang-dev \
     protobuf-compiler \
     && rm -rf /var/lib/apt/lists/* /tmp/*
+
+# Link RocksDB dynamically for faster builds
+ENV ROCKSDB_LIB_DIR="/usr/lib/"
 
 # Build arguments and variables
 ARG CARGO_INCREMENTAL
