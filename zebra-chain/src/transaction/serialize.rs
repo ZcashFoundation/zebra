@@ -1421,17 +1421,24 @@ impl ZcashDeserialize for zcash_tachyon::Anchor {
     }
 }
 
+/// Serialized size of a Tachyon proof in bytes.
+/// Matches `mock_ragu::proof::PROOF_SIZE_COMPRESSED`.
+const TACHYON_PROOF_SIZE: usize = 23_000;
+
 impl ZcashSerialize for zcash_tachyon::Proof {
-    fn zcash_serialize<W: io::Write>(&self, _writer: W) -> Result<(), io::Error> {
-        // Proof is currently a stub, no serialization needed yet
-        Ok(())
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        let bytes = self.serialize();
+        writer.write_all(bytes.as_ref())
     }
 }
 
 impl ZcashDeserialize for zcash_tachyon::Proof {
-    fn zcash_deserialize<R: io::Read>(_reader: R) -> Result<Self, SerializationError> {
-        // Proof is currently a stub, no deserialization needed yet  
-        Ok(zcash_tachyon::Proof)
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let mut bytes = vec![0u8; TACHYON_PROOF_SIZE];
+        reader.read_exact(&mut bytes)?;
+        let arr: [u8; TACHYON_PROOF_SIZE] = bytes.try_into().expect("vec is TACHYON_PROOF_SIZE");
+        zcash_tachyon::Proof::try_from(&arr)
+            .map_err(|_| SerializationError::Parse("invalid tachyon proof"))
     }
 }
 

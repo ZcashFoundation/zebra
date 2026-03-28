@@ -3014,6 +3014,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "mock_ragu"
+version = "0.0.0"
+source = "git+https://github.com/S1nus/tachyon.git?rev=f79ae92e4c4a775929a06add99fcf3925f5fef82#f79ae92e4c4a775929a06add99fcf3925f5fef82"
+dependencies = [
+ "blake2b_simd",
+ "ff",
+ "lazy_static",
+ "pasta_curves",
+ "rand_core 0.6.4",
+ "serde",
+]
+
+[[package]]
 name = "mset"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6654,7 +6667,7 @@ dependencies = [
  "zcash_protocol",
  "zcash_script",
  "zcash_spec",
- "zcash_tachyon",
+ "zcash_tachyon 0.0.0 (git+https://github.com/tachyon-zcash/tachyon.git?rev=a441c0cba73c9accebac324abdbd28b2f9701dd5)",
  "zcash_transparent",
  "zip32",
 ]
@@ -6728,6 +6741,22 @@ dependencies = [
  "ff",
  "group",
  "lazy_static",
+ "pasta_curves",
+ "rand_core 0.6.4",
+ "reddsa",
+]
+
+[[package]]
+name = "zcash_tachyon"
+version = "0.0.0"
+source = "git+https://github.com/S1nus/tachyon.git?rev=f79ae92e4c4a775929a06add99fcf3925f5fef82#f79ae92e4c4a775929a06add99fcf3925f5fef82"
+dependencies = [
+ "blake2b_simd",
+ "ff",
+ "group",
+ "halo2_poseidon",
+ "lazy_static",
+ "mock_ragu",
  "pasta_curves",
  "rand_core 0.6.4",
  "reddsa",
@@ -6824,7 +6853,7 @@ dependencies = [
  "zcash_primitives",
  "zcash_protocol",
  "zcash_script",
- "zcash_tachyon",
+ "zcash_tachyon 0.0.0 (git+https://github.com/S1nus/tachyon.git?rev=f79ae92e4c4a775929a06add99fcf3925f5fef82)",
  "zcash_transparent",
  "zebra-test",
 ]
@@ -6869,7 +6898,7 @@ dependencies = [
  "tracing-subscriber",
  "zcash_proofs",
  "zcash_protocol",
- "zcash_tachyon",
+ "zcash_tachyon 0.0.0 (git+https://github.com/S1nus/tachyon.git?rev=f79ae92e4c4a775929a06add99fcf3925f5fef82)",
  "zebra-chain",
  "zebra-node-services",
  "zebra-script",

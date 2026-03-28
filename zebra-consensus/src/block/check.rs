@@ -119,13 +119,14 @@ pub fn verify_tachyon_aggregates(block: &Block) -> Result<(), BlockError> {
                 }
 
                 // Verify the stamp proof against the accumulated actions.
+                let actions_multiset = zcash_tachyon::multiset::Multiset::try_from(
+                    all_actions.as_slice(),
+                )
+                .map_err(|_| BlockError::Other("invalid tachyon action digest".to_string()))?;
                 stamp
-                    .proof
-                    .verify(all_actions, stamp.tachygrams.clone(), stamp.anchor)
+                    .verify(&actions_multiset, &mut rand::rngs::OsRng)
                     .map_err(|_| {
-                        BlockError::Other(
-                            "tachyon proof verification failed".to_string(),
-                        )
+                        BlockError::Other("tachyon proof verification failed".to_string())
                     })?;
             }
             None => {
