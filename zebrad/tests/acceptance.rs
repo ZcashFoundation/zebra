@@ -1396,8 +1396,8 @@ fn sync_full_testnet() -> Result<()> {
     )
 }
 
-#[cfg(all(feature = "prometheus", not(target_os = "windows")))]
 #[tokio::test]
+#[cfg(all(feature = "prometheus", not(target_os = "windows")))]
 async fn metrics_endpoint() -> Result<()> {
     use bytes::Bytes;
     use http_body_util::BodyExt;
@@ -1916,7 +1916,7 @@ async fn lightwalletd_test_suite() -> Result<()> {
 ///
 /// Set `FullSyncFromGenesis { allow_lightwalletd_cached_state: true }` to speed up manual full sync tests.
 ///
-/// # Relibility
+/// # Reliability
 ///
 /// The random ports in this test can cause [rare port conflicts.](#Note on port conflict)
 ///
@@ -3308,7 +3308,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     use zebra_chain::{
         chain_sync_status::MockSyncStatus,
         parameters::{
-            subsidy::{FundingStreamReceiver, FUNDING_STREAM_MG_ADDRESSES_TESTNET},
+            subsidy::FundingStreamReceiver,
             testnet::{
                 self, ConfiguredActivationHeights, ConfiguredFundingStreamRecipient,
                 ConfiguredFundingStreams,
@@ -3494,15 +3494,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
                 numerator,
                 addresses: None,
             },
-            ConfiguredFundingStreamRecipient {
-                receiver: FundingStreamReceiver::MajorGrants,
-                numerator: 8,
-                addresses: Some(
-                    FUNDING_STREAM_MG_ADDRESSES_TESTNET
-                        .map(ToString::to_string)
-                        .to_vec(),
-                ),
-            },
+            ConfiguredFundingStreamRecipient::new_for(FundingStreamReceiver::MajorGrants),
         ])
     };
 
@@ -3686,8 +3678,11 @@ async fn nu7_nsm_transactions() -> Result<()> {
     let base_network_params = testnet::Parameters::build()
         // Regtest genesis hash
         .with_genesis_hash("029f11d80ef9765602235e1bc9727e3eb6ba20839319f761fee920d63401e327")
+        .unwrap()
         .with_checkpoints(false)
+        .unwrap()
         .with_target_difficulty_limit(U256::from_big_endian(&[0x0f; 32]))
+        .unwrap()
         .with_disable_pow(true)
         .with_slow_start_interval(Height::MIN)
         .with_lockbox_disbursements(vec![])
@@ -3698,13 +3693,15 @@ async fn nu7_nsm_transactions() -> Result<()> {
 
     let network = base_network_params
         .clone()
+        .unwrap()
         .with_funding_streams(vec![ConfiguredFundingStreams {
             // Start checking funding streams from block height 1
             height_range: Some(Height(1)..Height(100)),
             // Use default post-NU6 recipients
             recipients: None,
         }])
-        .to_network();
+        .to_network()
+        .unwrap();
 
     tracing::info!("built configured Testnet, starting state service and block verifier");
 
@@ -4089,7 +4086,10 @@ async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
     tokio::time::sleep(Duration::from_secs(6)).await;
 
     child.kill(true)?;
-    // Wait for Zebra to shut down.
+    // Wait for zebrad to fully terminate to ensure database lock is released.
+    child
+        .wait_with_output()
+        .wrap_err("failed to wait for zebrad to fully terminate")?;
     tokio::time::sleep(Duration::from_secs(3)).await;
     // Prepare checkpoint heights/hashes
     let last_hash = *generated_block_hashes
@@ -4149,7 +4149,10 @@ async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
          the finalized tip is below the max checkpoint height"
     );
     child.kill(true)?;
-    // Wait for Zebra to shut down.
+    // Wait for zebrad to fully terminate to ensure database lock is released.
+    child
+        .wait_with_output()
+        .wrap_err("failed to wait for zebrad to fully terminate")?;
     tokio::time::sleep(Duration::from_secs(3)).await;
 
     // Check that the non-finalized state is not restored from backup when the finalized tip height is below the
@@ -4197,6 +4200,11 @@ async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
         .expect("should successfully commit more blocks to the state");
 
     child.kill(true)?;
+    // Wait for zebrad to fully terminate to ensure database lock is released.
+    child
+        .wait_with_output()
+        .wrap_err("failed to wait for zebrad process to exit after kill")?;
+    tokio::time::sleep(Duration::from_secs(3)).await;
 
     // Check that Zebra will can commit blocks to its state when its finalized tip is past the max checkpoint height
     // and the non-finalized backup cache is disabled or empty.

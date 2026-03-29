@@ -857,12 +857,12 @@ async fn connection_is_randomly_disconnected_on_overload() {
             .respond_error(Overloaded::new().into());
         tokio::time::sleep(Duration::from_millis(1)).await;
 
-        let outbound_result = peer_outbound_messages.try_next();
+        let outbound_result = peer_outbound_messages.try_recv();
         assert!(
-            !matches!(outbound_result, Ok(Some(_))),
+            outbound_result.is_err(),
             "unexpected outbound message after Overloaded error:\n\
              {outbound_result:?}\n\
-             note: TryRecvErr means there are no messages, Ok(None) means the channel is closed"
+             note: Err(TryRecvError::Empty) means no messages, Err(TryRecvError::Closed) means the channel is closed"
         );
 
         let error = shared_error_slot.try_get_error();

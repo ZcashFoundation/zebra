@@ -135,7 +135,7 @@ impl Transaction {
     /// Generate a proptest strategy for V5 Transactions
     pub fn v5_strategy(ledger_state: LedgerState) -> BoxedStrategy<Self> {
         (
-            NetworkUpgrade::branch_id_strategy(),
+            NetworkUpgrade::nu5_branch_id_strategy(),
             any::<LockTime>(),
             any::<block::Height>(),
             transparent::Input::vec_strategy(&ledger_state, MAX_ARBITRARY_ITEMS),
@@ -847,12 +847,13 @@ impl Arbitrary for VerifiedUnminedTx {
                     Self {
                         transaction,
                         miner_fee,
-                        sigops,
+                        legacy_sigop_count: sigops,
                         conventional_actions,
                         unpaid_actions,
                         fee_weight_ratio,
                         time: Some(time),
                         height: Some(height),
+                        spent_outputs: std::sync::Arc::new(vec![]),
                     }
                 },
             )

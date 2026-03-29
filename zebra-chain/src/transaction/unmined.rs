@@ -26,6 +26,7 @@ use crate::{
         Transaction::{self, *},
         WtxId,
     },
+    transparent,
 };
 
 use UnminedTxId::*;
@@ -335,9 +336,12 @@ pub struct VerifiedUnminedTx {
     /// The transaction fee for this unmined transaction.
     pub miner_fee: Amount<NonNegative>,
 
-    /// The number of legacy signature operations in this transaction's
-    /// transparent inputs and outputs.
-    pub sigops: u32,
+    /// The number of legacy transparent signature operations in this transaction.
+    ///
+    /// This is the legacy sigop count only (`GetLegacySigOpCount()`).
+    /// The mempool adds P2SH sigops (`GetP2SHSigOpCount()`) when checking
+    /// `MAX_STANDARD_TX_SIGOPS`.
+    pub legacy_sigop_count: u32,
 
     /// The number of conventional actions for `transaction`, as defined by [ZIP-317].
     ///
@@ -369,6 +373,12 @@ pub struct VerifiedUnminedTx {
     /// The tip height when the transaction was added to the mempool, or None if
     /// it has not reached the mempool yet.
     pub height: Option<Height>,
+
+    /// The spent outputs for this transaction's transparent inputs.
+    ///
+    /// Used by mempool policy checks (`AreInputsStandard`, `GetP2SHSigOpCount`).
+    /// Empty for transactions with no transparent inputs or in test contexts.
+    pub spent_outputs: Arc<Vec<transparent::Output>>,
 }
 
 impl fmt::Debug for VerifiedUnminedTx {
@@ -391,11 +401,12 @@ impl fmt::Display for VerifiedUnminedTx {
 
 impl VerifiedUnminedTx {
     /// Create a new verified unmined transaction from an unmined transaction,
-    /// its miner fee, and its legacy sigop count.
+    /// its miner fee, its legacy sigop count, and the spent outputs for its transparent inputs.
     pub fn new(
         transaction: UnminedTx,
         miner_fee: Amount<NonNegative>,
         legacy_sigop_count: u32,
+        spent_outputs: Arc<Vec<transparent::Output>>,
     ) -> Result<Self, zip317::Error> {
         let fee_weight_ratio = zip317::conventional_fee_weight_ratio(&transaction, miner_fee);
         let conventional_actions = zip317::conventional_actions(&transaction.transaction);
@@ -406,12 +417,13 @@ impl VerifiedUnminedTx {
         Ok(Self {
             transaction,
             miner_fee,
-            sigops: legacy_sigop_count,
+            legacy_sigop_count,
             fee_weight_ratio,
             conventional_actions,
             unpaid_actions,
             time: None,
             height: None,
+            spent_outputs,
         })
     }
 

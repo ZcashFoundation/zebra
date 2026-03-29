@@ -7,5 +7,5 @@ not contain:
   APIs](https://docs.rs/zebrad/latest/zebrad/#zebra-crates) for the latest
   releases of the individual Zebra crates.
 
-- The [documentation of the internal APIs](https://doc-internal.zebra.zfnd.org)
-  for the `main` branch of the whole Zebra monorepo.
+- You can also build internal documentation locally by running
+  `cargo doc --document-private-items` in the Zebra repository.

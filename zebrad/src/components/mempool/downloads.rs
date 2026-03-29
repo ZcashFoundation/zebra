@@ -167,7 +167,7 @@ where
                         Option<Height>,
                         Option<oneshot::Sender<Result<(), BoxError>>>,
                     ),
-                    (TransactionDownloadVerifyError, UnminedTxId),
+                    Box<(TransactionDownloadVerifyError, UnminedTxId)>,
                 >,
                 tokio::time::error::Elapsed,
             >,
@@ -196,7 +196,7 @@ where
                 Option<Height>,
                 Option<oneshot::Sender<Result<(), BoxError>>>,
             ),
-            (UnminedTxId, TransactionDownloadVerifyError),
+            Box<(UnminedTxId, TransactionDownloadVerifyError)>,
         >,
         tokio::time::error::Elapsed,
     >;
@@ -219,9 +219,10 @@ where
                     this.cancel_handles.remove(&tx.transaction.id);
                     Ok(Ok((tx, spent_mempool_outpoints, tip_height, rsp_tx)))
                 }
-                Ok(Err((e, hash))) => {
+                Ok(Err(boxed_err)) => {
+                    let (e, hash) = *boxed_err;
                     this.cancel_handles.remove(&hash);
-                    Ok(Err((hash, e)))
+                    Ok(Err(Box::new((hash, e))))
                 }
                 Err(elapsed) => Err(elapsed),
             };
@@ -400,7 +401,7 @@ where
         })
         // Tack the hash onto the error so we can remove the cancel handle
         // on failure as well as on success.
-        .map_err(move |e| (e, txid))
+        .map_err(move |e| Box::new((e, txid)))
         .inspect(move |result| {
             // Hide the transaction data to avoid filling the logs
             let result = result.as_ref().map(|_tx| txid);
@@ -421,7 +422,7 @@ where
                         let _ = rsp_tx.send(Err("verification cancelled".into()));
                     }
 
-                    Ok(Err((TransactionDownloadVerifyError::Cancelled, txid)))
+                    Ok(Err(Box::new((TransactionDownloadVerifyError::Cancelled, txid))))
                 }
                 verification = fut => {
                     verification
@@ -433,7 +434,8 @@ where
                         .map(|inner_result| {
                             match inner_result {
                                 Ok((transaction, spent_mempool_outpoints, tip_height)) => Ok((transaction, spent_mempool_outpoints, tip_height, rsp_tx)),
-                                Err((tx_verifier_error, tx_id)) => {
+                                Err(boxed_err) => {
+                                    let (tx_verifier_error, tx_id) = *boxed_err;
                                     if let Some(rsp_tx) = rsp_tx.take() {
                                         let error_msg = format!(
                                             "failed to validate tx: {tx_id}, error: {tx_verifier_error}"
@@ -441,7 +443,7 @@ where
                                         let _ = rsp_tx.send(Err(error_msg.into()));
                                     };
 
-                                    Err((tx_verifier_error, tx_id))
+                                    Err(Box::new((tx_verifier_error, tx_id)))
                                 }
                             }
                         })

@@ -43,6 +43,7 @@ Building Zebra requires [Rust](https://www.rust-lang.org/tools/install),
 compiler. Below are quick summaries for installing these dependencies.
 
 [//]: # "The empty lines in the `summary` tag below are required for correct Markdown rendering."
+
 <details><summary>
 
 #### General Instructions for Installing Dependencies
@@ -60,6 +61,7 @@ compiler. Below are quick summaries for installing these dependencies.
 </details>
 
 [//]: # "The empty lines in the `summary` tag below are required for correct Markdown rendering."
+
 <details><summary>
 
 #### Dependencies on Arch Linux
@@ -88,7 +90,7 @@ cargo install --locked zebrad
 Alternatively, you can install it from GitHub:
 
 ```sh
-cargo install --git https://github.com/ZcashFoundation/zebra --tag v2.5.0 zebrad
+cargo install --git https://github.com/ZcashFoundation/zebra --tag v4.3.0 zebrad
 ```
 
 You can start Zebra by running
@@ -133,7 +135,7 @@ The Zcash Foundation maintains the following resources documenting Zebra:
   APIs](https://docs.rs/zebrad/latest/zebrad/#zebra-crates) for the latest
   releases of the individual Zebra crates.
 
-- The [documentation of the internal APIs](https://doc-internal.zebra.zfnd.org)
+- The [documentation of the internal APIs](https://zebra.zfnd.org/internal)
   for the `main` branch of the whole Zebra monorepo.
 
 ## User support

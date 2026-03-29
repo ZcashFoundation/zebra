@@ -113,6 +113,18 @@ pub struct Config {
     #[serde(with = "humantime_serde")]
     pub debug_validity_check_interval: Option<Duration>,
 
+    /// If true, skip spawning the non-finalized state backup task and instead write
+    /// the non-finalized state to the backup directory synchronously before each update
+    /// to the latest chain tip or non-finalized state channels.
+    ///
+    /// Set to `false` by default. When `true`, the non-finalized state is still restored
+    /// from the backup directory on startup, but updates are written synchronously on every
+    /// block commit rather than asynchronously every 5 seconds.
+    ///
+    /// This is intended for testing scenarios where blocks are committed rapidly and the
+    /// async backup task may not flush all blocks before shutdown.
+    pub debug_skip_non_finalized_state_backup_task: bool,
+
     // Elasticsearch configs
     //
     #[cfg(feature = "elasticsearch")]
@@ -206,6 +218,7 @@ impl Default for Config {
             delete_old_database: true,
             debug_stop_at_height: None,
             debug_validity_check_interval: None,
+            debug_skip_non_finalized_state_backup_task: false,
             #[cfg(feature = "elasticsearch")]
             elasticsearch_url: "https://localhost:9200".to_string(),
             #[cfg(feature = "elasticsearch")]
@@ -277,6 +290,8 @@ fn delete_old_databases(config: Config, db_kind: String, major_version: u64, net
 
     info!(db_kind, "checking for old database versions");
 
+    let restorable_db_versions = restorable_db_versions();
+
     let mut db_path = config.db_path(&db_kind, major_version, network);
     // Check and remove the network path.
     assert_eq!(
@@ -303,7 +318,8 @@ fn delete_old_databases(config: Config, db_kind: String, major_version: u64, net
 
     if let Some(db_kind_dir) = read_dir(&db_path) {
         for entry in db_kind_dir.flatten() {
-            let deleted_db = check_and_delete_database(&config, major_version, &entry);
+            let deleted_db =
+                check_and_delete_database(&config, major_version, &restorable_db_versions, &entry);
 
             if let Some(deleted_db) = deleted_db {
                 info!(?deleted_db, "deleted outdated {db_kind} database directory");
@@ -331,6 +347,7 @@ fn read_dir(dir: &Path) -> Option<ReadDir> {
 fn check_and_delete_database(
     config: &Config,
     major_version: u64,
+    restorable_db_versions: &[u64],
     entry: &DirEntry,
 ) -> Option<PathBuf> {
     let dir_name = parse_dir_name(entry)?;
@@ -341,7 +358,7 @@ fn check_and_delete_database(
     }
 
     // Don't delete databases that can be reused.
-    if restorable_db_versions()
+    if restorable_db_versions
         .iter()
         .map(|v| v - 1)
         .any(|v| v == dir_major_version)

@@ -76,4 +76,3 @@ to install `libsqlite3`, or use one of these commands instead:
 cargo build
 cargo build -p zebrad --all-features
 ```
-

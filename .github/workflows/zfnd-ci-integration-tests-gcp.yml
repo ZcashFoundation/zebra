@@ -342,8 +342,7 @@ jobs:
   # zebra testnet checkpoint generation tests
   #
   # These tests will fail when testnet is unstable, they should not be required to merge.
-  #
-  # TODO: ignore failures on testnet, so any failures don't appear in the GitHub interface.
+  # Testnet jobs use continue-on-error so failures don't block PRs or appear as workflow failures.
 
   # Test that Zebra can run a full testnet sync, and regenerate chain tip Zebra cached state disks.
   # This job always runs on testnet, regardless of any inputs or variable settings.
@@ -361,7 +360,7 @@ jobs:
       contents: read
       id-token: write
     uses: ./.github/workflows/zfnd-deploy-integration-tests-gcp.yml
-    if: ${{ (needs.get-available-disks-testnet.result == 'success' && !fromJSON(needs.get-available-disks-testnet.outputs.zebra_tip_disk)) || (github.event.inputs.run-full-sync == 'true' && (inputs.network || vars.ZCASH_NETWORK) == 'Testnet') }}
+    if: ${{ github.event_name == 'schedule' || (needs.get-available-disks-testnet.result == 'success' && !fromJSON(needs.get-available-disks-testnet.outputs.zebra_tip_disk)) || (github.event.inputs.run-full-sync == 'true' && (inputs.network || vars.ZCASH_NETWORK) == 'Testnet') }}
     concurrency:
       group: ${{ github.event_name == 'workflow_dispatch' && format('manual-{0}-sync-full-testnet', github.run_id) || 'sync-full-testnet' }}
       cancel-in-progress: false
@@ -380,6 +379,7 @@ jobs:
       saves_to_disk: true
       force_save_to_disk: ${{ inputs.force_save_to_disk || false }}
       height_grep_text: current_height.*=.*Height.*\(
+      allow_failure: true
 
   # Test that Zebra can generate testnet checkpoints after syncing to the chain tip,
   # using a cached Zebra tip state.
@@ -414,6 +414,7 @@ jobs:
       saves_to_disk: true
       force_save_to_disk: ${{ inputs.force_save_to_disk || false }}
       height_grep_text: zebra_tip_height.*=.*Height.*\(
+      allow_failure: true
 
   # lightwalletd cached tip state tests
 

@@ -89,6 +89,21 @@ where
         f(cloned_data)
     }
 
+    /// Calls the provided closure with the watch data in the channel
+    /// and returns the output.
+    ///
+    /// Does not mark the watched data as seen.
+    ///
+    /// The closure provided to this method will hold a read lock,
+    /// callers are expected to ensure any closures they provide
+    /// will promptly drop the read lock.
+    pub fn borrow_mapped<U: 'static, F>(&self, f: F) -> U
+    where
+        F: FnOnce(watch::Ref<T>) -> U,
+    {
+        f(self.receiver.borrow())
+    }
+
     /// Returns a clone of the watch data in the channel.
     /// Cloning the watched data helps avoid deadlocks.
     ///

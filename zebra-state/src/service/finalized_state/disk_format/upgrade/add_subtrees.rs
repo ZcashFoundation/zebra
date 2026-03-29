@@ -884,7 +884,7 @@ fn write_sapling_subtree(
         .write_batch(batch)
         .expect("writing sapling note commitment subtrees should always succeed.");
 
-    if subtree.index.0.is_multiple_of(100) {
+    if subtree.index.0 % 100 == 0 {
         info!(end_height = ?subtree.end_height, index = ?subtree.index.0, "calculated and added sapling subtree");
     }
     // This log happens about once per second on recent machines with SSD disks.
@@ -904,7 +904,7 @@ fn write_orchard_subtree(
         .write_batch(batch)
         .expect("writing orchard note commitment subtrees should always succeed.");
 
-    if subtree.index.0.is_multiple_of(100) {
+    if subtree.index.0 % 100 == 0 {
         info!(end_height = ?subtree.end_height, index = ?subtree.index.0, "calculated and added orchard subtree");
     }
     // This log happens about once per second on recent machines with SSD disks.

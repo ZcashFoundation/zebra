@@ -524,6 +524,11 @@ where
                     if self.bans_receiver.borrow().contains_key(&key.ip()) {
                         warn!(?key, "service is banned, dropping service");
                         std::mem::drop(svc);
+                        let cancel = self.cancel_handles.remove(&key);
+                        debug_assert!(
+                            cancel.is_some(),
+                            "missing cancel handle for banned unready peer"
+                        );
                         continue;
                     }
 
@@ -1087,6 +1092,9 @@ where
         let Some((req, sender, mut remaining_peers)) = self.queued_broadcast_all.take() else {
             return;
         };
+
+        let bans = self.bans_receiver.borrow().clone();
+        remaining_peers.retain(|addr| !bans.contains_key(&addr.ip()));
 
         let Ok(reserved_send_slot) = sender.try_reserve() else {
             self.queued_broadcast_all = Some((req, sender, remaining_peers));
