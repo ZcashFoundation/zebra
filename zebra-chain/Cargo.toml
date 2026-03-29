@@ -167,5 +167,9 @@ required-features = ["bench"]
 name = "redpallas"
 harness = false
 
+[[bench]]
+name = "transaction"
+harness = false
+
 [lints]
 workspace = true
