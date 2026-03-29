@@ -93,5 +93,11 @@ zebra-state = { path = "../zebra-state", version = "5.0.0", features = ["proptes
 zebra-chain = { path = "../zebra-chain", version = "6.0.1", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/", version = "3.0.0" }
 
+criterion = { workspace = true, features = ["html_reports"] }
+
+[[bench]]
+name = "groth16"
+harness = false
+
 [lints]
 workspace = true
