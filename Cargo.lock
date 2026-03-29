@@ -7583,6 +7583,7 @@ dependencies = [
  "tokio",
  "tower 0.4.13",
  "tracing",
+ "zcash_tachyon 0.0.0 (git+https://github.com/S1nus/tachyon.git?rev=f79ae92e4c4a775929a06add99fcf3925f5fef82)",
  "zebra-chain",
  "zebra-node-services",
  "zebra-test",

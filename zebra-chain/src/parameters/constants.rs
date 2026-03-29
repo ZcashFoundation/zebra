@@ -16,6 +16,11 @@ pub const SLOW_START_INTERVAL: Height = Height(20_000);
 /// This calculation is exact, because `SLOW_START_INTERVAL` is divisible by 2.
 pub const SLOW_START_SHIFT: Height = Height(SLOW_START_INTERVAL.0 / 2);
 
+/// The number of blocks in a tachyon epoch.
+/// At each epoch boundary, the tachygram set is pruned.
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+pub const TACHYON_EPOCH_LENGTH: u32 = 100;
+
 /// Magic numbers used to identify different Zcash networks.
 pub mod magics {
     use crate::parameters::network::magic::Magic;

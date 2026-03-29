@@ -84,6 +84,12 @@ pub(crate) type SpendingTransactionId = transaction::Hash;
 #[cfg(not(feature = "indexer"))]
 pub(crate) type SpendingTransactionId = ();
 
+/// Placeholder tachyon accumulator state.
+/// Will be replaced by the real accumulator type from `zcash_tachyon`.
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct TachyonAccumulator(pub [u8; 32]);
+
 /// The internal state of [`Chain`].
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct ChainInner {
@@ -230,6 +236,21 @@ pub struct ChainInner {
     pub(crate) chain_value_pools: ValueBalance<NonNegative>,
     /// The block info after the given block height.
     pub(crate) block_info_by_height: BTreeMap<block::Height, BlockInfo>,
+
+    // Tachyon epoch tracking
+    //
+    /// Tachygrams collected per block height, for revert support.
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+    pub(crate) tachygrams_by_height: BTreeMap<block::Height, Vec<zcash_tachyon::Tachygram>>,
+
+    /// The tachyon accumulator state at each block height.
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+    pub(crate) tachyon_accumulators_by_height: BTreeMap<block::Height, TachyonAccumulator>,
+
+    /// The current epoch's aggregated tachygram set.
+    /// Cleared at each epoch boundary (height % TACHYON_EPOCH_LENGTH == 0).
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+    pub(crate) current_epoch_tachygrams: Vec<zcash_tachyon::Tachygram>,
 }
 
 impl Chain {
@@ -269,6 +290,12 @@ impl Chain {
             history_trees_by_height: Default::default(),
             chain_value_pools: finalized_tip_chain_value_pools,
             block_info_by_height: Default::default(),
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            tachygrams_by_height: Default::default(),
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            tachyon_accumulators_by_height: Default::default(),
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            current_epoch_tachygrams: Default::default(),
         };
 
         let mut chain = Self {
@@ -1548,6 +1575,9 @@ impl Chain {
             .expect("work has already been validated");
         self.partial_cumulative_work += block_work;
 
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+        let mut block_tachygrams: Vec<zcash_tachyon::Tachygram> = Vec::new();
+
         // for each transaction in block
         for (transaction_index, (transaction, transaction_hash)) in block
             .transactions
@@ -1632,6 +1662,40 @@ impl Chain {
             ))?;
             self.update_chain_tip_with(&(sapling_shielded_data_shared_anchor, &transaction_hash))?;
             self.update_chain_tip_with(&(orchard_shielded_data, &transaction_hash))?;
+
+            // collect tachygrams from stamped tachyon bundles
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            if let V6 {
+                tachyon_shielded_data: Some(bundle),
+                ..
+            } = transaction.deref()
+            {
+                if let Some(stamp) = &bundle.stamp {
+                    block_tachygrams.extend_from_slice(&stamp.tachygrams);
+                }
+            }
+        }
+
+        // update tachyon epoch tracking
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+        {
+            use zebra_chain::parameters::constants::TACHYON_EPOCH_LENGTH;
+
+            self.tachygrams_by_height
+                .insert(height, block_tachygrams.clone());
+            self.current_epoch_tachygrams
+                .extend_from_slice(&block_tachygrams);
+
+            // stub accumulator: encode height as le bytes in a 32-byte array
+            let mut acc_bytes = [0u8; 32];
+            acc_bytes[..4].copy_from_slice(&height.0.to_le_bytes());
+            self.tachyon_accumulators_by_height
+                .insert(height, TachyonAccumulator(acc_bytes));
+
+            // at epoch boundaries, prune the tachygram set
+            if height.0 % TACHYON_EPOCH_LENGTH == 0 {
+                self.current_epoch_tachygrams.clear();
+            }
         }
 
         // update the chain value pool balances
@@ -1827,9 +1891,46 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
         // TODO: move this to the history tree UpdateWith.revert...()?
         self.remove_history_tree(position, height);
 
+        // revert tachyon epoch tracking data
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+        self.remove_tachyon_data(position, height);
+
         // revert the chain value pool balances, if needed
         // note that size is 0 because it isn't need for reverting
         self.revert_chain_with(&(*chain_value_pool_change, height, 0), position);
+    }
+}
+
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+impl Chain {
+    /// Remove tachyon tracking data when reverting a block at `height`.
+    fn remove_tachyon_data(&mut self, position: RevertPosition, height: Height) {
+        use zebra_chain::parameters::constants::TACHYON_EPOCH_LENGTH;
+
+        match position {
+            RevertPosition::Root => {
+                self.tachygrams_by_height.remove(&height);
+                self.tachyon_accumulators_by_height.remove(&height);
+            }
+            RevertPosition::Tip => {
+                self.tachygrams_by_height.remove(&height);
+                self.tachyon_accumulators_by_height.remove(&height);
+            }
+        }
+
+        // rebuild current_epoch_tachygrams from remaining entries
+        let rebuilt: Vec<zcash_tachyon::Tachygram> =
+            if let Some((&tip_height, _)) = self.tachygrams_by_height.iter().next_back() {
+                let epoch_start = tip_height.0 - (tip_height.0 % TACHYON_EPOCH_LENGTH);
+                self.tachygrams_by_height
+                    .iter()
+                    .filter(|(h, _)| h.0 > epoch_start)
+                    .flat_map(|(_, tg)| tg.iter().copied())
+                    .collect()
+            } else {
+                Vec::new()
+            };
+        self.current_epoch_tachygrams = rebuilt;
     }
 }
 
