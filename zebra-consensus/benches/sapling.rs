@@ -37,8 +37,8 @@ use zebra_chain::{
 };
 
 use sapling_crypto::{bundle::Authorized, BatchValidator, Bundle};
+use zcash_proofs::prover::LocalTxProver;
 use zcash_protocol::value::ZatBalance;
-use zebra_consensus::groth16::SAPLING;
 
 /// A Sapling bundle paired with its transaction sighash, ready for verification.
 #[derive(Clone)]
@@ -98,7 +98,8 @@ fn extract_sapling_items_from_blocks() -> Vec<SaplingItem> {
 }
 
 fn bench_sapling_verify(c: &mut Criterion) {
-    let (spend_vk, output_vk) = SAPLING.verifying_keys();
+    let sapling = LocalTxProver::bundled();
+    let (spend_vk, output_vk) = sapling.verifying_keys();
     let source_items = extract_sapling_items_from_blocks();
 
     let mut group = c.benchmark_group("groth16_sapling");

@@ -22,7 +22,7 @@ use zebra_chain::{
     sprout::JoinSplit,
 };
 
-use zebra_consensus::groth16::{Description, DescriptionWrapper, Item, SPROUT};
+use zebra_consensus::groth16::{Item, SPROUT};
 
 /// A Sprout JoinSplit paired with its transaction's JoinSplit public key,
 /// ready to be converted into a Groth16 verification [`Item`].
@@ -73,9 +73,7 @@ fn extract_joinsplit_sources() -> Vec<JoinSplitSource> {
 
 /// Converts a [`JoinSplitSource`] into a verification [`Item`].
 fn item_from(source: &JoinSplitSource) -> Item {
-    DescriptionWrapper(&(&source.joinsplit, &source.pub_key))
-        .try_into()
-        .expect("valid groth16 item")
+    Item::from_joinsplit(&source.joinsplit, &source.pub_key).expect("valid groth16 item")
 }
 
 fn bench_groth16_verify(c: &mut Criterion) {
@@ -114,14 +112,6 @@ fn bench_groth16_inputs(c: &mut Criterion) {
     let source = sources.first().expect("at least one JoinSplit source");
 
     let mut group = c.benchmark_group("Groth16 Input Preparation");
-
-    // Cost of computing h_sig and encoding primary inputs as BLS12-381 scalars.
-    group.bench_function("primary_inputs", |b| {
-        b.iter(|| {
-            let description: (&JoinSplit<Groth16Proof>, &_) = (&source.joinsplit, &source.pub_key);
-            description.primary_inputs()
-        })
-    });
 
     // Cost of Proof::read (192 bytes) + primary input computation, i.e. the
     // full Item construction that runs before verification.
