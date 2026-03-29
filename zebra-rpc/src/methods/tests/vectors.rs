@@ -1779,6 +1779,8 @@ async fn rpc_getpeerinfo() {
         .into(),
         &PeerServices::NODE_NETWORK,
         false,
+        "/Zebra:2.1.0/".to_string(),
+        zebra_network::constants::CURRENT_NETWORK_PROTOCOL_VERSION,
     )
     .into_new_meta_addr(
         std::time::Instant::now(),
@@ -1794,6 +1796,8 @@ async fn rpc_getpeerinfo() {
         .into(),
         &PeerServices::NODE_NETWORK,
         true,
+        "/zcashd:5.8.0/".to_string(),
+        zebra_network::constants::CURRENT_NETWORK_PROTOCOL_VERSION,
     )
     .into_new_meta_addr(
         std::time::Instant::now(),
@@ -1814,8 +1818,8 @@ async fn rpc_getpeerinfo() {
     );
 
     let mock_address_book = MockAddressBookPeers::new(vec![
-        outbound_mock_peer_address,
-        inbound_mock_peer_address,
+        outbound_mock_peer_address.clone(),
+        inbound_mock_peer_address.clone(),
         not_connected_mock_peer_adderess,
     ]);
 
@@ -3014,16 +3018,16 @@ async fn rpc_addnode() {
         .await
         .expect("We should have an array of addresses");
 
-    assert_eq!(
-        get_peer_info,
-        [PeerInfo {
-            addr,
-            inbound: false,
-            // TODO: Fix this when mock address book provides other values
-            pingtime: Some(0.1f64),
-            pingwait: None,
-        }]
-    );
+    assert_eq!(get_peer_info.len(), 1);
+    let peer = &get_peer_info[0];
+    assert_eq!(peer.addr(), addr);
+    assert!(!peer.inbound());
+    assert_eq!(peer.pingtime(), &Some(0.1f64));
+    assert_eq!(peer.pingwait(), &None);
+    assert_eq!(peer.services().as_str(), "0000000000000000");
+    assert_eq!(peer.banscore(), 0);
+    assert_eq!(peer.connection_state().as_str(), "Responded");
+    assert!(peer.lastrecv() > 0);
 
     mempool.expect_no_requests().await;
 }

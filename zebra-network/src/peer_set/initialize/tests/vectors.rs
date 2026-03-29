@@ -1194,6 +1194,7 @@ async fn self_connections_should_fail() {
 
         let updated_addr = unlocked_address_book.update(
             real_self_listener
+                .clone()
                 .new_gossiped_change()
                 .expect("change is valid"),
         );
@@ -1204,22 +1205,20 @@ async fn self_connections_should_fail() {
     };
 
     // Make sure we modified the address book correctly
-    assert!(
-        updated_addr.is_some(),
-        "inserting our own address into the address book failed: {real_self_listener:?}"
-    );
+    let updated_addr =
+        updated_addr.expect("inserting our own address into the address book failed");
     assert_eq!(
-        updated_addr.unwrap().addr(),
+        updated_addr.addr(),
         real_self_listener.addr(),
         "wrong address inserted into address book"
     );
     assert_ne!(
-        updated_addr.unwrap().addr().ip(),
+        updated_addr.addr().ip(),
         Ipv4Addr::UNSPECIFIED,
         "invalid address inserted into address book: ip must be valid for inbound connections"
     );
     assert_ne!(
-        updated_addr.unwrap().addr().port(),
+        updated_addr.addr().port(),
         0,
         "invalid address inserted into address book: port must be valid for inbound connections"
     );
@@ -1543,7 +1542,7 @@ where
             PeerServices::NODE_NETWORK,
             DateTime32::now(),
         );
-        fake_peer = Some(addr);
+        fake_peer = Some(addr.clone());
         let addr = addr
             .new_gossiped_change()
             .expect("created MetaAddr contains enough information to represent a gossiped address");
@@ -1555,15 +1554,19 @@ where
     }
 
     // Create a fake peer set.
-    let nil_peer_set = service_fn(move |req| async move {
-        let rsp = match req {
-            // Return the correct response variant for Peers requests,
-            // reusing one of the peers we already provided.
-            Request::Peers => Response::Peers(vec![fake_peer.unwrap()]),
-            _ => unreachable!("unexpected request: {:?}", req),
-        };
+    let fake_peer = fake_peer.expect("there is at least one fake peer");
+    let nil_peer_set = service_fn(move |req| {
+        let fake_peer = fake_peer.clone();
+        async move {
+            let rsp = match req {
+                // Return the correct response variant for Peers requests,
+                // reusing one of the peers we already provided.
+                Request::Peers => Response::Peers(vec![fake_peer]),
+                _ => unreachable!("unexpected request: {:?}", req),
+            };
 
-        Ok(rsp)
+            Ok(rsp)
+        }
     });
 
     // Make the channels large enough to hold all the peers.
