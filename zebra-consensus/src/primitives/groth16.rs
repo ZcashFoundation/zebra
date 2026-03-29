@@ -1,4 +1,4 @@
-//! Async Groth16 batch verifier service
+//! Async Groth16 verifier service for Sprout JoinSplit proofs
 
 use std::fmt;
 
@@ -35,7 +35,7 @@ mod tests;
 #[cfg(test)]
 mod vectors;
 
-pub use params::{SAPLING, SPROUT};
+pub use params::SPROUT;
 
 use crate::error::TransactionError;
 
@@ -101,15 +101,6 @@ pub static JOINSPLIT_VERIFIER: Lazy<
     )
 });
 
-/// A Groth16 Description (JoinSplit, Spend, or Output) with a Groth16 proof
-/// and its inputs encoded as scalars.
-pub trait Description {
-    /// The Groth16 proof of this description.
-    fn proof(&self) -> &Groth16Proof;
-    /// The primary inputs for this proof, encoded as [`jubjub::Fq`] scalars.
-    fn primary_inputs(&self) -> Vec<jubjub::Fq>;
-}
-
 /// Compute the [h_{Sig} hash function][1] which is used in JoinSplit descriptions.
 ///
 /// `random_seed`: the random seed from the JoinSplit description.
@@ -139,7 +130,10 @@ pub(super) fn h_sig(
     h_sig
 }
 
-impl Description for (&JoinSplit<Groth16Proof>, &ed25519::VerificationKeyBytes) {
+impl Item {
+    /// Converts a Sprout JoinSplit description and its associated public key into a
+    /// Groth16 verification [`Item`].
+    ///
     /// Encodes the primary input for the JoinSplit proof statement as Bls12_381 base
     /// field elements, to match [`bellman::groth16::verify_proof()`].
     ///
@@ -151,12 +145,12 @@ impl Description for (&JoinSplit<Groth16Proof>, &ed25519::VerificationKeyBytes) 
     /// This is not yet officially documented; see the reference implementation:
     /// <https://github.com/zcash/librustzcash/blob/0ec7f97c976d55e1a194a37b27f247e8887fca1d/zcash_proofs/src/sprout.rs#L152-L166>
     /// <https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc>
-    //
     // The borrows are actually needed to avoid taking ownership
     #[allow(clippy::needless_borrow)]
-    fn primary_inputs(&self) -> Vec<jubjub::Fq> {
-        let (joinsplit, joinsplit_pub_key) = self;
-
+    pub fn from_joinsplit(
+        joinsplit: &JoinSplit<Groth16Proof>,
+        joinsplit_pub_key: &ed25519::VerificationKeyBytes,
+    ) -> Result<Self, TransactionError> {
         let rt: [u8; 32] = joinsplit.anchor.into();
         let mac1: [u8; 32] = (&joinsplit.vmacs[0]).into();
         let mac2: [u8; 32] = (&joinsplit.vmacs[1]).into();
@@ -188,27 +182,8 @@ impl Description for (&JoinSplit<Groth16Proof>, &ed25519::VerificationKeyBytes) 
         public_input.extend(vpub_new);
 
         let public_input = multipack::bytes_to_bits(&public_input);
+        let primary_inputs = multipack::compute_multipacking(&public_input);
 
-        multipack::compute_multipacking(&public_input)
-    }
-
-    fn proof(&self) -> &Groth16Proof {
-        &self.0.zkproof
-    }
-}
-
-/// A wrapper to allow a TryFrom blanket implementation of the [`Description`]
-/// trait for the [`Item`] struct.
-/// See <https://github.com/rust-lang/rust/issues/50133> for more details.
-pub struct DescriptionWrapper<T>(pub T);
-
-impl<T> TryFrom<DescriptionWrapper<&T>> for Item
-where
-    T: Description,
-{
-    type Error = TransactionError;
-
-    fn try_from(input: DescriptionWrapper<&T>) -> Result<Self, Self::Error> {
         // # Consensus
         //
         // > Elements of a JoinSplit description MUST have the types given above
@@ -217,11 +192,10 @@ where
         //
         // This validates the 𝜋_{ZKJoinSplit} element. In #3179 we plan to validate
         // during deserialization, see [`JoinSplit::zcash_deserialize`].
-        Ok(Item::from((
-            bellman::groth16::Proof::read(&input.0.proof().0[..])
-                .map_err(|e| TransactionError::MalformedGroth16(e.to_string()))?,
-            input.0.primary_inputs(),
-        )))
+        let proof = bellman::groth16::Proof::read(&joinsplit.zkproof.0[..])
+            .map_err(|e| TransactionError::MalformedGroth16(e.to_string()))?;
+
+        Ok(Item::from((proof, primary_inputs)))
     }
 }
 

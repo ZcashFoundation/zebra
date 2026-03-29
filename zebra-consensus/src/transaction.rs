@@ -41,7 +41,7 @@ use zebra_node_services::mempool;
 use zebra_script::{CachedFfiTransaction, Sigops};
 use zebra_state as zs;
 
-use crate::{error::TransactionError, groth16::DescriptionWrapper, primitives, script, BoxError};
+use crate::{error::TransactionError, primitives, script, BoxError};
 
 pub mod check;
 #[cfg(test)]
@@ -1114,7 +1114,7 @@ where
                 // checks that (at a minimum) must pass for the
                 // transaction to verify.
                 checks.push(primitives::groth16::JOINSPLIT_VERIFIER.oneshot(
-                    DescriptionWrapper(&(joinsplit, &joinsplit_data.pub_key)).try_into()?,
+                    primitives::groth16::Item::from_joinsplit(joinsplit, &joinsplit_data.pub_key)?,
                 ));
             }
 
