@@ -16,6 +16,7 @@ use std::{
 
 use thiserror::Error;
 
+use zcash_script::solver;
 use zebra_chain::{
     block::Height,
     transaction::{self, Hash, Transaction, UnminedTx, UnminedTxId, VerifiedUnminedTx},
@@ -36,6 +37,7 @@ use proptest_derive::Arbitrary;
 pub mod tests;
 
 mod eviction_list;
+mod policy;
 mod verified_set;
 
 /// The size limit for mempool transaction rejection lists per [ZIP-401].
@@ -133,6 +135,22 @@ pub enum RejectionError {
 pub enum NonStandardTransactionError {
     #[error("transaction is dust")]
     IsDust,
+    #[error("transaction scriptSig is too large")]
+    ScriptSigTooLarge,
+    #[error("transaction scriptSig is not push-only")]
+    ScriptSigNotPushOnly,
+    #[error("transaction scriptPubKey is non-standard")]
+    ScriptPubKeyNonStandard,
+    #[error("transaction has a bare multisig output")]
+    BareMultiSig,
+    #[error("transaction has multiple OP_RETURN outputs")]
+    MultiOpReturn,
+    #[error("transaction has an OP_RETURN output that exceeds the size limit")]
+    DataCarrierTooLarge,
+    #[error("transaction has too many signature operations")]
+    TooManySigops,
+    #[error("transaction has non-standard inputs")]
+    NonStandardInputs,
 }
 
 /// Represents a set of transactions that have been removed from the mempool, either because
@@ -195,6 +213,9 @@ pub struct Storage {
     /// Max total cost of the verified mempool set, beyond which transactions
     /// are evicted to make room.
     tx_cost_limit: u64,
+
+    /// Maximum allowed size of OP_RETURN scripts, in bytes.
+    max_datacarrier_bytes: u32,
 }
 
 impl Drop for Storage {
@@ -209,6 +230,9 @@ impl Storage {
         Self {
             tx_cost_limit: config.tx_cost_limit,
             eviction_memory_time: config.eviction_memory_time,
+            max_datacarrier_bytes: config
+                .max_datacarrier_bytes
+                .unwrap_or(config::DEFAULT_MAX_DATACARRIER_BYTES),
             verified: Default::default(),
             pending_outputs: Default::default(),
             tip_rejected_exact: Default::default(),
@@ -220,26 +244,148 @@ impl Storage {
     /// Check and reject non-standard transaction.
     ///
     /// Zcashd defines non-consensus standard transaction checks in
-    /// <https://github.com/zcash/zcash/blob/v6.10.0/src/policy/policy.cpp#L58-L135>
+    /// <https://github.com/zcash/zcash/blob/v6.11.0/src/policy/policy.cpp#L58-L135>
     ///
     /// This checks are applied before inserting a transaction in `AcceptToMemoryPool`:
-    /// <https://github.com/zcash/zcash/blob/v6.10.0/src/main.cpp#L1819>
+    /// <https://github.com/zcash/zcash/blob/v6.11.0/src/main.cpp#L1819>
     ///
-    /// Currently, we only implement the dust output check.
+    /// Currently, we implement: per-transaction sigops limit, standard input script checks,
+    /// input scriptSig size/push-only checks, standard output script checks (including OP_RETURN
+    /// limits), and dust checks.
     fn reject_if_non_standard_tx(&mut self, tx: &VerifiedUnminedTx) -> Result<(), MempoolError> {
-        // TODO: implement other standard transaction checks from zcashd.
+        use zcash_script::script::{self, Evaluable as _};
 
-        // Check for dust outputs.
-        for output in tx.transaction.transaction.outputs() {
-            if output.is_dust() {
-                let rejection_error = NonStandardTransactionError::IsDust;
-                self.reject(tx.transaction.id, rejection_error.clone().into());
+        let transaction = tx.transaction.transaction.as_ref();
+        let spent_outputs = &tx.spent_outputs;
 
-                return Err(MempoolError::NonStandardTransaction(rejection_error));
+        for input in transaction.inputs() {
+            let unlock_script = match input {
+                transparent::Input::PrevOut { unlock_script, .. } => unlock_script,
+                transparent::Input::Coinbase { .. } => continue,
+            };
+
+            // Rule: scriptSig size must be within the standard limit.
+            if unlock_script.as_raw_bytes().len() > policy::MAX_STANDARD_SCRIPTSIG_SIZE {
+                return self
+                    .reject_non_standard(tx, NonStandardTransactionError::ScriptSigTooLarge);
+            }
+
+            let code = script::Code(unlock_script.as_raw_bytes().to_vec());
+            // Rule: scriptSig must be push-only.
+            if !code.is_push_only() {
+                return self
+                    .reject_non_standard(tx, NonStandardTransactionError::ScriptSigNotPushOnly);
             }
         }
 
+        if !spent_outputs.is_empty() {
+            // Validate that spent_outputs aligns with transparent inputs.
+            if transaction.inputs().len() != spent_outputs.len() {
+                tracing::warn!(
+                    inputs = transaction.inputs().len(),
+                    spent_outputs = spent_outputs.len(),
+                    "spent_outputs length mismatch, rejecting as non-standard"
+                );
+                return self
+                    .reject_non_standard(tx, NonStandardTransactionError::NonStandardInputs);
+            }
+
+            // Rule: all transparent inputs must pass `AreInputsStandard()` checks:
+            // https://github.com/zcash/zcash/blob/v6.11.0/src/policy/policy.cpp#L137
+            if !policy::are_inputs_standard(transaction, spent_outputs) {
+                return self
+                    .reject_non_standard(tx, NonStandardTransactionError::NonStandardInputs);
+            }
+
+            // Rule: per-transaction sigops (legacy + P2SH) must not exceed the limit.
+            // zcashd sums GetLegacySigOpCount + GetP2SHSigOpCount for AcceptToMemoryPool:
+            // https://github.com/zcash/zcash/blob/v6.11.0/src/main.cpp#L1819
+            let total_sigops = tx
+                .legacy_sigop_count
+                .saturating_add(policy::p2sh_sigop_count(transaction, spent_outputs));
+            if total_sigops > policy::MAX_STANDARD_TX_SIGOPS {
+                return self.reject_non_standard(tx, NonStandardTransactionError::TooManySigops);
+            }
+        } else {
+            // No spent outputs available (e.g. shielded-only transaction).
+            // Only check legacy sigops.
+            if tx.legacy_sigop_count > policy::MAX_STANDARD_TX_SIGOPS {
+                return self.reject_non_standard(tx, NonStandardTransactionError::TooManySigops);
+            }
+        }
+
+        // Rule: outputs must be standard script kinds, with special handling for OP_RETURN.
+        let mut data_out_count = 0u32;
+
+        for output in transaction.outputs() {
+            let lock_script = &output.lock_script;
+            let script_len = lock_script.as_raw_bytes().len();
+            let script_kind = policy::standard_script_kind(lock_script);
+
+            match script_kind {
+                None => {
+                    // Rule: output script must be standard (P2PKH/P2SH/P2PK/multisig/OP_RETURN).
+                    return self.reject_non_standard(
+                        tx,
+                        NonStandardTransactionError::ScriptPubKeyNonStandard,
+                    );
+                }
+                Some(solver::ScriptKind::NullData { .. }) => {
+                    // Rule: OP_RETURN script size is limited.
+                    // Cast is safe: u32 always fits in usize on 32-bit and 64-bit platforms.
+                    if script_len > self.max_datacarrier_bytes as usize {
+                        return self.reject_non_standard(
+                            tx,
+                            NonStandardTransactionError::DataCarrierTooLarge,
+                        );
+                    }
+                    // Rule: count OP_RETURN outputs to enforce the one-output limit.
+                    data_out_count += 1;
+                }
+                Some(solver::ScriptKind::MultiSig { pubkeys, .. }) => {
+                    // Rule: multisig must be at most 3-of-3 for standardness.
+                    // Note: This check is technically subsumed by the unconditional BareMultiSig
+                    // rejection below, but we keep it to distinguish the two error reasons
+                    // (ScriptPubKeyNonStandard for >3 keys vs BareMultiSig for valid multisig).
+                    if pubkeys.len() > policy::MAX_STANDARD_MULTISIG_PUBKEYS {
+                        return self.reject_non_standard(
+                            tx,
+                            NonStandardTransactionError::ScriptPubKeyNonStandard,
+                        );
+                    }
+                    // Rule: bare multisig outputs are non-standard (fIsBareMultisigStd = false).
+                    return self.reject_non_standard(tx, NonStandardTransactionError::BareMultiSig);
+                }
+                Some(_) => {
+                    // Rule: non-OP_RETURN outputs must not be dust.
+                    if output.is_dust() {
+                        return self.reject_non_standard(tx, NonStandardTransactionError::IsDust);
+                    }
+                }
+            }
+        }
+
+        // Rule: only one OP_RETURN output is permitted.
+        if data_out_count > 1 {
+            return self.reject_non_standard(tx, NonStandardTransactionError::MultiOpReturn);
+        }
+
         Ok(())
+    }
+
+    /// Rejects a transaction as non-standard, caches the rejection, and returns the mempool error.
+    ///
+    /// Note: The returned error is `MempoolError::NonStandardTransaction`, while the cached
+    /// rejection (via `reject()`) is stored as
+    /// `ExactTipRejectionError::FailedStandard`. Callers that later check
+    /// `rejection_error()` will get `MempoolError::StorageExactTip(FailedStandard(...))`.
+    fn reject_non_standard(
+        &mut self,
+        tx: &VerifiedUnminedTx,
+        rejection_error: NonStandardTransactionError,
+    ) -> Result<(), MempoolError> {
+        self.reject(tx.transaction.id, rejection_error.clone().into());
+        Err(MempoolError::NonStandardTransaction(rejection_error))
     }
 
     /// Insert a [`VerifiedUnminedTx`] into the mempool, caching any rejections.
@@ -526,6 +672,11 @@ impl Storage {
     /// [`transparent::OutPoint`] if one exists, or None otherwise.
     pub fn created_output(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Output> {
         self.verified.created_output(outpoint)
+    }
+
+    /// Returns true if a tx in the set has spent the output at the provided outpoint.
+    pub fn has_spent_outpoint(&self, outpoint: &transparent::OutPoint) -> bool {
+        self.verified.has_spent_outpoint(outpoint)
     }
 
     /// Returns the number of transactions in the mempool.

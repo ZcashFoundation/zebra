@@ -5,6 +5,57 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [5.0.1] - 2026-03-25
+
+This release fixes an important security issue:
+
+- [CVE-2026-34377: Consensus Failure via Crafted V5 Authorization Data](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-3vmh-33xr-9cqh)
+
+The impact of the issue for crate users will depend on the particular usage;
+if you use it as a building block for a node, you should update.
+
+### Added
+
+- ZIP-235 support under the `zcash_unstable = "zip235"` flag
+
+## [5.0.0] - 2026-03-12
+
+### Added
+
+- `block::subsidy::funding_stream_address`
+- `impl From<zebra_chain::amount::Error> for error::BlockError`
+
+### Removed
+
+- `block::subsidy::new_coinbase_script`
+- `block::subsidy::funding_streams`
+
+## [4.0.0] - 2026-02-05
+
+### Breaking Changes
+
+- `zebra-state` bumped to 4.0.0
+- `zebra-chain` bumped to 5.0.0
+- `zebra-script` bumped to 4.0.0
+- `zebra-node-services` bumped to 3.0.0
+- `VerifyBlockError::Commit` now contains `CommitBlockError` instead of `BoxError`.
+
+### Added
+
+- `VerifyBlockError::StateService` variant with `hash` and `source` fields.
+
+## [3.1.2] - 2026-01-21 - Yanked
+
+This should have been a major release, see 4.0.0.
+
+Dependencies updated.
+
+## [3.1.1] - 2025-11-28
+
+No API changes; internal dependencies updated.
+
 ## [3.1.0] - 2025-11-17
 
 ### Added
@@ -23,17 +74,16 @@ to simplify configuration in testnet and regtest modes. ([#9888](https://github.
 ### Breaking Changes
 
 - Removed public statics used for Groth16 verification:
-    - `SPEND_VERIFIER`
-    - `OUTPUT_VERIFIER`
+  - `SPEND_VERIFIER`
+  - `OUTPUT_VERIFIER`
 - Removed or renamed public structs:
-    - `zebra_consensus::groth16::Groth16Parameters`
-    - `zebra_consensus::groth16::GROTH16_PARAMETERS`
-    - `zebra_consensus::CheckpointList`
-    - `zebra_consensus::halo2::BatchVerifier`
+  - `zebra_consensus::groth16::Groth16Parameters`
+  - `zebra_consensus::groth16::GROTH16_PARAMETERS`
+  - `zebra_consensus::CheckpointList`
+  - `zebra_consensus::halo2::BatchVerifier`
 - Removed public trait:
-    - `zebra_consensus::ParameterCheckpoint`
+  - `zebra_consensus::ParameterCheckpoint`
 - Moved checkpoint configuration and related structures to zebra-chain.
-
 
 ## [2.0.0] - 2025-08-07
 
@@ -42,7 +92,6 @@ Support for NU6.1 testnet activation.
 ### Breaking Changes
 
 - Renamed `legacy_sigop_count` to `sigops` in `BlockError::TooManyTransparentSignatureOperations` and `transaction::Response::Block`.
-
 
 ## [1.0.0] - 2025-07-11
 

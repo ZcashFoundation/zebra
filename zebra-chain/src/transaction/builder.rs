@@ -18,6 +18,7 @@ impl Transaction {
         outputs: impl IntoIterator<Item = (Amount<NonNegative>, transparent::Script)>,
         miner_data: Vec<u8>,
         zip233_amount: Option<Amount<NonNegative>>,
+        #[cfg(zcash_unstable = "zip235")] miner_fee: Amount<NonNegative>,
     ) -> Transaction {
         // # Consensus
         //
@@ -63,7 +64,7 @@ impl Transaction {
         // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
         let outputs: Vec<_> = outputs
             .into_iter()
-            .map(|(amount, lock_script)| transparent::Output::new_coinbase(amount, lock_script))
+            .map(|(amount, lock_script)| transparent::Output::new(amount, lock_script))
             .collect();
         assert!(
             !outputs.is_empty(),
@@ -86,7 +87,11 @@ impl Transaction {
             // > block height.
             expiry_height: height,
 
-            // > The NSM zip233_amount field [ZIP-233] must be set. It must be >= 0.
+            // > The NSM zip233_amount field [ZIP-233] must be set at minimum to 60% of miner fees [ZIP-235].
+            #[cfg(zcash_unstable = "zip235")]
+            zip233_amount: zip233_amount
+                .unwrap_or_else(|| ((miner_fee * 6).unwrap() / 10).unwrap()),
+            #[cfg(not(zcash_unstable = "zip235"))]
             zip233_amount: zip233_amount.unwrap_or(Amount::zero()),
 
             inputs,
@@ -157,7 +162,7 @@ impl Transaction {
         // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
         let outputs: Vec<_> = outputs
             .into_iter()
-            .map(|(amount, lock_script)| transparent::Output::new_coinbase(amount, lock_script))
+            .map(|(amount, lock_script)| transparent::Output::new(amount, lock_script))
             .collect();
 
         assert!(
@@ -223,7 +228,7 @@ impl Transaction {
         // > and nJoinSplit MUST be nonzero.
         let outputs: Vec<_> = outputs
             .into_iter()
-            .map(|(amount, lock_script)| transparent::Output::new_coinbase(amount, lock_script))
+            .map(|(amount, lock_script)| transparent::Output::new(amount, lock_script))
             .collect();
 
         assert!(

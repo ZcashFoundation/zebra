@@ -19,6 +19,15 @@ impl NetworkUpgrade {
         .boxed()
     }
 
+    /// Generates network upgrades that are valid for V5+ transactions (Nu5 onward).
+    pub fn nu5_branch_id_strategy() -> BoxedStrategy<NetworkUpgrade> {
+        prop_oneof![
+            Just(NetworkUpgrade::Nu5),
+            // TODO: add future network upgrades (#1974)
+        ]
+        .boxed()
+    }
+
     /// Generates network upgrades from a reduced set
     pub fn reduced_branch_id_strategy() -> BoxedStrategy<NetworkUpgrade> {
         // We use this strategy to test legacy chain

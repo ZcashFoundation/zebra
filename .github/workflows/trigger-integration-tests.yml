@@ -1,0 +1,61 @@
+name: Trigger Integration Tests
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "**/*.rs"
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - .cargo/config.toml
+      - .github/workflows/trigger-integration-tests.yml
+
+  push:
+    branches: [main]
+    paths:
+      - "**/*.rs"
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - .cargo/config.toml
+      - .github/workflows/trigger-integration-tests.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  trigger-integration:
+    name: Trigger integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate app token
+        id: app-token
+        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
+        with:
+          app-id: ${{ secrets.Z3_APP_ID }}
+          private-key: ${{ secrets.Z3_APP_PRIVATE_KEY }}
+          owner: zcash
+          repositories: integration-tests
+
+      - name: Get requested test branch, if any
+        if: github.event_name == 'pull_request'
+        id: test-branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          TEST_SHA=$(gh pr -R ZcashFoundation/zebra list --search "${HEAD_SHA}" --json body | jq '.[0].body' | sed '/[^ ]ZIT-Revision/!d' | sed -E 's/.*ZIT-Revision: ([^\\]*)\\.*/\1/')
+          echo "test_sha=${TEST_SHA}" >> $GITHUB_OUTPUT
+
+      - name: Trigger integration tests
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          TEST_SHA: ${{ steps.test-branch.outputs.test_sha }}
+        run: >
+          gh api repos/zcash/integration-tests/dispatches
+          --field event_type="zebra-interop-request"
+          --field client_payload[sha]="${SHA}"
+          --field client_payload[test_sha]="${TEST_SHA}"

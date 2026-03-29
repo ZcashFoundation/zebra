@@ -218,9 +218,9 @@ impl ClientRequestReceiver {
         // and the channel has a limited capacity.
         // Task notifications are not required, because the sender is closed.
         //
-        // Despite what its documentation says, we've seen futures::channel::mpsc::Receiver::try_next()
+        // Despite what its documentation says, we've seen futures::channel::mpsc::Receiver::try_recv()
         // return an error after the channel is closed.
-        self.inner.try_next().ok()?.map(Into::into)
+        self.inner.try_recv().ok().map(Into::into)
     }
 }
 
@@ -509,23 +509,11 @@ impl Client {
                 self.set_task_exited_error("connection", PeerError::ConnectionTaskExited)
             }
             Err(error) => {
-                // Connection task panicked.
-                let error = error.panic_if_task_has_panicked();
+                // Connection task panicked or was cancelled.
+                let _ = error.panic_if_task_has_panicked();
 
-                // Connection task was cancelled.
-                if error.is_cancelled() {
-                    self.set_task_exited_error(
-                        "connection",
-                        PeerError::HeartbeatTaskExited("Task was cancelled".to_string()),
-                    )
-                }
-                // Connection task stopped with another kind of task error.
-                else {
-                    self.set_task_exited_error(
-                        "connection",
-                        PeerError::HeartbeatTaskExited(error.to_string()),
-                    )
-                }
+                // Any unexpected termination of the connection task is reported as ConnectionTaskExited.
+                self.set_task_exited_error("connection", PeerError::ConnectionTaskExited)
             }
         };
 

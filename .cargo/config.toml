@@ -1,85 +1,5 @@
 # Zebra cargo configuration
 
-# Flags that apply to all Zebra crates and configurations
-[target.'cfg(all())']
-rustflags = [
-    # Zebra standard lints for Rust 1.65+
-
-    # High-risk code
-    "-Dunsafe_code",
-    "-Dnon_ascii_idents",
-
-    # Potential bugs
-    #
-    # If we deny these lints, we could be excluded from Crater builds:
-    # https://www.reddit.com/r/rust/comments/f5xpib/psa_denywarnings_is_actively_harmful/
-
-    # Compatibility
-    "-Wrust_2021_compatibility",
-    "-Wnonstandard_style",
-    "-Wfuture_incompatible",
-
-    # Async code
-    "-Wclippy::await_holding_lock",
-    "-Wclippy::await_holding_refcell_ref",
-
-    # Pointers
-    "-Wclippy::cast_ptr_alignment",
-    "-Wclippy::fn_to_numeric_cast_any",
-
-    # Integers
-    "-Wclippy::checked_conversions",
-    "-Wclippy::implicit_saturating_sub",
-    "-Wclippy::invalid_upcast_comparisons",
-    "-Wclippy::range_minus_one",
-    "-Wclippy::range_plus_one",
-    "-Wclippy::unnecessary_cast",
-
-    # Incomplete code
-    "-Wclippy::dbg_macro",
-    "-Wclippy::todo",
-
-    # Manual debugging output.
-    # Use tracing::trace!() or tracing::debug!() instead.
-    "-Wclippy::print_stdout",
-    "-Wclippy::print_stderr",
-    "-Wclippy::dbg_macro",
-
-    # Code styles we want to accept
-    "-Aclippy::try_err",
-
-    # Panics
-    "-Wclippy::fallible_impl_from",
-    "-Wclippy::unwrap_in_result",
-
-    # Documentation
-    "-Wmissing_docs",
-
-    # TODOs:
-    # Fix this lint eventually.
-    "-Aclippy::result_large_err",
-
-    # `cargo fix` might help do these fixes,
-    # or add a config.toml to sub-directories which should allow these lints,
-    # or try allowing the lint in the specific module (lib.rs doesn't seem to work in some cases)
-    #
-    # lint configs that don't work:
-    # - allowing these lints in lib.rs (command-line warn overrides allow in lib.rs?)
-    # - adding a [target.'cfg(not(test))'] rustflags config (it runs on test code anyway)
-
-    # fix code that triggers these lints,
-    # or disable the lint for that code (or for all test code)
-    #
-    #"-Wclippy::cast_lossless", # 30 non-test warnings, a few test warnings
-    #"-Wclippy::cast_possible_truncation", # 40 non-test warnings, 20 test warnings
-    #"-Wclippy::cast_possible_wrap", # 13 test warnings (fixed outside tests)
-    #"-Wclippy::cast_precision_loss", # 25 non-test warnings, 10 test warnings
-    #"-Wclippy::cast_sign_loss", # 6 non-test warnings, 15 test warnings
-
-    # fix hidden lifetime parameters
-    #"-Wrust_2018_idioms",
-]
-
 [build]
 rustdocflags = [
     # The -A and -W settings must be the same as the `RUSTDOCFLAGS` in:
@@ -91,3 +11,7 @@ rustdocflags = [
 
 [env]
 RUST_BACKTRACE="1"
+
+[profile.profiling]
+inherits = "release"
+debug = true
