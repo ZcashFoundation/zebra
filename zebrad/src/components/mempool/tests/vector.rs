@@ -91,7 +91,15 @@ async fn mempool_service_basic_single() -> Result<(), Report> {
         .unwrap();
     let genesis_transaction_ids = match response {
         Response::TransactionIds(ids) => ids,
-        _ => unreachable!("will never happen in this test"),
+        Response::Transactions(_)
+        | Response::UnspentOutput(_)
+        | Response::TransactionWithDeps { .. }
+        | Response::FullTransactions { .. }
+        | Response::RejectedTransactionIds(_)
+        | Response::Queued(_)
+        | Response::CheckedForVerifiedTransactions
+        | Response::QueueStats { .. }
+        | Response::TransparentOutput(_) => unreachable!("will never happen in this test"),
     };
 
     // Test `Request::TransactionsById`
@@ -110,7 +118,15 @@ async fn mempool_service_basic_single() -> Result<(), Report> {
         .unwrap();
     let transactions = match response {
         Response::Transactions(transactions) => transactions,
-        _ => unreachable!("will never happen in this test"),
+        Response::TransactionIds(_)
+        | Response::UnspentOutput(_)
+        | Response::TransactionWithDeps { .. }
+        | Response::FullTransactions { .. }
+        | Response::RejectedTransactionIds(_)
+        | Response::Queued(_)
+        | Response::CheckedForVerifiedTransactions
+        | Response::QueueStats { .. }
+        | Response::TransparentOutput(_) => unreachable!("will never happen in this test"),
     };
 
     // Make sure the transaction from the blockchain test vector is the same as the
@@ -134,7 +150,15 @@ async fn mempool_service_basic_single() -> Result<(), Report> {
         .unwrap();
     let transactions = match response {
         Response::Transactions(transactions) => transactions,
-        _ => unreachable!("will never happen in this test"),
+        Response::TransactionIds(_)
+        | Response::UnspentOutput(_)
+        | Response::TransactionWithDeps { .. }
+        | Response::FullTransactions { .. }
+        | Response::RejectedTransactionIds(_)
+        | Response::Queued(_)
+        | Response::CheckedForVerifiedTransactions
+        | Response::QueueStats { .. }
+        | Response::TransparentOutput(_) => unreachable!("will never happen in this test"),
     };
 
     // Make sure the transaction from the blockchain test vector is the same as the
@@ -163,7 +187,15 @@ async fn mempool_service_basic_single() -> Result<(), Report> {
         .unwrap();
     let rejected_ids = match response {
         Response::RejectedTransactionIds(ids) => ids,
-        _ => unreachable!("will never happen in this test"),
+        Response::TransactionIds(_)
+        | Response::Transactions(_)
+        | Response::UnspentOutput(_)
+        | Response::TransactionWithDeps { .. }
+        | Response::FullTransactions { .. }
+        | Response::Queued(_)
+        | Response::CheckedForVerifiedTransactions
+        | Response::QueueStats { .. }
+        | Response::TransparentOutput(_) => unreachable!("will never happen in this test"),
     };
 
     assert!(rejected_ids.is_subset(&inserted_ids));
@@ -179,7 +211,15 @@ async fn mempool_service_basic_single() -> Result<(), Report> {
         .unwrap();
     let queued_responses = match response {
         Response::Queued(queue_responses) => queue_responses,
-        _ => unreachable!("will never happen in this test"),
+        Response::TransactionIds(_)
+        | Response::Transactions(_)
+        | Response::UnspentOutput(_)
+        | Response::TransactionWithDeps { .. }
+        | Response::FullTransactions { .. }
+        | Response::RejectedTransactionIds(_)
+        | Response::CheckedForVerifiedTransactions
+        | Response::QueueStats { .. }
+        | Response::TransparentOutput(_) => unreachable!("will never happen in this test"),
     };
     assert_eq!(queued_responses.len(), 1);
     assert!(queued_responses[0].is_ok());
@@ -201,7 +241,16 @@ async fn mempool_service_basic_single() -> Result<(), Report> {
             usage,
             fully_notified: None,
         } => (size, bytes, usage),
-        _ => unreachable!("expected QueueStats response"),
+        Response::TransactionIds(_)
+        | Response::Transactions(_)
+        | Response::UnspentOutput(_)
+        | Response::TransactionWithDeps { .. }
+        | Response::FullTransactions { .. }
+        | Response::RejectedTransactionIds(_)
+        | Response::Queued(_)
+        | Response::CheckedForVerifiedTransactions
+        | Response::QueueStats { .. }
+        | Response::TransparentOutput(_) => unreachable!("expected QueueStats response"),
     };
 
     // Expected values based on storage contents
@@ -284,7 +333,15 @@ async fn mempool_queue_single() -> Result<(), Report> {
         .unwrap();
     let queued_responses = match response {
         Response::Queued(queue_responses) => queue_responses,
-        _ => unreachable!("will never happen in this test"),
+        Response::TransactionIds(_)
+        | Response::Transactions(_)
+        | Response::UnspentOutput(_)
+        | Response::TransactionWithDeps { .. }
+        | Response::FullTransactions { .. }
+        | Response::RejectedTransactionIds(_)
+        | Response::CheckedForVerifiedTransactions
+        | Response::QueueStats { .. }
+        | Response::TransparentOutput(_) => unreachable!("will never happen in this test"),
     };
     assert_eq!(queued_responses.len(), 1);
     assert!(queued_responses[0].is_ok());
@@ -306,7 +363,15 @@ async fn mempool_queue_single() -> Result<(), Report> {
         .unwrap();
     let queued_responses = match response {
         Response::Queued(queue_responses) => queue_responses,
-        _ => unreachable!("will never happen in this test"),
+        Response::TransactionIds(_)
+        | Response::Transactions(_)
+        | Response::UnspentOutput(_)
+        | Response::TransactionWithDeps { .. }
+        | Response::FullTransactions { .. }
+        | Response::RejectedTransactionIds(_)
+        | Response::CheckedForVerifiedTransactions
+        | Response::QueueStats { .. }
+        | Response::TransparentOutput(_) => unreachable!("will never happen in this test"),
     };
     assert_eq!(queued_responses.len(), transactions.len());
 
@@ -319,7 +384,15 @@ async fn mempool_queue_single() -> Result<(), Report> {
                 evicted_count += 1
             }
             MempoolError::InMempool => in_mempool_count += 1,
-            error => panic!("transaction should not be rejected with reason {error:?}"),
+            error @ MempoolError::StorageExactTip(_)
+            | error @ MempoolError::StorageEffectsTip(_)
+            | error @ MempoolError::StorageEffectsChain(_)
+            | error @ MempoolError::AlreadyQueued
+            | error @ MempoolError::FullQueue
+            | error @ MempoolError::Disabled
+            | error @ MempoolError::NonStandardTransaction(_) => {
+                panic!("transaction should not be rejected with reason {error:?}")
+            }
         }
     }
     assert_eq!(in_mempool_count, transactions.len() - 1);
@@ -373,7 +446,15 @@ async fn mempool_service_disabled() -> Result<(), Report> {
         .unwrap();
     let _genesis_transaction_ids = match response {
         Response::TransactionIds(ids) => ids,
-        _ => unreachable!("will never happen in this test"),
+        Response::Transactions(_)
+        | Response::UnspentOutput(_)
+        | Response::TransactionWithDeps { .. }
+        | Response::FullTransactions { .. }
+        | Response::RejectedTransactionIds(_)
+        | Response::Queued(_)
+        | Response::CheckedForVerifiedTransactions
+        | Response::QueueStats { .. }
+        | Response::TransparentOutput(_) => unreachable!("will never happen in this test"),
     };
 
     // Queue a transaction for download
@@ -388,7 +469,15 @@ async fn mempool_service_disabled() -> Result<(), Report> {
         .unwrap();
     let queued_responses = match response {
         Response::Queued(queue_responses) => queue_responses,
-        _ => unreachable!("will never happen in this test"),
+        Response::TransactionIds(_)
+        | Response::Transactions(_)
+        | Response::UnspentOutput(_)
+        | Response::TransactionWithDeps { .. }
+        | Response::FullTransactions { .. }
+        | Response::RejectedTransactionIds(_)
+        | Response::CheckedForVerifiedTransactions
+        | Response::QueueStats { .. }
+        | Response::TransparentOutput(_) => unreachable!("will never happen in this test"),
     };
     assert_eq!(queued_responses.len(), 1);
     assert!(queued_responses[0].is_ok());
@@ -416,7 +505,15 @@ async fn mempool_service_disabled() -> Result<(), Report> {
                 "mempool should return no transactions when disabled"
             )
         }
-        _ => unreachable!("will never happen in this test"),
+        Response::Transactions(_)
+        | Response::UnspentOutput(_)
+        | Response::TransactionWithDeps { .. }
+        | Response::FullTransactions { .. }
+        | Response::RejectedTransactionIds(_)
+        | Response::Queued(_)
+        | Response::CheckedForVerifiedTransactions
+        | Response::QueueStats { .. }
+        | Response::TransparentOutput(_) => unreachable!("will never happen in this test"),
     };
 
     // Test if the mempool returns to Queue requests correctly when disabled
@@ -429,7 +526,15 @@ async fn mempool_service_disabled() -> Result<(), Report> {
         .unwrap();
     let queued_responses = match response {
         Response::Queued(queue_responses) => queue_responses,
-        _ => unreachable!("will never happen in this test"),
+        Response::TransactionIds(_)
+        | Response::Transactions(_)
+        | Response::UnspentOutput(_)
+        | Response::TransactionWithDeps { .. }
+        | Response::FullTransactions { .. }
+        | Response::RejectedTransactionIds(_)
+        | Response::CheckedForVerifiedTransactions
+        | Response::QueueStats { .. }
+        | Response::TransparentOutput(_) => unreachable!("will never happen in this test"),
     };
 
     assert_eq!(queued_responses.len(), 1);
@@ -458,7 +563,15 @@ async fn mempool_service_disabled() -> Result<(), Report> {
             usage,
             fully_notified,
         } => (size, bytes, usage, fully_notified),
-        _ => unreachable!("expected QueueStats response"),
+        Response::TransactionIds(_)
+        | Response::Transactions(_)
+        | Response::UnspentOutput(_)
+        | Response::TransactionWithDeps { .. }
+        | Response::FullTransactions { .. }
+        | Response::RejectedTransactionIds(_)
+        | Response::Queued(_)
+        | Response::CheckedForVerifiedTransactions
+        | Response::TransparentOutput(_) => unreachable!("expected QueueStats response"),
     };
 
     assert_eq!(size, 0, "size should be zero when mempool is disabled");
@@ -543,7 +656,15 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
         .unwrap();
     let mut queued_responses = match response {
         Response::Queued(queue_responses) => queue_responses,
-        _ => unreachable!("will never happen in this test"),
+        Response::TransactionIds(_)
+        | Response::Transactions(_)
+        | Response::UnspentOutput(_)
+        | Response::TransactionWithDeps { .. }
+        | Response::FullTransactions { .. }
+        | Response::RejectedTransactionIds(_)
+        | Response::CheckedForVerifiedTransactions
+        | Response::QueueStats { .. }
+        | Response::TransparentOutput(_) => unreachable!("will never happen in this test"),
     };
     assert_eq!(queued_responses.len(), 1);
 
@@ -648,7 +769,15 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
         .unwrap();
     let queued_responses = match response {
         Response::Queued(queue_responses) => queue_responses,
-        _ => unreachable!("will never happen in this test"),
+        Response::TransactionIds(_)
+        | Response::Transactions(_)
+        | Response::UnspentOutput(_)
+        | Response::TransactionWithDeps { .. }
+        | Response::FullTransactions { .. }
+        | Response::RejectedTransactionIds(_)
+        | Response::CheckedForVerifiedTransactions
+        | Response::QueueStats { .. }
+        | Response::TransparentOutput(_) => unreachable!("will never happen in this test"),
     };
     assert_eq!(queued_responses.len(), 1);
     assert!(queued_responses[0].is_ok());
@@ -742,7 +871,15 @@ async fn mempool_failed_verification_is_rejected() -> Result<(), Report> {
     let (response, _) = futures::join!(request, verification);
     let queued_responses = match response.unwrap() {
         Response::Queued(queue_responses) => queue_responses,
-        _ => unreachable!("will never happen in this test"),
+        Response::TransactionIds(_)
+        | Response::Transactions(_)
+        | Response::UnspentOutput(_)
+        | Response::TransactionWithDeps { .. }
+        | Response::FullTransactions { .. }
+        | Response::RejectedTransactionIds(_)
+        | Response::CheckedForVerifiedTransactions
+        | Response::QueueStats { .. }
+        | Response::TransparentOutput(_) => unreachable!("will never happen in this test"),
     };
     // Check that the request was enqueued successfully.
     assert_eq!(queued_responses.len(), 1);
@@ -766,7 +903,15 @@ async fn mempool_failed_verification_is_rejected() -> Result<(), Report> {
         .unwrap();
     let queued_responses = match response {
         Response::Queued(queue_responses) => queue_responses,
-        _ => unreachable!("will never happen in this test"),
+        Response::TransactionIds(_)
+        | Response::Transactions(_)
+        | Response::UnspentOutput(_)
+        | Response::TransactionWithDeps { .. }
+        | Response::FullTransactions { .. }
+        | Response::RejectedTransactionIds(_)
+        | Response::CheckedForVerifiedTransactions
+        | Response::QueueStats { .. }
+        | Response::TransparentOutput(_) => unreachable!("will never happen in this test"),
     };
     assert_eq!(queued_responses.len(), 1);
     assert!(matches!(
@@ -832,7 +977,15 @@ async fn mempool_failed_download_is_not_rejected() -> Result<(), Report> {
     let (response, _) = futures::join!(request, verification);
     let queued_responses = match response.unwrap() {
         Response::Queued(queue_responses) => queue_responses,
-        _ => unreachable!("will never happen in this test"),
+        Response::TransactionIds(_)
+        | Response::Transactions(_)
+        | Response::UnspentOutput(_)
+        | Response::TransactionWithDeps { .. }
+        | Response::FullTransactions { .. }
+        | Response::RejectedTransactionIds(_)
+        | Response::CheckedForVerifiedTransactions
+        | Response::QueueStats { .. }
+        | Response::TransparentOutput(_) => unreachable!("will never happen in this test"),
     };
     // Check that the request was enqueued successfully.
     assert_eq!(queued_responses.len(), 1);
@@ -859,7 +1012,15 @@ async fn mempool_failed_download_is_not_rejected() -> Result<(), Report> {
         .unwrap();
     let queued_responses = match response {
         Response::Queued(queue_responses) => queue_responses,
-        _ => unreachable!("will never happen in this test"),
+        Response::TransactionIds(_)
+        | Response::Transactions(_)
+        | Response::UnspentOutput(_)
+        | Response::TransactionWithDeps { .. }
+        | Response::FullTransactions { .. }
+        | Response::RejectedTransactionIds(_)
+        | Response::CheckedForVerifiedTransactions
+        | Response::QueueStats { .. }
+        | Response::TransparentOutput(_) => unreachable!("will never happen in this test"),
     };
     assert_eq!(queued_responses.len(), 1);
     assert!(queued_responses[0].is_ok());
@@ -919,7 +1080,15 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
         .unwrap();
     let queued_responses = match response {
         Response::Queued(queue_responses) => queue_responses,
-        _ => unreachable!("will never happen in this test"),
+        Response::TransactionIds(_)
+        | Response::Transactions(_)
+        | Response::UnspentOutput(_)
+        | Response::TransactionWithDeps { .. }
+        | Response::FullTransactions { .. }
+        | Response::RejectedTransactionIds(_)
+        | Response::CheckedForVerifiedTransactions
+        | Response::QueueStats { .. }
+        | Response::TransparentOutput(_) => unreachable!("will never happen in this test"),
     };
     assert_eq!(queued_responses.len(), 1);
     assert!(queued_responses[0].is_ok());

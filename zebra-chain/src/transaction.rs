@@ -1410,7 +1410,23 @@ impl Transaction {
                 joinsplit_data: Some(joinsplit_data),
                 ..
             } => Some(joinsplit_data.pub_key),
-            _ => None,
+            Transaction::V1 { .. }
+            | Transaction::V2 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V3 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V4 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V5 { .. } => None,
+
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            Transaction::V6 { .. } => None,
         }
     }
 
@@ -1435,7 +1451,23 @@ impl Transaction {
                 joinsplit_data: Some(joinsplit_data),
                 ..
             } => Some(joinsplit_data.sig),
-            _ => None,
+            Transaction::V1 { .. }
+            | Transaction::V2 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V3 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V4 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V5 { .. } => None,
+
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            Transaction::V6 { .. } => None,
         }
     }
 

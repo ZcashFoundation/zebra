@@ -247,7 +247,15 @@ where
     async fn handle_response(&mut self, response: zn::Response) -> Result<(), BoxError> {
         let transaction_ids: HashSet<_> = match response {
             zn::Response::TransactionIds(ids) => ids.into_iter().collect(),
-            _ => unreachable!("Peer set did not respond with transaction IDs to mempool crawler"),
+            zn::Response::Nil
+            | zn::Response::Peers(_)
+            | zn::Response::Pong(_)
+            | zn::Response::BlockHashes(_)
+            | zn::Response::BlockHeaders(_)
+            | zn::Response::Blocks(_)
+            | zn::Response::Transactions(_) => {
+                unreachable!("Peer set did not respond with transaction IDs to mempool crawler")
+            }
         };
 
         trace!(
