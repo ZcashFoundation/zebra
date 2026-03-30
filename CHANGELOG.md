@@ -7,11 +7,82 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
-This release adds the `gettxout` RPC method.
+## [Zebra 4.3.0](https://github.com/ZcashFoundation/zebra/releases/tag/v4.3) - 2026-03-12
+
+This release fixes **two important security issues**:
+
+- [CVE-2026-34202: Remote Denial of Service via Crafted V5 Transactions](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-qp6f-w4r3-h8wg)
+- [CVE-2026-34377: Consensus Failure via Crafted V5 Authorization Data](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-3vmh-33xr-9cqh)
+
+We recommend node operators to update to 4.3.0 as soon as possible. All previous
+Zebra versions are vulnerable to these issues.
+
+This release adds support for [ZIP-235](https://zips.z.cash/zip-0235) and
+extends the documentation on performance profiling. It also fixes issues with
+block propagation on Regtest, the computation of miner rewards for pre-Canopy
+blocks in the `getblocksubsidy` RPC, and a performance regression on Testnet
+where Zebra would hog a single CPU thread.
 
 ### Added
 
-- Added `UnspentOutput` to mempool component service ([#10235](https://github.com/ZcashFoundation/zebra/pull/10235))
+- Network Sustainability Mechanism: ZIP-235 ([#10357](https://github.com/ZcashFoundation/zebra/pull/10357))
+- Add `profiling` Cargo profile and use it in profiling docs ([#10411](https://github.com/ZcashFoundation/zebra/pull/10411))
+
+### Fixed
+
+- Fix block propagation on Regtest ([#10403](https://github.com/ZcashFoundation/zebra/pull/10403))
+- Subtract Founders' Reward from block subsidy ([#10338](https://github.com/ZcashFoundation/zebra/pull/10338))
+- Cache parsed checkpoints ([#10409](https://github.com/ZcashFoundation/zebra/pull/10409))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@gustavovalverde, @judah-caruso, @nuttycom, @oxarbitrage and @upbqdn.
+
+## [Zebra 4.2.0](https://github.com/ZcashFoundation/zebra/releases/tag/v4.2.0) - 2026-03-12
+
+This release expands Zebra’s RPC functionality, improves mempool policy,
+adds more state querying capabilities, and replaces the legacy OpenAPI
+documentation with OpenRPC.
+
+### Added
+
+- `UnspentOutput` request to mempool component service ([#10235](https://github.com/ZcashFoundation/zebra/pull/10235))
+- Founders reward addresses ([#10188](https://github.com/ZcashFoundation/zebra/pull/10188))
+- Support for pre-Canopy block subsidies ([#10191](https://github.com/ZcashFoundation/zebra/pull/10191))
+- AI contribution policy and agent guidance files ([#10318](https://github.com/ZcashFoundation/zebra/pull/10318))
+- `rpc.discover` endpoint ([#10201](https://github.com/ZcashFoundation/zebra/pull/10201))
+- `gettxout` RPC method ([#10235](https://github.com/ZcashFoundation/zebra/pull/10235))
+- `AnyChainBlock` state request for querying blocks in side chains ([#10325](https://github.com/ZcashFoundation/zebra/pull/10325))
+- Remaining non-standard mempool transaction filters ([#10314](https://github.com/ZcashFoundation/zebra/pull/10314))
+
+### Fixed
+
+- Subtract Founders' Reward from block subsidy ([#10338](https://github.com/ZcashFoundation/zebra/pull/10338))
+
+### Removed
+
+- Python QA RPC test framework (`zebra-rpc/qa/`) in favour of the new [integration-tests](https://github.com/zcash/integration-tests) project, which captures all previous work in [zcash/integration-tests#1](https://github.com/zcash/integration-tests/pull/1) ([#10363](https://github.com/ZcashFoundation/zebra/pull/10363))
+- OpenAPI specification and related functionality ([#10298](https://github.com/ZcashFoundation/zebra/pull/10298)) in favour of [OpenRPC](https://github.com/ZcashFoundation/zebra/pull/10201)
+
+### Changed
+
+- Simplify `ReadStateService::call()` method ([#10335](https://github.com/ZcashFoundation/zebra/pull/10335))
+- Replace `NETWORK_UPGRADES_IN_ORDER` with `strum::EnumIter` ([#10096](https://github.com/ZcashFoundation/zebra/pull/10096))
+
+### Fixed
+
+- Preserve input order in `spent_outputs` for mixed chain/mempool transactions ([#10356](https://github.com/ZcashFoundation/zebra/pull/10356))
+- Clarify `TransparentInputNotFound` error message ([#10302](https://github.com/ZcashFoundation/zebra/pull/10302))
+- Improve `getrawtransaction` compatibility with `zcashd` ([#10307](https://github.com/ZcashFoundation/zebra/pull/10307))
+- Peerset banned cancel handles ([#10258](https://github.com/ZcashFoundation/zebra/pull/10258))
+- Support writing non-finalized state backups to disk before broadcasting updated chainstate ([#10361](https://github.com/ZcashFoundation/zebra/pull/10361))
+- Fix bug in `ActiveConnectionCounter` and inaccurate connection count metrics ([#10311](https://github.com/ZcashFoundation/zebra/pull/10311))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@VolodymyrBg, @arya2, @conradoplg, @gustavovalverde, @mpguerra, @oxarbitrage, @syszery, @upbqdn and @zmanian
 
 ## [Zebra 4.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v4.1.0) - 2026-02-05
 

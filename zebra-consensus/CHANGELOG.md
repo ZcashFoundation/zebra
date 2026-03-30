@@ -5,7 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [Unreleased]
+
+## [5.0.1] - 2026-03-25
+
+This release fixes an important security issue:
+
+- [CVE-2026-34377: Consensus Failure via Crafted V5 Authorization Data](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-3vmh-33xr-9cqh)
+
+The impact of the issue for crate users will depend on the particular usage;
+if you use it as a building block for a node, you should update.
+
+### Added
+
+- ZIP-235 support under the `zcash_unstable = "zip235"` flag
+
+## [5.0.0] - 2026-03-12
 
 ### Added
 

@@ -1,0 +1,23 @@
+name: 'Setup Zebra Build Environment'
+description: 'Install protoc as system library'
+runs:
+  using: 'composite'
+  steps:
+    - name: Install protoc on Ubuntu
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get -qq update
+        sudo apt-get -qq install -y --no-install-recommends protobuf-compiler
+
+    - name: Install protoc on macOS
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        brew install protobuf
+
+    - name: Install protoc on Windows
+      if: runner.os == 'Windows'
+      shell: bash
+      run: |
+        choco install protoc -y

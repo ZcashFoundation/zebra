@@ -135,7 +135,7 @@ impl Transaction {
     /// Generate a proptest strategy for V5 Transactions
     pub fn v5_strategy(ledger_state: LedgerState) -> BoxedStrategy<Self> {
         (
-            NetworkUpgrade::branch_id_strategy(),
+            NetworkUpgrade::nu5_branch_id_strategy(),
             any::<LockTime>(),
             any::<block::Height>(),
             transparent::Input::vec_strategy(&ledger_state, MAX_ARBITRARY_ITEMS),

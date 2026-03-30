@@ -280,11 +280,6 @@ impl Storage {
 
         if !spent_outputs.is_empty() {
             // Validate that spent_outputs aligns with transparent inputs.
-            // TODO: `spent_outputs` may not align with `tx.inputs()` when a transaction
-            // spends both chain and mempool UTXOs (mempool outputs are appended last by
-            // `spent_utxos()`), causing `are_inputs_standard` and `p2sh_sigop_count`
-            // to pair the wrong input with the wrong spent output.
-            // https://github.com/ZcashFoundation/zebra/issues/10346
             if transaction.inputs().len() != spent_outputs.len() {
                 tracing::warn!(
                     inputs = transaction.inputs().len(),

@@ -67,7 +67,10 @@ use zebra_chain::{
     chain_sync_status::ChainSyncStatus,
     chain_tip::{ChainTip, NetworkChainTipHeightEstimator},
     parameters::{
-        subsidy::{block_subsidy, funding_stream_values, miner_subsidy, FundingStreamReceiver},
+        subsidy::{
+            block_subsidy, founders_reward, funding_stream_values, miner_subsidy,
+            FundingStreamReceiver,
+        },
         ConsensusBranchId, Network, NetworkUpgrade, POW_AVERAGING_WINDOW,
     },
     serialization::{BytesInDisplayOrder, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
@@ -3445,7 +3448,7 @@ where
             miner: miner_subsidy(height, &net, subsidy)
                 .map_misc_error()?
                 .into(),
-            founders: Amount::zero().into(),
+            founders: founders_reward(&net, height).into(),
             funding_streams,
             lockbox_streams,
             funding_streams_total: funding_streams_total?,

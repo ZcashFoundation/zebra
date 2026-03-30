@@ -478,7 +478,7 @@ async fn any_chain_block_finds_side_chain_blocks() -> Result<()> {
     // If hashes are the same, we can't test side chains properly
     // This would mean our fake block generation isn't working as expected
     if best_hash == side_hash {
-        tracing::warn!("Unable to create different block hashes, skipping side chain test");
+        tracing::warn!("unable to create different block hashes, skipping side chain test");
         return Ok(());
     }
 

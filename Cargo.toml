@@ -312,5 +312,52 @@ debug = false
 # The linter should ignore these expected config flags/values
 unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(tokio_unstable)', # Used by tokio-console
-    'cfg(zcash_unstable, values("zfuture", "nu6.1", "nu7"))' # Used in Zebra and librustzcash
+    'cfg(zcash_unstable, values("zfuture", "nu6.1", "nu7", "zip235"))' # Used in Zebra and librustzcash
 ] }
+
+# High-risk code
+unsafe_code = "deny"
+non_ascii_idents = "deny"
+
+# Compatibility
+rust_2021_compatibility = { level = "warn", priority = -1 }
+nonstandard_style = { level = "warn", priority = -1 }
+future_incompatible = { level = "warn", priority = -1 }
+
+# Documentation
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+# Async code
+await_holding_lock = "warn"
+await_holding_refcell_ref = "warn"
+
+# Pointers
+cast_ptr_alignment = "warn"
+fn_to_numeric_cast_any = "warn"
+
+# Integers
+checked_conversions = "warn"
+implicit_saturating_sub = "warn"
+invalid_upcast_comparisons = "warn"
+range_minus_one = "warn"
+range_plus_one = "warn"
+unnecessary_cast = "warn"
+
+# Incomplete code
+dbg_macro = "warn"
+todo = "warn"
+
+# Manual debugging output — use tracing::trace!() or tracing::debug!() instead
+print_stdout = "warn"
+print_stderr = "warn"
+
+# Code styles we want to accept
+try_err = "allow"
+
+# Panics
+fallible_impl_from = "warn"
+unwrap_in_result = "warn"
+
+# TODOs: fix this lint eventually
+result_large_err = "allow"
