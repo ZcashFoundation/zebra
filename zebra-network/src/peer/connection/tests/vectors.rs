@@ -927,7 +927,24 @@ async fn connection_ping_pong_round_trip() {
 
     let ping_nonce = match outbound_msg {
         Message::Ping(nonce) => nonce,
-        msg => panic!("expected Ping message, but got: {:?}", msg),
+        msg @ Message::Version(_)
+        | msg @ Message::Verack
+        | msg @ Message::Pong(_)
+        | msg @ Message::Reject { .. }
+        | msg @ Message::GetAddr
+        | msg @ Message::Addr(_)
+        | msg @ Message::GetBlocks { .. }
+        | msg @ Message::Inv(_)
+        | msg @ Message::GetHeaders { .. }
+        | msg @ Message::Headers(_)
+        | msg @ Message::GetData(_)
+        | msg @ Message::Block(_)
+        | msg @ Message::Tx(_)
+        | msg @ Message::NotFound(_)
+        | msg @ Message::Mempool
+        | msg @ Message::FilterLoad { .. }
+        | msg @ Message::FilterAdd { .. }
+        | msg @ Message::FilterClear => panic!("expected Ping message, but got: {:?}", msg),
     };
 
     assert_eq!(

@@ -2340,7 +2340,7 @@ impl Ord for Chain {
             // be consistent with the ordering on `ExpandedDifficulty` and `block::Hash`.
             match self_hash.0.cmp(&other_hash.0) {
                 Ordering::Equal => unreachable!("Chain tip block hashes are always unique"),
-                ordering => ordering,
+                ordering @ Ordering::Less | ordering @ Ordering::Greater => ordering,
             }
         }
     }

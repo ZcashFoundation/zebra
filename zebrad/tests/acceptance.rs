@@ -3157,7 +3157,12 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
                 ChainHistoryBlockTxAuthCommitmentHash::from_commitments(&hist_root, &auth_root)
                     .bytes_in_serialized_order()
             }
-            _ => Err(eyre!(
+            NetworkUpgrade::Genesis
+            | NetworkUpgrade::BeforeOverwinter
+            | NetworkUpgrade::Overwinter
+            | NetworkUpgrade::Sapling
+            | NetworkUpgrade::Blossom
+            | NetworkUpgrade::Heartwood => Err(eyre!(
                 "Zebra does not support generating pre-Canopy block templates"
             ))?,
         }

@@ -1036,7 +1036,20 @@ impl VerifyCheckpointError {
             // TODO: make this duplicate-incomplete
             VerifyCheckpointError::NewerRequest { .. } => true,
             VerifyCheckpointError::VerifyBlock(block_error) => block_error.is_duplicate_request(),
-            _ => false,
+            VerifyCheckpointError::Finished
+            | VerifyCheckpointError::TooHigh { .. }
+            | VerifyCheckpointError::CoinbaseHeight { .. }
+            | VerifyCheckpointError::BadMerkleRoot { .. }
+            | VerifyCheckpointError::DuplicateTransaction
+            | VerifyCheckpointError::Dropped
+            | VerifyCheckpointError::CommitCheckpointVerified(_)
+            | VerifyCheckpointError::Tip(_)
+            | VerifyCheckpointError::CheckpointList(_)
+            | VerifyCheckpointError::SubsidyError(_)
+            | VerifyCheckpointError::AmountError(_)
+            | VerifyCheckpointError::QueuedLimit
+            | VerifyCheckpointError::UnexpectedSideChain { .. }
+            | VerifyCheckpointError::ShuttingDown => false,
         }
     }
 
@@ -1051,7 +1064,18 @@ impl VerifyCheckpointError {
             | VerifyCheckpointError::CoinbaseHeight { .. }
             | VerifyCheckpointError::DuplicateTransaction
             | VerifyCheckpointError::AmountError(_) => 100,
-            _other => 0,
+            VerifyCheckpointError::Finished
+            | VerifyCheckpointError::TooHigh { .. }
+            | VerifyCheckpointError::AlreadyVerified { .. }
+            | VerifyCheckpointError::NewerRequest { .. }
+            | VerifyCheckpointError::BadMerkleRoot { .. }
+            | VerifyCheckpointError::Dropped
+            | VerifyCheckpointError::CommitCheckpointVerified(_)
+            | VerifyCheckpointError::Tip(_)
+            | VerifyCheckpointError::CheckpointList(_)
+            | VerifyCheckpointError::QueuedLimit
+            | VerifyCheckpointError::UnexpectedSideChain { .. }
+            | VerifyCheckpointError::ShuttingDown => 0,
         }
     }
 }
@@ -1139,7 +1163,27 @@ where
                     assert_eq!(committed_hash, hash, "state must commit correct hash");
                     Ok(hash)
                 }
-                _ => unreachable!("wrong response for CommitCheckpointVerifiedBlock"),
+                zs::Response::Invalidated(_)
+                | zs::Response::Reconsidered(_)
+                | zs::Response::Depth(_)
+                | zs::Response::Tip(_)
+                | zs::Response::BlockLocator(_)
+                | zs::Response::Transaction(_)
+                | zs::Response::AnyChainTransaction(_)
+                | zs::Response::UnspentBestChainUtxo(_)
+                | zs::Response::Block(_)
+                | zs::Response::BlockAndSize(_)
+                | zs::Response::BlockHeader { .. }
+                | zs::Response::Utxo(_)
+                | zs::Response::BlockHashes(_)
+                | zs::Response::BlockHeaders(_)
+                | zs::Response::ValidBestChainTipNullifiersAndAnchors
+                | zs::Response::BestChainNextMedianTimePast(_)
+                | zs::Response::BlockHash(_)
+                | zs::Response::KnownBlock(_)
+                | zs::Response::ValidBlockProposal => {
+                    unreachable!("wrong response for CommitCheckpointVerifiedBlock")
+                }
             }
         });
 
@@ -1169,7 +1213,25 @@ where
                     .map_err(VerifyCheckpointError::Tip)?
                 {
                     zs::Response::Tip(tip) => tip,
-                    _ => unreachable!("wrong response for Tip"),
+                    zs::Response::Committed(_)
+                    | zs::Response::Invalidated(_)
+                    | zs::Response::Reconsidered(_)
+                    | zs::Response::Depth(_)
+                    | zs::Response::BlockLocator(_)
+                    | zs::Response::Transaction(_)
+                    | zs::Response::AnyChainTransaction(_)
+                    | zs::Response::UnspentBestChainUtxo(_)
+                    | zs::Response::Block(_)
+                    | zs::Response::BlockAndSize(_)
+                    | zs::Response::BlockHeader { .. }
+                    | zs::Response::Utxo(_)
+                    | zs::Response::BlockHashes(_)
+                    | zs::Response::BlockHeaders(_)
+                    | zs::Response::ValidBestChainTipNullifiersAndAnchors
+                    | zs::Response::BestChainNextMedianTimePast(_)
+                    | zs::Response::BlockHash(_)
+                    | zs::Response::KnownBlock(_)
+                    | zs::Response::ValidBlockProposal => unreachable!("wrong response for Tip"),
                 };
                 // Ignore errors since send() can fail only when the verifier
                 // is being dropped, and then it doesn't matter anymore.

@@ -1334,7 +1334,14 @@ where
             Request::AdvertiseBlockToAll(_) => self.broadcast_all(req),
 
             // Choose a random less-loaded peer for all other requests
-            _ => self.route_p2c(req),
+            Request::Peers
+            | Request::Ping(_)
+            | Request::BlocksByHash(_)
+            | Request::TransactionsById(_)
+            | Request::FindBlocks { .. }
+            | Request::FindHeaders { .. }
+            | Request::PushTransaction(_)
+            | Request::MempoolTransactionIds => self.route_p2c(req),
         };
         self.update_metrics();
 

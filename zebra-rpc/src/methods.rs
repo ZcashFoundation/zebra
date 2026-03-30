@@ -1147,7 +1147,45 @@ where
                     received,
                 })
             }
-            _ => unreachable!("Unexpected response from state service: {response:?}"),
+            zebra_state::ReadResponse::UsageInfo(_)
+            | zebra_state::ReadResponse::Tip(_)
+            | zebra_state::ReadResponse::TipPoolValues { .. }
+            | zebra_state::ReadResponse::BlockInfo(_)
+            | zebra_state::ReadResponse::Depth(_)
+            | zebra_state::ReadResponse::Block(_)
+            | zebra_state::ReadResponse::BlockAndSize(_)
+            | zebra_state::ReadResponse::BlockHeader { .. }
+            | zebra_state::ReadResponse::Transaction(_)
+            | zebra_state::ReadResponse::AnyChainTransaction(_)
+            | zebra_state::ReadResponse::TransactionIdsForBlock(_)
+            | zebra_state::ReadResponse::AnyChainTransactionIdsForBlock(_)
+            | zebra_state::ReadResponse::BlockLocator(_)
+            | zebra_state::ReadResponse::BlockHashes(_)
+            | zebra_state::ReadResponse::BlockHeaders(_)
+            | zebra_state::ReadResponse::UnspentBestChainUtxo(_)
+            | zebra_state::ReadResponse::AnyChainUtxo(_)
+            | zebra_state::ReadResponse::SaplingTree(_)
+            | zebra_state::ReadResponse::OrchardTree(_)
+            | zebra_state::ReadResponse::SaplingSubtrees(_)
+            | zebra_state::ReadResponse::OrchardSubtrees(_)
+            | zebra_state::ReadResponse::AddressesTransactionIds(_)
+            | zebra_state::ReadResponse::AddressUtxos(_)
+            | zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors
+            | zebra_state::ReadResponse::BestChainNextMedianTimePast(_)
+            | zebra_state::ReadResponse::BlockHash(_)
+            | zebra_state::ReadResponse::ChainInfo(_)
+            | zebra_state::ReadResponse::SolutionRate(_)
+            | zebra_state::ReadResponse::ValidBlockProposal
+            | zebra_state::ReadResponse::TipBlockSize(_)
+            | zebra_state::ReadResponse::NonFinalizedBlocksListener(_)
+            | zebra_state::ReadResponse::IsTransparentOutputSpent(_) => {
+                unreachable!("Unexpected response from state service: {response:?}")
+            }
+
+            #[cfg(feature = "indexer")]
+            zebra_state::ReadResponse::TransactionId(_) => {
+                unreachable!("unmatched response to a state request")
+            }
         }
     }
 
@@ -1180,7 +1218,17 @@ where
 
         let mut queue_results = match response {
             mempool::Response::Queued(results) => results,
-            _ => unreachable!("incorrect response variant from mempool service"),
+            mempool::Response::TransactionIds(_)
+            | mempool::Response::Transactions(_)
+            | mempool::Response::UnspentOutput(_)
+            | mempool::Response::TransactionWithDeps { .. }
+            | mempool::Response::FullTransactions { .. }
+            | mempool::Response::RejectedTransactionIds(_)
+            | mempool::Response::CheckedForVerifiedTransactions
+            | mempool::Response::QueueStats { .. }
+            | mempool::Response::TransparentOutput(_) => {
+                unreachable!("incorrect response variant from mempool service")
+            }
         };
 
         assert_eq!(
@@ -1252,7 +1300,45 @@ where
                 zebra_state::ReadResponse::Block(None) => {
                     Err("Block not found").map_error(server::error::LegacyCode::InvalidParameter)
                 }
-                _ => unreachable!("unmatched response to a block request"),
+                zebra_state::ReadResponse::UsageInfo(_)
+                | zebra_state::ReadResponse::Tip(_)
+                | zebra_state::ReadResponse::TipPoolValues { .. }
+                | zebra_state::ReadResponse::BlockInfo(_)
+                | zebra_state::ReadResponse::Depth(_)
+                | zebra_state::ReadResponse::BlockAndSize(_)
+                | zebra_state::ReadResponse::BlockHeader { .. }
+                | zebra_state::ReadResponse::Transaction(_)
+                | zebra_state::ReadResponse::AnyChainTransaction(_)
+                | zebra_state::ReadResponse::TransactionIdsForBlock(_)
+                | zebra_state::ReadResponse::AnyChainTransactionIdsForBlock(_)
+                | zebra_state::ReadResponse::BlockLocator(_)
+                | zebra_state::ReadResponse::BlockHashes(_)
+                | zebra_state::ReadResponse::BlockHeaders(_)
+                | zebra_state::ReadResponse::UnspentBestChainUtxo(_)
+                | zebra_state::ReadResponse::AnyChainUtxo(_)
+                | zebra_state::ReadResponse::SaplingTree(_)
+                | zebra_state::ReadResponse::OrchardTree(_)
+                | zebra_state::ReadResponse::SaplingSubtrees(_)
+                | zebra_state::ReadResponse::OrchardSubtrees(_)
+                | zebra_state::ReadResponse::AddressBalance { .. }
+                | zebra_state::ReadResponse::AddressesTransactionIds(_)
+                | zebra_state::ReadResponse::AddressUtxos(_)
+                | zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors
+                | zebra_state::ReadResponse::BestChainNextMedianTimePast(_)
+                | zebra_state::ReadResponse::BlockHash(_)
+                | zebra_state::ReadResponse::ChainInfo(_)
+                | zebra_state::ReadResponse::SolutionRate(_)
+                | zebra_state::ReadResponse::ValidBlockProposal
+                | zebra_state::ReadResponse::TipBlockSize(_)
+                | zebra_state::ReadResponse::NonFinalizedBlocksListener(_)
+                | zebra_state::ReadResponse::IsTransparentOutputSpent(_) => {
+                    unreachable!("unmatched response to a block request")
+                }
+
+                #[cfg(feature = "indexer")]
+                zebra_state::ReadResponse::TransactionId(_) => {
+                    unreachable!("unmatched response to a state request")
+                }
             }
         } else if let Some(get_block_header_future) = get_block_header_future {
             let get_block_header_result: Result<GetBlockHeaderResponse> =
@@ -1349,7 +1435,44 @@ where
                             .collect();
                     (transactions, Some(size))
                 }
-                _ => unreachable!("unmatched response to a transaction_ids_for_block request"),
+                zebra_state::ReadResponse::UsageInfo(_)
+                | zebra_state::ReadResponse::Tip(_)
+                | zebra_state::ReadResponse::TipPoolValues { .. }
+                | zebra_state::ReadResponse::BlockInfo(_)
+                | zebra_state::ReadResponse::Depth(_)
+                | zebra_state::ReadResponse::Block(_)
+                | zebra_state::ReadResponse::BlockHeader { .. }
+                | zebra_state::ReadResponse::Transaction(_)
+                | zebra_state::ReadResponse::AnyChainTransaction(_)
+                | zebra_state::ReadResponse::AnyChainTransactionIdsForBlock(_)
+                | zebra_state::ReadResponse::BlockLocator(_)
+                | zebra_state::ReadResponse::BlockHashes(_)
+                | zebra_state::ReadResponse::BlockHeaders(_)
+                | zebra_state::ReadResponse::UnspentBestChainUtxo(_)
+                | zebra_state::ReadResponse::AnyChainUtxo(_)
+                | zebra_state::ReadResponse::SaplingTree(_)
+                | zebra_state::ReadResponse::OrchardTree(_)
+                | zebra_state::ReadResponse::SaplingSubtrees(_)
+                | zebra_state::ReadResponse::OrchardSubtrees(_)
+                | zebra_state::ReadResponse::AddressBalance { .. }
+                | zebra_state::ReadResponse::AddressesTransactionIds(_)
+                | zebra_state::ReadResponse::AddressUtxos(_)
+                | zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors
+                | zebra_state::ReadResponse::BestChainNextMedianTimePast(_)
+                | zebra_state::ReadResponse::BlockHash(_)
+                | zebra_state::ReadResponse::ChainInfo(_)
+                | zebra_state::ReadResponse::SolutionRate(_)
+                | zebra_state::ReadResponse::ValidBlockProposal
+                | zebra_state::ReadResponse::TipBlockSize(_)
+                | zebra_state::ReadResponse::NonFinalizedBlocksListener(_)
+                | zebra_state::ReadResponse::IsTransparentOutputSpent(_) => {
+                    unreachable!("unmatched response to a transaction_ids_for_block request")
+                }
+
+                #[cfg(feature = "indexer")]
+                zebra_state::ReadResponse::TransactionId(_) => {
+                    unreachable!("unmatched response to a state request")
+                }
             };
 
             let orchard_tree_response = futs.next().await.expect("`futs` should not be empty");
@@ -1681,7 +1804,16 @@ where
                 Ok(GetRawMempoolResponse::TxIds(tx_ids))
             }
 
-            _ => unreachable!("unmatched response to a transactionids request"),
+            mempool::Response::Transactions(_)
+            | mempool::Response::UnspentOutput(_)
+            | mempool::Response::TransactionWithDeps { .. }
+            | mempool::Response::RejectedTransactionIds(_)
+            | mempool::Response::Queued(_)
+            | mempool::Response::CheckedForVerifiedTransactions
+            | mempool::Response::QueueStats { .. }
+            | mempool::Response::TransparentOutput(_) => {
+                unreachable!("unmatched response to a transactionids request")
+            }
         }
     }
 
@@ -1731,7 +1863,17 @@ where
                     }
                 }
 
-                _ => unreachable!("unmatched response to a `TransactionsByMinedId` request"),
+                mempool::Response::TransactionIds(_)
+                | mempool::Response::UnspentOutput(_)
+                | mempool::Response::TransactionWithDeps { .. }
+                | mempool::Response::FullTransactions { .. }
+                | mempool::Response::RejectedTransactionIds(_)
+                | mempool::Response::Queued(_)
+                | mempool::Response::CheckedForVerifiedTransactions
+                | mempool::Response::QueueStats { .. }
+                | mempool::Response::TransparentOutput(_) => {
+                    unreachable!("unmatched response to a `TransactionsByMinedId` request")
+                }
             };
         }
 
@@ -1759,8 +1901,44 @@ where
                         server::error::LegacyCode::InvalidAddressOrKey,
                         "txid not found",
                     )?,
-                _ => {
+                zebra_state::ReadResponse::UsageInfo(_)
+                | zebra_state::ReadResponse::Tip(_)
+                | zebra_state::ReadResponse::TipPoolValues { .. }
+                | zebra_state::ReadResponse::BlockInfo(_)
+                | zebra_state::ReadResponse::Depth(_)
+                | zebra_state::ReadResponse::Block(_)
+                | zebra_state::ReadResponse::BlockAndSize(_)
+                | zebra_state::ReadResponse::BlockHeader { .. }
+                | zebra_state::ReadResponse::Transaction(_)
+                | zebra_state::ReadResponse::AnyChainTransaction(_)
+                | zebra_state::ReadResponse::TransactionIdsForBlock(_)
+                | zebra_state::ReadResponse::BlockLocator(_)
+                | zebra_state::ReadResponse::BlockHashes(_)
+                | zebra_state::ReadResponse::BlockHeaders(_)
+                | zebra_state::ReadResponse::UnspentBestChainUtxo(_)
+                | zebra_state::ReadResponse::AnyChainUtxo(_)
+                | zebra_state::ReadResponse::SaplingTree(_)
+                | zebra_state::ReadResponse::OrchardTree(_)
+                | zebra_state::ReadResponse::SaplingSubtrees(_)
+                | zebra_state::ReadResponse::OrchardSubtrees(_)
+                | zebra_state::ReadResponse::AddressBalance { .. }
+                | zebra_state::ReadResponse::AddressesTransactionIds(_)
+                | zebra_state::ReadResponse::AddressUtxos(_)
+                | zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors
+                | zebra_state::ReadResponse::BestChainNextMedianTimePast(_)
+                | zebra_state::ReadResponse::BlockHash(_)
+                | zebra_state::ReadResponse::ChainInfo(_)
+                | zebra_state::ReadResponse::SolutionRate(_)
+                | zebra_state::ReadResponse::ValidBlockProposal
+                | zebra_state::ReadResponse::TipBlockSize(_)
+                | zebra_state::ReadResponse::NonFinalizedBlocksListener(_)
+                | zebra_state::ReadResponse::IsTransparentOutputSpent(_) => {
                     unreachable!("unmatched response to a `AnyChainTransactionIdsForBlock` request")
+                }
+
+                #[cfg(feature = "indexer")]
+                zebra_state::ReadResponse::TransactionId(_) => {
+                    unreachable!("unmatched response to a state request")
                 }
             }
         } else {
@@ -1775,10 +1953,11 @@ where
             .await
             .map_misc_error()?
         {
-            zebra_state::ReadResponse::AnyChainTransaction(Some(tx)) => Ok(if verbose {
-                match tx {
-                    AnyTx::Mined(tx) => {
-                        let block_hash = match self
+            zebra_state::ReadResponse::AnyChainTransaction(Some(tx)) => {
+                Ok(if verbose {
+                    match tx {
+                        AnyTx::Mined(tx) => {
+                            let block_hash = match self
                             .read_state
                             .clone()
                             .oneshot(zebra_state::ReadRequest::BestChainBlockHash(tx.height))
@@ -1786,51 +1965,126 @@ where
                             .map_misc_error()?
                         {
                             zebra_state::ReadResponse::BlockHash(block_hash) => block_hash,
-                            _ => {
+                            zebra_state::ReadResponse::UsageInfo(_)
+                            | zebra_state::ReadResponse::Tip(_)
+                            | zebra_state::ReadResponse::TipPoolValues { .. }
+                            | zebra_state::ReadResponse::BlockInfo(_)
+                            | zebra_state::ReadResponse::Depth(_)
+                            | zebra_state::ReadResponse::Block(_)
+                            | zebra_state::ReadResponse::BlockAndSize(_)
+                            | zebra_state::ReadResponse::BlockHeader { .. }
+                            | zebra_state::ReadResponse::Transaction(_)
+                            | zebra_state::ReadResponse::AnyChainTransaction(_)
+                            | zebra_state::ReadResponse::TransactionIdsForBlock(_)
+                            | zebra_state::ReadResponse::AnyChainTransactionIdsForBlock(_)
+                            | zebra_state::ReadResponse::BlockLocator(_)
+                            | zebra_state::ReadResponse::BlockHashes(_)
+                            | zebra_state::ReadResponse::BlockHeaders(_)
+                            | zebra_state::ReadResponse::UnspentBestChainUtxo(_)
+                            | zebra_state::ReadResponse::AnyChainUtxo(_)
+                            | zebra_state::ReadResponse::SaplingTree(_)
+                            | zebra_state::ReadResponse::OrchardTree(_)
+                            | zebra_state::ReadResponse::SaplingSubtrees(_)
+                            | zebra_state::ReadResponse::OrchardSubtrees(_)
+                            | zebra_state::ReadResponse::AddressBalance { .. }
+                            | zebra_state::ReadResponse::AddressesTransactionIds(_)
+                            | zebra_state::ReadResponse::AddressUtxos(_)
+                            | zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors
+                            | zebra_state::ReadResponse::BestChainNextMedianTimePast(_)
+                            | zebra_state::ReadResponse::ChainInfo(_)
+                            | zebra_state::ReadResponse::SolutionRate(_)
+                            | zebra_state::ReadResponse::ValidBlockProposal
+                            | zebra_state::ReadResponse::TipBlockSize(_)
+                            | zebra_state::ReadResponse::NonFinalizedBlocksListener(_)
+                            | zebra_state::ReadResponse::IsTransparentOutputSpent(_) => {
                                 unreachable!("unmatched response to a `BestChainBlockHash` request")
+                            }
+
+                            #[cfg(feature = "indexer")]
+                            zebra_state::ReadResponse::TransactionId(_) => {
+                                unreachable!("unmatched response to a state request")
                             }
                         };
 
-                        GetRawTransactionResponse::Object(Box::new(
-                            TransactionObject::from_transaction(
-                                tx.tx.clone(),
-                                Some(tx.height),
-                                Some(tx.confirmations),
+                            GetRawTransactionResponse::Object(Box::new(
+                                TransactionObject::from_transaction(
+                                    tx.tx.clone(),
+                                    Some(tx.height),
+                                    Some(tx.confirmations),
+                                    &self.network,
+                                    // TODO: Performance gain:
+                                    // https://github.com/ZcashFoundation/zebra/pull/9458#discussion_r2059352752
+                                    Some(tx.block_time),
+                                    block_hash,
+                                    Some(true),
+                                    txid,
+                                ),
+                            ))
+                        }
+                        AnyTx::Side((tx, block_hash)) => GetRawTransactionResponse::Object(
+                            Box::new(TransactionObject::from_transaction(
+                                tx.clone(),
+                                None,
+                                None,
                                 &self.network,
-                                // TODO: Performance gain:
-                                // https://github.com/ZcashFoundation/zebra/pull/9458#discussion_r2059352752
-                                Some(tx.block_time),
-                                block_hash,
-                                Some(true),
+                                None,
+                                Some(block_hash),
+                                Some(false),
                                 txid,
-                            ),
-                        ))
-                    }
-                    AnyTx::Side((tx, block_hash)) => GetRawTransactionResponse::Object(Box::new(
-                        TransactionObject::from_transaction(
-                            tx.clone(),
-                            None,
-                            None,
-                            &self.network,
-                            None,
-                            Some(block_hash),
-                            Some(false),
-                            txid,
+                            )),
                         ),
-                    )),
-                }
-            } else {
-                let tx: Arc<Transaction> = tx.into();
-                let hex = tx.into();
-                GetRawTransactionResponse::Raw(hex)
-            }),
+                    }
+                } else {
+                    let tx: Arc<Transaction> = tx.into();
+                    let hex = tx.into();
+                    GetRawTransactionResponse::Raw(hex)
+                })
+            }
 
             zebra_state::ReadResponse::AnyChainTransaction(None) => {
                 Err("No such mempool or main chain transaction")
                     .map_error(server::error::LegacyCode::InvalidAddressOrKey)
             }
 
-            _ => unreachable!("unmatched response to a `Transaction` read request"),
+            zebra_state::ReadResponse::UsageInfo(_)
+            | zebra_state::ReadResponse::Tip(_)
+            | zebra_state::ReadResponse::TipPoolValues { .. }
+            | zebra_state::ReadResponse::BlockInfo(_)
+            | zebra_state::ReadResponse::Depth(_)
+            | zebra_state::ReadResponse::Block(_)
+            | zebra_state::ReadResponse::BlockAndSize(_)
+            | zebra_state::ReadResponse::BlockHeader { .. }
+            | zebra_state::ReadResponse::Transaction(_)
+            | zebra_state::ReadResponse::TransactionIdsForBlock(_)
+            | zebra_state::ReadResponse::AnyChainTransactionIdsForBlock(_)
+            | zebra_state::ReadResponse::BlockLocator(_)
+            | zebra_state::ReadResponse::BlockHashes(_)
+            | zebra_state::ReadResponse::BlockHeaders(_)
+            | zebra_state::ReadResponse::UnspentBestChainUtxo(_)
+            | zebra_state::ReadResponse::AnyChainUtxo(_)
+            | zebra_state::ReadResponse::SaplingTree(_)
+            | zebra_state::ReadResponse::OrchardTree(_)
+            | zebra_state::ReadResponse::SaplingSubtrees(_)
+            | zebra_state::ReadResponse::OrchardSubtrees(_)
+            | zebra_state::ReadResponse::AddressBalance { .. }
+            | zebra_state::ReadResponse::AddressesTransactionIds(_)
+            | zebra_state::ReadResponse::AddressUtxos(_)
+            | zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors
+            | zebra_state::ReadResponse::BestChainNextMedianTimePast(_)
+            | zebra_state::ReadResponse::BlockHash(_)
+            | zebra_state::ReadResponse::ChainInfo(_)
+            | zebra_state::ReadResponse::SolutionRate(_)
+            | zebra_state::ReadResponse::ValidBlockProposal
+            | zebra_state::ReadResponse::TipBlockSize(_)
+            | zebra_state::ReadResponse::NonFinalizedBlocksListener(_)
+            | zebra_state::ReadResponse::IsTransparentOutputSpent(_) => {
+                unreachable!("unmatched response to a `Transaction` read request")
+            }
+
+            #[cfg(feature = "indexer")]
+            zebra_state::ReadResponse::TransactionId(_) => {
+                unreachable!("unmatched response to a state request")
+            }
         }
     }
 
@@ -1865,7 +2119,45 @@ where
                 return Err("the requested block is not in the main chain")
                     .map_error(server::error::LegacyCode::InvalidParameter);
             }
-            _ => unreachable!("unmatched response to a block request"),
+            zebra_state::ReadResponse::UsageInfo(_)
+            | zebra_state::ReadResponse::Tip(_)
+            | zebra_state::ReadResponse::TipPoolValues { .. }
+            | zebra_state::ReadResponse::BlockInfo(_)
+            | zebra_state::ReadResponse::Depth(_)
+            | zebra_state::ReadResponse::BlockAndSize(_)
+            | zebra_state::ReadResponse::BlockHeader { .. }
+            | zebra_state::ReadResponse::Transaction(_)
+            | zebra_state::ReadResponse::AnyChainTransaction(_)
+            | zebra_state::ReadResponse::TransactionIdsForBlock(_)
+            | zebra_state::ReadResponse::AnyChainTransactionIdsForBlock(_)
+            | zebra_state::ReadResponse::BlockLocator(_)
+            | zebra_state::ReadResponse::BlockHashes(_)
+            | zebra_state::ReadResponse::BlockHeaders(_)
+            | zebra_state::ReadResponse::UnspentBestChainUtxo(_)
+            | zebra_state::ReadResponse::AnyChainUtxo(_)
+            | zebra_state::ReadResponse::SaplingTree(_)
+            | zebra_state::ReadResponse::OrchardTree(_)
+            | zebra_state::ReadResponse::SaplingSubtrees(_)
+            | zebra_state::ReadResponse::OrchardSubtrees(_)
+            | zebra_state::ReadResponse::AddressBalance { .. }
+            | zebra_state::ReadResponse::AddressesTransactionIds(_)
+            | zebra_state::ReadResponse::AddressUtxos(_)
+            | zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors
+            | zebra_state::ReadResponse::BestChainNextMedianTimePast(_)
+            | zebra_state::ReadResponse::BlockHash(_)
+            | zebra_state::ReadResponse::ChainInfo(_)
+            | zebra_state::ReadResponse::SolutionRate(_)
+            | zebra_state::ReadResponse::ValidBlockProposal
+            | zebra_state::ReadResponse::TipBlockSize(_)
+            | zebra_state::ReadResponse::NonFinalizedBlocksListener(_)
+            | zebra_state::ReadResponse::IsTransparentOutputSpent(_) => {
+                unreachable!("unmatched response to a block request")
+            }
+
+            #[cfg(feature = "indexer")]
+            zebra_state::ReadResponse::TransactionId(_) => {
+                unreachable!("unmatched response to a state request")
+            }
         };
 
         let hash = hash_or_height
@@ -1892,7 +2184,45 @@ where
                 zebra_state::ReadResponse::SaplingTree(tree) => {
                     tree.map(|t| (t.to_rpc_bytes(), t.root().bytes_in_display_order().to_vec()))
                 }
-                _ => unreachable!("unmatched response to a Sapling tree request"),
+                zebra_state::ReadResponse::UsageInfo(_)
+                | zebra_state::ReadResponse::Tip(_)
+                | zebra_state::ReadResponse::TipPoolValues { .. }
+                | zebra_state::ReadResponse::BlockInfo(_)
+                | zebra_state::ReadResponse::Depth(_)
+                | zebra_state::ReadResponse::Block(_)
+                | zebra_state::ReadResponse::BlockAndSize(_)
+                | zebra_state::ReadResponse::BlockHeader { .. }
+                | zebra_state::ReadResponse::Transaction(_)
+                | zebra_state::ReadResponse::AnyChainTransaction(_)
+                | zebra_state::ReadResponse::TransactionIdsForBlock(_)
+                | zebra_state::ReadResponse::AnyChainTransactionIdsForBlock(_)
+                | zebra_state::ReadResponse::BlockLocator(_)
+                | zebra_state::ReadResponse::BlockHashes(_)
+                | zebra_state::ReadResponse::BlockHeaders(_)
+                | zebra_state::ReadResponse::UnspentBestChainUtxo(_)
+                | zebra_state::ReadResponse::AnyChainUtxo(_)
+                | zebra_state::ReadResponse::OrchardTree(_)
+                | zebra_state::ReadResponse::SaplingSubtrees(_)
+                | zebra_state::ReadResponse::OrchardSubtrees(_)
+                | zebra_state::ReadResponse::AddressBalance { .. }
+                | zebra_state::ReadResponse::AddressesTransactionIds(_)
+                | zebra_state::ReadResponse::AddressUtxos(_)
+                | zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors
+                | zebra_state::ReadResponse::BestChainNextMedianTimePast(_)
+                | zebra_state::ReadResponse::BlockHash(_)
+                | zebra_state::ReadResponse::ChainInfo(_)
+                | zebra_state::ReadResponse::SolutionRate(_)
+                | zebra_state::ReadResponse::ValidBlockProposal
+                | zebra_state::ReadResponse::TipBlockSize(_)
+                | zebra_state::ReadResponse::NonFinalizedBlocksListener(_)
+                | zebra_state::ReadResponse::IsTransparentOutputSpent(_) => {
+                    unreachable!("unmatched response to a Sapling tree request")
+                }
+
+                #[cfg(feature = "indexer")]
+                zebra_state::ReadResponse::TransactionId(_) => {
+                    unreachable!("unmatched response to a state request")
+                }
             }
         } else {
             None
@@ -1913,7 +2243,45 @@ where
                 zebra_state::ReadResponse::OrchardTree(tree) => {
                     tree.map(|t| (t.to_rpc_bytes(), t.root().bytes_in_display_order().to_vec()))
                 }
-                _ => unreachable!("unmatched response to an Orchard tree request"),
+                zebra_state::ReadResponse::UsageInfo(_)
+                | zebra_state::ReadResponse::Tip(_)
+                | zebra_state::ReadResponse::TipPoolValues { .. }
+                | zebra_state::ReadResponse::BlockInfo(_)
+                | zebra_state::ReadResponse::Depth(_)
+                | zebra_state::ReadResponse::Block(_)
+                | zebra_state::ReadResponse::BlockAndSize(_)
+                | zebra_state::ReadResponse::BlockHeader { .. }
+                | zebra_state::ReadResponse::Transaction(_)
+                | zebra_state::ReadResponse::AnyChainTransaction(_)
+                | zebra_state::ReadResponse::TransactionIdsForBlock(_)
+                | zebra_state::ReadResponse::AnyChainTransactionIdsForBlock(_)
+                | zebra_state::ReadResponse::BlockLocator(_)
+                | zebra_state::ReadResponse::BlockHashes(_)
+                | zebra_state::ReadResponse::BlockHeaders(_)
+                | zebra_state::ReadResponse::UnspentBestChainUtxo(_)
+                | zebra_state::ReadResponse::AnyChainUtxo(_)
+                | zebra_state::ReadResponse::SaplingTree(_)
+                | zebra_state::ReadResponse::SaplingSubtrees(_)
+                | zebra_state::ReadResponse::OrchardSubtrees(_)
+                | zebra_state::ReadResponse::AddressBalance { .. }
+                | zebra_state::ReadResponse::AddressesTransactionIds(_)
+                | zebra_state::ReadResponse::AddressUtxos(_)
+                | zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors
+                | zebra_state::ReadResponse::BestChainNextMedianTimePast(_)
+                | zebra_state::ReadResponse::BlockHash(_)
+                | zebra_state::ReadResponse::ChainInfo(_)
+                | zebra_state::ReadResponse::SolutionRate(_)
+                | zebra_state::ReadResponse::ValidBlockProposal
+                | zebra_state::ReadResponse::TipBlockSize(_)
+                | zebra_state::ReadResponse::NonFinalizedBlocksListener(_)
+                | zebra_state::ReadResponse::IsTransparentOutputSpent(_) => {
+                    unreachable!("unmatched response to an Orchard tree request")
+                }
+
+                #[cfg(feature = "indexer")]
+                zebra_state::ReadResponse::TransactionId(_) => {
+                    unreachable!("unmatched response to a state request")
+                }
             }
         } else {
             None
@@ -1953,7 +2321,45 @@ where
 
             let subtrees = match response {
                 zebra_state::ReadResponse::SaplingSubtrees(subtrees) => subtrees,
-                _ => unreachable!("unmatched response to a subtrees request"),
+                zebra_state::ReadResponse::UsageInfo(_)
+                | zebra_state::ReadResponse::Tip(_)
+                | zebra_state::ReadResponse::TipPoolValues { .. }
+                | zebra_state::ReadResponse::BlockInfo(_)
+                | zebra_state::ReadResponse::Depth(_)
+                | zebra_state::ReadResponse::Block(_)
+                | zebra_state::ReadResponse::BlockAndSize(_)
+                | zebra_state::ReadResponse::BlockHeader { .. }
+                | zebra_state::ReadResponse::Transaction(_)
+                | zebra_state::ReadResponse::AnyChainTransaction(_)
+                | zebra_state::ReadResponse::TransactionIdsForBlock(_)
+                | zebra_state::ReadResponse::AnyChainTransactionIdsForBlock(_)
+                | zebra_state::ReadResponse::BlockLocator(_)
+                | zebra_state::ReadResponse::BlockHashes(_)
+                | zebra_state::ReadResponse::BlockHeaders(_)
+                | zebra_state::ReadResponse::UnspentBestChainUtxo(_)
+                | zebra_state::ReadResponse::AnyChainUtxo(_)
+                | zebra_state::ReadResponse::SaplingTree(_)
+                | zebra_state::ReadResponse::OrchardTree(_)
+                | zebra_state::ReadResponse::OrchardSubtrees(_)
+                | zebra_state::ReadResponse::AddressBalance { .. }
+                | zebra_state::ReadResponse::AddressesTransactionIds(_)
+                | zebra_state::ReadResponse::AddressUtxos(_)
+                | zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors
+                | zebra_state::ReadResponse::BestChainNextMedianTimePast(_)
+                | zebra_state::ReadResponse::BlockHash(_)
+                | zebra_state::ReadResponse::ChainInfo(_)
+                | zebra_state::ReadResponse::SolutionRate(_)
+                | zebra_state::ReadResponse::ValidBlockProposal
+                | zebra_state::ReadResponse::TipBlockSize(_)
+                | zebra_state::ReadResponse::NonFinalizedBlocksListener(_)
+                | zebra_state::ReadResponse::IsTransparentOutputSpent(_) => {
+                    unreachable!("unmatched response to a subtrees request")
+                }
+
+                #[cfg(feature = "indexer")]
+                zebra_state::ReadResponse::TransactionId(_) => {
+                    unreachable!("unmatched response to a state request")
+                }
             };
 
             let subtrees = subtrees
@@ -1979,7 +2385,45 @@ where
 
             let subtrees = match response {
                 zebra_state::ReadResponse::OrchardSubtrees(subtrees) => subtrees,
-                _ => unreachable!("unmatched response to a subtrees request"),
+                zebra_state::ReadResponse::UsageInfo(_)
+                | zebra_state::ReadResponse::Tip(_)
+                | zebra_state::ReadResponse::TipPoolValues { .. }
+                | zebra_state::ReadResponse::BlockInfo(_)
+                | zebra_state::ReadResponse::Depth(_)
+                | zebra_state::ReadResponse::Block(_)
+                | zebra_state::ReadResponse::BlockAndSize(_)
+                | zebra_state::ReadResponse::BlockHeader { .. }
+                | zebra_state::ReadResponse::Transaction(_)
+                | zebra_state::ReadResponse::AnyChainTransaction(_)
+                | zebra_state::ReadResponse::TransactionIdsForBlock(_)
+                | zebra_state::ReadResponse::AnyChainTransactionIdsForBlock(_)
+                | zebra_state::ReadResponse::BlockLocator(_)
+                | zebra_state::ReadResponse::BlockHashes(_)
+                | zebra_state::ReadResponse::BlockHeaders(_)
+                | zebra_state::ReadResponse::UnspentBestChainUtxo(_)
+                | zebra_state::ReadResponse::AnyChainUtxo(_)
+                | zebra_state::ReadResponse::SaplingTree(_)
+                | zebra_state::ReadResponse::OrchardTree(_)
+                | zebra_state::ReadResponse::SaplingSubtrees(_)
+                | zebra_state::ReadResponse::AddressBalance { .. }
+                | zebra_state::ReadResponse::AddressesTransactionIds(_)
+                | zebra_state::ReadResponse::AddressUtxos(_)
+                | zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors
+                | zebra_state::ReadResponse::BestChainNextMedianTimePast(_)
+                | zebra_state::ReadResponse::BlockHash(_)
+                | zebra_state::ReadResponse::ChainInfo(_)
+                | zebra_state::ReadResponse::SolutionRate(_)
+                | zebra_state::ReadResponse::ValidBlockProposal
+                | zebra_state::ReadResponse::TipBlockSize(_)
+                | zebra_state::ReadResponse::NonFinalizedBlocksListener(_)
+                | zebra_state::ReadResponse::IsTransparentOutputSpent(_) => {
+                    unreachable!("unmatched response to a subtrees request")
+                }
+
+                #[cfg(feature = "indexer")]
+                zebra_state::ReadResponse::TransactionId(_) => {
+                    unreachable!("unmatched response to a state request")
+                }
             };
 
             let subtrees = subtrees
@@ -2047,7 +2491,45 @@ where
                     })
                     .collect()
             }
-            _ => unreachable!("unmatched response to a TransactionsByAddresses request"),
+            zebra_state::ReadResponse::UsageInfo(_)
+            | zebra_state::ReadResponse::Tip(_)
+            | zebra_state::ReadResponse::TipPoolValues { .. }
+            | zebra_state::ReadResponse::BlockInfo(_)
+            | zebra_state::ReadResponse::Depth(_)
+            | zebra_state::ReadResponse::Block(_)
+            | zebra_state::ReadResponse::BlockAndSize(_)
+            | zebra_state::ReadResponse::BlockHeader { .. }
+            | zebra_state::ReadResponse::Transaction(_)
+            | zebra_state::ReadResponse::AnyChainTransaction(_)
+            | zebra_state::ReadResponse::TransactionIdsForBlock(_)
+            | zebra_state::ReadResponse::AnyChainTransactionIdsForBlock(_)
+            | zebra_state::ReadResponse::BlockLocator(_)
+            | zebra_state::ReadResponse::BlockHashes(_)
+            | zebra_state::ReadResponse::BlockHeaders(_)
+            | zebra_state::ReadResponse::UnspentBestChainUtxo(_)
+            | zebra_state::ReadResponse::AnyChainUtxo(_)
+            | zebra_state::ReadResponse::SaplingTree(_)
+            | zebra_state::ReadResponse::OrchardTree(_)
+            | zebra_state::ReadResponse::SaplingSubtrees(_)
+            | zebra_state::ReadResponse::OrchardSubtrees(_)
+            | zebra_state::ReadResponse::AddressBalance { .. }
+            | zebra_state::ReadResponse::AddressUtxos(_)
+            | zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors
+            | zebra_state::ReadResponse::BestChainNextMedianTimePast(_)
+            | zebra_state::ReadResponse::BlockHash(_)
+            | zebra_state::ReadResponse::ChainInfo(_)
+            | zebra_state::ReadResponse::SolutionRate(_)
+            | zebra_state::ReadResponse::ValidBlockProposal
+            | zebra_state::ReadResponse::TipBlockSize(_)
+            | zebra_state::ReadResponse::NonFinalizedBlocksListener(_)
+            | zebra_state::ReadResponse::IsTransparentOutputSpent(_) => {
+                unreachable!("unmatched response to a TransactionsByAddresses request")
+            }
+
+            #[cfg(feature = "indexer")]
+            zebra_state::ReadResponse::TransactionId(_) => {
+                unreachable!("unmatched response to a state request")
+            }
         };
 
         Ok(hashes)
@@ -2071,7 +2553,45 @@ where
             .map_misc_error()?;
         let utxos = match response {
             zebra_state::ReadResponse::AddressUtxos(utxos) => utxos,
-            _ => unreachable!("unmatched response to a UtxosByAddresses request"),
+            zebra_state::ReadResponse::UsageInfo(_)
+            | zebra_state::ReadResponse::Tip(_)
+            | zebra_state::ReadResponse::TipPoolValues { .. }
+            | zebra_state::ReadResponse::BlockInfo(_)
+            | zebra_state::ReadResponse::Depth(_)
+            | zebra_state::ReadResponse::Block(_)
+            | zebra_state::ReadResponse::BlockAndSize(_)
+            | zebra_state::ReadResponse::BlockHeader { .. }
+            | zebra_state::ReadResponse::Transaction(_)
+            | zebra_state::ReadResponse::AnyChainTransaction(_)
+            | zebra_state::ReadResponse::TransactionIdsForBlock(_)
+            | zebra_state::ReadResponse::AnyChainTransactionIdsForBlock(_)
+            | zebra_state::ReadResponse::BlockLocator(_)
+            | zebra_state::ReadResponse::BlockHashes(_)
+            | zebra_state::ReadResponse::BlockHeaders(_)
+            | zebra_state::ReadResponse::UnspentBestChainUtxo(_)
+            | zebra_state::ReadResponse::AnyChainUtxo(_)
+            | zebra_state::ReadResponse::SaplingTree(_)
+            | zebra_state::ReadResponse::OrchardTree(_)
+            | zebra_state::ReadResponse::SaplingSubtrees(_)
+            | zebra_state::ReadResponse::OrchardSubtrees(_)
+            | zebra_state::ReadResponse::AddressBalance { .. }
+            | zebra_state::ReadResponse::AddressesTransactionIds(_)
+            | zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors
+            | zebra_state::ReadResponse::BestChainNextMedianTimePast(_)
+            | zebra_state::ReadResponse::BlockHash(_)
+            | zebra_state::ReadResponse::ChainInfo(_)
+            | zebra_state::ReadResponse::SolutionRate(_)
+            | zebra_state::ReadResponse::ValidBlockProposal
+            | zebra_state::ReadResponse::TipBlockSize(_)
+            | zebra_state::ReadResponse::NonFinalizedBlocksListener(_)
+            | zebra_state::ReadResponse::IsTransparentOutputSpent(_) => {
+                unreachable!("unmatched response to a UtxosByAddresses request")
+            }
+
+            #[cfg(feature = "indexer")]
+            zebra_state::ReadResponse::TransactionId(_) => {
+                unreachable!("unmatched response to a state request")
+            }
         };
 
         let mut last_output_location = OutputLocation::from_usize(Height(0), 0, 0);
@@ -2176,7 +2696,45 @@ where
                 "Block not found",
                 None,
             )),
-            _ => unreachable!("unmatched response to a block request"),
+            zebra_state::ReadResponse::UsageInfo(_)
+            | zebra_state::ReadResponse::Tip(_)
+            | zebra_state::ReadResponse::TipPoolValues { .. }
+            | zebra_state::ReadResponse::BlockInfo(_)
+            | zebra_state::ReadResponse::Depth(_)
+            | zebra_state::ReadResponse::Block(_)
+            | zebra_state::ReadResponse::BlockAndSize(_)
+            | zebra_state::ReadResponse::BlockHeader { .. }
+            | zebra_state::ReadResponse::Transaction(_)
+            | zebra_state::ReadResponse::AnyChainTransaction(_)
+            | zebra_state::ReadResponse::TransactionIdsForBlock(_)
+            | zebra_state::ReadResponse::AnyChainTransactionIdsForBlock(_)
+            | zebra_state::ReadResponse::BlockLocator(_)
+            | zebra_state::ReadResponse::BlockHashes(_)
+            | zebra_state::ReadResponse::BlockHeaders(_)
+            | zebra_state::ReadResponse::UnspentBestChainUtxo(_)
+            | zebra_state::ReadResponse::AnyChainUtxo(_)
+            | zebra_state::ReadResponse::SaplingTree(_)
+            | zebra_state::ReadResponse::OrchardTree(_)
+            | zebra_state::ReadResponse::SaplingSubtrees(_)
+            | zebra_state::ReadResponse::OrchardSubtrees(_)
+            | zebra_state::ReadResponse::AddressBalance { .. }
+            | zebra_state::ReadResponse::AddressesTransactionIds(_)
+            | zebra_state::ReadResponse::AddressUtxos(_)
+            | zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors
+            | zebra_state::ReadResponse::BestChainNextMedianTimePast(_)
+            | zebra_state::ReadResponse::ChainInfo(_)
+            | zebra_state::ReadResponse::SolutionRate(_)
+            | zebra_state::ReadResponse::ValidBlockProposal
+            | zebra_state::ReadResponse::TipBlockSize(_)
+            | zebra_state::ReadResponse::NonFinalizedBlocksListener(_)
+            | zebra_state::ReadResponse::IsTransparentOutputSpent(_) => {
+                unreachable!("unmatched response to a block request")
+            }
+
+            #[cfg(feature = "indexer")]
+            zebra_state::ReadResponse::TransactionId(_) => {
+                unreachable!("unmatched response to a state request")
+            }
         }
     }
 
@@ -2629,7 +3187,42 @@ where
                 .map_error(server::error::LegacyCode::default())?;
             current_block_size = match response {
                 zebra_state::ReadResponse::TipBlockSize(Some(block_size)) => Some(block_size),
-                _ => None,
+                zebra_state::ReadResponse::UsageInfo(_)
+                | zebra_state::ReadResponse::Tip(_)
+                | zebra_state::ReadResponse::TipPoolValues { .. }
+                | zebra_state::ReadResponse::BlockInfo(_)
+                | zebra_state::ReadResponse::Depth(_)
+                | zebra_state::ReadResponse::Block(_)
+                | zebra_state::ReadResponse::BlockAndSize(_)
+                | zebra_state::ReadResponse::BlockHeader { .. }
+                | zebra_state::ReadResponse::Transaction(_)
+                | zebra_state::ReadResponse::AnyChainTransaction(_)
+                | zebra_state::ReadResponse::TransactionIdsForBlock(_)
+                | zebra_state::ReadResponse::AnyChainTransactionIdsForBlock(_)
+                | zebra_state::ReadResponse::BlockLocator(_)
+                | zebra_state::ReadResponse::BlockHashes(_)
+                | zebra_state::ReadResponse::BlockHeaders(_)
+                | zebra_state::ReadResponse::UnspentBestChainUtxo(_)
+                | zebra_state::ReadResponse::AnyChainUtxo(_)
+                | zebra_state::ReadResponse::SaplingTree(_)
+                | zebra_state::ReadResponse::OrchardTree(_)
+                | zebra_state::ReadResponse::SaplingSubtrees(_)
+                | zebra_state::ReadResponse::OrchardSubtrees(_)
+                | zebra_state::ReadResponse::AddressBalance { .. }
+                | zebra_state::ReadResponse::AddressesTransactionIds(_)
+                | zebra_state::ReadResponse::AddressUtxos(_)
+                | zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors
+                | zebra_state::ReadResponse::BestChainNextMedianTimePast(_)
+                | zebra_state::ReadResponse::BlockHash(_)
+                | zebra_state::ReadResponse::ChainInfo(_)
+                | zebra_state::ReadResponse::SolutionRate(_)
+                | zebra_state::ReadResponse::ValidBlockProposal
+                | zebra_state::ReadResponse::TipBlockSize(_)
+                | zebra_state::ReadResponse::NonFinalizedBlocksListener(_)
+                | zebra_state::ReadResponse::IsTransparentOutputSpent(_) => None,
+
+                #[cfg(feature = "indexer")]
+                zebra_state::ReadResponse::TransactionId(_) => None,
             };
         }
 
@@ -2674,7 +3267,45 @@ where
             // zcashd returns a 0 rate when the calculation is invalid
             ReadResponse::SolutionRate(solution_rate) => solution_rate.unwrap_or(0),
 
-            _ => unreachable!("unmatched response to a solution rate request"),
+            ReadResponse::UsageInfo(_)
+            | ReadResponse::Tip(_)
+            | ReadResponse::TipPoolValues { .. }
+            | ReadResponse::BlockInfo(_)
+            | ReadResponse::Depth(_)
+            | ReadResponse::Block(_)
+            | ReadResponse::BlockAndSize(_)
+            | ReadResponse::BlockHeader { .. }
+            | ReadResponse::Transaction(_)
+            | ReadResponse::AnyChainTransaction(_)
+            | ReadResponse::TransactionIdsForBlock(_)
+            | ReadResponse::AnyChainTransactionIdsForBlock(_)
+            | ReadResponse::BlockLocator(_)
+            | ReadResponse::BlockHashes(_)
+            | ReadResponse::BlockHeaders(_)
+            | ReadResponse::UnspentBestChainUtxo(_)
+            | ReadResponse::AnyChainUtxo(_)
+            | ReadResponse::SaplingTree(_)
+            | ReadResponse::OrchardTree(_)
+            | ReadResponse::SaplingSubtrees(_)
+            | ReadResponse::OrchardSubtrees(_)
+            | ReadResponse::AddressBalance { .. }
+            | ReadResponse::AddressesTransactionIds(_)
+            | ReadResponse::AddressUtxos(_)
+            | ReadResponse::ValidBestChainTipNullifiersAndAnchors
+            | ReadResponse::BestChainNextMedianTimePast(_)
+            | ReadResponse::BlockHash(_)
+            | ReadResponse::ChainInfo(_)
+            | ReadResponse::ValidBlockProposal
+            | ReadResponse::TipBlockSize(_)
+            | ReadResponse::NonFinalizedBlocksListener(_)
+            | ReadResponse::IsTransparentOutputSpent(_) => {
+                unreachable!("unmatched response to a solution rate request")
+            }
+
+            #[cfg(feature = "indexer")]
+            ReadResponse::TransactionId(_) => {
+                unreachable!("unmatched response to a state request")
+            }
         };
 
         Ok(solution_rate
@@ -2901,7 +3532,27 @@ where
             .await
             .map(|rsp| match rsp {
                 zebra_state::Response::Reconsidered(block_hashes) => block_hashes,
-                _ => unreachable!("unmatched response to a reconsider block request"),
+                zebra_state::Response::Committed(_)
+                | zebra_state::Response::Invalidated(_)
+                | zebra_state::Response::Depth(_)
+                | zebra_state::Response::Tip(_)
+                | zebra_state::Response::BlockLocator(_)
+                | zebra_state::Response::Transaction(_)
+                | zebra_state::Response::AnyChainTransaction(_)
+                | zebra_state::Response::UnspentBestChainUtxo(_)
+                | zebra_state::Response::Block(_)
+                | zebra_state::Response::BlockAndSize(_)
+                | zebra_state::Response::BlockHeader { .. }
+                | zebra_state::Response::Utxo(_)
+                | zebra_state::Response::BlockHashes(_)
+                | zebra_state::Response::BlockHeaders(_)
+                | zebra_state::Response::ValidBestChainTipNullifiersAndAnchors
+                | zebra_state::Response::BestChainNextMedianTimePast(_)
+                | zebra_state::Response::BlockHash(_)
+                | zebra_state::Response::KnownBlock(_)
+                | zebra_state::Response::ValidBlockProposal => {
+                    unreachable!("unmatched response to a reconsider block request")
+                }
             })
             .map_misc_error()
     }
@@ -3069,7 +3720,17 @@ where
                     return Ok(GetTxOutResponse(None))
                 }
                 mempool::Response::TransparentOutput(None) => {}
-                _ => unreachable!("unmatched response to an `UnspentOutput` request"),
+                mempool::Response::TransactionIds(_)
+                | mempool::Response::Transactions(_)
+                | mempool::Response::UnspentOutput(_)
+                | mempool::Response::TransactionWithDeps { .. }
+                | mempool::Response::FullTransactions { .. }
+                | mempool::Response::RejectedTransactionIds(_)
+                | mempool::Response::Queued(_)
+                | mempool::Response::CheckedForVerifiedTransactions
+                | mempool::Response::QueueStats { .. } => {
+                    unreachable!("unmatched response to an `UnspentOutput` request")
+                }
             };
         }
 
@@ -3086,7 +3747,45 @@ where
 
         let best_block_hash = match tip_rsp {
             zebra_state::ReadResponse::Tip(tip) => tip.ok_or_misc_error("No blocks in state")?.1,
-            _ => unreachable!("unmatched response to a `Tip` request"),
+            zebra_state::ReadResponse::UsageInfo(_)
+            | zebra_state::ReadResponse::TipPoolValues { .. }
+            | zebra_state::ReadResponse::BlockInfo(_)
+            | zebra_state::ReadResponse::Depth(_)
+            | zebra_state::ReadResponse::Block(_)
+            | zebra_state::ReadResponse::BlockAndSize(_)
+            | zebra_state::ReadResponse::BlockHeader { .. }
+            | zebra_state::ReadResponse::Transaction(_)
+            | zebra_state::ReadResponse::AnyChainTransaction(_)
+            | zebra_state::ReadResponse::TransactionIdsForBlock(_)
+            | zebra_state::ReadResponse::AnyChainTransactionIdsForBlock(_)
+            | zebra_state::ReadResponse::BlockLocator(_)
+            | zebra_state::ReadResponse::BlockHashes(_)
+            | zebra_state::ReadResponse::BlockHeaders(_)
+            | zebra_state::ReadResponse::UnspentBestChainUtxo(_)
+            | zebra_state::ReadResponse::AnyChainUtxo(_)
+            | zebra_state::ReadResponse::SaplingTree(_)
+            | zebra_state::ReadResponse::OrchardTree(_)
+            | zebra_state::ReadResponse::SaplingSubtrees(_)
+            | zebra_state::ReadResponse::OrchardSubtrees(_)
+            | zebra_state::ReadResponse::AddressBalance { .. }
+            | zebra_state::ReadResponse::AddressesTransactionIds(_)
+            | zebra_state::ReadResponse::AddressUtxos(_)
+            | zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors
+            | zebra_state::ReadResponse::BestChainNextMedianTimePast(_)
+            | zebra_state::ReadResponse::BlockHash(_)
+            | zebra_state::ReadResponse::ChainInfo(_)
+            | zebra_state::ReadResponse::SolutionRate(_)
+            | zebra_state::ReadResponse::ValidBlockProposal
+            | zebra_state::ReadResponse::TipBlockSize(_)
+            | zebra_state::ReadResponse::NonFinalizedBlocksListener(_)
+            | zebra_state::ReadResponse::IsTransparentOutputSpent(_) => {
+                unreachable!("unmatched response to a `Tip` request")
+            }
+
+            #[cfg(feature = "indexer")]
+            zebra_state::ReadResponse::TransactionId(_) => {
+                unreachable!("unmatched response to a state request")
+            }
         };
 
         // State path
@@ -3118,7 +3817,43 @@ where
 
                     match rsp {
                         zebra_state::ReadResponse::IsTransparentOutputSpent(spent) => spent,
-                        _ => unreachable!(
+                        zebra_state::ReadResponse::UsageInfo(_)
+                        | zebra_state::ReadResponse::Tip(_)
+                        | zebra_state::ReadResponse::TipPoolValues { .. }
+                        | zebra_state::ReadResponse::BlockInfo(_)
+                        | zebra_state::ReadResponse::Depth(_)
+                        | zebra_state::ReadResponse::Block(_)
+                        | zebra_state::ReadResponse::BlockAndSize(_)
+                        | zebra_state::ReadResponse::BlockHeader { .. }
+                        | zebra_state::ReadResponse::Transaction(_)
+                        | zebra_state::ReadResponse::AnyChainTransaction(_)
+                        | zebra_state::ReadResponse::TransactionIdsForBlock(_)
+                        | zebra_state::ReadResponse::AnyChainTransactionIdsForBlock(_)
+                        | zebra_state::ReadResponse::BlockLocator(_)
+                        | zebra_state::ReadResponse::BlockHashes(_)
+                        | zebra_state::ReadResponse::BlockHeaders(_)
+                        | zebra_state::ReadResponse::UnspentBestChainUtxo(_)
+                        | zebra_state::ReadResponse::AnyChainUtxo(_)
+                        | zebra_state::ReadResponse::SaplingTree(_)
+                        | zebra_state::ReadResponse::OrchardTree(_)
+                        | zebra_state::ReadResponse::SaplingSubtrees(_)
+                        | zebra_state::ReadResponse::OrchardSubtrees(_)
+                        | zebra_state::ReadResponse::AddressBalance { .. }
+                        | zebra_state::ReadResponse::AddressesTransactionIds(_)
+                        | zebra_state::ReadResponse::AddressUtxos(_)
+                        | zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors
+                        | zebra_state::ReadResponse::BestChainNextMedianTimePast(_)
+                        | zebra_state::ReadResponse::BlockHash(_)
+                        | zebra_state::ReadResponse::ChainInfo(_)
+                        | zebra_state::ReadResponse::SolutionRate(_)
+                        | zebra_state::ReadResponse::ValidBlockProposal
+                        | zebra_state::ReadResponse::TipBlockSize(_)
+                        | zebra_state::ReadResponse::NonFinalizedBlocksListener(_) => unreachable!(
+                            "unmatched response to an `IsTransparentOutputSpent` request"
+                        ),
+
+                        #[cfg(feature = "indexer")]
+                        zebra_state::ReadResponse::TransactionId(_) => unreachable!(
                             "unmatched response to an `IsTransparentOutputSpent` request"
                         ),
                     }
@@ -3140,7 +3875,45 @@ where
                 )))
             }
             zebra_state::ReadResponse::Transaction(None) => Ok(GetTxOutResponse(None)),
-            _ => unreachable!("unmatched response to a `Transaction` request"),
+            zebra_state::ReadResponse::UsageInfo(_)
+            | zebra_state::ReadResponse::Tip(_)
+            | zebra_state::ReadResponse::TipPoolValues { .. }
+            | zebra_state::ReadResponse::BlockInfo(_)
+            | zebra_state::ReadResponse::Depth(_)
+            | zebra_state::ReadResponse::Block(_)
+            | zebra_state::ReadResponse::BlockAndSize(_)
+            | zebra_state::ReadResponse::BlockHeader { .. }
+            | zebra_state::ReadResponse::AnyChainTransaction(_)
+            | zebra_state::ReadResponse::TransactionIdsForBlock(_)
+            | zebra_state::ReadResponse::AnyChainTransactionIdsForBlock(_)
+            | zebra_state::ReadResponse::BlockLocator(_)
+            | zebra_state::ReadResponse::BlockHashes(_)
+            | zebra_state::ReadResponse::BlockHeaders(_)
+            | zebra_state::ReadResponse::UnspentBestChainUtxo(_)
+            | zebra_state::ReadResponse::AnyChainUtxo(_)
+            | zebra_state::ReadResponse::SaplingTree(_)
+            | zebra_state::ReadResponse::OrchardTree(_)
+            | zebra_state::ReadResponse::SaplingSubtrees(_)
+            | zebra_state::ReadResponse::OrchardSubtrees(_)
+            | zebra_state::ReadResponse::AddressBalance { .. }
+            | zebra_state::ReadResponse::AddressesTransactionIds(_)
+            | zebra_state::ReadResponse::AddressUtxos(_)
+            | zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors
+            | zebra_state::ReadResponse::BestChainNextMedianTimePast(_)
+            | zebra_state::ReadResponse::BlockHash(_)
+            | zebra_state::ReadResponse::ChainInfo(_)
+            | zebra_state::ReadResponse::SolutionRate(_)
+            | zebra_state::ReadResponse::ValidBlockProposal
+            | zebra_state::ReadResponse::TipBlockSize(_)
+            | zebra_state::ReadResponse::NonFinalizedBlocksListener(_)
+            | zebra_state::ReadResponse::IsTransparentOutputSpent(_) => {
+                unreachable!("unmatched response to a `Transaction` request")
+            }
+
+            #[cfg(feature = "indexer")]
+            zebra_state::ReadResponse::TransactionId(_) => {
+                unreachable!("unmatched response to a state request")
+            }
         }
     }
 }
@@ -4620,7 +5393,45 @@ where
 
     let chain_info = match response {
         ReadResponse::ChainInfo(info) => info,
-        _ => unreachable!("unmatched response to a chain info request"),
+        ReadResponse::UsageInfo(_)
+        | ReadResponse::Tip(_)
+        | ReadResponse::TipPoolValues { .. }
+        | ReadResponse::BlockInfo(_)
+        | ReadResponse::Depth(_)
+        | ReadResponse::Block(_)
+        | ReadResponse::BlockAndSize(_)
+        | ReadResponse::BlockHeader { .. }
+        | ReadResponse::Transaction(_)
+        | ReadResponse::AnyChainTransaction(_)
+        | ReadResponse::TransactionIdsForBlock(_)
+        | ReadResponse::AnyChainTransactionIdsForBlock(_)
+        | ReadResponse::BlockLocator(_)
+        | ReadResponse::BlockHashes(_)
+        | ReadResponse::BlockHeaders(_)
+        | ReadResponse::UnspentBestChainUtxo(_)
+        | ReadResponse::AnyChainUtxo(_)
+        | ReadResponse::SaplingTree(_)
+        | ReadResponse::OrchardTree(_)
+        | ReadResponse::SaplingSubtrees(_)
+        | ReadResponse::OrchardSubtrees(_)
+        | ReadResponse::AddressBalance { .. }
+        | ReadResponse::AddressesTransactionIds(_)
+        | ReadResponse::AddressUtxos(_)
+        | ReadResponse::ValidBestChainTipNullifiersAndAnchors
+        | ReadResponse::BestChainNextMedianTimePast(_)
+        | ReadResponse::BlockHash(_)
+        | ReadResponse::SolutionRate(_)
+        | ReadResponse::ValidBlockProposal
+        | ReadResponse::TipBlockSize(_)
+        | ReadResponse::NonFinalizedBlocksListener(_)
+        | ReadResponse::IsTransparentOutputSpent(_) => {
+            unreachable!("unmatched response to a chain info request")
+        }
+
+        #[cfg(feature = "indexer")]
+        ReadResponse::TransactionId(_) => {
+            unreachable!("unmatched response to a state request")
+        }
     };
 
     // This RPC is typically used for display purposes, so it is not consensus-critical.

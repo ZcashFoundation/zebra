@@ -682,7 +682,25 @@ where
             .await
             .map(|response| match response {
                 zebra_state::Response::BlockLocator(block_locator) => block_locator,
-                _ => unreachable!(
+                zebra_state::Response::Committed(_)
+                | zebra_state::Response::Invalidated(_)
+                | zebra_state::Response::Reconsidered(_)
+                | zebra_state::Response::Depth(_)
+                | zebra_state::Response::Tip(_)
+                | zebra_state::Response::Transaction(_)
+                | zebra_state::Response::AnyChainTransaction(_)
+                | zebra_state::Response::UnspentBestChainUtxo(_)
+                | zebra_state::Response::Block(_)
+                | zebra_state::Response::BlockAndSize(_)
+                | zebra_state::Response::BlockHeader { .. }
+                | zebra_state::Response::Utxo(_)
+                | zebra_state::Response::BlockHashes(_)
+                | zebra_state::Response::BlockHeaders(_)
+                | zebra_state::Response::ValidBestChainTipNullifiersAndAnchors
+                | zebra_state::Response::BestChainNextMedianTimePast(_)
+                | zebra_state::Response::BlockHash(_)
+                | zebra_state::Response::KnownBlock(_)
+                | zebra_state::Response::ValidBlockProposal => unreachable!(
                     "GetBlockLocator request can only result in Response::BlockLocator"
                 ),
             })
@@ -1176,7 +1194,27 @@ where
             .map_err(|e| eyre!(e))?
         {
             zs::Response::KnownBlock(loc) => Ok(loc.is_some()),
-            _ => unreachable!("wrong response to known block request"),
+            zs::Response::Committed(_)
+            | zs::Response::Invalidated(_)
+            | zs::Response::Reconsidered(_)
+            | zs::Response::Depth(_)
+            | zs::Response::Tip(_)
+            | zs::Response::BlockLocator(_)
+            | zs::Response::Transaction(_)
+            | zs::Response::AnyChainTransaction(_)
+            | zs::Response::UnspentBestChainUtxo(_)
+            | zs::Response::Block(_)
+            | zs::Response::BlockAndSize(_)
+            | zs::Response::BlockHeader { .. }
+            | zs::Response::Utxo(_)
+            | zs::Response::BlockHashes(_)
+            | zs::Response::BlockHeaders(_)
+            | zs::Response::ValidBestChainTipNullifiersAndAnchors
+            | zs::Response::BestChainNextMedianTimePast(_)
+            | zs::Response::BlockHash(_)
+            | zs::Response::ValidBlockProposal => {
+                unreachable!("wrong response to known block request")
+            }
         }
     }
 
@@ -1231,7 +1269,15 @@ where
                 false
             }
 
-            _ => {
+            BlockDownloadVerifyError::NetworkServiceError { .. }
+            | BlockDownloadVerifyError::VerifierServiceError { .. }
+            | BlockDownloadVerifyError::DownloadFailed { .. }
+            | BlockDownloadVerifyError::AboveLookaheadHeightLimit { .. }
+            | BlockDownloadVerifyError::InvalidHeight { .. }
+            | BlockDownloadVerifyError::Invalid { .. }
+            | BlockDownloadVerifyError::ValidationRequestError { .. }
+            | BlockDownloadVerifyError::CancelledAwaitingVerifierReadiness { .. }
+            | BlockDownloadVerifyError::Timeout => {
                 // download_and_verify downcasts errors from the block verifier
                 // into VerifyChainError, and puts the result inside one of the
                 // BlockDownloadVerifyError enumerations. This downcast could

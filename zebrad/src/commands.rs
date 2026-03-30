@@ -139,7 +139,9 @@ impl Configurable<ZebradConfig> for ZebradCmd {
     fn process_config(&self, config: ZebradConfig) -> Result<ZebradConfig, FrameworkError> {
         match self {
             ZebradCmd::Start(cmd) => cmd.override_config(config),
-            _ => Ok(config),
+            ZebradCmd::CopyState(_) | ZebradCmd::Generate(_) | ZebradCmd::TipHeight(_) => {
+                Ok(config)
+            }
         }
     }
 }
