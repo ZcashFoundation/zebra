@@ -1123,8 +1123,18 @@ where
             IndexSet::new()
         };
 
-        for hash in hashes.into_iter() {
-            self.downloads.download_and_verify(hash).await?;
+        // Batch consecutive hashes into multi-block download requests.
+        // Each batch sends a single `getdata` message to one peer, reducing
+        // per-request overhead while still distributing batches across peers.
+        //
+        // The batch size adapts based on recently observed block sizes:
+        // small blocks (checkpoint sync) → larger batches, large blocks
+        // (near chain tip) → smaller batches down to 1 to stay under the
+        // peer's send buffer limit and avoid partial responses.
+        let batch_size = self.downloads.dynamic_batch_size();
+        let hash_vec: Vec<_> = hashes.into_iter().collect();
+        for batch in hash_vec.chunks(batch_size) {
+            self.downloads.download_and_verify_batch(batch).await?;
         }
 
         Ok(extra_hashes)
