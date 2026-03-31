@@ -94,7 +94,7 @@
 //! [ZIP-201]: https://zips.z.cash/zip-0201
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     convert,
     fmt::Debug,
     marker::PhantomData,
@@ -144,6 +144,14 @@ use crate::{
 
 #[cfg(test)]
 mod tests;
+
+/// The number of recently-used peers to track for tip-discovery requests
+/// (`FindBlocks` / `FindHeaders`).
+///
+/// The syncer sends `FANOUT` (3) consecutive `FindBlocks` requests and needs
+/// distinct peers for each. We track double the fanout to ensure diversity
+/// across consecutive sync rounds.
+const MAX_RECENT_TIP_PEERS: usize = 6;
 
 /// A signal sent by the [`PeerSet`] when it has no ready peers, and gets a request from Zebra.
 ///
@@ -202,6 +210,14 @@ where
     ///
     /// Used to route inventory requests to peers that are likely to have it.
     inventory_registry: InventoryRegistry,
+
+    /// Recently-used peers for tip-discovery requests (FindBlocks/FindHeaders).
+    ///
+    /// When the syncer sends multiple consecutive FindBlocks requests (fanout),
+    /// we track which peers were recently used and prefer different ones.
+    /// This ensures the syncer gets responses from distinct peers, improving
+    /// the quality and diversity of chain tip information.
+    recent_tip_peers: VecDeque<D::Key>,
 
     /// Stores requests that should be routed to peers once they are ready.
     queued_broadcast_all: Option<(
@@ -326,6 +342,7 @@ where
             // Request Routing
             inventory_registry: InventoryRegistry::new(inv_stream),
             queued_broadcast_all: None,
+            recent_tip_peers: VecDeque::new(),
 
             // Busy peers
             unready_services: FuturesUnordered::new(),
@@ -901,6 +918,59 @@ where
         .boxed()
     }
 
+    /// Routes a tip-discovery request (`FindBlocks` / `FindHeaders`) to a peer
+    /// that was not recently used for tip discovery.
+    ///
+    /// The syncer sends multiple consecutive `FindBlocks` requests (fanout) and
+    /// needs distinct peers to get diverse chain tip information. This method
+    /// uses P2C load-balancing on the subset of ready peers that haven't been
+    /// used for recent tip-discovery requests. Falls back to normal P2C if all
+    /// ready peers have been recently used.
+    fn route_tip_discovery(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
+        // Build candidate set: ready peers that are NOT in the recent list.
+        let recent: HashSet<D::Key> = self.recent_tip_peers.iter().copied().collect();
+        let fresh_peers: HashSet<D::Key> = self
+            .ready_services
+            .keys()
+            .filter(|k| !recent.contains(k))
+            .copied()
+            .collect();
+
+        // Pick from fresh peers if possible, otherwise fall back to all ready peers.
+        let selected = if fresh_peers.is_empty() {
+            self.select_ready_p2c_peer()
+        } else {
+            self.select_p2c_peer_from_list(&fresh_peers)
+        };
+
+        if let Some(key) = selected {
+            tracing::trace!(?key, fresh_peers = fresh_peers.len(), "routing tip discovery to distinct peer");
+
+            // Record this peer as recently used.
+            self.recent_tip_peers.push_back(key);
+            if self.recent_tip_peers.len() > MAX_RECENT_TIP_PEERS {
+                self.recent_tip_peers.pop_front();
+            }
+
+            let mut svc = self
+                .take_ready_service(&key)
+                .expect("selected peer must be ready");
+
+            let fut = svc.call(req);
+            self.push_unready(key, svc);
+
+            return fut.map_err(Into::into).boxed();
+        }
+
+        // No ready peers at all — same fallback as route_p2c.
+        async move {
+            tokio::task::yield_now().await;
+            Err(SharedPeerError::from(PeerError::NoReadyPeers))
+        }
+        .map_err(Into::into)
+        .boxed()
+    }
+
     /// Tries to route a request to a ready peer that advertised that inventory,
     /// falling back to a ready peer that isn't missing the inventory.
     ///
@@ -1326,6 +1396,13 @@ where
             Request::TransactionsById(ref hashes) if hashes.len() == 1 => {
                 let hash = InventoryHash::from(*hashes.iter().next().unwrap());
                 self.route_inv(req, hash)
+            }
+
+            // Route tip-discovery requests to distinct peers, so the syncer's
+            // fanout gets diverse chain tip information instead of potentially
+            // hitting the same peer multiple times.
+            Request::FindBlocks { .. } | Request::FindHeaders { .. } => {
+                self.route_tip_discovery(req)
             }
 
             // Broadcast advertisements to lots of peers
