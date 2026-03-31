@@ -475,6 +475,11 @@ where
         &self.network
     }
 
+    /// Returns `true` if the given block hash is already queued for download/verification.
+    pub fn is_queued(&self, hash: &block::Hash) -> bool {
+        self.cancel_handles.contains_key(hash)
+    }
+
     pub fn spawn_verify_task<F>(&mut self, hash: block::Hash, block_source: F)
     where
         F: Future<
@@ -702,10 +707,9 @@ where
         );
 
         self.pending.push(task);
-        assert!(
-            self.cancel_handles.insert(hash, cancel_tx).is_none(),
-            "blocks are only queued once"
-        );
+        if let Some(_old_cancel_tx) = self.cancel_handles.insert(hash, cancel_tx) {
+            debug!(?hash, "replacing cancel handle for already-queued block");
+        }
     }
 
     /// Cancel all running tasks and reset the downloader state.
