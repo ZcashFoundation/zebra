@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Changed `client::PeerInfo::new()` to take additional `services`, `lastrecv`, `banscore`, `subver`, `version`, and `connection_state` parameters
+
+### Added
+
+- Added `client::PeerInfo::services()` accessor
+- Added `client::PeerInfo::lastrecv()` accessor
+- Added `client::PeerInfo::banscore()` accessor
+- Added `client::PeerInfo::subver()` accessor
+- Added `client::PeerInfo::version()` accessor
+- Added `client::PeerInfo::connection_state()` accessor
+
 ## [6.0.1] - 2026-03-26
 
 ### Fixed

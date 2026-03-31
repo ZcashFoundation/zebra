@@ -5,6 +5,12 @@ expression: get_peer_info
 [
   {
     "addr": "127.0.0.1:18233",
-    "inbound": false
+    "services": "0000000000000001",
+    "lastrecv": "[lastrecv]",
+    "inbound": false,
+    "banscore": 0,
+    "subver": "/Zebra:2.1.0/",
+    "version": 170140,
+    "connection_state": "Responded"
   }
 ]

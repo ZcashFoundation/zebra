@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Added
+
+- Extended `getpeerinfo` RPC with `subver`, `version`, `services`, `lastrecv`, `banscore`, and `connection_state` fields
+
 ## [Zebra 4.3.0](https://github.com/ZcashFoundation/zebra/releases/tag/v4.3) - 2026-03-12
 
 This release fixes **two important security issues**:
