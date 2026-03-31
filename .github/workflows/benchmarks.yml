@@ -1,0 +1,72 @@
+name: Benchmarks
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  deployments: write
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    name: Run Benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+
+      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
+        with:
+          toolchain: stable
+
+      - name: Install cargo-criterion
+        run: cargo install cargo-criterion
+
+      - name: Run benchmarks
+        run: |
+          cargo criterion --bench groth16 --message-format=json >> bench_output.json
+          cargo criterion --bench halo2 --message-format=json >> bench_output.json
+          cargo criterion --bench sapling --message-format=json >> bench_output.json
+          cargo criterion --bench transaction --message-format=json >> bench_output.json
+          cargo criterion -p zebra-chain --bench block --features bench --message-format=json >> bench_output.json
+          cargo criterion -p zebra-chain --bench redpallas --message-format=json >> bench_output.json
+
+      - name: Convert criterion JSON to github-action-benchmark format
+        run: |
+          # cargo-criterion outputs one JSON object per line. Convert to the
+          # "customSmallerIsBetter" format: [{name, unit, value, range}, ...].
+          jq -s '[.[] | select(.reason == "benchmark-complete") | {
+            name: .id,
+            unit: .typical.unit,
+            value: .typical.estimate,
+            range: "\(.typical.lower_bound as $lo | .typical.upper_bound as $hi | (($hi - $lo) / 2 | . * 100 | round / 100)) \(.typical.unit)"
+          }]' bench_output.json > bench_results.json
+
+      - name: Generate summary
+        run: |
+          echo "## Benchmark Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Benchmark | Time | ±CI |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-----------|------|-----|" >> "$GITHUB_STEP_SUMMARY"
+          jq -r 'select(.reason == "benchmark-complete") |
+            "| \(.id) | \(.typical.estimate | . / 1e3 | if . >= 1000 then "\(. / 1000 | . * 100 | round / 100) ms" elif . >= 1 then "\(. * 100 | round / 100) µs" else "\(. * 1000 | . * 100 | round / 100) ns" end) | ±\(.typical.lower_bound as $lo | .typical.upper_bound as $hi | (($hi - $lo) / 2 / .typical.estimate * 10000 | round / 100))% |"' \
+            bench_output.json >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Total benchmarks:** $(grep -c '"benchmark-complete"' bench_output.json)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Store benchmark results
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          tool: customSmallerIsBetter
+          output-file-path: bench_results.json
+          gh-pages-branch: gh-pages
+          benchmark-data-dir-path: dev/bench
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          alert-threshold: "150%"
+          comment-on-alert: true
+          fail-on-alert: false
