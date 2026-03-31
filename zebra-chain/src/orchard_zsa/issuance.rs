@@ -2,15 +2,9 @@
 
 use std::{fmt::Debug, io};
 
-// For pallas::Base::from_repr only
-use group::ff::PrimeField;
-
 use halo2::pasta::pallas;
 
-use orchard::{
-    issuance::{IssueAction, IssueBundle, Signed},
-    note::ExtractedNoteCommitment,
-};
+use orchard::issuance::{IssueAction, IssueBundle, Signed};
 
 use zcash_primitives::transaction::components::issuance::{read_bundle, write_bundle};
 
@@ -36,14 +30,7 @@ impl From<IssueBundle<Signed>> for IssueData {
 
 impl IssueData {
     pub(crate) fn note_commitments(&self) -> impl Iterator<Item = pallas::Base> + '_ {
-        self.0.actions().iter().flat_map(|action| {
-            action.notes().iter().map(|note| {
-                // TODO: Replace this workaround with orchard `ExtractedNoteCommitment` if its inner
-                // field is made public, or if a note_commitments() method is added to IssueBundle.
-                pallas::Base::from_repr(ExtractedNoteCommitment::from(note.commitment()).to_bytes())
-                    .unwrap()
-            })
-        })
+        self.0.note_commitments()
     }
 
     /// Returns issuance actions
