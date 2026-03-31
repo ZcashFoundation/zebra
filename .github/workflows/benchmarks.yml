@@ -2,18 +2,33 @@ name: Benchmarks
 
 on:
   workflow_dispatch:
+  pull_request:
+    types: [labeled]
 
 permissions:
   contents: write
   deployments: write
+  pull-requests: write
 
 concurrency:
-  group: ${{ github.workflow }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+env:
+  BENCH_COMMAND: |
+    cargo bench --bench groth16 -- --save-baseline __BASELINE__
+    cargo bench --bench halo2 -- --save-baseline __BASELINE__
+    cargo bench --bench sapling -- --save-baseline __BASELINE__
+    cargo bench --bench transaction -- --save-baseline __BASELINE__
+    cargo bench -p zebra-chain --bench block --features bench -- --save-baseline __BASELINE__
+    cargo bench -p zebra-chain --bench redpallas -- --save-baseline __BASELINE__
+
 jobs:
+  # Runs all benchmarks and stores results for historical tracking.
+  # Triggered manually via workflow_dispatch.
   benchmark:
     name: Run Benchmarks
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -37,8 +52,6 @@ jobs:
 
       - name: Convert criterion JSON to github-action-benchmark format
         run: |
-          # cargo-criterion outputs one JSON object per line. Convert to the
-          # "customSmallerIsBetter" format: [{name, unit, value, range}, ...].
           jq -s '[.[] | select(.reason == "benchmark-complete") | {
             name: .id,
             unit: .typical.unit,
@@ -70,3 +83,97 @@ jobs:
           alert-threshold: "150%"
           comment-on-alert: true
           fail-on-alert: false
+
+  # Compares benchmarks between PR branch and base branch.
+  # Triggered by adding the "C-benchmark" label to a PR.
+  compare:
+    name: Compare Benchmarks
+    if: github.event_name == 'pull_request' && github.event.label.name == 'C-benchmark'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          fetch-depth: 0
+
+      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
+        with:
+          toolchain: stable
+
+      - name: Install critcmp
+        run: cargo install critcmp
+
+      - name: Benchmark base branch
+        run: |
+          git checkout ${{ github.event.pull_request.base.sha }}
+          cargo bench --bench groth16 -- --save-baseline base 2>/dev/null || true
+          cargo bench --bench halo2 -- --save-baseline base 2>/dev/null || true
+          cargo bench --bench sapling -- --save-baseline base 2>/dev/null || true
+          cargo bench --bench transaction -- --save-baseline base 2>/dev/null || true
+          cargo bench -p zebra-chain --bench block --features bench -- --save-baseline base 2>/dev/null || true
+          cargo bench -p zebra-chain --bench redpallas -- --save-baseline base 2>/dev/null || true
+
+      - name: Benchmark PR branch
+        run: |
+          git checkout ${{ github.event.pull_request.head.sha }}
+          cargo bench --bench groth16 -- --save-baseline pr 2>/dev/null || true
+          cargo bench --bench halo2 -- --save-baseline pr 2>/dev/null || true
+          cargo bench --bench sapling -- --save-baseline pr 2>/dev/null || true
+          cargo bench --bench transaction -- --save-baseline pr 2>/dev/null || true
+          cargo bench -p zebra-chain --bench block --features bench -- --save-baseline pr 2>/dev/null || true
+          cargo bench -p zebra-chain --bench redpallas -- --save-baseline pr 2>/dev/null || true
+
+      - name: Compare results
+        id: compare
+        run: |
+          echo "## Benchmark Comparison: base vs PR" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          critcmp base pr >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+          # Save for PR comment
+          {
+            echo 'COMMENT<<EOF'
+            echo "## Benchmark Comparison"
+            echo ""
+            echo "Comparing \`${{ github.event.pull_request.base.ref }}\` (base) vs \`${{ github.event.pull_request.head.ref }}\` (PR)"
+            echo ""
+            echo '```'
+            critcmp base pr
+            echo '```'
+            echo ""
+            echo "*Benchmarks ran on CI — results may have higher variance than local runs.*"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Post PR comment
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea #v7.0.1
+        with:
+          script: |
+            const body = process.env.COMMENT;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c =>
+              c.user.type === 'Bot' && c.body.startsWith('## Benchmark Comparison')
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+        env:
+          COMMENT: ${{ steps.compare.outputs.COMMENT }}
