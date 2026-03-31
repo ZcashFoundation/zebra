@@ -944,7 +944,11 @@ where
         };
 
         if let Some(key) = selected {
-            tracing::trace!(?key, fresh_peers = fresh_peers.len(), "routing tip discovery to distinct peer");
+            tracing::trace!(
+                ?key,
+                fresh_peers = fresh_peers.len(),
+                "routing tip discovery to distinct peer"
+            );
 
             // Record this peer as recently used.
             self.recent_tip_peers.push_back(key);
@@ -969,6 +973,50 @@ where
         }
         .map_err(Into::into)
         .boxed()
+    }
+
+    /// Routes a block download request to a ready peer whose handshake height
+    /// is at or above our current chain tip.
+    ///
+    /// During initial sync, this avoids sending block requests to peers that
+    /// connected when they were behind us — they're unlikely to have the blocks
+    /// we need. Falls back to normal P2C if no peers meet the height threshold.
+    fn route_block_download(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
+        let tip_height = self.minimum_peer_version.chain_tip_height();
+
+        if tip_height > self.network.checkpoint_list().max_height() {
+            return self.route_p2c(req);
+        }
+
+        let tall_peers: HashSet<D::Key> = self
+            .ready_services
+            .iter()
+            .filter(|(_addr, svc)| svc.remote_height() >= tip_height)
+            .map(|(addr, _svc)| *addr)
+            .collect();
+
+        if !tall_peers.is_empty() {
+            if let Some(key) = self.select_p2c_peer_from_list(&tall_peers) {
+                tracing::trace!(
+                    ?key,
+                    ?tip_height,
+                    tall_peers = tall_peers.len(),
+                    "routing block download to peer at or above chain tip"
+                );
+
+                let mut svc = self
+                    .take_ready_service(&key)
+                    .expect("selected peer must be ready");
+
+                let fut = svc.call(req);
+                self.push_unready(key, svc);
+
+                return fut.map_err(Into::into).boxed();
+            }
+        }
+
+        // No peers at our height — fall back to normal P2C.
+        self.route_p2c(req)
     }
 
     /// Tries to route a request to a ready peer that advertised that inventory,
@@ -1397,6 +1445,12 @@ where
                 let hash = InventoryHash::from(*hashes.iter().next().unwrap());
                 self.route_inv(req, hash)
             }
+
+            // Route multi-hash block requests to peers whose handshake height
+            // is at or above our current chain tip. This avoids wasting download
+            // slots on peers that are behind us during initial sync.
+            // Falls back to normal P2C if no peers are tall enough.
+            Request::BlocksByHash(ref hashes) if hashes.len() > 1 => self.route_block_download(req),
 
             // Route tip-discovery requests to distinct peers, so the syncer's
             // fanout gets diverse chain tip information instead of potentially

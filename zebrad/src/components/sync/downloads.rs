@@ -197,7 +197,11 @@ impl From<tokio::time::error::Elapsed> for BlockDownloadVerifyError {
 #[derive(Debug)]
 pub struct Downloads<ZN, ZV, ZSTip>
 where
-    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Sync + Clone + 'static,
+    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
     ZN::Future: Send,
     ZV: Service<zebra_consensus::Request, Response = block::Hash, Error = BoxError>
         + Send
@@ -268,7 +272,11 @@ where
 
 impl<ZN, ZV, ZSTip> Stream for Downloads<ZN, ZV, ZSTip>
 where
-    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Sync + Clone + 'static,
+    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
     ZN::Future: Send,
     ZV: Service<zebra_consensus::Request, Response = block::Hash, Error = BoxError>
         + Send
@@ -315,7 +323,11 @@ where
 
 impl<ZN, ZV, ZSTip> Downloads<ZN, ZV, ZSTip>
 where
-    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Sync + Clone + 'static,
+    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
     ZN::Future: Send,
     ZV: Service<zebra_consensus::Request, Response = block::Hash, Error = BoxError>
         + Send
@@ -758,8 +770,7 @@ where
     let (tx, rx) = mpsc::channel(hashes.len().max(1));
 
     tokio::spawn(async move {
-        let mut retries: HashMap<block::Hash, usize> =
-            hashes.iter().map(|h| (*h, 0)).collect();
+        let mut retries: HashMap<block::Hash, usize> = hashes.iter().map(|h| (*h, 0)).collect();
         let mut remaining = hashes;
 
         while !remaining.is_empty() {
@@ -813,8 +824,7 @@ where
                 for h in &remaining {
                     *retries.entry(*h).or_default() += 1;
                 }
-                remaining
-                    .retain(|h| retries.get(h).copied().unwrap_or(0) <= BATCH_RETRY_LIMIT);
+                remaining.retain(|h| retries.get(h).copied().unwrap_or(0) <= BATCH_RETRY_LIMIT);
             }
 
             if !remaining.is_empty() {
