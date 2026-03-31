@@ -488,7 +488,7 @@ where
                 .service(peers),
             AlwaysHedge,
             20,
-            0.95,
+            0.9,
             2 * SYNC_RESTART_DELAY,
         );
 
@@ -608,7 +608,7 @@ where
     ///
     /// Tries to extend the existing tips and download the missing blocks.
     ///
-    /// Returns `Ok(extra_hashes)` if it was able to extend once and synchronize sone of the chain.
+    /// Returns `Ok(extra_hashes)` if it was able to extend once and synchronize some of the chain.
     /// Returns `Err` if there was an unrecoverable error and restarting the synchronization is
     /// necessary.
     #[instrument(skip(self, extra_hashes))]
@@ -616,14 +616,31 @@ where
         &mut self,
         mut extra_hashes: IndexSet<block::Hash>,
     ) -> Result<IndexSet<block::Hash>, Report> {
-        // Check whether any block tasks are currently ready.
-        while let Poll::Ready(Some(rsp)) = futures::poll!(self.downloads.next()) {
-            // Some temporary errors are ignored, and syncing continues with other blocks.
-            // If it turns out they were actually important, syncing will run out of blocks, and
-            // the syncer will reset itself.
-            self.handle_block_response(rsp)?;
+        // Drain all currently ready download responses without blocking.
+        self.drain_ready_downloads().await?;
+
+        // Extend tips proactively when we've exhausted our hash queue.
+        //
+        // This runs while downloads are still in flight, overlapping tip
+        // discovery network round-trips with block downloading and verification.
+        // Previously, tip extension only happened after the pipeline drained,
+        // causing the pipeline to stall between tip extension rounds.
+        if extra_hashes.is_empty() && !self.prospective_tips.is_empty() {
+            info!(
+                tips.len = self.prospective_tips.len(),
+                in_flight = self.downloads.in_flight(),
+                extra_hashes = extra_hashes.len(),
+                lookahead_limit = self.lookahead_limit(extra_hashes.len()),
+                state_tip = ?self.latest_chain_tip.best_tip_height(),
+                "extending tips while downloads continue",
+            );
+
+            extra_hashes = self.extend_tips().await.map_err(|e| {
+                info!("temporary error extending tips: {:#}", e);
+                e
+            })?;
+            self.update_metrics();
         }
-        self.update_metrics();
 
         // Pause new downloads while the syncer or downloader are past their lookahead limits.
         //
@@ -648,7 +665,7 @@ where
             self.update_metrics();
         }
 
-        // Once we're below the lookahead limit, we can request more blocks or hashes.
+        // Once we're below the lookahead limit, queue more block downloads.
         if !extra_hashes.is_empty() {
             debug!(
                 tips.len = self.prospective_tips.len(),
@@ -661,20 +678,6 @@ where
 
             let response = self.request_blocks(extra_hashes).await;
             extra_hashes = Self::handle_hash_response(response)?;
-        } else {
-            info!(
-                tips.len = self.prospective_tips.len(),
-                in_flight = self.downloads.in_flight(),
-                extra_hashes = extra_hashes.len(),
-                lookahead_limit = self.lookahead_limit(extra_hashes.len()),
-                state_tip = ?self.latest_chain_tip.best_tip_height(),
-                "extending tips",
-            );
-
-            extra_hashes = self.extend_tips().await.map_err(|e| {
-                info!("temporary error extending tips: {:#}", e);
-                e
-            })?;
         }
         self.update_metrics();
 
@@ -728,6 +731,10 @@ where
 
         let mut download_set = IndexSet::new();
         while let Some(res) = requests.next().await {
+            // Process any completed downloads while waiting for tip responses,
+            // so verified blocks are committed during tip discovery.
+            self.drain_ready_downloads().await?;
+
             match res
                 .unwrap_or_else(|e @ JoinError { .. }| {
                     if e.is_panic() {
@@ -776,13 +783,34 @@ where
                         continue;
                     }
 
-                    let mut first_unknown = None;
-                    for (i, &hash) in hashes.iter().enumerate() {
-                        if !self.state_contains(hash).await? {
-                            first_unknown = Some(i);
-                            break;
+                    // Find the first unknown hash using a hybrid strategy.
+                    //
+                    // During initial sync, the first hash is usually unknown (we're
+                    // far behind the tip), so check it first for the fast path.
+                    // If known, binary search the rest — hashes are in chain order
+                    // (ascending height) so there's a single transition point from
+                    // known to unknown. This reduces O(n) state queries to O(log n)
+                    // for the case where many leading hashes are already known
+                    // (~9 queries instead of ~500).
+                    let first_unknown = if !self.state_contains(hashes[0]).await? {
+                        Some(0)
+                    } else {
+                        let mut lo = 1usize;
+                        let mut hi = hashes.len();
+                        while lo < hi {
+                            let mid = lo + (hi - lo) / 2;
+                            if self.state_contains(hashes[mid]).await? {
+                                lo = mid + 1;
+                            } else {
+                                hi = mid;
+                            }
                         }
-                    }
+                        if lo < hashes.len() {
+                            Some(lo)
+                        } else {
+                            None
+                        }
+                    };
 
                     debug!(hashes.len = ?hashes.len(), ?first_unknown);
 
@@ -870,9 +898,14 @@ where
 
         let mut download_set = IndexSet::new();
         debug!(tips = ?tips.len(), "trying to extend chain tips");
+
+        // Spawn all fanout requests for all tips concurrently.
+        // Previously, tips were extended one at a time, causing sequential
+        // round-trip latency. With N tips and FANOUT=3, this reduces
+        // wall-clock time from N * TIPS_RESPONSE_TIMEOUT to ~1 * TIPS_RESPONSE_TIMEOUT.
+        let mut all_responses = FuturesUnordered::new();
         for tip in tips {
             debug!(?tip, "asking peers to extend chain tip");
-            let mut responses = FuturesUnordered::new();
             for attempt in 0..FANOUT {
                 if attempt > 0 {
                     // Let other tasks run, so we're more likely to choose a different peer.
@@ -882,110 +915,113 @@ where
                 }
 
                 let ready_tip_network = self.tip_network.ready().await;
-                responses.push(tokio::spawn(ready_tip_network.map_err(|e| eyre!(e))?.call(
-                    zn::Request::FindBlocks {
+                let call = ready_tip_network
+                    .map_err(|e| eyre!(e))?
+                    .call(zn::Request::FindBlocks {
                         known_blocks: vec![tip.tip],
                         stop: None,
-                    },
-                )));
+                    });
+                all_responses.push(tokio::spawn(async move { (tip, call.await) }));
             }
-            while let Some(res) = responses.next().await {
-                match res
-                    .expect("panic in spawned extend tips request")
-                    .map_err::<Report, _>(|e| eyre!(e))
-                {
-                    Ok(zn::Response::BlockHashes(hashes)) => {
-                        debug!(first = ?hashes.first(), len = ?hashes.len());
-                        trace!(?hashes);
+        }
 
-                        // zcashd sometimes appends an unrelated hash at the
-                        // start or end of its response. Check the first hash
-                        // against the previous response, and discard mismatches.
-                        let unknown_hashes = match hashes.as_slice() {
-                            [expected_hash, rest @ ..] if expected_hash == &tip.expected_next => {
-                                rest
-                            }
-                            // If the first hash doesn't match, retry with the second.
-                            [first_hash, expected_hash, rest @ ..]
-                                if expected_hash == &tip.expected_next =>
-                            {
-                                debug!(?first_hash,
-                                                ?tip.expected_next,
-                                                ?tip.tip,
-                                                "unexpected first hash, but the second matches: using the hashes after the match");
-                                rest
-                            }
-                            // We ignore these responses
-                            [] => continue,
-                            [single_hash] => {
-                                debug!(?single_hash,
-                                                ?tip.expected_next,
-                                                ?tip.tip,
-                                                "discarding response containing a single unexpected hash");
-                                continue;
-                            }
-                            [first_hash, second_hash, rest @ ..] => {
-                                debug!(?first_hash,
-                                                ?second_hash,
-                                                rest_len = ?rest.len(),
-                                                ?tip.expected_next,
-                                                ?tip.tip,
-                                                "discarding response that starts with two unexpected hashes");
-                                continue;
-                            }
-                        };
+        // Process all responses as they arrive, regardless of which tip they belong to.
+        while let Some(join_result) = all_responses.next().await {
+            // Drain any completed downloads while processing tip responses,
+            // so verified blocks are committed during tip discovery.
+            self.drain_ready_downloads().await?;
 
-                        // We use the last hash for the tip, and we want to avoid
-                        // bad tips. So we discard the last hash. (We don't need
-                        // to worry about missed downloads, because we will pick
-                        // them up again in the next ExtendTips.)
-                        let unknown_hashes = match unknown_hashes {
-                            [] => continue,
-                            [rest @ .., _last] => rest,
-                        };
+            let (tip, result) = join_result.expect("panic in spawned extend tips request");
+            match result.map_err::<Report, _>(|e| eyre!(e)) {
+                Ok(zn::Response::BlockHashes(hashes)) => {
+                    debug!(first = ?hashes.first(), len = ?hashes.len());
+                    trace!(?hashes);
 
-                        let new_tip = if let Some(end) = unknown_hashes.rchunks_exact(2).next() {
-                            CheckedTip {
-                                tip: end[0],
-                                expected_next: end[1],
-                            }
-                        } else {
-                            debug!("discarding response that extends only one block");
-                            continue;
-                        };
-
-                        trace!(?unknown_hashes);
-
-                        // Make sure we get the same tips, regardless of the
-                        // order of peer responses
-                        if !download_set.contains(&new_tip.expected_next) {
-                            debug!(?new_tip,
-                                            "adding new prospective tip, and removing any existing tips in the new block hash list");
-                            self.prospective_tips
-                                .retain(|t| !unknown_hashes.contains(&t.expected_next));
-                            self.prospective_tips.insert(new_tip);
-                        } else {
-                            debug!(
-                                ?new_tip,
-                                "discarding prospective tip: already in download set"
-                            );
+                    // zcashd sometimes appends an unrelated hash at the
+                    // start or end of its response. Check the first hash
+                    // against the previous response, and discard mismatches.
+                    let unknown_hashes = match hashes.as_slice() {
+                        [expected_hash, rest @ ..] if expected_hash == &tip.expected_next => rest,
+                        // If the first hash doesn't match, retry with the second.
+                        [first_hash, expected_hash, rest @ ..]
+                            if expected_hash == &tip.expected_next =>
+                        {
+                            debug!(?first_hash,
+                                            ?tip.expected_next,
+                                            ?tip.tip,
+                                            "unexpected first hash, but the second matches: using the hashes after the match");
+                            rest
                         }
+                        // We ignore these responses
+                        [] => continue,
+                        [single_hash] => {
+                            debug!(?single_hash,
+                                            ?tip.expected_next,
+                                            ?tip.tip,
+                                            "discarding response containing a single unexpected hash");
+                            continue;
+                        }
+                        [first_hash, second_hash, rest @ ..] => {
+                            debug!(?first_hash,
+                                            ?second_hash,
+                                            rest_len = ?rest.len(),
+                                            ?tip.expected_next,
+                                            ?tip.tip,
+                                            "discarding response that starts with two unexpected hashes");
+                            continue;
+                        }
+                    };
 
-                        // security: the first response determines our download order
-                        //
-                        // TODO: can we make the download order independent of response order?
-                        let prev_download_len = download_set.len();
-                        download_set.extend(unknown_hashes);
-                        let new_download_len = download_set.len();
-                        let new_hashes = new_download_len - prev_download_len;
-                        debug!(new_hashes, "added hashes to download set");
-                        metrics::histogram!("sync.extend.response.hash.count")
-                            .record(new_hashes as f64);
+                    // We use the last hash for the tip, and we want to avoid
+                    // bad tips. So we discard the last hash. (We don't need
+                    // to worry about missed downloads, because we will pick
+                    // them up again in the next ExtendTips.)
+                    let unknown_hashes = match unknown_hashes {
+                        [] => continue,
+                        [rest @ .., _last] => rest,
+                    };
+
+                    let new_tip = if let Some(end) = unknown_hashes.rchunks_exact(2).next() {
+                        CheckedTip {
+                            tip: end[0],
+                            expected_next: end[1],
+                        }
+                    } else {
+                        debug!("discarding response that extends only one block");
+                        continue;
+                    };
+
+                    trace!(?unknown_hashes);
+
+                    // Make sure we get the same tips, regardless of the
+                    // order of peer responses
+                    if !download_set.contains(&new_tip.expected_next) {
+                        debug!(?new_tip,
+                                        "adding new prospective tip, and removing any existing tips in the new block hash list");
+                        self.prospective_tips
+                            .retain(|t| !unknown_hashes.contains(&t.expected_next));
+                        self.prospective_tips.insert(new_tip);
+                    } else {
+                        debug!(
+                            ?new_tip,
+                            "discarding prospective tip: already in download set"
+                        );
                     }
-                    Ok(_) => unreachable!("network returned wrong response"),
-                    // We ignore this error because we made multiple fanout requests.
-                    Err(e) => debug!(?e),
+
+                    // security: the first response determines our download order
+                    //
+                    // TODO: can we make the download order independent of response order?
+                    let prev_download_len = download_set.len();
+                    download_set.extend(unknown_hashes);
+                    let new_download_len = download_set.len();
+                    let new_hashes = new_download_len - prev_download_len;
+                    debug!(new_hashes, "added hashes to download set");
+                    metrics::histogram!("sync.extend.response.hash.count")
+                        .record(new_hashes as f64);
                 }
+                Ok(_) => unreachable!("network returned wrong response"),
+                // We ignore this error because we made multiple fanout requests.
+                Err(e) => debug!(?e),
             }
         }
 
@@ -1214,6 +1250,19 @@ where
         metrics::gauge!("sync.downloads.in_flight",).set(self.downloads.in_flight() as f64);
     }
 
+    /// Drains all currently ready download responses without blocking.
+    ///
+    /// This allows download progress to continue during tip discovery phases,
+    /// preventing the download pipeline from stalling while we wait for
+    /// network responses from tip requests.
+    async fn drain_ready_downloads(&mut self) -> Result<(), Report> {
+        while let Poll::Ready(Some(rsp)) = futures::poll!(self.downloads.next()) {
+            self.handle_block_response(rsp)?;
+        }
+        self.update_metrics();
+        Ok(())
+    }
+
     /// Return if the sync should be restarted based on the given error
     /// from the block downloader and verifier stream.
     fn should_restart_sync(e: &BlockDownloadVerifyError) -> bool {
@@ -1226,7 +1275,8 @@ where
 
             // Structural matches: direct
             BlockDownloadVerifyError::CancelledDuringDownload { .. }
-            | BlockDownloadVerifyError::CancelledDuringVerification { .. } => {
+            | BlockDownloadVerifyError::CancelledDuringVerification { .. }
+            | BlockDownloadVerifyError::CancelledAwaitingVerifierReadiness { .. } => {
                 debug!(error = ?e, "block verification was cancelled, continuing");
                 false
             }
@@ -1243,6 +1293,21 @@ where
                     error = ?e,
                     "queued duplicate block hash for download, \
                      assuming the syncer will eventually resolve duplicates, continuing"
+                );
+                false
+            }
+            BlockDownloadVerifyError::AboveLookaheadHeightLimit { .. } => {
+                debug!(
+                    error = ?e,
+                    "block height too far ahead of the chain tip, \
+                     the block was already dropped, continuing with other blocks"
+                );
+                false
+            }
+            BlockDownloadVerifyError::InvalidHeight { .. } => {
+                info!(
+                    error = ?e,
+                    "downloaded block had no valid height, skipping this block"
                 );
                 false
             }
