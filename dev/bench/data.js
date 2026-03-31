@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774956558836,
+  "lastUpdate": 1774964467411,
   "repoUrl": "https://github.com/ZcashFoundation/zebra",
   "entries": {
     "Benchmark": [
@@ -383,6 +383,390 @@ window.BENCHMARK_DATA = {
             "name": "Batch Verification/Batched verification/64",
             "value": 4360181.317500001,
             "range": "2504.23 ns",
+            "unit": "ns"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "oxarbitrage@gmail.com",
+            "name": "Alfredo Garcia",
+            "username": "oxarbitrage"
+          },
+          "committer": {
+            "email": "oxarbitrage@gmail.com",
+            "name": "Alfredo Garcia",
+            "username": "oxarbitrage"
+          },
+          "distinct": true,
+          "id": "d0b48c09316636b0471715934382a8fa97cba970",
+          "message": "ci: add on-demand benchmark workflow with github-action-benchmark\n\nAdds a workflow_dispatch workflow that runs the full benchmark suite\nusing cargo-criterion and stores results via github-action-benchmark\non the gh-pages branch for historical tracking.\n\nFeatures:\n- Selective benchmarks via comma-separated input (or 'all')\n- Configurable regression alert threshold\n- Step summary table visible in the Actions UI\n- Converts cargo-criterion JSON to customSmallerIsBetter format",
+          "timestamp": "2026-03-31T10:09:29-03:00",
+          "tree_id": "bb3dea3409b947a53d9264b102ef7f3aa216b661",
+          "url": "https://github.com/ZcashFoundation/zebra/commit/d0b48c09316636b0471715934382a8fa97cba970"
+        },
+        "date": 1774964466430,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Groth16 Verification/single proof",
+            "value": 5746879.06222222,
+            "range": "2076.89 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Groth16 Verification/unbatched/2",
+            "value": 11504395.103999998,
+            "range": "7725.1 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Groth16 Verification/unbatched/4",
+            "value": 23075703.880000006,
+            "range": "122416 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Groth16 Verification/unbatched/8",
+            "value": 45980322.315,
+            "range": "10853.44 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Groth16 Verification/unbatched/16",
+            "value": 91961314.45,
+            "range": "18575.26 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Groth16 Verification/unbatched/32",
+            "value": 184045717.23,
+            "range": "73717.96 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Groth16 Verification/unbatched/64",
+            "value": 367808647,
+            "range": "83452.2 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Groth16 Input Preparation/primary_inputs",
+            "value": 17518.3179991643,
+            "range": "62.31 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Groth16 Input Preparation/item_creation",
+            "value": 626005.0212959952,
+            "range": "207.12 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Halo2 Verification/single bundle",
+            "value": 21629928.993333336,
+            "range": "45833.32 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Halo2 Verification/unbatched (4 actions)/2",
+            "value": 43397708.585,
+            "range": "62850.04 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Halo2 Verification/unbatched (8 actions)/4",
+            "value": 86215416.18,
+            "range": "125489.37 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Halo2 Verification/unbatched (16 actions)/8",
+            "value": 173807898.45,
+            "range": "223366.36 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Halo2 Verification/unbatched (32 actions)/16",
+            "value": 347881153.17,
+            "range": "540994.96 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Halo2 Verification/unbatched (64 actions)/32",
+            "value": 695497123.67,
+            "range": "942790.61 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Sapling Verification/single bundle",
+            "value": 18587526.899999995,
+            "range": "107761.88 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Sapling Verification/unbatched/2",
+            "value": 27499145.44,
+            "range": "25837.39 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Sapling Verification/unbatched/4",
+            "value": 66678157.55,
+            "range": "18742.1 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Sapling Verification/unbatched/8",
+            "value": 123535081.4,
+            "range": "51787.06 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Sapling Verification/unbatched/16",
+            "value": 262192745.92,
+            "range": "68721.57 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Sapling Verification/unbatched/32",
+            "value": 539807353.02,
+            "range": "587789.62 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Sapling Verification/unbatched/64",
+            "value": 1069670830.24,
+            "range": "786259.24 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Sapling Verification/batched/2",
+            "value": 20901973.18333334,
+            "range": "5477.24 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Sapling Verification/batched/4",
+            "value": 35850598.76,
+            "range": "7660.22 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Sapling Verification/batched/8",
+            "value": 51063997.59,
+            "range": "135697.09 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Sapling Verification/batched/16",
+            "value": 81930907.06,
+            "range": "221905.6 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Sapling Verification/batched/32",
+            "value": 150622276.27,
+            "range": "303193.11 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Sapling Verification/batched/64",
+            "value": 270235204.35,
+            "range": "1283545.93 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Transaction Deserialization/deserialize/V1 transparent",
+            "value": 761.84462204637,
+            "range": "0.28 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Transaction Deserialization/deserialize/V2 sprout joinsplit",
+            "value": 1277.6159929279722,
+            "range": "1.14 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Transaction Deserialization/deserialize/V3 overwinter",
+            "value": 878.2312828526505,
+            "range": "0.41 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Transaction Deserialization/deserialize/V4 sapling",
+            "value": 921.5772347762334,
+            "range": "0.41 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Transaction Deserialization/deserialize/V5 orchard",
+            "value": 6196.32789568942,
+            "range": "3.92 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Transaction Serialization/serialize/V1 transparent",
+            "value": 206.5670557320345,
+            "range": "0.14 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Transaction Serialization/serialize/V2 sprout joinsplit",
+            "value": 432.0926712339389,
+            "range": "0.35 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Transaction Serialization/serialize/V3 overwinter",
+            "value": 228.13804168510154,
+            "range": "0.23 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Transaction Serialization/serialize/V4 sapling",
+            "value": 239.03823725113585,
+            "range": "0.1 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Transaction Serialization/serialize/V5 orchard",
+            "value": 497.47393730572287,
+            "range": "0.25 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "zcash_serialize_to_vec/BLOCK_TESTNET_141042",
+            "value": 181581.68655053742,
+            "range": "330.33 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "zcash_deserialize/BLOCK_TESTNET_141042",
+            "value": 535675.1095544555,
+            "range": "229.19 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "zcash_serialize_to_vec/large_multi_transaction_block",
+            "value": 2344141.425730926,
+            "range": "2226.24 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "zcash_deserialize/large_multi_transaction_block",
+            "value": 32666890.765,
+            "range": "263121.12 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "zcash_serialize_to_vec/large_single_transaction_block_many_inputs",
+            "value": 1287165.2176878275,
+            "range": "842.26 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "zcash_deserialize/large_single_transaction_block_many_inputs",
+            "value": 2287551.85613279,
+            "range": "738.17 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Batch Verification/Unbatched verification/8",
+            "value": 3463978.3733333354,
+            "range": "6598.01 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Batch Verification/Batched verification/8",
+            "value": 674326.9487409487,
+            "range": "2920.47 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Batch Verification/Unbatched verification/16",
+            "value": 6927077.625,
+            "range": "3258.3 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Batch Verification/Batched verification/16",
+            "value": 1199363.0388237033,
+            "range": "423.18 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Batch Verification/Unbatched verification/24",
+            "value": 10394229.564000001,
+            "range": "4663.59 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Batch Verification/Batched verification/24",
+            "value": 1726436.5168553274,
+            "range": "536.33 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Batch Verification/Unbatched verification/32",
+            "value": 13847611.3225,
+            "range": "4513.93 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Batch Verification/Batched verification/32",
+            "value": 2260701.1121739135,
+            "range": "9505.28 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Batch Verification/Unbatched verification/40",
+            "value": 17318543.213333335,
+            "range": "25760.93 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Batch Verification/Batched verification/40",
+            "value": 2780050.262631578,
+            "range": "1099.18 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Batch Verification/Unbatched verification/48",
+            "value": 20761524.906666666,
+            "range": "4829.1 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Batch Verification/Batched verification/48",
+            "value": 3306876.165625,
+            "range": "770.47 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Batch Verification/Unbatched verification/56",
+            "value": 24237449.096666664,
+            "range": "16416.6 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Batch Verification/Batched verification/56",
+            "value": 3834586.2650000006,
+            "range": "2129.51 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Batch Verification/Unbatched verification/64",
+            "value": 27690489.71,
+            "range": "10433.19 ns",
+            "unit": "ns"
+          },
+          {
+            "name": "Batch Verification/Batched verification/64",
+            "value": 4361154.436666665,
+            "range": "2271.57 ns",
             "unit": "ns"
           }
         ]
