@@ -5,7 +5,7 @@
 use std::{cmp::max, collections::HashSet, convert, pin::Pin, task::Poll, time::Duration};
 
 use color_eyre::eyre::{eyre, Report};
-use futures::stream::{FuturesUnordered, StreamExt};
+use futures::stream::{FuturesUnordered, SelectAll, StreamExt};
 use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
 use tokio::{
@@ -14,8 +14,8 @@ use tokio::{
     time::{sleep, timeout},
 };
 use tower::{
-    builder::ServiceBuilder, hedge::Hedge, limit::ConcurrencyLimit, retry::Retry, timeout::Timeout,
-    Service, ServiceExt,
+    buffer::Buffer, builder::ServiceBuilder, hedge::Hedge, limit::ConcurrencyLimit, retry::Retry,
+    timeout::Timeout, Service, ServiceExt,
 };
 
 use zebra_chain::{
@@ -39,7 +39,7 @@ mod status;
 #[cfg(test)]
 mod tests;
 
-use downloads::{AlwaysHedge, Downloads};
+use downloads::{download_batch, AlwaysHedge, Downloads};
 
 pub use downloads::VERIFICATION_PIPELINE_SCALING_MULTIPLIER;
 pub use gossip::{gossip_best_tip_block_hashes, BlockGossipError};
@@ -363,7 +363,10 @@ where
     downloads: Pin<
         Box<
             Downloads<
-                Hedge<ConcurrencyLimit<Retry<zn::RetryLimit, Timeout<ZN>>>, AlwaysHedge>,
+                Buffer<
+                    Hedge<ConcurrencyLimit<Retry<zn::RetryLimit, Timeout<ZN>>>, AlwaysHedge>,
+                    zn::Request,
+                >,
                 Timeout<ZV>,
                 ZSTip,
             >,
@@ -480,16 +483,19 @@ where
         // abstracts away spurious failures from individual peers
         // making a less-fallible network service, and the Hedge layer
         // tries to reduce latency of that less-fallible service.
-        let block_network = Hedge::new(
-            ServiceBuilder::new()
-                .concurrency_limit(download_concurrency_limit)
-                .retry(zn::RetryLimit::new(BLOCK_DOWNLOAD_RETRY_LIMIT))
-                .timeout(BLOCK_DOWNLOAD_TIMEOUT)
-                .service(peers),
-            AlwaysHedge,
-            20,
-            0.9,
-            2 * SYNC_RESTART_DELAY,
+        let block_network = Buffer::new(
+            Hedge::new(
+                ServiceBuilder::new()
+                    .concurrency_limit(download_concurrency_limit)
+                    .retry(zn::RetryLimit::new(BLOCK_DOWNLOAD_RETRY_LIMIT))
+                    .timeout(BLOCK_DOWNLOAD_TIMEOUT)
+                    .service(peers),
+                AlwaysHedge,
+                20,
+                0.9,
+                2 * SYNC_RESTART_DELAY,
+            ),
+            download_concurrency_limit,
         );
 
         // We apply a timeout to the verifier to avoid hangs due to missing earlier blocks.
@@ -1131,10 +1137,25 @@ where
         // small blocks (checkpoint sync) → larger batches, large blocks
         // (near chain tip) → smaller batches down to 1 to stay under the
         // peer's send buffer limit and avoid partial responses.
+        //
+        // All batches run concurrently, each with its own clone of the
+        // buffered network service. SelectAll interleaves their output
+        // streams so blocks flow to verification as soon as they arrive
+        // from any batch — no waiting for an entire batch to finish.
         let batch_size = self.downloads.dynamic_batch_size();
         let hash_vec: Vec<_> = hashes.into_iter().collect();
+
+        let mut all_batches = SelectAll::new();
         for batch in hash_vec.chunks(batch_size) {
-            self.downloads.download_and_verify_batch(batch).await?;
+            let network = self.downloads.network().clone();
+            let rx = download_batch(network, batch.to_vec());
+            all_batches.push(tokio_stream::wrappers::ReceiverStream::new(rx));
+        }
+
+        while let Some((block, addr)) = all_batches.next().await {
+            let hash = block.hash();
+            self.downloads
+                .spawn_verify_task(hash, async move { Ok((block, addr)) });
         }
 
         Ok(extra_hashes)
