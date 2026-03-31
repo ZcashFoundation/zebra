@@ -1263,6 +1263,26 @@ impl DiskDb {
         // This improves Zebra's initial sync speed slightly, as of April 2022.
         opts.optimize_level_style_compaction(Self::MEMTABLE_RAM_CACHE_MEGABYTES * ONE_MEGABYTE);
 
+        // # Write-heavy workload tuning for initial sync
+        //
+        // Larger write buffers reduce write stalls by allowing more data to
+        // accumulate in memory before flushing to L0. The default 64 MB is
+        // conservative; 256 MB per buffer with 4 buffers gives the flush
+        // thread headroom to keep up with sustained block commits.
+        opts.set_write_buffer_size(256 * ONE_MEGABYTE);
+        opts.set_max_write_buffer_number(4);
+
+        // Allow multiple background threads for flush and compaction.
+        // The default (1 flush + 1 compaction) can't keep up during sync.
+        // RocksDB splits these across flush and compaction automatically.
+        opts.set_max_background_jobs(6);
+
+        // Allow multiple memtables to be written to concurrently.
+        // This is safe with the default skiplist memtable and reduces
+        // contention when the write path and flush path overlap.
+        opts.set_allow_concurrent_memtable_write(true);
+        opts.set_enable_write_thread_adaptive_yield(true);
+
         // Increase the process open file limit if needed,
         // then use it to set RocksDB's limit.
         let open_file_limit = DiskDb::increase_open_file_limit();
