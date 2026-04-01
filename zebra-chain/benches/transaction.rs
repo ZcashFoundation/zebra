@@ -94,8 +94,6 @@ fn bench_transaction_deserialize(c: &mut Criterion) {
     }
 
     for (label, tx_bytes) in &tx_samples {
-        eprintln!("{}: {} bytes", label, tx_bytes.len());
-
         group.bench_with_input(
             BenchmarkId::new("deserialize", *label),
             tx_bytes,

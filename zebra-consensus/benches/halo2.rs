@@ -91,14 +91,6 @@ fn extract_halo2_items_from_blocks() -> Vec<Item> {
         }
     }
 
-    let total_actions: usize = items.iter().map(|item| item.request_weight()).sum();
-
-    eprintln!(
-        "Extracted {} Halo2 items ({} total actions) from test blocks",
-        items.len(),
-        total_actions
-    );
-
     assert!(
         !items.is_empty(),
         "NU5+ test blocks must contain Orchard transactions without transparent inputs"
