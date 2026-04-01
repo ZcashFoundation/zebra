@@ -5,23 +5,11 @@ on:
   pull_request:
     types: [labeled]
 
-permissions:
-  contents: write
-  deployments: write
-  pull-requests: write
+permissions: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
-
-env:
-  BENCH_COMMAND: |
-    cargo bench --bench groth16 -- --save-baseline __BASELINE__
-    cargo bench --bench halo2 -- --save-baseline __BASELINE__
-    cargo bench --bench sapling -- --save-baseline __BASELINE__
-    cargo bench --bench transaction -- --save-baseline __BASELINE__
-    cargo bench -p zebra-chain --bench block --features bench -- --save-baseline __BASELINE__
-    cargo bench -p zebra-chain --bench redpallas -- --save-baseline __BASELINE__
 
 jobs:
   # Runs all benchmarks and stores results for historical tracking.
@@ -29,10 +17,15 @@ jobs:
   benchmark:
     name: Run Benchmarks
     if: github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write
+      deployments: write
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          persist-credentials: false
 
       - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
         with:
@@ -72,7 +65,7 @@ jobs:
           echo "**Total benchmarks:** $(grep -c '"benchmark-complete"' bench_output.json)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Store benchmark results
-        uses: benchmark-action/github-action-benchmark@v1
+        uses: benchmark-action/github-action-benchmark@a60cea5bc7b49e15c1f58f411161f99e0df48372 #v1
         with:
           tool: customSmallerIsBetter
           output-file-path: bench_results.json
@@ -89,11 +82,15 @@ jobs:
   compare:
     name: Compare Benchmarks
     if: github.event_name == 'pull_request' && github.event.label.name == 'C-benchmark'
+    permissions:
+      contents: read
+      pull-requests: write
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
@@ -104,8 +101,10 @@ jobs:
         run: cargo install critcmp
 
       - name: Benchmark base branch
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          git checkout ${{ github.event.pull_request.base.sha }}
+          git checkout "$BASE_SHA"
           cargo bench --bench groth16 -- --save-baseline base 2>/dev/null || true
           cargo bench --bench halo2 -- --save-baseline base 2>/dev/null || true
           cargo bench --bench sapling -- --save-baseline base 2>/dev/null || true
@@ -114,8 +113,10 @@ jobs:
           cargo bench -p zebra-chain --bench redpallas -- --save-baseline base 2>/dev/null || true
 
       - name: Benchmark PR branch
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          git checkout ${{ github.event.pull_request.head.sha }}
+          git checkout "$HEAD_SHA"
           cargo bench --bench groth16 -- --save-baseline pr 2>/dev/null || true
           cargo bench --bench halo2 -- --save-baseline pr 2>/dev/null || true
           cargo bench --bench sapling -- --save-baseline pr 2>/dev/null || true
@@ -125,6 +126,9 @@ jobs:
 
       - name: Compare results
         id: compare
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           echo "## Benchmark Comparison: base vs PR" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
@@ -137,7 +141,7 @@ jobs:
             echo 'COMMENT<<EOF'
             echo "## Benchmark Comparison"
             echo ""
-            echo "Comparing \`${{ github.event.pull_request.base.ref }}\` (base) vs \`${{ github.event.pull_request.head.ref }}\` (PR)"
+            echo "Comparing \`${BASE_REF}\` (base) vs \`${HEAD_REF}\` (PR)"
             echo ""
             echo '```'
             critcmp base pr

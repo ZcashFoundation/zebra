@@ -101,10 +101,7 @@ fn extract_sapling_items_from_blocks() -> Vec<SaplingItem> {
         }
     }
 
-    eprintln!(
-        "Extracted {} Sapling items from test blocks",
-        items.len()
-    );
+    eprintln!("Extracted {} Sapling items from test blocks", items.len());
 
     assert!(
         !items.is_empty(),

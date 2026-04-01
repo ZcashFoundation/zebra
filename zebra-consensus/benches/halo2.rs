@@ -35,10 +35,7 @@ use std::sync::Arc;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 
 use zebra_chain::{
-    block::Block,
-    parameters::NetworkUpgrade,
-    serialization::ZcashDeserializeInto,
-    transparent,
+    block::Block, parameters::NetworkUpgrade, serialization::ZcashDeserializeInto, transparent,
 };
 
 use tower_batch_control::RequestWeight;
@@ -88,19 +85,13 @@ fn extract_halo2_items_from_blocks() -> Vec<Item> {
                 None => continue,
             };
 
-            let sighash = sighasher.sighash(
-                zebra_chain::transaction::HashType::ALL,
-                None,
-            );
+            let sighash = sighasher.sighash(zebra_chain::transaction::HashType::ALL, None);
 
             items.push(Item::new(bundle, sighash));
         }
     }
 
-    let total_actions: usize = items
-        .iter()
-        .map(|item| item.request_weight())
-        .sum();
+    let total_actions: usize = items.iter().map(|item| item.request_weight()).sum();
 
     eprintln!(
         "Extracted {} Halo2 items ({} total actions) from test blocks",

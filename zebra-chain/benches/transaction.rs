@@ -99,9 +99,7 @@ fn bench_transaction_deserialize(c: &mut Criterion) {
         group.bench_with_input(
             BenchmarkId::new("deserialize", *label),
             tx_bytes,
-            |b, bytes| {
-                b.iter(|| Transaction::zcash_deserialize(Cursor::new(bytes)).unwrap())
-            },
+            |b, bytes| b.iter(|| Transaction::zcash_deserialize(Cursor::new(bytes)).unwrap()),
         );
     }
 
@@ -114,13 +112,9 @@ fn bench_transaction_deserialize(c: &mut Criterion) {
     for (label, tx_bytes) in &tx_samples {
         let tx = Transaction::zcash_deserialize(Cursor::new(tx_bytes)).unwrap();
 
-        group.bench_with_input(
-            BenchmarkId::new("serialize", *label),
-            &tx,
-            |b, tx| {
-                b.iter(|| tx.zcash_serialize_to_vec().unwrap())
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("serialize", *label), &tx, |b, tx| {
+            b.iter(|| tx.zcash_serialize_to_vec().unwrap())
+        });
     }
 
     group.finish();

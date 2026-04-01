@@ -29,10 +29,7 @@ use bellman::groth16::PreparedVerifyingKey;
 use bls12_381::Bls12;
 
 use zebra_chain::{
-    block::Block,
-    primitives::Groth16Proof,
-    serialization::ZcashDeserializeInto,
-    sprout::JoinSplit,
+    block::Block, primitives::Groth16Proof, serialization::ZcashDeserializeInto, sprout::JoinSplit,
 };
 
 use zebra_consensus::groth16::{Description, DescriptionWrapper, Item, SPROUT};
