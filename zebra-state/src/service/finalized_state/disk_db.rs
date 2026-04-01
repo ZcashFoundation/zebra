@@ -25,7 +25,7 @@ use std::{
 use itertools::Itertools;
 use rlimit::increase_nofile_limit;
 
-use rocksdb::{ColumnFamilyDescriptor, ErrorKind, Options, ReadOptions};
+use rocksdb::{Cache, ColumnFamilyDescriptor, ErrorKind, Options, ReadOptions};
 use semver::Version;
 use zebra_chain::{parameters::Network, primitives::byte_array::increment_big_endian};
 
@@ -902,7 +902,7 @@ impl DiskDb {
     }
 
     /// The ideal open file limit for Zebra
-    const IDEAL_OPEN_FILE_LIMIT: u64 = 1024;
+    const IDEAL_OPEN_FILE_LIMIT: u64 = 4096;
 
     /// The minimum number of open files for Zebra to operate normally. Also used
     /// as the default open file limit, when the OS doesn't tell us how many
@@ -924,7 +924,7 @@ impl DiskDb {
     /// The size of the database memtable RAM cache in megabytes.
     ///
     /// <https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ#configuration-and-tuning>
-    const MEMTABLE_RAM_CACHE_MEGABYTES: usize = 128;
+    const MEMTABLE_RAM_CACHE_MEGABYTES: usize = 256;
 
     /// Build a vector of current column families on the disk and optionally any new column families.
     /// Returns an iterable collection of all column families.
@@ -1253,6 +1253,8 @@ impl DiskDb {
         // (They aren't needed for single-valued column families, but they don't hurt either.)
         block_based_opts.set_ribbon_filter(9.9);
 
+        block_based_opts.set_block_cache(&Cache::new_lru_cache(512 * ONE_MEGABYTE));
+
         // Use the recommended LZ4 compression type.
         //
         // https://github.com/facebook/rocksdb/wiki/Compression#configuration
@@ -1275,7 +1277,7 @@ impl DiskDb {
         // Allow multiple background threads for flush and compaction.
         // The default (1 flush + 1 compaction) can't keep up during sync.
         // RocksDB splits these across flush and compaction automatically.
-        opts.set_max_background_jobs(6);
+        opts.set_max_background_jobs(8);
 
         // Allow multiple memtables to be written to concurrently.
         // This is safe with the default skiplist memtable and reduces
