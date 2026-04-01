@@ -160,7 +160,13 @@ impl TransactionTemplate<NegativeOrZero> {
         }
 
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-        if let Some(zip233_amount) = zip233_amount {
+        {
+            let zip233_amount = if cfg!(zcash_unstable = "zip235") {
+                zip233_amount.unwrap_or_else(|| ((miner_fee * 6).unwrap() / 10).unwrap())
+            } else {
+                zip233_amount.unwrap_or(Amount::zero())
+            };
+
             builder.set_zip233_amount(Zatoshis::try_from(zip233_amount)?);
         }
 
