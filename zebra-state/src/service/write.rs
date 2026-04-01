@@ -406,16 +406,20 @@ impl WriteBlockWorkerTask {
                         non_finalized_state.finalize();
                     }
 
-                    // Send this block to the disk writer immediately.
-                    // The block stays in the non-finalized state so it
-                    // remains queryable until the disk writer confirms
-                    // the commit and the prune loop below removes it.
+                    // Send this block to the disk writer immediately
+                    // using the contextually verified data and treestate
+                    // already computed during the chain update. The block
+                    // stays in the non-finalized state so it remains
+                    // queryable until the disk writer confirms the commit
+                    // and the prune loop above removes it.
                     //
-                    // The bounded channel (capacity 16) provides natural
-                    // backpressure: if the disk writer falls behind, this
-                    // send blocks, throttling the pipeline.
-                    if finalize_tx.send(checkpoint_verified.into()).is_err() {
-                        warn!("disk writer channel closed unexpectedly");
+                    // The unbounded channel ensures this never blocks the
+                    // commit path; backpressure comes from the prune loop
+                    // waiting on committed_height_rx.
+                    if let Some(finalizable) = non_finalized_state.peek_finalize_tip() {
+                        if finalize_tx.send(finalizable).is_err() {
+                            warn!("disk writer channel closed unexpectedly");
+                        }
                     }
                 }
                 Err(error) => {
