@@ -338,6 +338,29 @@ impl NonFinalizedState {
         FinalizableBlock::new(best_chain_root, root_treestate)
     }
 
+    /// Returns a [`FinalizableBlock::Contextual`] for the tip of the best
+    /// chain by cloning data already computed during the chain update,
+    /// **without** mutating the non-finalized state.
+    ///
+    /// This is used to send the tip block to the disk writer immediately
+    /// after committing it to the non-finalized state, so the block
+    /// remains queryable in memory until the disk writer confirms the
+    /// commit and the prune loop removes it.
+    ///
+    /// Returns `None` if the non-finalized state is empty.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn peek_finalize_tip(&self) -> Option<FinalizableBlock> {
+        let best_chain = self.best_chain()?;
+        let tip = best_chain
+            .tip_block()
+            .expect("best chain is not empty because we just checked it");
+        let tip_height = tip.height;
+        let treestate = best_chain
+            .treestate(tip_height.into())
+            .expect("treestate exists for the tip height because the block is in the chain");
+        Some(FinalizableBlock::new(tip.clone(), treestate))
+    }
+
     /// Commit block to the non-finalized state, on top of:
     /// - an existing chain's tip, or
     /// - a newly forked chain.
