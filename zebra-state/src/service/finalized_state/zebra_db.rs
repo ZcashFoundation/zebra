@@ -100,6 +100,30 @@ impl ZebraDb {
         column_families_in_code: impl IntoIterator<Item = String>,
         read_only: bool,
     ) -> ZebraDb {
+        Self::new_with_options(
+            config,
+            db_kind,
+            format_version_in_code,
+            network,
+            debug_skip_format_upgrades,
+            column_families_in_code,
+            read_only,
+            false,
+        )
+    }
+
+    /// Opens or creates the database with optional bulk-load settings.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_options(
+        config: &Config,
+        db_kind: impl AsRef<str>,
+        format_version_in_code: &Version,
+        network: &Network,
+        debug_skip_format_upgrades: bool,
+        column_families_in_code: impl IntoIterator<Item = String>,
+        read_only: bool,
+        bulk_load: bool,
+    ) -> ZebraDb {
         let disk_version = DiskDb::try_reusing_previous_db_after_major_upgrade(
             &restorable_db_versions(),
             format_version_in_code,
@@ -130,13 +154,14 @@ impl ZebraDb {
             // changes to the default database version. Then we set the correct version in the
             // upgrade thread. We need to do the version change in this order, because the version
             // file can only be changed while we hold the RocksDB database lock.
-            db: DiskDb::new(
+            db: DiskDb::new_with_bulk_load(
                 config,
                 db_kind,
                 format_version_in_code,
                 network,
                 column_families_in_code,
                 read_only,
+                bulk_load,
             ),
         };
 

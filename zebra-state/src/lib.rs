@@ -60,7 +60,7 @@ pub use service::{
     chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip, TipAction},
     check,
     finalized_state::FinalizedState,
-    init, init_read_only,
+    init, init_bulk_load, init_read_only,
     non_finalized_state::NonFinalizedState,
     spawn_init_read_only,
     watch_receiver::WatchReceiver,

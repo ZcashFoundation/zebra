@@ -978,8 +978,7 @@ impl DiskDb {
                     cf_options.set_blob_file_size(256 * ONE_MEGABYTE);
 
                     // Compress blobs with LZ4, consistent with SST compression.
-                    cf_options
-                        .set_blob_compression_type(rocksdb::DBCompressionType::Lz4);
+                    cf_options.set_blob_compression_type(rocksdb::DBCompressionType::Lz4);
 
                     // Disable blob GC: transactions are never deleted or updated,
                     // so garbage collection would be pure wasted I/O.
@@ -1006,6 +1005,27 @@ impl DiskDb {
         column_families_in_code: impl IntoIterator<Item = String>,
         read_only: bool,
     ) -> DiskDb {
+        Self::new_with_bulk_load(
+            config,
+            db_kind,
+            format_version_in_code,
+            network,
+            column_families_in_code,
+            read_only,
+            false,
+        )
+    }
+
+    /// Opens or creates a database, optionally with bulk-load-optimized settings.
+    pub fn new_with_bulk_load(
+        config: &Config,
+        db_kind: impl AsRef<str>,
+        format_version_in_code: &Version,
+        network: &Network,
+        column_families_in_code: impl IntoIterator<Item = String>,
+        read_only: bool,
+        bulk_load: bool,
+    ) -> DiskDb {
         // If the database is ephemeral, we don't need to check the cache directory.
         if !config.ephemeral {
             DiskDb::validate_cache_dir(&config.cache_dir);
@@ -1014,7 +1034,7 @@ impl DiskDb {
         let db_kind = db_kind.as_ref();
         let path = config.db_path(db_kind, format_version_in_code.major, network);
 
-        let db_options = DiskDb::options();
+        let db_options = DiskDb::options_with_bulk_load(bulk_load);
 
         let column_families =
             DiskDb::construct_column_families(db_options.clone(), &path, column_families_in_code);
@@ -1267,7 +1287,11 @@ impl DiskDb {
     }
 
     /// Returns the database options for the finalized state database.
-    fn options() -> rocksdb::Options {
+    ///
+    /// If `bulk_load` is true, configures RocksDB for maximum sequential write
+    /// throughput (e.g. for the copy-state command). This disables auto
+    /// compaction and increases the write buffer to reduce write amplification.
+    fn options_with_bulk_load(bulk_load: bool) -> rocksdb::Options {
         let mut opts = rocksdb::Options::default();
         let mut block_based_opts = rocksdb::BlockBasedOptions::default();
 
@@ -1330,7 +1354,30 @@ impl DiskDb {
         // Set the block-based options
         opts.set_block_based_table_factory(&block_based_opts);
 
+        // Bulk load mode: optimise for maximum sequential write throughput.
+        // Disables auto-compaction so writes go straight to L0 without
+        // background merge overhead, and doubles the write buffer count so
+        // the flush thread always has a buffer ready. A manual compaction
+        // should be triggered after the bulk load finishes.
+        //
+        // See "What's the fastest way to load data into RocksDB?" in
+        // https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ
+        if bulk_load {
+            opts.set_disable_auto_compactions(true);
+            opts.set_max_write_buffer_number(8);
+            opts.set_level_zero_slowdown_writes_trigger(-1);
+            opts.set_level_zero_stop_writes_trigger(1 << 30);
+            info!(
+                "RocksDB bulk load mode enabled: auto-compaction disabled, write buffers increased"
+            );
+        }
+
         opts
+    }
+
+    /// Returns the default database options (non-bulk-load).
+    fn options() -> rocksdb::Options {
+        Self::options_with_bulk_load(false)
     }
 
     /// Calculate the database's share of `open_file_limit`

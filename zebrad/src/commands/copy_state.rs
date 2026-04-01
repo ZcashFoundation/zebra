@@ -33,7 +33,7 @@
 //!    * fetches blocks from the best finalized chain from permanent storage,
 //!      in the new format
 
-use std::{cmp::min, path::PathBuf};
+use std::{cmp::min, path::PathBuf, sync::Arc};
 
 use abscissa_core::{config, Command, FrameworkError};
 use color_eyre::eyre::{eyre, Report};
@@ -41,8 +41,8 @@ use tokio::time::Instant;
 use tower::{Service, ServiceExt};
 
 use zebra_chain::{block::Height, parameters::Network};
-use zebra_state as old_zs;
 use zebra_state as new_zs;
+use zebra_state as old_zs;
 
 use crate::{
     components::tokio::{RuntimeRun, TokioComponent},
@@ -53,6 +53,10 @@ use crate::{
 
 /// How often we log info-level progress messages
 const PROGRESS_HEIGHT_INTERVAL: u32 = 5_000;
+
+/// Number of blocks to prefetch from the source state ahead of the writer.
+/// This allows source reads and target writes to overlap.
+const PREFETCH_BLOCK_COUNT: usize = 100;
 
 /// copy cached chain state (expert users only)
 #[derive(Command, Debug, clap::Parser)]
@@ -73,6 +77,18 @@ pub struct CopyStateCmd {
                       the source state uses the main zebrad config"
     )]
     target_config_path: Option<PathBuf>,
+
+    /// Skip read-back verification of written blocks.
+    ///
+    /// By default, each block is read back from the target state and compared
+    /// to the source block to detect data corruption. Skipping this check
+    /// roughly doubles write throughput at the cost of not detecting
+    /// serialization bugs.
+    #[clap(
+        long,
+        help = "skip verifying blocks after writing (faster but less safe)"
+    )]
+    skip_verify: bool,
 
     /// Filter strings which override the config file and defaults
     #[clap(help = "tracing filters which override the zebrad.toml config")]
@@ -115,6 +131,8 @@ impl CopyStateCmd {
         source_config: old_zs::Config,
         target_config: new_zs::Config,
     ) -> Result<(), BoxError> {
+        let skip_verify = self.skip_verify;
+
         info!(
             ?source_config,
             "initializing source state service (old format)"
@@ -131,21 +149,18 @@ impl CopyStateCmd {
 
         info!(
             ?target_config, target_config_path = ?self.target_config_path,
-            "initializing target state service (new format)"
+            "initializing target state service (new format, bulk load mode)"
         );
 
         let target_start_time = Instant::now();
-        // We're not verifying UTXOs here, so we don't need the maximum checkpoint height.
-        //
-        // TODO: call Options::PrepareForBulkLoad()
-        // See "What's the fastest way to load data into RocksDB?" in
-        // https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ
+        // Use bulk-load-optimized RocksDB settings: auto-compaction is disabled
+        // and write buffers are enlarged for maximum sequential write throughput.
         let (
             mut target_state,
             _target_read_only_state_service,
             _target_latest_chain_tip,
             _target_chain_tip_change,
-        ) = new_zs::init(target_config.clone(), network, Height::MAX, 0).await;
+        ) = new_zs::init_bulk_load(target_config.clone(), network, Height::MAX, 0).await;
 
         let elapsed = target_start_time.elapsed();
         info!(?elapsed, "finished initializing target state service");
@@ -200,34 +215,59 @@ impl CopyStateCmd {
         info!(
             ?min_target_height,
             ?max_copy_height,
+            ?skip_verify,
             max_source_height = ?self.max_source_height,
             ?source_tip,
             ?initial_target_tip,
-            "starting copy from source to target"
+            prefetch_buffer = PREFETCH_BLOCK_COUNT,
+            "starting pipelined copy from source to target"
         );
 
-        let copy_start_time = Instant::now();
-        for height in min_target_height..=max_copy_height {
-            // Read block from source
-            let source_block = source_read_only_state_service
-                .ready()
-                .await?
-                .call(old_zs::ReadRequest::Block(Height(height).into()))
-                .await?;
-            let source_block = match source_block {
-                old_zs::ReadResponse::Block(Some(source_block)) => {
-                    trace!(?height, %source_block, "read source block");
-                    source_block
-                }
-                old_zs::ReadResponse::Block(None) => {
-                    Err(format!("unexpected missing source block, height: {height}",))?
-                }
+        // Pipelined copy: a prefetch task reads blocks from the source state
+        // into a bounded channel, while the main task drains the channel and
+        // writes blocks to the target state. This overlaps source I/O with
+        // target I/O for significantly higher throughput.
+        let (prefetch_tx, mut prefetch_rx) =
+            tokio::sync::mpsc::channel::<Arc<zebra_chain::block::Block>>(PREFETCH_BLOCK_COUNT);
 
-                response => Err(format!(
-                    "unexpected response to Block request, height: {height}, \n \
-                     response: {response:?}",
-                ))?,
-            };
+        // Spawn the prefetch task
+        let mut prefetch_source = source_read_only_state_service.clone();
+        let prefetch_task = tokio::spawn(async move {
+            for height in min_target_height..=max_copy_height {
+                let source_block = prefetch_source
+                    .ready()
+                    .await
+                    .map_err(|e| format!("source service ready failed at height {height}: {e}"))?
+                    .call(old_zs::ReadRequest::Block(Height(height).into()))
+                    .await
+                    .map_err(|e| format!("source block read failed at height {height}: {e}"))?;
+
+                let block = match source_block {
+                    old_zs::ReadResponse::Block(Some(block)) => block,
+                    old_zs::ReadResponse::Block(None) => {
+                        return Err(format!("unexpected missing source block, height: {height}"));
+                    }
+                    response => {
+                        return Err(format!(
+                            "unexpected response to Block request, height: {height}, \n \
+                             response: {response:?}"
+                        ));
+                    }
+                };
+
+                // If the receiver is dropped, the write loop has exited (likely due to error)
+                if prefetch_tx.send(block).await.is_err() {
+                    break;
+                }
+            }
+            Ok::<(), String>(())
+        });
+
+        // Main write loop: drain prefetched blocks and write to target
+        let copy_start_time = Instant::now();
+        let mut height = min_target_height;
+
+        while let Some(source_block) = prefetch_rx.recv().await {
             let source_block_hash = source_block.hash();
 
             // Write block to target
@@ -239,9 +279,9 @@ impl CopyStateCmd {
                 ))
                 .await?;
             let target_block_commit_hash = match target_block_commit_hash {
-                new_zs::Response::Committed(target_block_commit_hash) => {
-                    trace!(?target_block_commit_hash, "wrote target block");
-                    target_block_commit_hash
+                new_zs::Response::Committed(hash) => {
+                    trace!(?hash, "wrote target block");
+                    hash
                 }
                 response => Err(format!(
                     "unexpected response to CommitCheckpointVerifiedBlock request, height: {height}\n \
@@ -249,67 +289,96 @@ impl CopyStateCmd {
                 ))?,
             };
 
-            // Read written block from target
-            let target_block = target_state
-                .ready()
-                .await?
-                .call(new_zs::Request::Block(Height(height).into()))
-                .await?;
-            let target_block = match target_block {
-                new_zs::Response::Block(Some(target_block)) => {
-                    trace!(?height, %target_block, "read target block");
-                    target_block
-                }
-                new_zs::Response::Block(None) => {
-                    Err(format!("unexpected missing target block, height: {height}",))?
-                }
+            // Optionally read back and verify the written block
+            if !skip_verify {
+                let target_block = target_state
+                    .ready()
+                    .await?
+                    .call(new_zs::Request::Block(Height(height).into()))
+                    .await?;
+                let target_block = match target_block {
+                    new_zs::Response::Block(Some(target_block)) => {
+                        trace!(?height, %target_block, "read target block");
+                        target_block
+                    }
+                    new_zs::Response::Block(None) => {
+                        Err(format!("unexpected missing target block, height: {height}",))?
+                    }
 
-                response => Err(format!(
-                    "unexpected response to Block request, height: {height},\n \
-                     response: {response:?}",
-                ))?,
-            };
-            let target_block_data_hash = target_block.hash();
+                    response => Err(format!(
+                        "unexpected response to Block request, height: {height},\n \
+                         response: {response:?}",
+                    ))?,
+                };
+                let target_block_data_hash = target_block.hash();
 
-            // Check for data errors
-            //
-            // These checks make sure that Zebra doesn't corrupt the block data
-            // when serializing it in the new format.
-            // Zebra currently serializes `Block` structs into bytes while writing,
-            // then deserializes bytes into new `Block` structs when reading.
-            // So these checks are sufficient to detect block data corruption.
-            //
-            // If Zebra starts reusing cached `Block` structs after writing them,
-            // we'll also need to check `Block` structs created from the actual database bytes.
-            if source_block_hash != target_block_commit_hash
-                || source_block_hash != target_block_data_hash
-                || source_block != target_block
-            {
+                // Check for data errors
+                //
+                // These checks make sure that Zebra doesn't corrupt the block data
+                // when serializing it in the new format.
+                if source_block_hash != target_block_commit_hash
+                    || source_block_hash != target_block_data_hash
+                    || source_block != target_block
+                {
+                    Err(format!(
+                        "unexpected mismatch between source and target blocks,\n \
+                         max copy height: {max_copy_height:?},\n \
+                         source hash: {source_block_hash:?},\n \
+                         target commit hash: {target_block_commit_hash:?},\n \
+                         target data hash: {target_block_data_hash:?},\n \
+                         source block: {source_block:?},\n \
+                         target block: {target_block:?}",
+                    ))?;
+                }
+            } else if source_block_hash != target_block_commit_hash {
+                // Even with --skip-verify, check the commit hash
                 Err(format!(
-                    "unexpected mismatch between source and target blocks,\n \
-                     max copy height: {max_copy_height:?},\n \
-                     source hash: {source_block_hash:?},\n \
-                     target commit hash: {target_block_commit_hash:?},\n \
-                     target data hash: {target_block_data_hash:?},\n \
-                     source block: {source_block:?},\n \
-                     target block: {target_block:?}",
+                    "commit hash mismatch at height {height}: \
+                     source {source_block_hash:?} != target {target_block_commit_hash:?}",
                 ))?;
             }
 
             // Log progress
             if height % PROGRESS_HEIGHT_INTERVAL == 0 {
                 let elapsed = copy_start_time.elapsed();
+                let blocks_copied = height - min_target_height + 1;
+                let blocks_per_sec = if elapsed.as_secs() > 0 {
+                    blocks_copied as f64 / elapsed.as_secs_f64()
+                } else {
+                    0.0
+                };
                 info!(
                     ?height,
                     ?max_copy_height,
                     ?elapsed,
+                    blocks_per_sec = format!("{blocks_per_sec:.0}"),
                     "copied block from source to target"
                 );
             }
+
+            height += 1;
+        }
+
+        // Check that the prefetch task completed successfully
+        match prefetch_task.await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => Err(e)?,
+            Err(e) => Err(format!("prefetch task panicked: {e}"))?,
         }
 
         let elapsed = copy_start_time.elapsed();
-        info!(?max_copy_height, ?elapsed, "finished copying blocks");
+        let total_blocks = max_copy_height.saturating_sub(min_target_height) + 1;
+        let blocks_per_sec = if elapsed.as_secs() > 0 {
+            total_blocks as f64 / elapsed.as_secs_f64()
+        } else {
+            0.0
+        };
+        info!(
+            ?max_copy_height,
+            ?elapsed,
+            blocks_per_sec = format!("{blocks_per_sec:.0}"),
+            "finished copying blocks"
+        );
 
         info!(?max_copy_height, "fetching final target tip");
 
@@ -396,6 +465,7 @@ impl Runnable for CopyStateCmd {
         info!(
             max_source_height = ?self.max_source_height,
             target_config_path = ?self.target_config_path,
+            skip_verify = ?self.skip_verify,
             "starting cached chain state copy"
         );
         let rt = APPLICATION

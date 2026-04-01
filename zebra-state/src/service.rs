@@ -302,17 +302,44 @@ impl StateService {
         max_checkpoint_height: block::Height,
         checkpoint_verify_concurrency_limit: usize,
     ) -> (Self, ReadStateService, LatestChainTip, ChainTipChange) {
+        Self::new_with_options(
+            config,
+            network,
+            max_checkpoint_height,
+            checkpoint_verify_concurrency_limit,
+            false,
+        )
+        .await
+    }
+
+    /// Creates a new state service, optionally with bulk-load-optimized RocksDB settings.
+    pub async fn new_with_options(
+        config: Config,
+        network: &Network,
+        max_checkpoint_height: block::Height,
+        checkpoint_verify_concurrency_limit: usize,
+        bulk_load: bool,
+    ) -> (Self, ReadStateService, LatestChainTip, ChainTipChange) {
         let (finalized_state, finalized_tip, timer) = {
             let config = config.clone();
             let network = network.clone();
             tokio::task::spawn_blocking(move || {
                 let timer = CodeTimer::start();
-                let finalized_state = FinalizedState::new(
-                    &config,
-                    &network,
-                    #[cfg(feature = "elasticsearch")]
-                    true,
-                );
+                let finalized_state = if bulk_load {
+                    FinalizedState::new_bulk_load(
+                        &config,
+                        &network,
+                        #[cfg(feature = "elasticsearch")]
+                        false,
+                    )
+                } else {
+                    FinalizedState::new(
+                        &config,
+                        &network,
+                        #[cfg(feature = "elasticsearch")]
+                        true,
+                    )
+                };
                 timer.finish_desc("opening finalized state database");
 
                 let timer = CodeTimer::start();
@@ -1758,6 +1785,39 @@ pub async fn init(
             network,
             max_checkpoint_height,
             checkpoint_verify_concurrency_limit,
+        )
+        .await;
+
+    (
+        BoxService::new(state_service),
+        read_only_state_service,
+        latest_chain_tip,
+        chain_tip_change,
+    )
+}
+
+/// Initialize a state service with RocksDB bulk-load optimizations.
+///
+/// This disables auto-compaction and increases write buffers for maximum
+/// sequential write throughput. Intended for the `copy-state` command.
+pub async fn init_bulk_load(
+    config: Config,
+    network: &Network,
+    max_checkpoint_height: block::Height,
+    checkpoint_verify_concurrency_limit: usize,
+) -> (
+    BoxService<Request, Response, BoxError>,
+    ReadStateService,
+    LatestChainTip,
+    ChainTipChange,
+) {
+    let (state_service, read_only_state_service, latest_chain_tip, chain_tip_change) =
+        StateService::new_with_options(
+            config,
+            network,
+            max_checkpoint_height,
+            checkpoint_verify_concurrency_limit,
+            true,
         )
         .await;
 

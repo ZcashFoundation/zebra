@@ -168,6 +168,45 @@ impl FinalizedState {
         #[cfg(feature = "elasticsearch")] enable_elastic_db: bool,
         read_only: bool,
     ) -> Self {
+        Self::new_with_all_options(
+            config,
+            network,
+            debug_skip_format_upgrades,
+            #[cfg(feature = "elasticsearch")]
+            enable_elastic_db,
+            read_only,
+            false,
+        )
+    }
+
+    /// Returns an on-disk database instance optimized for bulk loading.
+    /// Disables auto-compaction and increases write buffers for maximum
+    /// sequential write throughput.
+    pub fn new_bulk_load(
+        config: &Config,
+        network: &Network,
+        #[cfg(feature = "elasticsearch")] enable_elastic_db: bool,
+    ) -> Self {
+        Self::new_with_all_options(
+            config,
+            network,
+            false,
+            #[cfg(feature = "elasticsearch")]
+            enable_elastic_db,
+            false,
+            true,
+        )
+    }
+
+    /// Returns an on-disk database instance with all configurable options.
+    fn new_with_all_options(
+        config: &Config,
+        network: &Network,
+        debug_skip_format_upgrades: bool,
+        #[cfg(feature = "elasticsearch")] enable_elastic_db: bool,
+        read_only: bool,
+        bulk_load: bool,
+    ) -> Self {
         #[cfg(feature = "elasticsearch")]
         let elastic_db = if enable_elastic_db {
             use elasticsearch::{
@@ -196,7 +235,7 @@ impl FinalizedState {
             None
         };
 
-        let db = ZebraDb::new(
+        let db = ZebraDb::new_with_options(
             config,
             STATE_DATABASE_KIND,
             &state_database_format_version_in_code(),
@@ -206,6 +245,7 @@ impl FinalizedState {
                 .iter()
                 .map(ToString::to_string),
             read_only,
+            bulk_load,
         );
 
         #[cfg(feature = "elasticsearch")]

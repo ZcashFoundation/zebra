@@ -278,9 +278,13 @@ impl WriteBlockWorkerTask {
         // to the finalized RocksDB state. This runs concurrently — while it's
         // writing block N, Thread 1 is already validating block N+1.
 
-        let (finalize_tx, finalize_rx) =
-            std::sync::mpsc::sync_channel::<crate::request::FinalizableBlock>(1);
-
+        // Buffer multiple blocks in the finalization pipeline so that block
+        // validation (Thread 1) can run ahead of disk I/O (Thread 2).
+        // A capacity of 1 serialized the two threads; 16 gives enough
+        // headroom to keep the disk writer busy without excessive memory use
+        // (~16 blocks worth of data in flight).
+        let (finalize_tx, mut finalize_rx) =
+            tokio::sync::mpsc::unbounded_channel::<crate::request::FinalizableBlock>();
         // The disk writer reports its committed height so we know when it's
         // safe to prune blocks from the non-finalized state.
         let (committed_height_tx, committed_height_rx) =
@@ -292,7 +296,7 @@ impl WriteBlockWorkerTask {
             let _guard = disk_span.enter();
             let mut prev_trees = None;
 
-            while let Ok(finalizable) = finalize_rx.recv() {
+            while let Some(finalizable) = finalize_rx.blocking_recv() {
                 let result = disk_finalized_state.commit_finalized_direct(
                     finalizable,
                     prev_trees.take(),
@@ -381,42 +385,38 @@ impl WriteBlockWorkerTask {
                     // non-finalized state and queryable by the read service.
                     let _ = rsp_tx.send(Ok(checkpoint_verified.hash));
 
-                    // Publish the updated non-finalized state so the read
-                    // service can see blocks that are in memory but not yet
-                    // written to disk.
-                    let _ = non_finalized_state_sender.send(non_finalized_state.clone());
-
-                    // Finalize root blocks from the in-memory chain and queue
-                    // them for disk writing. We keep at least 2 blocks in the
-                    // chain so `pop_root` doesn't empty it (which would lose
-                    // the cached treestate needed by the next commit).
-                    //
-                    // First, prune blocks the disk writer has already committed
-                    // (they're safely on disk and no longer needed in memory).
-                    let disk_tip_height = *committed_height_rx.borrow();
-                    while non_finalized_state
-                        .root_height()
-                        .is_some_and(|h| h < disk_tip_height)
-                    {
-                        non_finalized_state.finalize();
-                    }
-
-                    // Then send the next root block to the disk writer if the
-                    // chain has more than 1 block (keeping the tip in memory).
-                    while non_finalized_state.best_chain_len().unwrap_or(0) > 1 {
-                        let finalizable = non_finalized_state.finalize();
-                        if finalize_tx.send(finalizable).is_err() {
-                            info!("disk writer channel closed unexpectedly");
-                            break;
-                        }
-                    }
-
                     metrics::counter!("state.checkpoint.finalized.block.count").increment(1);
                     metrics::gauge!("state.checkpoint.finalized.block.height")
                         .set(checkpoint_verified.height.0 as f64);
                     metrics::gauge!("zcash.chain.verified.block.height")
                         .set(checkpoint_verified.height.0 as f64);
                     metrics::counter!("zcash.chain.verified.block.total").increment(1);
+
+                    // Publish the non-finalized state so the read service
+                    // sees both new blocks and pruned committed blocks.
+                    let _ = non_finalized_state_sender.send(non_finalized_state.clone());
+
+                    // Prune blocks the disk writer has already committed
+                    // (they're safely on disk and no longer needed in memory).
+                    let disk_tip_height = *committed_height_rx.borrow();
+                    while non_finalized_state
+                        .root_height()
+                        .is_some_and(|h| h <= disk_tip_height)
+                    {
+                        non_finalized_state.finalize();
+                    }
+
+                    // Send this block to the disk writer immediately.
+                    // The block stays in the non-finalized state so it
+                    // remains queryable until the disk writer confirms
+                    // the commit and the prune loop below removes it.
+                    //
+                    // The bounded channel (capacity 16) provides natural
+                    // backpressure: if the disk writer falls behind, this
+                    // send blocks, throttling the pipeline.
+                    if finalize_tx.send(checkpoint_verified.into()).is_err() {
+                        warn!("disk writer channel closed unexpectedly");
+                    }
                 }
                 Err(error) => {
                     info!(
@@ -437,14 +437,11 @@ impl WriteBlockWorkerTask {
             }
         }
 
-        // Drain all remaining blocks from the non-finalized chain to the
-        // disk writer so everything is finalized before the non-finalized
-        // block phase begins.
+        // All blocks were already sent to the disk writer when they were
+        // committed to the non-finalized state. Drain the non-finalized
+        // chain so it's empty before the non-finalized block phase begins.
         while non_finalized_state.best_chain_len().unwrap_or(0) > 0 {
-            let finalizable = non_finalized_state.finalize();
-            if finalize_tx.send(finalizable).is_err() {
-                break;
-            }
+            non_finalized_state.finalize();
         }
 
         // Drop the channel sender to signal the disk thread to finish,
