@@ -957,6 +957,35 @@ impl DiskDb {
                     );
                 }
 
+                // Use BlobDB for the transaction data column family.
+                //
+                // Transaction values are large (hundreds of bytes to 100KB+),
+                // write-once, and never updated or deleted during normal operation.
+                // Storing them in separate blob files avoids rewriting the full
+                // transaction bytes during LSM compaction, reducing write
+                // amplification by ~5-10x for this column family.
+                if cf_name == "tx_by_loc" {
+                    const ONE_MEGABYTE: u64 = 1024 * 1024;
+
+                    cf_options.set_enable_blob_files(true);
+
+                    // Transactions smaller than 256 bytes are rare (only some
+                    // early coinbase transactions). Keeping them inline avoids
+                    // the extra blob-file I/O for tiny values.
+                    cf_options.set_min_blob_size(256);
+
+                    // 256 MB blob files, matching the write buffer size.
+                    cf_options.set_blob_file_size(256 * ONE_MEGABYTE);
+
+                    // Compress blobs with LZ4, consistent with SST compression.
+                    cf_options
+                        .set_blob_compression_type(rocksdb::DBCompressionType::Lz4);
+
+                    // Disable blob GC: transactions are never deleted or updated,
+                    // so garbage collection would be pure wasted I/O.
+                    cf_options.set_enable_blob_gc(false);
+                }
+
                 rocksdb::ColumnFamilyDescriptor::new(cf_name, cf_options.clone())
             })
     }
