@@ -267,49 +267,105 @@ impl WriteBlockWorkerTask {
         let mut last_zebra_mined_log_height = None;
         let mut prev_finalized_note_commitment_trees = None;
 
-        // Pipelined checkpoint sync: two-thread architecture.
+        // Pipelined checkpoint sync: three-thread architecture.
         //
         // Thread 1 (this thread): Receives checkpoint blocks, commits them to
         // the in-memory NonFinalizedState (fast), and sends FinalizableBlocks
-        // to Thread 2 for disk writing. This decouples block validation from
-        // RocksDB I/O, allowing validation to run at memory speed.
+        // along with a snapshot of the non-finalized state to Thread 2.
         //
-        // Thread 2 (spawned below): Receives FinalizableBlocks and writes them
-        // to the finalized RocksDB state. This runs concurrently — while it's
-        // writing block N, Thread 1 is already validating block N+1.
+        // Thread 2 (pre-fetch, spawned below): Receives FinalizableBlocks,
+        // converts them to FinalizedBlocks (computing treestates), and
+        // pre-fetches spent UTXO data using batched multi_get_cf. Sends the
+        // block + pre-fetched data to Thread 3.
+        //
+        // Thread 3 (disk writer, spawned below): Receives FinalizedBlocks with
+        // pre-fetched UTXO data and writes them to RocksDB without needing
+        // per-input database lookups.
 
-        // Buffer multiple blocks in the finalization pipeline so that block
-        // validation (Thread 1) can run ahead of disk I/O (Thread 2).
-        // A capacity of 1 serialized the two threads; 16 gives enough
-        // headroom to keep the disk writer busy without excessive memory use
-        // (~16 blocks worth of data in flight).
-        let (finalize_tx, mut finalize_rx) =
-            tokio::sync::mpsc::unbounded_channel::<crate::request::FinalizableBlock>();
+        // Channel from Thread 1 → Thread 2: carries blocks + non-finalized state.
+        let (finalize_tx, mut finalize_rx) = tokio::sync::mpsc::unbounded_channel::<(
+            crate::request::FinalizableBlock,
+            NonFinalizedState,
+        )>();
+
+        // Channel from Thread 2 → Thread 3: carries finalized blocks + prefetched data.
+        type PrefetchedMessage = (
+            crate::request::FinalizableBlock,
+            crate::service::finalized_state::PrefetchedBlockWriteData,
+        );
+        let (prefetched_tx, prefetched_rx) = std::sync::mpsc::channel::<PrefetchedMessage>();
+
         // The disk writer reports its committed height so we know when it's
         // safe to prune blocks from the non-finalized state.
         let (committed_height_tx, committed_height_rx) =
             tokio::sync::watch::channel::<Height>(Height(0));
 
+        // Thread 2: Pre-fetch spent UTXOs using batched multi_get_cf.
+        let prefetch_db = finalized_state.db.clone();
+        let prefetch_span = tracing::info_span!("finalized_utxo_prefetch");
+        let prefetch_thread = std::thread::spawn(move || {
+            let _guard = prefetch_span.enter();
+
+            while let Some((finalizable, nfs_snapshot)) = finalize_rx.blocking_recv() {
+                let (block, height, new_outputs) = match &finalizable {
+                    crate::request::FinalizableBlock::Checkpoint {
+                        checkpoint_verified,
+                    } => (
+                        checkpoint_verified.block.clone(),
+                        checkpoint_verified.height,
+                        checkpoint_verified.new_outputs.clone(),
+                    ),
+                    crate::request::FinalizableBlock::Contextual {
+                        contextually_verified,
+                        ..
+                    } => (
+                        contextually_verified.block.clone(),
+                        contextually_verified.height,
+                        contextually_verified.new_outputs.clone(),
+                    ),
+                };
+
+                // Get unspent UTXOs from the non-finalized state (in-memory).
+                let nfs_utxos = nfs_snapshot
+                    .best_chain()
+                    .map(|chain| chain.unspent_utxos())
+                    .unwrap_or_default();
+
+                let prefetched =
+                    prefetch_db.fetch_block_write_data(&block, height, &new_outputs, &nfs_utxos);
+
+                if prefetched_tx.send((finalizable, prefetched)).is_err() {
+                    info!("disk writer channel closed, stopping prefetch");
+                    break;
+                }
+            }
+        });
+
+        // Thread 3: Disk writer — receives pre-fetched blocks and writes to DB.
         let mut disk_finalized_state = finalized_state.clone();
         let disk_span = tracing::info_span!("finalized_disk_writer");
         let disk_thread = std::thread::spawn(move || {
             let _guard = disk_span.enter();
             let mut prev_trees = None;
+            let mut prev_history_tree = None;
 
-            while let Some(finalizable) = finalize_rx.blocking_recv() {
-                let result = disk_finalized_state.commit_finalized_direct(
+            while let Ok((finalizable, prefetched)) = prefetched_rx.recv() {
+                let result = disk_finalized_state.commit_finalized_direct_with_trees(
                     finalizable,
                     prev_trees.take(),
+                    prev_history_tree.take(),
                     "commit checkpoint-verified request",
+                    Some(prefetched),
                 );
 
                 match result {
-                    Ok((_hash, note_commitment_trees)) => {
+                    Ok((_hash, note_commitment_trees, history_tree)) => {
                         let height = disk_finalized_state
                             .db
                             .finalized_tip_height()
                             .expect("just committed a block");
                         prev_trees = Some(note_commitment_trees);
+                        prev_history_tree = Some(history_tree);
                         let _ = committed_height_tx.send(height);
                     }
                     Err(error) => {
@@ -417,7 +473,10 @@ impl WriteBlockWorkerTask {
                     // commit path; backpressure comes from the prune loop
                     // waiting on committed_height_rx.
                     if let Some(finalizable) = non_finalized_state.peek_finalize_tip() {
-                        if finalize_tx.send(finalizable).is_err() {
+                        if finalize_tx
+                            .send((finalizable, non_finalized_state.clone()))
+                            .is_err()
+                        {
                             warn!("disk writer channel closed unexpectedly");
                         }
                     }
@@ -448,9 +507,13 @@ impl WriteBlockWorkerTask {
             non_finalized_state.finalize();
         }
 
-        // Drop the channel sender to signal the disk thread to finish,
-        // then wait for it to commit all remaining blocks.
+        // Drop the channel sender to signal the prefetch and disk threads
+        // to finish, then wait for them to complete all remaining blocks.
+        // Dropping finalize_tx → prefetch thread exits → drops prefetched_tx → disk thread exits.
         drop(finalize_tx);
+        if let Err(panic) = prefetch_thread.join() {
+            std::panic::resume_unwind(panic);
+        }
         if let Err(panic) = disk_thread.join() {
             std::panic::resume_unwind(panic);
         }

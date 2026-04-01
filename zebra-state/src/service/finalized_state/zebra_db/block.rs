@@ -49,6 +49,16 @@ use crate::{
 #[cfg(feature = "indexer")]
 use crate::request::Spend;
 
+/// UTXO data pre-fetched from the database for a block write, so
+/// [`write_block`](ZebraDb::write_block) does not need per-input DB reads
+/// for spent UTXOs.
+pub struct PrefetchedBlockWriteData {
+    /// Spent UTXOs with their output locations.
+    pub spent_utxos: Vec<(transparent::OutPoint, OutputLocation, transparent::Utxo)>,
+    /// New outputs indexed by output location.
+    pub new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
+}
+
 #[cfg(test)]
 mod tests;
 
@@ -416,12 +426,156 @@ impl ZebraDb {
 
     // Write block methods
 
-    /// Write `finalized` to the finalized state.
+    /// Pre-fetches spent UTXO data needed by [`write_block`](Self::write_block).
     ///
-    /// Uses:
-    /// - `history_tree`: the current tip's history tree
-    /// - `network`: the configured network
-    /// - `source`: the source of the block in log messages
+    /// Uses batched `multi_get_cf` to look up all spent UTXOs in two
+    /// round-trips instead of per-input queries. Can be called from a
+    /// separate thread to overlap DB reads with disk writes.
+    ///
+    /// `non_finalized_utxos` should contain UTXOs from the non-finalized
+    /// state that may not be on disk yet.
+    pub fn fetch_block_write_data(
+        &self,
+        block: &Block,
+        height: Height,
+        new_outputs: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+        non_finalized_utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    ) -> PrefetchedBlockWriteData {
+        let tx_hash_indexes: HashMap<transaction::Hash, usize> = block
+            .transactions
+            .iter()
+            .enumerate()
+            .map(|(index, tx)| (tx.hash(), index))
+            .collect();
+
+        // Build a set of tx hashes in this block so we can identify same-block spends.
+        let block_tx_hashes: HashSet<transaction::Hash> = tx_hash_indexes.keys().copied().collect();
+
+        let new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo> = new_outputs
+            .iter()
+            .map(|(outpoint, ordered_utxo)| {
+                (
+                    lookup_out_loc(height, outpoint, &tx_hash_indexes),
+                    ordered_utxo.utxo.clone(),
+                )
+            })
+            .collect();
+
+        // Collect all spent outpoints.
+        let spent_outpoints: Vec<transparent::OutPoint> = block
+            .transactions
+            .iter()
+            .flat_map(|tx| tx.inputs().iter())
+            .flat_map(|input| input.outpoint())
+            .collect();
+
+        // Resolve spent UTXOs: same-block from new_outputs, non-finalized from
+        // the in-memory state, and the rest from disk via batched multi_get_cf.
+        let mut spent_utxos: Vec<
+            Option<(transparent::OutPoint, OutputLocation, transparent::Utxo)>,
+        > = vec![None; spent_outpoints.len()];
+        let mut db_lookup_indices = Vec::new();
+        let mut db_lookup_tx_hashes = Vec::new();
+
+        for (i, outpoint) in spent_outpoints.iter().enumerate() {
+            if block_tx_hashes.contains(&outpoint.hash) {
+                // Same-block spend — resolve entirely from new_outputs.
+                let out_loc = lookup_out_loc(height, outpoint, &tx_hash_indexes);
+                let utxo = new_outputs
+                    .get(outpoint)
+                    .map(|ordered| ordered.utxo.clone())
+                    .expect("same-block UTXO must be in new_outputs");
+                spent_utxos[i] = Some((*outpoint, out_loc, utxo));
+            } else {
+                // Need a DB lookup for the transaction location (and
+                // possibly the UTXO itself if it's not in the
+                // non-finalized state).
+                db_lookup_indices.push(i);
+                db_lookup_tx_hashes.push(outpoint.hash);
+            }
+        }
+
+        if !db_lookup_indices.is_empty() {
+            // Batch 1: look up all transaction locations from disk.
+            let tx_loc_by_hash_cf = self.db.cf_handle("tx_loc_by_hash").unwrap();
+            let tx_locations: HashMap<transaction::Hash, TransactionLocation> = self
+                .db
+                .multi_get_cf(&tx_loc_by_hash_cf, &db_lookup_tx_hashes);
+
+            // Split into outpoints found on disk vs those only in the
+            // non-finalized state (whose creating block hasn't been
+            // written to disk yet by the lagging disk writer).
+            let mut disk_indices = Vec::new();
+            let mut disk_output_locations = Vec::new();
+
+            for (j, &idx) in db_lookup_indices.iter().enumerate() {
+                let outpoint = &spent_outpoints[idx];
+
+                if let Some(tl) = tx_locations.get(&outpoint.hash) {
+                    let out_loc = OutputLocation::from_outpoint(*tl, outpoint);
+                    disk_indices.push((j, idx, out_loc));
+                    disk_output_locations.push(out_loc);
+                } else if let Some(ordered) = non_finalized_utxos.get(outpoint) {
+                    // UTXO is in the non-finalized state but its creating
+                    // block hasn't been written to disk yet. We have the
+                    // UTXO value; construct a location from its metadata.
+                    let out_loc = OutputLocation::from_outpoint(
+                        TransactionLocation::from_usize(
+                            ordered.utxo.height,
+                            ordered.tx_index_in_block,
+                        ),
+                        outpoint,
+                    );
+                    spent_utxos[idx] = Some((*outpoint, out_loc, ordered.utxo.clone()));
+                } else {
+                    panic!(
+                        "spent UTXO not found in finalized DB, non-finalized state, or same block: \
+                         outpoint {outpoint:?}, block height {height:?}"
+                    );
+                }
+            }
+
+            // Batch 2: look up UTXOs that are on disk.
+            if !disk_output_locations.is_empty() {
+                let utxo_by_out_loc_cf = self.db.cf_handle("utxo_by_out_loc").unwrap();
+                let utxo_outputs: HashMap<OutputLocation, transparent::Output> = self
+                    .db
+                    .multi_get_cf(&utxo_by_out_loc_cf, &disk_output_locations);
+
+                for (_, idx, out_loc) in &disk_indices {
+                    let outpoint = spent_outpoints[*idx];
+                    let utxo = utxo_outputs
+                        .get(out_loc)
+                        .map(|output| transparent::Utxo {
+                            output: output.clone(),
+                            height: out_loc.height(),
+                            from_coinbase: out_loc.transaction_index().as_usize() == 0,
+                        })
+                        .or_else(|| {
+                            non_finalized_utxos
+                                .get(&outpoint)
+                                .map(|ordered| ordered.utxo.clone())
+                        })
+                        .expect("UTXO must be in finalized state or non-finalized state");
+
+                    spent_utxos[*idx] = Some((outpoint, *out_loc, utxo));
+                }
+            }
+        }
+
+        PrefetchedBlockWriteData {
+            spent_utxos: spent_utxos
+                .into_iter()
+                .map(|r| r.expect("all spent UTXOs must be resolved"))
+                .collect(),
+            new_outputs_by_out_loc,
+        }
+    }
+
+    /// Writes `finalized` to the on-disk database.
+    ///
+    /// All data needed for the write is provided in `prefetched` — this method
+    /// does **no database reads**.
     ///
     /// # Errors
     ///
@@ -435,58 +589,12 @@ impl ZebraDb {
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
         network: &Network,
         source: &str,
+        prefetched: PrefetchedBlockWriteData,
     ) -> Result<block::Hash, CommitCheckpointVerifiedError> {
-        let tx_hash_indexes: HashMap<transaction::Hash, usize> = finalized
-            .transaction_hashes
-            .iter()
-            .enumerate()
-            .map(|(index, hash)| (*hash, index))
-            .collect();
-
-        // Get a list of the new UTXOs in the format we need for database updates.
-        //
-        // TODO: index new_outputs by TransactionLocation,
-        //       simplify the spent_utxos location lookup code,
-        //       and remove the extra new_outputs_by_out_loc argument
-        let new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo> = finalized
-            .new_outputs
-            .iter()
-            .map(|(outpoint, ordered_utxo)| {
-                (
-                    lookup_out_loc(finalized.height, outpoint, &tx_hash_indexes),
-                    ordered_utxo.utxo.clone(),
-                )
-            })
-            .collect();
-
-        // Get a list of the spent UTXOs, before we delete any from the database
-        let spent_utxos: Vec<(transparent::OutPoint, OutputLocation, transparent::Utxo)> =
-            finalized
-                .block
-                .transactions
-                .iter()
-                .flat_map(|tx| tx.inputs().iter())
-                .flat_map(|input| input.outpoint())
-                .map(|outpoint| {
-                    (
-                        outpoint,
-                        // Some utxos are spent in the same block, so they will be in
-                        // `tx_hash_indexes` and `new_outputs`
-                        self.output_location(&outpoint).unwrap_or_else(|| {
-                            lookup_out_loc(finalized.height, &outpoint, &tx_hash_indexes)
-                        }),
-                        self.utxo(&outpoint)
-                            .map(|ordered_utxo| ordered_utxo.utxo)
-                            .or_else(|| {
-                                finalized
-                                    .new_outputs
-                                    .get(&outpoint)
-                                    .map(|ordered_utxo| ordered_utxo.utxo.clone())
-                            })
-                            .expect("already checked UTXO was in state or block"),
-                    )
-                })
-                .collect();
+        let PrefetchedBlockWriteData {
+            spent_utxos,
+            new_outputs_by_out_loc,
+        } = prefetched;
 
         let spent_utxos_by_outpoint: HashMap<transparent::OutPoint, transparent::Utxo> =
             spent_utxos
@@ -494,7 +602,6 @@ impl ZebraDb {
                 .map(|(outpoint, _output_loc, utxo)| (*outpoint, utxo.clone()))
                 .collect();
 
-        // TODO: Add `OutputLocation`s to the values in `spent_utxos_by_outpoint` to avoid creating a second hashmap with the same keys
         #[cfg(feature = "indexer")]
         let out_loc_by_outpoint: HashMap<transparent::OutPoint, OutputLocation> = spent_utxos
             .iter()
@@ -505,7 +612,7 @@ impl ZebraDb {
             .map(|(_outpoint, out_loc, utxo)| (out_loc, utxo))
             .collect();
 
-        // Get the transparent addresses with changed balances/UTXOs
+        // Address balance lookups — these are small and stay in write_block.
         let changed_addresses: HashSet<transparent::Address> = spent_utxos_by_out_loc
             .values()
             .chain(
@@ -518,8 +625,6 @@ impl ZebraDb {
             .unique()
             .collect();
 
-        // Get the current address balances, before the transactions in this block
-
         fn read_addr_locs<T, F: Fn(&transparent::Address) -> Option<T>>(
             changed_addresses: HashSet<transparent::Address>,
             f: F,
@@ -530,16 +635,6 @@ impl ZebraDb {
                 .collect()
         }
 
-        // # Performance
-        //
-        // It's better to update entries in RocksDB with insertions over merge operations when there is no risk that
-        // insertions may overwrite values that are updated concurrently in database format upgrades as inserted values
-        // are quicker to read and require less background compaction.
-        //
-        // Reading entries that have been updated with merge ops often requires reading the latest fully-merged value,
-        // reading all of the pending merge operands (potentially hundreds), and applying pending merge operands to the
-        // fully-merged value such that it's much faster to read entries that have been updated with insertions than it
-        // is to read entries that have been updated with merge operations.
         let address_balances: AddressBalanceLocationUpdates = if self.finished_format_upgrades() {
             AddressBalanceLocationUpdates::Insert(read_addr_locs(changed_addresses, |addr| {
                 self.address_balance_location(addr)

@@ -54,7 +54,7 @@ pub use disk_format::{
     FromDisk, IntoDisk, OutputLocation, RawBytes, TransactionIndex, TransactionLocation,
     MAX_ON_DISK_HEIGHT,
 };
-pub use zebra_db::ZebraDb;
+pub use zebra_db::{block::PrefetchedBlockWriteData, ZebraDb};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use disk_format::KV;
@@ -365,18 +365,43 @@ impl FinalizedState {
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
         source: &str,
     ) -> Result<(block::Hash, NoteCommitmentTrees), CommitCheckpointVerifiedError> {
+        self.commit_finalized_direct_with_trees(
+            finalizable_block,
+            prev_note_commitment_trees,
+            None,
+            source,
+            None,
+        )
+        .map(|(hash, trees, _history_tree)| (hash, trees))
+    }
+
+    /// Like [`commit_finalized_direct`](Self::commit_finalized_direct), but
+    /// also accepts and returns a cached history tree and optional pre-fetched
+    /// spent UTXO data to avoid redundant database reads.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn commit_finalized_direct_with_trees(
+        &mut self,
+        finalizable_block: FinalizableBlock,
+        prev_note_commitment_trees: Option<NoteCommitmentTrees>,
+        prev_history_tree: Option<Arc<zebra_chain::history_tree::HistoryTree>>,
+        source: &str,
+        prefetched: Option<
+            crate::service::finalized_state::zebra_db::block::PrefetchedBlockWriteData,
+        >,
+    ) -> Result<
+        (
+            block::Hash,
+            NoteCommitmentTrees,
+            Arc<zebra_chain::history_tree::HistoryTree>,
+        ),
+        CommitCheckpointVerifiedError,
+    > {
         let (height, hash, finalized, prev_note_commitment_trees) = match finalizable_block {
             FinalizableBlock::Checkpoint {
                 checkpoint_verified,
             } => {
-                // Checkpoint-verified blocks don't have an associated treestate, so we retrieve the
-                // treestate of the finalized tip from the database and update it for the block
-                // being committed, assuming the retrieved treestate is the parent block's
-                // treestate. Later on, this function proves this assumption by asserting that the
-                // finalized tip is the parent block of the block being committed.
-
                 let block = checkpoint_verified.block.clone();
-                let mut history_tree = self.db.history_tree();
+                let mut history_tree = prev_history_tree.unwrap_or_else(|| self.db.history_tree());
                 let prev_note_commitment_trees = prev_note_commitment_trees
                     .unwrap_or_else(|| self.db.note_commitment_trees_for_tip());
 
@@ -474,12 +499,24 @@ impl FinalizedState {
         #[cfg(feature = "elasticsearch")]
         let finalized_inner_block = finalized.block.clone();
         let note_commitment_trees = finalized.treestate.note_commitment_trees.clone();
+        let history_tree = finalized.treestate.history_tree.clone();
+
+        // If no pre-fetched data was provided, fetch it now.
+        let prefetched = prefetched.unwrap_or_else(|| {
+            self.db.fetch_block_write_data(
+                &finalized.block,
+                finalized.height,
+                &finalized.new_outputs,
+                &Default::default(),
+            )
+        });
 
         let result = self.db.write_block(
             finalized,
             prev_note_commitment_trees,
             &self.network(),
             source,
+            prefetched,
         );
 
         if result.is_ok() {
@@ -508,7 +545,7 @@ impl FinalizedState {
             }
         }
 
-        result.map(|hash| (hash, note_commitment_trees))
+        result.map(|hash| (hash, note_commitment_trees, history_tree))
     }
 
     #[cfg(feature = "elasticsearch")]

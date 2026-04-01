@@ -1134,6 +1134,28 @@ impl DiskDb {
         self.db.cf_handle(cf_name)
     }
 
+    /// Performs a batched multi-get across one column family.
+    /// Returns a `HashMap` mapping each key to its value (keys with no
+    /// matching entry are omitted).
+    pub fn multi_get_cf<'a, K: IntoDisk + Clone + Eq + std::hash::Hash, V: FromDisk>(
+        &'a self,
+        cf: &'a rocksdb::ColumnFamilyRef<'a>,
+        keys: &[K],
+    ) -> HashMap<K, V> {
+        let key_bytes: Vec<_> = keys.iter().map(|k| k.as_bytes()).collect();
+        let cf_keys: Vec<_> = key_bytes.iter().map(|kb| (cf, kb.as_ref())).collect();
+
+        let results = self.db.multi_get_cf(cf_keys);
+
+        keys.iter()
+            .zip(results)
+            .filter_map(|(key, result)| {
+                let value_bytes = result.expect("unexpected database failure")?;
+                Some((key.clone(), V::from_bytes(value_bytes)))
+            })
+            .collect()
+    }
+
     // Read methods are located in the ReadDisk trait
 
     // Write methods

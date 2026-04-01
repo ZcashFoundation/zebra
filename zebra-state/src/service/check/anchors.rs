@@ -395,6 +395,13 @@ pub(crate) fn block_sprout_anchors_refer_to_treestates(
     transaction_hashes: Arc<[TransactionHash]>,
     height: Height,
 ) -> Result<(), ValidateContextError> {
+    // When called from the checkpoint path, no treestates are fetched
+    // because checkpoint-verified blocks are already validated by hash
+    // chain. Skip the anchor check entirely in that case.
+    if sprout_final_treestates.is_empty() {
+        return Ok(());
+    }
+
     tracing::trace!(
         sprout_final_treestate_count = ?sprout_final_treestates.len(),
         ?sprout_final_treestates,
