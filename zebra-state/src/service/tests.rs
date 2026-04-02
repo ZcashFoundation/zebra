@@ -433,8 +433,16 @@ proptest! {
 
             prop_assert!(result.is_ok(), "unexpected failed finalized block commit: {:?}", result);
 
+            // Checkpoint blocks may be committed to the non-finalized state
+            // (pipelined to disk asynchronously), so check the effective value pool
+            // from whichever state holds the latest data.
+            let effective_value_pool = state_service.read_service.latest_non_finalized_state()
+                .best_chain()
+                .map(|chain| chain.chain_value_pools)
+                .unwrap_or_else(|| state_service.read_service.db.finalized_value_pool());
+
             prop_assert_eq!(
-                state_service.read_service.db.finalized_value_pool(),
+                effective_value_pool,
                 expected_finalized_value_pool.clone()?.constrain()?
             );
 
@@ -443,7 +451,7 @@ proptest! {
             let transparent_value = ValueBalance::from_transparent_amount(transparent_value);
             expected_transparent_pool = (expected_transparent_pool + transparent_value).unwrap();
             prop_assert_eq!(
-                state_service.read_service.db.finalized_value_pool(),
+                effective_value_pool,
                 expected_transparent_pool
             );
         }

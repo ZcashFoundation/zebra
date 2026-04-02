@@ -459,7 +459,11 @@ impl NonFinalizedState {
             )?;
 
         // Push onto chain — this updates trees, nullifiers, UTXOs, etc.
-        let chain = Self::validate_and_update_parallel(chain, contextual, HashMap::new())?;
+        // Skip the block commitment and sprout anchor validation that
+        // `validate_and_update_parallel` performs, because checkpoint
+        // verification has already guaranteed the block's validity.
+        let chain = Arc::try_unwrap(chain).unwrap_or_else(|shared_chain| (*shared_chain).clone());
+        let chain = Arc::new(chain.push(contextual)?);
 
         // Replace the best chain in the set.
         // Remove old best chain first (if any), then insert the updated one.
