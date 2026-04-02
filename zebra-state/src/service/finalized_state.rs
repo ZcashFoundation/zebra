@@ -29,7 +29,7 @@ use crate::{
     constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
     error::CommitCheckpointVerifiedError,
     request::{FinalizableBlock, FinalizedBlock, Treestate},
-    service::{check, QueuedCheckpointVerified},
+    service::{check, non_finalized_state::NonFinalizedState, QueuedCheckpointVerified},
     CheckpointVerifiedBlock, Config, ValidateContextError,
 };
 
@@ -435,8 +435,15 @@ impl FinalizedState {
         let finalized_inner_block = finalized.block.clone();
         let note_commitment_trees = finalized.treestate.note_commitment_trees.clone();
 
+        // Look up spent UTXOs before writing the block.
+        // During Phase 2 (non-finalized → finalized), all referenced UTXOs are on disk,
+        // so we pass an empty NonFinalizedState for the fallback.
+        let empty_nfs = NonFinalizedState::new(&self.network());
+        let spent_utxos = self.db.lookup_spent_utxos(&finalized, &empty_nfs);
+
         let result = self.db.write_block(
             finalized,
+            spent_utxos,
             prev_note_commitment_trees,
             &self.network(),
             source,

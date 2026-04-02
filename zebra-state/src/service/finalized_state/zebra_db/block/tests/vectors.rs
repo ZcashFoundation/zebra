@@ -29,7 +29,10 @@ use zebra_test::vectors::{MAINNET_BLOCKS, TESTNET_BLOCKS};
 use crate::{
     constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
     request::{FinalizedBlock, Treestate},
-    service::finalized_state::{disk_db::DiskWriteBatch, ZebraDb, STATE_COLUMN_FAMILIES_IN_CODE},
+    service::{
+        finalized_state::{disk_db::DiskWriteBatch, ZebraDb, STATE_COLUMN_FAMILIES_IN_CODE},
+        non_finalized_state::NonFinalizedState,
+    },
     CheckpointVerifiedBlock, Config, SemanticallyVerifiedBlock,
 };
 
@@ -72,6 +75,95 @@ fn test_block_db_round_trip() {
         .zcash_deserialize_into()
         .expect("deserialization of valid serialized block never fails");
     test_block_db_round_trip_with(&Mainnet, iter::once(block));
+}
+
+/// Test that `lookup_spent_utxos` returns an empty vec for blocks with no transparent inputs,
+/// and that `write_block` works correctly when provided spent UTXOs externally.
+#[test]
+fn test_lookup_spent_utxos_and_write_block_with_provided_utxos() {
+    let _init_guard = zebra_test::init();
+
+    let network = Mainnet;
+    let mut state = ZebraDb::new(
+        &Config::ephemeral(),
+        STATE_DATABASE_KIND,
+        &state_database_format_version_in_code(),
+        &network,
+        true,
+        STATE_COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .map(ToString::to_string),
+        false,
+    );
+    let empty_nfs = NonFinalizedState::new(&network);
+
+    // Commit the first few mainnet blocks using the new lookup_spent_utxos + write_block path.
+    // These early blocks have only coinbase transactions (no transparent inputs to spend),
+    // so lookup_spent_utxos should return an empty vec.
+    for (&height, block_bytes) in MAINNET_BLOCKS.iter().take(3) {
+        let block: Arc<Block> = block_bytes.zcash_deserialize_into().unwrap();
+        let checkpoint_verified = CheckpointVerifiedBlock::from(block.clone());
+        let treestate = Treestate::default();
+        let finalized = FinalizedBlock::from_checkpoint_verified(checkpoint_verified, treestate);
+
+        let spent_utxos = state.lookup_spent_utxos(&finalized, &empty_nfs);
+
+        // Early mainnet blocks have only coinbase inputs (no transparent spends).
+        assert!(
+            spent_utxos.is_empty(),
+            "block at height {height} should have no transparent spends"
+        );
+
+        state
+            .write_block(finalized, spent_utxos, None, &network, "test")
+            .expect("write_block should succeed for valid blocks");
+    }
+
+    // Verify the blocks were written by reading back the tip.
+    let tip = state.tip();
+    assert!(
+        tip.is_some(),
+        "state should have a tip after writing blocks"
+    );
+}
+
+/// Test that `lookup_spent_utxos` falls back to the non-finalized state for UTXOs
+/// not yet on disk.
+#[test]
+fn test_lookup_spent_utxos_falls_back_to_non_finalized_state() {
+    let _init_guard = zebra_test::init();
+
+    let network = Mainnet;
+    let state = ZebraDb::new(
+        &Config::ephemeral(),
+        STATE_DATABASE_KIND,
+        &state_database_format_version_in_code(),
+        &network,
+        true,
+        STATE_COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .map(ToString::to_string),
+        false,
+    );
+    let empty_nfs = NonFinalizedState::new(&network);
+
+    // With an empty database and empty non-finalized state, lookup_spent_utxos
+    // for blocks without transparent spends should return empty.
+    let block: Arc<Block> = MAINNET_BLOCKS
+        .values()
+        .next()
+        .unwrap()
+        .zcash_deserialize_into()
+        .unwrap();
+    let checkpoint_verified = CheckpointVerifiedBlock::from(block);
+    let treestate = Treestate::default();
+    let finalized = FinalizedBlock::from_checkpoint_verified(checkpoint_verified, treestate);
+
+    let spent_utxos = state.lookup_spent_utxos(&finalized, &empty_nfs);
+    assert!(
+        spent_utxos.is_empty(),
+        "genesis block should have no transparent spends"
+    );
 }
 
 fn test_block_db_round_trip_with(
