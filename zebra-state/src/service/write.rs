@@ -468,6 +468,17 @@ impl WriteBlockWorkerTask {
                 // state and queryable by the state service.
                 let _ = rsp_tx.send(Ok(checkpoint_verified.hash));
 
+                // Prune blocks from the non-finalized state that have already
+                // been written to disk by Thread 3.
+                if let Some(finalized_tip_height) = finalized_state.db.finalized_tip_height() {
+                    while non_finalized_state
+                        .root_height()
+                        .is_some_and(|root| root <= finalized_tip_height)
+                    {
+                        non_finalized_state.finalize();
+                    }
+                }
+
                 next_expected_height =
                     (next_expected_height + 1).expect("block heights in the pipeline are valid");
             }
