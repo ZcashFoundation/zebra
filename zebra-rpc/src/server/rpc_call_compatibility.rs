@@ -55,6 +55,8 @@ where
                     let json: serde_json::Value =
                         serde_json::from_str(response.into_parts().0.as_str())
                             .expect("response string should be valid json");
+                    // serde_json::Value is a non-exhaustive external enum.
+                    #[allow(clippy::wildcard_enum_match_arm)]
                     let id = match &json["id"] {
                         serde_json::Value::Null => Some(jsonrpsee::types::Id::Null),
                         serde_json::Value::Number(n) => {

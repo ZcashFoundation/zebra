@@ -685,10 +685,10 @@ impl MappedRequest for CommitSemanticallyVerifiedBlockRequest {
     }
 
     fn map_response(response: Response) -> Self::MappedResponse {
-        match response {
-            Response::Committed(hash) => hash,
-            _ => unreachable!("wrong response variant for request"),
-        }
+        let Response::Committed(hash) = response else {
+            unreachable!("wrong response variant for request")
+        };
+        hash
     }
 }
 
@@ -707,10 +707,10 @@ impl MappedRequest for CommitCheckpointVerifiedBlockRequest {
     }
 
     fn map_response(response: Response) -> Self::MappedResponse {
-        match response {
-            Response::Committed(hash) => hash,
-            _ => unreachable!("wrong response variant for request"),
-        }
+        let Response::Committed(hash) = response else {
+            unreachable!("wrong response variant for request")
+        };
+        hash
     }
 }
 
@@ -729,10 +729,10 @@ impl MappedRequest for InvalidateBlockRequest {
     }
 
     fn map_response(response: Response) -> Self::MappedResponse {
-        match response {
-            Response::Invalidated(hash) => hash,
-            _ => unreachable!("wrong response variant for request"),
-        }
+        let Response::Invalidated(hash) = response else {
+            unreachable!("wrong response variant for request")
+        };
+        hash
     }
 }
 
@@ -751,10 +751,10 @@ impl MappedRequest for ReconsiderBlockRequest {
     }
 
     fn map_response(response: Response) -> Self::MappedResponse {
-        match response {
-            Response::Reconsidered(hashes) => hashes,
-            _ => unreachable!("wrong response variant for request"),
-        }
+        let Response::Reconsidered(hashes) = response else {
+            unreachable!("wrong response variant for request")
+        };
+        hashes
     }
 }
 

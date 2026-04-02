@@ -1410,7 +1410,20 @@ impl Transaction {
                 joinsplit_data: Some(joinsplit_data),
                 ..
             } => Some(joinsplit_data.pub_key),
-            _ => None,
+            Transaction::V1 { .. }
+            | Transaction::V2 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V3 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V4 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V5 { .. } => None,
         }
     }
 
@@ -1435,7 +1448,20 @@ impl Transaction {
                 joinsplit_data: Some(joinsplit_data),
                 ..
             } => Some(joinsplit_data.sig),
-            _ => None,
+            Transaction::V1 { .. }
+            | Transaction::V2 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V3 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V4 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V5 { .. } => None,
         }
     }
 

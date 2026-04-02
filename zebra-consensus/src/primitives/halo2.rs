@@ -115,6 +115,8 @@ pub enum Halo2Error {
 
 impl From<halo2::plonk::Error> for Halo2Error {
     fn from(err: halo2::plonk::Error) -> Halo2Error {
+        // halo2::plonk::Error is from an external crate and may add variants.
+        #[allow(clippy::wildcard_enum_match_arm)]
         match err {
             halo2::plonk::Error::ConstraintSystemFailure => Halo2Error::ConstraintSystemFailure,
             _ => Halo2Error::Other,

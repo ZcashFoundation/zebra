@@ -1671,6 +1671,8 @@ impl DiskDb {
     // If the directory cannot be created, it panics with a specific error message.
     fn validate_cache_dir(cache_dir: &std::path::PathBuf) {
         if let Err(e) = fs::create_dir_all(cache_dir) {
+            // ErrorKind is #[non_exhaustive], so a wildcard is required for the fallback.
+            #[allow(clippy::wildcard_enum_match_arm)]
             match e.kind() {
                 std::io::ErrorKind::PermissionDenied => panic!(
                     "Permission denied creating {cache_dir:?}. \

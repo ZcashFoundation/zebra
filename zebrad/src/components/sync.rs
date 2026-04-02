@@ -694,13 +694,10 @@ where
             .map_err(|e| eyre!(e))?
             .call(zebra_state::Request::BlockLocator)
             .await
-            .map(|response| match response {
-                zebra_state::Response::BlockLocator(block_locator) => block_locator,
-                _ => unreachable!(
-                    "GetBlockLocator request can only result in Response::BlockLocator"
-                ),
-            })
             .map_err(|e| eyre!(e))?;
+        let zebra_state::Response::BlockLocator(block_locator) = block_locator else {
+            unreachable!("GetBlockLocator request can only result in Response::BlockLocator")
+        };
 
         debug!(
             tip = ?block_locator.first().expect("we have at least one block locator object"),
@@ -1195,18 +1192,18 @@ where
     /// Returns `true` if the hash is present in the state, and `false`
     /// if the hash is not present in the state.
     pub(crate) async fn state_contains(&mut self, hash: block::Hash) -> Result<bool, Report> {
-        match self
+        let response = self
             .state
             .ready()
             .await
             .map_err(|e| eyre!(e))?
             .call(zebra_state::Request::KnownBlock(hash))
             .await
-            .map_err(|e| eyre!(e))?
-        {
-            zs::Response::KnownBlock(loc) => Ok(loc.is_some()),
-            _ => unreachable!("wrong response to known block request"),
-        }
+            .map_err(|e| eyre!(e))?;
+        let zs::Response::KnownBlock(loc) = response else {
+            unreachable!("wrong response to known block request")
+        };
+        Ok(loc.is_some())
     }
 
     fn update_metrics(&mut self) {
@@ -1217,6 +1214,8 @@ where
     /// Return if the sync should be restarted based on the given error
     /// from the block downloader and verifier stream.
     fn should_restart_sync(e: &BlockDownloadVerifyError) -> bool {
+        // Catch-all is intentional: unmatched errors trigger a sync restart with a warning
+        #[allow(clippy::wildcard_enum_match_arm)]
         match e {
             // Structural matches: downcasts
             BlockDownloadVerifyError::Invalid { error, .. } if error.is_duplicate_request() => {

@@ -264,6 +264,8 @@ impl TransactionError {
         use TransactionError::*;
 
         // TODO: Adjust these values based on zcashd (#9258).
+        // All other errors (e.g. internal/verification errors) get score 0.
+        #[allow(clippy::wildcard_enum_match_arm)]
         match self {
             ImmatureTransparentCoinbaseSpend { .. }
             | UnshieldedTransparentCoinbaseSpend { .. }
@@ -401,6 +403,8 @@ impl BlockError {
     pub(crate) fn misbehavior_score(&self) -> u32 {
         use BlockError::*;
 
+        // All other block errors get score 0.
+        #[allow(clippy::wildcard_enum_match_arm)]
         match self {
             MissingHeight(_)
             | MaxHeight(_, _, _)

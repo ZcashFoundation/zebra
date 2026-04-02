@@ -390,14 +390,14 @@ impl TryFrom<Message> for VersionMessage {
     type Error = BoxError;
 
     fn try_from(message: Message) -> Result<Self, Self::Error> {
-        match message {
-            Message::Version(version_message) => Ok(version_message),
-            _ => Err(format!(
+        let Message::Version(version_message) = message else {
+            return Err(format!(
                 "{} message is not a version message: {message:?}",
                 message.command()
             )
-            .into()),
-        }
+            .into());
+        };
+        Ok(version_message)
     }
 }
 

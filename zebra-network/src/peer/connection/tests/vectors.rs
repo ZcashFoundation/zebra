@@ -925,6 +925,8 @@ async fn connection_ping_pong_round_trip() {
         .await
         .expect("expected outbound Ping message");
 
+    // Test assertion: only Ping is expected
+    #[allow(clippy::wildcard_enum_match_arm)]
     let ping_nonce = match outbound_msg {
         Message::Ping(nonce) => nonce,
         msg => panic!("expected Ping message, but got: {:?}", msg),

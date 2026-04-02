@@ -75,11 +75,8 @@ where
             .call(mempool::Request::CheckForVerifiedTransactions)
             .await?;
 
-        match response {
-            mempool::Response::CheckedForVerifiedTransactions => {}
-            _ => {
-                unreachable!("mempool did not respond with checked queue to mempool queue checker")
-            }
+        let mempool::Response::CheckedForVerifiedTransactions = response else {
+            unreachable!("mempool did not respond with checked queue to mempool queue checker")
         };
 
         Ok(())

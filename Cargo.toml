@@ -359,5 +359,8 @@ try_err = "allow"
 fallible_impl_from = "warn"
 unwrap_in_result = "warn"
 
+# Wildcard match arms
+wildcard_enum_match_arm = "warn"
+
 # TODOs: fix this lint eventually
 result_large_err = "allow"

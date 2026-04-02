@@ -881,7 +881,14 @@ impl MetaAddrChange {
     pub fn ping_sent(&self) -> Option<Instant> {
         match self {
             UpdatePingSent { ping_sent_at, .. } => Some(*ping_sent_at),
-            _ => None,
+            NewInitial { .. }
+            | NewGossiped { .. }
+            | NewLocal { .. }
+            | UpdateAttempt { .. }
+            | UpdateConnected { .. }
+            | UpdateResponded { .. }
+            | UpdateFailed { .. }
+            | UpdateMisbehavior { .. } => None,
         }
     }
 
@@ -889,7 +896,14 @@ impl MetaAddrChange {
     pub fn rtt(&self) -> Option<Duration> {
         match self {
             UpdateResponded { rtt, .. } => *rtt,
-            _ => None,
+            NewInitial { .. }
+            | NewGossiped { .. }
+            | NewLocal { .. }
+            | UpdateAttempt { .. }
+            | UpdateConnected { .. }
+            | UpdatePingSent { .. }
+            | UpdateFailed { .. }
+            | UpdateMisbehavior { .. } => None,
         }
     }
 
@@ -897,7 +911,14 @@ impl MetaAddrChange {
     pub fn ping_sent_at(&self) -> Option<Instant> {
         match self {
             UpdatePingSent { ping_sent_at, .. } => Some(*ping_sent_at),
-            _ => None,
+            NewInitial { .. }
+            | NewGossiped { .. }
+            | NewLocal { .. }
+            | UpdateAttempt { .. }
+            | UpdateConnected { .. }
+            | UpdateResponded { .. }
+            | UpdateFailed { .. }
+            | UpdateMisbehavior { .. } => None,
         }
     }
 
@@ -961,7 +982,14 @@ impl MetaAddrChange {
             MetaAddrChange::UpdateMisbehavior {
                 score_increment, ..
             } => *score_increment,
-            _ => 0,
+            NewInitial { .. }
+            | NewGossiped { .. }
+            | NewLocal { .. }
+            | UpdateAttempt { .. }
+            | UpdateConnected { .. }
+            | UpdatePingSent { .. }
+            | UpdateResponded { .. }
+            | UpdateFailed { .. } => 0,
         }
     }
 

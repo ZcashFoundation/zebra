@@ -89,6 +89,8 @@ async fn mempool_service_basic_single() -> Result<(), Report> {
         .call(Request::TransactionIds)
         .await
         .unwrap();
+    // Test assertion: only this variant is expected
+    #[allow(clippy::wildcard_enum_match_arm)]
     let genesis_transaction_ids = match response {
         Response::TransactionIds(ids) => ids,
         _ => unreachable!("will never happen in this test"),
@@ -108,6 +110,8 @@ async fn mempool_service_basic_single() -> Result<(), Report> {
         ))
         .await
         .unwrap();
+    // Test assertion: only this variant is expected
+    #[allow(clippy::wildcard_enum_match_arm)]
     let transactions = match response {
         Response::Transactions(transactions) => transactions,
         _ => unreachable!("will never happen in this test"),
@@ -132,6 +136,8 @@ async fn mempool_service_basic_single() -> Result<(), Report> {
         ))
         .await
         .unwrap();
+    // Test assertion: only this variant is expected
+    #[allow(clippy::wildcard_enum_match_arm)]
     let transactions = match response {
         Response::Transactions(transactions) => transactions,
         _ => unreachable!("will never happen in this test"),
@@ -161,6 +167,8 @@ async fn mempool_service_basic_single() -> Result<(), Report> {
         ))
         .await
         .unwrap();
+    // Test assertion: only this variant is expected
+    #[allow(clippy::wildcard_enum_match_arm)]
     let rejected_ids = match response {
         Response::RejectedTransactionIds(ids) => ids,
         _ => unreachable!("will never happen in this test"),
@@ -177,6 +185,8 @@ async fn mempool_service_basic_single() -> Result<(), Report> {
         .call(Request::Queue(vec![last_transaction.transaction.id.into()]))
         .await
         .unwrap();
+    // Test assertion: only this variant is expected
+    #[allow(clippy::wildcard_enum_match_arm)]
     let queued_responses = match response {
         Response::Queued(queue_responses) => queue_responses,
         _ => unreachable!("will never happen in this test"),
@@ -194,6 +204,8 @@ async fn mempool_service_basic_single() -> Result<(), Report> {
         .await
         .unwrap();
 
+    // Test assertion: only this variant is expected
+    #[allow(clippy::wildcard_enum_match_arm)]
     let (actual_size, actual_bytes, actual_usage) = match response {
         Response::QueueStats {
             size,
@@ -282,6 +294,8 @@ async fn mempool_queue_single() -> Result<(), Report> {
         .call(Request::Queue(vec![new_tx.transaction.id.into()]))
         .await
         .unwrap();
+    // Test assertion: only this variant is expected
+    #[allow(clippy::wildcard_enum_match_arm)]
     let queued_responses = match response {
         Response::Queued(queue_responses) => queue_responses,
         _ => unreachable!("will never happen in this test"),
@@ -304,6 +318,8 @@ async fn mempool_queue_single() -> Result<(), Report> {
         ))
         .await
         .unwrap();
+    // Test assertion: only this variant is expected
+    #[allow(clippy::wildcard_enum_match_arm)]
     let queued_responses = match response {
         Response::Queued(queue_responses) => queue_responses,
         _ => unreachable!("will never happen in this test"),
@@ -314,6 +330,8 @@ async fn mempool_queue_single() -> Result<(), Report> {
     let mut in_mempool_count = 0;
     let mut evicted_count = 0;
     for response in queued_responses {
+        // Test assertion: only these two responses are expected.
+        #[allow(clippy::wildcard_enum_match_arm)]
         match response.unbox_mempool_error() {
             MempoolError::StorageEffectsChain(SameEffectsChainRejectionError::RandomlyEvicted) => {
                 evicted_count += 1
@@ -371,6 +389,8 @@ async fn mempool_service_disabled() -> Result<(), Report> {
         .call(Request::TransactionIds)
         .await
         .unwrap();
+    // Test assertion: only this variant is expected
+    #[allow(clippy::wildcard_enum_match_arm)]
     let _genesis_transaction_ids = match response {
         Response::TransactionIds(ids) => ids,
         _ => unreachable!("will never happen in this test"),
@@ -386,6 +406,8 @@ async fn mempool_service_disabled() -> Result<(), Report> {
         .call(Request::Queue(vec![txid.into()]))
         .await
         .unwrap();
+    // Test assertion: only this variant is expected
+    #[allow(clippy::wildcard_enum_match_arm)]
     let queued_responses = match response {
         Response::Queued(queue_responses) => queue_responses,
         _ => unreachable!("will never happen in this test"),
@@ -408,6 +430,8 @@ async fn mempool_service_disabled() -> Result<(), Report> {
         .call(Request::TransactionIds)
         .await
         .unwrap();
+    // Test assertion: only this variant is expected
+    #[allow(clippy::wildcard_enum_match_arm)]
     match response {
         Response::TransactionIds(ids) => {
             assert_eq!(
@@ -427,6 +451,8 @@ async fn mempool_service_disabled() -> Result<(), Report> {
         .call(Request::Queue(vec![txid.into()]))
         .await
         .unwrap();
+    // Test assertion: only this variant is expected
+    #[allow(clippy::wildcard_enum_match_arm)]
     let queued_responses = match response {
         Response::Queued(queue_responses) => queue_responses,
         _ => unreachable!("will never happen in this test"),
@@ -451,6 +477,8 @@ async fn mempool_service_disabled() -> Result<(), Report> {
         .await
         .unwrap();
 
+    // Test assertion: only this variant is expected
+    #[allow(clippy::wildcard_enum_match_arm)]
     let (size, bytes, usage, fully_notified) = match response {
         Response::QueueStats {
             size,
@@ -541,6 +569,8 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
         .call(Request::Queue(vec![txid.into()]))
         .await
         .unwrap();
+    // Test assertion: only this variant is expected
+    #[allow(clippy::wildcard_enum_match_arm)]
     let mut queued_responses = match response {
         Response::Queued(queue_responses) => queue_responses,
         _ => unreachable!("will never happen in this test"),
@@ -646,6 +676,8 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
         .call(Request::Queue(vec![txid.into()]))
         .await
         .unwrap();
+    // Test assertion: only this variant is expected
+    #[allow(clippy::wildcard_enum_match_arm)]
     let queued_responses = match response {
         Response::Queued(queue_responses) => queue_responses,
         _ => unreachable!("will never happen in this test"),
@@ -740,6 +772,8 @@ async fn mempool_failed_verification_is_rejected() -> Result<(), Report> {
         responder.respond(Err(TransactionError::BadBalance));
     });
     let (response, _) = futures::join!(request, verification);
+    // Test assertion: only this variant is expected
+    #[allow(clippy::wildcard_enum_match_arm)]
     let queued_responses = match response.unwrap() {
         Response::Queued(queue_responses) => queue_responses,
         _ => unreachable!("will never happen in this test"),
@@ -764,6 +798,8 @@ async fn mempool_failed_verification_is_rejected() -> Result<(), Report> {
         .call(Request::Queue(vec![rejected_tx.transaction.id.into()]))
         .await
         .unwrap();
+    // Test assertion: only this variant is expected
+    #[allow(clippy::wildcard_enum_match_arm)]
     let queued_responses = match response {
         Response::Queued(queue_responses) => queue_responses,
         _ => unreachable!("will never happen in this test"),
@@ -830,6 +866,8 @@ async fn mempool_failed_download_is_not_rejected() -> Result<(), Report> {
             responder.respond(zn::Response::Transactions(vec![]));
         });
     let (response, _) = futures::join!(request, verification);
+    // Test assertion: only this variant is expected
+    #[allow(clippy::wildcard_enum_match_arm)]
     let queued_responses = match response.unwrap() {
         Response::Queued(queue_responses) => queue_responses,
         _ => unreachable!("will never happen in this test"),
@@ -857,6 +895,8 @@ async fn mempool_failed_download_is_not_rejected() -> Result<(), Report> {
             .into()]))
         .await
         .unwrap();
+    // Test assertion: only this variant is expected
+    #[allow(clippy::wildcard_enum_match_arm)]
     let queued_responses = match response {
         Response::Queued(queue_responses) => queue_responses,
         _ => unreachable!("will never happen in this test"),
@@ -917,6 +957,8 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
         .call(Request::Queue(vec![txid.into()]))
         .await
         .unwrap();
+    // Test assertion: only this variant is expected
+    #[allow(clippy::wildcard_enum_match_arm)]
     let queued_responses = match response {
         Response::Queued(queue_responses) => queue_responses,
         _ => unreachable!("will never happen in this test"),

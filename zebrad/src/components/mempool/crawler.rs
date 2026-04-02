@@ -245,10 +245,10 @@ where
 
     /// Handle a peer's response to the crawler's request for transactions.
     async fn handle_response(&mut self, response: zn::Response) -> Result<(), BoxError> {
-        let transaction_ids: HashSet<_> = match response {
-            zn::Response::TransactionIds(ids) => ids.into_iter().collect(),
-            _ => unreachable!("Peer set did not respond with transaction IDs to mempool crawler"),
+        let zn::Response::TransactionIds(ids) = response else {
+            unreachable!("Peer set did not respond with transaction IDs to mempool crawler")
         };
+        let transaction_ids: HashSet<_> = ids.into_iter().collect();
 
         trace!(
             "Mempool crawler received {} transaction IDs",

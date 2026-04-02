@@ -656,7 +656,10 @@ where
             let unspec_ipv4 = get_unspecified_ipv4_addr(config.network);
             (unspec_ipv4.into(), PeerServices::empty(), unspec_ipv4)
         }
-        _ => {
+        OutboundDirect { .. }
+        | InboundDirect { .. }
+        | OutboundProxy { .. }
+        | InboundProxy { .. } => {
             let their_addr = connected_addr
                 .get_transient_addr()
                 .expect("non-Isolated connections have a remote addr");
@@ -697,6 +700,8 @@ where
         .ok_or(HandshakeError::ConnectionClosed)??;
 
     // Wait for next message if the one we got is not Version
+    // Message has many variants; we only care about Version during handshake.
+    #[allow(clippy::wildcard_enum_match_arm)]
     let remote: VersionMessage = loop {
         match remote_msg {
             Message::Version(version_message) => {
@@ -820,7 +825,8 @@ where
         .await
         .ok_or(HandshakeError::ConnectionClosed)??;
 
-    // Wait for next message if the one we got is not Verack
+    // Message has many variants; we only care about Verack during handshake.
+    #[allow(clippy::wildcard_enum_match_arm)]
     loop {
         match remote_msg {
             Message::Verack => {
@@ -1451,7 +1457,13 @@ async fn heartbeat_timeout(
 
     let rtt = match response {
         Response::Pong(rtt) => Some(rtt),
-        _ => None,
+        Response::Nil
+        | Response::Peers(_)
+        | Response::BlockHashes(_)
+        | Response::BlockHeaders(_)
+        | Response::TransactionIds(_)
+        | Response::Blocks(_)
+        | Response::Transactions(_) => None,
     };
 
     Ok(rtt)

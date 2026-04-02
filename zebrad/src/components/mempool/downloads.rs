@@ -338,19 +338,19 @@ where
                 Gossip::Id(txid) => {
                     let req = zn::Request::TransactionsById(std::iter::once(txid).collect());
 
-                    let tx = match network
+                    let response = network
                         .oneshot(req)
                         .await
                         .map_err(CloneError::from)
-                        .map_err(TransactionDownloadVerifyError::DownloadFailed)?
-                    {
-                        zn::Response::Transactions(mut txs) => txs.pop().ok_or_else(|| {
-                            TransactionDownloadVerifyError::DownloadFailed(
-                                BoxError::from("no transactions returned").into(),
-                            )
-                        })?,
-                        _ => unreachable!("wrong response to transaction request"),
+                        .map_err(TransactionDownloadVerifyError::DownloadFailed)?;
+                    let zn::Response::Transactions(mut txs) = response else {
+                        unreachable!("wrong response to transaction request")
                     };
+                    let tx = txs.pop().ok_or_else(|| {
+                        TransactionDownloadVerifyError::DownloadFailed(
+                            BoxError::from("no transactions returned").into(),
+                        )
+                    })?;
 
                     let (tx, advertiser_addr) = tx.available().expect(
                         "unexpected missing tx status: single tx failures should be errors",

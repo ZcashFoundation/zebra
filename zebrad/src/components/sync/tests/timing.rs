@@ -125,6 +125,8 @@ fn request_genesis_is_rate_limited() {
     // create a fake peer service that respond with `Error` to `BlocksByHash` or
     // panic in any other type of request.
     let peer_service = tower::service_fn(move |request| {
+        // Test assertion: only BlocksByHash is expected
+        #[allow(clippy::wildcard_enum_match_arm)]
         match request {
             zebra_network::Request::BlocksByHash(_) => {
                 // Track the call
@@ -139,6 +141,8 @@ fn request_genesis_is_rate_limited() {
     // create a state service that respond with `None` to `Depth` or
     // panic in any other type of request.
     let state_service = tower::service_fn(move |request| {
+        // Test assertion: only KnownBlock is expected
+        #[allow(clippy::wildcard_enum_match_arm)]
         match request {
             zebra_state::Request::KnownBlock(_) => {
                 // Track the call

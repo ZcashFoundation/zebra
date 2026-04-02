@@ -157,6 +157,8 @@ impl CopyStateCmd {
             .await?
             .call(old_zs::ReadRequest::Tip)
             .await?;
+        // Large enum with multi-arm extraction
+        #[allow(clippy::wildcard_enum_match_arm)]
         let source_tip = match source_tip {
             old_zs::ReadResponse::Tip(Some(source_tip)) => source_tip,
             old_zs::ReadResponse::Tip(None) => Err("empty source state: no blocks to copy")?,
@@ -170,6 +172,8 @@ impl CopyStateCmd {
             .await?
             .call(new_zs::Request::Tip)
             .await?;
+        // Large enum with multi-arm extraction
+        #[allow(clippy::wildcard_enum_match_arm)]
         let initial_target_tip = match initial_target_tip {
             new_zs::Response::Tip(target_tip) => target_tip,
 
@@ -214,6 +218,8 @@ impl CopyStateCmd {
                 .await?
                 .call(old_zs::ReadRequest::Block(Height(height).into()))
                 .await?;
+            // Large enum with multi-arm extraction
+            #[allow(clippy::wildcard_enum_match_arm)]
             let source_block = match source_block {
                 old_zs::ReadResponse::Block(Some(source_block)) => {
                     trace!(?height, %source_block, "read source block");
@@ -238,16 +244,14 @@ impl CopyStateCmd {
                     source_block.clone().into(),
                 ))
                 .await?;
-            let target_block_commit_hash = match target_block_commit_hash {
-                new_zs::Response::Committed(target_block_commit_hash) => {
-                    trace!(?target_block_commit_hash, "wrote target block");
-                    target_block_commit_hash
-                }
-                response => Err(format!(
+            let new_zs::Response::Committed(target_block_commit_hash) = target_block_commit_hash
+            else {
+                Err(format!(
                     "unexpected response to CommitCheckpointVerifiedBlock request, height: {height}\n \
-                     response: {response:?}",
-                ))?,
+                     response: {target_block_commit_hash:?}",
+                ))?
             };
+            trace!(?target_block_commit_hash, "wrote target block");
 
             // Read written block from target
             let target_block = target_state
@@ -255,6 +259,8 @@ impl CopyStateCmd {
                 .await?
                 .call(new_zs::Request::Block(Height(height).into()))
                 .await?;
+            // Large enum with multi-arm extraction
+            #[allow(clippy::wildcard_enum_match_arm)]
             let target_block = match target_block {
                 new_zs::Response::Block(Some(target_block)) => {
                     trace!(?height, %target_block, "read target block");
@@ -318,6 +324,8 @@ impl CopyStateCmd {
             .await?
             .call(new_zs::Request::Tip)
             .await?;
+        // Large enum with multi-arm extraction
+        #[allow(clippy::wildcard_enum_match_arm)]
         let final_target_tip = match final_target_tip {
             new_zs::Response::Tip(Some(target_tip)) => target_tip,
             new_zs::Response::Tip(None) => Err("empty target state: expected written blocks")?,
@@ -332,12 +340,10 @@ impl CopyStateCmd {
             .await?
             .call(old_zs::ReadRequest::Depth(final_target_tip_hash))
             .await?;
-        let target_tip_source_depth = match target_tip_source_depth {
-            old_zs::ReadResponse::Depth(source_depth) => source_depth,
-
-            response => Err(format!(
-                "unexpected response to Depth request: {response:?}",
-            ))?,
+        let old_zs::ReadResponse::Depth(target_tip_source_depth) = target_tip_source_depth else {
+            Err(format!(
+                "unexpected response to Depth request: {target_tip_source_depth:?}",
+            ))?
         };
 
         // Check the tips match

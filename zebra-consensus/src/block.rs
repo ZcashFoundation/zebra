@@ -102,7 +102,13 @@ impl VerifyBlockError {
         match self {
             VerifyBlockError::Block { source, .. } => source.is_duplicate_request(),
             VerifyBlockError::Commit(commit_err) => commit_err.is_duplicate_request(),
-            _ => false,
+            VerifyBlockError::Depth { .. }
+            | VerifyBlockError::Equihash { .. }
+            | VerifyBlockError::Time(_)
+            | VerifyBlockError::ValidateProposal(_)
+            | VerifyBlockError::Transaction(_)
+            | VerifyBlockError::Subsidy(_)
+            | VerifyBlockError::StateService { .. } => false,
         }
     }
 
@@ -113,7 +119,13 @@ impl VerifyBlockError {
         match self {
             Block { source } => source.misbehavior_score(),
             Equihash { .. } => 100,
-            _other => 0,
+            Depth { .. }
+            | Time(_)
+            | Commit(_)
+            | ValidateProposal(_)
+            | Transaction(_)
+            | Subsidy(_)
+            | StateService { .. } => 0,
         }
     }
 }
@@ -177,14 +189,16 @@ where
             let hash = block.hash();
             // Check that this block is actually a new block.
             tracing::trace!("checking that block is not already in state");
-            match state_service
+            let known_block_response = state_service
                 .ready()
                 .await
                 .map_err(|source| VerifyBlockError::Depth { source, hash })?
                 .call(zs::Request::KnownBlock(hash))
                 .await
-                .map_err(|source| VerifyBlockError::Depth { source, hash })?
-            {
+                .map_err(|source| VerifyBlockError::Depth { source, hash })?;
+            // Service contract: KnownBlock request always returns KnownBlock response.
+            #[allow(clippy::wildcard_enum_match_arm)]
+            match known_block_response {
                 zs::Response::KnownBlock(Some(location)) => {
                     return Err(BlockError::AlreadyInChain(hash, location).into())
                 }
@@ -343,26 +357,26 @@ where
 
             // Return early for proposal requests.
             if request.is_proposal() {
-                return match state_service
+                let response = state_service
                     .ready()
                     .await
                     .map_err(VerifyBlockError::ValidateProposal)?
                     .call(zs::Request::CheckBlockProposalValidity(prepared_block))
                     .await
-                    .map_err(VerifyBlockError::ValidateProposal)?
-                {
-                    zs::Response::ValidBlockProposal => Ok(hash),
-                    _ => unreachable!("wrong response for CheckBlockProposalValidity"),
+                    .map_err(VerifyBlockError::ValidateProposal)?;
+                let zs::Response::ValidBlockProposal = response else {
+                    unreachable!("wrong response for CheckBlockProposalValidity")
                 };
+                return Ok(hash);
             }
 
-            match state_service
+            let response = state_service
                 .ready()
                 .await
                 .map_err(|source| VerifyBlockError::StateService { source, hash })?
                 .call(zs::Request::CommitSemanticallyVerifiedBlock(prepared_block))
-                .await
-            {
+                .await;
+            match response {
                 Ok(zs::Response::Committed(committed_hash)) => {
                     assert_eq!(committed_hash, hash, "state must commit correct hash");
                     Ok(hash)
@@ -376,7 +390,9 @@ where
                     Err(VerifyBlockError::StateService { source, hash })
                 }
 
-                _ => unreachable!("wrong response for CommitSemanticallyVerifiedBlock"),
+                // Service contract: CommitSemanticallyVerifiedBlock always returns Committed.
+                #[allow(clippy::wildcard_enum_match_arm)]
+                Ok(_) => unreachable!("wrong response for CommitSemanticallyVerifiedBlock"),
             }
         }
         .instrument(span)

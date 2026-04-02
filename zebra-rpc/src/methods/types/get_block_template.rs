@@ -748,9 +748,8 @@ where
         .await
         .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?;
 
-    let chain_info = match response {
-        zebra_state::ReadResponse::ChainInfo(chain_info) => chain_info,
-        _ => unreachable!("incorrect response to {request:?}"),
+    let zebra_state::ReadResponse::ChainInfo(chain_info) = response else {
+        unreachable!("incorrect response to {request:?}")
     };
 
     Ok(chain_info)

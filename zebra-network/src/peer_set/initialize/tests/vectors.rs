@@ -1556,6 +1556,8 @@ where
 
     // Create a fake peer set.
     let nil_peer_set = service_fn(move |req| async move {
+        // Test assertion: only Peers request is expected
+        #[allow(clippy::wildcard_enum_match_arm)]
         let rsp = match req {
             // Return the correct response variant for Peers requests,
             // reusing one of the peers we already provided.

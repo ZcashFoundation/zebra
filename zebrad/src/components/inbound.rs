@@ -379,6 +379,8 @@ impl Service<zn::Request> for Inbound {
     /// and will cause callers to disconnect from the remote peer.
     #[instrument(name = "inbound", skip(self, req))]
     fn call(&mut self, req: zn::Request) -> Self::Future {
+        // Setup has 4 variants; only Initialized proceeds, all others are ignored
+        #[allow(clippy::wildcard_enum_match_arm)]
         let (cached_peer_addr_response, block_downloads, mempool, state) = match &mut self.setup {
             Setup::Initialized {
                 cached_peer_addr_response,
@@ -408,9 +410,7 @@ impl Service<zn::Request> for Inbound {
                 cached_peer_addr_response.try_refresh();
                 let response = cached_peer_addr_response.value();
 
-                async move {
-                    Ok(response)
-                }.boxed()
+                async move { Ok(response) }.boxed()
             }
             zn::Request::BlocksByHash(hashes) => {
                 // We return an available or missing response to each inventory request,
@@ -422,7 +422,9 @@ impl Service<zn::Request> for Inbound {
                 let state = state.clone();
 
                 async move {
-                    let mut blocks: Vec<InventoryResponse<(Arc<Block>, Option<PeerSocketAddr>), block::Hash>> = Vec::new();
+                    let mut blocks: Vec<
+                        InventoryResponse<(Arc<Block>, Option<PeerSocketAddr>), block::Hash>,
+                    > = Vec::new();
                     let mut total_size = 0;
 
                     // Ignore any block hashes past the response limit.
@@ -434,12 +436,19 @@ impl Service<zn::Request> for Inbound {
                             break;
                         }
 
-                        let response = state.clone().ready().await?.call(zs::Request::Block(hash.into())).await?;
+                        let response = state
+                            .clone()
+                            .ready()
+                            .await?
+                            .call(zs::Request::Block(hash.into()))
+                            .await?;
 
                         // Add the block responses to the list, while updating the size limit.
                         //
                         // If there was a database error, return the error,
                         // and stop processing further chunks.
+                        // Large enum with multi-arm extraction
+                        #[allow(clippy::wildcard_enum_match_arm)]
                         match response {
                             zs::Response::Block(Some(block)) => {
                                 // If checking the serialized size of the block performs badly,
@@ -447,20 +456,20 @@ impl Service<zn::Request> for Inbound {
                                 total_size += block.zcash_serialized_size();
 
                                 blocks.push(Available((block, None)))
-                            },
+                            }
                             // We don't need to limit the size of the missing block IDs list,
                             // because it is already limited to the size of the getdata request
                             // sent by the peer. (Their content and encodings are the same.)
                             zs::Response::Block(None) => blocks.push(Missing(hash)),
                             _ => unreachable!("wrong response from state"),
                         }
-
                     }
 
                     // The network layer handles splitting this response into multiple `block`
                     // messages, and a `notfound` message if needed.
                     Ok(zn::Response::Blocks(blocks))
-                }.boxed()
+                }
+                .boxed()
             }
             zn::Request::TransactionsById(req_tx_ids) => {
                 // We return an available or missing response to each inventory request,
@@ -473,9 +482,8 @@ impl Service<zn::Request> for Inbound {
                 mempool.clone().oneshot(request).map_ok(move |resp| {
                     let mut total_size = 0;
 
-                    let transactions = match resp {
-                        mempool::Response::Transactions(transactions) => transactions,
-                        _ => unreachable!("Mempool component should always respond to a `TransactionsById` request with a `Transactions` response"),
+                    let mempool::Response::Transactions(transactions) = resp else {
+                        unreachable!("Mempool component should always respond to a `TransactionsById` request with a `Transactions` response")
                     };
 
                     // Work out which transaction IDs were missing.
@@ -507,6 +515,8 @@ impl Service<zn::Request> for Inbound {
             // Find* responses are already size-limited by the state.
             zn::Request::FindBlocks { known_blocks, stop } => {
                 let request = zs::Request::FindBlockHashes { known_blocks, stop };
+                // Large enum with multi-arm match and guard
+                #[allow(clippy::wildcard_enum_match_arm)]
                 state.clone().oneshot(request).map_ok(|resp| match resp {
                     zs::Response::BlockHashes(hashes) if hashes.is_empty() => zn::Response::Nil,
                     zs::Response::BlockHashes(hashes) => zn::Response::BlockHashes(hashes),
@@ -516,6 +526,8 @@ impl Service<zn::Request> for Inbound {
             }
             zn::Request::FindHeaders { known_blocks, stop } => {
                 let request = zs::Request::FindBlockHeaders { known_blocks, stop };
+                // Large enum with multi-arm match and guard
+                #[allow(clippy::wildcard_enum_match_arm)]
                 state.clone().oneshot(request).map_ok(|resp| match resp {
                     zs::Response::BlockHeaders(headers) if headers.is_empty() => zn::Response::Nil,
                     zs::Response::BlockHeaders(headers) => zn::Response::BlockHeaders(headers),
@@ -546,6 +558,8 @@ impl Service<zn::Request> for Inbound {
             }
             // The size of this response is limited by the `Connection` state machine in the network layer
             zn::Request::MempoolTransactionIds => {
+                // Large enum with multi-arm match and guard
+                #[allow(clippy::wildcard_enum_match_arm)]
                 mempool.clone().oneshot(mempool::Request::TransactionIds).map_ok(|resp| match resp {
                     mempool::Response::TransactionIds(transaction_ids) if transaction_ids.is_empty() => zn::Response::Nil,
                     mempool::Response::TransactionIds(transaction_ids) => zn::Response::TransactionIds(transaction_ids.into_iter().collect()),
@@ -557,7 +571,9 @@ impl Service<zn::Request> for Inbound {
                 unreachable!("ping requests are handled internally");
             }
 
-            zn::Request::AdvertiseBlockToAll(_) => unreachable!("should always be decoded as `AdvertiseBlock` request")
+            zn::Request::AdvertiseBlockToAll(_) => {
+                unreachable!("should always be decoded as `AdvertiseBlock` request")
+            }
         }
     }
 }

@@ -560,6 +560,8 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         .await
         .unwrap();
 
+    // Test assertion: only this variant is expected
+    #[allow(clippy::wildcard_enum_match_arm)]
     let queued_responses = match response {
         mempool::Response::Queued(queue_responses) => queue_responses,
         _ => unreachable!("will never happen in this test"),

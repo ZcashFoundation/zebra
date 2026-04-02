@@ -824,6 +824,8 @@ impl SpendConflictForTransactionV4 {
     ///
     /// Changes the `transaction_v4` to include the spend that will result in a conflict.
     pub fn apply_to(self, transaction_v4: &mut Transaction) {
+        // Test assertion: only V4 is expected here
+        #[allow(clippy::wildcard_enum_match_arm)]
         let (inputs, joinsplit_data, sapling_shielded_data) = match transaction_v4 {
             Transaction::V4 {
                 inputs,
@@ -848,6 +850,8 @@ impl SpendConflictForTransactionV5 {
     ///
     /// Changes the `transaction_v5` to include the spend that will result in a conflict.
     pub fn apply_to(self, transaction_v5: &mut Transaction) {
+        // Test assertion: only V5 is expected here
+        #[allow(clippy::wildcard_enum_match_arm)]
         let (inputs, sapling_shielded_data, orchard_shielded_data) = match transaction_v5 {
             Transaction::V5 {
                 inputs,

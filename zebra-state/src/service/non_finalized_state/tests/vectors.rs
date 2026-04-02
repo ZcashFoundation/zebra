@@ -719,6 +719,8 @@ fn commitment_is_validated_for_network_upgrade(network: Network, network_upgrade
     let err = state
         .commit_block(activation_block.clone().prepare(), &finalized_state)
         .unwrap_err();
+    // Test assertion: only this error variant is expected
+    #[allow(clippy::wildcard_enum_match_arm)]
     match err {
         crate::ValidateContextError::InvalidBlockCommitment(
             zebra_chain::block::CommitmentError::InvalidChainHistoryActivationReserved { .. },
@@ -747,6 +749,8 @@ fn commitment_is_validated_for_network_upgrade(network: Network, network_upgrade
     let err = state
         .commit_block(next_block.clone().prepare(), &finalized_state)
         .unwrap_err();
+    // Test assertion: only this error variant is expected
+    #[allow(clippy::wildcard_enum_match_arm)]
     match err {
         crate::ValidateContextError::InvalidBlockCommitment(
             zebra_chain::block::CommitmentError::InvalidChainHistoryRoot { .. },

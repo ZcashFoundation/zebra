@@ -357,16 +357,15 @@ where
     // block verification
     let (list, max_checkpoint_height) = init_checkpoint_list(config, network);
 
-    let tip = match state_service
+    let response = state_service
         .ready()
         .await
         .unwrap()
         .call(zs::Request::Tip)
         .await
-        .unwrap()
-    {
-        zs::Response::Tip(tip) => tip,
-        _ => unreachable!("wrong response to Request::Tip"),
+        .unwrap();
+    let zs::Response::Tip(tip) = response else {
+        unreachable!("wrong response to Request::Tip")
     };
     tracing::info!(
         ?tip,

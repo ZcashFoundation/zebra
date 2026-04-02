@@ -1036,7 +1036,20 @@ impl VerifyCheckpointError {
             // TODO: make this duplicate-incomplete
             VerifyCheckpointError::NewerRequest { .. } => true,
             VerifyCheckpointError::VerifyBlock(block_error) => block_error.is_duplicate_request(),
-            _ => false,
+            VerifyCheckpointError::Finished
+            | VerifyCheckpointError::TooHigh { .. }
+            | VerifyCheckpointError::CoinbaseHeight { .. }
+            | VerifyCheckpointError::BadMerkleRoot { .. }
+            | VerifyCheckpointError::DuplicateTransaction
+            | VerifyCheckpointError::Dropped
+            | VerifyCheckpointError::CommitCheckpointVerified(_)
+            | VerifyCheckpointError::Tip(_)
+            | VerifyCheckpointError::CheckpointList(_)
+            | VerifyCheckpointError::SubsidyError(_)
+            | VerifyCheckpointError::AmountError(_)
+            | VerifyCheckpointError::QueuedLimit
+            | VerifyCheckpointError::UnexpectedSideChain { .. }
+            | VerifyCheckpointError::ShuttingDown => false,
         }
     }
 
@@ -1051,7 +1064,18 @@ impl VerifyCheckpointError {
             | VerifyCheckpointError::CoinbaseHeight { .. }
             | VerifyCheckpointError::DuplicateTransaction
             | VerifyCheckpointError::AmountError(_) => 100,
-            _other => 0,
+            VerifyCheckpointError::Finished
+            | VerifyCheckpointError::TooHigh { .. }
+            | VerifyCheckpointError::AlreadyVerified { .. }
+            | VerifyCheckpointError::NewerRequest { .. }
+            | VerifyCheckpointError::BadMerkleRoot { .. }
+            | VerifyCheckpointError::Dropped
+            | VerifyCheckpointError::CommitCheckpointVerified(_)
+            | VerifyCheckpointError::Tip(_)
+            | VerifyCheckpointError::CheckpointList(_)
+            | VerifyCheckpointError::QueuedLimit
+            | VerifyCheckpointError::UnexpectedSideChain { .. }
+            | VerifyCheckpointError::ShuttingDown => 0,
         }
     }
 }
@@ -1130,17 +1154,15 @@ where
 
             // We use a `ServiceExt::oneshot`, so that every state service
             // `poll_ready` has a corresponding `call`. See #1593.
-            match state_service
+            let response = state_service
                 .oneshot(zs::Request::CommitCheckpointVerifiedBlock(req_block.block))
                 .map_err(VerifyCheckpointError::CommitCheckpointVerified)
-                .await?
-            {
-                zs::Response::Committed(committed_hash) => {
-                    assert_eq!(committed_hash, hash, "state must commit correct hash");
-                    Ok(hash)
-                }
-                _ => unreachable!("wrong response for CommitCheckpointVerifiedBlock"),
-            }
+                .await?;
+            let zs::Response::Committed(committed_hash) = response else {
+                unreachable!("wrong response for CommitCheckpointVerifiedBlock")
+            };
+            assert_eq!(committed_hash, hash, "state must commit correct hash");
+            Ok(hash)
         });
 
         let state_service = self.state_service.clone();
@@ -1163,13 +1185,12 @@ where
                 // If there was an error committing the block, then this verifier
                 // will be out of sync with the state. In that case, reset
                 // its progress back to the state tip.
-                let tip = match state_service
+                let response = state_service
                     .oneshot(zs::Request::Tip)
                     .await
-                    .map_err(VerifyCheckpointError::Tip)?
-                {
-                    zs::Response::Tip(tip) => tip,
-                    _ => unreachable!("wrong response for Tip"),
+                    .map_err(VerifyCheckpointError::Tip)?;
+                let zs::Response::Tip(tip) = response else {
+                    unreachable!("wrong response for Tip")
                 };
                 // Ignore errors since send() can fail only when the verifier
                 // is being dropped, and then it doesn't matter anymore.

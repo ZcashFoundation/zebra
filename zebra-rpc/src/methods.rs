@@ -1143,15 +1143,14 @@ where
             .await
             .map_misc_error()?;
 
-        match response {
-            zebra_state::ReadResponse::AddressBalance { balance, received } => {
-                Ok(GetAddressBalanceResponse {
-                    balance: u64::from(balance),
-                    received,
-                })
-            }
-            _ => unreachable!("Unexpected response from state service: {response:?}"),
-        }
+        let zebra_state::ReadResponse::AddressBalance { balance, received } = response else {
+            unreachable!("Unexpected response from state service: {response:?}")
+        };
+
+        Ok(GetAddressBalanceResponse {
+            balance: u64::from(balance),
+            received,
+        })
     }
 
     // TODO: use HexData or GetRawTransaction::Bytes to handle the transaction data argument
@@ -1181,9 +1180,8 @@ where
 
         let response = mempool.oneshot(request).await.map_misc_error()?;
 
-        let mut queue_results = match response {
-            mempool::Response::Queued(results) => results,
-            _ => unreachable!("incorrect response variant from mempool service"),
+        let mempool::Response::Queued(mut queue_results) = response else {
+            unreachable!("incorrect response variant from mempool service")
         };
 
         assert_eq!(
@@ -1248,6 +1246,8 @@ where
                 .await
                 .map_misc_error()?;
 
+            // Service contract: Block request always returns Block response.
+            #[allow(clippy::wildcard_enum_match_arm)]
             match response {
                 zebra_state::ReadResponse::Block(Some(block)) => {
                     Ok(GetBlockResponse::Raw(block.into()))
@@ -1317,6 +1317,8 @@ where
             }
 
             let tx_ids_response = futs.next().await.expect("`futs` should not be empty");
+            // Service contract: TransactionIdsForBlock/BlockAndSize request always returns corresponding response.
+            #[allow(clippy::wildcard_enum_match_arm)]
             let (tx, size): (Vec<_>, Option<usize>) = match tx_ids_response.map_misc_error()? {
                 zebra_state::ReadResponse::TransactionIdsForBlock(tx_ids) => (
                     tx_ids
@@ -1627,6 +1629,8 @@ where
             .await
             .map_misc_error()?;
 
+        // Service contract: FullTransactions/TransactionIds request always returns corresponding response.
+        #[allow(clippy::wildcard_enum_match_arm)]
         match response {
             mempool::Response::FullTransactions {
                 mut transactions,
@@ -1704,6 +1708,8 @@ where
 
         // Check the mempool first.
         if block_hash.is_none() {
+            // Service contract: TransactionsByMinedId request always returns Transactions response.
+            #[allow(clippy::wildcard_enum_match_arm)]
             match mempool
                 .ready()
                 .and_then(|service| {
@@ -1741,16 +1747,20 @@ where
         let txid = if let Some(block_hash) = block_hash {
             let block_hash = block::Hash::from_hex(block_hash)
                 .map_error(server::error::LegacyCode::InvalidAddressOrKey)?;
-            match self
-                .read_state
-                .clone()
-                .oneshot(zebra_state::ReadRequest::AnyChainTransactionIdsForBlock(
-                    block_hash.into(),
-                ))
-                .await
-                .map_misc_error()?
             {
-                zebra_state::ReadResponse::AnyChainTransactionIdsForBlock(tx_ids) => *tx_ids
+                let response = self
+                    .read_state
+                    .clone()
+                    .oneshot(zebra_state::ReadRequest::AnyChainTransactionIdsForBlock(
+                        block_hash.into(),
+                    ))
+                    .await
+                    .map_misc_error()?;
+                let zebra_state::ReadResponse::AnyChainTransactionIdsForBlock(tx_ids) = response
+                else {
+                    unreachable!("unmatched response to a `AnyChainTransactionIdsForBlock` request")
+                };
+                *tx_ids
                     .ok_or_error(
                         server::error::LegacyCode::InvalidAddressOrKey,
                         "block not found",
@@ -1761,16 +1771,15 @@ where
                     .ok_or_error(
                         server::error::LegacyCode::InvalidAddressOrKey,
                         "txid not found",
-                    )?,
-                _ => {
-                    unreachable!("unmatched response to a `AnyChainTransactionIdsForBlock` request")
-                }
+                    )?
             }
         } else {
             txid
         };
 
         // If the tx wasn't in the mempool, check the state.
+        // Service contract: AnyChainTransaction request always returns AnyChainTransaction response.
+        #[allow(clippy::wildcard_enum_match_arm)]
         match self
             .read_state
             .clone()
@@ -1781,17 +1790,14 @@ where
             zebra_state::ReadResponse::AnyChainTransaction(Some(tx)) => Ok(if verbose {
                 match tx {
                     AnyTx::Mined(tx) => {
-                        let block_hash = match self
+                        let response = self
                             .read_state
                             .clone()
                             .oneshot(zebra_state::ReadRequest::BestChainBlockHash(tx.height))
                             .await
-                            .map_misc_error()?
-                        {
-                            zebra_state::ReadResponse::BlockHash(block_hash) => block_hash,
-                            _ => {
-                                unreachable!("unmatched response to a `BestChainBlockHash` request")
-                            }
+                            .map_misc_error()?;
+                        let zebra_state::ReadResponse::BlockHash(block_hash) = response else {
+                            unreachable!("unmatched response to a `BestChainBlockHash` request")
                         };
 
                         GetRawTransactionResponse::Object(Box::new(
@@ -1855,6 +1861,8 @@ where
         // be based on the hash.
         //
         // TODO: If this RPC is called a lot, just get the block header, rather than the whole block.
+        // Service contract: Block request always returns Block response.
+        #[allow(clippy::wildcard_enum_match_arm)]
         let block = match read_state
             .ready()
             .and_then(|service| service.call(zebra_state::ReadRequest::Block(hash_or_height)))
@@ -1884,18 +1892,18 @@ where
 
         let sapling_nu = zcash_primitives::consensus::NetworkUpgrade::Sapling;
         let sapling = if network.is_nu_active(sapling_nu, height.into()) {
-            match read_state
-                .ready()
-                .and_then(|service| {
-                    service.call(zebra_state::ReadRequest::SaplingTree(hash.into()))
-                })
-                .await
-                .map_misc_error()?
             {
-                zebra_state::ReadResponse::SaplingTree(tree) => {
-                    tree.map(|t| (t.to_rpc_bytes(), t.root().bytes_in_display_order().to_vec()))
-                }
-                _ => unreachable!("unmatched response to a Sapling tree request"),
+                let response = read_state
+                    .ready()
+                    .and_then(|service| {
+                        service.call(zebra_state::ReadRequest::SaplingTree(hash.into()))
+                    })
+                    .await
+                    .map_misc_error()?;
+                let zebra_state::ReadResponse::SaplingTree(tree) = response else {
+                    unreachable!("unmatched response to a Sapling tree request")
+                };
+                tree.map(|t| (t.to_rpc_bytes(), t.root().bytes_in_display_order().to_vec()))
             }
         } else {
             None
@@ -1905,18 +1913,18 @@ where
 
         let orchard_nu = zcash_primitives::consensus::NetworkUpgrade::Nu5;
         let orchard = if network.is_nu_active(orchard_nu, height.into()) {
-            match read_state
-                .ready()
-                .and_then(|service| {
-                    service.call(zebra_state::ReadRequest::OrchardTree(hash.into()))
-                })
-                .await
-                .map_misc_error()?
             {
-                zebra_state::ReadResponse::OrchardTree(tree) => {
-                    tree.map(|t| (t.to_rpc_bytes(), t.root().bytes_in_display_order().to_vec()))
-                }
-                _ => unreachable!("unmatched response to an Orchard tree request"),
+                let response = read_state
+                    .ready()
+                    .and_then(|service| {
+                        service.call(zebra_state::ReadRequest::OrchardTree(hash.into()))
+                    })
+                    .await
+                    .map_misc_error()?;
+                let zebra_state::ReadResponse::OrchardTree(tree) = response else {
+                    unreachable!("unmatched response to an Orchard tree request")
+                };
+                tree.map(|t| (t.to_rpc_bytes(), t.root().bytes_in_display_order().to_vec()))
             }
         } else {
             None
@@ -1954,9 +1962,8 @@ where
                 .await
                 .map_misc_error()?;
 
-            let subtrees = match response {
-                zebra_state::ReadResponse::SaplingSubtrees(subtrees) => subtrees,
-                _ => unreachable!("unmatched response to a subtrees request"),
+            let zebra_state::ReadResponse::SaplingSubtrees(subtrees) = response else {
+                unreachable!("unmatched response to a subtrees request")
             };
 
             let subtrees = subtrees
@@ -1980,9 +1987,8 @@ where
                 .await
                 .map_misc_error()?;
 
-            let subtrees = match response {
-                zebra_state::ReadResponse::OrchardSubtrees(subtrees) => subtrees,
-                _ => unreachable!("unmatched response to a subtrees request"),
+            let zebra_state::ReadResponse::OrchardSubtrees(subtrees) = response else {
+                unreachable!("unmatched response to a subtrees request")
             };
 
             let subtrees = subtrees
@@ -2029,28 +2035,29 @@ where
             .await
             .map_misc_error()?;
 
-        let hashes = match response {
-            zebra_state::ReadResponse::AddressesTransactionIds(hashes) => {
-                let mut last_tx_location = TransactionLocation::from_usize(Height(0), 0);
+        let zebra_state::ReadResponse::AddressesTransactionIds(hashes) = response else {
+            unreachable!("unmatched response to a TransactionsByAddresses request")
+        };
 
-                hashes
-                    .iter()
-                    .map(|(tx_loc, tx_id)| {
-                        // Check that the returned transactions are in chain order.
-                        assert!(
-                            *tx_loc > last_tx_location,
-                            "Transactions were not in chain order:\n\
-                                 {tx_loc:?} {tx_id:?} was after:\n\
-                                 {last_tx_location:?}",
-                        );
+        let hashes = {
+            let mut last_tx_location = TransactionLocation::from_usize(Height(0), 0);
 
-                        last_tx_location = *tx_loc;
+            hashes
+                .iter()
+                .map(|(tx_loc, tx_id)| {
+                    // Check that the returned transactions are in chain order.
+                    assert!(
+                        *tx_loc > last_tx_location,
+                        "Transactions were not in chain order:\n\
+                             {tx_loc:?} {tx_id:?} was after:\n\
+                             {last_tx_location:?}",
+                    );
 
-                        tx_id.to_string()
-                    })
-                    .collect()
-            }
-            _ => unreachable!("unmatched response to a TransactionsByAddresses request"),
+                    last_tx_location = *tx_loc;
+
+                    tx_id.to_string()
+                })
+                .collect()
         };
 
         Ok(hashes)
@@ -2072,9 +2079,8 @@ where
             .and_then(|service| service.call(request))
             .await
             .map_misc_error()?;
-        let utxos = match response {
-            zebra_state::ReadResponse::AddressUtxos(utxos) => utxos,
-            _ => unreachable!("unmatched response to a UtxosByAddresses request"),
+        let zebra_state::ReadResponse::AddressUtxos(utxos) = response else {
+            unreachable!("unmatched response to a UtxosByAddresses request")
         };
 
         let mut last_output_location = OutputLocation::from_usize(Height(0), 0, 0);
@@ -2172,6 +2178,8 @@ where
             .await
             .map_error(server::error::LegacyCode::default())?;
 
+        // Service contract: BestChainBlockHash request always returns BlockHash response.
+        #[allow(clippy::wildcard_enum_match_arm)]
         match response {
             zebra_state::ReadResponse::BlockHash(Some(hash)) => Ok(GetBlockHashResponse(hash)),
             zebra_state::ReadResponse::BlockHash(None) => Err(ErrorObject::borrowed(
@@ -2630,10 +2638,9 @@ where
                 .and_then(|service| service.call(request))
                 .await
                 .map_error(server::error::LegacyCode::default())?;
-            current_block_size = match response {
-                zebra_state::ReadResponse::TipBlockSize(Some(block_size)) => Some(block_size),
-                _ => None,
-            };
+            if let zebra_state::ReadResponse::TipBlockSize(Some(block_size)) = response {
+                current_block_size = Some(block_size);
+            }
         }
 
         Ok(GetMiningInfoResponse::new_internal(
@@ -2673,12 +2680,11 @@ where
             .await
             .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?;
 
-        let solution_rate = match response {
-            // zcashd returns a 0 rate when the calculation is invalid
-            ReadResponse::SolutionRate(solution_rate) => solution_rate.unwrap_or(0),
-
-            _ => unreachable!("unmatched response to a solution rate request"),
+        let ReadResponse::SolutionRate(solution_rate) = response else {
+            unreachable!("unmatched response to a solution rate request")
         };
+        // zcashd returns a 0 rate when the calculation is invalid
+        let solution_rate = solution_rate.unwrap_or(0);
 
         Ok(solution_rate
             .try_into()
@@ -2902,9 +2908,11 @@ where
             .clone()
             .oneshot(zebra_state::Request::ReconsiderBlock(block_hash))
             .await
-            .map(|rsp| match rsp {
-                zebra_state::Response::Reconsidered(block_hashes) => block_hashes,
-                _ => unreachable!("unmatched response to a reconsider block request"),
+            .map(|rsp| {
+                let zebra_state::Response::Reconsidered(block_hashes) = rsp else {
+                    unreachable!("unmatched response to a reconsider block request")
+                };
+                block_hashes
             })
             .map_misc_error()
     }
@@ -3050,6 +3058,8 @@ where
                 .await
                 .map_misc_error()?;
 
+            // Service contract: UnspentOutput request always returns TransparentOutput response.
+            #[allow(clippy::wildcard_enum_match_arm)]
             match rsp {
                 // Return the output found in the mempool
                 mempool::Response::TransparentOutput(Some(CreatedOrSpent::Created {
@@ -3087,10 +3097,10 @@ where
             .await
             .map_misc_error()?;
 
-        let best_block_hash = match tip_rsp {
-            zebra_state::ReadResponse::Tip(tip) => tip.ok_or_misc_error("No blocks in state")?.1,
-            _ => unreachable!("unmatched response to a `Tip` request"),
+        let zebra_state::ReadResponse::Tip(tip) = tip_rsp else {
+            unreachable!("unmatched response to a `Tip` request")
         };
+        let best_block_hash = tip.ok_or_misc_error("No blocks in state")?.1;
 
         // State path
         let rsp = self
@@ -3100,6 +3110,8 @@ where
             .await
             .map_misc_error()?;
 
+        // Service contract: Transaction request always returns Transaction response.
+        #[allow(clippy::wildcard_enum_match_arm)]
         match rsp {
             zebra_state::ReadResponse::Transaction(Some(tx)) => {
                 let outputs = tx.tx.outputs();
@@ -3119,12 +3131,10 @@ where
                         .await
                         .map_misc_error()?;
 
-                    match rsp {
-                        zebra_state::ReadResponse::IsTransparentOutputSpent(spent) => spent,
-                        _ => unreachable!(
-                            "unmatched response to an `IsTransparentOutputSpent` request"
-                        ),
-                    }
+                    let zebra_state::ReadResponse::IsTransparentOutputSpent(spent) = rsp else {
+                        unreachable!("unmatched response to an `IsTransparentOutputSpent` request")
+                    };
+                    spent
                 };
 
                 if is_spent {
@@ -4621,9 +4631,8 @@ where
         (false, Err(error)) => return Err(ErrorObject::owned(0, error.to_string(), None::<()>)),
     };
 
-    let chain_info = match response {
-        ReadResponse::ChainInfo(info) => info,
-        _ => unreachable!("unmatched response to a chain info request"),
+    let ReadResponse::ChainInfo(chain_info) = response else {
+        unreachable!("unmatched response to a chain info request")
     };
 
     // This RPC is typically used for display purposes, so it is not consensus-critical.

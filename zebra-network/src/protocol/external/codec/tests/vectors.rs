@@ -343,6 +343,8 @@ fn max_msg_size_round_trip() {
 fn version_message_omitted_relay() {
     let _init_guard = zebra_test::init();
 
+    // Test assertion: only Version variant is expected
+    #[allow(clippy::wildcard_enum_match_arm)]
     let version = match VERSION_TEST_VECTOR.clone() {
         Message::Version(mut version) => {
             version.relay = false;
@@ -387,6 +389,8 @@ fn version_message_with_relay() {
 
     bytes.clear();
 
+    // Test assertion: only Version variant is expected
+    #[allow(clippy::wildcard_enum_match_arm)]
     let version = match VERSION_TEST_VECTOR.clone() {
         Message::Version(mut version) => {
             version.relay = false;
