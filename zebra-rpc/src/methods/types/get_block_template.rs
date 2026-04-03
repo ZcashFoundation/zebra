@@ -493,6 +493,13 @@ impl MinerParams {
         OsRng.fill_bytes(&mut random);
         self.memo = Some(MemoBytes::from_bytes(&random).unwrap());
     }
+
+    /// Randomizes the miner data.
+    pub fn randomize_data(&mut self) {
+        let mut random = [0u8; 32];
+        OsRng.fill_bytes(&mut random);
+        self.data = push_value(&random);
+    }
 }
 
 impl From<Address> for MinerParams {
@@ -591,9 +598,10 @@ where
         self.mined_block_sender.try_send((block, height))
     }
 
-    /// Randomizes the coinbase memo, if miner parameters are set.
+    /// Randomizes the coinbase data, if miner parameters are set.
     pub fn randomize_coinbase_data(&mut self) {
         if let Some(miner_params) = &mut self.miner_params {
+            miner_params.randomize_data();
             miner_params.randomize_memo();
         }
     }
