@@ -83,19 +83,7 @@ fn test_block_db_round_trip() {
 fn test_lookup_spent_utxos_and_write_block_with_provided_utxos() {
     let _init_guard = zebra_test::init();
 
-    let network = Mainnet;
-    let mut state = ZebraDb::new(
-        &Config::ephemeral(),
-        STATE_DATABASE_KIND,
-        &state_database_format_version_in_code(),
-        &network,
-        true,
-        STATE_COLUMN_FAMILIES_IN_CODE
-            .iter()
-            .map(ToString::to_string),
-        false,
-    );
-    let empty_nfs = NonFinalizedState::new(&network);
+    let (network, mut state, empty_nfs) = test_db_and_nfs();
 
     // Commit the first few mainnet blocks using the new lookup_spent_utxos + write_block path.
     // These early blocks have only coinbase transactions (no transparent inputs to spend),
@@ -133,19 +121,7 @@ fn test_lookup_spent_utxos_and_write_block_with_provided_utxos() {
 fn test_lookup_spent_utxos_falls_back_to_non_finalized_state() {
     let _init_guard = zebra_test::init();
 
-    let network = Mainnet;
-    let state = ZebraDb::new(
-        &Config::ephemeral(),
-        STATE_DATABASE_KIND,
-        &state_database_format_version_in_code(),
-        &network,
-        true,
-        STATE_COLUMN_FAMILIES_IN_CODE
-            .iter()
-            .map(ToString::to_string),
-        false,
-    );
-    let empty_nfs = NonFinalizedState::new(&network);
+    let (_network, state, empty_nfs) = test_db_and_nfs();
 
     // With an empty database and empty non-finalized state, lookup_spent_utxos
     // for blocks without transparent spends should return empty.
@@ -209,7 +185,10 @@ fn test_lookup_spent_utxos_empty_nfs_empty_db_returns_empty_for_coinbase_only_bl
 
     // Verify all blocks were written correctly.
     let tip = state.tip();
-    assert!(tip.is_some(), "state should have a tip after writing blocks");
+    assert!(
+        tip.is_some(),
+        "state should have a tip after writing blocks"
+    );
     let (tip_height, _tip_hash) = tip.unwrap();
     assert_eq!(
         tip_height,
@@ -225,18 +204,7 @@ fn test_lookup_spent_utxos_empty_nfs_empty_db_returns_empty_for_coinbase_only_bl
 fn test_lookup_spent_utxos_nfs_fallback_with_committed_blocks() {
     let _init_guard = zebra_test::init();
 
-    let network = Mainnet;
-    let mut state = ZebraDb::new(
-        &Config::ephemeral(),
-        STATE_DATABASE_KIND,
-        &state_database_format_version_in_code(),
-        &network,
-        true,
-        STATE_COLUMN_FAMILIES_IN_CODE
-            .iter()
-            .map(ToString::to_string),
-        false,
-    );
+    let (network, mut state, empty_nfs) = test_db_and_nfs();
 
     // First, write genesis to the finalized state so commit_checkpoint_block
     // can use it as the parent.
@@ -245,7 +213,6 @@ fn test_lookup_spent_utxos_nfs_fallback_with_committed_blocks() {
         .unwrap()
         .zcash_deserialize_into()
         .unwrap();
-    let empty_nfs = NonFinalizedState::new(&network);
     let genesis_cv = CheckpointVerifiedBlock::from(genesis_block.clone());
     let genesis_ts = Treestate::default();
     let genesis_fin = FinalizedBlock::from_checkpoint_verified(genesis_cv, genesis_ts);
@@ -288,19 +255,7 @@ fn test_lookup_spent_utxos_nfs_fallback_with_committed_blocks() {
 fn test_write_block_updates_tip_sequentially() {
     let _init_guard = zebra_test::init();
 
-    let network = Mainnet;
-    let mut state = ZebraDb::new(
-        &Config::ephemeral(),
-        STATE_DATABASE_KIND,
-        &state_database_format_version_in_code(),
-        &network,
-        true,
-        STATE_COLUMN_FAMILIES_IN_CODE
-            .iter()
-            .map(ToString::to_string),
-        false,
-    );
-    let empty_nfs = NonFinalizedState::new(&network);
+    let (network, mut state, empty_nfs) = test_db_and_nfs();
 
     for (&height, block_bytes) in zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS.iter() {
         let block: Arc<Block> = block_bytes.zcash_deserialize_into().unwrap();
@@ -425,4 +380,21 @@ fn test_block_db_round_trip_with(
 
         assert_eq!(stored_block, original_block);
     }
+}
+
+fn test_db_and_nfs() -> (Network, ZebraDb, NonFinalizedState) {
+    let network = Mainnet;
+    let state = ZebraDb::new(
+        &Config::ephemeral(),
+        STATE_DATABASE_KIND,
+        &state_database_format_version_in_code(),
+        &network,
+        true,
+        STATE_COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .map(ToString::to_string),
+        false,
+    );
+    let nfs = NonFinalizedState::new(&network);
+    (network, state, nfs)
 }

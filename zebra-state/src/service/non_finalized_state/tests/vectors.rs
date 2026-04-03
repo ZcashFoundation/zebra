@@ -835,12 +835,7 @@ async fn non_finalized_state_writes_blocks_to_and_restores_blocks_from_backup_ca
 /// This is needed because `commit_checkpoint_block` expects the finalized state to
 /// already contain the parent block's tree state.
 fn write_genesis_to_finalized(network: &Network) -> (FinalizedState, Vec<(u32, Arc<Block>)>) {
-    let finalized_state = FinalizedState::new(
-        &Config::ephemeral(),
-        network,
-        #[cfg(feature = "elasticsearch")]
-        false,
-    );
+    let (finalized_state, empty_nfs) = test_state();
 
     // Write genesis to the finalized state.
     let genesis: Arc<Block> = CONTINUOUS_MAINNET_BLOCKS
@@ -852,8 +847,9 @@ fn write_genesis_to_finalized(network: &Network) -> (FinalizedState, Vec<(u32, A
     let treestate = Treestate::default();
     let finalized = FinalizedBlock::from_checkpoint_verified(checkpoint_verified, treestate);
 
-    let empty_nfs = NonFinalizedState::new(network);
-    let spent_utxos = finalized_state.db.lookup_spent_utxos(&finalized, &empty_nfs);
+    let spent_utxos = finalized_state
+        .db
+        .lookup_spent_utxos(&finalized, &empty_nfs);
     // Clone the db to get a mutable reference.
     let mut db = finalized_state.db.clone();
     db.write_block(finalized, spent_utxos, None, network, "test")
@@ -874,10 +870,8 @@ fn write_genesis_to_finalized(network: &Network) -> (FinalizedState, Vec<(u32, A
 fn commit_checkpoint_block_after_genesis() {
     let _init_guard = zebra_test::init();
 
-    let network = Network::Mainnet;
-    let (finalized_state, remaining_blocks) = write_genesis_to_finalized(&network);
-
-    let mut nfs = NonFinalizedState::new(&network);
+    let (finalized_state, remaining_blocks) = write_genesis_to_finalized(&Network::Mainnet);
+    let (_, mut nfs) = test_state();
     assert!(nfs.best_chain().is_none(), "NFS should start empty");
 
     // Commit block 1 to the NFS via checkpoint path.
@@ -910,10 +904,8 @@ fn commit_checkpoint_block_after_genesis() {
 fn commit_checkpoint_block_sequential_blocks() {
     let _init_guard = zebra_test::init();
 
-    let network = Network::Mainnet;
-    let (finalized_state, remaining_blocks) = write_genesis_to_finalized(&network);
-
-    let mut nfs = NonFinalizedState::new(&network);
+    let (finalized_state, remaining_blocks) = write_genesis_to_finalized(&Network::Mainnet);
+    let (_, mut nfs) = test_state();
 
     // Commit blocks 1 through 10.
     for (height, block) in &remaining_blocks {
@@ -950,10 +942,8 @@ fn commit_checkpoint_block_sequential_blocks() {
 fn finalize_after_commit_checkpoint_block() {
     let _init_guard = zebra_test::init();
 
-    let network = Network::Mainnet;
-    let (finalized_state, remaining_blocks) = write_genesis_to_finalized(&network);
-
-    let mut nfs = NonFinalizedState::new(&network);
+    let (finalized_state, remaining_blocks) = write_genesis_to_finalized(&Network::Mainnet);
+    let (_, mut nfs) = test_state();
 
     // Commit blocks 1, 2, 3 via checkpoint path.
     let blocks: Vec<Arc<Block>> = remaining_blocks
@@ -1022,10 +1012,8 @@ fn finalize_after_commit_checkpoint_block() {
 fn peek_finalize_tip_does_not_mutate() {
     let _init_guard = zebra_test::init();
 
-    let network = Network::Mainnet;
-    let (finalized_state, remaining_blocks) = write_genesis_to_finalized(&network);
-
-    let mut nfs = NonFinalizedState::new(&network);
+    let (finalized_state, remaining_blocks) = write_genesis_to_finalized(&Network::Mainnet);
+    let (_, mut nfs) = test_state();
 
     // Empty NFS should return None.
     assert!(
@@ -1065,10 +1053,10 @@ fn peek_finalize_tip_does_not_mutate() {
 fn pipeline_checkpoint_commit_then_finalize_to_disk() {
     let _init_guard = zebra_test::init();
 
-    let network = Network::Mainnet;
-    let (finalized_state, remaining_blocks) = write_genesis_to_finalized(&network);
+    let (finalized_state, remaining_blocks) = write_genesis_to_finalized(&Network::Mainnet);
     let mut db = finalized_state.db.clone();
-    let mut nfs = NonFinalizedState::new(&network);
+    let (_, mut nfs) = test_state();
+    let network = Network::Mainnet;
 
     // Step 1: Commit blocks 1..=5 to the NFS via checkpoint path.
     let blocks: Vec<Arc<Block>> = remaining_blocks
@@ -1121,4 +1109,17 @@ fn pipeline_checkpoint_commit_then_finalize_to_disk() {
         blocks[4].hash(),
         "disk tip hash should match block at height 5"
     );
+}
+
+/// Creates an ephemeral finalized state and empty non-finalized state for testing.
+fn test_state() -> (FinalizedState, NonFinalizedState) {
+    let network = Network::Mainnet;
+    let finalized_state = FinalizedState::new(
+        &Config::ephemeral(),
+        &network,
+        #[cfg(feature = "elasticsearch")]
+        false,
+    );
+    let nfs = NonFinalizedState::new(&network);
+    (finalized_state, nfs)
 }

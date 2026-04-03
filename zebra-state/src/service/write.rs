@@ -51,22 +51,11 @@ const PIPELINE_LOOKUP_CHANNEL_CAPACITY: usize = 100;
 /// (batch preparation + disk writer).
 const PIPELINE_WRITE_CHANNEL_CAPACITY: usize = 100;
 
-/// Message sent from Thread 1 → Thread 2 in the checkpoint pipeline.
-///
-/// Contains a finalized block that needs its spent UTXOs and output locations
-/// looked up from disk and/or the non-finalized state.
-struct SpentOutputLookup {
-    finalized: FinalizedBlock,
-}
-
-/// Message sent from Thread 2 → Thread 3 in the checkpoint pipeline.
-///
-/// Contains a finalized block together with its pre-looked-up spent UTXOs,
-/// ready for batch preparation and disk commit.
-struct BlockWrite {
-    finalized: FinalizedBlock,
-    spent_utxos: Vec<(transparent::OutPoint, OutputLocation, transparent::Utxo)>,
-}
+/// Thread 2 → Thread 3: a finalized block with its pre-looked-up spent UTXOs.
+type BlockWrite = (
+    FinalizedBlock,
+    Vec<(transparent::OutPoint, OutputLocation, transparent::Utxo)>,
+);
 
 /// Run contextual validation on the prepared block and add it to the
 /// non-finalized state if it is contextually valid.
@@ -298,7 +287,7 @@ impl WriteBlockWorkerTask {
         // look up spent UTXOs/output-locations (Thread 2), then prepare batch and write to
         // disk (Thread 3). This avoids blocking Thread 1 on any disk I/O.
         let (lookup_tx, lookup_rx) =
-            crossbeam_channel::bounded::<SpentOutputLookup>(PIPELINE_LOOKUP_CHANNEL_CAPACITY);
+            crossbeam_channel::bounded::<FinalizedBlock>(PIPELINE_LOOKUP_CHANNEL_CAPACITY);
         let (write_tx, write_rx) =
             crossbeam_channel::bounded::<BlockWrite>(PIPELINE_WRITE_CHANNEL_CAPACITY);
 
@@ -314,12 +303,9 @@ impl WriteBlockWorkerTask {
                     // Clone the latest non-finalized state once per block so that UTXOs
                     // created by blocks not yet on disk can be found.
                     let latest_nfs = nfs_receiver.borrow().clone();
-                    let spent_utxos = db2.lookup_spent_utxos(&msg.finalized, &latest_nfs);
+                    let spent_utxos = db2.lookup_spent_utxos(&msg, &latest_nfs);
                     write_tx
-                        .send(BlockWrite {
-                            finalized: msg.finalized,
-                            spent_utxos,
-                        })
+                        .send((msg, spent_utxos))
                         .expect("disk writer thread should be alive");
                 }
             });
@@ -329,14 +315,13 @@ impl WriteBlockWorkerTask {
             let network = non_finalized_state.network.clone();
             s.spawn(move || {
                 let mut prev_note_commitment_trees: Option<NoteCommitmentTrees> = None;
-                while let Ok(msg) = write_rx.recv() {
-                    let note_commitment_trees =
-                        msg.finalized.treestate.note_commitment_trees.clone();
-                    let height = msg.finalized.height;
+                while let Ok((finalized, spent_utxos)) = write_rx.recv() {
+                    let note_commitment_trees = finalized.treestate.note_commitment_trees.clone();
+                    let height = finalized.height;
 
                     db3.write_block(
-                        msg.finalized,
-                        msg.spent_utxos,
+                        finalized,
+                        spent_utxos,
                         prev_note_commitment_trees.take(),
                         &network,
                         "commit checkpoint-verified pipeline",
@@ -459,9 +444,7 @@ impl WriteBlockWorkerTask {
 
                 // Send to the pipeline for UTXO lookup and disk write.
                 lookup_tx
-                    .send(SpentOutputLookup {
-                        finalized: finalized_block,
-                    })
+                    .send(finalized_block)
                     .expect("UTXO lookup thread should be alive");
 
                 // Respond to the caller immediately — the block is in the non-finalized

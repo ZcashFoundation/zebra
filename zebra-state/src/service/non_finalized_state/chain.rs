@@ -1178,7 +1178,7 @@ impl Chain {
         }
     }
 
-    pub fn treestate(&self, hash_or_height: HashOrHeight) -> Option<Treestate> {
+    pub(crate) fn treestate(&self, hash_or_height: HashOrHeight) -> Option<Treestate> {
         let sprout_tree = self.sprout_tree(hash_or_height)?;
         let sapling_tree = self.sapling_tree(hash_or_height)?;
         let orchard_tree = self.orchard_tree(hash_or_height)?;
