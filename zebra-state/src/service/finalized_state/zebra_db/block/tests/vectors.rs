@@ -345,6 +345,7 @@ fn test_block_db_round_trip_with(
                 new_outputs,
                 transaction_hashes,
                 deferred_pool_balance_change: None,
+                cached_raw_transactions: None,
             })
         };
 

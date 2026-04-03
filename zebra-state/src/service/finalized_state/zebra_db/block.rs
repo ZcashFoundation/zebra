@@ -181,6 +181,33 @@ impl ZebraDb {
     }
 
     /// Returns the [`Block`] with [`block::Hash`] or [`Height`], if it exists
+    /// in the finalized chain, along with the raw serialized bytes of each transaction.
+    ///
+    /// The raw bytes can be used to avoid re-serializing transactions when writing
+    /// them to another database (e.g., in the `copy-state` command).
+    #[allow(clippy::unwrap_in_result)]
+    pub fn block_and_raw_transactions(
+        &self,
+        hash_or_height: HashOrHeight,
+    ) -> Option<(Arc<Block>, Vec<RawBytes>)> {
+        let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
+        let header = self.block_header(height.into())?;
+
+        let mut transactions = Vec::new();
+        let mut raw_transactions = Vec::new();
+        for (_loc, raw) in self.raw_transactions_by_height(height) {
+            transactions.push(Arc::new(Transaction::from_bytes(raw.raw_bytes())));
+            raw_transactions.push(raw);
+        }
+
+        let block = Arc::new(Block {
+            header,
+            transactions,
+        });
+        Some((block, raw_transactions))
+    }
+
+    /// Returns the [`Block`] with [`block::Hash`] or [`Height`], if it exists
     /// in the finalized chain, and its serialized size.
     #[allow(clippy::unwrap_in_result)]
     pub fn block_and_size(&self, hash_or_height: HashOrHeight) -> Option<(Arc<Block>, usize)> {
@@ -766,8 +793,13 @@ impl DiskWriteBatch {
         {
             let transaction_location = TransactionLocation::from_usize(*height, transaction_index);
 
-            // Commit each transaction's data
-            self.zs_insert(&tx_by_loc, transaction_location, transaction);
+            // Commit each transaction's data, using cached raw bytes when available
+            // to avoid re-serializing transactions that were just read from another database.
+            if let Some(ref cached) = finalized.cached_raw_transactions {
+                self.zs_insert(&tx_by_loc, transaction_location, &cached[transaction_index]);
+            } else {
+                self.zs_insert(&tx_by_loc, transaction_location, transaction);
+            }
 
             // Index each transaction hash and location
             self.zs_insert(&hash_by_tx_loc, transaction_location, transaction_hash);

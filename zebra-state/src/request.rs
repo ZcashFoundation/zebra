@@ -33,6 +33,7 @@ use crate::{
 };
 use crate::{
     error::{CommitCheckpointVerifiedError, InvalidateError, LayeredStateError, ReconsiderError},
+    service::finalized_state::RawBytes,
     CommitSemanticallyVerifiedError,
 };
 
@@ -260,6 +261,12 @@ pub struct SemanticallyVerifiedBlock {
     pub transaction_hashes: Arc<[transaction::Hash]>,
     /// This block's deferred pool value balance change.
     pub deferred_pool_balance_change: Option<DeferredPoolBalanceChange>,
+    /// Cached raw serialized transaction bytes from the source database.
+    ///
+    /// When set, these bytes are written directly to the target database
+    /// without re-serializing the transactions. Used by the `copy-state`
+    /// command to avoid redundant serialization.
+    pub cached_raw_transactions: Option<Vec<RawBytes>>,
 }
 
 /// A block ready to be committed directly to the finalized state with
@@ -392,6 +399,8 @@ pub struct FinalizedBlock {
     pub(super) treestate: Treestate,
     /// This block's deferred pool value balance change.
     pub(super) deferred_pool_balance_change: Option<DeferredPoolBalanceChange>,
+    /// Cached raw serialized transaction bytes from the source database.
+    pub(super) cached_raw_transactions: Option<Vec<RawBytes>>,
 }
 
 impl FinalizedBlock {
@@ -418,6 +427,7 @@ impl FinalizedBlock {
             transaction_hashes: block.transaction_hashes,
             treestate,
             deferred_pool_balance_change: block.deferred_pool_balance_change,
+            cached_raw_transactions: block.cached_raw_transactions,
         }
     }
 }
@@ -491,6 +501,7 @@ impl ContextuallyVerifiedBlock {
             new_outputs,
             transaction_hashes,
             deferred_pool_balance_change,
+            cached_raw_transactions: _,
         } = semantically_verified;
 
         // This is redundant for the non-finalized state,
@@ -534,6 +545,15 @@ impl CheckpointVerifiedBlock {
     pub fn with_hash(block: Arc<Block>, hash: block::Hash) -> Self {
         Self(SemanticallyVerifiedBlock::with_hash(block, hash))
     }
+
+    /// Attaches cached raw serialized transaction bytes to this block.
+    ///
+    /// When set, these bytes are written directly to the target database
+    /// without re-serializing the transactions.
+    pub fn with_cached_raw_transactions(mut self, raw_txs: Vec<RawBytes>) -> Self {
+        self.0.cached_raw_transactions = Some(raw_txs);
+        self
+    }
 }
 
 impl SemanticallyVerifiedBlock {
@@ -552,6 +572,7 @@ impl SemanticallyVerifiedBlock {
             new_outputs,
             transaction_hashes,
             deferred_pool_balance_change: None,
+            cached_raw_transactions: None,
         }
     }
 
@@ -587,6 +608,7 @@ impl From<Arc<Block>> for SemanticallyVerifiedBlock {
             new_outputs,
             transaction_hashes,
             deferred_pool_balance_change: None,
+            cached_raw_transactions: None,
         }
     }
 }
@@ -602,6 +624,7 @@ impl From<ContextuallyVerifiedBlock> for SemanticallyVerifiedBlock {
             deferred_pool_balance_change: Some(DeferredPoolBalanceChange::new(
                 valid.chain_value_pool_change.deferred_amount(),
             )),
+            cached_raw_transactions: None,
         }
     }
 }
@@ -615,6 +638,7 @@ impl From<FinalizedBlock> for SemanticallyVerifiedBlock {
             new_outputs: finalized.new_outputs,
             transaction_hashes: finalized.transaction_hashes,
             deferred_pool_balance_change: finalized.deferred_pool_balance_change,
+            cached_raw_transactions: finalized.cached_raw_transactions,
         }
     }
 }

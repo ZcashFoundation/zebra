@@ -44,8 +44,8 @@ use zebra_chain::{
     block::{Block, Height},
     parameters::Network,
 };
-use zebra_state as old_zs;
 use zebra_state as new_zs;
+use zebra_state::{self as old_zs, RawBytes};
 
 use crate::{
     components::tokio::{RuntimeRun, TokioComponent},
@@ -213,19 +213,24 @@ impl CopyStateCmd {
 
         // Pipeline: read blocks from source in a blocking thread, send them
         // through a channel, and commit them to the target state concurrently.
-        let (block_tx, mut block_rx) = tokio::sync::mpsc::channel::<(u32, Arc<Block>)>(100);
+        let (block_tx, mut block_rx) =
+            tokio::sync::mpsc::channel::<(u32, Arc<Block>, Vec<RawBytes>)>(100);
 
         // Source reader: reads blocks sequentially from the source DB and sends
         // them through the channel. Runs in a blocking thread because source DB
-        // reads are synchronous.
+        // reads are synchronous. Raw transaction bytes are sent alongside each
+        // block to avoid re-serializing them on write.
         let source_db = source_db.clone();
         let reader_handle = tokio::task::spawn_blocking(move || {
             for height in min_target_height..=max_copy_height {
-                let source_block = source_db
-                    .block(Height(height).into())
+                let (source_block, raw_txs) = source_db
+                    .block_and_raw_transactions(Height(height).into())
                     .unwrap_or_else(|| panic!("missing source block at height {height}"));
 
-                if block_tx.blocking_send((height, source_block)).is_err() {
+                if block_tx
+                    .blocking_send((height, source_block, raw_txs))
+                    .is_err()
+                {
                     break;
                 }
             }
@@ -235,13 +240,15 @@ impl CopyStateCmd {
         // commit each block to the target state. The spawned tasks run
         // concurrently so many blocks can be in flight at once.
         let mut commit_count: u32 = 0;
-        while let Some((height, source_block)) = block_rx.recv().await {
+        while let Some((height, source_block, raw_txs)) = block_rx.recv().await {
+            let checkpoint_block = new_zs::CheckpointVerifiedBlock::from(source_block)
+                .with_cached_raw_transactions(raw_txs);
             let rsp =
                 target_state
                     .ready()
                     .await?
                     .call(new_zs::Request::CommitCheckpointVerifiedBlock(
-                        source_block.into(),
+                        checkpoint_block,
                     ));
 
             tokio::spawn(async move {
