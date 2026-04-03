@@ -152,13 +152,6 @@ impl TransactionTemplate<NegativeOrZero> {
         let empty_memo = MemoBytes::empty();
         let memo = miner_params.memo().unwrap_or(&empty_memo);
 
-        macro_rules! trace_err {
-            ($res:expr, $type:expr) => {
-                $res.map_err(|err| tracing::error!("Failed to add {} output: {err}", $type))
-                    .ok()
-            };
-        }
-
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         {
             let zip233_amount = if cfg!(zcash_unstable = "zip235") {
@@ -168,6 +161,13 @@ impl TransactionTemplate<NegativeOrZero> {
             };
 
             builder.set_zip233_amount(Zatoshis::try_from(zip233_amount)?);
+        }
+
+        macro_rules! trace_err {
+            ($res:expr, $type:expr) => {
+                $res.map_err(|err| tracing::error!("Failed to add {} output: {err}", $type))
+                    .ok()
+            };
         }
 
         let add_orchard_reward = |builder: &mut Builder<'_, _, _>, addr: &_| {
