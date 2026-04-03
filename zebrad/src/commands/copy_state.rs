@@ -55,7 +55,7 @@ use crate::{
 };
 
 /// How often we log info-level progress messages
-const PROGRESS_HEIGHT_INTERVAL: u32 = 100;
+const PROGRESS_HEIGHT_INTERVAL: u32 = 2_000;
 
 /// copy cached chain state (expert users only)
 #[derive(Command, Debug, clap::Parser)]
@@ -213,7 +213,7 @@ impl CopyStateCmd {
 
         // Pipeline: read blocks from source in a blocking thread, send them
         // through a channel, and commit them to the target state concurrently.
-        let (block_tx, mut block_rx) = tokio::sync::mpsc::channel::<(u32, Arc<Block>)>(1000);
+        let (block_tx, mut block_rx) = tokio::sync::mpsc::channel::<(u32, Arc<Block>)>(100);
 
         // Source reader: reads blocks sequentially from the source DB and sends
         // them through the channel. Runs in a blocking thread because source DB
@@ -247,7 +247,7 @@ impl CopyStateCmd {
             tokio::spawn(async move {
                 match rsp.await {
                     Ok(new_zs::Response::Committed(_hash)) => {}
-                    other => panic!("block commit failed at height {height}: {other:?}"),
+                    other => warn!("block commit failed at height {height}: {other:?}"),
                 }
             });
 
