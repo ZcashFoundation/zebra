@@ -163,42 +163,35 @@ impl TransactionTemplate<NegativeOrZero> {
             builder.set_zip233_amount(Zatoshis::try_from(zip233_amount)?);
         }
 
-        macro_rules! trace_err {
-            ($res:expr, $type:expr) => {
-                $res.map_err(|err| tracing::error!("Failed to add {} output: {err}", $type))
-                    .ok()
-            };
-        }
-
         let add_orchard_reward = |builder: &mut Builder<'_, _, _>, addr: &_| {
-            trace_err!(
-                builder.add_orchard_output::<String>(
+            builder
+                .add_orchard_output::<String>(
                     Some(::orchard::keys::OutgoingViewingKey::from([0u8; 32])),
                     *addr,
                     miner_reward,
                     memo.clone(),
-                ),
-                "Orchard"
-            )
+                )
+                .map_err(|e| tracing::error!("Failed to add Orchard output: {e}"))
+                .ok()
         };
 
         let add_sapling_reward = |builder: &mut Builder<'_, _, _>, addr: &_| {
-            trace_err!(
-                builder.add_sapling_output::<String>(
+            builder
+                .add_sapling_output::<String>(
                     Some(sapling_crypto::keys::OutgoingViewingKey([0u8; 32])),
                     *addr,
                     miner_reward,
                     memo.clone(),
-                ),
-                "Sapling"
-            )
+                )
+                .map_err(|e| tracing::error!("Failed to add Sapling output: {e}"))
+                .ok()
         };
 
         let add_transparent_reward = |builder: &mut Builder<'_, _, _>, addr| {
-            trace_err!(
-                builder.add_transparent_output(addr, miner_reward),
-                "transparent"
-            )
+            builder
+                .add_transparent_output(addr, miner_reward)
+                .map_err(|e| tracing::error!("Failed to add transparent output: {e}"))
+                .ok()
         };
 
         match miner_params.addr() {
