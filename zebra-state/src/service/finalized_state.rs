@@ -435,9 +435,7 @@ impl FinalizedState {
         let finalized_inner_block = finalized.block.clone();
         let note_commitment_trees = finalized.treestate.note_commitment_trees.clone();
 
-        // Look up spent UTXOs before writing the block.
-        // During Phase 2 (non-finalized → finalized), all referenced UTXOs are on disk,
-        // so we pass an empty NonFinalizedState for the fallback.
+        // Phase 2: all UTXOs are finalized, use empty NFS for fallback.
         let empty_nfs = NonFinalizedState::new(&self.network());
         let spent_utxos = self.db.lookup_spent_utxos(&finalized, &empty_nfs);
 

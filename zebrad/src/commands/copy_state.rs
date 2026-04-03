@@ -126,7 +126,7 @@ impl CopyStateCmd {
         let source_start_time = Instant::now();
 
         // We're not verifying UTXOs here, so we don't need the maximum checkpoint height.
-        let (mut source_read_only_state_service, _source_db, _source_latest_non_finalized_state) =
+        let (mut source_read_only_state_service, source_db, _source_latest_non_finalized_state) =
             old_zs::spawn_init_read_only(source_config.clone(), network).await?;
 
         let elapsed = source_start_time.elapsed();
@@ -218,7 +218,7 @@ impl CopyStateCmd {
         // Source reader: reads blocks sequentially from the source DB and sends
         // them through the channel. Runs in a blocking thread because source DB
         // reads are synchronous.
-        let source_db = _source_db.clone();
+        let source_db = source_db.clone();
         let reader_handle = tokio::task::spawn_blocking(move || {
             for height in min_target_height..=max_copy_height {
                 let source_block = source_db
