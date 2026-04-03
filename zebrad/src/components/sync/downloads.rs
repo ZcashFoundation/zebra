@@ -265,6 +265,11 @@ where
 
     /// Running total of `recent_block_sizes` for O(1) average computation.
     total_block_size: usize,
+
+    /// Random offset for block size sampling. Only blocks where
+    /// `(height + offset) % 100 == 0` compute and report their serialized size,
+    /// avoiding the cost of full serialization on every block.
+    block_size_sample_offset: u32,
 }
 
 impl<ZN, ZV, ZSTip> Stream for Downloads<ZN, ZV, ZSTip>
@@ -354,6 +359,7 @@ where
             block_size_receiver: block_size_rx,
             recent_block_sizes: VecDeque::new(),
             total_block_size: 0,
+            block_size_sample_offset: rand::random::<u32>() % 100,
         }
     }
 
@@ -596,6 +602,7 @@ where
         let past_lookahead_limit_sender = self.past_lookahead_limit_sender.clone();
         let past_lookahead_limit_receiver = self.past_lookahead_limit_receiver.clone();
         let block_size_sender = self.block_size_sender.clone();
+        let block_size_sample_offset = self.block_size_sample_offset;
 
         let task = tokio::spawn(
             async move {
@@ -617,10 +624,12 @@ where
                 metrics::histogram!("sync.block.download.duration_seconds", "result" => "success")
                     .record(download_start.elapsed().as_secs_f64());
 
-                // Report block size for adaptive batch sizing.
-                {
-                    use zebra_chain::serialization::ZcashSerialize;
-                    let _ = block_size_sender.send(block.zcash_serialized_size());
+                // Sample block size for adaptive batch sizing (every 100th block).
+                if let Some(height) = block.coinbase_height() {
+                    if (height.0 + block_size_sample_offset).is_multiple_of(100) {
+                        use zebra_chain::serialization::ZcashSerialize;
+                        let _ = block_size_sender.send(block.zcash_serialized_size());
+                    }
                 }
 
                 // Security & Performance: reject blocks that are too far ahead of our tip.
