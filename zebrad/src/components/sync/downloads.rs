@@ -383,7 +383,7 @@ where
 
         // Use 2/3 of the raw ratio as a safety margin to account for block
         // size variance and avoid partial responses from peers.
-        ((2 * BATCH_TARGET_SIZE) / (3 * avg_size)).clamp(1, MAX_BATCH_SIZE)
+        ((4 * BATCH_TARGET_SIZE) / (5 * avg_size)).clamp(1, MAX_BATCH_SIZE)
     }
 
     /// Queue a block for download and verification.
