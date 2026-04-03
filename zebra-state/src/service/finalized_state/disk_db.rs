@@ -25,7 +25,7 @@ use std::{
 use itertools::Itertools;
 use rlimit::increase_nofile_limit;
 
-use rocksdb::{ColumnFamilyDescriptor, ErrorKind, Options, ReadOptions};
+use rocksdb::{Cache, ColumnFamilyDescriptor, ErrorKind, Options, ReadOptions};
 use semver::Version;
 use zebra_chain::{parameters::Network, primitives::byte_array::increment_big_endian};
 
@@ -902,7 +902,7 @@ impl DiskDb {
     }
 
     /// The ideal open file limit for Zebra
-    const IDEAL_OPEN_FILE_LIMIT: u64 = 1024;
+    const IDEAL_OPEN_FILE_LIMIT: u64 = 8196;
 
     /// The minimum number of open files for Zebra to operate normally. Also used
     /// as the default open file limit, when the OS doesn't tell us how many
@@ -924,7 +924,7 @@ impl DiskDb {
     /// The size of the database memtable RAM cache in megabytes.
     ///
     /// <https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ#configuration-and-tuning>
-    const MEMTABLE_RAM_CACHE_MEGABYTES: usize = 128;
+    const MEMTABLE_RAM_CACHE_MEGABYTES: usize = 512;
 
     /// Build a vector of current column families on the disk and optionally any new column families.
     /// Returns an iterable collection of all column families.
@@ -955,6 +955,34 @@ impl DiskDb {
                         BALANCE_BY_TRANSPARENT_ADDR_MERGE_OP,
                         fetch_add_balance_and_received,
                     );
+                }
+
+                // Use BlobDB for the transaction data column family.
+                //
+                // Transaction values are large (hundreds of bytes to 100KB+),
+                // write-once, and never updated or deleted during normal operation.
+                // Storing them in separate blob files avoids rewriting the full
+                // transaction bytes during LSM compaction, reducing write
+                // amplification by ~5-10x for this column family.
+                if cf_name == "tx_by_loc" {
+                    const ONE_MEGABYTE: u64 = 1024 * 1024;
+
+                    cf_options.set_enable_blob_files(true);
+
+                    // Transactions smaller than 256 bytes are rare (only some
+                    // early coinbase transactions). Keeping them inline avoids
+                    // the extra blob-file I/O for tiny values.
+                    cf_options.set_min_blob_size(256);
+
+                    // 256 MB blob files, matching the write buffer size.
+                    cf_options.set_blob_file_size(256 * ONE_MEGABYTE);
+
+                    // Compress blobs with LZ4, consistent with SST compression.
+                    cf_options.set_blob_compression_type(rocksdb::DBCompressionType::Lz4);
+
+                    // Disable blob GC: transactions are never deleted or updated,
+                    // so garbage collection would be pure wasted I/O.
+                    cf_options.set_enable_blob_gc(false);
                 }
 
                 rocksdb::ColumnFamilyDescriptor::new(cf_name, cf_options.clone())
@@ -1252,7 +1280,7 @@ impl DiskDb {
         // Ribbon filters are faster than Bloom filters in Zebra, as of April 2022.
         // (They aren't needed for single-valued column families, but they don't hurt either.)
         block_based_opts.set_ribbon_filter(9.9);
-
+        block_based_opts.set_block_cache(&Cache::new_lru_cache(512 * ONE_MEGABYTE));
         // Use the recommended LZ4 compression type.
         //
         // https://github.com/facebook/rocksdb/wiki/Compression#configuration
@@ -1262,6 +1290,26 @@ impl DiskDb {
         //
         // This improves Zebra's initial sync speed slightly, as of April 2022.
         opts.optimize_level_style_compaction(Self::MEMTABLE_RAM_CACHE_MEGABYTES * ONE_MEGABYTE);
+
+        // # Write-heavy workload tuning for initial sync
+        //
+        // Larger write buffers reduce write stalls by allowing more data to
+        // accumulate in memory before flushing to L0. The default 64 MB is
+        // conservative; 256 MB per buffer with 4 buffers gives the flush
+        // thread headroom to keep up with sustained block commits.
+        opts.set_write_buffer_size(256 * ONE_MEGABYTE);
+        opts.set_max_write_buffer_number(4);
+
+        // Allow multiple background threads for flush and compaction.
+        // The default (1 flush + 1 compaction) can't keep up during sync.
+        // RocksDB splits these across flush and compaction automatically.
+        opts.set_max_background_jobs(8);
+
+        // Allow multiple memtables to be written to concurrently.
+        // This is safe with the default skiplist memtable and reduces
+        // contention when the write path and flush path overlap.
+        opts.set_allow_concurrent_memtable_write(true);
+        opts.set_enable_write_thread_adaptive_yield(true);
 
         // Increase the process open file limit if needed,
         // then use it to set RocksDB's limit.
