@@ -94,7 +94,7 @@
 //! [ZIP-201]: https://zips.z.cash/zip-0201
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     convert,
     fmt::Debug,
     marker::PhantomData,
@@ -144,6 +144,14 @@ use crate::{
 
 #[cfg(test)]
 mod tests;
+
+/// The number of recently-used peers to track for tip-discovery requests
+/// (`FindBlocks` / `FindHeaders`).
+///
+/// The syncer sends `FANOUT` (3) consecutive `FindBlocks` requests and needs
+/// distinct peers for each. We track double the fanout to ensure diversity
+/// across consecutive sync rounds.
+const MAX_RECENT_TIP_PEERS: usize = 6;
 
 /// A signal sent by the [`PeerSet`] when it has no ready peers, and gets a request from Zebra.
 ///
@@ -202,6 +210,14 @@ where
     ///
     /// Used to route inventory requests to peers that are likely to have it.
     inventory_registry: InventoryRegistry,
+
+    /// Recently-used peers for tip-discovery requests (FindBlocks/FindHeaders).
+    ///
+    /// When the syncer sends multiple consecutive FindBlocks requests (fanout),
+    /// we track which peers were recently used and prefer different ones.
+    /// This ensures the syncer gets responses from distinct peers, improving
+    /// the quality and diversity of chain tip information.
+    recent_tip_peers: VecDeque<D::Key>,
 
     /// Stores requests that should be routed to peers once they are ready.
     queued_broadcast_all: Option<(
@@ -326,6 +342,7 @@ where
             // Request Routing
             inventory_registry: InventoryRegistry::new(inv_stream),
             queued_broadcast_all: None,
+            recent_tip_peers: VecDeque::new(),
 
             // Busy peers
             unready_services: FuturesUnordered::new(),
@@ -722,6 +739,18 @@ where
         }
     }
 
+    /// Calls a ready peer, moving it to the unready set.
+    ///
+    /// The peer at `key` must be in `ready_services`.
+    fn call_ready_peer(&mut self, key: D::Key, req: Request) -> <Self as Service<Request>>::Future {
+        let mut svc = self
+            .take_ready_service(&key)
+            .expect("selected peer must be ready");
+        let fut = svc.call(req);
+        self.push_unready(key, svc);
+        fut.map_err(Into::into).boxed()
+    }
+
     /// Takes a ready service by key.
     fn take_ready_service(&mut self, key: &D::Key) -> Option<D::Service> {
         if let Some(svc) = self.ready_services.remove(key) {
@@ -875,15 +904,7 @@ where
     fn route_p2c(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
         if let Some(p2c_key) = self.select_ready_p2c_peer() {
             tracing::trace!(?p2c_key, "routing based on p2c");
-
-            let mut svc = self
-                .take_ready_service(&p2c_key)
-                .expect("selected peer must be ready");
-
-            let fut = svc.call(req);
-            self.push_unready(p2c_key, svc);
-
-            return fut.map_err(Into::into).boxed();
+            return self.call_ready_peer(p2c_key, req);
         }
 
         async move {
@@ -899,6 +920,94 @@ where
         }
         .map_err(Into::into)
         .boxed()
+    }
+
+    /// Routes a tip-discovery request (`FindBlocks` / `FindHeaders`) to a peer
+    /// that was not recently used for tip discovery.
+    ///
+    /// The syncer sends multiple consecutive `FindBlocks` requests (fanout) and
+    /// needs distinct peers to get diverse chain tip information. This method
+    /// uses P2C load-balancing on the subset of ready peers that haven't been
+    /// used for recent tip-discovery requests. Falls back to normal P2C if all
+    /// ready peers have been recently used.
+    fn route_tip_discovery(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
+        // Build candidate set: ready peers not in the recent list.
+        // recent_tip_peers has at most MAX_RECENT_TIP_PEERS (6) entries,
+        // so a linear contains() is faster than building a HashSet.
+        let fresh_peers: HashSet<D::Key> = self
+            .ready_services
+            .keys()
+            .filter(|k| !self.recent_tip_peers.contains(k))
+            .copied()
+            .collect();
+
+        // Pick from fresh peers if possible, otherwise fall back to all ready peers.
+        let selected = if fresh_peers.is_empty() {
+            self.select_ready_p2c_peer()
+        } else {
+            self.select_p2c_peer_from_list(&fresh_peers)
+        };
+
+        if let Some(key) = selected {
+            tracing::trace!(
+                ?key,
+                fresh_peers = fresh_peers.len(),
+                "routing tip discovery to distinct peer"
+            );
+
+            // Record this peer as recently used.
+            self.recent_tip_peers.push_back(key);
+            if self.recent_tip_peers.len() > MAX_RECENT_TIP_PEERS {
+                self.recent_tip_peers.pop_front();
+            }
+
+            return self.call_ready_peer(key, req);
+        }
+
+        // No ready peers at all — same fallback as route_p2c.
+        async move {
+            tokio::task::yield_now().await;
+            Err(SharedPeerError::from(PeerError::NoReadyPeers))
+        }
+        .map_err(Into::into)
+        .boxed()
+    }
+
+    /// Routes a block download request to a ready peer whose handshake height
+    /// is at or above our current chain tip.
+    ///
+    /// During initial sync, this avoids sending block requests to peers that
+    /// connected when they were behind us — they're unlikely to have the blocks
+    /// we need. Falls back to normal P2C if no peers meet the height threshold.
+    fn route_block_download(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
+        let tip_height = self.minimum_peer_version.chain_tip_height();
+
+        if tip_height > self.network.checkpoint_list().max_height() {
+            return self.route_p2c(req);
+        }
+
+        let tall_peers: HashSet<D::Key> = self
+            .ready_services
+            .iter()
+            .filter(|(_addr, svc)| svc.remote_height() >= tip_height)
+            .map(|(addr, _svc)| *addr)
+            .collect();
+
+        if !tall_peers.is_empty() {
+            if let Some(key) = self.select_p2c_peer_from_list(&tall_peers) {
+                tracing::trace!(
+                    ?key,
+                    ?tip_height,
+                    tall_peers = tall_peers.len(),
+                    "routing block download to peer at or above chain tip"
+                );
+
+                return self.call_ready_peer(key, req);
+            }
+        }
+
+        // No peers at our height — fall back to normal P2C.
+        self.route_p2c(req)
     }
 
     /// Tries to route a request to a ready peer that advertised that inventory,
@@ -930,12 +1039,9 @@ where
         // so that a peer can't provide all our inventory responses.
         let peer = self.select_p2c_peer_from_list(&advertising_peer_list);
 
-        if let Some(mut svc) = peer.and_then(|key| self.take_ready_service(&key)) {
-            let peer = peer.expect("just checked peer is Some");
-            tracing::trace!(?hash, ?peer, "routing to a peer which advertised inventory");
-            let fut = svc.call(req);
-            self.push_unready(peer, svc);
-            return fut.map_err(Into::into).boxed();
+        if let Some(key) = peer.filter(|k| self.ready_services.contains_key(k)) {
+            tracing::trace!(?hash, ?key, "routing to a peer which advertised inventory");
+            return self.call_ready_peer(key, req);
         }
 
         let missing_peer_list: HashSet<PeerSocketAddr> = self
@@ -953,12 +1059,9 @@ where
         // Security: choose a random, less-loaded peer that might have the inventory.
         let peer = self.select_p2c_peer_from_list(&maybe_peer_list);
 
-        if let Some(mut svc) = peer.and_then(|key| self.take_ready_service(&key)) {
-            let peer = peer.expect("just checked peer is Some");
-            tracing::trace!(?hash, ?peer, "routing to a peer that might have inventory");
-            let fut = svc.call(req);
-            self.push_unready(peer, svc);
-            return fut.map_err(Into::into).boxed();
+        if let Some(key) = peer.filter(|k| self.ready_services.contains_key(k)) {
+            tracing::trace!(?hash, ?key, "routing to a peer that might have inventory");
+            return self.call_ready_peer(key, req);
         }
 
         tracing::debug!(
@@ -1326,6 +1429,19 @@ where
             Request::TransactionsById(ref hashes) if hashes.len() == 1 => {
                 let hash = InventoryHash::from(*hashes.iter().next().unwrap());
                 self.route_inv(req, hash)
+            }
+
+            // Route multi-hash block requests to peers whose handshake height
+            // is at or above our current chain tip. This avoids wasting download
+            // slots on peers that are behind us during initial sync.
+            // Falls back to normal P2C if no peers are tall enough.
+            Request::BlocksByHash(ref hashes) if hashes.len() > 1 => self.route_block_download(req),
+
+            // Route tip-discovery requests to distinct peers, so the syncer's
+            // fanout gets diverse chain tip information instead of potentially
+            // hitting the same peer multiple times.
+            Request::FindBlocks { .. } | Request::FindHeaders { .. } => {
+                self.route_tip_discovery(req)
             }
 
             // Broadcast advertisements to lots of peers

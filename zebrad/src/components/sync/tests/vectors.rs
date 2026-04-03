@@ -161,21 +161,16 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
         .await
         .respond(zs::Response::KnownBlock(None));
 
-    // Blocks 1 & 2 are fetched in order, then verified concurrently
+    // Blocks 1 & 2 are fetched as a single batched request, then verified concurrently
     peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block1_hash).collect()))
+        .expect_request(zn::Request::BlocksByHash(
+            [block1_hash, block2_hash].into_iter().collect(),
+        ))
         .await
-        .respond(zn::Response::Blocks(vec![Available((
-            block1.clone(),
-            None,
-        ))]));
-    peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block2_hash).collect()))
-        .await
-        .respond(zn::Response::Blocks(vec![Available((
-            block2.clone(),
-            None,
-        ))]));
+        .respond(zn::Response::Blocks(vec![
+            Available((block1.clone(), None)),
+            Available((block2.clone(), None)),
+        ]));
 
     // We can't guarantee the verification request order
     let mut remaining_blocks: HashMap<block::Hash, Arc<Block>> =
@@ -231,21 +226,16 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
     block_verifier_router.expect_no_requests().await;
     state_service.expect_no_requests().await;
 
-    // Blocks 3 & 4 are fetched in order, then verified concurrently
+    // Blocks 3 & 4 are fetched as a single batched request, then verified concurrently
     peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block3_hash).collect()))
+        .expect_request(zn::Request::BlocksByHash(
+            [block3_hash, block4_hash].into_iter().collect(),
+        ))
         .await
-        .respond(zn::Response::Blocks(vec![Available((
-            block3.clone(),
-            None,
-        ))]));
-    peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block4_hash).collect()))
-        .await
-        .respond(zn::Response::Blocks(vec![Available((
-            block4.clone(),
-            None,
-        ))]));
+        .respond(zn::Response::Blocks(vec![
+            Available((block3.clone(), None)),
+            Available((block4.clone(), None)),
+        ]));
 
     // We can't guarantee the verification request order
     let mut remaining_blocks: HashMap<block::Hash, Arc<Block>> =
@@ -405,21 +395,16 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
         .await
         .respond(zs::Response::KnownBlock(None));
 
-    // Blocks 1 & 2 are fetched in order, then verified concurrently
+    // Blocks 1 & 2 are fetched as a single batched request, then verified concurrently
     peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block1_hash).collect()))
+        .expect_request(zn::Request::BlocksByHash(
+            [block1_hash, block2_hash].into_iter().collect(),
+        ))
         .await
-        .respond(zn::Response::Blocks(vec![Available((
-            block1.clone(),
-            None,
-        ))]));
-    peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block2_hash).collect()))
-        .await
-        .respond(zn::Response::Blocks(vec![Available((
-            block2.clone(),
-            None,
-        ))]));
+        .respond(zn::Response::Blocks(vec![
+            Available((block1.clone(), None)),
+            Available((block2.clone(), None)),
+        ]));
 
     // We can't guarantee the verification request order
     let mut remaining_blocks: HashMap<block::Hash, Arc<Block>> =
@@ -477,21 +462,16 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
     block_verifier_router.expect_no_requests().await;
     state_service.expect_no_requests().await;
 
-    // Blocks 3 & 4 are fetched in order, then verified concurrently
+    // Blocks 3 & 4 are fetched as a single batched request, then verified concurrently
     peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block3_hash).collect()))
+        .expect_request(zn::Request::BlocksByHash(
+            [block3_hash, block4_hash].into_iter().collect(),
+        ))
         .await
-        .respond(zn::Response::Blocks(vec![Available((
-            block3.clone(),
-            None,
-        ))]));
-    peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block4_hash).collect()))
-        .await
-        .respond(zn::Response::Blocks(vec![Available((
-            block4.clone(),
-            None,
-        ))]));
+        .respond(zn::Response::Blocks(vec![
+            Available((block3.clone(), None)),
+            Available((block4.clone(), None)),
+        ]));
 
     // We can't guarantee the verification request order
     let mut remaining_blocks: HashMap<block::Hash, Arc<Block>> =
@@ -708,31 +688,20 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
         .await
         .respond(zs::Response::KnownBlock(None));
 
-    // Blocks 982k, 1, 2 are fetched in order, then verified concurrently,
+    // Blocks 982k, 1, 2 are fetched as a single batched request, then verified concurrently,
     // but block 982k verification is skipped because it is too high.
     peer_set
         .expect_request(zn::Request::BlocksByHash(
-            iter::once(block982k_hash).collect(),
+            [block982k_hash, block1_hash, block2_hash]
+                .into_iter()
+                .collect(),
         ))
         .await
-        .respond(zn::Response::Blocks(vec![Available((
-            block982k.clone(),
-            None,
-        ))]));
-    peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block1_hash).collect()))
-        .await
-        .respond(zn::Response::Blocks(vec![Available((
-            block1.clone(),
-            None,
-        ))]));
-    peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block2_hash).collect()))
-        .await
-        .respond(zn::Response::Blocks(vec![Available((
-            block2.clone(),
-            None,
-        ))]));
+        .respond(zn::Response::Blocks(vec![
+            Available((block982k.clone(), None)),
+            Available((block1.clone(), None)),
+            Available((block2.clone(), None)),
+        ]));
 
     // At this point, the following tasks race:
     // - The valid chain verifier requests
@@ -876,21 +845,16 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
         .await
         .respond(zs::Response::KnownBlock(None));
 
-    // Blocks 1 & 2 are fetched in order, then verified concurrently
+    // Blocks 1 & 2 are fetched as a single batched request, then verified concurrently
     peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block1_hash).collect()))
+        .expect_request(zn::Request::BlocksByHash(
+            [block1_hash, block2_hash].into_iter().collect(),
+        ))
         .await
-        .respond(zn::Response::Blocks(vec![Available((
-            block1.clone(),
-            None,
-        ))]));
-    peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block2_hash).collect()))
-        .await
-        .respond(zn::Response::Blocks(vec![Available((
-            block2.clone(),
-            None,
-        ))]));
+        .respond(zn::Response::Blocks(vec![
+            Available((block1.clone(), None)),
+            Available((block2.clone(), None)),
+        ]));
 
     // We can't guarantee the verification request order
     let mut remaining_blocks: HashMap<block::Hash, Arc<Block>> =
@@ -947,31 +911,20 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
     block_verifier_router.expect_no_requests().await;
     state_service.expect_no_requests().await;
 
-    // Blocks 3, 4, 982k are fetched in order, then verified concurrently,
+    // Blocks 3, 4, 982k are fetched as a single batched request, then verified concurrently,
     // but block 982k verification is skipped because it is too high.
     peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block3_hash).collect()))
-        .await
-        .respond(zn::Response::Blocks(vec![Available((
-            block3.clone(),
-            None,
-        ))]));
-    peer_set
-        .expect_request(zn::Request::BlocksByHash(iter::once(block4_hash).collect()))
-        .await
-        .respond(zn::Response::Blocks(vec![Available((
-            block4.clone(),
-            None,
-        ))]));
-    peer_set
         .expect_request(zn::Request::BlocksByHash(
-            iter::once(block982k_hash).collect(),
+            [block3_hash, block4_hash, block982k_hash]
+                .into_iter()
+                .collect(),
         ))
         .await
-        .respond(zn::Response::Blocks(vec![Available((
-            block982k.clone(),
-            None,
-        ))]));
+        .respond(zn::Response::Blocks(vec![
+            Available((block3.clone(), None)),
+            Available((block4.clone(), None)),
+            Available((block982k.clone(), None)),
+        ]));
 
     // At this point, the following tasks race:
     // - The valid chain verifier requests

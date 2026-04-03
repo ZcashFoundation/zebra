@@ -53,6 +53,16 @@ impl LoadTrackedClient {
     pub fn remote_version(&self) -> Version {
         self.connection_info.remote.version
     }
+
+    /// Retrieve the peer's reported chain height at handshake time.
+    ///
+    /// This is the `start_height` from the version message, representing the
+    /// last block the peer had when the connection was established. It may be
+    /// stale for long-lived connections, but during initial sync it provides a
+    /// useful lower bound for filtering out peers that are behind.
+    pub fn remote_height(&self) -> zebra_chain::block::Height {
+        self.connection_info.remote.start_height
+    }
 }
 
 impl<Request> Service<Request> for LoadTrackedClient
