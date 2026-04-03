@@ -1111,6 +1111,68 @@ fn pipeline_checkpoint_commit_then_finalize_to_disk() {
     );
 }
 
+/// Test that pruning removes exactly the blocks that have been written to disk.
+#[test]
+fn pruning_removes_finalized_blocks_from_nfs() {
+    let _init_guard = zebra_test::init();
+    let (mut finalized_state, mut nfs) = test_state();
+    let network = Network::Mainnet;
+    let mut db = finalized_state.db.clone();
+
+    let blocks: Vec<Arc<Block>> = CONTINUOUS_MAINNET_BLOCKS
+        .values()
+        .take(6)
+        .map(|bytes| bytes.zcash_deserialize_into().unwrap())
+        .collect();
+
+    // Commit genesis (block 0) directly to disk, matching the real pipeline.
+    finalized_state
+        .commit_finalized_direct(blocks[0].clone().into(), None, "test")
+        .expect("genesis commit should succeed");
+
+    // Commit blocks 1-5 to NFS.
+    for block in &blocks[1..] {
+        nfs.commit_checkpoint_block(
+            CheckpointVerifiedBlock::from(block.clone()),
+            &finalized_state.db,
+        )
+        .expect("commit should succeed");
+    }
+    assert_eq!(nfs.best_chain_len(), Some(5));
+
+    // Write blocks 1-3 to disk (simulating Thread 3 catching up).
+    for block in &blocks[1..4] {
+        let checkpoint_verified = CheckpointVerifiedBlock::from(block.clone());
+        let treestate = Treestate::default();
+        let finalized = FinalizedBlock::from_checkpoint_verified(checkpoint_verified, treestate);
+        let empty_nfs = NonFinalizedState::new(&network);
+        let spent_utxos = db.lookup_spent_utxos(&finalized, &empty_nfs);
+        db.write_block(finalized, spent_utxos, None, &network, "test")
+            .expect("write should succeed");
+    }
+
+    // Prune: same logic as write.rs pipeline pruning loop.
+    let finalized_tip_height = db.finalized_tip_height().unwrap();
+    assert_eq!(finalized_tip_height, Height(3));
+
+    while nfs
+        .root_height()
+        .is_some_and(|root| root <= finalized_tip_height)
+    {
+        nfs.finalize();
+    }
+
+    // Blocks 1-3 should be pruned, leaving blocks 4-5.
+    assert_eq!(nfs.best_chain_len(), Some(2), "should have 2 blocks left");
+    assert_eq!(
+        nfs.root_height(),
+        Some(Height(4)),
+        "root should be at height 4"
+    );
+    let (tip_height, _) = nfs.best_tip().expect("should have tip");
+    assert_eq!(tip_height, Height(5), "tip should be at height 5");
+}
+
 /// Creates an ephemeral finalized state and empty non-finalized state for testing.
 fn test_state() -> (FinalizedState, NonFinalizedState) {
     let network = Network::Mainnet;
