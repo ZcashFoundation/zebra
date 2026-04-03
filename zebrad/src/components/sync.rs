@@ -39,7 +39,7 @@ mod status;
 #[cfg(test)]
 mod tests;
 
-use downloads::{download_batch, AlwaysHedge, Downloads};
+use downloads::{AlwaysHedge, Downloads};
 
 pub use downloads::VERIFICATION_PIPELINE_SCALING_MULTIPLIER;
 pub use gossip::{gossip_best_tip_block_hashes, BlockGossipError};
@@ -1147,8 +1147,7 @@ where
 
         let mut all_batches = SelectAll::new();
         for batch in hash_vec.chunks(batch_size) {
-            let network = self.downloads.network().clone();
-            let rx = download_batch(network, batch.to_vec());
+            let rx = self.downloads.download_batch(batch.to_vec());
             all_batches.push(tokio_stream::wrappers::ReceiverStream::new(rx));
         }
 

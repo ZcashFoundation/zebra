@@ -252,6 +252,9 @@ where
     /// verify tasks.
     cancel_handles: HashMap<block::Hash, oneshot::Sender<()>>,
 
+    /// A set of block hashes that have been requested and are expected to be downloaded soon.
+    pending_download_hashes: HashSet<block::Hash>,
+
     /// Sender for reporting block sizes from spawned verification tasks.
     ///
     /// Each task sends its block's serialized size after download. The receiver
@@ -372,6 +375,7 @@ where
             past_lookahead_limit_receiver,
             pending: FuturesUnordered::new(),
             cancel_handles: HashMap::new(),
+            pending_download_hashes: HashSet::new(),
             block_size_sender: block_size_tx,
             block_size_receiver: block_size_rx,
             recent_block_sizes: VecDeque::new(),
@@ -464,15 +468,102 @@ where
         Ok(())
     }
 
-    /// Spawns a task that obtains a block from `block_source`, validates its
-    /// height, and submits it for consensus verification.
+    /// Download a batch of blocks with per-block retry semantics, yielding
+    /// blocks as they arrive.
     ///
-    /// This is the shared download-and-verify pipeline used by both single-block
-    /// [`download_and_verify`](Self::download_and_verify) and batched
-    /// [`download_and_verify_batch`](Self::download_and_verify_batch).
-    /// Returns a reference to the underlying network service.
-    pub fn network(&self) -> &ZN {
-        &self.network
+    /// Spawns a background task that sends `BlocksByHash` requests and streams
+    /// each received block through the returned channel. If a response is partial
+    /// (peer hit its send buffer limit), the remaining hashes are re-requested
+    /// from a different peer — this repeats as long as each round makes forward
+    /// progress. A retry limit applies only when a round makes no progress
+    /// (empty response / network error).
+    ///
+    /// The channel closes naturally when all blocks have been sent or retries
+    /// are exhausted. If the receiver is dropped early, the background task
+    /// exits cleanly on the next send attempt.
+    pub fn download_batch(
+        &mut self,
+        mut hashes: Vec<block::Hash>,
+    ) -> mpsc::Receiver<(Arc<block::Block>, Option<PeerSocketAddr>)>
+    where
+        ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + 'static,
+        ZN::Future: Send,
+    {
+        let mut network = self.network.clone();
+
+        hashes.retain(|hash| {
+            !self.pending_download_hashes.contains(hash) && !self.cancel_handles.contains_key(hash)
+        });
+        self.pending_download_hashes.extend(&hashes);
+
+        let (tx, rx) = mpsc::channel(hashes.len().max(1));
+
+        tokio::spawn(async move {
+            let mut retries: HashMap<block::Hash, usize> = hashes.iter().map(|h| (*h, 0)).collect();
+            let mut remaining = hashes;
+
+            while !remaining.is_empty() {
+                let hash_set: HashSet<block::Hash> = remaining.iter().copied().collect();
+                let download_start = std::time::Instant::now();
+
+                let response = match network.ready().await {
+                    Ok(svc) => svc.call(zn::Request::BlocksByHash(hash_set)).await,
+                    Err(e) => {
+                        debug!(?e, "network service failed in batch download");
+                        break;
+                    }
+                };
+
+                let made_progress = match response {
+                    Ok(zn::Response::Blocks(blocks)) => {
+                        metrics::histogram!(
+                            "sync.batch.download.duration_seconds",
+                            "result" => "success"
+                        )
+                        .record(download_start.elapsed().as_secs_f64());
+
+                        let mut received = HashSet::new();
+                        for item in blocks {
+                            if let Some((block, addr)) = item.available() {
+                                received.insert(block.hash());
+                                retries.remove(&block.hash());
+                                if tx.send((block, addr)).await.is_err() {
+                                    // Receiver dropped — consumer is gone.
+                                    return;
+                                }
+                            }
+                        }
+
+                        remaining.retain(|h| !received.contains(h));
+                        !received.is_empty()
+                    }
+                    Ok(_) => unreachable!("wrong response to block request"),
+                    Err(error) => {
+                        metrics::histogram!(
+                            "sync.batch.download.duration_seconds",
+                            "result" => "failure"
+                        )
+                        .record(download_start.elapsed().as_secs_f64());
+                        debug!(?error, "batch download failed, retrying");
+                        false
+                    }
+                };
+
+                if !made_progress {
+                    for h in &remaining {
+                        *retries.entry(*h).or_default() += 1;
+                    }
+                    remaining.retain(|h| retries.get(h).copied().unwrap_or(0) <= BATCH_RETRY_LIMIT);
+                }
+
+                if !remaining.is_empty() {
+                    tokio::task::yield_now().await;
+                }
+            }
+            // tx is dropped here, closing the stream.
+        });
+
+        rx
     }
 
     /// Returns `true` if the given block hash is already queued for download/verification.
@@ -707,7 +798,11 @@ where
         );
 
         self.pending.push(task);
-        if let Some(_old_cancel_tx) = self.cancel_handles.insert(hash, cancel_tx) {
+        // The block has been downloaded and is now in the verify pipeline,
+        // so remove it from the pending download set.
+        self.pending_download_hashes.remove(&hash);
+
+        if let Some(_old_cancel) = self.cancel_handles.insert(hash, cancel_tx) {
             debug!(?hash, "replacing cancel handle for already-queued block");
         }
     }
@@ -723,6 +818,8 @@ where
         for (_hash, cancel) in self.cancel_handles.drain() {
             let _ = cancel.send(());
         }
+
+        self.pending_download_hashes.clear();
 
         assert!(self.pending.is_empty());
         assert!(self.cancel_handles.is_empty());
@@ -748,95 +845,4 @@ where
     pub fn is_empty(&mut self) -> bool {
         self.pending.is_empty()
     }
-}
-
-/// Download a batch of blocks with per-block retry semantics, yielding
-/// blocks as they arrive.
-///
-/// Spawns a background task that sends `BlocksByHash` requests and streams
-/// each received block through the returned channel. If a response is partial
-/// (peer hit its send buffer limit), the remaining hashes are re-requested
-/// from a different peer — this repeats as long as each round makes forward
-/// progress. A retry limit applies only when a round makes no progress
-/// (empty response / network error).
-///
-/// The channel closes naturally when all blocks have been sent or retries
-/// are exhausted. If the receiver is dropped early, the background task
-/// exits cleanly on the next send attempt.
-pub fn download_batch<ZN>(
-    mut network: ZN,
-    hashes: Vec<block::Hash>,
-) -> mpsc::Receiver<(Arc<block::Block>, Option<PeerSocketAddr>)>
-where
-    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + 'static,
-    ZN::Future: Send,
-{
-    let (tx, rx) = mpsc::channel(hashes.len().max(1));
-
-    tokio::spawn(async move {
-        let mut retries: HashMap<block::Hash, usize> = hashes.iter().map(|h| (*h, 0)).collect();
-        let mut remaining = hashes;
-
-        while !remaining.is_empty() {
-            let hash_set: HashSet<block::Hash> = remaining.iter().copied().collect();
-            let download_start = std::time::Instant::now();
-
-            let response = match network.ready().await {
-                Ok(svc) => svc.call(zn::Request::BlocksByHash(hash_set)).await,
-                Err(e) => {
-                    debug!(?e, "network service failed in batch download");
-                    break;
-                }
-            };
-
-            let made_progress = match response {
-                Ok(zn::Response::Blocks(blocks)) => {
-                    metrics::histogram!(
-                        "sync.batch.download.duration_seconds",
-                        "result" => "success"
-                    )
-                    .record(download_start.elapsed().as_secs_f64());
-
-                    let mut received = HashSet::new();
-                    for item in blocks {
-                        if let Some((block, addr)) = item.available() {
-                            received.insert(block.hash());
-                            retries.remove(&block.hash());
-                            if tx.send((block, addr)).await.is_err() {
-                                // Receiver dropped — consumer is gone.
-                                return;
-                            }
-                        }
-                    }
-
-                    remaining.retain(|h| !received.contains(h));
-                    !received.is_empty()
-                }
-                Ok(_) => unreachable!("wrong response to block request"),
-                Err(error) => {
-                    metrics::histogram!(
-                        "sync.batch.download.duration_seconds",
-                        "result" => "failure"
-                    )
-                    .record(download_start.elapsed().as_secs_f64());
-                    debug!(?error, "batch download failed, retrying");
-                    false
-                }
-            };
-
-            if !made_progress {
-                for h in &remaining {
-                    *retries.entry(*h).or_default() += 1;
-                }
-                remaining.retain(|h| retries.get(h).copied().unwrap_or(0) <= BATCH_RETRY_LIMIT);
-            }
-
-            if !remaining.is_empty() {
-                tokio::task::yield_now().await;
-            }
-        }
-        // tx is dropped here, closing the stream.
-    });
-
-    rx
 }
