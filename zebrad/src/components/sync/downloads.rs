@@ -1,7 +1,11 @@
 //! A download stream for Zebra's block syncer.
 
+mod block_size_tracker;
+
+pub(super) use block_size_tracker::BlockSizeTracker;
+
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, HashSet},
     convert,
     future::Future,
     pin::Pin,
@@ -59,22 +63,6 @@ pub const VERIFICATION_PIPELINE_SCALING_MULTIPLIER: usize = 2;
 /// The maximum height difference between Zebra's state tip and a downloaded block.
 /// Blocks higher than this will get dropped and return an error.
 pub const VERIFICATION_PIPELINE_DROP_LIMIT: HeightDiff = 50_000;
-
-/// Target total size for a batch of downloaded blocks, in bytes.
-///
-/// This should stay under the peer's send buffer limit to avoid partial
-/// responses. Both zcashd and Zebra use a 1 MB send buffer limit for
-/// `getdata` responses (see [`super::super::inbound::GETDATA_SENT_BYTES_LIMIT`]).
-const BATCH_TARGET_SIZE: usize = 1_000_000;
-
-/// Maximum number of block hashes in a single batched download request.
-///
-/// This matches the peer's per-request block count limit
-/// (see [`super::super::inbound::GETDATA_MAX_BLOCK_COUNT`]).
-pub const MAX_BATCH_SIZE: usize = 16;
-
-/// Number of recent block sizes to keep for computing the rolling average.
-const MAX_RECENT_BLOCK_SIZE_SAMPLES: usize = 100;
 
 /// Maximum number of retry rounds for fetching blocks missing from a batch response.
 ///
@@ -246,30 +234,8 @@ where
     /// A set of block hashes that have been requested and are expected to be downloaded soon.
     pending_download_hashes: HashSet<block::Hash>,
 
-    /// Sender for reporting block sizes from spawned verification tasks.
-    ///
-    /// Each task sends its block's serialized size after download. The receiver
-    /// side is drained in [`dynamic_batch_size`](Self::dynamic_batch_size) to
-    /// maintain a rolling average for adaptive batch sizing.
-    block_size_sender: mpsc::UnboundedSender<usize>,
-
-    /// Receiver for block size reports from spawned tasks.
-    block_size_receiver: mpsc::UnboundedReceiver<usize>,
-
-    /// Rolling window of recent block serialized sizes (in bytes).
-    ///
-    /// Fed by draining `block_size_receiver`. Used to dynamically adjust batch
-    /// download size — smaller blocks allow larger batches, larger blocks reduce
-    /// the batch size to stay under the peer's send buffer limit.
-    recent_block_sizes: VecDeque<usize>,
-
-    /// Running total of `recent_block_sizes` for O(1) average computation.
-    total_block_size: usize,
-
-    /// Random offset for block size sampling. Only blocks where
-    /// `(height + offset) % 100 == 0` compute and report their serialized size,
-    /// avoiding the cost of full serialization on every block.
-    block_size_sample_offset: u32,
+    /// Tracks recent block sizes for adaptive batch sizing.
+    pub(super) block_sizes: BlockSizeTracker,
 }
 
 impl<ZN, ZV, ZSTip> Stream for Downloads<ZN, ZV, ZSTip>
@@ -340,8 +306,6 @@ where
         let past_lookahead_limit_receiver =
             zs::WatchReceiver::new(past_lookahead_limit_sender.subscribe());
 
-        let (block_size_tx, block_size_rx) = mpsc::unbounded_channel();
-
         Self {
             network,
             verifier,
@@ -355,41 +319,8 @@ where
             pending: FuturesUnordered::new(),
             cancel_handles: HashMap::new(),
             pending_download_hashes: HashSet::new(),
-            block_size_sender: block_size_tx,
-            block_size_receiver: block_size_rx,
-            recent_block_sizes: VecDeque::new(),
-            total_block_size: 0,
-            block_size_sample_offset: rand::random::<u32>() % 100,
+            block_sizes: BlockSizeTracker::new(),
         }
-    }
-
-    /// Returns the recommended batch size based on recently observed block sizes.
-    ///
-    /// Computes `BATCH_TARGET_SIZE / avg_block_size`, clamped to `[1, MAX_BATCH_SIZE]`.
-    /// If no block sizes have been recorded yet, returns `MAX_BATCH_SIZE` (optimistic
-    /// default for early checkpoint sync where blocks are small).
-    pub(super) fn dynamic_batch_size(&mut self) -> usize {
-        // Drain all pending block size reports from spawned tasks.
-        while let Ok(size) = self.block_size_receiver.try_recv() {
-            self.recent_block_sizes.push_back(size);
-            self.total_block_size += size;
-            if self.recent_block_sizes.len() > MAX_RECENT_BLOCK_SIZE_SAMPLES {
-                self.total_block_size -= self.recent_block_sizes.pop_front().unwrap_or(0);
-            }
-        }
-
-        if self.recent_block_sizes.is_empty() {
-            return MAX_BATCH_SIZE;
-        }
-
-        let avg_size = self.total_block_size / self.recent_block_sizes.len();
-        if avg_size == 0 {
-            return MAX_BATCH_SIZE;
-        }
-
-        // Use 2/3 of the raw ratio as a safety margin to account for block
-        // size variance and avoid partial responses from peers.
-        ((4 * BATCH_TARGET_SIZE) / (5 * avg_size)).clamp(1, MAX_BATCH_SIZE)
     }
 
     /// Queue a block for download and verification.
@@ -601,8 +532,8 @@ where
 
         let past_lookahead_limit_sender = self.past_lookahead_limit_sender.clone();
         let past_lookahead_limit_receiver = self.past_lookahead_limit_receiver.clone();
-        let block_size_sender = self.block_size_sender.clone();
-        let block_size_sample_offset = self.block_size_sample_offset;
+        let block_size_sender = self.block_sizes.sender();
+        let block_size_sample_offset = self.block_sizes.sample_offset();
 
         let task = tokio::spawn(
             async move {

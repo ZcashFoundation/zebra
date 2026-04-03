@@ -1142,7 +1142,7 @@ where
         // buffered network service. SelectAll interleaves their output
         // streams so blocks flow to verification as soon as they arrive
         // from any batch — no waiting for an entire batch to finish.
-        let batch_size = self.downloads.dynamic_batch_size();
+        let batch_size = self.downloads.block_sizes.recommended_batch_size();
         let hash_vec: Vec<_> = hashes.into_iter().collect();
 
         let mut all_batches = SelectAll::new();
