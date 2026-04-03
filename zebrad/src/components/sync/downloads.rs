@@ -21,7 +21,7 @@ use tokio::{
     task::JoinHandle,
     time::timeout,
 };
-use tower::{hedge, Service, ServiceExt};
+use tower::{hedge, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::{
@@ -29,6 +29,7 @@ use zebra_chain::{
     chain_tip::ChainTip,
 };
 use zebra_network::{self as zn, PeerSocketAddr};
+use zebra_node_services::service_traits::ZebraService;
 use zebra_state as zs;
 
 use crate::components::sync::{
@@ -197,18 +198,8 @@ impl From<tokio::time::error::Elapsed> for BlockDownloadVerifyError {
 #[derive(Debug)]
 pub struct Downloads<ZN, ZV, ZSTip>
 where
-    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError>
-        + Send
-        + Sync
-        + Clone
-        + 'static,
-    ZN::Future: Send,
-    ZV: Service<zebra_consensus::Request, Response = block::Hash, Error = BoxError>
-        + Send
-        + Sync
-        + Clone
-        + 'static,
-    ZV::Future: Send,
+    ZN: ZebraService<zn::Request, zn::Response>,
+    ZV: ZebraService<zebra_consensus::Request, block::Hash>,
     ZSTip: ChainTip + Clone + Send + 'static,
 {
     // Services
@@ -278,18 +269,8 @@ where
 
 impl<ZN, ZV, ZSTip> Stream for Downloads<ZN, ZV, ZSTip>
 where
-    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError>
-        + Send
-        + Sync
-        + Clone
-        + 'static,
-    ZN::Future: Send,
-    ZV: Service<zebra_consensus::Request, Response = block::Hash, Error = BoxError>
-        + Send
-        + Sync
-        + Clone
-        + 'static,
-    ZV::Future: Send,
+    ZN: ZebraService<zn::Request, zn::Response>,
+    ZV: ZebraService<zebra_consensus::Request, block::Hash>,
     ZSTip: ChainTip + Clone + Send + 'static,
 {
     type Item = Result<(Height, block::Hash), BlockDownloadVerifyError>;
@@ -329,18 +310,8 @@ where
 
 impl<ZN, ZV, ZSTip> Downloads<ZN, ZV, ZSTip>
 where
-    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError>
-        + Send
-        + Sync
-        + Clone
-        + 'static,
-    ZN::Future: Send,
-    ZV: Service<zebra_consensus::Request, Response = block::Hash, Error = BoxError>
-        + Send
-        + Sync
-        + Clone
-        + 'static,
-    ZV::Future: Send,
+    ZN: ZebraService<zn::Request, zn::Response>,
+    ZV: ZebraService<zebra_consensus::Request, block::Hash>,
     ZSTip: ChainTip + Clone + Send + 'static,
 {
     /// Initialize a new download stream with the provided `network` and
@@ -495,11 +466,7 @@ where
     pub(super) fn download_batch(
         &mut self,
         mut hashes: Vec<block::Hash>,
-    ) -> mpsc::Receiver<Result<(Arc<block::Block>, Option<PeerSocketAddr>), block::Hash>>
-    where
-        ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + 'static,
-        ZN::Future: Send,
-    {
+    ) -> mpsc::Receiver<Result<(Arc<block::Block>, Option<PeerSocketAddr>), block::Hash>> {
         let mut network = self.network.clone();
 
         hashes.retain(|hash| {
