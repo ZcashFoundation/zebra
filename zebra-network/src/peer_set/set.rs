@@ -739,6 +739,18 @@ where
         }
     }
 
+    /// Calls a ready peer, moving it to the unready set.
+    ///
+    /// The peer at `key` must be in `ready_services`.
+    fn call_ready_peer(&mut self, key: D::Key, req: Request) -> <Self as Service<Request>>::Future {
+        let mut svc = self
+            .take_ready_service(&key)
+            .expect("selected peer must be ready");
+        let fut = svc.call(req);
+        self.push_unready(key, svc);
+        fut.map_err(Into::into).boxed()
+    }
+
     /// Takes a ready service by key.
     fn take_ready_service(&mut self, key: &D::Key) -> Option<D::Service> {
         if let Some(svc) = self.ready_services.remove(key) {
@@ -892,15 +904,7 @@ where
     fn route_p2c(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
         if let Some(p2c_key) = self.select_ready_p2c_peer() {
             tracing::trace!(?p2c_key, "routing based on p2c");
-
-            let mut svc = self
-                .take_ready_service(&p2c_key)
-                .expect("selected peer must be ready");
-
-            let fut = svc.call(req);
-            self.push_unready(p2c_key, svc);
-
-            return fut.map_err(Into::into).boxed();
+            return self.call_ready_peer(p2c_key, req);
         }
 
         async move {
@@ -927,12 +931,13 @@ where
     /// used for recent tip-discovery requests. Falls back to normal P2C if all
     /// ready peers have been recently used.
     fn route_tip_discovery(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
-        // Build candidate set: ready peers that are NOT in the recent list.
-        let recent: HashSet<D::Key> = self.recent_tip_peers.iter().copied().collect();
+        // Build candidate set: ready peers not in the recent list.
+        // recent_tip_peers has at most MAX_RECENT_TIP_PEERS (6) entries,
+        // so a linear contains() is faster than building a HashSet.
         let fresh_peers: HashSet<D::Key> = self
             .ready_services
             .keys()
-            .filter(|k| !recent.contains(k))
+            .filter(|k| !self.recent_tip_peers.contains(k))
             .copied()
             .collect();
 
@@ -956,14 +961,7 @@ where
                 self.recent_tip_peers.pop_front();
             }
 
-            let mut svc = self
-                .take_ready_service(&key)
-                .expect("selected peer must be ready");
-
-            let fut = svc.call(req);
-            self.push_unready(key, svc);
-
-            return fut.map_err(Into::into).boxed();
+            return self.call_ready_peer(key, req);
         }
 
         // No ready peers at all — same fallback as route_p2c.
@@ -1004,14 +1002,7 @@ where
                     "routing block download to peer at or above chain tip"
                 );
 
-                let mut svc = self
-                    .take_ready_service(&key)
-                    .expect("selected peer must be ready");
-
-                let fut = svc.call(req);
-                self.push_unready(key, svc);
-
-                return fut.map_err(Into::into).boxed();
+                return self.call_ready_peer(key, req);
             }
         }
 
@@ -1048,12 +1039,9 @@ where
         // so that a peer can't provide all our inventory responses.
         let peer = self.select_p2c_peer_from_list(&advertising_peer_list);
 
-        if let Some(mut svc) = peer.and_then(|key| self.take_ready_service(&key)) {
-            let peer = peer.expect("just checked peer is Some");
-            tracing::trace!(?hash, ?peer, "routing to a peer which advertised inventory");
-            let fut = svc.call(req);
-            self.push_unready(peer, svc);
-            return fut.map_err(Into::into).boxed();
+        if let Some(key) = peer.filter(|k| self.ready_services.contains_key(k)) {
+            tracing::trace!(?hash, ?key, "routing to a peer which advertised inventory");
+            return self.call_ready_peer(key, req);
         }
 
         let missing_peer_list: HashSet<PeerSocketAddr> = self
@@ -1071,12 +1059,9 @@ where
         // Security: choose a random, less-loaded peer that might have the inventory.
         let peer = self.select_p2c_peer_from_list(&maybe_peer_list);
 
-        if let Some(mut svc) = peer.and_then(|key| self.take_ready_service(&key)) {
-            let peer = peer.expect("just checked peer is Some");
-            tracing::trace!(?hash, ?peer, "routing to a peer that might have inventory");
-            let fut = svc.call(req);
-            self.push_unready(peer, svc);
-            return fut.map_err(Into::into).boxed();
+        if let Some(key) = peer.filter(|k| self.ready_services.contains_key(k)) {
+            tracing::trace!(?hash, ?key, "routing to a peer that might have inventory");
+            return self.call_ready_peer(key, req);
         }
 
         tracing::debug!(
