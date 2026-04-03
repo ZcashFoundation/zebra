@@ -271,6 +271,9 @@ where
     /// download size — smaller blocks allow larger batches, larger blocks reduce
     /// the batch size to stay under the peer's send buffer limit.
     recent_block_sizes: VecDeque<usize>,
+
+    /// Running total of `recent_block_sizes` for O(1) average computation.
+    total_block_size: usize,
 }
 
 impl<ZN, ZV, ZSTip> Stream for Downloads<ZN, ZV, ZSTip>
@@ -379,6 +382,7 @@ where
             block_size_sender: block_size_tx,
             block_size_receiver: block_size_rx,
             recent_block_sizes: VecDeque::new(),
+            total_block_size: 0,
         }
     }
 
@@ -387,12 +391,13 @@ where
     /// Computes `BATCH_TARGET_SIZE / avg_block_size`, clamped to `[1, MAX_BATCH_SIZE]`.
     /// If no block sizes have been recorded yet, returns `MAX_BATCH_SIZE` (optimistic
     /// default for early checkpoint sync where blocks are small).
-    pub fn dynamic_batch_size(&mut self) -> usize {
+    pub(super) fn dynamic_batch_size(&mut self) -> usize {
         // Drain all pending block size reports from spawned tasks.
         while let Ok(size) = self.block_size_receiver.try_recv() {
             self.recent_block_sizes.push_back(size);
+            self.total_block_size += size;
             if self.recent_block_sizes.len() > MAX_RECENT_BLOCK_SIZE_SAMPLES {
-                self.recent_block_sizes.pop_front();
+                self.total_block_size -= self.recent_block_sizes.pop_front().unwrap_or(0);
             }
         }
 
@@ -400,12 +405,13 @@ where
             return MAX_BATCH_SIZE;
         }
 
-        let avg_size =
-            self.recent_block_sizes.iter().sum::<usize>() / self.recent_block_sizes.len();
+        let avg_size = self.total_block_size / self.recent_block_sizes.len();
         if avg_size == 0 {
             return MAX_BATCH_SIZE;
         }
 
+        // Use 2/3 of the raw ratio as a safety margin to account for block
+        // size variance and avoid partial responses from peers.
         ((2 * BATCH_TARGET_SIZE) / (3 * avg_size)).clamp(1, MAX_BATCH_SIZE)
     }
 
@@ -481,10 +487,15 @@ where
     /// The channel closes naturally when all blocks have been sent or retries
     /// are exhausted. If the receiver is dropped early, the background task
     /// exits cleanly on the next send attempt.
-    pub fn download_batch(
+    /// Downloads a batch of blocks, yielding each as it arrives.
+    ///
+    /// Sends `Ok((block, addr))` for each successfully downloaded block, and
+    /// `Err(hash)` for each hash that could not be downloaded after retries.
+    /// The caller should remove failed hashes from `pending_download_hashes`.
+    pub(super) fn download_batch(
         &mut self,
         mut hashes: Vec<block::Hash>,
-    ) -> mpsc::Receiver<(Arc<block::Block>, Option<PeerSocketAddr>)>
+    ) -> mpsc::Receiver<Result<(Arc<block::Block>, Option<PeerSocketAddr>), block::Hash>>
     where
         ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + 'static,
         ZN::Future: Send,
@@ -525,10 +536,10 @@ where
                         let mut received = HashSet::new();
                         for item in blocks {
                             if let Some((block, addr)) = item.available() {
-                                received.insert(block.hash());
-                                retries.remove(&block.hash());
-                                if tx.send((block, addr)).await.is_err() {
-                                    // Receiver dropped — consumer is gone.
+                                let h = block.hash();
+                                received.insert(h);
+                                retries.remove(&h);
+                                if tx.send(Ok((block, addr))).await.is_err() {
                                     return;
                                 }
                             }
@@ -553,6 +564,15 @@ where
                     for h in &remaining {
                         *retries.entry(*h).or_default() += 1;
                     }
+                    // Report hashes that exhausted retries as errors.
+                    let exhausted: Vec<_> = remaining
+                        .iter()
+                        .filter(|h| retries.get(h).copied().unwrap_or(0) > BATCH_RETRY_LIMIT)
+                        .copied()
+                        .collect();
+                    for h in &exhausted {
+                        let _ = tx.send(Err(*h)).await;
+                    }
                     remaining.retain(|h| retries.get(h).copied().unwrap_or(0) <= BATCH_RETRY_LIMIT);
                 }
 
@@ -560,18 +580,27 @@ where
                     tokio::task::yield_now().await;
                 }
             }
-            // tx is dropped here, closing the stream.
+
+            // Report any remaining hashes (network failure exit) as errors.
+            for h in &remaining {
+                let _ = tx.send(Err(*h)).await;
+            }
         });
 
         rx
     }
 
     /// Returns `true` if the given block hash is already queued for download/verification.
-    pub fn is_queued(&self, hash: &block::Hash) -> bool {
+    pub(super) fn is_queued(&self, hash: &block::Hash) -> bool {
         self.cancel_handles.contains_key(hash)
     }
 
-    pub fn spawn_verify_task<F>(&mut self, hash: block::Hash, block_source: F)
+    /// Removes a hash from the pending download set, allowing it to be re-requested.
+    pub(super) fn clear_pending_download(&mut self, hash: &block::Hash) {
+        self.pending_download_hashes.remove(hash);
+    }
+
+    pub(super) fn spawn_verify_task<F>(&mut self, hash: block::Hash, block_source: F)
     where
         F: Future<
                 Output = Result<
@@ -581,6 +610,13 @@ where
             > + Send
             + 'static,
     {
+        // Skip if this hash is already being verified — avoids orphaning the
+        // new cancel handle when the old task completes and removes the entry.
+        if self.cancel_handles.contains_key(&hash) {
+            debug!(?hash, "skipping duplicate spawn_verify_task");
+            return;
+        }
+
         // This oneshot is used to signal cancellation to the task.
         let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
 
@@ -798,13 +834,8 @@ where
         );
 
         self.pending.push(task);
-        // The block has been downloaded and is now in the verify pipeline,
-        // so remove it from the pending download set.
         self.pending_download_hashes.remove(&hash);
-
-        if let Some(_old_cancel) = self.cancel_handles.insert(hash, cancel_tx) {
-            debug!(?hash, "replacing cancel handle for already-queued block");
-        }
+        self.cancel_handles.insert(hash, cancel_tx);
     }
 
     /// Cancel all running tasks and reset the downloader state.

@@ -1151,15 +1151,24 @@ where
             all_batches.push(tokio_stream::wrappers::ReceiverStream::new(rx));
         }
 
-        while let Some((block, addr)) = all_batches.next().await {
-            let hash = block.hash();
-            if self.downloads.is_queued(&hash) {
-                tracing::debug!(?hash, "skipping already-queued block from batch download");
-                metrics::counter!("sync.already.queued.dropped.block.hash.count").increment(1);
-                continue;
+        while let Some(result) = all_batches.next().await {
+            match result {
+                Ok((block, addr)) => {
+                    let hash = block.hash();
+                    if self.downloads.is_queued(&hash) {
+                        tracing::debug!(?hash, "skipping already-queued block from batch download");
+                        metrics::counter!("sync.already.queued.dropped.block.hash.count")
+                            .increment(1);
+                        continue;
+                    }
+                    self.downloads
+                        .spawn_verify_task(hash, async move { Ok((block, addr)) });
+                }
+                Err(hash) => {
+                    // Hash exhausted retries or network failed — allow re-download.
+                    self.downloads.clear_pending_download(&hash);
+                }
             }
-            self.downloads
-                .spawn_verify_task(hash, async move { Ok((block, addr)) });
         }
 
         Ok(extra_hashes)
