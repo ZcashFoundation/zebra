@@ -283,6 +283,12 @@ impl WriteBlockWorkerTask {
         let mut last_zebra_mined_log_height = None;
         let mut prev_finalized_note_commitment_trees = None;
 
+        // Disable auto-compaction during checkpoint sync for faster writes.
+        // WAL stays enabled for crash safety during network sync.
+        finalized_state
+            .db
+            .set_auto_compaction(false);
+
         // Pipeline: commit checkpoint-verified blocks to the non-finalized state (Thread 1),
         // look up spent UTXOs/output-locations (Thread 2), then prepare batch and write to
         // disk (Thread 3). This avoids blocking Thread 1 on any disk I/O.
@@ -469,6 +475,12 @@ impl WriteBlockWorkerTask {
             drop(lookup_tx);
             // Scoped threads are automatically joined when the scope exits.
         });
+
+        // Checkpoint sync is complete. Re-enable auto-compaction
+        // for normal operation during full verification.
+        finalized_state
+            .db
+            .set_auto_compaction(true);
 
         // All checkpoint blocks have been written to disk by the pipeline.
         // Remove them from the non-finalized state so Phase 2 starts clean.

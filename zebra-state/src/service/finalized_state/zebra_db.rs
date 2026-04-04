@@ -259,6 +259,12 @@ impl ZebraDb {
         }
     }
 
+    /// Enables or disables RocksDB auto-compaction.
+    /// See [`DiskDb::set_auto_compaction`] for details.
+    pub fn set_auto_compaction(&self, enabled: bool) {
+        self.db.set_auto_compaction(enabled);
+    }
+
     /// When called with a secondary DB instance, tries to catch up with the primary DB instance
     pub fn try_catch_up_with_primary(&self) -> Result<(), rocksdb::Error> {
         self.db.try_catch_up_with_primary()
