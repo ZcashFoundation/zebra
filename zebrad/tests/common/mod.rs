@@ -20,4 +20,5 @@ pub mod launch;
 pub mod lightwalletd;
 pub mod regtest;
 pub mod sync;
+pub mod sync_perf;
 pub mod test_type;
