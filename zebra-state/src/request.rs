@@ -1169,6 +1169,18 @@ pub enum ReadRequest {
     /// * [`ReadResponse::BlockAndSize(None)`](ReadResponse::BlockAndSize) otherwise.
     BlockAndSize(HashOrHeight),
 
+    /// Looks up a block by hash or height in the current best chain,
+    /// returning both the deserialized block and its raw transaction bytes.
+    ///
+    /// The raw bytes can be used to avoid re-serializing transactions when
+    /// writing them to another database (e.g., in the `copy-state` command).
+    ///
+    /// Returns
+    ///
+    /// * [`ReadResponse::BlockAndRawTransactions(Some(...))`](ReadResponse::BlockAndRawTransactions) if the block is in the best chain;
+    /// * [`ReadResponse::BlockAndRawTransactions(None)`](ReadResponse::BlockAndRawTransactions) otherwise.
+    BlockAndRawTransactions(HashOrHeight),
+
     /// Looks up a block header by hash or height in the current best chain.
     ///
     /// Returns
@@ -1448,6 +1460,7 @@ impl ReadRequest {
             ReadRequest::Block(_) => "block",
             ReadRequest::AnyChainBlock(_) => "any_chain_block",
             ReadRequest::BlockAndSize(_) => "block_and_size",
+            ReadRequest::BlockAndRawTransactions(_) => "block_and_raw_transactions",
             ReadRequest::BlockHeader(_) => "block_header",
             ReadRequest::Transaction(_) => "transaction",
             ReadRequest::AnyChainTransaction(_) => "any_chain_transaction",
