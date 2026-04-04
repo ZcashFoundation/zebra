@@ -37,6 +37,8 @@ pub struct SampleRange {
 }
 
 /// Mainnet sample ranges covering each network upgrade era.
+///
+/// 230k blocks total as of this writing.
 pub const MAINNET_SAMPLES: &[SampleRange] = &[
     SampleRange {
         name: "Genesis",
@@ -46,26 +48,26 @@ pub const MAINNET_SAMPLES: &[SampleRange] = &[
     },
     SampleRange {
         name: "Early",
-        start: 20_000,
+        start: 40_000,
         end: 50_000,
         description: "V1-V3 transparent-only",
     },
     SampleRange {
         name: "Overwinter-Sapling",
         start: 395_000,
-        end: 445_000,
+        end: 420_000,
         description: "Overwinter (347,500) -> Sapling (419,200)",
     },
     SampleRange {
         name: "Blossom",
         start: 630_000,
-        end: 680_000,
+        end: 670_000,
         description: "Blossom activation (653,600)",
     },
     SampleRange {
         name: "Heartwood",
         start: 880_000,
-        end: 930_000,
+        end: 940_000,
         description: "Heartwood activation (903,000)",
     },
     SampleRange {
@@ -77,13 +79,13 @@ pub const MAINNET_SAMPLES: &[SampleRange] = &[
     SampleRange {
         name: "Spam-attack",
         start: 1_820_000,
-        end: 1_850_000,
+        end: 1_840_000,
         description: "Dense transparent dust transactions",
     },
     SampleRange {
         name: "Post-NU6.1",
         start: 3_100_000,
-        end: 3_150_000,
+        end: 3_125_000,
         description: "Post-NU6.1, current chain",
     },
 ];

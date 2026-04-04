@@ -33,19 +33,21 @@
 //!    * fetches blocks from the best finalized chain from permanent storage,
 //!      in the new format
 
-use std::{cmp::min, path::PathBuf, sync::Arc};
+use std::{cmp::min, path::PathBuf};
 
 use abscissa_core::{config, Command, FrameworkError};
 use color_eyre::eyre::{eyre, Report};
+use futures::stream::FuturesOrdered;
 use tokio::time::Instant;
+use tokio_stream::StreamExt;
 use tower::{Service, ServiceExt};
 
 use zebra_chain::{
-    block::{Block, Height},
+    block::Height,
     parameters::Network,
 };
 use zebra_state as new_zs;
-use zebra_state::{self as old_zs, RawBytes};
+use zebra_state as old_zs;
 
 use crate::{
     components::tokio::{RuntimeRun, TokioComponent},
@@ -211,38 +213,18 @@ impl CopyStateCmd {
 
         let copy_start_time = Instant::now();
 
-        // Pipeline: read blocks from source in a blocking thread, send them
-        // through a channel, and commit them to the target state concurrently.
-        let (block_tx, mut block_rx) =
-            tokio::sync::mpsc::channel::<(u32, Arc<Block>, Vec<RawBytes>)>(100);
-
-        // Source reader: reads blocks sequentially from the source DB and sends
-        // them through the channel. Runs in a blocking thread because source DB
-        // reads are synchronous. Raw transaction bytes are sent alongside each
-        // block to avoid re-serializing them on write.
-        let source_db = source_db.clone();
-        let reader_handle = tokio::task::spawn_blocking(move || {
-            for height in min_target_height..=max_copy_height {
-                let (source_block, raw_txs) = source_db
-                    .block_and_raw_transactions(Height(height).into())
-                    .unwrap_or_else(|| panic!("missing source block at height {height}"));
-
-                if block_tx
-                    .blocking_send((height, source_block, raw_txs))
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        });
-
-        // Commit loop: receives blocks from the reader and commits each block
-        // to the target state. Responses are collected into a JoinSet so they
-        // can be awaited after all blocks have been sent, ensuring the write
-        // pipeline finishes before we check the final tip.
-        let mut commit_tasks = tokio::task::JoinSet::new();
+        // Copy loop: read each block from the source DB and commit it to the
+        // target state. Commit responses are collected in a FuturesOrdered and
+        // drained via select! so commits complete in the background while the
+        // next block is read.
+        let mut commit_futures = FuturesOrdered::new();
         let mut commit_count: u32 = 0;
-        while let Some((height, source_block, raw_txs)) = block_rx.recv().await {
+
+        for height in min_target_height..=max_copy_height {
+            let (source_block, raw_txs) = source_db
+                .block_and_raw_transactions(Height(height).into())
+                .unwrap_or_else(|| panic!("missing source block at height {height}"));
+
             let checkpoint_block = new_zs::CheckpointVerifiedBlock::from(source_block)
                 .with_cached_raw_transactions(raw_txs);
             let rsp =
@@ -253,12 +235,21 @@ impl CopyStateCmd {
                         checkpoint_block,
                     ));
 
-            commit_tasks.spawn(async move {
+            commit_futures.push_back(async move {
                 match rsp.await {
                     Ok(new_zs::Response::Committed(_hash)) => {}
                     other => warn!("block commit failed at height {height}: {other:?}"),
                 }
             });
+
+            // Drain any already-completed commit futures to bound memory.
+            loop {
+                tokio::select! {
+                    biased;
+                    Some(()) = commit_futures.next() => {}
+                    else => break,
+                }
+            }
 
             commit_count += 1;
             if commit_count.is_multiple_of(PROGRESS_HEIGHT_INTERVAL) {
@@ -272,15 +263,8 @@ impl CopyStateCmd {
             }
         }
 
-        reader_handle
-            .await
-            .expect("source reader task should not panic");
-
-        // Wait for all in-flight commit responses so the write pipeline
-        // finishes before we check the final tip.
-        while let Some(result) = commit_tasks.join_next().await {
-            result.expect("commit task should not panic");
-        }
+        // Wait for all remaining in-flight commit responses.
+        while let Some(()) = commit_futures.next().await {}
 
         let elapsed = copy_start_time.elapsed();
         info!(?max_copy_height, ?elapsed, "finished copying blocks");
