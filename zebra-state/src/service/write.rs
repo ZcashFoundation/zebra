@@ -283,6 +283,12 @@ impl WriteBlockWorkerTask {
         let mut last_zebra_mined_log_height = None;
         let mut prev_finalized_note_commitment_trees = None;
 
+        // Disable auto-compaction during checkpoint sync for faster writes.
+        // WAL stays enabled for crash safety during network sync.
+        finalized_state
+            .db
+            .set_auto_compaction(false);
+
         // Pipeline: commit checkpoint-verified blocks to the non-finalized state (Thread 1),
         // look up spent UTXOs/output-locations (Thread 2), then prepare batch and write to
         // disk (Thread 3). This avoids blocking Thread 1 on any disk I/O.
@@ -311,25 +317,24 @@ impl WriteBlockWorkerTask {
             });
 
             // Thread 3: prepare batch and write to disk
-            let mut db3 = finalized_state.db.clone();
-            let network = non_finalized_state.network.clone();
+            let mut finalized_state3 = finalized_state.clone();
             s.spawn(move || {
                 let mut prev_note_commitment_trees: Option<NoteCommitmentTrees> = None;
                 while let Ok((finalized, spent_utxos)) = write_rx.recv() {
                     let note_commitment_trees = finalized.treestate.note_commitment_trees.clone();
                     let height = finalized.height;
 
-                    db3.write_block(
-                        finalized,
-                        spent_utxos,
-                        prev_note_commitment_trees.take(),
-                        &network,
-                        "commit checkpoint-verified pipeline",
-                    )
-                    .expect(
-                        "unexpected disk write error: \
+                    finalized_state3
+                        .commit_finalized_direct_internal(
+                            finalized,
+                            prev_note_commitment_trees.take(),
+                            Some(spent_utxos),
+                            "commit checkpoint-verified pipeline",
+                        )
+                        .expect(
+                            "unexpected disk write error: \
                          block has already been validated by the non-finalized state",
-                    );
+                        );
 
                     prev_note_commitment_trees = Some(note_commitment_trees);
 
@@ -470,6 +475,12 @@ impl WriteBlockWorkerTask {
             drop(lookup_tx);
             // Scoped threads are automatically joined when the scope exits.
         });
+
+        // Checkpoint sync is complete. Re-enable auto-compaction
+        // for normal operation during full verification.
+        finalized_state
+            .db
+            .set_auto_compaction(true);
 
         // All checkpoint blocks have been written to disk by the pipeline.
         // Remove them from the non-finalized state so Phase 2 starts clean.

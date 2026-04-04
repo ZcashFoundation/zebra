@@ -339,6 +339,7 @@ where
                 new_outputs,
                 transaction_hashes,
                 deferred_pool_balance_change: Some(deferred_pool_balance_change),
+                cached_raw_transactions: None,
             };
 
             // Return early for proposal requests.

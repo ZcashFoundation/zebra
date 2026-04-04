@@ -255,8 +255,9 @@ pub fn sync_until(
         //
         // Since it needs to collect all the output,
         // the test harness can't kill `zebrad` after it logs the `stop_regex`.
+        // debug_stop_at_height ensures zebrad exits naturally at any height.
         assert!(
-            height.0 < 2_000_000,
+            height.0 < 10_000_000,
             "zebrad must exit by itself, so we can collect all the output",
         );
         let output = child.wait_with_output()?;

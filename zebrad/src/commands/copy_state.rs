@@ -33,19 +33,18 @@
 //!    * fetches blocks from the best finalized chain from permanent storage,
 //!      in the new format
 
-use std::{cmp::min, path::PathBuf, sync::Arc};
+use std::{cmp::min, path::PathBuf};
 
 use abscissa_core::{config, Command, FrameworkError};
 use color_eyre::eyre::{eyre, Report};
+use futures::stream::FuturesOrdered;
 use tokio::time::Instant;
+use tokio_stream::StreamExt;
 use tower::{Service, ServiceExt};
 
-use zebra_chain::{
-    block::{Block, Height},
-    parameters::Network,
-};
-use zebra_state as old_zs;
+use zebra_chain::{block::Height, parameters::Network};
 use zebra_state as new_zs;
+use zebra_state as old_zs;
 
 use crate::{
     components::tokio::{RuntimeRun, TokioComponent},
@@ -126,7 +125,7 @@ impl CopyStateCmd {
         let source_start_time = Instant::now();
 
         // We're not verifying UTXOs here, so we don't need the maximum checkpoint height.
-        let (mut source_read_only_state_service, source_db, _source_latest_non_finalized_state) =
+        let (mut source_read_only_state_service, _source_db, _source_latest_non_finalized_state) =
             old_zs::spawn_init_read_only(source_config.clone(), network).await?;
 
         let elapsed = source_start_time.elapsed();
@@ -139,10 +138,6 @@ impl CopyStateCmd {
 
         let target_start_time = Instant::now();
         // We're not verifying UTXOs here, so we don't need the maximum checkpoint height.
-        //
-        // TODO: call Options::PrepareForBulkLoad()
-        // See "What's the fastest way to load data into RocksDB?" in
-        // https://github.com/facebook/rocksdb/wiki/RocksDB-FAQ
         let (
             mut target_state,
             _target_read_only_state_service,
@@ -211,45 +206,56 @@ impl CopyStateCmd {
 
         let copy_start_time = Instant::now();
 
-        // Pipeline: read blocks from source in a blocking thread, send them
-        // through a channel, and commit them to the target state concurrently.
-        let (block_tx, mut block_rx) = tokio::sync::mpsc::channel::<(u32, Arc<Block>)>(100);
-
-        // Source reader: reads blocks sequentially from the source DB and sends
-        // them through the channel. Runs in a blocking thread because source DB
-        // reads are synchronous.
-        let source_db = source_db.clone();
-        let reader_handle = tokio::task::spawn_blocking(move || {
-            for height in min_target_height..=max_copy_height {
-                let source_block = source_db
-                    .block(Height(height).into())
-                    .unwrap_or_else(|| panic!("missing source block at height {height}"));
-
-                if block_tx.blocking_send((height, source_block)).is_err() {
-                    break;
-                }
-            }
-        });
-
-        // Commit loop: receives blocks from the reader and spawns tasks that
-        // commit each block to the target state. The spawned tasks run
-        // concurrently so many blocks can be in flight at once.
+        // Copy loop: read each block from the source read state service and
+        // commit it to the target state. Commit responses are collected in a
+        // FuturesOrdered and drained via select! so commits complete in the
+        // background while the next block is read.
+        let mut commit_futures = FuturesOrdered::new();
         let mut commit_count: u32 = 0;
-        while let Some((height, source_block)) = block_rx.recv().await {
+
+        for height in min_target_height..=max_copy_height {
+            let (source_block, raw_txs) = match source_read_only_state_service
+                .ready()
+                .await?
+                .call(old_zs::ReadRequest::BlockAndRawTransactions(
+                    Height(height).into(),
+                ))
+                .await?
+            {
+                old_zs::ReadResponse::BlockAndRawTransactions(Some(block_and_txs)) => block_and_txs,
+                old_zs::ReadResponse::BlockAndRawTransactions(None) => {
+                    panic!("missing source block at height {height}")
+                }
+                response => Err(format!(
+                    "unexpected response to BlockAndRawTransactions request: {response:?}"
+                ))?,
+            };
+
+            let checkpoint_block = new_zs::CheckpointVerifiedBlock::from(source_block)
+                .with_cached_raw_transactions(raw_txs);
             let rsp =
                 target_state
                     .ready()
                     .await?
                     .call(new_zs::Request::CommitCheckpointVerifiedBlock(
-                        source_block.into(),
+                        checkpoint_block,
                     ));
 
-            tokio::spawn(async move {
+            commit_futures.push_back(async move {
                 match rsp.await {
                     Ok(new_zs::Response::Committed(_hash)) => {}
                     other => warn!("block commit failed at height {height}: {other:?}"),
                 }
             });
+
+            // Drain any already-completed commit futures to bound memory.
+            loop {
+                tokio::select! {
+                    biased;
+                    Some(()) = commit_futures.next() => {}
+                    else => break,
+                }
+            }
 
             commit_count += 1;
             if commit_count.is_multiple_of(PROGRESS_HEIGHT_INTERVAL) {
@@ -263,9 +269,8 @@ impl CopyStateCmd {
             }
         }
 
-        reader_handle
-            .await
-            .expect("source reader task should not panic");
+        // Wait for all remaining in-flight commit responses.
+        while let Some(()) = commit_futures.next().await {}
 
         let elapsed = copy_start_time.elapsed();
         info!(?max_copy_height, ?elapsed, "finished copying blocks");

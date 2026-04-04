@@ -210,6 +210,7 @@ use common::{
         STOP_ON_LOAD_TIMEOUT, SYNC_FINISHED_REGEX, TINY_CHECKPOINT_TEST_HEIGHT,
         TINY_CHECKPOINT_TIMEOUT,
     },
+    sync_perf::{self, MAINNET_SAMPLES, TESTNET_SAMPLES},
     test_type::TestType::{self, *},
 };
 
@@ -1224,6 +1225,29 @@ fn sync_large_checkpoints_mempool_mainnet() -> Result<()> {
         true,
     )
     .map(|_tempdir| ())
+}
+
+/// Benchmark initial sync performance across different Mainnet chain eras.
+///
+/// Requires `ZEBRA_SOURCE_STATE_DIR` pointing to a fully-synced Mainnet state.
+/// Produces a markdown report with blocks/sec per era for cross-branch comparison.
+///
+/// Run with: `cargo test -p zebrad sync_performance_benchmark_mainnet -- --ignored --nocapture`
+#[test]
+#[ignore]
+fn sync_performance_benchmark_mainnet() -> Result<()> {
+    sync_perf::sync_performance_benchmark(&Mainnet, MAINNET_SAMPLES)
+}
+
+/// Benchmark initial sync performance across different Testnet chain eras.
+///
+/// Requires `ZEBRA_SOURCE_STATE_DIR` pointing to a fully-synced Testnet state.
+///
+/// Run with: `cargo test -p zebrad sync_performance_benchmark_testnet -- --ignored --nocapture`
+#[test]
+#[ignore]
+fn sync_performance_benchmark_testnet() -> Result<()> {
+    sync_perf::sync_performance_benchmark(&Network::new_default_testnet(), TESTNET_SAMPLES)
 }
 
 #[tracing::instrument]

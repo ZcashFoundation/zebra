@@ -1399,6 +1399,13 @@ impl Service<ReadRequest> for ReadStateService {
                 read::block_and_size(state.latest_best_chain(), &state.db, hash_or_height),
             )),
 
+            // Used by the copy-state command.
+            ReadRequest::BlockAndRawTransactions(hash_or_height) => {
+                Ok(ReadResponse::BlockAndRawTransactions(
+                    read::block_and_raw_transactions(&state.db, hash_or_height),
+                ))
+            }
+
             // Used by the get_block (verbose) RPC and the StateService.
             ReadRequest::BlockHeader(hash_or_height) => {
                 let best_chain = state.latest_best_chain();

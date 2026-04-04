@@ -97,6 +97,10 @@ pub struct DiskDb {
     /// applying any format changes that may have been required.
     finished_format_upgrades: Arc<AtomicBool>,
 
+    /// When true, the write-ahead log is skipped for write operations.
+    /// This is used during checkpoint sync for faster bulk writes.
+    disable_wal: Arc<AtomicBool>,
+
     // Owned State
     //
     // Everything contained in this state must be shared by all clones, or read-only.
@@ -1051,6 +1055,7 @@ impl DiskDb {
                     ephemeral: config.ephemeral,
                     db: Arc::new(db),
                     finished_format_upgrades: Arc::new(AtomicBool::new(false)),
+                    disable_wal: Arc::new(AtomicBool::new(false)),
                 };
 
                 db.assert_default_cf_is_empty();
@@ -1118,9 +1123,26 @@ impl DiskDb {
     // Write methods
     // Low-level write methods are located in the WriteDisk trait
 
+    /// Enables or disables RocksDB auto-compaction at runtime.
+    pub fn set_auto_compaction(&self, enabled: bool) {
+        let value = if enabled { "false" } else { "true" };
+        self.db
+            .set_options(&[("disable_auto_compactions", value)])
+            .expect("setting disable_auto_compactions should succeed");
+    }
+
     /// Writes `batch` to the database.
+    ///
+    /// When bulk writes are enabled, the write-ahead log is skipped
+    /// for faster throughput.
     pub(crate) fn write(&self, batch: DiskWriteBatch) -> Result<(), rocksdb::Error> {
-        self.db.write(batch.batch)
+        if self.disable_wal.load(atomic::Ordering::Relaxed) {
+            let mut write_opts = rocksdb::WriteOptions::default();
+            write_opts.disable_wal(true);
+            self.db.write_opt(batch.batch, &write_opts)
+        } else {
+            self.db.write(batch.batch)
+        }
     }
 
     // Private methods
@@ -1268,6 +1290,7 @@ impl DiskDb {
     /// Returns the database options for the finalized state database.
     fn options() -> rocksdb::Options {
         let mut opts = rocksdb::Options::default();
+
         let mut block_based_opts = rocksdb::BlockBasedOptions::default();
 
         const ONE_MEGABYTE: usize = 1024 * 1024;
@@ -1297,13 +1320,13 @@ impl DiskDb {
         // accumulate in memory before flushing to L0. The default 64 MB is
         // conservative; 256 MB per buffer with 4 buffers gives the flush
         // thread headroom to keep up with sustained block commits.
-        opts.set_write_buffer_size(256 * ONE_MEGABYTE);
-        opts.set_max_write_buffer_number(4);
+        opts.set_write_buffer_size(512 * ONE_MEGABYTE);
+        opts.set_max_write_buffer_number(2);
 
         // Allow multiple background threads for flush and compaction.
         // The default (1 flush + 1 compaction) can't keep up during sync.
         // RocksDB splits these across flush and compaction automatically.
-        opts.set_max_background_jobs(8);
+        opts.set_max_background_jobs(2);
 
         // Allow multiple memtables to be written to concurrently.
         // This is safe with the default skiplist memtable and reduces

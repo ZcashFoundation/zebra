@@ -27,7 +27,7 @@ use zebra_chain::{
 use crate::{
     response::{AnyTx, MinedTx},
     service::{
-        finalized_state::ZebraDb,
+        finalized_state::{RawBytes, ZebraDb},
         non_finalized_state::{Chain, NonFinalizedState},
         read::tip_height,
     },
@@ -87,6 +87,18 @@ where
             (contextual.block.clone(), size)
         })
         .or_else(|| db.block_and_size(hash_or_height))
+}
+
+/// Returns the [`Block`] and its raw serialized transaction bytes with
+/// [`block::Hash`] or [`Height`], if it exists in the finalized `db`.
+///
+/// For blocks in the non-finalized state, falls back to returning the block
+/// without raw transactions (raw bytes are only available from disk).
+pub fn block_and_raw_transactions(
+    db: &ZebraDb,
+    hash_or_height: HashOrHeight,
+) -> Option<(Arc<Block>, Vec<RawBytes>)> {
+    db.block_and_raw_transactions(hash_or_height)
 }
 
 /// Returns the [`block::Header`] with [`block::Hash`] or

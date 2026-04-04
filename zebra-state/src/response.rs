@@ -25,7 +25,10 @@ use zebra_chain::work::difficulty::CompactDifficulty;
 #[allow(unused_imports)]
 use crate::{ReadRequest, Request};
 
-use crate::{service::read::AddressUtxos, NonFinalizedState, TransactionLocation, WatchReceiver};
+use crate::{
+    service::{finalized_state::RawBytes, read::AddressUtxos},
+    NonFinalizedState, TransactionLocation, WatchReceiver,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A response to a [`StateService`](crate::service::StateService) [`Request`].
@@ -335,6 +338,10 @@ pub enum ReadResponse {
     /// serialized size.
     BlockAndSize(Option<(Arc<Block>, usize)>),
 
+    /// Response to [`ReadRequest::BlockAndRawTransactions`] with the specified
+    /// block and its raw serialized transaction bytes.
+    BlockAndRawTransactions(Option<(Arc<Block>, Vec<RawBytes>)>),
+
     /// The response to a `BlockHeader` request.
     BlockHeader {
         /// The header of the requested block
@@ -548,6 +555,7 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::AddressUtxos(_)
             | ReadResponse::ChainInfo(_)
             | ReadResponse::NonFinalizedBlocksListener(_)
+            | ReadResponse::BlockAndRawTransactions(_)
             | ReadResponse::IsTransparentOutputSpent(_) => {
                 Err("there is no corresponding Response for this ReadResponse")
             }
