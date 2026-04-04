@@ -236,9 +236,11 @@ impl CopyStateCmd {
             }
         });
 
-        // Commit loop: receives blocks from the reader and spawns tasks that
-        // commit each block to the target state. The spawned tasks run
-        // concurrently so many blocks can be in flight at once.
+        // Commit loop: receives blocks from the reader and commits each block
+        // to the target state. Responses are collected into a JoinSet so they
+        // can be awaited after all blocks have been sent, ensuring the write
+        // pipeline finishes before we check the final tip.
+        let mut commit_tasks = tokio::task::JoinSet::new();
         let mut commit_count: u32 = 0;
         while let Some((height, source_block, raw_txs)) = block_rx.recv().await {
             let checkpoint_block = new_zs::CheckpointVerifiedBlock::from(source_block)
@@ -251,7 +253,7 @@ impl CopyStateCmd {
                         checkpoint_block,
                     ));
 
-            tokio::spawn(async move {
+            commit_tasks.spawn(async move {
                 match rsp.await {
                     Ok(new_zs::Response::Committed(_hash)) => {}
                     other => warn!("block commit failed at height {height}: {other:?}"),
@@ -273,6 +275,12 @@ impl CopyStateCmd {
         reader_handle
             .await
             .expect("source reader task should not panic");
+
+        // Wait for all in-flight commit responses so the write pipeline
+        // finishes before we check the final tip.
+        while let Some(result) = commit_tasks.join_next().await {
+            result.expect("commit task should not panic");
+        }
 
         let elapsed = copy_start_time.elapsed();
         info!(?max_copy_height, ?elapsed, "finished copying blocks");
