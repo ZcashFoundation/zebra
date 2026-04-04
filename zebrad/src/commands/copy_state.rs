@@ -125,7 +125,7 @@ impl CopyStateCmd {
         let source_start_time = Instant::now();
 
         // We're not verifying UTXOs here, so we don't need the maximum checkpoint height.
-        let (mut source_read_only_state_service, source_db, _source_latest_non_finalized_state) =
+        let (mut source_read_only_state_service, _source_db, _source_latest_non_finalized_state) =
             old_zs::spawn_init_read_only(source_config.clone(), network).await?;
 
         let elapsed = source_start_time.elapsed();
@@ -218,9 +218,22 @@ impl CopyStateCmd {
         let mut commit_count: u32 = 0;
 
         for height in min_target_height..=max_copy_height {
-            let (source_block, raw_txs) = source_db
-                .block_and_raw_transactions(Height(height).into())
-                .unwrap_or_else(|| panic!("missing source block at height {height}"));
+            let (source_block, raw_txs) = match source_read_only_state_service
+                .ready()
+                .await?
+                .call(old_zs::ReadRequest::BlockAndRawTransactions(
+                    Height(height).into(),
+                ))
+                .await?
+            {
+                old_zs::ReadResponse::BlockAndRawTransactions(Some(block_and_txs)) => block_and_txs,
+                old_zs::ReadResponse::BlockAndRawTransactions(None) => {
+                    panic!("missing source block at height {height}")
+                }
+                response => Err(format!(
+                    "unexpected response to BlockAndRawTransactions request: {response:?}"
+                ))?,
+            };
 
             let checkpoint_block = new_zs::CheckpointVerifiedBlock::from(source_block)
                 .with_cached_raw_transactions(raw_txs);
