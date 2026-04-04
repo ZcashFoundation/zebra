@@ -42,10 +42,7 @@ use tokio::time::Instant;
 use tokio_stream::StreamExt;
 use tower::{Service, ServiceExt};
 
-use zebra_chain::{
-    block::Height,
-    parameters::Network,
-};
+use zebra_chain::{block::Height, parameters::Network};
 use zebra_state as new_zs;
 use zebra_state as old_zs;
 
@@ -213,10 +210,10 @@ impl CopyStateCmd {
 
         let copy_start_time = Instant::now();
 
-        // Copy loop: read each block from the source DB and commit it to the
-        // target state. Commit responses are collected in a FuturesOrdered and
-        // drained via select! so commits complete in the background while the
-        // next block is read.
+        // Copy loop: read each block from the source read state service and
+        // commit it to the target state. Commit responses are collected in a
+        // FuturesOrdered and drained via select! so commits complete in the
+        // background while the next block is read.
         let mut commit_futures = FuturesOrdered::new();
         let mut commit_count: u32 = 0;
 
