@@ -311,25 +311,24 @@ impl WriteBlockWorkerTask {
             });
 
             // Thread 3: prepare batch and write to disk
-            let mut db3 = finalized_state.db.clone();
-            let network = non_finalized_state.network.clone();
+            let mut finalized_state3 = finalized_state.clone();
             s.spawn(move || {
                 let mut prev_note_commitment_trees: Option<NoteCommitmentTrees> = None;
                 while let Ok((finalized, spent_utxos)) = write_rx.recv() {
                     let note_commitment_trees = finalized.treestate.note_commitment_trees.clone();
                     let height = finalized.height;
 
-                    db3.write_block(
-                        finalized,
-                        spent_utxos,
-                        prev_note_commitment_trees.take(),
-                        &network,
-                        "commit checkpoint-verified pipeline",
-                    )
-                    .expect(
-                        "unexpected disk write error: \
+                    finalized_state3
+                        .commit_finalized_direct_internal(
+                            finalized,
+                            prev_note_commitment_trees.take(),
+                            Some(spent_utxos),
+                            "commit checkpoint-verified pipeline",
+                        )
+                        .expect(
+                            "unexpected disk write error: \
                          block has already been validated by the non-finalized state",
-                    );
+                        );
 
                     prev_note_commitment_trees = Some(note_commitment_trees);
 

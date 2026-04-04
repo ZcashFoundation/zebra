@@ -26,7 +26,6 @@ use zebra_state::{self as zs};
 
 use zebra_chain::{
     block::{self, Block},
-    serialization::ZcashSerialize,
     transaction::UnminedTxId,
 };
 use zebra_consensus::{router::RouterError, VerifyBlockError};

@@ -19,7 +19,7 @@ use std::{
     sync::Arc,
 };
 
-use zebra_chain::{block, parallel::tree::NoteCommitmentTrees, parameters::Network};
+use zebra_chain::{block, parallel::tree::NoteCommitmentTrees, parameters::Network, transparent};
 use zebra_db::{
     chain::BLOCK_INFO,
     transparent::{BALANCE_BY_TRANSPARENT_ADDR, TX_LOC_BY_SPENT_OUT_LOC},
@@ -325,7 +325,7 @@ impl FinalizedState {
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
         source: &str,
     ) -> Result<(block::Hash, NoteCommitmentTrees), CommitCheckpointVerifiedError> {
-        let (height, hash, finalized, prev_note_commitment_trees) = match finalizable_block {
+        let (finalized, prev_note_commitment_trees) = match finalizable_block {
             FinalizableBlock::Checkpoint {
                 checkpoint_verified,
             } => {
@@ -387,8 +387,6 @@ impl FinalizedState {
                 };
 
                 (
-                    checkpoint_verified.height,
-                    checkpoint_verified.hash,
                     FinalizedBlock::from_checkpoint_verified(checkpoint_verified, treestate),
                     Some(prev_note_commitment_trees),
                 )
@@ -397,15 +395,38 @@ impl FinalizedState {
                 contextually_verified,
                 treestate,
             } => (
-                contextually_verified.height,
-                contextually_verified.hash,
                 FinalizedBlock::from_contextually_verified(contextually_verified, treestate),
                 prev_note_commitment_trees,
             ),
         };
 
+        self.commit_finalized_direct_internal(finalized, prev_note_commitment_trees, None, source)
+    }
+
+    /// Immediately commit a `finalized` block to the finalized state.
+    ///
+    /// This can be called either by the non-finalized state (when finalizing
+    /// a block) or by the checkpoint verifier.
+    ///
+    /// Use `source` as the source of the block in log messages.
+    ///
+    /// # Errors
+    ///
+    /// - Propagates any errors from writing to the DB
+    /// - Propagates any errors from updating history and note commitment trees
+    /// - If `hashFinalSaplingRoot` / `hashLightClientRoot` / `hashBlockCommitments`
+    ///   does not match the expected value
+    #[allow(clippy::unwrap_in_result)]
+    pub fn commit_finalized_direct_internal(
+        &mut self,
+        finalized: FinalizedBlock,
+        prev_note_commitment_trees: Option<NoteCommitmentTrees>,
+        spent_utxos: Option<Vec<(transparent::OutPoint, OutputLocation, transparent::Utxo)>>,
+        source: &str,
+    ) -> Result<(block::Hash, NoteCommitmentTrees), CommitCheckpointVerifiedError> {
         let committed_tip_hash = self.db.finalized_tip_hash();
         let committed_tip_height = self.db.finalized_tip_height();
+        let &FinalizedBlock { height, hash, .. } = &finalized;
 
         // Assert that callers (including unit tests) get the chain order correct
         if self.db.is_empty() {
@@ -437,7 +458,8 @@ impl FinalizedState {
 
         // Phase 2: all UTXOs are finalized, use empty NFS for fallback.
         let empty_nfs = NonFinalizedState::new(&self.network());
-        let spent_utxos = self.db.lookup_spent_utxos(&finalized, &empty_nfs);
+        let spent_utxos =
+            spent_utxos.unwrap_or_else(|| self.db.lookup_spent_utxos(&finalized, &empty_nfs));
 
         let result = self.db.write_block(
             finalized,
