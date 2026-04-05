@@ -260,6 +260,7 @@ tonic-prost-build = { workspace = true, optional = true }
 
 [dev-dependencies]
 abscissa_core = { workspace = true, features = ["testing"] }
+anyhow = { workspace = true }
 hex = { workspace = true }
 hex-literal = { workspace = true }
 jsonrpsee-types = { workspace = true }
@@ -269,6 +270,8 @@ insta = { workspace = true, features = ["json"] }
 bytes = { workspace = true }
 http-body-util = { workspace = true }
 hyper-util = { workspace = true }
+strum = { workspace = true }
+strum_macros = { workspace = true }
 
 # zebra-rpc needs the preserve_order feature, it also makes test results more stable
 serde_json = { workspace = true, features = ["preserve_order"] }

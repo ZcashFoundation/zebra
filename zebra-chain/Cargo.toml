@@ -93,7 +93,7 @@ zcash_primitives = { workspace = true, features = ["transparent-inputs"] }
 sapling-crypto.workspace = true
 zcash_protocol.workspace = true
 zcash_address.workspace = true
-zcash_transparent.workspace = true
+zcash_transparent = { workspace = true }
 sinsemilla = { version = "0.1" }
 
 # Time
