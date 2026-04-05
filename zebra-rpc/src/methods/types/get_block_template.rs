@@ -454,7 +454,7 @@ impl MinerParams {
             .ok_or(MinerParamsError::MissingAddr)??;
 
         let data = conf
-            .miner_data
+            .extra_coinbase_data
             .map(|s| {
                 let data = push_value(s.as_bytes()).ok_or(MinerParamsError::OversizedData)?;
 
