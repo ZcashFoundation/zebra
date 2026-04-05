@@ -25,7 +25,7 @@ pub struct Config {
     ///
     /// If this string is hex-encoded, it will be hex-decoded into bytes. Otherwise, it will be
     /// UTF-8 encoded into bytes.
-    pub miner_data: Option<String>,
+    pub extra_coinbase_data: Option<String>,
 
     /// Optional shielded memo that Zebra will include in the output of a shielded coinbase
     /// transaction. Limited to 512 bytes.
