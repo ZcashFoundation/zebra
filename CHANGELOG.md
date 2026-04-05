@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Sentry events now carry `SENTRY_ENVIRONMENT`, `git.ref`, `git.sha`, and CI context (`CI_PR_NUMBER`, `CI_TEST_ID`, `GITHUB_*`) when present ([#10490](https://github.com/ZcashFoundation/zebra/pull/10490))
 - `opentelemetry` is now part of the `default-release-binaries` feature set; export stays disabled until `OTEL_EXPORTER_OTLP_ENDPOINT` (or the tracing config) is set ([#10490](https://github.com/ZcashFoundation/zebra/pull/10490))
 - Public benchmark dashboard at [zebra.zfnd.org/dev/bench](https://zebra.zfnd.org/dev/bench) covering Groth16, Halo2, Sapling, RedPallas, block, and transaction benchmarks ([#10444](https://github.com/ZcashFoundation/zebra/pull/10444))
+- Support ZIP-213
 
 ### Changed
 
@@ -32,6 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - `zebrad::sentry` is now crate-private; downstream code should not import it directly ([#10490](https://github.com/ZcashFoundation/zebra/pull/10490))
 - Upgraded the librustzcash crate cohort (`equihash` 0.3, `orchard` 0.13, `sapling-crypto` 0.7, `zcash_address` 0.11, `zcash_encoding` 0.4, `zcash_keys` 0.13, `zcash_primitives` 0.27, `zcash_proofs` 0.27, `zcash_protocol` 0.8, `zcash_transparent` 0.7) to the 2026-04 release wave, which migrates off the yanked `core2` crate to `corez 0.1.1` and clears RUSTSEC-2026-0105.
 - Bumped workspace MSRV from 1.85.0 to 1.85.1, required by the new librustzcash releases. Also bumped `zebrad` MSRV from 1.89 to 1.91, required by `cargo-platform 0.3.3` (transitively via `vergen-git2`).
+- Upgraded `ed25519-zebra` from 4.0 to 4.2
+- Upgraded `console-subscriber` from 0.4 to 0.5
+- Upgraded `toml` from 0.9 to 1.0
+- Upgraded `opentelemetry` from 0.28 to 0.31, `opentelemetry_sdk` from 0.28 to 0.31, `opentelemetry-otlp` from 0.28 to 0.31, `tracing-opentelemetry` from 0.29 to 0.32
 
 ## [Zebra 4.3.1](https://github.com/ZcashFoundation/zebra/releases/tag/v4.3.1) - 2026-04-17
 
