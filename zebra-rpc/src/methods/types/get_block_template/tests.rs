@@ -20,7 +20,7 @@ use zebra_chain::{
 };
 
 use crate::client::TransactionTemplate;
-use crate::config::mining::{MinerAddressType, MINER_ADDRESS};
+use crate::config::mining::{default_miner_address, MinerAddressType};
 
 use super::MinerParams;
 
@@ -76,7 +76,7 @@ fn coinbase() -> anyhow::Result<()> {
                         &net,
                         height,
                         &MinerParams::from(
-                            Address::decode(&net, MINER_ADDRESS[&net.kind()][&addr_type])
+                            Address::decode(&net, default_miner_address(net.kind(), &addr_type))
                                 .ok_or(anyhow!("hard-coded addr must be valid"))?,
                         ),
                         &[],

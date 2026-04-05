@@ -66,14 +66,18 @@ pub enum MinerAddressType {
     Transparent,
 }
 
+/// Returns the hard-coded default miner address string for a given network and address type.
+///
+/// All addresses come from a single address:
+///
+/// - addresses for different networks are only different encodings of the same address;
+/// - addresses of different types are components of the same unified address.
+pub fn default_miner_address(kind: NetworkKind, addr_type: &MinerAddressType) -> &'static str {
+    MINER_ADDRESS[&kind][addr_type]
+}
+
 lazy_static::lazy_static! {
-    /// Hard-coded addresses which can be used in the `mining.miner_address` field.
-    ///
-    /// All addresses come from a single address:
-    ///
-    /// - addresses for different networks are only different encodings of the same address;
-    /// - addresses of different types are components of the same unified address.
-    pub static ref MINER_ADDRESS: HashMap<NetworkKind, HashMap<MinerAddressType, &'static str>> = [
+    static ref MINER_ADDRESS: HashMap<NetworkKind, HashMap<MinerAddressType, &'static str>> = [
         (NetworkKind::Mainnet, [
             (MinerAddressType::Unified, "u1cymdny2u2vllkx7t5jnelp0kde0dgnwu0jzmggzguxvxj6fe7gpuqehywejndlrjwgk9snr6g69azs8jfet78s9zy60uepx6tltk7ee57jlax49dezkhkgvjy2puuue6dvaevt53nah7t2cc2k4p0h0jxmlu9sx58m2xdm5f9sy2n89jdf8llflvtml2ll43e334avu2fwytuna404a"),
             // (MinerAddressType::Orchard, "u1hmfjpqdxaec3mvqypl7fkqcy53u438csydljpuepsfs7jx6sjwyznuzlna8qsslj3tg6sn9ua4q653280aqv4m2fjd4csptwxq3fjpwy"),
