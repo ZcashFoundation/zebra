@@ -7,7 +7,7 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
-use zebra_rpc::config::mining::{MinerAddressType, MINER_ADDRESS};
+use zebra_rpc::config::mining::{default_miner_address, MinerAddressType};
 
 use crate::components::With;
 
@@ -185,7 +185,7 @@ impl ZebradConfig {
 impl With<MinerAddressType> for ZebradConfig {
     fn with(mut self, miner_address_type: MinerAddressType) -> Self {
         self.mining.miner_address = Some(
-            MINER_ADDRESS[&self.network.network.kind()][&miner_address_type]
+            default_miner_address(self.network.network.kind(), &miner_address_type)
                 .parse()
                 .expect("valid hard-coded address"),
         );
