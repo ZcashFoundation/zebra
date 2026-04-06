@@ -588,6 +588,196 @@ fn reject_command_and_reason_size_limits() {
     }
 }
 
+// ======== Helpers for malformed-message tests ========
+
+/// Build a complete raw Zcash P2P network message with a correct double-SHA256d checksum.
+fn make_raw_message(network: &Network, command: &[u8; 12], body: &[u8]) -> BytesMut {
+    let mut bytes = BytesMut::new();
+    bytes.extend_from_slice(&network.magic().0);
+    bytes.extend_from_slice(command);
+    bytes.extend_from_slice(&(body.len() as u32).to_le_bytes());
+    let checksum = sha256d::Checksum::from(body);
+    bytes.extend_from_slice(&checksum.0);
+    bytes.extend_from_slice(body);
+    bytes
+}
+
+/// Build only the 24-byte header of a raw Zcash P2P message, without appending any body bytes.
+fn make_raw_header(
+    network: &Network,
+    command: &[u8; 12],
+    body_len: u32,
+    checksum: [u8; 4],
+) -> BytesMut {
+    let mut bytes = BytesMut::new();
+    bytes.extend_from_slice(&network.magic().0);
+    bytes.extend_from_slice(command);
+    bytes.extend_from_slice(&body_len.to_le_bytes());
+    bytes.extend_from_slice(&checksum);
+    bytes
+}
+
+/// A message with a corrupted checksum is rejected with a parse error.
+#[test]
+fn bad_checksum_returns_error() {
+    let _init_guard = zebra_test::init();
+
+    let mut bytes = BytesMut::new();
+    Codec::builder()
+        .finish()
+        .encode(Message::Ping(Nonce(0)), &mut bytes)
+        .expect("encoding should succeed");
+
+    // Corrupt the checksum field (header bytes 20..24).
+    bytes[20] ^= 0xFF;
+
+    let mut codec = Codec::builder().finish();
+    match codec.decode(&mut bytes) {
+        Err(Error::Parse(msg)) if msg.contains("checksum") => {}
+        result => panic!("expected checksum error, got: {result:?}"),
+    }
+}
+
+/// A header claiming body_len = MAX_PROTOCOL_MESSAGE_LEN + 1 is immediately rejected
+/// before any body bytes are read.
+#[test]
+fn body_length_exceeds_max_protocol_message_len_returns_error() {
+    let _init_guard = zebra_test::init();
+
+    let too_large = (MAX_PROTOCOL_MESSAGE_LEN + 1) as u32;
+    let mut bytes = make_raw_header(
+        &Network::Mainnet,
+        b"ping\0\0\0\0\0\0\0\0",
+        too_large,
+        [0; 4],
+    );
+
+    let mut codec = Codec::builder().finish();
+    match codec.decode(&mut bytes) {
+        Err(Error::Parse(msg)) if msg.contains("body length exceeded maximum size") => {}
+        result => panic!("expected body-too-large error, got: {result:?}"),
+    }
+}
+
+/// A header claiming body_len = u32::MAX is immediately rejected.
+/// Must not attempt to allocate 4 GB or hang.
+#[test]
+fn body_length_u32_max_returns_error() {
+    let _init_guard = zebra_test::init();
+
+    let mut bytes = make_raw_header(&Network::Mainnet, b"ping\0\0\0\0\0\0\0\0", u32::MAX, [0; 4]);
+
+    let mut codec = Codec::builder().finish();
+    match codec.decode(&mut bytes) {
+        Err(Error::Parse(msg)) if msg.contains("body length exceeded maximum size") => {}
+        result => panic!("expected body-too-large error, got: {result:?}"),
+    }
+}
+
+/// A header claiming body_len exactly equal to MAX_PROTOCOL_MESSAGE_LEN is accepted;
+/// the codec waits for body data rather than erroring (boundary condition).
+#[test]
+fn body_length_at_max_protocol_message_len_is_accepted() {
+    let _init_guard = zebra_test::init();
+
+    // Only the header is provided — no body bytes follow.
+    let at_max = MAX_PROTOCOL_MESSAGE_LEN as u32;
+    let mut bytes = make_raw_header(&Network::Mainnet, b"ping\0\0\0\0\0\0\0\0", at_max, [0; 4]);
+
+    let mut codec = Codec::builder().finish();
+    assert!(
+        matches!(codec.decode(&mut bytes), Ok(None)),
+        "codec should accept a MAX_PROTOCOL_MESSAGE_LEN body_len and wait for body bytes"
+    );
+}
+
+/// A message with an unknown command string is silently ignored (returns Ok(None)).
+/// This prevents an attacker from forcing disconnects by sending unrecognised commands.
+#[test]
+fn unknown_command_is_ignored() {
+    let _init_guard = zebra_test::init();
+
+    // 7 chars + 5 null bytes = 12-byte command field.
+    let mut bytes = make_raw_message(&Network::Mainnet, b"unknown\0\0\0\0\0", b"");
+
+    let mut codec = Codec::builder().finish();
+    assert!(
+        matches!(codec.decode(&mut bytes), Ok(None)),
+        "unknown command should return Ok(None), not an error"
+    );
+}
+
+/// A message with a null (all-zero) command is silently ignored (returns Ok(None)).
+#[test]
+fn null_command_is_ignored() {
+    let _init_guard = zebra_test::init();
+
+    let mut bytes = make_raw_message(&Network::Mainnet, &[0u8; 12], b"");
+
+    let mut codec = Codec::builder().finish();
+    assert!(
+        matches!(codec.decode(&mut bytes), Ok(None)),
+        "null command should return Ok(None), not an error"
+    );
+}
+
+/// When only part of the body has arrived the codec waits; it must not panic or error.
+#[test]
+fn truncated_body_does_not_panic_or_error() {
+    let _init_guard = zebra_test::init();
+
+    // Header says 100 bytes; only 10 bytes of body are provided.
+    let mut bytes = make_raw_header(&Network::Mainnet, b"ping\0\0\0\0\0\0\0\0", 100, [0; 4]);
+    bytes.extend_from_slice(&[0u8; 10]);
+
+    let mut codec = Codec::builder().finish();
+    assert!(
+        matches!(codec.decode(&mut bytes), Ok(None)),
+        "partial body should cause the codec to wait, not panic or error"
+    );
+}
+
+/// A `ping` body shorter than the required 8-byte nonce is rejected.
+#[test]
+fn ping_with_short_body_returns_error() {
+    let _init_guard = zebra_test::init();
+
+    // `ping` expects an 8-byte nonce; supply only 4 bytes.
+    let short_body = [0u8; 4];
+    let mut bytes = make_raw_message(&Network::Mainnet, b"ping\0\0\0\0\0\0\0\0", &short_body);
+
+    let mut codec = Codec::builder().finish();
+    assert!(
+        codec.decode(&mut bytes).is_err(),
+        "ping with only 4 bytes (needs 8) should return an error"
+    );
+}
+
+/// An `addr` message containing more than `MAX_ADDRS_IN_MESSAGE` (1000) entries is rejected.
+///
+/// The limit is defined by the Bitcoin/Zcash protocol.  An attacker sending 1001+ entries
+/// should get a parse error, not cause Zebra to allocate or process arbitrarily many addresses.
+#[test]
+fn addr_message_with_more_than_max_entries_is_rejected() {
+    let _init_guard = zebra_test::init();
+
+    // Build an addr body with 1001 entries.
+    // compact_size(1001): 1001 > 0xfc so the 3-byte form is used: 0xfd + u16 LE.
+    // Each AddrV1 entry is 30 bytes: 4 (time) + 8 (services) + 16 (IPv6) + 2 (port).
+    let count = (constants::MAX_ADDRS_IN_MESSAGE + 1) as u16; // 1001
+    let mut body = Vec::new();
+    body.push(0xfd);
+    body.extend_from_slice(&count.to_le_bytes()); // LE u16 = [0xe9, 0x03]
+    body.extend(std::iter::repeat(0u8).take(count as usize * 30));
+
+    let mut bytes = make_raw_message(&Network::Mainnet, b"addr\0\0\0\0\0\0\0\0", &body);
+    let mut codec = Codec::builder().finish();
+    match codec.decode(&mut bytes) {
+        Err(Error::Parse(msg)) if msg.contains("more than MAX_ADDRS_IN_MESSAGE") => {}
+        result => panic!("expected MAX_ADDRS_IN_MESSAGE limit error, got: {result:?}"),
+    }
+}
+
 /// Check that the version test vector deserialization fails when there's a network magic mismatch.
 #[test]
 fn message_with_wrong_network_magic_returns_error() {
