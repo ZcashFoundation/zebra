@@ -1168,6 +1168,8 @@ async fn self_connections_should_fail() {
         initial_mainnet_peers: IndexSet::new(),
         initial_testnet_peers: IndexSet::new(),
         cache_dir: CacheDir::disabled(),
+        // The test listener is on loopback (127.0.0.1), so we must allow private IPs.
+        debug_allow_private_ip_addresses: true,
 
         ..Config::default()
     };
@@ -1755,7 +1757,7 @@ where
     let mut peers = IndexSet::new();
     for address_number in 0..peer_count {
         peers.insert(
-            SocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number as _).into(), 1).to_string(),
+            SocketAddr::new(Ipv4Addr::new(1, 2, 3, address_number as _).into(), 8233).to_string(),
         );
     }
 

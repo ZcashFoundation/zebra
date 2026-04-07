@@ -768,7 +768,7 @@ fn addr_message_with_more_than_max_entries_is_rejected() {
     let mut body = Vec::new();
     body.push(0xfd);
     body.extend_from_slice(&count.to_le_bytes()); // LE u16 = [0xe9, 0x03]
-    body.extend(std::iter::repeat(0u8).take(count as usize * 30));
+    body.extend(std::iter::repeat_n(0u8, count as usize * 30));
 
     let mut bytes = make_raw_message(&Network::Mainnet, b"addr\0\0\0\0\0\0\0\0", &body);
     let mut codec = Codec::builder().finish();

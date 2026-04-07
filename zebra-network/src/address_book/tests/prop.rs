@@ -34,6 +34,7 @@ proptest! {
             local_listener,
             &Mainnet,
             DEFAULT_MAX_CONNS_PER_IP,
+            true,
             MAX_ADDRS_IN_ADDRESS_BOOK,
             Span::none(),
             addresses
@@ -73,6 +74,7 @@ proptest! {
             local_listener,
             &Mainnet,
             DEFAULT_MAX_CONNS_PER_IP,
+            true,
             MAX_ADDRS_IN_ADDRESS_BOOK,
             Span::none(),
             addresses
@@ -112,6 +114,7 @@ proptest! {
             local_listener,
             &Mainnet,
             DEFAULT_MAX_CONNS_PER_IP,
+            true,
             addr_limit,
             Span::none(),
             initial_addrs.clone(),
@@ -135,6 +138,7 @@ proptest! {
             local_listener,
             &Mainnet,
             DEFAULT_MAX_CONNS_PER_IP,
+            true,
             addr_limit,
             Span::none(),
             initial_addrs,

@@ -342,6 +342,7 @@ impl PeerSetGuard {
             local_listener,
             &Network::Mainnet,
             DEFAULT_MAX_CONNS_PER_IP,
+            false,
             Span::none(),
         );
 

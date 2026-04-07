@@ -65,6 +65,7 @@ impl AddressBookUpdater {
             local_listener,
             &config.network,
             config.max_connections_per_ip,
+            config.debug_allow_private_ip_addresses,
             span!(Level::TRACE, "address book"),
         );
         let address_metrics = address_book.address_metrics_watcher();

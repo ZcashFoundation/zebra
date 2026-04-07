@@ -193,6 +193,23 @@ pub struct Config {
     /// after the handshake, but before adding them to the peer set. The total numbers of inbound and
     /// outbound connections are also limited to a multiple of `peerset_initial_target_size`.
     pub max_connections_per_ip: usize,
+
+    /// If `true`, Zebra will connect to and advertise private IP addresses.
+    ///
+    /// Private addresses include RFC 1918 ranges (10.x.x.x, 172.16-31.x.x, 192.168.x.x),
+    /// loopback (127.x.x.x, ::1), link-local (169.254.x.x, fe80::/10), and other
+    /// non-globally-routable addresses.
+    ///
+    /// Only set this to `true` for testing or when running a private testnet.
+    /// Enabling this on a public network is a security risk: Zebra could be used to
+    /// probe internal networks (SSRF) or disclose whether internal hosts run Zcash nodes.
+    ///
+    /// Note: Zebra automatically allows private addresses when `network` is `Regtest`,
+    /// regardless of this setting.
+    ///
+    /// Default: `false`.
+    #[serde(default)]
+    pub debug_allow_private_ip_addresses: bool,
 }
 
 impl Config {
@@ -583,6 +600,7 @@ impl Default for Config {
             // so that idle peers don't use too many connection slots.
             peerset_initial_target_size: DEFAULT_PEERSET_INITIAL_TARGET_SIZE,
             max_connections_per_ip: DEFAULT_MAX_CONNS_PER_IP,
+            debug_allow_private_ip_addresses: false,
         }
     }
 }
@@ -623,6 +641,8 @@ struct DConfig {
     #[serde(alias = "new_peer_interval", with = "humantime_serde")]
     crawl_new_peer_interval: Duration,
     max_connections_per_ip: Option<usize>,
+    #[serde(default)]
+    debug_allow_private_ip_addresses: bool,
 }
 
 impl Default for DConfig {
@@ -639,6 +659,7 @@ impl Default for DConfig {
             peerset_initial_target_size: config.peerset_initial_target_size,
             crawl_new_peer_interval: config.crawl_new_peer_interval,
             max_connections_per_ip: Some(config.max_connections_per_ip),
+            debug_allow_private_ip_addresses: config.debug_allow_private_ip_addresses,
         }
     }
 }
@@ -691,6 +712,7 @@ impl From<Config> for DConfig {
             peerset_initial_target_size,
             crawl_new_peer_interval,
             max_connections_per_ip,
+            debug_allow_private_ip_addresses,
         }: Config,
     ) -> Self {
         let testnet_parameters = network
@@ -709,6 +731,7 @@ impl From<Config> for DConfig {
             peerset_initial_target_size,
             crawl_new_peer_interval,
             max_connections_per_ip: Some(max_connections_per_ip),
+            debug_allow_private_ip_addresses,
         }
     }
 }
@@ -729,6 +752,7 @@ impl<'de> Deserialize<'de> for Config {
             peerset_initial_target_size,
             crawl_new_peer_interval,
             max_connections_per_ip,
+            debug_allow_private_ip_addresses,
         } = DConfig::deserialize(deserializer)?;
 
         /// Accepts an [`IndexSet`] of initial peers,
@@ -955,6 +979,7 @@ impl<'de> Deserialize<'de> for Config {
             peerset_initial_target_size,
             crawl_new_peer_interval,
             max_connections_per_ip,
+            debug_allow_private_ip_addresses,
         })
     }
 }

@@ -142,6 +142,7 @@ fn candidate_set_updates_are_rate_limited() {
         SocketAddr::from_str("0.0.0.0:0").unwrap(),
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
+        false,
         Span::none(),
     );
     let mut peer_service = MockService::build().for_unit_tests();
@@ -188,6 +189,7 @@ fn candidate_set_update_after_update_initial_is_rate_limited() {
         SocketAddr::from_str("0.0.0.0:0").unwrap(),
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
+        false,
         Span::none(),
     );
     let mut peer_service = MockService::build().for_unit_tests();

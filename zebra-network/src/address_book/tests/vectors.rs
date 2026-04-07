@@ -26,6 +26,7 @@ fn address_book_empty() {
         "0.0.0.0:0".parse().unwrap(),
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
+        false,
         Span::current(),
     );
 
@@ -41,8 +42,8 @@ fn address_book_empty() {
 /// Make sure peers are attempted in priority order.
 #[test]
 fn address_book_peer_order() {
-    let addr1 = "127.0.0.1:1".parse().unwrap();
-    let addr2 = "127.0.0.2:2".parse().unwrap();
+    let addr1 = "1.2.3.4:8233".parse().unwrap();
+    let addr2 = "1.2.3.5:8233".parse().unwrap();
 
     let mut meta_addr1 =
         MetaAddr::new_gossiped_meta_addr(addr1, PeerServices::NODE_NETWORK, DateTime32::MIN);
@@ -58,6 +59,7 @@ fn address_book_peer_order() {
         "0.0.0.0:0".parse().unwrap(),
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
+        false,
         MAX_ADDRS_IN_ADDRESS_BOOK,
         Span::current(),
         addrs,
@@ -75,6 +77,7 @@ fn address_book_peer_order() {
         "0.0.0.0:0".parse().unwrap(),
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
+        false,
         MAX_ADDRS_IN_ADDRESS_BOOK,
         Span::current(),
         addrs,
@@ -95,6 +98,7 @@ fn address_book_peer_order() {
         "0.0.0.0:0".parse().unwrap(),
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
+        false,
         MAX_ADDRS_IN_ADDRESS_BOOK,
         Span::current(),
         addrs,
@@ -112,6 +116,7 @@ fn address_book_peer_order() {
         "0.0.0.0:0".parse().unwrap(),
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
+        false,
         MAX_ADDRS_IN_ADDRESS_BOOK,
         Span::current(),
         addrs,
@@ -149,8 +154,8 @@ fn test_reconnection_peers_skips_recently_updated_ip<
     should_skip_ip: bool,
     make_meta_addr_change: M,
 ) {
-    let addr1 = "127.0.0.1:1".parse().unwrap();
-    let addr2 = "127.0.0.1:2".parse().unwrap();
+    let addr1 = "1.2.3.4:8233".parse().unwrap();
+    let addr2 = "1.2.3.4:8234".parse().unwrap();
 
     let meta_addr1 = make_meta_addr_change(addr1).into_new_meta_addr(
         Instant::now(),
@@ -169,6 +174,7 @@ fn test_reconnection_peers_skips_recently_updated_ip<
         "0.0.0.0:0".parse().unwrap(),
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
+        false,
         MAX_ADDRS_IN_ADDRESS_BOOK,
         Span::current(),
         addrs,
@@ -196,7 +202,7 @@ fn port_zero_address_not_valid_for_outbound() {
         DateTime32::MIN,
     );
     assert!(
-        !addr.address_is_valid_for_outbound(&Mainnet),
+        !addr.address_is_valid_for_outbound(&Mainnet, false),
         "port 0 must be rejected as an outbound target"
     );
 }
@@ -210,37 +216,45 @@ fn unspecified_ip_not_valid_for_outbound() {
         DateTime32::MIN,
     );
     assert!(
-        !addr.address_is_valid_for_outbound(&Mainnet),
+        !addr.address_is_valid_for_outbound(&Mainnet, false),
         "unspecified IP must be rejected as an outbound target"
     );
 }
 
-/// RFC-1918 private addresses are currently accepted for outbound connections.
-///
-/// See TODO <https://github.com/ZcashFoundation/zebra/issues/3117>: once that issue is resolved
-/// this test should be inverted (or removed) to confirm filtering is in place.
+/// RFC-1918 private addresses are rejected for outbound connections by default.
 #[test]
-fn rfc1918_address_accepted_for_outbound_documents_missing_filter() {
+fn rfc1918_address_not_valid_for_outbound() {
     let addr = MetaAddr::new_gossiped_meta_addr(
         "192.168.1.1:8233".parse().unwrap(),
         PeerServices::NODE_NETWORK,
         DateTime32::MIN,
     );
-    // RFC-1918 addresses are NOT filtered today. This assertion captures current behavior.
-    // If this test starts failing, private-address filtering has been implemented — update it.
     assert!(
-        addr.address_is_valid_for_outbound(&Mainnet),
-        "RFC-1918 address should pass the current (unfiltered) outbound check"
+        !addr.address_is_valid_for_outbound(&Mainnet, false),
+        "RFC-1918 address must be rejected as an outbound target"
     );
 }
 
-/// IPv4-mapped IPv6 representation of an RFC-1918 address is also unfiltered.
+/// RFC-1918 private addresses are accepted when `allow_private_ips` is set.
+#[test]
+fn rfc1918_address_valid_when_allow_private_ips_is_set() {
+    let addr = MetaAddr::new_gossiped_meta_addr(
+        "192.168.1.1:8233".parse().unwrap(),
+        PeerServices::NODE_NETWORK,
+        DateTime32::MIN,
+    );
+    assert!(
+        addr.address_is_valid_for_outbound(&Mainnet, true),
+        "RFC-1918 address must be accepted when allow_private_ips is true"
+    );
+}
+
+/// IPv4-mapped IPv6 representation of an RFC-1918 address is also rejected.
 ///
 /// `::ffff:192.168.1.1` is canonicalized to `192.168.1.1` by `canonical_peer_addr`,
-/// so it is subject to the same (absent) filtering as plain RFC-1918 IPv4.
-/// See TODO <https://github.com/ZcashFoundation/zebra/issues/3117>.
+/// so it is subject to the same filtering as plain RFC-1918 IPv4.
 #[test]
-fn ipv4_mapped_ipv6_rfc1918_accepted_for_outbound_documents_missing_filter() {
+fn ipv4_mapped_ipv6_rfc1918_not_valid_for_outbound() {
     // Rust parses this as a V6 address; canonical_peer_addr converts it back to V4.
     let addr = MetaAddr::new_gossiped_meta_addr(
         "[::ffff:192.168.1.1]:8233".parse().unwrap(),
@@ -248,40 +262,36 @@ fn ipv4_mapped_ipv6_rfc1918_accepted_for_outbound_documents_missing_filter() {
         DateTime32::MIN,
     );
     assert!(
-        addr.address_is_valid_for_outbound(&Mainnet),
-        "IPv4-mapped IPv6 RFC-1918 address should pass the current (unfiltered) outbound check"
+        !addr.address_is_valid_for_outbound(&Mainnet, false),
+        "IPv4-mapped IPv6 RFC-1918 address must be rejected as an outbound target"
     );
 }
 
-/// IPv4 loopback (127.0.0.1) is currently accepted for outbound connections.
-///
-/// See TODO <https://github.com/ZcashFoundation/zebra/issues/3117>.
+/// IPv4 loopback (127.0.0.1) is rejected for outbound connections by default.
 #[test]
-fn loopback_address_accepted_for_outbound_documents_missing_filter() {
+fn loopback_address_not_valid_for_outbound() {
     let addr = MetaAddr::new_gossiped_meta_addr(
         "127.0.0.1:8233".parse().unwrap(),
         PeerServices::NODE_NETWORK,
         DateTime32::MIN,
     );
     assert!(
-        addr.address_is_valid_for_outbound(&Mainnet),
-        "loopback address should pass the current (unfiltered) outbound check"
+        !addr.address_is_valid_for_outbound(&Mainnet, false),
+        "loopback address must be rejected as an outbound target"
     );
 }
 
-/// IPv6 loopback (::1) is currently accepted for outbound connections.
-///
-/// See TODO <https://github.com/ZcashFoundation/zebra/issues/3117>.
+/// IPv6 loopback (::1) is rejected for outbound connections by default.
 #[test]
-fn ipv6_loopback_accepted_for_outbound_documents_missing_filter() {
+fn ipv6_loopback_not_valid_for_outbound() {
     let addr = MetaAddr::new_gossiped_meta_addr(
         "[::1]:8233".parse().unwrap(),
         PeerServices::NODE_NETWORK,
         DateTime32::MIN,
     );
     assert!(
-        addr.address_is_valid_for_outbound(&Mainnet),
-        "IPv6 loopback address should pass the current (unfiltered) outbound check"
+        !addr.address_is_valid_for_outbound(&Mainnet, false),
+        "IPv6 loopback address must be rejected as an outbound target"
     );
 }
 
@@ -300,7 +310,7 @@ fn inbound_address_is_not_sanitized() {
     .into_new_meta_addr(Instant::now(), now_ts);
 
     assert!(
-        inbound.sanitize(&Mainnet).is_none(),
+        inbound.sanitize(&Mainnet, false).is_none(),
         "inbound peer addresses must be suppressed from GetAddr responses"
     );
 }
@@ -327,7 +337,7 @@ fn misbehaving_peer_is_not_sanitized() {
     .expect("applying UpdateMisbehavior to a gossiped MetaAddr should succeed");
 
     assert!(
-        misbehaving.sanitize(&Mainnet).is_none(),
+        misbehaving.sanitize(&Mainnet, false).is_none(),
         "misbehaving peers must be suppressed from GetAddr responses"
     );
 }
@@ -368,7 +378,7 @@ fn timestamp_far_future_is_sanitized_and_truncated() {
 
     // sanitize must not panic on a future timestamp.
     let sanitized = addr
-        .sanitize(&Mainnet)
+        .sanitize(&Mainnet, false)
         .expect("far-future timestamp should sanitize without panic");
 
     let ts = sanitized

@@ -490,7 +490,11 @@ async fn limit_initial_peers(
     // Filter out invalid initial peers, and prioritise valid peers for initial connections.
     // (This treats initial peers the same way we treat gossiped peers.)
     for peer_addr in all_peers {
-        let preference = PeerPreference::new(peer_addr, config.network.clone());
+        let preference = PeerPreference::new(
+            peer_addr,
+            config.network.clone(),
+            config.debug_allow_private_ip_addresses,
+        );
 
         match preference {
             Ok(preference) => preferred_peers

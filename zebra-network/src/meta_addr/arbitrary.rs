@@ -82,7 +82,18 @@ impl MetaAddrChange {
     pub fn ready_outbound_strategy_ip() -> BoxedStrategy<IpAddr> {
         any::<IpAddr>()
             .prop_filter("failed MetaAddr::is_valid_for_outbound", |ip| {
-                !ip.is_unspecified()
+                if ip.is_unspecified() {
+                    return false;
+                }
+                match ip {
+                    IpAddr::V4(v4) => !v4.is_private() && !v4.is_loopback() && !v4.is_link_local(),
+                    IpAddr::V6(v6) => {
+                        let o = v6.octets();
+                        !v6.is_loopback()
+                            && (o[0] & 0xfe) != 0xfc
+                            && !(o[0] == 0xfe && (o[1] & 0xc0) == 0x80)
+                    }
+                }
             })
             .boxed()
     }
@@ -106,7 +117,7 @@ impl MetaAddrChange {
                 |(addr, services, local_now)| {
                     let addr = MetaAddr::new_gossiped_meta_addr(addr, services, local_now);
 
-                    if addr.last_known_info_is_valid_for_outbound(&Mainnet) {
+                    if addr.last_known_info_is_valid_for_outbound(&Mainnet, false) {
                         Some(addr.addr.port())
                     } else {
                         None

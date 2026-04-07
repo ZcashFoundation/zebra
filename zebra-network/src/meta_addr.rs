@@ -459,7 +459,9 @@ impl MetaAddr {
 
     /// Return the address preference level for this `MetaAddr`.
     pub fn peer_preference(&self) -> Result<PeerPreference, &'static str> {
-        PeerPreference::new(self.addr, None)
+        // Pass `true` for `allow_private_ips` so that private IPs can still participate in
+        // priority ordering even when they will be filtered at connection time.
+        PeerPreference::new(self.addr, None, true)
     }
 
     /// Returns the time of the last successful interaction with this peer.
@@ -632,8 +634,9 @@ impl MetaAddr {
         instant_now: Instant,
         chrono_now: chrono::DateTime<Utc>,
         network: &Network,
+        allow_private_ips: bool,
     ) -> bool {
-        self.last_known_info_is_valid_for_outbound(network)
+        self.last_known_info_is_valid_for_outbound(network, allow_private_ips)
             && !self.was_recently_updated(instant_now, chrono_now)
             && self.is_probably_reachable(chrono_now)
     }
@@ -643,8 +646,13 @@ impl MetaAddr {
     ///
     /// Since the addresses in the address book are unique, this check can be
     /// used to permanently reject entire [`MetaAddr`]s.
-    pub fn address_is_valid_for_outbound(&self, network: &Network) -> bool {
-        address_is_valid_for_outbound_connections(self.addr, network.clone()).is_ok()
+    pub fn address_is_valid_for_outbound(
+        &self,
+        network: &Network,
+        allow_private_ips: bool,
+    ) -> bool {
+        address_is_valid_for_outbound_connections(self.addr, network.clone(), allow_private_ips)
+            .is_ok()
     }
 
     /// Is the last known information for this peer valid for outbound
@@ -654,13 +662,17 @@ impl MetaAddr {
     /// only be used to:
     /// - reject `NeverAttempted...` [`MetaAddrChange`]s, and
     /// - temporarily stop outbound connections to a [`MetaAddr`].
-    pub fn last_known_info_is_valid_for_outbound(&self, network: &Network) -> bool {
+    pub fn last_known_info_is_valid_for_outbound(
+        &self,
+        network: &Network,
+        allow_private_ips: bool,
+    ) -> bool {
         let is_node = match self.services {
             Some(services) => services.contains(PeerServices::NODE_NETWORK),
             None => true,
         };
 
-        is_node && self.address_is_valid_for_outbound(network)
+        is_node && self.address_is_valid_for_outbound(network, allow_private_ips)
     }
 
     /// Should this peer considered reachable?
@@ -704,8 +716,8 @@ impl MetaAddr {
     ///
     /// Returns `None` if this `MetaAddr` should not be sent to remote peers.
     #[allow(clippy::unwrap_in_result)]
-    pub fn sanitize(&self, network: &Network) -> Option<MetaAddr> {
-        if !self.last_known_info_is_valid_for_outbound(network) {
+    pub fn sanitize(&self, network: &Network, allow_private_ips: bool) -> Option<MetaAddr> {
+        if !self.last_known_info_is_valid_for_outbound(network, allow_private_ips) {
             return None;
         }
 

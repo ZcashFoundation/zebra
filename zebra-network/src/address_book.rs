@@ -96,6 +96,11 @@ pub struct AddressBook {
     /// in release builds. Lower values are used during testing.
     addr_limit: usize,
 
+    /// Whether to accept and advertise private IP addresses.
+    ///
+    /// Set from [`Config::debug_allow_private_ip_addresses`](crate::config::Config).
+    allow_private_ips: bool,
+
     /// The span for operations on this address book.
     span: Span,
 
@@ -143,6 +148,7 @@ impl AddressBook {
         local_listener: SocketAddr,
         network: &Network,
         max_connections_per_ip: usize,
+        allow_private_ips: bool,
         span: Span,
     ) -> AddressBook {
         let constructor_span = span.clone();
@@ -161,6 +167,7 @@ impl AddressBook {
             by_addr: OrderedMap::new(|meta_addr| Reverse(*meta_addr)),
             local_listener: canonical_socket_addr(local_listener),
             network: network.clone(),
+            allow_private_ips,
             addr_limit: constants::MAX_ADDRS_IN_ADDRESS_BOOK,
             span,
             address_metrics_tx,
@@ -189,6 +196,7 @@ impl AddressBook {
         local_listener: SocketAddr,
         network: &Network,
         max_connections_per_ip: usize,
+        allow_private_ips: bool,
         addr_limit: usize,
         span: Span,
         addrs: impl IntoIterator<Item = MetaAddr>,
@@ -202,7 +210,13 @@ impl AddressBook {
         // The maximum number of addresses should be always greater than 0
         assert!(addr_limit > 0);
 
-        let mut new_book = AddressBook::new(local_listener, network, max_connections_per_ip, span);
+        let mut new_book = AddressBook::new(
+            local_listener,
+            network,
+            max_connections_per_ip,
+            allow_private_ips,
+            span,
+        );
         new_book.addr_limit = addr_limit;
 
         let addrs = addrs
@@ -211,7 +225,7 @@ impl AddressBook {
                 meta_addr.addr = canonical_peer_addr(meta_addr.addr);
                 meta_addr
             })
-            .filter(|meta_addr| meta_addr.address_is_valid_for_outbound(network))
+            .filter(|meta_addr| meta_addr.address_is_valid_for_outbound(network, allow_private_ips))
             .map(|meta_addr| (meta_addr.addr, meta_addr));
 
         for (socket_addr, meta_addr) in addrs {
@@ -297,7 +311,7 @@ impl AddressBook {
         // Then sanitize and shuffle
         let mut peers: Vec<MetaAddr> = peers
             .descending_values()
-            .filter_map(|meta_addr| meta_addr.sanitize(&self.network))
+            .filter_map(|meta_addr| meta_addr.sanitize(&self.network, self.allow_private_ips))
             // # Security
             //
             // Remove peers that:
@@ -481,7 +495,7 @@ impl AddressBook {
 
             // Ignore invalid outbound addresses.
             // (Inbound connections can be monitored via Zebra's metrics.)
-            if !updated.address_is_valid_for_outbound(&self.network) {
+            if !updated.address_is_valid_for_outbound(&self.network, self.allow_private_ips) {
                 return None;
             }
 
@@ -490,7 +504,7 @@ impl AddressBook {
             //
             // Otherwise, if we got the info directly from the peer,
             // store it in the address book, so we know not to reconnect.
-            if !updated.last_known_info_is_valid_for_outbound(&self.network)
+            if !updated.last_known_info_is_valid_for_outbound(&self.network, self.allow_private_ips)
                 && updated.last_connection_state.is_never_attempted()
             {
                 return None;
@@ -648,8 +662,12 @@ impl AddressBook {
         self.by_addr
             .descending_values()
             .filter(move |peer| {
-                peer.is_ready_for_connection_attempt(instant_now, chrono_now, &self.network)
-                    && self.is_ready_for_connection_attempt_with_ip(&peer.addr.ip(), chrono_now)
+                peer.is_ready_for_connection_attempt(
+                    instant_now,
+                    chrono_now,
+                    &self.network,
+                    self.allow_private_ips,
+                ) && self.is_ready_for_connection_attempt_with_ip(&peer.addr.ip(), chrono_now)
             })
             .cloned()
     }
@@ -680,7 +698,12 @@ impl AddressBook {
         self.by_addr
             .descending_values()
             .filter(move |peer| {
-                !peer.is_ready_for_connection_attempt(instant_now, chrono_now, &self.network)
+                !peer.is_ready_for_connection_attempt(
+                    instant_now,
+                    chrono_now,
+                    &self.network,
+                    self.allow_private_ips,
+                )
             })
             .cloned()
     }
@@ -870,6 +893,7 @@ impl Clone for AddressBook {
             by_addr: self.by_addr.clone(),
             local_listener: self.local_listener,
             network: self.network.clone(),
+            allow_private_ips: self.allow_private_ips,
             addr_limit: self.addr_limit,
             span: self.span.clone(),
             address_metrics_tx,
