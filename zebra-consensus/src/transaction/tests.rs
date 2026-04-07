@@ -3759,3 +3759,163 @@ async fn mempool_skip_accepts_block_with_garbage_orchard_proofs() {
 
     assert!(resp.is_err(), "garbage proofs rejected via mempool skip");
 }
+
+/// Regression test for the mempool-cache expiry bypass vulnerability.
+///
+/// A non-coinbase transaction with `nExpiryHeight = H+1` that was cached in the
+/// mempool as valid at height `H+1` can be presented inside a block at height
+/// `H+2`.  The block transaction verifier must re-run the expiry check even
+/// when it hits the mempool cache fast path in `find_verified_unmined_tx`;
+/// skipping that check lets Zebra accept a block that honest nodes reject,
+/// causing a consensus split.
+///
+/// # Attack window
+///
+/// The attack is possible because:
+/// * The mempool is active while Zebra is "close to tip" (not only at exact tip).
+/// * The download/verification pipeline accepts blocks up to
+///   `tip + full_verify_concurrency_limit` ahead of the current tip.
+/// * `find_verified_unmined_tx` returns the cached result before the normal
+///   expiry validation at `transaction.rs:430-435`.
+///
+/// Concretely: while Zebra's best tip is still `H`, the mempool can already
+/// hold a `VerifiedUnminedTx` for a transaction with `nExpiryHeight = H+1`.
+/// If the verifier is simultaneously asked to semantically verify a candidate
+/// block at `H+2` that contains the same transaction, the cache hit fires and
+/// the block passes semantic verification with an expired transaction inside.
+#[tokio::test(flavor = "multi_thread")]
+async fn mempool_cached_result_bypasses_expiry_check_for_block_at_next_height() {
+    use zebra_chain::transaction::VerifiedUnminedTx;
+
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+
+    // Heights used in the scenario:
+    //   H   = canopy_height    (local best tip while the attack occurs)
+    //   H+1 = mempool_height   (nExpiryHeight; tx is valid for mempool admission here)
+    //   H+2 = expired_block_height (block height at which the tx has expired)
+    let canopy_height = NetworkUpgrade::Canopy
+        .activation_height(&network)
+        .expect("Canopy activation height is specified");
+    let mempool_height = (canopy_height + 1).expect("mempool height should be valid");
+    let expired_block_height = (canopy_height + 2).expect("expired block height should be valid");
+    let fund_height = (canopy_height - 1).expect("fund height should be valid");
+
+    let (input, output, known_utxos) = mock_transparent_transfer(
+        fund_height,
+        true,
+        0,
+        Amount::try_from(10001).expect("valid value"),
+    );
+
+    // V4 transaction with nExpiryHeight = mempool_height (H+1).
+    // Valid in block H+1 (block_height == expiry_height) but expired in H+2
+    // (block_height > expiry_height).  LockTime::unlocked() avoids a
+    // BestChainNextMedianTimePast state query, keeping the test simpler.
+    let tx = Transaction::V4 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::unlocked(),
+        expiry_height: mempool_height,
+        joinsplit_data: None,
+        sapling_shielded_data: None,
+    };
+
+    let tx_hash = tx.hash();
+    let input_outpoint = match tx.inputs()[0] {
+        transparent::Input::PrevOut { outpoint, .. } => outpoint,
+        transparent::Input::Coinbase { .. } => panic!("requires a non-coinbase transaction"),
+    };
+
+    // Build the VerifiedUnminedTx that the mempool would have cached after
+    // verifying the transaction at mempool_height.
+    let spent_output = known_utxos
+        .get(&input_outpoint)
+        .expect("input outpoint should exist in known_utxos")
+        .utxo
+        .output
+        .clone();
+
+    let verified_tx = VerifiedUnminedTx::new(
+        tx.clone().into(),
+        Amount::try_from(10000).expect("valid fee"),
+        0,
+        Arc::new(vec![spent_output]),
+    )
+    .expect("VerifiedUnminedTx::new should succeed");
+
+    // Set up the verifier with a mock mempool that returns the cached result.
+    // for_prop_tests() is used here so that expect_request().await returns
+    // Result<ResponseSender, TestCaseError>, enabling the .expect("...") call.
+    let mempool: MockService<_, _, _, _> = MockService::build().for_prop_tests();
+    let state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
+    let (mempool_setup_tx, mempool_setup_rx) = tokio::sync::oneshot::channel();
+    let verifier = Verifier::new(&network, state.clone(), mempool_setup_rx);
+    let verifier = Buffer::new(verifier, 1);
+
+    mempool_setup_tx
+        .send(mempool.clone())
+        .ok()
+        .expect("send should succeed");
+
+    // Program the mock mempool to return the cached VerifiedUnminedTx when the
+    // block verifier queries it by mined transaction id.
+    let mut mempool_clone = mempool.clone();
+    tokio::spawn(async move {
+        mempool_clone
+            .expect_request(mempool::Request::TransactionWithDepsByMinedId(tx_hash))
+            .await
+            .expect("verifier should call mock mempool service with correct request")
+            .respond(mempool::Response::TransactionWithDeps {
+                transaction: verified_tx,
+                // The dependency hash is the tx that funds input_outpoint; we
+                // also pass it in known_outpoint_hashes below so that the
+                // find_verified_unmined_tx dependency check passes and the
+                // cache fast path fires without a state query.
+                dependencies: [input_outpoint.hash].into(),
+            });
+    });
+
+    // Yield briefly so the spawned task can register its expectation before the
+    // block request triggers the mempool lookup.
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+
+    // Submit the same transaction as a Block request at expired_block_height
+    // (H+2).  The known_outpoint_hashes set satisfies the dependency check
+    // inside find_verified_unmined_tx so the cache hit fires immediately.
+    //
+    // CURRENT BEHAVIOR (bug): the verifier returns Ok because it hits the
+    // mempool cache fast path before running non_coinbase_expiry_height.
+    //
+    // EXPECTED BEHAVIOR (after fix): the verifier returns
+    // Err(TransactionError::ExpiredTransaction) because H+2 > nExpiryHeight.
+    let result = timeout(
+        test_timeout(),
+        verifier.clone().oneshot(Request::Block {
+            transaction_hash: tx_hash,
+            transaction: Arc::new(tx.clone()),
+            known_outpoint_hashes: Arc::new([input_outpoint.hash].into()),
+            known_utxos: Arc::new(HashMap::new()),
+            height: expired_block_height,
+            time: Utc::now(),
+        }),
+    )
+    .await
+    .expect("block request should not time out");
+
+    // Buffer boxes the service error, so downcast to check the specific variant.
+    let err = result.expect_err(
+        "expected block verification to fail for a transaction with \
+         expired nExpiryHeight mined via the mempool cache path",
+    );
+    let tx_err = err
+        .downcast::<TransactionError>()
+        .expect("error should downcast to TransactionError");
+    assert!(
+        matches!(*tx_err, TransactionError::ExpiredTransaction { .. }),
+        "expected ExpiredTransaction error for block at height {expired_block_height:?} \
+         with nExpiryHeight {mempool_height:?} via mempool cache; \
+         got: {tx_err:?}"
+    );
+}
