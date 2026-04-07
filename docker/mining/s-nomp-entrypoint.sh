@@ -11,18 +11,4 @@ if [ "$NETWORK" = "Mainnet" ]; then
     sed -i 's|blockRefreshInterval": 500|blockRefreshInterval": 2000|g' /app/config.json
 fi
 
-echo "Waiting for Zebra RPC to be ready..."
-while true; do
-    RESP=$(curl -s "http://${ZEBRA_HOST}:${ZEBRA_RPC_PORT}" \
-        -X POST \
-        -H "content-type: application/json" \
-        -d '{"jsonrpc":"2.0","id":1,"method":"getinfo","params":[]}' 2>/dev/null)
-    if echo "$RESP" | grep -q result; then
-        echo "Zebra is ready, starting s-nomp..."
-        break
-    fi
-    echo "Zebra not ready, waiting 5s..."
-    sleep 5
-done
-
 exec node init.js

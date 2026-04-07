@@ -20,6 +20,12 @@ services:
       - mining
     restart: unless-stopped
     tty: true
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8080/healthy || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
 
   redis:
     image: redis:7-alpine
@@ -44,8 +50,10 @@ services:
       - "${STRATUM_PORT:-3333}:${STRATUM_PORT:-3333}"
       - "8080:8080"
     depends_on:
-      - zebra
-      - redis
+      zebra:
+        condition: service_healthy
+      redis:
+        condition: service_started
     networks:
       - mining
     restart: unless-stopped
