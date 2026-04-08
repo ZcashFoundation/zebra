@@ -401,16 +401,6 @@ where
         async move {
             tracing::trace!(?tx_id, ?req, "got tx verify request");
 
-            if let Some(result) = Self::find_verified_unmined_tx(&req, mempool.clone(), state.clone()).await {
-                let verified_tx = result?;
-
-                return Ok(Response::Block {
-                    tx_id,
-                    miner_fee: Some(verified_tx.miner_fee),
-                    sigops: verified_tx.legacy_sigop_count
-                });
-            }
-
             // Do quick checks first
             check::has_inputs_and_outputs(&tx)?;
             check::has_enough_orchard_flags(&tx)?;
@@ -657,80 +647,6 @@ where
         } else {
             unreachable!("Request::BestChainNextMedianTimePast always responds with BestChainNextMedianTimePast")
         }
-    }
-
-    /// Attempts to find a transaction in the mempool by its transaction hash and checks
-    /// that all of its dependencies are available in the block or in the state.  Waits
-    /// for UTXOs being spent by the given transaction to arrive in the state if they're
-    /// not found elsewhere.
-    ///
-    /// Returns [`Some(Ok(VerifiedUnminedTx))`](VerifiedUnminedTx) if successful,
-    /// None if the transaction id was not found in the mempool,
-    /// or `Some(Err(TransparentInputNotFound))` if the transaction was found, but some of its
-    /// dependencies were not found in the block or state after a timeout.
-    async fn find_verified_unmined_tx(
-        req: &Request,
-        mempool: Option<Timeout<Mempool>>,
-        state: Timeout<ZS>,
-    ) -> Option<Result<VerifiedUnminedTx, TransactionError>> {
-        let tx = req.transaction();
-
-        if req.is_mempool() || tx.is_coinbase() {
-            return None;
-        }
-
-        let mempool = mempool?;
-        let known_outpoint_hashes = req.known_outpoint_hashes();
-        let tx_id = req.tx_id();
-
-        let mempool::Response::TransactionWithDeps {
-            transaction: verified_tx,
-            dependencies,
-        } = mempool
-            .oneshot(mempool::Request::TransactionWithDepsByMinedId(
-                tx_id.mined_id(),
-            ))
-            .await
-            .ok()?
-        else {
-            panic!("unexpected response to TransactionWithDepsByMinedId request");
-        };
-
-        if verified_tx.transaction.id != tx_id {
-            return None;
-        }
-
-        // Note: This does not verify that the spends are in order, the spend order
-        //       should be verified during contextual validation in zebra-state.
-        let missing_deps: HashSet<_> = dependencies
-            .into_iter()
-            .filter(|dependency_id| !known_outpoint_hashes.contains(dependency_id))
-            .collect();
-
-        if missing_deps.is_empty() {
-            return Some(Ok(verified_tx));
-        }
-
-        let missing_outpoints = tx.inputs().iter().filter_map(|input| {
-            if let transparent::Input::PrevOut { outpoint, .. } = input {
-                missing_deps.contains(&outpoint.hash).then_some(outpoint)
-            } else {
-                None
-            }
-        });
-
-        for missing_outpoint in missing_outpoints {
-            let query = state
-                .clone()
-                .oneshot(zebra_state::Request::AwaitUtxo(*missing_outpoint));
-            match query.await {
-                Ok(zebra_state::Response::Utxo(_)) => {}
-                Err(_) => return Some(Err(TransactionError::TransparentInputNotFound)),
-                _ => unreachable!("AwaitUtxo always responds with Utxo"),
-            };
-        }
-
-        Some(Ok(verified_tx))
     }
 
     /// Wait for the UTXOs that are being spent by the given transaction.
