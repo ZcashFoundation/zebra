@@ -22,7 +22,6 @@ update.
 
 - Fixed miner subsidy computation.
 
-
 ## [6.0.0] - 2026-03-12
 
 ### Breaking Changes
