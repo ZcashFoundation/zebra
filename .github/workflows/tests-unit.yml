@@ -92,9 +92,7 @@ jobs:
           echo "PROPTEST_MAX_SHRINK_ITERS=1024" >> $GITHUB_ENV
 
       - name: Run unit tests
-        run: cargo nextest run --profile all-tests --locked --release --features "${{ matrix.features }}" --run-ignored=all
-        env:
-          TEST_LARGE_CHECKPOINTS: 1
+        run: cargo nextest run --profile ci --locked --release --features "${{ matrix.features }}" --run-ignored=all
 
   check-no-git-dependencies:
     name: Check no git dependencies
