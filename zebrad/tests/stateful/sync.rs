@@ -43,28 +43,13 @@ fn sync_past_mandatory_checkpoint(network: Network) -> Result<()> {
     )
 }
 
-/// Sync `network` until the chain tip is reached, or a timeout elapses.
+/// Sync `network` until the chain tip is reached.
 ///
-/// The timeout is specified using an environment variable, with the name configured by the
-/// `timeout_argument_name` parameter. The value of the environment variable must the number of
-/// minutes specified as an integer.
-#[allow(clippy::print_stderr)]
+/// Runs a full sync using checkpoints for initial progress, then full validation to the tip.
+/// Timeout is controlled by the nextest `ci-stateful` profile overrides.
 #[tracing::instrument]
-fn full_sync_test(network: Network, timeout_argument_name: &str) -> Result<()> {
-    // # TODO
-    //
-    // Replace hard-coded values in create_cached_database_height with:
-    // - the timeout in the environmental variable
-    // - the path from the resolved config (state.cache_dir)
-    create_cached_database_height(
-        &network,
-        // Just keep going until we reach the chain tip
-        block::Height::MAX,
-        // Use the checkpoints to sync quickly, then do full validation until the chain tip
-        true,
-        // Finish when we reach the chain tip
-        SYNC_FINISHED_REGEX,
-    )
+fn full_sync_test(network: Network) -> Result<()> {
+    create_cached_database_height(&network, block::Height::MAX, true, SYNC_FINISHED_REGEX)
 }
 
 /// Sync up to the mandatory checkpoint height on mainnet and stop.
@@ -120,7 +105,7 @@ fn sync_past_mandatory_checkpoint_testnet() -> Result<()> {
 #[test]
 #[ignore]
 fn sync_full_mainnet() -> Result<()> {
-    full_sync_test(Mainnet, "SYNC_FULL_MAINNET_TIMEOUT_MINUTES")
+    full_sync_test(Mainnet)
 }
 
 /// Test if `zebrad` can fully sync the chain on testnet.
@@ -130,10 +115,7 @@ fn sync_full_mainnet() -> Result<()> {
 #[test]
 #[ignore]
 fn sync_full_testnet() -> Result<()> {
-    full_sync_test(
-        Network::new_default_testnet(),
-        "SYNC_FULL_TESTNET_TIMEOUT_MINUTES",
-    )
+    full_sync_test(Network::new_default_testnet())
 }
 
 /// Make sure `zebrad` can sync from peers, but don't actually launch `lightwalletd`.

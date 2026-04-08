@@ -445,7 +445,7 @@ jobs:
       app_name: lightwalletd
       test_id: lwd-sync-full
       test_description: Test lightwalletd full sync
-      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(lwd_sync_full)"
+      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(lwd_sync_full),TEST_LIGHTWALLETD=1"
       # This test runs for longer than 6 hours, so it needs multiple jobs
       is_long_test: true
       needs_zebra_state: true
@@ -476,7 +476,7 @@ jobs:
       app_name: lightwalletd
       test_id: lwd-sync-update
       test_description: Test lightwalletd update sync with both states
-      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(lwd_sync_update)"
+      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(lwd_sync_update),TEST_LIGHTWALLETD=1"
       needs_zebra_state: true
       needs_lwd_state: true
       saves_to_disk: true
@@ -508,7 +508,7 @@ jobs:
       app_name: lightwalletd
       test_id: lwd-rpc-test
       test_description: Test lightwalletd RPC with a Zebra tip state
-      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(lwd_rpc_test)"
+      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(lwd_rpc_test),TEST_LIGHTWALLETD=1"
       needs_zebra_state: true
       saves_to_disk: false
 
@@ -534,7 +534,7 @@ jobs:
       app_name: lightwalletd
       test_id: lwd-rpc-send-tx
       test_description: Test sending transactions via lightwalletd
-      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(lwd_rpc_send_tx)"
+      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(lwd_rpc_send_tx),TEST_LIGHTWALLETD=1"
       needs_zebra_state: true
       needs_lwd_state: true
       saves_to_disk: false
@@ -561,7 +561,7 @@ jobs:
       app_name: lightwalletd
       test_id: lwd-grpc-wallet
       test_description: Test gRPC calls via lightwalletd
-      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(lwd_grpc_wallet)"
+      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(lwd_grpc_wallet),TEST_LIGHTWALLETD=1"
       needs_zebra_state: true
       needs_lwd_state: true
       saves_to_disk: false
