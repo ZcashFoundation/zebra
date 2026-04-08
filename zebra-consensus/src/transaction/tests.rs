@@ -729,7 +729,7 @@ async fn mempool_request_with_unmined_output_spends_is_accepted() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn skips_verification_of_block_transactions_in_mempool() {
+async fn dont_skip_verification_of_block_transactions_in_mempool() {
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
     let mempool: MockService<_, _, _, _> = MockService::build().for_prop_tests();
     let (mempool_setup_tx, mempool_setup_rx) = tokio::sync::oneshot::channel();
@@ -830,7 +830,7 @@ async fn skips_verification_of_block_transactions_in_mempool() {
     );
 
     let crate::transaction::Response::Mempool {
-        transaction,
+        transaction: _,
         spent_mempool_outpoints,
     } = verifier_response.expect("already checked that response is ok")
     else {
@@ -843,20 +843,6 @@ async fn skips_verification_of_block_transactions_in_mempool() {
         "spent_mempool_outpoints in tx verifier response should match input_outpoint"
     );
 
-    let mut mempool_clone = mempool.clone();
-    tokio::spawn(async move {
-        for _ in 0..2 {
-            mempool_clone
-                .expect_request(mempool::Request::TransactionWithDepsByMinedId(tx_hash))
-                .await
-                .expect("verifier should call mock mempool service with correct request")
-                .respond(mempool::Response::TransactionWithDeps {
-                    transaction: transaction.clone(),
-                    dependencies: [input_outpoint.hash].into(),
-                });
-        }
-    });
-
     let make_request = |known_outpoint_hashes| Request::Block {
         transaction_hash: tx_hash,
         transaction: Arc::new(tx),
@@ -866,6 +852,23 @@ async fn skips_verification_of_block_transactions_in_mempool() {
         time: Utc::now(),
     };
 
+    // Both block requests go through full verification (no mempool bypass), so each
+    // calls AwaitUtxo on the state service.
+    let utxo_clone = utxo.clone();
+    tokio::spawn(async move {
+        state
+            .expect_request(zebra_state::Request::AwaitUtxo(input_outpoint))
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::Utxo(utxo_clone));
+
+        state
+            .expect_request(zebra_state::Request::AwaitUtxo(input_outpoint))
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::Utxo(utxo));
+    });
+
     // Briefly yield and sleep so the spawned task can first expect the requests.
     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
@@ -873,18 +876,10 @@ async fn skips_verification_of_block_transactions_in_mempool() {
         .clone()
         .oneshot(make_request.clone()(Arc::new([input_outpoint.hash].into())))
         .await
-        .expect("should return Ok without calling state service")
+        .expect("should succeed after calling state service")
     else {
         panic!("unexpected response variant from transaction verifier for Block request")
     };
-
-    tokio::spawn(async move {
-        state
-            .expect_request(zebra_state::Request::AwaitUtxo(input_outpoint))
-            .await
-            .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::Utxo(utxo));
-    });
 
     let crate::transaction::Response::Block { .. } = verifier
         .clone()
@@ -896,13 +891,12 @@ async fn skips_verification_of_block_transactions_in_mempool() {
     };
 
     tokio::time::sleep(POLL_MEMPOOL_DELAY * 2).await;
-    // polled before AwaitOutput request, after a mempool transaction with transparent outputs,
-    // is successfully verified, and twice more when checking if a transaction in a block is
-    // already the mempool.
+    // polled before AwaitOutput request and after a mempool transaction with transparent outputs
+    // is successfully verified.
     assert_eq!(
         mempool.poll_count(),
-        4,
-        "the mempool service should have been polled 4 times"
+        2,
+        "the mempool service should have been polled twice"
     );
 }
 
