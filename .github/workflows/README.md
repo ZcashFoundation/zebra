@@ -150,7 +150,7 @@ _The diagram above illustrates the parallel execution patterns in our CI/CD syst
 - **Security Analysis** (`zizmor.yml`): GitHub Actions security lint (SARIF)
 - **Release Binaries** (`release-binaries.yml`): Build and publish release artifacts
 - **Release Drafter** (`release-drafter.yml`): Automates release notes
-- **Integration Tests on GCP** (`zfnd-ci-integration-tests-gcp.yml`): Stateful tests, cached disks, lwd flows
+- **Integration Tests on GCP** (`zfnd-ci-integration-tests-gcp.yml`): Stateful tests, E2E tests, cached disks, lwd flows
 
 ### Supporting/Re-usable Workflows
 
