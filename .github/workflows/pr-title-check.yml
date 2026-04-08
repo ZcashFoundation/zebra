@@ -10,6 +10,7 @@
 name: PR Title Check
 
 on:
+  # zizmor: ignore[dangerous-triggers] -- no checkout, no secrets, only API reads + PR comment write
   pull_request_target:
     types: [opened, edited, synchronize, reopened]
 
@@ -80,7 +81,7 @@ jobs:
             Docs: https://github.com/ZcashFoundation/zebra/blob/main/CONTRIBUTING.md#pull-requests
 
       - name: Comment on invalid PR title
-        uses: marocchino/sticky-pull-request-comment@70d2764d1a7d5d9560b100cbea0077fc8f633987 #v3
+        uses: marocchino/sticky-pull-request-comment@d4d6b0936434b21bc8345ad45a440c5f7d2c40ff #v3.0.3
         if: always() && (steps.lint_pr_title.outputs.error_message != null)
         with:
           header: pr-title-lint-error
@@ -94,7 +95,7 @@ jobs:
             See the [contribution guide](https://github.com/ZcashFoundation/zebra/blob/main/CONTRIBUTING.md#pull-requests) for details.
 
       - name: Remove comment on valid PR title
-        uses: marocchino/sticky-pull-request-comment@70d2764d1a7d5d9560b100cbea0077fc8f633987 #v3
+        uses: marocchino/sticky-pull-request-comment@d4d6b0936434b21bc8345ad45a440c5f7d2c40ff #v3.0.3
         if: ${{ steps.lint_pr_title.outputs.error_message == null }}
         with:
           header: pr-title-lint-error
