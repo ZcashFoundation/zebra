@@ -623,6 +623,9 @@ fn stored_configs_work() -> Result<()> {
     Ok(())
 }
 
+/// Test that Zebra's non-blocking logger works, by creating lots of debug output, but not reading the logs.
+/// Then make sure Zebra drops excess log lines. (Previously, it would block waiting for logs to be read.)
+///
 /// This test is unreliable and sometimes hangs on macOS.
 #[test]
 #[cfg(not(target_os = "macos"))]

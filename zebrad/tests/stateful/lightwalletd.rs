@@ -9,7 +9,7 @@ use crate::common::{
     test_type::TestType::{self, *},
 };
 
-use super::sync::lwd_integration_test;
+use crate::common::lightwalletd::lwd_integration_test;
 
 /// Make sure `lightwalletd` can sync from Zebra, in update sync mode.
 ///
