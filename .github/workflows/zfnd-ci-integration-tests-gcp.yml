@@ -203,7 +203,7 @@ jobs:
       app_name: zebrad
       test_id: sync-to-mandatory-checkpoint
       test_description: Test sync up to mandatory checkpoint
-      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(=sync_to_mandatory_checkpoint_${{ (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && 'mainnet' || 'testnet' }})"
+      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(sync_to_mandatory_checkpoint_${{ (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && 'mainnet' || 'testnet' }})"
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}
       # This test commonly less than 3 hours by October 2024, but now it takes longer
       is_long_test: true
@@ -231,7 +231,7 @@ jobs:
       app_name: zebrad
       test_id: sync-past-mandatory-checkpoint
       test_description: Test full validation sync from a cached state
-      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(=sync_past_mandatory_checkpoint_${{ (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && 'mainnet' || 'testnet' }})"
+      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(sync_past_mandatory_checkpoint_${{ (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && 'mainnet' || 'testnet' }})"
       needs_zebra_state: true
       saves_to_disk: false
       disk_suffix: checkpoint
@@ -267,7 +267,7 @@ jobs:
       test_id: sync-full-mainnet
       test_description: Test a full sync up to the tip
       # TODO: update the test to use {{ input.network }} instead?
-      test_variables: ZEBRA_NETWORK__NETWORK=Mainnet,NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(=sync_full_mainnet)
+      test_variables: ZEBRA_NETWORK__NETWORK=Mainnet,NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(sync_full_mainnet)
       # This test runs for longer than 6 hours, so it needs multiple jobs
       is_long_test: true
       needs_zebra_state: false
@@ -298,7 +298,7 @@ jobs:
       app_name: zebrad
       test_id: sync-update-mainnet
       test_description: Test syncing to tip with a Zebra tip state
-      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(=sync_update_mainnet)"
+      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(sync_update_mainnet)"
       needs_zebra_state: true
       # update the disk on every PR, to increase CI speed
       saves_to_disk: true
@@ -333,7 +333,7 @@ jobs:
       test_id: generate-checkpoints-mainnet
       test_description: Generate Zebra checkpoints on mainnet
       # TODO: update the test to use {{ input.network }} instead?
-      test_variables: ZEBRA_NETWORK__NETWORK=Mainnet,NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(=generate_checkpoints_mainnet)
+      test_variables: ZEBRA_NETWORK__NETWORK=Mainnet,NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(generate_checkpoints_mainnet)
       needs_zebra_state: true
       # sync-update-mainnet updates the disk on every PR, so we don't need to do it here
       saves_to_disk: false
@@ -370,7 +370,7 @@ jobs:
       app_name: zebrad
       test_id: sync-full-testnet
       test_description: Test a full sync up to the tip on testnet
-      test_variables: ZEBRA_NETWORK__NETWORK=Testnet,NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(=sync_full_testnet)
+      test_variables: ZEBRA_NETWORK__NETWORK=Testnet,NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(sync_full_testnet)
       network: Testnet
       # A full testnet sync could take 2-10 hours in April 2023.
       # The time varies a lot due to the small number of nodes.
@@ -406,7 +406,7 @@ jobs:
       app_name: zebrad
       test_id: generate-checkpoints-testnet
       test_description: Generate Zebra checkpoints on testnet
-      test_variables: ZEBRA_NETWORK__NETWORK=Testnet,NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(=generate_checkpoints_testnet)
+      test_variables: ZEBRA_NETWORK__NETWORK=Testnet,NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(generate_checkpoints_testnet)
       network: Testnet
       needs_zebra_state: true
       # update the disk on every PR, to increase CI speed
@@ -445,7 +445,7 @@ jobs:
       app_name: lightwalletd
       test_id: lwd-sync-full
       test_description: Test lightwalletd full sync
-      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(=lwd_sync_full)"
+      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(lwd_sync_full)"
       # This test runs for longer than 6 hours, so it needs multiple jobs
       is_long_test: true
       needs_zebra_state: true
@@ -476,7 +476,7 @@ jobs:
       app_name: lightwalletd
       test_id: lwd-sync-update
       test_description: Test lightwalletd update sync with both states
-      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(=lwd_sync_update)"
+      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(lwd_sync_update)"
       needs_zebra_state: true
       needs_lwd_state: true
       saves_to_disk: true
@@ -508,7 +508,7 @@ jobs:
       app_name: lightwalletd
       test_id: lwd-rpc-test
       test_description: Test lightwalletd RPC with a Zebra tip state
-      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(=lwd_rpc_test)"
+      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(lwd_rpc_test)"
       needs_zebra_state: true
       saves_to_disk: false
 
@@ -534,7 +534,7 @@ jobs:
       app_name: lightwalletd
       test_id: lwd-rpc-send-tx
       test_description: Test sending transactions via lightwalletd
-      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(=lwd_rpc_send_tx)"
+      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(lwd_rpc_send_tx)"
       needs_zebra_state: true
       needs_lwd_state: true
       saves_to_disk: false
@@ -561,7 +561,7 @@ jobs:
       app_name: lightwalletd
       test_id: lwd-grpc-wallet
       test_description: Test gRPC calls via lightwalletd
-      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(=lwd_grpc_wallet)"
+      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(lwd_grpc_wallet)"
       needs_zebra_state: true
       needs_lwd_state: true
       saves_to_disk: false
@@ -592,7 +592,7 @@ jobs:
       app_name: zebrad
       test_id: rpc-get-block-template
       test_description: Test getblocktemplate RPC method via Zebra's rpc server
-      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(=rpc_get_block_template)"
+      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(rpc_get_block_template)"
       needs_zebra_state: true
       needs_lwd_state: false
       saves_to_disk: false
@@ -619,7 +619,7 @@ jobs:
       app_name: zebrad
       test_id: rpc-submit-block
       test_description: Test submitting blocks via Zebra's rpc server
-      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(=rpc_submit_block)"
+      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=ci-stateful,NEXTEST_FILTER=test(rpc_submit_block)"
       needs_zebra_state: true
       needs_lwd_state: false
       saves_to_disk: false

@@ -14,17 +14,17 @@
 [profile.default]
 fail-fast = true
 status-level = "pass"
-default-filter = 'not test(/^stateful::/) and not test(=check_no_git_dependencies)'
+default-filter = 'not test(/^stateful::/) and not test(check_no_git_dependencies)'
 
 # --- Platform overrides ---
 
 [[profile.default.overrides]]
 platform = 'cfg(target_os = "windows")'
-filter = "not test(=trusted_chain_sync_handles_forks_correctly) and not test(=delete_old_databases)"
+filter = "not test(trusted_chain_sync_handles_forks_correctly) and not test(delete_old_databases)"
 
 # Slow integration test
 [[profile.default.overrides]]
-filter = 'test(=sync_large_checkpoints_empty)'
+filter = 'test(sync_large_checkpoints_empty)'
 slow-timeout = { period = "60m", terminate-after = 2 }
 
 # --- CI Profile (PRs) ---
@@ -32,14 +32,14 @@ slow-timeout = { period = "60m", terminate-after = 2 }
 [profile.ci]
 fail-fast = false
 failure-output = "immediate"
-default-filter = 'not test(/^stateful::/) and not test(=check_no_git_dependencies)'
+default-filter = 'not test(/^stateful::/) and not test(check_no_git_dependencies)'
 
 [[profile.ci.overrides]]
 platform = 'cfg(target_os = "windows")'
-filter = "not test(=trusted_chain_sync_handles_forks_correctly) and not test(=delete_old_databases)"
+filter = "not test(trusted_chain_sync_handles_forks_correctly) and not test(delete_old_databases)"
 
 [[profile.ci.overrides]]
-filter = 'test(=sync_large_checkpoints_empty)'
+filter = 'test(sync_large_checkpoints_empty)'
 slow-timeout = { period = "60m", terminate-after = 2 }
 
 # --- CI Stateful Profile (GCP VMs) ---
@@ -49,6 +49,7 @@ slow-timeout = { period = "60m", terminate-after = 2 }
 fail-fast = false
 failure-output = "immediate"
 success-output = "immediate"
+default-filter = 'all()'
 
 # Stateful tests run serially to avoid state conflicts
 [test-groups]
@@ -61,19 +62,19 @@ slow-timeout = { period = "30m", terminate-after = 2 }
 
 # Per-test timeout overrides for long-running tests
 [[profile.ci-stateful.overrides]]
-filter = 'test(=sync_full_mainnet) or test(=lwd_sync_full)'
+filter = 'test(sync_full_mainnet) or test(lwd_sync_full)'
 slow-timeout = { period = "30000m", terminate-after = 1 }
 
 [[profile.ci-stateful.overrides]]
-filter = 'test(=sync_full_testnet) or test(=sync_to_mandatory_checkpoint_mainnet) or test(=sync_to_mandatory_checkpoint_testnet)'
+filter = 'test(sync_full_testnet) or test(sync_to_mandatory_checkpoint_mainnet) or test(sync_to_mandatory_checkpoint_testnet)'
 slow-timeout = { period = "1500m", terminate-after = 1 }
 
 [[profile.ci-stateful.overrides]]
-filter = 'test(=generate_checkpoints_mainnet) or test(=generate_checkpoints_testnet)'
+filter = 'test(generate_checkpoints_mainnet) or test(generate_checkpoints_testnet)'
 slow-timeout = { period = "90m", terminate-after = 1 }
 
 [[profile.ci-stateful.overrides]]
-filter = 'test(=sync_past_mandatory_checkpoint_mainnet) or test(=sync_past_mandatory_checkpoint_testnet) or test(=lwd_rpc_test) or test(=lightwalletd_test_suite) or test(=lwd_grpc_wallet)'
+filter = 'test(sync_past_mandatory_checkpoint_mainnet) or test(sync_past_mandatory_checkpoint_testnet) or test(lwd_rpc_test) or test(lightwalletd_test_suite) or test(lwd_grpc_wallet)'
 slow-timeout = { period = "60m", terminate-after = 2 }
 
 # lwd_rpc_test runs single-threaded via the serial-state test group
@@ -81,4 +82,4 @@ slow-timeout = { period = "60m", terminate-after = 2 }
 # --- Special Profile ---
 
 [profile.check-no-git-dependencies]
-default-filter = 'test(=check_no_git_dependencies)'
+default-filter = 'test(check_no_git_dependencies)'
