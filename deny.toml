@@ -39,6 +39,7 @@ allow = [
     "0BSD",
     "MIT-0",
     "CDLA-Permissive-2.0",
+    "CDDL-1.0",
 ]
 exceptions = []
 
