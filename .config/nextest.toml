@@ -22,7 +22,7 @@ default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(=c
 
 [[profile.default.overrides]]
 platform = 'cfg(target_os = "windows")'
-filter = "not test(=trusted_chain_sync_handles_forks_correctly) and not test(=delete_old_databases)"
+filter = "not test(trusted_chain_sync_handles_forks_correctly) and not test(delete_old_databases)"
 
 # --- CI Profile (PRs) ---
 
@@ -34,7 +34,7 @@ default-filter = 'not test(/^stateful::/) and not test(/^e2e::/) and not test(=c
 
 [[profile.ci.overrides]]
 platform = 'cfg(target_os = "windows")'
-filter = "not test(=trusted_chain_sync_handles_forks_correctly) and not test(=delete_old_databases)"
+filter = "not test(trusted_chain_sync_handles_forks_correctly) and not test(delete_old_databases)"
 
 [[profile.ci.overrides]]
 filter = 'test(=integration::network::disconnects_from_misbehaving_peers)'
@@ -115,4 +115,4 @@ slow-timeout = { period = "60m", terminate-after = 2 }
 # --- Special Profile ---
 
 [profile.check-no-git-dependencies]
-default-filter = 'test(=check_no_git_dependencies)'
+default-filter = 'test(check_no_git_dependencies)'
