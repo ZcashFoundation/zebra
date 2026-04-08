@@ -115,25 +115,21 @@ fn sync_past_mandatory_checkpoint_testnet() -> Result<()> {
 
 /// Test if `zebrad` can fully sync the chain on mainnet.
 ///
-/// This test takes a long time to run, so we don't run it by default. This test is only executed
-/// if there is an environment variable named `SYNC_FULL_MAINNET_TIMEOUT_MINUTES` set with the number
-/// of minutes to wait for synchronization to complete before considering that the test failed.
+/// This test takes a long time to run. It is excluded from PR CI and only runs
+/// on GCP VMs via the `ci-stateful` nextest profile.
 #[test]
 #[ignore]
 fn sync_full_mainnet() -> Result<()> {
-    // TODO: add "ZEBRA" at the start of this env var, to avoid clashes
     full_sync_test(Mainnet, "SYNC_FULL_MAINNET_TIMEOUT_MINUTES")
 }
 
 /// Test if `zebrad` can fully sync the chain on testnet.
 ///
-/// This test takes a long time to run, so we don't run it by default. This test is only executed
-/// if there is an environment variable named `SYNC_FULL_TESTNET_TIMEOUT_MINUTES` set with the number
-/// of minutes to wait for synchronization to complete before considering that the test failed.
+/// This test takes a long time to run. It is excluded from PR CI and only runs
+/// on GCP VMs via the `ci-stateful` nextest profile.
 #[test]
 #[ignore]
 fn sync_full_testnet() -> Result<()> {
-    // TODO: add "ZEBRA" at the start of this env var, to avoid clashes
     full_sync_test(
         Network::new_default_testnet(),
         "SYNC_FULL_TESTNET_TIMEOUT_MINUTES",

@@ -234,8 +234,8 @@ where
                         if error.kind() == std::io::ErrorKind::NotFound {
                             panic!(
                                 "missing cached lightwalletd state at {path:?}.\n\
-                                 Populate the directory (for example by running the lwd-sync-full \n\
-                                 nextest profile) or set {env_var} to a populated cache.",
+                                 Populate the directory (for example by running the lwd_sync_full \n\
+                                 stateful test) or set {env_var} to a populated cache.",
                                 path = lwd_cache_dir_path,
                                 env_var = LWD_CACHE_DIR,
                             );
