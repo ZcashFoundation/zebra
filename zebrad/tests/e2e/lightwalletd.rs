@@ -1,8 +1,6 @@
 use color_eyre::eyre::Result;
 
-use crate::{
-    common::test_type::TestType::FullSyncFromGenesis, stateful::sync::lwd_integration_test,
-};
+use crate::common::{lightwalletd::lwd_integration_test, test_type::TestType::FullSyncFromGenesis};
 
 /// Make sure `lightwalletd` can fully sync from genesis using Zebra.
 ///

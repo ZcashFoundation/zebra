@@ -2,7 +2,7 @@ use color_eyre::eyre::Result;
 
 use crate::common::test_type::TestType::*;
 
-use super::sync::lwd_integration_test;
+use crate::common::lightwalletd::lwd_integration_test;
 
 /// Make sure `lightwalletd` can sync from Zebra, in update sync mode.
 ///
