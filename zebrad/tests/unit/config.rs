@@ -18,6 +18,17 @@ use crate::common::{
     launch::{ZebradTestDirExt, EXTENDED_LAUNCH_DELAY, LAUNCH_DELAY},
 };
 
+// Used by `non_blocking_logger` test, which is disabled on macOS.
+#[cfg(not(target_os = "macos"))]
+use crate::common::{
+    config::{os_assigned_rpc_port_config, read_listen_addr_from_logs},
+    sync::TINY_CHECKPOINT_TIMEOUT,
+};
+#[cfg(not(target_os = "macos"))]
+use zebra_node_services::rpc_client::RpcRequestClient;
+#[cfg(not(target_os = "macos"))]
+use zebra_rpc::server::OPENED_RPC_ENDPOINT_MSG;
+
 /// Check that the block state and peer list caches are written to disk.
 #[test]
 fn persistent_mode() -> Result<()> {

@@ -9,7 +9,7 @@ use crate::common::test_type::TestType::*;
 #[ignore]
 async fn has_spending_transaction_ids() -> Result<()> {
     use std::sync::Arc;
-    use tower::Service;
+    use tower::{Service, ServiceExt};
     use zebra_chain::{chain_tip::ChainTip, transparent::Input};
     use zebra_state::{ReadRequest, ReadResponse, SemanticallyVerifiedBlock, Spend};
 
