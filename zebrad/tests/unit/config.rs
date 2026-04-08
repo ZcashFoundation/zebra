@@ -6,6 +6,7 @@ use color_eyre::eyre::{eyre, Result, WrapErr};
 use tempfile::{Builder, TempDir};
 
 use zebra_chain::parameters::Network::*;
+#[cfg(not(target_os = "windows"))]
 use zebra_state;
 use zebra_test::{args, command::to_regex::CollectRegexSet, prelude::*};
 use zebrad::config::ZebradConfig;
