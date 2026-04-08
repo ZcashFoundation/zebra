@@ -12,10 +12,16 @@ use crate::common::{
     launch::{ZebradTestDirExt, LAUNCH_DELAY},
 };
 
-// Used by metrics_endpoint and tracing_endpoint, which are feature-gated.
-#[cfg(any(feature = "prometheus", feature = "filter-reload"))]
+// Used by metrics_endpoint and tracing_endpoint (feature + platform gated).
+#[cfg(all(
+    any(feature = "prometheus", feature = "filter-reload"),
+    not(target_os = "windows")
+))]
 use crate::common::config::default_test_config;
-#[cfg(any(feature = "prometheus", feature = "filter-reload"))]
+#[cfg(all(
+    any(feature = "prometheus", feature = "filter-reload"),
+    not(target_os = "windows")
+))]
 use zebra_test::net::random_known_port;
 
 #[tokio::test]
