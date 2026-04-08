@@ -117,10 +117,12 @@ These gates are applied at the module level in `stateful/mod.rs`, so individual 
 - The single binary compiles ~4,400 lines of test code regardless of which tests will run. This is acceptable at current scale but should be revisited if the test suite grows 5-10x.
 - `cargo test -p zebrad` (without nextest) will attempt to run non-ignored tests from all categories. The `#[ignore]` attributes on stateful tests prevent accidental long-running test execution.
 
+### Helpers stay in `zebrad/tests/common/`
+
+The shared test helpers (`failure_messages.rs`, `cached_state.rs`, `test_type.rs`, `launch.rs`, etc.) remain in `zebrad/tests/common/` rather than moving to the `zebra-test` crate. `failure_messages.rs` imports `zebrad::components::sync::end_of_support::EOS_PANIC_MESSAGE_HEADER`, so moving it to `zebra-test` would create a circular dependency. `cached_state.rs` imports from `crate::common::{launch, sync, test_type}`, making it zebrad-specific integration test infrastructure. The `TestType` enum encodes infrastructure requirements (needs cached state, launches lightwalletd, needs RPC server), not scheduling concerns; the scheduling gates removed in this refactor were in the test functions themselves, not in `TestType`.
+
 ## More Information
 
 - [Delete Cargo Integration Tests — matklad](https://matklad.github.io/2021/02/27/delete-cargo-integration-tests.html) — the analysis of why single-binary integration tests compile faster
 - [Nextest Per-Test Overrides](https://nexte.st/docs/configuration/per-test-overrides/) — how timeout overrides replace per-test profiles
 - [Nextest Filterset Reference](https://nexte.st/docs/filtersets/reference/) — the `test(/regex/)` syntax used for module-path filtering
-- reth's `testing/` directory pattern — inspiration for dedicated test infrastructure crates
-- Substrate's pallet test organization — inspiration for per-module test categorization
