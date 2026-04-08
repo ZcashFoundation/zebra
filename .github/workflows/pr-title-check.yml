@@ -1,0 +1,74 @@
+# Validates that PR titles follow the conventional commits specification.
+# https://www.conventionalcommits.org/en/v1.0.0/
+#
+# Since PRs are squash-merged, the PR title becomes the commit message on main.
+# This is the foundation for automated changelog generation and version bumping.
+name: PR Title Check
+
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  statuses: write
+  pull-requests: read
+
+jobs:
+  check:
+    name: Validate PR title
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 #v6.1.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            perf
+            refactor
+            build
+            chore
+            docs
+            test
+            ci
+            style
+            revert
+            release
+          scopes: |
+            zebra-chain
+            zebra-consensus
+            zebra-network
+            zebra-state
+            zebra-rpc
+            zebra-script
+            zebra-node-services
+            zebra-test
+            zebra-utils
+            zebrad
+            tower-batch-control
+            tower-fallback
+            chain
+            consensus
+            network
+            state
+            rpc
+            script
+            deps
+            ci
+            release
+          requireScope: false
+          subjectPattern: ^.+$
+          subjectPatternError: |
+            PR title must follow conventional commits:
+
+              <type>(<optional scope>): <description>
+
+            Examples:
+              fix(zebra-rpc): correct connection timeout
+              feat(zebra-chain): add signature verification
+              docs: update installation guide
+              build(deps): bump serde to 1.0.220
+
+            See: https://www.conventionalcommits.org/
+            Docs: https://github.com/ZcashFoundation/zebra/blob/main/CONTRIBUTING.md#pull-requests
