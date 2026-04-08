@@ -3,21 +3,28 @@
 #
 # Since PRs are squash-merged, the PR title becomes the commit message on main.
 # This is the foundation for automated changelog generation and version bumping.
+#
+# Uses pull_request_target to post sticky comments on invalid titles (requires
+# pull-requests: write). No code checkout or secret access — only reads the
+# PR title via the API and posts/deletes a comment.
 name: PR Title Check
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, edited, synchronize, reopened]
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
-  check:
+  validate:
     name: Validate PR title
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
     steps:
-      - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 #v6.1.1
+      - name: Check PR title
+        uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 #v6.1.1
+        id: lint_pr_title
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -71,3 +78,24 @@ jobs:
 
             See: https://www.conventionalcommits.org/
             Docs: https://github.com/ZcashFoundation/zebra/blob/main/CONTRIBUTING.md#pull-requests
+
+      - name: Comment on invalid PR title
+        uses: marocchino/sticky-pull-request-comment@70d2764d1a7d5d9560b100cbea0077fc8f633987 #v3
+        if: always() && (steps.lint_pr_title.outputs.error_message != null)
+        with:
+          header: pr-title-lint-error
+          message: |
+            PR titles must follow [Conventional Commits](https://www.conventionalcommits.org/) format. Your title needs a small adjustment.
+
+            ```
+            ${{ steps.lint_pr_title.outputs.error_message }}
+            ```
+
+            See the [contribution guide](https://github.com/ZcashFoundation/zebra/blob/main/CONTRIBUTING.md#pull-requests) for details.
+
+      - name: Remove comment on valid PR title
+        uses: marocchino/sticky-pull-request-comment@70d2764d1a7d5d9560b100cbea0077fc8f633987 #v3
+        if: ${{ steps.lint_pr_title.outputs.error_message == null }}
+        with:
+          header: pr-title-lint-error
+          delete: true
