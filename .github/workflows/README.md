@@ -174,24 +174,26 @@ Our test execution is centralized through our Docker [entrypoint script](../../d
 We use `nextest` profiles defined in [`.config/nextest.toml`](../../.config/nextest.toml) to manage test suites. A single environment variable, `NEXTEST_PROFILE`, selects the profile to run.
 
 ```bash
-# Run the full test suite using the 'all-tests' profile
-docker run --rm -e NEXTEST_PROFILE=all-tests zebra-tests
+# Run unit + integration tests using the 'ci' profile
+docker run --rm -e NEXTEST_PROFILE=ci zebra-tests
 
-# Run a specific test suite, like the lightwalletd integration tests
-docker run --rm -e NEXTEST_PROFILE=lwd-integration zebra-tests
+# Run a specific stateful test on GCP
+docker run --rm -e NEXTEST_PROFILE=ci-stateful -e "NEXTEST_FILTER=test(=stateful::sync::sync_update_mainnet)" zebra-tests
+
+# Run a specific E2E test on GCP
+docker run --rm -e NEXTEST_PROFILE=ci-e2e -e "NEXTEST_FILTER=test(=e2e::sync::sync_full_mainnet)" zebra-tests
 ```
 
 #### Test Categories
 
-Our tests are organized into different categories:
+Tests are organized into module-based tiers in `zebrad/tests/`:
 
-- **Unit & Integration Tests**: Basic functionality and component testing
-- **Network Sync Tests**: Testing blockchain synchronization from various states
-- **Lightwalletd Tests**: Integration with the lightwalletd service
-- **RPC Tests**: JSON-RPC endpoint functionality
-- **Checkpoint Tests**: Blockchain checkpoint generation and validation
+- **`unit::`**: CLI, config, end-of-support (<1 min)
+- **`integration::`**: Launches zebrad, no cached state (5-15 min)
+- **`stateful::`**: Requires cached blockchain state, runs on GCP (30 min - days)
+- **`e2e::`**: Full-system sync, checkpoint, and wallet flows, runs on GCP (hours - days)
 
-Each test category has specific profiles that can be run individually using the `NEXTEST_PROFILE` environment variable.
+The `ci` profile runs `unit::` and `integration::` tests on every PR. The `ci-stateful` and `ci-e2e` profiles are used on GCP VMs with `NEXTEST_FILTER` selecting specific tests. Adding a new test to `unit::` or `integration::` automatically includes it in PR CI.
 
 ### Pull Request Testing
 
