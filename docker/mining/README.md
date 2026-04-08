@@ -120,6 +120,7 @@ CPU_THREADS=4
 ## Web Interface
 
 S-NOMP provides a web UI at `http://<host>:8080` showing:
+
 - Pool hashrate
 - Connected workers
 - Found blocks
@@ -136,6 +137,7 @@ API endpoint: `http://<host>:8080/api/stats`
 | 18233/8233 | Zebra   | P2P network (Testnet/Mainnet) |
 
 Internal only (not exposed):
+
 - 18232/8232: Zebra RPC
 - 6379: Redis
 
@@ -214,11 +216,13 @@ docker compose logs s-nomp | tail -50
 ### Zebra not syncing
 
 1. Check peer connections:
+
    ```bash
    docker exec zebra curl -s -H "Content-Type: application/json" \
      localhost:18232 -d '{"jsonrpc":"2.0","id":1,"method":"getinfo","params":[]}' \
      | grep connections
    ```
+
 2. Ensure port 18233 (Testnet) or 8233 (Mainnet) is accessible
 
 ### Reset everything
@@ -234,10 +238,12 @@ To switch between Testnet and Mainnet:
 
 1. Stop services: `docker compose down`
 2. Edit `.env`:
+
    ```bash
    NETWORK=Mainnet
    MINER_ADDRESS=t1YourMainnetAddress
    ```
+
 3. Start: `docker compose up -d`
 
 ## Security Notes
