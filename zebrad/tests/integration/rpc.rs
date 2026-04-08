@@ -2,15 +2,21 @@ use color_eyre::eyre::{Result, WrapErr};
 
 use zebra_chain::parameters::Network::*;
 use zebra_rpc::server::OPENED_RPC_ENDPOINT_MSG;
-use zebra_test::{args, net::random_known_port, prelude::*};
+use zebra_test::{args, prelude::*};
 
 use crate::common::{
     config::{
-        default_test_config, os_assigned_rpc_port_config, random_known_rpc_port_config,
-        read_listen_addr_from_logs, testdir,
+        os_assigned_rpc_port_config, random_known_rpc_port_config, read_listen_addr_from_logs,
+        testdir,
     },
     launch::{ZebradTestDirExt, LAUNCH_DELAY},
 };
+
+// Used by metrics_endpoint and tracing_endpoint, which are feature-gated.
+#[cfg(any(feature = "prometheus", feature = "filter-reload"))]
+use crate::common::config::default_test_config;
+#[cfg(any(feature = "prometheus", feature = "filter-reload"))]
+use zebra_test::net::random_known_port;
 
 #[tokio::test]
 #[cfg(all(feature = "prometheus", not(target_os = "windows")))]
