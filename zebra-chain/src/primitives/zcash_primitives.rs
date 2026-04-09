@@ -244,8 +244,8 @@ impl PrecomputedTxData {
 
     /// Computes precomputed sighash data with an explicit consensus branch ID.
     ///
-    /// Serializes and re-reads the transaction to get an owned `TransactionData` for
-    /// `map_authorization` (the upstream `Transaction` doesn't implement `Clone`).
+    /// Clones the transaction to get an owned `TransactionData` for `map_authorization`,
+    /// reconstructing with the correct `branch_id` for V1-V4 sighash computation.
     fn from_transaction_with_branch_id(
         tx: &crate::transaction::Transaction,
         branch_id: zcash_protocol::consensus::BranchId,
@@ -254,24 +254,33 @@ impl PrecomputedTxData {
         let inner = tx.inner();
         let txid_parts = inner.deref().digest(zp_tx::txid::TxIdDigester);
 
-        let mut buf = Vec::new();
-        inner
-            .write(&mut buf)
-            .map_err(|e| Error::Io(std::sync::Arc::new(e)))?;
-        let owned = zcash_primitives::transaction::Transaction::read(&buf[..], branch_id)
-            .map_err(|e| Error::Io(std::sync::Arc::new(e)))?;
-
-        let tx_data: zp_tx::TransactionData<PrecomputedAuth> = owned.into_data().map_authorization(
-            MapTransparent {
-                auth: TransparentAuth {
-                    all_prev_outputs: all_previous_outputs.clone(),
-                },
-            },
-            IdentityMap,
-            IdentityMap,
-            #[cfg(zcash_unstable = "zfuture")]
-            (),
+        // Clone the transaction to get an owned TransactionData we can transform.
+        // Reconstruct with the correct branch_id (the stored value may differ for
+        // V1-V4 transactions that were parsed without network context).
+        let data = inner.clone().into_data();
+        let data_with_branch_id = zp_tx::TransactionData::<zp_tx::Authorized>::from_parts(
+            data.version(),
+            branch_id,
+            data.lock_time(),
+            data.expiry_height(),
+            data.transparent_bundle().cloned(),
+            data.sprout_bundle().cloned(),
+            data.sapling_bundle().cloned(),
+            data.orchard_bundle().cloned(),
         );
+
+        let tx_data: zp_tx::TransactionData<PrecomputedAuth> =
+            data_with_branch_id.map_authorization(
+                MapTransparent {
+                    auth: TransparentAuth {
+                        all_prev_outputs: all_previous_outputs.clone(),
+                    },
+                },
+                IdentityMap,
+                IdentityMap,
+                #[cfg(zcash_unstable = "zfuture")]
+                (),
+            );
 
         Ok(PrecomputedTxData {
             tx_data,

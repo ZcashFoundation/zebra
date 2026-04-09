@@ -67,6 +67,37 @@ impl Transaction {
         &self.0
     }
 
+    /// Return a copy of this transaction with the stored `consensus_branch_id` corrected.
+    ///
+    /// For V1-V4 transactions the consensus branch ID is NOT on the wire — it is inferred
+    /// from the block height and network at validation time.  During deserialization we
+    /// store a default value which may be wrong.  Call this method once the correct
+    /// branch ID is known to update the stored value.
+    ///
+    /// For V5+ transactions the branch ID is embedded in the serialized data, so this
+    /// method has no effect (the stored value is already correct).
+    pub fn with_branch_id(self, branch_id: zcash_protocol::consensus::BranchId) -> Self {
+        if self.version() >= 5 {
+            return self;
+        }
+        let data = self.0.into_data();
+        let corrected = zp_tx::TransactionData::<zp_tx::Authorized>::from_parts(
+            data.version(),
+            branch_id,
+            data.lock_time(),
+            data.expiry_height(),
+            data.transparent_bundle().cloned(),
+            data.sprout_bundle().cloned(),
+            data.sapling_bundle().cloned(),
+            data.orchard_bundle().cloned(),
+        );
+        Transaction(
+            corrected
+                .freeze()
+                .expect("re-wrapped from valid transaction"),
+        )
+    }
+
     /// Returns the transaction version.
     pub fn tx_version(&self) -> TxVersion {
         self.0.version()
@@ -702,12 +733,25 @@ impl crate::serialization::ZcashDeserializeWithContext<zcash_protocol::consensus
 }
 
 impl crate::serialization::ZcashDeserialize for Transaction {
-    /// Deserialize a transaction using `BranchId::Canopy` as the default consensus branch ID.
+    /// Deserialize a transaction without network context.
     ///
-    /// For V5+ transactions, the actual branch ID is embedded in the serialized data
-    /// and overrides this default during parsing.
-    /// For V1-V4 transactions, the branch ID parameter only affects the stored
-    /// `consensus_branch_id` field, not the parsing logic itself.
+    /// # Branch ID handling
+    ///
+    /// - **V5+ transactions**: the consensus branch ID is read from the wire. Correct.
+    /// - **V1-V4 transactions**: the branch ID is NOT on the wire, so a default
+    ///   (`BranchId::Canopy`) is stored.  This does not affect parsing or txid
+    ///   computation, but the stored `consensus_branch_id` field will be wrong for
+    ///   transactions mined before Canopy.  Call [`Transaction::with_branch_id`] to
+    ///   correct it once the mined height and network are known, or use
+    ///   [`ZcashDeserializeWithContext<BranchId>`] directly.
+    ///
+    /// # Callers
+    ///
+    /// Prefer `ZcashDeserializeWithContext<BranchId>` when the correct branch ID is
+    /// known.  This context-free impl exists for:
+    /// - Block deserialization (branch ID is corrected afterward)
+    /// - Network message parsing and RPC (transactions are re-validated with the
+    ///   correct branch ID before sighash computation)
     fn zcash_deserialize<R: std::io::Read>(
         reader: R,
     ) -> Result<Self, crate::serialization::SerializationError> {

@@ -158,6 +158,10 @@ impl ZcashDeserialize for Block {
         let limited_reader = &mut reader.take(MAX_BLOCK_BYTES);
         Ok(Block {
             header: limited_reader.zcash_deserialize_into()?,
+            // Note: transactions are parsed with a default `BranchId::Canopy` for V1-V4.
+            // The stored `consensus_branch_id` may be wrong.  Callers that need the correct
+            // value should call `Transaction::with_branch_id()` after determining the
+            // mined height and network from the coinbase transaction.
             transactions: limited_reader.zcash_deserialize_into()?,
         })
     }

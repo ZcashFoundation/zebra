@@ -133,11 +133,8 @@ pub fn lock_time_to_u32(lock_time: &LockTime) -> u32 {
 
 // ── Height ───────────────────────────────────────────────────────────
 
-/// Convert a librustzcash `BlockHeight` into a Zebra `block::Height`.
-///
-/// # Errors
-///
 /// Convert a Zebra `block::Height` into a librustzcash `BlockHeight`.
+#[cfg(any(test, feature = "proptest-impl"))]
 pub fn height_to_block_height(h: block::Height) -> zcash_primitives::consensus::BlockHeight {
     h.into()
 }
