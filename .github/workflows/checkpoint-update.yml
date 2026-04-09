@@ -12,8 +12,9 @@ on:
   # zizmor: ignore[dangerous-triggers] -- triggers only on internal CI workflow completion,
   # processes deterministic checkpoint data from artifacts, no untrusted user input
   workflow_run:
-    workflows: ["CI integration tests on GCP"]
+    workflows: ["Integration Tests on GCP"]
     types: [completed]
+    branches: [main]
 
 permissions: {}
 
@@ -23,6 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event.workflow_run.conclusion == 'success'
     permissions:
+      actions: read
       contents: write
       pull-requests: write
     env:
