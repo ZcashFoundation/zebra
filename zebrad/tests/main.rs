@@ -32,7 +32,7 @@
 //! cargo nextest run -E 'test(/^e2e::/)'
 //!
 //! # Specific test:
-//! cargo nextest run -E 'test(=sync_one_checkpoint_mainnet)'
+//! cargo nextest run -E 'test(=integration::sync::sync_one_checkpoint_mainnet)'
 //!
 //! # CI profiles:
 //! cargo nextest run --profile ci                                           # PR tests
