@@ -9,12 +9,13 @@ use color_eyre::eyre::Result;
 use transparent::OutPoint;
 use zebra_chain::{
     amount::{Amount, NonNegative},
+    block::Block,
     parameters::Network,
 };
 
 use zebra_chain::transparent;
 
-use crate::components::mempool::storage::*;
+use crate::components::mempool::{storage::*, Mempool};
 
 /// Eviction memory time used for tests. Most tests won't care about this
 /// so we use a large enough value that will never be reached in the tests.
@@ -242,18 +243,65 @@ fn mempool_storage_crud_same_effects_mainnet() {
     );
 }
 
-// TODO: Rewrite when Transaction API supports expiry_height_mut.
 #[test]
-#[ignore = "requires expiry_height_mut, not supported by new Transaction type"]
 fn mempool_expired_basic() -> Result<()> {
-    unimplemented!("requires Transaction expiry_height mutation support");
+    let _init_guard = zebra_test::init();
+    for network in Network::iter() {
+        mempool_expired_basic_for_network(network)?;
+    }
+    Ok(())
 }
 
-#[allow(dead_code)] // Only used by #[ignore]d mempool_expired_basic test
-fn mempool_expired_basic_for_network(_network: Network) -> Result<()> {
-    // TODO: Reimplement when Transaction API supports expiry_height_mut.
-    // The new Transaction type does not support mutating the expiry height.
-    unimplemented!("requires Transaction expiry_height mutation support");
+fn mempool_expired_basic_for_network(network: Network) -> Result<()> {
+    // Create an empty storage
+    let mut storage: Storage = Storage::new(&config::Config {
+        tx_cost_limit: 160_000_000,
+        eviction_memory_time: EVICTION_MEMORY_TIME,
+        ..Default::default()
+    });
+
+    let block: Block = network.test_block(982681, 925483).unwrap();
+
+    // Get a test transaction
+    let tx = &*(block.transactions[1]).clone();
+
+    // Change the expiration height of the test transaction
+    let mut tx = tx.clone();
+    tx.set_expiry_height(zebra_chain::block::Height(1));
+
+    let tx_id = tx.unmined_id();
+
+    // Insert the transaction into the mempool, with a fake zero miner fee and sigops
+    storage.insert(
+        VerifiedUnminedTx::new(
+            std::sync::Arc::new(tx).into(),
+            Amount::try_from(1_000_000).expect("valid amount"),
+            0,
+            std::sync::Arc::new(vec![]),
+        )
+        .expect("verification should pass"),
+        Vec::new(),
+        None,
+    )?;
+
+    assert_eq!(storage.transaction_count(), 1);
+
+    // Get everything available in mempool now
+    let everything_in_mempool: HashSet<UnminedTxId> = storage.tx_ids().collect();
+    assert_eq!(everything_in_mempool.len(), 1);
+    assert!(everything_in_mempool.contains(&tx_id));
+
+    // remove_expired_transactions() will return what was removed
+    let expired = storage.remove_expired_transactions(Height(1));
+    assert!(expired.contains(&tx_id));
+    let everything_in_mempool: HashSet<UnminedTxId> = storage.tx_ids().collect();
+    assert_eq!(everything_in_mempool.len(), 0);
+
+    // No transaction will be sent to peers
+    let send_to_peers = Mempool::remove_expired_from_peer_list(&everything_in_mempool, &expired);
+    assert_eq!(send_to_peers.len(), 0);
+
+    Ok(())
 }
 
 /// Check that the transaction dependencies are updated when transactions with spent mempool outputs

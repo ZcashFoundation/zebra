@@ -12,7 +12,7 @@ use std::{
 
 use chrono::{DateTime, TimeZone, Utc};
 use color_eyre::eyre::Report;
-use futures::FutureExt;
+use futures::{FutureExt, TryFutureExt};
 use halo2::pasta::{group::ff::PrimeField, pallas};
 use tokio::time::timeout;
 use tower::{buffer::Buffer, service_fn, ServiceExt};
@@ -24,11 +24,11 @@ use zebra_chain::{
     parameters::{testnet::ConfiguredActivationHeights, Network, NetworkUpgrade},
     primitives::{ed25519, x25519, Groth16Proof},
     sapling,
-    serialization::{AtLeastOne, DateTime32, ZcashDeserialize, ZcashDeserializeInto},
+    serialization::{DateTime32, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
     sprout,
     transaction::{
         arbitrary::{test_transactions, transactions_from_blocks, v5_transactions},
-        zip317, Hash, JoinSplitData, LockTime, Transaction,
+        zip317, Hash, HashType, JoinSplitData, LockTime, Transaction,
     },
     transparent::{self, CoinbaseData, CoinbaseSpendRestriction},
 };
@@ -76,24 +76,115 @@ fn v5_transactions_basic_check() -> Result<(), Report> {
     Ok(())
 }
 
-// TODO: Rewrite test when Transaction API supports mutating orchard flags.
-// The new Transaction type (librustzcash wrapper) does not support mutating shielded data.
 #[test]
-#[ignore = "requires ability to mutate orchard flags, not supported by new Transaction type"]
 fn v5_transaction_with_orchard_actions_has_inputs_and_outputs() {
-    // This test is ignored because the new Transaction type wraps librustzcash and
-    // does not support mutating orchard shielded data flags. See the TODO above.
-    unimplemented!("requires Transaction mutation support");
+    for net in Network::iter() {
+        let tx = v5_transactions(net.block_iter())
+            .find(|transaction| {
+                transaction.inputs().is_empty()
+                    && transaction.outputs().is_empty()
+                    && transaction.sapling_spends_count() == 0
+                    && transaction.sapling_outputs().next().is_none()
+                    && transaction.joinsplit_count() == 0
+            })
+            .expect("V5 tx with only Orchard shielded data");
+
+        let tx_bytes = tx
+            .zcash_serialize_to_vec()
+            .expect("transaction serialization should succeed");
+
+        // Find the orchard flags offset
+        let flags_offset = find_v5_orchard_flags_offset(&tx_bytes);
+
+        // Test with empty flags (no spends, no outputs)
+        let mut modified = tx_bytes.clone();
+        modified[flags_offset] = 0x00; // Flags::empty()
+        let modified_tx = Transaction::zcash_deserialize(modified.as_slice())
+            .expect("modified transaction should deserialize");
+        assert_eq!(
+            check::has_inputs_and_outputs(&modified_tx),
+            Err(TransactionError::NoInputs)
+        );
+
+        // ENABLE_SPENDS only -> passes inputs check but fails outputs
+        let mut modified = tx_bytes.clone();
+        modified[flags_offset] = 0x01; // Flags::ENABLE_SPENDS
+        let modified_tx = Transaction::zcash_deserialize(modified.as_slice())
+            .expect("modified transaction should deserialize");
+        assert_eq!(
+            check::has_inputs_and_outputs(&modified_tx),
+            Err(TransactionError::NoOutputs)
+        );
+
+        // ENABLE_OUTPUTS only -> passes outputs check but fails inputs
+        let mut modified = tx_bytes.clone();
+        modified[flags_offset] = 0x02; // Flags::ENABLE_OUTPUTS
+        let modified_tx = Transaction::zcash_deserialize(modified.as_slice())
+            .expect("modified transaction should deserialize");
+        assert_eq!(
+            check::has_inputs_and_outputs(&modified_tx),
+            Err(TransactionError::NoInputs)
+        );
+
+        // Both flags -> valid
+        let mut modified = tx_bytes.clone();
+        modified[flags_offset] = 0x03; // ENABLE_SPENDS | ENABLE_OUTPUTS
+        let modified_tx = Transaction::zcash_deserialize(modified.as_slice())
+            .expect("modified transaction should deserialize");
+        assert!(check::has_inputs_and_outputs(&modified_tx).is_ok());
+    }
 }
 
-// TODO: Rewrite test when Transaction API supports mutating orchard flags.
-// The new Transaction type (librustzcash wrapper) does not support mutating shielded data.
 #[test]
-#[ignore = "requires ability to mutate orchard flags, not supported by new Transaction type"]
 fn v5_transaction_with_orchard_actions_has_flags() {
-    // This test is ignored because the new Transaction type wraps librustzcash and
-    // does not support mutating orchard shielded data flags. See the TODO above.
-    unimplemented!("requires Transaction mutation support");
+    for net in Network::iter() {
+        let tx = v5_transactions(net.block_iter())
+            .find(|transaction| {
+                transaction.inputs().is_empty()
+                    && transaction.outputs().is_empty()
+                    && transaction.sapling_spends_count() == 0
+                    && transaction.sapling_outputs().next().is_none()
+                    && transaction.joinsplit_count() == 0
+            })
+            .expect("V5 tx with only Orchard actions");
+
+        let tx_bytes = tx
+            .zcash_serialize_to_vec()
+            .expect("transaction serialization should succeed");
+
+        let flags_offset = find_v5_orchard_flags_offset(&tx_bytes);
+
+        // Empty flags -> fails
+        let mut modified = tx_bytes.clone();
+        modified[flags_offset] = 0x00;
+        let modified_tx = Transaction::zcash_deserialize(modified.as_slice())
+            .expect("modified transaction should deserialize");
+        assert_eq!(
+            check::has_enough_orchard_flags(&modified_tx),
+            Err(TransactionError::NotEnoughFlags)
+        );
+
+        // ENABLE_SPENDS only -> passes
+        let mut modified = tx_bytes.clone();
+        modified[flags_offset] = 0x01;
+        let modified_tx = Transaction::zcash_deserialize(modified.as_slice())
+            .expect("modified transaction should deserialize");
+        assert!(check::has_enough_orchard_flags(&modified_tx).is_ok());
+
+        // ENABLE_OUTPUTS only -> passes
+        let mut modified = tx_bytes.clone();
+        modified[flags_offset] = 0x02;
+        let modified_tx = Transaction::zcash_deserialize(modified.as_slice())
+            .expect("modified transaction should deserialize");
+        assert!(check::has_enough_orchard_flags(&modified_tx).is_ok());
+
+        // Both flags -> passes
+        let mut modified = tx_bytes.clone();
+        modified[flags_offset] = 0x03;
+        let modified_tx = Transaction::zcash_deserialize(modified.as_slice())
+            .expect("modified transaction should deserialize");
+        assert!(check::has_enough_orchard_flags(&modified_tx).is_ok());
+    }
 }
 
 #[test]
@@ -1106,18 +1197,35 @@ async fn state_error_converted_correctly() {
     );
 }
 
-// TODO: Rewrite when Transaction API supports inserting fake orchard shielded data.
 #[test]
-#[ignore = "requires insert_fake_orchard_shielded_data, not available with new Transaction type"]
 fn v5_coinbase_transaction_without_enable_spends_flag_passes_validation() {
-    unimplemented!("requires insert_fake_orchard_shielded_data");
+    for net in Network::iter() {
+        let coinbase_tx = v5_transactions(net.block_iter())
+            .find(|transaction| transaction.is_coinbase())
+            .expect("V5 coinbase tx");
+
+        // Graft orchard data from a non-coinbase V5 tx onto the coinbase tx
+        let tx = graft_orchard_data_onto_v5_tx(&coinbase_tx, &net, Some(0x00)); // flags = empty
+
+        assert!(check::coinbase_tx_no_prevout_joinsplit_spend(&tx).is_ok());
+    }
 }
 
-// TODO: Rewrite when Transaction API supports inserting fake orchard shielded data.
 #[test]
-#[ignore = "requires insert_fake_orchard_shielded_data, not available with new Transaction type"]
 fn v5_coinbase_transaction_with_enable_spends_flag_fails_validation() {
-    unimplemented!("requires insert_fake_orchard_shielded_data");
+    for net in Network::iter() {
+        let coinbase_tx = v5_transactions(net.block_iter())
+            .find(|transaction| transaction.is_coinbase())
+            .expect("V5 coinbase tx");
+
+        // Graft orchard data with ENABLE_SPENDS flag set
+        let tx = graft_orchard_data_onto_v5_tx(&coinbase_tx, &net, Some(0x01)); // flags = ENABLE_SPENDS
+
+        assert_eq!(
+            check::coinbase_tx_no_prevout_joinsplit_spend(&tx),
+            Err(TransactionError::CoinbaseHasEnableSpendsOrchard)
+        );
+    }
 }
 
 #[tokio::test]
@@ -1634,19 +1742,117 @@ async fn v4_transaction_with_conflicting_transparent_spend_is_rejected() {
 }
 
 /// Test if V4 transaction with a joinsplit that has duplicate nullifiers is rejected.
-// TODO: Rewrite when Transaction API supports constructing transactions with joinsplit data.
 #[test]
-#[ignore = "requires ability to construct V4 transactions with joinsplit data"]
 fn v4_transaction_with_conflicting_sprout_nullifier_inside_joinsplit_is_rejected() {
-    unimplemented!("requires Transaction construction support for joinsplit data");
+    let _init_guard = zebra_test::init();
+    zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
+        let network = Network::Mainnet;
+        let nu = NetworkUpgrade::Canopy;
+
+        let canopy_activation_height = NetworkUpgrade::Canopy
+            .activation_height(&network)
+            .expect("Canopy activation height is specified");
+
+        let transaction_block_height =
+            (canopy_activation_height + 10).expect("transaction block height is too large");
+
+        // Create a fake Sprout join split
+        let (mut joinsplit_data, signing_key) = mock_sprout_join_split_data();
+
+        // Make both nullifiers the same inside the joinsplit transaction
+        let duplicate_nullifier = joinsplit_data.first.nullifiers[0];
+        joinsplit_data.first.nullifiers[1] = duplicate_nullifier;
+
+        // Build a signed V4 transaction with the joinsplit data
+        let transaction = build_signed_v4_tx_with_joinsplit_data(
+            joinsplit_data,
+            &signing_key,
+            nu,
+            (transaction_block_height + 1).expect("expiry height is too large"),
+        );
+
+        let state_service =
+            service_fn(|_| async { unreachable!("State service should not be called") });
+        let verifier = Verifier::new_for_tests(&network, state_service);
+
+        let result = verifier
+            .oneshot(Request::Block {
+                transaction_hash: transaction.hash(),
+                transaction: Arc::new(transaction),
+                known_utxos: Arc::new(HashMap::new()),
+                known_outpoint_hashes: Arc::new(HashSet::new()),
+                height: transaction_block_height,
+                time: DateTime::<Utc>::MAX_UTC,
+            })
+            .await;
+
+        assert_eq!(
+            result,
+            Err(TransactionError::DuplicateSproutNullifier(
+                duplicate_nullifier
+            ))
+        );
+    });
 }
 
 /// Test if V4 transaction with duplicate nullifiers across joinsplits is rejected.
-// TODO: Rewrite when Transaction API supports constructing transactions with joinsplit data.
 #[test]
-#[ignore = "requires ability to construct V4 transactions with joinsplit data"]
 fn v4_transaction_with_conflicting_sprout_nullifier_across_joinsplits_is_rejected() {
-    unimplemented!("requires Transaction construction support for joinsplit data");
+    let _init_guard = zebra_test::init();
+    zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
+        let network = Network::Mainnet;
+        let nu = NetworkUpgrade::Canopy;
+
+        let canopy_activation_height = NetworkUpgrade::Canopy
+            .activation_height(&network)
+            .expect("Canopy activation height is specified");
+
+        let transaction_block_height =
+            (canopy_activation_height + 10).expect("transaction block height is too large");
+
+        // Create a fake Sprout join split
+        let (mut joinsplit_data, signing_key) = mock_sprout_join_split_data();
+
+        // Duplicate a nullifier from the created joinsplit
+        let duplicate_nullifier = joinsplit_data.first.nullifiers[1];
+
+        // Add a new joinsplit with the duplicate nullifier
+        let mut new_joinsplit = joinsplit_data.first.clone();
+        new_joinsplit.nullifiers[0] = duplicate_nullifier;
+        new_joinsplit.nullifiers[1] = sprout::note::Nullifier([2u8; 32].into());
+
+        joinsplit_data.rest.push(new_joinsplit);
+
+        // Build a signed V4 transaction with the joinsplit data
+        let transaction = build_signed_v4_tx_with_joinsplit_data(
+            joinsplit_data,
+            &signing_key,
+            nu,
+            (transaction_block_height + 1).expect("expiry height is too large"),
+        );
+
+        let state_service =
+            service_fn(|_| async { unreachable!("State service should not be called") });
+        let verifier = Verifier::new_for_tests(&network, state_service);
+
+        let result = verifier
+            .oneshot(Request::Block {
+                transaction_hash: transaction.hash(),
+                transaction: Arc::new(transaction),
+                known_utxos: Arc::new(HashMap::new()),
+                known_outpoint_hashes: Arc::new(HashSet::new()),
+                height: transaction_block_height,
+                time: DateTime::<Utc>::MAX_UTC,
+            })
+            .await;
+
+        assert_eq!(
+            result,
+            Err(TransactionError::DuplicateSproutNullifier(
+                duplicate_nullifier
+            ))
+        );
+    });
 }
 
 /// Test if V5 transaction with transparent funds is accepted.
@@ -1753,11 +1959,141 @@ async fn v5_transaction_with_last_valid_expiry_height() {
 
 /// Tests that a coinbase V5 transaction is accepted only if its expiry height
 /// is equal to the height of the block the transaction belongs to.
-// TODO: Rewrite when Transaction API supports mutating expiry_height and network_upgrade.
 #[tokio::test]
-#[ignore = "requires expiry_height_mut and update_network_upgrade, not supported by new Transaction type"]
 async fn v5_coinbase_transaction_expiry_height() {
-    unimplemented!("requires Transaction mutation support");
+    let network = Network::new_default_testnet();
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called") });
+    let verifier = Verifier::new_for_tests(&network, state_service);
+    let verifier = Buffer::new(verifier, 10);
+
+    let block_height = NetworkUpgrade::Nu5
+        .activation_height(&network)
+        .expect("Nu5 activation height for testnet is specified");
+
+    let (input, output) = mock_coinbase_transparent_output(block_height);
+
+    // Create a coinbase V5 tx with an expiry height that matches the height of
+    // the block. Note that this is the only valid expiry height for a V5
+    // coinbase tx.
+    let transaction = Transaction::test_v5(
+        NetworkUpgrade::Nu5,
+        vec![input],
+        vec![output],
+        LockTime::unlocked(),
+        block_height,
+    );
+
+    let result = verifier
+        .clone()
+        .oneshot(Request::Block {
+            transaction_hash: transaction.hash(),
+            transaction: Arc::new(transaction.clone()),
+            known_utxos: Arc::new(HashMap::new()),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
+            height: block_height,
+            time: DateTime::<Utc>::MAX_UTC,
+        })
+        .await;
+
+    assert_eq!(
+        result.expect("unexpected error response").tx_id(),
+        transaction.unmined_id()
+    );
+
+    // Increment the expiry height so that it becomes invalid.
+    let new_expiry_height = (block_height + 1).expect("transaction block height is too large");
+    let mut new_transaction = transaction.clone();
+
+    new_transaction.set_expiry_height(new_expiry_height);
+
+    let result = verifier
+        .clone()
+        .oneshot(Request::Block {
+            transaction_hash: transaction.hash(),
+            transaction: Arc::new(new_transaction.clone()),
+            known_utxos: Arc::new(HashMap::new()),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
+            height: block_height,
+            time: DateTime::<Utc>::MAX_UTC,
+        })
+        .await
+        .map_err(|err| {
+            *err.downcast()
+                .expect("error type should be TransactionError")
+        });
+
+    assert_eq!(
+        result,
+        Err(TransactionError::CoinbaseExpiryBlockHeight {
+            expiry_height: Some(new_expiry_height),
+            block_height,
+            transaction_hash: new_transaction.hash(),
+        })
+    );
+
+    // Decrement the expiry height so that it becomes invalid.
+    let new_expiry_height = (block_height - 1).expect("transaction block height is too low");
+    let mut new_transaction = transaction.clone();
+
+    new_transaction.set_expiry_height(new_expiry_height);
+
+    let result = verifier
+        .clone()
+        .oneshot(Request::Block {
+            transaction_hash: transaction.hash(),
+            transaction: Arc::new(new_transaction.clone()),
+            known_utxos: Arc::new(HashMap::new()),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
+            height: block_height,
+            time: DateTime::<Utc>::MAX_UTC,
+        })
+        .await
+        .map_err(|err| {
+            *err.downcast()
+                .expect("error type should be TransactionError")
+        });
+
+    assert_eq!(
+        result,
+        Err(TransactionError::CoinbaseExpiryBlockHeight {
+            expiry_height: Some(new_expiry_height),
+            block_height,
+            transaction_hash: new_transaction.hash(),
+        })
+    );
+
+    // Test with matching heights again, but using a very high value
+    // that is greater than the limit for non-coinbase transactions,
+    // to ensure the limit is not being enforced for coinbase transactions.
+    let new_expiry_height = Height::MAX;
+    let mut new_transaction = transaction.clone();
+
+    new_transaction.set_expiry_height(new_expiry_height);
+
+    // Setting the new expiry height as the block height will activate NU6, so we need to set NU6
+    // for the tx as well.
+    let height = new_expiry_height;
+    new_transaction.set_network_upgrade(NetworkUpgrade::current(&network, height));
+
+    let verification_result = verifier
+        .clone()
+        .oneshot(Request::Block {
+            transaction_hash: transaction.hash(),
+            transaction: Arc::new(new_transaction.clone()),
+            known_utxos: Arc::new(HashMap::new()),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
+            height,
+            time: DateTime::<Utc>::MAX_UTC,
+        })
+        .await;
+
+    assert_eq!(
+        verification_result
+            .expect("successful verification")
+            .tx_id(),
+        new_transaction.unmined_id()
+    );
 }
 
 /// Tests if an expired non-coinbase V5 transaction is rejected.
@@ -2067,10 +2403,7 @@ fn v4_with_signed_sprout_transfer_is_accepted() {
 ///
 /// This test verifies if the transaction verifier correctly rejects the transaction because of the
 /// invalid JoinSplit.
-// TODO: Rewrite test when Transaction API supports mutating joinsplit data.
-// The new Transaction type (librustzcash wrapper) does not support mutating shielded data.
 #[test]
-#[ignore = "requires ability to mutate joinsplit data, not supported by new Transaction type"]
 fn v4_with_modified_joinsplit_is_rejected() {
     let _init_guard = zebra_test::init();
     zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
@@ -2100,13 +2433,100 @@ fn v4_with_modified_joinsplit_is_rejected() {
 }
 
 async fn v4_with_joinsplit_is_rejected_for_modification(
-    _modification: JoinSplitModification,
-    _expected_error: TransactionError,
+    modification: JoinSplitModification,
+    expected_error: TransactionError,
 ) {
-    // TODO: Rewrite when Transaction API supports mutating joinsplit data.
-    // The new Transaction type (librustzcash wrapper) does not support mutating shielded data.
-    // This function is only called from #[ignore]d tests so it will never be reached.
-    unimplemented!("requires Transaction mutation support");
+    let network = Network::Mainnet;
+
+    let (height, transaction) = test_transactions(&network)
+        .rev()
+        .filter(|(_, tx)| {
+            !tx.is_coinbase() && tx.inputs().is_empty() && !tx.has_sapling_shielded_data()
+        })
+        .find(|(_, tx)| tx.joinsplit_count() > 0)
+        .expect("There should be a tx with Groth16 JoinSplits.");
+
+    let expected_error = Err(expected_error);
+
+    // Serialize the transaction, apply byte-level modifications, and re-deserialize.
+    let mut tx_bytes = transaction
+        .zcash_serialize_to_vec()
+        .expect("transaction serialization should succeed");
+
+    match modification {
+        JoinSplitModification::CorruptSignature => {
+            // The joinsplit signature is the last 64 bytes of the serialized transaction.
+            let sig_offset = tx_bytes.len() - 64;
+            // Flip a bit from an arbitrary byte of the signature.
+            tx_bytes[sig_offset + 10] ^= 0x01;
+        }
+        JoinSplitModification::CorruptProof => {
+            // Find the first joinsplit proof in the serialized bytes and corrupt it.
+            // After the Sapling data, the joinsplit section starts with nJoinSplit (compact_size),
+            // then each JoinSplit contains: vpub_old(8) + vpub_new(8) + anchor(32) +
+            // nullifiers(2*32) + commitments(2*32) + ephemeral_key(32) + random_seed(32) +
+            // vmacs(2*32) + zkproof(192) + enc_ciphertexts(2*601)
+            // We locate the proof by finding the offset of the first 192-byte proof field.
+            let proof_offset = find_first_joinsplit_proof_offset(&tx_bytes);
+            // A proof is composed of three field elements: first(48) + middle(96) + last(48).
+            // To corrupt without making malformed, swap first and last elements.
+            let (first, rest) = tx_bytes[proof_offset..proof_offset + 192].split_at_mut(48);
+            let last_start = 96;
+            let mut first_copy = [0u8; 48];
+            first_copy.copy_from_slice(first);
+            first[..48].copy_from_slice(&rest[last_start..last_start + 48]);
+            rest[last_start..last_start + 48].copy_from_slice(&first_copy);
+        }
+        JoinSplitModification::ZeroProof => {
+            let proof_offset = find_first_joinsplit_proof_offset(&tx_bytes);
+            tx_bytes[proof_offset..proof_offset + 192].fill(0);
+        }
+    }
+
+    let transaction: Arc<Transaction> = Arc::new(
+        Transaction::zcash_deserialize(tx_bytes.as_slice())
+            .expect("modified transaction should deserialize"),
+    );
+
+    // Initialize the verifier
+    let state_service =
+        service_fn(|_| async { unreachable!("State service should not be called.") });
+    let verifier = Verifier::new_for_tests(&network, state_service);
+    let verifier = Buffer::new(verifier, 10);
+
+    // Test the transaction verifier.
+    //
+    // Note that modifying the JoinSplit data invalidates the tx signatures. The signatures are
+    // checked concurrently with the ZK proofs, and when a signature check finishes before the proof
+    // check, the verifier reports an invalid signature instead of invalid proof. This race
+    // condition happens only occasionally, so we run the verifier in a loop with a small iteration
+    // threshold until it returns the correct error.
+    let mut i = 1;
+    let result = loop {
+        let result = verifier
+            .clone()
+            .oneshot(Request::Block {
+                transaction_hash: transaction.hash(),
+                transaction: transaction.clone(),
+                known_utxos: Arc::new(HashMap::new()),
+                known_outpoint_hashes: Arc::new(HashSet::new()),
+                height,
+                time: DateTime::<Utc>::MAX_UTC,
+            })
+            .await
+            .map_err(|err| {
+                *err.downcast()
+                    .expect("error type should be TransactionError")
+            });
+
+        if result == expected_error || i >= 100 {
+            break result;
+        }
+
+        i += 1;
+    };
+
+    assert_eq!(result, expected_error);
 }
 
 /// Test if a V4 transaction with Sapling spends is accepted by the verifier.
@@ -2154,9 +2574,7 @@ fn v4_with_sapling_spends() {
 }
 
 /// Test if a V4 transaction with a duplicate Sapling spend is rejected by the verifier.
-// TODO: Rewrite test when Transaction API supports mutating sapling data.
 #[test]
-#[ignore = "requires ability to mutate sapling data, not supported by new Transaction type"]
 fn v4_with_duplicate_sapling_spends() {
     let _init_guard = zebra_test::init();
     zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
@@ -2291,7 +2709,6 @@ async fn v5_with_sapling_spends() {
 
 /// Test if a V5 transaction with a duplicate Sapling spend is rejected by the verifier.
 #[tokio::test]
-#[ignore = "requires Transaction mutation support for sapling spends"]
 async fn v5_with_duplicate_sapling_spends() {
     let _init_guard = zebra_test::init();
 
@@ -2332,17 +2749,172 @@ async fn v5_with_duplicate_sapling_spends() {
 /// Test if a V5 transaction with a duplicate Orchard action is rejected by the verifier.
 // TODO: Rewrite when Transaction API supports mutating orchard shielded data.
 #[tokio::test]
-#[ignore = "requires orchard_shielded_data_mut, not supported by new Transaction type"]
+#[ignore = "duplicating an orchard action requires modifying the orchard bundle proofs and action count, which is not feasible with byte-level manipulation"]
 async fn v5_with_duplicate_orchard_action() {
     unimplemented!("requires Transaction orchard shielded data mutation support");
 }
 
 /// Checks that the tx verifier handles consensus branch ids in V5 txs correctly.
-// TODO: Rewrite when Transaction API supports update_network_upgrade.
 #[tokio::test]
-#[ignore = "requires update_network_upgrade, not supported by new Transaction type"]
 async fn v5_consensus_branch_ids() {
-    unimplemented!("requires Transaction network upgrade update support");
+    let mut state = MockService::build().for_unit_tests();
+
+    let (input, output, known_utxos) = mock_transparent_transfer(
+        Height(1),
+        true,
+        0,
+        Amount::try_from(10001).expect("valid amount"),
+    );
+
+    let known_utxos = Arc::new(known_utxos);
+
+    // NU5 is the first network upgrade that supports V5 txs.
+    let mut network_upgrade = NetworkUpgrade::Nu5;
+
+    let mut tx = Transaction::test_v5(
+        network_upgrade,
+        vec![input],
+        vec![output],
+        LockTime::unlocked(),
+        Height::MAX_EXPIRY_HEIGHT,
+    );
+
+    let outpoint = match tx.inputs()[0] {
+        transparent::Input::PrevOut { outpoint, .. } => outpoint,
+        transparent::Input::Coinbase { .. } => panic!("requires a non-coinbase transaction"),
+    };
+
+    for network in Network::iter() {
+        let verifier = Buffer::new(Verifier::new_for_tests(&network, state.clone()), 10);
+
+        while let Some(next_nu) = network_upgrade.next_upgrade() {
+            // Check an outdated network upgrade.
+            let Some(height) = next_nu.activation_height(&network) else {
+                tracing::warn!(?next_nu, "missing activation height",);
+                // Shift the network upgrade for the next loop iteration.
+                network_upgrade = next_nu;
+                continue;
+            };
+
+            let block_req = verifier
+                .clone()
+                .oneshot(Request::Block {
+                    transaction_hash: tx.hash(),
+                    transaction: Arc::new(tx.clone()),
+                    known_utxos: known_utxos.clone(),
+                    known_outpoint_hashes: Arc::new(HashSet::new()),
+                    // The consensus branch ID of the tx is outdated for this height.
+                    height,
+                    time: DateTime::<Utc>::MAX_UTC,
+                })
+                .map_err(|err| *err.downcast().expect("`TransactionError` type"));
+
+            let mempool_req = verifier
+                .clone()
+                .oneshot(Request::Mempool {
+                    transaction: std::sync::Arc::new(tx.clone()).into(),
+                    // The consensus branch ID of the tx is outdated for this height.
+                    height,
+                })
+                .map_err(|err| *err.downcast().expect("`TransactionError` type"));
+
+            let (block_rsp, mempool_rsp) = futures::join!(block_req, mempool_req);
+
+            assert_eq!(block_rsp, Err(TransactionError::WrongConsensusBranchId));
+            assert_eq!(mempool_rsp, Err(TransactionError::WrongConsensusBranchId));
+
+            // Check the currently supported network upgrade.
+            let height = network_upgrade.activation_height(&network).expect("height");
+
+            let block_req = verifier
+                .clone()
+                .oneshot(Request::Block {
+                    transaction_hash: tx.hash(),
+                    transaction: Arc::new(tx.clone()),
+                    known_utxos: known_utxos.clone(),
+                    known_outpoint_hashes: Arc::new(HashSet::new()),
+                    // The consensus branch ID of the tx is supported by this height.
+                    height,
+                    time: DateTime::<Utc>::MAX_UTC,
+                })
+                .map_ok(|rsp| rsp.tx_id())
+                .map_err(|e| format!("{e}"));
+
+            let mempool_req = verifier
+                .clone()
+                .oneshot(Request::Mempool {
+                    transaction: std::sync::Arc::new(tx.clone()).into(),
+                    // The consensus branch ID of the tx is supported by this height.
+                    height,
+                })
+                .map_ok(|rsp| rsp.tx_id())
+                .map_err(|e| format!("{e}"));
+
+            let state_req = async {
+                state
+                    .expect_request(zebra_state::Request::UnspentBestChainUtxo(outpoint))
+                    .map(|r| {
+                        r.respond(zebra_state::Response::UnspentBestChainUtxo(
+                            known_utxos.get(&outpoint).map(|utxo| utxo.utxo.clone()),
+                        ))
+                    })
+                    .await;
+
+                state
+                    .expect_request_that(|req| {
+                        matches!(
+                            req,
+                            zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
+                        )
+                    })
+                    .map(|r| {
+                        r.respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors)
+                    })
+                    .await;
+            };
+
+            let (block_rsp, mempool_rsp, _) = futures::join!(block_req, mempool_req, state_req);
+            let txid = tx.unmined_id();
+
+            assert_eq!(block_rsp, Ok(txid));
+            assert_eq!(mempool_rsp, Ok(txid));
+
+            // Check a network upgrade that Zebra doesn't support yet.
+            tx.set_network_upgrade(next_nu);
+
+            let height = network_upgrade.activation_height(&network).expect("height");
+
+            let block_req = verifier
+                .clone()
+                .oneshot(Request::Block {
+                    transaction_hash: tx.hash(),
+                    transaction: Arc::new(tx.clone()),
+                    known_utxos: known_utxos.clone(),
+                    known_outpoint_hashes: Arc::new(HashSet::new()),
+                    // The consensus branch ID of the tx is not supported by this height.
+                    height,
+                    time: DateTime::<Utc>::MAX_UTC,
+                })
+                .map_err(|err| *err.downcast().expect("`TransactionError` type"));
+
+            let mempool_req = verifier
+                .clone()
+                .oneshot(Request::Mempool {
+                    transaction: std::sync::Arc::new(tx.clone()).into(),
+                    // The consensus branch ID of the tx is not supported by this height.
+                    height,
+                })
+                .map_err(|err| *err.downcast().expect("`TransactionError` type"));
+
+            let (block_rsp, mempool_rsp) = futures::join!(block_req, mempool_req);
+
+            assert_eq!(block_rsp, Err(TransactionError::WrongConsensusBranchId));
+            assert_eq!(mempool_rsp, Err(TransactionError::WrongConsensusBranchId));
+
+            // Shift the network upgrade for the next loop iteration.
+            network_upgrade = next_nu;
+        }
+    }
 }
 
 // Utility functions
@@ -2449,6 +3021,81 @@ fn mock_coinbase_transparent_output(
     (input, output)
 }
 
+/// Build a V4 transaction from joinsplit data using byte-level serialization.
+///
+/// Creates a minimal Sapling V4 transaction (no transparent inputs/outputs, no sapling data)
+/// containing the given joinsplit data.
+fn build_v4_tx_with_joinsplit_data(
+    joinsplit_data: Option<JoinSplitData<Groth16Proof>>,
+    expiry_height: block::Height,
+) -> Transaction {
+    let mut bytes: Vec<u8> = Vec::new();
+
+    // V4 overwintered header: version=4, overwintered flag set (= 0x80000004 LE)
+    bytes.extend_from_slice(&0x8000_0004u32.to_le_bytes());
+    // versionGroupId = SAPLING_VERSION_GROUP_ID = 0x892F2085 LE
+    bytes.extend_from_slice(&0x892F_2085u32.to_le_bytes());
+    // nTransparentInputs = 0 (compact_size)
+    bytes.push(0x00);
+    // nTransparentOutputs = 0 (compact_size)
+    bytes.push(0x00);
+    // nLockTime = 0
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+    // nExpiryHeight
+    bytes.extend_from_slice(&expiry_height.0.to_le_bytes());
+    // valueBalanceSapling = 0 (i64 LE)
+    bytes.extend_from_slice(&0i64.to_le_bytes());
+    // nSpendsSapling = 0 (compact_size)
+    bytes.push(0x00);
+    // nOutputsSapling = 0 (compact_size)
+    bytes.push(0x00);
+
+    // Joinsplit data
+    if let Some(ref jsd) = joinsplit_data {
+        jsd.zcash_serialize(&mut bytes)
+            .expect("joinsplit_data serialization should succeed");
+    } else {
+        // nJoinSplit = 0 (compact_size)
+        bytes.push(0x00);
+    }
+
+    Transaction::zcash_deserialize(bytes.as_slice())
+        .expect("manually constructed V4 transaction should deserialize")
+}
+
+/// Build a V4 transaction with joinsplit data and a valid ed25519 signature.
+///
+/// Constructs the transaction, computes the sighash, signs it, and patches the signature
+/// into the serialized bytes before re-deserializing.
+fn build_signed_v4_tx_with_joinsplit_data(
+    joinsplit_data: JoinSplitData<Groth16Proof>,
+    signing_key: &ed25519::SigningKey,
+    network_upgrade: NetworkUpgrade,
+    expiry_height: block::Height,
+) -> Transaction {
+    // Build the initial transaction with a dummy (zero) signature
+    let tx = build_v4_tx_with_joinsplit_data(Some(joinsplit_data), expiry_height);
+
+    // Compute the sighash
+    let sighash = tx
+        .sighash(network_upgrade, HashType::ALL, Arc::new(Vec::new()), None)
+        .expect("sighash computation should succeed");
+
+    // Sign the sighash
+    let sig = signing_key.sign(sighash.as_ref());
+    let sig_bytes: [u8; 64] = sig.into();
+
+    // Serialize the transaction, patch the signature (last 64 bytes), and re-deserialize
+    let mut tx_bytes = tx
+        .zcash_serialize_to_vec()
+        .expect("transaction serialization should succeed");
+    let sig_offset = tx_bytes.len() - 64;
+    tx_bytes[sig_offset..].copy_from_slice(&sig_bytes);
+
+    Transaction::zcash_deserialize(tx_bytes.as_slice())
+        .expect("signed V4 transaction should deserialize")
+}
+
 /// Create a mock [`sprout::JoinSplit`] and include it in a [`transaction::JoinSplitData`].
 ///
 /// This creates a dummy join split. By itself it is invalid, but it is useful for including in a
@@ -2457,7 +3104,6 @@ fn mock_coinbase_transparent_output(
 /// The [`transaction::JoinSplitData`] with the dummy [`sprout::JoinSplit`] is returned together
 /// with the [`ed25519::SigningKey`] that can be used to create a signature to later add to the
 /// returned join split data.
-#[allow(dead_code)] // Only used by #[ignore]d tests pending Transaction construction with joinsplit data
 fn mock_sprout_join_split_data() -> (JoinSplitData<Groth16Proof>, ed25519::SigningKey) {
     // Prepare dummy inputs for the join split
     let zero_amount = 0_i32
@@ -2515,82 +3161,419 @@ enum JoinSplitModification {
     ZeroProof,
 }
 
-/// Modify a [`JoinSplitData`] following the given modification type.
-#[allow(dead_code)] // Only used by #[ignore]d tests pending Transaction mutation support
-fn modify_joinsplit_data(
-    joinsplit_data: &mut JoinSplitData<Groth16Proof>,
-    modification: JoinSplitModification,
-) {
-    match modification {
-        JoinSplitModification::CorruptSignature => {
-            let mut sig_bytes: [u8; 64] = joinsplit_data.sig.into();
-            // Flip a bit from an arbitrary byte of the signature.
-            sig_bytes[10] ^= 0x01;
-            joinsplit_data.sig = sig_bytes.into();
+/// Find the byte offset of the first JoinSplit proof (zkproof) in a serialized V4 transaction.
+///
+/// Parses past the V4 header, transparent data, lock time, expiry height, sapling data,
+/// and the first joinsplit fields to reach the 192-byte proof field.
+fn find_first_joinsplit_proof_offset(tx_bytes: &[u8]) -> usize {
+    // Parse past V4 header
+    let mut pos = 8usize; // nVersion(4) + nVersionGroupId(4)
+
+    // Parse transparent inputs
+    let n_inputs = parse_compact_size(tx_bytes, &mut pos);
+    for _ in 0..n_inputs {
+        pos += 36; // outpoint (32 hash + 4 index)
+        let script_len = parse_compact_size(tx_bytes, &mut pos);
+        pos += script_len as usize + 4; // scriptSig + nSequence
+    }
+
+    // Parse transparent outputs
+    let n_outputs = parse_compact_size(tx_bytes, &mut pos);
+    for _ in 0..n_outputs {
+        pos += 8; // value
+        let script_len = parse_compact_size(tx_bytes, &mut pos);
+        pos += script_len as usize; // scriptPubKey
+    }
+
+    // nLockTime(4) + nExpiryHeight(4)
+    pos += 8;
+
+    // valueBalanceSapling(8)
+    pos += 8;
+
+    // Parse Sapling spends
+    let n_spends = parse_compact_size(tx_bytes, &mut pos);
+    for _ in 0..n_spends {
+        // cv(32) + anchor(32) + nullifier(32) + rk(32) + zkproof(192) + spendAuthSig(64)
+        pos += 32 + 32 + 32 + 32 + 192 + 64;
+    }
+
+    // Parse Sapling outputs
+    let n_sapling_outputs = parse_compact_size(tx_bytes, &mut pos);
+    for _ in 0..n_sapling_outputs {
+        // cv(32) + cmu(32) + ephemeralKey(32) + encCiphertext(580) + outCiphertext(80) + zkproof(192)
+        pos += 32 + 32 + 32 + 580 + 80 + 192;
+    }
+
+    // Parse nJoinSplit
+    let n_joinsplits = parse_compact_size(tx_bytes, &mut pos);
+    assert!(n_joinsplits > 0, "expected at least one joinsplit");
+
+    // First JoinSplit fields before zkproof:
+    // vpub_old(8) + vpub_new(8) + anchor(32) + nullifiers(2*32) + commitments(2*32) +
+    // ephemeral_key(32) + random_seed(32) + vmacs(2*32)
+    pos += 8 + 8 + 32 + 64 + 64 + 32 + 32 + 64;
+
+    // Now pos points to the first zkproof (192 bytes)
+    pos
+}
+
+/// Parse a CompactSize integer from `bytes` at the given `pos`, advancing `pos`.
+fn parse_compact_size(bytes: &[u8], pos: &mut usize) -> u64 {
+    let first = bytes[*pos];
+    *pos += 1;
+    match first {
+        0xfd => {
+            let val = u16::from_le_bytes([bytes[*pos], bytes[*pos + 1]]);
+            *pos += 2;
+            val as u64
         }
-        JoinSplitModification::CorruptProof => {
-            let joinsplit = joinsplit_data
-                .joinsplits_mut()
-                .next()
-                .expect("must have a JoinSplit");
-            {
-                // A proof is composed of three field elements, the first and last having 48 bytes.
-                // (The middle one has 96 bytes.) To corrupt the proof without making it malformed,
-                // simply swap those first and last elements.
-                let (first, rest) = joinsplit.zkproof.0.split_at_mut(48);
-                first.swap_with_slice(&mut rest[96..144]);
-            }
+        0xfe => {
+            let val = u32::from_le_bytes([
+                bytes[*pos],
+                bytes[*pos + 1],
+                bytes[*pos + 2],
+                bytes[*pos + 3],
+            ]);
+            *pos += 4;
+            val as u64
         }
-        JoinSplitModification::ZeroProof => {
-            let joinsplit = joinsplit_data
-                .joinsplits_mut()
-                .next()
-                .expect("must have a JoinSplit");
-            joinsplit.zkproof.0 = [0; 192];
+        0xff => {
+            let val = u64::from_le_bytes([
+                bytes[*pos],
+                bytes[*pos + 1],
+                bytes[*pos + 2],
+                bytes[*pos + 3],
+                bytes[*pos + 4],
+                bytes[*pos + 5],
+                bytes[*pos + 6],
+                bytes[*pos + 7],
+            ]);
+            *pos += 8;
+            val
         }
+        n => n as u64,
     }
 }
 
-/// Duplicate a Sapling spend inside a `transaction`.
+/// Duplicate the first Sapling spend inside a transaction using byte-level serialization.
 ///
-/// Returns the nullifier of the duplicate spend.
+/// Serializes the transaction, parses to the sapling spends section, duplicates the first
+/// spend description bytes, increments the spend count, and re-deserializes.
+///
+/// Returns the zebra `sapling::Nullifier` of the duplicated spend.
 ///
 /// # Panics
 ///
-/// Will panic if the `transaction` does not have Sapling spends.
-fn duplicate_sapling_spend(_transaction: &mut Transaction) -> sapling::Nullifier {
-    // TODO: Rewrite when Transaction API supports mutating sapling data.
-    // The new Transaction type (librustzcash wrapper) does not support mutating shielded data.
-    // This function is only called from #[ignore]d tests.
-    unimplemented!("requires Transaction mutation support");
+/// Will panic if the transaction does not have Sapling spends.
+fn duplicate_sapling_spend(transaction: &mut Transaction) -> sapling::Nullifier {
+    let tx_bytes = transaction
+        .zcash_serialize_to_vec()
+        .expect("transaction serialization should succeed");
+
+    let is_v5 = transaction.version() >= 5;
+
+    if is_v5 {
+        // V5 sapling spends are split across multiple sections:
+        // 1. Compact spend descriptions: cv(32) + nf(32) + rk(32) = 96 bytes each
+        // 2. Compact output descriptions: cv(32) + cmu(32) + epk(32) + enc(580) + out(80) = 756 bytes each
+        // 3. valueBalanceSapling (8 bytes, if spends or outputs exist)
+        // 4. Anchor (32 bytes, if spends > 0)
+        // 5. Spend proofs (192 bytes each)
+        // 6. Spend auth sigs (64 bytes each)
+        // 7. Output proofs (192 bytes each)
+        // 8. Binding sig (64 bytes, if spends or outputs exist)
+
+        let mut pos = skip_v5_header_and_transparent(&tx_bytes);
+
+        // nSpendsSapling
+        let spend_count_pos = pos;
+        let n_spends = parse_compact_size(&tx_bytes, &mut pos);
+        assert!(n_spends > 0, "expected sapling spends");
+
+        let first_spend_start = pos;
+        let first_spend_bytes = tx_bytes[first_spend_start..first_spend_start + 96].to_vec();
+
+        // Extract nullifier from first spend (at offset cv(32) = 32)
+        let mut nf_bytes = [0u8; 32];
+        nf_bytes.copy_from_slice(&tx_bytes[first_spend_start + 32..first_spend_start + 64]);
+        let duplicate_nullifier = sapling::Nullifier::from(nf_bytes);
+
+        let spends_end = first_spend_start + (n_spends as usize * 96);
+        pos = spends_end;
+
+        // nOutputsSapling + compact outputs
+        let outputs_section_start = pos;
+        let n_sapling_outputs = parse_compact_size(&tx_bytes, &mut pos);
+        pos += n_sapling_outputs as usize * 756;
+
+        let has_sapling_data = n_spends > 0 || n_sapling_outputs > 0;
+
+        // valueBalanceSapling
+        if has_sapling_data {
+            pos += 8;
+        }
+
+        // Anchor
+        if n_spends > 0 {
+            pos += 32;
+        }
+
+        // Save the position after outputs+valueBalance+anchor (before proofs)
+        let pre_proofs_end = pos;
+
+        // Spend proofs
+        let proof_section_start = pos;
+        let first_proof_bytes = tx_bytes[proof_section_start..proof_section_start + 192].to_vec();
+        pos += n_spends as usize * 192;
+
+        // Spend auth sigs
+        let sig_section_start = pos;
+        let first_sig_bytes = tx_bytes[sig_section_start..sig_section_start + 64].to_vec();
+        pos += n_spends as usize * 64;
+
+        // Remainder: output proofs + binding sig + orchard section
+        let remainder = tx_bytes[pos..].to_vec();
+
+        // Rebuild with duplicated first spend
+        let new_n_spends = n_spends + 1;
+        let mut new_bytes = Vec::new();
+
+        // Everything before the spend count
+        new_bytes.extend_from_slice(&tx_bytes[..spend_count_pos]);
+
+        // New spend count
+        write_compact_size(&mut new_bytes, new_n_spends);
+
+        // Original compact spends + duplicate first
+        new_bytes.extend_from_slice(&tx_bytes[first_spend_start..spends_end]);
+        new_bytes.extend_from_slice(&first_spend_bytes);
+
+        // Outputs section + valueBalance + anchor (unchanged)
+        new_bytes.extend_from_slice(&tx_bytes[outputs_section_start..pre_proofs_end]);
+
+        // Spend proofs: original + duplicate first
+        new_bytes.extend_from_slice(
+            &tx_bytes[proof_section_start..proof_section_start + n_spends as usize * 192],
+        );
+        new_bytes.extend_from_slice(&first_proof_bytes);
+
+        // Spend auth sigs: original + duplicate first
+        new_bytes.extend_from_slice(
+            &tx_bytes[sig_section_start..sig_section_start + n_spends as usize * 64],
+        );
+        new_bytes.extend_from_slice(&first_sig_bytes);
+
+        // Remainder (output proofs, binding sig, orchard)
+        new_bytes.extend_from_slice(&remainder);
+
+        *transaction = Transaction::zcash_deserialize(new_bytes.as_slice())
+            .expect("modified V5 transaction with duplicated sapling spend should deserialize");
+
+        duplicate_nullifier
+    } else {
+        // V4 transaction layout:
+        // After header, transparent data, locktime, expiryHeight, valueBalanceSapling,
+        // nSpendsSapling (compact_size), then each spend: cv(32) + anchor(32) + nullifier(32) + rk(32) + zkproof(192) + spendAuthSig(64) = 384 bytes
+
+        let mut pos = 8usize; // nVersion(4) + nVersionGroupId(4)
+
+        // Parse transparent inputs
+        let n_inputs = parse_compact_size(&tx_bytes, &mut pos);
+        for _ in 0..n_inputs {
+            pos += 36;
+            let script_len = parse_compact_size(&tx_bytes, &mut pos);
+            pos += script_len as usize + 4;
+        }
+
+        // Parse transparent outputs
+        let n_outputs = parse_compact_size(&tx_bytes, &mut pos);
+        for _ in 0..n_outputs {
+            pos += 8;
+            let script_len = parse_compact_size(&tx_bytes, &mut pos);
+            pos += script_len as usize;
+        }
+
+        // nLockTime(4) + nExpiryHeight(4) + valueBalanceSapling(8)
+        pos += 16;
+
+        // nSpendsSapling
+        let spend_count_pos = pos;
+        let n_spends = parse_compact_size(&tx_bytes, &mut pos);
+        assert!(n_spends > 0, "expected sapling spends");
+
+        let first_spend_start = pos;
+        // Each V4 spend is 384 bytes: cv(32) + anchor(32) + nullifier(32) + rk(32) + zkproof(192) + spendAuthSig(64)
+        let spend_size = 384;
+        let first_spend_bytes =
+            tx_bytes[first_spend_start..first_spend_start + spend_size].to_vec();
+
+        // Extract nullifier from first spend (at offset cv(32) + anchor(32) = 64)
+        let nf_start = first_spend_start + 64;
+        let mut nf_bytes = [0u8; 32];
+        nf_bytes.copy_from_slice(&tx_bytes[nf_start..nf_start + 32]);
+        let duplicate_nullifier = sapling::Nullifier::from(nf_bytes);
+
+        let spends_end = first_spend_start + (n_spends as usize * spend_size);
+
+        // Rebuild with duplicated first spend
+        let new_n_spends = n_spends + 1;
+        let mut new_bytes = Vec::new();
+
+        // Everything before the spend count
+        new_bytes.extend_from_slice(&tx_bytes[..spend_count_pos]);
+
+        // New spend count
+        write_compact_size(&mut new_bytes, new_n_spends);
+
+        // Original spends + duplicate first
+        new_bytes.extend_from_slice(&tx_bytes[first_spend_start..spends_end]);
+        new_bytes.extend_from_slice(&first_spend_bytes);
+
+        // Everything after spends
+        new_bytes.extend_from_slice(&tx_bytes[spends_end..]);
+
+        *transaction = Transaction::zcash_deserialize(new_bytes.as_slice())
+            .expect("modified V4 transaction with duplicated sapling spend should deserialize");
+
+        duplicate_nullifier
+    }
 }
 
-/// Duplicates the first spend of the `shielded_data`.
+/// Graft orchard data from a donor V5 transaction onto a target V5 transaction.
 ///
-/// Returns the nullifier of the duplicate spend.
-///
-/// # Panics
-///
-/// Will panic if `shielded_data` has no spends.
-#[allow(dead_code)] // Only used by #[ignore]d tests pending Transaction mutation support
-fn duplicate_sapling_spend_in_shielded_data<A: sapling::AnchorVariant + Clone>(
-    shielded_data: &mut sapling::ShieldedData<A>,
-) -> sapling::Nullifier {
-    match shielded_data.transfers {
-        sapling::TransferData::SpendsAndMaybeOutputs { ref mut spends, .. } => {
-            let duplicate_spend = spends.first().clone();
-            let duplicate_nullifier = duplicate_spend.nullifier;
+/// Finds a V5 non-coinbase transaction with orchard data from the network's test blocks,
+/// extracts the orchard section, replaces the target's orchard section with it,
+/// and optionally overrides the flags byte.
+fn graft_orchard_data_onto_v5_tx(
+    target: &Transaction,
+    net: &Network,
+    override_flags: Option<u8>,
+) -> Transaction {
+    // Find a V5 tx with orchard data to use as donor
+    let donor = v5_transactions(net.block_iter())
+        .find(|tx| tx.has_orchard_shielded_data())
+        .expect("V5 tx with orchard data");
 
-            let mut spends_vec = spends.as_slice().to_vec();
-            spends_vec.push(duplicate_spend);
-            *spends = AtLeastOne::from_vec(spends_vec)
-                .expect("pushing one element never breaks at least one constraints");
+    let target_bytes = target
+        .zcash_serialize_to_vec()
+        .expect("target serialization should succeed");
+    let donor_bytes = donor
+        .zcash_serialize_to_vec()
+        .expect("donor serialization should succeed");
 
-            duplicate_nullifier
-        }
-        sapling::TransferData::JustOutputs { .. } => {
-            unreachable!("Sapling shielded data has no spends")
-        }
+    // Find the start of the orchard section in both transactions
+    let target_orchard_start = find_v5_orchard_section_start(&target_bytes);
+    let donor_orchard_start = find_v5_orchard_section_start(&donor_bytes);
+
+    // Build the new transaction: target header + transparent + sapling, then donor orchard
+    let mut new_bytes = target_bytes[..target_orchard_start].to_vec();
+    new_bytes.extend_from_slice(&donor_bytes[donor_orchard_start..]);
+
+    // Override flags if requested
+    if let Some(flags) = override_flags {
+        let flags_offset = find_v5_orchard_flags_offset(&new_bytes);
+        new_bytes[flags_offset] = flags;
+    }
+
+    Transaction::zcash_deserialize(new_bytes.as_slice())
+        .expect("grafted V5 transaction should deserialize")
+}
+
+/// Skip past the V5 header and transparent section, returning the position
+/// just after transparent outputs (at the start of the sapling section).
+fn skip_v5_header_and_transparent(tx_bytes: &[u8]) -> usize {
+    // V5 header: version(4) + versionGroupId(4) + consensusBranchId(4) + lockTime(4) + expiryHeight(4)
+    let mut pos = 20usize;
+
+    // Parse transparent inputs
+    let n_inputs = parse_compact_size(tx_bytes, &mut pos);
+    for _ in 0..n_inputs {
+        pos += 36;
+        let script_len = parse_compact_size(tx_bytes, &mut pos);
+        pos += script_len as usize + 4;
+    }
+
+    // Parse transparent outputs
+    let n_outputs = parse_compact_size(tx_bytes, &mut pos);
+    for _ in 0..n_outputs {
+        pos += 8;
+        let script_len = parse_compact_size(tx_bytes, &mut pos);
+        pos += script_len as usize;
+    }
+
+    pos
+}
+
+/// Skip past the V5 sapling section, returning the position of the orchard section.
+///
+/// `pos` should be at the start of the sapling section.
+fn skip_v5_sapling_section(tx_bytes: &[u8], pos: &mut usize) {
+    let n_spends = parse_compact_size(tx_bytes, pos);
+    *pos += n_spends as usize * 96; // compact spends: cv(32) + nf(32) + rk(32)
+
+    let n_sapling_outputs = parse_compact_size(tx_bytes, pos);
+    *pos += n_sapling_outputs as usize * 756; // compact outputs: cv(32) + cmu(32) + epk(32) + enc(580) + out(80)
+
+    let has_sapling_data = n_spends > 0 || n_sapling_outputs > 0;
+
+    if has_sapling_data {
+        *pos += 8; // valueBalanceSapling (i64)
+    }
+
+    if n_spends > 0 {
+        *pos += 32; // anchor
+    }
+    *pos += n_spends as usize * 192; // spend proofs
+    *pos += n_spends as usize * 64; // spend auth sigs
+    *pos += n_sapling_outputs as usize * 192; // output proofs
+
+    if has_sapling_data {
+        *pos += 64; // binding sig
+    }
+}
+
+/// Find the byte offset where the orchard section starts in a serialized V5 transaction.
+///
+/// This is the position of nActionsOrchard (compact_size).
+fn find_v5_orchard_section_start(tx_bytes: &[u8]) -> usize {
+    let mut pos = skip_v5_header_and_transparent(tx_bytes);
+    skip_v5_sapling_section(tx_bytes, &mut pos);
+    pos
+}
+
+/// Find the byte offset of the orchard flags byte in a serialized V5 transaction.
+///
+/// Parses past the V5 header, transparent section, and sapling section to the orchard
+/// section, then past the actions to the flags byte.
+fn find_v5_orchard_flags_offset(tx_bytes: &[u8]) -> usize {
+    let mut pos = find_v5_orchard_section_start(tx_bytes);
+
+    // Orchard section: nActionsOrchard
+    let n_actions = parse_compact_size(tx_bytes, &mut pos);
+    assert!(n_actions > 0, "expected orchard actions");
+
+    // Each action: cv(32) + nullifier(32) + rk(32) + cmx(32) + ephemeralKey(32) +
+    //              encCiphertext(580) + outCiphertext(80) = 820 bytes
+    pos += n_actions as usize * 820;
+
+    // Now pos points to flagsOrchard (1 byte)
+    pos
+}
+
+/// Write a CompactSize integer to `bytes`.
+fn write_compact_size(bytes: &mut Vec<u8>, value: u64) {
+    if value < 0xfd {
+        bytes.push(value as u8);
+    } else if value <= 0xffff {
+        bytes.push(0xfd);
+        bytes.extend_from_slice(&(value as u16).to_le_bytes());
+    } else if value <= 0xffff_ffff {
+        bytes.push(0xfe);
+        bytes.extend_from_slice(&(value as u32).to_le_bytes());
+    } else {
+        bytes.push(0xff);
+        bytes.extend_from_slice(&value.to_le_bytes());
     }
 }
 
@@ -2777,7 +3760,7 @@ fn fill_action_with_note_encryption_test_vector(
 /// Test if shielded coinbase outputs are decryptable with an all-zero outgoing viewing key.
 // TODO: Rewrite when Transaction API supports insert_fake_orchard_shielded_data.
 #[test]
-#[ignore = "requires insert_fake_orchard_shielded_data, not available with new Transaction type"]
+#[ignore = "requires constructing custom orchard actions with specific note encryption test vector fields, not feasible with byte-level manipulation"]
 fn coinbase_outputs_are_decryptable_for_fake_v5_blocks() {
     unimplemented!("requires insert_fake_orchard_shielded_data");
 }
@@ -2785,7 +3768,7 @@ fn coinbase_outputs_are_decryptable_for_fake_v5_blocks() {
 /// Test if random shielded outputs are NOT decryptable with an all-zero outgoing viewing key.
 // TODO: Rewrite when Transaction API supports insert_fake_orchard_shielded_data.
 #[test]
-#[ignore = "requires insert_fake_orchard_shielded_data, not available with new Transaction type"]
+#[ignore = "requires constructing custom orchard actions with specific note encryption test vector fields, not feasible with byte-level manipulation"]
 fn shielded_outputs_are_not_decryptable_for_fake_v5_blocks() {
     unimplemented!("requires insert_fake_orchard_shielded_data");
 }
@@ -2930,7 +3913,7 @@ async fn mempool_zip317_ok() {
 
 // TODO: Rewrite when Transaction API supports constructing/mutating orchard shielded data.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "requires insert_fake_orchard_shielded_data and orchard_shielded_data_mut, not supported by new Transaction type"]
+#[ignore = "requires constructing and modifying orchard bundles with garbage proofs, not feasible with byte-level manipulation"]
 async fn mempool_skip_accepts_block_with_garbage_orchard_proofs() {
     unimplemented!("requires Transaction orchard shielded data mutation support");
 }
