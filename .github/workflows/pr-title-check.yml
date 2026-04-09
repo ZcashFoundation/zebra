@@ -82,6 +82,9 @@ jobs:
 
       - name: Comment on invalid PR title
         uses: marocchino/sticky-pull-request-comment@d4d6b0936434b21bc8345ad45a440c5f7d2c40ff #v3.0.3
+        # null comparison is intentional: the action only sets error_message on failure.
+        # When validation passes the output key is absent (null), not empty string.
+        # See: https://github.com/amannn/action-semantic-pull-request#outputs
         if: always() && (steps.lint_pr_title.outputs.error_message != null)
         with:
           header: pr-title-lint-error
