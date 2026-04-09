@@ -360,6 +360,86 @@ jobs:
           fi
           "
 
+  # Upload checkpoint output as an artifact for automated checkpoint PRs.
+  # Only runs for checkpoint generation tests — extracts "HEIGHT HASH" lines
+  # from the container logs. The checkpoint-update.yml workflow consumes these.
+  upload-checkpoint-artifact:
+    name: Upload ${{ inputs.test_id }} checkpoint artifact
+    runs-on: ubuntu-latest
+    needs: [ test-result ]
+    if: ${{ needs.test-result.result == 'success' && startsWith(inputs.test_id, 'generate-checkpoints-') }}
+    env:
+      TEST_ID: ${{ inputs.test_id }}
+      GCP_ZONE: ${{ vars.GCP_ZONE }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          persist-credentials: false
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@9e7def61550737ba68c62d34a32dd31792e3f429 #v5.5.0
+        with:
+          short-length: 7
+          slug-maxlength: 23
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@ba79af03959ebeac9769e648f473a284504d9193 #v2.1.10
+        with:
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@77e7a554d41e2ee56fc945c52dfd3f33d12def9a #v2.1.4
+      - name: Extract checkpoint lines from container logs
+        run: |
+          INSTANCE_NAME="${TEST_ID}-${GITHUB_REF_SLUG_URL}-${GITHUB_SHA_SHORT}"
+          CONTAINER_PREFIX="${TEST_ID}"
+
+          CONTAINER_ID=$(gcloud compute ssh "${INSTANCE_NAME}" \
+            --zone "${GCP_ZONE}" \
+            --ssh-flag="-o ServerAliveInterval=5" \
+            --ssh-flag="-o ConnectionAttempts=20" \
+            --ssh-flag="-o ConnectTimeout=5" \
+            --command="sudo docker ps -a --filter name=${CONTAINER_PREFIX} -q --no-trunc" 2>/dev/null | head -1)
+
+          if [ -z "$CONTAINER_ID" ]; then
+            echo "No container found for ${CONTAINER_PREFIX}"
+            exit 1
+          fi
+
+          echo "Extracting checkpoint lines from container ${CONTAINER_ID}..."
+          gcloud compute ssh "${INSTANCE_NAME}" \
+            --zone "${GCP_ZONE}" \
+            --ssh-flag="-o ServerAliveInterval=5" \
+            --ssh-flag="-o ConnectionAttempts=20" \
+            --ssh-flag="-o ConnectTimeout=5" \
+            --command="sudo docker logs ${CONTAINER_ID} 2>/dev/null" \
+            | grep -E '^[0-9]+ [0-9a-f]{64}$' \
+            > checkpoint-output.txt || true
+
+          LINES=$(wc -l < checkpoint-output.txt)
+          echo "Extracted ${LINES} checkpoint lines"
+
+          if [ "$LINES" -eq 0 ]; then
+            echo "WARNING: No checkpoint lines found in container logs"
+            exit 1
+          fi
+
+          # Determine the network from the test_id
+          NETWORK="mainnet"
+          if echo "${TEST_ID}" | grep -qi "testnet"; then
+            NETWORK="testnet"
+          fi
+          mv checkpoint-output.txt "checkpoints-${NETWORK}.txt"
+
+      - name: Upload checkpoint artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
+        with:
+          name: ${{ inputs.test_id }}-checkpoints
+          path: checkpoints-*.txt
+          retention-days: 30
+
   # create a state image from the instance's state disk, if requested by the caller
   create-state-image:
     name: Create ${{ inputs.test_id }} cached state image
