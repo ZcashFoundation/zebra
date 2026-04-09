@@ -63,12 +63,12 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
+      - uses: actions-rust-lang/setup-rust-toolchain@150fca883cd4034361b621bd4e6a9d34e5143606 #v1.15.4
         with:
           toolchain: ${{ matrix.rust-version }}
           cache-key: unit-tests-${{ matrix.os }}-${{ matrix.rust-version }}-${{ matrix.features }}
           cache-on-failure: true
-      - uses: taiki-e/install-action@305bebabd4457bed9b82541755f034994382465b #v2.68.10
+      - uses: taiki-e/install-action@80e6af7a2ec7f280fffe2d0a9d3a12a9d11d86e9 #v2.75.1
         with:
           tool: cargo-nextest
       - uses: ./.github/actions/setup-zebra-build
@@ -108,11 +108,11 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
+      - uses: actions-rust-lang/setup-rust-toolchain@150fca883cd4034361b621bd4e6a9d34e5143606 #v1.15.4
         with:
           toolchain: stable
           cache-on-failure: true
-      - uses: taiki-e/install-action@305bebabd4457bed9b82541755f034994382465b #v2.68.10
+      - uses: taiki-e/install-action@80e6af7a2ec7f280fffe2d0a9d3a12a9d11d86e9 #v2.75.1
         with:
           tool: cargo-nextest
       - uses: ./.github/actions/setup-zebra-build
