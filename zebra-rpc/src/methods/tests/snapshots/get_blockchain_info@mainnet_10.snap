@@ -45,7 +45,7 @@ expression: info
       "monitored": false
     },
     {
-      "id": "deferred",
+      "id": "lockbox",
       "chainValue": 0.0,
       "chainValueZat": 0,
       "monitored": false
@@ -85,6 +85,11 @@ expression: info
     "c8e71055": {
       "name": "NU6",
       "activationheight": 2726400,
+      "status": "pending"
+    },
+    "4dec4df0": {
+      "name": "NU6.1",
+      "activationheight": 3146400,
       "status": "pending"
     }
   },

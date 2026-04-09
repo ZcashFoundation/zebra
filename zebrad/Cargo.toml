@@ -1,25 +1,24 @@
 [package]
 # Crate metadata
 name = "zebrad"
-version = "2.3.0"
-authors = ["Zcash Foundation <zebra@zfnd.org>"]
+version = "4.3.0"
+authors.workspace = true
 description = "The Zcash Foundation's independent, consensus-compatible implementation of a Zcash node"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/ZcashFoundation/zebra"
+license.workspace = true
+repository.workspace = true
 
 readme = "../README.md"
-homepage = "https://zfnd.org/zebra/"
+homepage.workspace = true
 # crates.io is limited to 5 keywords and categories
-keywords = ["zebra", "zcash"]
+keywords.workspace = true
 # Must be one of <https://crates.io/category_slugs>
 categories = ["command-line-utilities", "cryptography::cryptocurrencies"]
 
 # Settings that impact compilation
-edition = "2021"
+edition.workspace = true
 
-# Zebra is only supported on the latest stable Rust version. See the README for details.
-# Any Zebra release can break compatibility with older Rust versions.
-rust-version = "1.85.0"
+# Zebra can have a higher MSRV than the other crates since it is a binary.
+rust-version = "1.89"
 
 # Settings that impact runtime behaviour
 
@@ -46,6 +45,7 @@ features = [
     "filter-reload",
     "flamegraph",
     "journald",
+    "opentelemetry",
     "prometheus",
     "sentry",
     "indexer",
@@ -53,18 +53,16 @@ features = [
 
 [features]
 # In release builds, don't compile debug logging code, to improve performance.
-default = ["release_max_level_info", "progress-bar"]
+default-release-binaries = ["release_max_level_info", "progress-bar", "prometheus", "sentry"]
+
 
 # Default features for official ZF binary release builds
-default-release-binaries = ["default", "sentry"]
+default = ["default-release-binaries"]
 
 # Production features that activate extra dependencies, or extra features in dependencies
 
 # Indexer support
 indexer = ["zebra-state/indexer"]
-
-# TODO: Remove this feature when releasing Zebra 3.0 (#9412).
-getblocktemplate-rpcs = []
 
 # Experimental internal miner support
 internal-miner = [
@@ -82,7 +80,8 @@ elasticsearch = [
 # Tracing and monitoring
 sentry = ["dep:sentry"]
 journald = ["tracing-journald"]
-filter-reload = ["hyper", "http-body-util", "hyper-util", "bytes"]
+filter-reload = []
+opentelemetry = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp", "dep:tracing-opentelemetry"]
 
 progress-bar = [
     "howudoin",
@@ -129,7 +128,7 @@ zebra-checkpoints = [
 ]
 
 # The gRPC tests also need an installed lightwalletd binary
-lightwalletd-grpc-tests = ["tonic-build"]
+lightwalletd-grpc-tests = ["tonic-prost-build"]
 
 # tokio-console support
 #
@@ -144,32 +143,27 @@ lightwalletd-grpc-tests = ["tonic-build"]
 # https://github.com/tokio-rs/console/blob/main/console-subscriber/README.md#enabling-tokio-instrumentation
 tokio-console = ["console-subscriber"]
 
-# TODO: replace with environmental variables that skip the tests when not set (part of #2995)
-sync_to_mandatory_checkpoint_mainnet = []
-sync_to_mandatory_checkpoint_testnet = []
-sync_past_mandatory_checkpoint_mainnet = []
-sync_past_mandatory_checkpoint_testnet = []
-
-tx_v6 = ["zebra-chain/tx_v6", "zebra-state/tx_v6", "zebra-consensus/tx_v6"]
+tx_v6 = ["zebra-chain/tx_v6", "zebra-state/tx_v6", "zebra-consensus/tx_v6", "zebra-rpc/tx_v6"]
 
 # Enable the C++/Rust comparison interpreter. See zebra-script/Cargo.toml for
 # details. This should be only used for testing.
 comparison-interpreter = ["zebra-script/comparison-interpreter"]
 
 [dependencies]
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.46" }
-zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.46" }
-zebra-network = { path = "../zebra-network", version = "1.0.0-beta.46" }
-zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.46", features = ["rpc-client"] }
-zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.46" }
-zebra-state = { path = "../zebra-state", version = "1.0.0-beta.46" }
+zebra-chain = { path = "../zebra-chain", version = "6.0.1" }
+zebra-consensus = { path = "../zebra-consensus", version = "5.0.1" }
+zebra-network = { path = "../zebra-network", version = "5.0.0" }
+zebra-node-services = { path = "../zebra-node-services", version = "4.0.0", features = ["rpc-client"] }
+zebra-rpc = { path = "../zebra-rpc", version = "6.0.1" }
+zebra-state = { path = "../zebra-state", version = "5.0.0" }
 # zebra-script is not used directly, but we list it here to enable the
 # "comparison-interpreter" feature. (Feature unification will take care of
 # enabling it in the other imports of zcash-script.)
-zebra-script = { path = "../zebra-script", version = "1.0.0-beta.46" }
+zebra-script = { path = "../zebra-script", version = "5.0.0" }
+zcash_script = { workspace = true }
 
 # Required for crates.io publishing, but it's only used in tests
-zebra-utils = { path = "../zebra-utils", version = "1.0.0-beta.46", optional = true }
+zebra-utils = { path = "../zebra-utils", version = "5.0.0", optional = true }
 
 abscissa_core = { workspace = true }
 clap = { workspace = true, features = ["cargo"] }
@@ -189,9 +183,6 @@ tower = { workspace = true, features = ["hedge", "limit"] }
 pin-project = { workspace = true }
 
 color-eyre = { workspace = true, features = ["issue-url"] }
-# This is a transitive dependency via color-eyre.
-# Enable a feature that makes tinyvec compile much faster.
-tinyvec = { workspace = true, features = ["rustc_1_55"] }
 
 thiserror = { workspace = true }
 
@@ -205,6 +196,14 @@ metrics = { workspace = true }
 
 dirs = { workspace = true }
 atty = { workspace = true }
+
+# Health check server dependencies
+hyper = { workspace = true, features = ["server", "http1"] }
+http-body-util = { workspace = true }
+hyper-util = { workspace = true, features = ["service", "server", "tokio"] }
+
+# Configuration management
+config = { workspace = true }
 
 num-integer = { workspace = true }
 rand = { workspace = true }
@@ -222,11 +221,14 @@ inferno = { workspace = true, optional = true }
 # prod feature journald
 tracing-journald = { workspace = true, optional = true }
 
+# prod feature opentelemetry
+opentelemetry = { workspace = true, optional = true }
+opentelemetry_sdk = { workspace = true, features = ["rt-tokio"], optional = true }
+opentelemetry-otlp = { workspace = true, features = ["http-proto", "reqwest-blocking-client"], optional = true }
+tracing-opentelemetry = { workspace = true, optional = true }
+
 # prod feature filter-reload
-hyper = { workspace = true, features = ["http1", "http2", "server"], optional = true }
-http-body-util = { workspace = true, optional = true }
-hyper-util = { workspace = true, optional = true }
-bytes = { workspace = true, optional = true }
+bytes = { workspace = true }
 
 # prod feature prometheus
 metrics-exporter-prometheus = { workspace = true, features = ["http-listener"], optional = true }
@@ -248,11 +250,13 @@ proptest-derive = { workspace = true, optional = true }
 # test feature tokio-console
 console-subscriber = { workspace = true, optional = true }
 
+derive-new.workspace = true
+
 [build-dependencies]
 vergen-git2 = { workspace = true, features = ["cargo", "rustc"] }
 
 # test feature lightwalletd-grpc-tests
-tonic-build = { workspace = true, optional = true }
+tonic-prost-build = { workspace = true, optional = true }
 
 [dev-dependencies]
 abscissa_core = { workspace = true, features = ["testing"] }
@@ -262,6 +266,9 @@ jsonrpsee-types = { workspace = true }
 once_cell = { workspace = true }
 regex = { workspace = true }
 insta = { workspace = true, features = ["json"] }
+bytes = { workspace = true }
+http-body-util = { workspace = true }
+hyper-util = { workspace = true }
 
 # zebra-rpc needs the preserve_order feature, it also makes test results more stable
 serde_json = { workspace = true, features = ["preserve_order"] }
@@ -278,6 +285,7 @@ zcash_keys = { workspace = true }
 # test feature lightwalletd-grpc-tests
 prost = { workspace = true }
 tonic = { workspace = true }
+tonic-prost = { workspace = true }
 
 proptest = { workspace = true }
 proptest-derive = { workspace = true }
@@ -285,13 +293,12 @@ proptest-derive = { workspace = true }
 # enable span traces and track caller in tests
 color-eyre = { workspace = true }
 
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.46", features = ["proptest-impl"] }
-zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.46", features = ["proptest-impl"] }
-zebra-network = { path = "../zebra-network", version = "1.0.0-beta.46", features = ["proptest-impl"] }
-zebra-state = { path = "../zebra-state", version = "1.0.0-beta.46", features = ["proptest-impl"] }
+zebra-chain = { path = "../zebra-chain", version = "6.0.1", features = ["proptest-impl"] }
+zebra-consensus = { path = "../zebra-consensus", version = "5.0.1", features = ["proptest-impl"] }
+zebra-network = { path = "../zebra-network", version = "5.0.0", features = ["proptest-impl"] }
+zebra-state = { path = "../zebra-state", version = "5.0.0", features = ["proptest-impl"] }
 
-zebra-test = { path = "../zebra-test", version = "1.0.0-beta.46" }
-zebra-grpc = { path = "../zebra-grpc", version = "0.1.0-alpha.13" }
+zebra-test = { path = "../zebra-test", version = "3.0.0" }
 
 # Used by the checkpoint generation tests via the zebra-checkpoints feature
 # (the binaries in this crate won't be built unless their features are enabled).
@@ -302,7 +309,17 @@ zebra-grpc = { path = "../zebra-grpc", version = "0.1.0-alpha.13" }
 # When `-Z bindeps` is stabilised, enable this binary dependency instead:
 # https://github.com/rust-lang/cargo/issues/9096
 # zebra-utils { path = "../zebra-utils", artifact = "bin:zebra-checkpoints" }
-zebra-utils = { path = "../zebra-utils", version = "1.0.0-beta.46" }
+zebra-utils = { path = "../zebra-utils", version = "5.0.0" }
 
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tokio_unstable)'] }
+[package.metadata.cargo-udeps.ignore]
+# These dependencies are false positives - they are actually used
+normal = [
+    "console-subscriber",  # Used behind the tokio-console feature flag
+    "zebra-utils",         # Used for the zebra-checkpoints feature
+]
+development = [
+    "zebra-utils",         # Required workaround to build zebra-checkpoints binary for tests (see zebra-utils/tests/build_utils_for_zebrad_tests.rs)
+]
+
+[lints]
+workspace = true

@@ -303,6 +303,9 @@ fn mock_transparent_transaction(
     // Create the mock transaction
     let expiry_height = block_height;
 
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+    let zip233_amount = Amount::zero();
+
     let transaction = match transaction_version {
         4 => Transaction::V4 {
             inputs,
@@ -317,6 +320,17 @@ fn mock_transparent_transaction(
             outputs,
             lock_time,
             expiry_height,
+            sapling_shielded_data: None,
+            orchard_shielded_data: None,
+            network_upgrade,
+        },
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+        6 => Transaction::V6 {
+            inputs,
+            outputs,
+            lock_time,
+            expiry_height,
+            zip233_amount,
             sapling_shielded_data: None,
             orchard_shielded_data: None,
             network_upgrade,
@@ -349,6 +363,9 @@ fn sanitize_transaction_version(
             Sapling | Blossom | Heartwood | Canopy => 4,
             // FIXME: Use 6 for Nu7
             Nu5 | Nu6 | Nu6_1 | Nu7 => 5,
+
+            #[cfg(zcash_unstable = "zfuture")]
+            NetworkUpgrade::ZFuture => u8::MAX,
         }
     };
 

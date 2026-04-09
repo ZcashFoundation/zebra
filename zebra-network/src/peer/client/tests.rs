@@ -1,6 +1,7 @@
 //! Tests for the [`Client`] part of peer connections, and some test utilities for mocking
 //! [`Client`] instances.
 
+#![allow(clippy::unwrap_in_result)]
 #![cfg_attr(feature = "proptest-impl", allow(dead_code))]
 
 use std::{
@@ -126,12 +127,12 @@ impl ClientTestHarness {
             .client_request_receiver
             .as_mut()
             .expect("request receiver endpoint has been dropped")
-            .try_next();
+            .try_recv();
 
         match receive_result {
-            Ok(Some(request)) => ReceiveRequestAttempt::Request(request),
-            Ok(None) => ReceiveRequestAttempt::Closed,
-            Err(_) => ReceiveRequestAttempt::Empty,
+            Ok(request) => ReceiveRequestAttempt::Request(request),
+            Err(mpsc::TryRecvError::Closed) => ReceiveRequestAttempt::Closed,
+            Err(mpsc::TryRecvError::Empty) => ReceiveRequestAttempt::Empty,
         }
     }
 

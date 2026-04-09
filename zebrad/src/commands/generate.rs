@@ -39,11 +39,22 @@ impl Runnable for GenerateCmd {
 # documented here:
 # https://docs.rs/zebrad/latest/zebrad/config/struct.ZebradConfig.html
 #
-# zebrad attempts to load configs in the following order:
+# CONFIGURATION SOURCES (in order of precedence, highest to lowest):
 #
-# 1. The -c flag on the command line, e.g., `zebrad -c myconfig.toml start`;
-# 2. The file `zebrad.toml` in the users's preference directory (platform-dependent);
-# 3. The default config.
+# 1. Environment variables with ZEBRA_ prefix (highest precedence)
+#    - Format: ZEBRA_SECTION__KEY (double underscore for nested keys)
+#    - Examples:
+#      - ZEBRA_NETWORK__NETWORK=Testnet
+#      - ZEBRA_RPC__LISTEN_ADDR=127.0.0.1:8232
+#      - ZEBRA_STATE__CACHE_DIR=/path/to/cache
+#      - ZEBRA_TRACING__FILTER=debug
+#      - ZEBRA_METRICS__ENDPOINT_ADDR=0.0.0.0:9999
+#
+# 2. Configuration file (TOML format)
+#    - At the path specified via -c flag, e.g. `zebrad -c myconfig.toml start`, or
+#    - At the default path in the user's preference directory (platform-dependent, see below)
+#
+# 3. Hard-coded defaults (lowest precedence)
 #
 # The user's preference directory and the default path to the `zebrad` config are platform dependent,
 # based on `dirs::preference_dir`, see https://docs.rs/dirs/latest/dirs/fn.preference_dir.html :

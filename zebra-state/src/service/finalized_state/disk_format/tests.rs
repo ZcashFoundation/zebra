@@ -1,5 +1,7 @@
 //! Tests for the finalized disk format.
 
+#![allow(clippy::unwrap_in_result)]
+
 use serde::{Deserialize, Serialize};
 
 #[cfg(test)]

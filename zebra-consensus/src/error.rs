@@ -174,7 +174,7 @@ pub enum TransactionError {
     #[error("must have at least one active orchard flag")]
     NotEnoughFlags,
 
-    #[error("could not find a mempool transaction input UTXO in the best chain")]
+    #[error("could not find transparent input UTXO in the best chain or mempool")]
     TransparentInputNotFound,
 
     #[error("could not contextually validate transaction on best chain: {0}")]
@@ -358,13 +358,13 @@ pub enum BlockError {
     WrongTransactionConsensusBranchId,
 
     #[error(
-        "block {height:?} {hash:?} has {legacy_sigop_count} legacy transparent signature operations, \
+        "block {height:?} {hash:?} has {sigops} legacy transparent signature operations, \
          but the limit is {MAX_BLOCK_SIGOPS}"
     )]
     TooManyTransparentSignatureOperations {
         height: zebra_chain::block::Height,
         hash: zebra_chain::block::Hash,
-        legacy_sigop_count: u64,
+        sigops: u32,
     },
 
     #[error("summing miner fees for block {height:?} {hash:?} failed: {source:?}")]
@@ -381,6 +381,12 @@ pub enum BlockError {
 impl From<SubsidyError> for BlockError {
     fn from(err: SubsidyError) -> BlockError {
         BlockError::Transaction(TransactionError::Subsidy(err))
+    }
+}
+
+impl From<amount::Error> for BlockError {
+    fn from(e: amount::Error) -> Self {
+        Self::from(SubsidyError::from(e))
     }
 }
 

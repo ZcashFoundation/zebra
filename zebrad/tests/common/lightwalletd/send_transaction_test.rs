@@ -24,7 +24,7 @@ use color_eyre::eyre::{eyre, Result};
 use zebra_chain::{
     block::Block,
     parameters::Network::*,
-    serialization::ZcashSerialize,
+    serialization::{BytesInDisplayOrder, ZcashSerialize},
     transaction::{self, Transaction},
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
@@ -333,14 +333,14 @@ trait SendTransactionMethod {
     async fn send_transaction(
         &self,
         transaction: &Arc<Transaction>,
-    ) -> Result<zebra_rpc::methods::SentTransactionHash, BoxError>;
+    ) -> Result<zebra_rpc::methods::SendRawTransactionResponse, BoxError>;
 }
 
 impl SendTransactionMethod for RpcRequestClient {
     async fn send_transaction(
         &self,
         transaction: &Arc<Transaction>,
-    ) -> Result<zebra_rpc::methods::SentTransactionHash, BoxError> {
+    ) -> Result<zebra_rpc::methods::SendRawTransactionResponse, BoxError> {
         let tx_data = hex::encode(transaction.zcash_serialize_to_vec()?);
         self.json_result_from_call("sendrawtransaction", format!(r#"["{tx_data}"]"#))
             .await

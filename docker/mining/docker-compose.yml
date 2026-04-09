@@ -1,0 +1,92 @@
+services:
+  zebra:
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile
+    container_name: zebra
+    environment:
+      - ZEBRA_NETWORK__NETWORK=${NETWORK:-Testnet}
+      - ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:${RPC_PORT:-18232}
+      - ZEBRA_RPC__ENABLE_COOKIE_AUTH=false
+      - ZEBRA_SYNC__PARALLEL_CPU_THREADS=12
+      - ZEBRA_MINING__MINER_ADDRESS=${MINER_ADDRESS:?MINER_ADDRESS is required}
+      - ZEBRA_MINING__MINER_DATA=${MINER_DATA:-}
+      - ZEBRA_MINING__MINER_MEMO=${MINER_MEMO:-}
+    volumes:
+      - zebra-data:/home/zebra/.cache/zebra
+    ports:
+      - "${PEER_PORT:-18233}:${PEER_PORT:-18233}"
+    networks:
+      - mining
+    restart: unless-stopped
+    tty: true
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8080/healthy || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    networks:
+      - mining
+    restart: unless-stopped
+
+  s-nomp:
+    build:
+      context: https://github.com/ZcashFoundation/s-nomp.git
+      dockerfile: Dockerfile.arch
+    container_name: s-nomp
+    environment:
+      - ZEBRA_HOST=zebra
+      - ZEBRA_RPC_PORT=${RPC_PORT:-18232}
+      - REDIS_HOST=redis
+      - STRATUM_PORT=${STRATUM_PORT:-3333}
+      - NETWORK=${NETWORK:-Testnet}
+      - POOL_ADDRESS=${MINER_ADDRESS}
+    ports:
+      - "${STRATUM_PORT:-3333}:${STRATUM_PORT:-3333}"
+      - "8080:8080"
+    depends_on:
+      zebra:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - mining
+    restart: unless-stopped
+    volumes:
+      - ./s-nomp-entrypoint.sh:/app/s-nomp-entrypoint.sh:ro
+    entrypoint: /app/s-nomp-entrypoint.sh
+
+  nheqminer:
+    build:
+      context: https://github.com/ZcashFoundation/nheqminer.git
+      dockerfile: Dockerfile
+    container_name: nheqminer
+    environment:
+      - POOL_HOST=s-nomp
+      - POOL_PORT=${STRATUM_PORT:-3333}
+      - WORKER_ADDRESS=${MINER_ADDRESS}
+      - WORKER_NAME=${WORKER_NAME:-docker}
+      - CPU_THREADS=${CPU_THREADS:-1}
+    command: >
+      -l ${POOL_HOST:-s-nomp}:${STRATUM_PORT:-3333}
+      -u ${MINER_ADDRESS}.${WORKER_NAME:-docker}
+      -t ${CPU_THREADS:-1}
+    depends_on:
+      - s-nomp
+    networks:
+      - mining
+    restart: unless-stopped
+    profiles:
+      - miner
+
+networks:
+  mining:
+    driver: bridge
+
+volumes:
+  zebra-data:

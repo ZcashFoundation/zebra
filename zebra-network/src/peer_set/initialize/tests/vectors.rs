@@ -8,10 +8,10 @@
 //! ## Failures due to Configured Network Interfaces
 //!
 //! If your test environment does not have any IPv6 interfaces configured, skip IPv6 tests
-//! by setting the `ZEBRA_SKIP_IPV6_TESTS` environmental variable.
+//! by setting the `SKIP_IPV6_TESTS` environmental variable.
 //!
 //! If it does not have any IPv4 interfaces, or IPv4 localhost is not on `127.0.0.1`,
-//! skip all the network tests by setting the `ZEBRA_SKIP_NETWORK_TESTS` environmental variable.
+//! skip all the network tests by setting the `SKIP_NETWORK_TESTS` environmental variable.
 
 use std::{
     net::{Ipv4Addr, SocketAddr},
@@ -422,11 +422,11 @@ async fn crawler_peer_limit_zero_connect_panic() {
     let (_config, mut peerset_rx) =
         spawn_crawler_with_peer_limit(0, unreachable_outbound_connector).await;
 
-    let peer_result = peerset_rx.try_next();
+    let peer_result = peerset_rx.try_recv();
     assert!(
-        // `Err(_)` means that no peers are available, and the sender has not been dropped.
-        // `Ok(None)` means that no peers are available, and the sender has been dropped.
-        matches!(peer_result, Err(_) | Ok(None)),
+        // `Err(TryRecvError::Empty)` means no peers are available and the channel is still open.
+        // `Err(TryRecvError::Closed)` means the channel is closed.
+        peer_result.is_err(),
         "unexpected peer when outbound limit is zero: {peer_result:?}",
     );
 }
@@ -445,11 +445,11 @@ async fn crawler_peer_limit_one_connect_error() {
     let (_config, mut peerset_rx) =
         spawn_crawler_with_peer_limit(1, error_outbound_connector).await;
 
-    let peer_result = peerset_rx.try_next();
+    let peer_result = peerset_rx.try_recv();
     assert!(
-        // `Err(_)` means that no peers are available, and the sender has not been dropped.
-        // `Ok(None)` means that no peers are available, and the sender has been dropped.
-        matches!(peer_result, Err(_) | Ok(None)),
+        // `Err(TryRecvError::Empty)` means no peers are available and the channel is still open.
+        // `Err(TryRecvError::Closed)` means the channel is closed.
+        peer_result.is_err(),
         "unexpected peer when all connections error: {peer_result:?}",
     );
 }
@@ -486,13 +486,11 @@ async fn crawler_peer_limit_one_connect_ok_then_drop() {
 
     let mut peer_count: usize = 0;
     loop {
-        let peer_result = peerset_rx.try_next();
+        let peer_result = peerset_rx.try_recv();
         match peer_result {
             // A peer handshake succeeded.
-            Ok(Some(_peer_change)) => peer_count += 1,
-            // The channel is closed and there are no messages left in the channel.
-            Ok(None) => break,
-            // The channel is still open, but there are no messages left in the channel.
+            Ok(_peer_change) => peer_count += 1,
+            // The channel is closed or there are no messages left in the channel.
             Err(_) => break,
         }
     }
@@ -540,30 +538,26 @@ async fn crawler_peer_limit_one_connect_ok_stay_open() {
 
     let mut peer_change_count: usize = 0;
     loop {
-        let peer_change_result = peerset_rx.try_next();
+        let peer_change_result = peerset_rx.try_recv();
         match peer_change_result {
             // A peer handshake succeeded.
-            Ok(Some(_peer_change)) => peer_change_count += 1,
-            // The channel is closed and there are no messages left in the channel.
-            Ok(None) => break,
-            // The channel is still open, but there are no messages left in the channel.
+            Ok(_peer_change) => peer_change_count += 1,
+            // The channel is closed or there are no messages left in the channel.
             Err(_) => break,
         }
     }
 
     let mut peer_tracker_count: usize = 0;
     loop {
-        let peer_tracker_result = peer_tracker_rx.try_next();
+        let peer_tracker_result = peer_tracker_rx.try_recv();
         match peer_tracker_result {
             // We held this peer tracker open until now.
-            Ok(Some(peer_tracker)) => {
+            Ok(peer_tracker) => {
                 std::mem::drop(peer_tracker);
                 peer_tracker_count += 1;
             }
 
-            // The channel is closed and there are no messages left in the channel.
-            Ok(None) => break,
-            // The channel is still open, but there are no messages left in the channel.
+            // The channel is closed or there are no messages left in the channel.
             Err(_) => break,
         }
     }
@@ -599,11 +593,11 @@ async fn crawler_peer_limit_default_connect_error() {
     let (_config, mut peerset_rx) =
         spawn_crawler_with_peer_limit(None, error_outbound_connector).await;
 
-    let peer_result = peerset_rx.try_next();
+    let peer_result = peerset_rx.try_recv();
     assert!(
-        // `Err(_)` means that no peers are available, and the sender has not been dropped.
-        // `Ok(None)` means that no peers are available, and the sender has been dropped.
-        matches!(peer_result, Err(_) | Ok(None)),
+        // `Err(TryRecvError::Empty)` means no peers are available and the channel is still open.
+        // `Err(TryRecvError::Closed)` means the channel is closed.
+        peer_result.is_err(),
         "unexpected peer when all connections error: {peer_result:?}",
     );
 }
@@ -642,13 +636,11 @@ async fn crawler_peer_limit_default_connect_ok_then_drop() {
 
     let mut peer_count: usize = 0;
     loop {
-        let peer_result = peerset_rx.try_next();
+        let peer_result = peerset_rx.try_recv();
         match peer_result {
             // A peer handshake succeeded.
-            Ok(Some(_peer_change)) => peer_count += 1,
-            // The channel is closed and there are no messages left in the channel.
-            Ok(None) => break,
-            // The channel is still open, but there are no messages left in the channel.
+            Ok(_peer_change) => peer_count += 1,
+            // The channel is closed or there are no messages left in the channel.
             Err(_) => break,
         }
     }
@@ -697,30 +689,26 @@ async fn crawler_peer_limit_default_connect_ok_stay_open() {
 
     let mut peer_change_count: usize = 0;
     loop {
-        let peer_change_result = peerset_rx.try_next();
+        let peer_change_result = peerset_rx.try_recv();
         match peer_change_result {
             // A peer handshake succeeded.
-            Ok(Some(_peer_change)) => peer_change_count += 1,
-            // The channel is closed and there are no messages left in the channel.
-            Ok(None) => break,
-            // The channel is still open, but there are no messages left in the channel.
+            Ok(_peer_change) => peer_change_count += 1,
+            // The channel is closed or there are no messages left in the channel.
             Err(_) => break,
         }
     }
 
     let mut peer_tracker_count: usize = 0;
     loop {
-        let peer_tracker_result = peer_tracker_rx.try_next();
+        let peer_tracker_result = peer_tracker_rx.try_recv();
         match peer_tracker_result {
             // We held this peer tracker open until now.
-            Ok(Some(peer_tracker)) => {
+            Ok(peer_tracker) => {
                 std::mem::drop(peer_tracker);
                 peer_tracker_count += 1;
             }
 
-            // The channel is closed and there are no messages left in the channel.
-            Ok(None) => break,
-            // The channel is still open, but there are no messages left in the channel.
+            // The channel is closed or there are no messages left in the channel.
             Err(_) => break,
         }
     }
@@ -759,11 +747,11 @@ async fn listener_peer_limit_zero_handshake_panic() {
     let (_config, mut peerset_rx) =
         spawn_inbound_listener_with_peer_limit(0, None, unreachable_inbound_handshaker).await;
 
-    let peer_result = peerset_rx.try_next();
+    let peer_result = peerset_rx.try_recv();
     assert!(
-        // `Err(_)` means that no peers are available, and the sender has not been dropped.
-        // `Ok(None)` means that no peers are available, and the sender has been dropped.
-        matches!(peer_result, Err(_) | Ok(None)),
+        // `Err(TryRecvError::Empty)` means no peers are available and the channel is still open.
+        // `Err(TryRecvError::Closed)` means the channel is closed.
+        peer_result.is_err(),
         "unexpected peer when inbound limit is zero: {peer_result:?}",
     );
 }
@@ -784,11 +772,11 @@ async fn listener_peer_limit_one_handshake_error() {
     let (_config, mut peerset_rx) =
         spawn_inbound_listener_with_peer_limit(1, None, error_inbound_handshaker).await;
 
-    let peer_result = peerset_rx.try_next();
+    let peer_result = peerset_rx.try_recv();
     assert!(
-        // `Err(_)` means that no peers are available, and the sender has not been dropped.
-        // `Ok(None)` means that no peers are available, and the sender has been dropped.
-        matches!(peer_result, Err(_) | Ok(None)),
+        // `Err(TryRecvError::Empty)` means no peers are available and the channel is still open.
+        // `Err(TryRecvError::Closed)` means the channel is closed.
+        peer_result.is_err(),
         "unexpected peer when all handshakes error: {peer_result:?}",
     );
 }
@@ -833,13 +821,11 @@ async fn listener_peer_limit_one_handshake_ok_then_drop() {
 
     let mut peer_count: usize = 0;
     loop {
-        let peer_result = peerset_rx.try_next();
+        let peer_result = peerset_rx.try_recv();
         match peer_result {
             // A peer handshake succeeded.
-            Ok(Some(_peer_change)) => peer_count += 1,
-            // The channel is closed and there are no messages left in the channel.
-            Ok(None) => break,
-            // The channel is still open, but there are no messages left in the channel.
+            Ok(_peer_change) => peer_count += 1,
+            // The channel is closed or there are no messages left in the channel.
             Err(_) => break,
         }
     }
@@ -891,31 +877,27 @@ async fn listener_peer_limit_one_handshake_ok_stay_open() {
 
     let mut peer_change_count: usize = 0;
     loop {
-        let peer_change_result = peerset_rx.try_next();
+        let peer_change_result = peerset_rx.try_recv();
         match peer_change_result {
             // A peer handshake succeeded.
-            Ok(Some(_peer_change)) => peer_change_count += 1,
-            // The channel is closed and there are no messages left in the channel.
-            Ok(None) => break,
-            // The channel is still open, but there are no messages left in the channel.
+            Ok(_peer_change) => peer_change_count += 1,
+            // The channel is closed or there are no messages left in the channel.
             Err(_) => break,
         }
     }
 
     let mut peer_tracker_count: usize = 0;
     loop {
-        let peer_tracker_result = peer_tracker_rx.try_next();
+        let peer_tracker_result = peer_tracker_rx.try_recv();
         match peer_tracker_result {
             // We held this peer connection and tracker open until now.
-            Ok(Some((peer_connection, peer_tracker))) => {
+            Ok((peer_connection, peer_tracker)) => {
                 std::mem::drop(peer_connection);
                 std::mem::drop(peer_tracker);
                 peer_tracker_count += 1;
             }
 
-            // The channel is closed and there are no messages left in the channel.
-            Ok(None) => break,
-            // The channel is still open, but there are no messages left in the channel.
+            // The channel is closed or there are no messages left in the channel.
             Err(_) => break,
         }
     }
@@ -953,11 +935,11 @@ async fn listener_peer_limit_default_handshake_error() {
     let (_config, mut peerset_rx) =
         spawn_inbound_listener_with_peer_limit(None, None, error_inbound_handshaker).await;
 
-    let peer_result = peerset_rx.try_next();
+    let peer_result = peerset_rx.try_recv();
     assert!(
-        // `Err(_)` means that no peers are available, and the sender has not been dropped.
-        // `Ok(None)` means that no peers are available, and the sender has been dropped.
-        matches!(peer_result, Err(_) | Ok(None)),
+        // `Err(TryRecvError::Empty)` means no peers are available and the channel is still open.
+        // `Err(TryRecvError::Closed)` means the channel is closed.
+        peer_result.is_err(),
         "unexpected peer when all handshakes error: {peer_result:?}",
     );
 }
@@ -1006,13 +988,11 @@ async fn listener_peer_limit_default_handshake_ok_then_drop() {
 
     let mut peer_count: usize = 0;
     loop {
-        let peer_result = peerset_rx.try_next();
+        let peer_result = peerset_rx.try_recv();
         match peer_result {
             // A peer handshake succeeded.
-            Ok(Some(_peer_change)) => peer_count += 1,
-            // The channel is closed and there are no messages left in the channel.
-            Ok(None) => break,
-            // The channel is still open, but there are no messages left in the channel.
+            Ok(_peer_change) => peer_count += 1,
+            // The channel is closed or there are no messages left in the channel.
             Err(_) => break,
         }
     }
@@ -1065,31 +1045,27 @@ async fn listener_peer_limit_default_handshake_ok_stay_open() {
 
     let mut peer_change_count: usize = 0;
     loop {
-        let peer_change_result = peerset_rx.try_next();
+        let peer_change_result = peerset_rx.try_recv();
         match peer_change_result {
             // A peer handshake succeeded.
-            Ok(Some(_peer_change)) => peer_change_count += 1,
-            // The channel is closed and there are no messages left in the channel.
-            Ok(None) => break,
-            // The channel is still open, but there are no messages left in the channel.
+            Ok(_peer_change) => peer_change_count += 1,
+            // The channel is closed or there are no messages left in the channel.
             Err(_) => break,
         }
     }
 
     let mut peer_tracker_count: usize = 0;
     loop {
-        let peer_tracker_result = peer_tracker_rx.try_next();
+        let peer_tracker_result = peer_tracker_rx.try_recv();
         match peer_tracker_result {
             // We held this peer connection and tracker open until now.
-            Ok(Some((peer_connection, peer_tracker))) => {
+            Ok((peer_connection, peer_tracker)) => {
                 std::mem::drop(peer_connection);
                 std::mem::drop(peer_tracker);
                 peer_tracker_count += 1;
             }
 
-            // The channel is closed and there are no messages left in the channel.
-            Ok(None) => break,
-            // The channel is still open, but there are no messages left in the channel.
+            // The channel is closed or there are no messages left in the channel.
             Err(_) => break,
         }
     }
@@ -1382,7 +1358,7 @@ async fn add_initial_peers_deadlock() {
     // still some extra peers left.
     const PEER_COUNT: usize = 200;
     const PEERSET_INITIAL_TARGET_SIZE: usize = 2;
-    const TIME_LIMIT: Duration = Duration::from_secs(10);
+    const TIME_LIMIT: Duration = Duration::from_secs(20);
 
     let _init_guard = zebra_test::init();
 
@@ -1424,7 +1400,9 @@ async fn add_initial_peers_deadlock() {
         "Test user agent".to_string(),
     );
 
-    assert!(tokio::time::timeout(TIME_LIMIT, init_future).await.is_ok());
+    tokio::time::timeout(TIME_LIMIT, init_future)
+        .await
+        .expect("should not timeout");
 }
 
 /// Open a local listener on `listen_addr` for `network`.

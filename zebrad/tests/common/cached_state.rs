@@ -17,7 +17,6 @@ use tower::{util::BoxService, Service};
 
 use zebra_chain::{
     block::{self, Block, Height},
-    chain_tip::ChainTip,
     parameters::Network,
     serialization::ZcashDeserializeInto,
 };
@@ -26,13 +25,10 @@ use zebra_state::{ChainTipChange, LatestChainTip, MAX_BLOCK_REORG_HEIGHT};
 use zebra_test::command::TestChild;
 
 use crate::common::{
-    launch::spawn_zebrad_for_rpc,
+    launch::spawn_zebrad_for_rpc_with_opts,
     sync::{check_sync_logs_until, MempoolBehavior, SYNC_FINISHED_REGEX},
     test_type::TestType,
 };
-
-/// The environmental variable that holds the path to a directory containing a cached Zebra state.
-pub const ZEBRA_CACHE_DIR: &str = "ZEBRA_CACHE_DIR";
 
 /// In integration tests, the interval between database format checks for newly added blocks.
 ///
@@ -76,6 +72,7 @@ pub fn wait_for_state_version_message<T>(zebrad: &mut TestChild<T>) -> Result<St
 
 /// Waits for the `required_version` state upgrade to complete, if needed.
 /// If `extra_required_log_regexes` are supplied, also waits for those logs before returning.
+/// Those extra regexes are also checked even if a state upgrade does not happen.
 ///
 /// This function should be called with the output of [`wait_for_state_version_message()`].
 #[tracing::instrument(skip(zebrad))]
@@ -85,15 +82,15 @@ pub fn wait_for_state_version_upgrade<T>(
     required_version: Version,
     extra_required_log_regexes: impl IntoIterator<Item = String> + std::fmt::Debug,
 ) -> Result<()> {
-    if state_version_message.contains("launching upgrade task") {
-        tracing::info!(
-            zebrad = ?zebrad.cmd,
-            %state_version_message,
-            %required_version,
-            ?extra_required_log_regexes,
-            "waiting for zebrad state upgrade..."
-        );
+    tracing::info!(
+        zebrad = ?zebrad.cmd,
+        %state_version_message,
+        %required_version,
+        ?extra_required_log_regexes,
+        "waiting for zebrad state upgrade..."
+    );
 
+    if state_version_message.contains("launching upgrade task") {
         let upgrade_pattern = format!(
             "marked database format as upgraded.*format_upgrade_version.*=.*{required_version}"
         );
@@ -111,6 +108,17 @@ pub fn wait_for_state_version_upgrade<T>(
             ?required_logs,
             ?upgrade_messages,
             "zebrad state has been upgraded"
+        );
+    } else {
+        let required_logs: Vec<String> = extra_required_log_regexes.into_iter().collect();
+        let upgrade_messages = zebrad.expect_stdout_line_matches_all_unordered(&required_logs)?;
+        tracing::info!(
+            zebrad = ?zebrad.cmd,
+            %state_version_message,
+            %required_version,
+            ?required_logs,
+            ?upgrade_messages,
+            "no zebrad upgrade needed"
         );
     }
 
@@ -138,23 +146,38 @@ pub async fn start_state_service_with_cache_dir(
     };
 
     // These tests don't need UTXOs to be verified efficiently, because they use cached states.
-    Ok(zebra_state::init(config, network, Height::MAX, 0))
+    Ok(zebra_state::init(config, network, Height::MAX, 0).await)
 }
 
-/// Loads the chain tip height from the state stored in a specified directory.
+/// Loads the finalized tip height from the state stored in a specified directory.
+///
+/// This function uses `init_read_only` instead of `init` to avoid spawning
+/// background tasks (like the metrics export task) that would keep the database
+/// lock held after this function returns.
+///
+/// Note: This returns the finalized tip height, which may be behind the best chain tip
+/// if there are non-finalized blocks.
 #[tracing::instrument]
-pub async fn load_tip_height_from_state_directory(
+pub async fn load_finalized_tip_height_from_state_directory(
     network: &Network,
     state_path: &Path,
 ) -> Result<block::Height> {
-    let (_state_service, _read_state_service, latest_chain_tip, _chain_tip_change) =
-        start_state_service_with_cache_dir(network, state_path).await?;
+    let config = zebra_state::Config {
+        cache_dir: state_path.to_path_buf(),
+        ..zebra_state::Config::default()
+    };
 
-    let chain_tip_height = latest_chain_tip
-        .best_tip_height()
-        .ok_or_else(|| eyre!("State directory doesn't have a chain tip block"))?;
+    let network = network.clone();
+    let (_read_state, db, _sender) =
+        tokio::task::spawn_blocking(move || zebra_state::init_read_only(config, &network))
+            .await
+            .map_err(|e| eyre!("Blocking task failed while loading state: {e}"))?;
 
-    Ok(chain_tip_height)
+    let finalized_tip_height = db
+        .finalized_tip_height()
+        .ok_or_else(|| eyre!("State directory doesn't have a finalized tip block"))?;
+
+    Ok(finalized_tip_height)
 }
 
 /// Accepts a network, test_type, test_name, and num_blocks (how many blocks past the finalized tip to try getting)
@@ -216,7 +239,7 @@ pub async fn raw_future_blocks(
 
     let should_sync = true;
     let (zebrad, zebra_rpc_address) =
-        spawn_zebrad_for_rpc(network.clone(), test_name, test_type, should_sync)?
+        spawn_zebrad_for_rpc_with_opts(network.clone(), test_name, test_type, should_sync, false)?
             .ok_or_else(|| eyre!("raw_future_blocks requires a cached state"))?;
     let rpc_address = zebra_rpc_address.expect("test type must have RPC port");
 
@@ -269,7 +292,10 @@ pub async fn raw_future_blocks(
 
     zebrad.kill(true)?;
 
-    // Sleep for a few seconds to make sure zebrad releases lock on cached state directory
+    // Wait for zebrad to fully terminate to ensure database lock is released.
+    // Just sending SIGKILL doesn't guarantee the process has terminated - we must
+    // wait for the OS to clean up the process and release all file locks.
+    zebrad.wait_with_output()?;
     std::thread::sleep(Duration::from_secs(3));
 
     let zebrad_state_path = test_type
@@ -277,7 +303,7 @@ pub async fn raw_future_blocks(
         .expect("already checked that there is a cached state path");
 
     let Height(finalized_tip_height) =
-        load_tip_height_from_state_directory(network, zebrad_state_path.as_ref()).await?;
+        load_finalized_tip_height_from_state_directory(network, zebrad_state_path.as_ref()).await?;
 
     tracing::info!(
         ?finalized_tip_height,

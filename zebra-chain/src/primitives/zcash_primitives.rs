@@ -4,7 +4,8 @@
 use std::{io, ops::Deref, sync::Arc};
 
 use zcash_primitives::transaction::{self as zp_tx, TxDigests};
-use zcash_protocol::value::BalanceError;
+use zcash_protocol::value::{BalanceError, ZatBalance, Zatoshis};
+use zcash_script::script;
 
 use crate::{
     amount::{Amount, NonNegative},
@@ -25,13 +26,13 @@ struct TransparentAuth {
 }
 
 impl zcash_transparent::bundle::Authorization for TransparentAuth {
-    type ScriptSig = zcash_primitives::legacy::Script;
+    type ScriptSig = zcash_transparent::address::Script;
 }
 
 // In this block we convert our Output to a librustzcash to TxOut.
 // (We could do the serialize/deserialize route but it's simple enough to convert manually)
 impl zcash_transparent::sighash::TransparentAuthorizingContext for TransparentAuth {
-    fn input_amounts(&self) -> Vec<zcash_protocol::value::Zatoshis> {
+    fn input_amounts(&self) -> Vec<Zatoshis> {
         self.all_prev_outputs
             .iter()
             .map(|prevout| {
@@ -43,11 +44,13 @@ impl zcash_transparent::sighash::TransparentAuthorizingContext for TransparentAu
             .collect()
     }
 
-    fn input_scriptpubkeys(&self) -> Vec<zcash_primitives::legacy::Script> {
+    fn input_scriptpubkeys(&self) -> Vec<zcash_transparent::address::Script> {
         self.all_prev_outputs
             .iter()
             .map(|prevout| {
-                zcash_primitives::legacy::Script(prevout.lock_script.as_raw_bytes().into())
+                zcash_transparent::address::Script(script::Code(
+                    prevout.lock_script.as_raw_bytes().into(),
+                ))
             })
             .collect()
     }
@@ -139,6 +142,9 @@ impl zp_tx::Authorization for PrecomputedAuth {
     type TransparentAuth = TransparentAuth;
     type SaplingAuth = sapling_crypto::bundle::Authorized;
     type OrchardAuth = orchard::bundle::Authorized;
+
+    #[cfg(zcash_unstable = "zfuture")]
+    type TzeAuth = zp_tx::components::tze::Authorized;
 }
 
 // End of (mostly) copied code
@@ -177,15 +183,23 @@ impl TryFrom<Amount<NonNegative>> for zcash_protocol::value::Zatoshis {
     }
 }
 
-/// Convert a Zebra Script into a librustzcash one.
-impl From<&Script> for zcash_primitives::legacy::Script {
-    fn from(script: &Script) -> Self {
-        zcash_primitives::legacy::Script(script.as_raw_bytes().to_vec())
+impl TryFrom<Amount> for ZatBalance {
+    type Error = BalanceError;
+
+    fn try_from(amount: Amount) -> Result<Self, Self::Error> {
+        ZatBalance::from_i64(amount.into())
     }
 }
 
 /// Convert a Zebra Script into a librustzcash one.
-impl From<Script> for zcash_primitives::legacy::Script {
+impl From<&Script> for zcash_transparent::address::Script {
+    fn from(script: &Script) -> Self {
+        zcash_transparent::address::Script(script::Code(script.as_raw_bytes().to_vec()))
+    }
+}
+
+/// Convert a Zebra Script into a librustzcash one.
+impl From<Script> for zcash_transparent::address::Script {
     // The borrow is actually needed to use From<&Script>
     #[allow(clippy::needless_borrow)]
     fn from(script: Script) -> Self {
@@ -250,15 +264,33 @@ impl PrecomputedTxData {
             },
         };
 
-        let tx_data: zp_tx::TransactionData<PrecomputedAuth> =
-            tx.into_data()
-                .map_authorization(f_transparent, IdentityMap, IdentityMap);
+        let tx_data: zp_tx::TransactionData<PrecomputedAuth> = tx.into_data().map_authorization(
+            f_transparent,
+            IdentityMap,
+            IdentityMap,
+            #[cfg(zcash_unstable = "zfuture")]
+            (),
+        );
 
         Ok(PrecomputedTxData {
             tx_data,
             txid_parts,
             all_previous_outputs,
         })
+    }
+
+    /// Returns the Orchard bundle in `tx_data`.
+    pub fn orchard_bundle(
+        &self,
+    ) -> Option<orchard::bundle::Bundle<orchard::bundle::Authorized, ZatBalance>> {
+        self.tx_data.orchard_bundle().cloned()
+    }
+
+    /// Returns the Sapling bundle in `tx_data`.
+    pub fn sapling_bundle(
+        &self,
+    ) -> Option<sapling_crypto::Bundle<sapling_crypto::bundle::Authorized, ZatBalance>> {
+        self.tx_data.sapling_bundle().cloned()
     }
 }
 
@@ -277,13 +309,13 @@ pub(crate) fn sighash(
     hash_type: HashType,
     input_index_script_code: Option<(usize, Vec<u8>)>,
 ) -> SigHash {
-    let lock_script: zcash_primitives::legacy::Script;
-    let unlock_script: zcash_primitives::legacy::Script;
+    let lock_script: zcash_transparent::address::Script;
+    let unlock_script: zcash_transparent::address::Script;
     let signable_input = match input_index_script_code {
         Some((input_index, script_code)) => {
             let output = &precomputed_tx_data.all_previous_outputs[input_index];
             lock_script = output.lock_script.clone().into();
-            unlock_script = zcash_primitives::legacy::Script(script_code);
+            unlock_script = zcash_transparent::address::Script(script::Code(script_code));
             zp_tx::sighash::SignableInput::Transparent(
                 zcash_transparent::sighash::SignableInput::from_parts(
                     hash_type.try_into().expect("hash type should be ALL"),

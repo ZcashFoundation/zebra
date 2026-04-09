@@ -24,7 +24,7 @@ use zebra_chain::{
 
 /// A multiplier used to calculate the inbound connection limit for the peer set,
 ///
-/// When it starts up, Zebra opens [`Config.peerset_initial_target_size`]
+/// When it starts up, Zebra opens [`crate::Config::peerset_initial_target_size`]
 /// outbound connections.
 ///
 /// Then it opens additional outbound connections as needed for network requests,
@@ -33,11 +33,11 @@ use zebra_chain::{
 /// The inbound and outbound connection limits are calculated from:
 ///
 /// The inbound limit is:
-/// `Config.peerset_initial_target_size * INBOUND_PEER_LIMIT_MULTIPLIER`.
+/// `crate::Config::peerset_initial_target_size * INBOUND_PEER_LIMIT_MULTIPLIER`.
 /// (This is similar to `zcashd`'s default inbound limit.)
 ///
 /// The outbound limit is:
-/// `Config.peerset_initial_target_size * OUTBOUND_PEER_LIMIT_MULTIPLIER`.
+/// `crate::Config::peerset_initial_target_size * OUTBOUND_PEER_LIMIT_MULTIPLIER`.
 /// (This is a bit larger than `zcashd`'s default outbound limit.)
 ///
 /// # Security
@@ -339,11 +339,11 @@ pub const TIMESTAMP_TRUNCATION_SECONDS: u32 = 30 * 60;
 /// network upgrades.
 ///
 /// This version of Zebra draws the current network protocol version from
-/// [ZIP-253](https://zips.z.cash/zip-0253).
-// TODO: Update this constant to the correct value after NU6.1 & NU7 activation,
-// pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_140); // NU6.1
-// pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_160); // NU7
-pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_120);
+/// [ZIP-255](https://zips.z.cash/zip-0255).
+// TODO: Update this constant to the correct value after NU7 activation (see NU deployment ZIPs),
+pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_140);
+// pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_150); // NU7 Testnet.
+// pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_160); // NU7 Mainnet.
 
 /// The default RTT estimate for peer responses.
 ///

@@ -83,15 +83,13 @@ use tower::{builder::ServiceBuilder, util::BoxService, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::block::genesis::regtest_genesis_block;
-use zebra_consensus::{router::BackgroundTaskHandles, ParameterCheckpoint};
-use zebra_rpc::{
-    methods::{types::submit_block::SubmitBlockChannel, RpcImpl},
-    server::RpcServer,
-};
+use zebra_consensus::router::BackgroundTaskHandles;
+use zebra_rpc::{methods::RpcImpl, server::RpcServer, SubmitBlockChannel};
 
 use crate::{
     application::{build_version, user_agent, LAST_WARN_ERROR_LOG_SENDER},
     components::{
+        health,
         inbound::{self, InboundSetupData, MAX_INBOUND_RESPONSE_TIME},
         mempool::{self, Mempool},
         sync::{self, show_block_chain_progress, VERIFICATION_PIPELINE_SCALING_MULTIPLIER},
@@ -139,14 +137,14 @@ impl StartCmd {
         info!("opening database, this may take a few minutes");
 
         let (state_service, read_only_state_service, latest_chain_tip, chain_tip_change) =
-            zebra_state::spawn_init(
+            zebra_state::init(
                 config.state.clone(),
                 &config.network.network,
                 max_checkpoint_height,
                 config.sync.checkpoint_verify_concurrency_limit
                     * (VERIFICATION_PIPELINE_SCALING_MULTIPLIER + 1),
             )
-            .await?;
+            .await;
 
         info!("logging database metrics on startup");
         read_only_state_service.log_db_metrics();
@@ -183,6 +181,8 @@ impl StartCmd {
             user_agent(),
         )
         .await;
+
+        // Start health server if configured (after sync_status is available)
 
         info!("initializing verifiers");
         let (tx_verifier_setup_tx, tx_verifier_setup_rx) = oneshot::channel();
@@ -324,14 +324,28 @@ impl StartCmd {
         );
 
         info!("spawning progress logging task");
+        let (chain_tip_metrics_sender, chain_tip_metrics_receiver) =
+            health::ChainTipMetrics::channel();
         let progress_task_handle = tokio::spawn(
             show_block_chain_progress(
                 config.network.network.clone(),
                 latest_chain_tip.clone(),
                 sync_status.clone(),
+                chain_tip_metrics_sender,
             )
             .in_current_span(),
         );
+
+        // Start health server if configured
+        info!("initializing health endpoints");
+        let (health_task_handle, _) = health::init(
+            config.health.clone(),
+            config.network.network.clone(),
+            chain_tip_metrics_receiver,
+            sync_status.clone(),
+            address_book.clone(),
+        )
+        .await;
 
         // Spawn never ending end of support task.
         info!("spawning end of support checking task");
@@ -356,28 +370,29 @@ impl StartCmd {
         );
 
         info!("spawning syncer task");
-        let syncer_task_handle = if is_regtest {
-            if !syncer
+        // In regtest, commit the genesis block directly (bypassing the syncer's genesis
+        // download, which requires a connected peer). Then run the syncer normally so
+        // that multi-hop block propagation works: gossiped blocks that arrive out of
+        // order (e.g. only the latest tip hash was gossiped) will be recovered by the
+        // syncer using block locators within REGTEST_SYNC_RESTART_DELAY (2 seconds).
+        if is_regtest
+            && !syncer
                 .state_contains(config.network.network.genesis_hash())
                 .await?
-            {
-                let genesis_hash = block_verifier_router
-                    .clone()
-                    .oneshot(zebra_consensus::Request::Commit(regtest_genesis_block()))
-                    .await
-                    .expect("should validate Regtest genesis block");
+        {
+            let genesis_hash = block_verifier_router
+                .clone()
+                .oneshot(zebra_consensus::Request::Commit(regtest_genesis_block()))
+                .await
+                .expect("should validate Regtest genesis block");
 
-                assert_eq!(
-                    genesis_hash,
-                    config.network.network.genesis_hash(),
-                    "validated block hash should match network genesis hash"
-                )
-            }
-
-            tokio::spawn(std::future::pending().in_current_span())
-        } else {
-            tokio::spawn(syncer.sync().in_current_span())
-        };
+            assert_eq!(
+                genesis_hash,
+                config.network.network.genesis_hash(),
+                "validated block hash should match network genesis hash"
+            )
+        }
+        let syncer_task_handle = tokio::spawn(syncer.sync().in_current_span());
 
         // And finally, spawn the internal Zcash miner, if it is enabled.
         //
@@ -525,6 +540,7 @@ impl StartCmd {
         // ongoing tasks
         rpc_task_handle.abort();
         rpc_tx_queue_handle.abort();
+        health_task_handle.abort();
         syncer_task_handle.abort();
         block_gossip_task_handle.abort();
         mempool_crawler_task_handle.abort();

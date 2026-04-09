@@ -13,7 +13,7 @@ use rand::thread_rng;
 
 use tokio::sync::watch;
 use tower::{util::ServiceFn, Service};
-use tower_batch_control::{Batch, BatchControl};
+use tower_batch_control::{Batch, BatchControl, RequestWeight};
 use tower_fallback::Fallback;
 use zebra_chain::primitives::ed25519::*;
 
@@ -34,8 +34,29 @@ type VerifyResult = Result<(), Error>;
 type Sender = watch::Sender<Option<VerifyResult>>;
 
 /// The type of the batch item.
-/// This is an `Ed25519Item`.
-pub type Item = batch::Item;
+/// This is a newtype around an `Ed25519Item`.
+#[derive(Clone, Debug)]
+pub struct Item(batch::Item);
+
+impl RequestWeight for Item {}
+
+impl<'msg, M: AsRef<[u8]> + ?Sized> From<(VerificationKeyBytes, Signature, &'msg M)> for Item {
+    fn from(tup: (VerificationKeyBytes, Signature, &'msg M)) -> Self {
+        Self(batch::Item::from(tup))
+    }
+}
+
+impl From<Item> for batch::Item {
+    fn from(Item(item): Item) -> Self {
+        item
+    }
+}
+
+impl Item {
+    fn verify_single(self) -> VerifyResult {
+        self.0.verify_single()
+    }
+}
 
 /// Global batch verification context for Ed25519 signatures.
 ///
@@ -128,7 +149,22 @@ impl Verifier {
     /// This function returns a future that becomes ready when the batch is completed.
     async fn flush_spawning(batch: BatchVerifier, tx: Sender) {
         // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
-        let _ = tx.send(spawn_fifo(move || batch.verify(thread_rng())).await.ok());
+        let start = std::time::Instant::now();
+        let result = spawn_fifo(move || batch.verify(thread_rng())).await;
+        let duration = start.elapsed().as_secs_f64();
+
+        let result_label = match &result {
+            Ok(Ok(())) => "success",
+            _ => "failure",
+        };
+        metrics::histogram!(
+            "zebra.consensus.batch.duration_seconds",
+            "verifier" => "ed25519",
+            "result" => result_label
+        )
+        .record(duration);
+
+        let _ = tx.send(result.ok());
     }
 
     /// Verify a single item using a thread pool, and return the result.

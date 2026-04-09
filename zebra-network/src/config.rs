@@ -16,7 +16,10 @@ use tracing::Span;
 use zebra_chain::{
     common::atomic_write,
     parameters::{
-        testnet::{self, ConfiguredActivationHeights, ConfiguredFundingStreams},
+        testnet::{
+            self, ConfiguredActivationHeights, ConfiguredCheckpoints, ConfiguredFundingStreams,
+            ConfiguredLockboxDisbursement, RegtestParameters,
+        },
         Magic, Network, NetworkKind,
     },
     work::difficulty::U256,
@@ -543,10 +546,10 @@ impl Config {
 impl Default for Config {
     fn default() -> Config {
         let mainnet_peers = [
-            "dnsseed.z.cash:8233",
             "dnsseed.str4d.xyz:8233",
+            "dnsseed.z.cash:8233",
+            "mainnet.seeder.shieldedinfra.net:8233",
             "mainnet.seeder.zfnd.org:8233",
-            "mainnet.is.yolo.money:8233",
         ]
         .iter()
         .map(|&s| String::from(s))
@@ -555,7 +558,6 @@ impl Default for Config {
         let testnet_peers = [
             "dnsseed.testnet.z.cash:18233",
             "testnet.seeder.zfnd.org:18233",
-            "testnet.is.yolo.money:18233",
         ]
         .iter()
         .map(|&s| String::from(s))
@@ -597,7 +599,14 @@ struct DTestnetParameters {
     activation_heights: Option<ConfiguredActivationHeights>,
     pre_nu6_funding_streams: Option<ConfiguredFundingStreams>,
     post_nu6_funding_streams: Option<ConfiguredFundingStreams>,
+    funding_streams: Option<Vec<ConfiguredFundingStreams>>,
     pre_blossom_halving_interval: Option<u32>,
+    lockbox_disbursements: Option<Vec<ConfiguredLockboxDisbursement>>,
+    #[serde(default)]
+    checkpoints: ConfiguredCheckpoints,
+    /// If `true`, automatically repeats configured funding stream addresses to fill
+    /// all required periods.
+    extend_funding_stream_addresses_as_required: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -644,14 +653,28 @@ impl From<Arc<testnet::Parameters>> for DTestnetParameters {
             disable_pow: Some(params.disable_pow()),
             genesis_hash: Some(params.genesis_hash().to_string()),
             activation_heights: Some(params.activation_heights().into()),
-            pre_nu6_funding_streams: Some(params.pre_nu6_funding_streams().into()),
-            post_nu6_funding_streams: Some(params.post_nu6_funding_streams().into()),
+            pre_nu6_funding_streams: None,
+            post_nu6_funding_streams: None,
+            funding_streams: Some(params.funding_streams().iter().map(Into::into).collect()),
             pre_blossom_halving_interval: Some(
                 params
                     .pre_blossom_halving_interval()
                     .try_into()
                     .expect("should convert"),
             ),
+            lockbox_disbursements: Some(
+                params
+                    .lockbox_disbursements()
+                    .into_iter()
+                    .map(Into::into)
+                    .collect(),
+            ),
+            checkpoints: if params.checkpoints() == testnet::Parameters::default().checkpoints() {
+                ConfiguredCheckpoints::Default(true)
+            } else {
+                params.checkpoints().into()
+            },
+            extend_funding_stream_addresses_as_required: None,
         }
     }
 }
@@ -729,11 +752,38 @@ impl<'de> Deserialize<'de> for Config {
             (NetworkKind::Mainnet, _) => Network::Mainnet,
             (NetworkKind::Testnet, None) => Network::new_default_testnet(),
             (NetworkKind::Regtest, testnet_parameters) => {
-                let configured_activation_heights = testnet_parameters
-                    .and_then(|params| params.activation_heights)
+                let params = testnet_parameters
+                    .map(
+                        |DTestnetParameters {
+                             activation_heights,
+                             pre_nu6_funding_streams,
+                             post_nu6_funding_streams,
+                             funding_streams,
+                             lockbox_disbursements,
+                             checkpoints,
+                             extend_funding_stream_addresses_as_required,
+                             ..
+                         }| {
+                            let mut funding_streams_vec = funding_streams.unwrap_or_default();
+                            if let Some(funding_streams) = post_nu6_funding_streams {
+                                funding_streams_vec.insert(0, funding_streams);
+                            }
+                            if let Some(funding_streams) = pre_nu6_funding_streams {
+                                funding_streams_vec.insert(0, funding_streams);
+                            }
+
+                            RegtestParameters {
+                                activation_heights: activation_heights.unwrap_or_default(),
+                                funding_streams: Some(funding_streams_vec),
+                                lockbox_disbursements,
+                                checkpoints: Some(checkpoints),
+                                extend_funding_stream_addresses_as_required,
+                            }
+                        },
+                    )
                     .unwrap_or_default();
 
-                Network::new_regtest(configured_activation_heights)
+                Network::new_regtest(params)
             }
             (
                 NetworkKind::Testnet,
@@ -747,21 +797,31 @@ impl<'de> Deserialize<'de> for Config {
                     activation_heights,
                     pre_nu6_funding_streams,
                     post_nu6_funding_streams,
+                    funding_streams,
                     pre_blossom_halving_interval,
+                    lockbox_disbursements,
+                    checkpoints,
+                    extend_funding_stream_addresses_as_required,
                 }),
             ) => {
                 let mut params_builder = testnet::Parameters::build();
 
                 if let Some(network_name) = network_name.clone() {
-                    params_builder = params_builder.with_network_name(network_name)
+                    params_builder = params_builder
+                        .with_network_name(network_name)
+                        .map_err(de::Error::custom)?
                 }
 
                 if let Some(network_magic) = network_magic {
-                    params_builder = params_builder.with_network_magic(Magic(network_magic));
+                    params_builder = params_builder
+                        .with_network_magic(Magic(network_magic))
+                        .map_err(de::Error::custom)?;
                 }
 
                 if let Some(genesis_hash) = genesis_hash {
-                    params_builder = params_builder.with_genesis_hash(genesis_hash);
+                    params_builder = params_builder
+                        .with_genesis_hash(genesis_hash)
+                        .map_err(de::Error::custom)?;
                 }
 
                 if let Some(slow_start_interval) = slow_start_interval {
@@ -771,11 +831,13 @@ impl<'de> Deserialize<'de> for Config {
                 }
 
                 if let Some(target_difficulty_limit) = target_difficulty_limit.clone() {
-                    params_builder = params_builder.with_target_difficulty_limit(
-                        target_difficulty_limit
-                            .parse::<U256>()
-                            .map_err(de::Error::custom)?,
-                    );
+                    params_builder = params_builder
+                        .with_target_difficulty_limit(
+                            target_difficulty_limit
+                                .parse::<U256>()
+                                .map_err(de::Error::custom)?,
+                        )
+                        .map_err(de::Error::custom)?;
                 }
 
                 if let Some(disable_pow) = disable_pow {
@@ -783,22 +845,44 @@ impl<'de> Deserialize<'de> for Config {
                 }
 
                 // Retain default Testnet activation heights unless there's an empty [testnet_parameters.activation_heights] section.
-                if let Some(activation_heights) = activation_heights.clone() {
-                    params_builder = params_builder.with_activation_heights(activation_heights)
+                if let Some(activation_heights) = activation_heights {
+                    params_builder = params_builder
+                        .with_activation_heights(activation_heights)
+                        .map_err(de::Error::custom)?
                 }
 
                 if let Some(halving_interval) = pre_blossom_halving_interval {
-                    params_builder = params_builder.with_halving_interval(halving_interval.into())
+                    params_builder = params_builder
+                        .with_halving_interval(halving_interval.into())
+                        .map_err(de::Error::custom)?
                 }
 
                 // Set configured funding streams after setting any parameters that affect the funding stream address period.
-
-                if let Some(funding_streams) = pre_nu6_funding_streams {
-                    params_builder = params_builder.with_pre_nu6_funding_streams(funding_streams);
-                }
+                let mut funding_streams_vec = funding_streams.unwrap_or_default();
 
                 if let Some(funding_streams) = post_nu6_funding_streams {
-                    params_builder = params_builder.with_post_nu6_funding_streams(funding_streams);
+                    funding_streams_vec.insert(0, funding_streams);
+                }
+
+                if let Some(funding_streams) = pre_nu6_funding_streams {
+                    funding_streams_vec.insert(0, funding_streams);
+                }
+
+                if !funding_streams_vec.is_empty() {
+                    params_builder = params_builder.with_funding_streams(funding_streams_vec);
+                }
+
+                if let Some(lockbox_disbursements) = lockbox_disbursements {
+                    params_builder =
+                        params_builder.with_lockbox_disbursements(lockbox_disbursements);
+                }
+
+                params_builder = params_builder
+                    .with_checkpoints(checkpoints)
+                    .map_err(de::Error::custom)?;
+
+                if let Some(true) = extend_funding_stream_addresses_as_required {
+                    params_builder = params_builder.extend_funding_streams();
                 }
 
                 // Return an error if the initial testnet peers includes any of the default initial Mainnet or Testnet
@@ -815,7 +899,7 @@ impl<'de> Deserialize<'de> for Config {
                 if network_name.is_none() && params_builder == testnet::Parameters::build() {
                     Network::new_default_testnet()
                 } else {
-                    params_builder.to_network()
+                    params_builder.to_network().map_err(de::Error::custom)?
                 }
             }
         };

@@ -37,11 +37,11 @@ use crate::{
 #[test]
 fn test_block_db_round_trip() {
     let mainnet_test_cases = MAINNET_BLOCKS
-        .iter()
-        .map(|(_height, block)| block.zcash_deserialize_into().unwrap());
+        .values()
+        .map(|block| block.zcash_deserialize_into().unwrap());
     let testnet_test_cases = TESTNET_BLOCKS
-        .iter()
-        .map(|(_height, block)| block.zcash_deserialize_into().unwrap());
+        .values()
+        .map(|block| block.zcash_deserialize_into().unwrap());
 
     test_block_db_round_trip_with(&Mainnet, mainnet_test_cases);
     test_block_db_round_trip_with(&Network::new_default_testnet(), testnet_test_cases);
@@ -136,7 +136,7 @@ fn test_block_db_round_trip_with(
                 height: Height(0),
                 new_outputs,
                 transaction_hashes,
-                deferred_balance: None,
+                deferred_pool_balance_change: None,
             })
         };
 
@@ -146,9 +146,7 @@ fn test_block_db_round_trip_with(
 
         // Skip validation by writing the block directly to the database
         let mut batch = DiskWriteBatch::new();
-        batch
-            .prepare_block_header_and_transaction_data_batch(&state.db, &finalized)
-            .expect("block is valid for batch");
+        batch.prepare_block_header_and_transaction_data_batch(&state.db, &finalized);
         state.db.write(batch).expect("block is valid for writing");
 
         // Now read it back from the state

@@ -59,7 +59,7 @@ impl CheckForPanics for JoinError {
 
                     task_cancelled
                 } else {
-                    panic!("task unexpectedly exited with: {:?}", task_cancelled)
+                    panic!("task unexpectedly exited with: {task_cancelled:?}")
                 }
             }
         }

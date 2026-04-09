@@ -82,6 +82,17 @@ pub struct Config {
     /// [`cache_dir`]: struct.Config.html#structfield.cache_dir
     pub ephemeral: bool,
 
+    /// Whether to cache non-finalized blocks on disk to be restored when Zebra restarts.
+    ///
+    /// Set to `true` by default. If this is set to `false`, Zebra will irrecoverably drop
+    /// non-finalized blocks when the process exits and will have to re-download them from
+    /// the network when it restarts, if those blocks are still available in the network.
+    ///
+    /// Note: The non-finalized state will be written to a backup cache once per 5 seconds at most.
+    ///       If blocks are added to the non-finalized state more frequently, the backup may not reflect
+    ///       Zebra's last non-finalized state before it shut down.
+    pub should_backup_non_finalized_state: bool,
+
     /// Whether to delete the old database directories when present.
     ///
     /// Set to `true` by default. If this is set to `false`,
@@ -101,6 +112,18 @@ pub struct Config {
     /// Set to `None` by default: Zebra only checks state format validity on startup and shutdown.
     #[serde(with = "humantime_serde")]
     pub debug_validity_check_interval: Option<Duration>,
+
+    /// If true, skip spawning the non-finalized state backup task and instead write
+    /// the non-finalized state to the backup directory synchronously before each update
+    /// to the latest chain tip or non-finalized state channels.
+    ///
+    /// Set to `false` by default. When `true`, the non-finalized state is still restored
+    /// from the backup directory on startup, but updates are written synchronously on every
+    /// block commit rather than asynchronously every 5 seconds.
+    ///
+    /// This is intended for testing scenarios where blocks are committed rapidly and the
+    /// async backup task may not flush all blocks before shutdown.
+    pub debug_skip_non_finalized_state_backup_task: bool,
 
     // Elasticsearch configs
     //
@@ -122,7 +145,7 @@ fn gen_temp_path(prefix: &str) -> PathBuf {
         .prefix(prefix)
         .tempdir()
         .expect("temporary directory is created successfully")
-        .into_path()
+        .keep()
 }
 
 impl Config {
@@ -135,7 +158,7 @@ impl Config {
         network: &Network,
     ) -> PathBuf {
         let db_kind = db_kind.as_ref();
-        let major_version = format!("v{}", major_version);
+        let major_version = format!("v{major_version}");
         let net_dir = network.lowercase_name();
 
         if self.ephemeral {
@@ -146,6 +169,20 @@ impl Config {
                 .join(major_version)
                 .join(net_dir)
         }
+    }
+
+    /// Returns the path for the non-finalized state backup directory, based on the network.
+    /// Non-finalized state backup files are encoded in the network protocol format and remain
+    /// valid across db format upgrades.
+    pub fn non_finalized_state_backup_dir(&self, network: &Network) -> Option<PathBuf> {
+        if self.ephemeral || !self.should_backup_non_finalized_state {
+            // Ephemeral databases are intended to be irrecoverable across restarts and don't
+            // require a backup for the non-finalized state.
+            return None;
+        }
+
+        let net_dir = network.lowercase_name();
+        Some(self.cache_dir.join("non_finalized_state").join(net_dir))
     }
 
     /// Returns the path for the database format minor/patch version file,
@@ -177,9 +214,11 @@ impl Default for Config {
         Self {
             cache_dir: default_cache_dir(),
             ephemeral: false,
+            should_backup_non_finalized_state: true,
             delete_old_database: true,
             debug_stop_at_height: None,
             debug_validity_check_interval: None,
+            debug_skip_non_finalized_state_backup_task: false,
             #[cfg(feature = "elasticsearch")]
             elasticsearch_url: "https://localhost:9200".to_string(),
             #[cfg(feature = "elasticsearch")]
@@ -251,6 +290,8 @@ fn delete_old_databases(config: Config, db_kind: String, major_version: u64, net
 
     info!(db_kind, "checking for old database versions");
 
+    let restorable_db_versions = restorable_db_versions();
+
     let mut db_path = config.db_path(&db_kind, major_version, network);
     // Check and remove the network path.
     assert_eq!(
@@ -277,7 +318,8 @@ fn delete_old_databases(config: Config, db_kind: String, major_version: u64, net
 
     if let Some(db_kind_dir) = read_dir(&db_path) {
         for entry in db_kind_dir.flatten() {
-            let deleted_db = check_and_delete_database(&config, major_version, &entry);
+            let deleted_db =
+                check_and_delete_database(&config, major_version, &restorable_db_versions, &entry);
 
             if let Some(deleted_db) = deleted_db {
                 info!(?deleted_db, "deleted outdated {db_kind} database directory");
@@ -305,6 +347,7 @@ fn read_dir(dir: &Path) -> Option<ReadDir> {
 fn check_and_delete_database(
     config: &Config,
     major_version: u64,
+    restorable_db_versions: &[u64],
     entry: &DirEntry,
 ) -> Option<PathBuf> {
     let dir_name = parse_dir_name(entry)?;
@@ -315,7 +358,7 @@ fn check_and_delete_database(
     }
 
     // Don't delete databases that can be reused.
-    if restorable_db_versions()
+    if restorable_db_versions
         .iter()
         .map(|v| v - 1)
         .any(|v| v == dir_major_version)

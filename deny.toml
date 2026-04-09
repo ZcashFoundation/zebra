@@ -4,6 +4,51 @@
 # * allow - No warning or error will be produced, though in some cases a note
 # will be
 
+# This section is considered when running `cargo deny check advisories`.
+# https://embarkstudios.github.io/cargo-deny/checks/advisories/cfg.html
+[advisories]
+version = 2
+yanked = "deny"
+# Unmaintained crate advisories — all transitive via abscissa_core/structopt or direct.
+# Remove each ignore entry as the dependency chain is upgraded.
+ignore = [
+    "RUSTSEC-2021-0139", # ansi_term — transitive via abscissa_core -> structopt
+    "RUSTSEC-2024-0375", # atty — transitive via abscissa_core -> structopt
+    "RUSTSEC-2024-0370", # proc-macro-error — transitive via abscissa_core -> structopt
+    "RUSTSEC-2025-0119", # number_prefix — transitive via indicatif
+    "RUSTSEC-2025-0141", # bincode — direct dependency
+]
+
+# This section is considered when running `cargo deny check licenses`.
+# https://embarkstudios.github.io/cargo-deny/checks/licenses/cfg.html
+[licenses]
+confidence-threshold = 0.8
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "CC0-1.0",
+    "MPL-2.0",
+    "Unlicense",
+    "0BSD",
+    "MIT-0",
+    "CDLA-Permissive-2.0",
+    "CDDL-1.0",
+]
+exceptions = []
+
+# rustls-webpki uses a custom ISC-style license
+[[licenses.clarify]]
+name = "rustls-webpki"
+expression = "ISC"
+license-files = [{ path = "LICENSE", hash = 0x001c7e6c }]
+
 # This section is considered when running `cargo deny check bans`.
 # More documentation about the 'bans' section can be found here:
 # https://embarkstudios.github.io/cargo-deny/checks/bans/cfg.html
@@ -42,10 +87,7 @@ deny = [
 #
 # Certain crates/versions that will be skipped when doing duplicate detection.
 skip = [
-    # wait for other dependencies to match zcash_script
-    # This is not in `skip-tree` because we don't want to allow duplicated
-    # secp256k1-sys crates, where the C code lives
-    { name = "secp256k1", version = "=0.29.1" }
+
 ]
 
 # Similarly to `skip` allows you to skip certain crates during duplicate
@@ -56,18 +98,14 @@ skip-tree = [
     # wait for ordered-map to release a dependency fix
     { name = "ordered-map", version = "=0.4.2" },
 
-    # wait for `color-eyre` to upgrade
-    { name = "owo-colors", version = "=3.5.0" },
-
     # wait for structopt upgrade (or upgrade to clap 4)
     { name = "clap", version = "=2.34.0" },
 
     # wait for abscissa_core to upgrade
     {name = "tracing-log", version = "=0.1.4" },
 
-    # wait for console-subscriber and tower to update hdrhistogram.
-    # also wait for ron to update insta, and wait for tonic update.
-    { name = "base64", version = "=0.13.1" },
+    # Multiple base64 versions through different dependencies
+    { name = "base64", version = "=0.21.7" },
 
     # wait for abscissa_core to update toml
     { name = "toml", version = "=0.5.11" },
@@ -75,8 +113,7 @@ skip-tree = [
     # wait for structopt-derive to update heck
     { name = "heck", version = "=0.3.3" },
 
-    # wait for librocksdb-sys to update bindgen to one that uses newer itertools
-    { name = "itertools", version = "=0.12.1" },
+    # wait for librocksdb-sys to update bindgen
     { name = "bindgen", version = "=0.69.5" },
 
     # wait for halo2_gadgets and primitive-types to update uint
@@ -84,30 +121,53 @@ skip-tree = [
 
     # wait for zebra to update tower
     { name = "tower", version = "=0.4.13" },
-    { name = "hashbrown", version = "=0.14.5" },
 
     # wait for zebra to update vergen
     { name = "thiserror", version = "=1.0.69" },
     { name = "thiserror-impl", version = "=1.0.69" },
 
     # wait for all librustzcash crates to update sha2, secp256k1, and ripemd
-    { name = "sha2", version = "=0.10.8" },
+    { name = "sha2", version = "=0.10.9" },
     { name = "ripemd", version = "=0.1.3" },
-
-    # wait for zcash_script to update itertools
-    { name = "itertools", version = "=0.13.0" },
 
     # wait for abscissa_core to update synstructure
     { name = "synstructure", version = "=0.12.6" },
 
-    # wait until zcash_client_backend update rustix
-    { name = "rustix", version = "=0.38.44" },
+    # wait for librustzcash to update tonic
+    { name = "tonic", version = "0.12" },
+    { name = "prost-types", version = "0.13" },
 
-    # wait for reqwest to update windows-registry
-    { name = "windows-strings", version = "=0.3.1" },
+    { name = "windows-sys", version = "=0.52.0" },
 
-    # wait for sentry to update windows-core
-    { name = "windows-core", version = "=0.52.0" }
+    { name = "indexmap", version = "1.9" },
+
+    { name = "hashbrown", version = "0.12" },
+    # hashbrown 0.15.x pulled by various deps; 0.16.x pulled by indexmap 2.x
+    { name = "hashbrown", version = "0.15" },
+
+    # itertools 0.13.x pulled by halo2 deps; 0.14.x pulled by other deps
+    { name = "itertools", version = "0.13" },
+
+    { name = "getrandom", version = "0.2" },
+
+    { name = "rand", version = "0.8" },
+    { name = "rand_core", version = "0.6" },
+    { name = "rand_chacha", version = "0.3" },
+
+    # TODO: Remove once https://github.com/zcash/librustzcash/pull/1893 merges.
+    { name = "equihash", version = "0.2" },
+
+    # wait for derive_builder to update
+    { name = "darling", version = "0.20.11" },
+
+    # wait until `config` updates `convert_case`
+    { name = "convert_case", version = "0.6.0" },
+
+    # wait until `config` updates `toml`
+    { name = "toml_datetime", version = "0.7.5"},
+
+    #
+    { name = "getrandom", version = "0.3.4" },
 ]
 
 # This section is considered when running `cargo deny check sources`.

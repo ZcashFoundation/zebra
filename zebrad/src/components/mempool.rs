@@ -38,7 +38,9 @@ use zebra_chain::{
 };
 use zebra_consensus::{error::TransactionError, transaction};
 use zebra_network::{self as zn, PeerSocketAddr};
-use zebra_node_services::mempool::{Gossip, MempoolChange, MempoolTxSubscriber, Request, Response};
+use zebra_node_services::mempool::{
+    CreatedOrSpent, Gossip, MempoolChange, MempoolTxSubscriber, Request, Response,
+};
 use zebra_state as zs;
 use zebra_state::{ChainTipChange, TipAction};
 
@@ -636,7 +638,8 @@ impl Service<Request> for Mempool {
                                 .download_if_needed_and_verify(tx.transaction.into(), rsp_tx);
                         }
                     }
-                    Ok(Err((tx_id, error))) => {
+                    Ok(Err(boxed_err)) => {
+                        let (tx_id, error) = *boxed_err;
                         if let TransactionDownloadVerifyError::Invalid {
                             error,
                             advertiser_addr: Some(advertiser_addr),
@@ -769,11 +772,7 @@ impl Service<Request> for Mempool {
 
                     let res: HashSet<_> = storage.tx_ids().collect();
 
-                    // This log line is checked by tests,
-                    // because lightwalletd doesn't return mempool transactions at the moment.
-                    //
-                    // TODO: downgrade to trace level when we can check transactions via gRPC
-                    info!(?req, res_count = ?res.len(), "answered mempool request");
+                    trace!(?req, res_count = ?res.len(), "answered mempool request");
 
                     async move { Ok(Response::TransactionIds(res)) }.boxed()
                 }
@@ -895,6 +894,73 @@ impl Service<Request> for Mempool {
                     // all the work for this request is done in poll_ready
                     async move { Ok(Response::CheckedForVerifiedTransactions) }.boxed()
                 }
+
+                // Summary statistics for the mempool: count, total size, and memory usage.
+                //
+                // Used by the `getmempoolinfo` RPC method
+                Request::QueueStats => {
+                    trace!(?req, "got mempool request");
+
+                    let size = storage.transaction_count();
+
+                    let bytes = storage.total_serialized_size();
+
+                    let usage = bytes; // TODO: Placeholder, should be fixed later
+
+                    // TODO: Set to Some(true) on regtest once network info is available.
+                    let fully_notified = None;
+
+                    trace!(size, bytes, usage, "answered mempool request");
+
+                    async move {
+                        Ok(Response::QueueStats {
+                            size,
+                            bytes,
+                            usage,
+                            fully_notified,
+                        })
+                    }
+                    .boxed()
+                }
+                Request::UnspentOutput(outpoint) => {
+                    trace!(?req, "got mempool request");
+
+                    if storage.has_spent_outpoint(&outpoint) {
+                        trace!(?req, "answered mempool request");
+
+                        return async move {
+                            Ok(Response::TransparentOutput(Some(CreatedOrSpent::Spent)))
+                        }
+                        .boxed();
+                    }
+
+                    if let Some((tx_version, output)) = storage
+                        .transactions()
+                        .get(&outpoint.hash)
+                        .map(|tx| tx.transaction.transaction.clone())
+                        .and_then(|tx| {
+                            tx.outputs()
+                                .get(outpoint.index as usize)
+                                .map(|output| (tx.version(), output.clone()))
+                        })
+                    {
+                        trace!(?req, "answered mempool request");
+
+                        let last_seen_hash = *last_seen_tip_hash;
+                        return async move {
+                            Ok(Response::TransparentOutput(Some(CreatedOrSpent::Created {
+                                output,
+                                tx_version,
+                                last_seen_hash,
+                            })))
+                        }
+                        .boxed();
+                    }
+
+                    trace!(?req, "answered mempool request");
+
+                    async move { Ok(Response::TransparentOutput(None)) }.boxed()
+                }
             },
             ActiveState::Disabled => {
                 // TODO: add the name of the request, but not the content,
@@ -911,7 +977,9 @@ impl Service<Request> for Mempool {
 
                     Request::TransactionsById(_) => Response::Transactions(Default::default()),
                     Request::TransactionsByMinedId(_) => Response::Transactions(Default::default()),
-                    Request::TransactionWithDepsByMinedId(_) | Request::AwaitOutput(_) => {
+                    Request::TransactionWithDepsByMinedId(_)
+                    | Request::AwaitOutput(_)
+                    | Request::UnspentOutput(_) => {
                         return async move {
                             Err("mempool is not active: wait for Zebra to sync to the tip".into())
                         }
@@ -945,6 +1013,14 @@ impl Service<Request> for Mempool {
                         // all the work for this request is done in poll_ready
                         Response::CheckedForVerifiedTransactions
                     }
+
+                    // Return empty mempool stats
+                    Request::QueueStats => Response::QueueStats {
+                        size: 0,
+                        bytes: 0,
+                        usage: 0,
+                        fully_notified: None,
+                    },
                 };
 
                 async move { Ok(resp) }.boxed()

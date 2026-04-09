@@ -5,16 +5,14 @@
 //! [`crate::constants::state_database_format_version_in_code()`] must be incremented
 //! each time the database format (column, serialization, etc) changes.
 
-use std::{cmp::max, fmt::Debug};
-
-use serde::{Deserialize, Serialize};
+use std::{cmp::max, collections::HashMap, fmt::Debug};
 
 use zebra_chain::{
     amount::{self, Amount, Constraint, NegativeAllowed, NonNegative},
     block::Height,
     parameters::NetworkKind,
     serialization::{ZcashDeserializeInto, ZcashSerialize},
-    transparent::{self, Address::*},
+    transparent::{self, Address::*, OutputIndex},
 };
 
 use crate::service::finalized_state::disk_format::{
@@ -24,9 +22,6 @@ use crate::service::finalized_state::disk_format::{
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
-
-#[cfg(any(test, feature = "proptest-impl"))]
-mod arbitrary;
 
 /// Transparent balances are stored as an 8 byte integer on disk.
 pub const BALANCE_DISK_BYTES: usize = 8;
@@ -48,7 +43,7 @@ pub const OUTPUT_INDEX_DISK_BYTES: usize = 3;
 /// Since Zebra only stores fully verified blocks on disk, blocks with larger indexes
 /// are rejected before reaching the database.
 pub const MAX_ON_DISK_OUTPUT_INDEX: OutputIndex =
-    OutputIndex((1 << (OUTPUT_INDEX_DISK_BYTES * 8)) - 1);
+    OutputIndex::from_index((1 << (OUTPUT_INDEX_DISK_BYTES * 8)) - 1);
 
 /// [`OutputLocation`]s are stored as a 3 byte height, 2 byte transaction index,
 /// and 3 byte output index on disk.
@@ -59,58 +54,6 @@ pub const OUTPUT_LOCATION_DISK_BYTES: usize =
 
 // Transparent types
 
-/// A transparent output's index in its transaction.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-pub struct OutputIndex(u32);
-
-impl OutputIndex {
-    /// Create a transparent output index from the Zcash consensus integer type.
-    ///
-    /// `u32` is also the inner type.
-    pub fn from_index(output_index: u32) -> OutputIndex {
-        OutputIndex(output_index)
-    }
-
-    /// Returns this index as the inner type.
-    pub fn index(&self) -> u32 {
-        self.0
-    }
-
-    /// Create a transparent output index from `usize`.
-    #[allow(dead_code)]
-    pub fn from_usize(output_index: usize) -> OutputIndex {
-        OutputIndex(
-            output_index
-                .try_into()
-                .expect("the maximum valid index fits in the inner type"),
-        )
-    }
-
-    /// Return this index as `usize`.
-    #[allow(dead_code)]
-    pub fn as_usize(&self) -> usize {
-        self.0
-            .try_into()
-            .expect("the maximum valid index fits in usize")
-    }
-
-    /// Create a transparent output index from `u64`.
-    #[allow(dead_code)]
-    pub fn from_u64(output_index: u64) -> OutputIndex {
-        OutputIndex(
-            output_index
-                .try_into()
-                .expect("the maximum u64 index fits in the inner type"),
-        )
-    }
-
-    /// Return this index as `u64`.
-    #[allow(dead_code)]
-    pub fn as_u64(&self) -> u64 {
-        self.0.into()
-    }
-}
-
 /// A transparent output's location in the chain, by block height and transaction index.
 ///
 /// [`OutputLocation`]s are sorted in increasing chain order, by height, transaction index,
@@ -118,7 +61,7 @@ impl OutputIndex {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
-    derive(Arbitrary, Serialize, Deserialize)
+    derive(Arbitrary, serde::Serialize, serde::Deserialize)
 )]
 pub struct OutputLocation {
     /// The location of the transparent input's transaction.
@@ -211,7 +154,7 @@ pub type AddressLocation = OutputLocation;
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
-    derive(Arbitrary, Serialize, Deserialize),
+    derive(Arbitrary, serde::Serialize, serde::Deserialize),
     serde(bound = "C: Constraint + Clone")
 )]
 pub struct AddressBalanceLocationInner<C: Constraint + Copy + std::fmt::Debug> {
@@ -230,7 +173,7 @@ impl<C: Constraint + Copy + std::fmt::Debug> AddressBalanceLocationInner<C> {
     /// the first [`transparent::Output`] sent to an address.
     ///
     /// The returned value has a zero initial balance and received balance.
-    fn new(first_output: OutputLocation) -> Self {
+    pub(crate) fn new(first_output: OutputLocation) -> Self {
         Self {
             balance: Amount::zero(),
             received: 0,
@@ -269,31 +212,6 @@ impl<C: Constraint + Copy + std::fmt::Debug> AddressBalanceLocationInner<C> {
     pub fn height_mut(&mut self) -> &mut Height {
         &mut self.location.transaction_location.height
     }
-}
-
-impl<C: Constraint + Copy + std::fmt::Debug> std::ops::Add for AddressBalanceLocationInner<C> {
-    type Output = Result<Self, amount::Error>;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        Ok(AddressBalanceLocationInner {
-            balance: (self.balance + rhs.balance)?,
-            received: self.received.saturating_add(rhs.received),
-            location: self.location.min(rhs.location),
-        })
-    }
-}
-
-/// Represents a change in the [`AddressBalanceLocation`] of a transparent address
-/// in the finalized state.
-pub struct AddressBalanceLocationChange(AddressBalanceLocationInner<NegativeAllowed>);
-
-impl AddressBalanceLocationChange {
-    /// Creates a new [`AddressBalanceLocationChange`].
-    ///
-    /// See [`AddressBalanceLocationInner::new`] for more details.
-    pub fn new(location: AddressLocation) -> Self {
-        Self(AddressBalanceLocationInner::new(location))
-    }
 
     /// Updates the current balance by adding the supplied output's value.
     #[allow(clippy::unwrap_in_result)]
@@ -305,7 +223,7 @@ impl AddressBalanceLocationChange {
             .balance
             .zatoshis()
             .checked_add(unspent_output.value().zatoshis()))
-        .expect("adding two Amounts is always within an i64")
+        .expect("ops handling taddr balances must not overflow")
         .try_into()?;
         self.received = self.received.saturating_add(unspent_output.value().into());
         Ok(())
@@ -321,10 +239,81 @@ impl AddressBalanceLocationChange {
             .balance
             .zatoshis()
             .checked_sub(spent_output.value().zatoshis()))
-        .expect("subtracting two Amounts is always within an i64")
+        .expect("ops handling taddr balances must not underflow")
         .try_into()?;
 
         Ok(())
+    }
+}
+
+impl<C: Constraint + Copy + std::fmt::Debug> std::ops::Add for AddressBalanceLocationInner<C> {
+    type Output = Result<Self, amount::Error>;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Ok(AddressBalanceLocationInner {
+            balance: (self.balance + rhs.balance)?,
+            received: self.received.saturating_add(rhs.received),
+            // Keep in mind that `AddressBalanceLocationChange` reuses this type
+            // (AddressBalanceLocationInner) and this addition method. The
+            // `block_info_and_address_received` database upgrade uses the
+            // usize::MAX dummy location value returned from
+            // `AddressBalanceLocationChange::empty()`. Therefore, when adding,
+            // we should ignore these dummy values. Using `min` achieves this.
+            // It is also possible that two dummy-location balance changes are
+            // added, and `min` will correctly keep the same dummy value. The
+            // reason we haven't used zero as a dummy value and `max()` here is
+            // because we use the minimum UTXO location as the canonical
+            // location for an address; and using `min()` will work if a
+            // non-canonical location is added.
+            location: self.location.min(rhs.location),
+        })
+    }
+}
+
+impl From<AddressBalanceLocationInner<NonNegative>> for AddressBalanceLocation {
+    fn from(value: AddressBalanceLocationInner<NonNegative>) -> Self {
+        Self(value)
+    }
+}
+
+impl From<AddressBalanceLocationInner<NegativeAllowed>> for AddressBalanceLocationChange {
+    fn from(value: AddressBalanceLocationInner<NegativeAllowed>) -> Self {
+        Self(value)
+    }
+}
+
+/// Represents a change in the [`AddressBalanceLocation`] of a transparent address
+/// in the finalized state.
+pub struct AddressBalanceLocationChange(AddressBalanceLocationInner<NegativeAllowed>);
+
+/// Represents a set of updates to address balance locations in the database.
+pub enum AddressBalanceLocationUpdates {
+    /// A set of [`AddressBalanceLocationChange`]s that should be merged into the existing values in the database.
+    Merge(HashMap<transparent::Address, AddressBalanceLocationChange>),
+    /// A set of full [`AddressBalanceLocation`]s that should be inserted as the new values in the database.
+    Insert(HashMap<transparent::Address, AddressBalanceLocation>),
+}
+
+impl From<HashMap<transparent::Address, AddressBalanceLocation>> for AddressBalanceLocationUpdates {
+    fn from(value: HashMap<transparent::Address, AddressBalanceLocation>) -> Self {
+        Self::Insert(value)
+    }
+}
+
+impl From<HashMap<transparent::Address, AddressBalanceLocationChange>>
+    for AddressBalanceLocationUpdates
+{
+    fn from(value: HashMap<transparent::Address, AddressBalanceLocationChange>) -> Self {
+        Self::Merge(value)
+    }
+}
+
+impl AddressBalanceLocationChange {
+    /// Creates a new [`AddressBalanceLocationChange`].
+    ///
+    /// See [`AddressBalanceLocationInner::new`] for more details.
+    pub fn new(location: AddressLocation) -> Self {
+        Self(AddressBalanceLocationInner::new(location))
     }
 }
 
@@ -362,7 +351,7 @@ impl std::ops::Add for AddressBalanceLocationChange {
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
-    derive(Arbitrary, Serialize, Deserialize)
+    derive(Arbitrary, serde::Serialize, serde::Deserialize)
 )]
 pub struct AddressBalanceLocation(AddressBalanceLocationInner<NonNegative>);
 
@@ -414,7 +403,7 @@ impl std::ops::Add for AddressBalanceLocation {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
-    derive(Arbitrary, Serialize, Deserialize)
+    derive(Arbitrary, serde::Serialize, serde::Deserialize)
 )]
 pub struct AddressUnspentOutput {
     /// The location of the first [`transparent::Output`] sent to the address in `output`.
@@ -471,7 +460,7 @@ impl AddressUnspentOutput {
         // even if it is in a later block or transaction.
         //
         // Consensus: the block size limit is 2MB, which is much lower than the index range.
-        self.unspent_output_location.output_index.0 += 1;
+        self.unspent_output_location.output_index += 1;
     }
 
     /// The location of the first [`transparent::Output`] sent to the address of this output.
@@ -512,7 +501,7 @@ impl AddressUnspentOutput {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
-    derive(Arbitrary, Serialize, Deserialize)
+    derive(Arbitrary, serde::Serialize, serde::Deserialize)
 )]
 pub struct AddressTransaction {
     /// The location of the first [`transparent::Output`] sent to the address in `output`.
@@ -707,14 +696,14 @@ impl IntoDisk for OutputIndex {
                 {
                     use zebra_chain::serialization::TrustedPreallocate;
                     assert!(
-                        u64::from(MAX_ON_DISK_OUTPUT_INDEX.0)
+                        u64::from(MAX_ON_DISK_OUTPUT_INDEX.index())
                             > zebra_chain::transparent::Output::max_allocation(),
                         "increased block size requires database output index format change",
                     );
                 }
 
                 truncate_zero_be_bytes(
-                    &MAX_ON_DISK_OUTPUT_INDEX.0.to_be_bytes(),
+                    &MAX_ON_DISK_OUTPUT_INDEX.index().to_be_bytes(),
                     OUTPUT_INDEX_DISK_BYTES,
                 )
                 .expect("max on disk output index is valid")
@@ -727,11 +716,9 @@ impl IntoDisk for OutputIndex {
 
 impl FromDisk for OutputIndex {
     fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
-        let mem_len = u32::BITS / 8;
-        let mem_len = mem_len.try_into().unwrap();
+        const MEM_LEN: usize = size_of::<u32>();
 
-        let mem_bytes = expand_zero_be_bytes(disk_bytes.as_ref(), mem_len);
-        let mem_bytes = mem_bytes.try_into().unwrap();
+        let mem_bytes = expand_zero_be_bytes::<MEM_LEN>(disk_bytes.as_ref());
         OutputIndex::from_index(u32::from_be_bytes(mem_bytes))
     }
 }

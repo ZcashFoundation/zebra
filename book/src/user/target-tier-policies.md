@@ -41,7 +41,7 @@ determined by the judgment of the Zebra team.
 
 For a list of all supported platforms and their corresponding tiers ("tier 3",
 "tier 2", or "tier 1"), see
-[platform support](platform-support.md).
+[platform support](supported-platforms.md).
 
 Note that a platform must have already received approval for the next lower
 tier, and spent a reasonable amount of time at that tier, before making a

@@ -16,7 +16,10 @@ use std::{
     fs,
     ops::RangeBounds,
     path::Path,
-    sync::Arc,
+    sync::{
+        atomic::{self, AtomicBool},
+        Arc,
+    },
 };
 
 use itertools::Itertools;
@@ -89,6 +92,10 @@ pub struct DiskDb {
     ///
     /// If true, the database files are deleted on drop.
     ephemeral: bool,
+
+    /// A boolean flag indicating whether the db format change task has finished
+    /// applying any format changes that may have been required.
+    finished_format_upgrades: Arc<AtomicBool>,
 
     // Owned State
     //
@@ -602,6 +609,76 @@ impl DiskDb {
         );
     }
 
+    /// Exports RocksDB metrics to Prometheus.
+    ///
+    /// This function collects database statistics and exposes them as Prometheus metrics.
+    /// Call this periodically (e.g., every 30 seconds) from a background task.
+    pub(crate) fn export_metrics(&self) {
+        let db: &Arc<DB> = &self.db;
+        let db_options = DiskDb::options();
+        let column_families = DiskDb::construct_column_families(db_options, db.path(), []);
+
+        let mut total_disk: u64 = 0;
+        let mut total_live: u64 = 0;
+        let mut total_mem: u64 = 0;
+
+        for cf_descriptor in column_families {
+            let cf_name = cf_descriptor.name().to_string();
+            if let Some(cf_handle) = db.cf_handle(&cf_name) {
+                let disk = db
+                    .property_int_value_cf(cf_handle, "rocksdb.total-sst-files-size")
+                    .ok()
+                    .flatten()
+                    .unwrap_or(0);
+                let live = db
+                    .property_int_value_cf(cf_handle, "rocksdb.estimate-live-data-size")
+                    .ok()
+                    .flatten()
+                    .unwrap_or(0);
+                let mem = db
+                    .property_int_value_cf(cf_handle, "rocksdb.size-all-mem-tables")
+                    .ok()
+                    .flatten()
+                    .unwrap_or(0);
+
+                total_disk += disk;
+                total_live += live;
+                total_mem += mem;
+
+                metrics::gauge!("zebra.state.rocksdb.cf_disk_size_bytes", "cf" => cf_name.clone())
+                    .set(disk as f64);
+                metrics::gauge!("zebra.state.rocksdb.cf_memory_size_bytes", "cf" => cf_name)
+                    .set(mem as f64);
+            }
+        }
+
+        metrics::gauge!("zebra.state.rocksdb.total_disk_size_bytes").set(total_disk as f64);
+        metrics::gauge!("zebra.state.rocksdb.live_data_size_bytes").set(total_live as f64);
+        metrics::gauge!("zebra.state.rocksdb.total_memory_size_bytes").set(total_mem as f64);
+
+        // Compaction metrics - these use database-wide properties (not per-column-family)
+        if let Ok(Some(pending)) = db.property_int_value("rocksdb.compaction-pending") {
+            metrics::gauge!("zebra.state.rocksdb.compaction.pending_bytes").set(pending as f64);
+        }
+
+        if let Ok(Some(running)) = db.property_int_value("rocksdb.num-running-compactions") {
+            metrics::gauge!("zebra.state.rocksdb.compaction.running").set(running as f64);
+        }
+
+        if let Ok(Some(cache)) = db.property_int_value("rocksdb.block-cache-usage") {
+            metrics::gauge!("zebra.state.rocksdb.block_cache_usage_bytes").set(cache as f64);
+        }
+
+        // Level-by-level file counts (RocksDB typically has up to 7 levels)
+        for level in 0..7 {
+            let prop = format!("rocksdb.num-files-at-level{}", level);
+            if let Ok(Some(count)) = db.property_int_value(&prop) {
+                metrics::gauge!("zebra.state.rocksdb.num_files_at_level", "level" => level.to_string())
+                    .set(count as f64);
+            }
+        }
+    }
+
     /// Returns the estimated total disk space usage of the database.
     pub fn size(&self) -> u64 {
         let db: &Arc<DB> = &self.db;
@@ -621,6 +698,19 @@ impl DiskDb {
         }
 
         total_size_on_disk
+    }
+
+    /// Sets `finished_format_upgrades` to true to indicate that Zebra has
+    /// finished applying any required db format upgrades.
+    pub fn mark_finished_format_upgrades(&self) {
+        self.finished_format_upgrades
+            .store(true, atomic::Ordering::SeqCst);
+    }
+
+    /// Returns true if the `finished_format_upgrades` flag has been set to true to
+    /// indicate that Zebra has finished applying any required db format upgrades.
+    pub fn finished_format_upgrades(&self) -> bool {
+        self.finished_format_upgrades.load(atomic::Ordering::SeqCst)
     }
 
     /// When called with a secondary DB instance, tries to catch up with the primary DB instance
@@ -776,7 +866,7 @@ impl DiskDb {
     ///
     /// RocksDB iterators are ordered by increasing key bytes by default.
     /// Otherwise, if `reverse` is `true`, the iterator is ordered by decreasing key bytes.
-    fn zs_iter_mode<R>(range: &R, reverse: bool) -> rocksdb::IteratorMode
+    fn zs_iter_mode<R>(range: &R, reverse: bool) -> rocksdb::IteratorMode<'_>
     where
         R: RangeBounds<Vec<u8>>,
     {
@@ -932,6 +1022,7 @@ impl DiskDb {
                     network: network.clone(),
                     ephemeral: config.ephemeral,
                     db: Arc::new(db),
+                    finished_format_upgrades: Arc::new(AtomicBool::new(false)),
                 };
 
                 db.assert_default_cf_is_empty();
@@ -1589,7 +1680,7 @@ impl DiskDb {
                     "No space left on device creating {cache_dir:?}. \
                      Hint: check if the disk is full."
                 ),
-                _ => panic!("Could not create cache dir {:?}: {}", cache_dir, e),
+                _ => panic!("Could not create cache dir {cache_dir:?}: {e}"),
             }
         }
     }

@@ -4,17 +4,22 @@
 
 use structopt::StructOpt;
 
-use zebra_rpc::methods::types::get_block_template::TimeSource;
+use zebra_chain::parameters::Network;
+use zebra_rpc::client::BlockTemplateTimeSource;
 
 /// block-template-to-proposal arguments
 #[derive(Clone, Debug, Eq, PartialEq, StructOpt)]
 pub struct Args {
+    /// The network to use for the block proposal.
+    #[structopt(default_value = "Mainnet", short, long)]
+    pub net: Network,
+
     /// The source of the time in the block proposal header.
     /// Format: "curtime", "mintime", "maxtime", ["clamped"]u32, "raw"u32
     /// Clamped times are clamped to the template's [`mintime`, `maxtime`].
     /// Raw times are used unmodified: this can produce invalid proposals.
     #[structopt(default_value = "CurTime", short, long)]
-    pub time_source: TimeSource,
+    pub time_source: BlockTemplateTimeSource,
 
     /// The JSON block template.
     /// If this argument is not supplied, the template is read from standard input.

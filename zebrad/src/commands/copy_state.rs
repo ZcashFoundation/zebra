@@ -45,7 +45,6 @@ use zebra_state as old_zs;
 use zebra_state as new_zs;
 
 use crate::{
-    application::ZebradApp,
     components::tokio::{RuntimeRun, TokioComponent},
     config::ZebradConfig,
     prelude::*,
@@ -86,11 +85,17 @@ impl CopyStateCmd {
         let base_config = APPLICATION.config();
         let source_config = base_config.state.clone();
 
-        // The default load_config impl doesn't actually modify the app config.
+        // Load the target config if a target config path was provided, or use an ephemeral config otherwise.
+        //
+        // Use the `ZEBRA_TARGET_` environment prefix for target overrides to avoid
+        // conflicting with the source/base config (`ZEBRA_...`).
+        // Example: `ZEBRA_TARGET_STATE__CACHE_DIR=/dst/cache`.
         let target_config = self
             .target_config_path
             .as_ref()
-            .map(|path| ZebradApp::default().load_config(path))
+            .map(|path| {
+                crate::config::ZebradConfig::load_with_env(Some(path.clone()), "ZEBRA_TARGET")
+            })
             .transpose()?
             .map(|app_config| app_config.state)
             .unwrap_or_else(new_zs::Config::ephemeral);
@@ -140,7 +145,7 @@ impl CopyStateCmd {
             _target_read_only_state_service,
             _target_latest_chain_tip,
             _target_chain_tip_change,
-        ) = new_zs::spawn_init(target_config.clone(), network, Height::MAX, 0).await?;
+        ) = new_zs::init(target_config.clone(), network, Height::MAX, 0).await;
 
         let elapsed = target_start_time.elapsed();
         info!(?elapsed, "finished initializing target state service");

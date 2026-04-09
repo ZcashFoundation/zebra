@@ -91,8 +91,6 @@ impl TracingEndpoint {
                             "Opening tracing endpoint listener {addr:?} failed: {err:?}. \
                             Hint: Check if another zebrad or zcashd process is running. \
                             Try changing the tracing endpoint_addr in the Zebra config.",
-                            addr = addr,
-                            err = err,
                         );
                     }
                 };

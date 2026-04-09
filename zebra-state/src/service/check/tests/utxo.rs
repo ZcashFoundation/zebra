@@ -377,8 +377,7 @@ proptest! {
             Err(DuplicateTransparentSpend {
                 outpoint: expected_outpoint,
                 location: "the same block",
-            }
-            .into())
+            })
         );
         prop_assert_eq!(Some((Height(0), genesis.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
 
@@ -441,8 +440,7 @@ proptest! {
             Err(DuplicateTransparentSpend {
                 outpoint: expected_outpoint,
                 location: "the same block",
-            }
-            .into())
+            })
         );
         prop_assert_eq!(Some((Height(1), block1.hash())), read::best_tip(&non_finalized_state, &finalized_state.db));
 
@@ -526,8 +524,7 @@ proptest! {
             Err(DuplicateTransparentSpend {
                 outpoint: expected_outpoint,
                 location: "the same block",
-            }
-            .into())
+            })
         );
         prop_assert_eq!(Some((Height(1), block1.hash())), read::best_tip(&non_finalized_state, &finalized_state.db));
 
@@ -677,8 +674,7 @@ proptest! {
                 Err(MissingTransparentOutput {
                     outpoint: expected_outpoint,
                     location: "the non-finalized and finalized chain",
-                }
-                .into())
+                })
             );
         } else {
             prop_assert_eq!(
@@ -686,8 +682,7 @@ proptest! {
                 Err(DuplicateTransparentSpend {
                     outpoint: expected_outpoint,
                     location: "the non-finalized chain",
-                }
-                .into())
+                })
             );
         }
         prop_assert_eq!(Some((Height(2), block2.hash())), read::best_tip(&non_finalized_state, &finalized_state.db));
@@ -752,8 +747,7 @@ proptest! {
             Err(MissingTransparentOutput {
                 outpoint: expected_outpoint,
                 location: "the non-finalized and finalized chain",
-            }
-            .into())
+            })
         );
         prop_assert_eq!(Some((Height(0), genesis.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
 
@@ -818,8 +812,7 @@ proptest! {
             commit_result,
             Err(EarlyTransparentSpend {
                 outpoint: expected_outpoint,
-            }
-            .into())
+            })
         );
         prop_assert_eq!(Some((Height(0), genesis.hash)), read::best_tip(&non_finalized_state, &finalized_state.db));
 

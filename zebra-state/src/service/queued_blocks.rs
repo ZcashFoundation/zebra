@@ -10,7 +10,11 @@ use tracing::instrument;
 
 use zebra_chain::{block, transparent};
 
-use crate::{BoxError, CheckpointVerifiedBlock, SemanticallyVerifiedBlock};
+use crate::{
+    error::{CommitBlockError, CommitCheckpointVerifiedError},
+    CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, KnownBlock, NonFinalizedState,
+    SemanticallyVerifiedBlock,
+};
 
 #[cfg(test)]
 mod tests;
@@ -18,13 +22,13 @@ mod tests;
 /// A queued checkpoint verified block, and its corresponding [`Result`] channel.
 pub type QueuedCheckpointVerified = (
     CheckpointVerifiedBlock,
-    oneshot::Sender<Result<block::Hash, BoxError>>,
+    oneshot::Sender<Result<block::Hash, CommitCheckpointVerifiedError>>,
 );
 
 /// A queued semantically verified block, and its corresponding [`Result`] channel.
 pub type QueuedSemanticallyVerified = (
     SemanticallyVerifiedBlock,
-    oneshot::Sender<Result<block::Hash, BoxError>>,
+    oneshot::Sender<Result<block::Hash, CommitSemanticallyVerifiedError>>,
 );
 
 /// A queue of blocks, awaiting the arrival of parent blocks.
@@ -136,15 +140,17 @@ impl QueuedBlocks {
         let mut by_height = self.by_height.split_off(&split_height);
         mem::swap(&mut self.by_height, &mut by_height);
 
-        for hash in by_height.into_iter().flat_map(|(_, hashes)| hashes) {
+        for hash in by_height.into_values().flatten() {
             let (expired_block, expired_sender) =
                 self.blocks.remove(&hash).expect("block is present");
             let parent_hash = &expired_block.block.header.previous_block_hash;
 
             // we don't care if the receiver was dropped
-            let _ = expired_sender.send(Err(
-                "pruned block at or below the finalized tip height".into()
-            ));
+            let _ = expired_sender.send(Err(CommitBlockError::new_duplicate(
+                Some(expired_block.height.into()),
+                KnownBlock::Finalized,
+            )
+            .into()));
 
             // TODO: only remove UTXOs if there are no queued blocks with that UTXO
             //       (known_utxos is best-effort, so this is ok for now)
@@ -233,7 +239,7 @@ pub(crate) struct SentHashes {
 
     /// Stores a set of hashes that have been sent to the block write task but
     /// may not be in the finalized state yet.
-    sent: HashMap<block::Hash, Vec<transparent::OutPoint>>,
+    pub sent: HashMap<block::Hash, Vec<transparent::OutPoint>>,
 
     /// Known UTXOs.
     known_utxos: HashMap<transparent::OutPoint, transparent::Utxo>,
@@ -244,6 +250,23 @@ pub(crate) struct SentHashes {
 }
 
 impl SentHashes {
+    /// Creates a new [`SentHashes`] with the block hashes and UTXOs in the provided non-finalized state.
+    pub fn new(non_finalized_state: &NonFinalizedState) -> Self {
+        let mut sent_hashes = Self::default();
+        for (_, block) in non_finalized_state
+            .chain_iter()
+            .flat_map(|c| c.blocks.clone())
+        {
+            sent_hashes.add(&block.into());
+        }
+
+        if !sent_hashes.sent.is_empty() {
+            sent_hashes.can_fork_chain_at_hashes = true;
+        }
+
+        sent_hashes
+    }
+
     /// Stores the `block`'s hash, height, and UTXOs, so they can be used to check if a block or UTXO
     /// is available in the state.
     ///

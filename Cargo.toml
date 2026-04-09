@@ -10,8 +10,6 @@ members = [
         "zebra-node-services",
         "zebra-test",
         "zebra-utils",
-        "zebra-scan",
-        "zebra-grpc",
         "tower-batch-control",
         "tower-fallback",
 ]
@@ -19,21 +17,29 @@ members = [
 # Use the edition 2021 dependency resolver in the workspace, to match the crates
 resolver = "2"
 
+[workspace.package]
+authors = ["Zcash Foundation <zebra@zfnd.org>"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ZcashFoundation/zebra"
+homepage = "https://zfnd.org/zebra/"
+keywords = ["zebra", "zcash"]
+rust-version = "1.85.0"
+edition = "2021"
+
 # `cargo release` settings
 
 [workspace.dependencies]
 incrementalmerkletree = { version = "0.8.2", features = ["legacy-api"] }
 orchard = "0.11"
 sapling-crypto = "0.5"
-zcash_address = "0.7"
-zcash_client_backend = "0.18"
+zcash_address = "0.10"
 zcash_encoding = "0.3"
 zcash_history = "0.4"
-zcash_keys = "0.8"
-zcash_primitives = "0.22"
-zcash_proofs = "0.22"
-zcash_transparent = "0.2.3"
-zcash_protocol = "0.5.1"
+zcash_keys = "0.12"
+zcash_primitives = "0.26"
+zcash_proofs = "0.26"
+zcash_transparent = "0.6"
+zcash_protocol = "0.7"
 zip32 = "0.2"
 abscissa_core = "0.7"
 atty = "0.2.14"
@@ -56,6 +62,8 @@ color-eyre = { version = "0.6.3", default-features = false }
 console-subscriber = "0.4"
 criterion = "0.5"
 crossbeam-channel = "0.5.14"
+derive-getters = "0.5"
+derive-new = "0.5"
 dirs = "6.0"
 ed25519-zebra = "4.0.3"
 elasticsearch = { version = "8.17.0-alpha.1", default-features = false }
@@ -86,20 +94,23 @@ jsonrpsee-proc-macros = "0.24.9"
 jsonrpsee-types = "0.24.9"
 jubjub = "0.10"
 lazy_static = "1.4"
+libzcash_script = "0.1"
 log = "0.4.27"
 metrics = "0.24"
 metrics-exporter-prometheus = { version = "0.16", default-features = false }
 mset = "0.1"
-nix = "0.29"
+nix = "0.30"
 num-integer = "0.1.46"
 once_cell = "1.21"
+openrpsee = "0.1.0"
 ordered-map = "0.4.2"
 owo-colors = "4.2.0"
+phf = "0.12"
 pin-project = "1.1.10"
 primitive-types = "0.12"
 proptest = "1.6"
 proptest-derive = "0.5"
-prost = "0.13.5"
+prost = "0.14"
 quote = "1.0.40"
 rand = "0.8.5"
 rand_chacha = "0.3"
@@ -114,18 +125,19 @@ rlimit = "0.10"
 rocksdb = { version = "0.22", default-features = false }
 secp256k1 = "0.29"
 semver = "1.0.26"
-sentry = { version = "0.36", default-features = false }
+sentry = { version = "0.40", default-features = false }
 serde = "1.0.219"
 serde-big-array = "0.5"
 serde_json = "1.0.140"
 serde_with = "3.12"
 serde_yml = "0.0"
 sha2 = "0.10"
+schemars = "1"
 spandoc = "0.2"
 static_assertions = "1.1"
 structopt = "0.3"
 syn = "2.0.100"
-tempfile = "3.19"
+tempfile = "3.20"
 thiserror = "2.0"
 thread-priority = "1.2"
 tinyvec = "1.9"
@@ -133,10 +145,11 @@ tokio = "1.44"
 tokio-stream = "0.1.17"
 tokio-test = "0.4"
 tokio-util = "0.7.14"
-toml = "0.8"
-tonic = "0.12.3"
-tonic-build = "0.12.3"
-tonic-reflection = "0.12.3"
+toml = "0.9.5"
+tonic = "0.14"
+tonic-prost = "0.14"
+tonic-prost-build = "0.14"
+tonic-reflection = "0.14"
 tower = "0.4.13"
 tower-test = "0.4"
 tracing = "0.1.41"
@@ -147,12 +160,17 @@ tracing-futures = "0.2.5"
 tracing-journald = "0.3"
 tracing-subscriber = "0.3.19"
 tracing-test = "0.2.4"
+tracing-opentelemetry = "0.29"
+opentelemetry = "0.28"
+opentelemetry_sdk = "0.28"
+opentelemetry-otlp = "0.28"
 uint = "0.10"
-vergen-git2 = { version = "1.0", default-features = false }
-wagyu-zcash-parameters = "0.2"
+vergen-git2 = { version = "9", default-features = false }
 x25519-dalek = "2.0.1"
 zcash_note_encryption = "0.4.1"
-zcash_script = "0.3.1"
+zcash_script = "0.4.3"
+config = { version = "0.15.14", features = ["toml"] }
+which = "8.0.0"
 
 [workspace.metadata.release]
 
@@ -164,48 +182,109 @@ allow-branch = ["main"]
 [profile.dev]
 panic = "abort"
 
-# Speed up tests by optimizing performance-critical crates
+# Speed up tests by optimizing performance-critical crates. The parameters
+# values are the ones from the `release` profile
+# (https://doc.rust-lang.org/cargo/reference/profiles.html#release)
 
 # Cryptographic crates
 
 [profile.dev.package.blake2b_simd]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.dev.package.ff]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.dev.package.group]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.dev.package.pasta_curves]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.dev.package.halo2_proofs]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.dev.package.halo2_gadgets]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.dev.package.bls12_381]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.dev.package.byteorder]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.dev.package.equihash]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.dev.package.zcash_proofs]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.dev.package.ring]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.dev.package.spin]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.dev.package.untrusted]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
+
+[profile.dev.package.bitvec]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 
 [profile.release]
@@ -222,3 +301,63 @@ panic = "abort"
 #     - add "-flto=thin" to all C/C++ code builds
 #     - see https://doc.rust-lang.org/rustc/linker-plugin-lto.html#cc-code-as-a-dependency-in-rust
 lto = "thin"
+# Enable line numbers in stack traces. Note that we re-disable it for dependencies below.
+debug = "line-tables-only"
+
+[profile.release.package."*"]
+# Disable debug info for dependencies to reduce binary size.
+debug = false
+
+[workspace.lints.rust]
+# The linter should ignore these expected config flags/values
+unexpected_cfgs = { level = "warn", check-cfg = [
+    'cfg(tokio_unstable)', # Used by tokio-console
+    'cfg(zcash_unstable, values("zfuture", "nu6.1", "nu7", "zip235"))' # Used in Zebra and librustzcash
+] }
+
+# High-risk code
+unsafe_code = "deny"
+non_ascii_idents = "deny"
+
+# Compatibility
+rust_2021_compatibility = { level = "warn", priority = -1 }
+nonstandard_style = { level = "warn", priority = -1 }
+future_incompatible = { level = "warn", priority = -1 }
+
+# Documentation
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+# Async code
+await_holding_lock = "warn"
+await_holding_refcell_ref = "warn"
+
+# Pointers
+cast_ptr_alignment = "warn"
+fn_to_numeric_cast_any = "warn"
+
+# Integers
+checked_conversions = "warn"
+implicit_saturating_sub = "warn"
+invalid_upcast_comparisons = "warn"
+range_minus_one = "warn"
+range_plus_one = "warn"
+unnecessary_cast = "warn"
+
+# Incomplete code
+dbg_macro = "warn"
+todo = "warn"
+
+# Manual debugging output — use tracing::trace!() or tracing::debug!() instead
+print_stdout = "warn"
+print_stderr = "warn"
+
+# Code styles we want to accept
+try_err = "allow"
+
+# Panics
+fallible_impl_from = "warn"
+unwrap_in_result = "warn"
+
+# TODOs: fix this lint eventually
+result_large_err = "allow"

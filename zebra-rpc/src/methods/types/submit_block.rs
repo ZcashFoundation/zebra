@@ -1,18 +1,18 @@
 //! Parameter and response types for the `submitblock` RPC.
 
-use tokio::sync::watch;
+use tokio::sync::mpsc;
 
-use zebra_chain::{block, parameters::GENESIS_PREVIOUS_BLOCK_HASH};
+use zebra_chain::block;
 
 // Allow doc links to these imports.
 #[allow(unused_imports)]
-use crate::methods::get_block_template::GetBlockTemplateHandler;
+use crate::methods::GetBlockTemplateHandler;
 
 /// Optional argument `jsonparametersobject` for `submitblock` RPC request
 ///
 /// See the notes for the [`submit_block`](crate::methods::RpcServer::submit_block) RPC.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
-pub struct JsonParameters {
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, schemars::JsonSchema)]
+pub struct SubmitBlockParameters {
     /// The workid for the block template. Currently unused.
     ///
     /// > If the server provided a workid, it MUST be included with submissions,
@@ -34,7 +34,7 @@ pub struct JsonParameters {
 /// Zebra never returns "duplicate-invalid", because it does not store invalid blocks.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum ErrorResponse {
+pub enum SubmitBlockErrorResponse {
     /// Block was already committed to the non-finalized or finalized state
     Duplicate,
     /// Block was already added to the state queue or channel, but not yet committed to the non-finalized state
@@ -50,21 +50,21 @@ pub enum ErrorResponse {
 /// Zebra never returns "duplicate-invalid", because it does not store invalid blocks.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
-pub enum Response {
+pub enum SubmitBlockResponse {
     /// Block was not successfully submitted, return error
-    ErrorResponse(ErrorResponse),
+    ErrorResponse(SubmitBlockErrorResponse),
     /// Block successfully submitted, returns null
     Accepted,
 }
 
-impl Default for Response {
+impl Default for SubmitBlockResponse {
     fn default() -> Self {
-        Self::ErrorResponse(ErrorResponse::Rejected)
+        Self::ErrorResponse(SubmitBlockErrorResponse::Rejected)
     }
 }
 
-impl From<ErrorResponse> for Response {
-    fn from(error_response: ErrorResponse) -> Self {
+impl From<SubmitBlockErrorResponse> for SubmitBlockResponse {
+    fn from(error_response: SubmitBlockErrorResponse) -> Self {
         Self::ErrorResponse(error_response)
     }
 }
@@ -72,26 +72,34 @@ impl From<ErrorResponse> for Response {
 /// A submit block channel, used to inform the gossip task about mined blocks.
 pub struct SubmitBlockChannel {
     /// The channel sender
-    sender: watch::Sender<(block::Hash, block::Height)>,
+    sender: mpsc::Sender<(block::Hash, block::Height)>,
     /// The channel receiver
-    receiver: watch::Receiver<(block::Hash, block::Height)>,
+    receiver: mpsc::Receiver<(block::Hash, block::Height)>,
 }
 
 impl SubmitBlockChannel {
-    /// Create a new submit block channel
+    /// Creates a new submit block channel
     pub fn new() -> Self {
-        let (sender, receiver) = watch::channel((GENESIS_PREVIOUS_BLOCK_HASH, block::Height::MIN));
+        /// How many unread messages the submit block channel should buffer before rejecting sends.
+        ///
+        /// This should be large enough to usually avoid rejecting sends. This channel is used by
+        /// the block hash gossip task, which waits for a ready peer in the peer set while
+        /// processing messages from this channel and could be much slower to gossip block hashes
+        /// than it is to commit blocks and produce new block templates.
+        const SUBMIT_BLOCK_CHANNEL_CAPACITY: usize = 10_000;
+
+        let (sender, receiver) = mpsc::channel(SUBMIT_BLOCK_CHANNEL_CAPACITY);
         Self { sender, receiver }
     }
 
     /// Get the channel sender
-    pub fn sender(&self) -> watch::Sender<(block::Hash, block::Height)> {
+    pub fn sender(&self) -> mpsc::Sender<(block::Hash, block::Height)> {
         self.sender.clone()
     }
 
     /// Get the channel receiver
-    pub fn receiver(&self) -> watch::Receiver<(block::Hash, block::Height)> {
-        self.receiver.clone()
+    pub fn receiver(self) -> mpsc::Receiver<(block::Hash, block::Height)> {
+        self.receiver
     }
 }
 

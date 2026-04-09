@@ -54,9 +54,7 @@ pub fn transparent_balance(
         let chain_balance_change =
             chain_transparent_balance_change(chain, &addresses, finalized_tip);
 
-        balance = apply_balance_change(balance, chain_balance_change).expect(
-            "unexpected amount overflow: value balances are valid, so partial sum should be valid",
-        );
+        balance = apply_balance_change(balance, chain_balance_change)?;
     }
 
     Ok(balance)

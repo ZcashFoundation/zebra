@@ -211,20 +211,18 @@ pub fn mempool_checks(
 
     const KILOBYTE: usize = 1000;
 
-    // This calculation can't overflow, because transactions are limited to 2 MB,
-    // and usize is at least 4 GB.
-    assert!(
-        MIN_MEMPOOL_TX_FEE_RATE
-            < usize::MAX / usize::try_from(MAX_BLOCK_BYTES).expect("constant fits in usize"),
-        "the fee rate multiplication must never overflow",
-    );
+    let max_block_size = usize::try_from(MAX_BLOCK_BYTES).map_err(|_| Error::InvalidMinFee)?;
 
-    let min_fee = (MIN_MEMPOOL_TX_FEE_RATE * transaction_size / KILOBYTE)
-        .clamp(MIN_MEMPOOL_TX_FEE_RATE, MEMPOOL_TX_FEE_REQUIREMENT_CAP);
-    let min_fee: u64 = min_fee
+    // Blocks, and therefore, txs are limited to 2 MB and usize is at least 4 GB, implying that we
+    // can multiply MIN_MEMPOOL_TX_FEE_RATE by transaction_size without overflow.
+    assert!(MIN_MEMPOOL_TX_FEE_RATE < usize::MAX / max_block_size);
+
+    let min_fee: u64 = (MIN_MEMPOOL_TX_FEE_RATE * transaction_size / KILOBYTE)
+        .clamp(MIN_MEMPOOL_TX_FEE_RATE, MEMPOOL_TX_FEE_REQUIREMENT_CAP)
         .try_into()
-        .expect("clamped value always fits in u64");
-    let min_fee: Amount<NonNegative> = min_fee.try_into().expect("clamped value is positive");
+        .map_err(|_| Error::InvalidMinFee)?;
+
+    let min_fee = Amount::<NonNegative>::try_from(min_fee).map_err(|_| Error::InvalidMinFee)?;
 
     if miner_fee < min_fee {
         return Err(Error::FeeBelowMinimumRate);
@@ -234,7 +232,7 @@ pub fn mempool_checks(
 }
 
 /// Errors related to ZIP-317.
-#[derive(Error, Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Error, Clone, Debug, PartialEq, Eq)]
 #[allow(missing_docs)]
 pub enum Error {
     #[error("Unpaid actions is higher than the limit")]
@@ -242,4 +240,7 @@ pub enum Error {
 
     #[error("Transaction fee is below the minimum fee rate")]
     FeeBelowMinimumRate,
+
+    #[error("Minimum fee could not be calculated")]
+    InvalidMinFee,
 }

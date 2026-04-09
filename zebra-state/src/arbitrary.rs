@@ -24,21 +24,7 @@ pub trait Prepare {
 
 impl Prepare for Arc<Block> {
     fn prepare(self) -> SemanticallyVerifiedBlock {
-        let block = self;
-        let hash = block.hash();
-        let height = block.coinbase_height().unwrap();
-        let transaction_hashes: Arc<[_]> = block.transactions.iter().map(|tx| tx.hash()).collect();
-        let new_outputs =
-            transparent::new_ordered_outputs_with_height(&block, height, &transaction_hashes);
-
-        SemanticallyVerifiedBlock {
-            block,
-            hash,
-            height,
-            new_outputs,
-            transaction_hashes,
-            deferred_balance: None,
-        }
+        self.into()
     }
 }
 
@@ -111,7 +97,7 @@ impl ContextuallyVerifiedBlock {
             height,
             new_outputs,
             transaction_hashes,
-            deferred_balance: _,
+            deferred_pool_balance_change: _,
         } = block.into();
 
         Self {

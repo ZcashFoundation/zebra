@@ -4,6 +4,7 @@ use NetworkUpgrade::*;
 
 use crate::block;
 use crate::parameters::{Network, Network::*};
+use crate::serialization::BytesInDisplayOrder;
 
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
@@ -11,31 +12,20 @@ use std::fmt;
 use chrono::{DateTime, Duration, Utc};
 use hex::{FromHex, ToHex};
 
+use strum::{EnumIter, IntoEnumIterator};
+
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
-
-/// A list of network upgrades in the order that they must be activated.
-const NETWORK_UPGRADES_IN_ORDER: &[NetworkUpgrade] = &[
-    Genesis,
-    BeforeOverwinter,
-    Overwinter,
-    Sapling,
-    Blossom,
-    Heartwood,
-    Canopy,
-    Nu5,
-    Nu6,
-    #[cfg(any(test, feature = "zebra-test"))]
-    Nu6_1,
-    #[cfg(any(test, feature = "zebra-test"))]
-    Nu7,
-];
 
 /// A Zcash network upgrade.
 ///
 /// Network upgrades change the Zcash network protocol or consensus rules. Note that they have no
 /// designated codenames from NU5 onwards.
-#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Ord, PartialOrd)]
+///
+/// Enum variants must be ordered by activation height.
+#[derive(
+    Copy, Clone, EnumIter, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Ord, PartialOrd,
+)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum NetworkUpgrade {
     /// The Zcash protocol for a Genesis block.
@@ -71,6 +61,9 @@ pub enum NetworkUpgrade {
     /// The Zcash protocol after the NU7 upgrade.
     #[serde(rename = "NU7")]
     Nu7,
+
+    #[cfg(zcash_unstable = "zfuture")]
+    ZFuture,
 }
 
 impl TryFrom<u32> for NetworkUpgrade {
@@ -102,34 +95,21 @@ impl fmt::Display for NetworkUpgrade {
 /// Don't use this directly; use NetworkUpgrade::activation_list() so that
 /// we can switch to fake activation heights for some tests.
 #[allow(unused)]
-pub(super) const MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
-    (block::Height(0), Genesis),
-    (block::Height(1), BeforeOverwinter),
-    (block::Height(347_500), Overwinter),
-    (block::Height(419_200), Sapling),
-    (block::Height(653_600), Blossom),
-    (block::Height(903_000), Heartwood),
-    (block::Height(1_046_400), Canopy),
-    (block::Height(1_687_104), Nu5),
-    (block::Height(2_726_400), Nu6),
-];
-
-/// Fake mainnet network upgrade activation heights, used in tests.
-#[allow(unused)]
-const FAKE_MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
-    (block::Height(0), Genesis),
-    (block::Height(5), BeforeOverwinter),
-    (block::Height(10), Overwinter),
-    (block::Height(15), Sapling),
-    (block::Height(20), Blossom),
-    (block::Height(25), Heartwood),
-    (block::Height(30), Canopy),
-    (block::Height(35), Nu5),
-    (block::Height(40), Nu6),
-    (block::Height(45), Nu6_1),
-    (block::Height(50), Nu7),
-];
-
+pub(super) const MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = {
+    use super::constants::activation_heights::mainnet::*;
+    &[
+        (block::Height(0), Genesis),
+        (BEFORE_OVERWINTER, BeforeOverwinter),
+        (OVERWINTER, Overwinter),
+        (SAPLING, Sapling),
+        (BLOSSOM, Blossom),
+        (HEARTWOOD, Heartwood),
+        (CANOPY, Canopy),
+        (NU5, Nu5),
+        (NU6, Nu6),
+        (NU6_1, Nu6_1),
+    ]
+};
 /// Testnet network upgrade activation heights.
 ///
 /// This is actually a bijective map, but it is const, so we use a vector, and
@@ -140,46 +120,34 @@ const FAKE_MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
 /// Don't use this directly; use NetworkUpgrade::activation_list() so that
 /// we can switch to fake activation heights for some tests.
 #[allow(unused)]
-pub(super) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
-    (block::Height(0), Genesis),
-    (block::Height(1), BeforeOverwinter),
-    (block::Height(207_500), Overwinter),
-    (block::Height(280_000), Sapling),
-    (block::Height(584_000), Blossom),
-    (block::Height(903_800), Heartwood),
-    (block::Height(1_028_500), Canopy),
-    (block::Height(1_842_420), Nu5),
-    (block::Height(2_976_000), Nu6),
-];
-
-/// Fake testnet network upgrade activation heights, used in tests.
-#[allow(unused)]
-const FAKE_TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
-    (block::Height(0), Genesis),
-    (block::Height(5), BeforeOverwinter),
-    (block::Height(10), Overwinter),
-    (block::Height(15), Sapling),
-    (block::Height(20), Blossom),
-    (block::Height(25), Heartwood),
-    (block::Height(30), Canopy),
-    (block::Height(35), Nu5),
-    (block::Height(40), Nu6),
-    (block::Height(45), Nu6_1),
-    (block::Height(50), Nu7),
-];
+pub(super) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = {
+    use super::constants::activation_heights::testnet::*;
+    &[
+        (block::Height(0), Genesis),
+        (BEFORE_OVERWINTER, BeforeOverwinter),
+        (OVERWINTER, Overwinter),
+        (SAPLING, Sapling),
+        (BLOSSOM, Blossom),
+        (HEARTWOOD, Heartwood),
+        (CANOPY, Canopy),
+        (NU5, Nu5),
+        (NU6, Nu6),
+        (NU6_1, Nu6_1),
+    ]
+};
 
 /// The Consensus Branch Id, used to bind transactions and blocks to a
 /// particular network upgrade.
 #[derive(Copy, Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct ConsensusBranchId(pub(crate) u32);
 
-impl ConsensusBranchId {
-    /// Return the hash bytes in big-endian byte-order suitable for printing out byte by byte.
-    ///
-    /// Zebra displays consensus branch IDs in big-endian byte-order,
-    /// following the convention set by zcashd.
-    fn bytes_in_display_order(&self) -> [u8; 4] {
+impl BytesInDisplayOrder<false, 4> for ConsensusBranchId {
+    fn bytes_in_serialized_order(&self) -> [u8; 4] {
         self.0.to_be_bytes()
+    }
+
+    fn from_bytes_in_serialized_order(bytes: [u8; 4]) -> Self {
+        ConsensusBranchId(u32::from_be_bytes(bytes))
     }
 }
 
@@ -257,10 +225,12 @@ pub(crate) const CONSENSUS_BRANCH_IDS: &[(NetworkUpgrade, ConsensusBranchId)] = 
     (Canopy, ConsensusBranchId(0xe9ff75a6)),
     (Nu5, ConsensusBranchId(0xc2d6d0b4)),
     (Nu6, ConsensusBranchId(0xc8e71055)),
-    #[cfg(any(test, feature = "zebra-test"))]
     (Nu6_1, ConsensusBranchId(0x4dec4df0)),
+    // TODO: set below to (Nu7, ConsensusBranchId(0x77190ad8)), once the same value is set in librustzcash
     #[cfg(any(test, feature = "zebra-test"))]
-    (Nu7, ConsensusBranchId(0x77190ad8)),
+    (Nu7, ConsensusBranchId(0xffffffff)),
+    #[cfg(zcash_unstable = "zfuture")]
+    (ZFuture, ConsensusBranchId(0xffffffff)),
 ];
 
 /// The target block spacing before Blossom.
@@ -300,33 +270,10 @@ impl Network {
     ///
     /// This is actually a bijective map.
     ///
-    /// When the environment variable TEST_FAKE_ACTIVATION_HEIGHTS is set
-    /// and it's a test build, this returns a list of fake activation heights
-    /// used by some tests.
-    ///
     /// Note: This skips implicit network upgrade activations, use [`Network::full_activation_list`]
     ///       to get an explicit list of all network upgrade activations.
     pub fn activation_list(&self) -> BTreeMap<block::Height, NetworkUpgrade> {
         match self {
-            // To prevent accidentally setting this somehow, only check the env var
-            // when being compiled for tests. We can't use cfg(test) since the
-            // test that uses this is in zebra-state, and cfg(test) is not
-            // set for dependencies. However, zebra-state does set the
-            // zebra-test feature of zebra-chain if it's a dev dependency.
-            //
-            // Cargo features are additive, so all test binaries built along with
-            // zebra-state will have this feature enabled. But we are using
-            // Rust Edition 2021 and Cargo resolver version 2, so the "zebra-test"
-            // feature should only be enabled for tests:
-            // https://doc.rust-lang.org/cargo/reference/features.html#resolver-version-2-command-line-flags
-            #[cfg(feature = "zebra-test")]
-            Mainnet if std::env::var_os("TEST_FAKE_ACTIVATION_HEIGHTS").is_some() => {
-                FAKE_MAINNET_ACTIVATION_HEIGHTS.iter().cloned().collect()
-            }
-            #[cfg(feature = "zebra-test")]
-            Testnet(_) if std::env::var_os("TEST_FAKE_ACTIVATION_HEIGHTS").is_some() => {
-                FAKE_TESTNET_ACTIVATION_HEIGHTS.iter().cloned().collect()
-            }
             Mainnet => MAINNET_ACTIVATION_HEIGHTS.iter().cloned().collect(),
             Testnet(params) => params.activation_heights().clone(),
         }
@@ -335,9 +282,8 @@ impl Network {
     /// Returns a vector of all implicit and explicit network upgrades for `network`,
     /// in ascending height order.
     pub fn full_activation_list(&self) -> Vec<(block::Height, NetworkUpgrade)> {
-        NETWORK_UPGRADES_IN_ORDER
-            .iter()
-            .map_while(|&nu| Some((NetworkUpgrade::activation_height(&nu, self)?, nu)))
+        NetworkUpgrade::iter()
+            .filter_map(|nu| Some((NetworkUpgrade::activation_height(&nu, self)?, nu)))
             .collect()
     }
 }
@@ -452,6 +398,9 @@ impl NetworkUpgrade {
             Blossom | Heartwood | Canopy | Nu5 | Nu6 | Nu6_1 | Nu7 => {
                 POST_BLOSSOM_POW_TARGET_SPACING.into()
             }
+
+            #[cfg(zcash_unstable = "zfuture")]
+            ZFuture => POST_BLOSSOM_POW_TARGET_SPACING.into(),
         };
 
         Duration::seconds(spacing_seconds)
@@ -556,7 +505,7 @@ impl NetworkUpgrade {
 
     /// Returns an iterator over [`NetworkUpgrade`] variants.
     pub fn iter() -> impl DoubleEndedIterator<Item = NetworkUpgrade> {
-        NETWORK_UPGRADES_IN_ORDER.iter().copied()
+        <Self as IntoEnumIterator>::iter()
     }
 }
 
@@ -570,7 +519,11 @@ impl From<zcash_protocol::consensus::NetworkUpgrade> for NetworkUpgrade {
             zcash_protocol::consensus::NetworkUpgrade::Canopy => Self::Canopy,
             zcash_protocol::consensus::NetworkUpgrade::Nu5 => Self::Nu5,
             zcash_protocol::consensus::NetworkUpgrade::Nu6 => Self::Nu6,
-            // zcash_protocol::consensus::NetworkUpgrade::Nu7 => Self::Nu7,
+            zcash_protocol::consensus::NetworkUpgrade::Nu6_1 => Self::Nu6_1,
+            #[cfg(zcash_unstable = "nu7")]
+            zcash_protocol::consensus::NetworkUpgrade::Nu7 => Self::Nu7,
+            #[cfg(zcash_unstable = "zfuture")]
+            zcash_protocol::consensus::NetworkUpgrade::ZFuture => Self::ZFuture,
         }
     }
 }

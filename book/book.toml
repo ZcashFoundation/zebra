@@ -1,7 +1,6 @@
 [book]
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 language = "en"
-multilingual = false
 src = "src"
 title = "The Zebra Book"
 

@@ -1,5 +1,7 @@
 //! Check the relationship between various sync timeouts and delays.
 
+#![allow(clippy::unwrap_in_result)]
+
 use std::sync::{
     atomic::{AtomicU8, Ordering},
     Arc,

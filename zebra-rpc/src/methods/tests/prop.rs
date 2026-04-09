@@ -26,7 +26,6 @@ use zebra_chain::{
     transparent,
     value_balance::ValueBalance,
 };
-use zebra_consensus::ParameterCheckpoint;
 use zebra_network::address_book_peers::MockAddressBookPeers;
 use zebra_node_services::mempool;
 use zebra_state::{BoxError, GetBlockTemplateChainInfo};
@@ -35,13 +34,14 @@ use zebra_test::mock_service::MockService;
 use crate::methods::{
     self,
     types::{
-        get_blockchain_info,
-        get_raw_mempool::{GetRawMempool, MempoolObject},
+        get_blockchain_info::GetBlockchainInfoBalance,
+        get_raw_mempool::{GetRawMempoolResponse, MempoolObject},
     },
 };
 
 use super::super::{
-    AddressBalance, AddressStrings, NetworkUpgradeStatus, RpcImpl, RpcServer, SentTransactionHash,
+    GetAddressBalanceRequest, GetAddressBalanceResponse, NetworkUpgradeStatus, RpcImpl, RpcServer,
+    SendRawTransactionResponse,
 };
 
 proptest! {
@@ -56,7 +56,7 @@ proptest! {
         tokio::time::pause();
 
         runtime.block_on(async move {
-            let hash = SentTransactionHash(transaction.hash());
+            let hash = SendRawTransactionResponse(transaction.hash());
 
             let transaction_bytes = transaction.zcash_serialize_to_vec()?;
 
@@ -273,7 +273,7 @@ proptest! {
                             last_seen_tip_hash: [0; 32].into(),
                         }));
 
-                    (GetRawMempool::Verbose(txs), mempool_query)
+                    (GetRawMempoolResponse::Verbose(txs), mempool_query)
                 };
 
                 let (rpc_rsp, _) = tokio::join!(rpc.get_raw_mempool(verbose), mempool_query);
@@ -295,7 +295,7 @@ proptest! {
                     let mempool_query = mempool.expect_request(mempool::Request::TransactionIds)
                             .map_ok(|r| r.respond(mempool::Response::TransactionIds(mempool_rsp)));
 
-                    (GetRawMempool::TxIds(tx_ids), mempool_query,)
+                    (GetRawMempoolResponse::TxIds(tx_ids), mempool_query,)
                 };
 
                 let (rpc_rsp, _) = tokio::join!(rpc.get_raw_mempool(verbose), mempool_query);
@@ -345,8 +345,8 @@ proptest! {
                 .map_ok(|r| r.respond(mempool::Response::Transactions(vec![])));
 
             let state_query = state
-                .expect_request(zebra_state::ReadRequest::Transaction(unknown_txid))
-                .map_ok(|r| r.respond(zebra_state::ReadResponse::Transaction(None)));
+                .expect_request(zebra_state::ReadRequest::AnyChainTransaction(unknown_txid))
+                .map_ok(|r| r.respond(zebra_state::ReadResponse::AnyChainTransaction(None)));
 
             let rpc_query = rpc.get_raw_transaction(unknown_txid.encode_hex(), Some(1), None);
 
@@ -585,7 +585,7 @@ proptest! {
             prop_assert_eq!(response.best_block_hash, genesis_block.header.hash());
             prop_assert_eq!(response.chain, network.bip70_network_name());
             prop_assert_eq!(response.blocks, Height::MIN);
-            prop_assert_eq!(response.value_pools, get_blockchain_info::Balance::value_pools(ValueBalance::zero()));
+            prop_assert_eq!(response.value_pools, GetBlockchainInfoBalance::value_pools(ValueBalance::zero(), None));
 
             let genesis_branch_id = NetworkUpgrade::current(&network, Height::MIN).branch_id().unwrap_or(ConsensusBranchId::RPC_MISSING_ID);
             let next_height = (Height::MIN + 1).expect("genesis height plus one is next height and valid");
@@ -629,7 +629,7 @@ proptest! {
         tokio::time::pause();
 
         // Prepare the list of addresses.
-        let address_strings = AddressStrings {
+        let address_strings = GetAddressBalanceRequest {
             addresses: addresses
                 .iter()
                 .map(|address| address.to_string())
@@ -656,7 +656,7 @@ proptest! {
             // Check that response contains the expected balance
             let received_balance = response?;
 
-            prop_assert_eq!(received_balance, AddressBalance { balance: balance.into(), received: balance.into() });
+            prop_assert_eq!(received_balance, GetAddressBalanceResponse { balance: balance.into(), received: balance.into() });
 
             // Check no further requests were made during this test
             mempool.expect_no_requests().await?;
@@ -691,7 +691,7 @@ proptest! {
 
         runtime.block_on(async move {
 
-            let address_strings = AddressStrings {
+            let address_strings = GetAddressBalanceRequest {
                 addresses: at_least_one_invalid_address,
             };
 

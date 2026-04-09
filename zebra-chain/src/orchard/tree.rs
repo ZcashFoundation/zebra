@@ -106,6 +106,15 @@ lazy_static! {
 #[derive(Clone, Copy, Default, Eq, Serialize, Deserialize)]
 pub struct Root(#[serde(with = "serde_helpers::Base")] pub(crate) pallas::Base);
 
+impl Root {
+    /// Return the node bytes in big-endian byte order as required
+    /// by RPCs such as `z_gettreestate`. Note that this is opposite
+    /// to the Sapling root.
+    pub fn bytes_in_display_order(&self) -> [u8; 32] {
+        self.into()
+    }
+}
+
 impl fmt::Debug for Root {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("Root")

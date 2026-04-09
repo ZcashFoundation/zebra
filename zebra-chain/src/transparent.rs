@@ -7,7 +7,7 @@ mod script;
 mod serialize;
 mod utxo;
 
-use std::{collections::HashMap, fmt, iter};
+use std::{collections::HashMap, fmt, iter, ops::AddAssign};
 
 use zcash_transparent::{address::TransparentAddress, bundle::TxOut};
 
@@ -15,6 +15,7 @@ use crate::{
     amount::{Amount, NonNegative},
     block,
     parameters::Network,
+    serialization::ZcashSerialize,
     transaction,
 };
 
@@ -62,6 +63,11 @@ pub const MIN_TRANSPARENT_COINBASE_MATURITY: u32 = 100;
 // - https://github.com/emacs-lsp/lsp-mode/issues/2080
 // - https://github.com/rust-lang/rust-analyzer/issues/13709
 pub const EXTRA_ZEBRA_COINBASE_DATA: &str = "z\u{1F993}";
+
+/// The rate used to calculate the dust threshold, in zatoshis per 1000 bytes.
+///
+/// History: <https://github.com/zcash/zcash/blob/v6.10.0/src/policy/policy.h#L43-L89>
+pub const ONE_THIRD_DUST_THRESHOLD_RATE: u32 = 100;
 
 /// Arbitrary data inserted by miners into a coinbase transaction.
 //
@@ -124,14 +130,14 @@ pub struct OutPoint {
     ///
     /// # Correctness
     ///
-    /// Consensus-critical serialization uses
-    /// [`ZcashSerialize`](crate::serialization::ZcashSerialize).
+    /// Consensus-critical serialization uses [`ZcashSerialize`].
     /// [`serde`]-based hex serialization must only be used for testing.
     #[cfg_attr(any(test, feature = "proptest-impl"), serde(with = "hex"))]
     pub hash: transaction::Hash,
 
     /// Identifies which UTXO from that transaction is referenced; the
     /// first output is 0, etc.
+    // TODO: Use OutputIndex here
     pub index: u32,
 }
 
@@ -219,11 +225,7 @@ impl Input {
     /// # Panics
     ///
     /// If the coinbase data is greater than [`MAX_COINBASE_DATA_LEN`].
-    pub fn new_coinbase(
-        height: block::Height,
-        data: Option<Vec<u8>>,
-        sequence: Option<u32>,
-    ) -> Input {
+    pub fn new_coinbase(height: block::Height, data: Vec<u8>, sequence: Option<u32>) -> Input {
         // `zcashd` includes an extra byte after the coinbase height in the coinbase data. We do
         // that only if the data is empty to stay compliant with the following consensus rule:
         //
@@ -234,15 +236,13 @@ impl Input {
         // Coinbase heights < 17 are serialized as a single byte, and if there is no coinbase data,
         // the script of a coinbase tx with such a height would consist only of this single byte,
         // violating the consensus rule.
-        let data = data.map_or(vec![0], |d| if d.is_empty() { vec![0] } else { d });
-        let height_size = height.coinbase_zcash_serialized_size();
+        let data = if data.is_empty() { vec![0] } else { data };
+        let data_limit = MAX_COINBASE_DATA_LEN - height.coinbase_zcash_serialized_size();
 
         assert!(
-            data.len() + height_size <= MAX_COINBASE_DATA_LEN,
-            "invalid coinbase data: extra data {} bytes + height {height_size} bytes \
-             must be {} or less",
+            data.len() <= data_limit,
+            "miner data has {} bytes, which exceeds the limit of {data_limit} bytes",
             data.len(),
-            MAX_COINBASE_DATA_LEN,
         );
 
         Input::Coinbase {
@@ -432,8 +432,8 @@ pub struct Output {
 }
 
 impl Output {
-    /// Returns a new coinbase output that pays `amount` using `lock_script`.
-    pub fn new_coinbase(amount: Amount<NonNegative>, lock_script: Script) -> Output {
+    /// Returns a new [`Output`].
+    pub fn new(amount: Amount<NonNegative>, lock_script: Script) -> Output {
         Output {
             value: amount,
             lock_script,
@@ -458,5 +458,77 @@ impl Output {
                 Some(Address::from_script_hash(net.t_addr_kind(), sh))
             }
         }
+    }
+
+    /// Returns true if this output is considered dust.
+    pub fn is_dust(&self) -> bool {
+        let output_size: u32 = self
+            .zcash_serialized_size()
+            .try_into()
+            .expect("output size should fit in u32");
+
+        // https://github.com/zcash/zcash/blob/v6.10.0/src/primitives/transaction.cpp#L75-L80
+        let threshold = 3 * (ONE_THIRD_DUST_THRESHOLD_RATE * (output_size + 148) / 1000);
+
+        // https://github.com/zcash/zcash/blob/v6.10.0/src/primitives/transaction.h#L396-L399
+        self.value.zatoshis() < threshold as i64
+    }
+}
+
+/// A transparent output's index in its transaction.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+pub struct OutputIndex(u32);
+
+impl OutputIndex {
+    /// Create a transparent output index from the Zcash consensus integer type.
+    ///
+    /// `u32` is also the inner type.
+    pub const fn from_index(output_index: u32) -> OutputIndex {
+        OutputIndex(output_index)
+    }
+
+    /// Returns this index as the inner type.
+    pub const fn index(&self) -> u32 {
+        self.0
+    }
+
+    /// Create a transparent output index from `usize`.
+    #[allow(dead_code)]
+    pub fn from_usize(output_index: usize) -> OutputIndex {
+        OutputIndex(
+            output_index
+                .try_into()
+                .expect("the maximum valid index fits in the inner type"),
+        )
+    }
+
+    /// Return this index as `usize`.
+    #[allow(dead_code)]
+    pub fn as_usize(&self) -> usize {
+        self.0
+            .try_into()
+            .expect("the maximum valid index fits in usize")
+    }
+
+    /// Create a transparent output index from `u64`.
+    #[allow(dead_code)]
+    pub fn from_u64(output_index: u64) -> OutputIndex {
+        OutputIndex(
+            output_index
+                .try_into()
+                .expect("the maximum u64 index fits in the inner type"),
+        )
+    }
+
+    /// Return this index as `u64`.
+    #[allow(dead_code)]
+    pub fn as_u64(&self) -> u64 {
+        self.0.into()
+    }
+}
+
+impl AddAssign<u32> for OutputIndex {
+    fn add_assign(&mut self, rhs: u32) {
+        self.0 += rhs
     }
 }

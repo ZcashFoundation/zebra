@@ -91,6 +91,11 @@ impl VerifiedSet {
         self.created_outputs.get(outpoint).cloned()
     }
 
+    /// Returns true if a tx in the set has spent the output at the provided outpoint.
+    pub fn has_spent_outpoint(&self, outpoint: &transparent::OutPoint) -> bool {
+        self.spent_outpoints.contains(outpoint)
+    }
+
     /// Returns the number of verified transactions in the set.
     pub fn transaction_count(&self) -> usize {
         self.transactions.len()
@@ -256,6 +261,11 @@ impl VerifiedSet {
         let mut removed_transactions = HashSet::new();
 
         for key_to_remove in keys_to_remove {
+            if !self.transactions.contains_key(&key_to_remove) {
+                // Skip any keys that may have already been removed as their dependencies were removed.
+                continue;
+            }
+
             removed_transactions.extend(
                 self.remove(&key_to_remove)
                     .into_iter()
@@ -281,17 +291,17 @@ impl VerifiedSet {
             .remove_all(key_to_remove)
             .iter()
             .chain(std::iter::once(key_to_remove))
-            .map(|key_to_remove| {
-                let removed_tx = self
-                    .transactions
-                    .remove(key_to_remove)
-                    .expect("invalid transaction key");
+            .filter_map(|key_to_remove| {
+                let Some(removed_tx) = self.transactions.remove(key_to_remove) else {
+                    tracing::warn!(?key_to_remove, "invalid transaction key");
+                    return None;
+                };
 
                 self.transactions_serialized_size -= removed_tx.transaction.size;
                 self.total_cost -= removed_tx.cost();
                 self.remove_outputs(&removed_tx.transaction);
 
-                removed_tx
+                Some(removed_tx)
             })
             .collect();
 

@@ -1,6 +1,12 @@
 use proptest::{collection::vec, prelude::*};
 
-use crate::{block, parameters::NetworkKind, LedgerState};
+use crate::{
+    block,
+    parameters::NetworkKind,
+    serialization::TrustedPreallocate,
+    transparent::{Output, OutputIndex},
+    LedgerState,
+};
 
 use super::{Address, CoinbaseData, Input, OutPoint, Script, GENESIS_COINBASE_DATA};
 
@@ -22,7 +28,7 @@ impl Arbitrary for Input {
 
     fn arbitrary_with(height: Self::Parameters) -> Self::Strategy {
         if let Some(height) = height {
-            (vec(any::<u8>(), 0..95), any::<u32>())
+            (vec(any::<u8>(), 1..95), any::<u32>())
                 .prop_map(move |(data, sequence)| Input::Coinbase {
                     height,
                     data: if height == block::Height(0) {
@@ -65,6 +71,18 @@ impl Arbitrary for Address {
                     Address::from_script_hash(network, hash_bytes)
                 }
             })
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
+impl Arbitrary for OutputIndex {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: ()) -> Self::Strategy {
+        (0..=Output::max_allocation())
+            .prop_map(OutputIndex::from_u64)
             .boxed()
     }
 

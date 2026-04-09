@@ -1,6 +1,6 @@
 # Code of Conduct
 
-----------------------------------------------------------------------
+---
 
 ## Conduct
 
@@ -32,7 +32,7 @@ In the community fostered by the Zcash Foundation we strive to go the extra step
 
 And if someone takes issue with something you said or did, resist the urge to be defensive. Just stop doing what it was they complained about and apologize. Even if you feel you were misinterpreted or unfairly accused, chances are good there was something you could’ve communicated better — remember that it’s your responsibility to make your fellow humans comfortable. Everyone wants to get along and we are all here first and foremost because we want to talk about cool technology. You will find that people will be eager to assume good intent and forgive as long as you earn their trust.
 
-The enforcement policies listed above apply to all official Zcash Foundation venues; including Discord channels (https://discord.com/channels/676527656170160146/716086297210650634); and GitHub repositories under ZcashFoundation. For other projects adopting the Zcash Foundation Code of Conduct, please contact the maintainers of those projects for enforcement. If you wish to use this code of conduct for your own project, consider explicitly mentioning your moderation policy or making a copy with your own moderation policy so as to avoid confusion.
+The enforcement policies listed above apply to all official Zcash Foundation venues; including Discord channels (<https://discord.com/channels/676527656170160146/716086297210650634>); and GitHub repositories under ZcashFoundation. For other projects adopting the Zcash Foundation Code of Conduct, please contact the maintainers of those projects for enforcement. If you wish to use this code of conduct for your own project, consider explicitly mentioning your moderation policy or making a copy with your own moderation policy so as to avoid confusion.
 
 Based on the Rust Code of Conduct, adapted from the Node.js Policy on Trolling as well as the Contributor Covenant v1.3.0.
 

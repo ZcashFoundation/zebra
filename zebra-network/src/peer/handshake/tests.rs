@@ -1,5 +1,7 @@
 //! Implements methods for testing [`Handshake`]
 
+#![allow(clippy::unwrap_in_result)]
+
 use super::*;
 
 impl<S, C> Handshake<S, C>

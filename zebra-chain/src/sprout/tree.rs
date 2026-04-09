@@ -93,6 +93,16 @@ lazy_static! {
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct Root([u8; 32]);
 
+impl Root {
+    /// Return the bytes in big-endian byte order as required
+    /// by RPCs such as `getrawtransaction`.
+    pub fn bytes_in_display_order(&self) -> [u8; 32] {
+        let mut root: [u8; 32] = self.into();
+        root.reverse();
+        root
+    }
+}
+
 impl fmt::Debug for Root {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("Root").field(&hex::encode(self.0)).finish()

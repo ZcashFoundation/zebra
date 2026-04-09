@@ -1,5 +1,6 @@
 use group::{ff::PrimeField, GroupEncoding};
 use halo2::pasta::pallas;
+
 #[derive(Deserialize, Serialize)]
 #[serde(remote = "jubjub::AffinePoint")]
 pub struct AffinePoint {
@@ -62,5 +63,56 @@ pub struct Base {
 impl From<Base> for pallas::Base {
     fn from(local: Base) -> Self {
         pallas::Base::from_repr(local.bytes).unwrap()
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(remote = "sapling_crypto::value::ValueCommitment")]
+pub struct ValueCommitment {
+    #[serde(getter = "sapling_crypto::value::ValueCommitment::to_bytes")]
+    bytes: [u8; 32],
+}
+
+impl From<ValueCommitment> for sapling_crypto::value::ValueCommitment {
+    fn from(local: ValueCommitment) -> Self {
+        sapling_crypto::value::ValueCommitment::from_bytes_not_small_order(&local.bytes).unwrap()
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(remote = "sapling_crypto::note::ExtractedNoteCommitment")]
+pub struct SaplingExtractedNoteCommitment {
+    #[serde(getter = "SaplingExtractedNoteCommitment::as_serializable_bytes")]
+    bytes: [u8; 32],
+}
+
+impl From<SaplingExtractedNoteCommitment> for sapling_crypto::note::ExtractedNoteCommitment {
+    fn from(local: SaplingExtractedNoteCommitment) -> Self {
+        sapling_crypto::note::ExtractedNoteCommitment::from_bytes(&local.bytes).unwrap()
+    }
+}
+
+impl SaplingExtractedNoteCommitment {
+    fn as_serializable_bytes(remote: &sapling_crypto::note::ExtractedNoteCommitment) -> [u8; 32] {
+        remote.to_bytes()
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(remote = "sapling_crypto::Node")]
+pub struct Node {
+    #[serde(getter = "Node::as_serializable_bytes")]
+    bytes: [u8; 32],
+}
+
+impl From<Node> for sapling_crypto::Node {
+    fn from(local: Node) -> Self {
+        sapling_crypto::Node::from_bytes(local.bytes).unwrap()
+    }
+}
+
+impl Node {
+    fn as_serializable_bytes(remote: &sapling_crypto::Node) -> [u8; 32] {
+        remote.to_bytes()
     }
 }

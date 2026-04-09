@@ -1,7 +1,7 @@
 //! Fixed test vectors for zebra-network configuration.
 
 use static_assertions::const_assert;
-use zebra_chain::parameters::testnet;
+use zebra_chain::parameters::testnet::{self, ConfiguredFundingStreams};
 
 use crate::{
     constants::{INBOUND_PEER_LIMIT_MULTIPLIER, OUTBOUND_PEER_LIMIT_MULTIPLIER},
@@ -64,7 +64,8 @@ fn testnet_params_serialization_roundtrip() {
     let config = Config {
         network: testnet::Parameters::build()
             .with_disable_pow(true)
-            .to_network(),
+            .to_network()
+            .expect("failed to build configured network"),
         initial_testnet_peers: [].into(),
         ..Config::default()
     };
@@ -82,4 +83,29 @@ fn default_config_uses_ipv6() {
 
     assert_eq!(config.listen_addr.to_string(), "[::]:8233");
     assert!(config.listen_addr.is_ipv6());
+}
+
+#[test]
+fn funding_streams_serialization_roundtrip() {
+    let _init_guard = zebra_test::init();
+
+    let fs = testnet::Parameters::default()
+        .funding_streams()
+        .iter()
+        .map(ConfiguredFundingStreams::from)
+        .collect();
+
+    let config = Config {
+        network: testnet::Parameters::build()
+            .with_funding_streams(fs)
+            .to_network()
+            .expect("failed to build configured network"),
+        initial_testnet_peers: [].into(),
+        ..Config::default()
+    };
+
+    let serialized = toml::to_string(&config).unwrap();
+    let deserialized: Config = toml::from_str(&serialized).unwrap();
+
+    assert_eq!(config, deserialized);
 }
