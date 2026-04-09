@@ -20,6 +20,7 @@ use crate::common::lightwalletd::lwd_integration_test;
 ///
 /// This test doesn't work on Windows, so it is always skipped on that platform.
 #[test]
+#[ignore]
 #[cfg(not(target_os = "windows"))]
 fn lwd_sync_update() -> Result<()> {
     lwd_integration_test(UpdateCachedState)

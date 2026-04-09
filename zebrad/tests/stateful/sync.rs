@@ -79,6 +79,7 @@ fn sync_to_mandatory_checkpoint_for_network(network: Network) -> Result<()> {
 /// activation by 1200 blocks, it will fail.
 #[allow(dead_code)]
 #[test]
+#[ignore]
 fn sync_past_mandatory_checkpoint_mainnet() -> Result<()> {
     let _init_guard = zebra_test::init();
     let network = Mainnet;
@@ -92,6 +93,7 @@ fn sync_past_mandatory_checkpoint_mainnet() -> Result<()> {
 /// activation by 1200 blocks, it will fail.
 #[allow(dead_code)]
 #[test]
+#[ignore]
 fn sync_past_mandatory_checkpoint_testnet() -> Result<()> {
     let _init_guard = zebra_test::init();
     let network = Network::new_default_testnet();

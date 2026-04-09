@@ -42,12 +42,12 @@ cargo nextest run -E 'test(/^integration::/)'
 cargo nextest run -E 'test(/^stateful::/)'
 
 # Specific test
-cargo nextest run -E 'test(=sync_one_checkpoint_mainnet)'
+cargo nextest run -E 'test(sync_one_checkpoint_mainnet)'
 
 # CI profiles
 cargo nextest run --profile ci              # PR tests (unit + integration)
 cargo nextest run --profile ci-stateful \
-  -E 'test(=sync_full_mainnet)'            # GCP stateful test
+  -E 'test(sync_full_mainnet)'             # GCP stateful test
 ```
 
 ## Nextest profiles

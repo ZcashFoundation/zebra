@@ -22,15 +22,15 @@
 //! cargo nextest run
 //!
 //! # Specific category:
-//! cargo nextest run -E 'test(::unit::)'
-//! cargo nextest run -E 'test(::integration::)'
+//! cargo nextest run -E 'test(/^unit::/)'
+//! cargo nextest run -E 'test(/^integration::/)'
 //!
 //! # Specific test:
-//! cargo nextest run -E 'test(=sync_one_checkpoint_mainnet)'
+//! cargo nextest run -E 'test(sync_one_checkpoint_mainnet)'
 //!
 //! # CI profiles:
-//! cargo nextest run --profile ci                                          # PR tests
-//! cargo nextest run --profile ci-stateful -E 'test(=sync_full_mainnet)'   # GCP
+//! cargo nextest run --profile ci                                                # PR tests
+//! cargo nextest run --profile ci-stateful -E 'test(sync_full_mainnet)'          # GCP
 //! ```
 
 #![allow(clippy::unwrap_in_result)]
