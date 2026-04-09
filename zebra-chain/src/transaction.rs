@@ -1083,4 +1083,52 @@ impl Transaction {
         );
         Transaction(tx_data.freeze().expect("rebuilt from valid transaction"))
     }
+
+    /// Rebuild this transaction with a different expiry height (recomputes txid).
+    pub fn set_expiry_height(&mut self, height: block::Height) {
+        let data = self.0.clone().into_data();
+        let new_data = zp_tx::TransactionData::<zp_tx::Authorized>::from_parts(
+            data.version(),
+            data.consensus_branch_id(),
+            data.lock_time(),
+            compat::height_to_block_height(height),
+            data.transparent_bundle().cloned(),
+            data.sprout_bundle().cloned(),
+            data.sapling_bundle().cloned(),
+            data.orchard_bundle().cloned(),
+        );
+        self.0 = new_data.freeze().expect("rebuilt from valid transaction");
+    }
+
+    /// Rebuild this transaction with a different network upgrade / branch ID (recomputes txid).
+    pub fn set_network_upgrade(&mut self, nu: NetworkUpgrade) {
+        let branch_id = nu
+            .branch_id()
+            .and_then(|cbid| zcash_protocol::consensus::BranchId::try_from(cbid).ok())
+            .expect("network upgrade must have a valid branch ID");
+        let data = self.0.clone().into_data();
+        let new_data = zp_tx::TransactionData::<zp_tx::Authorized>::from_parts(
+            data.version(),
+            branch_id,
+            data.lock_time(),
+            data.expiry_height(),
+            data.transparent_bundle().cloned(),
+            data.sprout_bundle().cloned(),
+            data.sapling_bundle().cloned(),
+            data.orchard_bundle().cloned(),
+        );
+        self.0 = new_data.freeze().expect("rebuilt from valid transaction");
+    }
+
+    /// Replace a single transparent output at the given index (recomputes txid).
+    pub fn set_output(&mut self, index: usize, output: transparent::Output) {
+        let mut outputs = self.outputs();
+        outputs[index] = output;
+        *self = self.clone().with_transparent_outputs(outputs);
+    }
+
+    /// Replace all transparent outputs (recomputes txid).
+    pub fn set_outputs(&mut self, outputs: Vec<transparent::Output>) {
+        *self = self.clone().with_transparent_outputs(outputs);
+    }
 }

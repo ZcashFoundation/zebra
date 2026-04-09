@@ -58,7 +58,7 @@ audit-as-crates-io = true
 [policy."zcash_primitives:0.17.0@git:1410f1449100a417bfbc4f6c7167aa9808e38792"]
 audit-as-crates-io = true
 
-[policy."zcash_primitives:0.26.4@git:d50fac813e2c45817ef3dbb549e6c7a58637ba1a"]
+[policy."zcash_primitives:0.26.4@git:e24afd4820591fe6d00420ac57a6eaf28bd05eeb"]
 audit-as-crates-io = true
 
 [policy.zcash_proofs]
