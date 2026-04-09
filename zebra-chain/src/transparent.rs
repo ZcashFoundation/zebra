@@ -4,7 +4,7 @@ mod address;
 mod keys;
 mod opcodes;
 mod script;
-mod serialize;
+pub(crate) mod serialize;
 mod utxo;
 
 use std::{collections::HashMap, fmt, iter, ops::AddAssign};

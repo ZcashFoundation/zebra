@@ -1,6 +1,8 @@
 //! Contains code that interfaces with the zcash_note_encryption crate from
 //! librustzcash.
 
+use std::ops::Deref;
+
 use crate::{
     block::Height,
     parameters::{Network, NetworkUpgrade},
@@ -12,10 +14,6 @@ use crate::{
 pub fn decrypts_successfully(tx: &Transaction, network: &Network, height: Height) -> bool {
     let nu = NetworkUpgrade::current(network, height);
 
-    let Ok(tx) = tx.to_librustzcash(nu) else {
-        return false;
-    };
-
     let null_sapling_ovk = sapling_crypto::keys::OutgoingViewingKey([0u8; 32]);
 
     // Note that, since this function is used to validate coinbase transactions, we can ignore
@@ -26,7 +24,7 @@ pub fn decrypts_successfully(tx: &Transaction, network: &Network, height: Height
         sapling_crypto::note_encryption::Zip212Enforcement::Off
     };
 
-    if let Some(bundle) = tx.sapling_bundle() {
+    if let Some(bundle) = tx.inner().deref().sapling_bundle() {
         for output in bundle.shielded_outputs().iter() {
             let recovery = sapling_crypto::note_encryption::try_sapling_output_recovery(
                 &null_sapling_ovk,
@@ -39,7 +37,7 @@ pub fn decrypts_successfully(tx: &Transaction, network: &Network, height: Height
         }
     }
 
-    if let Some(bundle) = tx.orchard_bundle() {
+    if let Some(bundle) = tx.inner().deref().orchard_bundle() {
         for act in bundle.actions() {
             if zcash_note_encryption::try_output_recovery_with_ovk(
                 &orchard::note_encryption::OrchardDomain::for_action(act),

@@ -9,12 +9,13 @@ use zcash_script::script;
 
 use crate::{
     amount::{Amount, NonNegative},
-    parameters::NetworkUpgrade,
     serialization::ZcashSerialize,
-    transaction::{AuthDigest, HashType, SigHash, Transaction},
+    transaction::{HashType, SigHash},
     transparent::{self, Script},
     Error,
 };
+
+use crate::{parameters::NetworkUpgrade, transaction::Transaction};
 
 // TODO: move copied and modified code to a separate module.
 //
@@ -218,54 +219,54 @@ pub(crate) struct PrecomputedTxData {
 impl PrecomputedTxData {
     /// Computes the data used for sighash or txid computation.
     ///
-    /// # Inputs
-    ///
-    /// - `tx`: the relevant transaction.
-    /// - `nu`: the network upgrade to which the transaction belongs.
-    /// - `all_previous_outputs`: the transparent Output matching each transparent input in `tx`.
-    ///
-    /// # Errors
-    ///
-    /// - If `tx` can't be converted to its `librustzcash` equivalent.
-    /// - If `nu` doesn't contain a consensus branch id convertible to its `librustzcash`
-    ///   equivalent.
-    ///
-    /// # Consensus
-    ///
-    /// > [NU5 only, pre-NU6] All transactions MUST use the NU5 consensus branch ID `0xF919A198` as
-    /// > defined in [ZIP-252].
-    ///
-    /// > [NU6 only] All transactions MUST use the NU6 consensus branch ID `0xC8E71055` as defined
-    /// > in  [ZIP-253].
-    ///
-    /// # Notes
-    ///
-    /// The check that ensures compliance with the two consensus rules stated above takes place in
-    /// the [`Transaction::to_librustzcash`] method. If the check fails, the tx can't be converted
-    /// to its `librustzcash` equivalent, which leads to an error. The check relies on the passed
-    /// `nu` parameter, which uniquely represents a consensus branch id and can, therefore, be used
-    /// as an equivalent to a consensus branch id. The desired `nu` is set either by the script or
-    /// tx verifier in `zebra-consensus`.
-    ///
-    /// [ZIP-252]: <https://zips.z.cash/zip-0252>
-    /// [ZIP-253]: <https://zips.z.cash/zip-0253>
+    /// For V4 transactions, uses the network upgrade's consensus branch ID for the sighash,
+    /// which must match the branch ID used when the transaction was signed.
+    /// Returns an error if `nu` doesn't have a valid consensus branch ID.
     pub(crate) fn new(
         tx: &Transaction,
         nu: NetworkUpgrade,
         all_previous_outputs: Arc<Vec<transparent::Output>>,
     ) -> Result<PrecomputedTxData, Error> {
-        let tx = tx.to_librustzcash(nu)?;
+        let branch_id = nu
+            .branch_id()
+            .and_then(|cbid| zcash_protocol::consensus::BranchId::try_from(cbid).ok())
+            .ok_or(Error::InvalidConsensusBranchId)?;
 
-        let txid_parts = tx.deref().digest(zp_tx::txid::TxIdDigester);
+        // For V5+ transactions, the branch_id is embedded and must match.
+        // For V4 transactions, use the network upgrade's branch_id for the sighash.
+        let tx_branch_id = tx.inner().deref().consensus_branch_id();
+        if tx.version() >= 5 && tx_branch_id != branch_id {
+            return Err(Error::InvalidConsensusBranchId);
+        }
 
-        let f_transparent = MapTransparent {
-            auth: TransparentAuth {
-                all_prev_outputs: all_previous_outputs.clone(),
+        Self::from_transaction_with_branch_id(tx, branch_id, all_previous_outputs)
+    }
+
+    /// Computes precomputed sighash data with an explicit consensus branch ID.
+    ///
+    /// Serializes and re-reads the transaction to get an owned `TransactionData` for
+    /// `map_authorization` (the upstream `Transaction` doesn't implement `Clone`).
+    fn from_transaction_with_branch_id(
+        tx: &crate::transaction::Transaction,
+        branch_id: zcash_protocol::consensus::BranchId,
+        all_previous_outputs: Arc<Vec<transparent::Output>>,
+    ) -> Result<PrecomputedTxData, Error> {
+        let inner = tx.inner();
+        let txid_parts = inner.deref().digest(zp_tx::txid::TxIdDigester);
+
+        let mut buf = Vec::new();
+        inner
+            .write(&mut buf)
+            .map_err(|e| Error::Io(std::sync::Arc::new(e)))?;
+        let owned = zcash_primitives::transaction::Transaction::read(&buf[..], branch_id)
+            .map_err(|e| Error::Io(std::sync::Arc::new(e)))?;
+
+        let tx_data: zp_tx::TransactionData<PrecomputedAuth> = owned.into_data().map_authorization(
+            MapTransparent {
+                auth: TransparentAuth {
+                    all_prev_outputs: all_previous_outputs.clone(),
+                },
             },
-        };
-
-        let tx_data: zp_tx::TransactionData<PrecomputedAuth> = tx.into_data().map_authorization(
-            f_transparent,
             IdentityMap,
             IdentityMap,
             #[cfg(zcash_unstable = "zfuture")]
@@ -339,25 +340,5 @@ pub(crate) fn sighash(
             &precomputed_tx_data.txid_parts,
         )
         .as_ref(),
-    )
-}
-
-/// Compute the authorizing data commitment of this transaction as specified in [ZIP-244].
-///
-/// # Panics
-///
-/// If passed a pre-v5 transaction.
-///
-/// [ZIP-244]: https://zips.z.cash/zip-0244
-pub(crate) fn auth_digest(tx: &Transaction) -> AuthDigest {
-    let nu = tx.network_upgrade().expect("V5 tx has a network upgrade");
-
-    AuthDigest(
-        tx.to_librustzcash(nu)
-            .expect("V5 tx is convertible to its `zcash_params` equivalent")
-            .auth_commitment()
-            .as_ref()
-            .try_into()
-            .expect("digest has the correct size"),
     )
 }

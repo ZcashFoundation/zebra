@@ -151,7 +151,7 @@ pub fn conventional_actions(transaction: &Transaction) -> u32 {
         .sum();
 
     let n_join_split = transaction.joinsplit_count();
-    let n_spends_sapling = transaction.sapling_spends_per_anchor().count();
+    let n_spends_sapling = transaction.sapling_spends_count();
     let n_outputs_sapling = transaction.sapling_outputs().count();
     let n_actions_orchard = transaction.orchard_actions().count();
 
