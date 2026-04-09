@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Chain state nullifier tracking updated for new `Transaction` type.
+  Nullifier extraction uses `Transaction` accessor methods instead of
+  enum destructuring.
+- Sprout anchor validation uses `JsDescription` accessors from
+  `zcash_primitives`.
+
 ## [5.0.0] - 2026-03-12
 
 ### Breaking Changes
