@@ -1,0 +1,37 @@
+# git-cliff configuration for release-plz changelog generation.
+# https://git-cliff.org/docs/configuration
+#
+# Generates Keep a Changelog format from conventional commits.
+# release-plz uses git-cliff as a library (not a CLI tool).
+
+[changelog]
+header = ""
+body = """
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits %}
+- {{ commit.message | split(pat="\n") | first | upper_first | trim }}\
+{% if commit.remote.pr_number %} ([#{{ commit.remote.pr_number }}](https://github.com/ZcashFoundation/zebra/pull/{{ commit.remote.pr_number }})){% endif %}
+{%- endfor %}
+{% endfor %}
+"""
+trim = true
+
+[git]
+conventional_commits = true
+filter_unconventional = false
+commit_parsers = [
+    { message = "^feat", group = "Added" },
+    { message = "^fix", group = "Fixed" },
+    { message = "^perf", group = "Performance" },
+    { message = "^refactor", group = "Changed" },
+    { message = "^docs", group = "Documentation" },
+    { message = "^build\\(deps\\)", group = "Dependencies" },
+    { message = "^build", group = "Build" },
+    { message = "^test", skip = true },
+    { message = "^ci", skip = true },
+    { message = "^chore", skip = true },
+    { message = "^style", skip = true },
+]
+protect_breaking_commits = true
+sort_commits = "oldest"
