@@ -20,7 +20,7 @@ Specifically, we will:
 
 The Zcash Foundation is committed to working with researchers who submit security vulnerability notifications to us to resolve those issues on an appropriate timeline and perform a coordinated release, giving credit to the reporter if they would like.
 
-Please submit issues to security@zfnd.org, using the following PGP Key:
+Please submit issues to <security@zfnd.org>, using the following PGP Key:
 
 ```
 -----BEGIN PGP PUBLIC KEY BLOCK-----
