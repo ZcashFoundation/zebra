@@ -12,9 +12,7 @@ use std::{
 use chrono::{DateTime, Utc};
 
 use zebra_chain::{
-    amount::{Amount, NonNegative},
     block::Height,
-    orchard::Flags,
     parameters::{Network, NetworkUpgrade},
     primitives::zcash_note_encryption,
     transaction::{LockTime, Transaction},
@@ -174,12 +172,12 @@ pub fn coinbase_tx_no_prevout_joinsplit_spend(tx: &Transaction) -> Result<(), Tr
     if tx.is_coinbase() {
         if tx.joinsplit_count() > 0 {
             return Err(TransactionError::CoinbaseHasJoinSplit);
-        } else if tx.sapling_spends_per_anchor().count() > 0 {
+        } else if tx.sapling_spends_count() > 0 {
             return Err(TransactionError::CoinbaseHasSpend);
         }
 
-        if let Some(orchard_shielded_data) = tx.orchard_shielded_data() {
-            if orchard_shielded_data.flags.contains(Flags::ENABLE_SPENDS) {
+        if let Some(flags) = tx.orchard_flags() {
+            if flags.spends_enabled() {
                 return Err(TransactionError::CoinbaseHasEnableSpendsOrchard);
             }
         }
@@ -193,18 +191,16 @@ pub fn coinbase_tx_no_prevout_joinsplit_spend(tx: &Transaction) -> Result<(), Tr
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc>
 pub fn joinsplit_has_vpub_zero(tx: &Transaction) -> Result<(), TransactionError> {
-    let zero = Amount::<NonNegative>::zero();
+    let vpub_old_values = tx.output_values_to_sprout();
+    let vpub_new_values = tx.input_values_from_sprout();
 
-    let vpub_pairs = tx
-        .output_values_to_sprout()
-        .zip(tx.input_values_from_sprout());
-    for (vpub_old, vpub_new) in vpub_pairs {
+    for (vpub_old, vpub_new) in vpub_old_values.iter().zip(vpub_new_values.iter()) {
         // # Consensus
         //
         // > Either v_{pub}^{old} or v_{pub}^{new} MUST be zero.
         //
         // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
-        if *vpub_old != zero && *vpub_new != zero {
+        if *vpub_old != 0 && *vpub_new != 0 {
             return Err(TransactionError::BothVPubsNonZero);
         }
     }
@@ -232,11 +228,8 @@ pub fn disabled_add_to_sprout_pool(
     //
     // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
     if height >= canopy_activation_height {
-        let zero = Amount::<NonNegative>::zero();
-
-        let tx_sprout_pool = tx.output_values_to_sprout();
-        for vpub_old in tx_sprout_pool {
-            if *vpub_old != zero {
+        for vpub_old in tx.output_values_to_sprout() {
+            if vpub_old != 0 {
                 return Err(TransactionError::DisabledAddToSproutPool);
             }
         }
@@ -267,15 +260,28 @@ pub fn disabled_add_to_sprout_pool(
 pub fn spend_conflicts(transaction: &Transaction) -> Result<(), TransactionError> {
     use crate::error::TransactionError::*;
 
-    let transparent_outpoints = transaction.spent_outpoints().map(Cow::Owned);
-    let sprout_nullifiers = transaction.sprout_nullifiers().map(Cow::Borrowed);
-    let sapling_nullifiers = transaction.sapling_nullifiers().map(Cow::Borrowed);
-    let orchard_nullifiers = transaction.orchard_nullifiers().map(Cow::Borrowed);
+    check_for_duplicates(
+        transaction.spent_outpoints().map(Cow::Owned),
+        DuplicateTransparentSpend,
+    )?;
 
-    check_for_duplicates(transparent_outpoints, DuplicateTransparentSpend)?;
-    check_for_duplicates(sprout_nullifiers, DuplicateSproutNullifier)?;
-    check_for_duplicates(sapling_nullifiers, DuplicateSaplingNullifier)?;
-    check_for_duplicates(orchard_nullifiers, DuplicateOrchardNullifier)?;
+    let sprout_nfs: Vec<_> = transaction.sprout_nullifiers().collect();
+    check_for_duplicates(
+        sprout_nfs.into_iter().map(Cow::Owned),
+        DuplicateSproutNullifier,
+    )?;
+
+    let sapling_nfs: Vec<_> = transaction.sapling_nullifiers().collect();
+    check_for_duplicates(
+        sapling_nfs.into_iter().map(Cow::Owned),
+        DuplicateSaplingNullifier,
+    )?;
+
+    let orchard_nfs: Vec<_> = transaction.orchard_nullifiers().collect();
+    check_for_duplicates(
+        orchard_nfs.into_iter().map(Cow::Owned),
+        DuplicateOrchardNullifier,
+    )?;
 
     Ok(())
 }
@@ -336,8 +342,7 @@ pub fn coinbase_outputs_are_decryptable(
     network: &Network,
     height: Height,
 ) -> Result<(), TransactionError> {
-    // Do quick checks first so we can avoid an expensive tx conversion
-    // in `zcash_note_encryption::decrypts_successfully`.
+    // Do quick checks first so we can avoid an expensive tx conversion.
 
     // The consensus rule only applies to coinbase txs with shielded outputs.
     if !transaction.has_shielded_outputs() {
@@ -496,7 +501,7 @@ fn validate_expiry_height_mined(
 /// valid for the block height, or a [`Err(TransactionError)`](TransactionError)
 pub fn tx_transparent_coinbase_spends_maturity(
     network: &Network,
-    tx: Arc<Transaction>,
+    tx: &Transaction,
     height: Height,
     block_new_outputs: Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>,
     spent_utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,

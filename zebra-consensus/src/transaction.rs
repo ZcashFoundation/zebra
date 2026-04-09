@@ -29,10 +29,9 @@ use zebra_chain::{
     amount::{Amount, NonNegative},
     block,
     parameters::{Network, NetworkUpgrade},
-    primitives::Groth16Proof,
     serialization::DateTime32,
     transaction::{
-        self, HashType, SigHash, Transaction, UnminedTx, UnminedTxId, VerifiedUnminedTx,
+        self, HashType, SigHash, Transaction, TxVersion, UnminedTx, UnminedTxId, VerifiedUnminedTx,
     },
     transparent,
 };
@@ -41,7 +40,7 @@ use zebra_node_services::mempool;
 use zebra_script::{CachedFfiTransaction, Sigops};
 use zebra_state as zs;
 
-use crate::{error::TransactionError, groth16::DescriptionWrapper, primitives, script, BoxError};
+use crate::{error::TransactionError, primitives, script, BoxError};
 
 pub mod check;
 #[cfg(test)]
@@ -411,6 +410,8 @@ where
                 });
             }
 
+            let nu = req.upgrade(&network);
+
             // Do quick checks first
             check::has_inputs_and_outputs(&tx)?;
             check::has_enough_orchard_flags(&tx)?;
@@ -488,44 +489,40 @@ where
                 Self::check_maturity_height(&network, &req, &spent_utxos)?;
             }
 
-            let nu = req.upgrade(&network);
             let cached_ffi_transaction =
                 Arc::new(CachedFfiTransaction::new(tx.clone(), Arc::new(spent_outputs), nu).map_err(|_| TransactionError::UnsupportedByNetworkUpgrade(tx.version(), nu))?);
 
             tracing::trace!(?tx_id, "got state UTXOs");
 
-            let mut async_checks = match tx.as_ref() {
-                Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {
+            let mut async_checks = match tx.tx_version() {
+                TxVersion::Sprout(_) | TxVersion::V3 => {
                     tracing::debug!(?tx, "got transaction with wrong version");
                     return Err(TransactionError::WrongVersion);
                 }
-                Transaction::V4 {
-                    joinsplit_data,
-                    ..
-                } => Self::verify_v4_transaction(
+                TxVersion::V4 => Self::verify_v4_transaction(
                     &req,
                     &network,
                     script_verifier,
                     cached_ffi_transaction.clone(),
-                    joinsplit_data,
                 )?,
-                Transaction::V5 {
-                    ..
-                } => Self::verify_v5_transaction(
+                TxVersion::V5 => Self::verify_v5_transaction(
                     &req,
                     &network,
                     script_verifier,
                     cached_ffi_transaction.clone(),
                 )?,
                 #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-                Transaction::V6 {
-                    ..
-                } => Self::verify_v6_transaction(
+                TxVersion::V6 => Self::verify_v6_transaction(
                     &req,
                     &network,
                     script_verifier,
                     cached_ffi_transaction.clone(),
                 )?,
+                #[allow(unreachable_patterns)]
+                _ => {
+                    tracing::debug!(?tx, "got transaction with unsupported version");
+                    return Err(TransactionError::WrongVersion);
+                }
             };
 
             if let Some(unmined_tx) = req.mempool_transaction() {
@@ -711,7 +708,8 @@ where
             return Some(Ok(verified_tx));
         }
 
-        let missing_outpoints = tx.inputs().iter().filter_map(|input| {
+        let inputs = tx.inputs();
+        let missing_outpoints = inputs.iter().filter_map(|input| {
             if let transparent::Input::PrevOut { outpoint, .. } = input {
                 missing_deps.contains(&outpoint.hash).then_some(outpoint)
             } else {
@@ -870,7 +868,7 @@ where
     ) -> Result<(), TransactionError> {
         check::tx_transparent_coinbase_spends_maturity(
             network,
-            request.transaction(),
+            &request.transaction(),
             request.height(),
             request.known_utxos(),
             spent_utxos,
@@ -901,7 +899,6 @@ where
         network: &Network,
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
-        joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
     ) -> Result<AsyncChecks, TransactionError> {
         let tx = request.transaction();
         let nu = request.upgrade(network);
@@ -919,7 +916,7 @@ where
             script_verifier,
             cached_ffi_transaction,
         )?
-        .and(Self::verify_sprout_shielded_data(joinsplit_data, &sighash)?)
+        .and(Self::verify_sprout_shielded_data(&tx, &sighash)?)
         .and(Self::verify_sapling_bundle(sapling_bundle, &sighash)))
     }
 
@@ -1098,29 +1095,27 @@ where
         }
     }
 
-    /// Verifies a transaction's Sprout shielded join split data.
+    /// Verifies a transaction's Sprout shielded JoinSplit data.
+    ///
+    /// Checks:
+    /// - Groth16 proof validity for each JoinSplit description
+    /// - Ed25519 signature validity for the JoinSplit public key
     fn verify_sprout_shielded_data(
-        joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
+        tx: &Arc<Transaction>,
         shielded_sighash: &SigHash,
     ) -> Result<AsyncChecks, TransactionError> {
         let mut checks = AsyncChecks::new();
 
-        if let Some(joinsplit_data) = joinsplit_data {
-            for joinsplit in joinsplit_data.joinsplits() {
+        if let Some(sprout_bundle) = tx.sprout_bundle() {
+            for js in &sprout_bundle.joinsplits {
                 // # Consensus
                 //
                 // > The proof π_ZKJoinSplit MUST be valid given a
                 // > primary input formed from the relevant other fields and h_{Sig}
                 //
                 // https://zips.z.cash/protocol/protocol.pdf#joinsplitdesc
-                //
-                // Queue the verification of the Groth16 spend proof
-                // for each JoinSplit description while adding the
-                // resulting future to our collection of async
-                // checks that (at a minimum) must pass for the
-                // transaction to verify.
                 checks.push(primitives::groth16::JOINSPLIT_VERIFIER.oneshot(
-                    DescriptionWrapper(&(joinsplit, &joinsplit_data.pub_key)).try_into()?,
+                    primitives::groth16::joinsplit_to_item(js, &sprout_bundle.joinsplit_pubkey)?,
                 ));
             }
 
@@ -1132,31 +1127,13 @@ where
             //     joinSplitPubKey of dataToBeSigned, as defined in § 4.11
             //
             // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
-            //
-            // The `if` part is indirectly enforced, since the `joinsplit_data`
-            // is only parsed if those conditions apply in
-            // [`Transaction::zcash_deserialize`].
-            //
-            // The valid encoding is defined in
-            //
-            // > A valid Ed25519 validating key is defined as a sequence of 32
-            // > bytes encoding a point on the Ed25519 curve
-            //
-            // https://zips.z.cash/protocol/protocol.pdf#concreteed25519
-            //
-            // which is enforced during signature verification, in both batched
-            // and single verification, when decompressing the encoded point.
-            //
-            // Queue the validation of the JoinSplit signature while
-            // adding the resulting future to our collection of
-            // async checks that (at a minimum) must pass for the
-            // transaction to verify.
-            //
-            // https://zips.z.cash/protocol/protocol.pdf#sproutnonmalleability
-            // https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
             let ed25519_verifier = primitives::ed25519::VERIFIER.clone();
-            let ed25519_item =
-                (joinsplit_data.pub_key, joinsplit_data.sig, shielded_sighash).into();
+            let pub_key = zebra_chain::primitives::ed25519::VerificationKeyBytes::from(
+                sprout_bundle.joinsplit_pubkey,
+            );
+            let sig =
+                zebra_chain::primitives::ed25519::Signature::from(sprout_bundle.joinsplit_sig);
+            let ed25519_item = (pub_key, sig, shielded_sighash).into();
 
             checks.push(ed25519_verifier.oneshot(ed25519_item));
         }

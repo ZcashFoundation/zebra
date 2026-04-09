@@ -830,8 +830,8 @@ pub fn generate_coinbase_and_roots(
             miner_fee,
         ),
         _ => Err("Zebra does not support generating pre-Canopy coinbase transactions")?,
-    }
-    .into();
+    };
+    let tx: UnminedTx = Arc::new(tx).into();
 
     // Calculate block default roots
     //

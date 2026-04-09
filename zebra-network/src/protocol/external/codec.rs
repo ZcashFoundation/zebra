@@ -4,6 +4,7 @@ use std::{
     cmp::min,
     fmt,
     io::{Cursor, Read, Write},
+    sync::Arc,
 };
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
@@ -710,7 +711,7 @@ impl Codec {
 
     fn read_tx<R: Read + std::marker::Send>(&self, reader: R) -> Result<Message, Error> {
         let result = Self::deserialize_transaction_spawning(reader);
-        Ok(Message::Tx(result?.into()))
+        Ok(Message::Tx(Arc::new(result?).into()))
     }
 
     fn read_mempool<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {

@@ -197,6 +197,67 @@ impl Description for (&JoinSplit<Groth16Proof>, &ed25519::VerificationKeyBytes) 
     }
 }
 
+/// Create a Groth16 verification [`Item`] from a [`JsDescription`] and JoinSplit public key.
+pub fn joinsplit_to_item(
+    js: &zcash_primitives::transaction::components::sprout::JsDescription,
+    joinsplit_pub_key: &[u8; 32],
+) -> Result<Item, TransactionError> {
+    let rt = js.anchor();
+    let nf1 = &js.nullifiers()[0];
+    let nf2 = &js.nullifiers()[1];
+    let mac1 = &js.macs()[0];
+    let mac2 = &js.macs()[1];
+    let cm1 = &js.commitments()[0];
+    let cm2 = &js.commitments()[1];
+
+    let h_sig: [u8; 32] = blake2b_simd::Params::new()
+        .hash_length(32)
+        .personal(b"ZcashComputehSig")
+        .to_state()
+        .update(js.random_seed())
+        .update(nf1)
+        .update(nf2)
+        .update(joinsplit_pub_key)
+        .finalize()
+        .as_bytes()
+        .try_into()
+        .map_err(|_| TransactionError::MalformedGroth16("h_sig hash must be 32 bytes".into()))?;
+
+    let vpub_old = js.vpub_old().to_i64_le_bytes();
+    let vpub_new = js.vpub_new().to_i64_le_bytes();
+
+    let mut public_input = Vec::with_capacity((32 * 8) + (8 * 2));
+    public_input.extend(rt);
+    public_input.extend(h_sig);
+    public_input.extend(nf1);
+    public_input.extend(mac1);
+    public_input.extend(nf2);
+    public_input.extend(mac2);
+    public_input.extend(cm1);
+    public_input.extend(cm2);
+    public_input.extend(vpub_old);
+    public_input.extend(vpub_new);
+
+    let public_input = multipack::bytes_to_bits(&public_input);
+    let primary_inputs = multipack::compute_multipacking(&public_input);
+
+    // V4 transactions always use Groth16 proofs for JoinSplits (V2/V3 use PHGR13).
+    // The proof type is determined at deserialization time by the transaction version
+    // (see zcash_primitives JsDescription::read), so a V4 sprout bundle will always
+    // contain Groth16 proofs. This function must only be called for V4 transactions.
+    let proof_bytes = js.groth_proof_bytes().ok_or_else(|| {
+        TransactionError::MalformedGroth16(
+            "expected Groth16 proof in JoinSplit but found PHGR13 (wrong transaction version?)"
+                .into(),
+        )
+    })?;
+
+    let proof = bellman::groth16::Proof::read(&proof_bytes[..])
+        .map_err(|e| TransactionError::MalformedGroth16(e.to_string()))?;
+
+    Ok(Item::from((proof, primary_inputs)))
+}
+
 /// A wrapper to allow a TryFrom blanket implementation of the [`Description`]
 /// trait for the [`Item`] struct.
 /// See <https://github.com/rust-lang/rust/issues/50133> for more details.

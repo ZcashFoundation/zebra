@@ -57,6 +57,7 @@ derive-getters = { workspace = true, features = ["auto_copy_getters"] }
 sapling-crypto = { workspace = true, features = ["multicore"]}
 orchard.workspace = true
 
+zcash_primitives.workspace = true
 zcash_proofs = { workspace = true, features = ["multicore", "bundled-prover"] }
 
 tower-fallback = { path = "../tower-fallback/", version = "0.2.41" }

@@ -465,7 +465,7 @@ impl ZebraDb {
                 .block
                 .transactions
                 .iter()
-                .flat_map(|tx| tx.inputs().iter())
+                .flat_map(|tx| tx.inputs().into_iter())
                 .flat_map(|input| input.outpoint())
                 .map(|outpoint| {
                     (
