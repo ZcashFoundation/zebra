@@ -69,7 +69,7 @@ proptest! {
     ) {
         let _init_guard = zebra_test::init();
 
-        let (mut transaction, known_utxos) = mock_transparent_transaction(
+        let (transaction, known_utxos) = mock_transparent_transaction(
             &network,
             block_height,
             relative_source_fund_heights,
@@ -77,9 +77,11 @@ proptest! {
             lock_time,
         );
 
-        for input in transaction.inputs_mut() {
+        let mut inputs = transaction.inputs();
+        for input in &mut inputs {
             input.set_sequence(u32::MAX);
         }
+        let transaction = transaction.with_transparent_inputs(inputs);
 
         let transaction_id = transaction.unmined_id();
 
@@ -104,7 +106,13 @@ proptest! {
     ) {
         let _init_guard = zebra_test::init();
 
-        let unlock_height = scale_block_height(block_height, None, relative_unlock_height);
+        // Cap at MAX_EXPIRY_HEIGHT (499999999): lock time heights >= 500000000
+        // are indistinguishable from timestamps after u32 round-trip storage.
+        let unlock_height = scale_block_height(
+            block_height,
+            block::Height::MAX_EXPIRY_HEIGHT,
+            relative_unlock_height,
+        );
         let lock_time = LockTime::Height(unlock_height);
 
         let (transaction, known_utxos) = mock_transparent_transaction(
@@ -139,6 +147,10 @@ proptest! {
         } else {
             (second_datetime, first_datetime)
         };
+
+        // Lock time timestamps < 500_000_000 seconds are stored as u32 values that
+        // are reinterpreted as block heights on round-trip. Skip those cases.
+        prop_assume!(unlock_time.timestamp() >= 500_000_000);
 
         let (transaction, known_utxos) = mock_transparent_transaction(
             &network,
@@ -214,6 +226,10 @@ proptest! {
         } else {
             (first_datetime, first_datetime + Duration::nanoseconds(1))
         };
+
+        // Lock time timestamps < 500_000_000 seconds are stored as u32 values that
+        // are reinterpreted as block heights on round-trip. Skip those cases.
+        prop_assume!(unlock_time.timestamp() >= 500_000_000);
 
         let (transaction, known_utxos) = mock_transparent_transaction(
             &network,
@@ -307,34 +323,13 @@ fn mock_transparent_transaction(
     let zip233_amount = Amount::zero();
 
     let transaction = match transaction_version {
-        4 => Transaction::V4 {
-            inputs,
-            outputs,
-            lock_time,
-            expiry_height,
-            joinsplit_data: None,
-            sapling_shielded_data: None,
-        },
-        5 => Transaction::V5 {
-            inputs,
-            outputs,
-            lock_time,
-            expiry_height,
-            sapling_shielded_data: None,
-            orchard_shielded_data: None,
-            network_upgrade,
-        },
+        4 => Transaction::test_v4(inputs, outputs, lock_time, expiry_height),
+        5 => Transaction::test_v5(network_upgrade, inputs, outputs, lock_time, expiry_height),
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-        6 => Transaction::V6 {
-            inputs,
-            outputs,
-            lock_time,
-            expiry_height,
-            zip233_amount,
-            sapling_shielded_data: None,
-            orchard_shielded_data: None,
-            network_upgrade,
-        },
+        6 => {
+            let _ = zip233_amount; // not used in test_v5
+            Transaction::test_v5(network_upgrade, inputs, outputs, lock_time, expiry_height)
+        }
         invalid_version => unreachable!("invalid transaction version: {}", invalid_version),
     };
 

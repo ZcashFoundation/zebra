@@ -6,7 +6,6 @@ use std::{mem, sync::Arc};
 
 use zebra_chain::{
     block::Block,
-    transaction::Transaction,
     transparent,
     work::difficulty::ExpandedDifficulty,
     work::difficulty::{Work, U256},
@@ -28,24 +27,18 @@ impl FakeChainHelper for Arc<Block> {
         let parent_hash = self.hash();
         let mut child = Block::clone(self);
         let mut transactions = mem::take(&mut child.transactions);
-        let mut tx = transactions.remove(0);
+        let tx = transactions.remove(0);
 
-        let input = match Arc::make_mut(&mut tx) {
-            Transaction::V1 { inputs, .. } => &mut inputs[0],
-            Transaction::V2 { inputs, .. } => &mut inputs[0],
-            Transaction::V3 { inputs, .. } => &mut inputs[0],
-            Transaction::V4 { inputs, .. } => &mut inputs[0],
-            Transaction::V5 { inputs, .. } => &mut inputs[0],
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 { inputs, .. } => &mut inputs[0],
-        };
-
-        match input {
+        // Get the first input (coinbase), increment its height, and rebuild the transaction.
+        let inner_tx = Arc::try_unwrap(tx).unwrap_or_else(|arc| (*arc).clone());
+        let mut inputs = inner_tx.inputs();
+        match &mut inputs[0] {
             transparent::Input::Coinbase { height, .. } => height.0 += 1,
             _ => panic!("block must have a coinbase height to create a child"),
         }
+        let new_tx = Arc::new(inner_tx.with_transparent_inputs(inputs));
 
-        child.transactions.insert(0, tx);
+        child.transactions.insert(0, new_tx);
         Arc::make_mut(&mut child.header).previous_block_hash = parent_hash;
 
         Arc::new(child)
