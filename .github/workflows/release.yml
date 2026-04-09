@@ -1,19 +1,14 @@
-# Unified release workflow: crate publishing, GitHub Release, Docker images.
+# Release workflow: crate publishing and GitHub Release creation.
 #
-# Replaces:
-# - release-drafter.yml (changelog generation now handled by release-plz + git-cliff)
-# - release-binaries.yml (Docker build now a job in this workflow)
+# Replaces release-drafter.yml (changelog generation now handled by release-plz + git-cliff).
 #
 # Pipeline:
-#   push to main → release-pr (creates/updates Release PR)
+#   push to main → release-pr (creates/updates Release PR on every push)
 #                → release (publishes crates + creates GitHub Release, only on Release PR merge)
-#                → docker (builds + pushes to Docker Hub, only if release happened)
-#                → dockerhub-description (updates Docker Hub README)
-#                → failure-issue (opens issue on failure)
 #
-# GCP deployment is NOT in this workflow — it triggers independently on the
-# release:published event fired by the release job's GitHub Release creation.
-# See: zfnd-deploy-nodes-gcp.yml
+# Downstream triggers (independent workflows, not managed here):
+#   release:released  → release-binaries.yml (Docker Hub)
+#   release:published → zfnd-deploy-nodes-gcp.yml (GCP deployment)
 name: Release
 
 on:
@@ -54,7 +49,11 @@ jobs:
   #   1. Publishes changed crates to crates.io in dependency order
   #   2. Uses trusted publishing (OIDC) — no static API tokens
   #   3. Creates per-crate git tags
-  #   4. Creates a GitHub Release (triggers GCP deployment independently)
+  #   4. Creates a GitHub Release for zebrad (triggers downstream workflows)
+  #
+  # The GitHub Release fires:
+  #   - release:released → release-binaries.yml (Docker Hub publish)
+  #   - release:published → zfnd-deploy-nodes-gcp.yml (GCP deployment)
   release:
     name: Publish crates and GitHub Release
     runs-on: ubuntu-latest
@@ -62,98 +61,13 @@ jobs:
       contents: write
       id-token: write
     environment: release
-    outputs:
-      releases_created: ${{ steps.release-plz.outputs.releases_created }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           fetch-depth: 0
           persist-credentials: false
-      - id: release-plz
-        uses: release-plz/action@1528104d2ca23787631a1c1f022abb64b34c1e11 #v0.5.128
+      - uses: release-plz/action@1528104d2ca23787631a1c1f022abb64b34c1e11 #v0.5.128
         with:
           command: release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # ── Stage 3: Build and publish Docker images to Docker Hub ──────────────
-  #
-  # Only runs when crates were actually released (not on every push).
-  # This is the production Docker image with RUST_PROD_FEATURES only.
-  # The GCP deployment builds its OWN image separately with test features.
-  docker:
-    name: Build Release Docker
-    needs: release
-    if: needs.release.outputs.releases_created == 'true'
-    permissions:
-      contents: read
-      id-token: write
-      pull-requests: write
-    uses: ./.github/workflows/zfnd-build-docker-image.yml
-    with:
-      dockerfile_path: ./docker/Dockerfile
-      dockerfile_target: runtime
-      image_name: zebra
-      short_sha: ''
-      features: ${{ vars.RUST_PROD_FEATURES }}
-      rust_log: ${{ vars.RUST_LOG }}
-      publish_to_dockerhub: true
-    secrets:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-
-  # ── Stage 4: Update Docker Hub repository description ───────────────────
-  dockerhub-description:
-    name: Update Docker Hub description
-    needs: docker
-    if: github.repository_owner == 'ZcashFoundation'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
-        with:
-          persist-credentials: false
-      - uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa #v5.0.0
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_PASSWORD }}
-          repository: zfnd/zebra
-          short-description: ${{ github.event.repository.description }}
-
-  # ── Failure handling ────────────────────────────────────────────────────
-  release-success:
-    name: Release success
-    runs-on: ubuntu-latest
-    if: >-
-      ${{
-        always() &&
-        github.repository_owner == 'ZcashFoundation' &&
-        needs.release.outputs.releases_created == 'true'
-      }}
-    needs:
-      - docker
-      - dockerhub-description
-    timeout-minutes: 1
-    permissions:
-      contents: read
-    steps:
-      - name: Decide whether the needed jobs succeeded or failed
-        uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe #v1.2.2
-        with:
-          jobs: ${{ toJSON(needs) }}
-
-  failure-issue:
-    name: Open or update issues for release failures
-    needs: [docker, dockerhub-description]
-    if: failure() || cancelled()
-    runs-on: ubuntu-latest
-    permissions:
-      issues: write
-    steps:
-      - uses: jayqi/failed-build-issue-action@1a893bbf43ef1c2a8705e2b115cd4f0fe3c5649b #v1.2.0
-        with:
-          title-template: "{{refname}} branch CI failed: {{eventName}} in {{workflow}}"
-          label-name: S-ci-fail-release-auto-issue
-          always-create-new-issue: false
-          github-token: ${{ secrets.GITHUB_TOKEN }}
