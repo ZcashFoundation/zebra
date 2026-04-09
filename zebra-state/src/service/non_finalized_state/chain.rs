@@ -197,9 +197,7 @@ pub struct ChainInner {
         BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<orchard::tree::Node>>,
 
     #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-    /// A partial map of `issued_assets` with entries for asset states that were updated in
-    /// this chain.
-    // TODO: Add reference to ZIP
+    /// The ZIP-0227 `issued_assets` state for this chain.
     pub(crate) issued_assets: HashMap<AssetBase, AssetState>,
 
     // Nullifiers
@@ -1570,9 +1568,7 @@ impl Chain {
                 .or_insert_with(|| {
                     // When `old_state_from_block` is `Some` but the asset is missing from
                     // the in-memory map, it means the entry was evicted during finalization
-                    // and lives in the finalized DB. Inserting `new_state` is correct, the
-                    // old state is preserved on disk for rollback via the `IssuedAssetChanges`
-                    // pairs.
+                    // and lives in the finalized DB.
                     *new_state
                 });
         }

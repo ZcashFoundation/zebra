@@ -637,8 +637,6 @@ impl From<Arc<Block>> for SemanticallyVerifiedBlock {
             height,
             new_outputs,
             transaction_hashes,
-            // Not used in checkpoint paths.
-            // FIXME: Is this correct?
             transaction_sighashes: None,
             deferred_pool_balance_change: None,
         }

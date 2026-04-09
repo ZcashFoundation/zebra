@@ -19,7 +19,7 @@ use std::{
 
 use zebra_chain::{
     block::Height,
-    orchard::{self},
+    orchard,
     parallel::tree::NoteCommitmentTrees,
     sapling, sprout,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
@@ -48,15 +48,10 @@ use zebra_chain::subtree::NoteCommitmentSubtree;
 
 #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
 /// The name of the chain value pools column family.
-///
-/// This constant should be used so the compiler can detect typos.
 pub const ISSUED_ASSETS: &str = "orchard_issued_assets";
 
 #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
 /// The type for reading value pools from the database.
-///
-/// This constant should be used so the compiler can detect incorrectly typed accesses to the
-/// column family.
 pub type IssuedAssetsCf<'cf> = TypedColumnFamily<'cf, AssetBase, AssetState>;
 
 impl ZebraDb {
@@ -573,8 +568,6 @@ impl DiskWriteBatch {
         } else {
             // Recalculate changes from transactions if not provided.
             // This happens for Checkpoint Verified Blocks loaded during startup.
-            // We use trusted validation (no signature verification) since these blocks
-            // are within checkpoint ranges and already considered valid.
             IssuedAssetChanges::validate_and_get_changes(
                 &finalized.block.transactions,
                 None, // No sighashes - uses trusted validation without signature checks
@@ -586,7 +579,7 @@ impl DiskWriteBatch {
             // ) -> Result<(), BoxError> { ...
             //.map_err(|_| BoxError::from("invalid issued assets changes"))?
         };
-        // Write only the new states to the database
+        // Add only the new states to the batch.
         for (asset_base, (_old_state, new_state)) in asset_changes.iter() {
             batch = batch.zs_insert(asset_base, new_state);
         }

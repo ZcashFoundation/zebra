@@ -1167,9 +1167,7 @@ pub fn transactions_from_blocks<'a>(
 /// action and the shielded data are invalid and shouldn't be used in tests that require them to be
 /// valid.
 pub fn create_fake_orchard_shielded_data<Flavor: orchard::ShieldedDataFlavor + 'static>(
-) -> orchard::ShieldedData<Flavor>
-//where <<Flavor as orchard::ShieldedDataFlavor>::EncryptedNote as Arbitrary>::Strategy: 'static
-{
+) -> orchard::ShieldedData<Flavor> {
     // Create a dummy action
     let mut runner = TestRunner::default();
     let dummy_action = orchard::Action::arbitrary()
