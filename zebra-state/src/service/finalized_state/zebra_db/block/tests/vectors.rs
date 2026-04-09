@@ -136,7 +136,6 @@ fn test_block_db_round_trip_with(
                 height: Height(0),
                 new_outputs,
                 transaction_hashes,
-                // FIXME: Do we need to (and can we) generate real arbitrary transaction_sighashes?
                 transaction_sighashes: None,
                 deferred_pool_balance_change: None,
             })

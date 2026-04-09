@@ -183,8 +183,6 @@ pub fn coinbase_tx_no_prevout_joinsplit_spend(tx: &Transaction) -> Result<(), Tr
                 return Err(TransactionError::CoinbaseHasEnableSpendsOrchard);
             }
             // ZIP-230: coinbase must not set enableZSA.
-            // TODO: Add V6 coinbase ENABLE_ZSA tests (fails when set, passes when unset),
-            // like v5_coinbase_transaction_without_enable_spends_flag_passes_validation.
             #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             if orchard_flags.contains(Flags::ENABLE_ZSA) {
                 return Err(TransactionError::CoinbaseHasEnableZSA);
