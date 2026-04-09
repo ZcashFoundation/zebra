@@ -197,7 +197,7 @@ impl Description for (&JoinSplit<Groth16Proof>, &ed25519::VerificationKeyBytes) 
     }
 }
 
-/// Create a Groth16 verification [`Item`] from a [`JsDescription`] and JoinSplit public key.
+/// Create a Groth16 verification [`Item`] from a JoinSplit description and public key.
 pub fn joinsplit_to_item(
     js: &zcash_primitives::transaction::components::sprout::JsDescription,
     joinsplit_pub_key: &[u8; 32],
