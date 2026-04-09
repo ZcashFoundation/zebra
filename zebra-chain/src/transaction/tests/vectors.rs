@@ -30,12 +30,15 @@ lazy_static! {
         sapling_shielded_data: None,
         orchard_shielded_data: None,
     };
+}
 
-    #[cfg(feature = "tx_v6")]
+#[cfg(feature = "tx_v6")]
+lazy_static! {
     pub static ref EMPTY_V6_TX: Transaction = Transaction::V6 {
         network_upgrade: NetworkUpgrade::Nu7,
         lock_time: LockTime::min_lock_time_timestamp(),
         expiry_height: block::Height(0),
+        zip233_amount: Default::default(),
         inputs: Vec::new(),
         outputs: Vec::new(),
         sapling_shielded_data: None,
@@ -491,8 +494,9 @@ fn v6_round_trip() {
 
     let _init_guard = zebra_test::init();
 
-    for block_bytes in ORCHARD_ZSA_WORKFLOW_BLOCKS.iter() {
-        let block = block_bytes
+    for workflow_block in ORCHARD_ZSA_WORKFLOW_BLOCKS.iter() {
+        let block = workflow_block
+            .bytes
             .zcash_deserialize_into::<Block>()
             .expect("block is structurally valid");
 
@@ -502,7 +506,7 @@ fn v6_round_trip() {
             .expect("vec serialization is infallible");
 
         assert_eq!(
-            block_bytes, &block_bytes2,
+            workflow_block.bytes, block_bytes2,
             "data must be equal if structs are equal"
         );
 
@@ -638,8 +642,9 @@ fn v6_librustzcash_tx_conversion() {
 
     let _init_guard = zebra_test::init();
 
-    for block_bytes in ORCHARD_ZSA_WORKFLOW_BLOCKS.iter() {
-        let block = block_bytes
+    for workflow_block in ORCHARD_ZSA_WORKFLOW_BLOCKS.iter() {
+        let block = workflow_block
+            .bytes
             .zcash_deserialize_into::<Block>()
             .expect("block is structurally valid");
 

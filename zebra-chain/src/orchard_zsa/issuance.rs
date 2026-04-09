@@ -8,7 +8,7 @@ use group::ff::PrimeField;
 use halo2::pasta::pallas;
 
 use orchard::{
-    issuance::{IssueBundle, Signed},
+    issuance::{IssueAction, IssueBundle, Signed},
     note::ExtractedNoteCommitment,
 };
 
@@ -38,14 +38,17 @@ impl IssueData {
     pub(crate) fn note_commitments(&self) -> impl Iterator<Item = pallas::Base> + '_ {
         self.0.actions().iter().flat_map(|action| {
             action.notes().iter().map(|note| {
-                // TODO: FIXME: Make `ExtractedNoteCommitment::inner` public in `orchard` (this would
-                // eliminate the need for the workaround of converting `pallas::Base` from bytes
-                // here), or introduce a new public method in `orchard::issuance::IssueBundle` to
-                // retrieve note commitments directly from `orchard`.
+                // TODO: Replace this workaround with orchard `ExtractedNoteCommitment` if its inner
+                // field is made public, or if a note_commitments() method is added to IssueBundle.
                 pallas::Base::from_repr(ExtractedNoteCommitment::from(note.commitment()).to_bytes())
                     .unwrap()
             })
         })
+    }
+
+    /// Returns issuance actions
+    pub fn actions(&self) -> impl Iterator<Item = &IssueAction> {
+        self.0.actions().iter()
     }
 }
 

@@ -160,6 +160,8 @@ pub enum Transaction {
         lock_time: LockTime,
         /// The latest block height that this transaction can be added to the chain.
         expiry_height: block::Height,
+        /// The burn amount for this transaction, if any.
+        zip233_amount: Amount<NonNegative>,
         /// The transparent inputs to the transaction.
         inputs: Vec<transparent::Input>,
         /// The transparent outputs from the transaction.
@@ -190,6 +192,8 @@ impl fmt::Display for Transaction {
         if let Some(expiry_height) = self.expiry_height() {
             fmter.field("expiry_height", &expiry_height);
         }
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+        fmter.field("zip233_amount", &self.zip233_amount());
 
         fmter.field("transparent_inputs", &self.inputs().len());
         fmter.field("transparent_outputs", &self.outputs().len());
@@ -1107,6 +1111,44 @@ impl Transaction {
         }
     }
 
+    /// Access the Orchard issue data in this transaction, if any,
+    /// regardless of version.
+    #[cfg(feature = "tx_v6")]
+    pub fn orchard_issue_data(&self) -> &Option<orchard_zsa::IssueData> {
+        match self {
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { .. }
+            | Transaction::V5 { .. } => &None,
+
+            Transaction::V6 {
+                orchard_zsa_issue_data,
+                ..
+            } => orchard_zsa_issue_data,
+        }
+    }
+
+    /// Access the Orchard asset burns in this transaction, if there are any,
+    /// regardless of version.
+    #[cfg(feature = "tx_v6")]
+    pub fn orchard_burns(&self) -> Option<&'_ [orchard_zsa::BurnItem]> {
+        match self {
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { .. }
+            | Transaction::V5 { .. } => None,
+
+            Transaction::V6 {
+                orchard_shielded_data,
+                ..
+            } => orchard_shielded_data
+                .as_ref()
+                .map(|data| data.burn.as_ref()),
+        }
+    }
+
     /// Access the [`orchard::Flags`] in this transaction, if there is any,
     /// regardless of version.
     pub fn orchard_flags(&self) -> Option<orchard::shielded_data::Flags> {
@@ -1388,6 +1430,7 @@ impl Transaction {
         &self,
         outputs: &HashMap<transparent::OutPoint, transparent::Output>,
     ) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
+        // TODO: subtract zip233_amount if zip233 is approved.
         self.transparent_value_balance_from_outputs(outputs)?
             + self.sprout_value_balance()?
             + self.sapling_value_balance()
@@ -1419,6 +1462,19 @@ impl Transaction {
         utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
     ) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
         self.value_balance_from_outputs(&outputs_from_utxos(utxos.clone()))
+    }
+
+    /// Access the zip233 amount field of this transaction, regardless of version.
+    pub fn zip233_amount(&self) -> Amount<NonNegative> {
+        match self {
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { .. }
+            | Transaction::V5 { .. } => Amount::zero(),
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            Transaction::V6 { zip233_amount, .. } => *zip233_amount,
+        }
     }
 }
 

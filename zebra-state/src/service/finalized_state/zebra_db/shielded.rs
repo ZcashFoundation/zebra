@@ -26,6 +26,9 @@ use zebra_chain::{
     transaction::Transaction,
 };
 
+#[cfg(feature = "tx_v6")]
+use zebra_chain::orchard_zsa::{AssetBase, AssetState, IssuedAssetChanges};
+
 use crate::{
     request::{FinalizedBlock, Treestate},
     service::finalized_state::{
@@ -36,11 +39,29 @@ use crate::{
     BoxError,
 };
 
+#[cfg(feature = "tx_v6")]
+use crate::service::finalized_state::TypedColumnFamily;
+
 // Doc-only items
 #[allow(unused_imports)]
 use zebra_chain::subtree::NoteCommitmentSubtree;
 
+#[cfg(feature = "tx_v6")]
+/// The name of the chain value pools column family.
+pub const ISSUED_ASSETS: &str = "orchard_issued_assets";
+
+#[cfg(feature = "tx_v6")]
+/// The type for reading value pools from the database.
+pub type IssuedAssetsCf<'cf> = TypedColumnFamily<'cf, AssetBase, AssetState>;
+
 impl ZebraDb {
+    #[cfg(feature = "tx_v6")]
+    /// Returns a typed handle to the `history_tree` column family.
+    pub(crate) fn issued_assets_cf(&self) -> IssuedAssetsCf {
+        IssuedAssetsCf::new(&self.db, ISSUED_ASSETS)
+            .expect("column family was created when database was created")
+    }
+
     // Read shielded methods
 
     /// Returns `true` if the finalized state contains `sprout_nullifier`.
@@ -410,6 +431,12 @@ impl ZebraDb {
         Some(subtree_data.with_index(index))
     }
 
+    #[cfg(feature = "tx_v6")]
+    /// Get the orchard issued asset state for the finalized tip.
+    pub fn issued_asset(&self, asset_base: &AssetBase) -> Option<AssetState> {
+        self.issued_assets_cf().zs_get(asset_base)
+    }
+
     /// Returns the shielded note commitment trees of the finalized tip
     /// or the empty trees if the state is empty.
     /// Additionally, returns the sapling and orchard subtrees for the finalized tip if
@@ -437,15 +464,18 @@ impl DiskWriteBatch {
     /// - Propagates any errors from updating note commitment trees
     pub fn prepare_shielded_transaction_batch(
         &mut self,
-        db: &DiskDb,
+        zebra_db: &ZebraDb,
         finalized: &FinalizedBlock,
     ) -> Result<(), BoxError> {
         let FinalizedBlock { block, .. } = finalized;
 
         // Index each transaction's shielded data
         for transaction in &block.transactions {
-            self.prepare_nullifier_batch(db, transaction)?;
+            self.prepare_nullifier_batch(&zebra_db.db, transaction)?;
         }
+
+        #[cfg(feature = "tx_v6")]
+        self.prepare_issued_assets_batch(zebra_db, finalized)?;
 
         Ok(())
     }
@@ -477,6 +507,39 @@ impl DiskWriteBatch {
             self.zs_insert(&orchard_nullifiers, orchard_nullifier, ());
         }
 
+        Ok(())
+    }
+
+    #[cfg(feature = "tx_v6")]
+    /// Prepare a database batch containing `finalized.block`'s asset issuance
+    /// and return it (without actually writing anything).
+    ///
+    /// # Errors
+    ///
+    /// - Returns an error if asset state changes cannot be calculated from the block's transactions
+    #[allow(clippy::unwrap_in_result)]
+    pub fn prepare_issued_assets_batch(
+        &mut self,
+        zebra_db: &ZebraDb,
+        finalized: &FinalizedBlock,
+    ) -> Result<(), BoxError> {
+        let mut batch = zebra_db.issued_assets_cf().with_batch_for_writing(self);
+        let asset_changes = if let Some(asset_changes) = finalized.issued_asset_changes.as_ref() {
+            asset_changes.clone()
+        } else {
+            // Recalculate changes from transactions if not provided.
+            // This happens for Checkpoint Verified Blocks loaded during startup.
+            IssuedAssetChanges::validate_and_get_changes(
+                &finalized.block.transactions,
+                None, // No sighashes - uses trusted validation without signature checks
+                |asset_base| zebra_db.issued_asset(asset_base),
+            )
+            .map_err(|e| BoxError::from(format!("invalid issued assets changes: {e:?}")))?
+        };
+        // Add only the new states to the batch.
+        for (asset_base, (_old_state, new_state)) in asset_changes.iter() {
+            batch = batch.zs_insert(asset_base, new_state);
+        }
         Ok(())
     }
 

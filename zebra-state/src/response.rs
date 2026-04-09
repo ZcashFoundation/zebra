@@ -13,6 +13,9 @@ use zebra_chain::{
     value_balance::ValueBalance,
 };
 
+#[cfg(feature = "tx_v6")]
+use zebra_chain::orchard_zsa::AssetState;
+
 #[cfg(feature = "getblocktemplate-rpcs")]
 use zebra_chain::work::difficulty::CompactDifficulty;
 
@@ -125,6 +128,7 @@ impl MinedTx {
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A response to a read-only
 /// [`ReadStateService`](crate::service::ReadStateService)'s [`ReadRequest`].
+#[allow(clippy::large_enum_variant)]
 pub enum ReadResponse {
     /// Response to [`ReadRequest::Tip`] with the current best chain tip.
     Tip(Option<(block::Height, block::Hash)>),
@@ -233,6 +237,10 @@ pub enum ReadResponse {
     #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`ReadRequest::TipBlockSize`]
     TipBlockSize(Option<usize>),
+
+    #[cfg(feature = "tx_v6")]
+    /// Response to [`ReadRequest::AssetState`]
+    AssetState(Option<AssetState>),
 }
 
 /// A structure with the information needed from the state to build a `getblocktemplate` RPC response.
@@ -322,6 +330,9 @@ impl TryFrom<ReadResponse> for Response {
             ReadResponse::ChainInfo(_) | ReadResponse::SolutionRate(_) | ReadResponse::TipBlockSize(_) => {
                 Err("there is no corresponding Response for this ReadResponse")
             }
+
+            #[cfg(feature = "tx_v6")]
+            ReadResponse::AssetState(_) => Err("there is no corresponding Response for this ReadResponse"),
         }
     }
 }

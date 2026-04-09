@@ -133,11 +133,8 @@ impl<Flavor: ShieldedDataFlavor> ShieldedData<Flavor> {
         let key = {
             let cv_balance = ValueCommitment::new(
                 pallas::Scalar::zero(),
-                // TODO: Make the `ValueSum::from_raw` function public in the `orchard` crate
-                // and use `ValueSum::from_raw(self.value_balance.into())` instead of the
-                // next line
-                (ValueSum::default() + i64::from(self.value_balance)).unwrap(),
-                AssetBase::native(),
+                ValueSum::from_raw(self.value_balance.into()),
+                AssetBase::zatoshi(),
             );
             let burn_value_commitment = compute_burn_value_commitment(self.burn.as_ref());
             cv - cv_balance - burn_value_commitment
@@ -283,7 +280,7 @@ bitflags! {
     /// # Consensus
     ///
     /// > [NU5 onward] In a version 5 transaction, the reserved bits 2..7 of the flagsOrchard
-    /// > field MUST be zero.
+    /// > field MUST be zero. Bit 2 (ENABLE_ZSA) is introduced in V6 (NU7, ZIP 230).
     ///
     /// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
     ///
@@ -298,7 +295,7 @@ bitflags! {
         /// Enable creating new non-zero valued Orchard notes.
         const ENABLE_OUTPUTS = 0b00000010;
         /// Enable ZSA transaction (otherwise all notes within actions must use native asset).
-        // FIXME: Should we use this flag explicitly anywhere in Zebra?
+        #[cfg(feature = "tx_v6")]
         const ENABLE_ZSA = 0b00000100;
     }
 }

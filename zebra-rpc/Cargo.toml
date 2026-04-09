@@ -20,6 +20,7 @@ categories = [
 ]
 
 [features]
+tx_v6 = ["zebra-chain/tx_v6", "zebra-state/tx_v6", "zebra-consensus/tx_v6"]
 
 indexer-rpcs = [
     "tonic-build",

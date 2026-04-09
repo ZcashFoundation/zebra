@@ -41,7 +41,7 @@ tx_v6 = [
 ]
 
 [dependencies]
-blake2b_simd = "1.0.2"
+blake2b_simd = "=1.0.1"
 bellman = "0.14.0"
 bls12_381 = "0.8.0"
 halo2 = { package = "halo2_proofs", version = "0.3.0" }
@@ -103,3 +103,6 @@ tracing-subscriber = "0.3.18"
 zebra-state = { path = "../zebra-state", version = "1.0.0-beta.41", features = ["proptest-impl"] }
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.41", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.41" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("nu7"))'] }

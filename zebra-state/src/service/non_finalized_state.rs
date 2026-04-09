@@ -10,6 +10,7 @@ use std::{
 
 use zebra_chain::{
     block::{self, Block},
+    orchard_zsa::{AssetBase, IssuedAssetChanges},
     parameters::Network,
     sprout, transparent,
 };
@@ -17,7 +18,7 @@ use zebra_chain::{
 use crate::{
     constants::MAX_NON_FINALIZED_CHAIN_FORKS,
     request::{ContextuallyVerifiedBlock, FinalizableBlock},
-    service::{check, finalized_state::ZebraDb},
+    service::{check, finalized_state::ZebraDb, read},
     SemanticallyVerifiedBlock, ValidateContextError,
 };
 
@@ -325,6 +326,15 @@ impl NonFinalizedState {
             finalized_state,
         )?;
 
+        #[cfg(feature = "tx_v6")]
+        let issued_assets = IssuedAssetChanges::validate_and_get_changes(
+            &prepared.block.transactions,
+            prepared.transaction_sighashes.as_deref(),
+            |asset_base: &AssetBase| {
+                read::asset_state(Some(&new_chain), finalized_state, asset_base)
+            },
+        )?;
+
         // Reads from disk
         check::anchors::block_sapling_orchard_anchors_refer_to_final_treestates(
             finalized_state,
@@ -343,6 +353,9 @@ impl NonFinalizedState {
         let contextual = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
             prepared.clone(),
             spent_utxos.clone(),
+            // TODO: Refactor this into repeated `With::with()` calls, see http_request_compatibility module.
+            #[cfg(feature = "tx_v6")]
+            issued_assets,
         )
         .map_err(|value_balance_error| {
             ValidateContextError::CalculateBlockChainValueChange {

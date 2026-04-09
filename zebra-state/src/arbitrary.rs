@@ -37,6 +37,7 @@ impl Prepare for Arc<Block> {
             height,
             new_outputs,
             transaction_hashes,
+            transaction_sighashes: None,
             deferred_balance: None,
         }
     }
@@ -96,8 +97,13 @@ impl ContextuallyVerifiedBlock {
             .map(|outpoint| (outpoint, zero_utxo.clone()))
             .collect();
 
-        ContextuallyVerifiedBlock::with_block_and_spent_utxos(block, zero_spent_utxos)
-            .expect("all UTXOs are provided with zero values")
+        ContextuallyVerifiedBlock::with_block_and_spent_utxos(
+            block,
+            zero_spent_utxos,
+            #[cfg(feature = "tx_v6")]
+            Default::default(),
+        )
+        .expect("all UTXOs are provided with zero values")
     }
 
     /// Create a [`ContextuallyVerifiedBlock`] from a [`Block`] or [`SemanticallyVerifiedBlock`],
@@ -111,6 +117,7 @@ impl ContextuallyVerifiedBlock {
             height,
             new_outputs,
             transaction_hashes,
+            transaction_sighashes,
             deferred_balance: _,
         } = block.into();
 
@@ -124,7 +131,10 @@ impl ContextuallyVerifiedBlock {
             // TODO: fix the tests, and stop adding unrelated inputs and outputs.
             spent_outputs: new_outputs,
             transaction_hashes,
+            transaction_sighashes,
             chain_value_pool_change: ValueBalance::zero(),
+            #[cfg(feature = "tx_v6")]
+            issued_asset_changes: Default::default(),
         }
     }
 }

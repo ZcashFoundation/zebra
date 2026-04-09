@@ -15,7 +15,7 @@ impl Arbitrary for BurnItem {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        BundleArb::<orchard::orchard_flavor::OrchardVanilla>::arb_asset_to_burn()
+        BundleArb::<orchard::flavor::OrchardVanilla>::arb_asset_to_burn()
             .prop_map(|(asset_base, value)| BurnItem::from((asset_base, value)))
             .boxed()
     }

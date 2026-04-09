@@ -475,6 +475,14 @@ impl ZcashDeserialize for Option<orchard::ShieldedData<OrchardVanilla>> {
         // in [`Flags::zcash_deserialized`].
         let flags: orchard::Flags = (&mut reader).zcash_deserialize_into()?;
 
+        // `ENABLE_ZSA` is introduced in V6 (ZIP 230) and must be zero in V5.
+        #[cfg(feature = "tx_v6")]
+        if flags.contains(orchard::Flags::ENABLE_ZSA) {
+            return Err(SerializationError::Parse(
+                "ENABLE_ZSA is not allowed in V5 transactions",
+            ));
+        }
+
         // Denoted as `valueBalanceOrchard` in the spec.
         let value_balance: Amount = (&mut reader).zcash_deserialize_into()?;
 
@@ -833,6 +841,7 @@ impl ZcashSerialize for Transaction {
                 network_upgrade,
                 lock_time,
                 expiry_height,
+                zip233_amount,
                 inputs,
                 outputs,
                 sapling_shielded_data,
@@ -854,6 +863,9 @@ impl ZcashSerialize for Transaction {
 
                 // Denoted as `nExpiryHeight` in the spec.
                 writer.write_u32::<LittleEndian>(expiry_height.0)?;
+
+                // Denoted as `zip233_amount` in the spec.
+                zip233_amount.zcash_serialize(&mut writer)?;
 
                 // Denoted as `tx_in_count` and `tx_in` in the spec.
                 inputs.zcash_serialize(&mut writer)?;
@@ -1164,6 +1176,9 @@ impl ZcashDeserialize for Transaction {
                 // Denoted as `nExpiryHeight` in the spec.
                 let expiry_height = block::Height(limited_reader.read_u32::<LittleEndian>()?);
 
+                // Denoted as `zip233_amount` in the spec.
+                let zip233_amount = (&mut limited_reader).zcash_deserialize_into()?;
+
                 // Denoted as `tx_in_count` and `tx_in` in the spec.
                 let inputs = Vec::zcash_deserialize(&mut limited_reader)?;
 
@@ -1195,6 +1210,7 @@ impl ZcashDeserialize for Transaction {
                     network_upgrade,
                     lock_time,
                     expiry_height,
+                    zip233_amount,
                     inputs,
                     outputs,
                     sapling_shielded_data,

@@ -136,6 +136,7 @@ fn test_block_db_round_trip_with(
                 height: Height(0),
                 new_outputs,
                 transaction_hashes,
+                transaction_sighashes: None,
                 deferred_balance: None,
             })
         };

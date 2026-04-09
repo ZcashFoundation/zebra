@@ -302,6 +302,18 @@ pub trait Rpc {
         address_strings: AddressStrings,
     ) -> BoxFuture<Result<Vec<GetAddressUtxos>>>;
 
+    /// Returns the asset state of the provided asset base at the best chain tip or finalized chain tip.
+    ///
+    /// method: post
+    /// tags: blockchain
+    #[cfg(feature = "tx_v6")]
+    #[rpc(name = "getassetstate")]
+    fn get_asset_state(
+        &self,
+        asset_base: String,
+        include_non_finalized: Option<bool>,
+    ) -> BoxFuture<Result<zebra_chain::orchard_zsa::AssetState>>;
+
     /// Stop the running zebrad process.
     ///
     /// # Notes
@@ -1354,6 +1366,57 @@ where
             }
 
             Ok(response_utxos)
+        }
+        .boxed()
+    }
+
+    #[cfg(feature = "tx_v6")]
+    fn get_asset_state(
+        &self,
+        asset_base: String,
+        include_non_finalized: Option<bool>,
+    ) -> BoxFuture<Result<zebra_chain::orchard_zsa::AssetState>> {
+        let state = self.state.clone();
+        let include_non_finalized = include_non_finalized.unwrap_or(true);
+
+        async move {
+            if asset_base.len() != 64 {
+                return Err(Error {
+                    code: INVALID_PARAMETERS_ERROR_CODE,
+                    message: "expected 32 bytes (64 hex chars)".to_string(),
+                    data: None,
+                });
+            }
+
+            let asset_base_bytes: [u8; 32] = hex::decode(&asset_base)
+                .map_err(|_| Error {
+                    code: INVALID_PARAMETERS_ERROR_CODE,
+                    message: "invalid hex encoding".to_string(),
+                    data: None,
+                })?
+                .try_into()
+                .expect("length already checked above");
+
+            let asset_base = zebra_chain::orchard_zsa::AssetBase::from_bytes(&asset_base_bytes)
+                .into_option()
+                .ok_or_else(|| Error {
+                    code: INVALID_PARAMETERS_ERROR_CODE,
+                    message: "invalid asset base".to_string(),
+                    data: None,
+                })?;
+
+            let request = zebra_state::ReadRequest::AssetState {
+                asset_base,
+                include_non_finalized,
+            };
+
+            let zebra_state::ReadResponse::AssetState(asset_state) =
+                state.oneshot(request).await.map_server_error()?
+            else {
+                unreachable!("unexpected response from state service");
+            };
+
+            asset_state.ok_or_server_error("asset base not found")
         }
         .boxed()
     }
