@@ -7286,6 +7286,7 @@ dependencies = [
  "tracing-error",
  "tracing-futures",
  "tracing-subscriber",
+ "zcash_primitives",
  "zcash_proofs",
  "zcash_protocol",
  "zebra-chain",
