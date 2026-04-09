@@ -236,9 +236,13 @@ jobs:
         checks:
           - bans
           - sources
+          - advisories
+          - licenses
         # We don't need to check `--no-default-features` here, because (except in very rare cases):
         # - disabling features isn't going to add duplicate dependencies
         # - disabling features isn't going to add more crate sources
+        # For advisories and licenses, feature flags don't change the dependency tree materially,
+        # so we only need the default and --all-features variants.
         features: ["", --features default-release-binaries, --all-features]
       # Always run the --all-features job, to get accurate "skip tree root was not found" warnings
       fail-fast: false
@@ -263,6 +267,26 @@ jobs:
           command: check ${{ matrix.checks }} ${{ matrix.features == '--all-features' && '--allow banned' || '--allow unmatched-skip-root' }}
           arguments: --workspace ${{ matrix.features }}
 
+  vet:
+    name: cargo-vet check
+    permissions:
+      statuses: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
+        with:
+          cache-on-failure: true
+      - name: Install cargo-vet
+        uses: taiki-e/install-action@305bebabd4457bed9b82541755f034994382465b #v2.68.10
+        with:
+          tool: cargo-vet
+      - name: Run cargo-vet check
+        run: cargo vet check
+
   lint-success:
     name: lint success
     runs-on: ubuntu-latest
@@ -277,6 +301,7 @@ jobs:
       - no-test-deps
       - features
       - deny
+      - vet
     timeout-minutes: 30
     steps:
       - name: Decide whether the needed jobs succeeded or failed
