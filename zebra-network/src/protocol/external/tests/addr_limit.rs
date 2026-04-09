@@ -5,7 +5,7 @@
 //! is checked. This test feeds that message through `Codec::decode()` — the
 //! exact code path hit by TCP data from a remote peer after handshake.
 
-use std::{io::Write, mem, time::Instant};
+use std::{io::Write, mem};
 
 use byteorder::{BigEndian, LittleEndian, WriteBytesExt};
 use bytes::BytesMut;
@@ -13,7 +13,7 @@ use tokio_util::codec::Decoder;
 
 use zebra_chain::{
     parameters::Network,
-    serialization::{sha256d, TrustedPreallocate},
+    serialization::{sha256d, TrustedPreallocate, ZcashDeserialize},
 };
 
 use crate::{
@@ -70,17 +70,7 @@ fn poc_remote_addrv2_resource_exhaustion() {
     // Feed through Codec::decode() — the real TCP inbound path
     let mut codec = Codec::builder().finish();
     let mut src = BytesMut::from(raw.as_slice());
-    let start = Instant::now();
     let result = codec.decode(&mut src);
-    let elapsed = start.elapsed();
-
-    eprintln!("--- GHSA-xr93-pcq3-pxf8 PoC ---");
-    eprintln!("  max_allocation:   {} (protocol cap: {})", AddrV2::max_allocation(), MAX_ADDRS_IN_MESSAGE);
-    eprintln!("  Wire message:     {:.2} MiB", raw.len() as f64 / (1024.0 * 1024.0));
-    eprintln!("  Entry count:      {attack_count}");
-    eprintln!("  Heap if parsed:   {:.2} MiB ({:.1}x amplification)", heap_bytes as f64 / (1024.0 * 1024.0), heap_bytes as f64 / raw.len() as f64);
-    eprintln!("  Decode time:      {elapsed:?}");
-    eprintln!("  Result:           {}", if result.is_err() { "rejected" } else { "ACCEPTED (bad!)" });
 
     // 1) max_allocation must not exceed protocol cap
     assert!(
@@ -92,4 +82,15 @@ fn poc_remote_addrv2_resource_exhaustion() {
 
     // 2) message must be rejected
     assert!(result.is_err(), "message with {attack_count} entries was accepted");
+
+    // 3) deserialization layer must reject >1000 entries directly
+    let oversized_body = build_attack_message(MAX_ADDRS_IN_MESSAGE + 1);
+    // Skip the 24-byte header to get just the body for direct deserialization
+    let body_only = &oversized_body[24..];
+    assert!(
+        Vec::<AddrV2>::zcash_deserialize(body_only).is_err(),
+        "Vec<AddrV2>::zcash_deserialize accepted {} entries (protocol cap: {})",
+        MAX_ADDRS_IN_MESSAGE + 1,
+        MAX_ADDRS_IN_MESSAGE,
+    );
 }
