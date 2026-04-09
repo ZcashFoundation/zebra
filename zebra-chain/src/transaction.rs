@@ -275,7 +275,7 @@ impl Transaction {
             _ => {
                 let hash = self.0.auth_commitment();
                 let bytes: &[u8] = hash.as_ref();
-                let digest_bytes: [u8; 32] = bytes.try_into().expect("auth commitment is 32 bytes");
+                let digest_bytes: [u8; 32] = bytes.try_into().ok()?;
                 Some(AuthDigest(digest_bytes))
             }
         }
@@ -479,10 +479,9 @@ impl Transaction {
 
     /// Access the Orchard anchor as a zebra tree root, if any.
     pub fn orchard_anchor(&self) -> Option<crate::orchard::tree::Root> {
-        self.0.orchard_bundle().map(|b| {
+        self.0.orchard_bundle().and_then(|b| {
             let bytes = b.anchor().to_bytes();
-            crate::orchard::tree::Root::try_from(bytes)
-                .expect("orchard anchor from valid transaction should be a valid tree root")
+            crate::orchard::tree::Root::try_from(bytes).ok()
         })
     }
 
@@ -743,7 +742,7 @@ impl crate::serialization::ZcashDeserialize for Transaction {
     ///   computation, but the stored `consensus_branch_id` field will be wrong for
     ///   transactions mined before Canopy.  Call [`Transaction::with_branch_id`] to
     ///   correct it once the mined height and network are known, or use
-    ///   [`ZcashDeserializeWithContext<BranchId>`] directly.
+    ///   `ZcashDeserializeWithContext<BranchId>` directly.
     ///
     /// # Callers
     ///

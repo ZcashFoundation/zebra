@@ -269,8 +269,8 @@ impl PrecomputedTxData {
             data.orchard_bundle().cloned(),
         );
 
-        let tx_data: zp_tx::TransactionData<PrecomputedAuth> =
-            data_with_branch_id.map_authorization(
+        let tx_data: zp_tx::TransactionData<PrecomputedAuth> = data_with_branch_id
+            .map_authorization(
                 MapTransparent {
                     auth: TransparentAuth {
                         all_prev_outputs: all_previous_outputs.clone(),

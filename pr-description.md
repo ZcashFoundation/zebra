@@ -29,6 +29,7 @@ The new type preserves the public API through accessor methods that delegate to 
 ### Specifications & References
 
 Verified against the Zcash protocol specification (`protocol.tex`) and active ZIPs:
+
 - JoinSplit primary input encoding matches `zcash_proofs/src/sprout.rs` reference implementation
 - h_sig computation matches spec section 8.3 (BLAKE2b-256, personalization "ZcashComputehSig")
 - Ed25519 JoinSplit signature verification matches spec section 4.11
