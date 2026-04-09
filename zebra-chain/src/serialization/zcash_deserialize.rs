@@ -159,6 +159,24 @@ impl ZcashDeserialize for Ipv6Addr {
     }
 }
 
+/// Consensus-critical deserialization with additional context.
+///
+/// Some types (e.g., `Transaction`, `Block`) require external context for
+/// deserialization that is not present in the byte stream itself. For example,
+/// `zcash_primitives::transaction::Transaction::read()` requires a `BranchId`
+/// which, for pre-V5 transactions, must be derived from the block height and
+/// network.
+///
+/// This trait extends `ZcashDeserialize` for types that need context without
+/// changing the signature of the context-free trait.
+pub trait ZcashDeserializeWithContext<C>: Sized {
+    /// Try to read `self` from the given `reader`, using the provided `context`.
+    fn zcash_deserialize_with_context<R: io::Read>(
+        reader: R,
+        context: &C,
+    ) -> Result<Self, SerializationError>;
+}
+
 /// Helper for deserializing more succinctly via type inference
 pub trait ZcashDeserializeInto {
     /// Deserialize based on type inference
