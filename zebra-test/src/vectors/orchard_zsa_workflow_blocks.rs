@@ -20,8 +20,6 @@ fn decode_bytes(hex: &str) -> Vec<u8> {
 }
 
 lazy_static! {
-    pub static ref ORCHARD_ZSA_WORKFLOW_BLOCK_0_BYTES: Vec<u8> =
-        decode_bytes(include_str!("orchard-zsa-workflow-block-0-genesis.txt"));
     pub static ref ORCHARD_ZSA_WORKFLOW_BLOCK_1_BYTES: Vec<u8> =
         decode_bytes(include_str!("orchard-zsa-workflow-block-1.txt"));
     pub static ref ORCHARD_ZSA_WORKFLOW_BLOCK_2_BYTES: Vec<u8> =
@@ -37,17 +35,8 @@ lazy_static! {
     /// The sequence demonstrates issuing, transferring, and burning a custom
     /// asset, then finalizing the issuance and attempting an extra issue.
     ///
-    /// Block 0 is the Regtest genesis block, copied from
-    /// `zebra-chain/src/block/genesis/block-regtest-0-000-000.txt`.
-    /// The remaining workflow blocks were generated using `zcash_tx_tool`
+    /// The workflow blocks were generated using `zcash_tx_tool`
     pub static ref ORCHARD_ZSA_WORKFLOW_BLOCKS: Vec<OrchardWorkflowBlock> = vec![
-        // Genesis
-        OrchardWorkflowBlock {
-            height: 0,
-            bytes: ORCHARD_ZSA_WORKFLOW_BLOCK_0_BYTES.as_slice(),
-            is_valid: true
-        },
-
         // Issue: 1000
         OrchardWorkflowBlock {
             height: 1,

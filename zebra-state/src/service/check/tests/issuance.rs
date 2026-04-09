@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use zebra_chain::{
-    block::{self, Block},
+    block::{self, genesis::regtest_genesis_block, Block},
     orchard_zsa::{AssetBase, IssuedAssetChanges},
     parameters::Network,
     serialization::ZcashDeserialize,
@@ -39,7 +39,7 @@ fn check_burns_and_issuance() {
                 Arc::new(Block::zcash_deserialize(&bytes[..]).expect("block should deserialize"))
             });
 
-    let genesis_block = block_iter.next().expect("genesis block must exist").clone();
+    let genesis_block = regtest_genesis_block();
 
     finalized_state
         .commit_finalized_direct(genesis_block.into(), None, "test")
