@@ -3029,38 +3029,9 @@ fn build_v4_tx_with_joinsplit_data(
     joinsplit_data: Option<JoinSplitData<Groth16Proof>>,
     expiry_height: block::Height,
 ) -> Transaction {
-    let mut bytes: Vec<u8> = Vec::new();
-
-    // V4 overwintered header: version=4, overwintered flag set (= 0x80000004 LE)
-    bytes.extend_from_slice(&0x8000_0004u32.to_le_bytes());
-    // versionGroupId = SAPLING_VERSION_GROUP_ID = 0x892F2085 LE
-    bytes.extend_from_slice(&0x892F_2085u32.to_le_bytes());
-    // nTransparentInputs = 0 (compact_size)
-    bytes.push(0x00);
-    // nTransparentOutputs = 0 (compact_size)
-    bytes.push(0x00);
-    // nLockTime = 0
-    bytes.extend_from_slice(&0u32.to_le_bytes());
-    // nExpiryHeight
-    bytes.extend_from_slice(&expiry_height.0.to_le_bytes());
-    // valueBalanceSapling = 0 (i64 LE)
-    bytes.extend_from_slice(&0i64.to_le_bytes());
-    // nSpendsSapling = 0 (compact_size)
-    bytes.push(0x00);
-    // nOutputsSapling = 0 (compact_size)
-    bytes.push(0x00);
-
-    // Joinsplit data
-    if let Some(ref jsd) = joinsplit_data {
-        jsd.zcash_serialize(&mut bytes)
-            .expect("joinsplit_data serialization should succeed");
-    } else {
-        // nJoinSplit = 0 (compact_size)
-        bytes.push(0x00);
-    }
-
-    Transaction::zcash_deserialize(bytes.as_slice())
-        .expect("manually constructed V4 transaction should deserialize")
+    let mut tx = Transaction::test_v4_with_joinsplit_data(joinsplit_data.as_ref());
+    tx.set_expiry_height(expiry_height);
+    tx
 }
 
 /// Build a V4 transaction with joinsplit data and a valid ed25519 signature.

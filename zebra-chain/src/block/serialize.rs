@@ -159,9 +159,9 @@ impl ZcashDeserialize for Block {
         Ok(Block {
             header: limited_reader.zcash_deserialize_into()?,
             // Note: transactions are parsed with a default `BranchId::Canopy` for V1-V4.
-            // The stored `consensus_branch_id` may be wrong.  Callers that need the correct
-            // value should call `Transaction::with_branch_id()` after determining the
-            // mined height and network from the coinbase transaction.
+            // The stored `consensus_branch_id` may be wrong for pre-Canopy transactions.
+            // This field is not used in production (sighash computation provides the
+            // correct branch ID explicitly via the NetworkUpgrade parameter).
             transactions: limited_reader.zcash_deserialize_into()?,
         })
     }

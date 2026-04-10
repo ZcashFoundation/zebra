@@ -1029,32 +1029,7 @@ fn transaction_v4_with_joinsplit_data(
         }
     }
 
-    // Build a V4 transaction by serializing to raw bytes and deserializing.
-    let mut bytes: Vec<u8> = Vec::new();
-    // V4 overwintered header (0x80000004 LE) and versionGroupId (0x892F2085 LE)
-    bytes.extend_from_slice(&0x8000_0004u32.to_le_bytes());
-    bytes.extend_from_slice(&0x892F_2085u32.to_le_bytes());
-    // No transparent inputs or outputs
-    bytes.push(0x00);
-    bytes.push(0x00);
-    // nLockTime = min_lock_time_timestamp (500_000_000 LE)
-    bytes.extend_from_slice(&500_000_000u32.to_le_bytes());
-    // nExpiryHeight = 0
-    bytes.extend_from_slice(&0u32.to_le_bytes());
-    // valueBalanceSapling = 0
-    bytes.extend_from_slice(&0i64.to_le_bytes());
-    // nSpendsSapling = 0, nOutputsSapling = 0
-    bytes.push(0x00);
-    bytes.push(0x00);
-    // Joinsplit data (including count)
-    if let Some(ref jsd) = joinsplit_data {
-        jsd.zcash_serialize(&mut bytes)
-            .expect("joinsplit_data serialization should succeed");
-    } else {
-        bytes.push(0x00); // nJoinSplits = 0
-    }
-    Transaction::zcash_deserialize(bytes.as_slice())
-        .expect("manually constructed V4 transaction should deserialize")
+    Transaction::test_v4_with_joinsplit_data(joinsplit_data.as_ref())
 }
 
 /// Return a `Transaction::V4` containing `sapling_shielded_data`,

@@ -152,7 +152,7 @@ pub fn block_height_to_height(
 /// Convert a librustzcash `BranchId` into a Zebra `NetworkUpgrade`.
 ///
 /// Returns `None` for unknown branch IDs (e.g., `Sprout` which has branch ID 0).
-pub fn branch_id_to_network_upgrade(
+pub(crate) fn branch_id_to_network_upgrade(
     branch_id: zcash_protocol::consensus::BranchId,
 ) -> Option<crate::parameters::NetworkUpgrade> {
     crate::parameters::NetworkUpgrade::try_from(u32::from(branch_id)).ok()

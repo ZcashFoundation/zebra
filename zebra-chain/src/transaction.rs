@@ -67,37 +67,6 @@ impl Transaction {
         &self.0
     }
 
-    /// Return a copy of this transaction with the stored `consensus_branch_id` corrected.
-    ///
-    /// For V1-V4 transactions the consensus branch ID is NOT on the wire — it is inferred
-    /// from the block height and network at validation time.  During deserialization we
-    /// store a default value which may be wrong.  Call this method once the correct
-    /// branch ID is known to update the stored value.
-    ///
-    /// For V5+ transactions the branch ID is embedded in the serialized data, so this
-    /// method has no effect (the stored value is already correct).
-    pub fn with_branch_id(self, branch_id: zcash_protocol::consensus::BranchId) -> Self {
-        if self.version() >= 5 {
-            return self;
-        }
-        let data = self.0.into_data();
-        let corrected = zp_tx::TransactionData::<zp_tx::Authorized>::from_parts(
-            data.version(),
-            branch_id,
-            data.lock_time(),
-            data.expiry_height(),
-            data.transparent_bundle().cloned(),
-            data.sprout_bundle().cloned(),
-            data.sapling_bundle().cloned(),
-            data.orchard_bundle().cloned(),
-        );
-        Transaction(
-            corrected
-                .freeze()
-                .expect("re-wrapped from valid transaction"),
-        )
-    }
-
     /// Returns the transaction version.
     pub fn tx_version(&self) -> TxVersion {
         self.0.version()
@@ -648,31 +617,14 @@ impl Eq for Transaction {}
 
 impl std::fmt::Display for Transaction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut fmter = f.debug_struct("Transaction");
-
-        fmter.field("version", &self.version());
-
-        if let Some(network_upgrade) = self.network_upgrade() {
-            fmter.field("network_upgrade", &network_upgrade);
-        }
-
-        if let Some(lock_time) = self.lock_time() {
-            fmter.field("lock_time", &lock_time);
-        }
-
-        if let Some(expiry_height) = self.expiry_height() {
-            fmter.field("expiry_height", &expiry_height);
-        }
-
-        fmter.field("transparent_inputs", &self.inputs().len());
-        fmter.field("transparent_outputs", &self.outputs().len());
-        fmter.field("sprout_joinsplits", &self.joinsplit_count());
-        fmter.field("sapling_spends", &self.sapling_spends_count());
-        fmter.field("sapling_outputs", &self.sapling_outputs().count());
-        fmter.field("orchard_actions", &self.orchard_actions().count());
-        fmter.field("unmined_id", &self.unmined_id());
-
-        fmter.finish()
+        write!(
+            f,
+            "Transaction(v{}, {}, {} tin, {} tout)",
+            self.version(),
+            self.unmined_id(),
+            self.inputs().len(),
+            self.outputs().len(),
+        )
     }
 }
 
@@ -740,9 +692,8 @@ impl crate::serialization::ZcashDeserialize for Transaction {
     /// - **V1-V4 transactions**: the branch ID is NOT on the wire, so a default
     ///   (`BranchId::Canopy`) is stored.  This does not affect parsing or txid
     ///   computation, but the stored `consensus_branch_id` field will be wrong for
-    ///   transactions mined before Canopy.  Call [`Transaction::with_branch_id`] to
-    ///   correct it once the mined height and network are known, or use
-    ///   `ZcashDeserializeWithContext<BranchId>` directly.
+    ///   transactions mined before Canopy.  Use
+    ///   `ZcashDeserializeWithContext<BranchId>` when the correct branch ID is known.
     ///
     /// # Callers
     ///
@@ -1120,15 +1071,37 @@ impl Transaction {
         self.0 = new_data.freeze().expect("rebuilt from valid transaction");
     }
 
-    /// Replace a single transparent output at the given index (recomputes txid).
-    pub fn set_output(&mut self, index: usize, output: transparent::Output) {
-        let mut outputs = self.outputs();
-        outputs[index] = output;
-        *self = self.clone().with_transparent_outputs(outputs);
-    }
-
     /// Replace all transparent outputs (recomputes txid).
     pub fn set_outputs(&mut self, outputs: Vec<transparent::Output>) {
         *self = self.clone().with_transparent_outputs(outputs);
+    }
+
+    /// Build a V4 transaction with optional JoinSplit data via byte-level serialization.
+    ///
+    /// Transparent inputs/outputs and sapling shielded data are empty.
+    /// Used by tests that need V4 transactions with sprout data.
+    pub fn test_v4_with_joinsplit_data(
+        joinsplit_data: Option<&JoinSplitData<crate::primitives::Groth16Proof>>,
+    ) -> Self {
+        use crate::serialization::{ZcashDeserialize, ZcashSerialize};
+
+        let mut bytes: Vec<u8> = Vec::new();
+        bytes.extend_from_slice(&0x8000_0004u32.to_le_bytes()); // V4 overwintered
+        bytes.extend_from_slice(&0x892F_2085u32.to_le_bytes()); // Sapling versionGroupId
+        bytes.push(0x00); // nTransparentInputs
+        bytes.push(0x00); // nTransparentOutputs
+        bytes.extend_from_slice(&500_000_000u32.to_le_bytes()); // nLockTime
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // nExpiryHeight
+        bytes.extend_from_slice(&0i64.to_le_bytes()); // valueBalanceSapling
+        bytes.push(0x00); // nSpendsSapling
+        bytes.push(0x00); // nOutputsSapling
+        if let Some(jsd) = joinsplit_data {
+            jsd.zcash_serialize(&mut bytes)
+                .expect("joinsplit_data serialization should succeed");
+        } else {
+            bytes.push(0x00); // nJoinSplits
+        }
+        Transaction::zcash_deserialize(bytes.as_slice())
+            .expect("manually constructed V4 transaction should deserialize")
     }
 }

@@ -201,42 +201,10 @@ fn prepare_sprout_block(
 
 /// Build a V4 (Sapling) transaction containing the given sprout joinsplit data.
 /// Transparent inputs/outputs and sapling shielded data are empty.
-/// The transaction bytes are constructed manually and deserialized into a `Transaction`.
 fn build_v4_tx_with_joinsplit_data(
     joinsplit_data: Option<JoinSplitData<Groth16Proof>>,
 ) -> Transaction {
-    let mut bytes: Vec<u8> = Vec::new();
-
-    // V4 overwintered header: version=4, overwintered flag set (= 0x80000004 LE)
-    bytes.extend_from_slice(&0x8000_0004u32.to_le_bytes());
-    // versionGroupId = SAPLING_VERSION_GROUP_ID = 0x892F2085 LE
-    bytes.extend_from_slice(&0x892F_2085u32.to_le_bytes());
-    // nTransparentInputs = 0 (compact_size)
-    bytes.push(0x00);
-    // nTransparentOutputs = 0 (compact_size)
-    bytes.push(0x00);
-    // nLockTime = min_lock_time_timestamp (500_000_000 = 0x1DCD6500 LE)
-    bytes.extend_from_slice(&500_000_000u32.to_le_bytes());
-    // nExpiryHeight = 0
-    bytes.extend_from_slice(&0u32.to_le_bytes());
-    // valueBalanceSapling = 0 (i64 LE)
-    bytes.extend_from_slice(&0i64.to_le_bytes());
-    // nSpendsSapling = 0 (compact_size)
-    bytes.push(0x00);
-    // nOutputsSapling = 0 (compact_size)
-    bytes.push(0x00);
-
-    // Joinsplit data
-    if let Some(ref jsd) = joinsplit_data {
-        jsd.zcash_serialize(&mut bytes)
-            .expect("joinsplit_data serialization should succeed");
-    } else {
-        // nJoinSplit = 0 (compact_size)
-        bytes.push(0x00);
-    }
-
-    Transaction::zcash_deserialize(bytes.as_slice())
-        .expect("manually constructed V4 transaction should deserialize")
+    Transaction::test_v4_with_joinsplit_data(joinsplit_data.as_ref())
 }
 
 /// Build a V4 transaction with the same sapling shielded data as `tx`,
