@@ -1,7 +1,7 @@
 [package]
 # Crate metadata
 name = "zebrad"
-version = "4.3.0"
+version = "4.3.1"
 authors.workspace = true
 description = "The Zcash Foundation's independent, consensus-compatible implementation of a Zcash node"
 license.workspace = true
@@ -29,9 +29,7 @@ default-run = "zebrad"
 # `cargo release` settings
 [package.metadata.release]
 pre-release-replacements = [
-  {file="../book/src/user/install.md", search="git checkout [a-z0-9\\.-]+", replace="git checkout v{{version}}"},
-  {file="../book/src/user/install.md", search="--tag [a-z0-9\\.-]+", replace="--tag v{{version}}"},
-  {file="../book/src/user/docker.md", search="--branch [a-z0-9\\.-]+", replace="--branch v{{version}}"},
+  {file="../README.md", search="--tag [a-z0-9\\.-]+", replace="--tag v{{version}}"},
 ]
 
 [package.metadata.docs.rs]
@@ -150,16 +148,16 @@ tx_v6 = ["zebra-chain/tx_v6", "zebra-state/tx_v6", "zebra-consensus/tx_v6", "zeb
 comparison-interpreter = ["zebra-script/comparison-interpreter"]
 
 [dependencies]
-zebra-chain = { path = "../zebra-chain", version = "6.0.1" }
-zebra-consensus = { path = "../zebra-consensus", version = "5.0.1" }
-zebra-network = { path = "../zebra-network", version = "5.0.0" }
+zebra-chain = { path = "../zebra-chain", version = "6.0.2" }
+zebra-consensus = { path = "../zebra-consensus", version = "5.0.2" }
+zebra-network = { path = "../zebra-network", version = "5.0.1" }
 zebra-node-services = { path = "../zebra-node-services", version = "4.0.0", features = ["rpc-client"] }
 zebra-rpc = { path = "../zebra-rpc", version = "6.0.1" }
 zebra-state = { path = "../zebra-state", version = "5.0.0" }
 # zebra-script is not used directly, but we list it here to enable the
 # "comparison-interpreter" feature. (Feature unification will take care of
 # enabling it in the other imports of zcash-script.)
-zebra-script = { path = "../zebra-script", version = "5.0.0" }
+zebra-script = { path = "../zebra-script", version = "5.0.1" }
 zcash_script = { workspace = true }
 
 # Required for crates.io publishing, but it's only used in tests
@@ -293,9 +291,9 @@ proptest-derive = { workspace = true }
 # enable span traces and track caller in tests
 color-eyre = { workspace = true }
 
-zebra-chain = { path = "../zebra-chain", version = "6.0.1", features = ["proptest-impl"] }
-zebra-consensus = { path = "../zebra-consensus", version = "5.0.1", features = ["proptest-impl"] }
-zebra-network = { path = "../zebra-network", version = "5.0.0", features = ["proptest-impl"] }
+zebra-chain = { path = "../zebra-chain", version = "6.0.2", features = ["proptest-impl"] }
+zebra-consensus = { path = "../zebra-consensus", version = "5.0.2", features = ["proptest-impl"] }
+zebra-network = { path = "../zebra-network", version = "5.0.1", features = ["proptest-impl"] }
 zebra-state = { path = "../zebra-state", version = "5.0.0", features = ["proptest-impl"] }
 
 zebra-test = { path = "../zebra-test", version = "3.0.0" }

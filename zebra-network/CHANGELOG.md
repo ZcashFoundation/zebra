@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.0.1] - 2026-04-13
+
+This release fixes an important security issue:
+
+- [CVE-2026-XXXXX: addr/addrv2 Deserialization Resource Exhaustion](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-xr93-pcq3-pxf8)
+
+The impact of the issue for crate users will depend on the particular usage; if
+your application allows deserializing arbitrary `addr` and/or `addrv2` messages,
+you should update.
+
 ## [5.0.0] - 2026-03-12
 
 ### Breaking Changes
