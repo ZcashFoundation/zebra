@@ -361,7 +361,7 @@ jobs:
           "
 
   # Upload checkpoint output as an artifact for automated checkpoint PRs.
-  # Only runs for checkpoint generation tests — extracts "HEIGHT HASH" lines
+  # Only runs for checkpoint generation tests. Extracts "HEIGHT HASH" lines
   # from the container logs. The checkpoint-update.yml workflow consumes these.
   upload-checkpoint-artifact:
     name: Upload ${{ inputs.test_id }} checkpoint artifact
@@ -394,27 +394,14 @@ jobs:
       - name: Extract checkpoint lines from container logs
         run: |
           INSTANCE_NAME="${TEST_ID}-${GITHUB_REF_SLUG_URL}-${GITHUB_SHA_SHORT}"
-          CONTAINER_PREFIX="${TEST_ID}"
 
-          CONTAINER_ID=$(gcloud compute ssh "${INSTANCE_NAME}" \
-            --zone "${GCP_ZONE}" \
-            --ssh-flag="-o ServerAliveInterval=5" \
-            --ssh-flag="-o ConnectionAttempts=20" \
-            --ssh-flag="-o ConnectTimeout=5" \
-            --command="sudo docker ps -a --filter name=${CONTAINER_PREFIX} -q --no-trunc" 2>/dev/null | head -1)
-
-          if [ -z "$CONTAINER_ID" ]; then
-            echo "No container found for ${CONTAINER_PREFIX}"
-            exit 1
-          fi
-
-          echo "Extracting checkpoint lines from container ${CONTAINER_ID}..."
+          # Single SSH session: find container and extract logs in one command
           gcloud compute ssh "${INSTANCE_NAME}" \
             --zone "${GCP_ZONE}" \
             --ssh-flag="-o ServerAliveInterval=5" \
             --ssh-flag="-o ConnectionAttempts=20" \
             --ssh-flag="-o ConnectTimeout=5" \
-            --command="sudo docker logs ${CONTAINER_ID} 2>/dev/null" \
+            --command="sudo docker ps -a --filter name=${TEST_ID} -q --no-trunc | head -1 | xargs -I{} sudo docker logs {} 2>/dev/null" \
             | grep -E '^[0-9]+ [0-9a-f]{64}$' \
             > checkpoint-output.txt || true
 
@@ -422,7 +409,7 @@ jobs:
           echo "Extracted ${LINES} checkpoint lines"
 
           if [ "$LINES" -eq 0 ]; then
-            echo "WARNING: No checkpoint lines found in container logs"
+            echo "No checkpoint lines found in container logs"
             exit 1
           fi
 
@@ -437,7 +424,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
         with:
           name: ${{ inputs.test_id }}-checkpoints
-          path: checkpoints-*.txt
+          path: "*-checkpoints.txt"
           retention-days: 30
 
   # create a state image from the instance's state disk, if requested by the caller
