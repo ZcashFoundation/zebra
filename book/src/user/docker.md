@@ -8,23 +8,20 @@ To get Zebra quickly up and running, you can use an off-the-rack image from
 [Docker Hub](https://hub.docker.com/r/zfnd/zebra/tags):
 
 ```shell
-docker run --name zebra zfnd/zebra
-```
-
-If you want to preserve Zebra's state, you can create a Docker volume:
-
-```shell
-docker volume create zebrad-cache
-```
-
-And mount it before you start the container:
-
-```shell
-docker run \
-  --mount source=zebrad-cache,target=/home/zebra/.cache/zebra \
+docker run -d \
   --name zebra \
+  -p 8233:8233 \
+  -v zebrad-cache:/home/zebra/.cache/zebra \
   zfnd/zebra
 ```
+
+This command:
+
+- **`-p 8233:8233`**: Exposes the P2P port so other Zcash nodes can connect to
+  yours. Without this, the node can only make outbound connections and does not
+  contribute to network health. Use `-p 18233:18233` for Testnet.
+- **`-v zebrad-cache:...`**: Persists the chain state across container restarts,
+  avoiding re-syncing ~300 GB of blockchain data.
 
 You can also use `docker compose`, which we recommend. First get the repo:
 
@@ -38,6 +35,8 @@ Then run:
 ```shell
 docker compose -f docker/docker-compose.yml up
 ```
+
+The default compose file already exposes the Mainnet P2P port.
 
 ## Custom Images
 
@@ -153,6 +152,53 @@ ports:
 
 For Kubernetes, configure liveness and readiness probes against `/healthy` and `/ready` respectively. See the [Health Endpoints](./health.md) page for details.
 
+### P2P Networking
+
+Zebra uses TCP port **8233** (Mainnet) or **18233** (Testnet) for peer-to-peer
+connections. This is the port that other Zcash nodes use to connect to yours.
+
+When running in Docker, you **must** publish this port for your node to accept
+inbound connections:
+
+```shell
+docker run -p 8233:8233 zfnd/zebra    # Mainnet
+docker run -p 18233:18233 zfnd/zebra  # Testnet
+```
+
+Without the `-p` flag, your node can still sync (via outbound connections) but
+will not be reachable by other peers. This reduces the overall health of the
+Zcash network, and prevents the node from being used as a network shield for
+zcashd.
+
+**Behind a NAT or load balancer:** If your node is behind a NAT, firewall, or
+load balancer, set `external_addr` so Zebra advertises your public IP to peers:
+
+```toml
+[network]
+external_addr = "203.0.113.42:8233"
+```
+
+Or via environment variable:
+
+```shell
+-e ZEBRA_NETWORK__EXTERNAL_ADDR=203.0.113.42:8233
+```
+
+Without `external_addr`, Zebra advertises its bind address (`[::]:8233`), which
+other nodes cannot use to dial back. They may still discover your node through
+observed connection IPs, but setting `external_addr` makes discovery reliable.
+
+**Port summary:**
+
+| Port | Protocol | Purpose | Default State |
+|------|----------|---------|---------------|
+| 8233 | TCP | P2P (Mainnet) | Listening |
+| 18233 | TCP | P2P (Testnet) | Listening |
+| 8232 | TCP | RPC (Mainnet) | Disabled |
+| 18232 | TCP | RPC (Testnet) | Disabled |
+| 9999 | TCP | Prometheus metrics | Disabled |
+| 8080 | TCP | Health endpoints | Disabled |
+
 ## Examples
 
 To make the initial setup of Zebra with other services easier, we provide some
@@ -174,28 +220,23 @@ directly in `docker/docker-compose.lwd.yml` (or an accompanying `.env` file).
 
 ### Running Zebra with Prometheus and Grafana
 
-The following commands will run Zebra with Prometheus and Grafana:
+The following commands will run Zebra with the observability stack (Prometheus,
+Grafana, Jaeger, and AlertManager):
 
 ```shell
-docker compose -f docker/docker-compose.grafana.yml build --no-cache
-docker compose -f docker/docker-compose.grafana.yml up
+docker compose -f docker/docker-compose.observability.yml build --no-cache
+docker compose -f docker/docker-compose.observability.yml up
 ```
 
-In this example, we build a local Zebra image with the `prometheus` Cargo
-compilation feature. Note that we enable this feature by specifying its name in
-the build arguments. Having this Cargo feature specified at build time makes
-`cargo` compile Zebra with the metrics support for Prometheus enabled. Note that
-we also specify this feature as an environment variable at run time. Having this
-feature specified at run time makes Docker's entrypoint script configure Zebra
-to open a scraping endpoint on `localhost:9999` for Prometheus.
+This builds a local Zebra image with the `opentelemetry` Cargo feature and
+starts all observability services. Once running:
 
-Once all services are up, the Grafana web UI should be available at
-`localhost:3000`, the Prometheus web UI should be at `localhost:9090`, and
-Zebra's scraping page should be at `localhost:9999`. The default login and
-password for Grafana are both `admin`. To make Grafana use Prometheus, you need
-to add Prometheus as a data source with the URL `http://localhost:9090` in
-Grafana's UI. You can then import various Grafana dashboards from the `grafana`
-directory in the Zebra repo.
+- Grafana: `http://localhost:3000` (default login: admin/admin)
+- Prometheus: `http://localhost:9094`
+- Jaeger: `http://localhost:16686`
+- Zebra metrics: `http://localhost:9999`
+
+See `docker/observability/README.md` for dashboard setup and configuration.
 
 ### Running CI Tests Locally
 

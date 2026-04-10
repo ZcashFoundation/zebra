@@ -32,8 +32,9 @@ services:
       - ZEBRA_TRACING__OPENTELEMETRY_SERVICE_NAME=zebra
       - ZEBRA_TRACING__OPENTELEMETRY_SAMPLE_PERCENT=100
     ports:
-      - "9999:9999"
-      - "8232:8232"
+      - "8233:8233"   # P2P (inbound peer connections)
+      - "9999:9999"   # Prometheus metrics
+      - "8232:8232"   # RPC
     networks:
       - observability
     depends_on:
