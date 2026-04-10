@@ -16,13 +16,18 @@ on:
     types: [completed]
     branches: [main]
 
+  # Manual trigger for testing; resolves the latest successful integration test run automatically
+  workflow_dispatch:
+
 permissions: {}
 
 jobs:
   update-checkpoints:
     name: Update checkpoint files
     runs-on: ubuntu-latest
-    if: github.event.workflow_run.conclusion == 'success'
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
     permissions:
       actions: read
       contents: write
@@ -31,13 +36,42 @@ jobs:
       MAINNET_CHECKPOINTS: zebra-chain/src/parameters/checkpoint/main-checkpoints.txt
       TESTNET_CHECKPOINTS: zebra-chain/src/parameters/checkpoint/test-checkpoints.txt
       EOS_FILE: zebrad/src/components/sync/end_of_support.rs
-      WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
-      WORKFLOW_RUN_URL: ${{ github.event.workflow_run.html_url }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: true
           ref: main
+
+      # Resolve the integration test run ID.
+      # For workflow_run: use the triggering run directly.
+      # For workflow_dispatch: find the latest successful run via the API.
+      - name: Resolve integration test run ID
+        id: resolve-run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            RUN_ID="${{ github.event.workflow_run.id }}"
+            RUN_URL="${{ github.event.workflow_run.html_url }}"
+          else
+            RUN_ID=$(gh run list \
+              --workflow "Integration Tests on GCP" \
+              --branch main \
+              --status success \
+              --limit 1 \
+              --json databaseId \
+              --jq '.[0].databaseId')
+            RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${RUN_ID}"
+          fi
+
+          if [ -z "$RUN_ID" ]; then
+            echo "No successful integration test run found"
+            exit 1
+          fi
+
+          echo "run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
+          echo "run_url=${RUN_URL}" >> "$GITHUB_OUTPUT"
+          echo "Using integration test run: ${RUN_URL}"
 
       # Download checkpoint artifacts from the integration test run.
       - name: Download mainnet checkpoint artifact
@@ -45,7 +79,7 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c #v8.0.1
         with:
           name: generate-checkpoints-mainnet-checkpoints
-          run-id: ${{ github.event.workflow_run.id }}
+          run-id: ${{ steps.resolve-run.outputs.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
 
@@ -54,7 +88,7 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c #v8.0.1
         with:
           name: generate-checkpoints-testnet-checkpoints
-          run-id: ${{ github.event.workflow_run.id }}
+          run-id: ${{ steps.resolve-run.outputs.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
 
@@ -171,7 +205,7 @@ jobs:
           body: |
             Automated checkpoint update from the weekly integration test run.
 
-            **Source:** [Integration test run #${{ env.WORKFLOW_RUN_ID }}](${{ env.WORKFLOW_RUN_URL }})
+            **Source:** [Integration test run #${{ steps.resolve-run.outputs.run_id }}](${{ steps.resolve-run.outputs.run_url }})
 
             ### Changes
 
