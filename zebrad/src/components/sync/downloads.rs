@@ -533,7 +533,6 @@ where
         let past_lookahead_limit_sender = self.past_lookahead_limit_sender.clone();
         let past_lookahead_limit_receiver = self.past_lookahead_limit_receiver.clone();
         let block_size_sender = self.block_sizes.sender();
-        let block_size_sample_offset = self.block_sizes.sample_offset();
 
         let task = tokio::spawn(
             async move {
@@ -556,12 +555,7 @@ where
                     .record(download_start.elapsed().as_secs_f64());
 
                 // Sample block size for adaptive batch sizing (every 100th block).
-                if let Some(height) = block.coinbase_height() {
-                    if (height.0 + block_size_sample_offset).is_multiple_of(100) {
-                        use zebra_chain::serialization::ZcashSerialize;
-                        let _ = block_size_sender.send(block.zcash_serialized_size());
-                    }
-                }
+                block_size_sender.sample(&block);
 
                 // Security & Performance: reject blocks that are too far ahead of our tip.
                 // Avoids denial of service attacks, and reduces wasted work on high blocks

@@ -1,8 +1,34 @@
 //! Tracks recent block sizes for adaptive batch download sizing.
 
-use std::collections::VecDeque;
+use std::{collections::VecDeque, sync::Arc};
 
 use tokio::sync::mpsc;
+
+use zebra_chain::{block::Block, serialization::ZcashSerialize};
+
+/// Cloneable handle for reporting block sizes from spawned download tasks.
+///
+/// Bundles the channel sender with the sampling offset so callers only need
+/// to clone a single value before moving into an async block.
+#[derive(Clone, Debug)]
+pub struct BlockSizeTrackerSender {
+    sender: mpsc::UnboundedSender<usize>,
+    sample_offset: u32,
+}
+
+impl BlockSizeTrackerSender {
+    /// Samples the serialized size of `block` if it falls on the sampling interval.
+    ///
+    /// Only every 100th block (at the tracker's random offset) is measured, to
+    /// keep serialization overhead low.
+    pub fn sample(&self, block: &Arc<Block>) {
+        if let Some(height) = block.coinbase_height() {
+            if (height.0 + self.sample_offset).is_multiple_of(100) {
+                let _ = self.sender.send(block.zcash_serialized_size());
+            }
+        }
+    }
+}
 
 /// Target total size for a batch of downloaded blocks, in bytes.
 const BATCH_TARGET_SIZE: usize = 1_000_000;
@@ -45,14 +71,20 @@ impl BlockSizeTracker {
         }
     }
 
-    /// Returns a sender that spawned tasks use to report block sizes.
-    pub fn sender(&self) -> mpsc::UnboundedSender<usize> {
-        self.sender.clone()
+    /// Returns a cloneable sender handle for reporting block sizes from spawned tasks.
+    pub fn sender(&self) -> BlockSizeTrackerSender {
+        BlockSizeTrackerSender {
+            sender: self.sender.clone(),
+            sample_offset: self.sample_offset,
+        }
     }
 
-    /// Returns the sampling offset for spawned tasks.
-    pub fn sample_offset(&self) -> u32 {
-        self.sample_offset
+    /// Sends a raw size sample directly, bypassing height-based sampling.
+    ///
+    /// Used in tests to feed known sizes into the tracker.
+    #[cfg(test)]
+    fn send_sample(&self, size: usize) {
+        self.sender.send(size).expect("receiver is held by self");
     }
 
     /// Returns the recommended batch size based on recently observed block sizes.
@@ -83,3 +115,6 @@ impl BlockSizeTracker {
         ((4 * BATCH_TARGET_SIZE) / (5 * avg_size)).clamp(1, MAX_BATCH_SIZE)
     }
 }
+
+#[cfg(test)]
+mod tests;

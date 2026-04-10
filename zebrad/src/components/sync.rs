@@ -492,7 +492,7 @@ where
                     .service(peers),
                 AlwaysHedge,
                 20,
-                0.9,
+                0.95,
                 2 * SYNC_RESTART_DELAY,
             ),
             download_concurrency_limit,
