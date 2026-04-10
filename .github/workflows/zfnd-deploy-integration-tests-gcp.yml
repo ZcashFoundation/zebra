@@ -426,12 +426,12 @@ jobs:
             exit 1
           fi
 
-          # Determine the network from the test_id
-          NETWORK="mainnet"
+          # Name to match the repo files: main-checkpoints.txt / test-checkpoints.txt
           if echo "${TEST_ID}" | grep -qi "testnet"; then
-            NETWORK="testnet"
+            mv checkpoint-output.txt "test-checkpoints.txt"
+          else
+            mv checkpoint-output.txt "main-checkpoints.txt"
           fi
-          mv checkpoint-output.txt "checkpoints-${NETWORK}.txt"
 
       - name: Upload checkpoint artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2

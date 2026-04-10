@@ -40,8 +40,6 @@ jobs:
           ref: main
 
       # Download checkpoint artifacts from the integration test run.
-      # The artifact names are: generate-checkpoints-mainnet-checkpoints
-      # and generate-checkpoints-testnet-checkpoints.
       - name: Download mainnet checkpoint artifact
         id: mainnet-artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c #v8.0.1
@@ -69,17 +67,16 @@ jobs:
           HAS_MAINNET="false"
           HAS_TESTNET="false"
 
-          # These are the CI-generated checkpoint files (new entries only),
-          # not the full repo checkpoint files. Named by the upload step in
-          # zfnd-deploy-integration-tests-gcp.yml.
-          if [ -f "checkpoints-mainnet.txt" ]; then
-            LINES=$(wc -l < checkpoints-mainnet.txt | tr -d ' ')
+              # Artifact files mirror the repo naming: main-checkpoints.txt / test-checkpoints.txt
+          # These contain only the new entries from the CI run, not the full file.
+          if [ -f "main-checkpoints.txt" ]; then
+            LINES=$(wc -l < main-checkpoints.txt | tr -d ' ')
             echo "Mainnet artifact: ${LINES} checkpoint lines"
             HAS_MAINNET="true"
           fi
 
-          if [ -f "checkpoints-testnet.txt" ]; then
-            LINES=$(wc -l < checkpoints-testnet.txt | tr -d ' ')
+          if [ -f "test-checkpoints.txt" ]; then
+            LINES=$(wc -l < test-checkpoints.txt | tr -d ' ')
             echo "Testnet artifact: ${LINES} checkpoint lines"
             HAS_TESTNET="true"
           fi
@@ -102,11 +99,11 @@ jobs:
           echo "Current last mainnet checkpoint: ${CURRENT_LAST}"
 
           # Extract only new entries (height > current last)
-          NEW_COUNT=$(awk -v last="$CURRENT_LAST" '$1 > last' checkpoints-mainnet.txt | wc -l | tr -d ' ')
+          NEW_COUNT=$(awk -v last="$CURRENT_LAST" '$1 > last' main-checkpoints.txt | wc -l | tr -d ' ')
           echo "New mainnet checkpoints to append: ${NEW_COUNT}"
 
           if [ "$NEW_COUNT" -gt 0 ]; then
-            awk -v last="$CURRENT_LAST" '$1 > last' checkpoints-mainnet.txt >> "${MAINNET_CHECKPOINTS}"
+            awk -v last="$CURRENT_LAST" '$1 > last' main-checkpoints.txt >> "${MAINNET_CHECKPOINTS}"
             NEW_LAST=$(tail -1 "${MAINNET_CHECKPOINTS}" | awk '{print $1}')
             echo "Updated last mainnet checkpoint: ${NEW_LAST}"
           fi
@@ -118,11 +115,11 @@ jobs:
           CURRENT_LAST=$(tail -1 "${TESTNET_CHECKPOINTS}" | awk '{print $1}')
           echo "Current last testnet checkpoint: ${CURRENT_LAST}"
 
-          NEW_COUNT=$(awk -v last="$CURRENT_LAST" '$1 > last' checkpoints-testnet.txt | wc -l | tr -d ' ')
+          NEW_COUNT=$(awk -v last="$CURRENT_LAST" '$1 > last' test-checkpoints.txt | wc -l | tr -d ' ')
           echo "New testnet checkpoints to append: ${NEW_COUNT}"
 
           if [ "$NEW_COUNT" -gt 0 ]; then
-            awk -v last="$CURRENT_LAST" '$1 > last' checkpoints-testnet.txt >> "${TESTNET_CHECKPOINTS}"
+            awk -v last="$CURRENT_LAST" '$1 > last' test-checkpoints.txt >> "${TESTNET_CHECKPOINTS}"
             NEW_LAST=$(tail -1 "${TESTNET_CHECKPOINTS}" | awk '{print $1}')
             echo "Updated last testnet checkpoint: ${NEW_LAST}"
           fi
