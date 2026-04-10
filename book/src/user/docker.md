@@ -156,16 +156,10 @@ For Kubernetes, configure liveness and readiness probes against `/healthy` and `
 Zebra uses TCP port **8233** (Mainnet) or **18233** (Testnet) for peer-to-peer
 connections. This is the port that other Zcash nodes use to connect to yours.
 
-When running in Docker, publish this port for your node to accept inbound
-connections:
-
-```shell
-docker run -p 8233:8233 zfnd/zebra    # Mainnet
-docker run -p 18233:18233 zfnd/zebra  # Testnet
-```
-
-Without the `-p` flag, your node can still sync via outbound connections but
-will not accept inbound connections from other peers.
+When running in Docker, publish this port with `-p` (as shown in the
+[Quick Start](#quick-start)) for your node to accept inbound connections.
+Without it, the node can still sync via outbound connections but will not
+accept inbound connections from other peers.
 
 **Behind a NAT or load balancer:** If your node is behind a NAT, firewall, or
 load balancer, set `external_addr` so Zebra advertises your public IP to peers:

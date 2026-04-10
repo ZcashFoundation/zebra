@@ -15,9 +15,7 @@
 network = "Mainnet"
 listen_addr = "[::]:8233"
 
-# If behind a NAT or load balancer, set external_addr to your public IP so peers
-# can connect to your node. Without this, Zebra advertises its bind address
-# ([::]:8233) which other nodes cannot dial.
+# Set to your public IP:port if behind a NAT or load balancer.
 
 # external_addr = "203.0.113.42:8233"
 
