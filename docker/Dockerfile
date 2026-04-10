@@ -213,9 +213,7 @@ COPY --link --from=release /usr/local/bin/zebrad /usr/local/bin/
 COPY --link --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 # P2P ports: 8233 (Mainnet), 18233 (Testnet)
-# These must be published at runtime (-p 8233:8233) for inbound peer connections.
-# Without inbound P2P, the node can only make outbound connections and does not
-# contribute to network health.
+# Publish at runtime with -p 8233:8233 for inbound peer connections.
 EXPOSE 8233 18233
 
 ENTRYPOINT [ "entrypoint.sh" ]

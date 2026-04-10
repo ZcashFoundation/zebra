@@ -17,9 +17,8 @@ docker run -d --name zebra_local \
 ```
 
 This command starts a container on Mainnet and binds both the P2P port (8233)
-and the RPC port (8232). The P2P port is needed so peers can connect to your
-node and receive newly mined blocks. If you want to start generating blocks, you
-need to let Zebra sync first.
+and the RPC port (8232). Publishing the P2P port allows inbound peer connections.
+If you want to start generating blocks, you need to let Zebra sync first.
 
 Note that you must pass the address for your mining rewards via the
 `MINER_ADDRESS` environment variable when you are starting the container, as we

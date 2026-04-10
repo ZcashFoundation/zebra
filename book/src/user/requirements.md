@@ -39,9 +39,9 @@ Zebra uses the following inbound and outbound TCP ports:
 If you configure Zebra with a specific
 [`listen_addr`](https://docs.rs/zebra-network/latest/zebra_network/config/struct.Config.html#structfield.listen_addr),
 it will advertise this address to other nodes for inbound connections. Outbound
-connections are required to sync, inbound connections are optional but strongly
-recommended for network health. Zebra also needs access to the Zcash DNS
-seeders, via the OS DNS resolver (usually port 53).
+connections are required to sync, inbound connections are optional but
+recommended. Zebra also needs access to the Zcash DNS seeders, via the OS DNS
+resolver (usually port 53).
 
 **Docker users:** You must publish the P2P port with `-p 8233:8233` (Mainnet) or
 `-p 18233:18233` (Testnet) for inbound connections. See

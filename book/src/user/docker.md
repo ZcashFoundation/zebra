@@ -18,8 +18,7 @@ docker run -d \
 This command:
 
 - **`-p 8233:8233`**: Exposes the P2P port so other Zcash nodes can connect to
-  yours. Without this, the node can only make outbound connections and does not
-  contribute to network health. Use `-p 18233:18233` for Testnet.
+  yours. Use `-p 18233:18233` for Testnet.
 - **`-v zebrad-cache:...`**: Persists the chain state across container restarts,
   avoiding re-syncing ~300 GB of blockchain data.
 
@@ -157,18 +156,16 @@ For Kubernetes, configure liveness and readiness probes against `/healthy` and `
 Zebra uses TCP port **8233** (Mainnet) or **18233** (Testnet) for peer-to-peer
 connections. This is the port that other Zcash nodes use to connect to yours.
 
-When running in Docker, you **must** publish this port for your node to accept
-inbound connections:
+When running in Docker, publish this port for your node to accept inbound
+connections:
 
 ```shell
 docker run -p 8233:8233 zfnd/zebra    # Mainnet
 docker run -p 18233:18233 zfnd/zebra  # Testnet
 ```
 
-Without the `-p` flag, your node can still sync (via outbound connections) but
-will not be reachable by other peers. This reduces the overall health of the
-Zcash network, and prevents the node from being used as a network shield for
-zcashd.
+Without the `-p` flag, your node can still sync via outbound connections but
+will not accept inbound connections from other peers.
 
 **Behind a NAT or load balancer:** If your node is behind a NAT, firewall, or
 load balancer, set `external_addr` so Zebra advertises your public IP to peers:
@@ -184,9 +181,9 @@ Or via environment variable:
 -e ZEBRA_NETWORK__EXTERNAL_ADDR=203.0.113.42:8233
 ```
 
-Without `external_addr`, Zebra advertises its bind address (`[::]:8233`), which
-other nodes cannot use to dial back. They may still discover your node through
-observed connection IPs, but setting `external_addr` makes discovery reliable.
+Without `external_addr`, Zebra advertises its bind address (`[::]:8233`).
+Setting `external_addr` to your public IP ensures peers can reliably connect
+to your node.
 
 **Port summary:**
 

@@ -21,8 +21,7 @@ services:
       - source: zebra-config
         target: /home/zebra/.config/zebrad.toml
 
-    # P2P port for inbound peer connections (required for full network
-    # participation). Without this, the node can only make outbound connections.
+    # P2P port for inbound peer connections (recommended).
     ports:
       - "8233:8233"   # P2P on Mainnet (use 18233:18233 for Testnet)
 

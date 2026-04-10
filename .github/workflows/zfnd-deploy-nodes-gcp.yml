@@ -380,10 +380,16 @@ jobs:
             --global
 
       # Ensure the VPC firewall allows inbound P2P connections to zebrad instances.
-      # Without this rule, GCP's default-deny ingress policy silently drops all
-      # peer connections, preventing the node from accepting inbound P2P traffic.
       - name: Ensure P2P firewall rule exists
         run: |
+          # P2P_PORT must be recomputed here because shell variables from
+          # earlier run: blocks do not persist across steps.
+          if [ "${{ matrix.network }}" = "Mainnet" ]; then
+            P2P_PORT="8233"
+          else
+            P2P_PORT="18233"
+          fi
+
           RULE_NAME="allow-zebrad-p2p-${NETWORK}"
           if gcloud compute firewall-rules describe "${RULE_NAME}" &>/dev/null; then
             echo "Firewall rule ${RULE_NAME} already exists"
