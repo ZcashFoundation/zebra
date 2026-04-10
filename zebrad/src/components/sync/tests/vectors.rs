@@ -652,9 +652,7 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
                 batch_responded = true;
             }
             zn::Request::FindBlocks { .. } => {
-                sender.respond(Err(zn::BoxError::from(
-                    "synthetic test extend tips error",
-                )));
+                sender.respond(Err(zn::BoxError::from("synthetic test extend tips error")));
             }
             other => panic!("unexpected request: {other:?}"),
         }

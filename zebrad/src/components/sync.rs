@@ -1115,10 +1115,7 @@ where
     /// Queue download and verify tasks for each block that isn't currently known to our node.
     ///
     /// TODO: turn obtain and extend tips into a separate task, which sends hashes via a channel?
-    fn request_blocks(
-        &mut self,
-        mut hashes: IndexSet<block::Hash>,
-    ) -> IndexSet<block::Hash> {
+    fn request_blocks(&mut self, mut hashes: IndexSet<block::Hash>) -> IndexSet<block::Hash> {
         let lookahead_limit = self.lookahead_limit(hashes.len());
 
         debug!(

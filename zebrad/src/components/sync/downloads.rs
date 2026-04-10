@@ -430,8 +430,7 @@ where
         let task = tokio::spawn(async move {
             let mut results: Vec<Result<(Arc<block::Block>, Option<PeerSocketAddr>), block::Hash>> =
                 Vec::new();
-            let mut retries: HashMap<block::Hash, usize> =
-                hashes.iter().map(|h| (*h, 0)).collect();
+            let mut retries: HashMap<block::Hash, usize> = hashes.iter().map(|h| (*h, 0)).collect();
             let mut remaining = hashes;
 
             while !remaining.is_empty() {
@@ -503,8 +502,7 @@ where
                     for h in &exhausted {
                         results.push(Err(*h));
                     }
-                    remaining
-                        .retain(|h| retries.get(h).copied().unwrap_or(0) <= BATCH_RETRY_LIMIT);
+                    remaining.retain(|h| retries.get(h).copied().unwrap_or(0) <= BATCH_RETRY_LIMIT);
                 }
 
                 if !remaining.is_empty() {
@@ -785,8 +783,7 @@ where
         while let Poll::Ready(Some(join_result)) =
             Pin::new(&mut self.pending_downloads).poll_next(&mut cx)
         {
-            let (batch_key, results) =
-                join_result.expect("batch download tasks must not panic");
+            let (batch_key, results) = join_result.expect("batch download tasks must not panic");
             self.cancel_download_handles.remove(&batch_key);
             batches.push(results);
         }
@@ -833,5 +830,4 @@ where
     pub fn in_flight(&mut self) -> usize {
         self.pending_verifications.len() + self.pending_downloads.len()
     }
-
 }
