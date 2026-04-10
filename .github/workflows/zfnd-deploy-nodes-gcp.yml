@@ -379,31 +379,6 @@ jobs:
             --healthy-threshold=2 \
             --global
 
-      # Ensure the VPC firewall allows inbound P2P connections to zebrad instances.
-      - name: Ensure P2P firewall rule exists
-        run: |
-          # P2P_PORT must be recomputed here because shell variables from
-          # earlier run: blocks do not persist across steps.
-          if [ "${{ matrix.network }}" = "Mainnet" ]; then
-            P2P_PORT="8233"
-          else
-            P2P_PORT="18233"
-          fi
-
-          RULE_NAME="allow-zebrad-p2p-${NETWORK}"
-          if gcloud compute firewall-rules describe "${RULE_NAME}" &>/dev/null; then
-            echo "Firewall rule ${RULE_NAME} already exists"
-          else
-            echo "Creating firewall rule ${RULE_NAME} for TCP ${P2P_PORT}"
-            gcloud compute firewall-rules create "${RULE_NAME}" \
-              --network=${{ vars.GCP_NETWORK || 'default' }} \
-              --direction=INGRESS \
-              --action=ALLOW \
-              --rules=tcp:${P2P_PORT} \
-              --source-ranges=0.0.0.0/0 \
-              --target-tags=zebrad \
-              --description="Allow inbound Zcash P2P connections to zebrad nodes (${NETWORK})"
-          fi
 
       # Check if our destination instance group exists already
       - name: Check if ${{ matrix.network }} instance group exists
