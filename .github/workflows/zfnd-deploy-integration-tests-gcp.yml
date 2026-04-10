@@ -360,6 +360,82 @@ jobs:
           fi
           "
 
+  # Upload checkpoint output as an artifact for automated checkpoint PRs.
+  # Only runs for checkpoint generation tests. Extracts "HEIGHT HASH" lines
+  # from the container logs. The checkpoint-update.yml workflow consumes these.
+  upload-checkpoint-artifact:
+    name: Upload ${{ inputs.test_id }} checkpoint artifact
+    runs-on: ubuntu-latest
+    needs: [ test-result ]
+    if: ${{ needs.test-result.result == 'success' && startsWith(inputs.test_id, 'generate-checkpoints-') }}
+    env:
+      TEST_ID: ${{ inputs.test_id }}
+      GCP_ZONE: ${{ vars.GCP_ZONE }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          persist-credentials: false
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@9e7def61550737ba68c62d34a32dd31792e3f429 #v5.5.0
+        with:
+          short-length: 7
+          slug-maxlength: 23
+      - uses: shimataro/ssh-key-action@6b84f2e793b32fa0b03a379cadadec75cc539391 #v2.8.0
+        with:
+          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          name: google_compute_engine
+          known_hosts: unnecessary
+      - name: Generate public SSH key
+        run: |
+          sudo apt-get update && sudo apt-get -qq install -y --no-install-recommends openssh-client
+          ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 #v3.0.0
+        with:
+          workload_identity_provider: '${{ vars.GCP_WIF }}'
+          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db #v3.0.1
+      - name: Extract checkpoint lines from container logs
+        run: |
+          INSTANCE_NAME="${TEST_ID}-${GITHUB_REF_SLUG_URL}-${GITHUB_SHA_SHORT}"
+
+          # Single SSH session: find container and extract logs in one command
+          gcloud compute ssh "${INSTANCE_NAME}" \
+            --zone "${GCP_ZONE}" \
+            --ssh-flag="-o ServerAliveInterval=5" \
+            --ssh-flag="-o ConnectionAttempts=20" \
+            --ssh-flag="-o ConnectTimeout=5" \
+            --command="sudo docker ps -a --filter name=${TEST_ID} -q --no-trunc | head -1 | xargs -I{} sudo docker logs {} 2>/dev/null" \
+            | grep -E '^[0-9]+ [0-9a-f]{64}$' \
+            > checkpoint-output.txt || true
+
+          LINES=$(wc -l < checkpoint-output.txt)
+          echo "Extracted ${LINES} checkpoint lines"
+
+          if [ "$LINES" -eq 0 ]; then
+            echo "No checkpoint lines found in container logs"
+            exit 1
+          fi
+
+          # Name to match the repo files: main-checkpoints.txt / test-checkpoints.txt
+          if echo "${TEST_ID}" | grep -qi "testnet"; then
+            mv checkpoint-output.txt "test-checkpoints.txt"
+          else
+            mv checkpoint-output.txt "main-checkpoints.txt"
+          fi
+
+      - name: Upload checkpoint artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
+        with:
+          name: ${{ inputs.test_id }}-checkpoints
+          path: "*-checkpoints.txt"
+          retention-days: 30
+
   # create a state image from the instance's state disk, if requested by the caller
   create-state-image:
     name: Create ${{ inputs.test_id }} cached state image
@@ -699,9 +775,11 @@ jobs:
   delete-instance:
     name: Delete ${{ inputs.test_id }} instance
     runs-on: ubuntu-latest
-    needs: [ create-state-image ]
+    needs: [ create-state-image, upload-checkpoint-artifact ]
     # If a disk generation step timeouts (+6 hours) the previous job (creating the image) will be skipped.
     # Even if the instance continues running, no image will be created, so it's better to delete it.
+    # upload-checkpoint-artifact is included to prevent the instance from being deleted
+    # before checkpoint data is extracted from the container logs.
     if: always()
     continue-on-error: true
     permissions:
@@ -751,6 +829,7 @@ jobs:
       - get-disk-name
       - test-result
       - create-state-image
+      - upload-checkpoint-artifact
       - delete-instance
     timeout-minutes: 1
     steps:
@@ -758,4 +837,6 @@ jobs:
         uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe #v1.2.2
         with:
           jobs: ${{ toJSON(needs) }}
-          allowed-skips: ${{ (inputs.saves_to_disk || inputs.force_save_to_disk) && '' || 'create-state-image' }}
+          allowed-skips: >-
+            ${{ (inputs.saves_to_disk || inputs.force_save_to_disk) && '' || 'create-state-image' }},
+            ${{ startsWith(inputs.test_id, 'generate-checkpoints-') && '' || 'upload-checkpoint-artifact' }}
