@@ -1155,7 +1155,7 @@ where
             match result {
                 Ok((block, addr)) => {
                     let hash = block.hash();
-                    if self.downloads.is_queued(&hash) {
+                    if self.downloads.is_queued_for_verification(&hash) {
                         tracing::debug!(?hash, "skipping already-queued block from batch download");
                         metrics::counter!("sync.already.queued.dropped.block.hash.count")
                             .increment(1);

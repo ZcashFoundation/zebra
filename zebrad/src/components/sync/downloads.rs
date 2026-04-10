@@ -495,7 +495,7 @@ where
     }
 
     /// Returns `true` if the given block hash is already queued for download/verification.
-    pub(super) fn is_queued(&self, hash: &block::Hash) -> bool {
+    pub(super) fn is_queued_for_verification(&self, hash: &block::Hash) -> bool {
         self.cancel_handles.contains_key(hash)
     }
 
