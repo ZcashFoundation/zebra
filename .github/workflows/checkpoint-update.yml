@@ -60,12 +60,18 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
 
+      # The generate-checkpoints-* jobs are skipped when no tip disk exists
+      # (e.g., full sync still in progress) or when the workflow runs in
+      # regenerate/sync-only mode. When skipped, no artifact is produced.
       - name: Check if any artifacts were downloaded
         id: check-artifacts
         run: |
           HAS_MAINNET="false"
           HAS_TESTNET="false"
 
+          # These are the CI-generated checkpoint files (new entries only),
+          # not the full repo checkpoint files. Named by the upload step in
+          # zfnd-deploy-integration-tests-gcp.yml.
           if [ -f "checkpoints-mainnet.txt" ]; then
             LINES=$(wc -l < checkpoints-mainnet.txt | tr -d ' ')
             echo "Mainnet artifact: ${LINES} checkpoint lines"
