@@ -383,14 +383,23 @@ jobs:
         with:
           short-length: 7
           slug-maxlength: 23
+      - uses: shimataro/ssh-key-action@6b84f2e793b32fa0b03a379cadadec75cc539391 #v2.8.0
+        with:
+          key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
+          name: google_compute_engine
+          known_hosts: unnecessary
+      - name: Generate public SSH key
+        run: |
+          sudo apt-get update && sudo apt-get -qq install -y --no-install-recommends openssh-client
+          ssh-keygen -y -f ~/.ssh/google_compute_engine > ~/.ssh/google_compute_engine.pub
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@ba79af03959ebeac9769e648f473a284504d9193 #v2.1.10
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 #v3.0.0
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@77e7a554d41e2ee56fc945c52dfd3f33d12def9a #v2.1.4
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db #v3.0.1
       - name: Extract checkpoint lines from container logs
         run: |
           INSTANCE_NAME="${TEST_ID}-${GITHUB_REF_SLUG_URL}-${GITHUB_SHA_SHORT}"
@@ -820,6 +829,7 @@ jobs:
       - get-disk-name
       - test-result
       - create-state-image
+      - upload-checkpoint-artifact
       - delete-instance
     timeout-minutes: 1
     steps:
@@ -827,4 +837,6 @@ jobs:
         uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe #v1.2.2
         with:
           jobs: ${{ toJSON(needs) }}
-          allowed-skips: ${{ (inputs.saves_to_disk || inputs.force_save_to_disk) && '' || 'create-state-image' }}
+          allowed-skips: >-
+            ${{ (inputs.saves_to_disk || inputs.force_save_to_disk) && '' || 'create-state-image' }},
+            ${{ startsWith(inputs.test_id, 'generate-checkpoints-') && '' || 'upload-checkpoint-artifact' }}

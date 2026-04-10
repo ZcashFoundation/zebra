@@ -67,8 +67,7 @@ jobs:
           HAS_MAINNET="false"
           HAS_TESTNET="false"
 
-              # Artifact files mirror the repo naming: main-checkpoints.txt / test-checkpoints.txt
-          # These contain only the new entries from the CI run, not the full file.
+          # Artifact files use the same names as the repo files (new entries only)
           if [ -f "main-checkpoints.txt" ]; then
             LINES=$(wc -l < main-checkpoints.txt | tr -d ' ')
             echo "Mainnet artifact: ${LINES} checkpoint lines"
@@ -131,8 +130,8 @@ jobs:
         if: steps.check-artifacts.outputs.has_mainnet == 'true'
         run: |
           LAST_HEIGHT=$(tail -1 "${MAINNET_CHECKPOINTS}" | awk '{print $1}')
-          # Format with underscores for readability (e.g., 3_282_406)
-          FORMATTED=$(echo "$LAST_HEIGHT" | sed ':a;s/\B[0-9]\{3\}\>/_&/;ta')
+          # Format with underscores for Rust readability (e.g., 3_282_406)
+          FORMATTED=$(echo "$LAST_HEIGHT" | awk '{n=$0; r=""; for(i=length(n);i>0;i--) { r=substr(n,i,1) r; if((length(n)-i)%3==2 && i>1) r="_" r }; print r}')
           echo "Setting ESTIMATED_RELEASE_HEIGHT to ${FORMATTED} (height ${LAST_HEIGHT})"
 
           sed -i "s/ESTIMATED_RELEASE_HEIGHT: u32 = [0-9_]*/ESTIMATED_RELEASE_HEIGHT: u32 = ${FORMATTED}/" \
