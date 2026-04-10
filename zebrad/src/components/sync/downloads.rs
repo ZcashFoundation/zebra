@@ -233,10 +233,13 @@ where
     // Internal state — download pipeline
     //
     /// Pending batch download tasks. Each task downloads blocks from one or
-    /// more peers and returns per-block results.
+    /// more peers and returns `(batch_key, per_block_results)`.
     #[pin]
     pending_downloads: FuturesUnordered<
-        JoinHandle<Vec<Result<(Arc<block::Block>, Option<PeerSocketAddr>), block::Hash>>>,
+        JoinHandle<(
+            block::Hash,
+            Vec<Result<(Arc<block::Block>, Option<PeerSocketAddr>), block::Hash>>,
+        )>,
     >,
 
     /// Cancel handles for in-flight batch download tasks, keyed by the first
@@ -425,9 +428,8 @@ where
         let batch_key = hashes[0];
 
         let task = tokio::spawn(async move {
-            let mut results: Vec<
-                Result<(Arc<block::Block>, Option<PeerSocketAddr>), block::Hash>,
-            > = Vec::new();
+            let mut results: Vec<Result<(Arc<block::Block>, Option<PeerSocketAddr>), block::Hash>> =
+                Vec::new();
             let mut retries: HashMap<block::Hash, usize> =
                 hashes.iter().map(|h| (*h, 0)).collect();
             let mut remaining = hashes;
@@ -443,7 +445,7 @@ where
                         for h in &remaining {
                             results.push(Err(*h));
                         }
-                        return results;
+                        return (batch_key, results);
                     }
                     ready_result = network.ready() => {
                         match ready_result {
@@ -514,7 +516,7 @@ where
             for h in &remaining {
                 results.push(Err(*h));
             }
-            results
+            (batch_key, results)
         });
 
         self.pending_downloads.push(task);
@@ -783,7 +785,9 @@ where
         while let Poll::Ready(Some(join_result)) =
             Pin::new(&mut self.pending_downloads).poll_next(&mut cx)
         {
-            let results = join_result.expect("batch download tasks must not panic");
+            let (batch_key, results) =
+                join_result.expect("batch download tasks must not panic");
+            self.cancel_download_handles.remove(&batch_key);
             batches.push(results);
         }
         batches
@@ -830,9 +834,4 @@ where
         self.pending_verifications.len() + self.pending_downloads.len()
     }
 
-    /// Returns true if there are no in-flight download and verify tasks.
-    #[allow(dead_code)]
-    pub fn is_empty(&mut self) -> bool {
-        self.pending_verifications.is_empty() && self.pending_downloads.is_empty()
-    }
 }

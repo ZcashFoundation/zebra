@@ -982,7 +982,7 @@ where
     fn route_block_download(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
         let tip_height = self.minimum_peer_version.chain_tip_height();
 
-        if tip_height > self.network.checkpoint_list().max_height() {
+        if tip_height >= self.network.checkpoint_list().max_height() {
             return self.route_p2c(req);
         }
 

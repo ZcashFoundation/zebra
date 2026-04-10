@@ -685,8 +685,7 @@ where
                 "requesting more blocks",
             );
 
-            let response = self.request_blocks(extra_hashes).await;
-            extra_hashes = Self::handle_hash_response(response)?;
+            extra_hashes = self.request_blocks(extra_hashes);
         }
         self.update_metrics();
 
@@ -892,12 +891,12 @@ where
         // so the last peer to respond can't toggle our mempool
         self.recent_syncs.push_obtain_tips_length(new_downloads);
 
-        let response = self.request_blocks(download_set).await;
+        let extra_hashes = self.request_blocks(download_set);
 
         metrics::histogram!("sync.stage.duration_seconds", "stage" => "obtain_tips")
             .record(stage_start.elapsed().as_secs_f64());
 
-        Self::handle_hash_response(response).map_err(Into::into)
+        Ok(extra_hashes)
     }
 
     #[instrument(skip(self))]
@@ -1044,12 +1043,12 @@ where
         // so the last peer to respond can't toggle our mempool
         self.recent_syncs.push_extend_tips_length(new_downloads);
 
-        let response = self.request_blocks(download_set).await;
+        let extra_hashes = self.request_blocks(download_set);
 
         metrics::histogram!("sync.stage.duration_seconds", "stage" => "extend_tips")
             .record(stage_start.elapsed().as_secs_f64());
 
-        Self::handle_hash_response(response).map_err(Into::into)
+        Ok(extra_hashes)
     }
 
     /// Download and verify the genesis block, if it isn't currently known to
@@ -1116,10 +1115,10 @@ where
     /// Queue download and verify tasks for each block that isn't currently known to our node.
     ///
     /// TODO: turn obtain and extend tips into a separate task, which sends hashes via a channel?
-    async fn request_blocks(
+    fn request_blocks(
         &mut self,
         mut hashes: IndexSet<block::Hash>,
-    ) -> Result<IndexSet<block::Hash>, BlockDownloadVerifyError> {
+    ) -> IndexSet<block::Hash> {
         let lookahead_limit = self.lookahead_limit(hashes.len());
 
         debug!(
@@ -1154,7 +1153,7 @@ where
             self.downloads.download_batch(batch.to_vec());
         }
 
-        Ok(extra_hashes)
+        extra_hashes
     }
 
     /// The configured lookahead limit, based on the currently verified height,
@@ -1217,19 +1216,6 @@ where
         };
 
         Self::handle_response(response)
-    }
-
-    /// Handles a response to block hash submission, passing through any extra hashes.
-    ///
-    /// See [`Self::handle_response`] for more details.
-    #[allow(unknown_lints)]
-    fn handle_hash_response(
-        response: Result<IndexSet<block::Hash>, BlockDownloadVerifyError>,
-    ) -> Result<IndexSet<block::Hash>, BlockDownloadVerifyError> {
-        match response {
-            Ok(extra_hashes) => Ok(extra_hashes),
-            Err(_) => Self::handle_response(response).map(|()| IndexSet::new()),
-        }
     }
 
     /// Handles a response to a syncer request.
