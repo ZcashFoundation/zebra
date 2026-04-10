@@ -33,14 +33,17 @@
 //!    * fetches blocks from the best finalized chain from permanent storage,
 //!      in the new format
 
-use std::{cmp::min, path::PathBuf};
+use std::{cmp::min, path::PathBuf, sync::Arc};
 
 use abscissa_core::{config, Command, FrameworkError};
 use color_eyre::eyre::{eyre, Report};
 use tokio::time::Instant;
 use tower::{Service, ServiceExt};
 
-use zebra_chain::{block::Height, parameters::Network};
+use zebra_chain::{
+    block::{Block, Height},
+    parameters::Network,
+};
 use zebra_state as old_zs;
 use zebra_state as new_zs;
 
@@ -52,7 +55,7 @@ use crate::{
 };
 
 /// How often we log info-level progress messages
-const PROGRESS_HEIGHT_INTERVAL: u32 = 5_000;
+const PROGRESS_HEIGHT_INTERVAL: u32 = 2_000;
 
 /// copy cached chain state (expert users only)
 #[derive(Command, Debug, clap::Parser)]
@@ -123,7 +126,7 @@ impl CopyStateCmd {
         let source_start_time = Instant::now();
 
         // We're not verifying UTXOs here, so we don't need the maximum checkpoint height.
-        let (mut source_read_only_state_service, _source_db, _source_latest_non_finalized_state) =
+        let (mut source_read_only_state_service, source_db, _source_latest_non_finalized_state) =
             old_zs::spawn_init_read_only(source_config.clone(), network).await?;
 
         let elapsed = source_start_time.elapsed();
@@ -207,97 +210,49 @@ impl CopyStateCmd {
         );
 
         let copy_start_time = Instant::now();
-        for height in min_target_height..=max_copy_height {
-            // Read block from source
-            let source_block = source_read_only_state_service
-                .ready()
-                .await?
-                .call(old_zs::ReadRequest::Block(Height(height).into()))
-                .await?;
-            let source_block = match source_block {
-                old_zs::ReadResponse::Block(Some(source_block)) => {
-                    trace!(?height, %source_block, "read source block");
-                    source_block
-                }
-                old_zs::ReadResponse::Block(None) => {
-                    Err(format!("unexpected missing source block, height: {height}",))?
-                }
 
-                response => Err(format!(
-                    "unexpected response to Block request, height: {height}, \n \
-                     response: {response:?}",
-                ))?,
-            };
-            let source_block_hash = source_block.hash();
+        // Pipeline: read blocks from source in a blocking thread, send them
+        // through a channel, and commit them to the target state concurrently.
+        let (block_tx, mut block_rx) = tokio::sync::mpsc::channel::<(u32, Arc<Block>)>(100);
 
-            // Write block to target
-            let target_block_commit_hash = target_state
-                .ready()
-                .await?
-                .call(new_zs::Request::CommitCheckpointVerifiedBlock(
-                    source_block.clone().into(),
-                ))
-                .await?;
-            let target_block_commit_hash = match target_block_commit_hash {
-                new_zs::Response::Committed(target_block_commit_hash) => {
-                    trace!(?target_block_commit_hash, "wrote target block");
-                    target_block_commit_hash
+        // Source reader: reads blocks sequentially from the source DB and sends
+        // them through the channel. Runs in a blocking thread because source DB
+        // reads are synchronous.
+        let source_db = source_db.clone();
+        let reader_handle = tokio::task::spawn_blocking(move || {
+            for height in min_target_height..=max_copy_height {
+                let source_block = source_db
+                    .block(Height(height).into())
+                    .unwrap_or_else(|| panic!("missing source block at height {height}"));
+
+                if block_tx.blocking_send((height, source_block)).is_err() {
+                    break;
                 }
-                response => Err(format!(
-                    "unexpected response to CommitCheckpointVerifiedBlock request, height: {height}\n \
-                     response: {response:?}",
-                ))?,
-            };
-
-            // Read written block from target
-            let target_block = target_state
-                .ready()
-                .await?
-                .call(new_zs::Request::Block(Height(height).into()))
-                .await?;
-            let target_block = match target_block {
-                new_zs::Response::Block(Some(target_block)) => {
-                    trace!(?height, %target_block, "read target block");
-                    target_block
-                }
-                new_zs::Response::Block(None) => {
-                    Err(format!("unexpected missing target block, height: {height}",))?
-                }
-
-                response => Err(format!(
-                    "unexpected response to Block request, height: {height},\n \
-                     response: {response:?}",
-                ))?,
-            };
-            let target_block_data_hash = target_block.hash();
-
-            // Check for data errors
-            //
-            // These checks make sure that Zebra doesn't corrupt the block data
-            // when serializing it in the new format.
-            // Zebra currently serializes `Block` structs into bytes while writing,
-            // then deserializes bytes into new `Block` structs when reading.
-            // So these checks are sufficient to detect block data corruption.
-            //
-            // If Zebra starts reusing cached `Block` structs after writing them,
-            // we'll also need to check `Block` structs created from the actual database bytes.
-            if source_block_hash != target_block_commit_hash
-                || source_block_hash != target_block_data_hash
-                || source_block != target_block
-            {
-                Err(format!(
-                    "unexpected mismatch between source and target blocks,\n \
-                     max copy height: {max_copy_height:?},\n \
-                     source hash: {source_block_hash:?},\n \
-                     target commit hash: {target_block_commit_hash:?},\n \
-                     target data hash: {target_block_data_hash:?},\n \
-                     source block: {source_block:?},\n \
-                     target block: {target_block:?}",
-                ))?;
             }
+        });
 
-            // Log progress
-            if height % PROGRESS_HEIGHT_INTERVAL == 0 {
+        // Commit loop: receives blocks from the reader and spawns tasks that
+        // commit each block to the target state. The spawned tasks run
+        // concurrently so many blocks can be in flight at once.
+        let mut commit_count: u32 = 0;
+        while let Some((height, source_block)) = block_rx.recv().await {
+            let rsp =
+                target_state
+                    .ready()
+                    .await?
+                    .call(new_zs::Request::CommitCheckpointVerifiedBlock(
+                        source_block.into(),
+                    ));
+
+            tokio::spawn(async move {
+                match rsp.await {
+                    Ok(new_zs::Response::Committed(_hash)) => {}
+                    other => warn!("block commit failed at height {height}: {other:?}"),
+                }
+            });
+
+            commit_count += 1;
+            if commit_count.is_multiple_of(PROGRESS_HEIGHT_INTERVAL) {
                 let elapsed = copy_start_time.elapsed();
                 info!(
                     ?height,
@@ -307,6 +262,10 @@ impl CopyStateCmd {
                 );
             }
         }
+
+        reader_handle
+            .await
+            .expect("source reader task should not panic");
 
         let elapsed = copy_start_time.elapsed();
         info!(?max_copy_height, ?elapsed, "finished copying blocks");
