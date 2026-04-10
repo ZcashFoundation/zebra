@@ -49,10 +49,14 @@ jobs:
         id: resolve-run
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          WF_RUN_ID: ${{ github.event.workflow_run.id }}
+          WF_RUN_URL: ${{ github.event.workflow_run.html_url }}
+          REPO: ${{ github.repository }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_run" ]; then
-            RUN_ID="${{ github.event.workflow_run.id }}"
-            RUN_URL="${{ github.event.workflow_run.html_url }}"
+          if [ "$EVENT_NAME" = "workflow_run" ]; then
+            RUN_ID="$WF_RUN_ID"
+            RUN_URL="$WF_RUN_URL"
           else
             RUN_ID=$(gh run list \
               --workflow "Integration Tests on GCP" \
@@ -61,7 +65,7 @@ jobs:
               --limit 1 \
               --json databaseId \
               --jq '.[0].databaseId')
-            RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${RUN_ID}"
+            RUN_URL="https://github.com/${REPO}/actions/runs/${RUN_ID}"
           fi
 
           if [ -z "$RUN_ID" ]; then
