@@ -5,7 +5,7 @@
 use std::{cmp::max, collections::HashSet, convert, pin::Pin, task::Poll, time::Duration};
 
 use color_eyre::eyre::{eyre, Report};
-use futures::stream::{FuturesUnordered, SelectAll, StreamExt};
+use futures::stream::{FuturesUnordered, StreamExt};
 use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
 use tokio::{
@@ -622,7 +622,8 @@ where
         &mut self,
         mut extra_hashes: IndexSet<block::Hash>,
     ) -> Result<IndexSet<block::Hash>, Report> {
-        // Drain all currently ready download responses without blocking.
+        // Drain completed batch downloads and verification responses without blocking.
+        self.drain_batch_downloads();
         self.drain_ready_downloads().await?;
 
         // Extend tips proactively when we've exhausted our hash queue.
@@ -664,6 +665,8 @@ where
                 state_tip = ?self.latest_chain_tip.best_tip_height(),
                 "waiting for pending blocks",
             );
+
+            self.drain_batch_downloads();
 
             let response = self.downloads.next().await.expect("downloads is nonempty");
 
@@ -737,8 +740,9 @@ where
 
         let mut download_set = IndexSet::new();
         while let Some(res) = requests.next().await {
-            // Process any completed downloads while waiting for tip responses,
-            // so verified blocks are committed during tip discovery.
+            // Process completed batch downloads and verification responses
+            // while waiting for tip responses.
+            self.drain_batch_downloads();
             self.drain_ready_downloads().await?;
 
             match res
@@ -933,8 +937,9 @@ where
 
         // Process all responses as they arrive, regardless of which tip they belong to.
         while let Some(join_result) = all_responses.next().await {
-            // Drain any completed downloads while processing tip responses,
-            // so verified blocks are committed during tip discovery.
+            // Drain completed batch downloads and verification responses
+            // while processing tip responses.
+            self.drain_batch_downloads();
             self.drain_ready_downloads().await?;
 
             let (tip, result) = join_result.expect("panic in spawned extend tips request");
@@ -1138,37 +1143,15 @@ where
         // (near chain tip) → smaller batches down to 1 to stay under the
         // peer's send buffer limit and avoid partial responses.
         //
-        // All batches run concurrently, each with its own clone of the
-        // buffered network service. SelectAll interleaves their output
-        // streams so blocks flow to verification as soon as they arrive
-        // from any batch — no waiting for an entire batch to finish.
+        // All batches run concurrently. The download tasks are tracked in
+        // `pending_downloads` and polled via `drain_batch_downloads`, which
+        // is called at every drain point in the sync loop — so downloads
+        // overlap with tip extension and verification.
         let batch_size = self.downloads.block_sizes.recommended_batch_size();
         let hash_vec: Vec<_> = hashes.into_iter().collect();
 
-        let mut all_batches = SelectAll::new();
         for batch in hash_vec.chunks(batch_size) {
-            let rx = self.downloads.download_batch(batch.to_vec());
-            all_batches.push(tokio_stream::wrappers::ReceiverStream::new(rx));
-        }
-
-        while let Some(result) = all_batches.next().await {
-            match result {
-                Ok((block, addr)) => {
-                    let hash = block.hash();
-                    if self.downloads.is_queued_for_verification(&hash) {
-                        tracing::debug!(?hash, "skipping already-queued block from batch download");
-                        metrics::counter!("sync.already.queued.dropped.block.hash.count")
-                            .increment(1);
-                        continue;
-                    }
-                    self.downloads
-                        .spawn_verify_task(hash, async move { Ok((block, addr)) });
-                }
-                Err(hash) => {
-                    // Hash exhausted retries or network failed — allow re-download.
-                    self.downloads.clear_pending_download(&hash);
-                }
-            }
+            self.downloads.download_batch(batch.to_vec());
         }
 
         Ok(extra_hashes)
@@ -1305,6 +1288,32 @@ where
         }
         self.update_metrics();
         Ok(())
+    }
+
+    /// Drains completed batch download tasks and spawns verify tasks for each
+    /// downloaded block.
+    ///
+    /// This is called alongside [`drain_ready_downloads`](Self::drain_ready_downloads)
+    /// so that batch downloads overlap with tip extension and verification.
+    fn drain_batch_downloads(&mut self) {
+        for batch_results in self.downloads.drain_completed_downloads() {
+            for result in batch_results {
+                match result {
+                    Ok((block, addr)) => {
+                        let hash = block.hash();
+                        if self.downloads.is_queued_for_verification(&hash) {
+                            self.downloads.clear_pending_download(&hash);
+                            continue;
+                        }
+                        self.downloads
+                            .spawn_verify_task(hash, async move { Ok((block, addr)) });
+                    }
+                    Err(hash) => {
+                        self.downloads.clear_pending_download(&hash);
+                    }
+                }
+            }
+        }
     }
 
     /// Return if the sync should be restarted based on the given error

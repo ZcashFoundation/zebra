@@ -151,110 +151,82 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
     peer_set.expect_no_requests().await;
     block_verifier_router.expect_no_requests().await;
 
-    // State is checked for all non-tip blocks (blocks 1 & 2) in response order
-    state_service
-        .expect_request(zs::Request::KnownBlock(block1_hash))
-        .await
-        .respond(zs::Response::KnownBlock(None));
-    state_service
-        .expect_request(zs::Request::KnownBlock(block2_hash))
-        .await
-        .respond(zs::Response::KnownBlock(None));
+    // Since request_blocks is non-blocking, BlocksByHash from batch tasks,
+    // FindBlocks from extend_tips, KnownBlock state checks, and block
+    // verification requests all arrive concurrently across services.
+    // Handle them all in a single select loop.
+    let mut blocks12_responded = false;
+    let mut blocks34_responded = false;
+    let mut find_blocks_responded = 0u32;
+    let mut blocks_verified = 0u32;
+    let mut remaining_blocks: HashMap<block::Hash, Arc<Block>> = [
+        (block1_hash, block1),
+        (block2_hash, block2),
+        (block3_hash, block3),
+        (block4_hash, block4),
+    ]
+    .iter()
+    .cloned()
+    .collect();
 
-    // Blocks 1 & 2 are fetched as a single batched request, then verified concurrently
-    peer_set
-        .expect_request(zn::Request::BlocksByHash(
-            [block1_hash, block2_hash].into_iter().collect(),
-        ))
-        .await
-        .respond(zn::Response::Blocks(vec![
-            Available((block1.clone(), None)),
-            Available((block2.clone(), None)),
-        ]));
-
-    // We can't guarantee the verification request order
-    let mut remaining_blocks: HashMap<block::Hash, Arc<Block>> =
-        [(block1_hash, block1), (block2_hash, block2)]
-            .iter()
-            .cloned()
-            .collect();
-
-    for _ in 1..=2 {
-        block_verifier_router
-            .expect_request_that(|req| remaining_blocks.remove(&req.block().hash()).is_some())
-            .await
-            .respond_with(|req| req.block().hash());
+    while blocks_verified < 4 {
+        tokio::select! {
+            Some(sender) = peer_set.try_next_request() => {
+                match sender.request() {
+                    zn::Request::BlocksByHash(hashes) if hashes.contains(&block1_hash) => {
+                        sender.respond(zn::Response::Blocks(vec![
+                            Available((remaining_blocks[&block1_hash].clone(), None)),
+                            Available((remaining_blocks[&block2_hash].clone(), None)),
+                        ]));
+                        blocks12_responded = true;
+                    }
+                    zn::Request::BlocksByHash(hashes) if hashes.contains(&block3_hash) => {
+                        sender.respond(zn::Response::Blocks(vec![
+                            Available((remaining_blocks[&block3_hash].clone(), None)),
+                            Available((remaining_blocks[&block4_hash].clone(), None)),
+                        ]));
+                        blocks34_responded = true;
+                    }
+                    zn::Request::FindBlocks { .. } => {
+                        if find_blocks_responded == 0 {
+                            sender.respond(zn::Response::BlockHashes(vec![
+                                block2_hash,
+                                block3_hash,
+                                block4_hash,
+                                block5_hash,
+                            ]));
+                        } else {
+                            sender.respond(Err(zn::BoxError::from(
+                                "synthetic test extend tips error",
+                            )));
+                        }
+                        find_blocks_responded += 1;
+                    }
+                    other => panic!("unexpected peer_set request: {other:?}"),
+                }
+            }
+            Some(sender) = block_verifier_router.try_next_request() => {
+                assert!(
+                    remaining_blocks.remove(&sender.request().block().hash()).is_some(),
+                    "unexpected verify request: {:?}",
+                    sender.request(),
+                );
+                sender.respond_with(|req| req.block().hash());
+                blocks_verified += 1;
+            }
+            Some(sender) = state_service.try_next_request() => {
+                sender.respond(zs::Response::KnownBlock(None));
+            }
+        }
     }
-    assert_eq!(
-        remaining_blocks,
-        HashMap::new(),
-        "expected all non-tip blocks to be verified by obtain tips"
+    assert!(blocks12_responded, "blocks 1&2 were not downloaded");
+    assert!(blocks34_responded, "blocks 3&4 were not downloaded");
+    assert!(
+        find_blocks_responded >= sync::FANOUT as u32,
+        "expected at least {FANOUT} FindBlocks, got {find_blocks_responded}",
+        FANOUT = sync::FANOUT,
     );
-
-    // Check that nothing unexpected happened.
-    block_verifier_router.expect_no_requests().await;
-    state_service.expect_no_requests().await;
-
-    // ChainSync::extend_tips
-
-    // Network is sent a block locator based on the tip
-    peer_set
-        .expect_request(zn::Request::FindBlocks {
-            known_blocks: vec![block1_hash],
-            stop: None,
-        })
-        .await
-        .respond(zn::Response::BlockHashes(vec![
-            block2_hash, // tip (discarded - already fetched)
-            block3_hash, // expected_next
-            block4_hash,
-            block5_hash, // (discarded - last hash, possibly incorrect)
-        ]));
-
-    // Clear remaining block locator requests
-    for _ in 0..(sync::FANOUT - 1) {
-        peer_set
-            .expect_request(zn::Request::FindBlocks {
-                known_blocks: vec![block1_hash],
-                stop: None,
-            })
-            .await
-            .respond(Err(zn::BoxError::from("synthetic test extend tips error")));
-    }
-
-    // Check that nothing unexpected happened.
-    block_verifier_router.expect_no_requests().await;
-    state_service.expect_no_requests().await;
-
-    // Blocks 3 & 4 are fetched as a single batched request, then verified concurrently
-    peer_set
-        .expect_request(zn::Request::BlocksByHash(
-            [block3_hash, block4_hash].into_iter().collect(),
-        ))
-        .await
-        .respond(zn::Response::Blocks(vec![
-            Available((block3.clone(), None)),
-            Available((block4.clone(), None)),
-        ]));
-
-    // We can't guarantee the verification request order
-    let mut remaining_blocks: HashMap<block::Hash, Arc<Block>> =
-        [(block3_hash, block3), (block4_hash, block4)]
-            .iter()
-            .cloned()
-            .collect();
-
-    for _ in 3..=4 {
-        block_verifier_router
-            .expect_request_that(|req| remaining_blocks.remove(&req.block().hash()).is_some())
-            .await
-            .respond_with(|req| req.block().hash());
-    }
-    assert_eq!(
-        remaining_blocks,
-        HashMap::new(),
-        "expected all non-tip blocks to be verified by extend tips"
-    );
+    assert!(remaining_blocks.is_empty(), "not all blocks verified");
 
     // Check that nothing unexpected happened.
     block_verifier_router.expect_no_requests().await;
@@ -385,112 +357,81 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
     peer_set.expect_no_requests().await;
     block_verifier_router.expect_no_requests().await;
 
-    // State is checked for all non-tip blocks (blocks 1 & 2) in response order
-    state_service
-        .expect_request(zs::Request::KnownBlock(block1_hash))
-        .await
-        .respond(zs::Response::KnownBlock(None));
-    state_service
-        .expect_request(zs::Request::KnownBlock(block2_hash))
-        .await
-        .respond(zs::Response::KnownBlock(None));
+    // Since request_blocks is non-blocking, all requests arrive concurrently.
+    let mut blocks12_responded = false;
+    let mut blocks34_responded = false;
+    let mut find_blocks_responded = 0u32;
+    let mut blocks_verified = 0u32;
+    let mut remaining_blocks: HashMap<block::Hash, Arc<Block>> = [
+        (block1_hash, block1),
+        (block2_hash, block2),
+        (block3_hash, block3),
+        (block4_hash, block4),
+    ]
+    .iter()
+    .cloned()
+    .collect();
 
-    // Blocks 1 & 2 are fetched as a single batched request, then verified concurrently
-    peer_set
-        .expect_request(zn::Request::BlocksByHash(
-            [block1_hash, block2_hash].into_iter().collect(),
-        ))
-        .await
-        .respond(zn::Response::Blocks(vec![
-            Available((block1.clone(), None)),
-            Available((block2.clone(), None)),
-        ]));
-
-    // We can't guarantee the verification request order
-    let mut remaining_blocks: HashMap<block::Hash, Arc<Block>> =
-        [(block1_hash, block1), (block2_hash, block2)]
-            .iter()
-            .cloned()
-            .collect();
-
-    for _ in 1..=2 {
-        block_verifier_router
-            .expect_request_that(|req| remaining_blocks.remove(&req.block().hash()).is_some())
-            .await
-            .respond_with(|req| req.block().hash());
+    while blocks_verified < 4 {
+        tokio::select! {
+            Some(sender) = peer_set.try_next_request() => {
+                match sender.request() {
+                    zn::Request::BlocksByHash(hashes) if hashes.contains(&block1_hash) => {
+                        sender.respond(zn::Response::Blocks(vec![
+                            Available((remaining_blocks[&block1_hash].clone(), None)),
+                            Available((remaining_blocks[&block2_hash].clone(), None)),
+                        ]));
+                        blocks12_responded = true;
+                    }
+                    zn::Request::BlocksByHash(hashes) if hashes.contains(&block3_hash) => {
+                        sender.respond(zn::Response::Blocks(vec![
+                            Available((remaining_blocks[&block3_hash].clone(), None)),
+                            Available((remaining_blocks[&block4_hash].clone(), None)),
+                        ]));
+                        blocks34_responded = true;
+                    }
+                    zn::Request::FindBlocks { .. } => {
+                        if find_blocks_responded == 0 {
+                            sender.respond(zn::Response::BlockHashes(vec![
+                                block2_hash,
+                                block3_hash,
+                                block4_hash,
+                                block3_hash,
+                                block4_hash,
+                                block5_hash,
+                            ]));
+                        } else {
+                            sender.respond(Err(zn::BoxError::from(
+                                "synthetic test extend tips error",
+                            )));
+                        }
+                        find_blocks_responded += 1;
+                    }
+                    other => panic!("unexpected peer_set request: {other:?}"),
+                }
+            }
+            Some(sender) = block_verifier_router.try_next_request() => {
+                assert!(
+                    remaining_blocks.remove(&sender.request().block().hash()).is_some(),
+                    "unexpected verify request: {:?}",
+                    sender.request(),
+                );
+                sender.respond_with(|req| req.block().hash());
+                blocks_verified += 1;
+            }
+            Some(sender) = state_service.try_next_request() => {
+                sender.respond(zs::Response::KnownBlock(None));
+            }
+        }
     }
-    assert_eq!(
-        remaining_blocks,
-        HashMap::new(),
-        "expected all non-tip blocks to be verified by obtain tips"
+    assert!(blocks12_responded, "blocks 1&2 were not downloaded");
+    assert!(blocks34_responded, "blocks 3&4 were not downloaded");
+    assert!(
+        find_blocks_responded >= sync::FANOUT as u32,
+        "expected at least {FANOUT} FindBlocks, got {find_blocks_responded}",
+        FANOUT = sync::FANOUT,
     );
-
-    // Check that nothing unexpected happened.
-    block_verifier_router.expect_no_requests().await;
-    state_service.expect_no_requests().await;
-
-    // ChainSync::extend_tips
-
-    // Network is sent a block locator based on the tip
-    peer_set
-        .expect_request(zn::Request::FindBlocks {
-            known_blocks: vec![block1_hash],
-            stop: None,
-        })
-        .await
-        .respond(zn::Response::BlockHashes(vec![
-            block2_hash, // tip (discarded - already fetched)
-            block3_hash, // expected_next
-            block4_hash,
-            block3_hash,
-            block4_hash,
-            block5_hash, // (discarded - last hash, possibly incorrect)
-        ]));
-
-    // Clear remaining block locator requests
-    for _ in 0..(sync::FANOUT - 1) {
-        peer_set
-            .expect_request(zn::Request::FindBlocks {
-                known_blocks: vec![block1_hash],
-                stop: None,
-            })
-            .await
-            .respond(Err(zn::BoxError::from("synthetic test extend tips error")));
-    }
-
-    // Check that nothing unexpected happened.
-    block_verifier_router.expect_no_requests().await;
-    state_service.expect_no_requests().await;
-
-    // Blocks 3 & 4 are fetched as a single batched request, then verified concurrently
-    peer_set
-        .expect_request(zn::Request::BlocksByHash(
-            [block3_hash, block4_hash].into_iter().collect(),
-        ))
-        .await
-        .respond(zn::Response::Blocks(vec![
-            Available((block3.clone(), None)),
-            Available((block4.clone(), None)),
-        ]));
-
-    // We can't guarantee the verification request order
-    let mut remaining_blocks: HashMap<block::Hash, Arc<Block>> =
-        [(block3_hash, block3), (block4_hash, block4)]
-            .iter()
-            .cloned()
-            .collect();
-
-    for _ in 3..=4 {
-        block_verifier_router
-            .expect_request_that(|req| remaining_blocks.remove(&req.block().hash()).is_some())
-            .await
-            .respond_with(|req| req.block().hash());
-    }
-    assert_eq!(
-        remaining_blocks,
-        HashMap::new(),
-        "expected all non-tip blocks to be verified by extend tips"
-    );
+    assert!(remaining_blocks.is_empty(), "not all blocks verified");
 
     // Check that nothing unexpected happened.
     block_verifier_router.expect_no_requests().await;
@@ -688,20 +629,36 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
         .await
         .respond(zs::Response::KnownBlock(None));
 
-    // Blocks 982k, 1, 2 are fetched as a single batched request, then verified concurrently,
-    // but block 982k verification is skipped because it is too high.
-    peer_set
-        .expect_request(zn::Request::BlocksByHash(
-            [block982k_hash, block1_hash, block2_hash]
-                .into_iter()
-                .collect(),
-        ))
-        .await
-        .respond(zn::Response::Blocks(vec![
-            Available((block982k.clone(), None)),
-            Available((block1.clone(), None)),
-            Available((block2.clone(), None)),
-        ]));
+    // Since request_blocks is non-blocking, BlocksByHash and FindBlocks
+    // may arrive concurrently. Handle the batch download, which may be
+    // interleaved with FindBlocks from extend_tips.
+    let mut batch_responded = false;
+    while !batch_responded {
+        let sender = peer_set
+            .expect_request_that(|req| {
+                matches!(
+                    req,
+                    zn::Request::BlocksByHash(_) | zn::Request::FindBlocks { .. }
+                )
+            })
+            .await;
+        match sender.request() {
+            zn::Request::BlocksByHash(_) => {
+                sender.respond(zn::Response::Blocks(vec![
+                    Available((block982k.clone(), None)),
+                    Available((block1.clone(), None)),
+                    Available((block2.clone(), None)),
+                ]));
+                batch_responded = true;
+            }
+            zn::Request::FindBlocks { .. } => {
+                sender.respond(Err(zn::BoxError::from(
+                    "synthetic test extend tips error",
+                )));
+            }
+            other => panic!("unexpected request: {other:?}"),
+        }
+    }
 
     // At this point, the following tasks race:
     // - The valid chain verifier requests
@@ -835,100 +792,76 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
     peer_set.expect_no_requests().await;
     block_verifier_router.expect_no_requests().await;
 
-    // State is checked for all non-tip blocks (blocks 1 & 2) in response order
-    state_service
-        .expect_request(zs::Request::KnownBlock(block1_hash))
-        .await
-        .respond(zs::Response::KnownBlock(None));
-    state_service
-        .expect_request(zs::Request::KnownBlock(block2_hash))
-        .await
-        .respond(zs::Response::KnownBlock(None));
-
-    // Blocks 1 & 2 are fetched as a single batched request, then verified concurrently
-    peer_set
-        .expect_request(zn::Request::BlocksByHash(
-            [block1_hash, block2_hash].into_iter().collect(),
-        ))
-        .await
-        .respond(zn::Response::Blocks(vec![
-            Available((block1.clone(), None)),
-            Available((block2.clone(), None)),
-        ]));
-
-    // We can't guarantee the verification request order
+    // Since request_blocks is non-blocking, all requests arrive concurrently.
+    let mut blocks12_responded = false;
+    let mut blocks34_responded = false;
+    let mut find_blocks_responded = 0u32;
+    let mut blocks_verified = 0u32;
     let mut remaining_blocks: HashMap<block::Hash, Arc<Block>> =
         [(block1_hash, block1), (block2_hash, block2)]
             .iter()
             .cloned()
             .collect();
 
-    for _ in 1..=2 {
-        block_verifier_router
-            .expect_request_that(|req| remaining_blocks.remove(&req.block().hash()).is_some())
-            .await
-            .respond_with(|req| req.block().hash());
+    // We need blocks 1&2 verified and blocks 3,4,982k batch responded to.
+    while !blocks34_responded || blocks_verified < 2 {
+        tokio::select! {
+            Some(sender) = peer_set.try_next_request() => {
+                match sender.request() {
+                    zn::Request::BlocksByHash(hashes) if hashes.contains(&block1_hash) => {
+                        sender.respond(zn::Response::Blocks(vec![
+                            Available((remaining_blocks[&block1_hash].clone(), None)),
+                            Available((remaining_blocks[&block2_hash].clone(), None)),
+                        ]));
+                        blocks12_responded = true;
+                    }
+                    zn::Request::BlocksByHash(hashes) if hashes.contains(&block3_hash) => {
+                        sender.respond(zn::Response::Blocks(vec![
+                            Available((block3.clone(), None)),
+                            Available((block4.clone(), None)),
+                            Available((block982k.clone(), None)),
+                        ]));
+                        blocks34_responded = true;
+                    }
+                    zn::Request::FindBlocks { .. } => {
+                        if find_blocks_responded == 0 {
+                            sender.respond(zn::Response::BlockHashes(vec![
+                                block2_hash,
+                                block3_hash,
+                                block4_hash,
+                                block982k_hash,
+                                block5_hash,
+                            ]));
+                        } else {
+                            sender.respond(Err(zn::BoxError::from(
+                                "synthetic test extend tips error",
+                            )));
+                        }
+                        find_blocks_responded += 1;
+                    }
+                    other => panic!("unexpected peer_set request: {other:?}"),
+                }
+            }
+            Some(sender) = block_verifier_router.try_next_request() => {
+                assert!(
+                    remaining_blocks.remove(&sender.request().block().hash()).is_some(),
+                    "unexpected verify request: {:?}",
+                    sender.request(),
+                );
+                sender.respond_with(|req| req.block().hash());
+                blocks_verified += 1;
+            }
+            Some(sender) = state_service.try_next_request() => {
+                sender.respond(zs::Response::KnownBlock(None));
+            }
+        }
     }
-    assert_eq!(
-        remaining_blocks,
-        HashMap::new(),
-        "expected all non-tip blocks to be verified by obtain tips"
-    );
-
-    // Check that nothing unexpected happened.
-    block_verifier_router.expect_no_requests().await;
-    state_service.expect_no_requests().await;
-
-    // ChainSync::extend_tips
-
-    // Network is sent a block locator based on the tip
-    peer_set
-        .expect_request(zn::Request::FindBlocks {
-            known_blocks: vec![block1_hash],
-            stop: None,
-        })
-        .await
-        .respond(zn::Response::BlockHashes(vec![
-            block2_hash, // tip (discarded - already fetched)
-            block3_hash, // expected_next
-            block4_hash,
-            block982k_hash,
-            block5_hash, // (discarded - last hash, possibly incorrect)
-        ]));
-
-    // Clear remaining block locator requests
-    for _ in 0..(sync::FANOUT - 1) {
-        peer_set
-            .expect_request(zn::Request::FindBlocks {
-                known_blocks: vec![block1_hash],
-                stop: None,
-            })
-            .await
-            .respond(Err(zn::BoxError::from("synthetic test extend tips error")));
-    }
-
-    // Check that nothing unexpected happened.
-    block_verifier_router.expect_no_requests().await;
-    state_service.expect_no_requests().await;
-
-    // Blocks 3, 4, 982k are fetched as a single batched request, then verified concurrently,
-    // but block 982k verification is skipped because it is too high.
-    peer_set
-        .expect_request(zn::Request::BlocksByHash(
-            [block3_hash, block4_hash, block982k_hash]
-                .into_iter()
-                .collect(),
-        ))
-        .await
-        .respond(zn::Response::Blocks(vec![
-            Available((block3.clone(), None)),
-            Available((block4.clone(), None)),
-            Available((block982k.clone(), None)),
-        ]));
+    assert!(blocks12_responded, "blocks 1&2 were not downloaded");
+    assert!(blocks34_responded, "blocks 3&4&982k were not downloaded");
 
     // At this point, the following tasks race:
-    // - The valid chain verifier requests
-    // - The block too high error, which causes a syncer reset and ChainSync::obtain_tips
+    // - The valid chain verifier requests for blocks 3 & 4
+    // - The block too high error for block 982k, which causes a syncer reset
     // - ChainSync::extend_tips for the next tip
 
     let chain_sync_result = chain_sync_task_handle.now_or_never();
