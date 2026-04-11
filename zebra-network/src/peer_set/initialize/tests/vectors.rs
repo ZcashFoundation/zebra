@@ -1560,7 +1560,16 @@ where
             // Return the correct response variant for Peers requests,
             // reusing one of the peers we already provided.
             Request::Peers => Response::Peers(vec![fake_peer.unwrap()]),
-            _ => unreachable!("unexpected request: {:?}", req),
+            Request::Ping(_)
+            | Request::BlocksByHash(_)
+            | Request::TransactionsById(_)
+            | Request::FindBlocks { .. }
+            | Request::FindHeaders { .. }
+            | Request::PushTransaction(_)
+            | Request::AdvertiseTransactionIds(_)
+            | Request::AdvertiseBlock(_)
+            | Request::AdvertiseBlockToAll(_)
+            | Request::MempoolTransactionIds => unreachable!("unexpected request: {:?}", req),
         };
 
         Ok(rsp)

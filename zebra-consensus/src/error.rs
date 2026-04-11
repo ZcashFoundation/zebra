@@ -296,7 +296,21 @@ impl TransactionError {
             | WrongConsensusBranchId
             | MissingConsensusBranchId => 100,
 
-            _other => 0,
+            NotCoinbase
+            | LockedUntilAfterBlockHeight(_)
+            | LockedUntilAfterBlockTime(_)
+            | MaximumExpiryHeight { .. }
+            | ExpiredTransaction { .. }
+            | UnsupportedByNetworkUpgrade(..)
+            | InternalDowncastError(_)
+            | DuplicateTransparentSpend(_)
+            | DuplicateSproutNullifier(_)
+            | DuplicateSaplingNullifier(_)
+            | DuplicateOrchardNullifier(_)
+            | TransparentInputNotFound
+            | ValidateContextError(_)
+            | ValidateMempoolLockTimeError(_)
+            | Zip317(_) => 0,
         }
     }
 }
@@ -407,7 +421,15 @@ impl BlockError {
             | InvalidDifficulty(_, _)
             | TargetDifficultyLimit(_, _, _, _, _)
             | DifficultyFilter(_, _, _, _) => 100,
-            _other => 0,
+            Transaction(_)
+            | NoTransactions
+            | BadMerkleRoot { .. }
+            | DuplicateTransaction
+            | AlreadyInChain(..)
+            | WrongTransactionConsensusBranchId
+            | TooManyTransparentSignatureOperations { .. }
+            | SummingMinerFees { .. }
+            | Other(_) => 0,
         }
     }
 }

@@ -61,7 +61,9 @@ where
                             n.as_u64().map(jsonrpsee::types::Id::Number)
                         }
                         serde_json::Value::String(s) => Some(jsonrpsee::types::Id::Str(s.into())),
-                        _ => None,
+                        serde_json::Value::Bool(_)
+                        | serde_json::Value::Array(_)
+                        | serde_json::Value::Object(_) => None,
                     }
                     .expect("response json should have an id");
 

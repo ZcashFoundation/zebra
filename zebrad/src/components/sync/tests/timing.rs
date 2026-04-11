@@ -132,7 +132,18 @@ fn request_genesis_is_rate_limited() {
                 // Respond with `Error`
                 future::err("block not found".into())
             }
-            _ => unreachable!("no other request is allowed"),
+            zebra_network::Request::Peers
+            | zebra_network::Request::Ping(_)
+            | zebra_network::Request::TransactionsById(_)
+            | zebra_network::Request::FindBlocks { .. }
+            | zebra_network::Request::FindHeaders { .. }
+            | zebra_network::Request::PushTransaction(_)
+            | zebra_network::Request::AdvertiseTransactionIds(_)
+            | zebra_network::Request::AdvertiseBlock(_)
+            | zebra_network::Request::AdvertiseBlockToAll(_)
+            | zebra_network::Request::MempoolTransactionIds => {
+                unreachable!("no other request is allowed")
+            }
         }
     });
 
@@ -146,7 +157,29 @@ fn request_genesis_is_rate_limited() {
                 // Respond with `None`
                 future::ok(zebra_state::Response::KnownBlock(None))
             }
-            _ => unreachable!("no other request is allowed"),
+            zebra_state::Request::CommitSemanticallyVerifiedBlock(_)
+            | zebra_state::Request::CommitCheckpointVerifiedBlock(_)
+            | zebra_state::Request::Depth(_)
+            | zebra_state::Request::Tip
+            | zebra_state::Request::BlockLocator
+            | zebra_state::Request::Transaction(_)
+            | zebra_state::Request::AnyChainTransaction(_)
+            | zebra_state::Request::UnspentBestChainUtxo(_)
+            | zebra_state::Request::Block(_)
+            | zebra_state::Request::AnyChainBlock(_)
+            | zebra_state::Request::BlockAndSize(_)
+            | zebra_state::Request::BlockHeader(_)
+            | zebra_state::Request::AwaitUtxo(_)
+            | zebra_state::Request::FindBlockHashes { .. }
+            | zebra_state::Request::FindBlockHeaders { .. }
+            | zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
+            | zebra_state::Request::BestChainNextMedianTimePast
+            | zebra_state::Request::BestChainBlockHash(_)
+            | zebra_state::Request::InvalidateBlock(_)
+            | zebra_state::Request::ReconsiderBlock(_)
+            | zebra_state::Request::CheckBlockProposalValidity(_) => {
+                unreachable!("no other request is allowed")
+            }
         }
     });
 
