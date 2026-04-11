@@ -39,9 +39,18 @@ Zebra uses the following inbound and outbound TCP ports:
 If you configure Zebra with a specific
 [`listen_addr`](https://docs.rs/zebra-network/latest/zebra_network/config/struct.Config.html#structfield.listen_addr),
 it will advertise this address to other nodes for inbound connections. Outbound
-connections are required to sync, inbound connections are optional. Zebra also
-needs access to the Zcash DNS seeders, via the OS DNS resolver (usually port
-53).
+connections are required to sync, inbound connections are optional but
+recommended. Zebra also needs access to the Zcash DNS seeders, via the OS DNS
+resolver (usually port 53).
+
+**Docker users:** You must publish the P2P port with `-p 8233:8233` (Mainnet) or
+`-p 18233:18233` (Testnet) for inbound connections. See
+[Docker](./docker.md#p2p-networking) for details.
+
+**Firewall/NAT:** If your node is behind a firewall or NAT, open the P2P port
+and consider setting
+[`external_addr`](https://docs.rs/zebra-network/latest/zebra_network/config/struct.Config.html#structfield.external_addr)
+to your public IP so peers can discover your node.
 
 Zebra makes outbound connections to peers on any port. But `zcashd` prefers
 peers on the default ports, so that it can't be used for DDoS attacks on other

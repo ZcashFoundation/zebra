@@ -325,10 +325,12 @@ jobs:
             LOG_FILE="${{ vars.CD_LOG_FILE }}"
           fi
 
-          # Set RPC port based on network
+          # Set network-specific ports
           if [ "${{ matrix.network }}" = "Mainnet" ]; then
+            P2P_PORT="8233"
             RPC_PORT="8232"
           else
+            P2P_PORT="18233"
             RPC_PORT="18232"
           fi
 
@@ -350,7 +352,7 @@ jobs:
             --container-stdin \
             --container-tty \
             --container-image ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
-            --container-env "ZEBRA_NETWORK__NETWORK=${{ matrix.network }},ZEBRA_NETWORK__LISTEN_ADDR=0.0.0.0,LOG_FILE=${LOG_FILE},SENTRY_DSN=${{ vars.SENTRY_DSN }},ZEBRA_HEALTH__LISTEN_ADDR=0.0.0.0:8080,ZEBRA_HEALTH__MIN_CONNECTED_PEERS=1,ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:${RPC_PORT}" \
+            --container-env "ZEBRA_NETWORK__NETWORK=${{ matrix.network }},ZEBRA_NETWORK__LISTEN_ADDR=0.0.0.0:${P2P_PORT},LOG_FILE=${LOG_FILE},SENTRY_DSN=${{ vars.SENTRY_DSN }},ZEBRA_HEALTH__LISTEN_ADDR=0.0.0.0:8080,ZEBRA_HEALTH__MIN_CONNECTED_PEERS=1,ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:${RPC_PORT}" \
             --service-account ${{ vars.GCP_DEPLOYMENTS_SA }} \
             --scopes cloud-platform \
             --metadata google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true \
@@ -376,6 +378,7 @@ jobs:
             --unhealthy-threshold=3 \
             --healthy-threshold=2 \
             --global
+
 
       # Check if our destination instance group exists already
       - name: Check if ${{ matrix.network }} instance group exists
