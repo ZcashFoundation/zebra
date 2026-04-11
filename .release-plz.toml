@@ -1,0 +1,87 @@
+[workspace]
+# Prevent Cargo.lock churn from triggering cascading Release PRs.
+# The `home` crate pin (0.5.11) would break if cargo update runs.
+dependencies_update = false
+
+# Only publish when the Release PR is merged, not on every push.
+# release-plz checks if the current commit is from a release-plz- branch.
+release_always = false
+
+# git-cliff configuration for changelog generation
+changelog_config = "cliff.toml"
+
+# Only prepare releases from commits matching this pattern.
+# Commits not matching are still counted for dependency cascade bumps.
+release_commits = "^(feat|fix|perf|refactor|build)"
+
+# Release PR metadata
+pr_labels = ["A-release", "P-Critical"]
+
+# Repository URL for changelog links
+repo_url = "https://github.com/ZcashFoundation/zebra"
+
+# Timeout for waiting for each crate to appear on crates.io after publish
+publish_timeout = "30m"
+
+# GitHub Release body template with operational sections from the changelog guidelines.
+# The {{ changelog }} variable contains the git-cliff generated changelog.
+# The [FILL IN] markers indicate sections the maintainer should complete.
+git_release_body = """
+{{ changelog }}
+
+---
+
+## Update Priority
+
+| User Type | Priority | Reason |
+|-----------|----------|--------|
+| All operators | [FILL IN] | [FILL IN] |
+
+## How to Upgrade
+
+### Docker
+
+```
+docker pull zfnd/zebra:{{ version }}
+```
+
+### Source
+
+```
+cargo install --locked zebrad@{{ version }}
+```
+
+## Compatibility
+
+| Component | Supported |
+|-----------|-----------|
+| Zcash Protocol | All upgrades through NU6.1 |
+| Minimum Rust | 1.85+ |
+"""
+
+# ── zebrad: the node binary ─────────────────────────────────────
+# Aggregates changelogs from all zebra-* crates for a complete release view.
+# Uses the legacy v-prefixed tag format (v4.3.1) for compatibility with
+# GCP deployment, which parses the tag to extract the semver.
+[[package]]
+name = "zebrad"
+changelog_include = [
+    "zebra-chain",
+    "zebra-consensus",
+    "zebra-network",
+    "zebra-state",
+    "zebra-rpc",
+    "zebra-script",
+    "zebra-node-services",
+    "zebra-utils",
+]
+git_tag_name = "v{{ version }}"
+git_release_enable = true
+changelog_path = "./CHANGELOG.md"
+
+# ── Library crates ──────────────────────────────────────────────
+# No special config needed for most crates. release-plz defaults:
+# - Tag format: <crate>-v<version> (e.g., zebra-chain-v6.0.2)
+# - Change detection: file-path-based (only files in crate directory)
+# - Version bump: from conventional commits touching the crate's files
+# - Changelog: per-crate CHANGELOG.md in the crate directory
