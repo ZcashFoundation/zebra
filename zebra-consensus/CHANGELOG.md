@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `error::TransactionError`:
+  - `Amount`, `Balance`, `CoinbaseConstruction`, `Io`, `Other`, `TryFromSlice` variants
+  - `impl From<core::array::TryFromSliceError> for TransactionError`
+  - `impl From<zcash_script::Error> for TransactionError`
+  - `impl From<io::Error> for TransactionError`
+  - `impl From<zcash_primitives::transaction::builder::Error> for TransactionError`
+  - `impl From<zcash_protocol::value::BalanceError> for TransactionError`
+  - `impl From<zcash_transparent::builder::Error> for TransactionError`
+  - `impl From<zebra_chain::amount::Error> for TransactionError`
+
 ## [5.0.1] - 2026-03-25
 
 This release fixes an important security issue:
