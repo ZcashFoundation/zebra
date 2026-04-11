@@ -7330,6 +7330,7 @@ dependencies = [
  "bls12_381",
  "chrono",
  "color-eyre",
+ "criterion",
  "derive-getters",
  "futures",
  "futures-util",
