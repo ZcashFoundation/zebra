@@ -614,8 +614,13 @@ struct DTestnetParameters {
 #[serde(untagged)]
 enum DNetwork {
     DefaultForKind(NetworkKind),
+    ConfiguredRegtest {
+        params: Box<DTestnetParameters>,
+
+        #[serde(default, skip_serializing)]
+        regtest: Option<bool>,
+    },
     ConfiguredTestnet(Box<DTestnetParameters>),
-    ConfiguredRegtest(Box<DTestnetParameters>),
 }
 
 impl Default for DNetwork {
@@ -723,7 +728,10 @@ impl From<Config> for DConfig {
             },
 
             NetworkKind::Regtest => match network.parameters().map(Into::into) {
-                Some(params) => DNetwork::ConfiguredRegtest(Box::new(params)),
+                Some(params) => DNetwork::ConfiguredRegtest {
+                    params: Box::new(params),
+                    regtest: Some(true),
+                },
                 None => DNetwork::DefaultForKind(NetworkKind::Regtest),
             },
 
@@ -767,7 +775,7 @@ impl<'de> Deserialize<'de> for Config {
             (DNetwork::ConfiguredTestnet(params), _) => {
                 build_configured_testnet::<D>(*params, &initial_testnet_peers)?
             }
-            (DNetwork::ConfiguredRegtest(params), _) => {
+            (DNetwork::ConfiguredRegtest { params, .. }, _) => {
                 Network::new_regtest(build_regtest_params(*params))
             }
             (DNetwork::DefaultForKind(NetworkKind::Mainnet), _) => Network::Mainnet,
@@ -885,20 +893,20 @@ where
 
     if let Some(network_name) = network_name.clone() {
         params_builder = params_builder
-                        .with_network_name(network_name)
-                        .map_err(de::Error::custom)?
+            .with_network_name(network_name)
+            .map_err(de::Error::custom)?
     }
 
     if let Some(network_magic) = network_magic {
         params_builder = params_builder
-                        .with_network_magic(Magic(network_magic))
-                        .map_err(de::Error::custom)?;
+            .with_network_magic(Magic(network_magic))
+            .map_err(de::Error::custom)?;
     }
 
     if let Some(genesis_hash) = genesis_hash {
         params_builder = params_builder
-                        .with_genesis_hash(genesis_hash)
-                        .map_err(de::Error::custom)?;
+            .with_genesis_hash(genesis_hash)
+            .map_err(de::Error::custom)?;
     }
 
     if let Some(slow_start_interval) = slow_start_interval {
@@ -908,12 +916,12 @@ where
 
     if let Some(target_difficulty_limit) = target_difficulty_limit.clone() {
         params_builder = params_builder
-                        .with_target_difficulty_limit(
+            .with_target_difficulty_limit(
                 target_difficulty_limit
                     .parse::<U256>()
                     .map_err(de::Error::custom)?,
             )
-                        .map_err(de::Error::custom)?;
+            .map_err(de::Error::custom)?;
     }
 
     if let Some(disable_pow) = disable_pow {
@@ -923,14 +931,14 @@ where
     // Retain default Testnet activation heights unless there's an empty [testnet_parameters.activation_heights] section.
     if let Some(activation_heights) = activation_heights {
         params_builder = params_builder
-                        .with_activation_heights(activation_heights)
-                        .map_err(de::Error::custom)?
+            .with_activation_heights(activation_heights)
+            .map_err(de::Error::custom)?
     }
 
     if let Some(halving_interval) = pre_blossom_halving_interval {
         params_builder = params_builder
-                        .with_halving_interval(halving_interval.into())
-                        .map_err(de::Error::custom)?
+            .with_halving_interval(halving_interval.into())
+            .map_err(de::Error::custom)?
     }
 
     // Set configured funding streams after setting any parameters that affect the funding stream address period.
@@ -953,8 +961,8 @@ where
     }
 
     params_builder = params_builder
-                    .with_checkpoints(checkpoints)
-                    .map_err(de::Error::custom)?;
+        .with_checkpoints(checkpoints)
+        .map_err(de::Error::custom)?;
 
     if let Some(true) = extend_funding_stream_addresses_as_required {
         params_builder = params_builder.extend_funding_streams();
@@ -963,7 +971,7 @@ where
     // Return an error if the initial testnet peers includes any of the default initial Mainnet or Testnet
     // peers and the configured network parameters are incompatible with the default public Testnet.
     if !params_builder.is_compatible_with_default_parameters()
-        && contains_default_initial_peers(&initial_testnet_peers)
+        && contains_default_initial_peers(initial_testnet_peers)
     {
         return Err(de::Error::custom(
             "cannot use default initials peers with incompatible testnet",
