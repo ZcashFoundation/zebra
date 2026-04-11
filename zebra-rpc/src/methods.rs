@@ -1173,6 +1173,7 @@ where
         let transaction_hash = raw_transaction.hash();
 
         // send transaction to the rpc queue, ignore any error.
+        let raw_transaction = Arc::new(raw_transaction);
         let unmined_transaction = UnminedTx::from(raw_transaction.clone());
         let _ = queue_sender.send(unmined_transaction);
 

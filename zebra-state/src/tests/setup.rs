@@ -133,14 +133,11 @@ pub(crate) fn transaction_v4_from_coinbase(coinbase: &Transaction) -> Transactio
         "conversion assumes sapling shielded data is None"
     );
 
-    Transaction::V4 {
-        inputs: coinbase.inputs().to_vec(),
-        outputs: coinbase.outputs().to_vec(),
-        lock_time: coinbase.lock_time().unwrap_or_else(LockTime::unlocked),
+    Transaction::test_v4(
+        coinbase.inputs().to_vec(),
+        coinbase.outputs().to_vec(),
+        coinbase.lock_time().unwrap_or_else(LockTime::unlocked),
         // `Height(0)` means that the expiry height is ignored
-        expiry_height: coinbase.expiry_height().unwrap_or(Height(0)),
-        // invalid for coinbase transactions
-        joinsplit_data: None,
-        sapling_shielded_data: None,
-    }
+        coinbase.expiry_height().unwrap_or(Height(0)),
+    )
 }

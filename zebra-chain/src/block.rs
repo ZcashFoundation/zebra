@@ -2,7 +2,7 @@
 
 use std::{collections::HashMap, fmt, ops::Neg, sync::Arc};
 
-use halo2::pasta::pallas;
+use halo2::pasta::{group::ff::PrimeField, pallas};
 
 use crate::{
     amount::{DeferredPoolBalanceChange, NegativeAllowed},
@@ -81,9 +81,12 @@ impl Block {
     pub fn coinbase_height(&self) -> Option<Height> {
         self.transactions
             .first()
-            .and_then(|tx| tx.inputs().first())
+            .and_then(|tx| {
+                let inputs = tx.inputs();
+                inputs.into_iter().next()
+            })
             .and_then(|input| match input {
-                transparent::Input::Coinbase { ref height, .. } => Some(*height),
+                transparent::Input::Coinbase { height, .. } => Some(height),
                 _ => None,
             })
     }
@@ -140,49 +143,58 @@ impl Block {
         Ok(())
     }
 
-    /// Access the [`sprout::Nullifier`]s from all transactions in this block.
-    pub fn sprout_nullifiers(&self) -> impl Iterator<Item = &sprout::Nullifier> {
+    /// Access the sprout nullifiers from all transactions in this block.
+    pub fn sprout_nullifiers(&self) -> impl Iterator<Item = sprout::Nullifier> + '_ {
         self.transactions
             .iter()
-            .flat_map(|transaction| transaction.sprout_nullifiers())
+            .flat_map(|transaction| transaction.sprout_nullifiers().collect::<Vec<_>>())
     }
 
-    /// Access the [`sapling::Nullifier`]s from all transactions in this block.
-    pub fn sapling_nullifiers(&self) -> impl Iterator<Item = &sapling::Nullifier> {
+    /// Access the sapling nullifiers from all transactions in this block.
+    pub fn sapling_nullifiers(&self) -> impl Iterator<Item = sapling::Nullifier> + '_ {
         self.transactions
             .iter()
-            .flat_map(|transaction| transaction.sapling_nullifiers())
+            .flat_map(|transaction| transaction.sapling_nullifiers().collect::<Vec<_>>())
     }
 
-    /// Access the [`orchard::Nullifier`]s from all transactions in this block.
-    pub fn orchard_nullifiers(&self) -> impl Iterator<Item = &orchard::Nullifier> {
+    /// Access the orchard nullifiers from all transactions in this block.
+    pub fn orchard_nullifiers(&self) -> impl Iterator<Item = orchard::Nullifier> + '_ {
         self.transactions
             .iter()
-            .flat_map(|transaction| transaction.orchard_nullifiers())
+            .flat_map(|transaction| transaction.orchard_nullifiers().collect::<Vec<_>>())
     }
 
-    /// Access the [`sprout::NoteCommitment`]s from all transactions in this block.
-    pub fn sprout_note_commitments(&self) -> impl Iterator<Item = &sprout::NoteCommitment> {
+    /// Access the sprout note commitments from all transactions in this block.
+    pub fn sprout_note_commitments(
+        &self,
+    ) -> impl Iterator<Item = sprout::commitment::NoteCommitment> + '_ {
         self.transactions
             .iter()
-            .flat_map(|transaction| transaction.sprout_note_commitments())
+            .flat_map(|transaction| transaction.sprout_note_commitments().collect::<Vec<_>>())
     }
 
-    /// Access the [sapling note commitments](`sapling_crypto::note::ExtractedNoteCommitment`)
-    /// from all transactions in this block.
+    /// Access the sapling note commitments from all transactions in this block.
     pub fn sapling_note_commitments(
         &self,
-    ) -> impl Iterator<Item = &sapling_crypto::note::ExtractedNoteCommitment> {
+    ) -> impl Iterator<Item = sapling_crypto::note::ExtractedNoteCommitment> + '_ {
         self.transactions
             .iter()
-            .flat_map(|transaction| transaction.sapling_note_commitments())
+            .flat_map(|transaction| transaction.sapling_note_commitments().collect::<Vec<_>>())
     }
 
-    /// Access the [orchard note commitments](pallas::Base) from all transactions in this block.
-    pub fn orchard_note_commitments(&self) -> impl Iterator<Item = &pallas::Base> {
-        self.transactions
-            .iter()
-            .flat_map(|transaction| transaction.orchard_note_commitments())
+    /// Access the orchard note commitments from all transactions in this block,
+    /// as `pallas::Base` values for the note commitment tree.
+    pub fn orchard_note_commitments(&self) -> impl Iterator<Item = pallas::Base> + '_ {
+        self.transactions.iter().flat_map(|transaction| {
+            transaction
+                .orchard_note_commitments()
+                .map(|cmx| {
+                    let bytes = cmx.to_bytes();
+                    pallas::Base::from_repr(bytes)
+                        .expect("orchard note commitment is a valid pallas::Base")
+                })
+                .collect::<Vec<_>>()
+        })
     }
 
     /// Count how many Sapling transactions exist in a block,

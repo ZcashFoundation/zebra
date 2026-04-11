@@ -46,7 +46,7 @@ fn sapling_orchard_anchors_refer_to_final_treestates(
     // [`zebra_chain::sapling::shielded_data`].
     //
     // The "earlier treestate" check is implemented here.
-    for (anchor_index_in_tx, anchor) in transaction.sapling_anchors().enumerate() {
+    for (anchor_index_in_tx, anchor) in transaction.sapling_anchors().into_iter().enumerate() {
         tracing::debug!(
             ?anchor,
             ?anchor_index_in_tx,
@@ -88,25 +88,21 @@ fn sapling_orchard_anchors_refer_to_final_treestates(
     // > earlier block’s final Orchard treestate.
     //
     // <https://zips.z.cash/protocol/protocol.pdf#actions>
-    if let Some(orchard_shielded_data) = transaction.orchard_shielded_data() {
+    if let Some(anchor) = transaction.orchard_anchor() {
         tracing::debug!(
-            ?orchard_shielded_data.shared_anchor,
+            ?anchor,
             ?tx_index_in_block,
             ?height,
             "observed orchard anchor",
         );
 
         if !parent_chain
-            .map(|chain| {
-                chain
-                    .orchard_anchors
-                    .contains(&orchard_shielded_data.shared_anchor)
-            })
+            .map(|chain| chain.orchard_anchors.contains(&anchor))
             .unwrap_or(false)
-            && !finalized_state.contains_orchard_anchor(&orchard_shielded_data.shared_anchor)
+            && !finalized_state.contains_orchard_anchor(&anchor)
         {
             return Err(ValidateContextError::UnknownOrchardAnchor {
-                anchor: orchard_shielded_data.shared_anchor,
+                anchor,
                 height,
                 tx_index_in_block,
                 transaction_hash,
@@ -114,7 +110,7 @@ fn sapling_orchard_anchors_refer_to_final_treestates(
         }
 
         tracing::debug!(
-            ?orchard_shielded_data.shared_anchor,
+            ?anchor,
             ?tx_index_in_block,
             ?height,
             "validated orchard anchor",
@@ -144,29 +140,24 @@ fn fetch_sprout_final_treestates(
     height: Option<Height>,
 ) {
     // Fetch and return Sprout JoinSplit final treestates
-    for (joinsplit_index_in_tx, joinsplit) in transaction.sprout_groth16_joinsplits().enumerate() {
+    for (joinsplit_index_in_tx, js) in transaction.sprout_joinsplit_descriptions().enumerate() {
+        let anchor = sprout::tree::Root::from(js.anchor());
+
         // Avoid duplicate fetches
-        if sprout_final_treestates.contains_key(&joinsplit.anchor) {
+        if sprout_final_treestates.contains_key(&anchor) {
             continue;
         }
 
         let input_tree = parent_chain
-            .and_then(|chain| chain.sprout_trees_by_anchor.get(&joinsplit.anchor).cloned())
-            .or_else(|| finalized_state.sprout_tree_by_anchor(&joinsplit.anchor));
+            .and_then(|chain| chain.sprout_trees_by_anchor.get(&anchor).cloned())
+            .or_else(|| finalized_state.sprout_tree_by_anchor(&anchor));
 
         if let Some(input_tree) = input_tree {
-            sprout_final_treestates.insert(joinsplit.anchor, input_tree);
-
-            /* TODO:
-               - fix tests that generate incorrect root data
-               - assert that joinsplit.anchor matches input_tree.root() during tests,
-                 but don't assert in production, because the check is CPU-intensive,
-                 and sprout_anchors_refer_to_treestates() constructs the map correctly
-            */
+            sprout_final_treestates.insert(anchor, input_tree);
 
             tracing::debug!(
                 sprout_final_treestate_count = ?sprout_final_treestates.len(),
-                ?joinsplit.anchor,
+                ?anchor,
                 ?joinsplit_index_in_tx,
                 ?tx_index_in_block,
                 ?height,
@@ -205,9 +196,11 @@ fn sprout_anchors_refer_to_treestates(
     let mut interstitial_trees: HashMap<sprout::tree::Root, Arc<sprout::tree::NoteCommitmentTree>> =
         HashMap::new();
 
-    let joinsplit_count = transaction.sprout_groth16_joinsplits().count();
+    let js_descriptions: Vec<_> = transaction.sprout_joinsplit_descriptions().collect();
+    let joinsplit_count = js_descriptions.len();
 
-    for (joinsplit_index_in_tx, joinsplit) in transaction.sprout_groth16_joinsplits().enumerate() {
+    for (joinsplit_index_in_tx, js) in js_descriptions.iter().enumerate() {
+        let anchor = sprout::tree::Root::from(js.anchor());
         // Check all anchor sets, including the one for interstitial
         // anchors.
         //
@@ -242,14 +235,14 @@ fn sprout_anchors_refer_to_treestates(
         // [`interstitial_trees`] is always empty in the first iteration
         // of the loop.
         let input_tree = interstitial_trees
-            .get(&joinsplit.anchor)
+            .get(&anchor)
             .cloned()
-            .or_else(|| sprout_final_treestates.get(&joinsplit.anchor).cloned());
+            .or_else(|| sprout_final_treestates.get(&anchor).cloned());
 
         tracing::trace!(
             ?input_tree,
-            final_lookup = ?sprout_final_treestates.get(&joinsplit.anchor),
-            interstitial_lookup = ?interstitial_trees.get(&joinsplit.anchor),
+            final_lookup = ?sprout_final_treestates.get(&anchor),
+            interstitial_lookup = ?interstitial_trees.get(&anchor),
             interstitial_tree_count = ?interstitial_trees.len(),
             ?interstitial_trees,
             ?height,
@@ -260,14 +253,14 @@ fn sprout_anchors_refer_to_treestates(
             Some(tree) => tree,
             None => {
                 tracing::debug!(
-                    ?joinsplit.anchor,
+                    ?anchor,
                     ?joinsplit_index_in_tx,
                     ?tx_index_in_block,
                     ?height,
                     "failed to find sprout anchor",
                 );
                 return Err(ValidateContextError::UnknownSproutAnchor {
-                    anchor: joinsplit.anchor,
+                    anchor,
                     height,
                     tx_index_in_block,
                     transaction_hash,
@@ -276,7 +269,7 @@ fn sprout_anchors_refer_to_treestates(
         };
 
         tracing::debug!(
-            ?joinsplit.anchor,
+            ?anchor,
             ?joinsplit_index_in_tx,
             ?tx_index_in_block,
             ?height,
@@ -292,14 +285,15 @@ fn sprout_anchors_refer_to_treestates(
         let input_tree_inner = Arc::make_mut(&mut input_tree);
 
         // Add new anchors to the interstitial note commitment tree.
-        for cm in joinsplit.commitments {
+        for cm_bytes in js.commitments() {
+            let cm = sprout::commitment::NoteCommitment::from(*cm_bytes);
             input_tree_inner.append(cm)?;
         }
 
         interstitial_trees.insert(input_tree.root(), input_tree);
 
         tracing::debug!(
-            ?joinsplit.anchor,
+            ?anchor,
             ?joinsplit_index_in_tx,
             ?tx_index_in_block,
             ?height,

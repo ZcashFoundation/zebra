@@ -48,10 +48,8 @@ pub fn transparent_spend(
     {
         // Coinbase inputs represent new coins,
         // so there are no UTXOs to mark as spent.
-        let spends = transaction
-            .inputs()
-            .iter()
-            .filter_map(transparent::Input::outpoint);
+        let inputs = transaction.inputs();
+        let spends = inputs.iter().filter_map(transparent::Input::outpoint);
 
         for spend in spends {
             let utxo = transparent_spend_chain_order(

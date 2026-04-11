@@ -1,15 +1,15 @@
 //! Tests for whether cited anchors are checked properly.
 
-use std::{ops::Deref, sync::Arc};
+use std::sync::Arc;
 
 use zebra_chain::{
     amount::Amount,
-    block::{Block, Height},
-    primitives::Groth16Proof,
+    block::Block,
+    primitives::{ed25519, x25519, Groth16Proof},
     sapling,
-    serialization::ZcashDeserializeInto,
+    serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
     sprout::{self, JoinSplit},
-    transaction::{JoinSplitData, LockTime, Transaction, UnminedTx},
+    transaction::{JoinSplitData, Transaction, UnminedTx},
 };
 
 use crate::{
@@ -132,58 +132,167 @@ fn prepare_sprout_block(
         .into_iter()
         .filter(|tx| tx.has_sprout_joinsplit_data())
         .for_each(|tx| {
-            let joinsplit_data = match tx.deref() {
-                Transaction::V2 { joinsplit_data, .. } => joinsplit_data.clone(),
-                _ => unreachable!("These are known v2 transactions"),
-            };
+            // Extract joinsplit descriptions from the V2 transaction using the new API.
+            // These are known V2 transactions with BCTV14 proofs.
+            let joinsplit_descs: Vec<_> = tx.sprout_joinsplit_descriptions().collect();
+            let pub_key = tx
+                .sprout_joinsplit_pub_key()
+                .expect("V2 transactions with joinsplit data must have a pub key");
 
-            // Change [`joinsplit_data`] so that the transaction passes the
-            // semantic validation. Namely, set the value balance to zero, and
-            // use a dummy Groth16 proof instead of a BCTV14 one.
-            let joinsplit_data = joinsplit_data.map(|s| {
-                let mut new_joinsplits: Vec<JoinSplit<Groth16Proof>> = Vec::new();
-
-                for old_joinsplit in s.joinsplits() {
-                    new_joinsplits.push(JoinSplit {
+            // Build new JoinSplit<Groth16Proof> values from the JsDescriptions,
+            // changing the proof to Groth16 and zeroing the value balance for semantic validation.
+            let new_joinsplits: Vec<JoinSplit<Groth16Proof>> = joinsplit_descs
+                .iter()
+                .map(|js| {
+                    let anchor = sprout::tree::Root::from(js.anchor());
+                    let raw_nullifiers = js.nullifiers();
+                    let nullifiers = [
+                        sprout::note::Nullifier::from(raw_nullifiers[0]),
+                        sprout::note::Nullifier::from(raw_nullifiers[1]),
+                    ];
+                    let raw_commitments = js.commitments();
+                    let commitments = [
+                        sprout::commitment::NoteCommitment::from(raw_commitments[0]),
+                        sprout::commitment::NoteCommitment::from(raw_commitments[1]),
+                    ];
+                    let raw_seed = js.random_seed();
+                    let random_seed = sprout::RandomSeed::from(*raw_seed);
+                    let raw_macs = js.macs();
+                    let vmacs = [
+                        sprout::note::Mac::from(raw_macs[0]),
+                        sprout::note::Mac::from(raw_macs[1]),
+                    ];
+                    JoinSplit {
                         vpub_old: Amount::zero(),
                         vpub_new: Amount::zero(),
-                        anchor: old_joinsplit.anchor,
-                        nullifiers: old_joinsplit.nullifiers,
-                        commitments: old_joinsplit.commitments,
-                        ephemeral_key: old_joinsplit.ephemeral_key,
-                        random_seed: old_joinsplit.random_seed.clone(),
-                        vmacs: old_joinsplit.vmacs.clone(),
+                        anchor,
+                        nullifiers,
+                        commitments,
+                        ephemeral_key: x25519::PublicKey::from([0u8; 32]),
+                        random_seed,
+                        vmacs,
                         zkproof: Groth16Proof::from([0; 192]),
-                        enc_ciphertexts: old_joinsplit.enc_ciphertexts,
-                    })
-                }
+                        enc_ciphertexts: [
+                            sprout::note::EncryptedNote([0u8; 601]),
+                            sprout::note::EncryptedNote([0u8; 601]),
+                        ],
+                    }
+                })
+                .collect();
 
-                match new_joinsplits.split_first() {
-                    None => unreachable!("the new joinsplits are never empty"),
+            let joinsplit_data = new_joinsplits
+                .split_first()
+                .map(|(first, rest)| JoinSplitData {
+                    first: first.clone(),
+                    rest: rest.to_vec(),
+                    pub_key,
+                    sig: ed25519::Signature::from_bytes(&[0u8; 64]),
+                });
 
-                    Some((first, rest)) => JoinSplitData {
-                        first: first.clone(),
-                        rest: rest.to_vec(),
-                        pub_key: s.pub_key,
-                        sig: s.sig,
-                    },
-                }
-            });
+            // Build a V4 transaction with the adjusted joinsplit data.
+            let new_tx = build_v4_tx_with_joinsplit_data(joinsplit_data);
 
             // Add the new adjusted transaction to [`block_to_prepare`].
-            block_to_prepare
-                .transactions
-                .push(Arc::new(Transaction::V4 {
-                    inputs: Vec::new(),
-                    outputs: Vec::new(),
-                    lock_time: LockTime::min_lock_time_timestamp(),
-                    expiry_height: Height(0),
-                    joinsplit_data,
-                    sapling_shielded_data: None,
-                }))
+            block_to_prepare.transactions.push(Arc::new(new_tx));
         });
 
     Arc::new(block_to_prepare).prepare()
+}
+
+/// Build a V4 (Sapling) transaction containing the given sprout joinsplit data.
+/// Transparent inputs/outputs and sapling shielded data are empty.
+fn build_v4_tx_with_joinsplit_data(
+    joinsplit_data: Option<JoinSplitData<Groth16Proof>>,
+) -> Transaction {
+    Transaction::test_v4_with_joinsplit_data(joinsplit_data.as_ref())
+}
+
+/// Build a V4 transaction with the same sapling shielded data as `tx`,
+/// but with `valueBalanceSapling` set to zero (to pass chain value pool checks).
+///
+/// Serializes `tx`, patches the valueBalanceSapling field to 0, then deserializes.
+fn build_v4_tx_with_sapling_data_zero_balance(tx: &Transaction) -> Transaction {
+    // Serialize the transaction to bytes.
+    let mut tx_bytes = tx
+        .zcash_serialize_to_vec()
+        .expect("transaction serialization should succeed");
+
+    // Parse past the V4 header (4 bytes nVersion + 4 bytes nVersionGroupId).
+    let mut pos = 8usize;
+
+    // Parse and skip transparent inputs.
+    let n_inputs = parse_compact_size_bytes(&tx_bytes, &mut pos);
+    for _ in 0..n_inputs {
+        // Each TxIn: outpoint (36 bytes) + scriptSig (compact_size + bytes) + sequence (4 bytes)
+        pos += 36; // outpoint
+        let script_len = parse_compact_size_bytes(&tx_bytes, &mut pos);
+        pos += script_len as usize + 4; // script + sequence
+    }
+
+    // Parse and skip transparent outputs.
+    let n_outputs = parse_compact_size_bytes(&tx_bytes, &mut pos);
+    for _ in 0..n_outputs {
+        // Each TxOut: value (8 bytes) + scriptPubKey (compact_size + bytes)
+        pos += 8; // value
+        let script_len = parse_compact_size_bytes(&tx_bytes, &mut pos);
+        pos += script_len as usize; // scriptPubKey
+    }
+
+    // Skip nLockTime (4 bytes) and nExpiryHeight (4 bytes).
+    pos += 8;
+
+    // Now `pos` points to valueBalanceSapling (8 bytes i64 LE). Set to 0.
+    assert!(
+        pos + 8 <= tx_bytes.len(),
+        "transaction too short to contain valueBalanceSapling"
+    );
+    tx_bytes[pos..pos + 8].copy_from_slice(&0i64.to_le_bytes());
+
+    let tx = Transaction::zcash_deserialize(tx_bytes.as_slice())
+        .expect("patched V4 transaction should deserialize");
+
+    // Remove transparent inputs/outputs that reference UTXOs not in the test state.
+    // This test only cares about sapling anchors, not transparent validation.
+    tx.with_transparent_inputs(vec![])
+        .with_transparent_outputs(vec![])
+}
+
+/// Parse a CompactSize integer from `bytes` at the given `pos`, advancing `pos`.
+fn parse_compact_size_bytes(bytes: &[u8], pos: &mut usize) -> u64 {
+    let first = bytes[*pos];
+    *pos += 1;
+    match first {
+        0xfd => {
+            let val = u16::from_le_bytes([bytes[*pos], bytes[*pos + 1]]);
+            *pos += 2;
+            val as u64
+        }
+        0xfe => {
+            let val = u32::from_le_bytes([
+                bytes[*pos],
+                bytes[*pos + 1],
+                bytes[*pos + 2],
+                bytes[*pos + 3],
+            ]);
+            *pos += 4;
+            val as u64
+        }
+        0xff => {
+            let val = u64::from_le_bytes([
+                bytes[*pos],
+                bytes[*pos + 1],
+                bytes[*pos + 2],
+                bytes[*pos + 3],
+                bytes[*pos + 4],
+                bytes[*pos + 5],
+                bytes[*pos + 6],
+                bytes[*pos + 7],
+            ]);
+            *pos += 8;
+            val
+        }
+        n => n as u64,
+    }
 }
 
 // Sapling
@@ -225,28 +334,10 @@ fn check_sapling_anchors() {
         .into_iter()
         .filter(|tx| tx.has_sapling_shielded_data())
         .for_each(|tx| {
-            let sapling_shielded_data = match tx.deref() {
-                Transaction::V4 {
-                    sapling_shielded_data,
-                    ..
-                } => sapling_shielded_data.clone(),
-                _ => unreachable!("These are known v4 transactions"),
-            };
-
-            // set value balance to 0 to pass the chain value pool checks
-            let sapling_shielded_data = sapling_shielded_data.map(|mut s| {
-                s.value_balance = 0.try_into().expect("unexpected invalid zero amount");
-                s
-            });
-
-            block1.transactions.push(Arc::new(Transaction::V4 {
-                inputs: Vec::new(),
-                outputs: Vec::new(),
-                lock_time: LockTime::min_lock_time_timestamp(),
-                expiry_height: Height(0),
-                joinsplit_data: None,
-                sapling_shielded_data,
-            }))
+            // Build a V4 transaction with zeroed value balance by serializing and patching bytes.
+            // The transaction must have value_balance = 0 to pass chain value pool checks.
+            let new_tx = build_v4_tx_with_sapling_data_zero_balance(tx.as_ref());
+            block1.transactions.push(Arc::new(new_tx));
         });
 
     let block1 = Arc::new(block1).prepare();
@@ -271,28 +362,10 @@ fn check_sapling_anchors() {
         .into_iter()
         .filter(|tx| tx.has_sapling_shielded_data())
         .for_each(|tx| {
-            let sapling_shielded_data = match tx.deref() {
-                Transaction::V4 {
-                    sapling_shielded_data,
-                    ..
-                } => sapling_shielded_data.clone(),
-                _ => unreachable!("These are known v4 transactions"),
-            };
-
-            // set value balance to 0 to pass the chain value pool checks
-            let sapling_shielded_data = sapling_shielded_data.map(|mut s| {
-                s.value_balance = 0.try_into().expect("unexpected invalid zero amount");
-                s
-            });
-
-            block2.transactions.push(Arc::new(Transaction::V4 {
-                inputs: Vec::new(),
-                outputs: Vec::new(),
-                lock_time: LockTime::min_lock_time_timestamp(),
-                expiry_height: Height(0),
-                joinsplit_data: None,
-                sapling_shielded_data,
-            }))
+            // Build a V4 transaction with zeroed value balance by serializing and patching bytes.
+            // The transaction must have value_balance = 0 to pass chain value pool checks.
+            let new_tx = build_v4_tx_with_sapling_data_zero_balance(tx.as_ref());
+            block2.transactions.push(Arc::new(new_tx));
         });
 
     let block2 = Arc::new(block2).prepare();

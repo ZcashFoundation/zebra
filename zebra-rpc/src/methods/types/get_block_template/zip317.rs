@@ -6,7 +6,10 @@
 //! > when computing `size_target`, since there is no consensus requirement for this to be
 //! > exactly the same between implementations.
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use rand::{
     distributions::{Distribution, WeightedIndex},
@@ -19,7 +22,9 @@ use zebra_chain::{
     amount::NegativeOrZero,
     block::{Height, MAX_BLOCK_BYTES},
     parameters::Network,
-    transaction::{self, zip317::BLOCK_UNPAID_ACTION_LIMIT, Transaction, VerifiedUnminedTx},
+    transaction::{
+        self, zip317::BLOCK_UNPAID_ACTION_LIMIT, Transaction, UnminedTx, VerifiedUnminedTx,
+    },
 };
 use zebra_consensus::MAX_BLOCK_SIGOPS;
 use zebra_node_services::mempool::TransactionDependencies;
@@ -171,7 +176,13 @@ pub fn fake_coinbase_transaction(
     let outputs = standard_coinbase_outputs(net, height, miner_address, miner_fee);
 
     #[cfg(not(all(zcash_unstable = "nu7", feature = "tx_v6")))]
-    let coinbase = Transaction::new_v5_coinbase(net, height, outputs, extra_coinbase_data).into();
+    let coinbase: UnminedTx = Arc::new(Transaction::new_v5_coinbase(
+        net,
+        height,
+        outputs,
+        extra_coinbase_data,
+    ))
+    .into();
 
     #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
     let coinbase = {

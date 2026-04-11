@@ -103,8 +103,8 @@ impl DiskFormatUpgrade for Upgrade {
                                 let (tx, h, _) = db
                                     .transaction(outpoint.hash)
                                     .expect("transaction should be in the database");
-                                let output = tx
-                                    .outputs()
+                                let outputs = tx.outputs();
+                                let output = outputs
                                     .get(outpoint.index as usize)
                                     .expect("output should exist");
 

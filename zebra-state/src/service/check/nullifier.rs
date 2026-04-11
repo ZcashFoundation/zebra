@@ -39,19 +39,19 @@ pub(crate) fn no_duplicates_in_finalized_chain(
     finalized_state: &ZebraDb,
 ) -> Result<(), ValidateContextError> {
     for nullifier in semantically_verified.block.sprout_nullifiers() {
-        if finalized_state.contains_sprout_nullifier(nullifier) {
+        if finalized_state.contains_sprout_nullifier(&nullifier) {
             Err(nullifier.duplicate_nullifier_error(true))?;
         }
     }
 
     for nullifier in semantically_verified.block.sapling_nullifiers() {
-        if finalized_state.contains_sapling_nullifier(nullifier) {
+        if finalized_state.contains_sapling_nullifier(&nullifier) {
             Err(nullifier.duplicate_nullifier_error(true))?;
         }
     }
 
     for nullifier in semantically_verified.block.orchard_nullifiers() {
-        if finalized_state.contains_orchard_nullifier(nullifier) {
+        if finalized_state.contains_orchard_nullifier(&nullifier) {
             Err(nullifier.duplicate_nullifier_error(true))?;
         }
     }
@@ -105,25 +105,28 @@ pub(crate) fn tx_no_duplicates_in_chain(
     non_finalized_chain: Option<&Arc<Chain>>,
     transaction: &Arc<Transaction>,
 ) -> Result<(), ValidateContextError> {
+    let sprout_nfs: Vec<_> = transaction.sprout_nullifiers().collect();
     find_duplicate_nullifier(
-        transaction.sprout_nullifiers(),
+        &sprout_nfs,
         |nullifier| finalized_chain.contains_sprout_nullifier(nullifier),
         non_finalized_chain
-            .map(|chain| |nullifier| chain.sprout_nullifiers.contains_key(nullifier)),
+            .map(|chain| |nullifier: &_| chain.sprout_nullifiers.contains_key(nullifier)),
     )?;
 
+    let sapling_nfs: Vec<_> = transaction.sapling_nullifiers().collect();
     find_duplicate_nullifier(
-        transaction.sapling_nullifiers(),
+        &sapling_nfs,
         |nullifier| finalized_chain.contains_sapling_nullifier(nullifier),
         non_finalized_chain
-            .map(|chain| |nullifier| chain.sapling_nullifiers.contains_key(nullifier)),
+            .map(|chain| |nullifier: &_| chain.sapling_nullifiers.contains_key(nullifier)),
     )?;
 
+    let orchard_nfs: Vec<_> = transaction.orchard_nullifiers().collect();
     find_duplicate_nullifier(
-        transaction.orchard_nullifiers(),
+        &orchard_nfs,
         |nullifier| finalized_chain.contains_orchard_nullifier(nullifier),
         non_finalized_chain
-            .map(|chain| |nullifier| chain.orchard_nullifiers.contains_key(nullifier)),
+            .map(|chain| |nullifier: &_| chain.orchard_nullifiers.contains_key(nullifier)),
     )?;
 
     Ok(())

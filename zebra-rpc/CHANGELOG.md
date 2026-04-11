@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Transaction RPC serialization updated to use `zcash_primitives` accessor
+  methods for sapling spend/output and orchard action fields.
+- Sprout JoinSplit RPC serialization stubbed out (TODO: reimplement with
+  `JsDescription` accessors).
+
 ## [6.0.1] - 2026-03-26
 
 ### Fixed

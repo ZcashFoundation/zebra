@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING**: Replace Zebra's `Transaction` enum with a newtype wrapper around
+  `zcash_primitives::transaction::Transaction`, eliminating ~1800 lines of
+  duplicated serialization and type definitions. The `Transaction` type now
+  delegates to `zcash_primitives` for serialization, txid computation, and
+  bundle access, while preserving Zebra's public API through accessor methods.
+
 ## [Zebra 4.3.0](https://github.com/ZcashFoundation/zebra/releases/tag/v4.3) - 2026-03-12
 
 This release fixes **two important security issues**:

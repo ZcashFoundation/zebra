@@ -21,11 +21,7 @@ use crate::{
     amount::{Amount, NonNegative},
     block::Height,
     serialization::ZcashSerialize,
-    transaction::{
-        AuthDigest, Hash,
-        Transaction::{self, *},
-        WtxId,
-    },
+    transaction::{AuthDigest, Hash, Transaction, WtxId},
     transparent,
 };
 
@@ -131,29 +127,8 @@ impl fmt::Display for UnminedTxId {
     }
 }
 
-impl From<Transaction> for UnminedTxId {
-    fn from(transaction: Transaction) -> Self {
-        // use the ref implementation, to avoid cloning the transaction
-        UnminedTxId::from(&transaction)
-    }
-}
-
-impl From<&Transaction> for UnminedTxId {
-    fn from(transaction: &Transaction) -> Self {
-        match transaction {
-            V1 { .. } | V2 { .. } | V3 { .. } | V4 { .. } => Legacy(transaction.into()),
-            V5 { .. } => Witnessed(transaction.into()),
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            V6 { .. } => Witnessed(transaction.into()),
-        }
-    }
-}
-
-impl From<Arc<Transaction>> for UnminedTxId {
-    fn from(transaction: Arc<Transaction>) -> Self {
-        transaction.as_ref().into()
-    }
-}
+// From<&Transaction> and From<Arc<Transaction>> for UnminedTxId
+// are defined in transaction.rs
 
 impl From<WtxId> for UnminedTxId {
     fn from(wtx_id: WtxId) -> Self {
@@ -259,39 +234,6 @@ impl fmt::Debug for UnminedTx {
 impl fmt::Display for UnminedTx {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("UnminedTx").field(&"private").finish()
-    }
-}
-
-// Each of these conversions is implemented slightly differently,
-// to avoid cloning the transaction where possible.
-
-impl From<Transaction> for UnminedTx {
-    fn from(transaction: Transaction) -> Self {
-        let size = transaction.zcash_serialized_size();
-        let conventional_fee = zip317::conventional_fee(&transaction);
-
-        // The borrow is actually needed to avoid taking ownership
-        #[allow(clippy::needless_borrow)]
-        Self {
-            id: (&transaction).into(),
-            size,
-            conventional_fee,
-            transaction: Arc::new(transaction),
-        }
-    }
-}
-
-impl From<&Transaction> for UnminedTx {
-    fn from(transaction: &Transaction) -> Self {
-        let size = transaction.zcash_serialized_size();
-        let conventional_fee = zip317::conventional_fee(transaction);
-
-        Self {
-            id: transaction.into(),
-            size,
-            conventional_fee,
-            transaction: Arc::new(transaction.clone()),
-        }
     }
 }
 

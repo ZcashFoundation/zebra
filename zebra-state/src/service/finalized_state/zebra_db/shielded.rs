@@ -512,14 +512,14 @@ impl DiskWriteBatch {
         let insert_value = ();
 
         // Mark sprout, sapling and orchard nullifiers as spent
-        for sprout_nullifier in transaction.sprout_nullifiers() {
-            self.zs_insert(&sprout_nullifiers, sprout_nullifier, insert_value);
+        for nullifier in transaction.sprout_nullifiers() {
+            self.zs_insert(&sprout_nullifiers, nullifier, insert_value);
         }
-        for sapling_nullifier in transaction.sapling_nullifiers() {
-            self.zs_insert(&sapling_nullifiers, sapling_nullifier, insert_value);
+        for nullifier in transaction.sapling_nullifiers() {
+            self.zs_insert(&sapling_nullifiers, nullifier, insert_value);
         }
-        for orchard_nullifier in transaction.orchard_nullifiers() {
-            self.zs_insert(&orchard_nullifiers, orchard_nullifier, insert_value);
+        for nullifier in transaction.orchard_nullifiers() {
+            self.zs_insert(&orchard_nullifiers, nullifier, insert_value);
         }
     }
 

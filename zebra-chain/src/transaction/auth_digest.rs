@@ -1,18 +1,13 @@
 //! Authorizing digests for Zcash transactions.
 
-use std::{fmt, sync::Arc};
+use std::fmt;
 
 use hex::{FromHex, ToHex};
 
-use crate::{
-    primitives::zcash_primitives::auth_digest,
-    serialization::{
-        BytesInDisplayOrder, ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize,
-        ZcashSerialize,
-    },
+use crate::serialization::{
+    BytesInDisplayOrder, ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize,
+    ZcashSerialize,
 };
-
-use super::Transaction;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -37,39 +32,7 @@ impl BytesInDisplayOrder<true> for AuthDigest {
     }
 }
 
-impl From<Transaction> for AuthDigest {
-    /// Computes the authorizing data commitment for a transaction.
-    ///
-    /// # Panics
-    ///
-    /// If passed a pre-v5 transaction.
-    fn from(transaction: Transaction) -> Self {
-        // use the ref implementation, to avoid cloning the transaction
-        AuthDigest::from(&transaction)
-    }
-}
-
-impl From<&Transaction> for AuthDigest {
-    /// Computes the authorizing data commitment for a transaction.
-    ///
-    /// # Panics
-    ///
-    /// If passed a pre-v5 transaction.
-    fn from(transaction: &Transaction) -> Self {
-        auth_digest(transaction)
-    }
-}
-
-impl From<Arc<Transaction>> for AuthDigest {
-    /// Computes the authorizing data commitment for a transaction.
-    ///
-    /// # Panics
-    ///
-    /// If passed a pre-v5 transaction.
-    fn from(transaction: Arc<Transaction>) -> Self {
-        transaction.as_ref().into()
-    }
-}
+// From<&Transaction> for AuthDigest is defined in transaction.rs (TryFrom)
 
 impl From<[u8; 32]> for AuthDigest {
     fn from(bytes: [u8; 32]) -> Self {
