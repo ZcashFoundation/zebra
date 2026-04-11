@@ -907,7 +907,14 @@ fn snapshot_rpc_getnetworkinfo(
 
 /// Snapshot `getpeerinfo` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getpeerinfo(get_peer_info: Vec<PeerInfo>, settings: &insta::Settings) {
-    settings.bind(|| insta::assert_json_snapshot!("get_peer_info", get_peer_info));
+    settings.bind(|| {
+        insta::assert_json_snapshot!("get_peer_info", get_peer_info, {
+            "[].lastrecv" => dynamic_redaction(|value, _path| {
+                assert!(value.as_u64().unwrap() > 0, "lastrecv should be non-zero");
+                "[lastrecv]"
+            })
+        })
+    });
 }
 
 /// Snapshot `getnetworksolps` response, using `cargo insta` and JSON serialization.
@@ -1043,6 +1050,8 @@ pub async fn test_mining_rpcs<State, ReadState>(
         .into(),
         &PeerServices::NODE_NETWORK,
         false,
+        "/Zebra:2.1.0/".to_string(),
+        zebra_network::constants::CURRENT_NETWORK_PROTOCOL_VERSION,
     )
     .into_new_meta_addr(Instant::now(), DateTime32::now())]);
 
