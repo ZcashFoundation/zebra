@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- `block::Height::coinbase_zcash_serialized_size()`
+- `transaction`:
+  - `builder` module
+  - `Transaction::new_v4_coinbase()` and `new_v5_coinbase()`
+- `transparent`:
+  - `Input::new_coinbase()` and `extra_coinbase_data()`
+  - `CoinbaseData` struct and its impls
+  - `EXTRA_ZEBRA_COINBASE_DATA`, `GENESIS_COINBASE_DATA`, `MAX_COINBASE_DATA_LEN`,
+    `MAX_COINBASE_HEIGHT_DATA_LEN` constants
+
+### Changed
+
+- `transparent::Input::Coinbase`:
+  - `data` field type changed from `CoinbaseData` to `Vec<u8>`
+  - `data` now stores only miner data (without height encoding)
+
+### Added
+
+- `block::Height`:
+  - `impl From<block::Height> for i64`
+  - `impl From<&block::Height> for i64`
+  - `impl TryFrom<i64> for block::Height`
+- `transparent`:
+  - `Input::miner_data()`
+  - `Input::coinbase_script()`
+  - `impl TryFrom<transparent::Address> for zcash_transparent::address::TransparentAddress`
+- `transaction`:
+  - `impl TryFrom<&[u8]> for AuthDigest`
+  - `impl AsRef<[u8; 32]> for Hash`
+  - `impl From<&[u8; 32]> for Hash`
+- `serialization`:
+  - `SerializationError::{Num, Opcode, Script}` variants
+  - `impl ZcashSerialize for u8`
+
 ## [6.0.1] - 2026-03-26
 
 This release fixes an important security issue:

@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- `client::TransactionTemplate::from_coinbase()`; replaced by `new_coinbase()`
+- `server::http_request_compatibility::With` trait and its impls on `HttpRequestMiddleware`
+- `fetch_state_tip_and_local_time()`; replaced by `fetch_chain_info()`
+- `generate_coinbase_and_roots()`; replaced by `TransactionTemplate::new_coinbase()` and `DefaultRoots::from_coinbase()`
+
+### Changed
+
+- `client::DefaultRoots::from_coinbase()` return type changed from `Result<Self, Box<dyn Error>>` to `Self`
+- `client::TransactionTemplate::new_coinbase()` parameter changed from `mempool_txs` to `txs_fee: Amount<NonNegative>`
+
+### Added
+
+- `client`:
+  - `DefaultRoots::from_coinbase()`
+  - `TransactionTemplate::new_coinbase()`
+- `MinerParams`:
+  - `addr()`, `data()`, `memo()`, `new()`
+  - `randomize_memo()`, `randomize_data()`
+  - `impl From<zcash_keys::address::Address>`
+- `config::mining`:
+  - `MinerAddressType` enum (`Transparent`, `Sapling`, `Unified`)
+  - `MinerAddressTypeIter` struct (strum-derived iterator for `MinerAddressType`)
+  - `Config::miner_memo` field
+  - `default_miner_address()` function
+- `fetch_chain_info()`; replacement for removed `fetch_state_tip_and_local_time()`
+
 ## [6.0.1] - 2026-03-26
 
 ### Fixed

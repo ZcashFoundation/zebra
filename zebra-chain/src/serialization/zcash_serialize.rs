@@ -1,5 +1,6 @@
 //! Converting Zcash consensus-critical data structures into bytes.
 
+use byteorder::WriteBytesExt;
 use std::{io, net::Ipv6Addr};
 
 use super::{AtLeastOne, CompactSizeMessage};
@@ -42,6 +43,12 @@ pub trait ZcashSerialize: Sized {
         self.zcash_serialize(&mut writer)
             .expect("writer should never fail");
         writer.0
+    }
+}
+
+impl ZcashSerialize for u8 {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        writer.write_u8(*self)
     }
 }
 
