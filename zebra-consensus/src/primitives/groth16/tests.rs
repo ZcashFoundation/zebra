@@ -41,8 +41,7 @@ where
                 .sprout_joinsplit_pub_key()
                 .expect("pub key must exist since there are joinsplits");
             let joinsplit_rsp = verifier.ready().await?.call(
-                DescriptionWrapper(&(joinsplit, &pub_key))
-                    .try_into()
+                Item::from_joinsplit(joinsplit, &pub_key)
                     .map_err(tower_fallback::BoxedError::from)?,
             );
 
@@ -104,11 +103,10 @@ where
 
     tracing::trace!(?joinsplit);
 
-    let joinsplit_rsp = verifier.ready().await?.call(
-        DescriptionWrapper(&(joinsplit, pub_key))
-            .try_into()
-            .map_err(tower_fallback::BoxedError::from)?,
-    );
+    let joinsplit_rsp = verifier
+        .ready()
+        .await?
+        .call(Item::from_joinsplit(joinsplit, pub_key).map_err(tower_fallback::BoxedError::from)?);
 
     async_checks.push(joinsplit_rsp);
 
@@ -225,8 +223,7 @@ where
             // which will make the verification fail.
             let modified_pub_key = [0x42; 32].into();
             let joinsplit_rsp = verifier.ready().await?.call(
-                DescriptionWrapper(&(joinsplit, &modified_pub_key))
-                    .try_into()
+                Item::from_joinsplit(joinsplit, &modified_pub_key)
                     .map_err(tower_fallback::BoxedError::from)?,
             );
 
