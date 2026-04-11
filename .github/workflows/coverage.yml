@@ -56,7 +56,6 @@ jobs:
           # TODO: Do we need --locked --release --features "default-release-binaries" here?
           cargo llvm-cov report --lcov --output-path lcov.info
         env:
-          TEST_LARGE_CHECKPOINTS: 1
           # We set cases to 1, because some tests already run 1 case by default.
           # We set maximum shrink iterations to 0, because we don't expect failures in coverage tests.
           # Coverage tests are much slower than other tests, particularly in hot loops.

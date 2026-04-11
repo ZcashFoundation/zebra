@@ -80,9 +80,12 @@ test)
     shift
     exec_as_user zebrad "${CONFIG_ARGS[@]}" "$@"
   elif [[ -n "${NEXTEST_PROFILE}" ]]; then
-    # All test filtering and scoping logic is handled by .config/nextest.toml
-    echo "Running tests with nextest profile: ${NEXTEST_PROFILE}"
-    exec_as_user cargo nextest run --locked --release --features "${FEATURES}" --run-ignored=all --hide-progress-bar
+    FILTER_ARGS=()
+    if [[ -n "${NEXTEST_FILTER}" ]]; then
+      FILTER_ARGS=(--filter-expr "${NEXTEST_FILTER}")
+    fi
+    echo "Running tests with profile=${NEXTEST_PROFILE} filter=${NEXTEST_FILTER:-all}"
+    exec_as_user cargo nextest run --profile "${NEXTEST_PROFILE}" --locked --release --features "${FEATURES}" --run-ignored=all --hide-progress-bar "${FILTER_ARGS[@]}"
   else
     exec_as_user "$@"
   fi

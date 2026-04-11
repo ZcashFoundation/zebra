@@ -86,6 +86,7 @@ pub enum TestType {
     /// Sync to tip from a lightwalletd cached state.
     ///
     /// This test requires a cached Zebra and lightwalletd state.
+    #[allow(dead_code)]
     UpdateCachedState,
 
     /// Launch `zebrad` and sync it to the tip, but don't launch `lightwalletd`.
