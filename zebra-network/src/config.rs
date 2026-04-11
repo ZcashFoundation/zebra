@@ -613,8 +613,13 @@ struct DTestnetParameters {
 #[serde(untagged)]
 enum DNetwork {
     DefaultForKind(NetworkKind),
+    ConfiguredRegtest {
+        params: Box<DTestnetParameters>,
+
+        #[serde(default, skip_serializing)]
+        regtest: Option<bool>,
+    },
     ConfiguredTestnet(Box<DTestnetParameters>),
-    ConfiguredRegtest(Box<DTestnetParameters>),
 }
 
 impl Default for DNetwork {
@@ -722,7 +727,10 @@ impl From<Config> for DConfig {
             },
 
             NetworkKind::Regtest => match network.parameters().map(Into::into) {
-                Some(params) => DNetwork::ConfiguredRegtest(Box::new(params)),
+                Some(params) => DNetwork::ConfiguredRegtest {
+                    params: Box::new(params),
+                    regtest: Some(true),
+                },
                 None => DNetwork::DefaultForKind(NetworkKind::Regtest),
             },
 
@@ -766,7 +774,7 @@ impl<'de> Deserialize<'de> for Config {
             (DNetwork::ConfiguredTestnet(params), _) => {
                 build_configured_testnet::<D>(*params, &initial_testnet_peers)?
             }
-            (DNetwork::ConfiguredRegtest(params), _) => {
+            (DNetwork::ConfiguredRegtest { params, .. }, _) => {
                 Network::new_regtest(build_regtest_params(*params))
             }
             (DNetwork::DefaultForKind(NetworkKind::Mainnet), _) => Network::Mainnet,
