@@ -10,13 +10,20 @@ use crate::config::ZebradConfig;
 
 pub use self::{entry_point::EntryPoint, start::StartCmd};
 
-use self::{copy_state::CopyStateCmd, generate::GenerateCmd, tip_height::TipHeightCmd};
+use self::{
+    copy_state::CopyStateCmd, generate::GenerateCmd, tip_height::TipHeightCmd,
+};
+
+#[cfg(feature = "internal-miner")]
+use self::genesis::GenesisCmd;
 
 pub mod start;
 
 mod copy_state;
 mod entry_point;
 mod generate;
+#[cfg(feature = "internal-miner")]
+mod genesis;
 mod tip_height;
 
 #[cfg(test)]
@@ -36,6 +43,10 @@ pub enum ZebradCmd {
 
     /// Generate a default `zebrad.toml` configuration
     Generate(GenerateCmd),
+
+    /// Generate a genesis block for a new network (requires internal-miner feature)
+    #[cfg(feature = "internal-miner")]
+    Genesis(GenesisCmd),
 
     /// Start the application (default command)
     Start(StartCmd),
@@ -58,6 +69,8 @@ impl ZebradCmd {
 
             // Utility commands that don't use server components
             Generate(_) | TipHeight(_) => false,
+            #[cfg(feature = "internal-miner")]
+            Genesis(_) => false,
         }
     }
 
@@ -72,13 +85,20 @@ impl ZebradCmd {
 
             // Utility commands
             CopyState(_) | Generate(_) | TipHeight(_) => false,
+            #[cfg(feature = "internal-miner")]
+            Genesis(_) => false,
         }
     }
 
     /// Returns true if this command should ignore errors when
     /// attempting to load a config file.
     pub(crate) fn should_ignore_load_config_error(&self) -> bool {
-        matches!(self, ZebradCmd::Generate(_))
+        match self {
+            Generate(_) => true,
+            #[cfg(feature = "internal-miner")]
+            Genesis(_) => true,
+            _ => false,
+        }
     }
 
     /// Returns the default log level for this command, based on the `verbose` command line flag.
@@ -91,6 +111,8 @@ impl ZebradCmd {
             // - is used by automated tools, or
             // - needs to be read easily.
             Generate(_) | TipHeight(_) => true,
+            #[cfg(feature = "internal-miner")]
+            Genesis(_) => true,
 
             // Commands that generate informative logging output by default.
             CopyState(_) | Start(_) => false,
@@ -111,6 +133,8 @@ impl Runnable for ZebradCmd {
         match self {
             CopyState(cmd) => cmd.run(),
             Generate(cmd) => cmd.run(),
+            #[cfg(feature = "internal-miner")]
+            Genesis(cmd) => cmd.run(),
             Start(cmd) => cmd.run(),
             TipHeight(cmd) => cmd.run(),
         }

@@ -16,6 +16,8 @@ pub mod checkpoints;
 pub mod coinbase;
 pub mod config;
 pub mod failure_messages;
+#[cfg(feature = "internal-miner")]
+pub mod genesis;
 pub mod get_block_template_rpcs;
 pub mod launch;
 pub mod lightwalletd;

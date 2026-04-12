@@ -3013,6 +3013,39 @@ async fn regtest_coinbase() -> Result<()> {
     common::coinbase::regtest_coinbase().await
 }
 
+/// Test that `zebrad genesis` command produces valid output.
+///
+/// This test runs the genesis command and verifies it produces a valid
+/// serialized genesis block.
+#[test]
+#[cfg(feature = "internal-miner")]
+fn genesis_command_produces_valid_output() -> Result<()> {
+    common::genesis::genesis_command_produces_output()
+}
+
+/// Test that `zebrad genesis --output` writes to a file.
+///
+/// This test runs the genesis command with an output file and verifies
+/// the file contains a valid serialized genesis block.
+#[test]
+#[cfg(feature = "internal-miner")]
+fn genesis_command_writes_to_output_file() -> Result<()> {
+    common::genesis::genesis_command_writes_to_file()
+}
+
+/// Test that a generated genesis block can be submitted to a custom testnet.
+///
+/// This test:
+/// 1. Generates a genesis block using `zebrad genesis`
+/// 2. Configures a Zebra node for a custom testnet with that genesis hash
+/// 3. Submits the genesis block via the `submitblock` RPC
+/// 4. Verifies the block was accepted
+#[tokio::test]
+#[cfg(feature = "internal-miner")]
+async fn genesis_block_submittable_to_custom_testnet() -> Result<()> {
+    common::genesis::genesis_block_can_be_submitted_to_custom_testnet().await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     use std::sync::Arc;

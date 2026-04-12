@@ -164,15 +164,20 @@ impl Input {
     }
 
     /// Returns the full coinbase script (the encoded height along with the optional miner data) if
-    /// this is an [`Input::Coinbase`]. Also returns `None` if the coinbase is for the genesis block
-    /// but does not match the expected genesis coinbase data.
+    /// this is an [`Input::Coinbase`].
+    ///
+    /// For the standard Zcash genesis block, the raw data is returned directly (pre-BIP34 format).
+    /// For all other blocks including custom genesis blocks, the BIP34 height encoding is
+    /// prepended to the miner data.
+    ///
+    /// Returns `None` if this is a [`Input::PrevOut`].
     pub fn coinbase_script(&self) -> Option<Vec<u8>> {
         match self {
             Input::PrevOut { .. } => None,
             Input::Coinbase { height, data, .. } => {
-                if height.is_min() {
-                    (data.as_slice() == GENESIS_COINBASE_SCRIPT_SIG)
-                        .then_some(GENESIS_COINBASE_SCRIPT_SIG.to_vec())
+                if height.is_min() && data.as_slice() == GENESIS_COINBASE_SCRIPT_SIG {
+                    // The standard Zcash genesis coinbase uses a pre-BIP34 format.
+                    Some(data.clone())
                 } else {
                     let mut script = push_num(height.into()).to_bytes();
                     script.extend_from_slice(data);

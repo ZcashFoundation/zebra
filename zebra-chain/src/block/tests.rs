@@ -6,6 +6,8 @@
 #[cfg(any(test, feature = "bench", feature = "proptest-impl"))]
 pub mod generate;
 #[cfg(test)]
+mod genesis_generate;
+#[cfg(test)]
 mod preallocate;
 #[cfg(test)]
 mod prop;

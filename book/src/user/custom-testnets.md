@@ -121,7 +121,7 @@ There are a few caveats:
 - Configured network upgrade activation heights must be above the genesis block height, which is reserved for Zebra's `Genesis` network upgrade, and must not be above Zebra's max block height of `2^31 - 1`[^fn2].
 - While it's possible to activate Canopy and later network upgrades after height 1, Zebra cannot currently produce pre-Canopy block templates, so the `getblocktemplate` RPC method and Zebra's internal miner which depends on the `getblocktemplate` method won't work until Canopy is activated. An alternative block source will be required to mine pre-Canopy blocks onto Zebra's chain.
 - While it's possible to use the default Testnet network magic with a configured Testnet, Zebra will panic when configured to use the default initial Testnet peers and Testnet parameters that are incompatible with the default public Testnet[^fn3].
-- If the genesis hash is configured, a genesis block will need to be copied into the custom Testnet state or submitted via the `submitblock` RPC method, Zebra cannot currently generate genesis blocks. See the `CreateGenesisBlock()` function in `zcashd/src/chainparams.cpp` for use cases that require a new genesis block.
+- If the genesis hash is configured, a genesis block will need to be submitted via the `submitblock` RPC method before the node can sync. See the [Generating a Genesis Block](#generating-a-genesis-block) section below for how to create a new genesis block.
 
 There are also a few other restrictions on these parameters:
 
@@ -131,6 +131,124 @@ There are also a few other restrictions on these parameters:
   - be shorter than the `MAX_NETWORK_NAME_LENGTH` of `30`.
 - The network magic must not be any of the reserved network magics: `[36, 233, 39, 100]` and `[170, 232, 63, 95]`, these are the `Mainnet` and `Regtest` network magics respectively.
 - The network upgrade activation heights must be in order, such that the activation height for every network upgrade is at or above the activation height of every preceding network upgrade.
+
+## Generating a Genesis Block
+
+When creating a completely new custom testnet (as opposed to forking an existing network), you'll need to generate a new genesis block. Zebra provides the `zebrad genesis` command for this purpose, which requires building Zebra with the `internal-miner` feature.
+
+### Building Zebra with Genesis Block Support
+
+```bash
+cargo build --release --features "internal-miner"
+```
+
+### Using the Genesis Command
+
+The `zebrad genesis` command mines a new genesis block using the Equihash proof-of-work algorithm:
+
+```bash
+zebrad genesis [OPTIONS]
+```
+
+**Options:**
+
+| Option         | Short | Description                             | Default                      |
+|----------------|-------|-----------------------------------------|------------------------------|
+| `--message`    | `-m`  | Timestamp message for coinbase          | "Custom Zcash Genesis Block" |
+| `--pubkey`     | `-k`  | Hex-encoded public key for P2PK output  | Satoshi's key                |
+| `--time`       | `-t`  | Block timestamp (Unix time)             | Current time                 |
+| `--difficulty` | `-d`  | Difficulty target in nBits format (hex) | `1f07ffff`                   |
+| `--version`    | `-v`  | Block version                           | 4                            |
+| `--reward`     | `-r`  | Coinbase reward in zatoshis             | 0                            |
+| `--output`     | `-o`  | Output file for genesis block hex       | stdout                       |
+
+### Example: Creating a Custom Genesis Block
+
+```bash
+# Generate a genesis block with a custom message
+zebrad genesis \
+    --message "My Custom Testnet 2024-01-15" \
+    --difficulty "1f07ffff" \
+    --output genesis_block.hex
+```
+
+The command will output:
+- The genesis block hash (use this in your configuration)
+- The block size
+- The serialized block data (hex-encoded)
+
+### Complete Custom Testnet Workflow
+
+1. **Generate a genesis block:**
+
+   ```bash
+   zebrad genesis \
+       --message "My Custom Testnet Genesis" \
+       --output genesis_block.hex
+   ```
+
+   Note the block hash from the output, e.g., `0004a8b5c...`.
+
+2. **Create a Zebra configuration** with your custom parameters:
+
+   ```toml
+   [mining]
+   miner_address = 't27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v'
+
+   [network]
+   network = "Testnet"
+   initial_testnet_peers = []
+
+   [network.testnet_parameters]
+   network_name = "MyCustomTestnet"
+   network_magic = [0, 1, 0, 255]
+   genesis_hash = "0004a8b5c..."  # Use the hash from step 1
+   slow_start_interval = 0
+   target_difficulty_limit = "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
+   disable_pow = true
+
+   [network.testnet_parameters.activation_heights]
+   NU5 = 1
+
+   [rpc]
+   listen_addr = "127.0.0.1:18232"
+   ```
+
+3. **Start Zebra:**
+
+   ```bash
+   zebrad start -c zebrad.toml
+   ```
+
+4. **Submit the genesis block** via RPC:
+
+   ```bash
+   # Read the genesis block hex and submit it
+   curl -X POST http://127.0.0.1:18232 \
+       -H "Content-Type: application/json" \
+       -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"submitblock\",\"params\":[\"$(cat genesis_block.hex)\"]}"
+   ```
+
+5. **Verify the block was accepted:**
+
+   ```bash
+   curl -X POST http://127.0.0.1:18232 \
+       -H "Content-Type: application/json" \
+       -d '{"jsonrpc":"2.0","id":1,"method":"getblockcount"}'
+   ```
+
+   This should return `0` indicating the genesis block (height 0) is now in the chain.
+
+### Genesis Block Parameters
+
+The genesis block follows the same format as the Zcash mainnet and testnet genesis blocks:
+
+- **Coinbase script**: Contains the difficulty bits and timestamp message (like Bitcoin's famous Times headline)
+- **Output script**: A P2PK (Pay-to-Public-Key) script, traditionally using an unspendable key
+- **Reward**: Typically 0 for genesis blocks (the coinbase output is unspendable anyway with the default key)
+- **Equihash solution**: A valid proof-of-work solution that meets the specified difficulty target
+
+The default public key is the same as Bitcoin's genesis block (Satoshi's key), which is considered unspendable since no one knows the private key.
 
 ## Comparison To Mainnet and Default Public Testnet Consensus Rules
 
