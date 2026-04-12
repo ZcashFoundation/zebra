@@ -139,11 +139,15 @@ unknown-git = "deny"
 # if not specified. If it is specified but empty, no registries are allowed.
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # List of URLs for allowed Git repositories
+# TODO: switch these QED-it entries back to upstream once the fork changes are merged upstream.
 allow-git = [
     "https://github.com/QED-it/librustzcash",
     "https://github.com/QED-it/orchard",
     "https://github.com/QED-it/sapling-crypto",
     "https://github.com/QED-it/zcash_spec",
+    "https://github.com/zcash/halo2",
+    "https://github.com/zcash/sinsemilla",
+    "https://github.com/zcash/zcash_note_encryption",
 ]
 
 [sources.allow-org]
