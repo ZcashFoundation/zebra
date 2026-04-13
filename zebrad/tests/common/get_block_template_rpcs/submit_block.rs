@@ -74,10 +74,16 @@ pub(crate) async fn run() -> Result<()> {
         assert!(res.status().is_success());
         let res_text = res.text().await?;
 
-        // Test rpc endpoint response
+        // Accept `null` (freshly accepted) or `duplicate[-inconclusive]` (already
+        // in the chain/queue): against a live network the capture-submit window
+        // can race with finalization, and a duplicate response still proves the
+        // block was valid and the submitblock path works.
+        let accepted = res_text.contains(r#""result":null"#);
+        let duplicate = res_text.contains(r#""result":"duplicate""#)
+            || res_text.contains(r#""result":"duplicate-inconclusive""#);
         assert!(
-            res_text.contains(r#""result":null"#),
-            "unexpected response from submitblock RPC, should be null, was: {res_text}"
+            accepted || duplicate,
+            "unexpected response from submitblock RPC, should be null or duplicate, was: {res_text}"
         );
     }
 

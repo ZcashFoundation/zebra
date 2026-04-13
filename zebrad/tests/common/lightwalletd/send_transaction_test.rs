@@ -269,7 +269,21 @@ async fn send_transactions_from_block(
         let request = prepare_send_transaction_request(transaction.clone());
 
         match rpc_client.send_transaction(request).await {
-            Ok(response) => assert_eq!(response.into_inner(), expected_response),
+            Ok(response) => {
+                let inner = response.into_inner();
+                // Accept the success response, or the `-25 "transaction is already
+                // in state"` path: against a live network the capture-submit window
+                // can race with finalization, and "already in state" still proves
+                // the transaction was valid and reached the mempool/chain.
+                let newly_accepted = inner == expected_response;
+                let already_in_state =
+                    inner.error_code == -25 && inner.error_message.contains("already in state");
+                assert!(
+                    newly_accepted || already_in_state,
+                    "unexpected response from send-transaction gRPC: {inner:?}; \
+                     expected success or 'already in state'"
+                );
+            }
             Err(err) => {
                 tracing::warn!(?err, "failed to send transaction");
                 let send_tx_rsp = zebrad_rpc_client
