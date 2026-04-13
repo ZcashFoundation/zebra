@@ -360,9 +360,29 @@ jobs:
           fi
           "
 
-  # Upload checkpoint output as an artifact for automated checkpoint PRs.
-  # Only runs for checkpoint generation tests. Extracts "HEIGHT HASH" lines
-  # from the container logs. The checkpoint-update.yml workflow consumes these.
+      # Capture HEIGHT HASH lines from the container logs into a file on the
+      # instance so the upload-checkpoint-artifact job can retrieve them with
+      # `gcloud compute scp` instead of rediscovering the container.
+      - name: Capture checkpoints from container logs
+        if: ${{ startsWith(inputs.test_id, 'generate-checkpoints-') }}
+        env:
+          CONTAINER_ID: ${{ steps.find-container.outputs.CONTAINER_ID }}
+          INSTANCE_NAME: ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}
+          GCP_ZONE: ${{ vars.GCP_ZONE }}
+        run: |
+          gcloud compute ssh "${INSTANCE_NAME}" \
+            --zone "${GCP_ZONE}" \
+            --ssh-flag="-o ServerAliveInterval=5" \
+            --ssh-flag="-o ConnectionAttempts=20" \
+            --ssh-flag="-o ConnectTimeout=5" \
+            --command="
+            sudo docker logs ${CONTAINER_ID} 2>&1 | grep -oE '[0-9]+ [0-9a-f]{64}' > /tmp/checkpoints.txt;
+            echo \"Captured \$(wc -l < /tmp/checkpoints.txt) checkpoint lines\";
+            "
+
+  # Upload the checkpoint file captured in the test-result job as a workflow
+  # artifact for checkpoint-update.yml to consume. Only runs for checkpoint
+  # generation tests.
   upload-checkpoint-artifact:
     name: Upload ${{ inputs.test_id }} checkpoint artifact
     runs-on: ubuntu-latest
@@ -400,33 +420,28 @@ jobs:
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db #v3.0.1
-      - name: Extract checkpoint lines from container logs
+      - name: Pull checkpoint file from instance
         run: |
           INSTANCE_NAME="${TEST_ID}-${GITHUB_REF_SLUG_URL}-${GITHUB_SHA_SHORT}"
-
-          # Single SSH session: find container and extract logs in one command
-          gcloud compute ssh "${INSTANCE_NAME}" \
-            --zone "${GCP_ZONE}" \
-            --ssh-flag="-o ServerAliveInterval=5" \
-            --ssh-flag="-o ConnectionAttempts=20" \
-            --ssh-flag="-o ConnectTimeout=5" \
-            --command="sudo docker ps -a --filter name=${TEST_ID} -q --no-trunc | head -1 | xargs -I{} sudo docker logs {} 2>/dev/null" \
-            | grep -E '^[0-9]+ [0-9a-f]{64}$' \
-            > checkpoint-output.txt || true
-
-          LINES=$(wc -l < checkpoint-output.txt)
-          echo "Extracted ${LINES} checkpoint lines"
-
-          if [ "$LINES" -eq 0 ]; then
-            echo "No checkpoint lines found in container logs"
-            exit 1
+          # Match the repo file naming used by checkpoint-update.yml.
+          if echo "${TEST_ID}" | grep -qi "testnet"; then
+            OUT="test-checkpoints.txt"
+          else
+            OUT="main-checkpoints.txt"
           fi
 
-          # Name to match the repo files: main-checkpoints.txt / test-checkpoints.txt
-          if echo "${TEST_ID}" | grep -qi "testnet"; then
-            mv checkpoint-output.txt "test-checkpoints.txt"
-          else
-            mv checkpoint-output.txt "main-checkpoints.txt"
+          gcloud compute scp \
+            --zone "${GCP_ZONE}" \
+            --ssh-flag="-o ServerAliveInterval=5" \
+            --ssh-flag="-o ConnectTimeout=5" \
+            "${INSTANCE_NAME}:/tmp/checkpoints.txt" \
+            "${OUT}"
+
+          LINES=$(wc -l < "${OUT}")
+          echo "Retrieved ${LINES} checkpoint lines into ${OUT}"
+          if [ "$LINES" -eq 0 ]; then
+            echo "ERROR: checkpoint file empty on instance"
+            exit 1
           fi
 
       - name: Upload checkpoint artifact
