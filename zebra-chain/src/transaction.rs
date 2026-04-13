@@ -1076,6 +1076,30 @@ impl Transaction {
         *self = self.clone().with_transparent_outputs(outputs);
     }
 
+    /// Rebuild this transaction with a replaced Orchard bundle (recomputes txid).
+    ///
+    /// Test helper for synthesizing transactions with malformed orchard data
+    /// (e.g. duplicated actions) that would otherwise be unreachable through
+    /// normal construction paths.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn with_orchard_bundle(
+        self,
+        bundle: Option<::orchard::Bundle<::orchard::bundle::Authorized, ZatBalance>>,
+    ) -> Self {
+        let data = &*self.0;
+        let tx_data = zp_tx::TransactionData::from_parts(
+            data.version(),
+            data.consensus_branch_id(),
+            data.lock_time(),
+            data.expiry_height(),
+            data.transparent_bundle().cloned(),
+            data.sprout_bundle().cloned(),
+            data.sapling_bundle().cloned(),
+            bundle,
+        );
+        Transaction(tx_data.freeze().expect("rebuilt from valid transaction"))
+    }
+
     /// Build a V4 transaction with optional JoinSplit data via byte-level serialization.
     ///
     /// Transparent inputs/outputs and sapling shielded data are empty.

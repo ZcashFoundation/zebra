@@ -2747,11 +2747,76 @@ async fn v5_with_duplicate_sapling_spends() {
 }
 
 /// Test if a V5 transaction with a duplicate Orchard action is rejected by the verifier.
-// TODO: Rewrite when Transaction API supports mutating orchard shielded data.
 #[tokio::test]
-#[ignore = "duplicating an orchard action requires modifying the orchard bundle proofs and action count, which is not feasible with byte-level manipulation"]
 async fn v5_with_duplicate_orchard_action() {
-    // TODO: restore when orchard bundle construction is available (see discussion #10463)
+    use ::orchard::bundle::{Bundle as OrchardBundle, Flags as OrchardFlags};
+    use nonempty::NonEmpty;
+
+    let _init_guard = zebra_test::init();
+
+    for net in Network::iter() {
+        let tx = v5_transactions(net.block_iter())
+            .rev()
+            .find(|tx| {
+                tx.inputs().is_empty()
+                    && tx.outputs().is_empty()
+                    && tx.sapling_spends_count() == 0
+                    && tx.sapling_outputs().next().is_none()
+                    && tx.joinsplit_count() == 0
+                    && tx.has_orchard_shielded_data()
+            })
+            .expect("V5 tx with only Orchard actions");
+
+        let height = tx.expiry_height().expect("expiry height");
+        let duplicate_nullifier = tx
+            .orchard_nullifiers()
+            .next()
+            .expect("tx has at least one orchard action");
+
+        // Duplicate the first action by rebuilding the orchard bundle. The
+        // bundle's binding proof/signature will no longer cover the new action
+        // count, but the duplicate-nullifier check runs before orchard proof
+        // verification, so the verifier short-circuits on the duplication.
+        let orig_bundle = tx
+            .orchard_bundle()
+            .expect("filter guarantees orchard shielded data");
+        let first_action = orig_bundle.actions().first().clone();
+        let mut actions: Vec<_> = orig_bundle.actions().iter().cloned().collect();
+        actions.push(first_action);
+        let actions = NonEmpty::from_vec(actions).expect("non-empty");
+
+        let new_bundle = OrchardBundle::from_parts(
+            actions,
+            // Enable spends so the nullifier participates in consensus checks.
+            OrchardFlags::ENABLED,
+            *orig_bundle.value_balance(),
+            *orig_bundle.anchor(),
+            orig_bundle.authorization().clone(),
+        );
+
+        let tx = tx.with_orchard_bundle(Some(new_bundle));
+
+        let verifier = Verifier::new_for_tests(
+            &net,
+            service_fn(|_| async { unreachable!("State service should not be called") }),
+        );
+
+        assert_eq!(
+            verifier
+                .oneshot(Request::Block {
+                    transaction_hash: tx.hash(),
+                    transaction: Arc::new(tx),
+                    known_utxos: Arc::new(HashMap::new()),
+                    known_outpoint_hashes: Arc::new(HashSet::new()),
+                    height,
+                    time: DateTime::<Utc>::MAX_UTC,
+                })
+                .await,
+            Err(TransactionError::DuplicateOrchardNullifier(
+                duplicate_nullifier
+            ))
+        );
+    }
 }
 
 /// Checks that the tx verifier handles consensus branch ids in V5 txs correctly.
