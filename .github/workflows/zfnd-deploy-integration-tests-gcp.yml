@@ -432,8 +432,6 @@ jobs:
 
           gcloud compute scp \
             --zone "${GCP_ZONE}" \
-            --ssh-flag="-o ServerAliveInterval=5" \
-            --ssh-flag="-o ConnectTimeout=5" \
             "${INSTANCE_NAME}:/tmp/checkpoints.txt" \
             "${OUT}"
 
