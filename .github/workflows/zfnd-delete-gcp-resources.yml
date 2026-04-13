@@ -5,12 +5,7 @@
 # 3. Deletes older disks not currently in use, with certain ones prefixed by commit hashes or "zebrad-".
 # 4. Deletes cache images from GCP, retaining a specified number of the latest images for certain types like zebrad checkpoint cache, zebrad tip cache, and lightwalletd + zebrad tip cache.
 #
-# Artifact Registry image cleanup is handled server-side by a cleanup policy
-# on the zebra repository, not by this workflow. The policy is defined in the
-# cloud-foundation-fabric Terraform stage.
-#
-# It uses the gcloud CLI for its operations and is scheduled to run daily at
-# 0700 UTC.
+# It uses the gcloud CLI for its operations and is scheduled to run daily at 0700 UTC.
 name: Delete GCP resources
 
 on:
