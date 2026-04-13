@@ -15,7 +15,6 @@ use std::{
 
 use futures::{
     future::{FutureExt, TryFutureExt},
-    ready,
     stream::{FuturesUnordered, Stream},
 };
 use pin_project::pin_project;
@@ -263,30 +262,65 @@ where
     type Item = Result<(Height, block::Hash), BlockDownloadVerifyError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        let this = self.project();
+        // Downloads is Unpin (all pinned fields are FuturesUnordered), so we
+        // can get &mut Self and reuse the &mut-self methods below.
+        let this = self.get_mut();
+
         // CORRECTNESS
         //
         // The current task must be scheduled for wakeup every time we return
         // `Poll::Pending`.
         //
-        // If no download and verify tasks have exited since the last poll, this
-        // task is scheduled for wakeup when the next task becomes ready.
+        // Phase 1 drains all completed batch downloads, spawning a verify task
+        // for each successfully downloaded block. Polling `pending_downloads`
+        // with `cx` registers the waker, so the task is rescheduled when any
+        // batch completes.
         //
-        // TODO: this would be cleaner with poll_map (#2693)
-        if let Some(join_result) = ready!(this.pending_verifications.poll_next(cx)) {
-            match join_result.expect("block download and verify tasks must not panic") {
-                Ok((height, hash)) => {
-                    this.cancel_verify_handles.remove(&hash);
+        // Phase 2 polls `pending_verifications` for the next completed verify
+        // result. When `pending_verifications` is empty but `pending_downloads`
+        // still has in-flight batches, we return `Pending` — the waker from
+        // Phase 1 will re-poll us once a batch completes and we can spawn the
+        // next verify task.
+        //
+        // `Ready(None)` is returned only when both queues are empty.
+        while let Poll::Ready(Some(join_result)) =
+            Pin::new(&mut this.pending_downloads).poll_next(cx)
+        {
+            let (batch_key, results) = join_result.expect("batch download tasks must not panic");
+            this.cancel_download_handles.remove(&batch_key);
 
-                    Poll::Ready(Some(Ok((height, hash))))
-                }
-                Err((e, hash)) => {
-                    this.cancel_verify_handles.remove(&hash);
-                    Poll::Ready(Some(Err(e)))
+            for result in results {
+                match result {
+                    Ok((block, addr)) => {
+                        let hash = block.hash();
+                        if this.is_queued_for_verification(&hash) {
+                            this.clear_pending_download(&hash);
+                        } else {
+                            this.spawn_verify_task(hash, async move { Ok((block, addr)) });
+                        }
+                    }
+                    Err(hash) => {
+                        this.clear_pending_download(&hash);
+                    }
                 }
             }
-        } else {
-            Poll::Ready(None)
+        }
+
+        match Pin::new(&mut this.pending_verifications).poll_next(cx) {
+            Poll::Ready(Some(join_result)) => {
+                match join_result.expect("block download and verify tasks must not panic") {
+                    Ok((height, hash)) => {
+                        this.cancel_verify_handles.remove(&hash);
+                        Poll::Ready(Some(Ok((height, hash))))
+                    }
+                    Err((e, hash)) => {
+                        this.cancel_verify_handles.remove(&hash);
+                        Poll::Ready(Some(Err(e)))
+                    }
+                }
+            }
+            Poll::Ready(None) if this.pending_downloads.is_empty() => Poll::Ready(None),
+            _ => Poll::Pending,
         }
     }
 
@@ -408,10 +442,11 @@ where
     /// each round makes forward progress. A retry limit applies only when a
     /// round makes no progress (empty response / network error).
     ///
-    /// The task's JoinHandle is stored in `pending_downloads` so the sync loop
-    /// can poll for completion. A cancel handle is stored in
-    /// `cancel_download_handles` (keyed by the first hash in the batch) so the
-    /// task can be cancelled on sync restart.
+    /// The task's JoinHandle is stored in `pending_downloads`. Completed
+    /// batches are drained inside [`Stream::poll_next`], which spawns a
+    /// verify task for each downloaded block. A cancel handle is stored in
+    /// `cancel_download_handles` (keyed by the first hash in the batch) so
+    /// the task can be cancelled on sync restart.
     pub(super) fn download_batch(&mut self, mut hashes: Vec<block::Hash>) {
         let mut network = self.network.clone();
 
@@ -764,30 +799,6 @@ where
         self.pending_verifications.push(task);
         self.pending_download_hashes.remove(&hash);
         self.cancel_verify_handles.insert(hash, cancel_tx);
-    }
-
-    /// Drains all completed batch download tasks, returning their per-block results.
-    ///
-    /// Each inner `Vec` contains results from one batch: `Ok((block, addr))` for
-    /// successfully downloaded blocks, `Err(hash)` for blocks that exhausted
-    /// retries or were cancelled.
-    ///
-    /// This is non-blocking — it only returns tasks that have already completed.
-    pub(super) fn drain_completed_downloads(
-        &mut self,
-    ) -> Vec<Vec<Result<(Arc<block::Block>, Option<PeerSocketAddr>), block::Hash>>> {
-        let mut batches = Vec::new();
-        let waker = futures::task::noop_waker();
-        let mut cx = std::task::Context::from_waker(&waker);
-
-        while let Poll::Ready(Some(join_result)) =
-            Pin::new(&mut self.pending_downloads).poll_next(&mut cx)
-        {
-            let (batch_key, results) = join_result.expect("batch download tasks must not panic");
-            self.cancel_download_handles.remove(&batch_key);
-            batches.push(results);
-        }
-        batches
     }
 
     /// Cancel all running tasks and reset the downloader state.
