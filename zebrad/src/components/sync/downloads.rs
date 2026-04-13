@@ -232,12 +232,13 @@ where
     // Internal state — download pipeline
     //
     /// Pending batch download tasks. Each task downloads blocks from one or
-    /// more peers and returns `(batch_key, per_block_results)`.
+    /// more peers and returns `(batch_key, per_block_results)`. Each per-block
+    /// result carries the block hash so the stream doesn't need to recompute it.
     #[pin]
     pending_downloads: FuturesUnordered<
         JoinHandle<(
             block::Hash,
-            Vec<Result<(Arc<block::Block>, Option<PeerSocketAddr>), block::Hash>>,
+            Vec<Result<(block::Hash, Arc<block::Block>, Option<PeerSocketAddr>), block::Hash>>,
         )>,
     >,
 
@@ -291,13 +292,8 @@ where
 
             for result in results {
                 match result {
-                    Ok((block, addr)) => {
-                        let hash = block.hash();
-                        if this.is_queued_for_verification(&hash) {
-                            this.clear_pending_download(&hash);
-                        } else {
-                            this.spawn_verify_task(hash, async move { Ok((block, addr)) });
-                        }
+                    Ok((hash, block, addr)) => {
+                        this.spawn_verify_task(hash, async move { Ok((block, addr)) });
                     }
                     Err(hash) => {
                         this.clear_pending_download(&hash);
@@ -463,8 +459,9 @@ where
         let batch_key = hashes[0];
 
         let task = tokio::spawn(async move {
-            let mut results: Vec<Result<(Arc<block::Block>, Option<PeerSocketAddr>), block::Hash>> =
-                Vec::new();
+            let mut results: Vec<
+                Result<(block::Hash, Arc<block::Block>, Option<PeerSocketAddr>), block::Hash>,
+            > = Vec::new();
             let mut retries: HashMap<block::Hash, usize> = hashes.iter().map(|h| (*h, 0)).collect();
             let mut remaining = hashes;
 
@@ -506,7 +503,7 @@ where
                                 let h = block.hash();
                                 received.insert(h);
                                 retries.remove(&h);
-                                results.push(Ok((block, addr)));
+                                results.push(Ok((h, block, addr)));
                             }
                         }
 
@@ -556,11 +553,6 @@ where
         self.cancel_download_handles.insert(batch_key, cancel_tx);
     }
 
-    /// Returns `true` if the given block hash is already queued for download/verification.
-    pub(super) fn is_queued_for_verification(&self, hash: &block::Hash) -> bool {
-        self.cancel_verify_handles.contains_key(hash)
-    }
-
     /// Removes a hash from the pending download set, allowing it to be re-requested.
     pub(super) fn clear_pending_download(&mut self, hash: &block::Hash) {
         self.pending_download_hashes.remove(hash);
@@ -576,6 +568,11 @@ where
             > + Send
             + 'static,
     {
+        // The block has arrived, so it no longer needs download tracking.
+        // Clear unconditionally so the download hash set doesn't leak entries
+        // on the duplicate-verify early return below.
+        self.pending_download_hashes.remove(&hash);
+
         // Skip if this hash is already being verified — avoids orphaning the
         // new cancel handle when the old task completes and removes the entry.
         if self.cancel_verify_handles.contains_key(&hash) {
@@ -797,7 +794,6 @@ where
         );
 
         self.pending_verifications.push(task);
-        self.pending_download_hashes.remove(&hash);
         self.cancel_verify_handles.insert(hash, cancel_tx);
     }
 
