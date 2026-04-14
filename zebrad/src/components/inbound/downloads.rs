@@ -254,7 +254,7 @@ where
             }
             .map_err(|e| (e, None))?;
 
-            let (block, advertiser_addr) = if let zn::Response::Blocks(blocks) = network
+            let (_hash, block, advertiser_addr) = if let zn::Response::Blocks(blocks) = network
                 .oneshot(zn::Request::BlocksByHash(std::iter::once(hash).collect()))
                 .await
                 .map_err(|e| (e, None))?
@@ -352,7 +352,7 @@ where
             }
 
             verifier
-                .oneshot(zebra_consensus::Request::Commit(block))
+                .oneshot(zebra_consensus::Request::Commit(block, hash))
                 .await
                 .map(|hash| (hash, block_height))
                 .map_err(|e| (e, advertiser_addr))

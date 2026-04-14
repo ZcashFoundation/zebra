@@ -66,7 +66,7 @@ async fn single_item_checkpoint_list() -> Result<(), Report> {
     /// SPANDOC: Set up the future for block 0
     let verify_future = timeout(
         Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
-        ready_verifier_service.call(block0.clone()),
+        ready_verifier_service.call((block0.clone(), block0.hash())),
     );
     /// SPANDOC: Wait for the response for block 0
     // TODO(teor || jlusby): check error kind
@@ -148,7 +148,7 @@ async fn multi_item_checkpoint_list() -> Result<(), Report> {
         /// SPANDOC: Set up the future for block {?height}
         let verify_future = timeout(
             Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
-            ready_verifier_service.call(block.clone()),
+            ready_verifier_service.call((block.clone(), block.hash())),
         );
         /// SPANDOC: Wait for the response for block {?height}
         // TODO(teor || jlusby): check error kind
@@ -344,7 +344,7 @@ async fn continuous_blockchain(
             // SPANDOC: Set up the future for block {?height}
             let verify_future = timeout(
                 Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
-                ready_verifier_service.call(block.clone()),
+                ready_verifier_service.call((block.clone(), block.hash())),
             );
 
             // SPANDOC: spawn verification future in the background for block {?height}
@@ -463,7 +463,7 @@ async fn block_higher_than_max_checkpoint_fail() -> Result<(), Report> {
     /// SPANDOC: Set up the future for block 415000
     let verify_future = timeout(
         Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
-        ready_verifier_service.call(block415000.clone()),
+        ready_verifier_service.call((block415000.clone(), block415000.hash())),
     );
     /// SPANDOC: Wait for the response for block 415000, and expect failure
     // TODO(teor || jlusby): check error kind
@@ -538,7 +538,7 @@ async fn wrong_checkpoint_hash_fail() -> Result<(), Report> {
     // TODO(teor || jlusby): check error kind
     let bad_verify_future_1 = timeout(
         Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
-        ready_verifier_service.call(bad_block0.clone()),
+        ready_verifier_service.call((bad_block0.clone(), bad_block0.hash())),
     );
     // We can't await the future yet, because bad blocks aren't cleared
     // until the chain is verified
@@ -562,7 +562,7 @@ async fn wrong_checkpoint_hash_fail() -> Result<(), Report> {
     // TODO(teor || jlusby): check error kind
     let bad_verify_future_2 = timeout(
         Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
-        ready_verifier_service.call(bad_block0.clone()),
+        ready_verifier_service.call((bad_block0.clone(), bad_block0.hash())),
     );
     // We can't await the future yet, because bad blocks aren't cleared
     // until the chain is verified
@@ -585,7 +585,7 @@ async fn wrong_checkpoint_hash_fail() -> Result<(), Report> {
     /// SPANDOC: Set up the future for good block 0 (3/3)
     let good_verify_future = timeout(
         Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
-        ready_verifier_service.call(good_block0.clone()),
+        ready_verifier_service.call((good_block0.clone(), good_block0.hash())),
     );
     /// SPANDOC: Wait for the response for good block 0, and expect success (3/3)
     // TODO(teor || jlusby): check error kind
@@ -714,7 +714,7 @@ async fn checkpoint_drop_cancel() -> Result<(), Report> {
         /// SPANDOC: Set up the future for block {?height}
         let verify_future = timeout(
             Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
-            ready_verifier_service.call(block.clone()),
+            ready_verifier_service.call((block.clone(), block.hash())),
         );
 
         futures.push((verify_future, height, hash));
@@ -789,7 +789,7 @@ async fn hard_coded_mainnet() -> Result<(), Report> {
     /// SPANDOC: Set up the future for block 0
     let verify_future = timeout(
         Duration::from_secs(VERIFY_TIMEOUT_SECONDS),
-        ready_verifier_service.call(block0.clone()),
+        ready_verifier_service.call((block0.clone(), block0.hash())),
     );
     /// SPANDOC: Wait for the response for block 0
     // TODO(teor || jlusby): check error kind

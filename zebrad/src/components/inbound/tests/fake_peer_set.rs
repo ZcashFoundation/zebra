@@ -684,7 +684,7 @@ async fn inbound_block_height_lookahead_limit() -> Result<(), crate::BoxError> {
     peer_set
         .expect_request(Request::BlocksByHash(iter::once(block_hash).collect()))
         .await
-        .respond(Response::Blocks(vec![Available((block, None))]));
+        .respond(Response::Blocks(vec![Available((block_hash, block, None))]));
 
     // Wait for the chain tip update
     if let Err(timeout_error) = timeout(
@@ -720,7 +720,7 @@ async fn inbound_block_height_lookahead_limit() -> Result<(), crate::BoxError> {
     peer_set
         .expect_request(Request::BlocksByHash(iter::once(block_hash).collect()))
         .await
-        .respond(Response::Blocks(vec![Available((block, None))]));
+        .respond(Response::Blocks(vec![Available((block_hash, block, None))]));
 
     let response = state_service
         .clone()

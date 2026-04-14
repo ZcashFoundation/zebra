@@ -32,8 +32,8 @@ static VALID_BLOCK_TRANSCRIPT: Lazy<Vec<(Request, Result<block::Hash, ExpectedTr
             Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
                 .unwrap()
                 .into();
-        let hash = Ok(block.as_ref().into());
-        vec![(Request::Commit(block), hash)]
+        let hash = block.hash();
+        vec![(Request::Commit(block, hash), Ok(hash))]
     });
 
 static INVALID_TIME_BLOCK_TRANSCRIPT: Lazy<
@@ -52,8 +52,11 @@ static INVALID_TIME_BLOCK_TRANSCRIPT: Lazy<
         .unwrap();
     Arc::make_mut(&mut block.header).time = three_hours_in_the_future;
 
+    let block = Arc::new(block);
+    let hash = block.hash();
+
     vec![(
-        Request::Commit(Arc::new(block)),
+        Request::Commit(block, hash),
         Err(ExpectedTranscriptError::Any),
     )]
 });
@@ -67,8 +70,11 @@ static INVALID_HEADER_SOLUTION_TRANSCRIPT: Lazy<
     // Change nonce to something invalid
     Arc::make_mut(&mut block.header).nonce = [0; 32].into();
 
+    let block = Arc::new(block);
+    let hash = block.hash();
+
     vec![(
-        Request::Commit(Arc::new(block)),
+        Request::Commit(block, hash),
         Err(ExpectedTranscriptError::Any),
     )]
 });
@@ -107,17 +113,24 @@ static INVALID_COINBASE_TRANSCRIPT: Lazy<
     block3.transactions.push(coinbase_transaction);
     assert_eq!(block3.transactions.len(), 2);
 
+    let block1 = Arc::new(block1);
+    let hash1 = block1.hash();
+    let block2 = Arc::new(block2);
+    let hash2 = block2.hash();
+    let block3 = Arc::new(block3);
+    let hash3 = block3.hash();
+
     vec![
         (
-            Request::Commit(Arc::new(block1)),
+            Request::Commit(block1, hash1),
             Err(ExpectedTranscriptError::Any),
         ),
         (
-            Request::Commit(Arc::new(block2)),
+            Request::Commit(block2, hash2),
             Err(ExpectedTranscriptError::Any),
         ),
         (
-            Request::Commit(Arc::new(block3)),
+            Request::Commit(block3, hash3),
             Err(ExpectedTranscriptError::Any),
         ),
     ]

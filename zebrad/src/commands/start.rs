@@ -380,9 +380,14 @@ impl StartCmd {
                 .state_contains(config.network.network.genesis_hash())
                 .await?
         {
+            let genesis_block = regtest_genesis_block();
+            let expected_genesis_hash = genesis_block.hash();
             let genesis_hash = block_verifier_router
                 .clone()
-                .oneshot(zebra_consensus::Request::Commit(regtest_genesis_block()))
+                .oneshot(zebra_consensus::Request::Commit(
+                    genesis_block,
+                    expected_genesis_hash,
+                ))
                 .await
                 .expect("should validate Regtest genesis block");
 

@@ -89,12 +89,13 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
         .expect_request(zn::Request::BlocksByHash(iter::once(block0_hash).collect()))
         .await
         .respond(zn::Response::Blocks(vec![Available((
+            block0_hash,
             block0.clone(),
             None,
         ))]));
 
     block_verifier_router
-        .expect_request(zebra_consensus::Request::Commit(block0))
+        .expect_request(zebra_consensus::Request::Commit(block0, block0_hash))
         .await
         .respond(block0_hash);
 
@@ -175,15 +176,15 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
                 match sender.request() {
                     zn::Request::BlocksByHash(hashes) if hashes.contains(&block1_hash) => {
                         sender.respond(zn::Response::Blocks(vec![
-                            Available((remaining_blocks[&block1_hash].clone(), None)),
-                            Available((remaining_blocks[&block2_hash].clone(), None)),
+                            Available((block1_hash, remaining_blocks[&block1_hash].clone(), None)),
+                            Available((block2_hash, remaining_blocks[&block2_hash].clone(), None)),
                         ]));
                         blocks12_responded = true;
                     }
                     zn::Request::BlocksByHash(hashes) if hashes.contains(&block3_hash) => {
                         sender.respond(zn::Response::Blocks(vec![
-                            Available((remaining_blocks[&block3_hash].clone(), None)),
-                            Available((remaining_blocks[&block4_hash].clone(), None)),
+                            Available((block3_hash, remaining_blocks[&block3_hash].clone(), None)),
+                            Available((block4_hash, remaining_blocks[&block4_hash].clone(), None)),
                         ]));
                         blocks34_responded = true;
                     }
@@ -293,12 +294,13 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
         .expect_request(zn::Request::BlocksByHash(iter::once(block0_hash).collect()))
         .await
         .respond(zn::Response::Blocks(vec![Available((
+            block0_hash,
             block0.clone(),
             None,
         ))]));
 
     block_verifier_router
-        .expect_request(zebra_consensus::Request::Commit(block0))
+        .expect_request(zebra_consensus::Request::Commit(block0, block0_hash))
         .await
         .respond(block0_hash);
 
@@ -378,15 +380,15 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
                 match sender.request() {
                     zn::Request::BlocksByHash(hashes) if hashes.contains(&block1_hash) => {
                         sender.respond(zn::Response::Blocks(vec![
-                            Available((remaining_blocks[&block1_hash].clone(), None)),
-                            Available((remaining_blocks[&block2_hash].clone(), None)),
+                            Available((block1_hash, remaining_blocks[&block1_hash].clone(), None)),
+                            Available((block2_hash, remaining_blocks[&block2_hash].clone(), None)),
                         ]));
                         blocks12_responded = true;
                     }
                     zn::Request::BlocksByHash(hashes) if hashes.contains(&block3_hash) => {
                         sender.respond(zn::Response::Blocks(vec![
-                            Available((remaining_blocks[&block3_hash].clone(), None)),
-                            Available((remaining_blocks[&block4_hash].clone(), None)),
+                            Available((block3_hash, remaining_blocks[&block3_hash].clone(), None)),
+                            Available((block4_hash, remaining_blocks[&block4_hash].clone(), None)),
                         ]));
                         blocks34_responded = true;
                     }
@@ -467,6 +469,7 @@ async fn sync_block_lookahead_drop() -> Result<(), crate::BoxError> {
     // Get a block that is a long way away from genesis
     let block982k: Arc<Block> =
         zebra_test::vectors::BLOCK_MAINNET_982681_BYTES.zcash_deserialize_into()?;
+    let block982k_hash = block982k.hash();
 
     // Start the syncer
     let chain_sync_task_handle = tokio::spawn(chain_sync_future);
@@ -484,6 +487,7 @@ async fn sync_block_lookahead_drop() -> Result<(), crate::BoxError> {
         .expect_request(zn::Request::BlocksByHash(iter::once(block0_hash).collect()))
         .await
         .respond(zn::Response::Blocks(vec![Available((
+            block982k_hash,
             block982k.clone(),
             None,
         ))]));
@@ -552,12 +556,13 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
         .expect_request(zn::Request::BlocksByHash(iter::once(block0_hash).collect()))
         .await
         .respond(zn::Response::Blocks(vec![Available((
+            block0_hash,
             block0.clone(),
             None,
         ))]));
 
     block_verifier_router
-        .expect_request(zebra_consensus::Request::Commit(block0))
+        .expect_request(zebra_consensus::Request::Commit(block0, block0_hash))
         .await
         .respond(block0_hash);
 
@@ -645,9 +650,9 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
         match sender.request() {
             zn::Request::BlocksByHash(_) => {
                 sender.respond(zn::Response::Blocks(vec![
-                    Available((block982k.clone(), None)),
-                    Available((block1.clone(), None)),
-                    Available((block2.clone(), None)),
+                    Available((block982k_hash, block982k.clone(), None)),
+                    Available((block1_hash, block1.clone(), None)),
+                    Available((block2_hash, block2.clone(), None)),
                 ]));
                 batch_responded = true;
             }
@@ -728,12 +733,13 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
         .expect_request(zn::Request::BlocksByHash(iter::once(block0_hash).collect()))
         .await
         .respond(zn::Response::Blocks(vec![Available((
+            block0_hash,
             block0.clone(),
             None,
         ))]));
 
     block_verifier_router
-        .expect_request(zebra_consensus::Request::Commit(block0))
+        .expect_request(zebra_consensus::Request::Commit(block0, block0_hash))
         .await
         .respond(block0_hash);
 
@@ -808,16 +814,16 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
                 match sender.request() {
                     zn::Request::BlocksByHash(hashes) if hashes.contains(&block1_hash) => {
                         sender.respond(zn::Response::Blocks(vec![
-                            Available((remaining_blocks[&block1_hash].clone(), None)),
-                            Available((remaining_blocks[&block2_hash].clone(), None)),
+                            Available((block1_hash, remaining_blocks[&block1_hash].clone(), None)),
+                            Available((block2_hash, remaining_blocks[&block2_hash].clone(), None)),
                         ]));
                         blocks12_responded = true;
                     }
                     zn::Request::BlocksByHash(hashes) if hashes.contains(&block3_hash) => {
                         sender.respond(zn::Response::Blocks(vec![
-                            Available((block3.clone(), None)),
-                            Available((block4.clone(), None)),
-                            Available((block982k.clone(), None)),
+                            Available((block3_hash, block3.clone(), None)),
+                            Available((block4_hash, block4.clone(), None)),
+                            Available((block982k_hash, block982k.clone(), None)),
                         ]));
                         blocks34_responded = true;
                     }

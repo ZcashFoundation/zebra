@@ -416,8 +416,7 @@ where
 
                         let mut received = HashSet::new();
                         for item in blocks {
-                            if let Some((block, addr)) = item.available() {
-                                let h = block.hash();
+                            if let Some((h, block, addr)) = item.available() {
                                 received.insert(h);
                                 retries.remove(&h);
                                 results.push(Ok((h, block, addr)));
@@ -682,7 +681,7 @@ where
                 let verify_start = std::time::Instant::now();
                 let mut rsp = verifier
                     .map_err(|error| BlockDownloadVerifyError::VerifierServiceError { error })?
-                    .call(zebra_consensus::Request::Commit(block)).boxed();
+                    .call(zebra_consensus::Request::Commit(block, hash)).boxed();
 
                 // Add a shorter timeout to workaround a known bug (#5125)
                 let short_timeout_max = (max_checkpoint_height + FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT).expect("checkpoint block height is in valid range");

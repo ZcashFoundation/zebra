@@ -168,13 +168,13 @@ where
         let mut transaction_verifier = self.transaction_verifier.clone();
         let network = self.network.clone();
 
+        let hash = request.hash();
         let block = request.block();
 
         // We don't include the block hash, because it's likely already in a parent span
         let span = tracing::debug_span!("block", height = ?block.coinbase_height());
 
         async move {
-            let hash = block.hash();
             // Check that this block is actually a new block.
             tracing::trace!("checking that block is not already in state");
             match state_service
