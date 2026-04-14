@@ -14,14 +14,16 @@ use tokio::sync::{
 use tracing::Span;
 use zebra_chain::{
     block::{self, Height},
-    transparent::EXTRA_ZEBRA_COINBASE_DATA,
+    parallel::tree::NoteCommitmentTrees,
+    transparent::{self, EXTRA_ZEBRA_COINBASE_DATA},
 };
 
 use crate::{
     constants::MAX_BLOCK_REORG_HEIGHT,
+    request::{FinalizableBlock, FinalizedBlock},
     service::{
         check,
-        finalized_state::{FinalizedState, ZebraDb},
+        finalized_state::{FinalizedState, OutputLocation, ZebraDb},
         non_finalized_state::NonFinalizedState,
         queued_blocks::{QueuedCheckpointVerified, QueuedSemanticallyVerified},
         ChainTipBlock, ChainTipSender, InvalidateError, ReconsiderError,
@@ -40,6 +42,20 @@ use crate::service::{
 ///
 /// We allow enough space for multiple concurrent chain forks with errors.
 const PARENT_ERROR_MAP_LIMIT: usize = MAX_BLOCK_REORG_HEIGHT as usize * 2;
+
+/// The capacity of the crossbeam channel from Thread 1 (block committer) to Thread 2
+/// (UTXO/output-location lookup).
+const PIPELINE_LOOKUP_CHANNEL_CAPACITY: usize = 100;
+
+/// The capacity of the crossbeam channel from Thread 2 (UTXO lookup) to Thread 3
+/// (batch preparation + disk writer).
+const PIPELINE_WRITE_CHANNEL_CAPACITY: usize = 100;
+
+/// Thread 2 → Thread 3: a finalized block with its pre-looked-up spent UTXOs.
+type BlockWrite = (
+    FinalizedBlock,
+    Vec<(transparent::OutPoint, OutputLocation, transparent::Utxo)>,
+);
 
 /// Run contextual validation on the prepared block and add it to the
 /// non-finalized state if it is contextually valid.
@@ -267,79 +283,202 @@ impl WriteBlockWorkerTask {
         let mut last_zebra_mined_log_height = None;
         let mut prev_finalized_note_commitment_trees = None;
 
-        // Write all the finalized blocks sent by the state,
-        // until the state closes the finalized block channel's sender.
-        while let Some(ordered_block) = finalized_block_write_receiver.blocking_recv() {
-            // TODO: split these checks into separate functions
+        // Pipeline: commit checkpoint-verified blocks to the non-finalized state (Thread 1),
+        // look up spent UTXOs/output-locations (Thread 2), then prepare batch and write to
+        // disk (Thread 3). This avoids blocking Thread 1 on any disk I/O.
+        let (lookup_tx, lookup_rx) =
+            crossbeam_channel::bounded::<FinalizedBlock>(PIPELINE_LOOKUP_CHANNEL_CAPACITY);
+        let (write_tx, write_rx) =
+            crossbeam_channel::bounded::<BlockWrite>(PIPELINE_WRITE_CHANNEL_CAPACITY);
 
-            if invalid_block_reset_sender.is_closed() {
-                info!("StateService closed the block reset channel. Is Zebra shutting down?");
-                return;
-            }
+        // Subscribe to the non-finalized state watch channel before spawning Thread 2,
+        // so the receiver is moved into the thread.
+        let nfs_receiver = non_finalized_state_sender.subscribe();
 
-            // Discard any children of invalid blocks in the channel
-            //
-            // `commit_finalized()` requires blocks in height order.
-            // So if there has been a block commit error,
-            // we need to drop all the descendants of that block,
-            // until we receive a block at the required next height.
-            let next_valid_height = finalized_state
+        std::thread::scope(|s| {
+            // Thread 2: look up spent UTXOs and output locations
+            let db2 = finalized_state.db.clone();
+            s.spawn(move || {
+                while let Ok(msg) = lookup_rx.recv() {
+                    // Clone the latest non-finalized state once per block so that UTXOs
+                    // created by blocks not yet on disk can be found.
+                    let latest_nfs = nfs_receiver.borrow().clone();
+                    let spent_utxos = db2.lookup_spent_utxos(&msg, &latest_nfs);
+                    write_tx
+                        .send((msg, spent_utxos))
+                        .expect("disk writer thread should be alive");
+                }
+            });
+
+            // Thread 3: prepare batch and write to disk
+            let mut db3 = finalized_state.db.clone();
+            let network = non_finalized_state.network.clone();
+            s.spawn(move || {
+                let mut prev_note_commitment_trees: Option<NoteCommitmentTrees> = None;
+                while let Ok((finalized, spent_utxos)) = write_rx.recv() {
+                    let note_commitment_trees = finalized.treestate.note_commitment_trees.clone();
+                    let height = finalized.height;
+
+                    db3.write_block(
+                        finalized,
+                        spent_utxos,
+                        prev_note_commitment_trees.take(),
+                        &network,
+                        "commit checkpoint-verified pipeline",
+                    )
+                    .expect(
+                        "unexpected disk write error: \
+                         block has already been validated by the non-finalized state",
+                    );
+
+                    prev_note_commitment_trees = Some(note_commitment_trees);
+
+                    metrics::counter!("state.checkpoint.finalized.block.count").increment(1);
+                    metrics::gauge!("state.checkpoint.finalized.block.height").set(height.0 as f64);
+                    metrics::gauge!("zcash.chain.verified.block.height").set(height.0 as f64);
+                    metrics::counter!("zcash.chain.verified.block.total").increment(1);
+                }
+            });
+
+            // Thread 1: commit checkpoint-verified blocks to the non-finalized state
+            // and feed them into the pipeline.
+            let mut next_expected_height = finalized_state
                 .db
                 .finalized_tip_height()
                 .map(|height| (height + 1).expect("committed heights are valid"))
                 .unwrap_or(Height(0));
 
-            if ordered_block.0.height != next_valid_height {
-                debug!(
-                    ?next_valid_height,
-                    invalid_height = ?ordered_block.0.height,
-                    invalid_hash = ?ordered_block.0.hash,
-                    "got a block that was the wrong height. \
-                     Assuming a parent block failed, and dropping this block",
-                );
-
-                // We don't want to send a reset here, because it could overwrite a valid sent hash
-                std::mem::drop(ordered_block);
-                continue;
-            }
-
-            // Try committing the block
-            match finalized_state
-                .commit_finalized(ordered_block, prev_finalized_note_commitment_trees.take())
+            while let Some((checkpoint_verified, rsp_tx)) =
+                finalized_block_write_receiver.blocking_recv()
             {
-                Ok((finalized, note_commitment_trees)) => {
-                    let tip_block = ChainTipBlock::from(finalized);
-                    prev_finalized_note_commitment_trees = Some(note_commitment_trees);
-
-                    log_if_mined_by_zebra(&tip_block, &mut last_zebra_mined_log_height);
-
-                    chain_tip_sender.set_finalized_tip(tip_block);
+                if invalid_block_reset_sender.is_closed() {
+                    info!("StateService closed the block reset channel. Is Zebra shutting down?");
+                    return;
                 }
-                Err(error) => {
-                    let finalized_tip = finalized_state.db.tip();
 
-                    // The last block in the queue failed, so we can't commit the next block.
-                    // Instead, we need to reset the state queue,
-                    // and discard any children of the invalid block in the channel.
-                    info!(
-                        ?error,
-                        last_valid_height = ?finalized_tip.map(|tip| tip.0),
-                        last_valid_hash = ?finalized_tip.map(|tip| tip.1),
-                        "committing a block to the finalized state failed, resetting state queue",
+                // Discard blocks at the wrong height (e.g. descendants of a failed block).
+                if checkpoint_verified.height != next_expected_height {
+                    debug!(
+                        ?next_expected_height,
+                        invalid_height = ?checkpoint_verified.height,
+                        invalid_hash = ?checkpoint_verified.hash,
+                        "got a block that was the wrong height. \
+                         Assuming a parent block failed, and dropping this block",
+                    );
+                    std::mem::drop((checkpoint_verified, rsp_tx));
+                    continue;
+                }
+
+                // The genesis block must be committed directly to disk because
+                // the non-finalized state's Chain requires a finalized tip to
+                // initialize its tree state from.
+                if checkpoint_verified.height == Height(0) {
+                    match finalized_state.commit_finalized(
+                        (checkpoint_verified, rsp_tx),
+                        prev_finalized_note_commitment_trees.take(),
+                    ) {
+                        Ok((committed, note_commitment_trees)) => {
+                            let tip_block = ChainTipBlock::from(committed);
+                            prev_finalized_note_commitment_trees = Some(note_commitment_trees);
+
+                            log_if_mined_by_zebra(&tip_block, &mut last_zebra_mined_log_height);
+                            chain_tip_sender.set_finalized_tip(tip_block);
+                        }
+                        Err(error) => {
+                            let finalized_tip = finalized_state.db.tip();
+                            info!(
+                                ?error,
+                                last_valid_height = ?finalized_tip.map(|tip| tip.0),
+                                last_valid_hash = ?finalized_tip.map(|tip| tip.1),
+                                "committing genesis block to the finalized state failed",
+                            );
+
+                            let send_result = invalid_block_reset_sender
+                                .send(finalized_state.db.finalized_tip_hash());
+                            if send_result.is_err() {
+                                info!(
+                                    "StateService closed the block reset channel. \
+                                       Is Zebra shutting down?"
+                                );
+                                return;
+                            }
+                        }
+                    }
+
+                    next_expected_height = (next_expected_height + 1)
+                        .expect("block heights in the pipeline are valid");
+                    continue;
+                }
+
+                // Commit block to the non-finalized state (fast, in-memory).
+                let tip_block = non_finalized_state
+                    .commit_checkpoint_block(checkpoint_verified.clone(), &finalized_state.db)
+                    .expect(
+                        "checkpoint block commit to non-finalized state should succeed \
+                         because the checkpoint verifier has already validated the hash chain",
                     );
 
-                    let send_result =
-                        invalid_block_reset_sender.send(finalized_state.db.finalized_tip_hash());
+                // Send the updated non-finalized state to the watch channel BEFORE sending
+                // the block to Thread 2, so Thread 2 is guaranteed to see the latest UTXOs.
+                let _ = non_finalized_state_sender.send(non_finalized_state.clone());
 
-                    if send_result.is_err() {
-                        info!(
-                            "StateService closed the block reset channel. Is Zebra shutting down?"
-                        );
-                        return;
+                log_if_mined_by_zebra(&tip_block, &mut last_zebra_mined_log_height);
+                chain_tip_sender.set_best_non_finalized_tip(tip_block);
+
+                // Get the finalizable block with its treestate already computed.
+                let finalizable = non_finalized_state
+                    .peek_finalize_tip()
+                    .expect("just committed a block to the non-finalized state");
+
+                let finalized_block = match finalizable {
+                    FinalizableBlock::Contextual {
+                        contextually_verified,
+                        treestate,
+                    } => {
+                        FinalizedBlock::from_contextually_verified(contextually_verified, treestate)
+                    }
+                    FinalizableBlock::Checkpoint { .. } => {
+                        unreachable!("peek_finalize_tip always returns Contextual")
+                    }
+                };
+
+                // Send to the pipeline for UTXO lookup and disk write.
+                lookup_tx
+                    .send(finalized_block)
+                    .expect("UTXO lookup thread should be alive");
+
+                // Respond to the caller immediately — the block is in the non-finalized
+                // state and queryable by the state service.
+                let _ = rsp_tx.send(Ok(checkpoint_verified.hash));
+
+                // Prune blocks from the non-finalized state that have already
+                // been written to disk by Thread 3.
+                if let Some(finalized_tip_height) = finalized_state.db.finalized_tip_height() {
+                    while non_finalized_state
+                        .root_height()
+                        .is_some_and(|root| root <= finalized_tip_height)
+                    {
+                        non_finalized_state.finalize();
                     }
                 }
+
+                next_expected_height =
+                    (next_expected_height + 1).expect("block heights in the pipeline are valid");
             }
+
+            // Drop the sender to signal the pipeline to drain and finish.
+            drop(lookup_tx);
+            // Scoped threads are automatically joined when the scope exits.
+        });
+
+        // All checkpoint blocks have been written to disk by the pipeline.
+        // Remove them from the non-finalized state so Phase 2 starts clean.
+        while non_finalized_state.best_chain_len().unwrap_or(0) > 0 {
+            non_finalized_state.finalize();
         }
+
+        // Update channels to reflect the now-empty non-finalized state.
+        let _ = non_finalized_state_sender.send(non_finalized_state.clone());
 
         // Do this check even if the channel got closed before any finalized blocks were sent.
         // This can happen if we're past the finalized tip.

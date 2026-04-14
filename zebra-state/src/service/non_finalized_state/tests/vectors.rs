@@ -12,14 +12,17 @@ use zebra_chain::{
 };
 use zebra_test::prelude::*;
 
+use zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS;
+
 use crate::{
     arbitrary::Prepare,
+    request::{FinalizedBlock, Treestate},
     service::{
         finalized_state::FinalizedState,
         non_finalized_state::{Chain, NonFinalizedState, MIN_DURATION_BETWEEN_BACKUP_UPDATES},
     },
     tests::FakeChainHelper,
-    Config,
+    CheckpointVerifiedBlock, Config,
 };
 
 #[test]
@@ -824,4 +827,299 @@ async fn non_finalized_state_writes_blocks_to_and_restores_blocks_from_backup_ca
         "non-finalized state should have restored the block committed \
         to the previous non-finalized state"
     );
+}
+
+/// Helper function that writes the genesis block to the finalized state and returns
+/// the finalized state and the list of continuous mainnet blocks (excluding genesis).
+///
+/// This is needed because `commit_checkpoint_block` expects the finalized state to
+/// already contain the parent block's tree state.
+fn write_genesis_to_finalized(network: &Network) -> (FinalizedState, Vec<(u32, Arc<Block>)>) {
+    let (finalized_state, empty_nfs) = test_state();
+
+    // Write genesis to the finalized state.
+    let genesis: Arc<Block> = CONTINUOUS_MAINNET_BLOCKS
+        .get(&0)
+        .unwrap()
+        .zcash_deserialize_into()
+        .unwrap();
+    let checkpoint_verified = CheckpointVerifiedBlock::from(genesis.clone());
+    let treestate = Treestate::default();
+    let finalized = FinalizedBlock::from_checkpoint_verified(checkpoint_verified, treestate);
+
+    let spent_utxos = finalized_state
+        .db
+        .lookup_spent_utxos(&finalized, &empty_nfs);
+    // Clone the db to get a mutable reference.
+    let mut db = finalized_state.db.clone();
+    db.write_block(finalized, spent_utxos, None, network, "test")
+        .expect("write_block should succeed for genesis");
+
+    // Collect non-genesis blocks.
+    let remaining_blocks: Vec<(u32, Arc<Block>)> = CONTINUOUS_MAINNET_BLOCKS
+        .iter()
+        .skip(1)
+        .map(|(&h, bytes)| (h, bytes.zcash_deserialize_into().unwrap()))
+        .collect();
+
+    (finalized_state, remaining_blocks)
+}
+
+/// Test that `commit_checkpoint_block` commits blocks after genesis to the non-finalized state.
+#[test]
+fn commit_checkpoint_block_after_genesis() {
+    let _init_guard = zebra_test::init();
+
+    let (finalized_state, remaining_blocks) = write_genesis_to_finalized(&Network::Mainnet);
+    let (_, mut nfs) = test_state();
+    assert!(nfs.best_chain().is_none(), "NFS should start empty");
+
+    // Commit block 1 to the NFS via checkpoint path.
+    let (height, block) = &remaining_blocks[0];
+    let tip_block = nfs
+        .commit_checkpoint_block(
+            CheckpointVerifiedBlock::from(block.clone()),
+            &finalized_state.db,
+        )
+        .expect("commit_checkpoint_block should succeed for block 1");
+
+    assert_eq!(
+        tip_block.hash,
+        block.hash(),
+        "returned tip block hash should match block 1 hash"
+    );
+    assert_eq!(
+        nfs.best_chain_len(),
+        Some(1),
+        "NFS should have exactly one block after committing block 1"
+    );
+
+    let (tip_height, tip_hash) = nfs.best_tip().expect("NFS should have a tip");
+    assert_eq!(tip_height, Height(*height), "tip height should match");
+    assert_eq!(tip_hash, block.hash(), "tip hash should match");
+}
+
+/// Test that `commit_checkpoint_block` can commit multiple sequential blocks after genesis.
+#[test]
+fn commit_checkpoint_block_sequential_blocks() {
+    let _init_guard = zebra_test::init();
+
+    let (finalized_state, remaining_blocks) = write_genesis_to_finalized(&Network::Mainnet);
+    let (_, mut nfs) = test_state();
+
+    // Commit blocks 1 through 10.
+    for (height, block) in &remaining_blocks {
+        nfs.commit_checkpoint_block(
+            CheckpointVerifiedBlock::from(block.clone()),
+            &finalized_state.db,
+        )
+        .unwrap_or_else(|e| panic!("commit_checkpoint_block failed at height {height}: {e:?}"));
+    }
+
+    let block_count = remaining_blocks.len();
+    assert_eq!(
+        nfs.best_chain_len(),
+        Some(block_count as u32),
+        "NFS should contain all committed blocks"
+    );
+
+    let (last_height, last_block) = remaining_blocks.last().unwrap();
+    let (tip_height, tip_hash) = nfs.best_tip().expect("NFS should have a tip");
+    assert_eq!(
+        tip_height,
+        Height(*last_height),
+        "tip should be at the last committed block height"
+    );
+    assert_eq!(
+        tip_hash,
+        last_block.hash(),
+        "tip hash should match the last committed block"
+    );
+}
+
+/// Test that `finalize()` pops the lowest block from a chain built with `commit_checkpoint_block`.
+#[test]
+fn finalize_after_commit_checkpoint_block() {
+    let _init_guard = zebra_test::init();
+
+    let (finalized_state, remaining_blocks) = write_genesis_to_finalized(&Network::Mainnet);
+    let (_, mut nfs) = test_state();
+
+    // Commit blocks 1, 2, 3 via checkpoint path.
+    let blocks: Vec<Arc<Block>> = remaining_blocks
+        .iter()
+        .take(3)
+        .map(|(_, b)| b.clone())
+        .collect();
+
+    for block in &blocks {
+        nfs.commit_checkpoint_block(
+            CheckpointVerifiedBlock::from(block.clone()),
+            &finalized_state.db,
+        )
+        .expect("commit_checkpoint_block should succeed");
+    }
+
+    assert_eq!(nfs.best_chain_len(), Some(3));
+
+    // Finalize the root block (height 1).
+    let finalized = nfs.finalize();
+    let finalized_block = finalized.inner_block();
+    assert_eq!(
+        finalized_block.hash(),
+        blocks[0].hash(),
+        "first finalized block should be block 1"
+    );
+
+    assert_eq!(
+        nfs.best_chain_len(),
+        Some(2),
+        "NFS should have 2 blocks after finalizing root"
+    );
+
+    // Finalize the next block (height 2).
+    let finalized = nfs.finalize();
+    let finalized_block = finalized.inner_block();
+    assert_eq!(
+        finalized_block.hash(),
+        blocks[1].hash(),
+        "second finalized block should be block 2"
+    );
+
+    assert_eq!(
+        nfs.best_chain_len(),
+        Some(1),
+        "NFS should have 1 block after finalizing two"
+    );
+
+    // Finalize the last block (height 3).
+    let finalized = nfs.finalize();
+    let finalized_block = finalized.inner_block();
+    assert_eq!(
+        finalized_block.hash(),
+        blocks[2].hash(),
+        "third finalized block should be block 3"
+    );
+
+    assert!(
+        nfs.best_chain().is_none(),
+        "NFS should be empty after finalizing all blocks"
+    );
+}
+
+/// Test that `peek_finalize_tip` returns the tip block context without mutating state.
+#[test]
+fn peek_finalize_tip_does_not_mutate() {
+    let _init_guard = zebra_test::init();
+
+    let (finalized_state, remaining_blocks) = write_genesis_to_finalized(&Network::Mainnet);
+    let (_, mut nfs) = test_state();
+
+    // Empty NFS should return None.
+    assert!(
+        nfs.peek_finalize_tip().is_none(),
+        "peek_finalize_tip should return None for empty NFS"
+    );
+
+    // Commit block 1.
+    let (_, block1) = &remaining_blocks[0];
+    nfs.commit_checkpoint_block(
+        CheckpointVerifiedBlock::from(block1.clone()),
+        &finalized_state.db,
+    )
+    .expect("commit_checkpoint_block should succeed");
+
+    // peek_finalize_tip should return the tip block.
+    let peeked = nfs
+        .peek_finalize_tip()
+        .expect("peek_finalize_tip should return Some for non-empty NFS");
+    let peeked_block = peeked.inner_block();
+    assert_eq!(
+        peeked_block.hash(),
+        block1.hash(),
+        "peeked block hash should match the committed block"
+    );
+
+    // The NFS should not be mutated.
+    assert_eq!(
+        nfs.best_chain_len(),
+        Some(1),
+        "NFS should still have 1 block after peek_finalize_tip"
+    );
+}
+
+/// Test the full pipeline: commit checkpoint blocks to NFS, then finalize them to disk.
+#[test]
+fn pipeline_checkpoint_commit_then_finalize_to_disk() {
+    let _init_guard = zebra_test::init();
+
+    let (finalized_state, remaining_blocks) = write_genesis_to_finalized(&Network::Mainnet);
+    let mut db = finalized_state.db.clone();
+    let (_, mut nfs) = test_state();
+    let network = Network::Mainnet;
+
+    // Step 1: Commit blocks 1..=5 to the NFS via checkpoint path.
+    let blocks: Vec<Arc<Block>> = remaining_blocks
+        .iter()
+        .take(5)
+        .map(|(_, b)| b.clone())
+        .collect();
+
+    for block in &blocks {
+        nfs.commit_checkpoint_block(
+            CheckpointVerifiedBlock::from(block.clone()),
+            &finalized_state.db,
+        )
+        .expect("commit_checkpoint_block should succeed");
+    }
+
+    assert_eq!(nfs.best_chain_len(), Some(5));
+
+    // Step 2: Finalize each block from the NFS and write it to disk.
+    for (i, block) in blocks.iter().enumerate() {
+        let finalizable = nfs.finalize();
+        let finalized_block = finalizable.inner_block();
+        assert_eq!(
+            finalized_block.hash(),
+            block.hash(),
+            "finalized block at index {i} should match"
+        );
+
+        // Convert to FinalizedBlock for disk write.
+        let checkpoint_verified = CheckpointVerifiedBlock::from(block.clone());
+        let treestate = Treestate::default();
+        let finalized = FinalizedBlock::from_checkpoint_verified(checkpoint_verified, treestate);
+
+        let empty_nfs = NonFinalizedState::new(&network);
+        let spent_utxos = db.lookup_spent_utxos(&finalized, &empty_nfs);
+        db.write_block(finalized, spent_utxos, None, &network, "test")
+            .unwrap_or_else(|e| panic!("write_block failed at index {i}: {e:?}"));
+    }
+
+    // Step 3: Verify the NFS is empty and the disk has the correct tip.
+    assert!(
+        nfs.best_chain().is_none(),
+        "NFS should be empty after all blocks finalized"
+    );
+
+    let (tip_height, tip_hash) = db.tip().expect("disk should have a tip");
+    assert_eq!(tip_height, Height(5), "disk tip height should be 5");
+    assert_eq!(
+        tip_hash,
+        blocks[4].hash(),
+        "disk tip hash should match block at height 5"
+    );
+}
+
+/// Creates an ephemeral finalized state and empty non-finalized state for testing.
+fn test_state() -> (FinalizedState, NonFinalizedState) {
+    let network = Network::Mainnet;
+    let finalized_state = FinalizedState::new(
+        &Config::ephemeral(),
+        &network,
+        #[cfg(feature = "elasticsearch")]
+        false,
+    );
+    let nfs = NonFinalizedState::new(&network);
+    (finalized_state, nfs)
 }

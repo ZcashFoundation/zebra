@@ -29,7 +29,10 @@ use zebra_test::vectors::{MAINNET_BLOCKS, TESTNET_BLOCKS};
 use crate::{
     constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
     request::{FinalizedBlock, Treestate},
-    service::finalized_state::{disk_db::DiskWriteBatch, ZebraDb, STATE_COLUMN_FAMILIES_IN_CODE},
+    service::{
+        finalized_state::{disk_db::DiskWriteBatch, ZebraDb, STATE_COLUMN_FAMILIES_IN_CODE},
+        non_finalized_state::NonFinalizedState,
+    },
     CheckpointVerifiedBlock, Config, SemanticallyVerifiedBlock,
 };
 
@@ -72,6 +75,211 @@ fn test_block_db_round_trip() {
         .zcash_deserialize_into()
         .expect("deserialization of valid serialized block never fails");
     test_block_db_round_trip_with(&Mainnet, iter::once(block));
+}
+
+/// Test that `lookup_spent_utxos` returns an empty vec for blocks with no transparent inputs,
+/// and that `write_block` works correctly when provided spent UTXOs externally.
+#[test]
+fn test_lookup_spent_utxos_and_write_block_with_provided_utxos() {
+    let _init_guard = zebra_test::init();
+
+    let (network, mut state, empty_nfs) = test_db_and_nfs();
+
+    // Commit the first few mainnet blocks using the new lookup_spent_utxos + write_block path.
+    // These early blocks have only coinbase transactions (no transparent inputs to spend),
+    // so lookup_spent_utxos should return an empty vec.
+    for (&height, block_bytes) in MAINNET_BLOCKS.iter().take(3) {
+        let block: Arc<Block> = block_bytes.zcash_deserialize_into().unwrap();
+        let checkpoint_verified = CheckpointVerifiedBlock::from(block.clone());
+        let treestate = Treestate::default();
+        let finalized = FinalizedBlock::from_checkpoint_verified(checkpoint_verified, treestate);
+
+        let spent_utxos = state.lookup_spent_utxos(&finalized, &empty_nfs);
+
+        // Early mainnet blocks have only coinbase inputs (no transparent spends).
+        assert!(
+            spent_utxos.is_empty(),
+            "block at height {height} should have no transparent spends"
+        );
+
+        state
+            .write_block(finalized, spent_utxos, None, &network, "test")
+            .expect("write_block should succeed for valid blocks");
+    }
+
+    // Verify the blocks were written by reading back the tip.
+    let tip = state.tip();
+    assert!(
+        tip.is_some(),
+        "state should have a tip after writing blocks"
+    );
+}
+
+/// Test that `lookup_spent_utxos` falls back to the non-finalized state for UTXOs
+/// not yet on disk.
+#[test]
+fn test_lookup_spent_utxos_falls_back_to_non_finalized_state() {
+    let _init_guard = zebra_test::init();
+
+    let (_network, state, empty_nfs) = test_db_and_nfs();
+
+    // With an empty database and empty non-finalized state, lookup_spent_utxos
+    // for blocks without transparent spends should return empty.
+    let block: Arc<Block> = MAINNET_BLOCKS
+        .values()
+        .next()
+        .unwrap()
+        .zcash_deserialize_into()
+        .unwrap();
+    let checkpoint_verified = CheckpointVerifiedBlock::from(block);
+    let treestate = Treestate::default();
+    let finalized = FinalizedBlock::from_checkpoint_verified(checkpoint_verified, treestate);
+
+    let spent_utxos = state.lookup_spent_utxos(&finalized, &empty_nfs);
+    assert!(
+        spent_utxos.is_empty(),
+        "genesis block should have no transparent spends"
+    );
+}
+
+/// Test that `lookup_spent_utxos` with an empty non-finalized state and empty database
+/// returns empty for all continuous mainnet blocks (which only have coinbase transactions).
+#[test]
+fn test_lookup_spent_utxos_empty_nfs_empty_db_returns_empty_for_coinbase_only_blocks() {
+    let _init_guard = zebra_test::init();
+
+    let network = Mainnet;
+    let mut state = ZebraDb::new(
+        &Config::ephemeral(),
+        STATE_DATABASE_KIND,
+        &state_database_format_version_in_code(),
+        &network,
+        true,
+        STATE_COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .map(ToString::to_string),
+        false,
+    );
+    let empty_nfs = NonFinalizedState::new(&network);
+
+    // Commit all continuous mainnet blocks (heights 0..=10).
+    // These blocks only have coinbase transactions, so lookup_spent_utxos
+    // should always return an empty vec.
+    for (&height, block_bytes) in zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS.iter() {
+        let block: Arc<Block> = block_bytes.zcash_deserialize_into().unwrap();
+        let checkpoint_verified = CheckpointVerifiedBlock::from(block.clone());
+        let treestate = Treestate::default();
+        let finalized = FinalizedBlock::from_checkpoint_verified(checkpoint_verified, treestate);
+
+        let spent_utxos = state.lookup_spent_utxos(&finalized, &empty_nfs);
+
+        assert!(
+            spent_utxos.is_empty(),
+            "block at height {height} has only coinbase transactions and should have no transparent spends"
+        );
+
+        state
+            .write_block(finalized, spent_utxos, None, &network, "test")
+            .expect("write_block should succeed for valid blocks");
+    }
+
+    // Verify all blocks were written correctly.
+    let tip = state.tip();
+    assert!(
+        tip.is_some(),
+        "state should have a tip after writing blocks"
+    );
+    let (tip_height, _tip_hash) = tip.unwrap();
+    assert_eq!(
+        tip_height,
+        Height(10),
+        "tip should be at height 10 after writing all continuous mainnet blocks"
+    );
+}
+
+/// Test that `lookup_spent_utxos` falls back to the non-finalized state for UTXOs
+/// that are in the NFS but not yet on disk. We write genesis to disk, commit block 1
+/// to the NFS, then verify that lookup_spent_utxos exercises the NFS fallback path.
+#[test]
+fn test_lookup_spent_utxos_nfs_fallback_with_committed_blocks() {
+    let _init_guard = zebra_test::init();
+
+    let (network, mut state, empty_nfs) = test_db_and_nfs();
+
+    // First, write genesis to the finalized state so commit_checkpoint_block
+    // can use it as the parent.
+    let genesis_block: Arc<Block> = MAINNET_BLOCKS
+        .get(&0)
+        .unwrap()
+        .zcash_deserialize_into()
+        .unwrap();
+    let genesis_cv = CheckpointVerifiedBlock::from(genesis_block.clone());
+    let genesis_ts = Treestate::default();
+    let genesis_fin = FinalizedBlock::from_checkpoint_verified(genesis_cv, genesis_ts);
+    let spent = state.lookup_spent_utxos(&genesis_fin, &empty_nfs);
+    state
+        .write_block(genesis_fin, spent, None, &network, "test")
+        .expect("genesis write should succeed");
+
+    // Now commit block 1 to the non-finalized state.
+    let mut nfs = NonFinalizedState::new(&network);
+    let block_1: Arc<Block> = MAINNET_BLOCKS
+        .get(&1)
+        .unwrap()
+        .zcash_deserialize_into()
+        .unwrap();
+    nfs.commit_checkpoint_block(CheckpointVerifiedBlock::from(block_1.clone()), &state)
+        .expect("commit_checkpoint_block should succeed for block 1");
+
+    // Look up spent UTXOs for block 2 with the NFS containing block 1.
+    // Block 2 is also coinbase-only, so the result should be empty,
+    // but this exercises the NFS fallback code path.
+    let block_2: Arc<Block> = MAINNET_BLOCKS
+        .get(&2)
+        .unwrap()
+        .zcash_deserialize_into()
+        .unwrap();
+    let checkpoint_2 = CheckpointVerifiedBlock::from(block_2);
+    let treestate_2 = Treestate::default();
+    let finalized_2 = FinalizedBlock::from_checkpoint_verified(checkpoint_2, treestate_2);
+
+    let spent_utxos = state.lookup_spent_utxos(&finalized_2, &nfs);
+    assert!(
+        spent_utxos.is_empty(),
+        "block 2 should have no transparent spends even with NFS fallback"
+    );
+}
+
+/// Test that `write_block` correctly writes blocks and the tip is updated after each write.
+#[test]
+fn test_write_block_updates_tip_sequentially() {
+    let _init_guard = zebra_test::init();
+
+    let (network, mut state, empty_nfs) = test_db_and_nfs();
+
+    for (&height, block_bytes) in zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS.iter() {
+        let block: Arc<Block> = block_bytes.zcash_deserialize_into().unwrap();
+        let expected_hash = block.hash();
+        let checkpoint_verified = CheckpointVerifiedBlock::from(block);
+        let treestate = Treestate::default();
+        let finalized = FinalizedBlock::from_checkpoint_verified(checkpoint_verified, treestate);
+
+        let spent_utxos = state.lookup_spent_utxos(&finalized, &empty_nfs);
+        let result_hash = state
+            .write_block(finalized, spent_utxos, None, &network, "test")
+            .expect("write_block should succeed");
+
+        assert_eq!(
+            result_hash, expected_hash,
+            "write_block should return the hash of the written block"
+        );
+
+        let (tip_height, tip_hash) = state
+            .tip()
+            .expect("state should have a tip after writing a block");
+        assert_eq!(tip_height, Height(height), "tip height should match");
+        assert_eq!(tip_hash, expected_hash, "tip hash should match");
+    }
 }
 
 fn test_block_db_round_trip_with(
@@ -172,4 +380,21 @@ fn test_block_db_round_trip_with(
 
         assert_eq!(stored_block, original_block);
     }
+}
+
+fn test_db_and_nfs() -> (Network, ZebraDb, NonFinalizedState) {
+    let network = Mainnet;
+    let state = ZebraDb::new(
+        &Config::ephemeral(),
+        STATE_DATABASE_KIND,
+        &state_database_format_version_in_code(),
+        &network,
+        true,
+        STATE_COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .map(ToString::to_string),
+        false,
+    );
+    let nfs = NonFinalizedState::new(&network);
+    (network, state, nfs)
 }

@@ -34,14 +34,17 @@ use zebra_chain::{
 use crate::{
     error::CommitCheckpointVerifiedError,
     request::FinalizedBlock,
-    service::finalized_state::{
-        disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
-        disk_format::{
-            block::TransactionLocation,
-            transparent::{AddressBalanceLocationUpdates, OutputLocation},
+    service::{
+        finalized_state::{
+            disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
+            disk_format::{
+                block::TransactionLocation,
+                transparent::{AddressBalanceLocationUpdates, OutputLocation},
+            },
+            zebra_db::{metrics::block_precommit_metrics, ZebraDb},
+            FromDisk, RawBytes,
         },
-        zebra_db::{metrics::block_precommit_metrics, ZebraDb},
-        FromDisk, RawBytes,
+        non_finalized_state::NonFinalizedState,
     },
     HashOrHeight,
 };
@@ -416,22 +419,87 @@ impl ZebraDb {
 
     // Write block methods
 
+    /// Look up the output locations and UTXOs spent by a finalized block.
+    ///
+    /// For each transparent input, resolves the [`OutputLocation`] and the spent
+    /// [`transparent::Utxo`]. Lookups fall back in this order:
+    /// 1. The finalized database (disk)
+    /// 2. The non-finalized state (for outputs created by blocks not yet on disk)
+    /// 3. Same-block outputs (for outputs created and spent in the same block)
+    pub fn lookup_spent_utxos(
+        &self,
+        finalized: &FinalizedBlock,
+        non_finalized_state: &NonFinalizedState,
+    ) -> Vec<(transparent::OutPoint, OutputLocation, transparent::Utxo)> {
+        let tx_hash_indexes: HashMap<transaction::Hash, usize> = finalized
+            .transaction_hashes
+            .iter()
+            .enumerate()
+            .map(|(index, hash)| (*hash, index))
+            .collect();
+
+        let best_chain = non_finalized_state.best_chain();
+
+        finalized
+            .block
+            .transactions
+            .iter()
+            .flat_map(|tx| tx.inputs().iter())
+            .flat_map(|input| input.outpoint())
+            .map(|outpoint| {
+                // Resolve the output location: try disk, then non-finalized state, then same-block
+                let output_location = self
+                    .output_location(&outpoint)
+                    .or_else(|| {
+                        best_chain
+                            .and_then(|chain| chain.tx_loc_by_hash.get(&outpoint.hash))
+                            .map(|tx_loc| OutputLocation::from_outpoint(*tx_loc, &outpoint))
+                    })
+                    .unwrap_or_else(|| {
+                        lookup_out_loc(finalized.height, &outpoint, &tx_hash_indexes)
+                    });
+
+                // Resolve the UTXO: try disk, then non-finalized state, then same-block
+                let utxo = self
+                    .utxo(&outpoint)
+                    .map(|ordered_utxo| ordered_utxo.utxo)
+                    .or_else(|| {
+                        best_chain.and_then(|chain| {
+                            chain
+                                .created_utxos
+                                .get(&outpoint)
+                                .map(|ordered_utxo| ordered_utxo.utxo.clone())
+                        })
+                    })
+                    .or_else(|| {
+                        finalized
+                            .new_outputs
+                            .get(&outpoint)
+                            .map(|ordered_utxo| ordered_utxo.utxo.clone())
+                    })
+                    .expect(
+                        "UTXO must be in finalized state, non-finalized state, or current block",
+                    );
+
+                (outpoint, output_location, utxo)
+            })
+            .collect()
+    }
+
     /// Write `finalized` to the finalized state.
     ///
-    /// Uses:
-    /// - `history_tree`: the current tip's history tree
-    /// - `network`: the configured network
-    /// - `source`: the source of the block in log messages
+    /// `spent_utxos` must contain the output location and UTXO for every transparent
+    /// input in the block, as returned by [`lookup_spent_utxos`](Self::lookup_spent_utxos).
     ///
     /// # Errors
     ///
     /// - Propagates any errors from writing to the DB
-    /// - Propagates any errors from computing the block's chain value balance change or
-    ///   from applying the change to the chain value balance
+    /// - Propagates any errors from computing the block's chain value balance change
     #[allow(clippy::unwrap_in_result)]
-    pub(in super::super) fn write_block(
+    pub(crate) fn write_block(
         &mut self,
         finalized: FinalizedBlock,
+        spent_utxos: Vec<(transparent::OutPoint, OutputLocation, transparent::Utxo)>,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
         network: &Network,
         source: &str,
@@ -458,35 +526,6 @@ impl ZebraDb {
                 )
             })
             .collect();
-
-        // Get a list of the spent UTXOs, before we delete any from the database
-        let spent_utxos: Vec<(transparent::OutPoint, OutputLocation, transparent::Utxo)> =
-            finalized
-                .block
-                .transactions
-                .iter()
-                .flat_map(|tx| tx.inputs().iter())
-                .flat_map(|input| input.outpoint())
-                .map(|outpoint| {
-                    (
-                        outpoint,
-                        // Some utxos are spent in the same block, so they will be in
-                        // `tx_hash_indexes` and `new_outputs`
-                        self.output_location(&outpoint).unwrap_or_else(|| {
-                            lookup_out_loc(finalized.height, &outpoint, &tx_hash_indexes)
-                        }),
-                        self.utxo(&outpoint)
-                            .map(|ordered_utxo| ordered_utxo.utxo)
-                            .or_else(|| {
-                                finalized
-                                    .new_outputs
-                                    .get(&outpoint)
-                                    .map(|ordered_utxo| ordered_utxo.utxo.clone())
-                            })
-                            .expect("already checked UTXO was in state or block"),
-                    )
-                })
-                .collect();
 
         let spent_utxos_by_outpoint: HashMap<transparent::OutPoint, transparent::Utxo> =
             spent_utxos
