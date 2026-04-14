@@ -431,9 +431,11 @@ where
                         let mut received = HashSet::new();
                         for item in blocks {
                             if let Some((h, block, addr)) = item.available() {
-                                received.insert(h);
-                                retries.remove(&h);
-                                results.push(Ok((h, block, addr)));
+                                if remaining.contains(&h) {
+                                    received.insert(h);
+                                    retries.remove(&h);
+                                    results.push(Ok((h, block, addr)));
+                                }
                             }
                         }
 
