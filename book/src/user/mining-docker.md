@@ -16,9 +16,10 @@ docker run -d --name zebra_local \
   zfnd/zebra:latest
 ```
 
-This command starts a container on Mainnet and binds both the P2P port (8233)
-and the RPC port (8232). Publishing the P2P port allows inbound peer connections.
-If you want to start generating blocks, you need to let Zebra sync first.
+This command starts a container on Mainnet and binds the P2P port (8233) and
+the RPC port (8232) on your Docker host. The P2P port lets other Zcash nodes
+connect to your node. If you want to start generating blocks, you need to let
+Zebra sync first.
 
 Note that you must pass the address for your mining rewards via the
 `MINER_ADDRESS` environment variable when you are starting the container, as we

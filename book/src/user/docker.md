@@ -15,12 +15,9 @@ docker run -d \
   zfnd/zebra
 ```
 
-This command:
-
-- **`-p 8233:8233`**: Exposes the P2P port so other Zcash nodes can connect to
-  yours. Use `-p 18233:18233` for Testnet.
-- **`-v zebrad-cache:...`**: Persists the chain state across container restarts,
-  avoiding re-syncing ~300 GB of blockchain data.
+The `-p 8233:8233` flag publishes Zebra's P2P port so other Zcash nodes can
+connect to yours (use `-p 18233:18233` for Testnet), and `-v` mounts a named
+volume so the chain state survives container restarts.
 
 You can also use `docker compose`, which we recommend. First get the repo:
 
@@ -153,16 +150,9 @@ For Kubernetes, configure liveness and readiness probes against `/healthy` and `
 
 ### P2P Networking
 
-Zebra uses TCP port **8233** (Mainnet) or **18233** (Testnet) for peer-to-peer
-connections. This is the port that other Zcash nodes use to connect to yours.
+Zebra uses TCP port 8233 on Mainnet and 18233 on Testnet for peer-to-peer connections. When running in Docker, publish this port with `-p` (as shown in the [Quick Start](#quick-start)) so other nodes can connect to yours. Without it, Zebra still syncs via outbound connections but does not accept inbound peers.
 
-When running in Docker, publish this port with `-p` (as shown in the
-[Quick Start](#quick-start)) for your node to accept inbound connections.
-Without it, the node can still sync via outbound connections but will not
-accept inbound connections from other peers.
-
-**Behind a NAT or load balancer:** If your node is behind a NAT, firewall, or
-load balancer, set `external_addr` so Zebra advertises your public IP to peers:
+If Zebra is behind a NAT, firewall, or load balancer, set `external_addr` so it advertises your public address to peers instead of the internal bind address:
 
 ```toml
 [network]
@@ -175,20 +165,16 @@ Or via environment variable:
 -e ZEBRA_NETWORK__EXTERNAL_ADDR=203.0.113.42:8233
 ```
 
-Without `external_addr`, Zebra advertises its bind address (`[::]:8233`).
-Setting `external_addr` to your public IP ensures peers can reliably connect
-to your node.
+For reference, the ports Zebra can use are:
 
-**Port summary:**
-
-| Port | Protocol | Purpose | Default State |
-|------|----------|---------|---------------|
-| 8233 | TCP | P2P (Mainnet) | Listening |
-| 18233 | TCP | P2P (Testnet) | Listening |
-| 8232 | TCP | RPC (Mainnet) | Disabled |
-| 18232 | TCP | RPC (Testnet) | Disabled |
-| 9999 | TCP | Prometheus metrics | Disabled |
-| 8080 | TCP | Health endpoints | Disabled |
+| Port  | Protocol | Purpose            | Default  |
+|-------|----------|--------------------|----------|
+| 8233  | TCP      | P2P (Mainnet)      | Enabled  |
+| 18233 | TCP      | P2P (Testnet)      | Enabled  |
+| 8232  | TCP      | RPC (Mainnet)      | Disabled |
+| 18232 | TCP      | RPC (Testnet)      | Disabled |
+| 9999  | TCP      | Prometheus metrics | Disabled |
+| 8080  | TCP      | Health endpoints   | Disabled |
 
 ## Examples
 
