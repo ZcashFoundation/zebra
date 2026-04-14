@@ -783,8 +783,8 @@ where
             .send(false);
     }
 
-    /// Get the number of currently in-flight download and verify tasks.
+    /// Get the number of currently in-flight download and verify blocks.
     pub fn in_flight(&mut self) -> usize {
-        self.pending_verifications.len() + self.pending_downloads.len()
+        self.pending_verifications.len() + self.pending_download_hashes.len()
     }
 }
