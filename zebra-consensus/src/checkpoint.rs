@@ -598,6 +598,7 @@ where
             .ok_or(VerifyCheckpointError::CoinbaseHeight { hash })?;
         self.check_height(height)?;
 
+        let t_eq = std::time::Instant::now();
         if self.network.disable_pow() {
             crate::block::check::difficulty_threshold_is_valid(
                 &block.header,
@@ -609,6 +610,7 @@ where
             crate::block::check::difficulty_is_valid(&block.header, &self.network, &height, &hash)?;
             crate::block::check::equihash_solution_is_valid(&block.header)?;
         }
+        let equihash_us = t_eq.elapsed().as_micros();
 
         // See [ZIP-1015](https://zips.z.cash/zip-1015).
         let expected_deferred_amount =
@@ -621,13 +623,28 @@ where
             .map(DeferredPoolBalanceChange::new);
 
         // don't do precalculation until the block passes basic difficulty checks
+        let t_pre = std::time::Instant::now();
         let block = CheckpointVerifiedBlock::new(block, Some(hash), deferred_pool_balance_change);
+        let tx_precompute_us = t_pre.elapsed().as_micros();
 
+        let t_mr = std::time::Instant::now();
         crate::block::check::merkle_root_validity(
             &self.network,
             &block.block,
             &block.transaction_hashes,
         )?;
+        let merkle_root_us = t_mr.elapsed().as_micros();
+
+        if height.0 % 100 == 0 {
+            tracing::info!(
+                ?height,
+                equihash_us,
+                tx_precompute_us,
+                merkle_root_us,
+                check_total_us = equihash_us + tx_precompute_us + merkle_root_us,
+                "checkpoint_check_timing",
+            );
+        }
 
         Ok(block)
     }
@@ -893,10 +910,20 @@ where
 
         // All the blocks we've kept are valid, so let's verify them
         // in height order.
+        let t_send = std::time::Instant::now();
         for qblock in rev_valid_blocks.drain(..).rev() {
             // Sending can fail, but there's nothing we can do about it.
             let _ = qblock.tx.send(Ok(qblock.block.hash));
         }
+        let send_us = t_send.elapsed().as_micros();
+
+        tracing::info!(
+            block_count,
+            ?target_checkpoint_height,
+            send_us,
+            queued_remaining = self.queued.len(),
+            "checkpoint_range_verified_timing",
+        );
 
         // Finally, update the checkpoint bounds
         self.update_progress(target_checkpoint_height);
@@ -1079,6 +1106,8 @@ where
 
     #[instrument(name = "checkpoint", skip(self, block, hash))]
     fn call(&mut self, (block, hash): (Arc<Block>, block::Hash)) -> Self::Future {
+        let t_call = std::time::Instant::now();
+
         // Reset the verifier back to the state tip if requested
         // (e.g. due to an error when committing a block to the state)
         if let Ok(tip) = self.reset_receiver.try_recv() {
@@ -1090,14 +1119,29 @@ where
             return async { Err(VerifyCheckpointError::Finished) }.boxed();
         }
 
+        let t_queue = std::time::Instant::now();
         let req_block = match self.queue_block(block, hash) {
             Ok(req_block) => req_block,
             Err(e) => return async { Err(e) }.boxed(),
         };
+        let queue_block_us = t_queue.elapsed().as_micros();
 
+        let t_process = std::time::Instant::now();
         self.process_checkpoint_range();
+        let process_range_us = t_process.elapsed().as_micros();
 
         metrics::gauge!("checkpoint.queued_slots").set(self.queued.len() as f64);
+
+        if req_block.block.height.0 % 100 == 0 {
+            tracing::info!(
+                height = ?req_block.block.height,
+                queue_block_us,
+                process_range_us,
+                queued = self.queued.len(),
+                call_us = t_call.elapsed().as_micros(),
+                "checkpoint_verifier_call_timing",
+            );
+        }
 
         // Because the checkpoint verifier duplicates state from the state
         // service (it tracks which checkpoints have been verified), we must
@@ -1125,15 +1169,18 @@ where
         // Instead, we reset the verifier to the successfully committed state tip.
         let state_service = self.state_service.clone();
         let commit_checkpoint_verified = tokio::spawn(async move {
+            let t_wait = std::time::Instant::now();
             let hash = req_block
                 .rx
                 .await
                 .map_err(Into::into)
                 .map_err(VerifyCheckpointError::CommitCheckpointVerified)
                 .expect("CheckpointVerifier does not leave dangling receivers")?;
+            let wait_verified_us = t_wait.elapsed().as_micros();
 
             // We use a `ServiceExt::oneshot`, so that every state service
             // `poll_ready` has a corresponding `call`. See #1593.
+            let t_commit = std::time::Instant::now();
             match state_service
                 .oneshot(zs::Request::CommitCheckpointVerifiedBlock(req_block.block))
                 .map_err(VerifyCheckpointError::CommitCheckpointVerified)
@@ -1141,6 +1188,13 @@ where
             {
                 zs::Response::Committed(committed_hash) => {
                     assert_eq!(committed_hash, hash, "state must commit correct hash");
+                    let state_commit_us = t_commit.elapsed().as_micros();
+                    tracing::info!(
+                        wait_verified_us,
+                        state_commit_us,
+                        total_us = t_wait.elapsed().as_micros(),
+                        "checkpoint_state_commit_timing",
+                    );
                     Ok(hash)
                 }
                 _ => unreachable!("wrong response for CommitCheckpointVerifiedBlock"),

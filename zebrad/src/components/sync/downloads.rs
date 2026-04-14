@@ -389,7 +389,9 @@ where
         let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
         let batch_key = hashes[0];
 
+        let batch_len = hashes.len();
         let task = tokio::spawn(async move {
+            let batch_start = std::time::Instant::now();
             let mut results: Vec<
                 Result<(block::Hash, Arc<block::Block>, Option<PeerSocketAddr>), block::Hash>,
             > = Vec::new();
@@ -478,6 +480,15 @@ where
             for h in &remaining {
                 results.push(Err(*h));
             }
+            let ok_count = results.iter().filter(|r| r.is_ok()).count();
+            let err_count = results.iter().filter(|r| r.is_err()).count();
+            tracing::info!(
+                batch_download_ms = batch_start.elapsed().as_millis(),
+                batch_len,
+                ok_count,
+                err_count,
+                "batch_download_timing",
+            );
             (batch_key, results)
         });
 
@@ -719,12 +730,23 @@ where
                     verification = rsp => verification,
                 };
 
+                let verify_us = verify_start.elapsed().as_micros();
                 let verify_result = if verification.is_ok() { "success" } else { "failure" };
                 metrics::histogram!("sync.block.verify.duration_seconds", "result" => verify_result)
                     .record(verify_start.elapsed().as_secs_f64());
 
                 if verification.is_ok() {
                     metrics::counter!("sync.verified.block.count").increment(1);
+                    if block_height.0 % 100 == 0 {
+                        let total_us = download_start.elapsed().as_micros();
+                        tracing::info!(
+                            height = ?block_height,
+                            download_us = (total_us - verify_us),
+                            verify_us,
+                            total_us,
+                            "download_verify_block_timing",
+                        );
+                    }
                 }
 
                 verification

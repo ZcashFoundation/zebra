@@ -272,6 +272,9 @@ where
     /// The last time we logged a message about the peer set size
     last_peer_log: Option<Instant>,
 
+    /// The last time we logged periodic peer stats for profiling
+    last_peer_stats_log: Option<Instant>,
+
     /// The configured maximum number of peers that can be in the
     /// peer set per IP, defaults to [`crate::constants::DEFAULT_MAX_CONNS_PER_IP`]
     max_conns_per_ip: usize,
@@ -358,6 +361,7 @@ where
 
             // Metrics
             last_peer_log: None,
+            last_peer_stats_log: None,
             address_metrics,
 
             max_conns_per_ip: max_conns_per_ip.unwrap_or(config.max_connections_per_ip),
@@ -1325,6 +1329,28 @@ where
         }
     }
 
+    /// Logs periodic peer set stats every ~10 seconds for profiling.
+    fn log_peer_stats_periodic(&mut self) {
+        let now = Instant::now();
+        if let Some(last) = self.last_peer_stats_log {
+            if now.duration_since(last).as_secs() < 10 {
+                return;
+            }
+        }
+        self.last_peer_stats_log = Some(now);
+
+        let ready = self.ready_services.len();
+        let unready = self.unready_services.len();
+        let total = ready + unready;
+
+        tracing::info!(
+            ready_peers = ready,
+            unready_peers = unready,
+            total_peers = total,
+            "peer_set_stats",
+        );
+    }
+
     /// Updates the peer set metrics.
     ///
     /// # Panics
@@ -1384,6 +1410,7 @@ where
 
         // These metrics should run last, to report the most up-to-date information.
         self.log_peer_set_size();
+        self.log_peer_stats_periodic();
         self.update_metrics();
 
         if ready_peers.is_pending() {

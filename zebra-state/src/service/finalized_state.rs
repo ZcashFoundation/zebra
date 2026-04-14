@@ -336,15 +336,20 @@ impl FinalizedState {
                 // finalized tip is the parent block of the block being committed.
 
                 let block = checkpoint_verified.block.clone();
+
+                let t0 = std::time::Instant::now();
                 let mut history_tree = self.db.history_tree();
                 let prev_note_commitment_trees = prev_note_commitment_trees
                     .unwrap_or_else(|| self.db.note_commitment_trees_for_tip());
+                let load_trees_us = t0.elapsed().as_micros();
 
                 // Update the note commitment trees.
+                let t1 = std::time::Instant::now();
                 let mut note_commitment_trees = prev_note_commitment_trees.clone();
                 note_commitment_trees
                     .update_trees_parallel(&block)
                     .map_err(ValidateContextError::from)?;
+                let nct_us = t1.elapsed().as_micros();
 
                 // Check the block commitment if the history tree was not
                 // supplied by the non-finalized state. Note that we don't do
@@ -363,16 +368,19 @@ impl FinalizedState {
                 //
                 // TODO: run this CPU-intensive cryptography in a parallel rayon
                 // thread, if it shows up in profiles
+                let t2 = std::time::Instant::now();
                 check::block_commitment_is_valid_for_chain_history(
                     block.clone(),
                     &self.network(),
                     &history_tree,
                 )?;
+                let block_commitment_us = t2.elapsed().as_micros();
 
                 // Update the history tree.
                 //
                 // TODO: run this CPU-intensive cryptography in a parallel rayon
                 // thread, if it shows up in profiles
+                let t3 = std::time::Instant::now();
                 let history_tree_mut = Arc::make_mut(&mut history_tree);
                 let sapling_root = note_commitment_trees.sapling.root();
                 let orchard_root = note_commitment_trees.orchard.root();
@@ -380,14 +388,30 @@ impl FinalizedState {
                     .push(&self.network(), block.clone(), &sapling_root, &orchard_root)
                     .map_err(Arc::new)
                     .map_err(ValidateContextError::from)?;
+                let history_tree_us = t3.elapsed().as_micros();
 
                 let treestate = Treestate {
                     note_commitment_trees,
                     history_tree,
                 };
 
+                let t4 = std::time::Instant::now();
+                let finalized =
+                    FinalizedBlock::from_checkpoint_verified(checkpoint_verified, treestate);
+                let finalize_block_us = t4.elapsed().as_micros();
+
+                tracing::info!(
+                    height = ?finalized.height,
+                    load_trees_us,
+                    nct_us,
+                    block_commitment_us,
+                    history_tree_us,
+                    finalize_block_us,
+                    "commit_prepare_timing",
+                );
+
                 (
-                    FinalizedBlock::from_checkpoint_verified(checkpoint_verified, treestate),
+                    finalized,
                     Some(prev_note_commitment_trees),
                 )
             }
@@ -457,10 +481,13 @@ impl FinalizedState {
         let note_commitment_trees = finalized.treestate.note_commitment_trees.clone();
 
         // Phase 2: all UTXOs are finalized, use empty NFS for fallback.
+        let t_utxo_lookup = std::time::Instant::now();
         let empty_nfs = NonFinalizedState::new(&self.network());
         let spent_utxos =
             spent_utxos.unwrap_or_else(|| self.db.lookup_spent_utxos(&finalized, &empty_nfs));
+        let lookup_spent_utxos_us = t_utxo_lookup.elapsed().as_micros();
 
+        let t_write = std::time::Instant::now();
         let result = self.db.write_block(
             finalized,
             spent_utxos,
@@ -468,6 +495,17 @@ impl FinalizedState {
             &self.network(),
             source,
         );
+        let write_block_us = t_write.elapsed().as_micros();
+
+        if height.0 % 100 == 0 {
+            tracing::info!(
+                ?height,
+                lookup_spent_utxos_us,
+                write_block_us,
+                total_us = lookup_spent_utxos_us + write_block_us,
+                "commit_write_timing",
+            );
+        }
 
         if result.is_ok() {
             // Save blocks to elasticsearch if the feature is enabled.

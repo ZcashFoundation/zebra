@@ -305,11 +305,31 @@ impl WriteBlockWorkerTask {
             // Thread 2: look up spent UTXOs and output locations
             let db2 = finalized_state.db.clone();
             s.spawn(move || {
+                let mut t2_sum: u128 = 0;
+                let mut t2_max: u128 = 0;
+                let mut t2_count: u64 = 0;
+
                 while let Ok(msg) = lookup_rx.recv() {
+                    let t = std::time::Instant::now();
                     // Clone the latest non-finalized state once per block so that UTXOs
                     // created by blocks not yet on disk can be found.
                     let latest_nfs = nfs_receiver.borrow().clone();
                     let spent_utxos = db2.lookup_spent_utxos(&msg, &latest_nfs);
+                    let lookup_us = t.elapsed().as_micros();
+
+                    t2_sum += lookup_us;
+                    if lookup_us > t2_max { t2_max = lookup_us; }
+                    t2_count += 1;
+
+                    if t2_count % 100 == 0 {
+                        tracing::info!(
+                            height = ?msg.height,
+                            avg_lookup_us = t2_sum / u128::from(t2_count),
+                            max_lookup_us = t2_max,
+                            blocks = t2_count,
+                            "pipeline_thread2_summary",
+                        );
+                    }
                     write_tx
                         .send((msg, spent_utxos))
                         .expect("disk writer thread should be alive");
@@ -320,10 +340,15 @@ impl WriteBlockWorkerTask {
             let mut finalized_state3 = finalized_state.clone();
             s.spawn(move || {
                 let mut prev_note_commitment_trees: Option<NoteCommitmentTrees> = None;
+                let mut t3_sum: u128 = 0;
+                let mut t3_max: u128 = 0;
+                let mut t3_count: u64 = 0;
+
                 while let Ok((finalized, spent_utxos)) = write_rx.recv() {
                     let note_commitment_trees = finalized.treestate.note_commitment_trees.clone();
                     let height = finalized.height;
 
+                    let t = std::time::Instant::now();
                     finalized_state3
                         .commit_finalized_direct_internal(
                             finalized,
@@ -335,6 +360,21 @@ impl WriteBlockWorkerTask {
                             "unexpected disk write error: \
                          block has already been validated by the non-finalized state",
                         );
+                    let commit_us = t.elapsed().as_micros();
+
+                    t3_sum += commit_us;
+                    if commit_us > t3_max { t3_max = commit_us; }
+                    t3_count += 1;
+
+                    if t3_count % 100 == 0 {
+                        tracing::info!(
+                            ?height,
+                            avg_commit_us = t3_sum / u128::from(t3_count),
+                            max_commit_us = t3_max,
+                            blocks = t3_count,
+                            "pipeline_thread3_summary",
+                        );
+                    }
 
                     prev_note_commitment_trees = Some(note_commitment_trees);
 
@@ -352,6 +392,15 @@ impl WriteBlockWorkerTask {
                 .finalized_tip_height()
                 .map(|height| (height + 1).expect("committed heights are valid"))
                 .unwrap_or(Height(0));
+
+            // Thread 1 accumulators for periodic summary logging
+            let mut t1_nfs_sum: u128 = 0;
+            let mut t1_nfs_max: u128 = 0;
+            let mut t1_send_sum: u128 = 0;
+            let mut t1_send_max: u128 = 0;
+            let mut t1_peek_sum: u128 = 0;
+            let mut t1_peek_max: u128 = 0;
+            let mut t1_count: u64 = 0;
 
             while let Some((checkpoint_verified, rsp_tx)) =
                 finalized_block_write_receiver.blocking_recv()
@@ -416,21 +465,26 @@ impl WriteBlockWorkerTask {
                 }
 
                 // Commit block to the non-finalized state (fast, in-memory).
+                let t_nfs = std::time::Instant::now();
                 let tip_block = non_finalized_state
                     .commit_checkpoint_block(checkpoint_verified.clone(), &finalized_state.db)
                     .expect(
                         "checkpoint block commit to non-finalized state should succeed \
                          because the checkpoint verifier has already validated the hash chain",
                     );
+                let nfs_commit_us = t_nfs.elapsed().as_micros();
 
                 // Send the updated non-finalized state to the watch channel BEFORE sending
                 // the block to Thread 2, so Thread 2 is guaranteed to see the latest UTXOs.
+                let t_send = std::time::Instant::now();
                 let _ = non_finalized_state_sender.send(non_finalized_state.clone());
+                let nfs_send_us = t_send.elapsed().as_micros();
 
                 log_if_mined_by_zebra(&tip_block, &mut last_zebra_mined_log_height);
                 chain_tip_sender.set_best_non_finalized_tip(tip_block);
 
                 // Get the finalizable block with its treestate already computed.
+                let t_peek = std::time::Instant::now();
                 let finalizable = non_finalized_state
                     .peek_finalize_tip()
                     .expect("just committed a block to the non-finalized state");
@@ -446,6 +500,7 @@ impl WriteBlockWorkerTask {
                         unreachable!("peek_finalize_tip always returns Contextual")
                     }
                 };
+                let peek_finalize_us = t_peek.elapsed().as_micros();
 
                 // Send to the pipeline for UTXO lookup and disk write.
                 lookup_tx
@@ -455,6 +510,29 @@ impl WriteBlockWorkerTask {
                 // Respond to the caller immediately — the block is in the non-finalized
                 // state and queryable by the state service.
                 let _ = rsp_tx.send(Ok(checkpoint_verified.hash));
+
+                t1_nfs_sum += nfs_commit_us;
+                if nfs_commit_us > t1_nfs_max { t1_nfs_max = nfs_commit_us; }
+                t1_send_sum += nfs_send_us;
+                if nfs_send_us > t1_send_max { t1_send_max = nfs_send_us; }
+                t1_peek_sum += peek_finalize_us;
+                if peek_finalize_us > t1_peek_max { t1_peek_max = peek_finalize_us; }
+                t1_count += 1;
+
+                if t1_count % 100 == 0 {
+                    let n = u128::from(t1_count);
+                    tracing::info!(
+                        height = ?checkpoint_verified.height,
+                        avg_nfs_commit_us = t1_nfs_sum / n,
+                        max_nfs_commit_us = t1_nfs_max,
+                        avg_nfs_send_us = t1_send_sum / n,
+                        max_nfs_send_us = t1_send_max,
+                        avg_peek_finalize_us = t1_peek_sum / n,
+                        max_peek_finalize_us = t1_peek_max,
+                        blocks = t1_count,
+                        "pipeline_thread1_summary",
+                    );
+                }
 
                 // Prune blocks from the non-finalized state that have already
                 // been written to disk by Thread 3.

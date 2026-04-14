@@ -642,6 +642,8 @@ where
         &mut self,
         mut extra_hashes: IndexSet<block::Hash>,
     ) -> Result<IndexSet<block::Hash>, Report> {
+        let t_iter = std::time::Instant::now();
+
         // Drain ready verification responses without blocking. This also
         // promotes any completed batch downloads into verify tasks via
         // `Downloads::poll_next`.
@@ -703,6 +705,29 @@ where
             extra_hashes = self.request_blocks(extra_hashes);
         }
         self.update_metrics();
+
+        // Rate-limit to ~once per 10 seconds using a thread-local timer.
+        {
+            use std::cell::Cell;
+            thread_local! {
+                static LAST_LOG: Cell<Option<std::time::Instant>> = const { Cell::new(None) };
+            }
+            LAST_LOG.with(|last| {
+                let now = std::time::Instant::now();
+                let should_log = last.get().map_or(true, |prev| now.duration_since(prev).as_secs() >= 10);
+                if should_log {
+                    last.set(Some(now));
+                    tracing::info!(
+                        iter_ms = t_iter.elapsed().as_millis(),
+                        in_flight = self.downloads.in_flight(),
+                        remaining_hashes = extra_hashes.len(),
+                        tips = self.prospective_tips.len(),
+                        state_tip = ?self.latest_chain_tip.best_tip_height(),
+                        "syncer_iteration_timing",
+                    );
+                }
+            });
+        }
 
         Ok(extra_hashes)
     }
@@ -908,8 +933,17 @@ where
 
         let extra_hashes = self.request_blocks(download_set);
 
+        let obtain_tips_ms = stage_start.elapsed().as_millis();
         metrics::histogram!("sync.stage.duration_seconds", "stage" => "obtain_tips")
             .record(stage_start.elapsed().as_secs_f64());
+
+        tracing::info!(
+            obtain_tips_ms,
+            new_downloads,
+            tips = self.prospective_tips.len(),
+            state_tip = ?self.latest_chain_tip.best_tip_height(),
+            "syncer_obtain_tips_timing",
+        );
 
         Ok(extra_hashes)
     }
@@ -1058,8 +1092,17 @@ where
 
         let extra_hashes = self.request_blocks(download_set);
 
+        let extend_tips_ms = stage_start.elapsed().as_millis();
         metrics::histogram!("sync.stage.duration_seconds", "stage" => "extend_tips")
             .record(stage_start.elapsed().as_secs_f64());
+
+        tracing::info!(
+            extend_tips_ms,
+            new_downloads,
+            tips = self.prospective_tips.len(),
+            state_tip = ?self.latest_chain_tip.best_tip_height(),
+            "syncer_extend_tips_timing",
+        );
 
         Ok(extra_hashes)
     }
@@ -1126,7 +1169,9 @@ where
     ///
     /// TODO: turn obtain and extend tips into a separate task, which sends hashes via a channel?
     fn request_blocks(&mut self, mut hashes: IndexSet<block::Hash>) -> IndexSet<block::Hash> {
+        let t = std::time::Instant::now();
         let lookahead_limit = self.lookahead_limit(hashes.len());
+        let total_hashes = hashes.len();
 
         debug!(
             hashes.len = hashes.len(),
@@ -1155,10 +1200,22 @@ where
         // with tip extension and verification.
         let batch_size = self.downloads.block_sizes.recommended_batch_size();
         let hash_vec: Vec<_> = hashes.into_iter().collect();
+        let num_batches = hash_vec.chunks(batch_size).len();
 
         for batch in hash_vec.chunks(batch_size) {
             self.downloads.download_batch(batch.to_vec());
         }
+
+        tracing::info!(
+            request_blocks_us = t.elapsed().as_micros(),
+            total_hashes,
+            queued = total_hashes - extra_hashes.len(),
+            deferred = extra_hashes.len(),
+            batch_size,
+            num_batches,
+            in_flight = self.downloads.in_flight(),
+            "syncer_request_blocks_timing",
+        );
 
         extra_hashes
     }

@@ -572,6 +572,10 @@ impl StateService {
             Err(TryRecvError::Empty) => {}
         }
 
+        let t_drain = std::time::Instant::now();
+        let mut drained_count: usize = 0;
+        let mut last_drained_height = None;
+
         while let Some(queued_block) = self
             .finalized_state_queued_blocks
             .remove(&self.finalized_block_write_last_sent_hash)
@@ -599,6 +603,19 @@ impl StateService {
                         .set(last_sent_finalized_block_height.0 as f64);
                 };
             }
+
+            drained_count += 1;
+            last_drained_height = Some(last_sent_finalized_block_height);
+        }
+
+        if drained_count > 0 {
+            tracing::info!(
+                drained_count,
+                last_height = ?last_drained_height,
+                remaining_queued = self.finalized_state_queued_blocks.len(),
+                drain_us = t_drain.elapsed().as_micros(),
+                "drain_finalized_queue_timing",
+            );
         }
     }
 
@@ -1059,6 +1076,9 @@ impl Service<Request> for StateService {
             // The expected error type for this request is `CommitCheckpointVerifiedError`.
             Request::CommitCheckpointVerifiedBlock(finalized) => {
                 let timer = CodeTimer::start();
+                let t_call = std::time::Instant::now();
+                let cp_height = finalized.height;
+
                 // # Consensus
                 //
                 // A semantic block verification could have called AwaitUtxo
@@ -1072,14 +1092,31 @@ impl Service<Request> for StateService {
                 //
                 // (Checkpoint block UTXOs are verified using block hash checkpoints
                 // and transaction merkle tree block header commitments.)
+                let t_utxo = std::time::Instant::now();
                 self.pending_utxos
                     .check_against_ordered(&finalized.new_outputs);
+                let check_utxos_us = t_utxo.elapsed().as_micros();
 
                 // # Performance
                 //
                 // This method doesn't block, access the database, or perform CPU-intensive tasks,
                 // so we can run it directly in the tokio executor's Future threads.
+                let t_queue = std::time::Instant::now();
                 let rsp_rx = self.queue_and_commit_to_finalized_state(finalized);
+                let queue_and_commit_us = t_queue.elapsed().as_micros();
+
+                let queued_blocks = self.finalized_state_queued_blocks.len();
+
+                if cp_height.0 % 100 == 0 {
+                    tracing::info!(
+                        height = ?cp_height,
+                        check_utxos_us,
+                        queue_and_commit_us,
+                        queued_blocks,
+                        total_us = t_call.elapsed().as_micros(),
+                        "state_service_commit_timing",
+                    );
+                }
 
                 // TODO:
                 //   - check for panics in the block write task here,

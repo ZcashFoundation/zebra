@@ -1179,6 +1179,8 @@ impl Chain {
     }
 
     pub(crate) fn treestate(&self, hash_or_height: HashOrHeight) -> Option<Treestate> {
+        let t = std::time::Instant::now();
+
         let sprout_tree = self.sprout_tree(hash_or_height)?;
         let sapling_tree = self.sapling_tree(hash_or_height)?;
         let orchard_tree = self.orchard_tree(hash_or_height)?;
@@ -1186,14 +1188,26 @@ impl Chain {
         let sapling_subtree = self.sapling_subtree(hash_or_height);
         let orchard_subtree = self.orchard_subtree(hash_or_height);
 
-        Some(Treestate::new(
+        let lookup_us = t.elapsed().as_micros();
+
+        let result = Treestate::new(
             sprout_tree,
             sapling_tree,
             orchard_tree,
             sapling_subtree,
             orchard_subtree,
             history_tree,
-        ))
+        );
+
+        if self.blocks.len() % 100 == 0 {
+            tracing::info!(
+                lookup_us,
+                blocks_in_chain = self.blocks.len(),
+                "treestate_lookup_timing",
+            );
+        }
+
+        Some(result)
     }
 
     /// Returns the block hash of the tip block.
@@ -1441,9 +1455,11 @@ impl Chain {
         &mut self,
         contextually_valid: &ContextuallyVerifiedBlock,
     ) -> Result<(), ValidateContextError> {
+        let t_total = std::time::Instant::now();
         let height = contextually_valid.height;
 
         // Prepare data for parallel execution
+        let t_prep = std::time::Instant::now();
         let mut nct = NoteCommitmentTrees {
             sprout: self.sprout_note_commitment_tree_for_tip(),
             sapling: self.sapling_note_commitment_tree_for_tip(),
@@ -1451,6 +1467,7 @@ impl Chain {
             orchard: self.orchard_note_commitment_tree_for_tip(),
             orchard_subtree: self.orchard_subtree_for_tip(),
         };
+        let tree_prep_us = t_prep.elapsed().as_micros();
 
         let mut tree_result = None;
         let mut partial_result = None;
@@ -1458,6 +1475,7 @@ impl Chain {
         // Run 4 tasks in parallel:
         // - sprout, sapling, and orchard tree updates and root calculations
         // - the rest of the Chain updates
+        let t_rayon = std::time::Instant::now();
         rayon::in_place_scope_fifo(|scope| {
             // Spawns a separate rayon task for each note commitment tree
             tree_result = Some(nct.update_trees_parallel(&contextually_valid.block.clone()));
@@ -1467,11 +1485,13 @@ impl Chain {
                     Some(self.update_chain_tip_with_block_except_trees(contextually_valid));
             });
         });
+        let rayon_parallel_us = t_rayon.elapsed().as_micros();
 
         tree_result.expect("scope has already finished")?;
         partial_result.expect("scope has already finished")?;
 
         // Update the note commitment trees in the chain.
+        let t_add_trees = std::time::Instant::now();
         self.add_sprout_tree_and_anchor(height, nct.sprout);
         self.add_sapling_tree_and_anchor(height, nct.sapling);
         self.add_orchard_tree_and_anchor(height, nct.orchard);
@@ -1484,7 +1504,9 @@ impl Chain {
             self.orchard_subtrees
                 .insert(subtree.index, subtree.into_data());
         }
+        let add_trees_us = t_add_trees.elapsed().as_micros();
 
+        let t_history = std::time::Instant::now();
         let sapling_root = self.sapling_note_commitment_tree_for_tip().root();
         let orchard_root = self.orchard_note_commitment_tree_for_tip().root();
 
@@ -1501,6 +1523,20 @@ impl Chain {
             .map_err(Arc::new)?;
 
         self.add_history_tree(height, history_tree);
+        let history_tree_us = t_history.elapsed().as_micros();
+
+        // Log breakdown every 1000 blocks — detail of what's inside chain.push()
+        if height.0 % 100 == 0 {
+            tracing::info!(
+                ?height,
+                tree_prep_us,
+                rayon_parallel_us,
+                add_trees_us,
+                history_tree_us,
+                total_us = t_total.elapsed().as_micros(),
+                "chain_update_parallel_timing",
+            );
+        }
 
         Ok(())
     }

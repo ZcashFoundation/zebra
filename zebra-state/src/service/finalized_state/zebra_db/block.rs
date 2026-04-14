@@ -10,10 +10,56 @@
 //! each time the database format (column, serialization, etc) changes.
 
 use std::{
+    cell::RefCell,
     collections::{BTreeMap, HashMap, HashSet},
     ops::RangeBounds,
     sync::Arc,
 };
+
+// Per-thread accumulators for write_block timing summaries.
+thread_local! {
+    static WB_STATS: RefCell<WbStats> = RefCell::new(WbStats::default());
+}
+
+#[derive(Default)]
+struct WbStats {
+    utxo_indexing: (u128, u128),    // (sum, max)
+    address_balances: (u128, u128),
+    prepare_batch: (u128, u128),
+    rocksdb_write: (u128, u128),
+    write_total: (u128, u128),
+    count: u64,
+}
+
+impl WbStats {
+    fn record(&mut self, utxo: u128, addr: u128, prep: u128, rdb: u128, total: u128) {
+        fn acc(pair: &mut (u128, u128), v: u128) {
+            pair.0 += v;
+            if v > pair.1 { pair.1 = v; }
+        }
+        acc(&mut self.utxo_indexing, utxo);
+        acc(&mut self.address_balances, addr);
+        acc(&mut self.prepare_batch, prep);
+        acc(&mut self.rocksdb_write, rdb);
+        acc(&mut self.write_total, total);
+        self.count += 1;
+
+        if self.count % 100 == 0 {
+            let n = u128::from(self.count);
+            tracing::info!(
+                avg_utxo_indexing_us = self.utxo_indexing.0 / n,
+                avg_address_balances_us = self.address_balances.0 / n,
+                avg_prepare_batch_us = self.prepare_batch.0 / n,
+                avg_rocksdb_write_us = self.rocksdb_write.0 / n,
+                max_rocksdb_write_us = self.rocksdb_write.1,
+                avg_write_total_us = self.write_total.0 / n,
+                max_write_total_us = self.write_total.1,
+                blocks = self.count,
+                "write_block_summary",
+            );
+        }
+    }
+}
 
 use chrono::{DateTime, Utc};
 use itertools::Itertools;
@@ -531,6 +577,7 @@ impl ZebraDb {
         network: &Network,
         source: &str,
     ) -> Result<block::Hash, CommitCheckpointVerifiedError> {
+        let t_idx = std::time::Instant::now();
         let tx_hash_indexes: HashMap<transaction::Hash, usize> = finalized
             .transaction_hashes
             .iter()
@@ -584,7 +631,10 @@ impl ZebraDb {
             .unique()
             .collect();
 
+        let utxo_indexing_us = t_idx.elapsed().as_micros();
+
         // Get the current address balances, before the transactions in this block
+        let t_addr = std::time::Instant::now();
 
         fn read_addr_locs<T, F: Fn(&transparent::Address) -> Option<T>>(
             changed_addresses: HashSet<transparent::Address>,
@@ -616,9 +666,12 @@ impl ZebraDb {
             }))
         };
 
+        let address_balances_us = t_addr.elapsed().as_micros();
+
         let mut batch = DiskWriteBatch::new();
 
         // In case of errors, propagate and do not write the batch.
+        let t_prep = std::time::Instant::now();
         batch.prepare_block_batch(
             self,
             network,
@@ -632,14 +685,18 @@ impl ZebraDb {
             self.finalized_value_pool(),
             prev_note_commitment_trees,
         )?;
+        let prepare_batch_us = t_prep.elapsed().as_micros();
 
-        // Track batch commit latency for observability
-        let batch_start = std::time::Instant::now();
+        let t_write = std::time::Instant::now();
         self.db
             .write(batch)
             .expect("unexpected rocksdb error while writing block");
-        metrics::histogram!("zebra.state.rocksdb.batch_commit.duration_seconds")
-            .record(batch_start.elapsed().as_secs_f64());
+        let rocksdb_write_us = t_write.elapsed().as_micros();
+
+        let write_total_us = utxo_indexing_us + address_balances_us + prepare_batch_us + rocksdb_write_us;
+        WB_STATS.with(|s| s.borrow_mut().record(
+            utxo_indexing_us, address_balances_us, prepare_batch_us, rocksdb_write_us, write_total_us,
+        ));
 
         tracing::trace!(?source, "committed block from");
 

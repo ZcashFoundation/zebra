@@ -3,11 +3,68 @@
 //! [RFC0005]: https://zebra.zfnd.org/dev/rfcs/0005-state-updates.html
 
 use std::{
+    cell::RefCell,
     collections::{BTreeSet, HashMap},
     mem,
     path::{Path, PathBuf},
     sync::Arc,
 };
+
+// Per-thread accumulators for commit_checkpoint_block timing summaries.
+// Logs a summary every 100 blocks, retaining all data in running averages.
+thread_local! {
+    static CCB_STATS: RefCell<CcbStats> = RefCell::new(CcbStats::default());
+}
+
+#[derive(Default)]
+struct CcbStats {
+    acquire_chain: (u128, u128),   // (sum, max)
+    unspent_utxos: (u128, u128),
+    transparent_spend: (u128, u128),
+    build_contextual: (u128, u128),
+    chain_push: (u128, u128),
+    chain_replace: (u128, u128),
+    total: (u128, u128),
+    count: u64,
+}
+
+impl CcbStats {
+    fn record(&mut self, acquire_chain: u128, unspent_utxos: u128, unspent_utxos_len: usize,
+              transparent_spend: u128, build_contextual: u128, chain_push: u128,
+              chain_replace: u128, total: u128, height: u32) {
+        fn acc(pair: &mut (u128, u128), v: u128) {
+            pair.0 += v;
+            if v > pair.1 { pair.1 = v; }
+        }
+        acc(&mut self.acquire_chain, acquire_chain);
+        acc(&mut self.unspent_utxos, unspent_utxos);
+        acc(&mut self.transparent_spend, transparent_spend);
+        acc(&mut self.build_contextual, build_contextual);
+        acc(&mut self.chain_push, chain_push);
+        acc(&mut self.chain_replace, chain_replace);
+        acc(&mut self.total, total);
+        self.count += 1;
+
+        if self.count % 100 == 0 {
+            let n = u128::from(self.count);
+            tracing::info!(
+                height,
+                avg_acquire_chain_us = self.acquire_chain.0 / n,
+                avg_unspent_utxos_us = self.unspent_utxos.0 / n,
+                avg_transparent_spend_us = self.transparent_spend.0 / n,
+                avg_build_contextual_us = self.build_contextual.0 / n,
+                avg_chain_push_us = self.chain_push.0 / n,
+                max_chain_push_us = self.chain_push.1,
+                avg_chain_replace_us = self.chain_replace.0 / n,
+                avg_total_us = self.total.0 / n,
+                max_total_us = self.total.1,
+                blocks = self.count,
+                last_unspent_utxos_len = unspent_utxos_len,
+                "commit_checkpoint_block_summary",
+            );
+        }
+    }
+}
 
 use indexmap::IndexMap;
 use tokio::sync::watch;
@@ -350,15 +407,31 @@ impl NonFinalizedState {
     /// Returns `None` if the non-finalized state is empty.
     #[allow(clippy::unwrap_in_result)]
     pub fn peek_finalize_tip(&self) -> Option<FinalizableBlock> {
+        let t = std::time::Instant::now();
         let best_chain = self.best_chain()?;
         let tip = best_chain
             .tip_block()
             .expect("best chain is not empty because we just checked it");
         let tip_height = tip.height;
+
+        let t_tree = std::time::Instant::now();
         let treestate = best_chain
             .treestate(tip_height.into())
             .expect("treestate exists for the tip height because the block is in the chain");
-        Some(FinalizableBlock::new(tip.clone(), treestate))
+        let treestate_us = t_tree.elapsed().as_micros();
+
+        let result = FinalizableBlock::new(tip.clone(), treestate);
+
+        if tip_height.0 % 100 == 0 {
+            tracing::info!(
+                height = ?tip_height,
+                treestate_us,
+                total_us = t.elapsed().as_micros(),
+                "peek_finalize_tip_timing",
+            );
+        }
+
+        Some(result)
     }
 
     /// Commit block to the non-finalized state, on top of:
@@ -409,6 +482,8 @@ impl NonFinalizedState {
         checkpoint_verified: crate::CheckpointVerifiedBlock,
         finalized_state: &ZebraDb,
     ) -> Result<crate::service::ChainTipBlock, ValidateContextError> {
+        let t_total = std::time::Instant::now();
+
         let prepared: SemanticallyVerifiedBlock = checkpoint_verified.clone().into();
         let height = prepared.height;
         let hash = prepared.hash;
@@ -420,6 +495,7 @@ impl NonFinalizedState {
         // We still need the spent_utxos for UTXO tracking. Look them up from
         // the chain (for same-chain spends) and the finalized state (for
         // finalized spends).
+        let t_chain = std::time::Instant::now();
         let chain = if self.chain_set.is_empty() {
             // First block after the finalized tip — create a new chain.
             Arc::new(Chain::new(
@@ -439,14 +515,23 @@ impl NonFinalizedState {
                 .cloned()
                 .expect("chain_set is not empty")
         };
+        let acquire_chain_us = t_chain.elapsed().as_micros();
 
+        let t_unspent = std::time::Instant::now();
+        let unspent = chain.unspent_utxos();
+        let unspent_utxos_us = t_unspent.elapsed().as_micros();
+        let unspent_utxos_len = unspent.len();
+
+        let t_spend = std::time::Instant::now();
         let spent_utxos = check::utxo::transparent_spend(
             &prepared,
-            &chain.unspent_utxos(),
+            &unspent,
             &chain.spent_utxos,
             finalized_state,
         )?;
+        let transparent_spend_us = t_spend.elapsed().as_micros();
 
+        let t_ctx = std::time::Instant::now();
         let contextual =
             ContextuallyVerifiedBlock::with_block_and_spent_utxos(prepared, spent_utxos).map_err(
                 |value_balance_error| ValidateContextError::CalculateBlockChainValueChange {
@@ -457,25 +542,37 @@ impl NonFinalizedState {
                     spent_utxo_count: 0,
                 },
             )?;
+        let build_contextual_us = t_ctx.elapsed().as_micros();
 
         // Push onto chain — this updates trees, nullifiers, UTXOs, etc.
         // Skip the block commitment and sprout anchor validation that
         // `validate_and_update_parallel` performs, because checkpoint
         // verification has already guaranteed the block's validity.
+        let t_push = std::time::Instant::now();
         let chain = Arc::try_unwrap(chain).unwrap_or_else(|shared_chain| (*shared_chain).clone());
         let chain = Arc::new(chain.push(contextual)?);
+        let chain_push_us = t_push.elapsed().as_micros();
 
         // Replace the best chain in the set.
         // Remove old best chain first (if any), then insert the updated one.
+        let t_replace = std::time::Instant::now();
         #[allow(clippy::mutable_key_type)]
         let mut chains = mem::take(&mut self.chain_set);
         chains.pop_last(); // remove the old best chain
         chains.insert(chain);
         self.chain_set = chains;
+        let chain_replace_us = t_replace.elapsed().as_micros();
 
         self.update_metrics_for_committed_block(height, hash);
 
         let tip_block = crate::service::ChainTipBlock::from(checkpoint_verified);
+
+        CCB_STATS.with(|s| s.borrow_mut().record(
+            acquire_chain_us, unspent_utxos_us, unspent_utxos_len,
+            transparent_spend_us, build_contextual_us, chain_push_us,
+            chain_replace_us, t_total.elapsed().as_micros(), height.0,
+        ));
+
         Ok(tip_block)
     }
 
