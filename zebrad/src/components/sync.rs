@@ -627,12 +627,8 @@ where
         // `Downloads::poll_next`.
         self.drain_ready_downloads().await?;
 
-        // Extend tips proactively when we've exhausted our hash queue.
-        //
-        // This runs while downloads are still in flight, overlapping tip
-        // discovery network round-trips with block downloading and verification.
-        // Previously, tip extension only happened after the pipeline drained,
-        // causing the pipeline to stall between tip extension rounds.
+        // Extend tips proactively when we've exhausted our hash queue,
+        // overlapping tip discovery with in-flight downloads and verification.
         if extra_hashes.is_empty() && !self.prospective_tips.is_empty() {
             info!(
                 tips.len = self.prospective_tips.len(),
@@ -907,10 +903,8 @@ where
         let mut download_set = IndexSet::new();
         debug!(tips = ?tips.len(), "trying to extend chain tips");
 
-        // Spawn all fanout requests for all tips concurrently.
-        // Previously, tips were extended one at a time, causing sequential
-        // round-trip latency. With N tips and FANOUT=3, this reduces
-        // wall-clock time from N * TIPS_RESPONSE_TIMEOUT to ~1 * TIPS_RESPONSE_TIMEOUT.
+        // Spawn all fanout requests for all tips concurrently, so
+        // wall-clock time is ~1 round-trip regardless of tip count.
         let mut all_responses = FuturesUnordered::new();
         for tip in tips {
             debug!(?tip, "asking peers to extend chain tip");
@@ -1294,14 +1288,6 @@ where
                 );
                 false
             }
-            BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. } => {
-                debug!(
-                    error = ?e,
-                    "queued duplicate block hash for download, \
-                     assuming the syncer will eventually resolve duplicates, continuing"
-                );
-                false
-            }
             BlockDownloadVerifyError::AboveLookaheadHeightLimit { .. } => {
                 debug!(
                     error = ?e,
@@ -1315,19 +1301,6 @@ where
                     error = ?e,
                     "downloaded block had no valid height, skipping this block"
                 );
-                false
-            }
-
-            BlockDownloadVerifyError::DownloadFailed { ref error, .. }
-                if format!("{error:?}").contains("NotFound") =>
-            {
-                // Covers these errors:
-                // - NotFoundResponse
-                // - NotFoundRegistry
-                //
-                // TODO: improve this by checking the type (#2908)
-                //       restart after a certain number of NotFound errors?
-                debug!(error = ?e, "block was not found, possibly from a peer that doesn't have the block yet, continuing");
                 false
             }
 

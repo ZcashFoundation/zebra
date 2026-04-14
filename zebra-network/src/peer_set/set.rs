@@ -148,8 +148,8 @@ mod tests;
 /// The number of recently-used peers to track for tip-discovery requests
 /// (`FindBlocks` / `FindHeaders`).
 ///
-/// The syncer sends `FANOUT` (3) consecutive `FindBlocks` requests and needs
-/// distinct peers for each. We track double the fanout to ensure diversity
+/// The syncer sends `FANOUT` (2) consecutive `FindBlocks` requests and needs
+/// distinct peers for each. We track triple the fanout to ensure diversity
 /// across consecutive sync rounds.
 const MAX_RECENT_TIP_PEERS: usize = 6;
 

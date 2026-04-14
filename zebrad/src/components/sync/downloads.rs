@@ -84,28 +84,11 @@ impl<Request: Clone> hedge::Policy<Request> for AlwaysHedge {
 
 /// Errors that can occur while downloading and verifying a block.
 #[derive(Error, Debug)]
-#[allow(dead_code)]
 pub enum BlockDownloadVerifyError {
-    #[error("permanent readiness error from the network service: {error:?}")]
-    NetworkServiceError {
-        #[source]
-        error: BoxError,
-    },
-
     #[error("permanent readiness error from the verifier service: {error:?}")]
     VerifierServiceError {
         #[source]
         error: BoxError,
-    },
-
-    #[error("duplicate block hash queued for download: {hash:?}")]
-    DuplicateBlockQueuedForDownload { hash: block::Hash },
-
-    #[error("error downloading block: {error:?} {hash:?}")]
-    DownloadFailed {
-        #[source]
-        error: BoxError,
-        hash: block::Hash,
     },
 
     /// A downloaded block was a long way ahead of the state chain tip.
