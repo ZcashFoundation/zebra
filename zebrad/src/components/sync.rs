@@ -276,8 +276,12 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            // 2/3 of the default outbound peer limit.
-            download_concurrency_limit: 50,
+            // Allow enough concurrent requests to keep all peers busy with
+            // multi-block batches during checkpoint sync. The previous default
+            // of 50 caused severe contention when large-block batches (size 1)
+            // queued hundreds of tasks competing for Buffer/ConcurrencyLimit
+            // slots, resulting in 60-108s wait times.
+            download_concurrency_limit: 200,
 
             // A few max-length checkpoints.
             checkpoint_verify_concurrency_limit: DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT,
@@ -948,6 +952,10 @@ where
         }
 
         // Process all responses as they arrive, regardless of which tip they belong to.
+        // Downloads are queued incrementally as each peer responds, so they
+        // overlap with remaining tip hash discovery.
+        let mut extra_hashes = IndexSet::new();
+
         while let Some(join_result) = all_responses.next().await {
             // Drain ready verification responses (and any completed batch
             // downloads promoted to verify tasks) while processing tip
@@ -1041,6 +1049,18 @@ where
                     debug!(new_hashes, "added hashes to download set");
                     metrics::histogram!("sync.extend.response.hash.count")
                         .record(new_hashes as f64);
+
+                    // Pipeline: queue downloads for newly discovered hashes
+                    // immediately, so they overlap with remaining tip responses.
+                    if new_hashes > 0 {
+                        let new_hash_set: IndexSet<_> = download_set
+                            .iter()
+                            .skip(prev_download_len)
+                            .copied()
+                            .collect();
+                        let deferred = self.request_blocks(new_hash_set);
+                        extra_hashes.extend(deferred);
+                    }
                 }
                 Ok(_) => unreachable!("network returned wrong response"),
                 // We ignore this error because we made multiple fanout requests.
@@ -1055,8 +1075,6 @@ where
         // security: use the actual number of new downloads from all peers,
         // so the last peer to respond can't toggle our mempool
         self.recent_syncs.push_extend_tips_length(new_downloads);
-
-        let extra_hashes = self.request_blocks(download_set);
 
         metrics::histogram!("sync.stage.duration_seconds", "stage" => "extend_tips")
             .record(stage_start.elapsed().as_secs_f64());
@@ -1154,9 +1172,23 @@ where
         // which spawns verify tasks for each block — so downloads overlap
         // with tip extension and verification.
         let batch_size = self.downloads.block_sizes.recommended_batch_size();
+
+        // When blocks are large (batch_size <= 4), each hash becomes its own
+        // download task. With 500 hashes that means 500 tasks all calling
+        // network.ready() and competing for Buffer/ConcurrencyLimit slots,
+        // causing 60-108s wait times. Instead, group hashes into larger
+        // "super-batches" of MAX_BATCH_SIZE so each download task handles
+        // multiple blocks sequentially. download_batch_internal's retry loop
+        // naturally fetches one block per peer round-trip and distributes
+        // across peers via network.ready().
+        let task_group_size = if batch_size <= 4 {
+            downloads::MAX_BATCH_SIZE
+        } else {
+            batch_size
+        };
         let hash_vec: Vec<_> = hashes.into_iter().collect();
 
-        for batch in hash_vec.chunks(batch_size) {
+        for batch in hash_vec.chunks(task_group_size) {
             self.downloads.download_batch(batch.to_vec());
         }
 

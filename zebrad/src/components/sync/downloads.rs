@@ -2,7 +2,7 @@
 
 mod block_size_tracker;
 
-pub(super) use block_size_tracker::BlockSizeTracker;
+pub(super) use block_size_tracker::{BlockSizeTracker, MAX_BATCH_SIZE};
 
 use std::{
     collections::{HashMap, HashSet, VecDeque},
