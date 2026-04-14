@@ -25,6 +25,8 @@ exclude = [
     "^https://github.com/.*/pull/0000",
     # Mergify dashboard (requires auth)
     "^https://dashboard.mergify.com/",
+    # IACR eprint server returns 403 to automated link checkers
+    "^https://eprint\\.iacr\\.org/",
 
     # Dead upstream links in historical audit document (zebra-dependencies-for-audit.md)
     "^https://github.com/iqlusioninc/abscissa/tree/develop",
