@@ -765,6 +765,7 @@ where
         }
 
         self.pending_download_hashes.clear();
+        self.pending_errors.clear();
 
         assert!(self.pending_verifications.is_empty());
         assert!(self.cancel_verify_handles.is_empty());
