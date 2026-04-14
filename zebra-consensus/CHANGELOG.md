@@ -16,7 +16,6 @@ This release fixes an important security issue:
 The impact of the issue for crate users will depend on the particular usage;
 if you use it as a building block for a consensus node, you should update.
 
-
 ## [5.0.1] - 2026-03-25
 
 This release fixes an important security issue:
