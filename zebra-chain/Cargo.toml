@@ -86,7 +86,7 @@ ff.workspace = true
 pasta_curves.workspace = true
 halo2 = { package = "halo2_proofs", version = "0.3" }
 orchard.workspace = true
-zcash_tachyon = { workspace = true, features = ["serde"] }
+zcash_tachyon = { workspace = true }
 zcash_encoding.workspace = true
 zcash_history.workspace = true
 zcash_note_encryption = { workspace = true }

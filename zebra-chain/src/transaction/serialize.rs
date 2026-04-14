@@ -5,7 +5,6 @@ use std::{borrow::Borrow, io, sync::Arc};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use ff::PrimeField;
-use group::GroupEncoding;
 use hex::FromHex;
 use reddsa::{orchard::Binding, orchard::SpendAuth, Signature};
 
@@ -728,7 +727,15 @@ impl ZcashSerialize for Transaction {
                 // `proofsOrchard`, `vSpendAuthSigsOrchard`, and `bindingSigOrchard`.
                 orchard_shielded_data.zcash_serialize(&mut writer)?;
 
-                tachyon_shielded_data.zcash_serialize(&mut writer)?;
+                // Tachyon bundle: presence flag, then the bundle body in the
+                // wire format owned by the `zcash_tachyon` crate.
+                match tachyon_shielded_data {
+                    None => writer.write_u8(0)?,
+                    Some(bundle) => {
+                        writer.write_u8(1)?;
+                        write_tachyon_bundle(bundle, &mut writer)?;
+                    }
+                }
             }
         }
         Ok(())
@@ -1019,7 +1026,18 @@ impl ZcashDeserialize for Transaction {
                 // `proofsOrchard`, `vSpendAuthSigsOrchard`, and `bindingSigOrchard`.
                 let orchard_shielded_data = (&mut limited_reader).zcash_deserialize_into()?;
 
-                let tachyon_shielded_data = (&mut limited_reader).zcash_deserialize_into()?;
+                // Tachyon bundle: presence flag, then `Stamped`/`Stripped`
+                // wire format from `zcash_tachyon`.
+                let tachyon_flag = (&mut limited_reader).read_u8()?;
+                let tachyon_shielded_data = match tachyon_flag {
+                    0 => None,
+                    1 => Some(read_tachyon_bundle(&mut limited_reader)?),
+                    _ => {
+                        return Err(SerializationError::Parse(
+                            "invalid tachyon bundle presence flag: expected 0 or 1",
+                        ))
+                    }
+                };
 
                 Ok(Transaction::V6 {
                     network_upgrade,
@@ -1181,290 +1199,180 @@ impl FromHex for SerializedTransaction {
     }
 }
 
-// Tachyon Bundle serialization implementations
-impl<S> ZcashSerialize for Option<zcash_tachyon::Bundle<S>>
-where 
-    S: ZcashSerialize + zcash_tachyon::bundle::StampState,
-    zcash_tachyon::Bundle<S>: ZcashSerialize,
-{
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        match self {
-            None => {
-                writer.write_u8(0)?;
+/// Compressed Ragu proof size. Mirrors
+/// `mock_ragu::proof::PROOF_SIZE_COMPRESSED` in the `zcash_tachyon`
+/// dependency; kept here because the constant is not re-exported.
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+const TACHYON_PROOF_SIZE: usize = 23_000;
+
+/// Write a Tachyon bundle in the consensus wire format defined by
+/// `zcash_tachyon` (see `Stamped::write` / `Stripped::write` upstream).
+///
+/// Layout: `nActionsTachyon` compactsize, `[cv||rk]` per action,
+/// `valueBalanceTachyon` (i64 LE), `[sig]` per action, `bindingSigTachyon`,
+/// `stampTachyon` compactsize (proof size if stamped, stamp index if
+/// stripped), then a stamp trailer if stamped.
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+fn write_tachyon_bundle<W: io::Write>(
+    bundle: &TachyonBundle,
+    mut writer: W,
+) -> Result<(), io::Error> {
+    use crate::serialization::CompactSize64;
+
+    let (actions, value_balance) = match bundle {
+        TachyonBundle::Stamped(b) => (&b.actions, b.value_balance),
+        TachyonBundle::Stripped(b) => (&b.actions, b.value_balance),
+    };
+
+    CompactSize64::from(actions.len() as u64).zcash_serialize(&mut writer)?;
+    for action in actions {
+        let cv_bytes: [u8; 32] = action.cv.into();
+        let rk_bytes: [u8; 32] = action.rk.into();
+        writer.write_all(&cv_bytes)?;
+        writer.write_all(&rk_bytes)?;
+    }
+    writer.write_i64::<LittleEndian>(value_balance)?;
+    for action in actions {
+        let sig_bytes: [u8; 64] = action.sig.into();
+        writer.write_all(&sig_bytes)?;
+    }
+
+    match bundle {
+        TachyonBundle::Stamped(b) => {
+            let binding_bytes: [u8; 64] = b.binding_sig.into();
+            writer.write_all(&binding_bytes)?;
+            // stampTachyon = proof size (> 0xFC), followed by anchor,
+            // tachygrams, proof.
+            CompactSize64::from(TACHYON_PROOF_SIZE as u64).zcash_serialize(&mut writer)?;
+            let anchor_bytes: [u8; 32] = pasta_curves::Fp::from(b.stamp.anchor).to_repr();
+            writer.write_all(&anchor_bytes)?;
+            CompactSize64::from(b.stamp.tachygrams.len() as u64).zcash_serialize(&mut writer)?;
+            for tg in &b.stamp.tachygrams {
+                let tg_bytes: [u8; 32] = pasta_curves::Fp::from(*tg).to_repr();
+                writer.write_all(&tg_bytes)?;
             }
-            Some(tachyon_bundle) => {
-                writer.write_u8(1)?;
-                tachyon_bundle.zcash_serialize(&mut writer)?;
+            let proof_bytes: [u8; TACHYON_PROOF_SIZE] = b.stamp.proof.clone().into();
+            writer.write_all(&proof_bytes)?;
+        }
+        TachyonBundle::Stripped(b) => {
+            let binding_bytes: [u8; 64] = b.binding_sig.into();
+            writer.write_all(&binding_bytes)?;
+            let stamp_index = b.stamp.get_index().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "stripped tachyon bundle stamp_index must be assigned before serialization",
+                )
+            })?;
+            CompactSize64::from(u64::from(stamp_index)).zcash_serialize(&mut writer)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Read a Tachyon bundle using the `zcash_tachyon` consensus wire format.
+/// Dispatches between `Stamped` and `Stripped` based on the `stampTachyon`
+/// compactsize: values ≤ 0xFC are a miner-assigned stripped index; larger
+/// values are the attached proof size.
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+fn read_tachyon_bundle<R: io::Read>(mut reader: R) -> Result<TachyonBundle, SerializationError> {
+    use crate::serialization::CompactSize64;
+
+    let n_actions: u64 = u64::from(CompactSize64::zcash_deserialize(&mut reader)?);
+    let n_actions: usize = n_actions
+        .try_into()
+        .map_err(|_| SerializationError::Parse("tachyon action count overflow"))?;
+    if n_actions as u64 > (MAX_BLOCK_BYTES - 1) / 128 {
+        return Err(SerializationError::Parse("tachyon action count exceeds block"));
+    }
+
+    let mut descriptors: Vec<(zcash_tachyon::value::Commitment, zcash_tachyon::keys::public::ActionVerificationKey)> =
+        Vec::with_capacity(n_actions);
+    for _ in 0..n_actions {
+        let cv_bytes = (&mut reader).read_32_bytes()?;
+        let rk_bytes = (&mut reader).read_32_bytes()?;
+        let cv = zcash_tachyon::value::Commitment::from_bytes(cv_bytes)
+            .ok_or(SerializationError::Parse("invalid tachyon cv encoding"))?;
+        let rk = zcash_tachyon::keys::public::ActionVerificationKey::try_from(rk_bytes)
+            .map_err(|_| SerializationError::Parse("invalid tachyon rk encoding"))?;
+        descriptors.push((cv, rk));
+    }
+
+    let value_balance = (&mut reader).read_i64::<LittleEndian>()?;
+
+    let mut actions: Vec<zcash_tachyon::Action> = Vec::with_capacity(n_actions);
+    for (cv, rk) in descriptors {
+        let sig_bytes = (&mut reader).read_64_bytes()?;
+        actions.push(zcash_tachyon::Action {
+            cv,
+            rk,
+            sig: zcash_tachyon::action::Signature::from(sig_bytes),
+        });
+    }
+
+    let binding_bytes = (&mut reader).read_64_bytes()?;
+    let binding_sig = zcash_tachyon::bundle::Signature::from(binding_bytes);
+
+    let stamp_compact: u64 = u64::from(CompactSize64::zcash_deserialize(&mut reader)?);
+
+    if stamp_compact <= 0xFC {
+        let stamp_index = stamp_compact as u8;
+        let mut adjunct = zcash_tachyon::stamp::Adjunct::default();
+        adjunct.set_index(stamp_index);
+        Ok(TachyonBundle::Stripped(zcash_tachyon::Stripped {
+            actions,
+            value_balance,
+            binding_sig,
+            stamp: adjunct,
+        }))
+    } else {
+        let proof_size: usize = stamp_compact
+            .try_into()
+            .map_err(|_| SerializationError::Parse("tachyon proof size overflow"))?;
+        if proof_size != TACHYON_PROOF_SIZE {
+            return Err(SerializationError::Parse(
+                "unexpected tachyon proof size",
+            ));
+        }
+
+        let anchor_bytes = (&mut reader).read_32_bytes()?;
+        let anchor = zcash_tachyon::Anchor::from_bytes(anchor_bytes)
+            .ok_or(SerializationError::Parse("invalid tachyon anchor"))?;
+
+        let n_tachygrams: u64 = u64::from(CompactSize64::zcash_deserialize(&mut reader)?);
+        let n_tachygrams: usize = n_tachygrams
+            .try_into()
+            .map_err(|_| SerializationError::Parse("tachyon tachygram count overflow"))?;
+        if n_tachygrams as u64 > (MAX_BLOCK_BYTES - 1) / 32 {
+            return Err(SerializationError::Parse(
+                "tachyon tachygram count exceeds block",
+            ));
+        }
+
+        let mut tachygrams = Vec::with_capacity(n_tachygrams);
+        for _ in 0..n_tachygrams {
+            let tg_bytes = (&mut reader).read_32_bytes()?;
+            let fp = pasta_curves::Fp::from_repr(tg_bytes);
+            if !bool::from(fp.is_some()) {
+                return Err(SerializationError::Parse("invalid tachygram encoding"));
             }
+            tachygrams.push(zcash_tachyon::Tachygram::from(fp.unwrap()));
         }
-        Ok(())
-    }
-}
 
-impl<S> ZcashSerialize for zcash_tachyon::Bundle<S>
-where
-    S: ZcashSerialize + zcash_tachyon::bundle::StampState,
-{
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        // Denoted as `nActionsTachyon` and `vActionsTachyon` in the spec
-        self.actions.zcash_serialize(&mut writer)?;
-        
-        // Denoted as `valueBalanceTachyon` in the spec
-        writer.write_i64::<LittleEndian>(self.value_balance)?;
-        
-        // Denoted as `bindingSigTachyon` in the spec
-        self.binding_sig.zcash_serialize(&mut writer)?;
-        
-        // Denoted as stamp data (stamp present or stripped)
-        self.stamp.zcash_serialize(&mut writer)?;
-        
-        Ok(())
-    }
-}
+        let mut proof_buf = Box::new([0u8; TACHYON_PROOF_SIZE]);
+        reader.read_exact(proof_buf.as_mut_slice())?;
+        let proof = zcash_tachyon::Proof::try_from(proof_buf.as_ref())
+            .map_err(|_| SerializationError::Parse("invalid tachyon proof encoding"))?;
 
-impl<S> ZcashDeserialize for Option<zcash_tachyon::Bundle<S>>
-where
-    S: ZcashDeserialize + zcash_tachyon::bundle::StampState,
-{
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        // Read presence flag byte
-        let flag = (&mut reader).read_u8()?;
-
-        match flag {
-            0 => Ok(None),
-            1 => {
-                let actions: Vec<zcash_tachyon::Action> =
-                    (&mut reader).zcash_deserialize_into()?;
-                let value_balance = (&mut reader).read_i64::<LittleEndian>()?;
-                let binding_sig = (&mut reader).zcash_deserialize_into()?;
-                let stamp: S = (&mut reader).zcash_deserialize_into()?;
-
-                Ok(Some(zcash_tachyon::Bundle {
-                    actions,
-                    value_balance,
-                    binding_sig,
-                    stamp,
-                }))
-            }
-            _ => Err(SerializationError::Parse(
-                "invalid tachyon bundle presence flag: expected 0 or 1",
-            )),
-        }
-    }
-}
-
-// Tachyon signature serializations
-impl ZcashSerialize for zcash_tachyon::action::Signature {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        writer.write_all(&<[u8; 64]>::from(*self)[..])
-    }
-}
-
-impl ZcashDeserialize for zcash_tachyon::action::Signature {
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        Ok(reader.read_64_bytes()?.into())
-    }
-}
-
-impl ZcashSerialize for zcash_tachyon::bundle::Signature {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        writer.write_all(&<[u8; 64]>::from(*self)[..])
-    }
-}
-
-impl ZcashDeserialize for zcash_tachyon::bundle::Signature {
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        Ok(reader.read_64_bytes()?.into())
-    }
-}
-
-// Tachyon TrustedPreallocate implementations
-impl TrustedPreallocate for zcash_tachyon::Action {
-    // Action = 32 (cv) + 32 (rk) + 64 (sig) = 128 bytes
-    fn max_allocation() -> u64 {
-        (MAX_BLOCK_BYTES - 1) / 128
-    }
-}
-
-impl TrustedPreallocate for zcash_tachyon::Tachygram {
-    // Tachygram = 32 bytes (Fp field element)
-    fn max_allocation() -> u64 {
-        (MAX_BLOCK_BYTES - 1) / 32
-    }
-}
-
-// Individual tachyon component serializations
-impl ZcashSerialize for zcash_tachyon::Action {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        // Serialize cv (value commitment)
-        self.cv.zcash_serialize(&mut writer)?;
-        // Serialize rk (randomized verification key) 
-        self.rk.zcash_serialize(&mut writer)?;
-        // Serialize sig (spend auth signature)
-        self.sig.zcash_serialize(&mut writer)?;
-        Ok(())
-    }
-}
-
-impl ZcashDeserialize for zcash_tachyon::Action {
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let cv = (&mut reader).zcash_deserialize_into()?;
-        let rk = (&mut reader).zcash_deserialize_into()?;
-        let sig = (&mut reader).zcash_deserialize_into()?;
-        
-        Ok(zcash_tachyon::Action { cv, rk, sig })
-    }
-}
-
-impl ZcashSerialize for zcash_tachyon::Stamp {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        // Serialize tachygrams list
-        self.tachygrams.zcash_serialize(&mut writer)?;
-        // Serialize anchor
-        self.anchor.zcash_serialize(&mut writer)?;
-        // Serialize proof
-        self.proof.zcash_serialize(&mut writer)?;
-        Ok(())
-    }
-}
-
-impl ZcashDeserialize for zcash_tachyon::Stamp {
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let tachygrams = (&mut reader).zcash_deserialize_into()?;
-        let anchor = (&mut reader).zcash_deserialize_into()?;
-        let proof = (&mut reader).zcash_deserialize_into()?;
-        
-        Ok(zcash_tachyon::Stamp {
-            tachygrams,
-            anchor,
-            proof,
-        })
-    }
-}
-
-impl ZcashSerialize for zcash_tachyon::stamp::Stampless {
-    fn zcash_serialize<W: io::Write>(&self, _writer: W) -> Result<(), io::Error> {
-        // Stampless is a zero-sized marker type, nothing to serialize
-        Ok(())
-    }
-}
-
-impl ZcashDeserialize for zcash_tachyon::stamp::Stampless {
-    fn zcash_deserialize<R: io::Read>(_reader: R) -> Result<Self, SerializationError> {
-        // Stampless is a zero-sized marker type, nothing to deserialize
-        Ok(zcash_tachyon::stamp::Stampless)
-    }
-}
-
-impl ZcashSerialize for Option<zcash_tachyon::Stamp> {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        match self {
-            None => writer.write_u8(0)?,
-            Some(stamp) => {
-                writer.write_u8(1)?;
-                stamp.zcash_serialize(&mut writer)?;
-            }
-        }
-        Ok(())
-    }
-}
-
-impl ZcashDeserialize for Option<zcash_tachyon::Stamp> {
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let flag = reader.read_u8()?;
-        match flag {
-            0 => Ok(None),
-            1 => Ok(Some(zcash_tachyon::Stamp::zcash_deserialize(&mut reader)?)),
-            _ => Err(SerializationError::Parse("invalid tachyon stamp flag")),
-        }
-    }
-}
-
-// Individual primitive serializations
-impl ZcashSerialize for zcash_tachyon::Tachygram {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        let fp: pasta_curves::Fp = (*self).into();
-        let bytes = fp.to_repr();
-        writer.write_all(&bytes)
-    }
-}
-
-impl ZcashDeserialize for zcash_tachyon::Tachygram {
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let bytes = reader.read_32_bytes()?;
-        let fp_option = pasta_curves::Fp::from_repr(bytes);
-        if fp_option.is_some().into() {
-            Ok(fp_option.unwrap().into())
-        } else {
-            Err(SerializationError::Parse("invalid tachygram field element"))
-        }
-    }
-}
-
-impl ZcashSerialize for zcash_tachyon::Anchor {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        let fp: pasta_curves::Fp = (*self).into();
-        let bytes = fp.to_repr();
-        writer.write_all(&bytes)
-    }
-}
-
-impl ZcashDeserialize for zcash_tachyon::Anchor {
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let bytes = reader.read_32_bytes()?;
-        let fp_option = pasta_curves::Fp::from_repr(bytes);
-        if fp_option.is_some().into() {
-            Ok(fp_option.unwrap().into())
-        } else {
-            Err(SerializationError::Parse("invalid anchor field element"))
-        }
-    }
-}
-
-impl ZcashSerialize for zcash_tachyon::Proof {
-    fn zcash_serialize<W: io::Write>(&self, _writer: W) -> Result<(), io::Error> {
-        // Proof is currently a stub, no serialization needed yet
-        Ok(())
-    }
-}
-
-impl ZcashDeserialize for zcash_tachyon::Proof {
-    fn zcash_deserialize<R: io::Read>(_reader: R) -> Result<Self, SerializationError> {
-        // Proof is currently a stub, no deserialization needed yet  
-        Ok(zcash_tachyon::Proof)
-    }
-}
-
-impl ZcashSerialize for zcash_tachyon::value::Commitment {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        let point: pasta_curves::EpAffine = (*self).into();
-        let bytes = point.to_bytes();
-        writer.write_all(&bytes)
-    }
-}
-
-impl ZcashDeserialize for zcash_tachyon::value::Commitment {
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let bytes = reader.read_32_bytes()?;
-        let point_option = pasta_curves::EpAffine::from_bytes(&bytes);
-        if point_option.is_some().into() {
-            Ok(point_option.unwrap().into())
-        } else {
-            Err(SerializationError::Parse("invalid value commitment point"))
-        }
-    }
-}
-
-impl ZcashSerialize for zcash_tachyon::keys::public::ActionVerificationKey {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        let bytes: [u8; 32] = (*self).into();
-        writer.write_all(&bytes)
-    }
-}
-
-impl ZcashDeserialize for zcash_tachyon::keys::public::ActionVerificationKey {
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let bytes = reader.read_32_bytes()?;
-        Self::try_from(bytes).map_err(|_| SerializationError::Parse("invalid action verification key"))
+        Ok(TachyonBundle::Stamped(zcash_tachyon::Stamped {
+            actions,
+            value_balance,
+            binding_sig,
+            stamp: zcash_tachyon::Stamp {
+                tachygrams,
+                anchor,
+                proof,
+            },
+        }))
     }
 }

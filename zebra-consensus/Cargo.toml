@@ -24,7 +24,7 @@ progress-bar = [
     "zebra-state/progress-bar",
 ]
 
-tx_v6 = ["zebra-chain/tx_v6", "zebra-state/tx_v6"]
+tx_v6 = ["zebra-chain/tx_v6", "zebra-state/tx_v6", "dep:zcash_tachyon"]
 
 # Test-only features
 proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl", "zebra-state/proptest-impl"]
@@ -67,6 +67,7 @@ zebra-node-services = { path = "../zebra-node-services", version = "2.1.1" }
 zebra-chain = { path = "../zebra-chain", version = "3.1.0" }
 
 zcash_protocol.workspace = true
+zcash_tachyon = { workspace = true, optional = true }
 
 # prod feature progress-bar
 howudoin = { workspace = true, optional = true }

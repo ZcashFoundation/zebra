@@ -172,8 +172,48 @@ pub enum Transaction {
         /// The orchard data for this transaction, if any.
         orchard_shielded_data: Option<orchard::ShieldedData>,
         /// The tachyon data for this transaction, if any.
-        tachyon_shielded_data: Option<zcash_tachyon::Bundle<Option<zcash_tachyon::Stamp>>>,
+        #[cfg_attr(
+            any(test, feature = "proptest-impl", feature = "elasticsearch"),
+            serde(skip)
+        )]
+        tachyon_shielded_data: Option<TachyonBundle>,
     },
+}
+
+/// Wire-level discriminator for the Tachyon bundle on a V6 transaction.
+///
+/// A stamped bundle carries its own aggregate proof. A stripped bundle has
+/// its stamp removed and carries an explicit `stamp_index` (assigned by the
+/// miner) referring to a stamped bundle elsewhere in the same block that
+/// covers its actions.
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TachyonBundle {
+    /// A `Bundle<Stamp>` — self-contained, covers its own actions plus any
+    /// stripped bundles in the block that reference its index.
+    Stamped(zcash_tachyon::Stamped),
+    /// A `Bundle<Adjunct>` — stamp removed, covered by a stamped bundle via
+    /// miner-assigned `stamp_index`.
+    Stripped(zcash_tachyon::Stripped),
+}
+
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+impl TachyonBundle {
+    /// The bundle's actions, regardless of stamp state.
+    pub fn actions(&self) -> &[zcash_tachyon::Action] {
+        match self {
+            Self::Stamped(b) => &b.actions,
+            Self::Stripped(b) => &b.actions,
+        }
+    }
+
+    /// The bundle's value balance.
+    pub fn value_balance(&self) -> i64 {
+        match self {
+            Self::Stamped(b) => b.value_balance,
+            Self::Stripped(b) => b.value_balance,
+        }
+    }
 }
 
 impl fmt::Display for Transaction {

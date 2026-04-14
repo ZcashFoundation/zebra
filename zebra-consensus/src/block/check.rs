@@ -68,6 +68,75 @@ pub fn coinbase_is_first(block: &Block) -> Result<Arc<transaction::Transaction>,
     Ok(first.clone())
 }
 
+/// Verify Tachyon aggregate proofs for a block.
+///
+/// Each Tachyon transaction carries either a stamped or stripped bundle.
+/// Stamped bundles hold the aggregate proof; stripped bundles have no
+/// proof of their own but carry an explicit `stamp_index` (assigned by
+/// the block producer) identifying which stamped bundle in the block
+/// covers their actions. Stamps are numbered in block order starting at 0.
+///
+/// This function:
+/// 1. Walks the block once to collect stamped bundles (numbered by position).
+/// 2. Walks the block again to attribute each stripped bundle's actions to
+///    the stamp whose index it references.
+/// 3. Verifies each stamp's proof against the combined action multiset.
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+pub fn verify_tachyon_aggregates(block: &Block) -> Result<(), BlockError> {
+    use zebra_chain::transaction::TachyonBundle;
+
+    let mut groups: Vec<(&zcash_tachyon::Stamp, Vec<zcash_tachyon::Action>)> = Vec::new();
+
+    for tx in &block.transactions {
+        if let Transaction::V6 {
+            tachyon_shielded_data: Some(TachyonBundle::Stamped(bundle)),
+            ..
+        } = tx.as_ref()
+        {
+            groups.push((&bundle.stamp, bundle.actions.clone()));
+        }
+    }
+
+    if groups.len() > 0xFD {
+        return Err(BlockError::Other(
+            "block contains more than 253 tachyon stamps".to_string(),
+        ));
+    }
+
+    for tx in &block.transactions {
+        if let Transaction::V6 {
+            tachyon_shielded_data: Some(TachyonBundle::Stripped(bundle)),
+            ..
+        } = tx.as_ref()
+        {
+            let idx = bundle.stamp.get_index().ok_or_else(|| {
+                BlockError::Other(
+                    "stripped tachyon bundle is missing a stamp_index".to_string(),
+                )
+            })?;
+            let slot = groups.get_mut(usize::from(idx)).ok_or_else(|| {
+                BlockError::Other(
+                    "stripped tachyon bundle references a non-existent stamp_index"
+                        .to_string(),
+                )
+            })?;
+            slot.1.extend(bundle.actions.iter().cloned());
+        }
+    }
+
+    let mut rng = rand::rngs::OsRng;
+    for (stamp, actions) in &groups {
+        let multiset = zcash_tachyon::Multiset::try_from(actions.as_slice()).map_err(|_| {
+            BlockError::Other("invalid tachyon action digest in block".to_string())
+        })?;
+        stamp.verify(&multiset, &mut rng).map_err(|_| {
+            BlockError::Other("tachyon aggregate proof verification failed".to_string())
+        })?;
+    }
+
+    Ok(())
+}
+
 /// Returns `Ok(ExpandedDifficulty)` if the`difficulty_threshold` of `header` is at least as difficult as
 /// the target difficulty limit for `network` (PoWLimit)
 ///
