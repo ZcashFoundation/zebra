@@ -265,6 +265,7 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           REF_SLUG: ${{ env.GITHUB_REF_SLUG_URL }}
+          SHA_SHORT: ${{ env.GITHUB_SHA_SHORT }}
         run: |
           case "${EVENT_NAME}" in
             release)
@@ -287,7 +288,7 @@ jobs:
 
           MIG_NAME="zebrad-${MIG_PREFIX}${NETWORK}"
           DISK_NAME="zebrad-cache-${MIG_PREFIX}${NETWORK}"
-          TEMPLATE_NAME="zebrad-${MIG_PREFIX}${{ env.GITHUB_SHA_SHORT }}-${NETWORK}"
+          TEMPLATE_NAME="zebrad-${MIG_PREFIX}${SHA_SHORT}-${NETWORK}"
 
           {
             echo "LIFECYCLE_CLASS=${LIFECYCLE_CLASS}"
@@ -302,10 +303,12 @@ jobs:
       # different MIG. Without this check, the symptom is a 20-minute
       # `wait-until --stable` timeout with no actionable error.
       - name: Pre-flight check for stateful disk squatters
+        env:
+          GCP_REGION: ${{ vars.GCP_REGION }}
         run: |
           SQUATTERS=""
           for zone in $(gcloud compute zones list \
-              --filter="region:${{ vars.GCP_REGION }}" \
+              --filter="region:${GCP_REGION}" \
               --format="value(name)" --limit=3); do
             users=$(gcloud compute disks describe "${DISK_NAME}" --zone="${zone}" \
               --format="value(users.basename())" 2>/dev/null || true)
