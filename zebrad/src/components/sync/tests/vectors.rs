@@ -216,7 +216,12 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
                 blocks_verified += 1;
             }
             Some(sender) = state_service.try_next_request() => {
-                sender.respond(zs::Response::KnownBlock(None));
+                match sender.request() {
+                    zs::Request::BlockLocator => {
+                        sender.respond(zs::Response::BlockLocator(vec![block0_hash]));
+                    }
+                    _ => sender.respond(zs::Response::KnownBlock(None)),
+                }
             }
         }
     }
@@ -229,9 +234,33 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
     );
     assert!(remaining_blocks.is_empty(), "not all blocks verified");
 
-    // Check that nothing unexpected happened.
+    // The syncer re-obtains tips when extend_tips exhausts prospective_tips
+    // while downloads are still in flight. Handle those requests here.
+    loop {
+        tokio::select! {
+            Some(sender) = peer_set.try_next_request() => {
+                match sender.request() {
+                    zn::Request::FindBlocks { .. } => {
+                        sender.respond(Err(zn::BoxError::from(
+                            "synthetic test re-obtain error",
+                        )));
+                    }
+                    other => panic!("unexpected peer_set request after verify: {other:?}"),
+                }
+            }
+            Some(sender) = state_service.try_next_request() => {
+                match sender.request() {
+                    zs::Request::BlockLocator => {
+                        sender.respond(zs::Response::BlockLocator(vec![block0_hash]));
+                    }
+                    _ => sender.respond(zs::Response::KnownBlock(None)),
+                }
+            }
+            else => break,
+        }
+    }
+
     block_verifier_router.expect_no_requests().await;
-    state_service.expect_no_requests().await;
 
     let chain_sync_result = chain_sync_task_handle.now_or_never();
     assert!(
@@ -422,7 +451,12 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
                 blocks_verified += 1;
             }
             Some(sender) = state_service.try_next_request() => {
-                sender.respond(zs::Response::KnownBlock(None));
+                match sender.request() {
+                    zs::Request::BlockLocator => {
+                        sender.respond(zs::Response::BlockLocator(vec![block0_hash]));
+                    }
+                    _ => sender.respond(zs::Response::KnownBlock(None)),
+                }
             }
         }
     }
@@ -435,9 +469,33 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
     );
     assert!(remaining_blocks.is_empty(), "not all blocks verified");
 
-    // Check that nothing unexpected happened.
+    // The syncer re-obtains tips when extend_tips exhausts prospective_tips
+    // while downloads are still in flight. Handle those requests here.
+    loop {
+        tokio::select! {
+            Some(sender) = peer_set.try_next_request() => {
+                match sender.request() {
+                    zn::Request::FindBlocks { .. } => {
+                        sender.respond(Err(zn::BoxError::from(
+                            "synthetic test re-obtain error",
+                        )));
+                    }
+                    other => panic!("unexpected peer_set request after verify: {other:?}"),
+                }
+            }
+            Some(sender) = state_service.try_next_request() => {
+                match sender.request() {
+                    zs::Request::BlockLocator => {
+                        sender.respond(zs::Response::BlockLocator(vec![block0_hash]));
+                    }
+                    _ => sender.respond(zs::Response::KnownBlock(None)),
+                }
+            }
+            else => break,
+        }
+    }
+
     block_verifier_router.expect_no_requests().await;
-    state_service.expect_no_requests().await;
 
     let chain_sync_result = chain_sync_task_handle.now_or_never();
     assert!(

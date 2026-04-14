@@ -585,24 +585,44 @@ where
             state_tip = ?self.latest_chain_tip.best_tip_height(),
             "starting sync, obtaining new tips"
         );
-        let mut extra_hashes = timeout(SYNC_RESTART_DELAY, self.obtain_tips())
-            .await
-            .map_err(Into::into)
-            // TODO: replace with flatten() when it stabilises (#70142)
-            .and_then(convert::identity)
-            .map_err(|e| {
-                info!("temporary error obtaining tips: {:#}", e);
-                e
-            })?;
-        self.update_metrics();
 
-        while !self.prospective_tips.is_empty() || !extra_hashes.is_empty() {
-            // Avoid hangs due to service readiness or other internal operations
-            extra_hashes = timeout(BLOCK_VERIFY_TIMEOUT, self.try_to_sync_once(extra_hashes))
+        loop {
+            let mut extra_hashes = timeout(SYNC_RESTART_DELAY, self.obtain_tips())
                 .await
                 .map_err(Into::into)
                 // TODO: replace with flatten() when it stabilises (#70142)
-                .and_then(convert::identity)?;
+                .and_then(convert::identity)
+                .map_err(|e| {
+                    info!("temporary error obtaining tips: {:#}", e);
+                    e
+                })?;
+
+            self.update_metrics();
+
+            while !self.prospective_tips.is_empty() || !extra_hashes.is_empty() {
+                // Avoid hangs due to service readiness or other internal operations
+                extra_hashes = timeout(BLOCK_VERIFY_TIMEOUT, self.try_to_sync_once(extra_hashes))
+                    .await
+                    .map_err(Into::into)
+                    // TODO: replace with flatten() when it stabilises (#70142)
+                    .and_then(convert::identity)?;
+            }
+
+            // If there are no more downloads in flight, we've genuinely
+            // exhausted this sync round.
+            self.drain_ready_downloads().await?;
+            if self.downloads.in_flight() == 0 {
+                break;
+            }
+
+            // Tips were exhausted but downloads are still in flight — this
+            // happens when all FANOUT extend_tips requests fail in one round.
+            // Re-obtain tips immediately instead of stalling SYNC_RESTART_DELAY.
+            info!(
+                in_flight = self.downloads.in_flight(),
+                state_tip = ?self.latest_chain_tip.best_tip_height(),
+                "re-obtaining tips: exhausted with downloads still in flight",
+            );
         }
 
         info!("exhausted prospective tip set");
