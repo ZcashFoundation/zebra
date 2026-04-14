@@ -2,17 +2,19 @@
 
 The continuous-delivery pipeline deploys every commit merged to `main` to a staging environment, and every published release to production, on Google Cloud Platform.
 
-## Lifecycle classes
+## Two GCP environments, three deploy kinds
 
-The pipeline distinguishes three lifecycle classes by trigger. Each class has its own GCP project, MIG, and stateful disk. Rationale and trade-offs live in [ADR 0006](../../../docs/decisions/devops/0006-gcp-deployment-lifecycle.md); operational procedures live in the [operations runbook](gcp-deployment-operations.md).
+The pipeline targets two GCP environments. Within the dev environment, the source branch determines whether the deploy is the persistent staging node or an ephemeral PR deploy. ADR [0006](../../../docs/decisions/devops/0006-gcp-deployment-naming.md) records the rationale; the [operations runbook](gcp-deployment-operations.md) covers day-to-day procedures.
 
-| Class       | Trigger              | Project           | MIG                            | Stateful disk                       | Lifetime                                                   |
-| ----------- | -------------------- | ----------------- | ------------------------------ | ----------------------------------- | ---------------------------------------------------------- |
-| **Prod**    | `release`            | `zfnd-prod-zebra` | `zebrad-${network}`            | `zebrad-cache-${network}`           | Permanent. Rolling template swap on every release.         |
-| **Staging** | `push` to `main`     | `zfnd-dev-zebra`  | `zebrad-main-${network}`       | `zebrad-cache-main-${network}`      | Permanent. Rolling template swap on every commit.          |
-| **Canary**  | `workflow_dispatch`  | `zfnd-dev-zebra`  | `zebrad-${branch}-${network}`  | `zebrad-cache-${branch}-${network}` | Per-branch. Manually reaped via labels (see runbook).      |
+| Trigger              | GCP environment    | Branch / tag | MIG                            | Stateful disk                       | Lifetime                                                   |
+| -------------------- | ------------------ | ------------ | ------------------------------ | ----------------------------------- | ---------------------------------------------------------- |
+| `release`            | `zfnd-prod-zebra`  | `${tag}`     | `zebrad-${network}`            | `zebrad-cache-${network}`           | Permanent. Rolling template swap on every release.         |
+| `push` to `main`     | `zfnd-dev-zebra`   | `main`       | `zebrad-main-${network}`       | `zebrad-cache-main-${network}`      | Permanent. Rolling template swap on every commit.          |
+| `workflow_dispatch`  | `zfnd-dev-zebra`   | `${branch}`  | `zebrad-${branch}-${network}`  | `zebrad-cache-${branch}-${network}` | Per-branch. Manually reaped via labels (see runbook).      |
 
 For each network (`mainnet`, `testnet`), the MIG runs one Spot instance per zone in the configured region, typically three zones in `us-east1`. The stateful disk persists the chain across template swaps, so a release upgrade does not trigger a multi-day resync.
+
+The MIG name encodes the source so the resource is self-describing: a reader sees `zebrad-feat-foo-mainnet` and knows the deploy came from branch `feat-foo` on Mainnet in the dev environment.
 
 ## Update mechanics
 

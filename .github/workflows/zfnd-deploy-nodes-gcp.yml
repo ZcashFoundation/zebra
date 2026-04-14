@@ -1,10 +1,20 @@
 # Deploy Zebra nodes to Google Cloud Platform.
 #
-# Triggers:
-# - push to `main`: deploy to staging in `zfnd-dev-zebra` (every code-affecting commit)
-# - release published: deploy to prod in `zfnd-prod-zebra` (downstream of release-binaries.yml)
-# - workflow_dispatch: per-branch canary in `zfnd-dev-zebra` (manual smoke test)
-# - pull_request: build-only validation; no deploy (skipped for forks)
+# Two GCP environments host the deploys:
+# - `zfnd-prod-zebra` (production): receives `release` events
+# - `zfnd-dev-zebra`  (dev):        receives `push`-to-main (the staging deploy)
+#                                   and `workflow_dispatch` from any branch (PR work)
+#
+# Within each environment, the MIG name encodes the source so the resource is
+# self-describing:
+# - production:   `zebrad-${network}`
+# - staging:      `zebrad-main-${network}`
+# - PR / branch:  `zebrad-${branch}-${network}`
+#
+# Each MIG is stable; every trigger swaps the instance template via rolling
+# action with `--max-unavailable=1`. The stateful disk policy preserves chain
+# state across the rolling restart, so cross-major-version upgrades do not
+# trigger a multi-day resync.
 #
 # Jobs:
 # - `get-disk-name`: looks up the most recent matching cache image for cold-start bootstrap
@@ -13,15 +23,9 @@
 # - `deploy-nodes`: creates or rolls the MIG for the matrix network
 # - `deploy-nodes-success` + `failure-issue`: success aggregation and auto-issue on failure
 #
-# Each trigger maps to one of three lifecycle classes (prod, staging, canary).
-# The class drives MIG name, disk name, and GCP project. The MIG itself is stable
-# per network; releases swap the instance template via rolling-action with
-# `--max-unavailable=1`. The stateful disk policy preserves chain state across
-# the rolling restart.
-#
-# See ADR docs/decisions/devops/0006-gcp-deployment-lifecycle.md for the design
+# See ADR docs/decisions/devops/0006-gcp-deployment-naming.md for the design
 # rationale and book/src/dev/gcp-deployment-operations.md for operational
-# procedures (canary cleanup, disk-corruption recovery, DB-format-version-break
+# procedures (PR-deploy cleanup, disk-corruption recovery, DB-format-version-break
 # release).
 name: Deploy Nodes to GCP
 
@@ -199,11 +203,11 @@ jobs:
             echo 'matrix=["Mainnet","Testnet"]' >> $GITHUB_OUTPUT
           fi
 
-  # Create or update the MIG for the matrix network. The MIG name is stable per
-  # network within its lifecycle class, so this step swaps the instance template
-  # via rolling-action when the MIG already exists, and creates a fresh MIG
-  # bootstrapped from the cache image when it does not. Stateful disks are
-  # preserved across rolling restarts.
+  # Create or update the MIG for the matrix network. The MIG name is a
+  # deterministic function of (environment, branch), so this step swaps the
+  # instance template via rolling-action when the MIG already exists, and
+  # creates a fresh MIG bootstrapped from the cache image when it does not.
+  # Stateful disks are preserved across rolling restarts.
   deploy-nodes:
     strategy:
       matrix:
@@ -259,27 +263,21 @@ jobs:
         with:
           install_components: 'beta'
 
-      # Map github.event_name to a lifecycle class (prod / staging / canary)
-      # and derive MIG, disk, and template names. See ADR 0006.
-      - name: Compute lifecycle class and naming for ${{ matrix.network }}
+      # Derive MIG, disk, and template names from the trigger. The release event
+      # produces unprefixed names (the production deploy in zfnd-prod-zebra);
+      # `push` to main produces `main-` prefixed names (the staging deploy in
+      # zfnd-dev-zebra); `workflow_dispatch` produces branch-prefixed names (PR
+      # work in zfnd-dev-zebra). See ADR 0006.
+      - name: Compute MIG and disk naming for ${{ matrix.network }}
         env:
           EVENT_NAME: ${{ github.event_name }}
           REF_SLUG: ${{ env.GITHUB_REF_SLUG_URL }}
           SHA_SHORT: ${{ env.GITHUB_SHA_SHORT }}
         run: |
           case "${EVENT_NAME}" in
-            release)
-              LIFECYCLE_CLASS="prod"
-              MIG_PREFIX=""
-              ;;
-            push)
-              LIFECYCLE_CLASS="staging"
-              MIG_PREFIX="main-"
-              ;;
-            workflow_dispatch)
-              LIFECYCLE_CLASS="canary"
-              MIG_PREFIX="${REF_SLUG}-"
-              ;;
+            release)           MIG_PREFIX="" ;;
+            push)              MIG_PREFIX="main-" ;;
+            workflow_dispatch) MIG_PREFIX="${REF_SLUG}-" ;;
             *)
               echo "::error::Unsupported event for deploy: ${EVENT_NAME}"
               exit 1
@@ -291,13 +289,12 @@ jobs:
           TEMPLATE_NAME="zebrad-${MIG_PREFIX}${SHA_SHORT}-${NETWORK}"
 
           {
-            echo "LIFECYCLE_CLASS=${LIFECYCLE_CLASS}"
             echo "MIG_NAME=${MIG_NAME}"
             echo "DISK_NAME=${DISK_NAME}"
             echo "TEMPLATE_NAME=${TEMPLATE_NAME}"
           } >> "$GITHUB_ENV"
 
-          echo "Computed: lifecycle_class=${LIFECYCLE_CLASS} mig=${MIG_NAME} disk=${DISK_NAME} template=${TEMPLATE_NAME}"
+          echo "Computed: mig=${MIG_NAME} disk=${DISK_NAME} template=${TEMPLATE_NAME}"
 
       # Reject early when the target disk is held by an instance from a
       # different MIG. Without this check, the symptom is a 20-minute
@@ -375,7 +372,7 @@ jobs:
             --service-account ${{ vars.GCP_DEPLOYMENTS_SA }} \
             --scopes cloud-platform \
             --metadata google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true \
-            --labels=app=zebrad,environment=${{ github.event_name == 'release' && 'prod' || (github.event_name == 'workflow_dispatch' && inputs.environment) || 'dev' }},network=${NETWORK},lifecycle_class=${LIFECYCLE_CLASS},created_by=${{ github.event_name }},github_ref=${{ env.GITHUB_REF_SLUG_URL }},github_sha=${{ env.GITHUB_SHA_SHORT }} \
+            --labels=app=zebrad,environment=${{ github.event_name == 'release' && 'prod' || (github.event_name == 'workflow_dispatch' && inputs.environment) || 'dev' }},network=${NETWORK},created_by=${{ github.event_name }},github_ref=${{ env.GITHUB_REF_SLUG_URL }},github_sha=${{ env.GITHUB_SHA_SHORT }} \
             --tags zebrad
           fi
 

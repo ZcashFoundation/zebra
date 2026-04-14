@@ -1,33 +1,42 @@
 # GCP Deployment Operations
 
-Operational procedures for the GCP Continuous Delivery pipeline. Architectural rationale lives in [ADR 0006](../../../docs/decisions/devops/0006-gcp-deployment-lifecycle.md); the high-level model is in [Continuous Delivery](continuous-delivery.md).
+Operational procedures for the GCP Continuous Delivery pipeline. Architectural rationale lives in [ADR 0006](../../../docs/decisions/devops/0006-gcp-deployment-naming.md); the high-level model is in [Continuous Delivery](continuous-delivery.md).
 
 ## Quick reference
 
 | Goal                                                   | Recipe                                                    |
 | ------------------------------------------------------ | --------------------------------------------------------- |
-| Deploy a PR branch to dev for smoke testing            | [Run a canary deploy](#run-a-canary-deploy)               |
-| Find your canary deploys                               | [List your resources](#list-your-resources)               |
-| Spare a canary from cleanup                            | [Label canary for retention](#label-canary-for-retention) |
-| Tear down a canary you no longer need                  | [Reap a canary](#reap-a-canary)                           |
+| Deploy a PR branch to dev for smoke testing            | [Run a PR deploy](#run-a-pr-deploy)                       |
+| Find your PR deploys                                   | [List your resources](#list-your-resources)               |
+| Spare a PR deploy from cleanup                         | [Label PR deploy for retention](#label-pr-deploy-for-retention) |
+| Tear down a PR deploy you no longer need               | [Reap a PR deploy](#reap-a-pr-deploy)                     |
 | Diagnose a stuck staging deploy                        | [Investigate a stuck MIG](#investigate-a-stuck-mig)       |
-| Recover from a corrupted staging or prod cache disk    | [Recover a corrupted cache disk](#recover-a-corrupted-cache-disk) |
+| Recover from a corrupted staging or production cache disk | [Recover a corrupted cache disk](#recover-a-corrupted-cache-disk) |
 | Cut a release with a backwards-incompatible DB format  | [DB-format-version-break release](#db-format-version-break-release) |
 
 ## Concepts
 
-The pipeline runs three lifecycle classes, each with its own GCP project, MIG name, and stateful disk. See the table in [Continuous Delivery](continuous-delivery.md). Every operation below is scoped to one class.
+The pipeline targets two GCP environments. Within `dev`, `main` is the persistent staging deploy and every other branch is an ephemeral PR deploy. See the table in [Continuous Delivery](continuous-delivery.md). Every operation below scopes to one of the three deploy kinds.
 
-GCP projects:
+GCP environments:
 
 - `zfnd-prod-zebra` (production releases)
-- `zfnd-dev-zebra` (staging from main and per-branch canaries)
+- `zfnd-dev-zebra` (staging from `main` and PR deploys from any branch)
 
 Region: `us-east1`, zones `b`, `c`, and `d`.
 
-## Run a canary deploy
+Labels stamped on every MIG, instance, and disk:
 
-Use a canary to smoke-test a PR branch in the dev project. The canary creates a per-branch MIG and disk that you can iterate on, then tear down when you finish.
+- `environment` — `dev` or `prod`
+- `created_by` — `release`, `push`, or `workflow_dispatch`
+- `github_ref` — branch or tag name
+- `github_sha` — short commit SHA
+
+Use `created_by` as the discriminator for cleanup and inspection: it is the only label whose value differs across all three deploy kinds.
+
+## Run a PR deploy
+
+A PR deploy smoke-tests a branch in the dev environment. It creates a per-branch MIG and disk that you iterate on, then tear down when you finish.
 
 From the GitHub UI: Actions → Deploy Nodes to GCP → Run workflow → choose the branch, network, and environment.
 
@@ -54,24 +63,24 @@ gcloud compute instance-groups managed list \
   --filter="labels.created_by=workflow_dispatch AND labels.github_ref=my-branch-slug"
 ```
 
-Find every disk and instance for a class or branch:
+Find every PR-deploy disk and instance:
 
 ```bash
 gcloud compute instances list --project zfnd-dev-zebra \
   --filter="labels.created_by=workflow_dispatch"
 
 gcloud compute disks list --project zfnd-dev-zebra \
-  --filter="labels.lifecycle_class=canary"
+  --filter="labels.created_by=workflow_dispatch"
 ```
 
-## Label canary for retention
+## Label PR deploy for retention
 
 The cleanup process is manual; labels are advisory but ritually respected. Operators recognize two label vocabularies:
 
 - `keep_until=YYYY-MM-DD` protects a resource from cleanup before that date. Self-expiring; after the date passes, the resource becomes eligible for reaping.
 - `delete_protection=true` protects indefinitely. Removing the label requires manual action before reaping.
 
-Apply directly to instances and disks (the labels propagate to new instances on the next template swap, but apply now if you need protection immediately):
+Apply directly to instances and disks. The labels propagate to new instances on the next template swap; apply now if you need protection immediately.
 
 ```bash
 for inst in $(gcloud compute instance-groups managed list-instances zebrad-${branch}-mainnet \
@@ -89,9 +98,9 @@ for z in b c d; do
 done
 ```
 
-## Reap a canary
+## Reap a PR deploy
 
-Remove a canary MIG and its stateful disk. The stateful policy `auto-delete=on-permanent-instance-deletion` deletes the disk when the MIG is deleted.
+Remove a PR-deploy MIG and its stateful disk. The stateful policy `auto-delete=on-permanent-instance-deletion` deletes the disk when the MIG is deleted.
 
 ```bash
 P=zfnd-dev-zebra; R=us-east1; MIG=zebrad-my-branch-mainnet
@@ -105,17 +114,17 @@ gcloud compute instances list --project $P --filter="name~^${MIG}-" \
 gcloud compute instance-groups managed delete "${MIG}" --region $R --project $P --quiet
 ```
 
-To reap every canary whose `keep_until` has passed, use a manual sweep:
+To reap every PR deploy whose `keep_until` has passed, use a manual sweep:
 
 ```bash
 TODAY=$(date +%Y-%m-%d)
 for mig in $(gcloud compute instance-groups managed list --project zfnd-dev-zebra \
-    --filter="labels.lifecycle_class=canary" \
-    --format='value(name,region.basename(),labels.keep_until,labels.delete_protection)' \
+    --filter="labels.created_by=workflow_dispatch" \
+    --format='value(name,labels.keep_until,labels.delete_protection)' \
     | awk -v today="$TODAY" '
-        $4 == "true" { next }                       # delete_protection=true: skip
-        $3 == "" { next }                            # no keep_until: skip
-        $3 < today { printf "%s\n", $1 }             # expired: candidate
+        $3 == "true" { next }                       # delete_protection=true: skip
+        $2 == "" { next }                            # no keep_until: skip
+        $2 < today { printf "%s\n", $1 }             # expired: candidate
       '); do
   echo "Reaping $mig"
   gcloud compute instance-groups managed delete "$mig" \
@@ -123,7 +132,7 @@ for mig in $(gcloud compute instance-groups managed list --project zfnd-dev-zebr
 done
 ```
 
-Adjust the policy if you also want to reap canaries with no `keep_until` after a default age (e.g., 14 days). Review the candidate list before piping into delete.
+Adjust the policy if you also want to reap PR deploys with no `keep_until` after a default age (for example, 14 days). Review the candidate list before piping into delete.
 
 ## Investigate a stuck MIG
 
@@ -155,7 +164,7 @@ for z in b c d; do
 done
 ```
 
-The squatter is some other MIG's instance. Identify the owning MIG and reap it (see [Reap a canary](#reap-a-canary)).
+The squatter is some other MIG's instance. Identify the owning MIG and reap it (see [Reap a PR deploy](#reap-a-pr-deploy)).
 
 ## Recover a corrupted cache disk
 
@@ -187,7 +196,7 @@ gh workflow run zfnd-deploy-nodes-gcp.yml -R ZcashFoundation/zebra \
   -f network=Mainnet -f environment=dev -f need_cached_disk=true -f cached_disk_type=tip
 ```
 
-For prod, follow the same sequence with `MIG=zebrad-mainnet`, `DISK=zebrad-cache-mainnet`, and `environment=prod` in `zfnd-prod-zebra`. Prod has no automatic cache image, so for a known-good prod state, use a recent operator-taken snapshot.
+For production, follow the same sequence with `MIG=zebrad-mainnet`, `DISK=zebrad-cache-mainnet`, and `environment=prod` in `zfnd-prod-zebra`. Production has no automatic cache image, so for a known-good production state use a recent operator-taken snapshot.
 
 ## DB-format-version-break release
 
@@ -250,6 +259,6 @@ gcloud compute images list --project zfnd-dev-zebra \
 
 ## Cleanup
 
-`zfnd-delete-gcp-resources.yml` runs daily and sweeps old instances, templates, disks, and cache images. The disk sweeper relies on age and name; it does not honor `keep_until` or `delete_protection` labels on canaries. Use the [Reap a canary](#reap-a-canary) recipe for label-aware control.
+`zfnd-delete-gcp-resources.yml` runs daily and sweeps old instances, templates, disks, and cache images. The disk sweeper relies on age and name; it does not honor `keep_until` or `delete_protection` labels on PR deploys. Use the [Reap a PR deploy](#reap-a-pr-deploy) recipe for label-aware control.
 
-The four stable cache disks (`zebrad-cache-{mainnet,testnet}` in prod, `zebrad-cache-main-{mainnet,testnet}` in staging) are attached to running MIGs at all times. They are not eligible for the daily sweep because GCP refuses to delete an attached disk; if a stable disk ever shows up unattached, that itself is an incident.
+The four stable cache disks (`zebrad-cache-{mainnet,testnet}` in production, `zebrad-cache-main-{mainnet,testnet}` in staging) are attached to running MIGs at all times. They are not eligible for the daily sweep because GCP refuses to delete an attached disk; if a stable disk ever shows up unattached, that is itself an incident.
