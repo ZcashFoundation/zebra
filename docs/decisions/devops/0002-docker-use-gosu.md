@@ -1,5 +1,5 @@
 ---
-status: superseded by [ADR-0004](0004-docker-use-setpriv.md)
+status: superseded by [ADR-0005](0005-docker-use-setpriv.md)
 date: 2025-02-28
 story: Volumes permissions and privilege management in container entrypoint
 ---
