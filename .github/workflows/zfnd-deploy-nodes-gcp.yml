@@ -1,9 +1,28 @@
 # Deploy Zebra nodes to Google Cloud Platform.
 #
+# Triggers:
+# - push to `main`: deploy to staging in `zfnd-dev-zebra` (every code-affecting commit)
+# - release published: deploy to prod in `zfnd-prod-zebra` (downstream of release-binaries.yml)
+# - workflow_dispatch: per-branch canary in `zfnd-dev-zebra` (manual smoke test)
+# - pull_request: build-only validation; no deploy (skipped for forks)
+#
+# Jobs:
+# - `get-disk-name`: looks up the most recent matching cache image for cold-start bootstrap
+# - `build`: builds the runtime container image and publishes to GAR
+# - `set-matrix`: chooses Mainnet, Testnet, or both based on the trigger
+# - `deploy-nodes`: creates or rolls the MIG for the matrix network
+# - `deploy-nodes-success` + `failure-issue`: success aggregation and auto-issue on failure
+#
 # Each trigger maps to one of three lifecycle classes (prod, staging, canary).
-# Class determines the MIG name, disk name, and GCP project. See ADR
-# docs/decisions/devops/0006-gcp-deployment-lifecycle.md for the model and
-# book/src/dev/gcp-deployment-operations.md for operational procedures.
+# The class drives MIG name, disk name, and GCP project. The MIG itself is stable
+# per network; releases swap the instance template via rolling-action with
+# `--max-unavailable=1`. The stateful disk policy preserves chain state across
+# the rolling restart.
+#
+# See ADR docs/decisions/devops/0006-gcp-deployment-lifecycle.md for the design
+# rationale and book/src/dev/gcp-deployment-operations.md for operational
+# procedures (canary cleanup, disk-corruption recovery, DB-format-version-break
+# release).
 name: Deploy Nodes to GCP
 
 # Ensures that only one workflow task will run at a time. Previous deployments, if
@@ -164,7 +183,8 @@ jobs:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
-  # Determine which networks to deploy based on the trigger.
+  # Choose Mainnet, Testnet, or both. Push and release fan out to both
+  # networks; workflow_dispatch deploys only the network the dispatcher chose.
   set-matrix:
     runs-on: ubuntu-latest
     outputs:
@@ -179,6 +199,11 @@ jobs:
             echo 'matrix=["Mainnet","Testnet"]' >> $GITHUB_OUTPUT
           fi
 
+  # Create or update the MIG for the matrix network. The MIG name is stable per
+  # network within its lifecycle class, so this step swaps the instance template
+  # via rolling-action when the MIG already exists, and creates a fresh MIG
+  # bootstrapped from the cache image when it does not. Stateful disks are
+  # preserved across rolling restarts.
   deploy-nodes:
     strategy:
       matrix:
