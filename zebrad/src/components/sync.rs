@@ -4,7 +4,7 @@
 
 use std::{cmp::max, collections::HashSet, convert, pin::Pin, task::Poll, time::Duration};
 
-use color_eyre::eyre::{eyre, Report};
+use color_eyre::eyre::{eyre, OptionExt, Report};
 use futures::stream::{FuturesUnordered, StreamExt};
 use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
@@ -1103,12 +1103,9 @@ where
     async fn request_genesis_once(
         &mut self,
     ) -> Result<Result<(Height, block::Hash), BlockDownloadVerifyError>, Report> {
-        let response = self.downloads.download_and_verify(self.genesis_hash).await;
-        Self::handle_response(response).map_err(|e| eyre!(e))?;
-
-        let response = self.downloads.next().await.expect("downloads is nonempty");
-
-        Ok(response)
+        self.downloads
+            .download_batch_internal::<1>(vec![self.genesis_hash]);
+        self.downloads.next().await.ok_or_eyre("missing download")
     }
 
     /// Queue download and verify tasks for each block that isn't currently known to our node.

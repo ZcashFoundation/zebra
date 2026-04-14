@@ -68,7 +68,7 @@ pub const VERIFICATION_PIPELINE_DROP_LIMIT: HeightDiff = 50_000;
 /// Each round re-requests only the blocks absent from the previous response
 /// (typically because the peer hit its send buffer limit). Retries are routed
 /// to different peers via P2C load balancing.
-const BATCH_RETRY_LIMIT: usize = 3;
+pub const BATCH_RETRY_LIMIT: usize = 3;
 
 #[derive(Copy, Clone, Debug)]
 pub(super) struct AlwaysHedge;
@@ -371,79 +371,13 @@ where
         }
     }
 
-    /// Queue a block for download and verification.
+    /// Internal implementation of `download_batch()`.
     ///
-    /// This method waits for the network to become ready, and returns an error
-    /// only if the network service fails. It returns immediately after queuing
-    /// the request.
-    #[instrument(level = "debug", skip(self), fields(%hash))]
-    pub async fn download_and_verify(
+    /// See [`Downloads::download_batch`] for more details.
+    pub(super) fn download_batch_internal<const RETRY_LIMIT: usize>(
         &mut self,
-        hash: block::Hash,
-    ) -> Result<(), BlockDownloadVerifyError> {
-        if self.cancel_verify_handles.contains_key(&hash) {
-            metrics::counter!("sync.already.queued.dropped.block.hash.count").increment(1);
-            return Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { hash });
-        }
-
-        // We construct the block requests sequentially, waiting for the peer
-        // set to be ready to process each request. This ensures that we start
-        // block downloads in the order we want them (though they may resolve
-        // out of order), and it means that we respect backpressure. Otherwise,
-        // if we waited for readiness and did the service call in the spawned
-        // tasks, all of the spawned tasks would race each other waiting for the
-        // network to become ready.
-        let block_req = self
-            .network
-            .ready()
-            .await
-            .map_err(|error| BlockDownloadVerifyError::NetworkServiceError { error })?
-            .call(zn::Request::BlocksByHash(std::iter::once(hash).collect()));
-
-        self.spawn_verify_task(hash, async move {
-            let rsp = block_req
-                .await
-                .map_err(|error| BlockDownloadVerifyError::DownloadFailed { error, hash })?;
-
-            if let zn::Response::Blocks(blocks) = rsp {
-                assert_eq!(
-                    blocks.len(),
-                    1,
-                    "wrong number of blocks in response to a single hash"
-                );
-
-                Ok(blocks
-                    .first()
-                    .expect("just checked length")
-                    .available()
-                    .expect(
-                        "unexpected missing block status: single block failures should be errors",
-                    ))
-            } else {
-                unreachable!("wrong response to block request");
-            }
-        });
-
-        // Try to start the spawned task before queueing the next block request
-        tokio::task::yield_now().await;
-
-        Ok(())
-    }
-
-    /// Download a batch of blocks, tracking the task for cancellation and polling.
-    ///
-    /// Spawns a task that sends `BlocksByHash` requests with retry semantics.
-    /// If a response is partial (peer hit its send buffer limit), the remaining
-    /// hashes are re-requested from a different peer — this repeats as long as
-    /// each round makes forward progress. A retry limit applies only when a
-    /// round makes no progress (empty response / network error).
-    ///
-    /// The task's JoinHandle is stored in `pending_downloads`. Completed
-    /// batches are drained inside [`Stream::poll_next`], which spawns a
-    /// verify task for each downloaded block. A cancel handle is stored in
-    /// `cancel_download_handles` (keyed by the first hash in the batch) so
-    /// the task can be cancelled on sync restart.
-    pub(super) fn download_batch(&mut self, mut hashes: Vec<block::Hash>) {
+        mut hashes: Vec<block::Hash>,
+    ) {
         let mut network = self.network.clone();
 
         hashes.retain(|hash| {
@@ -528,13 +462,13 @@ where
                     }
                     let exhausted: Vec<_> = remaining
                         .iter()
-                        .filter(|h| retries.get(h).copied().unwrap_or(0) > BATCH_RETRY_LIMIT)
+                        .filter(|h| retries.get(h).copied().unwrap_or(0) > RETRY_LIMIT)
                         .copied()
                         .collect();
                     for h in &exhausted {
                         results.push(Err(*h));
                     }
-                    remaining.retain(|h| retries.get(h).copied().unwrap_or(0) <= BATCH_RETRY_LIMIT);
+                    remaining.retain(|h| retries.get(h).copied().unwrap_or(0) <= RETRY_LIMIT);
                 }
 
                 if !remaining.is_empty() {
@@ -551,6 +485,23 @@ where
 
         self.pending_downloads.push(task);
         self.cancel_download_handles.insert(batch_key, cancel_tx);
+    }
+
+    /// Download a batch of blocks, tracking the task for cancellation and polling.
+    ///
+    /// Spawns a task that sends `BlocksByHash` requests with retry semantics.
+    /// If a response is partial (peer hit its send buffer limit), the remaining
+    /// hashes are re-requested from a different peer — this repeats as long as
+    /// each round makes forward progress. A retry limit applies only when a
+    /// round makes no progress (empty response / network error).
+    ///
+    /// The task's JoinHandle is stored in `pending_downloads`. Completed
+    /// batches are drained inside [`Stream::poll_next`], which spawns a
+    /// verify task for each downloaded block. A cancel handle is stored in
+    /// `cancel_download_handles` (keyed by the first hash in the batch) so
+    /// the task can be cancelled on sync restart.
+    pub(super) fn download_batch(&mut self, hashes: Vec<block::Hash>) {
+        self.download_batch_internal::<BATCH_RETRY_LIMIT>(hashes);
     }
 
     /// Removes a hash from the pending download set, allowing it to be re-requested.
