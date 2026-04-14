@@ -5,7 +5,7 @@ mod block_size_tracker;
 pub(super) use block_size_tracker::BlockSizeTracker;
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     convert,
     future::Future,
     pin::Pin,
@@ -151,6 +151,9 @@ pub enum BlockDownloadVerifyError {
         hash: block::Hash,
     },
 
+    #[error("block download failed after retries: {hash:?}")]
+    DownloadFailed { hash: block::Hash },
+
     #[error(
         "timeout during service readiness, download, verification, or internal downloader operation"
     )]
@@ -233,6 +236,10 @@ where
     /// expected to arrive soon.
     pending_download_hashes: HashSet<block::Hash>,
 
+    /// Download errors buffered during batch drain, yielded one at a time
+    /// by `poll_next` before polling verifications.
+    pending_errors: VecDeque<BlockDownloadVerifyError>,
+
     /// Tracks recent block sizes for adaptive batch sizing.
     pub(super) block_sizes: BlockSizeTracker,
 }
@@ -280,9 +287,15 @@ where
                     }
                     Err(hash) => {
                         this.clear_pending_download(&hash);
+                        this.pending_errors
+                            .push_back(BlockDownloadVerifyError::DownloadFailed { hash });
                     }
                 }
             }
+        }
+
+        if let Some(error) = this.pending_errors.pop_front() {
+            return Poll::Ready(Some(Err(error)));
         }
 
         match Pin::new(&mut this.pending_verifications).poll_next(cx) {
@@ -350,6 +363,7 @@ where
             pending_downloads: FuturesUnordered::new(),
             cancel_download_handles: HashMap::new(),
             pending_download_hashes: HashSet::new(),
+            pending_errors: VecDeque::new(),
             block_sizes: BlockSizeTracker::new(),
         }
     }

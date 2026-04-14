@@ -1098,7 +1098,7 @@ where
         &mut self,
     ) -> Result<Result<(Height, block::Hash), BlockDownloadVerifyError>, Report> {
         self.downloads
-            .download_batch_internal::<1>(vec![self.genesis_hash]);
+            .download_batch_internal::<0>(vec![self.genesis_hash]);
         self.downloads.next().await.ok_or_eyre("missing download")
     }
 
@@ -1300,6 +1300,13 @@ where
                 info!(
                     error = ?e,
                     "downloaded block had no valid height, skipping this block"
+                );
+                false
+            }
+            BlockDownloadVerifyError::DownloadFailed { .. } => {
+                debug!(
+                    error = ?e,
+                    "block download failed after retries, hash cleared for re-request"
                 );
                 false
             }
