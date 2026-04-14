@@ -111,4 +111,4 @@ Every MIG, instance, and disk carries `app`, `environment`, `network`, `zone`, `
 
 - [GCP Deployment Operations runbook](../../../book/src/dev/gcp-deployment-operations.md): PR-deploy cleanup, disk-corruption recovery, DB-format-version-break release procedure, regional-to-zonal migration procedure.
 - [Continuous Delivery overview](../../../book/src/dev/continuous-delivery.md): the high-level model.
-- GCP documentation on [zonal MIGs](https://cloud.google.com/compute/docs/instance-groups/zonal-migs), [stateful MIGs](https://cloud.google.com/compute/docs/instance-groups/stateful-migs), and [persistent disk attachment limits](https://cloud.google.com/compute/docs/disks#pd_modes).
+- GCP documentation on [instance groups](https://cloud.google.com/compute/docs/instance-groups), [stateful MIGs](https://cloud.google.com/compute/docs/instance-groups/stateful-migs), and [persistent disk attachment limits](https://cloud.google.com/compute/docs/disks#pd_modes).
