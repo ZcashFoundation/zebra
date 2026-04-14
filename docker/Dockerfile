@@ -212,10 +212,6 @@ RUN chown -R ${UID}:${GID} ${HOME}
 COPY --link --from=release /usr/local/bin/zebrad /usr/local/bin/
 COPY --link --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
-# P2P ports: 8233 (Mainnet), 18233 (Testnet)
-# Publish at runtime with -p 8233:8233 for inbound peer connections.
-EXPOSE 8233 18233
-
 ENTRYPOINT [ "entrypoint.sh" ]
 CMD ["zebrad"]
 
