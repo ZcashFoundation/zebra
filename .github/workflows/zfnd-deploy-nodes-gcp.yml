@@ -17,11 +17,15 @@
 # release).
 name: Deploy Nodes to GCP
 
-# Concurrency is scoped per cell for workflow_dispatch: each (environment, network,
-# zone) is an independent zonal MIG, so dispatching different cells must not
-# serialize. For push/release the inputs are empty and the key collapses to one
-# group per (event, ref); the in-workflow matrix fans out the six cells inside
-# that run. Pull requests cancel in progress (only Docker tests run, no deploy).
+# Ensures that only one workflow task will run at a time. Previous deployments, if
+# already in process, won't get cancelled. Instead, we let the first to complete
+# then queue the latest pending workflow, cancelling any workflows in between.
+#
+# Since the different event types each use a different Managed Instance Group or instance,
+# we can run different event types concurrently.
+#
+# For pull requests, we only run the tests from this workflow, and don't do any deployments.
+# So an in-progress pull request gets cancelled, just like other tests.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ inputs.environment }}-${{ inputs.network }}-${{ inputs.zone }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -331,10 +335,6 @@ jobs:
         with:
           install_components: 'beta'
 
-      # Derive the name prefix from (environment, branch), not the event, so
-      # any path that targets prod (release or workflow_dispatch) uses the
-      # stable zonal names from ADR 0006. Dev uses a branch-derived prefix
-      # (`main-` for push to main, `${ref}-` for feature-branch dispatches).
       - name: Compute MIG and disk naming
         env:
           ENV: ${{ needs.set-matrix.outputs.environment }}
@@ -444,11 +444,11 @@ jobs:
             --stateful-disk="device-name=${DISK_NAME},auto-delete=on-permanent-instance-deletion" \
             --zone="${ZONE}"
 
-      # Assign one static IP per zone on stable deploys (prod or dev-main):
+      # Assign one static IP per zone, deterministically:
       #   zone b -> primary (`zebra-${network}`)
       #   zone c -> secondary (`zebra-${network}-secondary`)
       #   zone d -> tertiary (`zebra-${network}-tertiary`)
-      # Feature-branch dispatches to dev use ephemeral IPs (PR smoke tests).
+      # Skipped for feature-branch dispatches to dev (PR smoke tests use ephemeral IPs).
       # Empirically `instance-configs create --stateful-external-ip` accepts
       # STAGING / RUNNING-UNKNOWN instances; a short bounded poll handles the
       # async gap between MIG-create returning and list-instances reporting.
