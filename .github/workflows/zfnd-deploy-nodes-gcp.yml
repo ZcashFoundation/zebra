@@ -193,13 +193,9 @@ jobs:
       - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db #v3.0.1
       - run: |
           for NET in $(echo '${{ needs.set-matrix.outputs.networks }}' | jq -r '.[] | ascii_downcase'); do
-            gcloud compute health-checks create http "zebra-${NET}-health" \
+            gcloud compute health-checks describe "zebra-${NET}-health" --global &>/dev/null \
+            || gcloud compute health-checks create http "zebra-${NET}-health" \
               --port=8080 --request-path=/healthy \
-              --check-interval=60s --timeout=10s \
-              --unhealthy-threshold=3 --healthy-threshold=2 \
-              --global 2>/dev/null \
-            || gcloud compute health-checks update http "zebra-${NET}-health" \
-              --request-path=/healthy \
               --check-interval=60s --timeout=10s \
               --unhealthy-threshold=3 --healthy-threshold=2 \
               --global
@@ -363,7 +359,7 @@ jobs:
           for user in ${users}; do
             owner=$(gcloud compute instances describe "${user}" --zone="${ZONE}" \
               --format="value(metadata.items.filter(key:created-by).extract(value))" 2>/dev/null \
-              | grep -oE 'instanceGroupManagers/[^/]+' | cut -d/ -f2 || true)
+              | grep -oE 'instanceGroupManagers/[a-z0-9-]+' | cut -d/ -f2 || true)
             if [ -n "${owner}" ] && [ "${owner}" != "${MIG_NAME}" ]; then
               echo "::error::${DISK_NAME} in ${ZONE} is held by ${user} (MIG ${owner}). See gcp-deployment-operations.md."
               exit 1
