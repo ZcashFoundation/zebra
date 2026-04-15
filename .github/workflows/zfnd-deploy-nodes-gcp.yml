@@ -331,18 +331,24 @@ jobs:
         with:
           install_components: 'beta'
 
+      # Derive the name prefix from (environment, branch), not the event, so
+      # any path that targets prod (release or workflow_dispatch) uses the
+      # stable zonal names from ADR 0006. Dev uses a branch-derived prefix
+      # (`main-` for push to main, `${ref}-` for feature-branch dispatches).
       - name: Compute MIG and disk naming
         env:
-          EVENT_NAME: ${{ github.event_name }}
+          ENV: ${{ needs.set-matrix.outputs.environment }}
+          REF_NAME: ${{ github.ref_name }}
           REF_SLUG: ${{ env.GITHUB_REF_SLUG_URL }}
           SHA_SHORT: ${{ env.GITHUB_SHA_SHORT }}
         run: |
-          case "${EVENT_NAME}" in
-            release)           PREFIX="" ;;
-            push)              PREFIX="main-" ;;
-            workflow_dispatch) PREFIX="${REF_SLUG}-" ;;
-            *) echo "::error::Unsupported event: ${EVENT_NAME}"; exit 1 ;;
-          esac
+          if [ "${ENV}" = "prod" ]; then
+            PREFIX=""
+          elif [ "${REF_NAME}" = "main" ]; then
+            PREFIX="main-"
+          else
+            PREFIX="${REF_SLUG}-"
+          fi
           {
             echo "MIG_NAME=zebrad-${PREFIX}${NETWORK}-${ZONE_LETTER}"
             echo "DISK_NAME=zebrad-cache-${PREFIX}${NETWORK}-${ZONE_LETTER}"
@@ -438,18 +444,16 @@ jobs:
             --stateful-disk="device-name=${DISK_NAME},auto-delete=on-permanent-instance-deletion" \
             --zone="${ZONE}"
 
-      # Assign one static IP per zone, deterministically:
+      # Assign one static IP per zone on stable deploys (prod or dev-main):
       #   zone b -> primary (`zebra-${network}`)
       #   zone c -> secondary (`zebra-${network}-secondary`)
       #   zone d -> tertiary (`zebra-${network}-tertiary`)
-      # Skipped for workflow_dispatch (PR deploys use ephemeral external IPs).
+      # Feature-branch dispatches to dev use ephemeral IPs (PR smoke tests).
       # Empirically `instance-configs create --stateful-external-ip` accepts
       # STAGING / RUNNING-UNKNOWN instances; a short bounded poll handles the
       # async gap between MIG-create returning and list-instances reporting.
-      # Zone b -> primary, c -> secondary, d -> tertiary.
-      # Skipped for workflow_dispatch (PR deploys use ephemeral IPs).
-      - name: Assign static IP (fresh MIG, non-dispatch)
-        if: ${{ steps.does-group-exist.outcome == 'failure' && github.event_name != 'workflow_dispatch' }}
+      - name: Assign static IP (fresh MIG, stable deploy)
+        if: ${{ steps.does-group-exist.outcome == 'failure' && (needs.set-matrix.outputs.environment == 'prod' || github.ref_name == 'main') }}
         run: |
           case "${ZONE_LETTER}" in
             b) SUFFIX="" ;;
