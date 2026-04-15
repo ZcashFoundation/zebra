@@ -19,6 +19,14 @@ This release fixes **four important security issues**:
 We recommend node operators to update to 4.3.1 as soon as possible. All previous
 Zebra versions are vulnerable to these issues.
 
+### Changed
+
+- The Dockerfile and docker-compose.yml were changed to expose the P2P port by
+  default. This is important for the network since it allows other peers to
+  connect to the node. Note that if you deploy Zebra behind a firewall or NAT
+  you might require additional configuration
+  ([#10464](https://github.com/ZcashFoundation/zebra/pull/10464)).
+
 ## [Zebra 4.3.0](https://github.com/ZcashFoundation/zebra/releases/tag/v4.3.0) - 2026-03-12
 
 This release fixes **two important security issues**:
