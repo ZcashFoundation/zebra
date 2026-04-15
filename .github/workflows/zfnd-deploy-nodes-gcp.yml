@@ -27,7 +27,7 @@ name: Deploy Nodes to GCP
 # For pull requests, we only run the tests from this workflow, and don't do any deployments.
 # So an in-progress pull request gets cancelled, just like other tests.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ inputs.environment }}-${{ inputs.network }}-${{ inputs.zone }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 on:
@@ -337,16 +337,18 @@ jobs:
 
       - name: Compute MIG and disk naming
         env:
-          EVENT_NAME: ${{ github.event_name }}
+          ENV: ${{ needs.set-matrix.outputs.environment }}
+          REF_NAME: ${{ github.ref_name }}
           REF_SLUG: ${{ env.GITHUB_REF_SLUG_URL }}
           SHA_SHORT: ${{ env.GITHUB_SHA_SHORT }}
         run: |
-          case "${EVENT_NAME}" in
-            release)           PREFIX="" ;;
-            push)              PREFIX="main-" ;;
-            workflow_dispatch) PREFIX="${REF_SLUG}-" ;;
-            *) echo "::error::Unsupported event: ${EVENT_NAME}"; exit 1 ;;
-          esac
+          if [ "${ENV}" = "prod" ]; then
+            PREFIX=""
+          elif [ "${REF_NAME}" = "main" ]; then
+            PREFIX="main-"
+          else
+            PREFIX="${REF_SLUG}-"
+          fi
           {
             echo "MIG_NAME=zebrad-${PREFIX}${NETWORK}-${ZONE_LETTER}"
             echo "DISK_NAME=zebrad-cache-${PREFIX}${NETWORK}-${ZONE_LETTER}"
@@ -446,14 +448,12 @@ jobs:
       #   zone b -> primary (`zebra-${network}`)
       #   zone c -> secondary (`zebra-${network}-secondary`)
       #   zone d -> tertiary (`zebra-${network}-tertiary`)
-      # Skipped for workflow_dispatch (PR deploys use ephemeral external IPs).
+      # Skipped for feature-branch dispatches to dev (PR smoke tests use ephemeral IPs).
       # Empirically `instance-configs create --stateful-external-ip` accepts
       # STAGING / RUNNING-UNKNOWN instances; a short bounded poll handles the
       # async gap between MIG-create returning and list-instances reporting.
-      # Zone b -> primary, c -> secondary, d -> tertiary.
-      # Skipped for workflow_dispatch (PR deploys use ephemeral IPs).
-      - name: Assign static IP (fresh MIG, non-dispatch)
-        if: ${{ steps.does-group-exist.outcome == 'failure' && github.event_name != 'workflow_dispatch' }}
+      - name: Assign static IP (fresh MIG, stable deploy)
+        if: ${{ steps.does-group-exist.outcome == 'failure' && (needs.set-matrix.outputs.environment == 'prod' || github.ref_name == 'main') }}
         run: |
           case "${ZONE_LETTER}" in
             b) SUFFIX="" ;;
