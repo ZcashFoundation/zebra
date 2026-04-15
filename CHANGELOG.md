@@ -11,10 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 This release fixes **four important security issues**:
 
-- [CVE-2026-XXXXX: Cached Mempool Verification Bypasses Consensus Rules for Ahead-of-Tip Blocks](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-xvj8-ph7x-65gf)
+- [CVE-2026-40880: Cached Mempool Verification Bypasses Consensus Rules for Ahead-of-Tip Blocks](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-xvj8-ph7x-65gf)
 - [CVE-2026-XXXXX: Consensus Divergence in Transparent Sighash Hash-Type Handling](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-8m29-fpq5-89jj)
 - [CVE-2026-XXXXX: rk Identity Point Panic in Transaction Verification](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-452v-w3gx-72wg)
-- [CVE-2026-XXXXX: addr/addrv2 Deserialization Resource Exhaustion](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-xr93-pcq3-pxf8)
+- [CVE-2026-40881: addr/addrv2 Deserialization Resource Exhaustion](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-xr93-pcq3-pxf8)
 
 We recommend node operators to update to 4.3.1 as soon as possible. All previous
 Zebra versions are vulnerable to these issues.

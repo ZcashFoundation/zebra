@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This release fixes an important security issue:
 
-- [CVE-2026-XXXXX: Cached Mempool Verification Bypasses Consensus Rules for Ahead-of-Tip Blocks](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-xvj8-ph7x-65gf)
+- [CVE-2026-40880: Cached Mempool Verification Bypasses Consensus Rules for Ahead-of-Tip Blocks](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-xvj8-ph7x-65gf)
 
 The impact of the issue for crate users will depend on the particular usage;
 if you use it as a building block for a consensus node, you should update.
