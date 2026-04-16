@@ -58,9 +58,8 @@ impl Metadata {
             metadata.tags.insert("git.ref", git_ref);
         }
 
-        let git_sha = ZebradApp::git_commit()
-            .map(ToOwned::to_owned)
-            .or_else(|| lookup_value(&lookup, "GITHUB_SHA"));
+        let git_sha = lookup_value(&lookup, "GITHUB_SHA")
+            .or_else(|| ZebradApp::git_commit().map(ToOwned::to_owned));
         if let Some(git_sha) = git_sha {
             metadata.tags.insert("git.sha", git_sha);
         }
@@ -219,7 +218,7 @@ where
 mod tests {
     use std::collections::HashMap;
 
-    use crate::application::{build_version, ZebradApp};
+    use crate::application::build_version;
 
     use super::{release_name_from, Metadata};
 
@@ -238,7 +237,6 @@ mod tests {
 
     #[test]
     fn metadata_reads_expected_tags_and_ci_context() {
-        let expected_git_sha = ZebradApp::git_commit().unwrap_or("deadbeef");
         let env = HashMap::from([
             ("SENTRY_ENVIRONMENT", "stage".to_string()),
             ("GITHUB_ACTIONS", "true".to_string()),
@@ -264,7 +262,7 @@ mod tests {
         );
         assert_eq!(
             metadata.tags.get("git.sha").map(String::as_str),
-            Some(expected_git_sha),
+            Some("deadbeef"),
         );
         assert_eq!(
             metadata.tags.get("ci.provider").map(String::as_str),
