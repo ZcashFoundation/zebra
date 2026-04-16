@@ -1,16 +1,16 @@
 # Zebra Continuous Delivery
 
-The continuous-delivery pipeline deploys every commit merged to `main` to a staging environment and every published release to production, on Google Cloud Platform.
+The continuous-delivery pipeline deploys every commit merged to `main` to the `stage` environment and every published release to `prod`, on Google Cloud Platform. PR-triggered work uses the `dev` environment.
 
 ## Topology: one zonal MIG per (environment, branch, network, zone)
 
 The pipeline targets two GCP environments. Each network in each environment deploys to three zonal Managed Instance Groups (MIGs) in `us-east1` zones `b`, `c`, and `d`. Each zonal MIG holds one Zebra instance with one stateful cache disk and one static IP.
 
-| Trigger              | Environment          | MIGs per network | MIG name                                      | Stateful disk                                 |
-| -------------------- | -------------------- | ---------------- | --------------------------------------------- | --------------------------------------------- |
-| `release`            | `zfnd-prod-zebra`    | 3 (one per zone) | `zebrad-${network}-${zone-letter}`            | `zebrad-cache-${network}-${zone-letter}`      |
-| `push` to `main`     | `zfnd-dev-zebra`     | 3 (one per zone) | `zebrad-main-${network}-${zone-letter}`       | `zebrad-cache-main-${network}-${zone-letter}` |
-| `workflow_dispatch`  | `zfnd-dev-zebra`     | 1 (user-chosen zone) | `zebrad-${branch}-${network}-${zone-letter}` | `zebrad-cache-${branch}-${network}-${zone-letter}` |
+| Trigger              | Environment label | GCP project       | MIGs per network | MIG name                                      | Stateful disk                                 |
+| -------------------- | ----------------- | ----------------- | ---------------- | --------------------------------------------- | --------------------------------------------- |
+| `release`            | `prod`            | `zfnd-prod-zebra` | 3 (one per zone) | `zebrad-${network}-${zone-letter}`            | `zebrad-cache-${network}-${zone-letter}`      |
+| `push` to `main`     | `stage`           | `zfnd-dev-zebra`  | 3 (one per zone) | `zebrad-main-${network}-${zone-letter}`       | `zebrad-cache-main-${network}-${zone-letter}` |
+| `workflow_dispatch`  | `dev` or `prod`   | selected by env   | 1 (user-chosen zone) | `zebrad-${branch}-${network}-${zone-letter}` | `zebrad-cache-${branch}-${network}-${zone-letter}` |
 
 ADR [0006](../../../docs/decisions/devops/0006-gcp-deployment-naming.md) records the rationale; the [runbook](gcp-deployment-operations.md) covers day-to-day procedures.
 

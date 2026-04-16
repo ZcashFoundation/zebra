@@ -98,7 +98,7 @@ Workflow_dispatch deploys use ephemeral IPs (PR smoke tests don't need stable ex
 
 ### Labels
 
-Every MIG, instance, and disk carries `app`, `environment`, `network`, `zone`, `created_by`, `github_ref`, `github_sha`. The `created_by` label (`release`, `push`, or `workflow_dispatch`) discriminates the three deploy kinds for cleanup and inspection. PR-deploy cleanup uses `keep_until=YYYY-MM-DD` and `delete_protection=true` opt-out labels.
+Every MIG, instance, and disk carries `app`, `environment`, `network`, `zone`, `created_by`, `github_ref`, `github_sha`. The `environment` label is standardized as `dev`, `stage`, or `prod`. The `created_by` label (`release`, `push`, or `workflow_dispatch`) discriminates the deploy kind for cleanup and inspection. PR-deploy cleanup uses `keep_until=YYYY-MM-DD` and `delete_protection=true` opt-out labels.
 
 ### Accepted trade-offs
 

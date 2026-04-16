@@ -17,7 +17,7 @@ services:
       target: runtime
       args:
         # Enable OpenTelemetry feature for tracing
-        FEATURES: "default-release-binaries opentelemetry"
+        FEATURES: "default-release-binaries"
     volumes:
       - zebrad-cache:/home/zebra/.cache/zebra
     tty: true

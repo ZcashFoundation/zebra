@@ -129,6 +129,7 @@ jobs:
     uses: ./.github/workflows/zfnd-find-cached-disks.yml
     if: ${{ (inputs.needs_zebra_state || inputs.needs_lwd_state) || (inputs.saves_to_disk || inputs.force_save_to_disk) }}
     with:
+      environment: ${{ github.event_name == 'release' && 'prod' || github.event_name == 'pull_request' && 'dev' || 'stage' }}
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}
       disk_prefix: ${{ inputs.needs_lwd_state && 'lwd-cache' || inputs.needs_zebra_state && 'zebrad-cache' }}
       disk_suffix: ${{ (inputs.needs_zebra_state || inputs.needs_lwd_state) && inputs.disk_suffix || '' }}
@@ -142,6 +143,7 @@ jobs:
     name: Run ${{ inputs.test_id }} test
     runs-on: zfnd-runners
     needs: [ get-disk-name ]
+    environment: ${{ github.event_name == 'release' && 'prod' || github.event_name == 'pull_request' && 'dev' || 'stage' }}
     if: ${{ !cancelled() && !failure() && (needs.get-disk-name.result == 'success' || needs.get-disk-name.result == 'skipped') }}
     continue-on-error: ${{ inputs.allow_failure }}
     timeout-minutes: ${{ inputs.is_long_test && 7200 || 180 }}
@@ -219,6 +221,8 @@ jobs:
       # $CONTAINER_ENV) or these known paths to access the state data.
       - name: Create ${{ inputs.test_id }} GCP compute instance
         id: create-instance
+        env:
+          WORKFLOW_ENVIRONMENT: ${{ github.event_name == 'release' && 'prod' || github.event_name == 'pull_request' && 'dev' || 'stage' }}
         run: |
           NAME="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}"
 
@@ -251,7 +255,7 @@ jobs:
           fi
 
           # Environment variables for the container
-          CONTAINER_ENV="${{ inputs.test_variables }},RUST_LOG=${{ env.RUST_LOG }},RUST_BACKTRACE=${{ env.RUST_BACKTRACE }},RUST_LIB_BACKTRACE=${{ env.RUST_LIB_BACKTRACE }},COLORBT_SHOW_HIDDEN=${{ env.COLORBT_SHOW_HIDDEN }},CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
+          CONTAINER_ENV="${{ inputs.test_variables }},RUST_LOG=${{ env.RUST_LOG }},RUST_BACKTRACE=${{ env.RUST_BACKTRACE }},RUST_LIB_BACKTRACE=${{ env.RUST_LIB_BACKTRACE }},COLORBT_SHOW_HIDDEN=${{ env.COLORBT_SHOW_HIDDEN }},CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }},SENTRY_DSN=${{ vars.SENTRY_DSN }},SENTRY_ENVIRONMENT=${WORKFLOW_ENVIRONMENT},GITHUB_ACTIONS=${GITHUB_ACTIONS},GITHUB_EVENT_NAME=${GITHUB_EVENT_NAME},GITHUB_REF_POINT_SLUG_URL=${GITHUB_REF_POINT_SLUG_URL},GITHUB_SHA=${GITHUB_SHA},GITHUB_RUN_ID=${GITHUB_RUN_ID},GITHUB_RUN_ATTEMPT=${GITHUB_RUN_ATTEMPT},GITHUB_WORKFLOW=${GITHUB_WORKFLOW},GITHUB_JOB=${GITHUB_JOB},CI_PR_NUMBER=${{ github.event.pull_request.number || '' }},CI_TEST_ID=${{ inputs.test_id }}"
 
           # Trim whitespace from GAR_BASE as for some reason it's getting a trailing space
           GAR_BASE_TRIMMED=$(echo "${{ vars.GAR_BASE }}" | xargs)
@@ -274,7 +278,7 @@ jobs:
           --service-account=${{ vars.GCP_DEPLOYMENTS_SA }} \
           --metadata=google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true \
           --metadata-from-file=startup-script=.github/workflows/scripts/gcp-vm-startup-script.sh \
-          --labels=app=${{ inputs.app_name }},environment=test,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }},test=${{ inputs.test_id }} \
+          --labels=app=${{ inputs.app_name }},environment=${WORKFLOW_ENVIRONMENT},network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }},test=${{ inputs.test_id }} \
           --tags ${{ inputs.app_name }} \
           --zone ${{ vars.GCP_ZONE }}
 
@@ -387,6 +391,7 @@ jobs:
     name: Upload ${{ inputs.test_id }} checkpoint artifact
     runs-on: ubuntu-latest
     needs: [ test-result ]
+    environment: ${{ github.event_name == 'release' && 'prod' || github.event_name == 'pull_request' && 'dev' || 'stage' }}
     if: ${{ needs.test-result.result == 'success' && startsWith(inputs.test_id, 'generate-checkpoints-') }}
     env:
       TEST_ID: ${{ inputs.test_id }}
@@ -454,6 +459,7 @@ jobs:
     name: Create ${{ inputs.test_id }} cached state image
     runs-on: ubuntu-latest
     needs: [ test-result ]
+    environment: ${{ github.event_name == 'release' && 'prod' || github.event_name == 'pull_request' && 'dev' || 'stage' }}
     # We run exactly one of without-cached-state or with-cached-state, and we always skip the other one.
     # Normally, if a job is skipped, all the jobs that depend on it are also skipped.
     # So we need to override the default success() check to make this job run.
@@ -789,6 +795,7 @@ jobs:
     name: Delete ${{ inputs.test_id }} instance
     runs-on: ubuntu-latest
     needs: [ create-state-image, upload-checkpoint-artifact ]
+    environment: ${{ github.event_name == 'release' && 'prod' || github.event_name == 'pull_request' && 'dev' || 'stage' }}
     # If a disk generation step timeouts (+6 hours) the previous job (creating the image) will be skipped.
     # Even if the instance continues running, no image will be created, so it's better to delete it.
     # upload-checkpoint-artifact is included to prevent the instance from being deleted

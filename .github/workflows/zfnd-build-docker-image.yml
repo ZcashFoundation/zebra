@@ -51,7 +51,7 @@ on:
         description: "Environment to use for the build (commonly dev)"
         required: false
         type: string
-        default: dev
+        default: ''
 
     secrets:
       DOCKERHUB_USERNAME:
@@ -103,7 +103,7 @@ jobs:
     needs: prepare-matrix
     timeout-minutes: 210
     runs-on: ${{ matrix.runner }}
-    environment: ${{ github.event_name == 'release' && 'prod' || inputs.environment || 'dev' }}
+    environment: ${{ inputs.environment || (github.event_name == 'release' && 'prod' || github.event_name == 'pull_request' && 'dev' || 'stage') }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare-matrix.outputs.matrix) }}
@@ -267,7 +267,7 @@ jobs:
     name: Create multi-arch manifest
     runs-on: ubuntu-latest
     needs: [prepare-matrix, build]
-    environment: ${{ github.event_name == 'release' && 'prod' || inputs.environment || 'dev' }}
+    environment: ${{ inputs.environment || (github.event_name == 'release' && 'prod' || github.event_name == 'pull_request' && 'dev' || 'stage') }}
     permissions:
       contents: read
       id-token: write

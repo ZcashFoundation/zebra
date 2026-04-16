@@ -147,6 +147,7 @@ jobs:
           case "${{ github.event_name }}" in
             release)           ENV="prod" ;;
             workflow_dispatch) ENV="${{ inputs.environment }}" ;;
+            push)              ENV="stage" ;;
             *)                 ENV="dev" ;;
           esac
 
@@ -214,6 +215,7 @@ jobs:
       && contains(fromJSON(needs.set-matrix.outputs.networks), 'Mainnet') }}
     with:
       network: Mainnet
+      environment: ${{ needs.set-matrix.outputs.environment }}
       disk_prefix: zebrad-cache
       disk_suffix: ${{ inputs.cached_disk_type || 'tip' }}
 
@@ -230,6 +232,7 @@ jobs:
       && contains(fromJSON(needs.set-matrix.outputs.networks), 'Testnet') }}
     with:
       network: Testnet
+      environment: ${{ needs.set-matrix.outputs.environment }}
       disk_prefix: zebrad-cache
       disk_suffix: ${{ inputs.cached_disk_type || 'tip' }}
 
@@ -288,7 +291,7 @@ jobs:
         ${{ matrix.network == 'Mainnet'
             && needs.get-disk-name-mainnet.outputs.cached_disk_name
             || needs.get-disk-name-testnet.outputs.cached_disk_name }}
-    # Use prod environment for releases, allow manual selection for workflow_dispatch, default to dev for others
+    # Use the workflow environment consistently across GitHub, GCP labels, and runtime metadata.
     environment: ${{ needs.set-matrix.outputs.environment }}
     permissions:
       contents: read
@@ -410,7 +413,7 @@ jobs:
             --container-mount-disk="mount-path=/home/zebra/.cache/zebra,name=${DISK_NAME},mode=rw" \
             --container-stdin --container-tty \
             --container-image="${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}" \
-            --container-env="ZEBRA_NETWORK__NETWORK=${{ matrix.network }},ZEBRA_NETWORK__LISTEN_ADDR=0.0.0.0:${P2P},LOG_FILE=${LOG_FILE},SENTRY_DSN=${{ vars.SENTRY_DSN }},ZEBRA_HEALTH__LISTEN_ADDR=0.0.0.0:8080,ZEBRA_HEALTH__MIN_CONNECTED_PEERS=1,ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:${RPC}" \
+            --container-env="ZEBRA_NETWORK__NETWORK=${{ matrix.network }},ZEBRA_NETWORK__LISTEN_ADDR=0.0.0.0:${P2P},LOG_FILE=${LOG_FILE},SENTRY_DSN=${{ vars.SENTRY_DSN }},SENTRY_ENVIRONMENT=${{ needs.set-matrix.outputs.environment }},GITHUB_ACTIONS=${GITHUB_ACTIONS},GITHUB_EVENT_NAME=${GITHUB_EVENT_NAME},GITHUB_REF_POINT_SLUG_URL=${GITHUB_REF_POINT_SLUG_URL},GITHUB_SHA=${GITHUB_SHA},GITHUB_RUN_ID=${GITHUB_RUN_ID},GITHUB_RUN_ATTEMPT=${GITHUB_RUN_ATTEMPT},GITHUB_WORKFLOW=${GITHUB_WORKFLOW},GITHUB_JOB=${GITHUB_JOB},CI_PR_NUMBER=${{ github.event.pull_request.number || '' }},ZEBRA_HEALTH__LISTEN_ADDR=0.0.0.0:8080,ZEBRA_HEALTH__MIN_CONNECTED_PEERS=1,ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:${RPC}" \
             --service-account=${{ vars.GCP_DEPLOYMENTS_SA }} --scopes=cloud-platform \
             --metadata=google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true \
             --labels="app=zebrad,environment=${{ needs.set-matrix.outputs.environment }},network=${NETWORK},zone=${ZONE_LETTER},created_by=${{ github.event_name }},github_ref=${{ env.GITHUB_REF_SLUG_URL }},github_sha=${{ env.GITHUB_SHA_SHORT }}" \
