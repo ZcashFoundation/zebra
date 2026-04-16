@@ -1,10 +1,10 @@
 //! Integration with sentry.io for event reporting.
 
-use std::{collections::BTreeMap, env};
+use std::{collections::BTreeMap, env, sync::Arc};
 
 use sentry::{
     integrations::tracing::EventFilter,
-    protocol::{Context, Event, Exception, Map, Mechanism, Value},
+    protocol::{Context, Event, Exception, Log, LogAttribute, Map, Mechanism, Value},
     ClientInitGuard, ClientOptions, Scope,
 };
 use tracing::Level;
@@ -78,12 +78,33 @@ impl Metadata {
     }
 
     fn client_options_with_release(&self, release: String) -> ClientOptions {
+        let log_attributes = self.log_attributes();
         ClientOptions {
             release: Some(release.into()),
             environment: self.environment.clone().map(Into::into),
             enable_logs: true,
+            before_send_log: Some(Arc::new(move |mut log: Log| {
+                merge_log_attributes(&mut log, &log_attributes);
+                Some(log)
+            })),
             ..Default::default()
         }
+    }
+
+    /// Build the static CI/git attributes to attach to every outgoing [`Log`].
+    ///
+    /// `Scope::set_tag` only propagates to [`Event`]s, so Logs need their own
+    /// enrichment path. CI context is namespaced under `ci.*` to mirror the
+    /// grouping used for Event contexts.
+    fn log_attributes(&self) -> Vec<(String, LogAttribute)> {
+        let mut attrs = Vec::with_capacity(self.tags.len() + self.ci_context.len());
+        for (key, value) in &self.tags {
+            attrs.push(((*key).to_owned(), LogAttribute::from(value.clone())));
+        }
+        for (key, value) in &self.ci_context {
+            attrs.push((format!("ci.{key}"), LogAttribute::from(value.clone())));
+        }
+        attrs
     }
 
     fn apply_to_scope(&self, scope: &mut Scope) {
@@ -140,6 +161,20 @@ where
         exception: vec![exception].into(),
         level: sentry::Level::Fatal,
         ..Default::default()
+    }
+}
+
+/// Merge `attrs` into `log.attributes`, letting existing keys win.
+///
+/// Tracing event fields are already present on the [`Log`] when the
+/// `before_send_log` hook fires, so we must not overwrite them; this keeps
+/// our CI/git metadata as a fallback that enriches (but never masks) the
+/// log's own attributes.
+fn merge_log_attributes(log: &mut Log, attrs: &[(String, LogAttribute)]) {
+    for (key, value) in attrs {
+        log.attributes
+            .entry(key.clone())
+            .or_insert_with(|| value.clone());
     }
 }
 
@@ -216,11 +251,16 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::{
+        collections::{BTreeMap, HashMap},
+        time::SystemTime,
+    };
+
+    use sentry::protocol::{Log, LogAttribute, LogLevel};
 
     use crate::application::build_version;
 
-    use super::{release_name_from, Metadata};
+    use super::{merge_log_attributes, release_name_from, Metadata};
 
     #[test]
     fn metadata_ignores_empty_values() {
@@ -393,5 +433,87 @@ mod tests {
         let options = metadata.client_options_with_release("zebrad@test".to_string());
 
         assert!(options.environment.is_none());
+    }
+
+    #[test]
+    fn log_attributes_include_tags_and_ci_context() {
+        let env = HashMap::from([
+            ("GITHUB_ACTIONS", "true".to_string()),
+            ("GITHUB_EVENT_NAME", "push".to_string()),
+            ("GITHUB_SHA", "deadbeef".to_string()),
+            ("GITHUB_REF_POINT_SLUG_URL", "main".to_string()),
+            ("GITHUB_RUN_ID", "42".to_string()),
+            ("GITHUB_RUN_ATTEMPT", "2".to_string()),
+            ("GITHUB_WORKFLOW", "CI".to_string()),
+            ("GITHUB_JOB", "deploy".to_string()),
+            ("CI_TEST_ID", "sync-full-mainnet".to_string()),
+            ("CI_PR_NUMBER", "84".to_string()),
+        ]);
+        let metadata = Metadata::from_lookup(|key| env.get(key).cloned());
+
+        let attrs: BTreeMap<String, LogAttribute> =
+            metadata.log_attributes().into_iter().collect();
+
+        let expect = |key: &str, value: &str| {
+            assert_eq!(
+                attrs.get(key).and_then(|attr| attr.0.as_str()),
+                Some(value),
+                "missing or wrong log attribute {key}",
+            );
+        };
+
+        expect("test.id", "sync-full-mainnet");
+        expect("git.sha", "deadbeef");
+        expect("git.ref", "main");
+        expect("ci.provider", "github-actions");
+        expect("pr.number", "84");
+        expect("deploy.trigger", "push");
+        expect("ci.run_id", "42");
+        expect("ci.run_attempt", "2");
+        expect("ci.workflow", "CI");
+        expect("ci.job", "deploy");
+    }
+
+    #[test]
+    fn merge_log_attributes_preserves_existing() {
+        let mut log = Log {
+            level: LogLevel::Info,
+            body: "test".to_string(),
+            trace_id: None,
+            timestamp: SystemTime::UNIX_EPOCH,
+            severity_number: None,
+            attributes: BTreeMap::new(),
+        };
+
+        log.attributes.insert(
+            "git.sha".to_string(),
+            LogAttribute::from("event-sha".to_string()),
+        );
+
+        let attrs = vec![
+            (
+                "git.sha".to_string(),
+                LogAttribute::from("metadata-sha".to_string()),
+            ),
+            (
+                "ci.run_id".to_string(),
+                LogAttribute::from("42".to_string()),
+            ),
+        ];
+
+        merge_log_attributes(&mut log, &attrs);
+
+        assert_eq!(
+            log.attributes.get("git.sha").and_then(|attr| attr.0.as_str()),
+            Some("event-sha"),
+            "pre-existing attribute must not be overwritten",
+        );
+        assert_eq!(
+            log.attributes
+                .get("ci.run_id")
+                .and_then(|attr| attr.0.as_str()),
+            Some("42"),
+            "new attribute must be inserted",
+        );
     }
 }
