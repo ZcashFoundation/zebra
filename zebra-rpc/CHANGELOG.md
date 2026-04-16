@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [Unreleased]
+
+## [6.0.2] - 2026-04-17
+
+### Fixed
+
+- Fixed a [panic that could be triggered in the RPC interface on HTTP
+  errors](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-29x4-r6jv-ff4w),
+  such as resetting the connection halfway through a request. We do not consider
+  this a critical issue since the RPC port is security-sensitive and should not
+  be opened publicly, but we plan to update our documentation to make this
+  clear.
+
 ## [6.0.1] - 2026-03-26
 
 ### Fixed
