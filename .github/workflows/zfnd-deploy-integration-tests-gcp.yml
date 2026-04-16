@@ -108,6 +108,26 @@ permissions:
   contents: read
 
 jobs:
+  # Resolve the workflow environment once so every downstream job and the
+  # SENTRY_ENVIRONMENT / GCP labels stay in lockstep.
+  determine-environment:
+    name: Determine environment
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    outputs:
+      environment: ${{ steps.set.outputs.environment }}
+    steps:
+      - id: set
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          case "$EVENT_NAME" in
+            release)      ENV="prod" ;;
+            pull_request) ENV="dev" ;;
+            *)            ENV="stage" ;;
+          esac
+          echo "environment=$ENV" >> "$GITHUB_OUTPUT"
+
   # Find a cached state disk for ${{ inputs.test_id }}, matching all of:
   # - disk cached state prefix -> zebrad-cache or lwd-cache
   # - state version (from the source code) - v{N}
@@ -123,13 +143,14 @@ jobs:
   #
   get-disk-name:
     name: Get disk name
+    needs: [determine-environment]
     permissions:
       contents: read
       id-token: write
     uses: ./.github/workflows/zfnd-find-cached-disks.yml
     if: ${{ (inputs.needs_zebra_state || inputs.needs_lwd_state) || (inputs.saves_to_disk || inputs.force_save_to_disk) }}
     with:
-      environment: ${{ github.event_name == 'release' && 'prod' || github.event_name == 'pull_request' && 'dev' || 'stage' }}
+      environment: ${{ needs.determine-environment.outputs.environment }}
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}
       disk_prefix: ${{ inputs.needs_lwd_state && 'lwd-cache' || inputs.needs_zebra_state && 'zebrad-cache' }}
       disk_suffix: ${{ (inputs.needs_zebra_state || inputs.needs_lwd_state) && inputs.disk_suffix || '' }}
@@ -142,8 +163,8 @@ jobs:
   test-result:
     name: Run ${{ inputs.test_id }} test
     runs-on: zfnd-runners
-    needs: [ get-disk-name ]
-    environment: ${{ github.event_name == 'release' && 'prod' || github.event_name == 'pull_request' && 'dev' || 'stage' }}
+    needs: [ determine-environment, get-disk-name ]
+    environment: ${{ needs.determine-environment.outputs.environment }}
     if: ${{ !cancelled() && !failure() && (needs.get-disk-name.result == 'success' || needs.get-disk-name.result == 'skipped') }}
     continue-on-error: ${{ inputs.allow_failure }}
     timeout-minutes: ${{ inputs.is_long_test && 7200 || 180 }}
@@ -222,7 +243,7 @@ jobs:
       - name: Create ${{ inputs.test_id }} GCP compute instance
         id: create-instance
         env:
-          WORKFLOW_ENVIRONMENT: ${{ github.event_name == 'release' && 'prod' || github.event_name == 'pull_request' && 'dev' || 'stage' }}
+          WORKFLOW_ENVIRONMENT: ${{ needs.determine-environment.outputs.environment }}
         run: |
           NAME="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}"
 
@@ -390,8 +411,8 @@ jobs:
   upload-checkpoint-artifact:
     name: Upload ${{ inputs.test_id }} checkpoint artifact
     runs-on: ubuntu-latest
-    needs: [ test-result ]
-    environment: ${{ github.event_name == 'release' && 'prod' || github.event_name == 'pull_request' && 'dev' || 'stage' }}
+    needs: [ determine-environment, test-result ]
+    environment: ${{ needs.determine-environment.outputs.environment }}
     if: ${{ needs.test-result.result == 'success' && startsWith(inputs.test_id, 'generate-checkpoints-') }}
     env:
       TEST_ID: ${{ inputs.test_id }}
@@ -458,8 +479,8 @@ jobs:
   create-state-image:
     name: Create ${{ inputs.test_id }} cached state image
     runs-on: ubuntu-latest
-    needs: [ test-result ]
-    environment: ${{ github.event_name == 'release' && 'prod' || github.event_name == 'pull_request' && 'dev' || 'stage' }}
+    needs: [ determine-environment, test-result ]
+    environment: ${{ needs.determine-environment.outputs.environment }}
     # We run exactly one of without-cached-state or with-cached-state, and we always skip the other one.
     # Normally, if a job is skipped, all the jobs that depend on it are also skipped.
     # So we need to override the default success() check to make this job run.
@@ -794,8 +815,8 @@ jobs:
   delete-instance:
     name: Delete ${{ inputs.test_id }} instance
     runs-on: ubuntu-latest
-    needs: [ create-state-image, upload-checkpoint-artifact ]
-    environment: ${{ github.event_name == 'release' && 'prod' || github.event_name == 'pull_request' && 'dev' || 'stage' }}
+    needs: [ determine-environment, create-state-image, upload-checkpoint-artifact ]
+    environment: ${{ needs.determine-environment.outputs.environment }}
     # If a disk generation step timeouts (+6 hours) the previous job (creating the image) will be skipped.
     # Even if the instance continues running, no image will be created, so it's better to delete it.
     # upload-checkpoint-artifact is included to prevent the instance from being deleted

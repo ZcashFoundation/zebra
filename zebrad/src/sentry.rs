@@ -65,10 +65,7 @@ impl Metadata {
             metadata.tags.insert("git.sha", git_sha);
         }
 
-        let is_github_actions = lookup_value(&lookup, "GITHUB_ACTIONS")
-            .is_some_and(|v| v.eq_ignore_ascii_case("true"))
-            || metadata.ci_context.contains_key("run_id");
-        if is_github_actions {
+        if lookup_value(&lookup, "GITHUB_ACTIONS").is_some_and(|v| v.eq_ignore_ascii_case("true")) {
             metadata
                 .tags
                 .insert("ci.provider", "github-actions".to_owned());
@@ -78,8 +75,12 @@ impl Metadata {
     }
 
     fn client_options(&self) -> ClientOptions {
+        self.client_options_with_release(release_name())
+    }
+
+    fn client_options_with_release(&self, release: String) -> ClientOptions {
         ClientOptions {
-            release: Some(release_name().into()),
+            release: Some(release.into()),
             environment: self.environment.clone().map(Into::into),
             enable_logs: true,
             ..Default::default()
@@ -192,14 +193,21 @@ fn context_map(values: &BTreeMap<&'static str, String>) -> Map<String, Value> {
 }
 
 fn release_name() -> String {
-    lookup_value(&env_var, "SENTRY_RELEASE").unwrap_or_else(default_release_name)
+    release_name_from(&env_var, ZebradApp::git_commit())
 }
 
-fn default_release_name() -> String {
+fn release_name_from<F>(lookup: &F, git_commit: Option<&str>) -> String
+where
+    F: Fn(&str) -> Option<String>,
+{
+    if let Some(release) = lookup_value(lookup, "SENTRY_RELEASE") {
+        return release;
+    }
+
     let version = build_version();
 
     if version.build.is_empty() {
-        if let Some(git_sha) = ZebradApp::git_commit() {
+        if let Some(git_sha) = git_commit {
             return format!("{version}+git.{git_sha}");
         }
     }
@@ -211,9 +219,9 @@ fn default_release_name() -> String {
 mod tests {
     use std::collections::HashMap;
 
-    use crate::application::ZebradApp;
+    use crate::application::{build_version, ZebradApp};
 
-    use super::Metadata;
+    use super::{release_name_from, Metadata};
 
     #[test]
     fn metadata_ignores_empty_values() {
@@ -333,5 +341,59 @@ mod tests {
         let metadata = Metadata::from_lookup(|key| env.get(key).cloned());
 
         assert_eq!(metadata.tags.get("git.ref"), None);
+    }
+
+    #[test]
+    fn release_name_prefers_sentry_release_override() {
+        let env = HashMap::from([("SENTRY_RELEASE", "zebrad@4.4.0-rc.1".to_string())]);
+
+        let release = release_name_from(&|key| env.get(key).cloned(), Some("deadbeef"));
+
+        assert_eq!(release, "zebrad@4.4.0-rc.1");
+    }
+
+    #[test]
+    fn release_name_appends_git_sha_when_build_metadata_is_empty() {
+        let env: HashMap<&str, String> = HashMap::new();
+
+        let release = release_name_from(&|key| env.get(key).cloned(), Some("deadbeef"));
+
+        let version = build_version();
+        if version.build.is_empty() {
+            assert_eq!(release, format!("{version}+git.deadbeef"));
+        } else {
+            // Tagged build already carries +build metadata; do not double-append.
+            assert_eq!(release, version.to_string());
+        }
+    }
+
+    #[test]
+    fn release_name_falls_back_to_version_without_git_sha() {
+        let env: HashMap<&str, String> = HashMap::new();
+
+        let release = release_name_from(&|key| env.get(key).cloned(), None);
+
+        assert_eq!(release, build_version().to_string());
+    }
+
+    #[test]
+    fn client_options_enables_logs_and_roundtrips_environment() {
+        let env = HashMap::from([("SENTRY_ENVIRONMENT", "stage".to_string())]);
+        let metadata = Metadata::from_lookup(|key| env.get(key).cloned());
+
+        let options = metadata.client_options_with_release("zebrad@test".to_string());
+
+        assert!(options.enable_logs);
+        assert_eq!(options.environment.as_deref(), Some("stage"));
+        assert_eq!(options.release.as_deref(), Some("zebrad@test"));
+    }
+
+    #[test]
+    fn client_options_omits_environment_when_unset() {
+        let metadata = Metadata::from_lookup(|_: &str| -> Option<String> { None });
+
+        let options = metadata.client_options_with_release("zebrad@test".to_string());
+
+        assert!(options.environment.is_none());
     }
 }
