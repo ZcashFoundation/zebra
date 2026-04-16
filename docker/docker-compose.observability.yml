@@ -16,7 +16,7 @@ services:
       dockerfile: docker/Dockerfile
       target: runtime
       args:
-        # Enable OpenTelemetry feature for tracing
+        # OpenTelemetry tracing is included transitively in default-release-binaries.
         FEATURES: "default-release-binaries"
     volumes:
       - zebrad-cache:/home/zebra/.cache/zebra
