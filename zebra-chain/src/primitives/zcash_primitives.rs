@@ -309,6 +309,37 @@ pub(crate) fn sighash(
     hash_type: HashType,
     input_index_script_code: Option<(usize, Vec<u8>)>,
 ) -> SigHash {
+    sighash_inner(
+        precomputed_tx_data,
+        hash_type
+            .try_into()
+            .expect("hash type should be canonical"),
+        input_index_script_code,
+    )
+}
+
+/// Compute a pre-V5 (V4) signature hash using the raw `hash_type` byte.
+///
+/// `zcashd` serializes the full raw byte into the V4 sighash preimage and only
+/// masks with `SIGHASH_MASK` (0x1f) for selection logic. Callers handling V5+
+/// transactions must use [`sighash`] instead so ZIP-244 strictness is enforced.
+pub(crate) fn sighash_v4_raw(
+    precomputed_tx_data: &PrecomputedTxData,
+    raw_hash_type: u8,
+    input_index_script_code: Option<(usize, Vec<u8>)>,
+) -> SigHash {
+    sighash_inner(
+        precomputed_tx_data,
+        zcash_transparent::sighash::SighashType::from_raw(raw_hash_type),
+        input_index_script_code,
+    )
+}
+
+fn sighash_inner(
+    precomputed_tx_data: &PrecomputedTxData,
+    sighash_type: zcash_transparent::sighash::SighashType,
+    input_index_script_code: Option<(usize, Vec<u8>)>,
+) -> SigHash {
     let lock_script: zcash_transparent::address::Script;
     let unlock_script: zcash_transparent::address::Script;
     let signable_input = match input_index_script_code {
@@ -318,7 +349,7 @@ pub(crate) fn sighash(
             unlock_script = zcash_transparent::address::Script(script::Code(script_code));
             zp_tx::sighash::SignableInput::Transparent(
                 zcash_transparent::sighash::SignableInput::from_parts(
-                    hash_type.try_into().expect("hash type should be ALL"),
+                    sighash_type,
                     input_index,
                     &unlock_script,
                     &lock_script,
