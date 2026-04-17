@@ -86,9 +86,9 @@ static BLOCK_VERIFY_TRANSCRIPT_GENESIS: Lazy<
         Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
             .unwrap()
             .into();
-    let hash = Ok(block.hash());
+    let hash = block.hash();
 
-    vec![(Request::Commit(block), hash)]
+    vec![(Request::Commit(block, hash), Ok(hash))]
 });
 
 static BLOCK_VERIFY_TRANSCRIPT_GENESIS_FAIL: Lazy<
@@ -99,15 +99,21 @@ static BLOCK_VERIFY_TRANSCRIPT_GENESIS_FAIL: Lazy<
             .unwrap()
             .into();
 
-    vec![(Request::Commit(block), Err(ExpectedTranscriptError::Any))]
+    vec![(
+        Request::Commit(block.clone(), block.hash()),
+        Err(ExpectedTranscriptError::Any),
+    )]
 });
 
 static NO_COINBASE_TRANSCRIPT: Lazy<Vec<(Request, Result<block::Hash, ExpectedTranscriptError>)>> =
     Lazy::new(|| {
         let block = block_no_transactions();
 
+        let block = Arc::new(block);
+        let hash = block.hash();
+
         vec![(
-            Request::Commit(Arc::new(block)),
+            Request::Commit(block, hash),
             Err(ExpectedTranscriptError::Any),
         )]
     });

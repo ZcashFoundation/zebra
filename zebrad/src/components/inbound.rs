@@ -422,7 +422,7 @@ impl Service<zn::Request> for Inbound {
                 let state = state.clone();
 
                 async move {
-                    let mut blocks: Vec<InventoryResponse<(Arc<Block>, Option<PeerSocketAddr>), block::Hash>> = Vec::new();
+                    let mut blocks: Vec<InventoryResponse<(block::Hash, Arc<Block>, Option<PeerSocketAddr>), block::Hash>> = Vec::new();
                     let mut total_size = 0;
 
                     // Ignore any block hashes past the response limit.
@@ -446,7 +446,7 @@ impl Service<zn::Request> for Inbound {
                                 // return the size from the state using a wrapper type.
                                 total_size += block.zcash_serialized_size();
 
-                                blocks.push(Available((block, None)))
+                                blocks.push(Available((hash, block, None)))
                             },
                             // We don't need to limit the size of the missing block IDs list,
                             // because it is already limited to the size of the getdata request

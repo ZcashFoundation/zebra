@@ -61,7 +61,7 @@ pub(super) enum Handler {
     FindHeaders,
     BlocksByHash {
         pending_hashes: HashSet<block::Hash>,
-        blocks: Vec<Arc<Block>>,
+        blocks: Vec<(block::Hash, Arc<Block>)>,
     },
     TransactionsById {
         pending_ids: HashSet<UnminedTxId>,
@@ -305,9 +305,10 @@ impl Handler {
                 //   - the block messages are sent in a single continuous batch
                 //   - missing blocks are silently skipped
                 //     (there is no `notfound` message at the end of the batch)
-                if pending_hashes.remove(&block.hash()) {
+                let hash = block.hash();
+                if pending_hashes.remove(&hash) {
                     // we are in the middle of the continuous block messages
-                    blocks.push(block);
+                    blocks.push((hash, block));
                 } else {
                     // We got a block we didn't ask for.
                     //
@@ -342,9 +343,9 @@ impl Handler {
 
                 if pending_hashes.is_empty() {
                     // If we got everything we wanted, let the internal client know.
-                    let available = blocks
-                        .into_iter()
-                        .map(|block| InventoryResponse::Available((block, transient_addr)));
+                    let available = blocks.into_iter().map(|(hash, block)| {
+                        InventoryResponse::Available((hash, block, transient_addr))
+                    });
                     Handler::Finished(Ok(Response::Blocks(available.collect())))
                 } else {
                     // Keep on waiting for all the blocks we wanted, until we get them or time out.
@@ -388,9 +389,9 @@ impl Handler {
                     Handler::Finished(Err(PeerError::NotFoundResponse(missing_block_hashes)))
                 } else {
                     // If we got some of what we wanted, let the internal client know.
-                    let available = blocks
-                        .into_iter()
-                        .map(|block| InventoryResponse::Available((block, transient_addr)));
+                    let available = blocks.into_iter().map(|(hash, block)| {
+                        InventoryResponse::Available((hash, block, transient_addr))
+                    });
                     let missing = pending_hashes.into_iter().map(InventoryResponse::Missing);
 
                     Handler::Finished(Ok(Response::Blocks(available.chain(missing).collect())))
@@ -1499,7 +1500,7 @@ where
 
                 for block in blocks.into_iter() {
                     match block {
-                        Available((block, _)) => {
+                        Available((_, block, _)) => {
                             if let Err(e) = self.peer_tx.send(Message::Block(block)).await {
                                 self.fail_with(e).await;
                                 return;

@@ -2960,8 +2960,13 @@ async fn validate_regtest_genesis_block() {
     ) = zebra_consensus::router::init_test(zebra_consensus::Config::default(), &network, state)
         .await;
 
+    let genesis_block = regtest_genesis_block();
+    let expected_genesis_hash = genesis_block.hash();
     let genesis_hash = block_verifier_router
-        .oneshot(zebra_consensus::Request::Commit(regtest_genesis_block()))
+        .oneshot(zebra_consensus::Request::Commit(
+            genesis_block,
+            expected_genesis_hash,
+        ))
         .await
         .expect("should validate Regtest genesis block");
 
@@ -3382,9 +3387,14 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 
     tracing::info!("started state service and block verifier, committing Regtest genesis block");
 
+    let genesis_block = regtest_genesis_block();
+    let expected_genesis_hash = genesis_block.hash();
     let genesis_hash = block_verifier_router
         .clone()
-        .oneshot(zebra_consensus::Request::Commit(regtest_genesis_block()))
+        .oneshot(zebra_consensus::Request::Commit(
+            genesis_block,
+            expected_genesis_hash,
+        ))
         .await
         .expect("should validate Regtest genesis block");
 
@@ -3725,9 +3735,14 @@ async fn nu7_nsm_transactions() -> Result<()> {
 
     tracing::info!("started state service and block verifier, committing Regtest genesis block");
 
+    let genesis_block = regtest_genesis_block();
+    let expected_genesis_hash = genesis_block.hash();
     let genesis_hash = block_verifier_router
         .clone()
-        .oneshot(zebra_consensus::Request::Commit(regtest_genesis_block()))
+        .oneshot(zebra_consensus::Request::Commit(
+            genesis_block,
+            expected_genesis_hash,
+        ))
         .await
         .expect("should validate Regtest genesis block");
 
