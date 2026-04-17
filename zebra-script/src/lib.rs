@@ -159,7 +159,30 @@ impl CachedFfiTransaction {
 
         let calculate_sighash =
             |script_code: &script::Code, hash_type: &zcash_script::signature::HashType| {
+                // For v5+ transactions: reject undefined hash_type values,
+                // matching zcashd's SighashType::parse behavior.
+                // Valid values: {0x01, 0x02, 0x03, 0x81, 0x82, 0x83}.
+                if self.transaction.version() >= 5 {
+                    let valid_v5_types: &[i32] = &[0x01, 0x02, 0x03, 0x81, 0x82, 0x83];
+                    if !valid_v5_types.contains(&hash_type.raw_bits()) {
+                        return None;
+                    }
+                }
+
                 let script_code_vec = script_code.0.clone();
+
+                // For pre-v5 (v4) transactions: zcashd serializes the raw
+                // hash_type byte into the sighash preimage (only masking with
+                // 0x1f for selection logic). Use the raw byte to match.
+                if self.transaction.version() < 5 {
+                    let raw_byte = hash_type.raw_bits() as u8;
+                    return Some(
+                        self.sighasher()
+                            .sighash_v4_raw(raw_byte, Some((input_index, script_code_vec)))
+                            .0,
+                    );
+                }
+
                 let mut our_hash_type = match hash_type.signed_outputs() {
                     zcash_script::signature::SignedOutputs::All => HashType::ALL,
                     zcash_script::signature::SignedOutputs::Single => HashType::SINGLE,

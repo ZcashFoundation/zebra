@@ -33,6 +33,9 @@ thiserror = { workspace = true }
 [dev-dependencies]
 hex = { workspace = true }
 lazy_static = { workspace = true }
+ripemd = { workspace = true }
+secp256k1 = { workspace = true }
+sha2 = { workspace = true }
 zebra-test = { path = "../zebra-test", version = "3.0.0" }
 
 [lints]

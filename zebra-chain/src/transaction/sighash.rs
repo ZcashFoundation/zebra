@@ -10,7 +10,7 @@ use super::Transaction;
 use crate::parameters::NetworkUpgrade;
 use crate::{transparent, Error};
 
-use crate::primitives::zcash_primitives::{sighash, PrecomputedTxData};
+use crate::primitives::zcash_primitives::{sighash, sighash_v4_raw, PrecomputedTxData};
 
 bitflags::bitflags! {
     /// The different SigHash types, as defined in <https://zips.z.cash/zip-0143>
@@ -120,6 +120,24 @@ impl SigHasher {
         sighash(
             &self.precomputed_tx_data,
             hash_type,
+            input_index_script_code,
+        )
+    }
+
+    /// Calculate the sighash for the current pre-V5 (V4) transaction using the
+    /// raw `hash_type` byte taken directly from the signature.
+    ///
+    /// This preserves non-canonical bits (e.g. `0x41`) in the preimage so that
+    /// the resulting digest matches `zcashd`'s pre-V5 sighash semantics.
+    /// Callers handling V5+ transactions must use [`SigHasher::sighash`].
+    pub fn sighash_v4_raw(
+        &self,
+        raw_hash_type: u8,
+        input_index_script_code: Option<(usize, Vec<u8>)>,
+    ) -> SigHash {
+        sighash_v4_raw(
+            &self.precomputed_tx_data,
+            raw_hash_type,
             input_index_script_code,
         )
     }
