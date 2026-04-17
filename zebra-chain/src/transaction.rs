@@ -16,6 +16,8 @@ mod memo;
 mod serialize;
 mod sighash;
 mod unmined;
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+mod v6;
 
 pub mod builder;
 
@@ -519,10 +521,11 @@ impl Transaction {
     pub fn zip233_amount(&self) -> Amount<NonNegative> {
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         if self.tx_version() == TxVersion::V6 {
-            let zatoshis = self.0.zip233_amount();
-            let value: u64 = zatoshis.into();
-            return Amount::try_from(value as i64)
-                .expect("zip233 amount should be a valid non-negative Amount");
+            if let Some(zatoshis) = self.0.value_pool_deltas().zip233_amount() {
+                let value: u64 = zatoshis.into();
+                return Amount::try_from(value as i64)
+                    .expect("zip233 amount should be a valid non-negative Amount");
+            }
         }
         Amount::zero()
     }
@@ -679,6 +682,10 @@ impl crate::serialization::ZcashDeserializeWithContext<zcash_protocol::consensus
         &branch_id: &zcash_protocol::consensus::BranchId,
     ) -> Result<Self, crate::serialization::SerializationError> {
         let inner = zp_tx::Transaction::read(reader, branch_id)?;
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+        if inner.version() == TxVersion::V6 {
+            v6::reject_unknown_v6_bundles(&*inner)?;
+        }
         Ok(Transaction(inner))
     }
 }
@@ -740,6 +747,11 @@ impl crate::serialization::ZcashDeserialize for Transaction {
                 return Err(crate::serialization::SerializationError::BadTransactionBalance);
             }
             return Ok(tx);
+        }
+
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+        if inner.version() == TxVersion::V6 {
+            v6::reject_unknown_v6_bundles(&*inner)?;
         }
 
         Ok(Transaction(inner))
@@ -965,6 +977,7 @@ impl Transaction {
             branch_id,
             lock_time,
             expiry_height,
+            zp_tx::zip248::ValuePoolDeltas::default(),
             transparent_bundle,
             None,
             None,
@@ -1027,6 +1040,7 @@ impl Transaction {
             data.consensus_branch_id(),
             data.lock_time(),
             data.expiry_height(),
+            data.value_pool_deltas().clone(),
             transparent_bundle,
             data.sprout_bundle().cloned(),
             data.sapling_bundle().cloned(),
@@ -1043,6 +1057,7 @@ impl Transaction {
             data.consensus_branch_id(),
             data.lock_time(),
             compat::height_to_block_height(height),
+            data.value_pool_deltas().clone(),
             data.transparent_bundle().cloned(),
             data.sprout_bundle().cloned(),
             data.sapling_bundle().cloned(),
@@ -1063,6 +1078,7 @@ impl Transaction {
             branch_id,
             data.lock_time(),
             data.expiry_height(),
+            data.value_pool_deltas().clone(),
             data.transparent_bundle().cloned(),
             data.sprout_bundle().cloned(),
             data.sapling_bundle().cloned(),
@@ -1092,6 +1108,7 @@ impl Transaction {
             data.consensus_branch_id(),
             data.lock_time(),
             data.expiry_height(),
+            data.value_pool_deltas().clone(),
             data.transparent_bundle().cloned(),
             data.sprout_bundle().cloned(),
             data.sapling_bundle().cloned(),

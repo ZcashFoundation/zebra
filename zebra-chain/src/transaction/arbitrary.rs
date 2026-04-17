@@ -814,6 +814,7 @@ pub fn transaction_to_fake_v5(
                 branch_id,
                 lock_time_u32,
                 zcash_protocol::consensus::BlockHeight::from_u32(height.0),
+                zp_tx::zip248::ValuePoolDeltas::default(),
                 transparent_bundle,
                 None,
                 sapling_bundle,
