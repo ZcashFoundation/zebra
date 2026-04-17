@@ -127,10 +127,6 @@ impl ZcashDeserialize for AddrV1 {
     }
 }
 
-/// A serialized `addr` (v1) has a 4 byte time, 8 byte services, 16 byte IP addr, and 2 byte port
-#[cfg(any(test, feature = "proptest-impl"))]
-pub(in super::super) const ADDR_V1_SIZE: usize = 4 + 8 + 16 + 2;
-
 impl TrustedPreallocate for AddrV1 {
     fn max_allocation() -> u64 {
         // The protocol caps addr messages at 1,000 entries.

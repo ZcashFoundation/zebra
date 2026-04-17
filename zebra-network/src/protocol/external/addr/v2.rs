@@ -312,17 +312,6 @@ impl ZcashDeserialize for AddrV2 {
     }
 }
 
-/// A serialized `addrv2` has:
-/// * 4 byte time,
-/// * 1-9 byte services,
-/// * 1 byte networkID,
-/// * 1-9 byte sizeAddr,
-/// * 0-512 bytes addr,
-/// * 2 bytes port.
-#[cfg(any(test, feature = "proptest-impl"))]
-#[allow(clippy::identity_op)]
-pub(in super::super) const ADDR_V2_MIN_SIZE: usize = 4 + 1 + 1 + 1 + 0 + 2;
-
 impl TrustedPreallocate for AddrV2 {
     fn max_allocation() -> u64 {
         // The protocol caps addrv2 messages at 1,000 entries.

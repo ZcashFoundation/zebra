@@ -16,10 +16,18 @@ use crate::{
     constants::MAX_ADDRS_IN_MESSAGE,
     meta_addr::MetaAddr,
     protocol::external::{
-        addr::{AddrV1, AddrV2, ADDR_V1_SIZE, ADDR_V2_MIN_SIZE},
+        addr::{AddrV1, AddrV2},
         inv::{InventoryHash, MAX_INV_IN_RECEIVED_MESSAGE},
     },
 };
+
+/// A serialized `addr` (v1) has a 4 byte time, 8 byte services, 16 byte IP addr, and 2 byte port.
+const ADDR_V1_SIZE: usize = 4 + 8 + 16 + 2;
+
+/// Minimum size of a serialized `addrv2`: 4 byte time + 1 byte services + 1 byte networkID
+/// + 1 byte sizeAddr + 0 bytes addr + 2 bytes port.
+#[allow(clippy::identity_op)]
+const ADDR_V2_MIN_SIZE: usize = 4 + 1 + 1 + 1 + 0 + 2;
 
 /// The number of test cases to use for expensive proptests.
 const DEFAULT_PROPTEST_CASES: u32 = 8;

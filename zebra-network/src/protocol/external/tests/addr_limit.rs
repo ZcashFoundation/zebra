@@ -18,11 +18,13 @@ use zebra_chain::{
 
 use crate::{
     constants::MAX_ADDRS_IN_MESSAGE,
-    protocol::external::{
-        addr::{AddrV2, ADDR_V2_MIN_SIZE},
-        Codec,
-    },
+    protocol::external::{addr::AddrV2, Codec},
 };
+
+/// Minimum size of a serialized `addrv2`: 4 byte time + 1 byte services + 1 byte networkID
+/// + 1 byte sizeAddr + 0 bytes addr + 2 bytes port.
+#[allow(clippy::identity_op)]
+const ADDR_V2_MIN_SIZE: usize = 4 + 1 + 1 + 1 + 0 + 2;
 
 /// Build a wire-format Zcash `addrv2` message with `count` minimal 9-byte entries.
 fn build_attack_message(count: usize) -> Vec<u8> {
