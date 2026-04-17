@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Added
+
+- Support ZIP-213
+
+### Changed
+
+- Upgraded `orchard` from 0.11 to 0.12
+- Upgraded `sapling-crypto` from 0.5 to 0.6
+- Upgraded `ed25519-zebra` from 4.0 to 4.2
+- Upgraded `console-subscriber` from 0.4 to 0.5
+- Upgraded `toml` from 0.9 to 1.0
+- Upgraded `opentelemetry` from 0.28 to 0.31, `opentelemetry_sdk` from 0.28 to 0.31, `opentelemetry-otlp` from 0.28 to 0.31, `tracing-opentelemetry` from 0.29 to 0.32
+- Bumped MSRV from 1.85 to 1.88
+
 ## [Zebra 4.3.0](https://github.com/ZcashFoundation/zebra/releases/tag/v4.3) - 2026-03-12
 
 This release fixes **two important security issues**:

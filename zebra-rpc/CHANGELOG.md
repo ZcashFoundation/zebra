@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- `client::TransactionTemplate::from_coinbase()`; replaced by `new_coinbase()`
+- `server::http_request_compatibility::With` trait and its impls on `HttpRequestMiddleware`
+- `generate_coinbase_and_roots()`; replaced by `new_coinbase_with_roots()`
+
+### Added
+
+- `client`:
+  - `DefaultRoots::from_coinbase()`
+  - `TransactionTemplate::new_coinbase()`
+- `MinerParams`:
+  - `addr()`, `data()`, `memo()`, `new()`
+  - `randomize_memo()`, `randomize_data()`
+  - `impl From<zcash_keys::address::Address>`
+- `config::mining`:
+  - `MinerAddressType` enum (`Transparent`, `Sapling`, `Unified`)
+  - `MinerAddressTypeIter` struct (strum-derived iterator for `MinerAddressType`)
+  - `Config::miner_memo` field
+  - `default_miner_address()` function
+- `new_coinbase_with_roots()`; replacement for removed `generate_coinbase_and_roots()`
+
 ## [6.0.1] - 2026-03-26
 
 ### Fixed
