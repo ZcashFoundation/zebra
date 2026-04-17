@@ -963,3 +963,163 @@ fn test_coinbase_script() -> Result<()> {
 
     Ok(())
 }
+
+/// ZIP 248 (V6) test vectors. Focus on zebra's strict-parse layer:
+/// wire forms that librustzcash accepts but zebra must reject.
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+mod zip248 {
+    use super::*;
+
+    use zcash_encoding::CompactSize;
+    use zcash_primitives::transaction::{self as zp_tx, zip248 as lrz_zip248};
+    use zcash_protocol::consensus::{BlockHeight, BranchId};
+    use zcash_protocol::constants::{V6_TX_VERSION, V6_VERSION_GROUP_ID};
+    use zcash_protocol::value::Zatoshis;
+
+    /// Builds a minimal V6 transaction header (20 bytes).
+    fn v6_header(branch_id: BranchId) -> Vec<u8> {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&(V6_TX_VERSION | (1 << 31)).to_le_bytes());
+        buf.extend_from_slice(&V6_VERSION_GROUP_ID.to_le_bytes());
+        buf.extend_from_slice(&u32::from(branch_id).to_le_bytes());
+        buf.extend_from_slice(&0u32.to_le_bytes()); // lock_time
+        buf.extend_from_slice(&100u32.to_le_bytes()); // expiry_height
+        buf
+    }
+
+    fn append_empty_body(buf: &mut Vec<u8>) {
+        CompactSize::write(&mut *buf, 0).unwrap(); // nValuePoolDeltas
+        CompactSize::write(&mut *buf, 0).unwrap(); // nEffectBundles
+        CompactSize::write(&mut *buf, 0).unwrap(); // nAuthBundles
+    }
+
+    fn write_vp_entry(buf: &mut Vec<u8>, bundle_type: u64, variant: u64, value: i64) {
+        CompactSize::write(&mut *buf, bundle_type as usize).unwrap();
+        CompactSize::write(&mut *buf, variant as usize).unwrap();
+        buf.push(lrz_zip248::ASSET_CLASS_ZEC);
+        buf.extend_from_slice(&value.to_le_bytes());
+    }
+
+    /// Constructs a V6 transaction with an unknown bundle type via librustzcash's
+    /// builder and returns the serialized bytes. librustzcash accepts this wire
+    /// form; zebra must reject it.
+    fn unknown_bundle_v6_bytes() -> Vec<u8> {
+        let mut vp = lrz_zip248::ValuePoolDeltas::empty();
+        vp.set_fee(Zatoshis::from_u64(1_000).unwrap());
+
+        let mut bundles: lrz_zip248::BundleMap<zp_tx::Authorized> = lrz_zip248::BundleMap::new();
+        bundles.insert_unknown(
+            42,
+            0,
+            lrz_zip248::UnknownBundle {
+                compact_effect_data: vec![0xDE, 0xAD, 0xBE, 0xEF],
+                noncompact_effect_data: Vec::new(),
+                auth_data: None,
+            },
+        );
+
+        let txdata = zp_tx::TransactionData::<zp_tx::Authorized>::from_parts_v6(
+            zp_tx::TxVersion::V6,
+            BranchId::Nu7,
+            0,
+            BlockHeight::from_u32(100),
+            vp,
+            bundles,
+        );
+        let tx = txdata.freeze().expect("V6 freeze is infallible");
+        let mut buf = Vec::new();
+        tx.write(&mut buf).expect("V6 write is infallible");
+        buf
+    }
+
+    #[test]
+    fn v6_accepts_empty_transaction() {
+        let _init_guard = zebra_test::init();
+
+        let mut buf = v6_header(BranchId::Nu7);
+        append_empty_body(&mut buf);
+
+        let tx: Transaction = buf
+            .clone()
+            .zcash_deserialize_into()
+            .expect("empty V6 should parse");
+        assert_eq!(tx.tx_version(), TxVersion::V6);
+
+        let reencoded = tx.zcash_serialize_to_vec().expect("V6 should re-serialize");
+        assert_eq!(buf, reencoded);
+    }
+
+    #[test]
+    fn v6_rejects_unknown_bundle() {
+        let _init_guard = zebra_test::init();
+
+        let buf = unknown_bundle_v6_bytes();
+
+        // Sanity check: librustzcash round-trips unknown bundles opaquely.
+        zp_tx::Transaction::read(&buf[..], BranchId::Nu7)
+            .expect("librustzcash should accept an unknown V6 bundle");
+
+        // Zebra must reject it via the strict-parse layer.
+        let result: Result<Transaction, SerializationError> = buf.zcash_deserialize_into();
+        match result {
+            Err(SerializationError::Parse(msg)) => {
+                assert!(
+                    msg.contains("unrecognized bundle"),
+                    "unexpected parse error: {msg}"
+                );
+            }
+            other => panic!("expected parse error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn v6_rejects_reserved_bundle_type() {
+        let _init_guard = zebra_test::init();
+
+        let mut buf = v6_header(BranchId::Nu7);
+        CompactSize::write(&mut buf, 1).unwrap();
+        write_vp_entry(&mut buf, 1, 0, 1_000);
+        CompactSize::write(&mut buf, 0).unwrap();
+        CompactSize::write(&mut buf, 0).unwrap();
+
+        let result: Result<Transaction, SerializationError> = buf.zcash_deserialize_into();
+        assert!(
+            result.is_err(),
+            "reserved bundle type (wire ID 1) must be rejected"
+        );
+    }
+
+    #[test]
+    fn v6_rejects_key_rotation_in_vp_deltas() {
+        let _init_guard = zebra_test::init();
+
+        let mut buf = v6_header(BranchId::Nu7);
+        CompactSize::write(&mut buf, 1).unwrap();
+        write_vp_entry(&mut buf, 6, 0, 1_000);
+        CompactSize::write(&mut buf, 0).unwrap();
+        CompactSize::write(&mut buf, 0).unwrap();
+
+        let result: Result<Transaction, SerializationError> = buf.zcash_deserialize_into();
+        assert!(
+            result.is_err(),
+            "KeyRotation (wire ID 6) in VP deltas must be rejected"
+        );
+    }
+
+    #[test]
+    fn v6_rejects_lockbox_in_vp_deltas() {
+        let _init_guard = zebra_test::init();
+
+        let mut buf = v6_header(BranchId::Nu7);
+        CompactSize::write(&mut buf, 1).unwrap();
+        write_vp_entry(&mut buf, 7, 0, 1_000);
+        CompactSize::write(&mut buf, 0).unwrap();
+        CompactSize::write(&mut buf, 0).unwrap();
+
+        let result: Result<Transaction, SerializationError> = buf.zcash_deserialize_into();
+        assert!(
+            result.is_err(),
+            "LockboxDisbursement (wire ID 7) in VP deltas must be rejected"
+        );
+    }
+}
