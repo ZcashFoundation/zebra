@@ -451,8 +451,7 @@ mod tests {
         ]);
         let metadata = Metadata::from_lookup(|key| env.get(key).cloned());
 
-        let attrs: BTreeMap<String, LogAttribute> =
-            metadata.log_attributes().into_iter().collect();
+        let attrs: BTreeMap<String, LogAttribute> = metadata.log_attributes().into_iter().collect();
 
         let expect = |key: &str, value: &str| {
             assert_eq!(
@@ -504,7 +503,9 @@ mod tests {
         merge_log_attributes(&mut log, &attrs);
 
         assert_eq!(
-            log.attributes.get("git.sha").and_then(|attr| attr.0.as_str()),
+            log.attributes
+                .get("git.sha")
+                .and_then(|attr| attr.0.as_str()),
             Some("event-sha"),
             "pre-existing attribute must not be overwritten",
         );
