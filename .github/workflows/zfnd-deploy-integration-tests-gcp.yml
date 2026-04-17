@@ -161,7 +161,7 @@ jobs:
           fetch-depth: '2'
 
       - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@9e7def61550737ba68c62d34a32dd31792e3f429 #v5.5.0
+        uses: rlespinasse/github-slug-action@e6f261660910b273384c5c42b17a0217881b217a #v5.6.0
         with:
           short-length: 7
           # GCP instance names are limited to 63 chars. With test_id (max ~31) + sha (7) + hyphens (2),
@@ -175,7 +175,7 @@ jobs:
 
       # Install our SSH secret
       - name: Install private SSH key
-        uses: shimataro/ssh-key-action@6b84f2e793b32fa0b03a379cadadec75cc539391 #v2.8.0
+        uses: shimataro/ssh-key-action@87a8f067114a8ce263df83e9ed5c849953548bc3 #v2.8.1
         with:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           name: google_compute_engine
@@ -399,11 +399,11 @@ jobs:
         with:
           persist-credentials: false
       - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@9e7def61550737ba68c62d34a32dd31792e3f429 #v5.5.0
+        uses: rlespinasse/github-slug-action@e6f261660910b273384c5c42b17a0217881b217a #v5.6.0
         with:
           short-length: 7
           slug-maxlength: 23
-      - uses: shimataro/ssh-key-action@6b84f2e793b32fa0b03a379cadadec75cc539391 #v2.8.0
+      - uses: shimataro/ssh-key-action@87a8f067114a8ce263df83e9ed5c849953548bc3 #v2.8.1
         with:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           name: google_compute_engine
@@ -443,7 +443,7 @@ jobs:
           fi
 
       - name: Upload checkpoint artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a #v7.0.1
         with:
           name: ${{ inputs.test_id }}-checkpoints
           path: "*-checkpoints.txt"
@@ -472,7 +472,7 @@ jobs:
           fetch-depth: '2'
 
       - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@9e7def61550737ba68c62d34a32dd31792e3f429 #v5.5.0
+        uses: rlespinasse/github-slug-action@e6f261660910b273384c5c42b17a0217881b217a #v5.6.0
         with:
           short-length: 7
           slug-maxlength: 23
@@ -496,7 +496,7 @@ jobs:
 
       # Install our SSH secret
       - name: Install private SSH key
-        uses: shimataro/ssh-key-action@6b84f2e793b32fa0b03a379cadadec75cc539391 #v2.8.0
+        uses: shimataro/ssh-key-action@87a8f067114a8ce263df83e9ed5c849953548bc3 #v2.8.1
         with:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           name: google_compute_engine
@@ -805,7 +805,7 @@ jobs:
           fetch-depth: '2'
 
       - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@9e7def61550737ba68c62d34a32dd31792e3f429 #v5.5.0
+        uses: rlespinasse/github-slug-action@e6f261660910b273384c5c42b17a0217881b217a #v5.6.0
         with:
           short-length: 7
           slug-maxlength: 23
