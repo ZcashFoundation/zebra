@@ -16,6 +16,7 @@ pub mod checkpoints;
 pub mod config;
 pub mod failure_messages;
 pub mod get_block_template_rpcs;
+#[macro_use]
 pub mod launch;
 pub mod lightwalletd;
 pub mod regtest;
