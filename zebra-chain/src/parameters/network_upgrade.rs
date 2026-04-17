@@ -108,6 +108,7 @@ pub(super) const MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
         (NU5, Nu5),
         (NU6, Nu6),
         (NU6_1, Nu6_1),
+        (NU7, Nu7),
     ]
 };
 /// Testnet network upgrade activation heights.
@@ -133,6 +134,7 @@ pub(super) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
         (NU5, Nu5),
         (NU6, Nu6),
         (NU6_1, Nu6_1),
+        (NU7, Nu7),
     ]
 };
 
@@ -226,8 +228,8 @@ pub(crate) const CONSENSUS_BRANCH_IDS: &[(NetworkUpgrade, ConsensusBranchId)] = 
     (Nu5, ConsensusBranchId(0xc2d6d0b4)),
     (Nu6, ConsensusBranchId(0xc8e71055)),
     (Nu6_1, ConsensusBranchId(0x4dec4df0)),
-    // TODO: set below to (Nu7, ConsensusBranchId(0x77190ad8)), once the same value is set in librustzcash
-    #[cfg(any(test, feature = "zebra-test"))]
+    // TODO: replace placeholder with (Nu7, ConsensusBranchId(0x77190ad8)) once set upstream in librustzcash.
+    // librustzcash zip248-zebra currently uses the same 0xffffffff placeholder.
     (Nu7, ConsensusBranchId(0xffffffff)),
     #[cfg(zcash_unstable = "zfuture")]
     (ZFuture, ConsensusBranchId(0xffffffff)),

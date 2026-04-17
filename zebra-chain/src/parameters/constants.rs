@@ -52,6 +52,10 @@ pub mod activation_heights {
         pub const NU6: Height = Height(2_976_000);
         /// The block height at which `NU6.1` activates on Testnet.
         pub const NU6_1: Height = Height(3_536_500);
+        /// Placeholder block height at which `NU7` activates on Testnet.
+        ///
+        /// TODO: replace with the real NU7 activation height once it's set upstream.
+        pub const NU7: Height = Height(Height::MAX.0 / 2);
     }
 
     /// Network upgrade activation heights for Mainnet.
@@ -76,5 +80,9 @@ pub mod activation_heights {
         pub const NU6: Height = Height(2_726_400);
         /// The block height at which `NU6.1` activates on Mainnet.
         pub const NU6_1: Height = Height(3_146_400);
+        /// Placeholder block height at which `NU7` activates on Mainnet.
+        ///
+        /// TODO: replace with the real NU7 activation height once it's set upstream.
+        pub const NU7: Height = Height(Height::MAX.0 / 2);
     }
 }

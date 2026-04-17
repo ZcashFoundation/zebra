@@ -287,6 +287,5 @@ fn full_activation_list_contains_all_upgrades() {
     let network = Network::Mainnet;
     let full_list = network.full_activation_list();
 
-    // NU7 is only included in tests; on Mainnet, NU7 isn’t live yet, so we subtract 1 here.
-    assert_eq!(full_list.len(), NetworkUpgrade::iter().count() - 1);
+    assert_eq!(full_list.len(), NetworkUpgrade::iter().count());
 }

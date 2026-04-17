@@ -156,13 +156,18 @@ fn transaction_valid_network_upgrade_strategy() -> Result<()> {
     });
 
     proptest!(|((network, block) in strategy)| {
-        // Only check consistency at heights where the network upgrade has a known
-        // consensus branch ID. V5 transactions at pre-Overwinter heights are a
-        // proptest artifact — in consensus these wouldn't exist, and they can't
-        // carry a matching branch ID since no branch ID is defined for those upgrades.
+        // Only check consistency at heights where the network upgrade has a branch
+        // ID recognized by zcash_protocol — V5 transactions can only embed branch
+        // IDs that librustzcash knows. Placeholder NU branch IDs (e.g. NU7 before
+        // its real branch ID is set upstream) are skipped because the V5 builder
+        // can't round-trip them.
         let coinbase_height = block.coinbase_height().expect("block has a coinbase");
         let block_nu = crate::parameters::NetworkUpgrade::current(&network, coinbase_height);
-        if block_nu.branch_id().is_some() {
+        let has_known_branch_id = block_nu
+            .branch_id()
+            .and_then(|cbid| zcash_protocol::consensus::BranchId::try_from(cbid).ok())
+            .is_some();
+        if has_known_branch_id {
             block.check_transaction_network_upgrade_consistency(&network)?;
         }
     });
