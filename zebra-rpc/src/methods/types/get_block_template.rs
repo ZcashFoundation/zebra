@@ -750,7 +750,45 @@ where
 
     let chain_info = match response {
         zebra_state::ReadResponse::ChainInfo(chain_info) => chain_info,
-        _ => unreachable!("incorrect response to {request:?}"),
+        zebra_state::ReadResponse::UsageInfo(_)
+        | zebra_state::ReadResponse::Tip(_)
+        | zebra_state::ReadResponse::TipPoolValues { .. }
+        | zebra_state::ReadResponse::BlockInfo(_)
+        | zebra_state::ReadResponse::Depth(_)
+        | zebra_state::ReadResponse::Block(_)
+        | zebra_state::ReadResponse::BlockAndSize(_)
+        | zebra_state::ReadResponse::BlockHeader { .. }
+        | zebra_state::ReadResponse::Transaction(_)
+        | zebra_state::ReadResponse::AnyChainTransaction(_)
+        | zebra_state::ReadResponse::TransactionIdsForBlock(_)
+        | zebra_state::ReadResponse::AnyChainTransactionIdsForBlock(_)
+        | zebra_state::ReadResponse::BlockLocator(_)
+        | zebra_state::ReadResponse::BlockHashes(_)
+        | zebra_state::ReadResponse::BlockHeaders(_)
+        | zebra_state::ReadResponse::UnspentBestChainUtxo(_)
+        | zebra_state::ReadResponse::AnyChainUtxo(_)
+        | zebra_state::ReadResponse::SaplingTree(_)
+        | zebra_state::ReadResponse::OrchardTree(_)
+        | zebra_state::ReadResponse::SaplingSubtrees(_)
+        | zebra_state::ReadResponse::OrchardSubtrees(_)
+        | zebra_state::ReadResponse::AddressBalance { .. }
+        | zebra_state::ReadResponse::AddressesTransactionIds(_)
+        | zebra_state::ReadResponse::AddressUtxos(_)
+        | zebra_state::ReadResponse::ValidBestChainTipNullifiersAndAnchors
+        | zebra_state::ReadResponse::BestChainNextMedianTimePast(_)
+        | zebra_state::ReadResponse::BlockHash(_)
+        | zebra_state::ReadResponse::SolutionRate(_)
+        | zebra_state::ReadResponse::ValidBlockProposal
+        | zebra_state::ReadResponse::TipBlockSize(_)
+        | zebra_state::ReadResponse::NonFinalizedBlocksListener(_)
+        | zebra_state::ReadResponse::IsTransparentOutputSpent(_) => {
+            unreachable!("incorrect response to {request:?}")
+        }
+
+        #[cfg(feature = "indexer")]
+        zebra_state::ReadResponse::TransactionId(_) => {
+            unreachable!("unmatched response to a state request")
+        }
     };
 
     Ok(chain_info)

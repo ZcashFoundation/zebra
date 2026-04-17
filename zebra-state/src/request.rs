@@ -687,7 +687,25 @@ impl MappedRequest for CommitSemanticallyVerifiedBlockRequest {
     fn map_response(response: Response) -> Self::MappedResponse {
         match response {
             Response::Committed(hash) => hash,
-            _ => unreachable!("wrong response variant for request"),
+            Response::Invalidated(_)
+            | Response::Reconsidered(_)
+            | Response::Depth(_)
+            | Response::Tip(_)
+            | Response::BlockLocator(_)
+            | Response::Transaction(_)
+            | Response::AnyChainTransaction(_)
+            | Response::UnspentBestChainUtxo(_)
+            | Response::Block(_)
+            | Response::BlockAndSize(_)
+            | Response::BlockHeader { .. }
+            | Response::Utxo(_)
+            | Response::BlockHashes(_)
+            | Response::BlockHeaders(_)
+            | Response::ValidBestChainTipNullifiersAndAnchors
+            | Response::BestChainNextMedianTimePast(_)
+            | Response::BlockHash(_)
+            | Response::KnownBlock(_)
+            | Response::ValidBlockProposal => unreachable!("wrong response variant for request"),
         }
     }
 }
@@ -709,7 +727,25 @@ impl MappedRequest for CommitCheckpointVerifiedBlockRequest {
     fn map_response(response: Response) -> Self::MappedResponse {
         match response {
             Response::Committed(hash) => hash,
-            _ => unreachable!("wrong response variant for request"),
+            Response::Invalidated(_)
+            | Response::Reconsidered(_)
+            | Response::Depth(_)
+            | Response::Tip(_)
+            | Response::BlockLocator(_)
+            | Response::Transaction(_)
+            | Response::AnyChainTransaction(_)
+            | Response::UnspentBestChainUtxo(_)
+            | Response::Block(_)
+            | Response::BlockAndSize(_)
+            | Response::BlockHeader { .. }
+            | Response::Utxo(_)
+            | Response::BlockHashes(_)
+            | Response::BlockHeaders(_)
+            | Response::ValidBestChainTipNullifiersAndAnchors
+            | Response::BestChainNextMedianTimePast(_)
+            | Response::BlockHash(_)
+            | Response::KnownBlock(_)
+            | Response::ValidBlockProposal => unreachable!("wrong response variant for request"),
         }
     }
 }
@@ -731,7 +767,25 @@ impl MappedRequest for InvalidateBlockRequest {
     fn map_response(response: Response) -> Self::MappedResponse {
         match response {
             Response::Invalidated(hash) => hash,
-            _ => unreachable!("wrong response variant for request"),
+            Response::Committed(_)
+            | Response::Reconsidered(_)
+            | Response::Depth(_)
+            | Response::Tip(_)
+            | Response::BlockLocator(_)
+            | Response::Transaction(_)
+            | Response::AnyChainTransaction(_)
+            | Response::UnspentBestChainUtxo(_)
+            | Response::Block(_)
+            | Response::BlockAndSize(_)
+            | Response::BlockHeader { .. }
+            | Response::Utxo(_)
+            | Response::BlockHashes(_)
+            | Response::BlockHeaders(_)
+            | Response::ValidBestChainTipNullifiersAndAnchors
+            | Response::BestChainNextMedianTimePast(_)
+            | Response::BlockHash(_)
+            | Response::KnownBlock(_)
+            | Response::ValidBlockProposal => unreachable!("wrong response variant for request"),
         }
     }
 }
@@ -753,7 +807,25 @@ impl MappedRequest for ReconsiderBlockRequest {
     fn map_response(response: Response) -> Self::MappedResponse {
         match response {
             Response::Reconsidered(hashes) => hashes,
-            _ => unreachable!("wrong response variant for request"),
+            Response::Committed(_)
+            | Response::Invalidated(_)
+            | Response::Depth(_)
+            | Response::Tip(_)
+            | Response::BlockLocator(_)
+            | Response::Transaction(_)
+            | Response::AnyChainTransaction(_)
+            | Response::UnspentBestChainUtxo(_)
+            | Response::Block(_)
+            | Response::BlockAndSize(_)
+            | Response::BlockHeader { .. }
+            | Response::Utxo(_)
+            | Response::BlockHashes(_)
+            | Response::BlockHeaders(_)
+            | Response::ValidBestChainTipNullifiersAndAnchors
+            | Response::BestChainNextMedianTimePast(_)
+            | Response::BlockHash(_)
+            | Response::KnownBlock(_)
+            | Response::ValidBlockProposal => unreachable!("wrong response variant for request"),
         }
     }
 }

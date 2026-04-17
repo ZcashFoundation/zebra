@@ -102,7 +102,13 @@ impl VerifyBlockError {
         match self {
             VerifyBlockError::Block { source, .. } => source.is_duplicate_request(),
             VerifyBlockError::Commit(commit_err) => commit_err.is_duplicate_request(),
-            _ => false,
+            VerifyBlockError::Depth { .. }
+            | VerifyBlockError::Equihash { .. }
+            | VerifyBlockError::Time(_)
+            | VerifyBlockError::ValidateProposal(_)
+            | VerifyBlockError::Transaction(_)
+            | VerifyBlockError::Subsidy(_)
+            | VerifyBlockError::StateService { .. } => false,
         }
     }
 
@@ -113,7 +119,13 @@ impl VerifyBlockError {
         match self {
             Block { source } => source.misbehavior_score(),
             Equihash { .. } => 100,
-            _other => 0,
+            Depth { .. }
+            | Time(_)
+            | Commit(_)
+            | ValidateProposal(_)
+            | Transaction(_)
+            | Subsidy(_)
+            | StateService { .. } => 0,
         }
     }
 }
@@ -189,7 +201,27 @@ where
                     return Err(BlockError::AlreadyInChain(hash, location).into())
                 }
                 zs::Response::KnownBlock(None) => {}
-                _ => unreachable!("wrong response to Request::KnownBlock"),
+                zs::Response::Committed(_)
+                | zs::Response::Invalidated(_)
+                | zs::Response::Reconsidered(_)
+                | zs::Response::Depth(_)
+                | zs::Response::Tip(_)
+                | zs::Response::BlockLocator(_)
+                | zs::Response::Transaction(_)
+                | zs::Response::AnyChainTransaction(_)
+                | zs::Response::UnspentBestChainUtxo(_)
+                | zs::Response::Block(_)
+                | zs::Response::BlockAndSize(_)
+                | zs::Response::BlockHeader { .. }
+                | zs::Response::Utxo(_)
+                | zs::Response::BlockHashes(_)
+                | zs::Response::BlockHeaders(_)
+                | zs::Response::ValidBestChainTipNullifiersAndAnchors
+                | zs::Response::BestChainNextMedianTimePast(_)
+                | zs::Response::BlockHash(_)
+                | zs::Response::ValidBlockProposal => {
+                    unreachable!("wrong response to Request::KnownBlock")
+                }
             }
 
             tracing::trace!("performing block checks");
@@ -352,7 +384,27 @@ where
                     .map_err(VerifyBlockError::ValidateProposal)?
                 {
                     zs::Response::ValidBlockProposal => Ok(hash),
-                    _ => unreachable!("wrong response for CheckBlockProposalValidity"),
+                    zs::Response::Committed(_)
+                    | zs::Response::Invalidated(_)
+                    | zs::Response::Reconsidered(_)
+                    | zs::Response::Depth(_)
+                    | zs::Response::Tip(_)
+                    | zs::Response::BlockLocator(_)
+                    | zs::Response::Transaction(_)
+                    | zs::Response::AnyChainTransaction(_)
+                    | zs::Response::UnspentBestChainUtxo(_)
+                    | zs::Response::Block(_)
+                    | zs::Response::BlockAndSize(_)
+                    | zs::Response::BlockHeader { .. }
+                    | zs::Response::Utxo(_)
+                    | zs::Response::BlockHashes(_)
+                    | zs::Response::BlockHeaders(_)
+                    | zs::Response::ValidBestChainTipNullifiersAndAnchors
+                    | zs::Response::BestChainNextMedianTimePast(_)
+                    | zs::Response::BlockHash(_)
+                    | zs::Response::KnownBlock(_) => {
+                        unreachable!("wrong response for CheckBlockProposalValidity")
+                    }
                 };
             }
 

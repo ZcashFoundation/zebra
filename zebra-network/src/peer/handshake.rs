@@ -656,7 +656,10 @@ where
             let unspec_ipv4 = get_unspecified_ipv4_addr(config.network);
             (unspec_ipv4.into(), PeerServices::empty(), unspec_ipv4)
         }
-        _ => {
+        OutboundDirect { .. }
+        | InboundDirect { .. }
+        | OutboundProxy { .. }
+        | InboundProxy { .. } => {
             let their_addr = connected_addr
                 .get_transient_addr()
                 .expect("non-Isolated connections have a remote addr");
@@ -703,7 +706,24 @@ where
                 debug!(?version_message, "got version message from remote peer");
                 break version_message;
             }
-            _ => {
+            Message::Verack
+            | Message::Ping(_)
+            | Message::Pong(_)
+            | Message::Reject { .. }
+            | Message::GetAddr
+            | Message::Addr(_)
+            | Message::GetBlocks { .. }
+            | Message::Inv(_)
+            | Message::GetHeaders { .. }
+            | Message::Headers(_)
+            | Message::GetData(_)
+            | Message::Block(_)
+            | Message::Tx(_)
+            | Message::NotFound(_)
+            | Message::Mempool
+            | Message::FilterLoad { .. }
+            | Message::FilterAdd { .. }
+            | Message::FilterClear => {
                 remote_msg = peer_conn
                     .next()
                     .await
@@ -827,7 +847,24 @@ where
                 debug!(?remote_msg, "got verack message from remote peer");
                 break;
             }
-            _ => {
+            Message::Version(_)
+            | Message::Ping(_)
+            | Message::Pong(_)
+            | Message::Reject { .. }
+            | Message::GetAddr
+            | Message::Addr(_)
+            | Message::GetBlocks { .. }
+            | Message::Inv(_)
+            | Message::GetHeaders { .. }
+            | Message::Headers(_)
+            | Message::GetData(_)
+            | Message::Block(_)
+            | Message::Tx(_)
+            | Message::NotFound(_)
+            | Message::Mempool
+            | Message::FilterLoad { .. }
+            | Message::FilterAdd { .. }
+            | Message::FilterClear => {
                 remote_msg = peer_conn
                     .next()
                     .await
@@ -1451,7 +1488,13 @@ async fn heartbeat_timeout(
 
     let rtt = match response {
         Response::Pong(rtt) => Some(rtt),
-        _ => None,
+        Response::Nil
+        | Response::Peers(_)
+        | Response::BlockHashes(_)
+        | Response::BlockHeaders(_)
+        | Response::TransactionIds(_)
+        | Response::Blocks(_)
+        | Response::Transactions(_) => None,
     };
 
     Ok(rtt)
