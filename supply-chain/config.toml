@@ -136,6 +136,18 @@ criteria = "safe-to-deploy"
 version = "0.1.88"
 criteria = "safe-to-deploy"
 
+[[exemptions.aws-lc-rs]]
+version = "1.16.3"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
+
+[[exemptions.aws-lc-sys]]
+version = "0.40.0"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
+
 [[exemptions.axum]]
 version = "0.7.9"
 criteria = "safe-to-deploy"
@@ -248,6 +260,12 @@ criteria = "safe-to-deploy"
 version = "1.2.56"
 criteria = "safe-to-deploy"
 
+[[exemptions.cesu8]]
+version = "1.1.0"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
+
 [[exemptions.chacha20]]
 version = "0.9.1"
 criteria = "safe-to-deploy"
@@ -280,6 +298,12 @@ criteria = "safe-to-deploy"
 version = "1.0.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.cmake]]
+version = "0.1.58"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
+
 [[exemptions.color-eyre]]
 version = "0.6.5"
 criteria = "safe-to-deploy"
@@ -291,6 +315,12 @@ criteria = "safe-to-deploy"
 [[exemptions.colorchoice]]
 version = "1.0.3"
 criteria = "safe-to-deploy"
+
+[[exemptions.combine]]
+version = "4.6.7"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
 
 [[exemptions.compression-codecs]]
 version = "0.4.37"
@@ -347,6 +377,12 @@ criteria = "safe-to-deploy"
 [[exemptions.convert_case]]
 version = "0.8.0"
 criteria = "safe-to-deploy"
+
+[[exemptions.core-foundation]]
+version = "0.10.1"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
 
 [[exemptions.core2]]
 version = "0.3.3"
@@ -468,6 +504,12 @@ criteria = "safe-to-deploy"
 version = "0.9.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.dunce]]
+version = "1.0.5"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
+
 [[exemptions.dyn-clone]]
 version = "1.0.19"
 criteria = "safe-to-deploy"
@@ -539,6 +581,12 @@ criteria = "safe-to-deploy"
 [[exemptions.fs-err]]
 version = "2.11.0"
 criteria = "safe-to-deploy"
+
+[[exemptions.fs_extra]]
+version = "1.3.0"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
 
 [[exemptions.funty]]
 version = "2.0.0"
@@ -788,6 +836,30 @@ criteria = "safe-to-deploy"
 version = "1.0.17"
 criteria = "safe-to-deploy"
 
+[[exemptions.jni]]
+version = "0.21.1"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
+
+[[exemptions.jni-sys]]
+version = "0.3.1"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
+
+[[exemptions.jni-sys]]
+version = "0.4.1"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
+
+[[exemptions.jni-sys-macros]]
+version = "0.4.1"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
+
 [[exemptions.jobserver]]
 version = "0.1.34"
 criteria = "safe-to-deploy"
@@ -1003,6 +1075,12 @@ criteria = "safe-to-deploy"
 [[exemptions.openrpsee]]
 version = "0.1.0"
 criteria = "safe-to-deploy"
+
+[[exemptions.openssl-probe]]
+version = "0.2.1"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
 
 [[exemptions.opentelemetry]]
 version = "0.28.0"
@@ -1320,6 +1398,12 @@ criteria = "safe-to-deploy"
 version = "0.12.28"
 criteria = "safe-to-deploy"
 
+[[exemptions.reqwest]]
+version = "0.13.2"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
+
 [[exemptions.rgb]]
 version = "0.8.53"
 criteria = "safe-to-deploy"
@@ -1372,13 +1456,37 @@ criteria = "safe-to-deploy"
 version = "0.23.37"
 criteria = "safe-to-deploy"
 
+[[exemptions.rustls-native-certs]]
+version = "0.8.3"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
+
 [[exemptions.rustls-pki-types]]
 version = "1.14.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.rustls-platform-verifier]]
+version = "0.6.2"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
+
+[[exemptions.rustls-platform-verifier-android]]
+version = "0.1.1"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
+
 [[exemptions.rustls-webpki]]
 version = "0.103.10"
 criteria = "safe-to-deploy"
+
+[[exemptions.rustls-webpki]]
+version = "0.103.12"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
 
 [[exemptions.rusty-fork]]
 version = "0.3.1"
@@ -1388,9 +1496,21 @@ criteria = "safe-to-deploy"
 version = "1.0.23"
 criteria = "safe-to-deploy"
 
+[[exemptions.same-file]]
+version = "1.0.6"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
+
 [[exemptions.sapling-crypto]]
 version = "0.5.0"
 criteria = "safe-to-deploy"
+
+[[exemptions.schannel]]
+version = "0.1.29"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
 
 [[exemptions.schemars]]
 version = "1.2.1"
@@ -1416,6 +1536,18 @@ criteria = "safe-to-deploy"
 version = "0.8.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.security-framework]]
+version = "3.7.0"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
+
+[[exemptions.security-framework-sys]]
+version = "2.17.0"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
+
 [[exemptions.semver]]
 version = "1.0.27"
 criteria = "safe-to-deploy"
@@ -1424,25 +1556,67 @@ criteria = "safe-to-deploy"
 version = "0.40.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.sentry]]
+version = "0.47.0"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
+
 [[exemptions.sentry-backtrace]]
 version = "0.40.0"
 criteria = "safe-to-deploy"
+
+[[exemptions.sentry-backtrace]]
+version = "0.47.0"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
 
 [[exemptions.sentry-contexts]]
 version = "0.40.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.sentry-contexts]]
+version = "0.47.0"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
+
 [[exemptions.sentry-core]]
 version = "0.40.0"
 criteria = "safe-to-deploy"
+
+[[exemptions.sentry-core]]
+version = "0.47.0"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
+
+[[exemptions.sentry-log]]
+version = "0.47.0"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
 
 [[exemptions.sentry-tracing]]
 version = "0.40.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.sentry-tracing]]
+version = "0.47.0"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
+
 [[exemptions.sentry-types]]
 version = "0.40.0"
 criteria = "safe-to-deploy"
+
+[[exemptions.sentry-types]]
+version = "0.47.0"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
 
 [[exemptions.serde-big-array]]
 version = "0.5.1"
@@ -1794,6 +1968,12 @@ criteria = "safe-to-deploy"
 
 [[exemptions.walkdir]]
 version = "2.5.0"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
+
+[[exemptions.walkdir]]
+version = "2.5.0"
 criteria = "safe-to-run"
 
 [[exemptions.wasi]]
@@ -1831,6 +2011,12 @@ criteria = "safe-to-deploy"
 [[exemptions.web-time]]
 version = "1.1.0"
 criteria = "safe-to-deploy"
+
+[[exemptions.webpki-root-certs]]
+version = "1.0.7"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
 
 [[exemptions.webpki-roots]]
 version = "1.0.6"
@@ -1877,6 +2063,12 @@ version = "0.5.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows-sys]]
+version = "0.45.0"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
+
+[[exemptions.windows-sys]]
 version = "0.52.0"
 criteria = "safe-to-deploy"
 
@@ -1889,6 +2081,12 @@ version = "0.61.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows-targets]]
+version = "0.42.2"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
+
+[[exemptions.windows-targets]]
 version = "0.52.5"
 criteria = "safe-to-deploy"
 
@@ -1897,6 +2095,12 @@ version = "0.53.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows_aarch64_gnullvm]]
+version = "0.42.2"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
+
+[[exemptions.windows_aarch64_gnullvm]]
 version = "0.52.5"
 criteria = "safe-to-deploy"
 
@@ -1905,6 +2109,12 @@ version = "0.53.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows_aarch64_msvc]]
+version = "0.42.2"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
+
+[[exemptions.windows_aarch64_msvc]]
 version = "0.52.5"
 criteria = "safe-to-deploy"
 
@@ -1913,6 +2123,12 @@ version = "0.53.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows_i686_gnu]]
+version = "0.42.2"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
+
+[[exemptions.windows_i686_gnu]]
 version = "0.52.5"
 criteria = "safe-to-deploy"
 
@@ -1929,6 +2145,12 @@ version = "0.53.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows_i686_msvc]]
+version = "0.42.2"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
+
+[[exemptions.windows_i686_msvc]]
 version = "0.52.5"
 criteria = "safe-to-deploy"
 
@@ -1937,6 +2159,12 @@ version = "0.53.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows_x86_64_gnu]]
+version = "0.42.2"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
+
+[[exemptions.windows_x86_64_gnu]]
 version = "0.52.5"
 criteria = "safe-to-deploy"
 
@@ -1945,12 +2173,24 @@ version = "0.53.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows_x86_64_gnullvm]]
+version = "0.42.2"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
+
+[[exemptions.windows_x86_64_gnullvm]]
 version = "0.52.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows_x86_64_gnullvm]]
 version = "0.53.0"
 criteria = "safe-to-deploy"
+
+[[exemptions.windows_x86_64_msvc]]
+version = "0.42.2"
+criteria = "safe-to-deploy"
+suggest = false
+notes = "Sentry 0.47 upgrade"
 
 [[exemptions.windows_x86_64_msvc]]
 version = "0.52.5"

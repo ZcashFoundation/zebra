@@ -57,16 +57,18 @@ See [Building Zebra](https://github.com/ZcashFoundation/zebra#manual-build) for 
 
 Zebra supports various features that can be enabled during build time using the `FEATURES` build argument:
 
-For example, if we'd like to enable metrics on the image, we'd build it using the following `build-arg`:
+For example, if you'd like to add an extra feature on top of the default release feature set, you'd build it using the following `build-arg`:
 
 > [!IMPORTANT]
-> To fully use and display the metrics, you'll need to run a Prometheus and Grafana server, and configure it to scrape and visualize the metrics endpoint. This is explained in more detailed in the [Metrics](https://zebra.zfnd.org/user/metrics.html#zebra-metrics) section of the User Guide.
+> Some optional features need extra runtime services or configuration. Check the
+> matching User Guide page for the feature you enable before using the image in
+> production.
 
 ```shell
 # Build with specific features
 docker build -f ./docker/Dockerfile --target runtime \
-    --build-arg FEATURES="default-release-binaries prometheus" \
-    --tag zebra:metrics .
+    --build-arg FEATURES="default-release-binaries elasticsearch" \
+    --tag zebra:custom-features .
 ```
 
 All available Cargo features are listed at
@@ -205,8 +207,7 @@ docker compose -f docker/docker-compose.observability.yml build --no-cache
 docker compose -f docker/docker-compose.observability.yml up
 ```
 
-This builds a local Zebra image with the `opentelemetry` Cargo feature and
-starts all observability services. Once running:
+This builds a local Zebra image with the default release feature set, which now includes OpenTelemetry support, and starts all observability services. Once running:
 
 - Grafana: `http://localhost:3000` (default login: admin/admin)
 - Prometheus: `http://localhost:9094`

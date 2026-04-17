@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Added
+
+- Sentry events now carry `SENTRY_ENVIRONMENT`, `git.ref`, `git.sha`, and CI context (`CI_PR_NUMBER`, `CI_TEST_ID`, `GITHUB_*`) when present ([#10490](https://github.com/ZcashFoundation/zebra/pull/10490))
+- `opentelemetry` is now part of the `default-release-binaries` feature set; export stays disabled until `OTEL_EXPORTER_OTLP_ENDPOINT` (or the tracing config) is set ([#10490](https://github.com/ZcashFoundation/zebra/pull/10490))
+
+### Changed
+
+- Upgrade Sentry SDK to `0.47` and switch its transport feature from `reqwest` to `ureq` ([#10490](https://github.com/ZcashFoundation/zebra/pull/10490))
+- `zebrad::sentry` is now crate-private; downstream code should not import it directly ([#10490](https://github.com/ZcashFoundation/zebra/pull/10490))
+
 ## [Zebra 4.3.0](https://github.com/ZcashFoundation/zebra/releases/tag/v4.3) - 2026-03-12
 
 This release fixes **two important security issues**:

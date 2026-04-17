@@ -53,7 +53,7 @@ features = [
 
 [features]
 # In release builds, don't compile debug logging code, to improve performance.
-default-release-binaries = ["release_max_level_info", "progress-bar", "prometheus", "sentry"]
+default-release-binaries = ["release_max_level_info", "progress-bar", "prometheus", "sentry", "opentelemetry"]
 
 
 # Default features for official ZF binary release builds
@@ -212,7 +212,7 @@ rand = { workspace = true }
 thread-priority = { workspace = true, optional = true }
 
 # prod feature sentry
-sentry = { workspace = true, features = ["backtrace", "contexts", "reqwest", "rustls", "tracing"], optional = true }
+sentry = { workspace = true, features = ["backtrace", "contexts", "logs", "rustls", "tracing", "ureq"], optional = true }
 
 # prod feature flamegraph
 tracing-flame = { workspace = true, optional = true }

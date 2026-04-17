@@ -2,7 +2,7 @@
 
 Operational procedures for the GCP Continuous Delivery pipeline. Architectural rationale: [ADR 0006](../../../docs/decisions/devops/0006-gcp-deployment-naming.md). High-level model: [Continuous Delivery](continuous-delivery.md).
 
-Two GCP projects (`zfnd-prod-zebra`, `zfnd-dev-zebra`) in `us-east1`, zones `b`, `c`, `d`. Every MIG, instance, and disk carries `environment`, `network`, `zone`, `created_by`, `github_ref`, and `github_sha` labels. Use `created_by` as the kind discriminator: `release` (production), `push` (staging), `workflow_dispatch` (PR deploy).
+Two GCP projects (`zfnd-prod-zebra`, `zfnd-dev-zebra`) in `us-east1`, zones `b`, `c`, `d`. Every MIG, instance, and disk carries `environment`, `network`, `zone`, `created_by`, `github_ref`, and `github_sha` labels. The `environment` label is standardized as `dev`, `stage`, or `prod`. Use `created_by` as the kind discriminator: `release`, `push`, or `workflow_dispatch`.
 
 The recipes below assume `gh` and `gcloud` are authenticated, and use these shell defaults when scoped to dev:
 
@@ -252,4 +252,4 @@ gcloud compute images list --project zfnd-dev-zebra \
   --sort-by=~creationTimestamp --limit=5
 ```
 
-**Daily cleanup** (`zfnd-delete-gcp-resources.yml`) sweeps old instances, templates, disks, and cache images by age and name. It does not honor `keep_until` or `delete_protection` labels on PR deploys; use the [sweep recipe](#sweep-expired) for label-aware control. The twelve stable cache disks (`zebrad-cache-{mainnet,testnet}-{b,c,d}` in production, `zebrad-cache-main-{mainnet,testnet}-{b,c,d}` in staging) are never eligible because GCP refuses to delete attached disks; if any stable disk ever shows up unattached, that is itself an incident.
+**Daily cleanup** (`zfnd-delete-gcp-resources.yml`) sweeps old instances, templates, disks, and cache images by age and name. It does not honor `keep_until` or `delete_protection` labels on PR deploys; use the [sweep recipe](#sweep-expired) for label-aware control. The twelve stable cache disks (`zebrad-cache-{mainnet,testnet}-{b,c,d}` in production, `zebrad-cache-main-{mainnet,testnet}-{b,c,d}` in stage) are never eligible because GCP refuses to delete attached disks; if any stable disk ever shows up unattached, that is itself an incident.
