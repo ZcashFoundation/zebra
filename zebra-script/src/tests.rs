@@ -301,8 +301,7 @@ fn build_and_verify_v5_p2pkh(
     let all_previous_outputs = Arc::new(vec![previous_output.clone()]);
     let sighasher = SigHasher::new(&placeholder_tx, NetworkUpgrade::Nu5, all_previous_outputs)
         .expect("sighasher creation should succeed");
-    let sighash =
-        sighasher.sighash(canonical_hash_type, Some((0, lock_script_bytes.clone())));
+    let sighash = sighasher.sighash(canonical_hash_type, Some((0, lock_script_bytes.clone())));
 
     // Sign the sighash with the private key
     let msg = Message::from_digest(*sighash.as_ref());
@@ -445,9 +444,7 @@ fn sighash_divergence_v5_p2pkh_malformed_0x84_wrong_canonical_type_rejected() {
 /// e.g. `0x41` would be accepted by `zcashd` but rejected by Zebra (digest
 /// mismatch). With the V4 fix, both implementations compute the same digest
 /// and Zebra accepts.
-fn build_and_verify_v4_p2pkh(
-    sig_hash_type_byte: u8,
-) -> std::result::Result<(), crate::Error> {
+fn build_and_verify_v4_p2pkh(sig_hash_type_byte: u8) -> std::result::Result<(), crate::Error> {
     use ripemd::{Digest as _, Ripemd160};
     use secp256k1::{Message, Secp256k1, SecretKey};
     use sha2::Sha256;
@@ -490,9 +487,12 @@ fn build_and_verify_v4_p2pkh(
     };
 
     let all_previous_outputs = Arc::new(vec![previous_output.clone()]);
-    let sighasher =
-        SigHasher::new(&placeholder_tx, NetworkUpgrade::Canopy, all_previous_outputs)
-            .expect("sighasher creation should succeed");
+    let sighasher = SigHasher::new(
+        &placeholder_tx,
+        NetworkUpgrade::Canopy,
+        all_previous_outputs,
+    )
+    .expect("sighasher creation should succeed");
 
     // V4: use the raw byte to match zcashd's preimage semantics.
     let sighash =
@@ -563,7 +563,9 @@ fn sighash_divergence_v4_p2pkh_extra_bits_0x41_accepted() {
 fn sighash_divergence_v4_raw_canonical_matches_typed() {
     let _init_guard = zebra_test::init();
 
-    let lock_script = transparent::Script::new(&[0x76, 0xa9, 0x14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x88, 0xac]);
+    let lock_script = transparent::Script::new(&[
+        0x76, 0xa9, 0x14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x88, 0xac,
+    ]);
     let previous_output = transparent::Output {
         value: 1_0000_0000u64.try_into().expect("valid amount"),
         lock_script: lock_script.clone(),
@@ -588,12 +590,8 @@ fn sighash_divergence_v4_raw_canonical_matches_typed() {
         sapling_shielded_data: None,
     };
 
-    let sighasher = SigHasher::new(
-        &tx,
-        NetworkUpgrade::Canopy,
-        Arc::new(vec![previous_output]),
-    )
-    .expect("sighasher creation should succeed");
+    let sighasher = SigHasher::new(&tx, NetworkUpgrade::Canopy, Arc::new(vec![previous_output]))
+        .expect("sighasher creation should succeed");
 
     let script_code = lock_script.as_raw_bytes().to_vec();
 
@@ -634,27 +632,43 @@ fn sighash_divergence_from_bits_canonicalization() {
     // zcashd rejects them in SighashType::parse (transaction_ffi.rs:267-273).
     // Valid v5 values are: {0x01, 0x02, 0x03, 0x81, 0x82, 0x83}.
     let invalid_raw_bytes: &[(i32, &str)] = &[
-        (0x84, "0x84: undefined bits set, canonicalizes to ALL|ANYONECANPAY (0x81)"),
-        (0x50, "0x50: undefined bits set, canonicalizes to ALL (0x01)"),
-        (0x00, "0x00: no signed_outputs bits set, canonicalizes to ALL (0x01)"),
-        (0x04, "0x04: undefined lower bits, canonicalizes to ALL (0x01)"),
-        (0xFF, "0xFF: all bits set, canonicalizes to SINGLE|ANYONECANPAY (0x83)"),
-        (0x85, "0x85: undefined bits set, canonicalizes to ALL|ANYONECANPAY (0x81)"),
+        (
+            0x84,
+            "0x84: undefined bits set, canonicalizes to ALL|ANYONECANPAY (0x81)",
+        ),
+        (
+            0x50,
+            "0x50: undefined bits set, canonicalizes to ALL (0x01)",
+        ),
+        (
+            0x00,
+            "0x00: no signed_outputs bits set, canonicalizes to ALL (0x01)",
+        ),
+        (
+            0x04,
+            "0x04: undefined lower bits, canonicalizes to ALL (0x01)",
+        ),
+        (
+            0xFF,
+            "0xFF: all bits set, canonicalizes to SINGLE|ANYONECANPAY (0x83)",
+        ),
+        (
+            0x85,
+            "0x85: undefined bits set, canonicalizes to ALL|ANYONECANPAY (0x81)",
+        ),
     ];
 
     for &(raw_byte, description) in invalid_raw_bytes {
         // Non-strict mode (what libzcash_script uses in the callback): SUCCEEDS
         // This is the lossy conversion that causes the divergence.
-        let non_strict_result =
-            zcash_script::signature::HashType::from_bits(raw_byte, false);
+        let non_strict_result = zcash_script::signature::HashType::from_bits(raw_byte, false);
         assert!(
             non_strict_result.is_ok(),
             "from_bits({raw_byte:#x}, false) should succeed (canonicalize) but failed: {description}"
         );
 
         // Strict mode: REJECTS (matching zcashd v5 behavior)
-        let strict_result =
-            zcash_script::signature::HashType::from_bits(raw_byte, true);
+        let strict_result = zcash_script::signature::HashType::from_bits(raw_byte, true);
         assert!(
             strict_result.is_err(),
             "from_bits({raw_byte:#x}, true) should reject undefined bits but succeeded: {description}"
@@ -674,5 +688,3 @@ fn sighash_divergence_from_bits_canonicalization() {
         );
     }
 }
-
-

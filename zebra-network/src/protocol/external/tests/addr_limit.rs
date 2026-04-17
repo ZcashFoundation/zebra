@@ -52,7 +52,8 @@ fn build_attack_message(count: usize) -> Vec<u8> {
     msg.write_all(&Network::Mainnet.magic().0).unwrap();
     msg.write_all(b"addrv2\0\0\0\0\0\0").unwrap();
     msg.write_u32::<LittleEndian>(body.len() as u32).unwrap();
-    msg.write_all(&sha256d::Checksum::from(body.as_slice()).0).unwrap();
+    msg.write_all(&sha256d::Checksum::from(body.as_slice()).0)
+        .unwrap();
     msg.write_all(&body).unwrap();
     msg
 }
@@ -81,7 +82,10 @@ fn poc_remote_addrv2_resource_exhaustion() {
     );
 
     // 2) message must be rejected
-    assert!(result.is_err(), "message with {attack_count} entries was accepted");
+    assert!(
+        result.is_err(),
+        "message with {attack_count} entries was accepted"
+    );
 
     // 3) deserialization layer must reject >1000 entries directly
     let oversized_body = build_attack_message(MAX_ADDRS_IN_MESSAGE + 1);

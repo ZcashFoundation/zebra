@@ -17,11 +17,7 @@ use zebra_chain::serialization::{
     ZcashSerialize,
 };
 
-use crate::{
-    meta_addr::MetaAddr,
-    protocol::external::types::PeerServices,
-    PeerSocketAddr,
-};
+use crate::{meta_addr::MetaAddr, protocol::external::types::PeerServices, PeerSocketAddr};
 
 use super::canonical_peer_addr;
 
