@@ -1,6 +1,6 @@
 [package]
 name = "zebra-network"
-version = "5.0.0"
+version = "5.0.1"
 authors = ["Zcash Foundation <zebra@zfnd.org>", "Tower Maintainers <team@tower-rs.com>"]
 description = "Networking code for Zebra"
 # # Legal
@@ -85,7 +85,7 @@ howudoin = { workspace = true, optional = true }
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
 
-zebra-chain = { path = "../zebra-chain", version = "6.0.1", features = ["async-error"] }
+zebra-chain = { path = "../zebra-chain", version = "6.0.2", features = ["async-error"] }
 
 [dev-dependencies]
 proptest = { workspace = true }

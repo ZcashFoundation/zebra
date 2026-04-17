@@ -79,7 +79,7 @@ elasticsearch = { workspace = true, features = ["rustls-tls"], optional = true }
 serde_json = { workspace = true, optional = true }
 
 zebra-node-services = { path = "../zebra-node-services", version = "4.0.0" }
-zebra-chain = { path = "../zebra-chain", version = "6.0.1", features = ["async-error"] }
+zebra-chain = { path = "../zebra-chain", version = "6.0.2", features = ["async-error"] }
 
 # prod feature progress-bar
 howudoin = { workspace = true, optional = true }
@@ -109,7 +109,7 @@ jubjub = { workspace = true }
 
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 
-zebra-chain = { path = "../zebra-chain", version = "6.0.1", features = ["proptest-impl"] }
+zebra-chain = { path = "../zebra-chain", version = "6.0.2", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/", version = "3.0.0" }
 
 [lints]
