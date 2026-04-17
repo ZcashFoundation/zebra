@@ -287,5 +287,12 @@ fn full_activation_list_contains_all_upgrades() {
     let network = Network::Mainnet;
     let full_list = network.full_activation_list();
 
-    assert_eq!(full_list.len(), NetworkUpgrade::iter().count());
+    // Nu7 is an enum variant but only has an activation height when the
+    // `zcash_unstable = "nu7"` cfg and `tx_v6` feature are both enabled.
+    let nu7_gated_out = cfg!(not(all(zcash_unstable = "nu7", feature = "tx_v6"))) as usize;
+
+    assert_eq!(
+        full_list.len() + nu7_gated_out,
+        NetworkUpgrade::iter().count()
+    );
 }

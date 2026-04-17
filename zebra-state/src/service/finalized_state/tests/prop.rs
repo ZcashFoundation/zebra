@@ -73,7 +73,10 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
             nu5: Some(35),
             nu6: Some(40),
             nu6_1: Some(45),
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             nu7: Some(50),
+            #[cfg(not(all(zcash_unstable = "nu7", feature = "tx_v6")))]
+            nu7: None,
         })
         .expect("failed to set activation heights")
         .extend_funding_streams()
