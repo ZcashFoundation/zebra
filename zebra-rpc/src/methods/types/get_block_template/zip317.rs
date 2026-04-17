@@ -185,10 +185,10 @@ pub fn fake_coinbase_transaction(
     .into();
 
     #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-    let coinbase = {
+    let coinbase: UnminedTx = {
         let network_upgrade = NetworkUpgrade::current(net, height);
-        if network_upgrade < NetworkUpgrade::Nu7 {
-            Transaction::new_v5_coinbase(net, height, outputs, extra_coinbase_data).into()
+        let tx = if network_upgrade < NetworkUpgrade::Nu7 {
+            Transaction::new_v5_coinbase(net, height, outputs, extra_coinbase_data)
         } else {
             Transaction::new_v6_coinbase(
                 net,
@@ -199,8 +199,8 @@ pub fn fake_coinbase_transaction(
                 #[cfg(zcash_unstable = "zip235")]
                 miner_fee,
             )
-            .into()
-        }
+        };
+        Arc::new(tx).into()
     };
 
     TransactionTemplate::from_coinbase(&coinbase, miner_fee)

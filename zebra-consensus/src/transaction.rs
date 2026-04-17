@@ -552,10 +552,17 @@ where
             // Get the `value_balance` to calculate the transaction fee.
             let value_balance = tx.value_balance(&spent_utxos);
 
-            let zip233_amount = match *tx {
-            	#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-                Transaction::V6{ .. } => tx.zip233_amount(),
-                _ => Amount::zero()
+            let zip233_amount = {
+                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+                {
+                    if tx.tx_version() == zebra_chain::transaction::TxVersion::V6 {
+                        tx.zip233_amount()
+                    } else {
+                        Amount::zero()
+                    }
+                }
+                #[cfg(not(all(zcash_unstable = "nu7", feature = "tx_v6")))]
+                Amount::zero()
             };
 
             // Calculate the fee only for non-coinbase transactions.

@@ -65,6 +65,73 @@ impl Transaction {
         Transaction(inner)
     }
 
+    /// Returns a new version 6 (ZIP 248) coinbase transaction for `network` and
+    /// `height`, which contains the specified `outputs` and an optional
+    /// ZIP 233 NSM value delta.
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+    pub fn new_v6_coinbase(
+        network: &Network,
+        height: Height,
+        outputs: impl IntoIterator<Item = (Amount<NonNegative>, transparent::Script)>,
+        miner_data: Vec<u8>,
+        zip233_amount: Option<Amount<NonNegative>>,
+        #[cfg(zcash_unstable = "zip235")] _miner_fee: Amount<NonNegative>,
+    ) -> Transaction {
+        let inputs = [transparent::Input::new_coinbase(height, miner_data, None)];
+        let outputs: Vec<_> = outputs
+            .into_iter()
+            .map(|(amount, lock_script)| transparent::Output::new(amount, lock_script))
+            .collect();
+
+        assert!(
+            !outputs.is_empty(),
+            "invalid coinbase transaction: must have at least one output"
+        );
+
+        let nu = NetworkUpgrade::current(network, height);
+        let branch_id = nu
+            .branch_id()
+            .and_then(|cbid| BranchId::try_from(cbid).ok())
+            .expect("V6 coinbase requires a valid consensus branch ID");
+
+        let vin: Vec<_> = inputs.iter().map(compat::input_to_txin).collect();
+        let vout: Vec<_> = outputs.iter().map(compat::output_to_txout).collect();
+
+        let transparent_bundle = Some(zcash_transparent::bundle::Bundle {
+            vin,
+            vout,
+            authorization: zcash_transparent::bundle::Authorized,
+        });
+
+        let mut value_pool_deltas = zp_tx::zip248::ValuePoolDeltas::default();
+        if let Some(amount) = zip233_amount {
+            let zats: u64 = i64::from(amount)
+                .try_into()
+                .expect("non-negative zip233 amount fits in u64");
+            let value = zcash_protocol::value::Zatoshis::from_u64(zats)
+                .expect("valid non-negative ZIP 233 amount");
+            value_pool_deltas.set_zip233(value);
+        }
+
+        let tx_data = zp_tx::TransactionData::from_parts(
+            TxVersion::V6,
+            branch_id,
+            compat::lock_time_to_u32(&LockTime::unlocked()),
+            height.into(),
+            value_pool_deltas,
+            transparent_bundle,
+            None, // sprout
+            None, // sapling
+            None, // orchard
+        );
+
+        let inner = tx_data
+            .freeze()
+            .expect("valid V6 coinbase transaction should freeze successfully");
+
+        Transaction(inner)
+    }
+
     /// Returns a new version 4 coinbase transaction for `network` and `height`,
     /// which contains the specified `outputs`.
     pub fn new_v4_coinbase(
