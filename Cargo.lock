@@ -7429,12 +7429,14 @@ name = "zebra-rpc"
 version = "6.0.1"
 dependencies = [
  "base64 0.22.1",
+ "bytes",
  "chrono",
  "color-eyre",
  "derive-getters",
  "derive-new",
  "futures",
  "hex",
+ "http-body",
  "http-body-util",
  "hyper",
  "indexmap 2.13.0",

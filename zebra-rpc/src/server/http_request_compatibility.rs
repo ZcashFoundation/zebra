@@ -122,13 +122,9 @@ impl<S> HttpRequestMiddleware<S> {
     /// Maps whatever JSON-RPC version the client is using to JSON-RPC 2.0.
     async fn request_to_json_rpc_2(
         request: HttpRequest<HttpBody>,
-    ) -> (JsonRpcVersion, HttpRequest<HttpBody>) {
+    ) -> Result<(JsonRpcVersion, HttpRequest<HttpBody>), BoxError> {
         let (parts, body) = request.into_parts();
-        let bytes = body
-            .collect()
-            .await
-            .expect("Failed to collect body data")
-            .to_bytes();
+        let bytes = body.collect().await?.to_bytes();
         let (version, bytes) =
             if let Ok(request) = serde_json::from_slice::<'_, JsonRpcRequest>(bytes.as_ref()) {
                 let version = request.version();
@@ -143,22 +139,18 @@ impl<S> HttpRequestMiddleware<S> {
             } else {
                 (JsonRpcVersion::Unknown, bytes)
             };
-        (
+        Ok((
             version,
             HttpRequest::from_parts(parts, HttpBody::from(bytes.as_ref().to_vec())),
-        )
+        ))
     }
     /// Maps JSON-2.0 to whatever JSON-RPC version the client is using.
     async fn response_from_json_rpc_2(
         version: JsonRpcVersion,
         response: HttpResponse<HttpBody>,
-    ) -> HttpResponse<HttpBody> {
+    ) -> Result<HttpResponse<HttpBody>, BoxError> {
         let (parts, body) = response.into_parts();
-        let bytes = body
-            .collect()
-            .await
-            .expect("Failed to collect body data")
-            .to_bytes();
+        let bytes = body.collect().await?.to_bytes();
         let bytes =
             if let Ok(response) = serde_json::from_slice::<'_, JsonRpcResponse>(bytes.as_ref()) {
                 serde_json::to_vec(&response.into_version(version))
@@ -167,7 +159,7 @@ impl<S> HttpRequestMiddleware<S> {
             } else {
                 bytes
             };
-        HttpResponse::from_parts(parts, HttpBody::from(bytes.as_ref().to_vec()))
+        Ok(HttpResponse::from_parts(parts, HttpBody::from(bytes.as_ref().to_vec())))
     }
 }
 
@@ -237,9 +229,9 @@ where
         let mut service = self.service.clone();
 
         async move {
-            let (version, request) = Self::request_to_json_rpc_2(request).await;
+            let (version, request) = Self::request_to_json_rpc_2(request).await?;
             let response = service.call(request).await.map_err(Into::into)?;
-            Ok(Self::response_from_json_rpc_2(version, response).await)
+            Self::response_from_json_rpc_2(version, response).await
         }
         .boxed()
     }

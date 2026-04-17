@@ -120,6 +120,8 @@ tonic-prost-build = { workspace = true }
 which = { workspace = true }
 
 [dev-dependencies]
+bytes = { workspace = true }
+http-body = { workspace = true }
 insta = { workspace = true, features = ["redactions", "json", "ron"] }
 
 proptest = { workspace = true }
