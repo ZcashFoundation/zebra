@@ -19,6 +19,10 @@ This release fixes **four important security issues**:
 We recommend node operators to update to 4.3.1 as soon as possible. All previous
 Zebra versions are vulnerable to these issues.
 
+### Added
+
+- Dockerized mining setup ([#10301](https://github.com/ZcashFoundation/zebra/pull/10301))
+
 ### Fixed
 
 - Fixed [a panic that could be triggered in the RPC interface on HTTP
