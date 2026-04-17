@@ -65,3 +65,5 @@ priority_rules:
       - 'label~=^P-(Optional|Low)'
     allow_checks_interruption: true
     priority: low
+merge_protections_settings:
+  reporting_method: check-runs
