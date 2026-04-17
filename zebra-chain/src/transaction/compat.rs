@@ -135,13 +135,13 @@ pub fn lock_time_to_u32(lock_time: &LockTime) -> u32 {
 
 /// Convert a Zebra `block::Height` into a librustzcash `BlockHeight`.
 #[cfg(any(test, feature = "proptest-impl"))]
-pub fn height_to_block_height(h: block::Height) -> zcash_primitives::consensus::BlockHeight {
+pub fn height_to_block_height(h: block::Height) -> zcash_protocol::consensus::BlockHeight {
     h.into()
 }
 
 /// Returns an error if the height is out of the valid Zebra range.
 pub fn block_height_to_height(
-    bh: zcash_primitives::consensus::BlockHeight,
+    bh: zcash_protocol::consensus::BlockHeight,
 ) -> Result<block::Height, SerializationError> {
     block::Height::try_from(bh)
         .map_err(|_| SerializationError::Parse("block height out of valid range"))

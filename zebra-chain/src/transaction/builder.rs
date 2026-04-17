@@ -51,6 +51,7 @@ impl Transaction {
             branch_id,
             compat::lock_time_to_u32(&LockTime::unlocked()),
             height.into(),
+            zp_tx::zip248::ValuePoolDeltas::default(),
             transparent_bundle,
             None, // sprout
             None, // sapling
@@ -98,6 +99,7 @@ impl Transaction {
             branch_id,
             compat::lock_time_to_u32(&LockTime::unlocked()),
             height.into(),
+            zp_tx::zip248::ValuePoolDeltas::default(),
             transparent_bundle,
             None, // sprout
             None, // sapling

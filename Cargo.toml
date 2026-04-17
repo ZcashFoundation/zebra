@@ -30,8 +30,8 @@ edition = "2021"
 
 [workspace.dependencies]
 incrementalmerkletree = { version = "0.8.2", features = ["legacy-api"] }
-orchard = "0.11"
-sapling-crypto = "0.5"
+orchard = "0.12"
+sapling-crypto = "0.6"
 zcash_address = "0.10"
 zcash_encoding = "0.3"
 zcash_history = "0.4"
@@ -362,13 +362,18 @@ unwrap_in_result = "warn"
 # TODOs: fix this lint eventually
 result_large_err = "allow"
 
-# Overrides for zcash_primitives with public JsDescription field accessors.
-# See https://github.com/zcash/librustzcash/tree/zebra-js-accessors
+# Local librustzcash on branch zip248-zebra (zip248 + JsDescription accessors + Clone impls).
+# TODO: switch to a git branch once zip248-zebra is pushed to a fork under ZF's control.
 [patch.crates-io]
-zcash_primitives = { git = "https://github.com/zcash/librustzcash.git", branch = "zebra-js-accessors" }
-zcash_address = { git = "https://github.com/zcash/librustzcash.git", branch = "zebra-js-accessors" }
-zcash_encoding = { git = "https://github.com/zcash/librustzcash.git", branch = "zebra-js-accessors" }
-zcash_protocol = { git = "https://github.com/zcash/librustzcash.git", branch = "zebra-js-accessors" }
-zcash_history = { git = "https://github.com/zcash/librustzcash.git", branch = "zebra-js-accessors" }
-zcash_proofs = { git = "https://github.com/zcash/librustzcash.git", branch = "zebra-js-accessors" }
-zcash_transparent = { git = "https://github.com/zcash/librustzcash.git", branch = "zebra-js-accessors" }
+zcash_primitives = { path = "../librustzcash/zcash_primitives" }
+zcash_address = { path = "../librustzcash/components/zcash_address" }
+zcash_encoding = { path = "../librustzcash/components/zcash_encoding" }
+zcash_protocol = { path = "../librustzcash/components/zcash_protocol" }
+zcash_history = { path = "../librustzcash/zcash_history" }
+zcash_proofs = { path = "../librustzcash/zcash_proofs" }
+zcash_transparent = { path = "../librustzcash/zcash_transparent" }
+equihash = { path = "../librustzcash/components/equihash" }
+f4jumble = { path = "../librustzcash/components/f4jumble" }
+# Match librustzcash zip248 branch's sapling/orchard pins.
+sapling-crypto = { git = "https://github.com/zcash/sapling-crypto.git", rev = "e99f38a8f4685c381bb4cca94874092e50e3f7e9" }
+orchard = { git = "https://github.com/zcash/orchard.git", rev = "6b12c77260aa7fac0d804983fc31b71b584d48e0" }

@@ -813,7 +813,7 @@ pub fn transaction_to_fake_v5(
                 TxVersion::V5,
                 branch_id,
                 lock_time_u32,
-                zcash_primitives::consensus::BlockHeight::from_u32(height.0),
+                zcash_protocol::consensus::BlockHeight::from_u32(height.0),
                 transparent_bundle,
                 None,
                 sapling_bundle,

@@ -155,7 +155,7 @@ impl Transaction {
             TxVersion::Sprout(_) => None,
             _ => {
                 let bh = self.0.expiry_height();
-                if bh == zcash_primitives::consensus::BlockHeight::from_u32(0) {
+                if bh == zcash_protocol::consensus::BlockHeight::from_u32(0) {
                     None
                 } else {
                     compat::block_height_to_height(bh).ok()
@@ -863,7 +863,7 @@ impl Transaction {
             zcash_primitives::transaction::TxVersion::Sprout(1),
             zcash_protocol::consensus::BranchId::Sprout,
             compat::lock_time_to_u32(&lock_time),
-            zcash_primitives::consensus::BlockHeight::from_u32(0),
+            zcash_protocol::consensus::BlockHeight::from_u32(0),
             inputs,
             outputs,
         )
@@ -879,7 +879,7 @@ impl Transaction {
             zcash_primitives::transaction::TxVersion::Sprout(2),
             zcash_protocol::consensus::BranchId::Sprout,
             compat::lock_time_to_u32(&lock_time),
-            zcash_primitives::consensus::BlockHeight::from_u32(0),
+            zcash_protocol::consensus::BlockHeight::from_u32(0),
             inputs,
             outputs,
         )
@@ -945,7 +945,7 @@ impl Transaction {
         version: zcash_primitives::transaction::TxVersion,
         branch_id: zcash_protocol::consensus::BranchId,
         lock_time: u32,
-        expiry_height: zcash_primitives::consensus::BlockHeight,
+        expiry_height: zcash_protocol::consensus::BlockHeight,
         inputs: Vec<transparent::Input>,
         outputs: Vec<transparent::Output>,
     ) -> Self {

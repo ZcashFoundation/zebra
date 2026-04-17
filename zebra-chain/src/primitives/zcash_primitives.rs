@@ -263,6 +263,7 @@ impl PrecomputedTxData {
             branch_id,
             data.lock_time(),
             data.expiry_height(),
+            data.value_pool_deltas().clone(),
             data.transparent_bundle().cloned(),
             data.sprout_bundle().cloned(),
             data.sapling_bundle().cloned(),
