@@ -356,6 +356,7 @@ jobs:
   sync-full-testnet:
     name: Zebra tip on testnet
     needs: [build, get-available-disks-testnet]
+    continue-on-error: true
     permissions:
       contents: read
       id-token: write
@@ -395,6 +396,7 @@ jobs:
   generate-checkpoints-testnet:
     name: Generate checkpoints testnet
     needs: [sync-full-testnet, get-available-disks-testnet]
+    continue-on-error: true
     permissions:
       contents: read
       id-token: write
