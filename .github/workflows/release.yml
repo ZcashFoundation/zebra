@@ -1,0 +1,73 @@
+# Release workflow: crate publishing and GitHub Release creation.
+#
+# Replaces release-drafter.yml (changelog generation now handled by release-plz + git-cliff).
+#
+# Pipeline:
+#   push to main → release-pr (creates/updates Release PR on every push)
+#                → release (publishes crates + creates GitHub Release, only on Release PR merge)
+#
+# Downstream triggers (independent workflows, not managed here):
+#   release:released  → release-binaries.yml (Docker Hub)
+#   release:published → zfnd-deploy-nodes-gcp.yml (GCP deployment)
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+# Deny all at workflow level — each job declares minimum permissions
+permissions: {}
+
+jobs:
+  # ── Stage 1: Create or update the Release PR ────────────────────────────
+  #
+  # Runs on every push to main. Detects changed crates by comparing local
+  # source against crates.io, bumps versions based on conventional commits,
+  # generates per-crate changelogs, and opens/updates a single Release PR.
+  release-pr:
+    name: Create or update Release PR
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: release-plz/action@1528104d2ca23787631a1c1f022abb64b34c1e11 #v0.5.128
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ── Stage 2: Publish crates and create GitHub Release ───────────────────
+  #
+  # Runs on every push to main, but exits early for non-Release-PR commits
+  # (release_always = false in .release-plz.toml). When a Release PR merge
+  # is detected:
+  #   1. Publishes changed crates to crates.io in dependency order
+  #   2. Uses trusted publishing (OIDC) — no static API tokens
+  #   3. Creates per-crate git tags
+  #   4. Creates a GitHub Release for zebrad (triggers downstream workflows)
+  #
+  # The GitHub Release fires:
+  #   - release:released → release-binaries.yml (Docker Hub publish)
+  #   - release:published → zfnd-deploy-nodes-gcp.yml (GCP deployment)
+  release:
+    name: Publish crates and GitHub Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    environment: release
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: release-plz/action@1528104d2ca23787631a1c1f022abb64b34c1e11 #v0.5.128
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
