@@ -159,7 +159,10 @@ impl<S> HttpRequestMiddleware<S> {
             } else {
                 bytes
             };
-        Ok(HttpResponse::from_parts(parts, HttpBody::from(bytes.as_ref().to_vec())))
+        Ok(HttpResponse::from_parts(
+            parts,
+            HttpBody::from(bytes.as_ref().to_vec()),
+        ))
     }
 }
 
