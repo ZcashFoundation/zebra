@@ -12,7 +12,10 @@ use zebra_chain::{parameters::Network, serialization::DateTime32};
 use crate::{
     constants,
     peer::{address_is_valid_for_outbound_connections, PeerPreference},
-    protocol::{external::canonical_peer_addr, types::PeerServices},
+    protocol::{
+        external::{canonical_peer_addr, types::Version},
+        types::PeerServices,
+    },
 };
 
 use MetaAddrChange::*;
@@ -146,7 +149,7 @@ impl PartialOrd for PeerAddrState {
 /// This struct can be created from `addr` or `addrv2` messages.
 ///
 /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#Network_address)
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct MetaAddr {
     /// The peer's canonical socket address.
@@ -223,10 +226,16 @@ pub struct MetaAddr {
     /// Whether this peer address was added to the address book
     /// when the peer made an inbound connection.
     is_inbound: bool,
+
+    /// The user agent string reported by the peer during handshake, if available.
+    user_agent: Option<String>,
+
+    /// The protocol version negotiated with the peer during handshake, if available.
+    negotiated_version: Option<Version>,
 }
 
 /// A change to an existing `MetaAddr`.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum MetaAddrChange {
     // TODO:
@@ -280,6 +289,8 @@ pub enum MetaAddrChange {
         addr: PeerSocketAddr,
         services: PeerServices,
         is_inbound: bool,
+        user_agent: String,
+        negotiated_version: Version,
     },
 
     /// Updates an existing `MetaAddr` when we send a ping to a peer.
@@ -349,6 +360,8 @@ impl MetaAddr {
             last_connection_state: NeverAttemptedGossiped,
             misbehavior_score: 0,
             is_inbound: false,
+            user_agent: None,
+            negotiated_version: None,
         }
     }
 
@@ -385,11 +398,15 @@ impl MetaAddr {
         addr: PeerSocketAddr,
         services: &PeerServices,
         is_inbound: bool,
+        user_agent: String,
+        negotiated_version: Version,
     ) -> MetaAddrChange {
         UpdateConnected {
             addr: canonical_peer_addr(*addr),
             services: *services,
             is_inbound,
+            user_agent,
+            negotiated_version,
         }
     }
 
@@ -695,6 +712,26 @@ impl MetaAddr {
         }
     }
 
+    /// Returns the services advertised by the peer, if available.
+    pub fn services(&self) -> Option<PeerServices> {
+        self.services
+    }
+
+    /// Returns the last known connection state for this peer.
+    pub fn last_connection_state(&self) -> PeerAddrState {
+        self.last_connection_state
+    }
+
+    /// Returns the user agent string reported by this peer, if available.
+    pub fn user_agent(&self) -> Option<&str> {
+        self.user_agent.as_deref()
+    }
+
+    /// Returns the negotiated protocol version for this peer, if available.
+    pub fn negotiated_version(&self) -> Option<Version> {
+        self.negotiated_version
+    }
+
     /// Returns a score of misbehavior encountered in a peer at this address.
     pub fn misbehavior(&self) -> u32 {
         self.misbehavior_score
@@ -741,6 +778,8 @@ impl MetaAddr {
             last_connection_state: NeverAttemptedGossiped,
             misbehavior_score: 0,
             is_inbound: false,
+            user_agent: None,
+            negotiated_version: None,
         })
     }
 }
@@ -940,6 +979,8 @@ impl MetaAddrChange {
 
     /// Returns the corresponding `MetaAddr` for this change.
     pub fn into_new_meta_addr(self, instant_now: Instant, local_now: DateTime32) -> MetaAddr {
+        let user_agent = self.user_agent();
+        let negotiated_version = self.negotiated_version();
         MetaAddr {
             addr: self.addr(),
             services: self.untrusted_services(),
@@ -952,6 +993,8 @@ impl MetaAddrChange {
             last_connection_state: self.peer_addr_state(),
             misbehavior_score: self.misbehavior_score(),
             is_inbound: self.is_inbound(),
+            user_agent,
+            negotiated_version,
         }
     }
 
@@ -971,6 +1014,27 @@ impl MetaAddrChange {
             *is_inbound
         } else {
             false
+        }
+    }
+
+    /// Returns the user agent from this change, if available.
+    pub fn user_agent(&self) -> Option<String> {
+        if let MetaAddrChange::UpdateConnected { user_agent, .. } = self {
+            Some(user_agent.clone())
+        } else {
+            None
+        }
+    }
+
+    /// Returns the negotiated protocol version from this change, if available.
+    pub fn negotiated_version(&self) -> Option<Version> {
+        if let MetaAddrChange::UpdateConnected {
+            negotiated_version, ..
+        } = self
+        {
+            Some(*negotiated_version)
+        } else {
+            None
         }
     }
 
@@ -997,6 +1061,8 @@ impl MetaAddrChange {
             last_connection_state: self.peer_addr_state(),
             misbehavior_score: self.misbehavior_score(),
             is_inbound: self.is_inbound(),
+            user_agent: None,
+            negotiated_version: None,
         }
     }
 
@@ -1015,7 +1081,7 @@ impl MetaAddrChange {
 
         let Some(previous) = previous.into() else {
             // no previous: create a new entry
-            return Some(self.into_new_meta_addr(instant_now, local_now));
+            return Some(self.clone().into_new_meta_addr(instant_now, local_now));
         };
 
         assert_eq!(previous.addr, self.addr(), "unexpected addr mismatch");
@@ -1153,6 +1219,8 @@ impl MetaAddrChange {
                 last_connection_state: self.peer_addr_state(),
                 misbehavior_score: previous.misbehavior_score + self.misbehavior_score(),
                 is_inbound: previous.is_inbound || self.is_inbound(),
+                user_agent: None,
+                negotiated_version: None,
             })
         } else {
             // Existing entry and change are both Attempt, Responded, Failed,
@@ -1179,6 +1247,8 @@ impl MetaAddrChange {
                 last_connection_state: self.peer_addr_state(),
                 misbehavior_score: previous.misbehavior_score + self.misbehavior_score(),
                 is_inbound: previous.is_inbound || self.is_inbound(),
+                user_agent: self.user_agent().or(previous.user_agent),
+                negotiated_version: self.negotiated_version().or(previous.negotiated_version),
             })
         }
     }

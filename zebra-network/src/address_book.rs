@@ -158,7 +158,7 @@ impl AddressBook {
         // Avoid initiating outbound handshakes when max_connections_per_ip is 1.
         let should_limit_outbound_conns_per_ip = max_connections_per_ip == 1;
         let mut new_book = AddressBook {
-            by_addr: OrderedMap::new(|meta_addr| Reverse(*meta_addr)),
+            by_addr: OrderedMap::new(|meta_addr: &MetaAddr| Reverse(meta_addr.clone())),
             local_listener: canonical_socket_addr(local_listener),
             network: network.clone(),
             addr_limit: constants::MAX_ADDRS_IN_ADDRESS_BOOK,
@@ -215,16 +215,16 @@ impl AddressBook {
             .map(|meta_addr| (meta_addr.addr, meta_addr));
 
         for (socket_addr, meta_addr) in addrs {
-            // overwrite any duplicate addresses
-            new_book.by_addr.insert(socket_addr, meta_addr);
             // Add the address to `most_recent_by_ip` if it has responded
-            if new_book.should_update_most_recent_by_ip(meta_addr) {
+            if new_book.should_update_most_recent_by_ip(&meta_addr) {
                 new_book
                     .most_recent_by_ip
                     .as_mut()
                     .expect("should be some when should_update_most_recent_by_ip is true")
-                    .insert(socket_addr.ip(), meta_addr);
+                    .insert(socket_addr.ip(), meta_addr.clone());
             }
+            // overwrite any duplicate addresses
+            new_book.by_addr.insert(socket_addr, meta_addr);
             // exit as soon as we get enough addresses
             if new_book.by_addr.len() >= addr_limit {
                 break;
@@ -347,8 +347,8 @@ impl AddressBook {
         // Unfortunately, `OrderedMap` doesn't implement `get`.
         let meta_addr = self.by_addr.remove(&addr);
 
-        if let Some(meta_addr) = meta_addr {
-            self.by_addr.insert(addr, meta_addr);
+        if let Some(ref meta_addr) = meta_addr {
+            self.by_addr.insert(addr, meta_addr.clone());
         }
 
         meta_addr
@@ -366,7 +366,7 @@ impl AddressBook {
     /// - this is the only field checked by `has_connection_recently_responded()`
     ///
     /// See [`AddressBook::is_ready_for_connection_attempt_with_ip`] for more details.
-    fn should_update_most_recent_by_ip(&self, updated: MetaAddr) -> bool {
+    fn should_update_most_recent_by_ip(&self, updated: &MetaAddr) -> bool {
         let Some(most_recent_by_ip) = self.most_recent_by_ip.as_ref() else {
             return false;
         };
@@ -429,7 +429,7 @@ impl AddressBook {
         let instant_now = Instant::now();
         let chrono_now = Utc::now();
 
-        let updated = change.apply_to_meta_addr(previous, instant_now, chrono_now);
+        let updated = change.apply_to_meta_addr(previous.clone(), instant_now, chrono_now);
 
         trace!(
             ?change,
@@ -440,7 +440,7 @@ impl AddressBook {
             "calculated updated address book entry",
         );
 
-        if let Some(updated) = updated {
+        if let Some(ref updated) = updated {
             if updated.misbehavior() >= constants::MAX_PEER_MISBEHAVIOR_SCORE {
                 // Ban and skip outbound connections with excessively misbehaving peers.
                 let banned_ip = updated.addr.ip();
@@ -496,16 +496,16 @@ impl AddressBook {
                 return None;
             }
 
-            self.by_addr.insert(updated.addr, updated);
-
             // Add the address to `most_recent_by_ip` if it sent the most recent
             // response Zebra has received from this IP.
             if self.should_update_most_recent_by_ip(updated) {
                 self.most_recent_by_ip
                     .as_mut()
                     .expect("should be some when should_update_most_recent_by_ip is true")
-                    .insert(updated.addr.ip(), updated);
+                    .insert(updated.addr.ip(), updated.clone());
             }
+
+            self.by_addr.insert(updated.addr, updated.clone());
 
             debug!(
                 ?change,

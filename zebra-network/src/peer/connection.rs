@@ -448,7 +448,7 @@ impl Handler {
         // doesn't respond to our getaddr requests.
         //
         // Add the new addresses to the end of the cache.
-        cached_addrs.extend(new_addrs);
+        cached_addrs.extend(new_addrs.into_iter().cloned());
 
         // # Security
         //
