@@ -371,6 +371,11 @@ who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.8.4 -> 0.8.5"
 
+[[audits.rustls-webpki]]
+who = "Alfredo Garcia <alfredo@zfnd.org>"
+criteria = "safe-to-deploy"
+delta = "0.103.10 -> 0.103.12"
+
 [[audits.rlimit]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
