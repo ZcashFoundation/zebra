@@ -17,10 +17,17 @@ use tower_batch_control::{Batch, BatchControl, RequestWeight};
 use tower_fallback::Fallback;
 
 use sapling_crypto::{bundle::Authorized, BatchValidator, Bundle};
+use zcash_proofs::prover::LocalTxProver;
 use zcash_protocol::value::ZatBalance;
 use zebra_chain::transaction::SigHash;
 
-use crate::groth16::SAPLING;
+/// Sapling prover containing spend and output params for the Sapling circuit.
+///
+/// Used to:
+///
+/// - construct Sapling outputs in coinbase txs, and
+/// - verify Sapling shielded data in the tx verifier.
+static SAPLING: Lazy<LocalTxProver> = Lazy::new(LocalTxProver::bundled);
 
 #[derive(Clone)]
 pub struct Item {
@@ -115,10 +122,10 @@ impl Service<BatchControl<Item>> for Verifier {
                             rx.borrow()
                                 .ok_or("threadpool unexpectedly dropped channel sender")?
                                 .then(|| {
-                                    metrics::counter!("proofs.groth16.verified").increment(1);
+                                    metrics::counter!("proofs.sapling.verified").increment(1);
                                 })
                                 .ok_or_else(|| {
-                                    metrics::counter!("proofs.groth16.invalid").increment(1);
+                                    metrics::counter!("proofs.sapling.invalid").increment(1);
                                     "batch verification of Sapling shielded data failed"
                                 })
                         })
