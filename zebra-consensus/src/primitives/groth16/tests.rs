@@ -10,7 +10,11 @@ use hex::FromHex;
 use tower::ServiceExt;
 
 use zebra_chain::{
-    block::Block, serialization::ZcashDeserializeInto, sprout::EncryptedNote,
+    amount::Amount,
+    block::Block,
+    primitives::{x25519, Groth16Proof},
+    serialization::ZcashDeserializeInto,
+    sprout::{note::EncryptedNote, JoinSplit},
     transaction::Transaction,
 };
 
@@ -32,7 +36,7 @@ where
     let mut async_checks = FuturesUnordered::new();
 
     for tx in transactions {
-        let joinsplits = tx.sprout_groth16_joinsplits();
+        let joinsplits: Vec<JoinSplit<Groth16Proof>> = joinsplits_from_transaction(&tx);
 
         for joinsplit in joinsplits {
             tracing::trace!(?joinsplit);
@@ -41,7 +45,7 @@ where
                 .sprout_joinsplit_pub_key()
                 .expect("pub key must exist since there are joinsplits");
             let joinsplit_rsp = verifier.ready().await?.call(
-                DescriptionWrapper(&(joinsplit, &pub_key))
+                DescriptionWrapper(&(&joinsplit, &pub_key))
                     .try_into()
                     .map_err(tower_fallback::BoxedError::from)?,
             );
@@ -56,6 +60,42 @@ where
     }
 
     Ok(())
+}
+
+/// Convert a transaction's sprout joinsplit descriptions to [`JoinSplit<Groth16Proof>`] values.
+/// Fields not needed for proof verification (ephemeral_key, enc_ciphertexts) are zeroed.
+fn joinsplits_from_transaction(tx: &std::sync::Arc<Transaction>) -> Vec<JoinSplit<Groth16Proof>> {
+    tx.sprout_joinsplit_descriptions()
+        .filter_map(|js| {
+            let proof_bytes = js.groth_proof_bytes()?;
+            let raw_nullifiers = js.nullifiers();
+            let raw_macs = js.macs();
+            let raw_commitments = js.commitments();
+            let vpub_old = Amount::try_from(i64::from(js.vpub_old())).ok()?;
+            let vpub_new = Amount::try_from(i64::from(js.vpub_new())).ok()?;
+            Some(JoinSplit {
+                vpub_old,
+                vpub_new,
+                anchor: zebra_chain::sprout::tree::Root::from(js.anchor()),
+                nullifiers: [
+                    zebra_chain::sprout::note::Nullifier::from(raw_nullifiers[0]),
+                    zebra_chain::sprout::note::Nullifier::from(raw_nullifiers[1]),
+                ],
+                commitments: [
+                    zebra_chain::sprout::commitment::NoteCommitment::from(raw_commitments[0]),
+                    zebra_chain::sprout::commitment::NoteCommitment::from(raw_commitments[1]),
+                ],
+                ephemeral_key: x25519::PublicKey::from([0u8; 32]),
+                random_seed: zebra_chain::sprout::RandomSeed::from(*js.random_seed()),
+                vmacs: [
+                    zebra_chain::sprout::note::Mac::from(raw_macs[0]),
+                    zebra_chain::sprout::note::Mac::from(raw_macs[1]),
+                ],
+                zkproof: Groth16Proof::from(*proof_bytes),
+                enc_ciphertexts: [EncryptedNote([0u8; 601]), EncryptedNote([0u8; 601])],
+            })
+        })
+        .collect()
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -218,14 +258,14 @@ where
     let mut async_checks = FuturesUnordered::new();
 
     for tx in transactions {
-        let joinsplits = tx.sprout_groth16_joinsplits();
+        let joinsplits = joinsplits_from_transaction(&tx);
 
         for joinsplit in joinsplits {
             // Use an arbitrary public key which is not the correct one,
             // which will make the verification fail.
             let modified_pub_key = [0x42; 32].into();
             let joinsplit_rsp = verifier.ready().await?.call(
-                DescriptionWrapper(&(joinsplit, &modified_pub_key))
+                DescriptionWrapper(&(&joinsplit, &modified_pub_key))
                     .try_into()
                     .map_err(tower_fallback::BoxedError::from)?,
             );

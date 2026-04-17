@@ -9,7 +9,7 @@ use color_eyre::eyre::Result;
 use transparent::OutPoint;
 use zebra_chain::{
     amount::{Amount, NonNegative},
-    block::{Block, Height},
+    block::Block,
     parameters::Network,
 };
 
@@ -267,14 +267,14 @@ fn mempool_expired_basic_for_network(network: Network) -> Result<()> {
 
     // Change the expiration height of the test transaction
     let mut tx = tx.clone();
-    *tx.expiry_height_mut() = zebra_chain::block::Height(1);
+    tx.set_expiry_height(zebra_chain::block::Height(1));
 
     let tx_id = tx.unmined_id();
 
     // Insert the transaction into the mempool, with a fake zero miner fee and sigops
     storage.insert(
         VerifiedUnminedTx::new(
-            tx.into(),
+            std::sync::Arc::new(tx).into(),
             Amount::try_from(1_000_000).expect("valid amount"),
             0,
             std::sync::Arc::new(vec![]),

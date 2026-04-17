@@ -176,6 +176,7 @@ impl VerifiedSet {
             self.created_outputs.insert(outpoint, output.clone());
             pending_outputs.respond(&outpoint, output)
         }
+
         self.spent_outpoints.extend(tx.spent_outpoints());
         self.sprout_nullifiers.extend(tx.sprout_nullifiers());
         self.sapling_nullifiers.extend(tx.sapling_nullifiers());
@@ -318,9 +319,9 @@ impl VerifiedSet {
         let tx = &unmined_tx.transaction;
 
         Self::has_conflicts(&self.spent_outpoints, tx.spent_outpoints())
-            || Self::has_conflicts(&self.sprout_nullifiers, tx.sprout_nullifiers().copied())
-            || Self::has_conflicts(&self.sapling_nullifiers, tx.sapling_nullifiers().copied())
-            || Self::has_conflicts(&self.orchard_nullifiers, tx.orchard_nullifiers().copied())
+            || Self::has_conflicts(&self.sprout_nullifiers, tx.sprout_nullifiers())
+            || Self::has_conflicts(&self.sapling_nullifiers, tx.sapling_nullifiers())
+            || Self::has_conflicts(&self.orchard_nullifiers, tx.orchard_nullifiers())
     }
 
     /// Removes the tracked transaction outputs from the mempool.
@@ -336,14 +337,24 @@ impl VerifiedSet {
         }
 
         let spent_outpoints = tx.spent_outpoints().map(Cow::Owned);
-        let sprout_nullifiers = tx.sprout_nullifiers().map(Cow::Borrowed);
-        let sapling_nullifiers = tx.sapling_nullifiers().map(Cow::Borrowed);
-        let orchard_nullifiers = tx.orchard_nullifiers().map(Cow::Borrowed);
+
+        let sprout_nfs: Vec<_> = tx.sprout_nullifiers().collect();
+        let sapling_nfs: Vec<_> = tx.sapling_nullifiers().collect();
+        let orchard_nfs: Vec<_> = tx.orchard_nullifiers().collect();
 
         Self::remove_from_set(&mut self.spent_outpoints, spent_outpoints);
-        Self::remove_from_set(&mut self.sprout_nullifiers, sprout_nullifiers);
-        Self::remove_from_set(&mut self.sapling_nullifiers, sapling_nullifiers);
-        Self::remove_from_set(&mut self.orchard_nullifiers, orchard_nullifiers);
+        Self::remove_from_set(
+            &mut self.sprout_nullifiers,
+            sprout_nfs.into_iter().map(Cow::Owned),
+        );
+        Self::remove_from_set(
+            &mut self.sapling_nullifiers,
+            sapling_nfs.into_iter().map(Cow::Owned),
+        );
+        Self::remove_from_set(
+            &mut self.orchard_nullifiers,
+            orchard_nfs.into_iter().map(Cow::Owned),
+        );
     }
 
     /// Returns `true` if the two sets have common items.

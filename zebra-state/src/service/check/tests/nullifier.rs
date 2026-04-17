@@ -9,12 +9,11 @@ use zebra_chain::{
     block::{Block, Height},
     fmt::TypeNameToDebug,
     orchard,
-    parameters::NetworkUpgrade::Nu5,
     primitives::Groth16Proof,
     sapling::{self, FieldNotPresent, PerSpendAnchor, TransferData::*},
-    serialization::ZcashDeserializeInto,
+    serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
     sprout::JoinSplit,
-    transaction::{JoinSplitData, LockTime, Transaction},
+    transaction::{JoinSplitData, Transaction},
 };
 
 use crate::{
@@ -998,6 +997,7 @@ fn make_distinct_nullifiers<'until_modified, NullifierT>(
 /// with its `JoinSplit`s replaced by `joinsplits`.
 ///
 /// Other fields have empty or default values.
+/// Builds the transaction by serializing to raw V4 bytes and deserializing.
 ///
 /// # Panics
 ///
@@ -1029,20 +1029,14 @@ fn transaction_v4_with_joinsplit_data(
         }
     }
 
-    Transaction::V4 {
-        inputs: Vec::new(),
-        outputs: Vec::new(),
-        lock_time: LockTime::min_lock_time_timestamp(),
-        expiry_height: Height(0),
-        joinsplit_data,
-        sapling_shielded_data: None,
-    }
+    Transaction::test_v4_with_joinsplit_data(joinsplit_data.as_ref())
 }
 
-/// Return a `Transaction::V4` containing `sapling_shielded_data`.
+/// Return a `Transaction::V4` containing `sapling_shielded_data`,
 /// with its `Spend`s replaced by `spends`.
 ///
 /// Other fields have empty or default values.
+/// Builds the transaction by serializing to raw V4 bytes and deserializing.
 ///
 /// Note: since sapling nullifiers in V5 transactions are identical to V4 transactions,
 /// we just use V4 transactions in the tests.
@@ -1097,20 +1091,60 @@ fn transaction_v4_with_sapling_shielded_data(
         sapling_shielded_data.value_balance = zero_amount;
     }
 
-    Transaction::V4 {
-        inputs: Vec::new(),
-        outputs: Vec::new(),
-        lock_time: LockTime::min_lock_time_timestamp(),
-        expiry_height: Height(0),
-        joinsplit_data: None,
-        sapling_shielded_data,
+    // Build a V4 transaction by writing raw bytes with the sapling shielded data in the correct
+    // V4 wire format (valueBalanceSapling BEFORE spends and outputs).
+    let mut bytes: Vec<u8> = Vec::new();
+    // V4 overwintered header + versionGroupId
+    bytes.extend_from_slice(&0x8000_0004u32.to_le_bytes());
+    bytes.extend_from_slice(&0x892F_2085u32.to_le_bytes());
+    // No transparent inputs or outputs
+    bytes.push(0x00);
+    bytes.push(0x00);
+    // nLockTime = min_lock_time_timestamp (500_000_000 LE)
+    bytes.extend_from_slice(&500_000_000u32.to_le_bytes());
+    // nExpiryHeight = 0
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+    // valueBalanceSapling = 0
+    bytes.extend_from_slice(&0i64.to_le_bytes());
+
+    // Sapling spends and outputs (V4 format: spends with individual anchors)
+    if let Some(ref sd) = sapling_shielded_data {
+        let spend_list: Vec<_> = sd.spends().cloned().collect();
+        let output_list: Vec<_> = sd
+            .outputs()
+            .cloned()
+            .map(sapling::Output::into_v4)
+            .collect();
+
+        spend_list
+            .zcash_serialize(&mut bytes)
+            .expect("sapling spends serialization should succeed");
+        output_list
+            .zcash_serialize(&mut bytes)
+            .expect("sapling outputs serialization should succeed");
+
+        // No joinsplits
+        bytes.push(0x00);
+
+        // bindingSig (64 bytes zeros - not cryptographically valid but state only checks nullifiers)
+        bytes.extend_from_slice(&[0u8; 64]);
+    } else {
+        // nSpendsSapling = 0, nOutputsSapling = 0
+        bytes.push(0x00);
+        bytes.push(0x00);
+        // nJoinSplits = 0
+        bytes.push(0x00);
     }
+
+    Transaction::zcash_deserialize(bytes.as_slice())
+        .expect("manually constructed V4 transaction should deserialize")
 }
 
 /// Return a `Transaction::V5` containing `orchard_shielded_data`.
 /// with its `AuthorizedAction`s replaced by `authorized_actions`.
 ///
 /// Other fields have empty or default values.
+/// Builds the transaction by serializing to raw V5 bytes and deserializing.
 ///
 /// # Panics
 ///
@@ -1133,13 +1167,29 @@ fn transaction_v5_with_orchard_shielded_data(
         orchard_shielded_data.value_balance = zero_amount;
     }
 
-    Transaction::V5 {
-        network_upgrade: Nu5,
-        inputs: Vec::new(),
-        outputs: Vec::new(),
-        lock_time: LockTime::min_lock_time_timestamp(),
-        expiry_height: Height(0),
-        sapling_shielded_data: None,
-        orchard_shielded_data,
+    // Build a V5 transaction by writing raw bytes with the orchard shielded data.
+    let mut bytes: Vec<u8> = Vec::new();
+    // V5 header: nVersion=5 overwintered, nVersionGroupId, nConsensusBranchId (Nu5), lockTime, expiryHeight
+    bytes.extend_from_slice(&0x8000_0005u32.to_le_bytes());
+    bytes.extend_from_slice(&0x26A7_270Au32.to_le_bytes());
+    bytes.extend_from_slice(&0xC2D6_D0B4u32.to_le_bytes()); // Nu5 branch ID
+    bytes.extend_from_slice(&500_000_000u32.to_le_bytes()); // nLockTime
+    bytes.extend_from_slice(&0u32.to_le_bytes()); // nExpiryHeight
+                                                  // No transparent inputs or outputs
+    bytes.push(0x00);
+    bytes.push(0x00);
+    // No sapling data: nSpendsSapling = 0, nOutputsSapling = 0
+    bytes.push(0x00);
+    bytes.push(0x00);
+    // Orchard data (via the ZcashSerialize impl for orchard::ShieldedData)
+    if let Some(ref sd) = orchard_shielded_data {
+        sd.zcash_serialize(&mut bytes)
+            .expect("orchard ShieldedData serialization should succeed");
+    } else {
+        // nActionsOrchard = 0
+        bytes.push(0x00);
     }
+
+    Transaction::zcash_deserialize(bytes.as_slice())
+        .expect("manually constructed V5 transaction should deserialize")
 }

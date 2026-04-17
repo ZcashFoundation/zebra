@@ -6,12 +6,15 @@ use color_eyre::eyre::Result;
 use lazy_static::lazy_static;
 use rand::{seq::IteratorRandom, thread_rng};
 
+use std::sync::Arc;
+
 use crate::{
     block::{Block, Height, MAX_BLOCK_BYTES},
+    orchard,
     parameters::Network,
     primitives::zcash_primitives::PrecomputedTxData,
     serialization::{SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
-    transaction::{sighash::SigHasher, txid::TxIdBuilder},
+    transaction::sighash::SigHasher,
     transparent::Script,
 };
 
@@ -23,15 +26,13 @@ use zebra_test::{
 use super::super::*;
 
 lazy_static! {
-    pub static ref EMPTY_V5_TX: Transaction = Transaction::V5 {
-        network_upgrade: NetworkUpgrade::Nu5,
-        lock_time: LockTime::min_lock_time_timestamp(),
-        expiry_height: block::Height(0),
-        inputs: Vec::new(),
-        outputs: Vec::new(),
-        sapling_shielded_data: None,
-        orchard_shielded_data: None,
-    };
+    pub static ref EMPTY_V5_TX: Transaction = Transaction::test_v5(
+        NetworkUpgrade::Nu5,
+        Vec::new(),
+        Vec::new(),
+        LockTime::min_lock_time_timestamp(),
+        block::Height(0),
+    );
 }
 
 /// Build a mock output list for pre-V5 transactions, with (index+1)
@@ -131,14 +132,8 @@ fn librustzcash_tx_hash() {
 fn doesnt_deserialize_transaction_with_invalid_value_balance() {
     let _init_guard = zebra_test::init();
 
-    let dummy_transaction = Transaction::V4 {
-        inputs: vec![],
-        outputs: vec![],
-        lock_time: LockTime::Height(Height(1)),
-        expiry_height: Height(10),
-        joinsplit_data: None,
-        sapling_shielded_data: None,
-    };
+    let dummy_transaction =
+        Transaction::test_v4(vec![], vec![], LockTime::Height(Height(1)), Height(10));
 
     let mut input_bytes = Vec::new();
     dummy_transaction
@@ -237,11 +232,11 @@ fn deserialize_large_transaction() {
 
     // Create an oversized transaction. Adding the output and lock time causes
     // the transaction to overflow the threshold.
-    let oversized_tx = Transaction::V1 {
+    let oversized_tx = Transaction::test_v1(
         inputs,
-        outputs: vec![output],
-        lock_time: LockTime::Time(DateTime::from_timestamp(61, 0).unwrap()),
-    };
+        vec![output],
+        LockTime::Time(DateTime::from_timestamp(61, 0).unwrap()),
+    );
 
     // Serialize the transaction.
     let mut tx_data = Vec::new();
@@ -291,14 +286,12 @@ fn empty_v5_round_trip() {
 fn empty_v4_round_trip() {
     let _init_guard = zebra_test::init();
 
-    let tx = Transaction::V4 {
-        inputs: Vec::new(),
-        outputs: Vec::new(),
-        lock_time: LockTime::min_lock_time_timestamp(),
-        expiry_height: block::Height(0),
-        joinsplit_data: None,
-        sapling_shielded_data: None,
-    };
+    let tx = Transaction::test_v4(
+        Vec::new(),
+        Vec::new(),
+        LockTime::min_lock_time_timestamp(),
+        block::Height(0),
+    );
 
     let data = tx.zcash_serialize_to_vec().expect("tx should serialize");
     let tx2 = data
@@ -320,12 +313,15 @@ fn empty_v5_librustzcash_round_trip() {
     let _init_guard = zebra_test::init();
 
     let tx: &Transaction = &EMPTY_V5_TX;
-    let nu = tx.network_upgrade().expect("network upgrade");
-
-    tx.to_librustzcash(nu).expect(
-        "librustzcash deserialization might work for empty zebra serialized transactions. \
-        Hint: if empty transactions fail, but other transactions work, delete this test",
-    );
+    // Transaction now wraps zcash_primitives::transaction::Transaction directly,
+    // so serialization roundtrip via ZcashSerialize/ZcashDeserialize validates this.
+    let _nu = tx.network_upgrade().expect("network upgrade");
+    let bytes = tx
+        .zcash_serialize_to_vec()
+        .expect("empty V5 transaction serializes");
+    let _tx2: Transaction = bytes
+        .zcash_deserialize_into()
+        .expect("empty V5 transaction deserializes");
 }
 
 #[test]
@@ -419,11 +415,7 @@ fn fake_v5_librustzcash_round_trip_for_network(network: Network) {
                 "v1-v4 transaction data must change when converted to fake v5"
             );
 
-            let nu = fake_tx.network_upgrade().expect("network upgrade");
-
-            fake_tx
-                .to_librustzcash(nu)
-                .expect("librustzcash deserialization must work for zebra serialized transactions");
+            // Transaction is now a zcash_primitives newtype, so no explicit conversion needed.
         }
     }
 }
@@ -438,10 +430,7 @@ fn zip244_round_trip() -> Result<()> {
 
         assert_eq!(test.tx, reencoded);
 
-        let nu = tx.network_upgrade().expect("network upgrade");
-
-        tx.to_librustzcash(nu)
-            .expect("librustzcash deserialization must work for zebra serialized transactions");
+        // Transaction is now a zcash_primitives newtype, so no explicit conversion needed.
     }
 
     Ok(())
@@ -452,10 +441,8 @@ fn zip244_txid() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     for test in zip0244::TEST_VECTORS.iter() {
-        let txid = TxIdBuilder::new(&test.tx.zcash_deserialize_into::<Transaction>()?)
-            .txid()
-            .expect("txid");
-
+        let tx: Transaction = test.tx.zcash_deserialize_into()?;
+        let txid = tx.hash();
         assert_eq!(txid.0, test.txid);
     }
 
@@ -860,8 +847,6 @@ fn consensus_branch_id() {
 
             // All computations should succeed under the tx nu.
 
-            tx.to_librustzcash(tx_nu)
-                .expect("tx is convertible under tx nu");
             PrecomputedTxData::new(&tx, tx_nu, Arc::new(Vec::new()))
                 .expect("network upgrade is valid for tx");
             sighash::SigHasher::new(&tx, tx_nu, Arc::new(Vec::new()))
@@ -870,9 +855,6 @@ fn consensus_branch_id() {
                 .expect("network upgrade is valid for tx");
 
             // All computations should fail under an nu other than the tx one.
-
-            tx.to_librustzcash(any_other_nu)
-                .expect_err("tx is not convertible under nu other than the tx one");
 
             let err = PrecomputedTxData::new(&tx, any_other_nu, Arc::new(Vec::new())).unwrap_err();
             assert!(
@@ -921,90 +903,39 @@ fn binding_signatures() {
                 .expect("a valid block")
                 .transactions
             {
-                match &*tx {
-                    Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => (),
-                    Transaction::V4 {
-                        sapling_shielded_data,
-                        ..
-                    } => {
-                        if let Some(sapling_shielded_data) = sapling_shielded_data {
-                            let sighash = tx
-                                .sighash(nu, HashType::ALL, Arc::new(Vec::new()), None)
-                                .expect("network upgrade is valid for tx");
+                // Compute bvk and verify binding sig if there's sapling data.
+                if let Some(bundle) = tx.inner().sapling_bundle() {
+                    let version = tx.version();
 
-                            let bvk = redjubjub::VerificationKey::try_from(
-                                sapling_shielded_data.binding_verification_key(),
-                            )
-                            .expect("a valid redjubjub::VerificationKey");
-
-                            bvk.verify(sighash.as_ref(), &sapling_shielded_data.binding_sig)
-                                .expect("must pass verification");
-
-                            at_least_one_v4_checked = true;
-                        }
+                    // V5+ sighashes include transparent output amounts, so skip txs with
+                    // transparent inputs when we don't have the previous outputs handy.
+                    //
+                    // References:
+                    //
+                    // <https://zips.z.cash/zip-0244#s-2c-amounts-sig-digest>
+                    // <https://zips.z.cash/zip-0244#s-2d-scriptpubkeys-sig-digest>
+                    if version >= 5 && tx.has_transparent_inputs() {
+                        continue;
                     }
-                    Transaction::V5 {
-                        sapling_shielded_data,
-                        ..
-                    } => {
-                        if let Some(sapling_shielded_data) = sapling_shielded_data {
-                            // V5 txs have the outputs spent by their transparent inputs hashed into
-                            // their SIGHASH, so we need to exclude txs with transparent inputs.
-                            //
-                            // References:
-                            //
-                            // <https://zips.z.cash/zip-0244#s-2c-amounts-sig-digest>
-                            // <https://zips.z.cash/zip-0244#s-2d-scriptpubkeys-sig-digest>
-                            if tx.has_transparent_inputs() {
-                                continue;
-                            }
 
-                            let sighash = tx
-                                .sighash(nu, HashType::ALL, Arc::new(Vec::new()), None)
-                                .expect("network upgrade is valid for tx");
+                    let sighash = tx
+                        .sighash(nu, HashType::ALL, Arc::new(Vec::new()), None)
+                        .expect("network upgrade is valid for tx");
 
-                            let bvk = redjubjub::VerificationKey::try_from(
-                                sapling_shielded_data.binding_verification_key(),
-                            )
-                            .expect("a valid redjubjub::VerificationKey");
+                    // Compute binding verification key from spend and output CVs.
+                    let cv_spends: sapling_crypto::value::CommitmentSum =
+                        bundle.shielded_spends().iter().map(|s| s.cv()).sum();
+                    let cv_outputs: sapling_crypto::value::CommitmentSum =
+                        bundle.shielded_outputs().iter().map(|o| o.cv()).sum();
+                    let bvk = (cv_spends - cv_outputs).into_bvk(i64::from(bundle.value_balance()));
 
-                            bvk.verify(sighash.as_ref(), &sapling_shielded_data.binding_sig)
-                                .expect("verification passes");
+                    bvk.verify(sighash.as_ref(), &bundle.authorization().binding_sig)
+                        .expect("must pass binding signature verification");
 
-                            at_least_one_v5_checked = true;
-                        }
-                    }
-                    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-                    Transaction::V6 {
-                        sapling_shielded_data,
-                        ..
-                    } => {
-                        if let Some(sapling_shielded_data) = sapling_shielded_data {
-                            // V6 txs have the outputs spent by their transparent inputs hashed into
-                            // their SIGHASH, so we need to exclude txs with transparent inputs.
-                            //
-                            // References:
-                            //
-                            // <https://zips.z.cash/zip-0244#s-2c-amounts-sig-digest>
-                            // <https://zips.z.cash/zip-0244#s-2d-scriptpubkeys-sig-digest>
-                            if tx.has_transparent_inputs() {
-                                continue;
-                            }
-
-                            let sighash = tx
-                                .sighash(nu, HashType::ALL, Arc::new(Vec::new()), None)
-                                .expect("network upgrade is valid for tx");
-
-                            let bvk = redjubjub::VerificationKey::try_from(
-                                sapling_shielded_data.binding_verification_key(),
-                            )
-                            .expect("a valid redjubjub::VerificationKey");
-
-                            bvk.verify(sighash.as_ref(), &sapling_shielded_data.binding_sig)
-                                .expect("verification passes");
-
-                            at_least_one_v5_checked = true;
-                        }
+                    if version == 4 {
+                        at_least_one_v4_checked = true;
+                    } else {
+                        at_least_one_v5_checked = true;
                     }
                 }
             }

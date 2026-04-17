@@ -319,14 +319,12 @@ mod tests {
         inputs: Vec<transparent::Input>,
         outputs: Vec<transparent::Output>,
     ) -> Transaction {
-        Transaction::V4 {
+        Transaction::test_v4(
             inputs,
             outputs,
-            lock_time: LockTime::min_lock_time_timestamp(),
-            expiry_height: Height(0),
-            joinsplit_data: None,
-            sapling_shielded_data: None,
-        }
+            LockTime::min_lock_time_timestamp(),
+            Height(0),
+        )
     }
 
     /// Build a PrevOut input with the given unlock script.

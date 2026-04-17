@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING**: Replace `Transaction` enum with a newtype wrapper around
+  `zcash_primitives::transaction::Transaction`. The public API is preserved
+  through accessor methods, but pattern matching on variants (V1-V6) is no
+  longer possible — use `Transaction::tx_version()` instead.
+- `Transaction` now implements `Deref<Target = TransactionData<Authorized>>`,
+  giving direct access to `sprout_bundle()`, `sapling_bundle()`,
+  `orchard_bundle()`, and other `TransactionData` methods.
+- Nullifier methods (`sprout_nullifiers()`, `sapling_nullifiers()`,
+  `orchard_nullifiers()`) now return zebra types directly instead of
+  librustzcash types.
+- `inputs()` and `outputs()` now return owned `Vec` instead of `&[]`.
+
+### Added
+
+- `ZcashDeserializeWithContext<C>` trait for context-dependent deserialization.
+- `transaction::compat` module with conversions between zebra and
+  `zcash_primitives` types.
+- `Transaction::tx_version()` returning `zcash_primitives::transaction::TxVersion`.
+
+### Removed
+
+- `Transaction` enum variants (V1-V6) and all pattern matching on them.
+- `transaction::txid` module (`TxIdBuilder`) — txid is now obtained from
+  the inner `zcash_primitives` type.
+- ~1800 lines of serialization code replaced by delegation to `zcash_primitives`.
+
 ## [6.0.1] - 2026-03-26
 
 This release fixes an important security issue:

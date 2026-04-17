@@ -156,7 +156,15 @@ fn transaction_valid_network_upgrade_strategy() -> Result<()> {
     });
 
     proptest!(|((network, block) in strategy)| {
-        block.check_transaction_network_upgrade_consistency(&network)?;
+        // Only check consistency at heights where the network upgrade has a known
+        // consensus branch ID. V5 transactions at pre-Overwinter heights are a
+        // proptest artifact — in consensus these wouldn't exist, and they can't
+        // carry a matching branch ID since no branch ID is defined for those upgrades.
+        let coinbase_height = block.coinbase_height().expect("block has a coinbase");
+        let block_nu = crate::parameters::NetworkUpgrade::current(&network, coinbase_height);
+        if block_nu.branch_id().is_some() {
+            block.check_transaction_network_upgrade_consistency(&network)?;
+        }
     });
 
     Ok(())

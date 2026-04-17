@@ -277,7 +277,7 @@ fn max_msg_size_round_trip() {
     let tx: Transaction = zebra_test::vectors::DUMMY_TX1
         .zcash_deserialize_into()
         .unwrap();
-    let msg = Message::Tx(tx.into());
+    let msg = Message::Tx(std::sync::Arc::new(tx).into());
 
     use tokio_util::codec::{FramedRead, FramedWrite};
 

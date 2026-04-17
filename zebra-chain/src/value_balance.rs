@@ -209,10 +209,12 @@ impl ValueBalance<NonNegative> {
 
         // the chain pool (unspent outputs) has the opposite sign to
         // transaction value balances (inputs - outputs)
-        let chain_value_pool_change = transaction
-            .borrow()
-            .value_balance_from_outputs(utxos)?
-            .neg();
+        let tx = transaction.borrow();
+        let transparent = tx.transparent_value_balance_from_outputs(utxos)?;
+        let sprout = tx.sprout_value_balance();
+        let sapling = tx.sapling_value_balance();
+        let orchard = tx.orchard_value_balance();
+        let chain_value_pool_change = (transparent + sprout + sapling + orchard)?.neg();
 
         self.add_chain_value_pool_change(chain_value_pool_change)
     }

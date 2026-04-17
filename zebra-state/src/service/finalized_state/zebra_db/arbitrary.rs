@@ -56,8 +56,9 @@ impl ZebraDb {
 
         for transaction in block.transactions.iter() {
             // Sprout
-            for joinsplit in transaction.sprout_groth16_joinsplits() {
-                batch.zs_insert(&sprout_anchors, joinsplit.anchor, sprout_tree.clone());
+            for joinsplit in transaction.sprout_joinsplit_descriptions() {
+                let anchor = sprout::tree::Root::from(joinsplit.anchor());
+                batch.zs_insert(&sprout_anchors, anchor, sprout_tree.clone());
             }
 
             // Sapling
@@ -66,8 +67,8 @@ impl ZebraDb {
             }
 
             // Orchard
-            if let Some(orchard_shielded_data) = transaction.orchard_shielded_data() {
-                batch.zs_insert(&orchard_anchors, orchard_shielded_data.shared_anchor, ());
+            if let Some(anchor) = transaction.orchard_anchor() {
+                batch.zs_insert(&orchard_anchors, anchor, ());
             }
         }
 

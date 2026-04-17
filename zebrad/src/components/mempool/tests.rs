@@ -107,7 +107,7 @@ pub fn standard_verified_unmined_tx_strategy() -> BoxedStrategy<VerifiedUnminedT
         .prop_map(|mut transaction| {
             standardize_transaction(&mut transaction);
 
-            let unmined_tx = UnminedTx::from(transaction);
+            let unmined_tx = UnminedTx::from(std::sync::Arc::new(transaction));
             let miner_fee = unmined_tx.conventional_fee;
 
             VerifiedUnminedTx::new(unmined_tx, miner_fee, 0, std::sync::Arc::new(vec![]))
@@ -121,16 +121,25 @@ pub fn standardize_transaction(transaction: &mut Transaction) {
     let lock_script = standard_lock_script();
     let output_value = Amount::<NonNegative>::try_from(10_000).expect("valid amount");
 
-    for input in transaction.inputs_mut() {
+    // Rebuild inputs with cleared unlock scripts.
+    let mut inputs = transaction.inputs();
+    for input in &mut inputs {
         if let transparent::Input::PrevOut { unlock_script, .. } = input {
             *unlock_script = transparent::Script::new(&[]);
         }
     }
 
-    for output in transaction.outputs_mut() {
+    // Rebuild outputs with standardized lock scripts and values.
+    let mut outputs = transaction.outputs();
+    for output in &mut outputs {
         output.lock_script = lock_script.clone();
         output.value = output_value;
     }
+
+    *transaction = transaction
+        .clone()
+        .with_transparent_inputs(inputs)
+        .with_transparent_outputs(outputs);
 }
 
 fn standard_lock_script() -> transparent::Script {

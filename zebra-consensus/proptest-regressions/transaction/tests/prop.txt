@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc a6b1879bf6fe6ea4f4bbfae7370c7fef1f5af1b149cb4366527f2988d0166032 # shrinks to (network, block_height) = (Mainnet, Height(419200)), block_time = 1970-01-01T00:00:00Z, relative_source_fund_heights = [0.0], transaction_version = 4, relative_unlock_height = 0.993006151189066
+cc dcaa38c1e2eec28216b0be73dd4aad5d51781a47c0ee2cb308126dfc0e571c3f # shrinks to (network, block_height) = (Mainnet, Height(419200)), first_datetime = 1970-01-01T00:00:00Z, second_datetime = 1970-01-01T00:00:00Z, relative_source_fund_heights = [0.0], transaction_version = 4
+cc eeefc97bd0ac1c0120d98d7acaa5c660e682bb03c3a028dad8e69dfdefa7b24c # shrinks to (network, block_height) = (Mainnet, Height(419200)), first_datetime = 1970-01-05T20:26:40Z, second_datetime = 1970-01-05T20:26:40Z, relative_source_fund_heights = [0.0], transaction_version = 4

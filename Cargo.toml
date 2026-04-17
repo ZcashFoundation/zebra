@@ -362,3 +362,14 @@ unwrap_in_result = "warn"
 
 # TODOs: fix this lint eventually
 result_large_err = "allow"
+
+# Overrides for zcash_primitives with public JsDescription field accessors.
+# See https://github.com/zcash/librustzcash/tree/zebra-js-accessors
+[patch.crates-io]
+zcash_primitives = { git = "https://github.com/zcash/librustzcash.git", branch = "zebra-js-accessors" }
+zcash_address = { git = "https://github.com/zcash/librustzcash.git", branch = "zebra-js-accessors" }
+zcash_encoding = { git = "https://github.com/zcash/librustzcash.git", branch = "zebra-js-accessors" }
+zcash_protocol = { git = "https://github.com/zcash/librustzcash.git", branch = "zebra-js-accessors" }
+zcash_history = { git = "https://github.com/zcash/librustzcash.git", branch = "zebra-js-accessors" }
+zcash_proofs = { git = "https://github.com/zcash/librustzcash.git", branch = "zebra-js-accessors" }
+zcash_transparent = { git = "https://github.com/zcash/librustzcash.git", branch = "zebra-js-accessors" }

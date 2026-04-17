@@ -554,15 +554,15 @@ impl Storage {
             .collect();
         let sprout_nullifiers: HashSet<_> = transactions
             .iter()
-            .flat_map(|transaction| transaction.sprout_nullifiers())
+            .flat_map(|tx| tx.sprout_nullifiers().collect::<Vec<_>>())
             .collect();
         let sapling_nullifiers: HashSet<_> = transactions
             .iter()
-            .flat_map(|transaction| transaction.sapling_nullifiers())
+            .flat_map(|tx| tx.sapling_nullifiers().collect::<Vec<_>>())
             .collect();
         let orchard_nullifiers: HashSet<_> = transactions
             .iter()
-            .flat_map(|transaction| transaction.orchard_nullifiers())
+            .flat_map(|tx| tx.orchard_nullifiers().collect::<Vec<_>>())
             .collect();
 
         let duplicate_spend_ids: HashSet<_> = self
@@ -575,13 +575,13 @@ impl Storage {
                     .any(|outpoint| spent_outpoints.contains(&outpoint))
                     || tx
                         .sprout_nullifiers()
-                        .any(|nullifier| sprout_nullifiers.contains(nullifier))
+                        .any(|nf| sprout_nullifiers.contains(&nf))
                     || tx
                         .sapling_nullifiers()
-                        .any(|nullifier| sapling_nullifiers.contains(nullifier))
+                        .any(|nf| sapling_nullifiers.contains(&nf))
                     || tx
                         .orchard_nullifiers()
-                        .any(|nullifier| orchard_nullifiers.contains(nullifier)))
+                        .any(|nf| orchard_nullifiers.contains(&nf)))
                 .then_some(tx_id)
             })
             .collect();

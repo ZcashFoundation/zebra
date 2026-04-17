@@ -1,17 +1,20 @@
 //! Transactions and transaction-related structures.
 
-use std::{collections::HashMap, fmt, iter, sync::Arc};
+use std::fmt;
 
-use halo2::pasta::pallas;
+pub use zcash_primitives::transaction::TxVersion;
+
+use zcash_primitives::transaction::{self as zp_tx};
+use zcash_protocol::value::ZatBalance;
 
 mod auth_digest;
+pub(crate) mod compat;
 mod hash;
 mod joinsplit;
 mod lock_time;
 mod memo;
 mod serialize;
 mod sighash;
-mod txid;
 mod unmined;
 
 pub mod builder;
@@ -22,13 +25,12 @@ pub mod arbitrary;
 #[cfg(test)]
 mod tests;
 
+pub use crate::sapling::FieldNotPresent;
 pub use auth_digest::AuthDigest;
 pub use hash::{Hash, WtxId};
 pub use joinsplit::JoinSplitData;
 pub use lock_time::LockTime;
 pub use memo::Memo;
-use redjubjub::{Binding, Signature};
-pub use sapling::FieldNotPresent;
 pub use serialize::{
     SerializedTransaction, MIN_TRANSPARENT_TX_SIZE, MIN_TRANSPARENT_TX_V4_SIZE,
     MIN_TRANSPARENT_TX_V5_SIZE,
@@ -37,418 +39,95 @@ pub use sighash::{HashType, SigHash, SigHasher};
 pub use unmined::{
     zip317, UnminedTx, UnminedTxId, VerifiedUnminedTx, MEMPOOL_TRANSACTION_COST_THRESHOLD,
 };
-use zcash_protocol::consensus;
 
-#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-use crate::parameters::TX_V6_VERSION_GROUP_ID;
 use crate::{
-    amount::{Amount, Error as AmountError, NegativeAllowed, NonNegative},
-    block, orchard,
-    parameters::{
-        Network, NetworkUpgrade, OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID,
-        TX_V5_VERSION_GROUP_ID,
-    },
-    primitives::{ed25519, Bctv14Proof, Groth16Proof},
-    sapling,
-    serialization::ZcashSerialize,
-    sprout,
-    transparent::{
-        self, outputs_from_utxos,
-        CoinbaseSpendRestriction::{self, *},
-    },
-    value_balance::{ValueBalance, ValueBalanceError},
+    amount::{Amount, NegativeAllowed, NonNegative},
+    block,
+    parameters::NetworkUpgrade,
+    transparent,
+    value_balance::ValueBalance,
     Error,
 };
 
-/// A Zcash transaction.
-///
-/// A transaction is an encoded data structure that facilitates the transfer of
-/// value between two public key addresses on the Zcash ecosystem. Everything is
-/// designed to ensure that transactions can be created, propagated on the
-/// network, validated, and finally added to the global ledger of transactions
-/// (the blockchain).
-///
-/// Zcash has a number of different transaction formats. They are represented
-/// internally by different enum variants. Because we checkpoint on Canopy
-/// activation, we do not validate any pre-Sapling transaction types.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(
-    any(test, feature = "proptest-impl", feature = "elasticsearch"),
-    derive(Serialize)
-)]
-pub enum Transaction {
-    /// A fully transparent transaction (`version = 1`).
-    V1 {
-        /// The transparent inputs to the transaction.
-        inputs: Vec<transparent::Input>,
-        /// The transparent outputs from the transaction.
-        outputs: Vec<transparent::Output>,
-        /// The earliest time or block height that this transaction can be added to the
-        /// chain.
-        lock_time: LockTime,
-    },
-    /// A Sprout transaction (`version = 2`).
-    V2 {
-        /// The transparent inputs to the transaction.
-        inputs: Vec<transparent::Input>,
-        /// The transparent outputs from the transaction.
-        outputs: Vec<transparent::Output>,
-        /// The earliest time or block height that this transaction can be added to the
-        /// chain.
-        lock_time: LockTime,
-        /// The JoinSplit data for this transaction, if any.
-        joinsplit_data: Option<JoinSplitData<Bctv14Proof>>,
-    },
-    /// An Overwinter transaction (`version = 3`).
-    V3 {
-        /// The transparent inputs to the transaction.
-        inputs: Vec<transparent::Input>,
-        /// The transparent outputs from the transaction.
-        outputs: Vec<transparent::Output>,
-        /// The earliest time or block height that this transaction can be added to the
-        /// chain.
-        lock_time: LockTime,
-        /// The latest block height that this transaction can be added to the chain.
-        expiry_height: block::Height,
-        /// The JoinSplit data for this transaction, if any.
-        joinsplit_data: Option<JoinSplitData<Bctv14Proof>>,
-    },
-    /// A Sapling transaction (`version = 4`).
-    V4 {
-        /// The transparent inputs to the transaction.
-        inputs: Vec<transparent::Input>,
-        /// The transparent outputs from the transaction.
-        outputs: Vec<transparent::Output>,
-        /// The earliest time or block height that this transaction can be added to the
-        /// chain.
-        lock_time: LockTime,
-        /// The latest block height that this transaction can be added to the chain.
-        expiry_height: block::Height,
-        /// The JoinSplit data for this transaction, if any.
-        joinsplit_data: Option<JoinSplitData<Groth16Proof>>,
-        /// The sapling shielded data for this transaction, if any.
-        sapling_shielded_data: Option<sapling::ShieldedData<sapling::PerSpendAnchor>>,
-    },
-    /// A `version = 5` transaction , which supports Orchard, Sapling, and transparent, but not Sprout.
-    V5 {
-        /// The Network Upgrade for this transaction.
-        ///
-        /// Derived from the ConsensusBranchId field.
-        network_upgrade: NetworkUpgrade,
-        /// The earliest time or block height that this transaction can be added to the
-        /// chain.
-        lock_time: LockTime,
-        /// The latest block height that this transaction can be added to the chain.
-        expiry_height: block::Height,
-        /// The transparent inputs to the transaction.
-        inputs: Vec<transparent::Input>,
-        /// The transparent outputs from the transaction.
-        outputs: Vec<transparent::Output>,
-        /// The sapling shielded data for this transaction, if any.
-        sapling_shielded_data: Option<sapling::ShieldedData<sapling::SharedAnchor>>,
-        /// The orchard data for this transaction, if any.
-        orchard_shielded_data: Option<orchard::ShieldedData>,
-    },
-    /// A `version = 6` transaction, which is reserved for current development.
-    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-    V6 {
-        /// The Network Upgrade for this transaction.
-        ///
-        /// Derived from the ConsensusBranchId field.
-        network_upgrade: NetworkUpgrade,
-        /// The earliest time or block height that this transaction can be added to the
-        /// chain.
-        lock_time: LockTime,
-        /// The latest block height that this transaction can be added to the chain.
-        expiry_height: block::Height,
-        /// The burn amount for this transaction, if any.
-        zip233_amount: Amount<NonNegative>,
-        /// The transparent inputs to the transaction.
-        inputs: Vec<transparent::Input>,
-        /// The transparent outputs from the transaction.
-        outputs: Vec<transparent::Output>,
-        /// The sapling shielded data for this transaction, if any.
-        sapling_shielded_data: Option<sapling::ShieldedData<sapling::SharedAnchor>>,
-        /// The orchard data for this transaction, if any.
-        orchard_shielded_data: Option<orchard::ShieldedData>,
-    },
-}
+/// A Zcash transaction, wrapping `zcash_primitives::transaction::Transaction`.
+#[derive(Debug)]
+pub struct Transaction(pub(crate) zp_tx::Transaction);
 
-impl fmt::Display for Transaction {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut fmter = f.debug_struct("Transaction");
+impl std::ops::Deref for Transaction {
+    type Target = zp_tx::TransactionData<zp_tx::Authorized>;
 
-        fmter.field("version", &self.version());
-
-        if let Some(network_upgrade) = self.network_upgrade() {
-            fmter.field("network_upgrade", &network_upgrade);
-        }
-
-        if let Some(lock_time) = self.lock_time() {
-            fmter.field("lock_time", &lock_time);
-        }
-
-        if let Some(expiry_height) = self.expiry_height() {
-            fmter.field("expiry_height", &expiry_height);
-        }
-        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-        fmter.field("zip233_amount", &self.zip233_amount());
-
-        fmter.field("transparent_inputs", &self.inputs().len());
-        fmter.field("transparent_outputs", &self.outputs().len());
-        fmter.field("sprout_joinsplits", &self.joinsplit_count());
-        fmter.field("sapling_spends", &self.sapling_spends_per_anchor().count());
-        fmter.field("sapling_outputs", &self.sapling_outputs().count());
-        fmter.field("orchard_actions", &self.orchard_actions().count());
-
-        fmter.field("unmined_id", &self.unmined_id());
-
-        fmter.finish()
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
 impl Transaction {
-    // identifiers and hashes
-
-    /// Compute the hash (mined transaction ID) of this transaction.
-    ///
-    /// The hash uniquely identifies mined v5 transactions,
-    /// and all v1-v4 transactions, whether mined or unmined.
-    pub fn hash(&self) -> Hash {
-        Hash::from(self)
+    /// Access the inner `zcash_primitives::transaction::Transaction`.
+    pub(crate) fn inner(&self) -> &zp_tx::Transaction {
+        &self.0
     }
 
-    /// Compute the unmined transaction ID of this transaction.
-    ///
-    /// This ID uniquely identifies unmined transactions,
-    /// regardless of version.
-    pub fn unmined_id(&self) -> UnminedTxId {
-        UnminedTxId::from(self)
+    /// Returns the transaction version.
+    pub fn tx_version(&self) -> TxVersion {
+        self.0.version()
     }
 
-    /// Calculate the sighash for the current transaction.
+    /// Returns the numeric version of this transaction.
+    #[allow(unreachable_patterns)]
+    pub fn version(&self) -> u32 {
+        match self.0.version() {
+            TxVersion::Sprout(v) => v,
+            TxVersion::V3 => 3,
+            TxVersion::V4 => 4,
+            TxVersion::V5 => 5,
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            TxVersion::V6 => 6,
+            _ => panic!("unsupported transaction version"),
+        }
+    }
+
+    /// Returns `true` if this is an overwinter or later transaction.
+    pub fn is_overwintered(&self) -> bool {
+        !matches!(self.0.version(), TxVersion::Sprout(_))
+    }
+
+    /// Get the network upgrade for this transaction, if any (V5+).
+    #[allow(unreachable_patterns)]
+    pub fn network_upgrade(&self) -> Option<NetworkUpgrade> {
+        match self.tx_version() {
+            TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => None,
+            // V5+ transactions embed the consensus branch ID
+            _ => compat::branch_id_to_network_upgrade(self.0.consensus_branch_id()),
+        }
+    }
+
+    /// Compute the sighash for this transaction.
     ///
-    /// If you need to compute multiple sighashes for the same transactions,
-    /// it's more efficient to use [`Transaction::sighasher()`].
-    ///
-    /// # Details
-    ///
-    /// `all_previous_outputs` represents the UTXOs being spent by each input
-    /// in the transaction.
-    ///
-    /// The `input_index_script_code` tuple indicates the index of the
-    /// transparent Input for which we are producing a sighash and the
-    /// respective script code being validated, or None if it's a shielded
-    /// input.
-    ///
-    /// # Panics
-    ///
-    /// - if passed in any NetworkUpgrade from before NetworkUpgrade::Overwinter
-    /// - if called on a v1 or v2 transaction
-    /// - if the input index points to a transparent::Input::CoinBase
-    /// - if the input index is out of bounds for self.inputs()
-    /// - if the tx contains `nConsensusBranchId` field and `nu` doesn't match it
-    /// - if the tx is not convertible to its `librustzcash` equivalent
-    /// - if `nu` doesn't contain a consensus branch id convertible to its `librustzcash`
-    ///   equivalent
+    /// Returns an error if `network_upgrade` doesn't match the transaction's consensus branch ID.
     pub fn sighash(
         &self,
-        nu: NetworkUpgrade,
+        network_upgrade: NetworkUpgrade,
         hash_type: sighash::HashType,
-        all_previous_outputs: Arc<Vec<transparent::Output>>,
+        all_previous_outputs: std::sync::Arc<Vec<transparent::Output>>,
         input_index_script_code: Option<(usize, Vec<u8>)>,
-    ) -> Result<SigHash, Error> {
-        Ok(sighash::SigHasher::new(self, nu, all_previous_outputs)?
-            .sighash(hash_type, input_index_script_code))
-    }
-
-    /// Return a [`SigHasher`] for this transaction.
-    pub fn sighasher(
-        &self,
-        nu: NetworkUpgrade,
-        all_previous_outputs: Arc<Vec<transparent::Output>>,
-    ) -> Result<sighash::SigHasher, Error> {
-        sighash::SigHasher::new(self, nu, all_previous_outputs)
-    }
-
-    /// Compute the authorizing data commitment of this transaction as specified
-    /// in [ZIP-244].
-    ///
-    /// Returns None for pre-v5 transactions.
-    ///
-    /// [ZIP-244]: https://zips.z.cash/zip-0244.
-    pub fn auth_digest(&self) -> Option<AuthDigest> {
-        match self {
-            Transaction::V1 { .. }
-            | Transaction::V2 { .. }
-            | Transaction::V3 { .. }
-            | Transaction::V4 { .. } => None,
-            Transaction::V5 { .. } => Some(AuthDigest::from(self)),
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 { .. } => Some(AuthDigest::from(self)),
-        }
-    }
-
-    // other properties
-
-    /// Does this transaction have transparent inputs?
-    pub fn has_transparent_inputs(&self) -> bool {
-        !self.inputs().is_empty()
-    }
-
-    /// Does this transaction have transparent outputs?
-    pub fn has_transparent_outputs(&self) -> bool {
-        !self.outputs().is_empty()
-    }
-
-    /// Does this transaction have transparent inputs or outputs?
-    pub fn has_transparent_inputs_or_outputs(&self) -> bool {
-        self.has_transparent_inputs() || self.has_transparent_outputs()
-    }
-
-    /// Does this transaction have transparent or shielded inputs?
-    pub fn has_transparent_or_shielded_inputs(&self) -> bool {
-        self.has_transparent_inputs() || self.has_shielded_inputs()
-    }
-
-    /// Does this transaction have shielded inputs?
-    ///
-    /// See [`Self::has_transparent_or_shielded_inputs`] for details.
-    pub fn has_shielded_inputs(&self) -> bool {
-        self.joinsplit_count() > 0
-            || self.sapling_spends_per_anchor().count() > 0
-            || (self.orchard_actions().count() > 0
-                && self
-                    .orchard_flags()
-                    .unwrap_or_else(orchard::Flags::empty)
-                    .contains(orchard::Flags::ENABLE_SPENDS))
-    }
-
-    /// Does this transaction have zip233_amount output?
-    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-    pub fn has_zip233_amount(&self) -> bool {
-        self.zip233_amount() > Amount::<NonNegative>::zero()
-    }
-    /// Does this transaction have shielded outputs?
-    ///
-    /// See [`Self::has_transparent_or_shielded_outputs`] for details.
-    pub fn has_shielded_outputs(&self) -> bool {
-        self.joinsplit_count() > 0
-            || self.sapling_outputs().count() > 0
-            || (self.orchard_actions().count() > 0
-                && self
-                    .orchard_flags()
-                    .unwrap_or_else(orchard::Flags::empty)
-                    .contains(orchard::Flags::ENABLE_OUTPUTS))
-    }
-
-    /// Does this transaction have transparent or shielded outputs?
-    pub fn has_transparent_or_shielded_outputs(&self) -> bool {
-        self.has_transparent_outputs() || self.has_shielded_outputs()
-    }
-
-    /// Does this transaction has at least one flag when we have at least one orchard action?
-    pub fn has_enough_orchard_flags(&self) -> bool {
-        if self.version() < 5 || self.orchard_actions().count() == 0 {
-            return true;
-        }
-        self.orchard_flags()
-            .unwrap_or_else(orchard::Flags::empty)
-            .intersects(orchard::Flags::ENABLE_SPENDS | orchard::Flags::ENABLE_OUTPUTS)
-    }
-
-    /// Returns the [`CoinbaseSpendRestriction`] for this transaction,
-    /// assuming it is mined at `spend_height`.
-    pub fn coinbase_spend_restriction(
-        &self,
-        network: &Network,
-        spend_height: block::Height,
-    ) -> CoinbaseSpendRestriction {
-        if self.outputs().is_empty() || network.should_allow_unshielded_coinbase_spends() {
-            // we know this transaction must have shielded outputs if it has no
-            // transparent outputs, because of other consensus rules.
-            CheckCoinbaseMaturity { spend_height }
-        } else {
-            DisallowCoinbaseSpend
-        }
-    }
-
-    // header
-
-    /// Return if the `fOverwintered` flag of this transaction is set.
-    pub fn is_overwintered(&self) -> bool {
-        match self {
-            Transaction::V1 { .. } | Transaction::V2 { .. } => false,
-            Transaction::V3 { .. } | Transaction::V4 { .. } | Transaction::V5 { .. } => true,
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 { .. } => true,
-        }
-    }
-
-    /// Returns the version of this transaction.
-    ///
-    /// Note that the returned version is equal to `effectiveVersion`, described in [§ 7.1
-    /// Transaction Encoding and Consensus]:
-    ///
-    /// > `effectiveVersion` [...] is equal to `min(2, version)` when `fOverwintered = 0` and to
-    /// > `version` otherwise.
-    ///
-    /// Zebra handles the `fOverwintered` flag via the [`Self::is_overwintered`] method.
-    ///
-    /// [§ 7.1 Transaction Encoding and Consensus]: <https://zips.z.cash/protocol/protocol.pdf#txnencoding>
-    pub fn version(&self) -> u32 {
-        match self {
-            Transaction::V1 { .. } => 1,
-            Transaction::V2 { .. } => 2,
-            Transaction::V3 { .. } => 3,
-            Transaction::V4 { .. } => 4,
-            Transaction::V5 { .. } => 5,
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 { .. } => 6,
-        }
+    ) -> Result<sighash::SigHash, Error> {
+        let hasher = sighash::SigHasher::new(self, network_upgrade, all_previous_outputs)?;
+        Ok(hasher.sighash(hash_type, input_index_script_code))
     }
 
     /// Get this transaction's lock time.
     pub fn lock_time(&self) -> Option<LockTime> {
-        let lock_time = match self {
-            Transaction::V1 { lock_time, .. }
-            | Transaction::V2 { lock_time, .. }
-            | Transaction::V3 { lock_time, .. }
-            | Transaction::V4 { lock_time, .. }
-            | Transaction::V5 { lock_time, .. } => *lock_time,
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 { lock_time, .. } => *lock_time,
-        };
+        let lock_time = compat::u32_to_lock_time(self.0.lock_time());
 
-        // `zcashd` checks that the block height is greater than the lock height.
-        // This check allows the genesis block transaction, which would otherwise be invalid.
-        // (Or have to use a lock time.)
-        //
-        // It matches the `zcashd` check here:
-        // https://github.com/zcash/zcash/blob/1a7c2a3b04bcad6549be6d571bfdff8af9a2c814/src/main.cpp#L720
         if lock_time == LockTime::unlocked() {
             return None;
         }
 
-        // Consensus rule:
-        //
-        // > The transaction must be finalized: either its locktime must be in the past (or less
-        // > than or equal to the current block height), or all of its sequence numbers must be
-        // > 0xffffffff.
-        //
-        // In `zcashd`, this rule applies to both coinbase and prevout input sequence numbers.
-        //
-        // Unlike Bitcoin, Zcash allows transactions with no transparent inputs. These transactions
-        // only have shielded inputs. Surprisingly, the `zcashd` implementation ignores the lock
-        // time in these transactions. `zcashd` only checks the lock time when it finds a
-        // transparent input sequence number that is not `u32::MAX`.
-        //
-        // https://developer.bitcoin.org/devguide/transactions.html#non-standard-transactions
         let has_sequence_number_enabling_lock_time = self
             .inputs()
             .iter()
             .map(transparent::Input::sequence)
-            .any(|sequence_number| sequence_number != u32::MAX);
+            .any(|seq| seq != u32::MAX);
 
         if has_sequence_number_enabling_lock_time {
             Some(lock_time)
@@ -457,692 +136,417 @@ impl Transaction {
         }
     }
 
-    /// Get the raw lock time value.
+    /// Get the raw lock time value as a `u32`.
     pub fn raw_lock_time(&self) -> u32 {
-        let lock_time = match self {
-            Transaction::V1 { lock_time, .. }
-            | Transaction::V2 { lock_time, .. }
-            | Transaction::V3 { lock_time, .. }
-            | Transaction::V4 { lock_time, .. }
-            | Transaction::V5 { lock_time, .. } => *lock_time,
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 { lock_time, .. } => *lock_time,
-        };
-        let mut lock_time_bytes = Vec::new();
-        lock_time
-            .zcash_serialize(&mut lock_time_bytes)
-            .expect("lock_time should serialize");
-        u32::from_le_bytes(
-            lock_time_bytes
-                .try_into()
-                .expect("should serialize as 4 bytes"),
-        )
+        self.0.lock_time()
     }
 
-    /// Returns `true` if this transaction's `lock_time` is a [`LockTime::Time`].
-    /// Returns `false` if it is a [`LockTime::Height`] (locked or unlocked), is unlocked,
-    /// or if the transparent input sequence numbers have disabled lock times.
+    /// Returns `true` if `lock_time` is a [`LockTime::Time`] and is not disabled by sequence numbers.
     pub fn lock_time_is_time(&self) -> bool {
-        if let Some(lock_time) = self.lock_time() {
-            return lock_time.is_time();
-        }
-
-        false
+        matches!(self.lock_time(), Some(LockTime::Time(_)))
     }
 
-    /// Get this transaction's expiry height, if any.
-    pub fn expiry_height(&self) -> Option<block::Height> {
-        match self {
-            Transaction::V1 { .. } | Transaction::V2 { .. } => None,
-            Transaction::V3 { expiry_height, .. }
-            | Transaction::V4 { expiry_height, .. }
-            | Transaction::V5 { expiry_height, .. } => match expiry_height {
-                // Consensus rule:
-                // > No limit: To set no limit on transactions (so that they do not expire), nExpiryHeight should be set to 0.
-                // https://zips.z.cash/zip-0203#specification
-                block::Height(0) => None,
-                block::Height(expiry_height) => Some(block::Height(*expiry_height)),
-            },
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 { expiry_height, .. } => match expiry_height {
-                // # Consensus
-                //
-                // > No limit: To set no limit on transactions (so that they do not expire), nExpiryHeight should be set to 0.
-                // https://zips.z.cash/zip-0203#specification
-                block::Height(0) => None,
-                block::Height(expiry_height) => Some(block::Height(*expiry_height)),
-            },
-        }
-    }
-
-    /// Get this transaction's network upgrade field, if any.
-    /// This field is serialized as `nConsensusBranchId` ([7.1]).
+    /// Get the expiry height for this transaction, if any (V3+).
     ///
-    /// [7.1]: https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus
-    pub fn network_upgrade(&self) -> Option<NetworkUpgrade> {
-        match self {
-            Transaction::V1 { .. }
-            | Transaction::V2 { .. }
-            | Transaction::V3 { .. }
-            | Transaction::V4 { .. } => None,
-            Transaction::V5 {
-                network_upgrade, ..
-            } => Some(*network_upgrade),
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 {
-                network_upgrade, ..
-            } => Some(*network_upgrade),
+    /// Returns `None` if the transaction is Sprout, or if `nExpiryHeight == 0`
+    /// (which means "no expiry" per the Zcash protocol spec).
+    pub fn expiry_height(&self) -> Option<block::Height> {
+        match self.tx_version() {
+            TxVersion::Sprout(_) => None,
+            _ => {
+                let bh = self.0.expiry_height();
+                if bh == zcash_primitives::consensus::BlockHeight::from_u32(0) {
+                    None
+                } else {
+                    compat::block_height_to_height(bh).ok()
+                }
+            }
         }
     }
 
-    // transparent
-
-    /// Access the transparent inputs of this transaction, regardless of version.
-    pub fn inputs(&self) -> &[transparent::Input] {
-        match self {
-            Transaction::V1 { ref inputs, .. } => inputs,
-            Transaction::V2 { ref inputs, .. } => inputs,
-            Transaction::V3 { ref inputs, .. } => inputs,
-            Transaction::V4 { ref inputs, .. } => inputs,
-            Transaction::V5 { ref inputs, .. } => inputs,
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 { ref inputs, .. } => inputs,
+    /// Get the version group ID for this transaction, if any.
+    pub fn version_group_id(&self) -> Option<u32> {
+        match self.tx_version() {
+            TxVersion::Sprout(_) => None,
+            v => Some(v.version_group_id()),
         }
     }
 
-    /// Access the [`transparent::OutPoint`]s spent by this transaction's [`transparent::Input`]s.
+    /// Get the transparent inputs, converted to Zebra types.
+    pub fn inputs(&self) -> Vec<transparent::Input> {
+        let bundle = self.0.transparent_bundle();
+        match bundle {
+            Some(b) => b
+                .vin
+                .iter()
+                .map(|txin| {
+                    compat::txin_to_input(txin)
+                        .expect("librustzcash TxIn should be convertible to Zebra Input")
+                })
+                .collect(),
+            None => Vec::new(),
+        }
+    }
+
+    /// Get the transparent outputs, converted to Zebra types.
+    pub fn outputs(&self) -> Vec<transparent::Output> {
+        let bundle = self.0.transparent_bundle();
+        match bundle {
+            Some(b) => b.vout.iter().map(compat::txout_to_output).collect(),
+            None => Vec::new(),
+        }
+    }
+
+    /// Returns `true` if this transaction has transparent inputs.
+    pub fn has_transparent_inputs(&self) -> bool {
+        !self.inputs().is_empty()
+    }
+
+    /// Returns `true` if this transaction has transparent outputs.
+    pub fn has_transparent_outputs(&self) -> bool {
+        !self.outputs().is_empty()
+    }
+
+    /// Returns `true` if this transaction has transparent inputs or outputs.
+    pub fn has_transparent_inputs_or_outputs(&self) -> bool {
+        self.has_transparent_inputs() || self.has_transparent_outputs()
+    }
+
+    /// Returns `true` if this is a coinbase transaction.
+    pub fn is_coinbase(&self) -> bool {
+        self.transparent_bundle().is_some_and(|b| b.is_coinbase())
+    }
+
+    /// Returns `true` if this is a valid non-coinbase transaction.
+    pub fn is_valid_non_coinbase(&self) -> bool {
+        !self.is_coinbase()
+    }
+
+    /// Returns the outpoints spent by this transaction's transparent inputs.
     pub fn spent_outpoints(&self) -> impl Iterator<Item = transparent::OutPoint> + '_ {
         self.inputs()
-            .iter()
-            .filter_map(transparent::Input::outpoint)
+            .into_iter()
+            .filter_map(|input| input.outpoint())
     }
 
-    /// Access the transparent outputs of this transaction, regardless of version.
-    pub fn outputs(&self) -> &[transparent::Output] {
-        match self {
-            Transaction::V1 { ref outputs, .. } => outputs,
-            Transaction::V2 { ref outputs, .. } => outputs,
-            Transaction::V3 { ref outputs, .. } => outputs,
-            Transaction::V4 { ref outputs, .. } => outputs,
-            Transaction::V5 { ref outputs, .. } => outputs,
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 { ref outputs, .. } => outputs,
-        }
+    /// Compute the hash (txid) of this transaction.
+    pub fn hash(&self) -> Hash {
+        let txid_bytes: [u8; 32] = *self.0.txid().as_ref();
+        Hash(txid_bytes)
     }
 
-    /// Returns `true` if this transaction has valid inputs for a coinbase
-    /// transaction, that is, has a single input and it is a coinbase input
-    /// (null prevout).
-    pub fn is_coinbase(&self) -> bool {
-        self.inputs().len() == 1
-            && matches!(
-                self.inputs().first(),
-                Some(transparent::Input::Coinbase { .. })
-            )
-    }
-
-    /// Returns `true` if this transaction has valid inputs for a non-coinbase
-    /// transaction, that is, does not have any coinbase input (non-null prevouts).
+    /// Compute the authorizing data commitment for this transaction.
     ///
-    /// Note that it's possible for a transaction return false in both
-    /// [`Transaction::is_coinbase`] and [`Transaction::is_valid_non_coinbase`],
-    /// though those transactions will be rejected.
-    pub fn is_valid_non_coinbase(&self) -> bool {
-        self.inputs()
-            .iter()
-            .all(|input| matches!(input, transparent::Input::PrevOut { .. }))
-    }
-
-    // sprout
-
-    /// Returns the Sprout `JoinSplit<Groth16Proof>`s in this transaction, regardless of version.
-    pub fn sprout_groth16_joinsplits(
-        &self,
-    ) -> Box<dyn Iterator<Item = &sprout::JoinSplit<Groth16Proof>> + '_> {
-        match self {
-            // JoinSplits with Groth16 Proofs
-            Transaction::V4 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            } => Box::new(joinsplit_data.joinsplits()),
-
-            // No JoinSplits / JoinSplits with BCTV14 proofs
-            Transaction::V1 { .. }
-            | Transaction::V2 { .. }
-            | Transaction::V3 { .. }
-            | Transaction::V4 {
-                joinsplit_data: None,
-                ..
+    /// Returns `None` for pre-V5 transactions (which don't have auth digests).
+    pub fn auth_digest(&self) -> Option<AuthDigest> {
+        match self.tx_version() {
+            TxVersion::Sprout(_) | TxVersion::V3 | TxVersion::V4 => None,
+            _ => {
+                let hash = self.0.auth_commitment();
+                let bytes: &[u8] = hash.as_ref();
+                let digest_bytes: [u8; 32] = bytes.try_into().ok()?;
+                Some(AuthDigest(digest_bytes))
             }
-            | Transaction::V5 { .. } => Box::new(std::iter::empty()),
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 { .. } => Box::new(std::iter::empty()),
         }
     }
 
-    /// Returns the Sprout `GenericJoinSplit`s in this transaction, regardless of version.
-    pub fn sprout_joinsplits(&self) -> Box<dyn Iterator<Item = sprout::GenericJoinSplit> + '_> {
-        match self {
-            // JoinSplits with Bctv14 Proofs
-            Transaction::V2 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            }
-            | Transaction::V3 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            } => Box::new(joinsplit_data.joinsplits().map(|js| js.clone().into())),
-            // JoinSplits with Groth Proofs
-            Transaction::V4 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            } => Box::new(joinsplit_data.joinsplits().map(|js| js.clone().into())),
-            // No JoinSplits
-            Transaction::V1 { .. }
-            | Transaction::V2 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V3 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V4 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V5 { .. } => Box::new(std::iter::empty()),
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 { .. } => Box::new(std::iter::empty()),
+    /// Compute the unmined transaction ID for this transaction.
+    pub fn unmined_id(&self) -> UnminedTxId {
+        match self.auth_digest() {
+            Some(auth_digest) => UnminedTxId::Witnessed(WtxId {
+                id: self.hash(),
+                auth_digest,
+            }),
+            None => UnminedTxId::Legacy(self.hash()),
         }
     }
 
-    /// Returns the number of `JoinSplit`s in this transaction, regardless of version.
+    /// Returns the number of JoinSplit descriptions in this transaction.
     pub fn joinsplit_count(&self) -> usize {
-        match self {
-            // JoinSplits with Bctv14 Proofs
-            Transaction::V2 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            }
-            | Transaction::V3 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            } => joinsplit_data.joinsplits().count(),
-            // JoinSplits with Groth Proofs
-            Transaction::V4 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            } => joinsplit_data.joinsplits().count(),
-            // No JoinSplits
-            Transaction::V1 { .. }
-            | Transaction::V2 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V3 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V4 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V5 { .. } => 0,
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 { .. } => 0,
-        }
+        self.sprout_bundle().map_or(0, |b| b.joinsplits.len())
     }
 
-    /// Access the sprout::Nullifiers in this transaction, regardless of version.
-    pub fn sprout_nullifiers(&self) -> Box<dyn Iterator<Item = &sprout::Nullifier> + '_> {
-        // This function returns a boxed iterator because the different
-        // transaction variants end up having different iterator types
-        // (we could extract bctv and groth as separate iterators, then chain
-        // them together, but that would be much harder to read and maintain)
-        match self {
-            // JoinSplits with Bctv14 Proofs
-            Transaction::V2 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            }
-            | Transaction::V3 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            } => Box::new(joinsplit_data.nullifiers()),
-            // JoinSplits with Groth Proofs
-            Transaction::V4 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            } => Box::new(joinsplit_data.nullifiers()),
-            // No JoinSplits
-            Transaction::V1 { .. }
-            | Transaction::V2 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V3 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V4 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V5 { .. } => Box::new(std::iter::empty()),
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 { .. } => Box::new(std::iter::empty()),
-        }
-    }
-
-    /// Access the JoinSplit public validating key in this transaction,
-    /// regardless of version, if any.
-    pub fn sprout_joinsplit_pub_key(&self) -> Option<ed25519::VerificationKeyBytes> {
-        match self {
-            // JoinSplits with Bctv14 Proofs
-            Transaction::V2 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            }
-            | Transaction::V3 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            } => Some(joinsplit_data.pub_key),
-            // JoinSplits with Groth Proofs
-            Transaction::V4 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            } => Some(joinsplit_data.pub_key),
-            // No JoinSplits
-            Transaction::V1 { .. }
-            | Transaction::V2 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V3 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V4 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V5 { .. } => None,
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 { .. } => None,
-        }
-    }
-
-    /// Return if the transaction has any Sprout JoinSplit data.
+    /// Returns `true` if this transaction has Sprout JoinSplit data.
     pub fn has_sprout_joinsplit_data(&self) -> bool {
-        match self {
-            // No JoinSplits
-            Transaction::V1 { .. } | Transaction::V5 { .. } => false,
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 { .. } => false,
-
-            // JoinSplits-on-BCTV14
-            Transaction::V2 { joinsplit_data, .. } | Transaction::V3 { joinsplit_data, .. } => {
-                joinsplit_data.is_some()
-            }
-
-            // JoinSplits-on-Groth16
-            Transaction::V4 { joinsplit_data, .. } => joinsplit_data.is_some(),
-        }
+        self.0.sprout_bundle().is_some()
     }
 
-    /// Returns the Sprout note commitments in this transaction.
+    /// Iterate over the Sprout JoinSplit descriptions (librustzcash type).
+    pub fn sprout_joinsplit_descriptions(
+        &self,
+    ) -> impl Iterator<Item = &zcash_primitives::transaction::components::sprout::JsDescription> + '_
+    {
+        self.sprout_bundle()
+            .into_iter()
+            .flat_map(|b| b.joinsplits.iter())
+    }
+
+    /// Access the Sprout nullifiers in this transaction.
+    pub fn sprout_nullifiers(&self) -> impl Iterator<Item = crate::sprout::Nullifier> + '_ {
+        self.sprout_bundle()
+            .into_iter()
+            .flat_map(|b| b.joinsplits.iter())
+            .flat_map(|js| js.nullifiers().iter().copied())
+            .map(crate::sprout::Nullifier::from)
+    }
+
+    /// Access the Sprout note commitments in this transaction.
     pub fn sprout_note_commitments(
         &self,
-    ) -> Box<dyn Iterator<Item = &sprout::commitment::NoteCommitment> + '_> {
-        match self {
-            // Return [`NoteCommitment`]s with [`Bctv14Proof`]s.
-            Transaction::V2 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            }
-            | Transaction::V3 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            } => Box::new(joinsplit_data.note_commitments()),
-
-            // Return [`NoteCommitment`]s with [`Groth16Proof`]s.
-            Transaction::V4 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            } => Box::new(joinsplit_data.note_commitments()),
-
-            // Return an empty iterator.
-            Transaction::V2 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V3 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V4 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V1 { .. }
-            | Transaction::V5 { .. } => Box::new(std::iter::empty()),
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 { .. } => Box::new(std::iter::empty()),
-        }
+    ) -> impl Iterator<Item = crate::sprout::commitment::NoteCommitment> + '_ {
+        self.sprout_bundle()
+            .into_iter()
+            .flat_map(|b| b.joinsplits.iter())
+            .flat_map(|js| js.commitments().iter().copied())
+            .map(crate::sprout::commitment::NoteCommitment::from)
     }
 
-    // sapling
-
-    /// Access the deduplicated [`sapling::tree::Root`]s in this transaction,
-    /// regardless of version.
-    pub fn sapling_anchors(&self) -> Box<dyn Iterator<Item = sapling::tree::Root> + '_> {
-        // This function returns a boxed iterator because the different
-        // transaction variants end up having different iterator types
-        match self {
-            Transaction::V4 {
-                sapling_shielded_data: Some(sapling_shielded_data),
-                ..
-            } => Box::new(sapling_shielded_data.anchors()),
-
-            Transaction::V5 {
-                sapling_shielded_data: Some(sapling_shielded_data),
-                ..
-            } => Box::new(sapling_shielded_data.anchors()),
-
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 {
-                sapling_shielded_data: Some(sapling_shielded_data),
-                ..
-            } => Box::new(sapling_shielded_data.anchors()),
-
-            // No Spends
-            Transaction::V1 { .. }
-            | Transaction::V2 { .. }
-            | Transaction::V3 { .. }
-            | Transaction::V4 {
-                sapling_shielded_data: None,
-                ..
-            }
-            | Transaction::V5 {
-                sapling_shielded_data: None,
-                ..
-            } => Box::new(std::iter::empty()),
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 {
-                sapling_shielded_data: None,
-                ..
-            } => Box::new(std::iter::empty()),
-        }
+    /// Returns vpub_old values (amounts entering the Sprout pool).
+    pub fn output_values_to_sprout(&self) -> Vec<i64> {
+        self.sprout_bundle()
+            .into_iter()
+            .flat_map(|b| b.joinsplits.iter())
+            .map(|js| js.vpub_old().into())
+            .collect()
     }
 
-    /// Iterate over the sapling [`Spend`](sapling::Spend)s for this transaction,
-    /// returning `Spend<PerSpendAnchor>` regardless of the underlying
-    /// transaction version.
-    ///
-    /// Shared anchors in V5 transactions are copied into each sapling spend.
-    /// This allows the same code to validate spends from V4 and V5 transactions.
-    ///
-    /// # Correctness
-    ///
-    /// Do not use this function for serialization.
-    pub fn sapling_spends_per_anchor(
+    /// Returns vpub_new values (amounts leaving the Sprout pool).
+    pub fn input_values_from_sprout(&self) -> Vec<i64> {
+        self.sprout_bundle()
+            .into_iter()
+            .flat_map(|b| b.joinsplits.iter())
+            .map(|js| js.vpub_new().into())
+            .collect()
+    }
+
+    /// Access the JoinSplit public validating key, if any.
+    pub fn sprout_joinsplit_pub_key(
         &self,
-    ) -> Box<dyn Iterator<Item = sapling::Spend<sapling::PerSpendAnchor>> + '_> {
-        match self {
-            Transaction::V4 {
-                sapling_shielded_data: Some(sapling_shielded_data),
-                ..
-            } => Box::new(sapling_shielded_data.spends_per_anchor()),
-            Transaction::V5 {
-                sapling_shielded_data: Some(sapling_shielded_data),
-                ..
-            } => Box::new(sapling_shielded_data.spends_per_anchor()),
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 {
-                sapling_shielded_data: Some(sapling_shielded_data),
-                ..
-            } => Box::new(sapling_shielded_data.spends_per_anchor()),
-
-            // No Spends
-            Transaction::V1 { .. }
-            | Transaction::V2 { .. }
-            | Transaction::V3 { .. }
-            | Transaction::V4 {
-                sapling_shielded_data: None,
-                ..
-            }
-            | Transaction::V5 {
-                sapling_shielded_data: None,
-                ..
-            } => Box::new(std::iter::empty()),
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 {
-                sapling_shielded_data: None,
-                ..
-            } => Box::new(std::iter::empty()),
-        }
+    ) -> Option<crate::primitives::ed25519::VerificationKeyBytes> {
+        self.sprout_bundle()
+            .map(|b| crate::primitives::ed25519::VerificationKeyBytes::from(b.joinsplit_pubkey))
     }
 
-    /// Iterate over the sapling [`Output`](sapling::Output)s for this
-    /// transaction
-    pub fn sapling_outputs(&self) -> Box<dyn Iterator<Item = &sapling::Output> + '_> {
-        match self {
-            Transaction::V4 {
-                sapling_shielded_data: Some(sapling_shielded_data),
-                ..
-            } => Box::new(sapling_shielded_data.outputs()),
-            Transaction::V5 {
-                sapling_shielded_data: Some(sapling_shielded_data),
-                ..
-            } => Box::new(sapling_shielded_data.outputs()),
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 {
-                sapling_shielded_data: Some(sapling_shielded_data),
-                ..
-            } => Box::new(sapling_shielded_data.outputs()),
-
-            // No Outputs
-            Transaction::V1 { .. }
-            | Transaction::V2 { .. }
-            | Transaction::V3 { .. }
-            | Transaction::V4 {
-                sapling_shielded_data: None,
-                ..
-            }
-            | Transaction::V5 {
-                sapling_shielded_data: None,
-                ..
-            } => Box::new(std::iter::empty()),
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 {
-                sapling_shielded_data: None,
-                ..
-            } => Box::new(std::iter::empty()),
-        }
+    /// Returns `true` if this transaction has Sapling shielded data.
+    pub fn has_sapling_shielded_data(&self) -> bool {
+        self.0.sapling_bundle().is_some()
     }
 
-    /// Access the sapling::Nullifiers in this transaction, regardless of version.
-    pub fn sapling_nullifiers(&self) -> Box<dyn Iterator<Item = &sapling::Nullifier> + '_> {
-        // This function returns a boxed iterator because the different
-        // transaction variants end up having different iterator types
-        match self {
-            // Spends with Groth Proofs
-            Transaction::V4 {
-                sapling_shielded_data: Some(sapling_shielded_data),
-                ..
-            } => Box::new(sapling_shielded_data.nullifiers()),
-            Transaction::V5 {
-                sapling_shielded_data: Some(sapling_shielded_data),
-                ..
-            } => Box::new(sapling_shielded_data.nullifiers()),
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 {
-                sapling_shielded_data: Some(sapling_shielded_data),
-                ..
-            } => Box::new(sapling_shielded_data.nullifiers()),
-
-            // No Spends
-            Transaction::V1 { .. }
-            | Transaction::V2 { .. }
-            | Transaction::V3 { .. }
-            | Transaction::V4 {
-                sapling_shielded_data: None,
-                ..
-            }
-            | Transaction::V5 {
-                sapling_shielded_data: None,
-                ..
-            } => Box::new(std::iter::empty()),
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 {
-                sapling_shielded_data: None,
-                ..
-            } => Box::new(std::iter::empty()),
-        }
+    /// Access the Sapling nullifiers in this transaction.
+    pub fn sapling_nullifiers(&self) -> impl Iterator<Item = crate::sapling::Nullifier> + '_ {
+        self.sapling_bundle()
+            .into_iter()
+            .flat_map(|b| b.shielded_spends().iter())
+            .map(|spend| crate::sapling::Nullifier::from(spend.nullifier().0))
     }
 
-    /// Returns the Sapling note commitments in this transaction, regardless of version.
+    /// Access the Sapling spend descriptions (librustzcash type).
+    ///
+    /// The spend description type uses `GrothProofBytes` for proofs and
+    /// `redjubjub::Signature<SpendAuth>` for auth sigs.
+    pub fn sapling_spends(
+        &self,
+    ) -> impl Iterator<
+        Item = &sapling_crypto::bundle::SpendDescription<sapling_crypto::bundle::Authorized>,
+    > + '_ {
+        self.sapling_bundle()
+            .into_iter()
+            .flat_map(|b| b.shielded_spends().iter())
+    }
+
+    /// Returns the number of Sapling spends.
+    pub fn sapling_spends_count(&self) -> usize {
+        self.sapling_bundle()
+            .map_or(0, |b| b.shielded_spends().len())
+    }
+
+    /// Access the Sapling output descriptions (librustzcash type).
+    pub fn sapling_outputs(
+        &self,
+    ) -> impl Iterator<
+        Item = &sapling_crypto::bundle::OutputDescription<sapling_crypto::bundle::GrothProofBytes>,
+    > + '_ {
+        self.sapling_bundle()
+            .into_iter()
+            .flat_map(|b| b.shielded_outputs().iter())
+    }
+
+    /// Access the Sapling note commitments in this transaction.
     pub fn sapling_note_commitments(
         &self,
-    ) -> Box<dyn Iterator<Item = &sapling_crypto::note::ExtractedNoteCommitment> + '_> {
-        // This function returns a boxed iterator because the different
-        // transaction variants end up having different iterator types
-        match self {
-            // Spends with Groth16 Proofs
-            Transaction::V4 {
-                sapling_shielded_data: Some(sapling_shielded_data),
-                ..
-            } => Box::new(sapling_shielded_data.note_commitments()),
-            Transaction::V5 {
-                sapling_shielded_data: Some(sapling_shielded_data),
-                ..
-            } => Box::new(sapling_shielded_data.note_commitments()),
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 {
-                sapling_shielded_data: Some(sapling_shielded_data),
-                ..
-            } => Box::new(sapling_shielded_data.note_commitments()),
+    ) -> impl Iterator<Item = sapling_crypto::note::ExtractedNoteCommitment> + '_ {
+        self.sapling_outputs().map(|output| *output.cmu())
+    }
 
-            // No Spends
-            Transaction::V1 { .. }
-            | Transaction::V2 { .. }
-            | Transaction::V3 { .. }
-            | Transaction::V4 {
-                sapling_shielded_data: None,
-                ..
+    /// Iterate over deduplicated Sapling anchors as zebra tree roots.
+    pub fn sapling_anchors(&self) -> Vec<crate::sapling::tree::Root> {
+        let mut seen = Vec::new();
+        for spend in self.sapling_spends() {
+            let bytes = spend.anchor().to_bytes();
+            let root = crate::sapling::tree::Root::try_from(bytes)
+                .expect("sapling anchor from valid transaction should be a valid tree root");
+            if !seen.contains(&root) {
+                seen.push(root);
             }
-            | Transaction::V5 {
-                sapling_shielded_data: None,
-                ..
-            } => Box::new(std::iter::empty()),
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 {
-                sapling_shielded_data: None,
-                ..
-            } => Box::new(std::iter::empty()),
         }
+        seen
     }
 
-    /// Returns `true` if the transaction has any Sapling shielded data.
-    pub fn has_sapling_shielded_data(&self) -> bool {
-        match self {
-            Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => false,
-            Transaction::V4 {
-                sapling_shielded_data,
-                ..
-            } => sapling_shielded_data.is_some(),
-            Transaction::V5 {
-                sapling_shielded_data,
-                ..
-            } => sapling_shielded_data.is_some(),
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 {
-                sapling_shielded_data,
-                ..
-            } => sapling_shielded_data.is_some(),
-        }
+    /// Get the Sapling value balance.
+    pub fn sapling_value_balance(&self) -> ValueBalance<NegativeAllowed> {
+        let balance = self
+            .sapling_bundle()
+            .map(|b| *b.value_balance())
+            .unwrap_or(ZatBalance::zero());
+
+        let amount: Amount<NegativeAllowed> = Amount::try_from(i64::from(balance))
+            .expect("sapling value balance should be a valid Amount");
+
+        ValueBalance::from_sapling_amount(amount)
     }
 
-    // orchard
-
-    /// Access the [`orchard::ShieldedData`] in this transaction,
-    /// regardless of version.
-    pub fn orchard_shielded_data(&self) -> Option<&orchard::ShieldedData> {
-        match self {
-            // Maybe Orchard shielded data
-            Transaction::V5 {
-                orchard_shielded_data,
-                ..
-            } => orchard_shielded_data.as_ref(),
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 {
-                orchard_shielded_data,
-                ..
-            } => orchard_shielded_data.as_ref(),
-
-            // No Orchard shielded data
-            Transaction::V1 { .. }
-            | Transaction::V2 { .. }
-            | Transaction::V3 { .. }
-            | Transaction::V4 { .. } => None,
-        }
-    }
-
-    /// Iterate over the [`orchard::Action`]s in this transaction, if there are any,
-    /// regardless of version.
-    pub fn orchard_actions(&self) -> impl Iterator<Item = &orchard::Action> {
-        self.orchard_shielded_data()
-            .into_iter()
-            .flat_map(orchard::ShieldedData::actions)
-    }
-
-    /// Access the [`orchard::Nullifier`]s in this transaction, if there are any,
-    /// regardless of version.
-    pub fn orchard_nullifiers(&self) -> impl Iterator<Item = &orchard::Nullifier> {
-        self.orchard_shielded_data()
-            .into_iter()
-            .flat_map(orchard::ShieldedData::nullifiers)
-    }
-
-    /// Access the note commitments in this transaction, if there are any,
-    /// regardless of version.
-    pub fn orchard_note_commitments(&self) -> impl Iterator<Item = &pallas::Base> {
-        self.orchard_shielded_data()
-            .into_iter()
-            .flat_map(orchard::ShieldedData::note_commitments)
-    }
-
-    /// Access the [`orchard::Flags`] in this transaction, if there is any,
-    /// regardless of version.
-    pub fn orchard_flags(&self) -> Option<orchard::shielded_data::Flags> {
-        self.orchard_shielded_data()
-            .map(|orchard_shielded_data| orchard_shielded_data.flags)
-    }
-
-    /// Return if the transaction has any Orchard shielded data,
-    /// regardless of version.
+    /// Returns `true` if this transaction has Orchard shielded data.
     pub fn has_orchard_shielded_data(&self) -> bool {
-        self.orchard_shielded_data().is_some()
+        self.0.orchard_bundle().is_some()
     }
 
-    // value balances
+    /// Access the Orchard nullifiers in this transaction.
+    pub fn orchard_nullifiers(&self) -> impl Iterator<Item = crate::orchard::Nullifier> + '_ {
+        self.orchard_bundle()
+            .into_iter()
+            .flat_map(|b| b.actions().iter())
+            .map(|action| {
+                crate::orchard::Nullifier::try_from(action.nullifier().to_bytes())
+                    .expect("orchard nullifier from valid transaction")
+            })
+    }
+
+    /// Access the Orchard actions (librustzcash type).
+    pub fn orchard_actions(
+        &self,
+    ) -> impl Iterator<
+        Item = &::orchard::Action<
+            <::orchard::bundle::Authorized as ::orchard::bundle::Authorization>::SpendAuth,
+        >,
+    > + '_ {
+        self.orchard_bundle()
+            .into_iter()
+            .flat_map(|b| b.actions().iter())
+    }
+
+    /// Access Orchard note commitments.
+    pub fn orchard_note_commitments(
+        &self,
+    ) -> impl Iterator<Item = ::orchard::note::ExtractedNoteCommitment> + '_ {
+        self.orchard_actions().map(|action| *action.cmx())
+    }
+
+    /// Access the Orchard flags, if any.
+    pub fn orchard_flags(&self) -> Option<::orchard::bundle::Flags> {
+        self.0.orchard_bundle().map(|b| *b.flags())
+    }
+
+    /// Access the Orchard anchor as a zebra tree root, if any.
+    pub fn orchard_anchor(&self) -> Option<crate::orchard::tree::Root> {
+        self.0.orchard_bundle().and_then(|b| {
+            let bytes = b.anchor().to_bytes();
+            crate::orchard::tree::Root::try_from(bytes).ok()
+        })
+    }
+
+    /// Get the Orchard value balance.
+    pub fn orchard_value_balance(&self) -> ValueBalance<NegativeAllowed> {
+        let balance = self
+            .orchard_bundle()
+            .map(|b| *b.value_balance())
+            .unwrap_or(ZatBalance::zero());
+
+        let amount: Amount<NegativeAllowed> = Amount::try_from(i64::from(balance))
+            .expect("orchard value balance should be a valid Amount");
+
+        ValueBalance::from_orchard_amount(amount)
+    }
+
+    /// Returns `true` if this transaction has shielded inputs.
+    pub fn has_shielded_inputs(&self) -> bool {
+        self.has_sprout_joinsplit_data()
+            || self
+                .sapling_bundle()
+                .is_some_and(|b| !b.shielded_spends().is_empty())
+            || self
+                .orchard_bundle()
+                .is_some_and(|b| b.flags().spends_enabled() && !b.actions().is_empty())
+    }
+
+    /// Returns `true` if this transaction has shielded outputs.
+    pub fn has_shielded_outputs(&self) -> bool {
+        self.has_sprout_joinsplit_data()
+            || self
+                .sapling_bundle()
+                .is_some_and(|b| !b.shielded_outputs().is_empty())
+            || self
+                .orchard_bundle()
+                .is_some_and(|b| b.flags().outputs_enabled() && !b.actions().is_empty())
+    }
+
+    /// Does this transaction have shielded inputs or outputs?
+    pub fn has_shielded_data(&self) -> bool {
+        self.has_shielded_inputs() || self.has_shielded_outputs()
+    }
+
+    /// Returns `true` if this transaction has transparent or shielded inputs.
+    pub fn has_transparent_or_shielded_inputs(&self) -> bool {
+        self.has_transparent_inputs() || self.has_shielded_inputs()
+    }
+
+    /// Returns `true` if this transaction has transparent or shielded outputs.
+    pub fn has_transparent_or_shielded_outputs(&self) -> bool {
+        self.has_transparent_outputs() || self.has_shielded_outputs()
+    }
+
+    /// Returns `true` if the Orchard flags are consistent.
+    pub fn has_enough_orchard_flags(&self) -> bool {
+        match self.0.orchard_bundle() {
+            Some(bundle) => {
+                let flags = bundle.flags();
+                flags.spends_enabled() || flags.outputs_enabled()
+            }
+            None => true,
+        }
+    }
+
+    /// Access the zip233 amount field of this transaction.
+    pub fn zip233_amount(&self) -> Amount<NonNegative> {
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+        if self.tx_version() == TxVersion::V6 {
+            let zatoshis = self.0.zip233_amount();
+            let value: u64 = zatoshis.into();
+            return Amount::try_from(value as i64)
+                .expect("zip233 amount should be a valid non-negative Amount");
+        }
+        Amount::zero()
+    }
+
+    /// Returns `true` if this transaction has a non-zero ZIP-233 amount.
+    pub fn has_zip233_amount(&self) -> bool {
+        self.zip233_amount() != Amount::<NonNegative>::zero()
+    }
 
     /// Return the transparent value balance,
-    /// using the outputs spent by this transaction.
-    ///
-    /// See `transparent_value_balance` for details.
+    /// the change in the transaction value pool due to transparent inputs and outputs.
     #[allow(clippy::unwrap_in_result)]
-    fn transparent_value_balance_from_outputs(
+    pub fn transparent_value_balance_from_outputs(
         &self,
-        outputs: &HashMap<transparent::OutPoint, transparent::Output>,
-    ) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
+        outputs: &std::collections::HashMap<transparent::OutPoint, transparent::Output>,
+    ) -> Result<ValueBalance<NegativeAllowed>, crate::value_balance::ValueBalanceError> {
+        use crate::amount::Error as AmountError;
+
         let input_value = self
             .inputs()
             .iter()
             .map(|i| i.value_from_outputs(outputs))
             .sum::<Result<Amount<NonNegative>, AmountError>>()
-            .map_err(ValueBalanceError::Transparent)?
+            .map_err(crate::value_balance::ValueBalanceError::Transparent)?
             .constrain()
             .expect("conversion from NonNegative to NegativeAllowed is always valid");
 
@@ -1151,697 +555,577 @@ impl Transaction {
             .iter()
             .map(|o| o.value())
             .sum::<Result<Amount<NonNegative>, AmountError>>()
-            .map_err(ValueBalanceError::Transparent)?
+            .map_err(crate::value_balance::ValueBalanceError::Transparent)?
             .constrain()
             .expect("conversion from NonNegative to NegativeAllowed is always valid");
 
         (input_value - output_value)
             .map(ValueBalance::from_transparent_amount)
-            .map_err(ValueBalanceError::Transparent)
+            .map_err(crate::value_balance::ValueBalanceError::Transparent)
     }
 
-    /// Returns the `vpub_old` fields from `JoinSplit`s in this transaction,
-    /// regardless of version, in the order they appear in the transaction.
-    ///
-    /// These values are added to the sprout chain value pool,
-    /// and removed from the value pool of this transaction.
-    pub fn output_values_to_sprout(&self) -> Box<dyn Iterator<Item = &Amount<NonNegative>> + '_> {
-        match self {
-            // JoinSplits with Bctv14 Proofs
-            Transaction::V2 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            }
-            | Transaction::V3 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            } => Box::new(
-                joinsplit_data
-                    .joinsplits()
-                    .map(|joinsplit| &joinsplit.vpub_old),
-            ),
-            // JoinSplits with Groth Proofs
-            Transaction::V4 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            } => Box::new(
-                joinsplit_data
-                    .joinsplits()
-                    .map(|joinsplit| &joinsplit.vpub_old),
-            ),
-            // No JoinSplits
-            Transaction::V1 { .. }
-            | Transaction::V2 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V3 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V4 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V5 { .. } => Box::new(std::iter::empty()),
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 { .. } => Box::new(std::iter::empty()),
-        }
+    /// Return the sprout value balance.
+    pub fn sprout_value_balance(&self) -> ValueBalance<NegativeAllowed> {
+        let balance = self
+            .sprout_bundle()
+            .and_then(|b| b.value_balance())
+            .unwrap_or(ZatBalance::zero());
+
+        let amount: Amount<NegativeAllowed> = Amount::try_from(i64::from(balance))
+            .expect("sprout value balance should be a valid Amount");
+
+        ValueBalance::from_sprout_amount(amount)
     }
 
-    /// Returns the `vpub_new` fields from `JoinSplit`s in this transaction,
-    /// regardless of version, in the order they appear in the transaction.
-    ///
-    /// These values are removed from the value pool of this transaction.
-    /// and added to the sprout chain value pool.
-    pub fn input_values_from_sprout(&self) -> Box<dyn Iterator<Item = &Amount<NonNegative>> + '_> {
-        match self {
-            // JoinSplits with Bctv14 Proofs
-            Transaction::V2 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            }
-            | Transaction::V3 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            } => Box::new(
-                joinsplit_data
-                    .joinsplits()
-                    .map(|joinsplit| &joinsplit.vpub_new),
-            ),
-            // JoinSplits with Groth Proofs
-            Transaction::V4 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            } => Box::new(
-                joinsplit_data
-                    .joinsplits()
-                    .map(|joinsplit| &joinsplit.vpub_new),
-            ),
-            // No JoinSplits
-            Transaction::V1 { .. }
-            | Transaction::V2 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V3 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V4 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V5 { .. } => Box::new(std::iter::empty()),
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 { .. } => Box::new(std::iter::empty()),
-        }
-    }
-
-    /// Return a list of sprout value balances,
-    /// the changes in the transaction value pool due to each sprout `JoinSplit`.
-    ///
-    /// Each value balance is the sprout `vpub_new` field, minus the `vpub_old` field.
-    ///
-    /// See [`sprout_value_balance`][svb] for details.
-    ///
-    /// [svb]: crate::transaction::Transaction::sprout_value_balance
-    fn sprout_joinsplit_value_balances(
-        &self,
-    ) -> impl Iterator<Item = ValueBalance<NegativeAllowed>> + '_ {
-        let joinsplit_value_balances = match self {
-            Transaction::V2 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            }
-            | Transaction::V3 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            } => joinsplit_data.joinsplit_value_balances(),
-            Transaction::V4 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            } => joinsplit_data.joinsplit_value_balances(),
-            Transaction::V1 { .. }
-            | Transaction::V2 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V3 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V4 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V5 { .. } => Box::new(iter::empty()),
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 { .. } => Box::new(iter::empty()),
-        };
-
-        joinsplit_value_balances.map(ValueBalance::from_sprout_amount)
-    }
-
-    /// Return the sprout value balance,
-    /// the change in the transaction value pool due to sprout `JoinSplit`s.
-    ///
-    /// The sum of all sprout `vpub_new` fields, minus the sum of all `vpub_old` fields.
-    ///
-    /// Positive values are added to this transaction's value pool,
-    /// and removed from the sprout chain value pool.
-    /// Negative values are removed from this transaction,
-    /// and added to the sprout pool.
-    ///
-    /// <https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions>
-    fn sprout_value_balance(&self) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
-        self.sprout_joinsplit_value_balances().sum()
-    }
-
-    /// Return the sapling value balance,
-    /// the change in the transaction value pool due to sapling `Spend`s and `Output`s.
-    ///
-    /// Returns the `valueBalanceSapling` field in this transaction.
-    ///
-    /// Positive values are added to this transaction's value pool,
-    /// and removed from the sapling chain value pool.
-    /// Negative values are removed from this transaction,
-    /// and added to sapling pool.
-    ///
-    /// <https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions>
-    pub fn sapling_value_balance(&self) -> ValueBalance<NegativeAllowed> {
-        let sapling_value_balance = match self {
-            Transaction::V4 {
-                sapling_shielded_data: Some(sapling_shielded_data),
-                ..
-            } => sapling_shielded_data.value_balance,
-            Transaction::V5 {
-                sapling_shielded_data: Some(sapling_shielded_data),
-                ..
-            } => sapling_shielded_data.value_balance,
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 {
-                sapling_shielded_data: Some(sapling_shielded_data),
-                ..
-            } => sapling_shielded_data.value_balance,
-
-            Transaction::V1 { .. }
-            | Transaction::V2 { .. }
-            | Transaction::V3 { .. }
-            | Transaction::V4 {
-                sapling_shielded_data: None,
-                ..
-            }
-            | Transaction::V5 {
-                sapling_shielded_data: None,
-                ..
-            } => Amount::zero(),
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 {
-                sapling_shielded_data: None,
-                ..
-            } => Amount::zero(),
-        };
-
-        ValueBalance::from_sapling_amount(sapling_value_balance)
-    }
-
-    /// Returns the Sapling binding signature for this transaction.
-    ///
-    /// Returns `Some(binding_sig)` for transactions that contain Sapling shielded
-    /// data (V4+), or `None` for transactions without Sapling components.
-    pub fn sapling_binding_sig(&self) -> Option<Signature<Binding>> {
-        match self {
-            Transaction::V4 {
-                sapling_shielded_data: Some(sapling_shielded_data),
-                ..
-            } => Some(sapling_shielded_data.binding_sig),
-            Transaction::V5 {
-                sapling_shielded_data: Some(sapling_shielded_data),
-                ..
-            } => Some(sapling_shielded_data.binding_sig),
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 {
-                sapling_shielded_data: Some(sapling_shielded_data),
-                ..
-            } => Some(sapling_shielded_data.binding_sig),
-            _ => None,
-        }
-    }
-
-    /// Returns the JoinSplit public key for this transaction.
-    ///
-    /// Returns `Some(pub_key)` for transactions that contain JoinSplit data (V2-V4),
-    /// or `None` for transactions without JoinSplit components or unsupported versions.
-    ///
-    /// ## Note
-    /// JoinSplits are deprecated in favor of Sapling and Orchard
-    pub fn joinsplit_pub_key(&self) -> Option<ed25519::VerificationKeyBytes> {
-        match self {
-            Transaction::V2 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            } => Some(joinsplit_data.pub_key),
-            Transaction::V3 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            } => Some(joinsplit_data.pub_key),
-            Transaction::V4 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            } => Some(joinsplit_data.pub_key),
-            _ => None,
-        }
-    }
-
-    /// Returns the JoinSplit signature this for transaction.
-    ///
-    /// Returns `Some(signature)` for transactions that contain JoinSplit data (V2-V4),
-    /// or `None` for transactions without JoinSplit components or unsupported versions.
-    ///
-    /// ## Note
-    /// JoinSplits are deprecated in favor of Sapling and Orchard
-    pub fn joinsplit_sig(&self) -> Option<ed25519::Signature> {
-        match self {
-            Transaction::V2 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            } => Some(joinsplit_data.sig),
-            Transaction::V3 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            } => Some(joinsplit_data.sig),
-            Transaction::V4 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            } => Some(joinsplit_data.sig),
-            _ => None,
-        }
-    }
-
-    /// Return the orchard value balance, the change in the transaction value
-    /// pool due to [`orchard::Action`]s.
-    ///
-    /// Returns the `valueBalanceOrchard` field in this transaction.
-    ///
-    /// Positive values are added to this transaction's value pool,
-    /// and removed from the orchard chain value pool.
-    /// Negative values are removed from this transaction,
-    /// and added to orchard pool.
-    ///
-    /// <https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions>
-    pub fn orchard_value_balance(&self) -> ValueBalance<NegativeAllowed> {
-        let orchard_value_balance = self
-            .orchard_shielded_data()
-            .map(|shielded_data| shielded_data.value_balance)
-            .unwrap_or_else(Amount::zero);
-
-        ValueBalance::from_orchard_amount(orchard_value_balance)
-    }
-
-    /// Returns the value balances for this transaction using the provided transparent outputs.
-    pub(crate) fn value_balance_from_outputs(
-        &self,
-        outputs: &HashMap<transparent::OutPoint, transparent::Output>,
-    ) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
-        self.transparent_value_balance_from_outputs(outputs)?
-            + self.sprout_value_balance()?
-            + self.sapling_value_balance()
-            + self.orchard_value_balance()
-    }
-
-    /// Returns the value balances for this transaction.
-    ///
-    /// These are the changes in the transaction value pool, split up into transparent, Sprout,
-    /// Sapling, and Orchard values.
-    ///
-    /// Calculated as the sum of the inputs and outputs from each pool, or the sum of the value
-    /// balances from each pool.
-    ///
-    /// Positive values are added to this transaction's value pool, and removed from the
-    /// corresponding chain value pool. Negative values are removed from this transaction, and added
-    /// to the corresponding pool.
-    ///
-    /// <https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions>
-    ///
-    /// `utxos` must contain the utxos of every input in the transaction, including UTXOs created by
-    /// earlier transactions in this block.
-    ///
-    /// ## Note
-    ///
-    /// The chain value pool has the opposite sign to the transaction value pool.
+    /// Get the overall value balance for this transaction.
     pub fn value_balance(
         &self,
-        utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
-    ) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
-        self.value_balance_from_outputs(&outputs_from_utxos(utxos.clone()))
+        utxos: &std::collections::HashMap<transparent::OutPoint, transparent::Utxo>,
+    ) -> Result<ValueBalance<NegativeAllowed>, crate::value_balance::ValueBalanceError> {
+        let transparent = self.transparent_value_balance_from_outputs(
+            &transparent::outputs_from_utxos(utxos.clone()),
+        )?;
+        let sprout = self.sprout_value_balance();
+        let sapling = self.sapling_value_balance();
+        let orchard = self.orchard_value_balance();
+
+        transparent + sprout + sapling + orchard
     }
 
-    /// Converts [`Transaction`] to [`zcash_primitives::transaction::Transaction`].
-    ///
-    /// If the tx contains a network upgrade, this network upgrade must match the passed `nu`. The
-    /// passed `nu` must also contain a consensus branch id convertible to its `librustzcash`
-    /// equivalent.
-    pub(crate) fn to_librustzcash(
+    /// Returns the [`transparent::CoinbaseSpendRestriction`] for this transaction,
+    /// assuming it is mined at `spend_height`.
+    pub fn coinbase_spend_restriction(
         &self,
-        nu: NetworkUpgrade,
-    ) -> Result<zcash_primitives::transaction::Transaction, crate::Error> {
-        if self.network_upgrade().is_some_and(|tx_nu| tx_nu != nu) {
-            return Err(crate::Error::InvalidConsensusBranchId);
+        network: &crate::parameters::Network,
+        spend_height: block::Height,
+    ) -> transparent::CoinbaseSpendRestriction {
+        if self.outputs().is_empty() || network.should_allow_unshielded_coinbase_spends() {
+            transparent::CoinbaseSpendRestriction::CheckCoinbaseMaturity { spend_height }
+        } else {
+            transparent::CoinbaseSpendRestriction::DisallowCoinbaseSpend
+        }
+    }
+}
+
+impl PartialEq for Transaction {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.txid() == other.0.txid()
+    }
+}
+
+impl Eq for Transaction {}
+
+impl std::fmt::Display for Transaction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Transaction(v{}, {}, {} tin, {} tout)",
+            self.version(),
+            self.unmined_id(),
+            self.inputs().len(),
+            self.outputs().len(),
+        )
+    }
+}
+
+impl From<&Transaction> for Hash {
+    fn from(transaction: &Transaction) -> Self {
+        transaction.hash()
+    }
+}
+
+impl From<std::sync::Arc<Transaction>> for Hash {
+    fn from(transaction: std::sync::Arc<Transaction>) -> Self {
+        transaction.hash()
+    }
+}
+
+impl From<&Transaction> for UnminedTxId {
+    fn from(transaction: &Transaction) -> Self {
+        transaction.unmined_id()
+    }
+}
+
+impl From<std::sync::Arc<Transaction>> for UnminedTxId {
+    fn from(transaction: std::sync::Arc<Transaction>) -> Self {
+        transaction.unmined_id()
+    }
+}
+
+impl TryFrom<&Transaction> for AuthDigest {
+    type Error = &'static str;
+
+    /// Computes the authorizing data commitment for a transaction.
+    ///
+    /// Returns an error if passed a pre-V5 transaction (which has no auth digest).
+    fn try_from(transaction: &Transaction) -> Result<Self, Self::Error> {
+        transaction
+            .auth_digest()
+            .ok_or("pre-V5 transactions do not have an auth digest")
+    }
+}
+
+impl crate::serialization::ZcashSerialize for Transaction {
+    fn zcash_serialize<W: std::io::Write>(&self, writer: W) -> Result<(), std::io::Error> {
+        self.0.write(writer)
+    }
+}
+
+impl crate::serialization::ZcashDeserializeWithContext<zcash_protocol::consensus::BranchId>
+    for Transaction
+{
+    fn zcash_deserialize_with_context<R: std::io::Read>(
+        reader: R,
+        &branch_id: &zcash_protocol::consensus::BranchId,
+    ) -> Result<Self, crate::serialization::SerializationError> {
+        let inner = zp_tx::Transaction::read(reader, branch_id)?;
+        Ok(Transaction(inner))
+    }
+}
+
+impl crate::serialization::ZcashDeserialize for Transaction {
+    /// Deserialize a transaction without network context.
+    ///
+    /// # Branch ID handling
+    ///
+    /// - **V5+ transactions**: the consensus branch ID is read from the wire. Correct.
+    /// - **V1-V4 transactions**: the branch ID is NOT on the wire, so a default
+    ///   (`BranchId::Canopy`) is stored.  This does not affect parsing or txid
+    ///   computation, but the stored `consensus_branch_id` field will be wrong for
+    ///   transactions mined before Canopy.  Use
+    ///   `ZcashDeserializeWithContext<BranchId>` when the correct branch ID is known.
+    ///
+    /// # Callers
+    ///
+    /// Prefer `ZcashDeserializeWithContext<BranchId>` when the correct branch ID is
+    /// known.  This context-free impl exists for:
+    /// - Block deserialization (branch ID is corrected afterward)
+    /// - Network message parsing and RPC (transactions are re-validated with the
+    ///   correct branch ID before sighash computation)
+    fn zcash_deserialize<R: std::io::Read>(
+        reader: R,
+    ) -> Result<Self, crate::serialization::SerializationError> {
+        use crate::serialization::ZcashSerialize as _;
+
+        let branch_id = zcash_protocol::consensus::BranchId::Canopy;
+
+        // Limit to MAX_BLOCK_BYTES: a transaction larger than a block is always invalid.
+        let limited = reader.take(crate::block::MAX_BLOCK_BYTES);
+        // Wrap reader to record bytes as they are consumed, so we can validate
+        // the V4 sapling value balance field post-parse without over-reading.
+        let mut recording = RecordingReader::new(limited);
+        let inner = zp_tx::Transaction::read(&mut recording, branch_id)?;
+        let raw_bytes = recording.into_recorded();
+
+        // Validate coinbase inputs: the height encoding must parse correctly.
+        // zcash_primitives accepts raw bytes without validating the height encoding,
+        // so we validate it explicitly here to preserve Zebra's parse-time check.
+        if let Some(bundle) = inner.transparent_bundle() {
+            for txin in &bundle.vin {
+                if *txin.prevout() == zcash_transparent::bundle::OutPoint::NULL {
+                    let script_bytes = txin.script_sig().0 .0.clone();
+                    transparent::serialize::parse_coinbase_height(script_bytes)?;
+                }
+            }
         }
 
-        let Some(branch_id) = nu.branch_id() else {
-            return Err(crate::Error::InvalidConsensusBranchId);
+        // For V4 transactions: validate valueBalanceSapling is 0 when there are no
+        // sapling spends or outputs. zcash_primitives reads the field but discards it
+        // in this case, so we check by re-serializing and comparing with the original.
+        if inner.version() == TxVersion::V4 && inner.sapling_bundle().is_none() {
+            let tx = Transaction(inner);
+            let mut re_serialized = Vec::new();
+            tx.zcash_serialize(&mut re_serialized)?;
+            if raw_bytes != re_serialized {
+                return Err(crate::serialization::SerializationError::BadTransactionBalance);
+            }
+            return Ok(tx);
+        }
+
+        Ok(Transaction(inner))
+    }
+}
+
+/// An `io::Read` wrapper that records every byte consumed, for post-parse validation.
+struct RecordingReader<R> {
+    inner: R,
+    recorded: Vec<u8>,
+}
+
+impl<R: std::io::Read> RecordingReader<R> {
+    fn new(inner: R) -> Self {
+        Self {
+            inner,
+            recorded: Vec::new(),
+        }
+    }
+
+    fn into_recorded(self) -> Vec<u8> {
+        self.recorded
+    }
+}
+
+impl<R: std::io::Read> std::io::Read for RecordingReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        self.recorded.extend_from_slice(&buf[..n]);
+        Ok(n)
+    }
+}
+
+impl Clone for Transaction {
+    fn clone(&self) -> Self {
+        Transaction(self.0.clone())
+    }
+}
+
+// Human-readable Serialize for elasticsearch, tests, and snapshots.
+// Produces structured output matching the old Transaction enum format
+// so that RON snapshot tests remain human-readable.
+#[cfg(any(test, feature = "proptest-impl", feature = "elasticsearch"))]
+impl serde::Serialize for Transaction {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStructVariant;
+
+        let version = self.version();
+        let (variant_name, field_count) = match version {
+            1 => ("V1", 3),
+            2 => ("V2", 4),
+            3 => ("V3", 5),
+            4 => ("V4", 6),
+            _ => ("V5", 7),
         };
 
-        let Ok(branch_id) = consensus::BranchId::try_from(branch_id) else {
-            return Err(crate::Error::InvalidConsensusBranchId);
-        };
+        let mut sv = serializer.serialize_struct_variant(
+            "Transaction",
+            version.saturating_sub(1),
+            variant_name,
+            field_count,
+        )?;
 
-        Ok(zcash_primitives::transaction::Transaction::read(
-            &self.zcash_serialize_to_vec()?[..],
-            branch_id,
-        )?)
-    }
-
-    // Common Sapling & Orchard Properties
-
-    /// Does this transaction have shielded inputs or outputs?
-    pub fn has_shielded_data(&self) -> bool {
-        self.has_shielded_inputs() || self.has_shielded_outputs()
-    }
-
-    /// Get the version group ID for this transaction, if any.
-    pub fn version_group_id(&self) -> Option<u32> {
-        // We could store the parsed version group ID and return that,
-        // but since the consensus rules constraint it, we can just return
-        // the value that must have been parsed.
-        match self {
-            Transaction::V1 { .. } | Transaction::V2 { .. } => None,
-            Transaction::V3 { .. } => Some(OVERWINTER_VERSION_GROUP_ID),
-            Transaction::V4 { .. } => Some(SAPLING_VERSION_GROUP_ID),
-            Transaction::V5 { .. } => Some(TX_V5_VERSION_GROUP_ID),
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 { .. } => Some(TX_V6_VERSION_GROUP_ID),
+        // V5+ has network_upgrade as the first field (unwrap since V5 always has one)
+        if version >= 5 {
+            let nu = self
+                .network_upgrade()
+                .unwrap_or(crate::parameters::NetworkUpgrade::Nu5);
+            sv.serialize_field("network_upgrade", &nu)?;
         }
-    }
 
-    /// Access the zip233 amount field of this transaction, regardless of version.
-    pub fn zip233_amount(&self) -> Amount<NonNegative> {
-        match self {
-            Transaction::V1 { .. }
-            | Transaction::V2 { .. }
-            | Transaction::V3 { .. }
-            | Transaction::V4 { .. }
-            | Transaction::V5 { .. } => Amount::zero(),
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 { zip233_amount, .. } => *zip233_amount,
+        sv.serialize_field("lock_time", &compat::u32_to_lock_time(self.0.lock_time()))?;
+
+        // V3+ has expiry_height (use Height(0) when nExpiryHeight == 0, matching old format)
+        if version >= 3 {
+            let eh =
+                compat::block_height_to_height(self.0.expiry_height()).unwrap_or(block::Height(0));
+            sv.serialize_field("expiry_height", &eh)?;
         }
+
+        sv.serialize_field("inputs", &self.inputs())?;
+        sv.serialize_field("outputs", &self.outputs())?;
+
+        if (2..=4).contains(&version) {
+            let has_joinsplit = self.has_sprout_joinsplit_data();
+            sv.serialize_field::<Option<()>>(
+                "joinsplit_data",
+                if has_joinsplit { &Some(()) } else { &None },
+            )?;
+        }
+
+        if version >= 4 {
+            let has_sapling = self.has_sapling_shielded_data();
+            sv.serialize_field::<Option<()>>(
+                "sapling_shielded_data",
+                if has_sapling { &Some(()) } else { &None },
+            )?;
+        }
+
+        if version >= 5 {
+            let has_orchard = self.has_orchard_shielded_data();
+            sv.serialize_field::<Option<()>>(
+                "orchard_shielded_data",
+                if has_orchard { &Some(()) } else { &None },
+            )?;
+        }
+
+        sv.end()
     }
 }
 
 #[cfg(any(test, feature = "proptest-impl"))]
 impl Transaction {
-    /// Updates the [`NetworkUpgrade`] for this transaction.
+    /// Build a V1 transaction from transparent components. Used in tests.
+    pub fn test_v1(
+        inputs: Vec<transparent::Input>,
+        outputs: Vec<transparent::Output>,
+        lock_time: LockTime,
+    ) -> Self {
+        Self::build_transparent(
+            zcash_primitives::transaction::TxVersion::Sprout(1),
+            zcash_protocol::consensus::BranchId::Sprout,
+            compat::lock_time_to_u32(&lock_time),
+            zcash_primitives::consensus::BlockHeight::from_u32(0),
+            inputs,
+            outputs,
+        )
+    }
+
+    /// Build a V2 transaction from transparent components. Used in tests.
+    pub fn test_v2(
+        inputs: Vec<transparent::Input>,
+        outputs: Vec<transparent::Output>,
+        lock_time: LockTime,
+    ) -> Self {
+        Self::build_transparent(
+            zcash_primitives::transaction::TxVersion::Sprout(2),
+            zcash_protocol::consensus::BranchId::Sprout,
+            compat::lock_time_to_u32(&lock_time),
+            zcash_primitives::consensus::BlockHeight::from_u32(0),
+            inputs,
+            outputs,
+        )
+    }
+
+    /// Build a V3 (Overwinter) transaction from transparent components. Used in tests.
+    pub fn test_v3(
+        inputs: Vec<transparent::Input>,
+        outputs: Vec<transparent::Output>,
+        lock_time: LockTime,
+        expiry_height: block::Height,
+    ) -> Self {
+        Self::build_transparent(
+            zcash_primitives::transaction::TxVersion::V3,
+            zcash_protocol::consensus::BranchId::Overwinter,
+            compat::lock_time_to_u32(&lock_time),
+            compat::height_to_block_height(expiry_height),
+            inputs,
+            outputs,
+        )
+    }
+
+    /// Build a V4 (Sapling) transaction from transparent components. Used in tests.
+    pub fn test_v4(
+        inputs: Vec<transparent::Input>,
+        outputs: Vec<transparent::Output>,
+        lock_time: LockTime,
+        expiry_height: block::Height,
+    ) -> Self {
+        Self::build_transparent(
+            zcash_primitives::transaction::TxVersion::V4,
+            zcash_protocol::consensus::BranchId::Canopy,
+            compat::lock_time_to_u32(&lock_time),
+            compat::height_to_block_height(expiry_height),
+            inputs,
+            outputs,
+        )
+    }
+
+    /// Build a V5 (NU5) transaction from transparent components. Used in tests.
+    pub fn test_v5(
+        network_upgrade: crate::parameters::NetworkUpgrade,
+        inputs: Vec<transparent::Input>,
+        outputs: Vec<transparent::Output>,
+        lock_time: LockTime,
+        expiry_height: block::Height,
+    ) -> Self {
+        let branch_id = network_upgrade
+            .branch_id()
+            .and_then(|cbid| zcash_protocol::consensus::BranchId::try_from(cbid).ok())
+            .unwrap_or(zcash_protocol::consensus::BranchId::Nu5);
+        Self::build_transparent(
+            zcash_primitives::transaction::TxVersion::V5,
+            branch_id,
+            compat::lock_time_to_u32(&lock_time),
+            compat::height_to_block_height(expiry_height),
+            inputs,
+            outputs,
+        )
+    }
+
+    fn build_transparent(
+        version: zcash_primitives::transaction::TxVersion,
+        branch_id: zcash_protocol::consensus::BranchId,
+        lock_time: u32,
+        expiry_height: zcash_primitives::consensus::BlockHeight,
+        inputs: Vec<transparent::Input>,
+        outputs: Vec<transparent::Output>,
+    ) -> Self {
+        let vin: Vec<_> = inputs.iter().map(compat::input_to_txin).collect();
+        let vout: Vec<_> = outputs.iter().map(compat::output_to_txout).collect();
+        let transparent_bundle = if vin.is_empty() && vout.is_empty() {
+            None
+        } else {
+            Some(zcash_transparent::bundle::Bundle {
+                vin,
+                vout,
+                authorization: zcash_transparent::bundle::Authorized,
+            })
+        };
+        let tx_data = zp_tx::TransactionData::from_parts(
+            version,
+            branch_id,
+            lock_time,
+            expiry_height,
+            transparent_bundle,
+            None,
+            None,
+            None,
+        );
+        Transaction(tx_data.freeze().expect("built from valid components"))
+    }
+
+    /// Rebuild this transaction with new transparent inputs.
+    pub fn with_transparent_inputs(self, inputs: Vec<transparent::Input>) -> Self {
+        let vin = inputs
+            .iter()
+            .map(crate::transaction::compat::input_to_txin)
+            .collect();
+        let vout = self
+            .0
+            .transparent_bundle()
+            .map(|b| b.vout.clone())
+            .unwrap_or_default();
+        let transparent_bundle = Some(zcash_transparent::bundle::Bundle {
+            vin,
+            vout,
+            authorization: zcash_transparent::bundle::Authorized,
+        });
+        self.rebuild_with_transparent(transparent_bundle)
+    }
+
+    /// Rebuild this transaction with new transparent outputs.
+    pub fn with_transparent_outputs(self, outputs: Vec<transparent::Output>) -> Self {
+        let vin = self
+            .0
+            .transparent_bundle()
+            .map(|b| b.vin.clone())
+            .unwrap_or_default();
+        let vout: Vec<_> = outputs
+            .iter()
+            .map(crate::transaction::compat::output_to_txout)
+            .collect();
+        let transparent_bundle = if vin.is_empty() && vout.is_empty() {
+            None
+        } else {
+            Some(zcash_transparent::bundle::Bundle {
+                vin,
+                vout,
+                authorization: zcash_transparent::bundle::Authorized,
+            })
+        };
+        self.rebuild_with_transparent(transparent_bundle)
+    }
+
+    fn rebuild_with_transparent(
+        self,
+        transparent_bundle: Option<
+            zcash_transparent::bundle::Bundle<zcash_transparent::bundle::Authorized>,
+        >,
+    ) -> Self {
+        let data = &*self.0;
+        let tx_data = zp_tx::TransactionData::from_parts(
+            data.version(),
+            data.consensus_branch_id(),
+            data.lock_time(),
+            data.expiry_height(),
+            transparent_bundle,
+            data.sprout_bundle().cloned(),
+            data.sapling_bundle().cloned(),
+            data.orchard_bundle().cloned(),
+        );
+        Transaction(tx_data.freeze().expect("rebuilt from valid transaction"))
+    }
+
+    /// Rebuild this transaction with a different expiry height (recomputes txid).
+    pub fn set_expiry_height(&mut self, height: block::Height) {
+        let data = self.0.clone().into_data();
+        let new_data = zp_tx::TransactionData::<zp_tx::Authorized>::from_parts(
+            data.version(),
+            data.consensus_branch_id(),
+            data.lock_time(),
+            compat::height_to_block_height(height),
+            data.transparent_bundle().cloned(),
+            data.sprout_bundle().cloned(),
+            data.sapling_bundle().cloned(),
+            data.orchard_bundle().cloned(),
+        );
+        self.0 = new_data.freeze().expect("rebuilt from valid transaction");
+    }
+
+    /// Rebuild this transaction with a different network upgrade / branch ID (recomputes txid).
+    pub fn set_network_upgrade(&mut self, nu: NetworkUpgrade) {
+        let branch_id = nu
+            .branch_id()
+            .and_then(|cbid| zcash_protocol::consensus::BranchId::try_from(cbid).ok())
+            .expect("network upgrade must have a valid branch ID");
+        let data = self.0.clone().into_data();
+        let new_data = zp_tx::TransactionData::<zp_tx::Authorized>::from_parts(
+            data.version(),
+            branch_id,
+            data.lock_time(),
+            data.expiry_height(),
+            data.transparent_bundle().cloned(),
+            data.sprout_bundle().cloned(),
+            data.sapling_bundle().cloned(),
+            data.orchard_bundle().cloned(),
+        );
+        self.0 = new_data.freeze().expect("rebuilt from valid transaction");
+    }
+
+    /// Replace all transparent outputs (recomputes txid).
+    pub fn set_outputs(&mut self, outputs: Vec<transparent::Output>) {
+        *self = self.clone().with_transparent_outputs(outputs);
+    }
+
+    /// Rebuild this transaction with a replaced Orchard bundle (recomputes txid).
     ///
-    /// ## Notes
+    /// Test helper for synthesizing transactions with malformed orchard data
+    /// (e.g. duplicated actions) that would otherwise be unreachable through
+    /// normal construction paths.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn with_orchard_bundle(
+        self,
+        bundle: Option<::orchard::Bundle<::orchard::bundle::Authorized, ZatBalance>>,
+    ) -> Self {
+        let data = &*self.0;
+        let tx_data = zp_tx::TransactionData::from_parts(
+            data.version(),
+            data.consensus_branch_id(),
+            data.lock_time(),
+            data.expiry_height(),
+            data.transparent_bundle().cloned(),
+            data.sprout_bundle().cloned(),
+            data.sapling_bundle().cloned(),
+            bundle,
+        );
+        Transaction(tx_data.freeze().expect("rebuilt from valid transaction"))
+    }
+
+    /// Build a V4 transaction with optional JoinSplit data via byte-level serialization.
     ///
-    /// - Updating the network upgrade for V1, V2, V3 and V4 transactions is not possible.
-    pub fn update_network_upgrade(&mut self, nu: NetworkUpgrade) -> Result<(), &str> {
-        match self {
-            Transaction::V1 { .. }
-            | Transaction::V2 { .. }
-            | Transaction::V3 { .. }
-            | Transaction::V4 { .. } => Err(
-                "Updating the network upgrade for V1, V2, V3 and V4 transactions is not possible.",
-            ),
-            Transaction::V5 {
-                ref mut network_upgrade,
-                ..
-            } => {
-                *network_upgrade = nu;
-                Ok(())
-            }
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 {
-                ref mut network_upgrade,
-                ..
-            } => {
-                *network_upgrade = nu;
-                Ok(())
-            }
+    /// Transparent inputs/outputs and sapling shielded data are empty.
+    /// Used by tests that need V4 transactions with sprout data.
+    pub fn test_v4_with_joinsplit_data(
+        joinsplit_data: Option<&JoinSplitData<crate::primitives::Groth16Proof>>,
+    ) -> Self {
+        use crate::serialization::{ZcashDeserialize, ZcashSerialize};
+
+        let mut bytes: Vec<u8> = Vec::new();
+        bytes.extend_from_slice(&0x8000_0004u32.to_le_bytes()); // V4 overwintered
+        bytes.extend_from_slice(&0x892F_2085u32.to_le_bytes()); // Sapling versionGroupId
+        bytes.push(0x00); // nTransparentInputs
+        bytes.push(0x00); // nTransparentOutputs
+        bytes.extend_from_slice(&500_000_000u32.to_le_bytes()); // nLockTime
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // nExpiryHeight
+        bytes.extend_from_slice(&0i64.to_le_bytes()); // valueBalanceSapling
+        bytes.push(0x00); // nSpendsSapling
+        bytes.push(0x00); // nOutputsSapling
+        if let Some(jsd) = joinsplit_data {
+            jsd.zcash_serialize(&mut bytes)
+                .expect("joinsplit_data serialization should succeed");
+        } else {
+            bytes.push(0x00); // nJoinSplits
         }
-    }
-
-    /// Modify the expiry height of this transaction.
-    ///
-    /// # Panics
-    ///
-    /// - if called on a v1 or v2 transaction
-    pub fn expiry_height_mut(&mut self) -> &mut block::Height {
-        match self {
-            Transaction::V1 { .. } | Transaction::V2 { .. } => {
-                panic!("v1 and v2 transactions are not supported")
-            }
-            Transaction::V3 {
-                ref mut expiry_height,
-                ..
-            }
-            | Transaction::V4 {
-                ref mut expiry_height,
-                ..
-            }
-            | Transaction::V5 {
-                ref mut expiry_height,
-                ..
-            } => expiry_height,
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 {
-                ref mut expiry_height,
-                ..
-            } => expiry_height,
-        }
-    }
-
-    /// Modify the transparent inputs of this transaction, regardless of version.
-    pub fn inputs_mut(&mut self) -> &mut Vec<transparent::Input> {
-        match self {
-            Transaction::V1 { ref mut inputs, .. } => inputs,
-            Transaction::V2 { ref mut inputs, .. } => inputs,
-            Transaction::V3 { ref mut inputs, .. } => inputs,
-            Transaction::V4 { ref mut inputs, .. } => inputs,
-            Transaction::V5 { ref mut inputs, .. } => inputs,
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 { ref mut inputs, .. } => inputs,
-        }
-    }
-
-    /// Modify the `value_balance` field from the `orchard::ShieldedData` in this transaction,
-    /// regardless of version.
-    ///
-    /// See `orchard_value_balance` for details.
-    pub fn orchard_value_balance_mut(&mut self) -> Option<&mut Amount<NegativeAllowed>> {
-        self.orchard_shielded_data_mut()
-            .map(|shielded_data| &mut shielded_data.value_balance)
-    }
-
-    /// Modify the `value_balance` field from the `sapling::ShieldedData` in this transaction,
-    /// regardless of version.
-    ///
-    /// See `sapling_value_balance` for details.
-    pub fn sapling_value_balance_mut(&mut self) -> Option<&mut Amount<NegativeAllowed>> {
-        match self {
-            Transaction::V4 {
-                sapling_shielded_data: Some(sapling_shielded_data),
-                ..
-            } => Some(&mut sapling_shielded_data.value_balance),
-            Transaction::V5 {
-                sapling_shielded_data: Some(sapling_shielded_data),
-                ..
-            } => Some(&mut sapling_shielded_data.value_balance),
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 {
-                sapling_shielded_data: Some(sapling_shielded_data),
-                ..
-            } => Some(&mut sapling_shielded_data.value_balance),
-            Transaction::V1 { .. }
-            | Transaction::V2 { .. }
-            | Transaction::V3 { .. }
-            | Transaction::V4 {
-                sapling_shielded_data: None,
-                ..
-            }
-            | Transaction::V5 {
-                sapling_shielded_data: None,
-                ..
-            } => None,
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 {
-                sapling_shielded_data: None,
-                ..
-            } => None,
-        }
-    }
-
-    /// Modify the `vpub_new` fields from `JoinSplit`s in this transaction,
-    /// regardless of version, in the order they appear in the transaction.
-    ///
-    /// See `input_values_from_sprout` for details.
-    pub fn input_values_from_sprout_mut(
-        &mut self,
-    ) -> Box<dyn Iterator<Item = &mut Amount<NonNegative>> + '_> {
-        match self {
-            // JoinSplits with Bctv14 Proofs
-            Transaction::V2 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            }
-            | Transaction::V3 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            } => Box::new(
-                joinsplit_data
-                    .joinsplits_mut()
-                    .map(|joinsplit| &mut joinsplit.vpub_new),
-            ),
-            // JoinSplits with Groth Proofs
-            Transaction::V4 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            } => Box::new(
-                joinsplit_data
-                    .joinsplits_mut()
-                    .map(|joinsplit| &mut joinsplit.vpub_new),
-            ),
-            // No JoinSplits
-            Transaction::V1 { .. }
-            | Transaction::V2 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V3 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V4 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V5 { .. } => Box::new(std::iter::empty()),
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 { .. } => Box::new(std::iter::empty()),
-        }
-    }
-
-    /// Modify the `vpub_old` fields from `JoinSplit`s in this transaction,
-    /// regardless of version, in the order they appear in the transaction.
-    ///
-    /// See `output_values_to_sprout` for details.
-    pub fn output_values_to_sprout_mut(
-        &mut self,
-    ) -> Box<dyn Iterator<Item = &mut Amount<NonNegative>> + '_> {
-        match self {
-            // JoinSplits with Bctv14 Proofs
-            Transaction::V2 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            }
-            | Transaction::V3 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            } => Box::new(
-                joinsplit_data
-                    .joinsplits_mut()
-                    .map(|joinsplit| &mut joinsplit.vpub_old),
-            ),
-            // JoinSplits with Groth16 Proofs
-            Transaction::V4 {
-                joinsplit_data: Some(joinsplit_data),
-                ..
-            } => Box::new(
-                joinsplit_data
-                    .joinsplits_mut()
-                    .map(|joinsplit| &mut joinsplit.vpub_old),
-            ),
-            // No JoinSplits
-            Transaction::V1 { .. }
-            | Transaction::V2 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V3 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V4 {
-                joinsplit_data: None,
-                ..
-            }
-            | Transaction::V5 { .. } => Box::new(std::iter::empty()),
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 { .. } => Box::new(std::iter::empty()),
-        }
-    }
-
-    /// Modify the transparent output values of this transaction, regardless of version.
-    pub fn output_values_mut(&mut self) -> impl Iterator<Item = &mut Amount<NonNegative>> {
-        self.outputs_mut()
-            .iter_mut()
-            .map(|output| &mut output.value)
-    }
-
-    /// Modify the [`orchard::ShieldedData`] in this transaction,
-    /// regardless of version.
-    pub fn orchard_shielded_data_mut(&mut self) -> Option<&mut orchard::ShieldedData> {
-        match self {
-            Transaction::V5 {
-                orchard_shielded_data: Some(orchard_shielded_data),
-                ..
-            } => Some(orchard_shielded_data),
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 {
-                orchard_shielded_data: Some(orchard_shielded_data),
-                ..
-            } => Some(orchard_shielded_data),
-
-            Transaction::V1 { .. }
-            | Transaction::V2 { .. }
-            | Transaction::V3 { .. }
-            | Transaction::V4 { .. }
-            | Transaction::V5 {
-                orchard_shielded_data: None,
-                ..
-            } => None,
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 {
-                orchard_shielded_data: None,
-                ..
-            } => None,
-        }
-    }
-
-    /// Modify the transparent outputs of this transaction, regardless of version.
-    pub fn outputs_mut(&mut self) -> &mut Vec<transparent::Output> {
-        match self {
-            Transaction::V1 {
-                ref mut outputs, ..
-            } => outputs,
-            Transaction::V2 {
-                ref mut outputs, ..
-            } => outputs,
-            Transaction::V3 {
-                ref mut outputs, ..
-            } => outputs,
-            Transaction::V4 {
-                ref mut outputs, ..
-            } => outputs,
-            Transaction::V5 {
-                ref mut outputs, ..
-            } => outputs,
-            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            Transaction::V6 {
-                ref mut outputs, ..
-            } => outputs,
-        }
+        Transaction::zcash_deserialize(bytes.as_slice())
+            .expect("manually constructed V4 transaction should deserialize")
     }
 }

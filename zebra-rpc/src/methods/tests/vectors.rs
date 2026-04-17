@@ -2298,11 +2298,11 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
 
     // Try getting mempool transactions with a different tip hash
 
-    let tx = Arc::new(Transaction::V1 {
-        inputs: vec![],
-        outputs: vec![],
-        lock_time: transaction::LockTime::unlocked(),
-    });
+    let tx = Arc::new(Transaction::test_v1(
+        vec![],
+        vec![],
+        transaction::LockTime::unlocked(),
+    ));
 
     let unmined_tx = UnminedTx {
         transaction: tx.clone(),

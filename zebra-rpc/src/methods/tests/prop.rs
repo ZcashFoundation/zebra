@@ -64,7 +64,7 @@ proptest! {
 
             let send_task = tokio::spawn(async move { rpc.send_raw_transaction(transaction_hex, None).await });
 
-            let unmined_transaction = UnminedTx::from(transaction);
+            let unmined_transaction = UnminedTx::from(std::sync::Arc::new(transaction));
             let expected_request = mempool::Request::Queue(vec![unmined_transaction.into()]);
             let (rsp_tx, rsp_rx) = oneshot::channel();
             let _ = rsp_tx.send(Ok(()));
@@ -108,7 +108,7 @@ proptest! {
             let _transaction_hex = transaction_hex.clone();
             let send_task = tokio::spawn(async move { _rpc.send_raw_transaction(_transaction_hex, None).await });
 
-            let unmined_transaction = UnminedTx::from(transaction);
+            let unmined_transaction = UnminedTx::from(std::sync::Arc::new(transaction));
             let expected_request = mempool::Request::Queue(vec![unmined_transaction.clone().into()]);
 
             mempool
@@ -156,7 +156,7 @@ proptest! {
 
         runtime.block_on(async move {
             let tx = hex::encode(&transaction.zcash_serialize_to_vec()?);
-            let req = mempool::Request::Queue(vec![UnminedTx::from(transaction).into()]);
+            let req = mempool::Request::Queue(vec![UnminedTx::from(std::sync::Arc::new(transaction)).into()]);
             let rsp = mempool::Response::Queued(vec![Err(DummyError.into())]);
             let mempool_query = mempool.expect_request(req).map_ok(|r| r.respond(rsp));
 
@@ -729,7 +729,7 @@ proptest! {
                 let rpc = rpc.clone();
                 tokio::task::spawn(async move { rpc.send_raw_transaction(tx_hex, None).await })
             };
-            let tx_unmined = UnminedTx::from(tx);
+            let tx_unmined = UnminedTx::from(std::sync::Arc::new(tx));
             let expected_request = mempool::Request::Queue(vec![tx_unmined.clone().into()]);
 
             // fail the mempool insertion
@@ -808,7 +808,7 @@ proptest! {
                 let tx_hex = hex::encode(&tx_bytes);
                 let send_task = tokio::task::spawn(async move { rpc_clone.send_raw_transaction(tx_hex, None).await });
 
-                let tx_unmined = UnminedTx::from(tx.clone());
+                let tx_unmined = UnminedTx::from(std::sync::Arc::new(tx.clone()));
                 let expected_request = mempool::Request::Queue(vec![tx_unmined.clone().into()]);
 
                 // insert to hs we will use later
@@ -854,7 +854,7 @@ proptest! {
             // each transaction will be retried
             for tx in txs.clone() {
                 let expected_request =
-                    mempool::Request::Queue(vec![mempool::Gossip::Tx(UnminedTx::from(tx))]);
+                    mempool::Request::Queue(vec![mempool::Gossip::Tx(UnminedTx::from(std::sync::Arc::new(tx)))]);
                 let (rsp_tx, rsp_rx) = oneshot::channel();
                 let _ = rsp_tx.send(Ok(()));
                 let response = mempool::Response::Queued(vec![Ok(rsp_rx)]);

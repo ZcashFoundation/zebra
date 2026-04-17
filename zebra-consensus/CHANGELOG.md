@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Transaction verification now uses `TxVersion` enum for version dispatch
+  instead of pattern matching on `Transaction` variants.
+- Sprout JoinSplit verification reimplemented using `zcash_primitives`
+  `JsDescription` accessors instead of the old `JoinSplitData` type.
+
+### Added
+
+- `groth16::joinsplit_to_item()` for creating Groth16 verification items
+  from `zcash_primitives` JoinSplit descriptions.
+
 ## [5.0.1] - 2026-03-25
 
 This release fixes an important security issue:

@@ -8,7 +8,6 @@ use color_eyre::Report;
 use tokio::time::{self, timeout};
 use tower::{ServiceBuilder, ServiceExt};
 
-use rand::{seq::SliceRandom, thread_rng};
 use zebra_chain::{
     amount::Amount,
     block::Block,
@@ -1190,14 +1189,10 @@ async fn mempool_responds_to_await_output() -> Result<(), Report> {
 async fn mempool_reject_non_standard() -> Result<(), Report> {
     let network = Network::Mainnet;
 
-    // pick a random transaction from the dummy Zcash blockchain
-    let unmined_transactions = network.unmined_transactions_in_blocks(1..=10);
-    let transactions = unmined_transactions.collect::<Vec<_>>();
-    let mut rng = thread_rng();
-    let mut last_transaction = transactions
-        .choose(&mut rng)
-        .expect("Missing transaction")
-        .clone();
+    let mut last_transaction = network
+        .unmined_transactions_in_blocks(1..=10)
+        .next()
+        .expect("missing transaction");
 
     last_transaction.height = Some(Height(100_000));
 
@@ -1205,10 +1200,10 @@ async fn mempool_reject_non_standard() -> Result<(), Report> {
     // This is done by replacing its outputs with a dust output.
     let mut tx = last_transaction.transaction.transaction.clone();
     let tx_mut = Arc::make_mut(&mut tx);
-    *tx_mut.outputs_mut() = vec![transparent::Output {
+    tx_mut.set_outputs(vec![transparent::Output {
         value: Amount::new(10), // this is below the dust threshold
         lock_script: p2pkh_script([0u8; 20]),
-    }];
+    }]);
     last_transaction.transaction.transaction = tx;
 
     // Set cost limit to the cost of the transaction we will try to insert.
@@ -1256,10 +1251,10 @@ async fn mempool_accept_standard_op_return() -> Result<(), Report> {
 
     let mut tx = last_transaction.transaction.transaction.clone();
     let tx_mut = Arc::make_mut(&mut tx);
-    *tx_mut.outputs_mut() = vec![transparent::Output {
+    tx_mut.set_outputs(vec![transparent::Output {
         value: Amount::new(0),
         lock_script: op_return_script(&[0x01]),
-    }];
+    }]);
     last_transaction.transaction.transaction = tx;
 
     let cost_limit = last_transaction.cost();
@@ -1297,10 +1292,10 @@ async fn mempool_reject_op_return_too_large() -> Result<(), Report> {
 
     let mut tx = last_transaction.transaction.transaction.clone();
     let tx_mut = Arc::make_mut(&mut tx);
-    *tx_mut.outputs_mut() = vec![transparent::Output {
+    tx_mut.set_outputs(vec![transparent::Output {
         value: Amount::new(0),
         lock_script: op_return_script(&[0x03]),
-    }];
+    }]);
     last_transaction.transaction.transaction = tx;
 
     let cost_limit = last_transaction.cost();
@@ -1352,7 +1347,7 @@ async fn mempool_reject_multi_op_return() -> Result<(), Report> {
 
     let mut tx = last_transaction.transaction.transaction.clone();
     let tx_mut = Arc::make_mut(&mut tx);
-    *tx_mut.outputs_mut() = vec![
+    tx_mut.set_outputs(vec![
         transparent::Output {
             value: Amount::new(0),
             lock_script: op_return_script(&[0x04]),
@@ -1361,7 +1356,7 @@ async fn mempool_reject_multi_op_return() -> Result<(), Report> {
             value: Amount::new(0),
             lock_script: op_return_script(&[0x05]),
         },
-    ];
+    ]);
     last_transaction.transaction.transaction = tx;
 
     let cost_limit = last_transaction.cost();
@@ -1405,10 +1400,10 @@ async fn mempool_reject_non_standard_scriptpubkey() -> Result<(), Report> {
 
     let mut tx = last_transaction.transaction.transaction.clone();
     let tx_mut = Arc::make_mut(&mut tx);
-    *tx_mut.outputs_mut() = vec![transparent::Output {
+    tx_mut.set_outputs(vec![transparent::Output {
         value: Amount::new(1000),
         lock_script: transparent::Script::new(&[0x00]),
-    }];
+    }]);
     last_transaction.transaction.transaction = tx;
 
     let cost_limit = last_transaction.cost();
@@ -1454,10 +1449,10 @@ async fn mempool_reject_bare_multisig() -> Result<(), Report> {
 
     let mut tx = last_transaction.transaction.transaction.clone();
     let tx_mut = Arc::make_mut(&mut tx);
-    *tx_mut.outputs_mut() = vec![transparent::Output {
+    tx_mut.set_outputs(vec![transparent::Output {
         value: Amount::new(1000),
         lock_script: multisig_script(1, 1),
-    }];
+    }]);
     last_transaction.transaction.transaction = tx;
 
     let cost_limit = last_transaction.cost();
@@ -1501,10 +1496,10 @@ async fn mempool_reject_large_multisig() -> Result<(), Report> {
 
     let mut tx = last_transaction.transaction.transaction.clone();
     let tx_mut = Arc::make_mut(&mut tx);
-    *tx_mut.outputs_mut() = vec![transparent::Output {
+    tx_mut.set_outputs(vec![transparent::Output {
         value: Amount::new(1000),
         lock_script: multisig_script(1, 4),
-    }];
+    }]);
     last_transaction.transaction.transaction = tx;
 
     let cost_limit = last_transaction.cost();
@@ -1769,14 +1764,20 @@ fn op_n(n: u8) -> u8 {
 }
 
 fn set_first_prevout_unlock_script(tx: &mut Transaction, script: transparent::Script) {
-    for input in tx.inputs_mut() {
+    // Rebuild the transaction with modified inputs.
+    let mut inputs = tx.inputs();
+    let mut modified = false;
+    for input in &mut inputs {
         if let transparent::Input::PrevOut { unlock_script, .. } = input {
-            *unlock_script = script;
-            return;
+            *unlock_script = script.clone();
+            modified = true;
+            break;
         }
     }
-
-    panic!("missing prevout input");
+    if !modified {
+        panic!("missing prevout input");
+    }
+    *tx = tx.clone().with_transparent_inputs(inputs);
 }
 
 fn pick_transaction_with_prevout(network: &Network) -> VerifiedUnminedTx {

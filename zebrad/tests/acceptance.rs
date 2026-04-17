@@ -3902,9 +3902,9 @@ async fn has_spending_transaction_ids() -> Result<()> {
                 .iter()
                 .filter_map(Input::outpoint)
                 .map(Spend::from)
-                .chain(tx.sprout_nullifiers().cloned().map(Spend::from))
-                .chain(tx.sapling_nullifiers().cloned().map(Spend::from))
-                .chain(tx.orchard_nullifiers().cloned().map(Spend::from))
+                .chain(tx.sprout_nullifiers().map(Spend::from))
+                .chain(tx.sapling_nullifiers().map(Spend::from))
+                .chain(tx.orchard_nullifiers().map(Spend::from))
                 .map(|spend| (spend, tx_hash))
                 .collect::<Vec<_>>()
         });

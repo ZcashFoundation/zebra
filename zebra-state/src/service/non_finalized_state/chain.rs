@@ -25,10 +25,7 @@ use zebra_chain::{
     serialization::ZcashSerialize as _,
     sprout,
     subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
-    transaction::{
-        self,
-        Transaction::{self, *},
-    },
+    transaction::{self, Transaction},
     transparent,
     value_balance::ValueBalance,
     work::difficulty::PartialCumulativeWork,
@@ -1555,55 +1552,8 @@ impl Chain {
             .zip(transaction_hashes.iter().cloned())
             .enumerate()
         {
-            let (
-                inputs,
-                outputs,
-                joinsplit_data,
-                sapling_shielded_data_per_spend_anchor,
-                sapling_shielded_data_shared_anchor,
-                orchard_shielded_data,
-            ) = match transaction.deref() {
-                V4 {
-                    inputs,
-                    outputs,
-                    joinsplit_data,
-                    sapling_shielded_data,
-                    ..
-                } => (inputs, outputs, joinsplit_data, sapling_shielded_data, &None, &None),
-                V5 {
-                    inputs,
-                    outputs,
-                    sapling_shielded_data,
-                    orchard_shielded_data,
-                    ..
-                } => (
-                    inputs,
-                    outputs,
-                    &None,
-                    &None,
-                    sapling_shielded_data,
-                    orchard_shielded_data,
-                ),
-                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-                V6 {
-                    inputs,
-                    outputs,
-                    sapling_shielded_data,
-                    orchard_shielded_data,
-                    ..
-                } => (
-                    inputs,
-                    outputs,
-                    &None,
-                    &None,
-                    sapling_shielded_data,
-                    orchard_shielded_data,
-                ),
-
-                V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
-                    "older transaction versions only exist in finalized blocks, because of the mandatory canopy checkpoint",
-                ),
-            };
+            let inputs = transaction.inputs();
+            let outputs = transaction.outputs();
 
             // add key `transaction.hash` and value `(height, tx_index)` to `tx_loc_by_hash`
             let transaction_location = TransactionLocation::from_usize(height, transaction_index);
@@ -1616,22 +1566,38 @@ impl Chain {
             );
 
             // add the utxos this produced
-            self.update_chain_tip_with(&(outputs, &transaction_hash, new_outputs))?;
+            self.update_chain_tip_with(&(&outputs, &transaction_hash, new_outputs))?;
             // delete the utxos this consumed
-            self.update_chain_tip_with(&(inputs, &transaction_hash, spent_outputs))?;
+            self.update_chain_tip_with(&(&inputs, &transaction_hash, spent_outputs))?;
 
-            // add the shielded data
+            // add the shielded nullifiers
 
             #[cfg(not(feature = "indexer"))]
             let transaction_hash = ();
 
-            self.update_chain_tip_with(&(joinsplit_data, &transaction_hash))?;
-            self.update_chain_tip_with(&(
-                sapling_shielded_data_per_spend_anchor,
-                &transaction_hash,
-            ))?;
-            self.update_chain_tip_with(&(sapling_shielded_data_shared_anchor, &transaction_hash))?;
-            self.update_chain_tip_with(&(orchard_shielded_data, &transaction_hash))?;
+            // Sprout nullifiers
+            let sprout_nfs: Vec<_> = transaction.sprout_nullifiers().collect();
+            check::nullifier::add_to_non_finalized_chain_unique(
+                &mut self.sprout_nullifiers,
+                &sprout_nfs,
+                transaction_hash,
+            )?;
+
+            // Sapling nullifiers
+            let sapling_nfs: Vec<_> = transaction.sapling_nullifiers().collect();
+            check::nullifier::add_to_non_finalized_chain_unique(
+                &mut self.sapling_nullifiers,
+                &sapling_nfs,
+                transaction_hash,
+            )?;
+
+            // Orchard nullifiers
+            let orchard_nfs: Vec<_> = transaction.orchard_nullifiers().collect();
+            check::nullifier::add_to_non_finalized_chain_unique(
+                &mut self.orchard_nullifiers,
+                &orchard_nfs,
+                transaction_hash,
+            )?;
         }
 
         // update the chain value pool balances
@@ -1740,60 +1706,13 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
         for (transaction, transaction_hash) in
             block.transactions.iter().zip(transaction_hashes.iter())
         {
-            let (
-                inputs,
-                outputs,
-                joinsplit_data,
-                sapling_shielded_data_per_spend_anchor,
-                sapling_shielded_data_shared_anchor,
-                orchard_shielded_data,
-            ) = match transaction.deref() {
-                V4 {
-                    inputs,
-                    outputs,
-                    joinsplit_data,
-                    sapling_shielded_data,
-                    ..
-                } => (inputs, outputs, joinsplit_data, sapling_shielded_data, &None, &None),
-                V5 {
-                    inputs,
-                    outputs,
-                    sapling_shielded_data,
-                    orchard_shielded_data,
-                    ..
-                } => (
-                    inputs,
-                    outputs,
-                    &None,
-                    &None,
-                    sapling_shielded_data,
-                    orchard_shielded_data,
-                ),
-                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-                V6 {
-                    inputs,
-                    outputs,
-                    sapling_shielded_data,
-                    orchard_shielded_data,
-                    ..
-                } => (
-                    inputs,
-                    outputs,
-                    &None,
-                    &None,
-                    sapling_shielded_data,
-                    orchard_shielded_data,
-                ),
-
-                V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
-                    "older transaction versions only exist in finalized blocks, because of the mandatory canopy checkpoint",
-                ),
-            };
+            let inputs = transaction.inputs();
+            let outputs = transaction.outputs();
 
             // remove the utxos this produced
-            self.revert_chain_with(&(outputs, transaction_hash, new_outputs), position);
+            self.revert_chain_with(&(&outputs, transaction_hash, new_outputs), position);
             // reset the utxos this consumed
-            self.revert_chain_with(&(inputs, transaction_hash, spent_outputs), position);
+            self.revert_chain_with(&(&inputs, transaction_hash, spent_outputs), position);
 
             // TODO: move this to the history tree UpdateWith.revert...()?
             // remove `transaction.hash` from `tx_loc_by_hash`
@@ -1802,21 +1721,28 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                 "transactions must be present if block was added to chain"
             );
 
-            // remove the shielded data
+            // remove the shielded nullifiers
 
-            #[cfg(not(feature = "indexer"))]
-            let transaction_hash = &();
+            // Sprout nullifiers
+            let sprout_nfs: Vec<_> = transaction.sprout_nullifiers().collect();
+            check::nullifier::remove_from_non_finalized_chain(
+                &mut self.sprout_nullifiers,
+                &sprout_nfs,
+            );
 
-            self.revert_chain_with(&(joinsplit_data, transaction_hash), position);
-            self.revert_chain_with(
-                &(sapling_shielded_data_per_spend_anchor, transaction_hash),
-                position,
+            // Sapling nullifiers
+            let sapling_nfs: Vec<_> = transaction.sapling_nullifiers().collect();
+            check::nullifier::remove_from_non_finalized_chain(
+                &mut self.sapling_nullifiers,
+                &sapling_nfs,
             );
-            self.revert_chain_with(
-                &(sapling_shielded_data_shared_anchor, transaction_hash),
-                position,
+
+            // Orchard nullifiers
+            let orchard_nfs: Vec<_> = transaction.orchard_nullifiers().collect();
+            check::nullifier::remove_from_non_finalized_chain(
+                &mut self.orchard_nullifiers,
+                &orchard_nfs,
             );
-            self.revert_chain_with(&(orchard_shielded_data, transaction_hash), position);
         }
 
         // TODO: move these to the shielded UpdateWith.revert...()?

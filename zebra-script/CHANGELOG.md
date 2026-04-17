@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `Sigops::scripts()` now returns `Vec<Vec<u8>>` instead of
+  `impl Iterator<Item = &[u8]>`.
+- `CachedFfiTransaction::inputs()` now returns `Vec<transparent::Input>`
+  instead of `&[transparent::Input]`.
+
 ## [5.0.0] - 2026-03-12
 
 - `zebra-chain` was bumped to `6.0.0`

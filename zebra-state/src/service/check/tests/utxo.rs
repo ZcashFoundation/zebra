@@ -957,14 +957,12 @@ fn transaction_v4_with_transparent_data(
     let inputs: Vec<_> = inputs.into_iter().collect();
     let outputs: Vec<_> = outputs.into_iter().collect();
 
-    let mut transaction = Transaction::V4 {
+    let mut transaction = Transaction::test_v4(
         inputs,
         outputs,
-        lock_time: LockTime::min_lock_time_timestamp(),
-        expiry_height: Height(0),
-        joinsplit_data: None,
-        sapling_shielded_data: None,
-    };
+        LockTime::min_lock_time_timestamp(),
+        Height(0),
+    );
 
     // do required fixups, but ignore any errors,
     // because we're not checking all the consensus rules here
