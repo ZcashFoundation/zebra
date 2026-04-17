@@ -168,3 +168,6 @@ zebra-rpc/qa/cache/
 # Lychee link checker cache
 .lycheecache
 /.agent-shell/
+
+# Build artifacts from deterministic build
+build/
