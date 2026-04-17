@@ -71,6 +71,22 @@ jobs:
           # https://github.com/ZcashFoundation/zebra/blob/main/.cargo/config.toml#L87
           RUSTDOCFLAGS: --html-in-header katex-header.html -D warnings -A rustdoc::private_intra_doc_links --cfg docsrs --show-type-layout --generate-link-to-definition --enable-index-page -Zunstable-options
 
+      - name: Include benchmark dashboard
+        run: |
+          # Copy benchmark data from gh-pages branch into the docs output.
+          # This makes the benchmark dashboard available at /dev/bench/.
+          # Fails gracefully if gh-pages has no benchmark data yet.
+          git fetch origin gh-pages --depth=1 || true
+          if git rev-parse origin/gh-pages >/dev/null 2>&1; then
+            git show origin/gh-pages:dev/bench/index.html > /dev/null 2>&1 && {
+              mkdir -p target/docs/dev/bench
+              git show origin/gh-pages:dev/bench/index.html > target/docs/dev/bench/index.html
+              git show origin/gh-pages:dev/bench/data.js > target/docs/dev/bench/data.js
+            } || echo "No benchmark data on gh-pages yet, skipping"
+          else
+            echo "gh-pages branch not found, skipping benchmark dashboard"
+          fi
+
       - name: Setup Pages
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b #v5.0.0
 
