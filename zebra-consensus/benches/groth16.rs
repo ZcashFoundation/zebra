@@ -1,27 +1,31 @@
 //! Benchmarks for Groth16 proof verification (Sprout JoinSplits).
 //!
-//! These benchmarks measure the cost of verifying Groth16 zero-knowledge proofs
-//! used in Sprout JoinSplit descriptions. Groth16 verification involves a pairing
-//! check on BLS12-381, making it one of the most expensive per-proof operations
-//! during chain sync.
+//! Measures the cost of verifying Groth16 zero-knowledge proofs used in Sprout
+//! JoinSplit descriptions. Groth16 verification is a pairing check on BLS12-381,
+//! making it one of the most expensive per-proof operations during chain sync.
+//!
+//! # Benchmark groups
+//!
+//! - `groth16_sprout`: matches the hypothetical `verifier` label if Sprout
+//!   gets its own batch verifier (none exists today; see the production path
+//!   in `zebra-consensus/src/primitives/groth16.rs`).
+//! - `groth16_sprout_inputs`: primary input preparation cost.
+//!
+//! Group names intentionally mirror the `verifier` label values emitted from
+//! `zebra-consensus/src/primitives/*.rs` (e.g. `groth16_sapling`, `halo2`,
+//! `redpallas`) so prod regressions can be traced to benchmarks by label.
 //!
 //! # Test data limitations
 //!
-//! The hardcoded mainnet test blocks in `zebra-test` contain only a small number
-//! of Groth16 JoinSplits (~5 items). To benchmark realistic batch sizes, items
-//! are cycled (repeated) to fill larger batches.
-//!
-//! This is valid for measuring verification throughput because:
-//! - Groth16 pairing checks perform the same curve operations regardless of the
-//!   specific proof bytes — the cost is constant per proof.
-//! - Primary input preparation (blake2b hashing + field element packing) is also
-//!   constant-cost regardless of input values.
-//!
-//! However, this means the benchmarks do **not** capture any cache effects or
-//! memory access patterns that might differ with truly unique proofs at scale.
+//! The hardcoded mainnet test blocks in `zebra-test` contain only a small
+//! number of Groth16 JoinSplits. Items are cycled to fill larger batches;
+//! Groth16 cost is constant per proof so this is valid for per-item
+//! throughput measurements, but cache/memory effects are not representative.
 
 // Disabled due to warnings in criterion macros
 #![allow(missing_docs)]
+
+mod common;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 
@@ -29,21 +33,29 @@ use bellman::groth16::PreparedVerifyingKey;
 use bls12_381::Bls12;
 
 use zebra_chain::{
-    block::Block, primitives::Groth16Proof, serialization::ZcashDeserializeInto, sprout::JoinSplit,
+    block::Block,
+    primitives::{ed25519, Groth16Proof},
+    serialization::ZcashDeserializeInto,
+    sprout::JoinSplit,
 };
 
 use zebra_consensus::groth16::{Description, DescriptionWrapper, Item, SPROUT};
 
-/// Extracts valid Groth16 items from the hardcoded mainnet test blocks.
+/// A Sprout JoinSplit paired with its transaction's JoinSplit public key,
+/// ready to be converted into a Groth16 verification [`Item`].
+#[derive(Clone)]
+struct JoinSplitSource {
+    joinsplit: JoinSplit<Groth16Proof>,
+    pub_key: ed25519::VerificationKeyBytes,
+}
+
+/// Extracts JoinSplit/pub-key pairs from the mainnet test blocks.
 ///
-/// Iterates over `MAINNET_BLOCKS`, deserializes each block, and collects all
-/// Groth16 JoinSplit proofs along with their primary inputs. Only V4 transactions
-/// contain Groth16 JoinSplits (earlier versions use BCTV14 proofs, V5+ dropped
-/// Sprout support).
-///
-/// Returns a small set of real, valid proof items (~5 from current test vectors).
-fn extract_groth16_items_from_blocks() -> Vec<Item> {
-    let mut items = Vec::new();
+/// Only V4 transactions contain Groth16 JoinSplits (V2/V3 use BCTV14 proofs,
+/// V5+ dropped Sprout support). The returned pairs are the raw inputs to
+/// [`Item`] construction and to `primary_inputs()`.
+fn extract_joinsplit_sources() -> Vec<JoinSplitSource> {
+    let mut sources = Vec::new();
 
     for (_height, bytes) in zebra_test::vectors::MAINNET_BLOCKS.iter() {
         let block: Block = bytes.zcash_deserialize_into().expect("valid block");
@@ -61,115 +73,85 @@ fn extract_groth16_items_from_blocks() -> Vec<Item> {
                 .expect("pub key must exist since there are joinsplits");
 
             for joinsplit in joinsplits {
-                let item: Item = DescriptionWrapper(&(joinsplit, &pub_key))
-                    .try_into()
-                    .expect("valid groth16 item");
-                items.push(item);
+                sources.push(JoinSplitSource {
+                    joinsplit: joinsplit.clone(),
+                    pub_key,
+                });
             }
         }
     }
 
     assert!(
-        !items.is_empty(),
+        !sources.is_empty(),
         "test blocks must contain Groth16 JoinSplits"
     );
-    items
+    sources
 }
 
-/// Creates a batch of `n` items by cycling through the source items.
-///
-/// Since Groth16 verification cost is constant per proof (the same pairing
-/// operations run regardless of proof content), repeating proofs produces
-/// benchmarks with the same per-item cost as unique proofs would.
-fn cycled_items(source: &[Item], n: usize) -> Vec<Item> {
-    source.iter().cycle().take(n).cloned().collect()
+/// Converts a [`JoinSplitSource`] into a verification [`Item`].
+fn item_from(source: &JoinSplitSource) -> Item {
+    DescriptionWrapper(&(&source.joinsplit, &source.pub_key))
+        .try_into()
+        .expect("valid groth16 item")
 }
 
-/// Benchmarks Groth16 proof verification at various batch sizes, and the cost
-/// of preparing primary inputs from JoinSplit descriptions.
 fn bench_groth16_verify(c: &mut Criterion) {
     let pvk: &'static PreparedVerifyingKey<Bls12> = SPROUT.prepared_verifying_key();
-    let source_items = extract_groth16_items_from_blocks();
+    let sources = extract_joinsplit_sources();
+    let items: Vec<Item> = sources.iter().map(item_from).collect();
 
-    // -- Verification benchmarks --
+    let mut group = c.benchmark_group("groth16_sprout");
 
-    let mut group = c.benchmark_group("Groth16 Verification");
-
-    // Single proof verification: baseline cost of one pairing check.
     group.throughput(Throughput::Elements(1));
-    group.bench_function("single proof", |b| {
-        let item = source_items[0].clone();
+    group.bench_function("single", |b| {
+        let item = items[0].clone();
         b.iter(|| {
             item.clone().verify_single(pvk).expect("valid proof");
         })
     });
 
-    // Multiple proofs verified individually (no batching).
-    // Items are cycled to reach batch sizes larger than the source set.
-    // This measures linear scaling since Zebra does not yet batch Groth16
-    // (see https://github.com/ZcashFoundation/zebra/issues/3127).
+    // Sprout has no batch verifier in Zebra today: every proof is verified
+    // individually in the production path, so this is the cost profile.
     for n in [2, 4, 8, 16, 32, 64] {
-        let items = cycled_items(&source_items, n);
+        let batch = common::cycled(&items, n);
 
         group.throughput(Throughput::Elements(n as u64));
-        group.bench_with_input(
-            BenchmarkId::new("unbatched", n),
-            &items,
-            |b, items: &Vec<Item>| {
-                b.iter(|| {
-                    for item in items.iter() {
-                        item.clone().verify_single(pvk).expect("valid proof");
-                    }
-                })
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("unbatched", n), &batch, |b, batch| {
+            b.iter(|| {
+                for item in batch {
+                    item.clone().verify_single(pvk).expect("valid proof");
+                }
+            })
+        });
     }
 
     group.finish();
-
-    // -- Input preparation benchmarks --
-
-    let mut group = c.benchmark_group("Groth16 Input Preparation");
-
-    for (_height, bytes) in zebra_test::vectors::MAINNET_BLOCKS.iter() {
-        let block: Block = bytes.zcash_deserialize_into().expect("valid block");
-
-        for tx in &block.transactions {
-            let joinsplits: Vec<&JoinSplit<Groth16Proof>> =
-                tx.sprout_groth16_joinsplits().collect();
-
-            if joinsplits.is_empty() {
-                continue;
-            }
-
-            let pub_key = tx
-                .sprout_joinsplit_pub_key()
-                .expect("pub key must exist since there are joinsplits");
-
-            let joinsplit = joinsplits[0];
-
-            // Cost of computing h_sig + encoding primary inputs as BLS12-381 scalars.
-            group.bench_function("primary_inputs", |b| {
-                b.iter(|| {
-                    let description: (&JoinSplit<Groth16Proof>, &_) = (joinsplit, &pub_key);
-                    description.primary_inputs()
-                })
-            });
-
-            // Cost of proof deserialization (Proof::read on 192 bytes) + input computation.
-            group.bench_function("item_creation", |b| {
-                b.iter(|| {
-                    let _item: Item = DescriptionWrapper(&(joinsplit, &pub_key))
-                        .try_into()
-                        .expect("valid groth16 item");
-                })
-            });
-
-            group.finish();
-            return;
-        }
-    }
 }
 
-criterion_group!(benches, bench_groth16_verify);
+fn bench_groth16_inputs(c: &mut Criterion) {
+    let sources = extract_joinsplit_sources();
+    let source = sources.first().expect("at least one JoinSplit source");
+
+    let mut group = c.benchmark_group("groth16_sprout_inputs");
+
+    // Cost of computing h_sig and encoding primary inputs as BLS12-381 scalars.
+    group.bench_function("primary_inputs", |b| {
+        b.iter(|| {
+            let description: (&JoinSplit<Groth16Proof>, &_) = (&source.joinsplit, &source.pub_key);
+            description.primary_inputs()
+        })
+    });
+
+    // Cost of Proof::read (192 bytes) + primary input computation, i.e. the
+    // full Item construction that runs before verification.
+    group.bench_function("item_creation", |b| b.iter(|| item_from(source)));
+
+    group.finish();
+}
+
+criterion_group! {
+    name = benches;
+    config = Criterion::default().noise_threshold(0.1).sample_size(50);
+    targets = bench_groth16_verify, bench_groth16_inputs
+}
 criterion_main!(benches);

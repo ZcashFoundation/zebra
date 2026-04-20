@@ -1,4 +1,9 @@
-//! Benchmarks for batch verifiication of RedPallas signatures.
+//! Benchmarks for batch verification of RedPallas signatures.
+//!
+//! Group name `redpallas` matches the `verifier` label in
+//! `zebra.consensus.batch.duration_seconds` emitted from
+//! `zebra-consensus/src/primitives/redpallas.rs`, so a prod regression on
+//! that histogram maps to this file by name.
 
 // Disabled due to warnings in criterion macros
 #![allow(missing_docs)]
@@ -60,66 +65,58 @@ fn sigs_with_distinct_keys() -> impl Iterator<Item = Item> {
 ///
 /// Includes heterogeneous groups across [SigType], [SigningKey]s, and messages.
 fn bench_batch_verify(c: &mut Criterion) {
-    let mut group = c.benchmark_group("Batch Verification");
+    let mut group = c.benchmark_group("redpallas");
     for &n in [8usize, 16, 24, 32, 40, 48, 56, 64].iter() {
         group.throughput(Throughput::Elements(n as u64));
 
         let sigs = sigs_with_distinct_keys().take(n).collect::<Vec<_>>();
 
-        group.bench_with_input(
-            BenchmarkId::new("Unbatched verification", n),
-            &sigs,
-            |b, sigs| {
-                b.iter(|| {
-                    for item in sigs.iter() {
-                        match item {
-                            Item::SpendAuth { vk_bytes, sig } => {
-                                assert!(VerificationKey::try_from(*vk_bytes)
-                                    .and_then(|vk| vk.verify(MESSAGE_BYTES, sig))
-                                    .is_ok());
-                            }
-                            Item::Binding { vk_bytes, sig } => {
-                                assert!(VerificationKey::try_from(*vk_bytes)
-                                    .and_then(|vk| vk.verify(MESSAGE_BYTES, sig))
-                                    .is_ok());
-                            }
+        group.bench_with_input(BenchmarkId::new("unbatched", n), &sigs, |b, sigs| {
+            b.iter(|| {
+                for item in sigs.iter() {
+                    match item {
+                        Item::SpendAuth { vk_bytes, sig } => {
+                            assert!(VerificationKey::try_from(*vk_bytes)
+                                .and_then(|vk| vk.verify(MESSAGE_BYTES, sig))
+                                .is_ok());
+                        }
+                        Item::Binding { vk_bytes, sig } => {
+                            assert!(VerificationKey::try_from(*vk_bytes)
+                                .and_then(|vk| vk.verify(MESSAGE_BYTES, sig))
+                                .is_ok());
                         }
                     }
-                })
-            },
-        );
+                }
+            })
+        });
 
-        group.bench_with_input(
-            BenchmarkId::new("Batched verification", n),
-            &sigs,
-            |b, sigs| {
-                b.iter(|| {
-                    let mut batch = batch::Verifier::new();
-                    for item in sigs.iter() {
-                        match item {
-                            Item::SpendAuth { vk_bytes, sig } => {
-                                batch.queue(batch::Item::from_spendauth(
-                                    *vk_bytes,
-                                    *sig,
-                                    MESSAGE_BYTES,
-                                ));
-                            }
-                            Item::Binding { vk_bytes, sig } => {
-                                batch.queue(batch::Item::from_binding(
-                                    *vk_bytes,
-                                    *sig,
-                                    MESSAGE_BYTES,
-                                ));
-                            }
+        group.bench_with_input(BenchmarkId::new("batched", n), &sigs, |b, sigs| {
+            b.iter(|| {
+                let mut batch = batch::Verifier::new();
+                for item in sigs.iter() {
+                    match item {
+                        Item::SpendAuth { vk_bytes, sig } => {
+                            batch.queue(batch::Item::from_spendauth(
+                                *vk_bytes,
+                                *sig,
+                                MESSAGE_BYTES,
+                            ));
+                        }
+                        Item::Binding { vk_bytes, sig } => {
+                            batch.queue(batch::Item::from_binding(*vk_bytes, *sig, MESSAGE_BYTES));
                         }
                     }
-                    assert!(batch.verify(thread_rng()).is_ok())
-                })
-            },
-        );
+                }
+                assert!(batch.verify(thread_rng()).is_ok())
+            })
+        });
     }
     group.finish();
 }
 
-criterion_group!(benches, bench_batch_verify);
+criterion_group! {
+    name = benches;
+    config = Criterion::default().noise_threshold(0.1).sample_size(50);
+    targets = bench_batch_verify
+}
 criterion_main!(benches);

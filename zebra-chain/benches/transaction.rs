@@ -41,8 +41,7 @@ fn first_tx_of_version(block: &Block, version: u32) -> Option<Vec<u8>> {
 }
 
 fn bench_transaction_deserialize(c: &mut Criterion) {
-    let mut group = c.benchmark_group("Transaction Deserialization");
-    group.noise_threshold(0.05).sample_size(50);
+    let mut group = c.benchmark_group("transaction_deserialize");
 
     // Collect (label, serialized_tx_bytes) pairs for each version.
     let mut tx_samples: Vec<(&str, Vec<u8>)> = Vec::new();
@@ -94,23 +93,19 @@ fn bench_transaction_deserialize(c: &mut Criterion) {
     }
 
     for (label, tx_bytes) in &tx_samples {
-        group.bench_with_input(
-            BenchmarkId::new("deserialize", *label),
-            tx_bytes,
-            |b, bytes| b.iter(|| Transaction::zcash_deserialize(Cursor::new(bytes)).unwrap()),
-        );
+        group.bench_with_input(BenchmarkId::from_parameter(*label), tx_bytes, |b, bytes| {
+            b.iter(|| Transaction::zcash_deserialize(Cursor::new(bytes)).unwrap())
+        });
     }
 
     group.finish();
 
-    // Serialization benchmarks: measure the reverse direction.
-    let mut group = c.benchmark_group("Transaction Serialization");
-    group.noise_threshold(0.05).sample_size(50);
+    let mut group = c.benchmark_group("transaction_serialize");
 
     for (label, tx_bytes) in &tx_samples {
         let tx = Transaction::zcash_deserialize(Cursor::new(tx_bytes)).unwrap();
 
-        group.bench_with_input(BenchmarkId::new("serialize", *label), &tx, |b, tx| {
+        group.bench_with_input(BenchmarkId::from_parameter(*label), &tx, |b, tx| {
             b.iter(|| tx.zcash_serialize_to_vec().unwrap())
         });
     }
@@ -118,5 +113,9 @@ fn bench_transaction_deserialize(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_transaction_deserialize);
+criterion_group! {
+    name = benches;
+    config = Criterion::default().noise_threshold(0.1).sample_size(50);
+    targets = bench_transaction_deserialize
+}
 criterion_main!(benches);
