@@ -63,6 +63,13 @@ cargo install --locked zebrad@{{ version }}
 # Aggregates changelogs from all zebra-* crates for a complete release view.
 # Uses the legacy v-prefixed tag format (v4.3.1) for compatibility with
 # GCP deployment, which parses the tag to extract the semver.
+#
+# git_release_draft splits the automated chain into two stages. release-plz
+# still publishes crates and creates the tag, but the GitHub Release stays
+# in Draft. release-binaries.yml and zfnd-deploy-nodes-gcp.yml key on
+# `released` / `published` events which do not fire for drafts, so a human
+# promotes the draft after verifying crates.io and filling in the
+# [FILL IN] sections of git_release_body.
 [[package]]
 name = "zebrad"
 changelog_include = [
@@ -77,6 +84,7 @@ changelog_include = [
 ]
 git_tag_name = "v{{ version }}"
 git_release_enable = true
+git_release_draft = true
 changelog_path = "./CHANGELOG.md"
 
 # ── Library crates ──────────────────────────────────────────────
