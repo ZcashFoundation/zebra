@@ -11,15 +11,26 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+# Bench list is shared by both jobs. Each entry is one `cargo ...` invocation
+# minus the leading `cargo` and the per-job flags (`--message-format=json`,
+# `--save-baseline`). Adding a bench here is the only change required.
+env:
+  BENCHES: |
+    criterion -p zebra-consensus --bench groth16
+    criterion -p zebra-consensus --bench halo2
+    criterion -p zebra-consensus --bench sapling
+    criterion -p zebra-chain --bench transaction
+    criterion -p zebra-chain --bench block --features bench
+    criterion -p zebra-chain --bench redpallas
+
 jobs:
-  # Runs all benchmarks and stores results for historical tracking.
-  # Triggered manually via workflow_dispatch.
+  # Runs all benchmarks and publishes results to gh-pages for historical
+  # tracking. Triggered manually via workflow_dispatch.
   benchmark:
     name: Run Benchmarks
     if: github.event_name == 'workflow_dispatch'
     permissions:
       contents: write
-      deployments: write
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -30,18 +41,21 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
         with:
           toolchain: stable
+          cache-on-failure: true
 
       - name: Install cargo-criterion
-        run: cargo install cargo-criterion
+        run: cargo install cargo-criterion --locked
 
       - name: Run benchmarks
         run: |
-          cargo criterion --bench groth16 --message-format=json >> bench_output.json
-          cargo criterion --bench halo2 --message-format=json >> bench_output.json
-          cargo criterion --bench sapling --message-format=json >> bench_output.json
-          cargo criterion --bench transaction --message-format=json >> bench_output.json
-          cargo criterion -p zebra-chain --bench block --features bench --message-format=json >> bench_output.json
-          cargo criterion -p zebra-chain --bench redpallas --message-format=json >> bench_output.json
+          : > bench_output.json
+          while IFS= read -r bench; do
+            [ -z "$bench" ] && continue
+            echo "::group::cargo $bench"
+            # shellcheck disable=SC2086
+            cargo $bench --message-format=json >> bench_output.json
+            echo "::endgroup::"
+          done <<< "$BENCHES"
 
       - name: Convert criterion JSON to github-action-benchmark format
         run: |
@@ -54,15 +68,17 @@ jobs:
 
       - name: Generate summary
         run: |
-          echo "## Benchmark Results" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Benchmark | Time | ±CI |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|-----------|------|-----|" >> "$GITHUB_STEP_SUMMARY"
-          jq -r 'select(.reason == "benchmark-complete") |
-            "| \(.id) | \(.typical.estimate | . / 1e3 | if . >= 1000 then "\(. / 1000 | . * 100 | round / 100) ms" elif . >= 1 then "\(. * 100 | round / 100) µs" else "\(. * 1000 | . * 100 | round / 100) ns" end) | ±\(.typical.lower_bound as $lo | .typical.upper_bound as $hi | (($hi - $lo) / 2 / .typical.estimate * 10000 | round / 100))% |"' \
-            bench_output.json >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Total benchmarks:** $(grep -c '"benchmark-complete"' bench_output.json)" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "## Benchmark Results"
+            echo ""
+            echo "| Benchmark | Time | ±CI |"
+            echo "|-----------|------|-----|"
+            jq -r 'select(.reason == "benchmark-complete") |
+              "| \(.id) | \(.typical.estimate | . / 1e3 | if . >= 1000 then "\(. / 1000 | . * 100 | round / 100) ms" elif . >= 1 then "\(. * 100 | round / 100) µs" else "\(. * 1000 | . * 100 | round / 100) ns" end) | ±\(.typical.lower_bound as $lo | .typical.upper_bound as $hi | (($hi - $lo) / 2 / .typical.estimate * 10000 | round / 100))% |"' \
+              bench_output.json
+            echo ""
+            echo "**Total benchmarks:** $(grep -c '"benchmark-complete"' bench_output.json)"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Store benchmark results
         uses: benchmark-action/github-action-benchmark@a60cea5bc7b49e15c1f58f411161f99e0df48372 #v1
@@ -73,12 +89,17 @@ jobs:
           benchmark-data-dir-path: dev/bench
           github-token: ${{ secrets.GITHUB_TOKEN }}
           auto-push: true
+          # 150% = a run that is 1.5x slower than the previous. Loose enough to
+          # avoid false alarms from ~10-20% runner noise, tight enough to catch
+          # meaningful regressions. Tune once a baseline history accumulates.
           alert-threshold: "150%"
           comment-on-alert: true
           fail-on-alert: false
 
-  # Compares benchmarks between PR branch and base branch.
-  # Triggered by adding the "C-benchmark" label to a PR.
+  # Compares benchmarks between the PR branch and the base branch.
+  # Triggered by maintainers adding the `C-benchmark` label to a PR.
+  # NOTE: the `C-benchmark` label must exist in the repo for this trigger to
+  # fire. Current labels: `gh api /repos/ZcashFoundation/zebra/labels`.
   compare:
     name: Compare Benchmarks
     if: github.event_name == 'pull_request' && github.event.label.name == 'C-benchmark'
@@ -96,33 +117,55 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
         with:
           toolchain: stable
+          cache-on-failure: true
 
       - name: Install critcmp
-        run: cargo install critcmp
+        run: cargo install critcmp --locked
 
       - name: Benchmark base branch
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           git checkout "$BASE_SHA"
-          cargo bench --bench groth16 -- --save-baseline base 2>/dev/null || true
-          cargo bench --bench halo2 -- --save-baseline base 2>/dev/null || true
-          cargo bench --bench sapling -- --save-baseline base 2>/dev/null || true
-          cargo bench --bench transaction -- --save-baseline base 2>/dev/null || true
-          cargo bench -p zebra-chain --bench block --features bench -- --save-baseline base 2>/dev/null || true
-          cargo bench -p zebra-chain --bench redpallas -- --save-baseline base 2>/dev/null || true
+          failures=()
+          while IFS= read -r bench; do
+            [ -z "$bench" ] && continue
+            # Strip the `criterion ` prefix so we can run via `cargo bench`.
+            cmd="${bench#criterion }"
+            echo "::group::base: cargo bench $cmd"
+            # shellcheck disable=SC2086
+            if ! cargo bench $cmd -- --save-baseline base; then
+              failures+=("$cmd")
+            fi
+            echo "::endgroup::"
+          done <<< "$BENCHES"
+          if [ "${#failures[@]}" -gt 0 ]; then
+            {
+              echo "### Base-branch benchmark failures"
+              echo ""
+              echo "The following benches failed on the base branch (likely because they are new in this PR):"
+              echo ""
+              for f in "${failures[@]}"; do
+                echo "- \`cargo bench $f\`"
+              done
+              echo ""
+              echo "critcmp will show no comparison for these."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Benchmark PR branch
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           git checkout "$HEAD_SHA"
-          cargo bench --bench groth16 -- --save-baseline pr 2>/dev/null || true
-          cargo bench --bench halo2 -- --save-baseline pr 2>/dev/null || true
-          cargo bench --bench sapling -- --save-baseline pr 2>/dev/null || true
-          cargo bench --bench transaction -- --save-baseline pr 2>/dev/null || true
-          cargo bench -p zebra-chain --bench block --features bench -- --save-baseline pr 2>/dev/null || true
-          cargo bench -p zebra-chain --bench redpallas -- --save-baseline pr 2>/dev/null || true
+          while IFS= read -r bench; do
+            [ -z "$bench" ] && continue
+            cmd="${bench#criterion }"
+            echo "::group::pr: cargo bench $cmd"
+            # shellcheck disable=SC2086
+            cargo bench $cmd -- --save-baseline pr
+            echo "::endgroup::"
+          done <<< "$BENCHES"
 
       - name: Compare results
         id: compare
@@ -130,29 +173,38 @@ jobs:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
-          echo "## Benchmark Comparison: base vs PR" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          critcmp base pr >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          # Branch names are attacker-controlled. Strip anything that isn't a
+          # conventional ref character before rendering them inside markdown.
+          sanitize() { printf '%s' "$1" | tr -cd 'A-Za-z0-9._/-'; }
+          base_ref=$(sanitize "$BASE_REF")
+          head_ref=$(sanitize "$HEAD_REF")
 
-          # Save for PR comment
+          {
+            echo "## Benchmark Comparison: base vs PR"
+            echo ""
+            echo '```'
+            critcmp base pr
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
           {
             echo 'COMMENT<<EOF'
             echo "## Benchmark Comparison"
             echo ""
-            echo "Comparing \`${BASE_REF}\` (base) vs \`${HEAD_REF}\` (PR)"
+            echo "Comparing \`${base_ref}\` (base) vs \`${head_ref}\` (PR)"
             echo ""
             echo '```'
             critcmp base pr
             echo '```'
             echo ""
-            echo "*Benchmarks ran on CI — results may have higher variance than local runs.*"
+            echo "*Benchmarks ran on CI: results may have higher variance than local runs.*"
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
 
       - name: Post PR comment
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea #v7.0.1
+        env:
+          COMMENT: ${{ steps.compare.outputs.COMMENT }}
         with:
           script: |
             const body = process.env.COMMENT;
@@ -179,5 +231,3 @@ jobs:
                 body,
               });
             }
-        env:
-          COMMENT: ${{ steps.compare.outputs.COMMENT }}
