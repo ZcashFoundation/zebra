@@ -18,11 +18,7 @@ use zebra_chain::serialization::{
     SerializationError, TrustedPreallocate, ZcashDeserialize, ZcashDeserializeInto,
 };
 
-use crate::{
-    meta_addr::MetaAddr,
-    protocol::external::{types::PeerServices, MAX_PROTOCOL_MESSAGE_LEN},
-    PeerSocketAddr,
-};
+use crate::{meta_addr::MetaAddr, protocol::external::types::PeerServices, PeerSocketAddr};
 
 use super::canonical_peer_addr;
 
@@ -316,19 +312,14 @@ impl ZcashDeserialize for AddrV2 {
     }
 }
 
-/// A serialized `addrv2` has:
-/// * 4 byte time,
-/// * 1-9 byte services,
-/// * 1 byte networkID,
-/// * 1-9 byte sizeAddr,
-/// * 0-512 bytes addr,
-/// * 2 bytes port.
-#[allow(clippy::identity_op)]
-pub(in super::super) const ADDR_V2_MIN_SIZE: usize = 4 + 1 + 1 + 1 + 0 + 2;
-
 impl TrustedPreallocate for AddrV2 {
     fn max_allocation() -> u64 {
-        // Since ADDR_V2_MIN_SIZE is less than 2^5, the length of the largest list takes up 5 bytes.
-        ((MAX_PROTOCOL_MESSAGE_LEN - 5) / ADDR_V2_MIN_SIZE) as u64
+        // The protocol caps addrv2 messages at 1,000 entries.
+        // <https://zips.z.cash/zip-0155#specification>
+        //
+        // Previously this was derived from MAX_PROTOCOL_MESSAGE_LEN / ADDR_V2_MIN_SIZE = 233,016,
+        // which allowed a remote peer to force a ~10.7 MiB heap allocation before the cap
+        // was checked. See GHSA-xr93-pcq3-pxf8.
+        crate::constants::MAX_ADDRS_IN_MESSAGE as u64
     }
 }

@@ -8,7 +8,7 @@
 # https://embarkstudios.github.io/cargo-deny/checks/advisories/cfg.html
 [advisories]
 version = 2
-yanked = "deny"
+yanked = "warn" # all core2 0.3.x versions yanked; transitive via zcash_keys, waiting on upstream
 # Unmaintained crate advisories — all transitive via abscissa_core/structopt or direct.
 # Remove each ignore entry as the dependency chain is upgraded.
 ignore = [

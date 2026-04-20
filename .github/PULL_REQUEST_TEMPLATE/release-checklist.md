@@ -131,6 +131,7 @@ Check that the release will work:
 
 ```sh
 cargo release version --verbose --execute --allow-branch '*' -p <crate> patch # [ major | minor ]
+# zebrad only
 cargo release replace --verbose --execute --allow-branch '*' -p <crate>
 ```
 
