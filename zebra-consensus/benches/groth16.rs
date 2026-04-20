@@ -6,17 +6,8 @@
 //!
 //! # Benchmark groups
 //!
-//! - `joinsplit`: Groth16 verification for Sprout JoinSplit descriptions.
-//!   Named after `JOINSPLIT_VERIFIER`, the authoritative verifier service
-//!   in `zebra-consensus/src/primitives/groth16.rs`. Unlike the `halo2`,
-//!   `groth16_sapling`, and `redpallas` benches, there is no matching
-//!   `verifier` label on the `zebra.consensus.batch.duration_seconds`
-//!   histogram because Sprout has no batch verifier today: each JoinSplit
-//!   is verified individually via a `service_fn` (see the comment on
-//!   `JOINSPLIT_VERIFIER`). Tracked in the Zebra performance issue
-//!   (closed #3127, now rolled into #3153).
-//! - `joinsplit_inputs`: primary input preparation cost, isolated from
-//!   pairing verification so the two can be measured separately.
+//! - `joinsplit`: per-proof verification (mirrors `JOINSPLIT_VERIFIER`).
+//! - `joinsplit_inputs`: primary input preparation cost.
 //!
 //! # Test data limitations
 //!
