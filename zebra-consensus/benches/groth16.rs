@@ -6,14 +6,17 @@
 //!
 //! # Benchmark groups
 //!
-//! - `groth16_sprout`: matches the hypothetical `verifier` label if Sprout
-//!   gets its own batch verifier (none exists today; see the production path
-//!   in `zebra-consensus/src/primitives/groth16.rs`).
-//! - `groth16_sprout_inputs`: primary input preparation cost.
-//!
-//! Group names intentionally mirror the `verifier` label values emitted from
-//! `zebra-consensus/src/primitives/*.rs` (e.g. `groth16_sapling`, `halo2`,
-//! `redpallas`) so prod regressions can be traced to benchmarks by label.
+//! - `joinsplit`: Groth16 verification for Sprout JoinSplit descriptions.
+//!   Named after `JOINSPLIT_VERIFIER`, the authoritative verifier service
+//!   in `zebra-consensus/src/primitives/groth16.rs`. Unlike the `halo2`,
+//!   `groth16_sapling`, and `redpallas` benches, there is no matching
+//!   `verifier` label on the `zebra.consensus.batch.duration_seconds`
+//!   histogram because Sprout has no batch verifier today: each JoinSplit
+//!   is verified individually via a `service_fn` (see the comment on
+//!   `JOINSPLIT_VERIFIER`). Tracked in the Zebra performance issue
+//!   (closed #3127, now rolled into #3153).
+//! - `joinsplit_inputs`: primary input preparation cost, isolated from
+//!   pairing verification so the two can be measured separately.
 //!
 //! # Test data limitations
 //!
@@ -100,7 +103,7 @@ fn bench_groth16_verify(c: &mut Criterion) {
     let sources = extract_joinsplit_sources();
     let items: Vec<Item> = sources.iter().map(item_from).collect();
 
-    let mut group = c.benchmark_group("groth16_sprout");
+    let mut group = c.benchmark_group("joinsplit");
 
     group.throughput(Throughput::Elements(1));
     group.bench_function("single", |b| {
@@ -132,7 +135,7 @@ fn bench_groth16_inputs(c: &mut Criterion) {
     let sources = extract_joinsplit_sources();
     let source = sources.first().expect("at least one JoinSplit source");
 
-    let mut group = c.benchmark_group("groth16_sprout_inputs");
+    let mut group = c.benchmark_group("joinsplit_inputs");
 
     // Cost of computing h_sig and encoding primary inputs as BLS12-381 scalars.
     group.bench_function("primary_inputs", |b| {

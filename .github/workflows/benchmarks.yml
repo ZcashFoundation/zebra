@@ -13,7 +13,14 @@ concurrency:
 
 # Bench list is shared by both jobs. Each entry is one `cargo ...` invocation
 # minus the leading `cargo` and the per-job flags (`--message-format=json`,
-# `--save-baseline`). Adding a bench here is the only change required.
+# `--save-baseline`).
+#
+# Adding a bench requires two changes:
+# 1. Append a `criterion -p <crate> --bench <name>` line to `BENCHES` below.
+# 2. Add a matching `[[bench]]` stanza (with `harness = false`) to the
+#    crate's `Cargo.toml`. Required for every bench regardless of the
+#    crate's `autobenches` setting, because Criterion replaces the test
+#    harness.
 env:
   BENCHES: |
     criterion -p zebra-consensus --bench groth16
@@ -100,6 +107,14 @@ jobs:
   # Triggered by maintainers adding the `C-benchmark` label to a PR.
   # NOTE: the `C-benchmark` label must exist in the repo for this trigger to
   # fire. Current labels: `gh api /repos/ZcashFoundation/zebra/labels`.
+  #
+  # Baselines are ephemeral: `target/criterion/` is not cached across runs,
+  # so each job creates `base` and `pr` fresh from the two checkouts below.
+  # Renaming a bench group ID is therefore safe: it only affects comparison
+  # within the single PR that introduces the rename (critcmp shows the old
+  # and new IDs as non-overlapping benches there). If a future change adds
+  # caching for `target/`, it must exclude `target/criterion/` or bump a
+  # cache key to avoid stale baselines from previous group IDs.
   compare:
     name: Compare Benchmarks
     if: github.event_name == 'pull_request' && github.event.label.name == 'C-benchmark'
