@@ -964,8 +964,6 @@ where
             NetworkUpgrade::Genesis
             | NetworkUpgrade::BeforeOverwinter
             | NetworkUpgrade::Overwinter => Err(TransactionError::UnsupportedByNetworkUpgrade(
-                // FIXME: The upstream Zebra does not allow v4 transactions in Nu7 - is that correct?
-                //| NetworkUpgrade::Nu7 => Err(TransactionError::UnsupportedByNetworkUpgrade(
                 transaction.version(),
                 network_upgrade,
             )),

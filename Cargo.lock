@@ -7781,8 +7781,3 @@ name = "zmij"
 version = "1.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
-
-[[patch.unused]]
-name = "zcash_client_backend"
-version = "0.21.1"
-source = "git+https://github.com/QED-it/librustzcash?rev=0ea737548f7aea6124056df54d55f6c5a35ef914#0ea737548f7aea6124056df54d55f6c5a35ef914"

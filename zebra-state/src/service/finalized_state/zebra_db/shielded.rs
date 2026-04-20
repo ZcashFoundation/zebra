@@ -574,10 +574,6 @@ impl DiskWriteBatch {
                 |asset_base| zebra_db.issued_asset(asset_base),
             )
             .expect("valid issued assets changes")
-            // FIXME: Should we use map_err instead of expect? The latest Zebra does not use
-            // error propagation in prepare_... functions here
-            // ) -> Result<(), BoxError> { ...
-            //.map_err(|_| BoxError::from("invalid issued assets changes"))?
         };
         // Add only the new states to the batch.
         for (asset_base, (_old_state, new_state)) in asset_changes.iter() {

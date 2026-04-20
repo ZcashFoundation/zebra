@@ -19,7 +19,7 @@ pub struct TestVector {
     pub shared_secret: [u8; 32],
     pub k_enc: [u8; 32],
     pub p_enc: [u8; 564],
-    pub c_enc: [u8; 580], // FIXME: works for OrchardVanilla only!
+    pub c_enc: [u8; 580],
     pub ock: [u8; 32],
     pub op: [u8; 64],
     pub c_out: [u8; 80],

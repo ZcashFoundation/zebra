@@ -7,16 +7,10 @@ mod block;
 mod orchard_note_encryption;
 
 #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-mod orchard_zsa_shielded_data;
-
-#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
 mod orchard_zsa_workflow_blocks;
 
 pub use block::*;
 pub use orchard_note_encryption::*;
-
-#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-pub use orchard_zsa_shielded_data::*;
 
 #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
 pub use orchard_zsa_workflow_blocks::*;

@@ -206,8 +206,6 @@ impl IssuedAssetChanges {
                 // `orchard_nullifiers()` preserving Action order, so `.next()` returns nf_{0,0}.
                 // Nullifier type conversion via bytes: both types wrap pallas::Point
                 // but lack a direct conversion path in the current orchard API.
-                // TODO: Consider adding a test for the case where a V6 transaction has issuance data
-                // but has no nullifiers (the test may require constructing a proper mock V6 transaction).
                 let raw_nullifier = tx.orchard_nullifiers().next().ok_or_else(|| {
                     AssetStateError::InvalidInput(
                         "issuance bundle has no orchard actions".to_string(),

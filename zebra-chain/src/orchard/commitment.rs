@@ -262,21 +262,21 @@ impl ValueCommitment {
         Self::from(*V * v + *R * rcv)
     }
 
-    /// Generate a new `ValueCommitment` from an existing `rcv on a `value` (ZSA version).
+    /// Generate a new `ValueCommitment` accounting for `rcv`, `value` and `assetBase`.
     #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
     pub fn new(rcv: pallas::Scalar, value: ValueSum, asset: AssetBase) -> Self {
-        // TODO: Add `pub` methods to `ValueCommitTrapdoor` and `ValueCommitment` in `orchard`
-        // to simplify type conversions when calling `orchard::value::ValueCommitment::derive`.
+        // TODO: Can be simplified if `ValueCommitTrapdoor` and `ValueCommitment` are exposed in Orchard.
         Self(
             pallas::Affine::from_bytes(
                 &orchard::value::ValueCommitment::derive(
                     value,
-                    ValueCommitTrapdoor::from_bytes(rcv.to_repr()).unwrap(),
+                    ValueCommitTrapdoor::from_bytes(rcv.to_repr())
+                        .expect("canonical scalar representation round-trip"),
                     asset,
                 )
                 .to_bytes(),
             )
-            .unwrap(),
+            .expect("valid commitment point round-trip"),
         )
     }
 }

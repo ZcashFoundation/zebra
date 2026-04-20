@@ -474,6 +474,12 @@ pub trait Rpc {
 
     /// Returns the asset state of the provided asset base at the best chain tip or finalized chain tip.
     ///
+    /// # Parameters
+    ///
+    /// - `asset_base`: hex-encoded 32-byte asset base to query.
+    /// - `include_non_finalized`: if `true`, query the best chain tip, including non-finalized state;
+    ///   if `false`, query only the finalized chain tip.
+    ///
     /// method: post
     /// tags: blockchain
     #[method(name = "getassetstate")]

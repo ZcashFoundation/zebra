@@ -1,6 +1,5 @@
 name: Basic checks
 
-#on: [push, pull_request]
 on: [push]
 
 jobs:
@@ -35,7 +34,6 @@ jobs:
           df -h
 
       - name: Install dependencies on Ubuntu
-        #run: sudo apt-get update && sudo apt-get install -y protobuf-compiler build-essential librocksdb-dev
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler librocksdb-dev
       - name: Install formatting & linting tools
         run: rustup component add rustfmt clippy

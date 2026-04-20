@@ -277,6 +277,7 @@ impl TransactionError {
             | CoinbaseHasSpend
             | CoinbaseHasOutputPreHeartwood
             | CoinbaseHasEnableSpendsOrchard
+            | CoinbaseHasEnableZSA
             | CoinbaseOutputsNotDecryptable
             | CoinbaseInMempool
             | NonCoinbaseHasCoinbaseInput

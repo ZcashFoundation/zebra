@@ -6,7 +6,7 @@ rustflags = [
     # Enable tx_v6 everywhere by default
     "--cfg", 'feature="tx_v6"',
 
-    # TODO: Consider removing this line later (it's needed for the ZSA version of librustzcash crates)
+    # TODO: Remove when ZSA is stable
     "--cfg", "zcash_unstable=\"nu7\"",
 
     # Zebra standard lints for Rust 1.65+
@@ -91,7 +91,7 @@ rustdocflags = [
     # Enable tx_v6 everywhere by default
     "--cfg", 'feature="tx_v6"',
 
-    # TODO: Consider removing this line later (it's needed for the ZSA version of librustzcash crates)
+    # TODO: Remove when ZSA is stable
     "--cfg", "zcash_unstable=\"nu7\"",
 
     # The -A and -W settings must be the same as the `RUSTDOCFLAGS` in:

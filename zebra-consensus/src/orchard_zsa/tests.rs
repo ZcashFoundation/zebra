@@ -1,16 +1,9 @@
-//! Simulates a full Zebra node’s block‐processing pipeline on a predefined Orchard/ZSA workflow.
+//! Simulates a full Zebra node’s block-processing pipeline on a predefined Orchard/ZSA workflow.
 //!
 //! This integration test reads a sequence of serialized regtest blocks (including Orchard burns
 //! and ZSA issuance), feeds them through the node’s deserialization, consensus router, and state
 //! service exactly as if they arrived from the network, and verifies that each block is accepted
-//! (or fails at the injected point).
-//!
-//! In a future PR, we will add tracking and verification of issuance/burn state changes so that
-//! the test can also assert that on-chain asset state (total supply and finalization flags)
-//! matches the expected values computed in memory.
-//!
-//! In short, it demonstrates end-to-end handling of Orchard asset burns and ZSA issuance through
-//! consensus (with state verification to follow in the next PR).
+//! (or fails at the injected point) and that the final state is updated correctly.
 
 use std::{
     collections::{hash_map, HashMap},
@@ -55,8 +48,10 @@ type TranscriptItem = (Request, Result<Hash, ExpectedTranscriptError>);
 #[derive(Debug)]
 enum AssetRecordsError {
     BurnAssetMissing,
+    AssetMismatch,
     EmptyActionNotFinalized,
     AmountOverflow,
+    AmountUnderflow,
     MissingRefNote,
     ModifyFinalized,
 }
@@ -67,7 +62,6 @@ fn process_burns<'a, I: IntoIterator<Item = &'a BurnItem>>(
     burns: I,
 ) -> Result<(), AssetRecordsError> {
     for burn in burns {
-        // FIXME: check for burn specific errors?
         let asset_record = asset_records
             .get_mut(&burn.asset())
             .ok_or(AssetRecordsError::BurnAssetMissing)?;
@@ -77,7 +71,7 @@ fn process_burns<'a, I: IntoIterator<Item = &'a BurnItem>>(
                 .amount
                 .inner()
                 .checked_sub(burn.amount().inner())
-                .ok_or(AssetRecordsError::AmountOverflow)?,
+                .ok_or(AssetRecordsError::AmountUnderflow)?,
         );
     }
 
@@ -99,7 +93,7 @@ fn process_issue_actions<'a, I: Iterator<Item = &'a IssueAction>>(
             if note.asset() == action_asset {
                 Ok(note.value())
             } else {
-                Err(AssetRecordsError::BurnAssetMissing)
+                Err(AssetRecordsError::AssetMismatch)
             }
         });
 
@@ -117,7 +111,6 @@ fn process_issue_actions<'a, I: Iterator<Item = &'a IssueAction>>(
         for amount_result in std::iter::once(first_note_amount).chain(note_amounts) {
             let amount = amount_result?;
 
-            // FIXME: check for issuance specific errors?
             match asset_records.entry(action_asset) {
                 hash_map::Entry::Occupied(mut entry) => {
                     let asset_record = entry.get_mut();

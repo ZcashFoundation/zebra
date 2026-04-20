@@ -664,7 +664,7 @@ pub struct OrchardAction {
     #[serde(rename = "ephemeralKey", with = "hex")]
     ephemeral_key: [u8; 32],
     /// The output note encrypted to the recipient.
-    #[serde(rename = "encCiphertext")]
+    #[serde(rename = "encCiphertext", with = "hex")]
     enc_ciphertext: Vec<u8>,
     /// A ciphertext enabling the sender to recover the output note.
     #[serde(rename = "spendAuthSig", with = "hex")]
