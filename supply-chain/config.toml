@@ -504,12 +504,6 @@ criteria = "safe-to-deploy"
 version = "0.9.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.dunce]]
-version = "1.0.5"
-criteria = "safe-to-deploy"
-suggest = false
-notes = "Sentry 0.47 upgrade"
-
 [[exemptions.dyn-clone]]
 version = "1.0.19"
 criteria = "safe-to-deploy"
@@ -642,10 +636,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.getrandom]]
 version = "0.2.17"
-criteria = "safe-to-deploy"
-
-[[exemptions.getrandom]]
-version = "0.4.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.getset]]
@@ -835,12 +825,6 @@ criteria = "safe-to-deploy"
 [[exemptions.itoa]]
 version = "1.0.17"
 criteria = "safe-to-deploy"
-
-[[exemptions.jni]]
-version = "0.21.1"
-criteria = "safe-to-deploy"
-suggest = false
-notes = "Sentry 0.47 upgrade"
 
 [[exemptions.jni-sys]]
 version = "0.3.1"
@@ -1350,10 +1334,6 @@ criteria = "safe-to-deploy"
 version = "0.2.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.rand_xorshift]]
-version = "0.4.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.rand_xoshiro]]
 version = "0.7.0"
 criteria = "safe-to-deploy"
@@ -1482,12 +1462,6 @@ notes = "Sentry 0.47 upgrade"
 version = "0.103.10"
 criteria = "safe-to-deploy"
 
-[[exemptions.rustls-webpki]]
-version = "0.103.12"
-criteria = "safe-to-deploy"
-suggest = false
-notes = "Sentry 0.47 upgrade"
-
 [[exemptions.rusty-fork]]
 version = "0.3.1"
 criteria = "safe-to-deploy"
@@ -1553,18 +1527,10 @@ version = "1.0.27"
 criteria = "safe-to-deploy"
 
 [[exemptions.sentry]]
-version = "0.40.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.sentry]]
 version = "0.47.0"
 criteria = "safe-to-deploy"
 suggest = false
 notes = "Sentry 0.47 upgrade"
-
-[[exemptions.sentry-backtrace]]
-version = "0.40.0"
-criteria = "safe-to-deploy"
 
 [[exemptions.sentry-backtrace]]
 version = "0.47.0"
@@ -1573,18 +1539,10 @@ suggest = false
 notes = "Sentry 0.47 upgrade"
 
 [[exemptions.sentry-contexts]]
-version = "0.40.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.sentry-contexts]]
 version = "0.47.0"
 criteria = "safe-to-deploy"
 suggest = false
 notes = "Sentry 0.47 upgrade"
-
-[[exemptions.sentry-core]]
-version = "0.40.0"
-criteria = "safe-to-deploy"
 
 [[exemptions.sentry-core]]
 version = "0.47.0"
@@ -1599,18 +1557,10 @@ suggest = false
 notes = "Sentry 0.47 upgrade"
 
 [[exemptions.sentry-tracing]]
-version = "0.40.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.sentry-tracing]]
 version = "0.47.0"
 criteria = "safe-to-deploy"
 suggest = false
 notes = "Sentry 0.47 upgrade"
-
-[[exemptions.sentry-types]]
-version = "0.40.0"
-criteria = "safe-to-deploy"
 
 [[exemptions.sentry-types]]
 version = "0.47.0"
@@ -1922,10 +1872,6 @@ criteria = "safe-to-deploy"
 version = "0.9.5"
 criteria = "safe-to-deploy"
 
-[[exemptions.unarray]]
-version = "0.1.4"
-criteria = "safe-to-deploy"
-
 [[exemptions.unicase]]
 version = "2.9.0"
 criteria = "safe-to-deploy"
@@ -1971,10 +1917,6 @@ version = "2.5.0"
 criteria = "safe-to-deploy"
 suggest = false
 notes = "Sentry 0.47 upgrade"
-
-[[exemptions.walkdir]]
-version = "2.5.0"
-criteria = "safe-to-run"
 
 [[exemptions.wasi]]
 version = "0.9.0+wasi-snapshot-preview1"

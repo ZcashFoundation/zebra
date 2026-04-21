@@ -371,11 +371,6 @@ who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.8.4 -> 0.8.5"
 
-[[audits.rustls-webpki]]
-who = "Alfredo Garcia <alfredo@zfnd.org>"
-criteria = "safe-to-deploy"
-delta = "0.103.10 -> 0.103.12"
-
 [[audits.rlimit]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
@@ -385,6 +380,11 @@ delta = "0.10.1 -> 0.10.2"
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.38.34 -> 0.38.37"
+
+[[audits.rustls-webpki]]
+who = "Alfredo Garcia <alfredo@zfnd.org>"
+criteria = "safe-to-deploy"
+delta = "0.103.10 -> 0.103.12"
 
 [[audits.sapling-crypto]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
@@ -826,19 +826,19 @@ importable = false
 
 [[trusted.clap]]
 criteria = "safe-to-deploy"
-user-id = 6743 # Ed Page (epage)
+user-id = 6743
 start = "2021-12-08"
 end = "2025-07-09"
 
 [[trusted.clap_builder]]
 criteria = "safe-to-deploy"
-user-id = 6743 # Ed Page (epage)
+user-id = 6743
 start = "2023-03-28"
 end = "2025-07-09"
 
 [[trusted.clap_derive]]
 criteria = "safe-to-deploy"
-user-id = 6743 # Ed Page (epage)
+user-id = 6743
 start = "2021-12-08"
 end = "2025-07-09"
 
@@ -856,6 +856,6 @@ end = "2025-07-09"
 
 [[trusted.tokio]]
 criteria = "safe-to-deploy"
-user-id = 6741 # Alice Ryhl (Darksonn)
+user-id = 6741
 start = "2020-12-25"
 end = "2025-07-29"
