@@ -3,7 +3,7 @@ name: Benchmarks
 on:
   workflow_dispatch:
   pull_request:
-    types: [labeled]
+    types: [labeled, synchronize]
 
 permissions: {}
 
@@ -98,12 +98,13 @@ jobs:
           fail-on-alert: false
 
   # Compares benchmarks between the PR branch and the base branch.
-  # Triggered by maintainers adding the `C-benchmark` label to a PR.
-  # NOTE: the `C-benchmark` label must exist in the repo for this trigger to
-  # fire. Current labels: `gh api /repos/ZcashFoundation/zebra/labels`.
+  # Runs when the `C-benchmark` label is present: both when it is first added
+  # and on subsequent pushes to the PR.
   compare:
     name: Compare Benchmarks
-    if: github.event_name == 'pull_request' && github.event.label.name == 'C-benchmark'
+    if: >-
+      github.event_name == 'pull_request' &&
+      contains(github.event.pull_request.labels.*.name, 'C-benchmark')
     permissions:
       contents: read
       pull-requests: write
