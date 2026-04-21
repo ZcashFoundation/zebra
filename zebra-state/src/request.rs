@@ -498,6 +498,7 @@ impl ContextuallyVerifiedBlock {
     pub fn with_block_and_spent_utxos(
         semantically_verified: SemanticallyVerifiedBlock,
         mut spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+        deferred_pool_balance_change: DeferredPoolBalanceChange,
     ) -> Result<Self, ValueBalanceError> {
         let SemanticallyVerifiedBlock {
             block,
@@ -522,7 +523,7 @@ impl ContextuallyVerifiedBlock {
             transaction_hashes,
             chain_value_pool_change: block.chain_value_pool_change(
                 &utxos_from_ordered_utxos(spent_outputs),
-                DeferredPoolBalanceChange::zero(),
+                deferred_pool_balance_change,
             )?,
         })
     }
