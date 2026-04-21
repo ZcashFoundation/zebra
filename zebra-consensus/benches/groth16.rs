@@ -1,20 +1,9 @@
 //! Benchmarks for Groth16 proof verification (Sprout JoinSplits).
 //!
-//! Measures the cost of verifying Groth16 zero-knowledge proofs used in Sprout
-//! JoinSplit descriptions. Groth16 verification is a pairing check on BLS12-381,
-//! making it one of the most expensive per-proof operations during chain sync.
-//!
-//! # Benchmark groups
-//!
-//! - `joinsplit`: per-proof verification (mirrors `JOINSPLIT_VERIFIER`).
-//! - `joinsplit_inputs`: primary input preparation cost.
-//!
-//! # Test data limitations
-//!
-//! The hardcoded mainnet test blocks in `zebra-test` contain only a small
-//! number of Groth16 JoinSplits. Items are cycled to fill larger batches;
-//! Groth16 cost is constant per proof so this is valid for per-item
-//! throughput measurements, but cache/memory effects are not representative.
+//! Groth16 verification is a pairing check on BLS12-381. Sprout has no batch
+//! verifier in Zebra; each proof is verified individually, so the only
+//! throughput dimension is per-proof cost. Test vectors contain few
+//! JoinSplits, so items are cycled to fill larger sizes.
 
 // Disabled due to warnings in criterion macros
 #![allow(missing_docs)]
@@ -94,10 +83,10 @@ fn bench_groth16_verify(c: &mut Criterion) {
     let sources = extract_joinsplit_sources();
     let items: Vec<Item> = sources.iter().map(item_from).collect();
 
-    let mut group = c.benchmark_group("joinsplit");
+    let mut group = c.benchmark_group("Groth16 Verification");
 
     group.throughput(Throughput::Elements(1));
-    group.bench_function("single", |b| {
+    group.bench_function("single proof", |b| {
         let item = items[0].clone();
         b.iter(|| {
             item.clone().verify_single(pvk).expect("valid proof");
@@ -126,7 +115,7 @@ fn bench_groth16_inputs(c: &mut Criterion) {
     let sources = extract_joinsplit_sources();
     let source = sources.first().expect("at least one JoinSplit source");
 
-    let mut group = c.benchmark_group("joinsplit_inputs");
+    let mut group = c.benchmark_group("Groth16 Input Preparation");
 
     // Cost of computing h_sig and encoding primary inputs as BLS12-381 scalars.
     group.bench_function("primary_inputs", |b| {

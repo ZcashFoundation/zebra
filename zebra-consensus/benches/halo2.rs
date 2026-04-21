@@ -95,7 +95,7 @@ fn bench_halo2_verify(c: &mut Criterion) {
     let mut group = c.benchmark_group("halo2");
 
     group.throughput(Throughput::Elements(source_items[0].request_weight() as u64));
-    group.bench_function("single", |b| {
+    group.bench_function("single bundle", |b| {
         let item = source_items[0].clone();
         b.iter(|| {
             assert!(item.clone().verify_single(vk));
