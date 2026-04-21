@@ -166,12 +166,11 @@ where
 
                 // Get the matching hash for the given height, if any
                 let last_height_and_hash = last_height.and_then(|height| {
-                    Some(height).zip(
-                        chain
-                            .as_ref()
-                            .and_then(|c| c.as_ref().hash_by_height(height))
-                            .or_else(|| db.hash(height)),
-                    )
+                    chain
+                        .as_ref()
+                        .and_then(|c| c.as_ref().hash_by_height(height))
+                        .or_else(|| db.hash(height))
+                        .map(|hash| (height, hash))
                 });
 
                 return Ok(AddressUtxos::new(
