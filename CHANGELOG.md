@@ -9,9 +9,57 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Added
 
+- Sentry events now carry `SENTRY_ENVIRONMENT`, `git.ref`, `git.sha`, and CI context (`CI_PR_NUMBER`, `CI_TEST_ID`, `GITHUB_*`) when present ([#10490](https://github.com/ZcashFoundation/zebra/pull/10490))
+- `opentelemetry` is now part of the `default-release-binaries` feature set; export stays disabled until `OTEL_EXPORTER_OTLP_ENDPOINT` (or the tracing config) is set ([#10490](https://github.com/ZcashFoundation/zebra/pull/10490))
 - Public benchmark dashboard at [zebra.zfnd.org/dev/bench](https://zebra.zfnd.org/dev/bench) covering Groth16, Halo2, Sapling, RedPallas, block, and transaction benchmarks ([#10444](https://github.com/ZcashFoundation/zebra/pull/10444))
 
-## [Zebra 4.3](https://github.com/ZcashFoundation/zebra/releases/tag/v4.3) - 2026-03-12
+### Changed
+
+- Upgrade Sentry SDK to `0.47` and switch its transport feature from `reqwest` to `ureq` ([#10490](https://github.com/ZcashFoundation/zebra/pull/10490))
+- `zebrad::sentry` is now crate-private; downstream code should not import it directly ([#10490](https://github.com/ZcashFoundation/zebra/pull/10490))
+
+## [Zebra 4.3.1](https://github.com/ZcashFoundation/zebra/releases/tag/v4.3.1) - 2026-04-17
+
+This release fixes **four important security issues**:
+
+- [CVE-2026-40880: Cached Mempool Verification Bypasses Consensus Rules for Ahead-of-Tip Blocks](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-xvj8-ph7x-65gf)
+- [CVE-2026-XXXXX: Consensus Divergence in Transparent Sighash Hash-Type Handling](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-8m29-fpq5-89jj)
+- [CVE-2026-XXXXX: rk Identity Point Panic in Transaction Verification](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-452v-w3gx-72wg)
+- [CVE-2026-40881: addr/addrv2 Deserialization Resource Exhaustion](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-xr93-pcq3-pxf8)
+
+We recommend node operators to update to 4.3.1 as soon as possible. All previous
+Zebra versions are vulnerable to these issues.
+
+### Added
+
+- Dockerized mining setup ([#10301](https://github.com/ZcashFoundation/zebra/pull/10301))
+
+### Fixed
+
+- Fixed [a panic that could be triggered in the RPC interface on HTTP
+  errors](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-29x4-r6jv-ff4w),
+  such as resetting the connection halfway through a request. We do not consider
+  this a critical issue since the RPC port is security-sensitive and should not
+  be opened publicly, but we plan to update our documentation to make this
+  clear.
+
+### Changed
+
+- The Dockerfile and docker-compose.yml were changed to expose the P2P port by
+  default. This is important for the network since it allows other peers to
+  connect to the node. Note that if you deploy Zebra behind a firewall or NAT
+  you might require additional configuration
+  ([#10464](https://github.com/ZcashFoundation/zebra/pull/10464)).
+
+## [Zebra 4.3.0](https://github.com/ZcashFoundation/zebra/releases/tag/v4.3.0) - 2026-03-12
+
+This release fixes **two important security issues**:
+
+- [CVE-2026-34202: Remote Denial of Service via Crafted V5 Transactions](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-qp6f-w4r3-h8wg)
+- [CVE-2026-34377: Consensus Failure via Crafted V5 Authorization Data](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-3vmh-33xr-9cqh)
+
+We recommend node operators to update to 4.3.0 as soon as possible. All previous
+Zebra versions are vulnerable to these issues.
 
 This release adds support for [ZIP-235](https://zips.z.cash/zip-0235) and
 extends the documentation on performance profiling. It also fixes issues with

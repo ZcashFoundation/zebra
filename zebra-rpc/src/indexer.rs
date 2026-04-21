@@ -38,7 +38,7 @@ impl BlockHashAndHeight {
                 )
             })
             .ok()
-            .and_then(|hash| self.height.try_into().ok().map(|height| (hash, height)))
+            .zip(self.height.try_into().ok())
     }
 }
 
@@ -74,7 +74,7 @@ impl BlockAndHash {
                     .zcash_deserialize_into()
                     .map_err(|err| tracing::warn!(?err, "failed to deserialize block",))
                     .ok()
-                    .map(|block| (block, hash))
+                    .zip(Some(hash))
             })
     }
 }

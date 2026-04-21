@@ -269,7 +269,7 @@ impl Tracing {
         let subscriber = subscriber.with(journaldlayer);
 
         #[cfg(feature = "sentry")]
-        let subscriber = subscriber.with(sentry::integrations::tracing::layer());
+        let subscriber = subscriber.with(crate::sentry::tracing_layer());
 
         // OpenTelemetry layer - zero overhead when config.opentelemetry_endpoint is None
         #[cfg(feature = "opentelemetry")]

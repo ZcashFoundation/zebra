@@ -7,12 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [6.0.2] - 2026-04-17
+
+This release fixes an important security issue:
+
+- [CVE-2026-XXXXX: rk Identity Point Panic in Transaction Verification](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-452v-w3gx-72wg)
+
+The impact of the issue for crate users will depend on the particular usage;
+if you use it as a building block for a consensus node, you should update.
+
 ## [6.0.1] - 2026-03-26
+
+This release fixes an important security issue:
+
+- [CVE-2026-34202: Remote Denial of Service via Crafted V5 Transactions](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-qp6f-w4r3-h8wg)
+
+The impact of the issue for crate users will depend on the particular usage;
+if you use zebra-chain to parse untrusted transactions, a particularly crafted
+transaction will raise a panic which will crash your application; you should
+update.
 
 ### Fixed
 
 - Fixed miner subsidy computation.
-
 
 ## [6.0.0] - 2026-03-12
 

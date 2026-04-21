@@ -28,6 +28,7 @@ jobs:
   build:
     name: Build Docs
     permissions:
+      contents: read
       id-token: write
       statuses: write
     runs-on: ubuntu-latest

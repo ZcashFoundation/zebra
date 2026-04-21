@@ -42,7 +42,7 @@
 
 ### PR Checklist
 
-- [ ] The PR name is suitable for the release notes.
+- [ ] The PR title follows [conventional commits](https://www.conventionalcommits.org/) format: `type(scope): description`
 - [ ] The PR follows the [contribution guidelines](https://github.com/ZcashFoundation/zebra/blob/main/CONTRIBUTING.md).
 - [ ] This change was discussed in an issue or with the team beforehand.
 - [ ] The solution is tested.

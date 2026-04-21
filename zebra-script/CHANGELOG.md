@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.0.1] - 2026-04-17
+
+This release fixes an important security issue:
+
+- [CVE-2026-XXXXX: Consensus Divergence in Transparent Sighash Hash-Type Handling](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-8m29-fpq5-89jj)
+
+The impact of the issue for crate users will depend on the particular usage;
+if you use it as a building block for a consensus node, you should update.
+
 ## [5.0.0] - 2026-03-12
 
 - `zebra-chain` was bumped to `6.0.0`

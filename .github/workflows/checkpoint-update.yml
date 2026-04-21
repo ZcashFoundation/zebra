@@ -1,0 +1,234 @@
+# Automated checkpoint and end-of-support height updates.
+#
+# Triggered when the weekly integration tests complete successfully.
+# Downloads checkpoint artifacts produced by generate-checkpoints-* jobs,
+# appends new entries to the checkpoint files, updates the end-of-support
+# height, validates everything, and opens a PR.
+#
+# The PR requires human review before merge; checkpoints are consensus-critical.
+name: Checkpoint Update
+
+on:
+  # zizmor: ignore[dangerous-triggers] -- triggers only on internal CI workflow completion,
+  # processes deterministic checkpoint data from artifacts, no untrusted user input
+  workflow_run:
+    workflows: ["Integration Tests on GCP"]
+    types: [completed]
+    branches: [main]
+
+  # Manual trigger for testing; resolves the latest successful integration test run automatically
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  update-checkpoints:
+    name: Update checkpoint files
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    permissions:
+      actions: read
+      contents: write
+      pull-requests: write
+    env:
+      MAINNET_CHECKPOINTS: zebra-chain/src/parameters/checkpoint/main-checkpoints.txt
+      TESTNET_CHECKPOINTS: zebra-chain/src/parameters/checkpoint/test-checkpoints.txt
+      EOS_FILE: zebrad/src/components/sync/end_of_support.rs
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          persist-credentials: true
+          ref: main
+
+      # Resolve the integration test run ID.
+      # For workflow_run: use the triggering run directly.
+      # For workflow_dispatch: find the latest successful run via the API.
+      - name: Resolve integration test run ID
+        id: resolve-run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          WF_RUN_ID: ${{ github.event.workflow_run.id }}
+          WF_RUN_URL: ${{ github.event.workflow_run.html_url }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_run" ]; then
+            RUN_ID="$WF_RUN_ID"
+            RUN_URL="$WF_RUN_URL"
+          else
+            RUN_ID=$(gh run list \
+              --workflow "Integration Tests on GCP" \
+              --branch main \
+              --status success \
+              --limit 1 \
+              --json databaseId \
+              --jq '.[0].databaseId')
+            RUN_URL="https://github.com/${REPO}/actions/runs/${RUN_ID}"
+          fi
+
+          if [ -z "$RUN_ID" ]; then
+            echo "No successful integration test run found"
+            exit 1
+          fi
+
+          echo "run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
+          echo "run_url=${RUN_URL}" >> "$GITHUB_OUTPUT"
+          echo "Using integration test run: ${RUN_URL}"
+
+      # Download checkpoint artifacts from the integration test run.
+      - name: Download mainnet checkpoint artifact
+        id: mainnet-artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c #v8.0.1
+        with:
+          name: generate-checkpoints-mainnet-checkpoints
+          run-id: ${{ steps.resolve-run.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Download testnet checkpoint artifact
+        id: testnet-artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c #v8.0.1
+        with:
+          name: generate-checkpoints-testnet-checkpoints
+          run-id: ${{ steps.resolve-run.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      # The generate-checkpoints-* jobs are skipped when no tip disk exists
+      # (e.g., full sync still in progress) or when the workflow runs in
+      # regenerate/sync-only mode. When skipped, no artifact is produced.
+      - name: Check if any artifacts were downloaded
+        id: check-artifacts
+        run: |
+          HAS_MAINNET="false"
+          HAS_TESTNET="false"
+
+          # Artifact files use the same names as the repo files (new entries only)
+          if [ -f "main-checkpoints.txt" ]; then
+            LINES=$(wc -l < main-checkpoints.txt | tr -d ' ')
+            echo "Mainnet artifact: ${LINES} checkpoint lines"
+            HAS_MAINNET="true"
+          fi
+
+          if [ -f "test-checkpoints.txt" ]; then
+            LINES=$(wc -l < test-checkpoints.txt | tr -d ' ')
+            echo "Testnet artifact: ${LINES} checkpoint lines"
+            HAS_TESTNET="true"
+          fi
+
+          if [ "$HAS_MAINNET" = "false" ] && [ "$HAS_TESTNET" = "false" ]; then
+            echo "No checkpoint artifacts found, skipping update"
+            echo "has_updates=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "has_mainnet=${HAS_MAINNET}" >> "$GITHUB_OUTPUT"
+          echo "has_testnet=${HAS_TESTNET}" >> "$GITHUB_OUTPUT"
+          echo "has_updates=true" >> "$GITHUB_OUTPUT"
+
+      # Append new mainnet checkpoints (entries with heights higher than current last)
+      - name: Append new mainnet checkpoints
+        if: steps.check-artifacts.outputs.has_mainnet == 'true'
+        run: |
+          CURRENT_LAST=$(tail -1 "${MAINNET_CHECKPOINTS}" | awk '{print $1}')
+          echo "Current last mainnet checkpoint: ${CURRENT_LAST}"
+
+          # Extract only new entries (height > current last)
+          NEW_COUNT=$(awk -v last="$CURRENT_LAST" '$1 > last' main-checkpoints.txt | wc -l | tr -d ' ')
+          echo "New mainnet checkpoints to append: ${NEW_COUNT}"
+
+          if [ "$NEW_COUNT" -gt 0 ]; then
+            awk -v last="$CURRENT_LAST" '$1 > last' main-checkpoints.txt >> "${MAINNET_CHECKPOINTS}"
+            NEW_LAST=$(tail -1 "${MAINNET_CHECKPOINTS}" | awk '{print $1}')
+            echo "Updated last mainnet checkpoint: ${NEW_LAST}"
+          fi
+
+      # Append new testnet checkpoints
+      - name: Append new testnet checkpoints
+        if: steps.check-artifacts.outputs.has_testnet == 'true'
+        run: |
+          CURRENT_LAST=$(tail -1 "${TESTNET_CHECKPOINTS}" | awk '{print $1}')
+          echo "Current last testnet checkpoint: ${CURRENT_LAST}"
+
+          NEW_COUNT=$(awk -v last="$CURRENT_LAST" '$1 > last' test-checkpoints.txt | wc -l | tr -d ' ')
+          echo "New testnet checkpoints to append: ${NEW_COUNT}"
+
+          if [ "$NEW_COUNT" -gt 0 ]; then
+            awk -v last="$CURRENT_LAST" '$1 > last' test-checkpoints.txt >> "${TESTNET_CHECKPOINTS}"
+            NEW_LAST=$(tail -1 "${TESTNET_CHECKPOINTS}" | awk '{print $1}')
+            echo "Updated last testnet checkpoint: ${NEW_LAST}"
+          fi
+
+      # Update the end-of-support estimated release height using the latest
+      # mainnet checkpoint height. This is a lower bound (~3-7 days behind
+      # the real tip), but the EOS window is 105 days, making it negligible.
+      - name: Update end-of-support height
+        if: steps.check-artifacts.outputs.has_mainnet == 'true'
+        run: |
+          LAST_HEIGHT=$(tail -1 "${MAINNET_CHECKPOINTS}" | awk '{print $1}')
+          # Format with underscores for Rust readability (e.g., 3_282_406)
+          FORMATTED=$(echo "$LAST_HEIGHT" | awk '{n=$0; r=""; for(i=length(n);i>0;i--) { r=substr(n,i,1) r; if((length(n)-i)%3==2 && i>1) r="_" r }; print r}')
+          echo "Setting ESTIMATED_RELEASE_HEIGHT to ${FORMATTED} (height ${LAST_HEIGHT})"
+
+          sed -i "s/ESTIMATED_RELEASE_HEIGHT: u32 = [0-9_]*/ESTIMATED_RELEASE_HEIGHT: u32 = ${FORMATTED}/" \
+            "${EOS_FILE}"
+
+          grep "ESTIMATED_RELEASE_HEIGHT" "${EOS_FILE}" | head -1
+
+      # Validate the updated checkpoint files
+      - name: Validate checkpoint files
+        if: steps.check-artifacts.outputs.has_updates == 'true'
+        run: |
+          .github/scripts/validate-checkpoints.sh "${MAINNET_CHECKPOINTS}"
+          .github/scripts/validate-checkpoints.sh "${TESTNET_CHECKPOINTS}"
+
+      # Check if there are actual changes to commit
+      - name: Check for changes
+        id: changes
+        if: steps.check-artifacts.outputs.has_updates == 'true'
+        run: |
+          if git diff --quiet; then
+            echo "No changes to commit"
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Changes detected:"
+            git diff --stat
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Open or update a PR with the checkpoint changes
+      - name: Create checkpoint update PR
+        if: steps.changes.outputs.has_changes == 'true'
+        uses: peter-evans/create-pull-request@c0f553fe549906ede9cf27b5156039d195d2ece0 #v8.1.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: chore/update-checkpoints
+          title: "chore(chain): update checkpoints and end-of-support height"
+          body: |
+            Automated checkpoint update from the weekly integration test run.
+
+            **Source:** [Integration test run #${{ steps.resolve-run.outputs.run_id }}](${{ steps.resolve-run.outputs.run_url }})
+
+            ### Changes
+
+            - Updated mainnet and/or testnet checkpoint files with new entries
+            - Updated `ESTIMATED_RELEASE_HEIGHT` in `end_of_support.rs` to match the latest mainnet checkpoint
+
+            ### Validation
+
+            The checkpoint validation script verified:
+            - All entries match `HEIGHT HASH` format
+            - Heights are monotonically increasing
+            - No gaps exceed 400 blocks
+            - No duplicate heights or hashes
+
+            ### Review
+
+            Checkpoints are consensus-critical; incorrect hashes could cause nodes
+            to follow a wrong fork. Verify the source integration test run linked
+            above completed successfully against the real Zcash network.
+          labels: A-release,C-enhancement
+          commit-message: "chore(chain): update checkpoints and end-of-support height"
+          delete-branch: true
