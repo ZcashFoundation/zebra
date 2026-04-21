@@ -277,7 +277,6 @@ impl TransactionError {
             | CoinbaseHasSpend
             | CoinbaseHasOutputPreHeartwood
             | CoinbaseHasEnableSpendsOrchard
-            | CoinbaseHasEnableZSA
             | CoinbaseOutputsNotDecryptable
             | CoinbaseInMempool
             | NonCoinbaseHasCoinbaseInput
@@ -300,6 +299,9 @@ impl TransactionError {
             | NotEnoughFlags
             | WrongConsensusBranchId
             | MissingConsensusBranchId => 100,
+
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            CoinbaseHasEnableZSA => 100,
 
             _other => 0,
         }

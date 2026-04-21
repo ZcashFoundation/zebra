@@ -1169,18 +1169,18 @@ impl Transaction {
     /// Access the Orchard issue data in this transaction, if any,
     /// regardless of version.
     #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-    pub fn orchard_issue_data(&self) -> &Option<orchard_zsa::IssueData> {
+    pub fn orchard_issue_data(&self) -> Option<&orchard_zsa::IssueData> {
         match self {
             Transaction::V1 { .. }
             | Transaction::V2 { .. }
             | Transaction::V3 { .. }
             | Transaction::V4 { .. }
-            | Transaction::V5 { .. } => &None,
+            | Transaction::V5 { .. } => None,
 
             Transaction::V6 {
                 orchard_zsa_issue_data,
                 ..
-            } => orchard_zsa_issue_data,
+            } => orchard_zsa_issue_data.as_ref(),
         }
     }
 
