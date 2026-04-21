@@ -68,7 +68,7 @@ jobs:
       - uses: ./.github/actions/setup-zebra-build
       - name: Run clippy
         # TODO: Temporary QED-it fork exception for clippy::manual_option_zip; remove before merging this branch upstream.
-        run: cargo clippy ${{ matrix.args }} --features "${{ matrix.features }}" -- -A clippy::manual_option_zip
+        run: cargo clippy ${{ matrix.args }} --features "${{ matrix.features }}" -- -A unknown-lints -A clippy::manual_option_zip
 
   crate-checks:
     permissions:
