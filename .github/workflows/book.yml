@@ -71,12 +71,8 @@ jobs:
           RUSTDOCFLAGS: --html-in-header katex-header.html -D warnings -A rustdoc::private_intra_doc_links --cfg docsrs --show-type-layout --generate-link-to-definition --enable-index-page -Zunstable-options
 
       - name: Include benchmark dashboard
-        # Benchmarks are published to `gh-pages/dev/bench` by `benchmarks.yml`.
-        # This step snapshots those files into the docs artifact so they are
-        # reachable at `/dev/bench`. Known tradeoff: the dashboard lags the
-        # latest benchmark run until the book workflow runs again on `main`.
-        # When GitHub Pages is migrated off workflow-artifact deploys and onto
-        # the gh-pages branch, this step can be removed.
+        # Snapshots `gh-pages/dev/bench` (published by `benchmarks.yml`) into
+        # the docs artifact so it is reachable at `/dev/bench`.
         run: |
           if ! git fetch origin gh-pages --depth=1 2>/dev/null; then
             echo "gh-pages branch does not exist yet, skipping benchmark dashboard"
@@ -88,8 +84,8 @@ jobs:
             exit 0
           fi
 
-          # Both files are published atomically by github-action-benchmark,
-          # so a missing data.js when index.html exists is a real inconsistency.
+          # index.html and data.js are published atomically by
+          # github-action-benchmark, so data.js isn't guarded separately.
           mkdir -p target/docs/dev/bench
           git show origin/gh-pages:dev/bench/index.html > target/docs/dev/bench/index.html
           git show origin/gh-pages:dev/bench/data.js > target/docs/dev/bench/data.js

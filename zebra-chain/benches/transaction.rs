@@ -74,7 +74,6 @@ fn bench_transaction_deserialize(c: &mut Criterion) {
     }
 
     // V4 — Sapling block with shielded data.
-    // Try 419201 first (has Sapling transactions), fall back to 419200.
     let block = Block::zcash_deserialize(Cursor::new(
         zebra_test::vectors::BLOCK_MAINNET_419201_BYTES.as_slice(),
     ))

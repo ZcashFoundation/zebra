@@ -11,10 +11,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-# Bench list shared by both jobs. Each entry is a `cargo ...` invocation
-# minus the leading `cargo` and per-job flags (`--message-format=json`,
-# `--save-baseline`). New benches also need a `[[bench]]` stanza with
-# `harness = false` in the crate's `Cargo.toml`.
+# Bench list shared by both jobs. New benches need a `[[bench]]` stanza
+# with `harness = false` in the crate's `Cargo.toml`.
 env:
   BENCHES: |
     criterion -p zebra-consensus --bench groth16
@@ -90,9 +88,8 @@ jobs:
           benchmark-data-dir-path: dev/bench
           github-token: ${{ secrets.GITHUB_TOKEN }}
           auto-push: true
-          # 150% = a run that is 1.5x slower than the previous. Loose enough to
-          # avoid false alarms from ~10-20% runner noise, tight enough to catch
-          # meaningful regressions. Tune once a baseline history accumulates.
+          # 150% = 1.5x slower than the previous run. Stays above ~10-20%
+          # runner noise while catching real regressions.
           alert-threshold: "150%"
           comment-on-alert: true
           fail-on-alert: false

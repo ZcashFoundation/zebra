@@ -93,8 +93,6 @@ fn bench_groth16_verify(c: &mut Criterion) {
         })
     });
 
-    // Sprout has no batch verifier in Zebra today: every proof is verified
-    // individually in the production path, so this is the cost profile.
     for n in [2, 4, 8, 16, 32, 64] {
         let batch = common::cycled(&items, n);
 

@@ -22,9 +22,7 @@
 //!
 //! `orchard::bundle::BatchValidator` supports cross-bundle batching, but
 //! [`Item`]'s internal fields are private, so this benchmark can only
-//! exercise `verify_single()` (a one-item batch). That still captures the
-//! dominant cost; exposing a public batch API on `Item` would unlock a
-//! cross-bundle variant analogous to the Sapling bench.
+//! exercise `verify_single()` (a one-item batch).
 
 // Disabled due to warnings in criterion macros
 #![allow(missing_docs)]
@@ -102,11 +100,10 @@ fn bench_halo2_verify(c: &mut Criterion) {
         })
     });
 
-    // Unbatched verification across N bundles: each call creates its own
-    // one-item BatchValidator. Reports throughput in total actions so the
-    // dashboard series is stable across test-vector changes.
     for n in [2, 4, 8, 16, 32] {
         let items = common::cycled(&source_items, n);
+        // Scale throughput by total actions, not bundles, so the dashboard
+        // series stays stable across test-vector changes.
         let total_actions: u64 = items.iter().map(|i| i.request_weight() as u64).sum();
 
         group.throughput(Throughput::Elements(total_actions));

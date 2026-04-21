@@ -14,15 +14,9 @@
 //!
 //! # Batched vs unbatched
 //!
-//! Unlike the Halo2 bench, this file can exercise true batch verification
-//! because `sapling_crypto::BatchValidator` is public. The `batched` series
-//! is the production path; the `unbatched` series is the fallback taken when
-//! a batch fails verification and items are re-verified individually.
-//!
-//! # Test data limitations
-//!
-//! Bundles are cycled from the small set in `zebra-test`, so cache effects
-//! are not representative of a real workload with unique inputs.
+//! The `batched` series is the production path; the `unbatched` series is
+//! the fallback taken when a batch fails verification and items are
+//! re-verified individually.
 
 // Disabled due to warnings in criterion macros
 #![allow(missing_docs)]
@@ -119,8 +113,6 @@ fn bench_sapling_verify(c: &mut Criterion) {
         })
     });
 
-    // Unbatched: one BatchValidator per bundle. This is the fallback path
-    // used when a batch fails and items are re-verified individually.
     for n in [2, 4, 8, 16, 32, 64] {
         let items = common::cycled(&source_items, n);
 
@@ -140,8 +132,8 @@ fn bench_sapling_verify(c: &mut Criterion) {
         );
     }
 
-    // Batched: all bundles in one BatchValidator, amortizing the final
-    // multi-scalar multiplication. This is the production path.
+    // All bundles share one BatchValidator, amortizing the final
+    // multi-scalar multiplication.
     for n in [2, 4, 8, 16, 32, 64] {
         let items = common::cycled(&source_items, n);
 

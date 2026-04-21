@@ -42,7 +42,6 @@ enum Item {
 fn sigs_with_distinct_keys() -> impl Iterator<Item = Item> {
     std::iter::repeat_with(|| {
         let mut rng = thread_rng();
-        // let msg = b"";
         match rng.gen::<u8>() % 2 {
             0 => {
                 let sk = SigningKey::<SpendAuth>::new(thread_rng());
