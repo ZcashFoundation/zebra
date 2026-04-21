@@ -37,7 +37,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
+      - uses: actions-rust-lang/setup-rust-toolchain@2b1f5e9b395427c92ee4e3331786ca3c37afe2d7 #v1.16.0
         with:
           toolchain: stable
           cache-on-failure: true
@@ -113,7 +113,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
+      - uses: actions-rust-lang/setup-rust-toolchain@2b1f5e9b395427c92ee4e3331786ca3c37afe2d7 #v1.16.0
         with:
           toolchain: stable
           cache-on-failure: true
@@ -201,7 +201,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Post PR comment
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea #v7.0.1
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 #v9.0.0
         env:
           COMMENT: ${{ steps.compare.outputs.COMMENT }}
         with:
