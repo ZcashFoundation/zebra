@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Added
+
+- Public benchmark dashboard at [zebra.zfnd.org/dev/bench](https://zebra.zfnd.org/dev/bench) covering Groth16, Halo2, Sapling, RedPallas, block, and transaction benchmarks ([#10444](https://github.com/ZcashFoundation/zebra/pull/10444))
+
 ## [Zebra 4.3](https://github.com/ZcashFoundation/zebra/releases/tag/v4.3) - 2026-03-12
 
 This release adds support for [ZIP-235](https://zips.z.cash/zip-0235) and

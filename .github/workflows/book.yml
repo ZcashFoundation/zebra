@@ -71,20 +71,24 @@ jobs:
           RUSTDOCFLAGS: --html-in-header katex-header.html -D warnings -A rustdoc::private_intra_doc_links --cfg docsrs --show-type-layout --generate-link-to-definition --enable-index-page -Zunstable-options
 
       - name: Include benchmark dashboard
+        # Snapshots `gh-pages/dev/bench` (published by `benchmarks.yml`) into
+        # the docs artifact so it is reachable at `/dev/bench`.
         run: |
-          # Copy benchmark data from gh-pages branch into the docs output.
-          # This makes the benchmark dashboard available at /dev/bench/.
-          # Fails gracefully if gh-pages has no benchmark data yet.
-          git fetch origin gh-pages --depth=1 || true
-          if git rev-parse origin/gh-pages >/dev/null 2>&1; then
-            git show origin/gh-pages:dev/bench/index.html > /dev/null 2>&1 && {
-              mkdir -p target/docs/dev/bench
-              git show origin/gh-pages:dev/bench/index.html > target/docs/dev/bench/index.html
-              git show origin/gh-pages:dev/bench/data.js > target/docs/dev/bench/data.js
-            } || echo "No benchmark data on gh-pages yet, skipping"
-          else
-            echo "gh-pages branch not found, skipping benchmark dashboard"
+          if ! git fetch origin gh-pages --depth=1 2>/dev/null; then
+            echo "gh-pages branch does not exist yet, skipping benchmark dashboard"
+            exit 0
           fi
+
+          if ! git show origin/gh-pages:dev/bench/index.html >/dev/null 2>&1; then
+            echo "gh-pages has no benchmark data yet, skipping benchmark dashboard"
+            exit 0
+          fi
+
+          # index.html and data.js are published atomically by
+          # github-action-benchmark, so data.js isn't guarded separately.
+          mkdir -p target/docs/dev/bench
+          git show origin/gh-pages:dev/bench/index.html > target/docs/dev/bench/index.html
+          git show origin/gh-pages:dev/bench/data.js > target/docs/dev/bench/data.js
 
       - name: Setup Pages
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b #v5.0.0
