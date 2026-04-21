@@ -71,45 +71,57 @@ fn bench_batch_verify(c: &mut Criterion) {
 
         let sigs = sigs_with_distinct_keys().take(n).collect::<Vec<_>>();
 
-        group.bench_with_input(BenchmarkId::new("unbatched", n), &sigs, |b, sigs| {
-            b.iter(|| {
-                for item in sigs.iter() {
-                    match item {
-                        Item::SpendAuth { vk_bytes, sig } => {
-                            assert!(VerificationKey::try_from(*vk_bytes)
-                                .and_then(|vk| vk.verify(MESSAGE_BYTES, sig))
-                                .is_ok());
-                        }
-                        Item::Binding { vk_bytes, sig } => {
-                            assert!(VerificationKey::try_from(*vk_bytes)
-                                .and_then(|vk| vk.verify(MESSAGE_BYTES, sig))
-                                .is_ok());
+        group.bench_with_input(
+            BenchmarkId::new("Unbatched verification", n),
+            &sigs,
+            |b, sigs| {
+                b.iter(|| {
+                    for item in sigs.iter() {
+                        match item {
+                            Item::SpendAuth { vk_bytes, sig } => {
+                                assert!(VerificationKey::try_from(*vk_bytes)
+                                    .and_then(|vk| vk.verify(MESSAGE_BYTES, sig))
+                                    .is_ok());
+                            }
+                            Item::Binding { vk_bytes, sig } => {
+                                assert!(VerificationKey::try_from(*vk_bytes)
+                                    .and_then(|vk| vk.verify(MESSAGE_BYTES, sig))
+                                    .is_ok());
+                            }
                         }
                     }
-                }
-            })
-        });
+                })
+            },
+        );
 
-        group.bench_with_input(BenchmarkId::new("batched", n), &sigs, |b, sigs| {
-            b.iter(|| {
-                let mut batch = batch::Verifier::new();
-                for item in sigs.iter() {
-                    match item {
-                        Item::SpendAuth { vk_bytes, sig } => {
-                            batch.queue(batch::Item::from_spendauth(
-                                *vk_bytes,
-                                *sig,
-                                MESSAGE_BYTES,
-                            ));
-                        }
-                        Item::Binding { vk_bytes, sig } => {
-                            batch.queue(batch::Item::from_binding(*vk_bytes, *sig, MESSAGE_BYTES));
+        group.bench_with_input(
+            BenchmarkId::new("Batched verification", n),
+            &sigs,
+            |b, sigs| {
+                b.iter(|| {
+                    let mut batch = batch::Verifier::new();
+                    for item in sigs.iter() {
+                        match item {
+                            Item::SpendAuth { vk_bytes, sig } => {
+                                batch.queue(batch::Item::from_spendauth(
+                                    *vk_bytes,
+                                    *sig,
+                                    MESSAGE_BYTES,
+                                ));
+                            }
+                            Item::Binding { vk_bytes, sig } => {
+                                batch.queue(batch::Item::from_binding(
+                                    *vk_bytes,
+                                    *sig,
+                                    MESSAGE_BYTES,
+                                ));
+                            }
                         }
                     }
-                }
-                assert!(batch.verify(thread_rng()).is_ok())
-            })
-        });
+                    assert!(batch.verify(thread_rng()).is_ok())
+                })
+            },
+        );
     }
     group.finish();
 }

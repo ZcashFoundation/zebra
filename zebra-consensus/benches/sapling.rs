@@ -110,7 +110,7 @@ fn bench_sapling_verify(c: &mut Criterion) {
     let mut group = c.benchmark_group("groth16_sapling");
 
     group.throughput(Throughput::Elements(1));
-    group.bench_function("single", |b| {
+    group.bench_function("single bundle", |b| {
         let item = source_items[0].clone();
         b.iter(|| {
             let mut batch = BatchValidator::default();
