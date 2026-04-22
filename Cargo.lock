@@ -1748,7 +1748,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "835c052cb0c08c1acf6ffd71c022172e18723949c8282f2b9f27efbc51e64534"
 dependencies = [
  "byteorder",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rustc-hex",
  "static_assertions",
 ]
@@ -2080,7 +2080,7 @@ dependencies = [
  "halo2_proofs",
  "lazy_static",
  "pasta_curves",
- "rand 0.8.5",
+ "rand 0.8.6",
  "sinsemilla",
  "subtle",
  "uint 0.9.5",
@@ -2835,7 +2835,7 @@ dependencies = [
  "http-body-util",
  "jsonrpsee-types",
  "parking_lot",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rustc-hash 2.1.1",
  "serde",
  "serde_json",
@@ -3606,7 +3606,7 @@ dependencies = [
  "glob",
  "opentelemetry",
  "percent-encoding",
- "rand 0.8.5",
+ "rand 0.8.6",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
@@ -3654,7 +3654,7 @@ dependencies = [
  "memuse",
  "nonempty",
  "pasta_curves",
- "rand 0.8.5",
+ "rand 0.8.6",
  "reddsa",
  "serde",
  "sinsemilla",
@@ -3778,7 +3778,7 @@ dependencies = [
  "ff",
  "group",
  "lazy_static",
- "rand 0.8.5",
+ "rand 0.8.6",
  "static_assertions",
  "subtle",
 ]
@@ -4389,9 +4389,9 @@ dependencies = [
 
 [[package]]
 name = "rand"
-version = "0.8.5"
+version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34af8d1a0e25924bc5b7c43c079c942339d8f0a8b57c39049bef581b46327404"
+checksum = "5ca0ecfa931c29007047d1bc58e623ab12e5590e8c7cc53200d5202b69266d8a"
 dependencies = [
  "libc",
  "rand_chacha 0.3.1",
@@ -4970,7 +4970,7 @@ dependencies = [
  "jubjub",
  "lazy_static",
  "memuse",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rand_core 0.6.4",
  "redjubjub",
  "subtle",
@@ -5465,7 +5465,7 @@ dependencies = [
  "http",
  "httparse",
  "log",
- "rand 0.8.5",
+ "rand 0.8.6",
  "sha1",
 ]
 
@@ -6091,7 +6091,7 @@ dependencies = [
  "indexmap 1.9.3",
  "pin-project",
  "pin-project-lite",
- "rand 0.8.5",
+ "rand 0.8.6",
  "slab",
  "tokio",
  "tokio-util",
@@ -6128,7 +6128,7 @@ dependencies = [
  "futures",
  "futures-core",
  "pin-project",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rayon",
  "tokio",
  "tokio-test",
@@ -7466,7 +7466,7 @@ dependencies = [
  "memuse",
  "nonempty",
  "orchard",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rand_core 0.6.4",
  "redjubjub",
  "ripemd 0.1.3",
@@ -7607,7 +7607,7 @@ dependencies = [
  "primitive-types",
  "proptest",
  "proptest-derive",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rand_chacha 0.3.1",
  "rand_core 0.6.4",
  "rayon",
@@ -7668,7 +7668,7 @@ dependencies = [
  "orchard",
  "proptest",
  "proptest-derive",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rayon",
  "sapling-crypto",
  "serde",
@@ -7713,7 +7713,7 @@ dependencies = [
  "pin-project",
  "proptest",
  "proptest-derive",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rayon",
  "regex",
  "schemars 1.2.1",
@@ -7773,7 +7773,7 @@ dependencies = [
  "phf",
  "proptest",
  "prost 0.14.3",
- "rand 0.8.5",
+ "rand 0.8.6",
  "sapling-crypto",
  "schemars 1.2.1",
  "semver",
@@ -7851,7 +7851,7 @@ dependencies = [
  "once_cell",
  "proptest",
  "proptest-derive",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rayon",
  "regex",
  "rlimit",
@@ -7886,7 +7886,7 @@ dependencies = [
  "once_cell",
  "owo-colors",
  "proptest",
- "rand 0.8.5",
+ "rand 0.8.6",
  "regex",
  "spandoc",
  "tempfile",
@@ -7960,7 +7960,7 @@ dependencies = [
  "proptest",
  "proptest-derive",
  "prost 0.14.3",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rayon",
  "regex",
  "semver",
