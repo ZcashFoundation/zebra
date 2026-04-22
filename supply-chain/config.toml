@@ -1459,7 +1459,7 @@ suggest = false
 notes = "Sentry 0.47 upgrade"
 
 [[exemptions.rustls-webpki]]
-version = "0.103.10"
+version = "0.103.13"
 criteria = "safe-to-deploy"
 
 [[exemptions.rusty-fork]]
