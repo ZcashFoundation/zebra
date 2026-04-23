@@ -1203,33 +1203,15 @@ fn coinbase_v5_with_sapling_spends_deserializes_successfully() {
         .zcash_serialize_to_vec()
         .expect("coinbase V5 with Sapling spends must serialize");
 
-    // Deserialize it — this is the crux of the advisory.
-    // The parser allocates all Sapling spend vectors BEFORE any coinbase check.
-    // If deserialization succeeds, the allocation gap is confirmed.
-    let deserialized: Result<Transaction, _> = serialized.zcash_deserialize_into();
+    // Deserialize it — the parser must now reject coinbase transactions with
+    // Sapling spends before allocating spend vectors (GHSA-rgwx-8r98-p34c fix).
+    let err = serialized
+        .zcash_deserialize_into::<Transaction>()
+        .expect_err("coinbase with Sapling spends must be rejected during deserialization");
 
-    match deserialized {
-        Ok(tx) => {
-            // Parser accepted a coinbase transaction with Sapling spends.
-            assert!(tx.is_coinbase());
-            let spend_count = tx.sapling_spends_per_anchor().count();
-            assert!(
-                spend_count > 0,
-                "deserialized coinbase has {spend_count} Sapling spends — \
-                 parser allocated spend vectors before coinbase rule check"
-            );
-            println!(
-                "GHSA-rgwx-8r98-p34c reproduced: parser allocated {spend_count} \
-                 Sapling spend(s) for a coinbase transaction"
-            );
-        }
-        Err(e) => {
-            // If deserialization fails (e.g. librustzcash rejects it), the
-            // allocation still happened transiently — the spend prefixes were
-            // parsed at serialize.rs:188 before this error was raised.
-            println!(
-                "Deserialization returned error (spends were still transiently allocated): {e}"
-            );
-        }
-    }
+    assert!(
+        err.to_string()
+            .contains("coinbase transaction must not have Sapling spends"),
+        "unexpected error: {err}"
+    );
 }
