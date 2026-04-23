@@ -3062,7 +3062,7 @@ async fn getrawtransaction_confirmations_include_non_finalized_blocks() -> Resul
         .await
         .map_err(|err| eyre::eyre!(err))?;
 
-    let confirmations = response["confirmations"]
+    let confirmations: u32 = response["confirmations"]
         .as_u64()
         .expect("confirmations should be a positive integer")
         .try_into()
