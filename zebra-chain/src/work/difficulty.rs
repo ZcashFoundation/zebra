@@ -294,25 +294,27 @@ impl CompactDifficulty {
     /// Returns a floating-point number representing a difficulty as a multiple
     /// of the minimum difficulty for the provided network.
     // Copied from <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L34-L74>
-    // TODO: Explain here what this ported code is doing and why, request help to do so with the ECC team.
     pub fn relative_to_network(&self, network: &Network) -> f64 {
         let network_difficulty = network.target_difficulty_limit().to_compact();
 
-        let [mut n_shift, ..] = self.0.to_be_bytes();
-        let [n_shift_amount, ..] = network_difficulty.0.to_be_bytes();
-        let mut d_diff = f64::from(network_difficulty.0 << 8) / f64::from(self.0 << 8);
+        // get exponent byte from both values
+        let [mut self_exponent_byte, ..] = self.0.to_be_bytes();
+        let [network_exponent_byte, ..] = network_difficulty.0.to_be_bytes();
+        // take the ratio of network mantissa difficulty to self mantissa difficulty
+        let mut mantissa_ratio = f64::from(network_difficulty.0 << 8) / f64::from(self.0 << 8);
 
-        while n_shift < n_shift_amount {
-            d_diff *= 256.0;
-            n_shift += 1;
+        // multiply by 256 for each exponent byte difference
+        while self_exponent_byte < network_exponent_byte {
+            mantissa_ratio *= 256.0;
+            self_exponent_byte += 1;
         }
 
-        while n_shift > n_shift_amount {
-            d_diff /= 256.0;
-            n_shift -= 1;
+        while self_exponent_byte > network_exponent_byte {
+            mantissa_ratio /= 256.0;
+            self_exponent_byte -= 1;
         }
 
-        d_diff
+        mantissa_ratio
     }
 }
 
