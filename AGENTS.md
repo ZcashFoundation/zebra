@@ -94,11 +94,15 @@ cargo test -p zebra-state
 # Run a single test by name
 cargo test -p zebra-chain -- test_name
 
-# CI-like nextest profile for broad coverage
-cargo nextest run --profile all-tests --locked --release --features default-release-binaries --run-ignored=all
+# CI-like nextest profile (unit + integration, excludes stateful)
+cargo nextest run --profile ci --locked --release --features default-release-binaries --run-ignored=all
 
-# Run with nextest (integration profiles)
-cargo nextest run --profile sync-large-checkpoints-empty
+# Run specific test category
+cargo nextest run -E 'test(/^unit::/)'
+cargo nextest run -E 'test(/^integration::/)'
+
+# Run a specific stateful test (GCP)
+cargo nextest run --profile ci-stateful -E 'test(=sync_full_mainnet)' --run-ignored=all
 ```
 
 ## Commit & Pull Request Guidelines
@@ -209,17 +213,25 @@ S::Future: Send + 'static,
 
 ## Testing Guidelines
 
-- Unit/property tests: `src/*/tests/` within each crate (`prop.rs`, `vectors.rs`, `preallocate.rs`)
-- Integration tests: `crate/tests/` (standard Rust layout)
+- **Unit/property tests**: `src/*/tests/` within each crate (`prop.rs`, `vectors.rs`, `preallocate.rs`)
+- **zebrad acceptance tests**: `zebrad/tests/` organized into 3 module tiers:
+  - `unit::` — Fast CLI, config tests (<1 min, no network/state)
+  - `integration::` — Tests that launch zebrad (5-15 min, no cached state)
+  - `stateful::` — Tests requiring cached blockchain state (30 min+, GCP VMs)
+- **Adding new tests**: Place in the appropriate module. No nextest config changes needed.
 - Async tests: `#[tokio::test]` with timeouts for long-running tests
 - Test configs must match real network parameters (don't rely on defaults)
 
 ```bash
-# Unit tests
+# Unit tests (all crates)
 cargo test --workspace
 
-# Integration tests with nextest
-cargo nextest run --profile sync-large-checkpoints-empty
+# zebrad unit + integration tests (default nextest profile excludes stateful)
+cargo nextest run
+
+# Specific test category
+cargo nextest run -E 'test(/^unit::/)'
+cargo nextest run -E 'test(/^integration::/)'
 ```
 
 ## Metrics & Observability
