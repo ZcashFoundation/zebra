@@ -1419,6 +1419,7 @@ where
                 solution: Some(solution),
                 bits: Some(bits),
                 difficulty: Some(difficulty),
+                n_tx: tx.len(),
                 tx,
                 trees,
                 chain_supply: block_info
@@ -3782,6 +3783,7 @@ impl Default for GetBlockResponse {
             confirmations: 0,
             height: None,
             time: None,
+            n_tx: 0,
             tx: Vec::new(),
             trees: GetBlockTrees::default(),
             size: None,
@@ -3859,6 +3861,10 @@ pub struct BlockObject {
 
     // `chainhistoryroot` would be here. Undocumented. TODO: decide if we want to support it
     //
+    /// The number of transactions in this block.
+    #[serde(rename = "nTx")]
+    n_tx: usize,
+
     /// List of transactions in block order, hex-encoded if verbosity=1 or
     /// as objects if verbosity=2.
     tx: Vec<GetBlockTransaction>,
