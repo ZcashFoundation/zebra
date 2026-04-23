@@ -15,8 +15,9 @@ use crate::{
     primitives::{Halo2Proof, ZkSnarkProof},
     serialization::{
         zcash_deserialize_external_count, zcash_serialize_empty_list,
-        zcash_serialize_external_count, AtLeastOne, ReadZcashExt, SerializationError,
-        TrustedPreallocate, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
+        zcash_serialize_external_count, AtLeastOne, CompactSizeMessage, ReadZcashExt,
+        SerializationError, TrustedPreallocate, ZcashDeserialize, ZcashDeserializeInto,
+        ZcashSerialize,
     },
 };
 
@@ -183,147 +184,180 @@ impl ZcashSerialize for sapling::ShieldedData<sapling::SharedAnchor> {
 // because the counts are read along with the arrays.
 impl ZcashDeserialize for Option<sapling::ShieldedData<sapling::SharedAnchor>> {
     #[allow(clippy::unwrap_in_result)]
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        // Denoted as `nSpendsSapling` and `vSpendsSapling` in the spec.
-        let spend_prefixes: Vec<_> = (&mut reader).zcash_deserialize_into()?;
-
-        // Denoted as `nOutputsSapling` and `vOutputsSapling` in the spec.
-        let output_prefixes: Vec<_> = (&mut reader).zcash_deserialize_into()?;
-
-        // nSpendsSapling and nOutputsSapling as variables
-        let spends_count = spend_prefixes.len();
-        let outputs_count = output_prefixes.len();
-
-        // All the other fields depend on having spends or outputs
-        if spend_prefixes.is_empty() && output_prefixes.is_empty() {
-            return Ok(None);
-        }
-
-        // Denoted as `valueBalanceSapling` in the spec.
-        let value_balance = (&mut reader).zcash_deserialize_into()?;
-
-        // Denoted as `anchorSapling` in the spec.
-        //
-        // # Consensus
-        //
-        // > Elements of a Spend description MUST be valid encodings of the types given above.
-        //
-        // https://zips.z.cash/protocol/protocol.pdf#spenddesc
-        //
-        // Type is `B^{[ℓ_{Sapling}_{Merkle}]}`, i.e. 32 bytes
-        //
-        // > LEOS2IP_{256}(anchorSapling), if present, MUST be less than 𝑞_𝕁.
-        //
-        // https://zips.z.cash/protocol/protocol.pdf#spendencodingandconsensus
-        //
-        // Validated in [`crate::sapling::tree::Root::zcash_deserialize`].
-        let shared_anchor = if spends_count > 0 {
-            Some((&mut reader).zcash_deserialize_into()?)
-        } else {
-            None
-        };
-
-        // Denoted as `vSpendProofsSapling` in the spec.
-        //
-        // # Consensus
-        //
-        // > Elements of a Spend description MUST be valid encodings of the types given above.
-        //
-        // https://zips.z.cash/protocol/protocol.pdf#spenddesc
-        //
-        // Type is `ZKSpend.Proof`, described in
-        // https://zips.z.cash/protocol/protocol.pdf#grothencoding
-        // It is not enforced here; this just reads 192 bytes.
-        // The type is validated when validating the proof, see
-        // [`groth16::Item::try_from`]. In #3179 we plan to validate here instead.
-        let spend_proofs = zcash_deserialize_external_count(spends_count, &mut reader)?;
-
-        // Denoted as `vSpendAuthSigsSapling` in the spec.
-        //
-        // # Consensus
-        //
-        // > Elements of a Spend description MUST be valid encodings of the types given above.
-        //
-        // https://zips.z.cash/protocol/protocol.pdf#spenddesc
-        //
-        // Type is SpendAuthSig^{Sapling}.Signature, i.e.
-        // B^Y^{[ceiling(ℓ_G/8) + ceiling(bitlength(𝑟_G)/8)]} i.e. 64 bytes
-        // https://zips.z.cash/protocol/protocol.pdf#concretereddsa
-        // See [`redjubjub::Signature<SpendAuth>::zcash_deserialize`].
-        let spend_sigs = zcash_deserialize_external_count(spends_count, &mut reader)?;
-
-        // Denoted as `vOutputProofsSapling` in the spec.
-        //
-        // # Consensus
-        //
-        // > Elements of an Output description MUST be valid encodings of the types given above.
-        //
-        // https://zips.z.cash/protocol/protocol.pdf#outputdesc
-        //
-        // Type is `ZKOutput.Proof`, described in
-        // https://zips.z.cash/protocol/protocol.pdf#grothencoding
-        // It is not enforced here; this just reads 192 bytes.
-        // The type is validated when validating the proof, see
-        // [`groth16::Item::try_from`]. In #3179 we plan to validate here instead.
-        let output_proofs = zcash_deserialize_external_count(outputs_count, &mut reader)?;
-
-        // Denoted as `bindingSigSapling` in the spec.
-        let binding_sig = reader.read_64_bytes()?.into();
-
-        // Create shielded spends from deserialized parts
-        let spends: Vec<_> = spend_prefixes
-            .into_iter()
-            .zip(spend_proofs)
-            .zip(spend_sigs)
-            .map(|((prefix, proof), sig)| {
-                sapling::Spend::<sapling::SharedAnchor>::from_v5_parts(prefix, proof, sig)
-            })
-            .collect();
-
-        // Create shielded outputs from deserialized parts
-        let outputs = output_prefixes
-            .into_iter()
-            .zip(output_proofs)
-            .map(|(prefix, proof)| sapling::Output::from_v5_parts(prefix, proof))
-            .collect();
-
-        // Create transfers
-        //
-        // # Consensus
-        //
-        // > The anchor of each Spend description MUST refer to some earlier
-        // > block’s final Sapling treestate. The anchor is encoded separately
-        // > in each Spend description for v4 transactions, or encoded once and
-        // > shared between all Spend descriptions in a v5 transaction.
-        //
-        // <https://zips.z.cash/protocol/protocol.pdf#spendsandoutputs>
-        //
-        // This rule is also implemented in
-        // [`zebra_state::service::check::anchor`] and
-        // [`zebra_chain::sapling::spend`].
-        //
-        // The "anchor encoding for v5 transactions" is implemented here.
-        let transfers = match shared_anchor {
-            Some(shared_anchor) => sapling::TransferData::SpendsAndMaybeOutputs {
-                shared_anchor,
-                spends: spends
-                    .try_into()
-                    .expect("checked spends when parsing shared anchor"),
-                maybe_outputs: outputs,
-            },
-            None => sapling::TransferData::JustOutputs {
-                outputs: outputs
-                    .try_into()
-                    .expect("checked spends or outputs and returned early"),
-            },
-        };
-
-        Ok(Some(sapling::ShieldedData {
-            value_balance,
-            transfers,
-            binding_sig,
-        }))
+    fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
+        deserialize_v5_sapling_shielded_data(reader, false)
     }
+}
+
+/// Deserialize V5/V6 Sapling shielded data with an optional early coinbase
+/// rejection.
+///
+/// When `is_coinbase` is true, a non-zero `nSpendsSapling` count is rejected
+/// **before** allocating the spend vector, closing the late-validation gap
+/// described in GHSA-rgwx-8r98-p34c.
+#[allow(clippy::unwrap_in_result)]
+fn deserialize_v5_sapling_shielded_data<R: io::Read>(
+    mut reader: R,
+    is_coinbase: bool,
+) -> Result<Option<sapling::ShieldedData<sapling::SharedAnchor>>, SerializationError> {
+    // Denoted as `nSpendsSapling` in the spec — read count before allocating.
+    let spend_count: CompactSizeMessage = (&mut reader).zcash_deserialize_into()?;
+    let spend_count: usize = spend_count.into();
+
+    // # Consensus
+    //
+    // > A coinbase transaction MUST NOT have any Spend descriptions.
+    //
+    // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+    //
+    // Reject before allocating to prevent a peer from forcing thousands of
+    // spend-prefix allocations for a transaction that will always be invalid.
+    if is_coinbase && spend_count > 0 {
+        return Err(SerializationError::Parse(
+            "coinbase transaction must not have Sapling spends",
+        ));
+    }
+
+    // Denoted as `vSpendsSapling` in the spec.
+    let spend_prefixes: Vec<sapling::SpendPrefixInTransactionV5> =
+        zcash_deserialize_external_count(spend_count, &mut reader)?;
+
+    // Denoted as `nOutputsSapling` and `vOutputsSapling` in the spec.
+    let output_prefixes: Vec<_> = (&mut reader).zcash_deserialize_into()?;
+
+    // nSpendsSapling and nOutputsSapling as variables
+    let spends_count = spend_prefixes.len();
+    let outputs_count = output_prefixes.len();
+
+    // All the other fields depend on having spends or outputs
+    if spend_prefixes.is_empty() && output_prefixes.is_empty() {
+        return Ok(None);
+    }
+
+    // Denoted as `valueBalanceSapling` in the spec.
+    let value_balance = (&mut reader).zcash_deserialize_into()?;
+
+    // Denoted as `anchorSapling` in the spec.
+    //
+    // # Consensus
+    //
+    // > Elements of a Spend description MUST be valid encodings of the types given above.
+    //
+    // https://zips.z.cash/protocol/protocol.pdf#spenddesc
+    //
+    // Type is `B^{[ℓ_{Sapling}_{Merkle}]}`, i.e. 32 bytes
+    //
+    // > LEOS2IP_{256}(anchorSapling), if present, MUST be less than 𝑞_𝕁.
+    //
+    // https://zips.z.cash/protocol/protocol.pdf#spendencodingandconsensus
+    //
+    // Validated in [`crate::sapling::tree::Root::zcash_deserialize`].
+    let shared_anchor = if spends_count > 0 {
+        Some((&mut reader).zcash_deserialize_into()?)
+    } else {
+        None
+    };
+
+    // Denoted as `vSpendProofsSapling` in the spec.
+    //
+    // # Consensus
+    //
+    // > Elements of a Spend description MUST be valid encodings of the types given above.
+    //
+    // https://zips.z.cash/protocol/protocol.pdf#spenddesc
+    //
+    // Type is `ZKSpend.Proof`, described in
+    // https://zips.z.cash/protocol/protocol.pdf#grothencoding
+    // It is not enforced here; this just reads 192 bytes.
+    // The type is validated when validating the proof, see
+    // [`groth16::Item::try_from`]. In #3179 we plan to validate here instead.
+    let spend_proofs = zcash_deserialize_external_count(spends_count, &mut reader)?;
+
+    // Denoted as `vSpendAuthSigsSapling` in the spec.
+    //
+    // # Consensus
+    //
+    // > Elements of a Spend description MUST be valid encodings of the types given above.
+    //
+    // https://zips.z.cash/protocol/protocol.pdf#spenddesc
+    //
+    // Type is SpendAuthSig^{Sapling}.Signature, i.e.
+    // B^Y^{[ceiling(ℓ_G/8) + ceiling(bitlength(𝑟_G)/8)]} i.e. 64 bytes
+    // https://zips.z.cash/protocol/protocol.pdf#concretereddsa
+    // See [`redjubjub::Signature<SpendAuth>::zcash_deserialize`].
+    let spend_sigs = zcash_deserialize_external_count(spends_count, &mut reader)?;
+
+    // Denoted as `vOutputProofsSapling` in the spec.
+    //
+    // # Consensus
+    //
+    // > Elements of an Output description MUST be valid encodings of the types given above.
+    //
+    // https://zips.z.cash/protocol/protocol.pdf#outputdesc
+    //
+    // Type is `ZKOutput.Proof`, described in
+    // https://zips.z.cash/protocol/protocol.pdf#grothencoding
+    // It is not enforced here; this just reads 192 bytes.
+    // The type is validated when validating the proof, see
+    // [`groth16::Item::try_from`]. In #3179 we plan to validate here instead.
+    let output_proofs = zcash_deserialize_external_count(outputs_count, &mut reader)?;
+
+    // Denoted as `bindingSigSapling` in the spec.
+    let binding_sig = reader.read_64_bytes()?.into();
+
+    // Create shielded spends from deserialized parts
+    let spends: Vec<_> = spend_prefixes
+        .into_iter()
+        .zip(spend_proofs)
+        .zip(spend_sigs)
+        .map(|((prefix, proof), sig)| {
+            sapling::Spend::<sapling::SharedAnchor>::from_v5_parts(prefix, proof, sig)
+        })
+        .collect();
+
+    // Create shielded outputs from deserialized parts
+    let outputs = output_prefixes
+        .into_iter()
+        .zip(output_proofs)
+        .map(|(prefix, proof)| sapling::Output::from_v5_parts(prefix, proof))
+        .collect();
+
+    // Create transfers
+    //
+    // # Consensus
+    //
+    // > The anchor of each Spend description MUST refer to some earlier
+    // > block’s final Sapling treestate. The anchor is encoded separately
+    // > in each Spend description for v4 transactions, or encoded once and
+    // > shared between all Spend descriptions in a v5 transaction.
+    //
+    // <https://zips.z.cash/protocol/protocol.pdf#spendsandoutputs>
+    //
+    // This rule is also implemented in
+    // [`zebra_state::service::check::anchor`] and
+    // [`zebra_chain::sapling::spend`].
+    //
+    // The "anchor encoding for v5 transactions" is implemented here.
+    let transfers = match shared_anchor {
+        Some(shared_anchor) => sapling::TransferData::SpendsAndMaybeOutputs {
+            shared_anchor,
+            spends: spends
+                .try_into()
+                .expect("checked spends when parsing shared anchor"),
+            maybe_outputs: outputs,
+        },
+        None => sapling::TransferData::JustOutputs {
+            outputs: outputs
+                .try_into()
+                .expect("checked spends or outputs and returned early"),
+        },
+    };
+
+    Ok(Some(sapling::ShieldedData {
+        value_balance,
+        transfers,
+        binding_sig,
+    }))
 }
 
 impl ZcashSerialize for Option<orchard::ShieldedData> {
@@ -860,10 +894,13 @@ impl ZcashDeserialize for Transaction {
                 // then assemble them.
 
                 // Denoted as `tx_in_count` and `tx_in` in the spec.
-                let inputs = Vec::zcash_deserialize(&mut limited_reader)?;
+                let inputs: Vec<transparent::Input> = Vec::zcash_deserialize(&mut limited_reader)?;
 
                 // Denoted as `tx_out_count` and `tx_out` in the spec.
                 let outputs = Vec::zcash_deserialize(&mut limited_reader)?;
+
+                let is_coinbase = inputs.len() == 1
+                    && matches!(inputs.first(), Some(transparent::Input::Coinbase { .. }));
 
                 // Denoted as `lock_time` in the spec.
                 let lock_time = LockTime::zcash_deserialize(&mut limited_reader)?;
@@ -874,8 +911,25 @@ impl ZcashDeserialize for Transaction {
                 // Denoted as `valueBalanceSapling` in the spec.
                 let value_balance = (&mut limited_reader).zcash_deserialize_into()?;
 
-                // Denoted as `nSpendsSapling` and `vSpendsSapling` in the spec.
-                let shielded_spends = Vec::zcash_deserialize(&mut limited_reader)?;
+                // Denoted as `nSpendsSapling` — read count before allocating.
+                let spend_count: CompactSizeMessage =
+                    (&mut limited_reader).zcash_deserialize_into()?;
+                let spend_count: usize = spend_count.into();
+
+                // # Consensus
+                //
+                // > A coinbase transaction MUST NOT have any Spend descriptions.
+                //
+                // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+                if is_coinbase && spend_count > 0 {
+                    return Err(SerializationError::Parse(
+                        "coinbase transaction must not have Sapling spends",
+                    ));
+                }
+
+                // Denoted as `vSpendsSapling` in the spec.
+                let shielded_spends: Vec<sapling::Spend<sapling::PerSpendAnchor>> =
+                    zcash_deserialize_external_count(spend_count, &mut limited_reader)?;
 
                 // Denoted as `nOutputsSapling` and `vOutputsSapling` in the spec.
                 let shielded_outputs =
@@ -963,16 +1017,20 @@ impl ZcashDeserialize for Transaction {
                 let expiry_height = block::Height(limited_reader.read_u32::<LittleEndian>()?);
 
                 // Denoted as `tx_in_count` and `tx_in` in the spec.
-                let inputs = Vec::zcash_deserialize(&mut limited_reader)?;
+                let inputs: Vec<transparent::Input> = Vec::zcash_deserialize(&mut limited_reader)?;
 
                 // Denoted as `tx_out_count` and `tx_out` in the spec.
                 let outputs = Vec::zcash_deserialize(&mut limited_reader)?;
+
+                let is_coinbase = inputs.len() == 1
+                    && matches!(inputs.first(), Some(transparent::Input::Coinbase { .. }));
 
                 // A bundle of fields denoted in the spec as `nSpendsSapling`, `vSpendsSapling`,
                 // `nOutputsSapling`,`vOutputsSapling`, `valueBalanceSapling`, `anchorSapling`,
                 // `vSpendProofsSapling`, `vSpendAuthSigsSapling`, `vOutputProofsSapling` and
                 // `bindingSigSapling`.
-                let sapling_shielded_data = (&mut limited_reader).zcash_deserialize_into()?;
+                let sapling_shielded_data =
+                    deserialize_v5_sapling_shielded_data(&mut limited_reader, is_coinbase)?;
 
                 // A bundle of fields denoted in the spec as `nActionsOrchard`, `vActionsOrchard`,
                 // `flagsOrchard`,`valueBalanceOrchard`, `anchorOrchard`, `sizeProofsOrchard`,
@@ -1021,16 +1079,20 @@ impl ZcashDeserialize for Transaction {
                 let zip233_amount = (&mut limited_reader).zcash_deserialize_into()?;
 
                 // Denoted as `tx_in_count` and `tx_in` in the spec.
-                let inputs = Vec::zcash_deserialize(&mut limited_reader)?;
+                let inputs: Vec<transparent::Input> = Vec::zcash_deserialize(&mut limited_reader)?;
 
                 // Denoted as `tx_out_count` and `tx_out` in the spec.
                 let outputs = Vec::zcash_deserialize(&mut limited_reader)?;
+
+                let is_coinbase = inputs.len() == 1
+                    && matches!(inputs.first(), Some(transparent::Input::Coinbase { .. }));
 
                 // A bundle of fields denoted in the spec as `nSpendsSapling`, `vSpendsSapling`,
                 // `nOutputsSapling`,`vOutputsSapling`, `valueBalanceSapling`, `anchorSapling`,
                 // `vSpendProofsSapling`, `vSpendAuthSigsSapling`, `vOutputProofsSapling` and
                 // `bindingSigSapling`.
-                let sapling_shielded_data = (&mut limited_reader).zcash_deserialize_into()?;
+                let sapling_shielded_data =
+                    deserialize_v5_sapling_shielded_data(&mut limited_reader, is_coinbase)?;
 
                 // A bundle of fields denoted in the spec as `nActionsOrchard`, `vActionsOrchard`,
                 // `flagsOrchard`,`valueBalanceOrchard`, `anchorOrchard`, `sizeProofsOrchard`,
