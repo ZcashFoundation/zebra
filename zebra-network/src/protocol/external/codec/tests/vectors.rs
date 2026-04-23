@@ -588,6 +588,57 @@ fn reject_command_and_reason_size_limits() {
     }
 }
 
+/// Reproduce GHSA-438q-jx8f-cccv: read_headers() accepts more than the
+/// protocol-maximum 160 headers because the receive path relies on
+/// TrustedPreallocate (ceiling ≈ 1 409) instead of MAX_FIND_BLOCK_HEADERS_RESULTS.
+#[test]
+fn headers_message_exceeding_protocol_cap_is_accepted() {
+    use zebra_chain::serialization::ZcashDeserializeInto;
+
+    let _init_guard = zebra_test::init();
+
+    // Parse the dummy header from test vectors.
+    let header: block::Header = zebra_test::vectors::DUMMY_HEADER
+        .zcash_deserialize_into()
+        .expect("dummy header should deserialize");
+    let counted = block::CountedHeader {
+        header: header.into(),
+    };
+
+    // 161 headers — one more than the Zcash protocol limit of 160.
+    let count = 161;
+    let msg = Message::Headers(vec![counted; count]);
+
+    // Encode via the codec (no cap on the send side either).
+    let mut codec = Codec::builder().finish();
+    let mut bytes = BytesMut::new();
+    codec
+        .encode(msg, &mut bytes)
+        .expect("encoding 161 headers should succeed");
+
+    // Decode — this succeeds because read_headers() has no 160-entry cap.
+    let decoded = codec
+        .decode(&mut bytes)
+        .expect("decoding should not error")
+        .expect("a message should be present");
+
+    match decoded {
+        Message::Headers(headers) => {
+            assert_eq!(
+                headers.len(),
+                count,
+                "codec accepted {count} headers; protocol cap is 160"
+            );
+        }
+        other => panic!("expected Headers, got {other:?}"),
+    }
+
+    // Show the TrustedPreallocate ceiling that enables the amplification.
+    use zebra_chain::serialization::TrustedPreallocate;
+    let max = block::CountedHeader::max_allocation();
+    assert_eq!(max, 1409, "preallocation ceiling should be ~8.8x the protocol cap of 160");
+}
+
 /// Check that the version test vector deserialization fails when there's a network magic mismatch.
 #[test]
 fn message_with_wrong_network_magic_returns_error() {
