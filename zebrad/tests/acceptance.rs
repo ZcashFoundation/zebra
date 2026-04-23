@@ -3064,7 +3064,9 @@ async fn getrawtransaction_confirmations_include_non_finalized_blocks() -> Resul
 
     let confirmations = response["confirmations"]
         .as_u64()
-        .expect("confirmations should be a positive integer") as u32;
+        .expect("confirmations should be a positive integer")
+        .try_into()
+        .expect("confirmations should fit in u32 because regtest block heights fit in u32");
 
     assert_eq!(
         confirmations, expected_confirmations,
