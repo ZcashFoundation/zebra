@@ -148,8 +148,10 @@ impl CachedFfiTransaction {
         let previous_output = self
             .all_previous_outputs
             .get(input_index)
+            .filter(|_| self.all_previous_outputs.len() == self.transaction.inputs().len())
             .ok_or(Error::TxIndex)?
             .clone();
+
         let transparent::Output {
             value: _,
             lock_script,
