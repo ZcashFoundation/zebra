@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+This release fixes an important security issue:
+
+- [CVE-2026-XXXXX: Consensus Divergence in Transparent Sighash Hash-Type
+  Handling due to Stale
+  Buffer](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-gq4h-3grw-2rhv)
+
+The impact of the issue for crate users will depend on the particular usage;
+if you use it as a building block for a consensus node, you should update.
+
 ### Breaking Changes
 
 - `Sigops::scripts` now returns `impl Iterator<Item = Vec<u8>>` instead of `impl

@@ -1053,3 +1053,155 @@ fn is_valid_rejects_out_of_range_input_index() {
         .expect_err("out-of-range input_index must error, not panic");
     assert_eq!(err, super::Error::TxIndex);
 }
+
+/// Regression test for the libzcash_script stale-sighash-buffer bypass.
+///
+/// Construct a V5 transaction whose scriptPubKey is:
+///
+/// ```text
+/// <pubkey> OP_CHECKSIGVERIFY <pubkey> OP_CHECKSIG
+/// ```
+///
+/// and whose scriptSig pushes two signatures over the same canonical
+/// `SIGHASH_ALL` (0x01) digest, the first tagged with an *invalid* V5
+/// hash-type byte (0x50) and the second tagged with the canonical 0x01:
+///
+/// ```text
+/// <der_sig || 0x50>   (pushed first → bottom of stack)
+/// <der_sig || 0x01>   (pushed second → top of stack)
+/// ```
+///
+/// Script evaluation then:
+///
+/// 1. Consumes `<der_sig || 0x01>` via `OP_CHECKSIGVERIFY`. Zebra's callback
+///    returns the canonical SIGHASH_ALL digest, the C++ verifier fills its
+///    stack-local `sighashArray` with that digest, and the signature passes.
+/// 2. Consumes `<der_sig || 0x50>` via `OP_CHECKSIG`. Zebra's callback sees
+///    an invalid V5 hash-type byte. Prior to this fix the callback returned
+///    `None`, libzcash_script silently wrote nothing to the C++ buffer, and
+///    the C++ `CheckSig` verified the signature against the stale
+///    SIGHASH_ALL digest from step 1 — accepting a spend that `zcashd`
+///    rejects and splitting Zebra nodes from `zcashd` nodes.
+///
+/// With the defense-in-depth fix in `zebra-script::calculate_sighash`, the
+/// callback now returns a per-call CSPRNG-derived sighash when the hash
+/// type would have been rejected, so the second signature fails to verify
+/// and `is_valid` returns an error — matching `zcashd`.
+///
+/// The bypass requires release-grade C++ optimizations in `libzcash_script`
+/// (so the stack buffer is not zero-initialized and the prior digest
+/// lingers between callbacks). The workspace `Cargo.toml` forces
+/// `[profile.dev.package.libzcash_script]` to `opt-level = 3` in all
+/// profiles so that `cargo test` exercises the vulnerable code path and
+/// this regression test catches any re-introduction of the bug in both
+/// dev and release builds.
+#[test]
+fn stale_sighash_buffer_v5_two_checksig_rejected() {
+    use secp256k1::{Message, Secp256k1, SecretKey};
+
+    let _init_guard = zebra_test::init();
+
+    let secp = Secp256k1::new();
+    let secret_key = SecretKey::from_slice(&[0xcd; 32]).expect("valid secret key");
+    let public_key = secp256k1::PublicKey::from_secret_key(&secp, &secret_key);
+    let pubkey_bytes = public_key.serialize();
+
+    // scriptPubKey: <0x21> <pubkey 33 bytes> OP_CHECKSIGVERIFY
+    //               <0x21> <pubkey 33 bytes> OP_CHECKSIG
+    // OP_CHECKSIGVERIFY = 0xad, OP_CHECKSIG = 0xac
+    let mut lock_script_bytes = Vec::with_capacity(1 + 33 + 1 + 1 + 33 + 1);
+    lock_script_bytes.push(0x21);
+    lock_script_bytes.extend_from_slice(&pubkey_bytes);
+    lock_script_bytes.push(0xad);
+    lock_script_bytes.push(0x21);
+    lock_script_bytes.extend_from_slice(&pubkey_bytes);
+    lock_script_bytes.push(0xac);
+    let lock_script = transparent::Script::new(&lock_script_bytes);
+
+    let previous_output = transparent::Output {
+        value: 1_0000_0000u64.try_into().expect("valid amount"),
+        lock_script: lock_script.clone(),
+    };
+
+    // Placeholder V5 tx used to compute the sighash; the V5 (ZIP 244) sighash
+    // does not depend on the unlock script contents, so we can sign, then
+    // rebuild the transaction with the real unlock script.
+    let placeholder_tx = Transaction::V5 {
+        network_upgrade: NetworkUpgrade::Nu5,
+        lock_time: LockTime::unlocked(),
+        expiry_height: block::Height(0),
+        inputs: vec![transparent::Input::PrevOut {
+            outpoint: transparent::OutPoint {
+                hash: transaction::Hash([0u8; 32]),
+                index: 0,
+            },
+            unlock_script: transparent::Script::new(&[]),
+            sequence: u32::MAX,
+        }],
+        outputs: vec![transparent::Output {
+            value: 9000_0000u64.try_into().expect("valid amount"),
+            lock_script: transparent::Script::new(&[0x00]),
+        }],
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    };
+
+    let all_previous_outputs = Arc::new(vec![previous_output.clone()]);
+    let sighasher = SigHasher::new(&placeholder_tx, NetworkUpgrade::Nu5, all_previous_outputs)
+        .expect("sighasher creation should succeed");
+
+    // Canonical SIGHASH_ALL digest — this is the digest the attacker needs
+    // the stale C++ buffer to still hold when the second CHECKSIG runs.
+    let sighash = sighasher.sighash(HashType::ALL, Some((0, lock_script_bytes.clone())));
+    let msg = Message::from_digest(*sighash.as_ref());
+    let signature = secp.sign_ecdsa(&msg, &secret_key);
+    let der_sig = signature.serialize_der();
+
+    // scriptSig pushes:
+    //   1. <der_sig || 0x50>  (bottom)
+    //   2. <der_sig || 0x01>  (top, consumed by OP_CHECKSIGVERIFY first)
+    let mut unlock_script_bytes = Vec::new();
+    let sig_with_hashtype_len = (der_sig.len() + 1) as u8;
+
+    unlock_script_bytes.push(sig_with_hashtype_len);
+    unlock_script_bytes.extend_from_slice(&der_sig);
+    unlock_script_bytes.push(0x50);
+
+    unlock_script_bytes.push(sig_with_hashtype_len);
+    unlock_script_bytes.extend_from_slice(&der_sig);
+    unlock_script_bytes.push(0x01);
+
+    let final_tx = Transaction::V5 {
+        network_upgrade: NetworkUpgrade::Nu5,
+        lock_time: LockTime::unlocked(),
+        expiry_height: block::Height(0),
+        inputs: vec![transparent::Input::PrevOut {
+            outpoint: transparent::OutPoint {
+                hash: transaction::Hash([0u8; 32]),
+                index: 0,
+            },
+            unlock_script: transparent::Script::new(&unlock_script_bytes),
+            sequence: u32::MAX,
+        }],
+        outputs: vec![transparent::Output {
+            value: 9000_0000u64.try_into().expect("valid amount"),
+            lock_script: transparent::Script::new(&[0x00]),
+        }],
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    };
+
+    let verifier = super::CachedFfiTransaction::new(
+        Arc::new(final_tx),
+        Arc::new(vec![previous_output]),
+        NetworkUpgrade::Nu5,
+    )
+    .expect("network upgrade should be valid for v5 tx");
+
+    assert!(
+        verifier.is_valid(0).is_err(),
+        "V5 tx exploiting the stale libzcash_script sighash buffer via \
+         OP_CHECKSIGVERIFY + OP_CHECKSIG with an invalid second hash-type \
+         byte (0x50) must be rejected, matching zcashd"
+    );
+}

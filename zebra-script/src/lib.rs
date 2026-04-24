@@ -177,43 +177,67 @@ impl CachedFfiTransaction {
 
         let calculate_sighash =
             |script_code: &script::Code, hash_type: &zcash_script::signature::HashType| {
-                // For v5+ transactions: reject undefined hash_type values,
-                // matching zcashd's SighashType::parse behavior.
-                // Valid values: {0x01, 0x02, 0x03, 0x81, 0x82, 0x83}.
-                if self.transaction.version() >= 5 {
-                    let valid_v5_types: &[i32] = &[0x01, 0x02, 0x03, 0x81, 0x82, 0x83];
-                    if !valid_v5_types.contains(&hash_type.raw_bits()) {
-                        return None;
+                // Inner helper: returns None when the hash type is invalid
+                // and the callback should signal failure.
+                let computed: Option<[u8; 32]> = (|| {
+                    // For v5+ transactions: reject undefined hash_type values,
+                    // matching zcashd's SighashType::parse behavior.
+                    // Valid values: {0x01, 0x02, 0x03, 0x81, 0x82, 0x83}.
+                    if self.transaction.version() >= 5 {
+                        let valid_v5_types: &[i32] = &[0x01, 0x02, 0x03, 0x81, 0x82, 0x83];
+                        if !valid_v5_types.contains(&hash_type.raw_bits()) {
+                            return None;
+                        }
                     }
-                }
 
-                let script_code_vec = script_code.0.clone();
+                    let script_code_vec = script_code.0.clone();
 
-                // For pre-v5 (v4) transactions: zcashd serializes the raw
-                // hash_type byte into the sighash preimage (only masking with
-                // 0x1f for selection logic). Use the raw byte to match.
-                if self.transaction.version() < 5 {
-                    let raw_byte = hash_type.raw_bits() as u8;
-                    return Some(
+                    // For pre-v5 (v4) transactions: zcashd serializes the raw
+                    // hash_type byte into the sighash preimage (only masking with
+                    // 0x1f for selection logic). Use the raw byte to match.
+                    if self.transaction.version() < 5 {
+                        let raw_byte = hash_type.raw_bits() as u8;
+                        return Some(
+                            self.sighasher()
+                                .sighash_v4_raw(raw_byte, Some((input_index, script_code_vec)))
+                                .0,
+                        );
+                    }
+
+                    let mut our_hash_type = match hash_type.signed_outputs() {
+                        zcash_script::signature::SignedOutputs::All => HashType::ALL,
+                        zcash_script::signature::SignedOutputs::Single => HashType::SINGLE,
+                        zcash_script::signature::SignedOutputs::None => HashType::NONE,
+                    };
+                    if hash_type.anyone_can_pay() {
+                        our_hash_type |= HashType::ANYONECANPAY;
+                    }
+                    Some(
                         self.sighasher()
-                            .sighash_v4_raw(raw_byte, Some((input_index, script_code_vec)))
+                            .sighash(our_hash_type, Some((input_index, script_code_vec)))
                             .0,
-                    );
-                }
+                    )
+                })();
 
-                let mut our_hash_type = match hash_type.signed_outputs() {
-                    zcash_script::signature::SignedOutputs::All => HashType::ALL,
-                    zcash_script::signature::SignedOutputs::Single => HashType::SINGLE,
-                    zcash_script::signature::SignedOutputs::None => HashType::NONE,
-                };
-                if hash_type.anyone_can_pay() {
-                    our_hash_type |= HashType::ANYONECANPAY;
-                }
-                Some(
-                    self.sighasher()
-                        .sighash(our_hash_type, Some((input_index, script_code_vec)))
-                        .0,
-                )
+                // Workaround for the libzcash_script callback API: returning
+                // `None` from this callback does not propagate failure to the
+                // C++ verifier.
+                //
+                // Instead of returning `None` to indicate an error, we return a
+                // per-call randomly-generated dummy sighash so any signature
+                // fails to verify with overwhelming probability. Note that a
+                // fixed sentinel value would be unsafe: an attacker who knows
+                // it can construct an ECDSA signature that verifies against any
+                // 32-byte value under a chosen pubkey.
+                //
+                // This shim can be removed once libzcash_script propagates
+                // callback failure to the C++ verifier.
+                Some(computed.unwrap_or_else(|| {
+                    use rand::RngCore;
+                    let mut bytes = [0u8; 32];
+                    rand::rngs::OsRng.fill_bytes(&mut bytes);
+                    bytes
+                }))
             };
         let interpreter = get_interpreter(&calculate_sighash, lock_time, is_final);
         interpreter

@@ -28,6 +28,7 @@ zcash_script = { workspace = true }
 zcash_primitives = { workspace = true }
 zebra-chain = { path = "../zebra-chain", version = "6.0.2" }
 
+rand = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
