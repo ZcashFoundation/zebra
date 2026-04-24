@@ -52,26 +52,28 @@ impl tower::Service<Request> for Verifier {
             cached_ffi_transaction,
             input_index,
         } = req;
-        let input = &cached_ffi_transaction.inputs()[input_index];
-        match input {
-            transparent::Input::PrevOut { outpoint, .. } => {
-                let outpoint = *outpoint;
 
-                // Avoid calling the state service if the utxo is already known
-                let span = tracing::trace_span!("script", ?outpoint);
+        let span = tracing::trace_span!("script");
+        async move {
+            let input = &cached_ffi_transaction
+                .inputs()
+                .get(input_index)
+                .ok_or_else(|| "cached_ffi_transaction missing input at input_index")?;
 
-                async move {
+            match input {
+                transparent::Input::PrevOut { outpoint, .. } => {
+                    let outpoint = *outpoint;
+
+                    // Avoid calling the state service if the utxo is already known
                     cached_ffi_transaction.is_valid(input_index)?;
-                    tracing::trace!("script verification succeeded");
+                    tracing::trace!(?outpoint, "script verification succeeded");
 
                     Ok(())
                 }
-                .instrument(span)
-                .boxed()
-            }
-            transparent::Input::Coinbase { .. } => {
-                async { Err("unexpected coinbase input".into()) }.boxed()
+                transparent::Input::Coinbase { .. } => Err("unexpected coinbase input".into()),
             }
         }
+        .instrument(span)
+        .boxed()
     }
 }
