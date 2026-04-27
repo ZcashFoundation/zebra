@@ -1109,6 +1109,7 @@ where
     }
 
     /// Verifies if a V6 `transaction` is supported by `network_upgrade`.
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
     fn verify_v6_transaction_network_upgrade(
         transaction: &Transaction,
         network_upgrade: NetworkUpgrade,
