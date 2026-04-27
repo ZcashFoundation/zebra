@@ -263,29 +263,29 @@ pub fn subsidy_is_valid(
         {
             let lockbox_disbursements = net.lockbox_disbursements(height);
 
-            // FIXME: Temporarily disabled this error by commenting out the code below
-            // and adding the extra condition to the `if` above, because after syncing
-            // with upstream Zebra v4.2.0 our Orchard ZSA Regtest workflow tests
-            // started failing here when NU6.1 lockbox disbursements are empty on
-            // Regtest/configured testnets. Revisit later.
-            // if lockbox_disbursements.is_empty() {
-            //     Err(BlockError::Other(
-            //         "missing lockbox disbursements for NU6.1 activation block".to_string(),
-            //     ))?;
-            // }
+            if lockbox_disbursements.is_empty() {
+                // Regtest may not have lockbox disbursements configured, as it may enable
+                // NU6.1 for other consensus rules without requiring ZIP-271 payouts.
+                // For Mainnet/Testnet, empty disbursements indicates a misconfiguration.
+                if !net.is_regtest() {
+                    Err(BlockError::Other(
+                        "missing lockbox disbursements for NU6.1 activation block".to_string(),
+                    ))?;
+                }
+            } else {
+                deferred_pool_balance_change = lockbox_disbursements.into_iter().try_fold(
+                    deferred_pool_balance_change,
+                    |balance, (addr, expected_amount)| {
+                        if !has_amount(&addr, expected_amount) {
+                            Err(SubsidyError::OneTimeLockboxDisbursementNotFound)?;
+                        }
 
-            deferred_pool_balance_change = lockbox_disbursements.into_iter().try_fold(
-                deferred_pool_balance_change,
-                |balance, (addr, expected_amount)| {
-                    if !has_amount(&addr, expected_amount) {
-                        Err(SubsidyError::OneTimeLockboxDisbursementNotFound)?;
-                    }
-
-                    balance
-                        .checked_sub(expected_amount)
-                        .ok_or(SubsidyError::Underflow)
-                },
-            )?;
+                        balance
+                            .checked_sub(expected_amount)
+                            .ok_or(SubsidyError::Underflow)
+                    },
+                )?;
+            }
         };
 
         // Check each funding stream output.
