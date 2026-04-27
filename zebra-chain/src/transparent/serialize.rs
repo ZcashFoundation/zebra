@@ -7,8 +7,9 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use crate::{
     block::{self, Height},
     serialization::{
-        zcash_serialize_bytes, FakeWriter, ReadZcashExt, SerializationError, ZcashDeserialize,
-        ZcashDeserializeInto, ZcashSerialize,
+        zcash_deserialize_bytes_external_count, zcash_serialize_bytes, CompactSizeMessage,
+        FakeWriter, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashDeserializeInto,
+        ZcashSerialize,
     },
     transaction,
 };
@@ -295,14 +296,23 @@ impl ZcashDeserialize for Input {
                 return Err(SerializationError::Parse("wrong index in coinbase"));
             }
 
-            let data: Vec<u8> = (&mut reader).zcash_deserialize_into()?;
-
-            // Check the coinbase data length.
-            if data.len() > MAX_COINBASE_DATA_LEN {
+            // Read the coinbase script length and validate it against the consensus
+            // bound *before* allocating any script bytes. The generic `Vec<u8>`
+            // deserializer would otherwise allocate up to MAX_PROTOCOL_MESSAGE_LEN
+            // bytes for an attacker-controlled CompactSize length and only reject
+            // afterwards, letting a peer force multi-MiB transient allocations per
+            // bogus block.
+            //
+            // Consensus: A coinbase transaction script MUST have length in {2 .. 100} bytes.
+            // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+            let len: CompactSizeMessage = (&mut reader).zcash_deserialize_into()?;
+            let len: usize = len.into();
+            if len > MAX_COINBASE_DATA_LEN {
                 return Err(SerializationError::Parse("coinbase data is too long"));
-            } else if data.len() < MIN_COINBASE_DATA_LEN {
+            } else if len < MIN_COINBASE_DATA_LEN {
                 return Err(SerializationError::Parse("coinbase data is too short"));
             }
+            let data = zcash_deserialize_bytes_external_count(len, &mut reader)?;
 
             let (height, data) = parse_coinbase_height(data)?;
 
