@@ -1,6 +1,6 @@
 ---
 source: zebra-rpc/src/methods/tests/snapshot.rs
-assertion_line: 815
+assertion_line: 867
 expression: block
 ---
 {
@@ -57,7 +57,7 @@ expression: block
         "actions": [],
         "valueBalance": 0.0,
         "valueBalanceZat": 0,
-        "burnexist": false
+        "burnexists": false
       },
       "valueBalance": 0.0,
       "valueBalanceZat": 0,
@@ -69,7 +69,7 @@ expression: block
       "locktime": 0,
       "blockhash": "025579869bcf52a989337342f5f57a84f3a28b968f7d6a8307902b065a668d23",
       "blocktime": 1477674473,
-      "issuanceexist": false
+      "issuanceexists": false
     }
   ],
   "time": 1477674473,

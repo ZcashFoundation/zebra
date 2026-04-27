@@ -48,7 +48,7 @@ expression: rsp
       "actions": [],
       "valueBalance": 0.0,
       "valueBalanceZat": 0,
-      "burnexist": false
+      "burnexists": false
     },
     "valueBalance": 0.0,
     "valueBalanceZat": 0,
@@ -60,6 +60,6 @@ expression: rsp
     "locktime": 0,
     "blockhash": "025579869bcf52a989337342f5f57a84f3a28b968f7d6a8307902b065a668d23",
     "blocktime": 1477674473,
-    "issuanceexist": false
+    "issuanceexists": false
   }
 }

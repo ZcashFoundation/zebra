@@ -1,0 +1,9 @@
+---
+source: zebra-rpc/src/methods/tests/snapshot.rs
+assertion_line: 720
+expression: invalid_hex
+---
+{
+  "code": -8,
+  "message": "invalid hex encoding: Invalid character 'z' at position 0"
+}
