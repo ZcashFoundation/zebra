@@ -760,7 +760,6 @@ impl SpendConflictTestInput {
     ///
     /// This may clear the entire shielded data.
     fn remove_orchard_actions_with_conflicts<Flavor: orchard::ShieldedDataFlavor>(
-        // TODO: Consider adding support of OrchardZSA.
         maybe_shielded_data: &mut Option<orchard::ShieldedData<Flavor>>,
         conflicts: &HashSet<orchard::Nullifier>,
     ) {
@@ -821,7 +820,6 @@ struct SaplingSpendConflict<A: sapling::AnchorVariant + Clone> {
 /// A conflict caused by revealing the same Orchard nullifier.
 #[derive(Arbitrary, Clone, Debug)]
 struct OrchardSpendConflict {
-    // TODO: Consider adding support of OrchardZSA.
     new_shielded_data: DisplayToDebug<orchard::ShieldedData<orchard::OrchardVanilla>>,
 }
 

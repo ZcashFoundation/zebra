@@ -156,6 +156,7 @@ pub enum Transaction {
         orchard_shielded_data: Option<orchard::ShieldedData<orchard::OrchardVanilla>>,
     },
     /// A `version = 6` transaction, which is reserved for current development.
+    // TODO: Add ZIP-230 fee support once our librustzcash/orchard dependencies support it.
     #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
     V6 {
         /// The Network Upgrade for this transaction.
@@ -1169,7 +1170,7 @@ impl Transaction {
     /// Access the Orchard issue data in this transaction, if any,
     /// regardless of version.
     #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-    pub fn orchard_issue_data(&self) -> Option<&orchard_zsa::IssueData> {
+    pub fn orchard_zsa_issue_data(&self) -> Option<&orchard_zsa::IssueData> {
         match self {
             Transaction::V1 { .. }
             | Transaction::V2 { .. }

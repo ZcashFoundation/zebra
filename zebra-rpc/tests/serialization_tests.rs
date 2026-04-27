@@ -806,17 +806,32 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
         let value_balance_zat = bundle.value_balance_zat();
         let spends_flag = bundle.flags().as_ref().map(|f| f.enable_spends());
         let outputs_flag = bundle.flags().as_ref().map(|f| f.enable_outputs());
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+        let enable_zsa_flag = bundle.flags().as_ref().map(|f| f.enable_zsa());
         let anchor = bundle.anchor();
         let proof = bundle.proof().clone();
         let binding_sig = bundle.binding_sig();
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+        let burn_exists = bundle.burn_exists();
         Orchard::new(
             actions,
             value_balance,
             value_balance_zat,
+            #[cfg(not(all(zcash_unstable = "nu7", feature = "tx_v6")))]
             spends_flag.map(|_| OrchardFlags::new(spends_flag.unwrap(), outputs_flag.unwrap())),
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            spends_flag.map(|_| {
+                OrchardFlags::new(
+                    spends_flag.unwrap(),
+                    outputs_flag.unwrap(),
+                    enable_zsa_flag.unwrap(),
+                )
+            }),
             anchor,
             proof,
             binding_sig,
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            burn_exists,
         )
     });
     let binding_sig = tx.binding_sig();
@@ -836,6 +851,8 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
     let expiry_height = tx.expiry_height();
     let block_hash = tx.block_hash();
     let block_time = tx.block_time();
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+    let issuance_exists = tx.issuance_exists();
 
     let new_obj = GetRawTransactionResponse::Object(Box::new(TransactionObject::new(
         in_active_chain,
@@ -864,6 +881,8 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
         expiry_height,
         block_hash,
         block_time,
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+        issuance_exists,
     )));
 
     assert_eq!(obj, new_obj);

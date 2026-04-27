@@ -156,7 +156,7 @@ fn build_asset_records<'a, I: IntoIterator<Item = &'a TranscriptItem>>(
                 process_burns(&mut asset_records, burns.iter())?;
             }
 
-            if let Some(issue_data) = tx.orchard_issue_data() {
+            if let Some(issue_data) = tx.orchard_zsa_issue_data() {
                 process_issue_actions(
                     &mut asset_records,
                     issue_data.inner().ik(),

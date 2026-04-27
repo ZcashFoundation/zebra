@@ -699,6 +699,33 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
     // Test the response format from `getassetstate`.
     #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
     {
+        // Wrong length: asset base hex must be exactly 64 characters.
+        let req = rpc.get_asset_state("abcd".to_string(), None);
+        let wrong_length = req
+            .await
+            .expect_err("The RPC response should be an error for wrong-length asset base");
+
+        settings
+            .bind(|| insta::assert_json_snapshot!("get_asset_state_wrong_length", wrong_length));
+
+        // Invalid hex: 64 chars but not valid hex.
+        let req = rpc.get_asset_state("zz".repeat(32), None);
+        let invalid_hex = req
+            .await
+            .expect_err("The RPC response should be an error for invalid hex");
+
+        settings.bind(|| insta::assert_json_snapshot!("get_asset_state_invalid_hex", invalid_hex));
+
+        // Invalid curve point: valid 64-char hex, but not a valid Pallas point.
+        let req = rpc.get_asset_state("ff".repeat(32), None);
+        let invalid_asset_base = req
+            .await
+            .expect_err("The RPC response should be an error for invalid asset base");
+
+        settings.bind(|| {
+            insta::assert_json_snapshot!("get_asset_state_invalid_asset_base", invalid_asset_base)
+        });
+
         // Prepare the state response and make the RPC request.
         let asset_base = mock_asset_base(b"Asset1");
         let rsp = read_state
@@ -713,6 +740,31 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
         // Check the error response.
         settings.bind(|| {
             insta::assert_json_snapshot!(format!("get_asset_state_not_found"), asset_state)
+        });
+
+        // Query the same asset with include_non_finalized=false, verifying it only checks
+        // finalized state.
+        let asset_base = mock_asset_base(b"Asset1");
+        let rsp = read_state
+            .expect_request_that(|req| {
+                matches!(
+                    req,
+                    ReadRequest::AssetState {
+                        asset_base: _,
+                        include_non_finalized: false,
+                    }
+                )
+            })
+            .map(|responder| responder.respond(ReadResponse::AssetState(None)));
+        let req = rpc.get_asset_state(hex::encode(asset_base.to_bytes()), Some(false));
+
+        let (asset_state_rsp, ..) = tokio::join!(req, rsp);
+        let asset_state = asset_state_rsp.expect_err(
+            "The RPC response should be an error when the asset is absent from finalized state",
+        );
+
+        settings.bind(|| {
+            insta::assert_json_snapshot!("get_asset_state_not_found_finalized_only", asset_state)
         });
 
         // Prepare the state response and make the RPC request.

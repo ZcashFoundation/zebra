@@ -299,6 +299,12 @@ pub struct TransactionObject {
     #[serde(rename = "blocktime", skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
     pub(crate) block_time: Option<i64>,
+
+    /// Whether this transaction contains OrchardZSA issuance data.
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+    #[serde(rename = "issuanceexists")]
+    #[getter(copy)]
+    pub(crate) issuance_exists: bool,
 }
 
 /// The transparent input of a transaction.
@@ -586,6 +592,11 @@ pub struct Orchard {
     #[serde_as(as = "Option<serde_with::hex::Hex>")]
     #[getter(copy)]
     binding_sig: Option<[u8; 64]>,
+    /// Whether OrchardZSA burn data is present.
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+    #[serde(rename = "burnexists")]
+    #[getter(copy)]
+    pub(crate) burn_exists: bool,
 }
 
 impl Orchard {
@@ -625,10 +636,14 @@ impl Orchard {
             flags: Some(OrchardFlags::new(
                 shielded_data.flags.contains(orchard::Flags::ENABLE_OUTPUTS),
                 shielded_data.flags.contains(orchard::Flags::ENABLE_SPENDS),
+                #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+                shielded_data.flags.contains(orchard::Flags::ENABLE_ZSA),
             )),
             anchor: Some(shielded_data.shared_anchor.bytes_in_display_order()),
             proof: Some(shielded_data.proof.bytes_in_display_order()),
             binding_sig: Some(shielded_data.binding_sig.into()),
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            burn_exists: !shielded_data.burn.as_ref().is_empty(),
         }
     }
 }
@@ -642,6 +657,10 @@ pub struct OrchardFlags {
     /// Whether Orchard spends are enabled.
     #[serde(rename = "enableSpends")]
     enable_spends: bool,
+    /// Whether OrchardZSA is enabled.
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+    #[serde(rename = "enableZSA")]
+    enable_zsa: bool,
 }
 
 /// The Orchard action of a transaction.
@@ -705,6 +724,8 @@ impl Default for TransactionObject {
             expiry_height: None,
             block_hash: None,
             block_time: None,
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            issuance_exists: false,
         }
     }
 }
@@ -955,6 +976,8 @@ impl TransactionObject {
             },
             block_hash,
             block_time,
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            issuance_exists: tx.orchard_zsa_issue_data().is_some(),
         }
     }
 }

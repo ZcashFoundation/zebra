@@ -1059,7 +1059,25 @@ where
         }
     }
 
-    /// Passthrough to verify_v5_transaction, but for V6 transactions.
+    /// Verify a V5 transaction.
+    ///
+    /// Returns a set of asynchronous checks that must all succeed for the transaction to be
+    /// considered valid. These checks include:
+    ///
+    /// - transaction support by the considered network upgrade (see [`Request::upgrade`])
+    /// - transparent transfers
+    /// - sapling shielded data
+    /// - orchard shielded data
+    ///
+    /// The parameters of this method are:
+    ///
+    /// - the `request` to verify (that contains the transaction and other metadata, see [`Request`]
+    ///   for more information)
+    /// - the `network` to consider when verifying
+    /// - the `script_verifier` to use for verifying the transparent transfers
+    /// - the prepared `cached_ffi_transaction` used by the script verifier
+    /// - the sapling shielded data of the transaction, if any
+    /// - the orchard shielded data of the transaction, if any
     #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
     fn verify_v6_transaction(
         request: &Request,
@@ -1067,7 +1085,67 @@ where
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
     ) -> Result<(AsyncChecks, SigHash), TransactionError> {
-        Self::verify_v5_transaction(request, network, script_verifier, cached_ffi_transaction)
+        let transaction = request.transaction();
+        let nu = request.upgrade(network);
+
+        Self::verify_v6_transaction_network_upgrade(&transaction, nu)?;
+
+        let sapling_bundle = cached_ffi_transaction.sighasher().sapling_bundle();
+        let orchard_bundle = cached_ffi_transaction.sighasher().orchard_bundle();
+
+        let sighash = cached_ffi_transaction
+            .sighasher()
+            .sighash(HashType::ALL, None);
+
+        let async_check = Self::verify_transparent_inputs_and_outputs(
+            request,
+            script_verifier,
+            cached_ffi_transaction,
+        )?
+        .and(Self::verify_sapling_bundle(sapling_bundle, &sighash))
+        .and(Self::verify_orchard_bundle(orchard_bundle, &sighash));
+
+        Ok((async_check, sighash))
+    }
+
+    /// Verifies if a V6 `transaction` is supported by `network_upgrade`.
+    fn verify_v6_transaction_network_upgrade(
+        transaction: &Transaction,
+        network_upgrade: NetworkUpgrade,
+    ) -> Result<(), TransactionError> {
+        match network_upgrade {
+            // TODO: update V6 group ID in the comment below after it's chosen
+            // Supports V6 transactions
+            //
+            // # Consensus
+            //
+            // > [NU7 onward] The transaction version number MUST be 4, 5, or 6.
+            // > If the transaction version number is 4 then the version group ID MUST be 0x892F2085.
+            // > If the transaction version number is 5 then the version group ID MUST be 0x26A7270A.
+            // > If the transaction version number is 6 then the version group ID MUST be 0x77777777.
+            //
+            // Note: Here we verify the transaction version number of the above rule. The version
+            // group ID is checked in the zebra-chain crate during transaction deserialization.
+            NetworkUpgrade::Nu7 => Ok(()),
+
+            #[cfg(zcash_unstable = "zfuture")]
+            NetworkUpgrade::ZFuture => Ok(()),
+
+            // Does not support V6 transactions
+            NetworkUpgrade::Genesis
+            | NetworkUpgrade::BeforeOverwinter
+            | NetworkUpgrade::Overwinter
+            | NetworkUpgrade::Sapling
+            | NetworkUpgrade::Blossom
+            | NetworkUpgrade::Heartwood
+            | NetworkUpgrade::Canopy
+            | NetworkUpgrade::Nu5
+            | NetworkUpgrade::Nu6
+            | NetworkUpgrade::Nu6_1 => Err(TransactionError::UnsupportedByNetworkUpgrade(
+                transaction.version(),
+                network_upgrade,
+            )),
+        }
     }
 
     /// Verifies if a transaction's transparent inputs are valid using the provided

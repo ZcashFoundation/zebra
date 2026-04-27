@@ -200,7 +200,7 @@ impl IssuedAssetChanges {
             }
 
             // Validate and apply issuances
-            if let Some(issue_data) = tx.orchard_issue_data() {
+            if let Some(issue_data) = tx.orchard_zsa_issue_data() {
                 // ZIP-0227 defines issued-note rho as DeriveIssuedRho(nf_{0,0}, i_action, i_note),
                 // so we must pass the first Action nullifier (nf_{0,0}). We rely on
                 // `orchard_nullifiers()` preserving Action order, so `.next()` returns nf_{0,0}.

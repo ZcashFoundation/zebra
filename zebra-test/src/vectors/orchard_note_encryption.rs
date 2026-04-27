@@ -1,7 +1,6 @@
 //! Contains test vectors for Orchard note encryptions.
 use lazy_static::lazy_static;
 
-// FIXME: add tests for OrchardZSA
 #[allow(missing_docs)]
 pub struct TestVector {
     pub incoming_viewing_key: [u8; 64],
