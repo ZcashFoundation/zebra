@@ -1739,7 +1739,7 @@ where
             };
         }
 
-        let txid = if let Some(block_hash) = block_hash {
+        let caller_block_context = if let Some(block_hash) = block_hash {
             let block_hash = block::Hash::from_hex(block_hash)
                 .map_error(server::error::LegacyCode::InvalidAddressOrKey)?;
             match self
@@ -1751,24 +1751,25 @@ where
                 .await
                 .map_misc_error()?
             {
-                zebra_state::ReadResponse::AnyChainTransactionIdsForBlock(tx_ids) => *tx_ids
-                    .ok_or_error(
+                zebra_state::ReadResponse::AnyChainTransactionIdsForBlock(tx_ids) => {
+                    let (ids, in_best_chain) = tx_ids.ok_or_error(
                         server::error::LegacyCode::InvalidAddressOrKey,
                         "block not found",
-                    )?
-                    .0
-                    .iter()
-                    .find(|id| **id == txid)
-                    .ok_or_error(
+                    )?;
+
+                    ids.iter().find(|id| **id == txid).ok_or_error(
                         server::error::LegacyCode::InvalidAddressOrKey,
                         "txid not found",
-                    )?,
+                    )?;
+
+                    Some((block_hash, in_best_chain))
+                }
                 _ => {
                     unreachable!("unmatched response to a `AnyChainTransactionIdsForBlock` request")
                 }
             }
         } else {
-            txid
+            None
         };
 
         // If the tx wasn't in the mempool, check the state.
@@ -1780,48 +1781,80 @@ where
             .map_misc_error()?
         {
             zebra_state::ReadResponse::AnyChainTransaction(Some(tx)) => Ok(if verbose {
-                match tx {
-                    AnyTx::Mined(tx) => {
-                        let block_hash = match self
-                            .read_state
-                            .clone()
-                            .oneshot(zebra_state::ReadRequest::BestChainBlockHash(tx.height))
-                            .await
-                            .map_misc_error()?
-                        {
-                            zebra_state::ReadResponse::BlockHash(block_hash) => block_hash,
-                            _ => {
-                                unreachable!("unmatched response to a `BestChainBlockHash` request")
-                            }
-                        };
+                if let Some((caller_block_hash, in_best_chain)) = caller_block_context {
+                    // Use the caller-provided block context to avoid TOCTOU races
+                    // between the validation query and the transaction fetch.
+                    let (raw_tx, height, confirmations, block_time) = match &tx {
+                        AnyTx::Mined(mined) if in_best_chain => (
+                            mined.tx.clone(),
+                            Some(mined.height),
+                            Some(mined.confirmations),
+                            Some(mined.block_time),
+                        ),
+                        _ => {
+                            let raw_tx: Arc<Transaction> = tx.into();
+                            (raw_tx, None, None, None)
+                        }
+                    };
 
-                        GetRawTransactionResponse::Object(Box::new(
-                            TransactionObject::from_transaction(
-                                tx.tx.clone(),
-                                Some(tx.height),
-                                Some(tx.confirmations),
-                                &self.network,
-                                // TODO: Performance gain:
-                                // https://github.com/ZcashFoundation/zebra/pull/9458#discussion_r2059352752
-                                Some(tx.block_time),
-                                block_hash,
-                                Some(true),
-                                txid,
-                            ),
-                        ))
-                    }
-                    AnyTx::Side((tx, block_hash)) => GetRawTransactionResponse::Object(Box::new(
+                    GetRawTransactionResponse::Object(Box::new(
                         TransactionObject::from_transaction(
-                            tx.clone(),
-                            None,
-                            None,
+                            raw_tx,
+                            height,
+                            confirmations,
                             &self.network,
-                            None,
-                            Some(block_hash),
-                            Some(false),
+                            block_time,
+                            Some(caller_block_hash),
+                            Some(in_best_chain),
                             txid,
                         ),
-                    )),
+                    ))
+                } else {
+                    match tx {
+                        AnyTx::Mined(tx) => {
+                            let block_hash = match self
+                                .read_state
+                                .clone()
+                                .oneshot(zebra_state::ReadRequest::BestChainBlockHash(tx.height))
+                                .await
+                                .map_misc_error()?
+                            {
+                                zebra_state::ReadResponse::BlockHash(block_hash) => block_hash,
+                                _ => {
+                                    unreachable!(
+                                        "unmatched response to a `BestChainBlockHash` request"
+                                    )
+                                }
+                            };
+
+                            GetRawTransactionResponse::Object(Box::new(
+                                TransactionObject::from_transaction(
+                                    tx.tx.clone(),
+                                    Some(tx.height),
+                                    Some(tx.confirmations),
+                                    &self.network,
+                                    // TODO: Performance gain:
+                                    // https://github.com/ZcashFoundation/zebra/pull/9458#discussion_r2059352752
+                                    Some(tx.block_time),
+                                    block_hash,
+                                    Some(true),
+                                    txid,
+                                ),
+                            ))
+                        }
+                        AnyTx::Side((tx, block_hash)) => GetRawTransactionResponse::Object(
+                            Box::new(TransactionObject::from_transaction(
+                                tx.clone(),
+                                None,
+                                None,
+                                &self.network,
+                                None,
+                                Some(block_hash),
+                                Some(false),
+                                txid,
+                            )),
+                        ),
+                    }
                 }
             } else {
                 let tx: Arc<Transaction> = tx.into();
