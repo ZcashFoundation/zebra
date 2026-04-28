@@ -118,3 +118,11 @@ written to `/etc/sysctl.d/99-zebra-network.conf` so they survive reboot.
 
 Zebra logs a warning at startup on Linux if `tcp_slow_start_after_idle` is
 enabled.
+
+#### Running Zebra in Docker
+
+These sysctls must be applied on the **host**, not inside the container.
+Containers share the host's network stack settings for these knobs, so
+setting them inside the container has no effect. Run
+`sudo ./scripts/tune-sysctl.sh` (or apply the equivalent settings) on the
+Docker host.
