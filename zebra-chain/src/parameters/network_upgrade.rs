@@ -239,6 +239,46 @@ const PRE_BLOSSOM_POW_TARGET_SPACING: i64 = 150;
 /// The target block spacing after Blossom activation.
 pub const POST_BLOSSOM_POW_TARGET_SPACING: u32 = 75;
 
+/// The target block spacing after NU7 activation, in seconds.
+///
+/// Defined by the draft "Shorter Block Target Spacing" ZIP, which lowers the
+/// block target spacing from 75 to 25 seconds at NU7.
+pub const POST_NU7_POW_TARGET_SPACING: u32 = 25;
+
+/// The ratio between the post-Blossom and post-NU7 block target spacings.
+///
+/// `PostBlossomPoWTargetSpacing / PostNU7PoWTargetSpacing = 75 / 25 = 3`.
+pub const NU7_POW_TARGET_SPACING_RATIO: u32 =
+    POST_BLOSSOM_POW_TARGET_SPACING / POST_NU7_POW_TARGET_SPACING;
+
+/// Per-block limit on the total number of Orchard actions, applied from NU7
+/// activation onwards.
+///
+/// `OrchardBlockActionLimit` in the draft "Shorter Block Target Spacing" ZIP.
+pub const ORCHARD_BLOCK_ACTION_LIMIT: u32 = 306;
+
+/// Per-block limit on the total number of Sapling spends + outputs, applied
+/// from NU7 activation onwards.
+///
+/// `SaplingBlockIOLimit` in the draft "Shorter Block Target Spacing" ZIP.
+pub const SAPLING_BLOCK_IO_LIMIT: u32 = 300;
+
+/// Per-block limit on the total number of Sprout JoinSplits, applied from NU7
+/// activation onwards.
+///
+/// `SproutBlockJoinSplitLimit` in the draft "Shorter Block Target Spacing" ZIP.
+// TODO: Remove this when disallowing
+pub const SPROUT_BLOCK_JOINSPLIT_LIMIT: u32 = 25;
+
+/// Per-block global shielded budget, applied from NU7 activation onwards.
+///
+/// Bounds the worst-case shielded sync bandwidth per block independently of
+/// which combination of pools is used. Sprout JoinSplits are weighted by 2
+/// because each JoinSplit produces 2 shielded outputs.
+///
+/// `GlobalShieldedBudget` in the draft "Shorter Block Target Spacing" ZIP.
+pub const GLOBAL_SHIELDED_BUDGET: u32 = 306;
+
 /// The averaging window for difficulty threshold arithmetic mean calculations.
 ///
 /// `PoWAveragingWindow` in the Zcash specification.
@@ -395,12 +435,13 @@ impl NetworkUpgrade {
     pub fn target_spacing(&self) -> Duration {
         let spacing_seconds = match self {
             Genesis | BeforeOverwinter | Overwinter | Sapling => PRE_BLOSSOM_POW_TARGET_SPACING,
-            Blossom | Heartwood | Canopy | Nu5 | Nu6 | Nu6_1 | Nu7 => {
+            Blossom | Heartwood | Canopy | Nu5 | Nu6 | Nu6_1 => {
                 POST_BLOSSOM_POW_TARGET_SPACING.into()
             }
+            Nu7 => POST_NU7_POW_TARGET_SPACING.into(),
 
             #[cfg(zcash_unstable = "zfuture")]
-            ZFuture => POST_BLOSSOM_POW_TARGET_SPACING.into(),
+            ZFuture => POST_NU7_POW_TARGET_SPACING.into(),
         };
 
         Duration::seconds(spacing_seconds)
@@ -423,6 +464,7 @@ impl NetworkUpgrade {
                 NetworkUpgrade::Blossom,
                 POST_BLOSSOM_POW_TARGET_SPACING.into(),
             ),
+            (NetworkUpgrade::Nu7, POST_NU7_POW_TARGET_SPACING.into()),
         ]
         .into_iter()
         .filter_map(move |(upgrade, spacing_seconds)| {

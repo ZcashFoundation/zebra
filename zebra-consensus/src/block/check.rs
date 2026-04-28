@@ -15,7 +15,8 @@ use zebra_chain::{
             founders_reward, founders_reward_address, funding_stream_values, FundingStreamReceiver,
             ParameterSubsidy, SubsidyError,
         },
-        Network, NetworkUpgrade,
+        Network, NetworkUpgrade, GLOBAL_SHIELDED_BUDGET, ORCHARD_BLOCK_ACTION_LIMIT,
+        SAPLING_BLOCK_IO_LIMIT, SPROUT_BLOCK_JOINSPLIT_LIMIT,
     },
     transaction::{self, Transaction},
     transparent::{Address, Output},
@@ -404,6 +405,82 @@ pub fn time_is_valid_at(
     hash: &Hash,
 ) -> Result<(), zebra_chain::block::BlockTimeError> {
     header.time_is_valid_at(now, height, hash)
+}
+
+/// Returns `Ok(())` if the per-block shielded action limits introduced by the
+/// draft "Shorter Block Target Spacing" ZIP are satisfied for the sum of
+/// `transactions` on `network` at `height`.
+///
+/// The block verifier passes every transaction in the block; the transaction
+/// verifier passes a single mempool transaction (a tx whose own counts exceed
+/// any per-block limit can never be mined, so we reject it on submission).
+///
+/// The limits apply only after NU7 activation. Before NU7 this is a no-op.
+///
+/// # Consensus
+///
+/// > For each block at height `height` where `IsNU7Activated(height)`, the
+/// > following limits MUST be satisfied:
+/// > - the total number of Orchard actions across all transactions in the
+/// >   block MUST NOT exceed `OrchardBlockActionLimit`;
+/// > - the total number of Sapling inputs and outputs across all transactions
+/// >   in the block MUST NOT exceed `SaplingBlockIOLimit`;
+/// > - the total number of Sprout JoinSplits across all transactions in the
+/// >   block MUST NOT exceed `SproutBlockJoinSplitLimit`;
+/// > - the total shielded cost across all pools MUST NOT exceed
+/// >   `GlobalShieldedBudget`, where the cost is
+/// >   `Σ orchard_actions + Σ (sapling_spends + sapling_outputs)
+/// >    + 2 * Σ joinsplits`.
+///
+/// Defined by the draft "Shorter Block Target Spacing" ZIP.
+pub fn shielded_action_limits_are_valid<'a>(
+    transactions: impl IntoIterator<Item = &'a Arc<Transaction>>,
+    height: Height,
+    network: &Network,
+) -> Result<(), TransactionError> {
+    let nu7_activated = NetworkUpgrade::Nu7
+        .activation_height(network)
+        .is_some_and(|h| height >= h);
+    if !nu7_activated {
+        return Ok(());
+    }
+
+    // Per-block counts fit in u32 because the block size is bounded to 2 MB
+    // and each shielded item is much larger than 4 bytes.
+    let (mut orchard_actions, mut sapling_ios, mut sprout_joinsplits): (u32, u32, u32) = (0, 0, 0);
+    for tx in transactions {
+        orchard_actions += tx.orchard_actions().count() as u32;
+        sapling_ios +=
+            (tx.sapling_spends_per_anchor().count() + tx.sapling_outputs().count()) as u32;
+        sprout_joinsplits += tx.joinsplit_count() as u32;
+    }
+
+    if orchard_actions > ORCHARD_BLOCK_ACTION_LIMIT {
+        return Err(TransactionError::OrchardActionsExceedBlockLimit {
+            actions: orchard_actions,
+            limit: ORCHARD_BLOCK_ACTION_LIMIT,
+        });
+    }
+    if sapling_ios > SAPLING_BLOCK_IO_LIMIT {
+        return Err(TransactionError::SaplingIOsExceedBlockLimit {
+            ios: sapling_ios,
+            limit: SAPLING_BLOCK_IO_LIMIT,
+        });
+    }
+    if sprout_joinsplits > SPROUT_BLOCK_JOINSPLIT_LIMIT {
+        return Err(TransactionError::SproutJoinSplitsExceedBlockLimit {
+            joinsplits: sprout_joinsplits,
+            limit: SPROUT_BLOCK_JOINSPLIT_LIMIT,
+        });
+    }
+    let cost = orchard_actions + sapling_ios + sprout_joinsplits * 2;
+    if cost > GLOBAL_SHIELDED_BUDGET {
+        return Err(TransactionError::ShieldedCostExceedsBlockBudget {
+            cost,
+            limit: GLOBAL_SHIELDED_BUDGET,
+        });
+    }
+    Ok(())
 }
 
 /// Check Merkle root validity.
