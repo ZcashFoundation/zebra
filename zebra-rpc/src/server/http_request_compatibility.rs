@@ -7,7 +7,7 @@ use std::future::Future;
 use std::pin::Pin;
 
 use futures::{future, FutureExt};
-use http_body_util::BodyExt;
+use http_body_util::{BodyExt, Limited};
 use hyper::header;
 use jsonrpsee::{
     core::BoxError,
@@ -56,12 +56,17 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 pub struct HttpRequestMiddleware<S> {
     service: S,
     cookie: Option<Cookie>,
+    max_request_body_size: usize,
 }
 
 impl<S> HttpRequestMiddleware<S> {
-    /// Create a new `HttpRequestMiddleware` with the given service and cookie.
-    pub fn new(service: S, cookie: Option<Cookie>) -> Self {
-        Self { service, cookie }
+    /// Create a new `HttpRequestMiddleware` with the given service, cookie, and request body size limit.
+    pub fn new(service: S, cookie: Option<Cookie>, max_request_body_size: usize) -> Self {
+        Self {
+            service,
+            cookie,
+            max_request_body_size,
+        }
     }
 
     /// Check if the request is authenticated.
@@ -122,9 +127,13 @@ impl<S> HttpRequestMiddleware<S> {
     /// Maps whatever JSON-RPC version the client is using to JSON-RPC 2.0.
     async fn request_to_json_rpc_2(
         request: HttpRequest<HttpBody>,
+        max_request_body_size: usize,
     ) -> Result<(JsonRpcVersion, HttpRequest<HttpBody>), BoxError> {
         let (parts, body) = request.into_parts();
-        let bytes = body.collect().await?.to_bytes();
+        let bytes = Limited::new(body, max_request_body_size)
+            .collect()
+            .await?
+            .to_bytes();
         let (version, bytes) =
             if let Ok(request) = serde_json::from_slice::<'_, JsonRpcRequest>(bytes.as_ref()) {
                 let version = request.version();
@@ -170,12 +179,16 @@ impl<S> HttpRequestMiddleware<S> {
 #[derive(Clone)]
 pub struct HttpRequestMiddlewareLayer {
     cookie: Option<Cookie>,
+    max_request_body_size: usize,
 }
 
 impl HttpRequestMiddlewareLayer {
-    /// Create a new `HttpRequestMiddlewareLayer` with the given cookie.
-    pub fn new(cookie: Option<Cookie>) -> Self {
-        Self { cookie }
+    /// Create a new `HttpRequestMiddlewareLayer` with the given cookie and request body size limit.
+    pub fn new(cookie: Option<Cookie>, max_request_body_size: usize) -> Self {
+        Self {
+            cookie,
+            max_request_body_size,
+        }
     }
 }
 
@@ -183,7 +196,7 @@ impl<S> tower::Layer<S> for HttpRequestMiddlewareLayer {
     type Service = HttpRequestMiddleware<S>;
 
     fn layer(&self, service: S) -> Self::Service {
-        HttpRequestMiddleware::new(service, self.cookie.clone())
+        HttpRequestMiddleware::new(service, self.cookie.clone(), self.max_request_body_size)
     }
 }
 
@@ -230,9 +243,11 @@ where
         Self::insert_or_replace_content_type_header(request.headers_mut());
 
         let mut service = self.service.clone();
+        let max_request_body_size = self.max_request_body_size;
 
         async move {
-            let (version, request) = Self::request_to_json_rpc_2(request).await?;
+            let (version, request) =
+                Self::request_to_json_rpc_2(request, max_request_body_size).await?;
             let response = service.call(request).await.map_err(Into::into)?;
             Self::response_from_json_rpc_2(version, response).await
         }
