@@ -88,3 +88,33 @@ filter = 'info,zebra_network=debug'
 
 If you keep on seeing multiple info logs per second, please
 [open a bug.](https://github.com/ZcashFoundation/zebra/issues/new/choose)
+
+### Linux TCP tuning for block propagation
+
+On Linux, the kernel resets each TCP connection's congestion window after a short idle period
+(`net.ipv4.tcp_slow_start_after_idle=1`, the default on most distros). Zcash's
+pull-based, single-request-per-block propagation means most peer connections are
+idle between blocks, so every full-block transfer starts from a cold congestion
+window. On long-haul links this can cap single-peer throughput far below the
+available bandwidth — even between nodes with 1–2 Gbps connections, observed
+throughput during block propagation can be as low as ~6 Mbps.
+
+The most impactful setting to change is:
+
+```text
+net.ipv4.tcp_slow_start_after_idle=0
+```
+
+You can either apply this manually, or run the helper script bundled with the
+Zebra repo:
+
+```sh
+sudo ./scripts/tune-sysctl.sh
+```
+
+The script also sets `net.core.default_qdisc=fq_codel` and pins
+`net.ipv4.tcp_congestion_control=cubic` for completeness. Settings are
+written to `/etc/sysctl.d/99-zebra-network.conf` so they survive reboot.
+
+Zebra logs a warning at startup on Linux if `tcp_slow_start_after_idle` is
+enabled.
