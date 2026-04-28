@@ -1058,6 +1058,20 @@ mod v6_tests {
         pasta_curves::Fp::from_uniform_bytes(&seed)
     }
 
+    /// Helper: build a default Anchor (height 0, identity pool commit) by
+    /// reading a 64-byte zero buffer through tachyon's wire format. Anchor's
+    /// `BlockHeight` field is `pub(crate)` upstream, so this is the simplest
+    /// way to construct one from outside the tachyon crate.
+    fn default_anchor() -> zcash_tachyon::Anchor {
+        zcash_tachyon::Anchor::read(&[0u8; 64][..]).unwrap()
+    }
+
+    /// Helper: build an Adjunct with the given wtxid (covering-aggregate
+    /// reference for stripped bundles).
+    fn adjunct_with_wtxid(wtxid: [u8; 64]) -> zcash_tachyon::stamp::Adjunct {
+        zcash_tachyon::stamp::Adjunct { wtxid }
+    }
+
     lazy_static! {
         /// An empty V6 transaction with no bundles at all.
         pub static ref EMPTY_V6_TX: Transaction = Transaction::V6 {
@@ -1072,14 +1086,20 @@ mod v6_tests {
             tachyon_shielded_data: None,
         };
 
-        /// V6 transaction with a tachyon bundle, stamp = None.
-        pub static ref V6_TX_TACHYON_NO_STAMP: Transaction = {
+        /// V6 transaction with a stripped tachyon bundle (post-aggregation, no stamp).
+        pub static ref V6_TX_TACHYON_STRIPPED: Transaction = {
             let rk = rk_from_seed([0x42u8; 64]);
             let action = zcash_tachyon::Action {
                 cv: zcash_tachyon::value::Commitment::from(pasta_curves::EpAffine::generator()),
                 rk,
                 sig: zcash_tachyon::action::Signature::from([0x01u8; 64]),
             };
+            let bundle = zcash_tachyon::TachyonBundle::Stripped(zcash_tachyon::Stripped {
+                actions: vec![action],
+                value_balance: 0i64,
+                binding_sig: zcash_tachyon::bundle::Signature::from([0x02u8; 64]),
+                stamp: adjunct_with_wtxid([0xEEu8; 64]),
+            });
             Transaction::V6 {
                 network_upgrade: NetworkUpgrade::Nu7,
                 lock_time: LockTime::min_lock_time_timestamp(),
@@ -1089,25 +1109,29 @@ mod v6_tests {
                 outputs: Vec::new(),
                 sapling_shielded_data: None,
                 orchard_shielded_data: None,
-                tachyon_shielded_data: Some(zcash_tachyon::Bundle {
-                    actions: vec![action],
-                    value_balance: 0i64,
-                    binding_sig: zcash_tachyon::bundle::Signature::from([0x02u8; 64]),
-                    stamp: None,
-                }),
+                tachyon_shielded_data: Some(crate::transaction::TachyonShieldedData(bundle)),
             }
         };
 
-        /// V6 transaction with a tachyon bundle that includes a stamp with tachygrams.
-        pub static ref V6_TX_TACHYON_WITH_STAMP: Transaction = {
+        /// V6 transaction with a stamped tachyon bundle (autonome with proof + tachygrams).
+        pub static ref V6_TX_TACHYON_STAMPED: Transaction = {
             let rk = rk_from_seed([0x42u8; 64]);
             let action = zcash_tachyon::Action {
                 cv: zcash_tachyon::value::Commitment::from(pasta_curves::EpAffine::generator()),
                 rk,
                 sig: zcash_tachyon::action::Signature::from([0x01u8; 64]),
             };
-            let tachygram = zcash_tachyon::Tachygram::from(fp_from_seed([0xAAu8; 64]));
-            let anchor = zcash_tachyon::Anchor::from(fp_from_seed([0xBBu8; 64]));
+            let tachygram = zcash_tachyon::Tachygram::from(&fp_from_seed([0xAAu8; 64]));
+            let bundle = zcash_tachyon::TachyonBundle::Stamped(zcash_tachyon::Stamped {
+                actions: vec![action],
+                value_balance: 100i64,
+                binding_sig: zcash_tachyon::bundle::Signature::from([0x02u8; 64]),
+                stamp: zcash_tachyon::Stamp {
+                    tachygrams: vec![tachygram],
+                    anchor: default_anchor(),
+                    proof: mock_ragu::Proof::trivial(),
+                },
+            });
             Transaction::V6 {
                 network_upgrade: NetworkUpgrade::Nu7,
                 lock_time: LockTime::min_lock_time_timestamp(),
@@ -1117,20 +1141,11 @@ mod v6_tests {
                 outputs: Vec::new(),
                 sapling_shielded_data: None,
                 orchard_shielded_data: None,
-                tachyon_shielded_data: Some(zcash_tachyon::Bundle {
-                    actions: vec![action],
-                    value_balance: 100i64,
-                    binding_sig: zcash_tachyon::bundle::Signature::from([0x02u8; 64]),
-                    stamp: Some(zcash_tachyon::Stamp {
-                        tachygrams: vec![tachygram],
-                        anchor,
-                        proof: zcash_tachyon::Proof,
-                    }),
-                }),
+                tachyon_shielded_data: Some(crate::transaction::TachyonShieldedData(bundle)),
             }
         };
 
-        /// V6 transaction with multiple actions and multiple tachygrams.
+        /// V6 transaction with a stamped bundle, multiple actions and multiple tachygrams.
         pub static ref V6_TX_TACHYON_MULTI_ACTION: Transaction = {
             let rk1 = rk_from_seed([0x42u8; 64]);
             let rk2 = rk_from_seed([0x43u8; 64]);
@@ -1144,10 +1159,19 @@ mod v6_tests {
                 rk: rk2,
                 sig: zcash_tachyon::action::Signature::from([0x03u8; 64]),
             };
-            let tg1 = zcash_tachyon::Tachygram::from(fp_from_seed([0xAAu8; 64]));
-            let tg2 = zcash_tachyon::Tachygram::from(fp_from_seed([0xCCu8; 64]));
-            let tg3 = zcash_tachyon::Tachygram::from(fp_from_seed([0xDDu8; 64]));
-            let anchor = zcash_tachyon::Anchor::from(fp_from_seed([0xBBu8; 64]));
+            let tg1 = zcash_tachyon::Tachygram::from(&fp_from_seed([0xAAu8; 64]));
+            let tg2 = zcash_tachyon::Tachygram::from(&fp_from_seed([0xCCu8; 64]));
+            let tg3 = zcash_tachyon::Tachygram::from(&fp_from_seed([0xDDu8; 64]));
+            let bundle = zcash_tachyon::TachyonBundle::Stamped(zcash_tachyon::Stamped {
+                actions: vec![action1, action2],
+                value_balance: 300i64,
+                binding_sig: zcash_tachyon::bundle::Signature::from([0x02u8; 64]),
+                stamp: zcash_tachyon::Stamp {
+                    tachygrams: vec![tg1, tg2, tg3],
+                    anchor: default_anchor(),
+                    proof: mock_ragu::Proof::trivial(),
+                },
+            });
             Transaction::V6 {
                 network_upgrade: NetworkUpgrade::Nu7,
                 lock_time: LockTime::min_lock_time_timestamp(),
@@ -1157,16 +1181,7 @@ mod v6_tests {
                 outputs: Vec::new(),
                 sapling_shielded_data: None,
                 orchard_shielded_data: None,
-                tachyon_shielded_data: Some(zcash_tachyon::Bundle {
-                    actions: vec![action1, action2],
-                    value_balance: 300i64,
-                    binding_sig: zcash_tachyon::bundle::Signature::from([0x02u8; 64]),
-                    stamp: Some(zcash_tachyon::Stamp {
-                        tachygrams: vec![tg1, tg2, tg3],
-                        anchor,
-                        proof: zcash_tachyon::Proof,
-                    }),
-                }),
+                tachyon_shielded_data: Some(crate::transaction::TachyonShieldedData(bundle)),
             }
         };
     }
@@ -1199,8 +1214,8 @@ mod v6_tests {
 
         let test_cases: &[(&str, &Transaction)] = &[
             ("EMPTY_V6_TX", &EMPTY_V6_TX),
-            ("V6_TX_TACHYON_NO_STAMP", &V6_TX_TACHYON_NO_STAMP),
-            ("V6_TX_TACHYON_WITH_STAMP", &V6_TX_TACHYON_WITH_STAMP),
+            ("V6_TX_TACHYON_STRIPPED", &V6_TX_TACHYON_STRIPPED),
+            ("V6_TX_TACHYON_STAMPED", &V6_TX_TACHYON_STAMPED),
             ("V6_TX_TACHYON_MULTI_ACTION", &V6_TX_TACHYON_MULTI_ACTION),
         ];
 
@@ -1219,11 +1234,16 @@ mod v6_tests {
         }
     }
 
-    /// Assert that V6 tachyon test vectors serialize to exact expected bytes.
+    /// Pin the exact wire encoding for the small V6 fixtures. Stamped
+    /// fixtures are not pinned here because their proof field carries
+    /// `PROOF_SIZE_COMPRESSED` (~23KB) of mostly-zero padding — the
+    /// round-trip test below covers the encoding without ~46KB of inline hex.
     #[test]
     fn v6_tachyon_test_vectors_exact_encoding() {
         let _init_guard = zebra_test::init();
 
+        // To regenerate after intentional wire-format changes, run
+        // `generate_v6_tachyon_test_vectors` and paste the printed hex below.
         let test_cases: &[(&str, &Transaction, &str)] = &[
             (
                 "EMPTY_V6_TX",
@@ -1231,19 +1251,9 @@ mod v6_tests {
                 "06000080ffffffffffffffff0065cd1d000000000000000000000000000000000000",
             ),
             (
-                "V6_TX_TACHYON_NO_STAMP",
-                &V6_TX_TACHYON_NO_STAMP,
-                "06000080ffffffffffffffff0065cd1d0000000000000000000000000000000000010100000000ed302d991bf94c09fc98462200000000000000000000000000000040ba6454c4a1d42730b53cbf30d05d3f95aa541c98eba0205a75bb7983443b37310101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010100000000000000000202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020200",
-            ),
-            (
-                "V6_TX_TACHYON_WITH_STAMP",
-                &V6_TX_TACHYON_WITH_STAMP,
-                "06000080ffffffffffffffff0065cd1d0000000000000000000000000000000000010100000000ed302d991bf94c09fc98462200000000000000000000000000000040ba6454c4a1d42730b53cbf30d05d3f95aa541c98eba0205a75bb7983443b37310101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010164000000000000000202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020201015f555555c6580ae6f8e822b5273ca4f06593dbd767c60fa50d7a6852ca2b9e1b4f44444458b35c8c947f94ae11ebee5823220b073f5a913542860cc19196c724",
-            ),
-            (
-                "V6_TX_TACHYON_MULTI_ACTION",
-                &V6_TX_TACHYON_MULTI_ACTION,
-                "06000080ffffffffffffffff0065cd1d00000000f4010000000000000000000000010200000000ed302d991bf94c09fc98462200000000000000000000000000000040ba6454c4a1d42730b53cbf30d05d3f95aa541c98eba0205a75bb7983443b37310101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010100000000ed302d991bf94c09fc98462200000000000000000000000000000040336a1f7ed0903193f39fa5306f3fd88d8a0a8907a1defde547f117e7075d9e01030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303032c010000000000000202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020201035f555555c6580ae6f8e822b5273ca4f06593dbd767c60fa50d7a6852ca2b9e1b3f333333ea0daf32301606a8fb9939c1e0b03a3616ee12c67692b02f5901f12d2f2222227c6801d9cbac77a1e54884299e3f6a65ed819456ab9e549e206c1a374f44444458b35c8c947f94ae11ebee5823220b073f5a913542860cc19196c724",
+                "V6_TX_TACHYON_STRIPPED",
+                &V6_TX_TACHYON_STRIPPED,
+                "06000080ffffffffffffffff0065cd1d00000000000000000000000000000000000200000000000000000100000000ed302d991bf94c09fc98462200000000000000000000000000000040ba6454c4a1d42730b53cbf30d05d3f95aa541c98eba0205a75bb7983443b37310101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010102020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
             ),
         ];
 
@@ -1253,6 +1263,30 @@ mod v6_tests {
                 .expect("tx should serialize");
 
             assert_eq!(hex::encode(&bytes), *expected_hex, "{name} encoding mismatch");
+        }
+    }
+
+    /// Round-trip every V6 fixture to confirm the new TachyonBundle wire
+    /// format encodes and decodes losslessly. Independent of the hardcoded
+    /// hex check above so it stays meaningful even before the hex is pinned.
+    #[test]
+    fn v6_tachyon_round_trip_fixtures() {
+        let _init_guard = zebra_test::init();
+
+        for (name, tx) in &[
+            ("EMPTY_V6_TX", &*EMPTY_V6_TX),
+            ("V6_TX_TACHYON_STRIPPED", &*V6_TX_TACHYON_STRIPPED),
+            ("V6_TX_TACHYON_STAMPED", &*V6_TX_TACHYON_STAMPED),
+            ("V6_TX_TACHYON_MULTI_ACTION", &*V6_TX_TACHYON_MULTI_ACTION),
+        ] {
+            let bytes = tx.zcash_serialize_to_vec().expect("serialize");
+            let decoded: Transaction = bytes
+                .clone()
+                .zcash_deserialize_into()
+                .unwrap_or_else(|err| panic!("{name} deserialize failed: {err:?}"));
+            assert_eq!(*tx, &decoded, "{name} round-trip mismatch");
+            let bytes2 = decoded.zcash_serialize_to_vec().expect("re-serialize");
+            assert_eq!(bytes, bytes2, "{name} re-serialization differs");
         }
     }
 }
