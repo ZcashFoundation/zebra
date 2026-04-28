@@ -19,6 +19,8 @@ fi
 
 CONF_FILE="/etc/sysctl.d/99-zebra-network.conf"
 
+mkdir -p "$(dirname "$CONF_FILE")"
+
 echo "Writing $CONF_FILE..."
 
 cat <<EOF > "$CONF_FILE"

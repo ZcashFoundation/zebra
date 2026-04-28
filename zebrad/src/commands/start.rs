@@ -142,7 +142,7 @@ fn check_tcp_slow_start_after_idle() {
          block propagation. \
          Hint: run `sudo ./scripts/tune-sysctl.sh` from the Zebra repo, or set \
          `net.ipv4.tcp_slow_start_after_idle=0` via sysctl. \
-         See the 'Improving Performance' section in book/src/user/troubleshooting.md."
+         See https://zebra.zfnd.org/user/troubleshooting.html#linux-tcp-tuning-for-block-propagation"
     );
 }
 
