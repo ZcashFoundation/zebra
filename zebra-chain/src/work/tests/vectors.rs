@@ -88,7 +88,7 @@ fn equihash_solution_rejects_oversize_compactsize_before_allocating() {
     let _init_guard = zebra_test::init();
 
     let mut data = Vec::new();
-    let oversize: CompactSizeMessage = ((MAX_BLOCK_BYTES - 1) as usize)
+    let oversize: CompactSizeMessage = (SOLUTION_SIZE + 1)
         .try_into()
         .expect("fits in MAX_PROTOCOL_MESSAGE_LEN");
     oversize
