@@ -123,6 +123,7 @@ which = { workspace = true }
 bytes = { workspace = true }
 http-body = { workspace = true }
 insta = { workspace = true, features = ["redactions", "json", "ron"] }
+tempfile = { workspace = true }
 
 proptest = { workspace = true }
 
