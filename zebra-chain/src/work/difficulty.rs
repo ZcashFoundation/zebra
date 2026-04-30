@@ -315,23 +315,25 @@ impl CompactDifficulty {
         let network_difficulty = network.target_difficulty_limit().to_compact();
 
         // get exponent byte from both values
-        let [mut self_exponent_cursor, ..] = self.0.to_be_bytes();
+        let [self_exponent_byte, ..] = self.0.to_be_bytes();
         let [network_exponent_byte, ..] = network_difficulty.0.to_be_bytes();
         // take the ratio of network mantissa difficulty to self mantissa difficulty
-        let mut mantissa_ratio = f64::from(network_difficulty.0 << 8) / f64::from(self.0 << 8);
+        let mantissa_ratio = f64::from(network_difficulty.0 << 8) / f64::from(self.0 << 8);
 
+        let mut ratio = mantissa_ratio;
+        let mut exponent_cursor = self_exponent_byte;
         // multiply by 256 for each exponent byte difference
-        while self_exponent_cursor < network_exponent_byte {
-            mantissa_ratio *= 256.0;
-            self_exponent_cursor += 1;
+        while exponent_cursor < network_exponent_byte {
+            ratio *= 256.0;
+            exponent_cursor += 1;
         }
 
-        while self_exponent_cursor > network_exponent_byte {
-            mantissa_ratio /= 256.0;
-            self_exponent_cursor -= 1;
+        while exponent_cursor > network_exponent_byte {
+            ratio /= 256.0;
+            exponent_cursor -= 1;
         }
 
-        mantissa_ratio
+        ratio
     }
 }
 
