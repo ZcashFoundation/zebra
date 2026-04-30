@@ -291,27 +291,44 @@ impl CompactDifficulty {
         Ok(difficulty)
     }
 
-    /// Returns a floating-point number representing a difficulty as a multiple
-    /// of the minimum difficulty for the provided network.
+    /// Returns a floating-point number representing this block's difficulty
+    /// as a multiple of the minimum network difficulty.
+    ///
+    /// A result of 1.0 means the block was mined at minimum difficulty.
+    /// Values above 1.0 mean proportionally more work was done.
+    ///
+    /// # How it works
+    ///
+    /// `CompactDifficulty` encodes a target as `mantissa × 256^(exponent - 3)`.
+    /// Since difficulty is inversely proportional to the target threshold:
+    ///
+    /// ```text
+    /// result = network_min_target / self_target
+    ///        = (network_mantissa / self_mantissa) × 256^(network_exponent - self_exponent)
+    /// ```
+    ///
+    /// The mantissa ratio is computed first by stripping both exponent bytes (`<< 8`),
+    /// then the result is scaled up or down by 256 once per unit of exponent difference.
     // Copied from <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L34-L74>
+    // Used for RPC functions only, not consensus-critical.
     pub fn relative_to_network(&self, network: &Network) -> f64 {
         let network_difficulty = network.target_difficulty_limit().to_compact();
 
         // get exponent byte from both values
-        let [mut self_exponent_byte, ..] = self.0.to_be_bytes();
+        let [mut self_exponent_cursor, ..] = self.0.to_be_bytes();
         let [network_exponent_byte, ..] = network_difficulty.0.to_be_bytes();
         // take the ratio of network mantissa difficulty to self mantissa difficulty
         let mut mantissa_ratio = f64::from(network_difficulty.0 << 8) / f64::from(self.0 << 8);
 
         // multiply by 256 for each exponent byte difference
-        while self_exponent_byte < network_exponent_byte {
+        while self_exponent_cursor < network_exponent_byte {
             mantissa_ratio *= 256.0;
-            self_exponent_byte += 1;
+            self_exponent_cursor += 1;
         }
 
-        while self_exponent_byte > network_exponent_byte {
+        while self_exponent_cursor > network_exponent_byte {
             mantissa_ratio /= 256.0;
-            self_exponent_byte -= 1;
+            self_exponent_cursor -= 1;
         }
 
         mantissa_ratio
