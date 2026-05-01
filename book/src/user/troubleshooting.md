@@ -99,7 +99,7 @@ window. On long-haul links this can cap single-peer throughput far below the
 available bandwidth — even between nodes with 1–2 Gbps connections, observed
 throughput during block propagation can be as low as ~6 Mbps.
 
-> **Warning: these settings are system-wide.** They affect *every* TCP
+> **Warning: these settings are system-wide.** They affect _every_ TCP
 > connection on the host and every program using it, not just Zebra. Review
 > the implications before applying, particularly on multi-tenant or
 > production hosts running unrelated workloads.
