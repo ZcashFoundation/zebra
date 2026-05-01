@@ -13,15 +13,11 @@ operators update to 4.4.0.
 ### Security
 
 - Fix sigops counting ([GHSA-jv4h-j224-23cc](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-jv4h-j224-23cc)).
-- Defense-in-depth fix for a consensus-divergence follow-up to GHSA-8m29-fpq5-89jj
-  in transparent script verification. Under the prior fix, the V5 sighash
-  callback returned `None` for undefined ZIP 244 hash-type bytes, but the
-  `libzcash_script` C++ bridge did not propagate that failure to the C++
-  verifier. A crafted `OP_CHECKSIGVERIFY` + `OP_CHECKSIG` script could therefore
-  make optimized Zebra accept a spend that `zcashd` rejects. Zebra's callback
-  now substitutes a per-call CSPRNG-derived sighash when rejecting, so any
-  signature the peer shipped fails to verify and the block is rejected in
-  agreement with `zcashd` ([GHSA-gq4h-3grw-2rhv](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-gq4h-3grw-2rhv), [#10524](https://github.com/ZcashFoundation/zebra/pull/10524)).
+- Consensus-divergence defense-in-depth follow-up to GHSA-8m29-fpq5-89jj:
+  the V5 sighash callback now substitutes a per-call CSPRNG-derived sighash
+  when rejecting undefined ZIP 244 hash-type bytes, so any peer-supplied
+  signature fails to verify and the block is rejected in agreement with
+  `zcashd` ([GHSA-gq4h-3grw-2rhv](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-gq4h-3grw-2rhv), [#10524](https://github.com/ZcashFoundation/zebra/pull/10524)).
 - Allocation amplification in inbound network deserializers: validate
   coinbase Sapling spend count, coinbase data size, and Equihash solution
   size before allocating, and enforce the 160-entry cap in `read_headers`
@@ -46,14 +42,11 @@ operators update to 4.4.0.
 ### Added
 
 - `nTx` (per-block transaction count) field in the verbose `getblock` RPC response ([#10498](https://github.com/ZcashFoundation/zebra/pull/10498)).
-- Sentry events now carry `SENTRY_ENVIRONMENT`, `git.ref`, `git.sha`, and CI context (`CI_PR_NUMBER`, `CI_TEST_ID`, `GITHUB_*`) when present ([#10490](https://github.com/ZcashFoundation/zebra/pull/10490)).
-- `opentelemetry` is now part of the `default-release-binaries` feature set; export stays disabled until `OTEL_EXPORTER_OTLP_ENDPOINT` (or the tracing config) is set ([#10490](https://github.com/ZcashFoundation/zebra/pull/10490)).
 - Public benchmark dashboard at [zebra.zfnd.org/dev/bench](https://zebra.zfnd.org/dev/bench) covering Groth16, Halo2, Sapling, RedPallas, block, and transaction benchmarks ([#10444](https://github.com/ZcashFoundation/zebra/pull/10444)).
 
 ### Changed
 
-- Upgrade Sentry SDK to `0.47` and switch its transport feature from `reqwest` to `ureq` ([#10490](https://github.com/ZcashFoundation/zebra/pull/10490)).
-- `zebrad::sentry` is now crate-private; downstream code should not import it directly ([#10490](https://github.com/ZcashFoundation/zebra/pull/10490)).
+- Refreshed the Sentry/OpenTelemetry observability stack ([#10490](https://github.com/ZcashFoundation/zebra/pull/10490)): Sentry SDK upgraded to `0.47` (transport switched from `reqwest` to `ureq`); Sentry events now carry `SENTRY_ENVIRONMENT`, `git.ref`, `git.sha`, and CI context (`CI_PR_NUMBER`, `CI_TEST_ID`, `GITHUB_*`) when present; `opentelemetry` is now part of the `default-release-binaries` feature set, with export still gated on `OTEL_EXPORTER_OTLP_ENDPOINT` (or the tracing config); and `zebrad::sentry` is now crate-private.
 - Upgraded the librustzcash crate cohort (`equihash` 0.3, `orchard` 0.13, `sapling-crypto` 0.7, `zcash_address` 0.11, `zcash_encoding` 0.4, `zcash_keys` 0.13, `zcash_primitives` 0.27, `zcash_proofs` 0.27, `zcash_protocol` 0.8, `zcash_transparent` 0.7) to the 2026-04 release wave, which migrates off the yanked `core2` crate to `corez 0.1.1` and clears RUSTSEC-2026-0105 ([#10522](https://github.com/ZcashFoundation/zebra/pull/10522)).
 - Bumped workspace MSRV from 1.85.0 to 1.85.1, required by the new librustzcash releases. Also bumped `zebrad` MSRV from 1.89 to 1.91, required by `cargo-platform 0.3.3` (transitively via `vergen-git2`).
 
