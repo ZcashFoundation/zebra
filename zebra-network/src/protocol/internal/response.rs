@@ -72,7 +72,7 @@ pub enum Response {
     /// `zcashd` sometimes sends no response, and sometimes sends `notfound`.
     //
     // TODO: make this into a HashMap<block::Hash, InventoryResponse<Arc<Block>, ()>> - a unique list (#2244)
-    Blocks(Vec<InventoryResponse<(Arc<Block>, Option<PeerSocketAddr>), block::Hash>>),
+    Blocks(Vec<InventoryResponse<(block::Hash, Arc<Block>, Option<PeerSocketAddr>), block::Hash>>),
 
     /// A list of found unmined transactions, and missing unmined transaction IDs.
     ///
@@ -101,14 +101,14 @@ impl fmt::Display for Response {
             // Display heights for single-block responses (which Zebra requests and expects)
             Response::Blocks(blocks) if blocks.len() == 1 => {
                 match blocks.first().expect("len is 1") {
-                    Available((block, _)) => format!(
+                    Available((hash, block, _)) => format!(
                         "Block {{ height: {}, hash: {} }}",
                         block
                             .coinbase_height()
                             .as_ref()
                             .map(|h| h.0.to_string())
                             .unwrap_or_else(|| "None".into()),
-                        block.hash(),
+                        hash,
                     ),
                     Missing(hash) => format!("Block {{ missing: {hash} }}"),
                 }

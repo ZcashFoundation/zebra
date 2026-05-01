@@ -591,8 +591,8 @@ where
     fn check_block(
         &self,
         block: Arc<Block>,
+        hash: block::Hash,
     ) -> Result<CheckpointVerifiedBlock, VerifyCheckpointError> {
-        let hash = block.hash();
         let height = block
             .coinbase_height()
             .ok_or(VerifyCheckpointError::CoinbaseHeight { hash })?;
@@ -643,12 +643,16 @@ where
     /// If the block does not pass basic validity checks,
     /// returns an error immediately.
     #[allow(clippy::unwrap_in_result)]
-    fn queue_block(&mut self, block: Arc<Block>) -> Result<RequestBlock, VerifyCheckpointError> {
+    fn queue_block(
+        &mut self,
+        block: Arc<Block>,
+        hash: block::Hash,
+    ) -> Result<RequestBlock, VerifyCheckpointError> {
         // Set up a oneshot channel to send results
         let (tx, rx) = oneshot::channel();
 
         // Check that the height and Merkle roots are valid.
-        let block = self.check_block(block)?;
+        let block = self.check_block(block, hash)?;
         let height = block.height;
         let hash = block.hash;
 
@@ -1059,7 +1063,7 @@ impl VerifyCheckpointError {
 /// The CheckpointVerifier service implementation.
 ///
 /// After verification, the block futures resolve to their hashes.
-impl<S> Service<Arc<Block>> for CheckpointVerifier<S>
+impl<S> Service<(Arc<Block>, block::Hash)> for CheckpointVerifier<S>
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
@@ -1073,8 +1077,8 @@ where
         Poll::Ready(Ok(()))
     }
 
-    #[instrument(name = "checkpoint", skip(self, block))]
-    fn call(&mut self, block: Arc<Block>) -> Self::Future {
+    #[instrument(name = "checkpoint", skip(self, block, hash))]
+    fn call(&mut self, (block, hash): (Arc<Block>, block::Hash)) -> Self::Future {
         // Reset the verifier back to the state tip if requested
         // (e.g. due to an error when committing a block to the state)
         if let Ok(tip) = self.reset_receiver.try_recv() {
@@ -1086,7 +1090,7 @@ where
             return async { Err(VerifyCheckpointError::Finished) }.boxed();
         }
 
-        let req_block = match self.queue_block(block) {
+        let req_block = match self.queue_block(block, hash) {
             Ok(req_block) => req_block,
             Err(e) => return async { Err(e) }.boxed(),
         };

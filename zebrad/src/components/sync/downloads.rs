@@ -1,8 +1,13 @@
 //! A download stream for Zebra's block syncer.
 
+mod block_size_tracker;
+
+pub(super) use block_size_tracker::BlockSizeTracker;
+
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet, VecDeque},
     convert,
+    future::Future,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -10,7 +15,6 @@ use std::{
 
 use futures::{
     future::{FutureExt, TryFutureExt},
-    ready,
     stream::{FuturesUnordered, Stream},
 };
 use pin_project::pin_project;
@@ -20,7 +24,7 @@ use tokio::{
     task::JoinHandle,
     time::timeout,
 };
-use tower::{hedge, Service, ServiceExt};
+use tower::{hedge, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::{
@@ -28,6 +32,7 @@ use zebra_chain::{
     chain_tip::ChainTip,
 };
 use zebra_network::{self as zn, PeerSocketAddr};
+use zebra_node_services::service_traits::ZebraService;
 use zebra_state as zs;
 
 use crate::components::sync::{
@@ -58,6 +63,13 @@ pub const VERIFICATION_PIPELINE_SCALING_MULTIPLIER: usize = 2;
 /// Blocks higher than this will get dropped and return an error.
 pub const VERIFICATION_PIPELINE_DROP_LIMIT: HeightDiff = 50_000;
 
+/// Maximum number of retry rounds for fetching blocks missing from a batch response.
+///
+/// Each round re-requests only the blocks absent from the previous response
+/// (typically because the peer hit its send buffer limit). Retries are routed
+/// to different peers via P2C load balancing.
+pub const BATCH_RETRY_LIMIT: usize = 3;
+
 #[derive(Copy, Clone, Debug)]
 pub(super) struct AlwaysHedge;
 
@@ -72,28 +84,11 @@ impl<Request: Clone> hedge::Policy<Request> for AlwaysHedge {
 
 /// Errors that can occur while downloading and verifying a block.
 #[derive(Error, Debug)]
-#[allow(dead_code)]
 pub enum BlockDownloadVerifyError {
-    #[error("permanent readiness error from the network service: {error:?}")]
-    NetworkServiceError {
-        #[source]
-        error: BoxError,
-    },
-
     #[error("permanent readiness error from the verifier service: {error:?}")]
     VerifierServiceError {
         #[source]
         error: BoxError,
-    },
-
-    #[error("duplicate block hash queued for download: {hash:?}")]
-    DuplicateBlockQueuedForDownload { hash: block::Hash },
-
-    #[error("error downloading block: {error:?} {hash:?}")]
-    DownloadFailed {
-        #[source]
-        error: BoxError,
-        hash: block::Hash,
     },
 
     /// A downloaded block was a long way ahead of the state chain tip.
@@ -156,6 +151,9 @@ pub enum BlockDownloadVerifyError {
         hash: block::Hash,
     },
 
+    #[error("block download failed after retries: {hash:?}")]
+    DownloadFailed { hash: block::Hash },
+
     #[error(
         "timeout during service readiness, download, verification, or internal downloader operation"
     )]
@@ -173,14 +171,8 @@ impl From<tokio::time::error::Elapsed> for BlockDownloadVerifyError {
 #[derive(Debug)]
 pub struct Downloads<ZN, ZV, ZSTip>
 where
-    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Sync + 'static,
-    ZN::Future: Send,
-    ZV: Service<zebra_consensus::Request, Response = block::Hash, Error = BoxError>
-        + Send
-        + Sync
-        + Clone
-        + 'static,
-    ZV::Future: Send,
+    ZN: ZebraService<zn::Request, zn::Response>,
+    ZV: ZebraService<zebra_consensus::Request, block::Hash>,
     ZSTip: ChainTip + Clone + Send + 'static,
 {
     // Services
@@ -212,76 +204,127 @@ where
     /// Receiver for `past_lookahead_limit_sender`, which is used to avoid accessing the mutex.
     past_lookahead_limit_receiver: zs::WatchReceiver<bool>,
 
-    // Internal downloads state
+    // Internal state — verification pipeline
     //
-    /// A list of pending block download and verify tasks.
+    /// Pending block verification tasks.
     #[pin]
-    pending: FuturesUnordered<
+    pending_verifications: FuturesUnordered<
         JoinHandle<Result<(Height, block::Hash), (BlockDownloadVerifyError, block::Hash)>>,
     >,
 
-    /// A list of channels that can be used to cancel pending block download and
-    /// verify tasks.
-    cancel_handles: HashMap<block::Hash, oneshot::Sender<()>>,
+    /// Cancel handles for in-flight verification tasks.
+    cancel_verify_handles: HashMap<block::Hash, oneshot::Sender<()>>,
+
+    // Internal state — download pipeline
+    //
+    /// Pending batch download tasks. Each task downloads blocks from one or
+    /// more peers and returns `(batch_key, per_block_results)`. Each per-block
+    /// result carries the block hash so the stream doesn't need to recompute it.
+    #[pin]
+    pending_downloads: FuturesUnordered<
+        JoinHandle<(
+            block::Hash,
+            Vec<Result<(block::Hash, Arc<block::Block>, Option<PeerSocketAddr>), block::Hash>>,
+        )>,
+    >,
+
+    /// Cancel handles for in-flight batch download tasks, keyed by the first
+    /// hash in the batch (used as a batch identifier).
+    cancel_download_handles: HashMap<block::Hash, oneshot::Sender<()>>,
+
+    /// Block hashes that have been submitted to a download batch and are
+    /// expected to arrive soon.
+    pending_download_hashes: HashSet<block::Hash>,
+
+    /// Download errors buffered during batch drain, yielded one at a time
+    /// by `poll_next` before polling verifications.
+    pending_errors: VecDeque<BlockDownloadVerifyError>,
+
+    /// Tracks recent block sizes for adaptive batch sizing.
+    pub(super) block_sizes: BlockSizeTracker,
 }
 
 impl<ZN, ZV, ZSTip> Stream for Downloads<ZN, ZV, ZSTip>
 where
-    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Sync + 'static,
-    ZN::Future: Send,
-    ZV: Service<zebra_consensus::Request, Response = block::Hash, Error = BoxError>
-        + Send
-        + Sync
-        + Clone
-        + 'static,
-    ZV::Future: Send,
+    ZN: ZebraService<zn::Request, zn::Response>,
+    ZV: ZebraService<zebra_consensus::Request, block::Hash>,
     ZSTip: ChainTip + Clone + Send + 'static,
 {
     type Item = Result<(Height, block::Hash), BlockDownloadVerifyError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        let this = self.project();
+        // Downloads is Unpin (all pinned fields are FuturesUnordered), so we
+        // can get &mut Self and reuse the &mut-self methods below.
+        let this = self.get_mut();
+
         // CORRECTNESS
         //
         // The current task must be scheduled for wakeup every time we return
         // `Poll::Pending`.
         //
-        // If no download and verify tasks have exited since the last poll, this
-        // task is scheduled for wakeup when the next task becomes ready.
+        // Phase 1 drains all completed batch downloads, spawning a verify task
+        // for each successfully downloaded block. Polling `pending_downloads`
+        // with `cx` registers the waker, so the task is rescheduled when any
+        // batch completes.
         //
-        // TODO: this would be cleaner with poll_map (#2693)
-        if let Some(join_result) = ready!(this.pending.poll_next(cx)) {
-            match join_result.expect("block download and verify tasks must not panic") {
-                Ok((height, hash)) => {
-                    this.cancel_handles.remove(&hash);
+        // Phase 2 polls `pending_verifications` for the next completed verify
+        // result. When `pending_verifications` is empty but `pending_downloads`
+        // still has in-flight batches, we return `Pending` — the waker from
+        // Phase 1 will re-poll us once a batch completes and we can spawn the
+        // next verify task.
+        //
+        // `Ready(None)` is returned only when both queues are empty.
+        while let Poll::Ready(Some(join_result)) =
+            Pin::new(&mut this.pending_downloads).poll_next(cx)
+        {
+            let (batch_key, results) = join_result.expect("batch download tasks must not panic");
+            this.cancel_download_handles.remove(&batch_key);
 
-                    Poll::Ready(Some(Ok((height, hash))))
-                }
-                Err((e, hash)) => {
-                    this.cancel_handles.remove(&hash);
-                    Poll::Ready(Some(Err(e)))
+            for result in results {
+                match result {
+                    Ok((hash, block, addr)) => {
+                        this.spawn_verify_task(hash, async move { Ok((block, addr)) });
+                    }
+                    Err(hash) => {
+                        this.clear_pending_download(&hash);
+                        this.pending_errors
+                            .push_back(BlockDownloadVerifyError::DownloadFailed { hash });
+                    }
                 }
             }
-        } else {
-            Poll::Ready(None)
+        }
+
+        if let Some(error) = this.pending_errors.pop_front() {
+            return Poll::Ready(Some(Err(error)));
+        }
+
+        match Pin::new(&mut this.pending_verifications).poll_next(cx) {
+            Poll::Ready(Some(join_result)) => {
+                match join_result.expect("block download and verify tasks must not panic") {
+                    Ok((height, hash)) => {
+                        this.cancel_verify_handles.remove(&hash);
+                        Poll::Ready(Some(Ok((height, hash))))
+                    }
+                    Err((e, hash)) => {
+                        this.cancel_verify_handles.remove(&hash);
+                        Poll::Ready(Some(Err(e)))
+                    }
+                }
+            }
+            Poll::Ready(None) if this.pending_downloads.is_empty() => Poll::Ready(None),
+            _ => Poll::Pending,
         }
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        self.pending.size_hint()
+        self.pending_verifications.size_hint()
     }
 }
 
 impl<ZN, ZV, ZSTip> Downloads<ZN, ZV, ZSTip>
 where
-    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Sync + 'static,
-    ZN::Future: Send,
-    ZV: Service<zebra_consensus::Request, Response = block::Hash, Error = BoxError>
-        + Send
-        + Sync
-        + Clone
-        + 'static,
-    ZV::Future: Send,
+    ZN: ZebraService<zn::Request, zn::Response>,
+    ZV: ZebraService<zebra_consensus::Request, block::Hash>,
     ZSTip: ChainTip + Clone + Send + 'static,
 {
     /// Initialize a new download stream with the provided `network` and
@@ -315,41 +358,178 @@ where
                 past_lookahead_limit_sender,
             )),
             past_lookahead_limit_receiver,
-            pending: FuturesUnordered::new(),
-            cancel_handles: HashMap::new(),
+            pending_verifications: FuturesUnordered::new(),
+            cancel_verify_handles: HashMap::new(),
+            pending_downloads: FuturesUnordered::new(),
+            cancel_download_handles: HashMap::new(),
+            pending_download_hashes: HashSet::new(),
+            pending_errors: VecDeque::new(),
+            block_sizes: BlockSizeTracker::new(),
         }
     }
 
-    /// Queue a block for download and verification.
+    /// Internal implementation of `download_batch()`.
     ///
-    /// This method waits for the network to become ready, and returns an error
-    /// only if the network service fails. It returns immediately after queuing
-    /// the request.
-    #[instrument(level = "debug", skip(self), fields(%hash))]
-    pub async fn download_and_verify(
+    /// See [`Downloads::download_batch`] for more details.
+    pub(super) fn download_batch_internal<const RETRY_LIMIT: usize>(
         &mut self,
-        hash: block::Hash,
-    ) -> Result<(), BlockDownloadVerifyError> {
-        if self.cancel_handles.contains_key(&hash) {
-            metrics::counter!("sync.already.queued.dropped.block.hash.count").increment(1);
-            return Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { hash });
+        mut hashes: Vec<block::Hash>,
+    ) {
+        let mut network = self.network.clone();
+
+        hashes.retain(|hash| {
+            !self.pending_download_hashes.contains(hash)
+                && !self.cancel_verify_handles.contains_key(hash)
+        });
+        if hashes.is_empty() {
+            return;
+        }
+        self.pending_download_hashes.extend(&hashes);
+
+        let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
+        let batch_key = hashes[0];
+
+        let task = tokio::spawn(async move {
+            let mut results: Vec<
+                Result<(block::Hash, Arc<block::Block>, Option<PeerSocketAddr>), block::Hash>,
+            > = Vec::new();
+            let mut retries: HashMap<block::Hash, usize> = hashes.iter().map(|h| (*h, 0)).collect();
+            let mut remaining = hashes;
+
+            while !remaining.is_empty() {
+                let hash_set: HashSet<block::Hash> = remaining.iter().copied().collect();
+                let download_start = std::time::Instant::now();
+
+                let response = tokio::select! {
+                    biased;
+                    _ = &mut cancel_rx => {
+                        // Cancelled — report all remaining hashes as errors.
+                        for h in &remaining {
+                            results.push(Err(*h));
+                        }
+                        return (batch_key, results);
+                    }
+                    ready_result = network.ready() => {
+                        match ready_result {
+                            Ok(svc) => svc.call(zn::Request::BlocksByHash(hash_set)).await,
+                            Err(e) => {
+                                debug!(?e, "network service failed in batch download");
+                                break;
+                            }
+                        }
+                    }
+                };
+
+                let made_progress = match response {
+                    Ok(zn::Response::Blocks(blocks)) => {
+                        metrics::histogram!(
+                            "sync.batch.download.duration_seconds",
+                            "result" => "success"
+                        )
+                        .record(download_start.elapsed().as_secs_f64());
+
+                        let mut received = HashSet::new();
+                        for item in blocks {
+                            if let Some((h, block, addr)) = item.available() {
+                                if remaining.contains(&h) {
+                                    received.insert(h);
+                                    retries.remove(&h);
+                                    results.push(Ok((h, block, addr)));
+                                }
+                            }
+                        }
+
+                        remaining.retain(|h| !received.contains(h));
+                        !received.is_empty()
+                    }
+                    Ok(_) => unreachable!("wrong response to block request"),
+                    Err(error) => {
+                        metrics::histogram!(
+                            "sync.batch.download.duration_seconds",
+                            "result" => "failure"
+                        )
+                        .record(download_start.elapsed().as_secs_f64());
+                        debug!(?error, "batch download failed, retrying");
+                        false
+                    }
+                };
+
+                if !made_progress {
+                    for h in &remaining {
+                        *retries.entry(*h).or_default() += 1;
+                    }
+                    let exhausted: Vec<_> = remaining
+                        .iter()
+                        .filter(|h| retries.get(h).copied().unwrap_or(0) > RETRY_LIMIT)
+                        .copied()
+                        .collect();
+                    for h in &exhausted {
+                        results.push(Err(*h));
+                    }
+                    remaining.retain(|h| retries.get(h).copied().unwrap_or(0) <= RETRY_LIMIT);
+                }
+
+                if !remaining.is_empty() {
+                    tokio::task::yield_now().await;
+                }
+            }
+
+            // Report any remaining hashes (network failure exit) as errors.
+            for h in &remaining {
+                results.push(Err(*h));
+            }
+            (batch_key, results)
+        });
+
+        self.pending_downloads.push(task);
+        self.cancel_download_handles.insert(batch_key, cancel_tx);
+    }
+
+    /// Download a batch of blocks, tracking the task for cancellation and polling.
+    ///
+    /// Spawns a task that sends `BlocksByHash` requests with retry semantics.
+    /// If a response is partial (peer hit its send buffer limit), the remaining
+    /// hashes are re-requested from a different peer — this repeats as long as
+    /// each round makes forward progress. A retry limit applies only when a
+    /// round makes no progress (empty response / network error).
+    ///
+    /// The task's JoinHandle is stored in `pending_downloads`. Completed
+    /// batches are drained inside [`Stream::poll_next`], which spawns a
+    /// verify task for each downloaded block. A cancel handle is stored in
+    /// `cancel_download_handles` (keyed by the first hash in the batch) so
+    /// the task can be cancelled on sync restart.
+    pub(super) fn download_batch(&mut self, hashes: Vec<block::Hash>) {
+        self.download_batch_internal::<BATCH_RETRY_LIMIT>(hashes);
+    }
+
+    /// Removes a hash from the pending download set, allowing it to be re-requested.
+    pub(super) fn clear_pending_download(&mut self, hash: &block::Hash) {
+        self.pending_download_hashes.remove(hash);
+    }
+
+    pub(super) fn spawn_verify_task<F>(&mut self, hash: block::Hash, block_source: F)
+    where
+        F: Future<
+                Output = Result<
+                    (Arc<block::Block>, Option<PeerSocketAddr>),
+                    BlockDownloadVerifyError,
+                >,
+            > + Send
+            + 'static,
+    {
+        // The block has arrived, so it no longer needs download tracking.
+        // Clear unconditionally so the download hash set doesn't leak entries
+        // on the duplicate-verify early return below.
+        self.pending_download_hashes.remove(&hash);
+
+        // Skip if this hash is already being verified — avoids orphaning the
+        // new cancel handle when the old task completes and removes the entry.
+        if self.cancel_verify_handles.contains_key(&hash) {
+            debug!(?hash, "skipping duplicate spawn_verify_task");
+            return;
         }
 
-        // We construct the block requests sequentially, waiting for the peer
-        // set to be ready to process each request. This ensures that we start
-        // block downloads in the order we want them (though they may resolve
-        // out of order), and it means that we respect backpressure. Otherwise,
-        // if we waited for readiness and did the service call in the spawned
-        // tasks, all of the spawned tasks would race each other waiting for the
-        // network to become ready.
-        let block_req = self
-            .network
-            .ready()
-            .await
-            .map_err(|error| BlockDownloadVerifyError::NetworkServiceError { error })?
-            .call(zn::Request::BlocksByHash(std::iter::once(hash).collect()));
-
-        // This oneshot is used to signal cancellation to the download task.
+        // This oneshot is used to signal cancellation to the task.
         let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
 
         let mut verifier = self.verifier.clone();
@@ -360,13 +540,14 @@ where
 
         let past_lookahead_limit_sender = self.past_lookahead_limit_sender.clone();
         let past_lookahead_limit_receiver = self.past_lookahead_limit_receiver.clone();
+        let block_size_sender = self.block_sizes.sender();
 
         let task = tokio::spawn(
             async move {
-                // Download the block.
+                // Obtain the block from the source (single download or batch channel).
                 // Prefer the cancel handle if both are ready.
                 let download_start = std::time::Instant::now();
-                let rsp = tokio::select! {
+                let (block, advertiser_addr) = tokio::select! {
                     biased;
                     _ = &mut cancel_rx => {
                         trace!("task cancelled prior to download completion");
@@ -375,27 +556,14 @@ where
                             .record(download_start.elapsed().as_secs_f64());
                         return Err(BlockDownloadVerifyError::CancelledDuringDownload { hash })
                     }
-                    rsp = block_req => rsp.map_err(|error| BlockDownloadVerifyError::DownloadFailed { error, hash})?,
-                };
-
-                let (block, advertiser_addr) = if let zn::Response::Blocks(blocks) = rsp {
-                    assert_eq!(
-                        blocks.len(),
-                        1,
-                        "wrong number of blocks in response to a single hash"
-                    );
-
-                    blocks
-                        .first()
-                        .expect("just checked length")
-                        .available()
-                        .expect("unexpected missing block status: single block failures should be errors")
-                } else {
-                    unreachable!("wrong response to block request");
+                    result = block_source => result?,
                 };
                 metrics::counter!("sync.downloaded.block.count").increment(1);
                 metrics::histogram!("sync.block.download.duration_seconds", "result" => "success")
                     .record(download_start.elapsed().as_secs_f64());
+
+                // Sample block size for adaptive batch sizing (every 100th block).
+                block_size_sender.sample(&block);
 
                 // Security & Performance: reject blocks that are too far ahead of our tip.
                 // Avoids denial of service attacks, and reduces wasted work on high blocks
@@ -529,7 +697,7 @@ where
                 let verify_start = std::time::Instant::now();
                 let mut rsp = verifier
                     .map_err(|error| BlockDownloadVerifyError::VerifierServiceError { error })?
-                    .call(zebra_consensus::Request::Commit(block)).boxed();
+                    .call(zebra_consensus::Request::Commit(block, hash)).boxed();
 
                 // Add a shorter timeout to workaround a known bug (#5125)
                 let short_timeout_max = (max_checkpoint_height + FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT).expect("checkpoint block height is in valid range");
@@ -574,32 +742,35 @@ where
             .map_err(move |e| (e, hash)),
         );
 
-        // Try to start the spawned task before queueing the next block request
-        tokio::task::yield_now().await;
-
-        self.pending.push(task);
-        assert!(
-            self.cancel_handles.insert(hash, cancel_tx).is_none(),
-            "blocks are only queued once"
-        );
-
-        Ok(())
+        self.pending_verifications.push(task);
+        self.cancel_verify_handles.insert(hash, cancel_tx);
     }
 
     /// Cancel all running tasks and reset the downloader state.
     pub fn cancel_all(&mut self) {
-        // Replace the pending task list with an empty one and drop it.
-        let _ = std::mem::take(&mut self.pending);
+        // Drop all verification task JoinHandles.
+        let _ = std::mem::take(&mut self.pending_verifications);
 
-        // Signal cancellation to all running tasks.
-        // Since we already dropped the JoinHandles above, they should
-        // fail silently.
-        for (_hash, cancel) in self.cancel_handles.drain() {
+        // Signal cancellation to all verification tasks.
+        for (_hash, cancel) in self.cancel_verify_handles.drain() {
             let _ = cancel.send(());
         }
 
-        assert!(self.pending.is_empty());
-        assert!(self.cancel_handles.is_empty());
+        // Drop all download task JoinHandles.
+        let _ = std::mem::take(&mut self.pending_downloads);
+
+        // Signal cancellation to all download tasks.
+        for (_hash, cancel) in self.cancel_download_handles.drain() {
+            let _ = cancel.send(());
+        }
+
+        self.pending_download_hashes.clear();
+        self.pending_errors.clear();
+
+        assert!(self.pending_verifications.is_empty());
+        assert!(self.cancel_verify_handles.is_empty());
+        assert!(self.pending_downloads.is_empty());
+        assert!(self.cancel_download_handles.is_empty());
 
         // Set the lookahead limit to false, since we're empty (so we're under the limit).
         //
@@ -612,14 +783,8 @@ where
             .send(false);
     }
 
-    /// Get the number of currently in-flight download and verify tasks.
+    /// Get the number of currently in-flight download and verify blocks.
     pub fn in_flight(&mut self) -> usize {
-        self.pending.len()
-    }
-
-    /// Returns true if there are no in-flight download and verify tasks.
-    #[allow(dead_code)]
-    pub fn is_empty(&mut self) -> bool {
-        self.pending.is_empty()
+        self.pending_verifications.len() + self.pending_download_hashes.len()
     }
 }

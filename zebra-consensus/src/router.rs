@@ -192,6 +192,7 @@ where
     }
 
     fn call(&mut self, request: Request) -> Self::Future {
+        let hash = request.hash();
         let block = request.block();
 
         match block.coinbase_height() {
@@ -207,9 +208,11 @@ where
                 .boxed()
             }
 
-            Some(height) if height <= self.max_checkpoint_height => {
-                self.checkpoint.call(block).map_err(Into::into).boxed()
-            }
+            Some(height) if height <= self.max_checkpoint_height => self
+                .checkpoint
+                .call((block, hash))
+                .map_err(Into::into)
+                .boxed(),
             // This also covers blocks with no height, which the block verifier
             // will reject immediately.
             _ => self.block.call(request).map_err(Into::into).boxed(),
