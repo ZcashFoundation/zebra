@@ -10,19 +10,6 @@ use crate::serialization::{
     MAX_PROTOCOL_MESSAGE_LEN,
 };
 
-// Allow direct serialization of Vec<u8> for these tests. We don't usually
-// allow this because some types have specific rules for about serialization
-// of their inner Vec<u8>. This method could be easily misused if it applied
-// more generally.
-//
-// Due to Rust's trait rules, these trait impls apply to all zebra-chain tests,
-// not just the tests in this module. But other crates' tests can't access them.
-impl ZcashSerialize for u8 {
-    fn zcash_serialize<W: std::io::Write>(&self, mut writer: W) -> Result<(), std::io::Error> {
-        writer.write_all(&[*self])
-    }
-}
-
 impl TrustedPreallocate for u8 {
     fn max_allocation() -> u64 {
         // MAX_PROTOCOL_MESSAGE_LEN takes up 5 bytes when encoded as a CompactSize.
