@@ -15,6 +15,7 @@ use zcash_primitives::transaction::{
     builder::{BuildConfig, Builder},
     fees::fixed::FeeRule,
 };
+use zcash_proofs::prover::LocalTxProver;
 use zcash_protocol::{consensus::BlockHeight, memo::MemoBytes, value::Zatoshis};
 use zebra_chain::{
     amount::{self, Amount, NegativeOrZero, NonNegative},
@@ -30,7 +31,7 @@ use zebra_chain::{
     transaction::{self, SerializedTransaction, Transaction, VerifiedUnminedTx},
     transparent::Script,
 };
-use zebra_consensus::{error::TransactionError, funding_stream_address, groth16};
+use zebra_consensus::{error::TransactionError, funding_stream_address};
 use zebra_script::Sigops;
 use zebra_state::IntoDisk;
 
@@ -245,13 +246,14 @@ impl TransactionTemplate<NegativeOrZero> {
             builder.add_transparent_output(&fs_addr, fs_amount)?;
         }
 
+        let sapling_prover = LocalTxProver::bundled();
         let build_result = builder.build(
             &Default::default(),
             Default::default(),
             Default::default(),
             OsRng,
-            &*groth16::SAPLING,
-            &*groth16::SAPLING,
+            &sapling_prover,
+            &sapling_prover,
             &FeeRule::non_standard(Zatoshis::ZERO),
         )?;
 
