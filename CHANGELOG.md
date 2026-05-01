@@ -10,6 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 ### Security
 
 - Fix sigops counting ([GHSA-jv4h-j224-23cc](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-jv4h-j224-23cc)).
+- Defense-in-depth fix for a consensus-divergence follow-up to GHSA-8m29-fpq5-89jj
+  in transparent script verification. Under the prior fix, the V5 sighash
+  callback returned `None` for undefined ZIP 244 hash-type bytes, but the
+  `libzcash_script` C++ bridge did not propagate that failure to the C++
+  verifier. A crafted `OP_CHECKSIGVERIFY` + `OP_CHECKSIG` script could therefore
+  make optimized Zebra accept a spend that `zcashd` rejects. Zebra's callback
+  now substitutes a per-call CSPRNG-derived sighash when rejecting, so any
+  signature the peer shipped fails to verify and the block is rejected in
+  agreement with `zcashd`.
 
 ### Added
 
@@ -22,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 - Upgrade Sentry SDK to `0.47` and switch its transport feature from `reqwest` to `ureq` ([#10490](https://github.com/ZcashFoundation/zebra/pull/10490))
 - `zebrad::sentry` is now crate-private; downstream code should not import it directly ([#10490](https://github.com/ZcashFoundation/zebra/pull/10490))
+- Upgraded the librustzcash crate cohort (`equihash` 0.3, `orchard` 0.13, `sapling-crypto` 0.7, `zcash_address` 0.11, `zcash_encoding` 0.4, `zcash_keys` 0.13, `zcash_primitives` 0.27, `zcash_proofs` 0.27, `zcash_protocol` 0.8, `zcash_transparent` 0.7) to the 2026-04 release wave, which migrates off the yanked `core2` crate to `corez 0.1.1` and clears RUSTSEC-2026-0105.
+- Bumped workspace MSRV from 1.85.0 to 1.85.1, required by the new librustzcash releases. Also bumped `zebrad` MSRV from 1.89 to 1.91, required by `cargo-platform 0.3.3` (transitively via `vergen-git2`).
 
 ## [Zebra 4.3.1](https://github.com/ZcashFoundation/zebra/releases/tag/v4.3.1) - 2026-04-17
 

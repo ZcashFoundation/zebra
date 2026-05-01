@@ -1,7 +1,8 @@
 //! A download stream that handles gossiped blocks from peers.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
+    net::IpAddr,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -35,21 +36,17 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 ///
 /// ## Security
 ///
-/// We use a small concurrency limit, to prevent memory denial-of-service
-/// attacks.
-///
 /// The maximum block size is 2 million bytes. A deserialized malicious
 /// block with ~225_000 transparent outputs can take up 9MB of RAM.
-/// So the maximum inbound queue usage is `MAX_INBOUND_CONCURRENCY * 9 MB`.
+/// The total queue bound is `MAX_INBOUND_CONCURRENCY * 9 MB`. Each peer IP
+/// is limited to one in-flight download (9 MB) by the per-IP cap enforced
+/// in [`Downloads::download_and_verify`], so a sybil or IPv6-range attacker
+/// still needs many distinct source IPs to approach the total bound.
 /// (See #1880 for more details.)
 ///
 /// Malicious blocks will eventually timeout or fail contextual validation.
 /// Once validation fails, the block is dropped, and its memory is deallocated.
-///
-/// Since Zebra keeps an `inv` index, inbound downloads for malicious blocks
-/// will be directed to the malicious node that originally gossiped the hash.
-/// Therefore, this attack can be carried out by a single malicious node.
-pub const MAX_INBOUND_CONCURRENCY: usize = 30;
+pub const MAX_INBOUND_CONCURRENCY: usize = 200;
 
 /// The action taken in response to a peer's gossiped block hash.
 pub enum DownloadAction {
@@ -66,6 +63,13 @@ pub enum DownloadAction {
     /// The sync service should discover this block later, when we are closer
     /// to the tip. The queue's capacity is [`Downloads::full_verify_concurrency_limit`].
     FullQueue,
+
+    /// The advertising peer's IP already has an in-flight download, so
+    /// this request was ignored. Zcash's post-Blossom target block spacing
+    /// is 75 seconds, so honest peers rarely gossip more than one block
+    /// before the first is verified; during reorgs or recovery the same
+    /// hash also arrives from other peers or via the syncer.
+    TooManyFromPeer,
 }
 
 /// Manages download and verification of blocks gossiped to this peer.
@@ -111,9 +115,20 @@ where
         JoinHandle<Result<block::Hash, (BoxError, block::Hash, Option<PeerSocketAddr>)>>,
     >,
 
-    /// A list of channels that can be used to cancel pending block download and
-    /// verify tasks.
-    cancel_handles: HashMap<block::Hash, oneshot::Sender<()>>,
+    /// Cancellation handles for tasks in [`Self::pending`], keyed by block
+    /// hash. The `Option<IpAddr>` is the advertiser IP recorded in
+    /// [`Self::in_flight_ips`], so completion can remove it by hash lookup.
+    cancel_handles: HashMap<block::Hash, (oneshot::Sender<()>, Option<IpAddr>)>,
+
+    /// Advertiser IPs with an in-flight download and verify task.
+    ///
+    /// Invariant: an IP is present iff some entry in [`Self::cancel_handles`]
+    /// has value `(_, Some(ip))`. Enforces the one-download-per-IP cap.
+    ///
+    /// Size-bounded by `full_verify_concurrency_limit` (≤ [`MAX_INBOUND_CONCURRENCY`]),
+    /// inherited from the [`DownloadAction::FullQueue`] check on
+    /// [`Self::pending`].
+    in_flight_ips: HashSet<IpAddr>,
 }
 
 impl<ZN, ZV, ZS> Stream for Downloads<ZN, ZV, ZS>
@@ -142,16 +157,19 @@ where
         //
         // TODO: this would be cleaner with poll_map (#2693)
         if let Some(join_result) = ready!(this.pending.poll_next(cx)) {
-            match join_result.expect("block download and verify tasks must not panic") {
-                Ok(hash) => {
-                    this.cancel_handles.remove(&hash);
-                    Poll::Ready(Some(Ok(hash)))
-                }
-                Err((e, hash, advertiser_addr)) => {
-                    this.cancel_handles.remove(&hash);
-                    Poll::Ready(Some(Err((e, advertiser_addr))))
-                }
+            let (result, hash) = match join_result
+                .expect("block download and verify tasks must not panic")
+            {
+                Ok(hash) => (Ok(hash), hash),
+                Err((e, hash, advertiser_addr)) => (Err((e, advertiser_addr)), hash),
+            };
+            if let Some((_, Some(ip))) = this.cancel_handles.remove(&hash) {
+                assert!(
+                    this.in_flight_ips.remove(&ip),
+                    "every tracked IP was inserted when its download was queued",
+                );
             }
+            Poll::Ready(Some(result))
         } else {
             Poll::Ready(None)
         }
@@ -199,14 +217,22 @@ where
             latest_chain_tip,
             pending: FuturesUnordered::new(),
             cancel_handles: HashMap::new(),
+            in_flight_ips: HashSet::new(),
         }
     }
 
     /// Queue a block for download and verification.
     ///
-    /// Returns the action taken in response to the queue request.
+    /// When `advertiser` is `Some`, its IP is tracked in
+    /// [`Self::in_flight_ips`] and used to enforce the one-download-per-IP
+    /// cap; `None` bypasses per-IP accounting (for example when Zebra
+    /// triggers the download internally).
     #[instrument(skip(self, hash), fields(hash = %hash))]
-    pub fn download_and_verify(&mut self, hash: block::Hash) -> DownloadAction {
+    pub fn download_and_verify(
+        &mut self,
+        hash: block::Hash,
+        advertiser: Option<PeerSocketAddr>,
+    ) -> DownloadAction {
         if self.cancel_handles.contains_key(&hash) {
             debug!(
                 ?hash,
@@ -233,6 +259,21 @@ where
             metrics::counter!("gossip.full.queue.dropped.block.hash.count").increment(1);
 
             return DownloadAction::FullQueue;
+        }
+
+        let advertiser_ip = advertiser.map(|addr| addr.ip());
+        if let Some(ip) = advertiser_ip {
+            if self.in_flight_ips.contains(&ip) {
+                debug!(
+                    ?hash,
+                    ?advertiser,
+                    "already have an in-flight inbound download from peer IP: ignored block",
+                );
+
+                metrics::counter!("gossip.peer.limit.dropped.block.hash.count").increment(1);
+
+                return DownloadAction::TooManyFromPeer;
+            }
         }
 
         // This oneshot is used to signal cancellation to the download task.
@@ -362,8 +403,8 @@ where
             metrics::counter!("gossip.verified.block.count").increment(1);
             hash
         })
-        // Tack the hash onto the error so we can remove the cancel handle
-        // on failure as well as on success.
+        // Tack the hash onto the error so poll_next can look up the cancel
+        // handle and advertising IP on failure as well as success.
         .map_err(move |(e, advertiser_addr)| (e, hash, advertiser_addr))
         .in_current_span();
 
@@ -382,9 +423,17 @@ where
 
         self.pending.push(task);
         assert!(
-            self.cancel_handles.insert(hash, cancel_tx).is_none(),
+            self.cancel_handles
+                .insert(hash, (cancel_tx, advertiser_ip))
+                .is_none(),
             "blocks are only queued once"
         );
+        if let Some(ip) = advertiser_ip {
+            assert!(
+                self.in_flight_ips.insert(ip),
+                "the per-IP cap check above rejects any IP already in flight",
+            );
+        }
 
         debug!(
             ?hash,

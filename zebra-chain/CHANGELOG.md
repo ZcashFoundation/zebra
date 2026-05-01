@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `p2sh_sigop_count: u32`.
   - `block_sigop_count(&self) -> u32`.
 
+## [7.0.0] - PLANNED
+
+### Breaking changes
+
+- Migrated to `zcash_primitives 0.27` (and the rest of the librustzcash 2026-04 release wave), which replaces the yanked `core2` dependency with `corez`.
+
 ## [6.0.2] - 2026-04-17
 
 This release fixes an important security issue:
