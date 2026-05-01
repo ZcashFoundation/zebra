@@ -719,12 +719,22 @@ fn count_coinbase_legacy_sigops_includes_coinbase_script() -> Result<()> {
         .activation_height(&network)
         .expect("NU5 has a Mainnet activation height");
 
-    let tx = Transaction::new_v5_coinbase(
-        &network,
-        height,
-        vec![(output_amount, dummy_output_script)],
-        miner_data,
-    );
+    let tx = Transaction::V5 {
+        network_upgrade: NetworkUpgrade::Nu5,
+        inputs: vec![transparent::Input::Coinbase {
+            height,
+            data: miner_data,
+            sequence: u32::MAX,
+        }],
+        outputs: vec![transparent::Output {
+            value: output_amount,
+            lock_script: dummy_output_script,
+        }],
+        lock_time: LockTime::unlocked(),
+        expiry_height: Height(0),
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    };
 
     // Before the fix, Zebra's `Sigops` impl skipped the coinbase input and returned 0 for a
     // coinbase with no OP_CHECKSIG in its outputs. After the fix, every OP_CHECKSIG in the coinbase
@@ -842,12 +852,22 @@ fn p2sh_sigop_count_is_zero_for_non_p2sh_and_coinbase() -> Result<()> {
         .expect("NU5 has a Mainnet activation height");
     let dummy_output_script = transparent::Script::new(&[0x51]);
     let output_amount = zebra_chain::amount::Amount::try_from(1_000_000)?;
-    let coinbase_tx = Transaction::new_v5_coinbase(
-        &network,
-        nu5_height,
-        vec![(output_amount, dummy_output_script.clone())],
-        vec![OP_CHECKSIG; 80],
-    );
+    let coinbase_tx = Transaction::V5 {
+        network_upgrade: NetworkUpgrade::Nu5,
+        inputs: vec![transparent::Input::Coinbase {
+            height: nu5_height,
+            data: vec![OP_CHECKSIG; 80],
+            sequence: u32::MAX,
+        }],
+        outputs: vec![transparent::Output {
+            value: output_amount,
+            lock_script: dummy_output_script.clone(),
+        }],
+        lock_time: LockTime::unlocked(),
+        expiry_height: Height(0),
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    };
 
     // Coinbase inputs have no spent output; zcashd passes an empty vector.
     assert_eq!(p2sh_sigop_count(&coinbase_tx, &[]), 0);
@@ -921,12 +941,22 @@ fn block_sigop_total_includes_coinbase_and_p2sh() -> Result<()> {
         .expect("NU5 has a Mainnet activation height");
     let dummy_output_script = transparent::Script::new(&[0x51]); // OP_TRUE
     let output_amount = zebra_chain::amount::Amount::try_from(1_000_000)?;
-    let coinbase_tx = Transaction::new_v5_coinbase(
-        &network,
-        nu5_height,
-        vec![(output_amount, dummy_output_script)],
-        vec![OP_CHECKSIG; 80],
-    );
+    let coinbase_tx = Transaction::V5 {
+        network_upgrade: NetworkUpgrade::Nu5,
+        inputs: vec![transparent::Input::Coinbase {
+            height: nu5_height,
+            data: vec![OP_CHECKSIG; 80],
+            sequence: u32::MAX,
+        }],
+        outputs: vec![transparent::Output {
+            value: output_amount,
+            lock_script: dummy_output_script,
+        }],
+        lock_time: LockTime::unlocked(),
+        expiry_height: Height(0),
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    };
 
     // Surface B: each non-coinbase transaction has one P2SH input whose
     // 15-byte redeem script is 15 x OP_CHECKSIG, contributing 15 P2SH
