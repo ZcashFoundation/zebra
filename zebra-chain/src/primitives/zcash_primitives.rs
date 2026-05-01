@@ -294,6 +294,82 @@ impl PrecomputedTxData {
     }
 }
 
+/// Internal error type returned by [`sighash_inner`] when a sighash request
+/// violates one of the documented preconditions of [`sighash`] or
+/// [`sighash_v4_raw`].
+///
+/// Public callers (`SigHasher::sighash`, `SigHasher::sighash_v4_raw`) document
+/// these conditions as panics, so they unwrap the result at the public
+/// boundary. Keeping the internal code `Result`-shaped avoids spreading
+/// `.expect()` calls across multiple locations whose justifications all
+/// depend on the same caller invariants.
+#[derive(Debug)]
+enum SighashError {
+    /// Caller passed an `input_index` greater than or equal to the number of
+    /// transparent inputs the caller declared in `all_previous_outputs`.
+    InputIndexOutOfBounds {
+        input_index: usize,
+        input_count: usize,
+    },
+    /// Caller asked for a transparent sighash on a transaction that
+    /// `zcash_primitives` parsed without a transparent bundle. This contradicts
+    /// the precondition that `Some((input_index, _))` is only passed for
+    /// transactions with at least one transparent input.
+    NoTransparentBundle,
+    /// `input_index` is within bounds for `all_previous_outputs` but out of
+    /// bounds for the transparent bundle's `vin` returned by
+    /// `zcash_primitives`. Reaching this branch indicates a serialize /
+    /// deserialize round-trip inconsistency between Zebra's `Transaction` and
+    /// the parsed `zcash_primitives::Transaction`, which would be a bug in
+    /// either crate.
+    BundleInputCountMismatch {
+        input_index: usize,
+        bundle_vin_len: usize,
+        all_prev_outputs_len: usize,
+    },
+    /// The previous output's value could not be converted to `Zatoshis`.
+    /// Reaching this branch means the caller passed an output whose amount
+    /// was not validated by the consensus rules before sighash computation.
+    InvalidPreviousOutputAmount,
+}
+
+impl std::fmt::Display for SighashError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InputIndexOutOfBounds {
+                input_index,
+                input_count,
+            } => write!(
+                f,
+                "input_index {input_index} is out of bounds (transaction has \
+                 {input_count} transparent inputs)"
+            ),
+            Self::NoTransparentBundle => f.write_str(
+                "transparent sighash requested for a transaction with no \
+                 transparent bundle (vin and vout both empty)",
+            ),
+            Self::BundleInputCountMismatch {
+                input_index,
+                bundle_vin_len,
+                all_prev_outputs_len,
+            } => write!(
+                f,
+                "input_index {input_index} valid for all_previous_outputs (len \
+                 {all_prev_outputs_len}) but out of bounds for the parsed \
+                 transparent bundle (vin len {bundle_vin_len}); this indicates \
+                 a serialize/deserialize round-trip inconsistency"
+            ),
+            Self::InvalidPreviousOutputAmount => f.write_str(
+                "previous output amount could not be converted to Zatoshis; \
+                 the amount should have been validated before sighash \
+                 computation",
+            ),
+        }
+    }
+}
+
+impl std::error::Error for SighashError {}
+
 /// Compute a signature hash using librustzcash.
 ///
 /// # Inputs
@@ -304,6 +380,15 @@ impl PrecomputedTxData {
 /// - `input_index_script_code`: a tuple with the index of the transparent Input
 ///   for which we are producing a sighash and the respective script code being
 ///   validated, or None if it's a shielded input.
+///
+/// # Panics
+///
+/// - if `input_index_script_code` is `Some((input_index, _))` and `input_index`
+///   is out of bounds for `precomputed_tx_data.all_previous_outputs`. The
+///   public callers in `zebra-chain` document this as a precondition.
+/// - if the previous output at `input_index` has a value that cannot be
+///   converted to `Zatoshis`. Output values are validated before sighash
+///   computation, so this branch is unreachable in practice.
 pub(crate) fn sighash(
     precomputed_tx_data: &PrecomputedTxData,
     hash_type: HashType,
@@ -314,6 +399,11 @@ pub(crate) fn sighash(
         hash_type.try_into().expect("hash type should be canonical"),
         input_index_script_code,
     )
+    .expect(
+        "sighash precondition violated: callers must pass an in-bounds \
+         input_index when computing a transparent sighash, and the transaction \
+         must contain the transparent input being signed",
+    )
 }
 
 /// Compute a pre-V5 (V4) signature hash using the raw `hash_type` byte.
@@ -321,6 +411,10 @@ pub(crate) fn sighash(
 /// `zcashd` serializes the full raw byte into the V4 sighash preimage and only
 /// masks with `SIGHASH_MASK` (0x1f) for selection logic. Callers handling V5+
 /// transactions must use [`sighash`] instead so ZIP-244 strictness is enforced.
+///
+/// # Panics
+///
+/// Same preconditions as [`sighash`].
 pub(crate) fn sighash_v4_raw(
     precomputed_tx_data: &PrecomputedTxData,
     raw_hash_type: u8,
@@ -331,44 +425,84 @@ pub(crate) fn sighash_v4_raw(
         zcash_transparent::sighash::SighashType::from_raw(raw_hash_type),
         input_index_script_code,
     )
+    .expect(
+        "sighash precondition violated: callers must pass an in-bounds \
+         input_index when computing a transparent sighash, and the transaction \
+         must contain the transparent input being signed",
+    )
 }
 
+/// Internal sighash computation that surfaces precondition violations through
+/// `Result` instead of spreading `.expect()` calls across multiple sites.
+///
+/// All callers in `zebra-chain` unwrap the returned `Result` at the public
+/// boundary, but funnelling the error variants through one type makes it
+/// obvious which preconditions each call site relies on.
 fn sighash_inner(
     precomputed_tx_data: &PrecomputedTxData,
     sighash_type: zcash_transparent::sighash::SighashType,
     input_index_script_code: Option<(usize, Vec<u8>)>,
-) -> SigHash {
+) -> Result<SigHash, SighashError> {
     let lock_script: zcash_transparent::address::Script;
     let unlock_script: zcash_transparent::address::Script;
     let signable_input = match input_index_script_code {
         Some((input_index, script_code)) => {
-            let output = &precomputed_tx_data.all_previous_outputs[input_index];
+            // The `all_previous_outputs` vector is supplied by the caller in
+            // 1:1 correspondence with `tx.inputs()`, and the transparent
+            // bundle was produced by round-tripping the same transaction
+            // bytes through `zcash_primitives::Transaction::read`. Both have
+            // length equal to `tx.inputs().len()`, so an out-of-bounds index
+            // is a caller error that should be reported once here.
+            let all_prev_outputs_len = precomputed_tx_data.all_previous_outputs.len();
+            let output = precomputed_tx_data
+                .all_previous_outputs
+                .get(input_index)
+                .ok_or(SighashError::InputIndexOutOfBounds {
+                    input_index,
+                    input_count: all_prev_outputs_len,
+                })?;
+            // `zcash_primitives::Transaction::read` returns
+            // `transparent_bundle = None` only when both `vin` and `vout` are
+            // empty. The caller only reaches this branch with `Some(_)` when
+            // the transaction has at least one transparent input, so reaching
+            // a `None` here means the caller violated the precondition or
+            // librustzcash changed its behaviour.
+            let bundle = precomputed_tx_data
+                .tx_data
+                .transparent_bundle()
+                .ok_or(SighashError::NoTransparentBundle)?;
             lock_script = output.lock_script.clone().into();
             unlock_script = zcash_transparent::address::Script(script::Code(script_code));
-            zp_tx::sighash::SignableInput::Transparent(
-                zcash_transparent::sighash::SignableInput::from_parts(
-                    sighash_type,
-                    input_index,
-                    &unlock_script,
-                    &lock_script,
-                    output
-                        .value
-                        .try_into()
-                        .expect("amount was previously validated"),
-                ),
+            let value = output
+                .value
+                .try_into()
+                .map_err(|_| SighashError::InvalidPreviousOutputAmount)?;
+            let from_parts = zcash_transparent::sighash::SignableInput::from_parts(
+                bundle,
+                sighash_type,
+                input_index,
+                &unlock_script,
+                &lock_script,
+                value,
             )
+            .map_err(|_| SighashError::BundleInputCountMismatch {
+                input_index,
+                bundle_vin_len: bundle.vin.len(),
+                all_prev_outputs_len,
+            })?;
+            zp_tx::sighash::SignableInput::Transparent(from_parts)
         }
         None => zp_tx::sighash::SignableInput::Shielded,
     };
 
-    SigHash(
+    Ok(SigHash(
         *zp_tx::sighash::signature_hash(
             &precomputed_tx_data.tx_data,
             &signable_input,
             &precomputed_tx_data.txid_parts,
         )
         .as_ref(),
-    )
+    ))
 }
 
 /// Compute the authorizing data commitment of this transaction as specified in [ZIP-244].

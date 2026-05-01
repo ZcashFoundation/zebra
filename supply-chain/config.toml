@@ -384,9 +384,10 @@ criteria = "safe-to-deploy"
 suggest = false
 notes = "Sentry 0.47 upgrade"
 
-[[exemptions.core2]]
-version = "0.3.3"
+[[exemptions.corez]]
+version = "0.1.1"
 criteria = "safe-to-deploy"
+notes = "Replacement for the yanked core2 crate; pulled in transitively by librustzcash 2026-04 release wave."
 
 [[exemptions.cpufeatures]]
 version = "0.2.12"
@@ -529,7 +530,7 @@ version = "0.7.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.equihash]]
-version = "0.2.2"
+version = "0.3.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.erased-serde]]
@@ -1091,7 +1092,7 @@ version = "0.4.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.orchard]]
-version = "0.11.0"
+version = "0.13.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.ordered-map]]
@@ -1477,7 +1478,7 @@ suggest = false
 notes = "Sentry 0.47 upgrade"
 
 [[exemptions.sapling-crypto]]
-version = "0.5.0"
+version = "0.7.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.schannel]]
@@ -2167,11 +2168,11 @@ version = "0.8.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.zcash_address]]
-version = "0.10.1"
+version = "0.11.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zcash_encoding]]
-version = "0.3.0"
+version = "0.4.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zcash_history]]
@@ -2179,19 +2180,19 @@ version = "0.4.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zcash_keys]]
-version = "0.12.0"
+version = "0.13.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zcash_primitives]]
-version = "0.26.4"
+version = "0.27.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zcash_proofs]]
-version = "0.26.1"
+version = "0.27.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zcash_protocol]]
-version = "0.7.2"
+version = "0.8.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zcash_script]]
@@ -2203,7 +2204,7 @@ version = "0.2.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.zcash_transparent]]
-version = "0.6.4"
+version = "0.7.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zebra-chain]]
