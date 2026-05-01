@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- `Request::AdvertiseBlock` now carries a second tuple field `Option<PeerSocketAddr>` so the inbound service can attribute the announcing peer when fanning out.
+
 ## [5.0.1] - 2026-04-17
 
 This release fixes an important security issue:

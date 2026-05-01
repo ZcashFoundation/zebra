@@ -38,6 +38,10 @@ operators update to 4.4.0.
   - HTTP request bodies are bounded before allocation, with the limit derived from `MAX_BLOCK_BYTES` to accommodate `submitblock` ([GHSA-8r29-5wjm-jgvx](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-8r29-5wjm-jgvx)).
   - gRPC indexer streams use `try_send` to drop slow subscribers instead of backpressuring the server; the buffer was reduced from 4000 to 64. Well-behaved clients are unaffected ([GHSA-826r-gfq8-x79q](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-826r-gfq8-x79q)).
   - `getrawtransaction` reuses the caller-provided block hash and best-chain flag from the initial query, fixing a TOCTOU race against a third state lookup ([GHSA-w23c-6rpp-ff87](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-w23c-6rpp-ff87)).
+- Disconnect peers that persistently return empty or bad `FindBlocks` /
+  `FindHeaders` responses, freeing fanout slots for useful peers. Stall
+  classification happens inside `PeerSet::route_p2c`, so coverage spans both
+  request types without a separate per-IP guard.
 
 ### Added
 

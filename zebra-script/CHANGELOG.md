@@ -25,17 +25,12 @@ if you use it as a building block for a consensus node, you should update.
   - `impl Sigops for zebra_chain::transaction::UnminedTx`
   - `impl Sigops for CachedFfiTransaction`
   - `impl Sigops for zcash_primitives::transaction::Transaction`
+- Migrated to `zcash_primitives 0.27` (and the rest of the librustzcash 2026-04 release wave), which replaces the yanked `core2` dependency with `corez`.
 
 ### Added
 
 - `CachedFfiTransaction::p2sh_sigops(&self) -> u32`.
 - `p2sh_sigop_count(tx, spent_outputs) -> u32`.
-
-## [6.0.0] - PLANNED
-
-### Breaking changes
-
-- Migrated to `zcash_primitives 0.27` (and the rest of the librustzcash 2026-04 release wave), which replaces the yanked `core2` dependency with `corez`.
 
 ## [5.0.1] - 2026-04-17
 

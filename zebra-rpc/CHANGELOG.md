@@ -7,11 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [7.0.0] - PLANNED
-
-### Breaking changes
+### Breaking Changes
 
 - Migrated to `zcash_primitives 0.27` (and the rest of the librustzcash 2026-04 release wave), which replaces the yanked `core2` dependency with `corez`.
+- `methods::BlockObject::new` gained a required `n_tx: usize` parameter, inserted positionally between `final_orchard_root` and `tx`.
+- `server::http_request_compatibility::HttpRequestMiddleware::new` and `HttpRequestMiddlewareLayer::new` gained a required `max_request_body_size: usize` parameter (used to bound HTTP request bodies before allocation; see [GHSA-8r29-5wjm-jgvx](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-8r29-5wjm-jgvx)).
+
+### Added
+
+- `methods::BlockObject::n_tx(&self) -> usize`, exposing the per-block transaction count in the verbose `getblock` response.
 
 ## [6.0.2] - 2026-04-17
 
