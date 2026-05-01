@@ -157,12 +157,11 @@ where
         //
         // TODO: this would be cleaner with poll_map (#2693)
         if let Some(join_result) = ready!(this.pending.poll_next(cx)) {
-            let (result, hash) = match join_result
-                .expect("block download and verify tasks must not panic")
-            {
-                Ok(hash) => (Ok(hash), hash),
-                Err((e, hash, advertiser_addr)) => (Err((e, advertiser_addr)), hash),
-            };
+            let (result, hash) =
+                match join_result.expect("block download and verify tasks must not panic") {
+                    Ok(hash) => (Ok(hash), hash),
+                    Err((e, hash, advertiser_addr)) => (Err((e, advertiser_addr)), hash),
+                };
             if let Some((_, Some(ip))) = this.cancel_handles.remove(&hash) {
                 assert!(
                     this.in_flight_ips.remove(&ip),
