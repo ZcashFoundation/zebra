@@ -22,12 +22,14 @@ operators update to 4.4.0.
   now substitutes a per-call CSPRNG-derived sighash when rejecting, so any
   signature the peer shipped fails to verify and the block is rejected in
   agreement with `zcashd` ([GHSA-gq4h-3grw-2rhv](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-gq4h-3grw-2rhv), [#10524](https://github.com/ZcashFoundation/zebra/pull/10524)).
-- Reject coinbase Sapling spends during transaction deserialization, before
-  spend vectors are allocated ([GHSA-rgwx-8r98-p34c](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-rgwx-8r98-p34c), [#10527](https://github.com/ZcashFoundation/zebra/pull/10527)).
-- Validate coinbase data size before allocating ([#10526](https://github.com/ZcashFoundation/zebra/pull/10526)).
-- Validate Equihash solution size before allocating ([GHSA-hccx-4ppw-h442](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-hccx-4ppw-h442), [#10525](https://github.com/ZcashFoundation/zebra/pull/10525)).
-- Enforce the 160-entry cap in `read_headers` to prevent unbounded peer
-  responses ([#10528](https://github.com/ZcashFoundation/zebra/pull/10528)).
+- Allocation amplification in inbound network deserializers: validate
+  coinbase Sapling spend count, coinbase data size, and Equihash solution
+  size before allocating, and enforce the 160-entry cap in `read_headers`
+  ([GHSA-438q-jx8f-cccv](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-438q-jx8f-cccv),
+  [#10525](https://github.com/ZcashFoundation/zebra/pull/10525),
+  [#10526](https://github.com/ZcashFoundation/zebra/pull/10526),
+  [#10527](https://github.com/ZcashFoundation/zebra/pull/10527),
+  [#10528](https://github.com/ZcashFoundation/zebra/pull/10528)).
 - Validate transparent input/output alignment before script verification, so
   malformed verifier requests return an error instead of panicking or
   verifying against a misaligned previous output ([#10510](https://github.com/ZcashFoundation/zebra/pull/10510)).
