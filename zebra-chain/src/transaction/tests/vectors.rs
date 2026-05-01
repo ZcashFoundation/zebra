@@ -1176,7 +1176,7 @@ fn coinbase_v5_with_sapling_spends_deserializes_successfully() {
         expiry_height,
         inputs: vec![transparent::Input::Coinbase {
             height,
-            data: transparent::CoinbaseData(vec![0x00; 4]),
+            data: vec![0x00; 4],
             sequence: 0xFFFF_FFFF,
         }],
         outputs: if outputs.is_empty() {
