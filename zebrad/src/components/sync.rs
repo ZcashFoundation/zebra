@@ -203,7 +203,7 @@ const FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT: HeightDiff = 100;
 /// If this delay is removed (or set too low), the syncer will
 /// sometimes get stuck in a failure loop, due to leftover downloads from
 /// previous sync runs.
-const SYNC_RESTART_DELAY: Duration = Duration::from_secs(67);
+const SYNC_RESTART_DELAY: Duration = Duration::from_secs(17);
 
 /// In regtest, use a much shorter restart delay so that downstream nodes pick up
 /// newly-mined blocks quickly (e.g. after `generate(N)` in integration tests).
