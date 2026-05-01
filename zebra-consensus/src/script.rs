@@ -58,7 +58,9 @@ impl tower::Service<Request> for Verifier {
             let input = &cached_ffi_transaction
                 .inputs()
                 .get(input_index)
-                .ok_or_else(|| "cached_ffi_transaction missing input at input_index")?;
+                .ok_or_else(|| {
+                    format!("cached_ffi_transaction missing input at index {input_index}")
+                })?;
 
             match input {
                 transparent::Input::PrevOut { outpoint, .. } => {
