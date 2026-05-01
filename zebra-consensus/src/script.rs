@@ -7,6 +7,9 @@ use zebra_script::CachedFfiTransaction;
 
 use crate::BoxError;
 
+#[cfg(test)]
+mod tests;
+
 /// Asynchronous script verification.
 ///
 /// The verifier asynchronously requests the UTXO a transaction attempts

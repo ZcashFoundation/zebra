@@ -997,3 +997,59 @@ fn block_sigop_total_includes_coinbase_and_p2sh() -> Result<()> {
 
     Ok(())
 }
+
+/// Calling `is_valid` when `all_previous_outputs.len()` differs from `transaction.inputs().len()`
+/// must return `Error::TxIndex`, even when the requested `input_index` is in range for
+/// `all_previous_outputs`. This guards against verifying a script against a misaligned
+/// previous output.
+#[test]
+fn is_valid_rejects_mismatched_previous_outputs_length() {
+    let _init_guard = zebra_test::init();
+
+    let transaction = SCRIPT_TX
+        .zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()
+        .expect("test fixture deserializes");
+
+    // SCRIPT_TX has exactly one input. Pass two previous outputs so `.get(0)` succeeds
+    // but the lengths disagree.
+    let output = Output {
+        value: (212 * u64::pow(10, 8)).try_into().expect("valid amount"),
+        lock_script: transparent::Script::new(&SCRIPT_PUBKEY),
+    };
+    let mismatched_outputs = Arc::new(vec![output.clone(), output]);
+
+    let verifier =
+        super::CachedFfiTransaction::new(transaction, mismatched_outputs, NetworkUpgrade::Blossom)
+            .expect("constructor accepts mismatched-length outputs");
+
+    let err = verifier
+        .is_valid(0)
+        .expect_err("mismatched length must be rejected by is_valid");
+    assert_eq!(err, super::Error::TxIndex);
+}
+
+/// Calling `is_valid` with an `input_index` past the end of `all_previous_outputs` must
+/// return `Error::TxIndex` instead of panicking.
+#[test]
+fn is_valid_rejects_out_of_range_input_index() {
+    let _init_guard = zebra_test::init();
+
+    let transaction = SCRIPT_TX
+        .zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()
+        .expect("test fixture deserializes");
+    let output = Output {
+        value: (212 * u64::pow(10, 8)).try_into().expect("valid amount"),
+        lock_script: transparent::Script::new(&SCRIPT_PUBKEY),
+    };
+    let previous_outputs = Arc::new(vec![output]);
+
+    let verifier =
+        super::CachedFfiTransaction::new(transaction, previous_outputs, NetworkUpgrade::Blossom)
+            .expect("matched-length construction succeeds");
+
+    // SCRIPT_TX has one input at index 0; index 1 is out of range.
+    let err = verifier
+        .is_valid(1)
+        .expect_err("out-of-range input_index must error, not panic");
+    assert_eq!(err, super::Error::TxIndex);
+}
