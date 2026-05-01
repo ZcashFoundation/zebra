@@ -5,7 +5,10 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Unreleased]
+## [Zebra 4.4.0](https://github.com/ZcashFoundation/zebra/releases/tag/v4.4.0) - 2026-05-01
+
+This release includes several security and bug fixes. We recommend node
+operators update to 4.4.0.
 
 ### Security
 
@@ -18,20 +21,39 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   make optimized Zebra accept a spend that `zcashd` rejects. Zebra's callback
   now substitutes a per-call CSPRNG-derived sighash when rejecting, so any
   signature the peer shipped fails to verify and the block is rejected in
-  agreement with `zcashd`.
+  agreement with `zcashd` ([GHSA-gq4h-3grw-2rhv](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-gq4h-3grw-2rhv), [#10524](https://github.com/ZcashFoundation/zebra/pull/10524)).
+- Reject coinbase Sapling spends during transaction deserialization, before
+  spend vectors are allocated ([GHSA-rgwx-8r98-p34c](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-rgwx-8r98-p34c), [#10527](https://github.com/ZcashFoundation/zebra/pull/10527)).
+- Validate coinbase data size before allocating ([#10526](https://github.com/ZcashFoundation/zebra/pull/10526)).
+- Validate Equihash solution size before allocating ([GHSA-hccx-4ppw-h442](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-hccx-4ppw-h442), [#10525](https://github.com/ZcashFoundation/zebra/pull/10525)).
+- Enforce the 160-entry cap in `read_headers` to prevent unbounded peer
+  responses ([#10528](https://github.com/ZcashFoundation/zebra/pull/10528)).
+- Validate transparent input/output alignment before script verification, so
+  malformed verifier requests return an error instead of panicking or
+  verifying against a misaligned previous output ([#10510](https://github.com/ZcashFoundation/zebra/pull/10510)).
+- RPC hardening ([#10523](https://github.com/ZcashFoundation/zebra/pull/10523)):
+  - Cookie file is now written with explicit `0600` permissions on Unix; symlinks at the cookie path are rejected ([GHSA-jg86-rwhm-fhg4](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-jg86-rwhm-fhg4)).
+  - HTTP request bodies are bounded before allocation, with the limit derived from `MAX_BLOCK_BYTES` to accommodate `submitblock` ([GHSA-8r29-5wjm-jgvx](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-8r29-5wjm-jgvx)).
+  - gRPC indexer streams use `try_send` to drop slow subscribers instead of backpressuring the server; the buffer was reduced from 4000 to 64. Well-behaved clients are unaffected ([GHSA-826r-gfq8-x79q](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-826r-gfq8-x79q)).
+  - `getrawtransaction` reuses the caller-provided block hash and best-chain flag from the initial query, fixing a TOCTOU race against a third state lookup ([GHSA-w23c-6rpp-ff87](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-w23c-6rpp-ff87)).
 
 ### Added
 
-- Sentry events now carry `SENTRY_ENVIRONMENT`, `git.ref`, `git.sha`, and CI context (`CI_PR_NUMBER`, `CI_TEST_ID`, `GITHUB_*`) when present ([#10490](https://github.com/ZcashFoundation/zebra/pull/10490))
-- `opentelemetry` is now part of the `default-release-binaries` feature set; export stays disabled until `OTEL_EXPORTER_OTLP_ENDPOINT` (or the tracing config) is set ([#10490](https://github.com/ZcashFoundation/zebra/pull/10490))
-- Public benchmark dashboard at [zebra.zfnd.org/dev/bench](https://zebra.zfnd.org/dev/bench) covering Groth16, Halo2, Sapling, RedPallas, block, and transaction benchmarks ([#10444](https://github.com/ZcashFoundation/zebra/pull/10444))
+- `nTx` (per-block transaction count) field in the verbose `getblock` RPC response ([#10498](https://github.com/ZcashFoundation/zebra/pull/10498)).
+- Sentry events now carry `SENTRY_ENVIRONMENT`, `git.ref`, `git.sha`, and CI context (`CI_PR_NUMBER`, `CI_TEST_ID`, `GITHUB_*`) when present ([#10490](https://github.com/ZcashFoundation/zebra/pull/10490)).
+- `opentelemetry` is now part of the `default-release-binaries` feature set; export stays disabled until `OTEL_EXPORTER_OTLP_ENDPOINT` (or the tracing config) is set ([#10490](https://github.com/ZcashFoundation/zebra/pull/10490)).
+- Public benchmark dashboard at [zebra.zfnd.org/dev/bench](https://zebra.zfnd.org/dev/bench) covering Groth16, Halo2, Sapling, RedPallas, block, and transaction benchmarks ([#10444](https://github.com/ZcashFoundation/zebra/pull/10444)).
 
 ### Changed
 
-- Upgrade Sentry SDK to `0.47` and switch its transport feature from `reqwest` to `ureq` ([#10490](https://github.com/ZcashFoundation/zebra/pull/10490))
-- `zebrad::sentry` is now crate-private; downstream code should not import it directly ([#10490](https://github.com/ZcashFoundation/zebra/pull/10490))
-- Upgraded the librustzcash crate cohort (`equihash` 0.3, `orchard` 0.13, `sapling-crypto` 0.7, `zcash_address` 0.11, `zcash_encoding` 0.4, `zcash_keys` 0.13, `zcash_primitives` 0.27, `zcash_proofs` 0.27, `zcash_protocol` 0.8, `zcash_transparent` 0.7) to the 2026-04 release wave, which migrates off the yanked `core2` crate to `corez 0.1.1` and clears RUSTSEC-2026-0105.
+- Upgrade Sentry SDK to `0.47` and switch its transport feature from `reqwest` to `ureq` ([#10490](https://github.com/ZcashFoundation/zebra/pull/10490)).
+- `zebrad::sentry` is now crate-private; downstream code should not import it directly ([#10490](https://github.com/ZcashFoundation/zebra/pull/10490)).
+- Upgraded the librustzcash crate cohort (`equihash` 0.3, `orchard` 0.13, `sapling-crypto` 0.7, `zcash_address` 0.11, `zcash_encoding` 0.4, `zcash_keys` 0.13, `zcash_primitives` 0.27, `zcash_proofs` 0.27, `zcash_protocol` 0.8, `zcash_transparent` 0.7) to the 2026-04 release wave, which migrates off the yanked `core2` crate to `corez 0.1.1` and clears RUSTSEC-2026-0105 ([#10522](https://github.com/ZcashFoundation/zebra/pull/10522)).
 - Bumped workspace MSRV from 1.85.0 to 1.85.1, required by the new librustzcash releases. Also bumped `zebrad` MSRV from 1.89 to 1.91, required by `cargo-platform 0.3.3` (transitively via `vergen-git2`).
+
+### Fixed
+
+- `getrawtransaction` now reports correct `confirmations` ([#10507](https://github.com/ZcashFoundation/zebra/pull/10507)).
 
 ## [Zebra 4.3.1](https://github.com/ZcashFoundation/zebra/releases/tag/v4.3.1) - 2026-04-17
 
