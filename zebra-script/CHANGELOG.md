@@ -22,6 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `CachedFfiTransaction::p2sh_sigops(&self) -> u32`.
 - `p2sh_sigop_count(tx, spent_outputs) -> u32`.
 
+## [6.0.0] - PLANNED
+
+### Breaking changes
+
+- Migrated to `zcash_primitives 0.27` (and the rest of the librustzcash 2026-04 release wave), which replaces the yanked `core2` dependency with `corez`.
+
 ## [5.0.1] - 2026-04-17
 
 This release fixes an important security issue:
