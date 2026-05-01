@@ -416,27 +416,23 @@ version = "0.1.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.darling]]
-version = "0.20.11"
+version = "0.13.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.darling]]
-version = "0.23.0"
+version = "0.20.11"
+criteria = "safe-to-deploy"
+
+[[exemptions.darling_core]]
+version = "0.13.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.darling_core]]
 version = "0.20.11"
 criteria = "safe-to-deploy"
 
-[[exemptions.darling_core]]
-version = "0.23.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.darling_macro]]
 version = "0.20.11"
-criteria = "safe-to-deploy"
-
-[[exemptions.darling_macro]]
-version = "0.23.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.derive-getters]]
@@ -693,10 +689,6 @@ criteria = "safe-to-deploy"
 version = "0.13.0-pre.4"
 criteria = "safe-to-deploy"
 
-[[exemptions.home]]
-version = "0.5.12"
-criteria = "safe-to-deploy"
-
 [[exemptions.hostname]]
 version = "0.4.2"
 criteria = "safe-to-deploy"
@@ -753,40 +745,20 @@ criteria = "safe-to-deploy"
 version = "0.1.65"
 criteria = "safe-to-deploy"
 
-[[exemptions.icu_collections]]
-version = "2.2.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.icu_locale_core]]
-version = "2.2.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.icu_normalizer]]
-version = "2.2.0"
+[[exemptions.icu_locid_transform_data]]
+version = "1.5.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.icu_normalizer_data]]
-version = "2.2.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.icu_properties]]
-version = "2.2.0"
+version = "1.5.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.icu_properties_data]]
-version = "2.2.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.icu_provider]]
-version = "2.2.0"
+version = "1.5.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.id-arena]]
 version = "2.3.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.idna_adapter]]
-version = "1.2.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.impl-codec]]
@@ -961,10 +933,6 @@ criteria = "safe-to-deploy"
 version = "0.12.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.litemap]]
-version = "0.8.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.litrs]]
 version = "1.0.0"
 criteria = "safe-to-deploy"
@@ -994,7 +962,7 @@ version = "0.2.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.metrics]]
-version = "0.24.5"
+version = "0.24.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.metrics-exporter-prometheus]]
@@ -1253,10 +1221,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.portable-atomic]]
 version = "1.13.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.potential_utf]]
-version = "0.1.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.ppv-lite86]]
@@ -1644,11 +1608,11 @@ version = "0.7.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.serde_with]]
-version = "3.18.0"
+version = "3.17.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.serde_with_macros]]
-version = "3.18.0"
+version = "3.17.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.sha2]]
@@ -1757,10 +1721,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.tiny-keccak]]
 version = "2.0.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.tinystr]]
-version = "0.8.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.tinyvec]]
@@ -1957,10 +1917,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.ureq-proto]]
 version = "0.6.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.url]]
-version = "2.5.8"
 criteria = "safe-to-deploy"
 
 [[exemptions.utf8-zero]]
@@ -2167,10 +2123,6 @@ criteria = "safe-to-deploy"
 version = "1.0.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.writeable]]
-version = "0.6.3"
-criteria = "safe-to-deploy"
-
 [[exemptions.wyz]]
 version = "0.5.1"
 criteria = "safe-to-deploy"
@@ -2185,14 +2137,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.yaml-rust2]]
 version = "0.10.4"
-criteria = "safe-to-deploy"
-
-[[exemptions.yoke]]
-version = "0.8.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.yoke-derive]]
-version = "0.8.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.zcash_address]]
@@ -2293,18 +2237,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.zeroize_derive]]
 version = "1.4.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.zerotrie]]
-version = "0.2.4"
-criteria = "safe-to-deploy"
-
-[[exemptions.zerovec]]
-version = "0.11.6"
-criteria = "safe-to-deploy"
-
-[[exemptions.zerovec-derive]]
-version = "0.11.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.zip32]]
