@@ -348,7 +348,24 @@ fn version_message_omitted_relay() {
             version.relay = false;
             version.into()
         }
-        _ => unreachable!("const is the Message::Version variant"),
+        Message::Verack
+        | Message::Ping(_)
+        | Message::Pong(_)
+        | Message::Reject { .. }
+        | Message::GetAddr
+        | Message::Addr(_)
+        | Message::GetBlocks { .. }
+        | Message::Inv(_)
+        | Message::GetHeaders { .. }
+        | Message::Headers(_)
+        | Message::GetData(_)
+        | Message::Block(_)
+        | Message::Tx(_)
+        | Message::NotFound(_)
+        | Message::Mempool
+        | Message::FilterLoad { .. }
+        | Message::FilterAdd { .. }
+        | Message::FilterClear => unreachable!("const is the Message::Version variant"),
     };
 
     let codec = Codec::builder().finish();
@@ -392,7 +409,24 @@ fn version_message_with_relay() {
             version.relay = false;
             version.into()
         }
-        _ => unreachable!("const is the Message::Version variant"),
+        Message::Verack
+        | Message::Ping(_)
+        | Message::Pong(_)
+        | Message::Reject { .. }
+        | Message::GetAddr
+        | Message::Addr(_)
+        | Message::GetBlocks { .. }
+        | Message::Inv(_)
+        | Message::GetHeaders { .. }
+        | Message::Headers(_)
+        | Message::GetData(_)
+        | Message::Block(_)
+        | Message::Tx(_)
+        | Message::NotFound(_)
+        | Message::Mempool
+        | Message::FilterLoad { .. }
+        | Message::FilterAdd { .. }
+        | Message::FilterClear => unreachable!("const is the Message::Version variant"),
     };
 
     codec

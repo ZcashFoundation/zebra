@@ -392,7 +392,24 @@ impl TryFrom<Message> for VersionMessage {
     fn try_from(message: Message) -> Result<Self, Self::Error> {
         match message {
             Message::Version(version_message) => Ok(version_message),
-            _ => Err(format!(
+            Message::Verack
+            | Message::Ping(_)
+            | Message::Pong(_)
+            | Message::Reject { .. }
+            | Message::GetAddr
+            | Message::Addr(_)
+            | Message::GetBlocks { .. }
+            | Message::Inv(_)
+            | Message::GetHeaders { .. }
+            | Message::Headers(_)
+            | Message::GetData(_)
+            | Message::Block(_)
+            | Message::Tx(_)
+            | Message::NotFound(_)
+            | Message::Mempool
+            | Message::FilterLoad { .. }
+            | Message::FilterAdd { .. }
+            | Message::FilterClear => Err(format!(
                 "{} message is not a version message: {message:?}",
                 message.command()
             )

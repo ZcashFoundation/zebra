@@ -349,7 +349,15 @@ where
                                 BoxError::from("no transactions returned").into(),
                             )
                         })?,
-                        _ => unreachable!("wrong response to transaction request"),
+                        zn::Response::Nil
+                        | zn::Response::Peers(_)
+                        | zn::Response::Pong(_)
+                        | zn::Response::BlockHashes(_)
+                        | zn::Response::BlockHeaders(_)
+                        | zn::Response::TransactionIds(_)
+                        | zn::Response::Blocks(_) => {
+                            unreachable!("wrong response to transaction request")
+                        }
                     };
 
                     let (tx, advertiser_addr) = tx.available().expect(

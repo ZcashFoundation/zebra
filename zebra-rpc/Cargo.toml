@@ -26,6 +26,9 @@ exclude = ["*.proto"]
 [features]
 tx_v6 = ["zebra-chain/tx_v6", "zebra-state/tx_v6", "zebra-consensus/tx_v6"]
 
+# Indexer support
+indexer = ["zebra-state/indexer"]
+
 # Production features that activate extra dependencies, or extra features in
 # dependencies
 

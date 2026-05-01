@@ -366,7 +366,25 @@ where
         .unwrap()
     {
         zs::Response::Tip(tip) => tip,
-        _ => unreachable!("wrong response to Request::Tip"),
+        zs::Response::Committed(_)
+        | zs::Response::Invalidated(_)
+        | zs::Response::Reconsidered(_)
+        | zs::Response::Depth(_)
+        | zs::Response::BlockLocator(_)
+        | zs::Response::Transaction(_)
+        | zs::Response::AnyChainTransaction(_)
+        | zs::Response::UnspentBestChainUtxo(_)
+        | zs::Response::Block(_)
+        | zs::Response::BlockAndSize(_)
+        | zs::Response::BlockHeader { .. }
+        | zs::Response::Utxo(_)
+        | zs::Response::BlockHashes(_)
+        | zs::Response::BlockHeaders(_)
+        | zs::Response::ValidBestChainTipNullifiersAndAnchors
+        | zs::Response::BestChainNextMedianTimePast(_)
+        | zs::Response::BlockHash(_)
+        | zs::Response::KnownBlock(_)
+        | zs::Response::ValidBlockProposal => unreachable!("wrong response to Request::Tip"),
     };
     tracing::info!(
         ?tip,

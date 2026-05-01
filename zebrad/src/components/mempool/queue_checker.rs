@@ -77,7 +77,15 @@ where
 
         match response {
             mempool::Response::CheckedForVerifiedTransactions => {}
-            _ => {
+            mempool::Response::TransactionIds(_)
+            | mempool::Response::Transactions(_)
+            | mempool::Response::UnspentOutput(_)
+            | mempool::Response::TransactionWithDeps { .. }
+            | mempool::Response::FullTransactions { .. }
+            | mempool::Response::RejectedTransactionIds(_)
+            | mempool::Response::Queued(_)
+            | mempool::Response::QueueStats { .. }
+            | mempool::Response::TransparentOutput(_) => {
                 unreachable!("mempool did not respond with checked queue to mempool queue checker")
             }
         };

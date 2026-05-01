@@ -134,7 +134,10 @@ fn prepare_sprout_block(
         .for_each(|tx| {
             let joinsplit_data = match tx.deref() {
                 Transaction::V2 { joinsplit_data, .. } => joinsplit_data.clone(),
-                _ => unreachable!("These are known v2 transactions"),
+                Transaction::V1 { .. }
+                | Transaction::V3 { .. }
+                | Transaction::V4 { .. }
+                | Transaction::V5 { .. } => unreachable!("These are known v2 transactions"),
             };
 
             // Change [`joinsplit_data`] so that the transaction passes the
@@ -230,7 +233,10 @@ fn check_sapling_anchors() {
                     sapling_shielded_data,
                     ..
                 } => sapling_shielded_data.clone(),
-                _ => unreachable!("These are known v4 transactions"),
+                Transaction::V1 { .. }
+                | Transaction::V2 { .. }
+                | Transaction::V3 { .. }
+                | Transaction::V5 { .. } => unreachable!("These are known v4 transactions"),
             };
 
             // set value balance to 0 to pass the chain value pool checks
@@ -276,7 +282,10 @@ fn check_sapling_anchors() {
                     sapling_shielded_data,
                     ..
                 } => sapling_shielded_data.clone(),
-                _ => unreachable!("These are known v4 transactions"),
+                Transaction::V1 { .. }
+                | Transaction::V2 { .. }
+                | Transaction::V3 { .. }
+                | Transaction::V5 { .. } => unreachable!("These are known v4 transactions"),
             };
 
             // set value balance to 0 to pass the chain value pool checks

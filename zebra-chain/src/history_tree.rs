@@ -468,7 +468,7 @@ impl HistoryTree {
             .cmp(&heartwood_height)
         {
             std::cmp::Ordering::Less => Ok(HistoryTree(None)),
-            _ => Ok(
+            std::cmp::Ordering::Equal | std::cmp::Ordering::Greater => Ok(
                 NonEmptyHistoryTree::from_block(network, block, sapling_root, orchard_root)?.into(),
             ),
         }

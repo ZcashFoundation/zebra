@@ -126,7 +126,13 @@ proptest! {
                 SerializationError::Io(io_err) => {
                     prop_assert_eq![io_err.kind(), ErrorKind::UnexpectedEof];
                 }
-                _ => {
+                SerializationError::Parse(_)
+                | SerializationError::Utf8Error(_)
+                | SerializationError::TryFromSliceError(_)
+                | SerializationError::TryFromIntError(_)
+                | SerializationError::FromHexError(_)
+                | SerializationError::Amount { .. }
+                | SerializationError::BadTransactionBalance => {
                     prop_assert!(false,
                                  "blocks larger than the maximum size should fail with an io::Error");
                 }

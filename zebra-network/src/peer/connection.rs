@@ -877,7 +877,7 @@ where
                                 State::AwaitingResponse {
                                     ref mut handler, ..
                                 } => span.in_scope(|| handler.process_message(peer_msg, &mut self.cached_addrs, self.connection_info.connected_addr.get_transient_addr())),
-                                _ => unreachable!("unexpected state after AwaitingResponse: {:?}, peer_msg: {:?}, client_receiver: {:?}",
+                                State::AwaitingRequest | State::Failed => unreachable!("unexpected state after AwaitingResponse: {:?}, peer_msg: {:?}, client_receiver: {:?}",
                                                   self.state,
                                                   peer_msg,
                                                   self.client_rx,
@@ -929,7 +929,7 @@ where
                                     let _ = tx.send(Err(e.into()));
                                     State::AwaitingRequest
                                 }
-                                _ => unreachable!(
+                                State::AwaitingRequest | State::Failed => unreachable!(
                                     "unexpected failed connection state while AwaitingResponse: client_receiver: {:?}",
                                     self.client_rx
                                 ),

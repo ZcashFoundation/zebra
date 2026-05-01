@@ -831,7 +831,12 @@ impl SpendConflictForTransactionV4 {
                 sapling_shielded_data,
                 ..
             } => (inputs, joinsplit_data, sapling_shielded_data),
-            _ => unreachable!("incorrect transaction version generated for test"),
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V5 { .. } => {
+                unreachable!("incorrect transaction version generated for test")
+            }
         };
 
         use SpendConflictForTransactionV4::*;
@@ -855,7 +860,12 @@ impl SpendConflictForTransactionV5 {
                 orchard_shielded_data,
                 ..
             } => (inputs, sapling_shielded_data, orchard_shielded_data),
-            _ => unreachable!("incorrect transaction version generated for test"),
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { .. } => {
+                unreachable!("incorrect transaction version generated for test")
+            }
         };
 
         use SpendConflictForTransactionV5::*;

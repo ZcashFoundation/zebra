@@ -1092,6 +1092,12 @@ pub fn insert_fake_orchard_shielded_data(
                 .as_mut()
                 .expect("shielded data was just inserted")
         }
-        _ => panic!("Fake V5 transaction is not V5"),
+        Transaction::V1 { .. }
+        | Transaction::V2 { .. }
+        | Transaction::V3 { .. }
+        | Transaction::V4 { .. } => panic!("Fake V5 transaction is not V5"),
+
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+        Transaction::V6 { .. } => panic!("Fake V5 transaction is not V5"),
     }
 }

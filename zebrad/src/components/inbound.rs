@@ -387,7 +387,7 @@ impl Service<zn::Request> for Inbound {
                 state,
                 misbehavior_sender: _,
             } => (cached_peer_addr_response, block_downloads, mempool, state),
-            _ => {
+            Setup::Pending { .. } | Setup::FailedInit | Setup::FailedRecv { .. } => {
                 debug!("ignoring request from remote peer during setup");
                 return async { Ok(zn::Response::Nil) }.boxed();
             }
@@ -452,7 +452,27 @@ impl Service<zn::Request> for Inbound {
                             // because it is already limited to the size of the getdata request
                             // sent by the peer. (Their content and encodings are the same.)
                             zs::Response::Block(None) => blocks.push(Missing(hash)),
-                            _ => unreachable!("wrong response from state"),
+                            zs::Response::Committed(_)
+                            | zs::Response::Invalidated(_)
+                            | zs::Response::Reconsidered(_)
+                            | zs::Response::Depth(_)
+                            | zs::Response::Tip(_)
+                            | zs::Response::BlockLocator(_)
+                            | zs::Response::Transaction(_)
+                            | zs::Response::AnyChainTransaction(_)
+                            | zs::Response::UnspentBestChainUtxo(_)
+                            | zs::Response::BlockAndSize(_)
+                            | zs::Response::BlockHeader { .. }
+                            | zs::Response::Utxo(_)
+                            | zs::Response::BlockHashes(_)
+                            | zs::Response::BlockHeaders(_)
+                            | zs::Response::ValidBestChainTipNullifiersAndAnchors
+                            | zs::Response::BestChainNextMedianTimePast(_)
+                            | zs::Response::BlockHash(_)
+                            | zs::Response::KnownBlock(_)
+                            | zs::Response::ValidBlockProposal => {
+                                unreachable!("wrong response from state")
+                            }
                         }
 
                     }
@@ -475,7 +495,17 @@ impl Service<zn::Request> for Inbound {
 
                     let transactions = match resp {
                         mempool::Response::Transactions(transactions) => transactions,
-                        _ => unreachable!("Mempool component should always respond to a `TransactionsById` request with a `Transactions` response"),
+                        mempool::Response::TransactionIds(_)
+                        | mempool::Response::UnspentOutput(_)
+                        | mempool::Response::TransactionWithDeps { .. }
+                        | mempool::Response::FullTransactions { .. }
+                        | mempool::Response::RejectedTransactionIds(_)
+                        | mempool::Response::Queued(_)
+                        | mempool::Response::CheckedForVerifiedTransactions
+                        | mempool::Response::QueueStats { .. }
+                        | mempool::Response::TransparentOutput(_) => {
+                            unreachable!("Mempool component should always respond to a `TransactionsById` request with a `Transactions` response")
+                        }
                     };
 
                     // Work out which transaction IDs were missing.
@@ -510,7 +540,27 @@ impl Service<zn::Request> for Inbound {
                 state.clone().oneshot(request).map_ok(|resp| match resp {
                     zs::Response::BlockHashes(hashes) if hashes.is_empty() => zn::Response::Nil,
                     zs::Response::BlockHashes(hashes) => zn::Response::BlockHashes(hashes),
-                    _ => unreachable!("zebra-state should always respond to a `FindBlockHashes` request with a `BlockHashes` response"),
+                    zs::Response::Committed(_)
+                    | zs::Response::Invalidated(_)
+                    | zs::Response::Reconsidered(_)
+                    | zs::Response::Depth(_)
+                    | zs::Response::Tip(_)
+                    | zs::Response::BlockLocator(_)
+                    | zs::Response::Transaction(_)
+                    | zs::Response::AnyChainTransaction(_)
+                    | zs::Response::UnspentBestChainUtxo(_)
+                    | zs::Response::Block(_)
+                    | zs::Response::BlockAndSize(_)
+                    | zs::Response::BlockHeader { .. }
+                    | zs::Response::Utxo(_)
+                    | zs::Response::BlockHeaders(_)
+                    | zs::Response::ValidBestChainTipNullifiersAndAnchors
+                    | zs::Response::BestChainNextMedianTimePast(_)
+                    | zs::Response::BlockHash(_)
+                    | zs::Response::KnownBlock(_)
+                    | zs::Response::ValidBlockProposal => {
+                        unreachable!("zebra-state should always respond to a `FindBlockHashes` request with a `BlockHashes` response")
+                    }
                 })
                     .boxed()
             }
@@ -519,7 +569,27 @@ impl Service<zn::Request> for Inbound {
                 state.clone().oneshot(request).map_ok(|resp| match resp {
                     zs::Response::BlockHeaders(headers) if headers.is_empty() => zn::Response::Nil,
                     zs::Response::BlockHeaders(headers) => zn::Response::BlockHeaders(headers),
-                    _ => unreachable!("zebra-state should always respond to a `FindBlockHeaders` request with a `BlockHeaders` response"),
+                    zs::Response::Committed(_)
+                    | zs::Response::Invalidated(_)
+                    | zs::Response::Reconsidered(_)
+                    | zs::Response::Depth(_)
+                    | zs::Response::Tip(_)
+                    | zs::Response::BlockLocator(_)
+                    | zs::Response::Transaction(_)
+                    | zs::Response::AnyChainTransaction(_)
+                    | zs::Response::UnspentBestChainUtxo(_)
+                    | zs::Response::Block(_)
+                    | zs::Response::BlockAndSize(_)
+                    | zs::Response::BlockHeader { .. }
+                    | zs::Response::Utxo(_)
+                    | zs::Response::BlockHashes(_)
+                    | zs::Response::ValidBestChainTipNullifiersAndAnchors
+                    | zs::Response::BestChainNextMedianTimePast(_)
+                    | zs::Response::BlockHash(_)
+                    | zs::Response::KnownBlock(_)
+                    | zs::Response::ValidBlockProposal => {
+                        unreachable!("zebra-state should always respond to a `FindBlockHeaders` request with a `BlockHeaders` response")
+                    }
                 })
                     .boxed()
             }
@@ -549,7 +619,17 @@ impl Service<zn::Request> for Inbound {
                 mempool.clone().oneshot(mempool::Request::TransactionIds).map_ok(|resp| match resp {
                     mempool::Response::TransactionIds(transaction_ids) if transaction_ids.is_empty() => zn::Response::Nil,
                     mempool::Response::TransactionIds(transaction_ids) => zn::Response::TransactionIds(transaction_ids.into_iter().collect()),
-                    _ => unreachable!("Mempool component should always respond to a `TransactionIds` request with a `TransactionIds` response"),
+                    mempool::Response::Transactions(_)
+                    | mempool::Response::UnspentOutput(_)
+                    | mempool::Response::TransactionWithDeps { .. }
+                    | mempool::Response::FullTransactions { .. }
+                    | mempool::Response::RejectedTransactionIds(_)
+                    | mempool::Response::Queued(_)
+                    | mempool::Response::CheckedForVerifiedTransactions
+                    | mempool::Response::QueueStats { .. }
+                    | mempool::Response::TransparentOutput(_) => {
+                        unreachable!("Mempool component should always respond to a `TransactionIds` request with a `TransactionIds` response")
+                    }
                 })
                     .boxed()
             }

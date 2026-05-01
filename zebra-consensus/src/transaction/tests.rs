@@ -1815,7 +1815,11 @@ fn v4_transaction_with_conflicting_sprout_nullifier_inside_joinsplit_is_rejected
                 joinsplit_data: Some(joinsplit_data),
                 ..
             } => joinsplit_data.sig = signing_key.sign(sighash.as_ref()),
-            _ => unreachable!("Mock transaction was created incorrectly"),
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { .. }
+            | Transaction::V5 { .. } => unreachable!("Mock transaction was created incorrectly"),
         }
 
         let state_service =
@@ -1890,7 +1894,11 @@ fn v4_transaction_with_conflicting_sprout_nullifier_across_joinsplits_is_rejecte
                 joinsplit_data: Some(joinsplit_data),
                 ..
             } => joinsplit_data.sig = signing_key.sign(sighash.as_ref()),
-            _ => unreachable!("Mock transaction was created incorrectly"),
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { .. }
+            | Transaction::V5 { .. } => unreachable!("Mock transaction was created incorrectly"),
         }
 
         let state_service =
@@ -2535,7 +2543,13 @@ async fn v4_with_joinsplit_is_rejected_for_modification(
             joinsplit_data: Some(ref mut joinsplit_data),
             ..
         } => modify_joinsplit_data(joinsplit_data, modification),
-        _ => unreachable!("Transaction should have some JoinSplit shielded data."),
+        Transaction::V1 { .. }
+        | Transaction::V2 { .. }
+        | Transaction::V3 { .. }
+        | Transaction::V4 { .. }
+        | Transaction::V5 { .. } => {
+            unreachable!("Transaction should have some JoinSplit shielded data.")
+        }
     }
 
     // Initialize the verifier
@@ -3241,7 +3255,11 @@ fn duplicate_sapling_spend(transaction: &mut Transaction) -> sapling::Nullifier 
             sapling_shielded_data: Some(ref mut shielded_data),
             ..
         } => duplicate_sapling_spend_in_shielded_data(shielded_data),
-        _ => unreachable!("Transaction has no Sapling shielded data"),
+        Transaction::V1 { .. }
+        | Transaction::V2 { .. }
+        | Transaction::V3 { .. }
+        | Transaction::V4 { .. }
+        | Transaction::V5 { .. } => unreachable!("Transaction has no Sapling shielded data"),
     }
 }
 

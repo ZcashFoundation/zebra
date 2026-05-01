@@ -562,7 +562,15 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
 
     let queued_responses = match response {
         mempool::Response::Queued(queue_responses) => queue_responses,
-        _ => unreachable!("will never happen in this test"),
+        mempool::Response::TransactionIds(_)
+        | mempool::Response::Transactions(_)
+        | mempool::Response::UnspentOutput(_)
+        | mempool::Response::TransactionWithDeps { .. }
+        | mempool::Response::FullTransactions { .. }
+        | mempool::Response::RejectedTransactionIds(_)
+        | mempool::Response::CheckedForVerifiedTransactions
+        | mempool::Response::QueueStats { .. }
+        | mempool::Response::TransparentOutput(_) => unreachable!("will never happen in this test"),
     };
 
     assert_eq!(queued_responses.len(), 1);

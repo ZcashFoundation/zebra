@@ -161,7 +161,45 @@ impl CopyStateCmd {
             old_zs::ReadResponse::Tip(Some(source_tip)) => source_tip,
             old_zs::ReadResponse::Tip(None) => Err("empty source state: no blocks to copy")?,
 
-            response => Err(format!("unexpected response to Tip request: {response:?}",))?,
+            response @ old_zs::ReadResponse::UsageInfo(_)
+            | response @ old_zs::ReadResponse::TipPoolValues { .. }
+            | response @ old_zs::ReadResponse::BlockInfo(_)
+            | response @ old_zs::ReadResponse::Depth(_)
+            | response @ old_zs::ReadResponse::Block(_)
+            | response @ old_zs::ReadResponse::BlockAndSize(_)
+            | response @ old_zs::ReadResponse::BlockHeader { .. }
+            | response @ old_zs::ReadResponse::Transaction(_)
+            | response @ old_zs::ReadResponse::AnyChainTransaction(_)
+            | response @ old_zs::ReadResponse::TransactionIdsForBlock(_)
+            | response @ old_zs::ReadResponse::AnyChainTransactionIdsForBlock(_)
+            | response @ old_zs::ReadResponse::BlockLocator(_)
+            | response @ old_zs::ReadResponse::BlockHashes(_)
+            | response @ old_zs::ReadResponse::BlockHeaders(_)
+            | response @ old_zs::ReadResponse::UnspentBestChainUtxo(_)
+            | response @ old_zs::ReadResponse::AnyChainUtxo(_)
+            | response @ old_zs::ReadResponse::SaplingTree(_)
+            | response @ old_zs::ReadResponse::OrchardTree(_)
+            | response @ old_zs::ReadResponse::SaplingSubtrees(_)
+            | response @ old_zs::ReadResponse::OrchardSubtrees(_)
+            | response @ old_zs::ReadResponse::AddressBalance { .. }
+            | response @ old_zs::ReadResponse::AddressesTransactionIds(_)
+            | response @ old_zs::ReadResponse::AddressUtxos(_)
+            | response @ old_zs::ReadResponse::ValidBestChainTipNullifiersAndAnchors
+            | response @ old_zs::ReadResponse::BestChainNextMedianTimePast(_)
+            | response @ old_zs::ReadResponse::BlockHash(_)
+            | response @ old_zs::ReadResponse::ChainInfo(_)
+            | response @ old_zs::ReadResponse::SolutionRate(_)
+            | response @ old_zs::ReadResponse::ValidBlockProposal
+            | response @ old_zs::ReadResponse::TipBlockSize(_)
+            | response @ old_zs::ReadResponse::NonFinalizedBlocksListener(_)
+            | response @ old_zs::ReadResponse::IsTransparentOutputSpent(_) => {
+                Err(format!("unexpected response to Tip request: {response:?}",))?
+            }
+
+            #[cfg(feature = "indexer")]
+            response @ old_zs::ReadResponse::TransactionId(_) => {
+                Err(format!("unexpected response to Tip request: {response:?}",))?
+            }
         };
         let source_tip_height = source_tip.0 .0;
 
@@ -173,7 +211,27 @@ impl CopyStateCmd {
         let initial_target_tip = match initial_target_tip {
             new_zs::Response::Tip(target_tip) => target_tip,
 
-            response => Err(format!("unexpected response to Tip request: {response:?}",))?,
+            response @ new_zs::Response::Committed(_)
+            | response @ new_zs::Response::Invalidated(_)
+            | response @ new_zs::Response::Reconsidered(_)
+            | response @ new_zs::Response::Depth(_)
+            | response @ new_zs::Response::BlockLocator(_)
+            | response @ new_zs::Response::Transaction(_)
+            | response @ new_zs::Response::AnyChainTransaction(_)
+            | response @ new_zs::Response::UnspentBestChainUtxo(_)
+            | response @ new_zs::Response::Block(_)
+            | response @ new_zs::Response::BlockAndSize(_)
+            | response @ new_zs::Response::BlockHeader { .. }
+            | response @ new_zs::Response::Utxo(_)
+            | response @ new_zs::Response::BlockHashes(_)
+            | response @ new_zs::Response::BlockHeaders(_)
+            | response @ new_zs::Response::ValidBestChainTipNullifiersAndAnchors
+            | response @ new_zs::Response::BestChainNextMedianTimePast(_)
+            | response @ new_zs::Response::BlockHash(_)
+            | response @ new_zs::Response::KnownBlock(_)
+            | response @ new_zs::Response::ValidBlockProposal => {
+                Err(format!("unexpected response to Tip request: {response:?}",))?
+            }
         };
         let min_target_height = initial_target_tip
             .map(|target_tip| target_tip.0 .0 + 1)
@@ -223,7 +281,44 @@ impl CopyStateCmd {
                     Err(format!("unexpected missing source block, height: {height}",))?
                 }
 
-                response => Err(format!(
+                response @ old_zs::ReadResponse::UsageInfo(_)
+                | response @ old_zs::ReadResponse::Tip(_)
+                | response @ old_zs::ReadResponse::TipPoolValues { .. }
+                | response @ old_zs::ReadResponse::BlockInfo(_)
+                | response @ old_zs::ReadResponse::Depth(_)
+                | response @ old_zs::ReadResponse::BlockAndSize(_)
+                | response @ old_zs::ReadResponse::BlockHeader { .. }
+                | response @ old_zs::ReadResponse::Transaction(_)
+                | response @ old_zs::ReadResponse::AnyChainTransaction(_)
+                | response @ old_zs::ReadResponse::TransactionIdsForBlock(_)
+                | response @ old_zs::ReadResponse::AnyChainTransactionIdsForBlock(_)
+                | response @ old_zs::ReadResponse::BlockLocator(_)
+                | response @ old_zs::ReadResponse::BlockHashes(_)
+                | response @ old_zs::ReadResponse::BlockHeaders(_)
+                | response @ old_zs::ReadResponse::UnspentBestChainUtxo(_)
+                | response @ old_zs::ReadResponse::AnyChainUtxo(_)
+                | response @ old_zs::ReadResponse::SaplingTree(_)
+                | response @ old_zs::ReadResponse::OrchardTree(_)
+                | response @ old_zs::ReadResponse::SaplingSubtrees(_)
+                | response @ old_zs::ReadResponse::OrchardSubtrees(_)
+                | response @ old_zs::ReadResponse::AddressBalance { .. }
+                | response @ old_zs::ReadResponse::AddressesTransactionIds(_)
+                | response @ old_zs::ReadResponse::AddressUtxos(_)
+                | response @ old_zs::ReadResponse::ValidBestChainTipNullifiersAndAnchors
+                | response @ old_zs::ReadResponse::BestChainNextMedianTimePast(_)
+                | response @ old_zs::ReadResponse::BlockHash(_)
+                | response @ old_zs::ReadResponse::ChainInfo(_)
+                | response @ old_zs::ReadResponse::SolutionRate(_)
+                | response @ old_zs::ReadResponse::ValidBlockProposal
+                | response @ old_zs::ReadResponse::TipBlockSize(_)
+                | response @ old_zs::ReadResponse::NonFinalizedBlocksListener(_)
+                | response @ old_zs::ReadResponse::IsTransparentOutputSpent(_) => Err(format!(
+                    "unexpected response to Block request, height: {height}, \n \
+                     response: {response:?}",
+                ))?,
+
+                #[cfg(feature = "indexer")]
+                response @ old_zs::ReadResponse::TransactionId(_) => Err(format!(
                     "unexpected response to Block request, height: {height}, \n \
                      response: {response:?}",
                 ))?,
@@ -243,7 +338,25 @@ impl CopyStateCmd {
                     trace!(?target_block_commit_hash, "wrote target block");
                     target_block_commit_hash
                 }
-                response => Err(format!(
+                response @ new_zs::Response::Invalidated(_)
+                | response @ new_zs::Response::Reconsidered(_)
+                | response @ new_zs::Response::Depth(_)
+                | response @ new_zs::Response::Tip(_)
+                | response @ new_zs::Response::BlockLocator(_)
+                | response @ new_zs::Response::Transaction(_)
+                | response @ new_zs::Response::AnyChainTransaction(_)
+                | response @ new_zs::Response::UnspentBestChainUtxo(_)
+                | response @ new_zs::Response::Block(_)
+                | response @ new_zs::Response::BlockAndSize(_)
+                | response @ new_zs::Response::BlockHeader { .. }
+                | response @ new_zs::Response::Utxo(_)
+                | response @ new_zs::Response::BlockHashes(_)
+                | response @ new_zs::Response::BlockHeaders(_)
+                | response @ new_zs::Response::ValidBestChainTipNullifiersAndAnchors
+                | response @ new_zs::Response::BestChainNextMedianTimePast(_)
+                | response @ new_zs::Response::BlockHash(_)
+                | response @ new_zs::Response::KnownBlock(_)
+                | response @ new_zs::Response::ValidBlockProposal => Err(format!(
                     "unexpected response to CommitCheckpointVerifiedBlock request, height: {height}\n \
                      response: {response:?}",
                 ))?,
@@ -264,7 +377,25 @@ impl CopyStateCmd {
                     Err(format!("unexpected missing target block, height: {height}",))?
                 }
 
-                response => Err(format!(
+                response @ new_zs::Response::Committed(_)
+                | response @ new_zs::Response::Invalidated(_)
+                | response @ new_zs::Response::Reconsidered(_)
+                | response @ new_zs::Response::Depth(_)
+                | response @ new_zs::Response::Tip(_)
+                | response @ new_zs::Response::BlockLocator(_)
+                | response @ new_zs::Response::Transaction(_)
+                | response @ new_zs::Response::AnyChainTransaction(_)
+                | response @ new_zs::Response::UnspentBestChainUtxo(_)
+                | response @ new_zs::Response::BlockAndSize(_)
+                | response @ new_zs::Response::BlockHeader { .. }
+                | response @ new_zs::Response::Utxo(_)
+                | response @ new_zs::Response::BlockHashes(_)
+                | response @ new_zs::Response::BlockHeaders(_)
+                | response @ new_zs::Response::ValidBestChainTipNullifiersAndAnchors
+                | response @ new_zs::Response::BestChainNextMedianTimePast(_)
+                | response @ new_zs::Response::BlockHash(_)
+                | response @ new_zs::Response::KnownBlock(_)
+                | response @ new_zs::Response::ValidBlockProposal => Err(format!(
                     "unexpected response to Block request, height: {height},\n \
                      response: {response:?}",
                 ))?,
@@ -322,7 +453,27 @@ impl CopyStateCmd {
             new_zs::Response::Tip(Some(target_tip)) => target_tip,
             new_zs::Response::Tip(None) => Err("empty target state: expected written blocks")?,
 
-            response => Err(format!("unexpected response to Tip request: {response:?}",))?,
+            response @ new_zs::Response::Committed(_)
+            | response @ new_zs::Response::Invalidated(_)
+            | response @ new_zs::Response::Reconsidered(_)
+            | response @ new_zs::Response::Depth(_)
+            | response @ new_zs::Response::BlockLocator(_)
+            | response @ new_zs::Response::Transaction(_)
+            | response @ new_zs::Response::AnyChainTransaction(_)
+            | response @ new_zs::Response::UnspentBestChainUtxo(_)
+            | response @ new_zs::Response::Block(_)
+            | response @ new_zs::Response::BlockAndSize(_)
+            | response @ new_zs::Response::BlockHeader { .. }
+            | response @ new_zs::Response::Utxo(_)
+            | response @ new_zs::Response::BlockHashes(_)
+            | response @ new_zs::Response::BlockHeaders(_)
+            | response @ new_zs::Response::ValidBestChainTipNullifiersAndAnchors
+            | response @ new_zs::Response::BestChainNextMedianTimePast(_)
+            | response @ new_zs::Response::BlockHash(_)
+            | response @ new_zs::Response::KnownBlock(_)
+            | response @ new_zs::Response::ValidBlockProposal => {
+                Err(format!("unexpected response to Tip request: {response:?}",))?
+            }
         };
         let final_target_tip_height = final_target_tip.0 .0;
         let final_target_tip_hash = final_target_tip.1;
@@ -335,7 +486,43 @@ impl CopyStateCmd {
         let target_tip_source_depth = match target_tip_source_depth {
             old_zs::ReadResponse::Depth(source_depth) => source_depth,
 
-            response => Err(format!(
+            response @ old_zs::ReadResponse::UsageInfo(_)
+            | response @ old_zs::ReadResponse::Tip(_)
+            | response @ old_zs::ReadResponse::TipPoolValues { .. }
+            | response @ old_zs::ReadResponse::BlockInfo(_)
+            | response @ old_zs::ReadResponse::Block(_)
+            | response @ old_zs::ReadResponse::BlockAndSize(_)
+            | response @ old_zs::ReadResponse::BlockHeader { .. }
+            | response @ old_zs::ReadResponse::Transaction(_)
+            | response @ old_zs::ReadResponse::AnyChainTransaction(_)
+            | response @ old_zs::ReadResponse::TransactionIdsForBlock(_)
+            | response @ old_zs::ReadResponse::AnyChainTransactionIdsForBlock(_)
+            | response @ old_zs::ReadResponse::BlockLocator(_)
+            | response @ old_zs::ReadResponse::BlockHashes(_)
+            | response @ old_zs::ReadResponse::BlockHeaders(_)
+            | response @ old_zs::ReadResponse::UnspentBestChainUtxo(_)
+            | response @ old_zs::ReadResponse::AnyChainUtxo(_)
+            | response @ old_zs::ReadResponse::SaplingTree(_)
+            | response @ old_zs::ReadResponse::OrchardTree(_)
+            | response @ old_zs::ReadResponse::SaplingSubtrees(_)
+            | response @ old_zs::ReadResponse::OrchardSubtrees(_)
+            | response @ old_zs::ReadResponse::AddressBalance { .. }
+            | response @ old_zs::ReadResponse::AddressesTransactionIds(_)
+            | response @ old_zs::ReadResponse::AddressUtxos(_)
+            | response @ old_zs::ReadResponse::ValidBestChainTipNullifiersAndAnchors
+            | response @ old_zs::ReadResponse::BestChainNextMedianTimePast(_)
+            | response @ old_zs::ReadResponse::BlockHash(_)
+            | response @ old_zs::ReadResponse::ChainInfo(_)
+            | response @ old_zs::ReadResponse::SolutionRate(_)
+            | response @ old_zs::ReadResponse::ValidBlockProposal
+            | response @ old_zs::ReadResponse::TipBlockSize(_)
+            | response @ old_zs::ReadResponse::NonFinalizedBlocksListener(_)
+            | response @ old_zs::ReadResponse::IsTransparentOutputSpent(_) => Err(format!(
+                "unexpected response to Depth request: {response:?}",
+            ))?,
+
+            #[cfg(feature = "indexer")]
+            response @ old_zs::ReadResponse::TransactionId(_) => Err(format!(
                 "unexpected response to Depth request: {response:?}",
             ))?,
         };
