@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 - Upgrade Sentry SDK to `0.47` and switch its transport feature from `reqwest` to `ureq` ([#10490](https://github.com/ZcashFoundation/zebra/pull/10490))
 - `zebrad::sentry` is now crate-private; downstream code should not import it directly ([#10490](https://github.com/ZcashFoundation/zebra/pull/10490))
+- Upgraded the librustzcash crate cohort (`equihash` 0.3, `orchard` 0.13, `sapling-crypto` 0.7, `zcash_address` 0.11, `zcash_encoding` 0.4, `zcash_keys` 0.13, `zcash_primitives` 0.27, `zcash_proofs` 0.27, `zcash_protocol` 0.8, `zcash_transparent` 0.7) to the 2026-04 release wave, which migrates off the yanked `core2` crate to `corez 0.1.1` and clears RUSTSEC-2026-0105.
+- Bumped workspace MSRV from 1.85.0 to 1.85.1, required by the new librustzcash releases. Also bumped `zebrad` MSRV from 1.89 to 1.91, required by `cargo-platform 0.3.3` (transitively via `vergen-git2`).
 
 ## [Zebra 4.3.1](https://github.com/ZcashFoundation/zebra/releases/tag/v4.3.1) - 2026-04-17
 

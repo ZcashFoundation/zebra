@@ -8,7 +8,7 @@
 # https://embarkstudios.github.io/cargo-deny/checks/advisories/cfg.html
 [advisories]
 version = 2
-yanked = "warn" # all core2 0.3.x versions yanked; transitive via zcash_keys, waiting on upstream
+yanked = "deny"
 # Unmaintained crate advisories — all transitive via abscissa_core/structopt or direct.
 # Remove each ignore entry as the dependency chain is upgraded.
 ignore = [
@@ -17,7 +17,6 @@ ignore = [
     "RUSTSEC-2024-0370", # proc-macro-error — transitive via abscissa_core -> structopt
     "RUSTSEC-2025-0119", # number_prefix — transitive via indicatif
     "RUSTSEC-2025-0141", # bincode — direct dependency
-    "RUSTSEC-2026-0105", # core2 — unmaintained, transitive via zcash crates, waiting on upstream corez migration
 ]
 
 # This section is considered when running `cargo deny check licenses`.
@@ -131,6 +130,28 @@ skip-tree = [
     { name = "sha2", version = "=0.10.9" },
     { name = "ripemd", version = "=0.1.3" },
 
+    # pre-release RustCrypto crates pulled in by librustzcash 2026-04 release wave;
+    # remove once the broader ecosystem catches up to the same pre-release line
+    { name = "block-buffer", version = "=0.11.0-rc.3" },
+    { name = "crypto-common", version = "=0.2.0-rc.1" },
+    { name = "digest", version = "=0.11.0-pre.9" },
+
+    # console 0.15.x is pulled by indicatif (via howudoin); 0.16.x by insta (dev-dep).
+    # remove once indicatif/howudoin update to console 0.16.
+    { name = "console", version = "=0.15.11" },
+
+    # hashbrown 0.16.x pulled by ed25519-zebra; 0.17.x by indexmap 2.14 (transitive of librustzcash).
+    # remove once ed25519-zebra updates hashbrown.
+    { name = "hashbrown", version = "=0.16.1" },
+
+    # toml 0.9.x pulled by zebrad direct; 1.1.x by config 0.15 (also via zebrad).
+    # toml 1.x is the spec-1.1 line; remove once zebrad migrates its direct dep.
+    { name = "toml", version = "=0.9.12+spec-1.1.0" },
+
+    # winnow 0.7.x pulled by toml 0.9.x; 1.x by toml 1.x / config 0.15.
+    # resolved together with the toml entry above.
+    { name = "winnow", version = "=0.7.15" },
+
     # wait for abscissa_core to update synstructure
     { name = "synstructure", version = "=0.12.6" },
 
@@ -154,9 +175,6 @@ skip-tree = [
     { name = "rand", version = "0.8" },
     { name = "rand_core", version = "0.6" },
     { name = "rand_chacha", version = "0.3" },
-
-    # TODO: Remove once https://github.com/zcash/librustzcash/pull/1893 merges.
-    { name = "equihash", version = "0.2" },
 
     # wait for derive_builder to update
     { name = "darling", version = "0.20.11" },
