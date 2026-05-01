@@ -136,6 +136,22 @@ skip-tree = [
     { name = "crypto-common", version = "=0.2.0-rc.1" },
     { name = "digest", version = "=0.11.0-pre.9" },
 
+    # console 0.15.x is pulled by indicatif (via howudoin); 0.16.x by insta (dev-dep).
+    # remove once indicatif/howudoin update to console 0.16.
+    { name = "console", version = "=0.15.11" },
+
+    # hashbrown 0.16.x pulled by ed25519-zebra; 0.17.x by indexmap 2.14 (transitive of librustzcash).
+    # remove once ed25519-zebra updates hashbrown.
+    { name = "hashbrown", version = "=0.16.1" },
+
+    # toml 0.9.x pulled by zebrad direct; 1.1.x by config 0.15 (also via zebrad).
+    # toml 1.x is the spec-1.1 line; remove once zebrad migrates its direct dep.
+    { name = "toml", version = "=0.9.12+spec-1.1.0" },
+
+    # winnow 0.7.x pulled by toml 0.9.x; 1.x by toml 1.x / config 0.15.
+    # resolved together with the toml entry above.
+    { name = "winnow", version = "=0.7.15" },
+
     # wait for abscissa_core to update synstructure
     { name = "synstructure", version = "=0.12.6" },
 

@@ -18,7 +18,7 @@ categories = ["command-line-utilities", "cryptography::cryptocurrencies"]
 edition.workspace = true
 
 # Zebra can have a higher MSRV than the other crates since it is a binary.
-rust-version = "1.89"
+rust-version = "1.91"
 
 # Settings that impact runtime behaviour
 
