@@ -1,9 +1,96 @@
 use std::sync::Arc;
 
-use crate::{block::Block, parameters::Network, serialization::ZcashDeserializeInto, transaction};
+use crate::{
+    block::Block,
+    parameters::Network,
+    serialization::{ZcashDeserialize, ZcashDeserializeInto},
+    transaction,
+    transparent::Input,
+};
 use hex::FromHex;
 
 use zebra_test::prelude::*;
+
+/// Returns a serialized [`Input::Coinbase`] with the given `script_sig` bytes
+/// and a zero sequence, for feeding to [`Input::zcash_deserialize`].
+fn coinbase_input_bytes(script_sig: &[u8]) -> Vec<u8> {
+    assert!(
+        script_sig.len() < 253,
+        "script_sig length needs longer compact-size encoding than this helper writes",
+    );
+
+    let mut bytes = Vec::new();
+    // Null prevout hash marks the input as a coinbase.
+    bytes.extend_from_slice(&[0u8; 32]);
+    // Coinbase prevout index is u32::MAX.
+    bytes.extend_from_slice(&0xffff_ffff_u32.to_le_bytes());
+    // CompactSize-prefixed script_sig.
+    bytes.push(script_sig.len() as u8);
+    bytes.extend_from_slice(script_sig);
+    // Sequence.
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+    bytes
+}
+
+/// Consensus rule: coinbase height must use the minimum-length BIP-34 encoding.
+///
+/// Tests the boundary cases that distinguish the OP_N form from the
+/// length-prefixed form, and the boundary cases between length-prefixed forms.
+/// Adapted from the pre-zip-213 `parse_coinbase_height_mins` test that ran
+/// directly against the now-removed `parse_coinbase_height` helper.
+///
+/// > A coinbase transaction for a block at block height greater than 0 MUST
+/// > have a script that, as its first item, encodes the block height `height`
+/// > as follows. For `height` in the range {1 .. 16}, the encoding is a single
+/// > byte of value `0x50` + `height`. Otherwise, let `heightBytes` be the
+/// > signed little-endian representation of `height`, using the minimum
+/// > nonzero number of bytes such that the most significant byte is < `0x80`.
+///
+/// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+#[test]
+fn coinbase_height_minimal_encoding() {
+    let _init_guard = zebra_test::init();
+
+    // Asserts that a coinbase script_sig parses as the given height. A trailing
+    // padding byte is appended where needed to satisfy the 2-byte minimum
+    // coinbase script length.
+    fn assert_height(script_sig: &[u8], expected_height: u32) {
+        let bytes = coinbase_input_bytes(script_sig);
+        match Input::zcash_deserialize(&bytes[..]) {
+            Ok(Input::Coinbase { height, .. }) => assert_eq!(
+                height.0, expected_height,
+                "wrong height for script_sig {script_sig:?}",
+            ),
+            other => panic!("expected coinbase with height {expected_height}, got {other:?}"),
+        }
+    }
+
+    // Asserts that a coinbase script_sig is rejected by the deserializer.
+    fn assert_rejected(script_sig: &[u8]) {
+        let bytes = coinbase_input_bytes(script_sig);
+        let result = Input::zcash_deserialize(&bytes[..]);
+        assert!(
+            result.is_err(),
+            "expected error for non-minimal script_sig {script_sig:?}, got {result:?}",
+        );
+    }
+
+    // Height 1: the only valid encoding is the OP_1 opcode (0x51). Padded with
+    // a trailing byte to satisfy the 2-byte minimum coinbase script length.
+    assert_height(&[0x51, 0x00], 1);
+    // Non-minimal length-prefixed encodings of height 1 must be rejected.
+    assert_rejected(&[0x01, 0x01]);
+    assert_rejected(&[0x02, 0x01, 0x00]);
+    assert_rejected(&[0x03, 0x01, 0x00, 0x00]);
+    assert_rejected(&[0x04, 0x01, 0x00, 0x00, 0x00]);
+
+    // Height 17: the only valid encoding is `0x01 0x11` (push 1 byte = 17).
+    assert_height(&[0x01, 0x11], 17);
+    // Non-minimal length-prefixed encodings of height 17 must be rejected.
+    assert_rejected(&[0x02, 0x11, 0x00]);
+    assert_rejected(&[0x03, 0x11, 0x00, 0x00]);
+    assert_rejected(&[0x04, 0x11, 0x00, 0x00, 0x00]);
+}
 
 #[test]
 fn get_transparent_output_address() -> Result<()> {
