@@ -287,6 +287,19 @@ overflow-checks = false
 incremental = false
 codegen-units = 16
 
+# The advisory
+# https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-gq4h-3grw-2rhv
+# only reproduces reliably when the bundled libzcash_script C++ code is compiled
+# in release mode since it relies on a buffer to not be zeroed out (arrays in
+# C++ are usually zeroed out when allocated in debug mode). To reliably test
+# against that issue, and to also better simulate real-world usage of
+# libzcash_script, we enable optimizations for it in dev builds.
+[profile.dev.package.libzcash_script]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.release]
 panic = "abort"

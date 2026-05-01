@@ -10,6 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 ### Security
 
 - Fix sigops counting ([GHSA-jv4h-j224-23cc](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-jv4h-j224-23cc)).
+- Defense-in-depth fix for a consensus-divergence follow-up to GHSA-8m29-fpq5-89jj
+  in transparent script verification. Under the prior fix, the V5 sighash
+  callback returned `None` for undefined ZIP 244 hash-type bytes, but the
+  `libzcash_script` C++ bridge did not propagate that failure to the C++
+  verifier. A crafted `OP_CHECKSIGVERIFY` + `OP_CHECKSIG` script could therefore
+  make optimized Zebra accept a spend that `zcashd` rejects. Zebra's callback
+  now substitutes a per-call CSPRNG-derived sighash when rejecting, so any
+  signature the peer shipped fails to verify and the block is rejected in
+  agreement with `zcashd`.
 
 ### Added
 
