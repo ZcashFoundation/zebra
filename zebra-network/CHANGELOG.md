@@ -12,9 +12,10 @@ This release adds defense in depth for inbound deserializers. The
 size-limits coinbase data and Equihash solutions before allocation
 ([GHSA-438q-jx8f-cccv](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-438q-jx8f-cccv)).
 
-### Breaking Changes
-
-- `Request::AdvertiseBlock` now carries a second tuple field `Option<PeerSocketAddr>` so the inbound service can attribute the announcing peer when fanning out.
+### Changed
+- `Request::AdvertiseBlock` now carries a second tuple field
+  `Option<PeerSocketAddr>` so the inbound service can attribute the announcing
+  peer when fanning out.
 
 ## [5.0.1] - 2026-04-17
 

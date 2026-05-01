@@ -7,15 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [6.0.0] - 2026-05-01
 
-### Breaking Changes
-
-- `groth16` module trimmed after the Sapling migration to `bellman`-free verification:
-  - Removed `groth16::DescriptionWrapper`, `groth16::SAPLING`, and the `groth16::Description` trait (with its `Description for (&JoinSplit, &VerificationKeyBytes)` impl).
-  - The `TryFrom<DescriptionWrapper<&T>> for groth16::Item` impls were removed in favor of dedicated constructors.
-
 ### Added
+- `groth16`:
+  - `Item::from_joinsplit(joinsplit, joinsplit_pub_key) -> Result<Self, TransactionError>`,
+    replacing the removed `Description`-based conversions.
 
-- `groth16::Item::from_joinsplit(joinsplit, joinsplit_pub_key) -> Result<Self, TransactionError>` to replace the removed `Description`-based conversions.
+### Removed
+- `groth16` (trimmed after the Sapling migration to `bellman`-free verification):
+  - `DescriptionWrapper`
+  - `SAPLING`
+  - `Description` trait
+  - `impl Description for (&sprout::joinsplit::JoinSplit<Groth16Proof>, &VerificationKeyBytes)`
+  - `impl TryFrom<DescriptionWrapper<&T>> for Item` (use `Item::from_joinsplit` instead).
 
 ## [5.0.2] - 2026-04-17
 

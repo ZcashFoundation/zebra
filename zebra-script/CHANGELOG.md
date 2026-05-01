@@ -16,21 +16,20 @@ This release fixes an important security issue:
 The impact of the issue for crate users will depend on the particular usage;
 if you use it as a building block for a consensus node, you should update.
 
-### Breaking Changes
+### Added
+- `CachedFfiTransaction::p2sh_sigops(&self) -> u32`.
+- `p2sh_sigop_count(tx, spent_outputs) -> u32`.
 
-- `Sigops::scripts` now returns `impl Iterator<Item = Vec<u8>>` instead of `impl
-  Iterator<Item = &[u8]>`. This signature change ripples through all `Sigops`
-  implementations:
+### Changed
+- Migrated to `zcash_primitives 0.27` (and the rest of the librustzcash 2026-04
+  release wave), which replaces the yanked `core2` dependency with `corez`.
+- `Sigops::scripts` now returns `impl Iterator<Item = Vec<u8>>` instead of
+  `impl Iterator<Item = &[u8]>`. The change ripples through every `Sigops`
+  implementation:
   - `impl Sigops for zebra_chain::transaction::Transaction`
   - `impl Sigops for zebra_chain::transaction::UnminedTx`
   - `impl Sigops for CachedFfiTransaction`
   - `impl Sigops for zcash_primitives::transaction::Transaction`
-- Migrated to `zcash_primitives 0.27` (and the rest of the librustzcash 2026-04 release wave), which replaces the yanked `core2` dependency with `corez`.
-
-### Added
-
-- `CachedFfiTransaction::p2sh_sigops(&self) -> u32`.
-- `p2sh_sigop_count(tx, spent_outputs) -> u32`.
 
 ## [5.0.1] - 2026-04-17
 
