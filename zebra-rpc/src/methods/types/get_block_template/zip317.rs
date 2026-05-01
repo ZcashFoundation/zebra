@@ -387,14 +387,17 @@ impl TryUpdateBlockLimits for VerifiedUnminedTx {
         // > and block_unpaid_actions <=  block_unpaid_action_limit,
         // > add the transaction to the block template
         //
-        // Unpaid actions are always zero for transactions that pay the conventional fee,
-        // so the unpaid action check always passes for those transactions.
+        // Unpaid actions are always zero for transactions that pay the conventional fee, so the
+        // unpaid action check always passes for those transactions. Use the full block-level sigop
+        // count (legacy + P2SH) so template selection cannot produce blocks that the block verifier
+        // would reject for exceeding `MAX_BLOCK_SIGOPS`.
+        let tx_block_sigops = self.block_sigop_count();
         if self.transaction.size <= *remaining_block_bytes
-            && self.legacy_sigop_count <= *remaining_block_sigops
+            && tx_block_sigops <= *remaining_block_sigops
             && self.unpaid_actions <= *remaining_block_unpaid_actions
         {
             *remaining_block_bytes -= self.transaction.size;
-            *remaining_block_sigops -= self.legacy_sigop_count;
+            *remaining_block_sigops -= tx_block_sigops;
 
             // Unpaid actions are always zero for transactions that pay the conventional fee,
             // so this limit always remains the same after they are added.

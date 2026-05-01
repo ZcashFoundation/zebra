@@ -140,7 +140,7 @@ Aside from the configurable parameters, custom Testnets in Zebra validate the sa
 
 Zebra's Testnet validates almost all of the same consensus rules as Mainnet, the differences are:
 
-- Constants defined in the `zcash_primitives::consensus::Parameters` trait, which includes but may not be limited to:
+- Constants defined in the `zcash_protocol::consensus::Parameters` trait, which includes but may not be limited to:
   - Zcash address prefixes (see [`NetworkConstants`](https://docs.rs/zcash_protocol/latest/zcash_protocol/consensus/trait.NetworkConstants.html)), and coin type, which is `133` on `Mainnet` or `1` elsewhere.
   - Network upgrade activation heights.
 - Constants defined in Zebra:

@@ -95,7 +95,9 @@ impl From<&VerifiedUnminedTx> for TransactionTemplate<NonNegative> {
 
             fee: tx.miner_fee,
 
-            sigops: tx.legacy_sigop_count,
+            // Report the full block-level sigop count (legacy + P2SH) so the template `sigops`
+            // field matches what the block verifier charges against `MAX_BLOCK_SIGOPS`.
+            sigops: tx.block_sigop_count(),
 
             // Zebra does not require any transactions except the coinbase transaction.
             required: false,

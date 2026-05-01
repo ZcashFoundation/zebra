@@ -3725,6 +3725,7 @@ async fn block_with_garbage_orchard_proofs_is_rejected() {
         tx.clone().into(),
         Amount::try_from(10000).unwrap(),
         0,
+        0,
         Arc::new(vec![spent_output]),
     )
     .unwrap();

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Security
+
+- Fix sigops counting ([GHSA-jv4h-j224-23cc](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-jv4h-j224-23cc)).
+
 ### Added
 
 - Startup warning on Linux when `net.ipv4.tcp_slow_start_after_idle` is enabled (which resets TCP congestion windows between block requests and significantly reduces single-peer block-propagation throughput on long-haul links), with a `scripts/tune-sysctl.sh` helper and a "Linux TCP tuning for block propagation" troubleshooting section ([#10513](https://github.com/ZcashFoundation/zebra/pull/10513))

@@ -3009,6 +3009,78 @@ async fn regtest_block_templates_are_valid_block_submissions() -> Result<()> {
     Ok(())
 }
 
+/// Regression test for <https://github.com/ZcashFoundation/zebra/issues/10470>.
+///
+/// `getrawtransaction` must count confirmations against the full best-chain tip
+/// (including non-finalized blocks), not just the finalized-database tip.
+#[tokio::test]
+async fn getrawtransaction_confirmations_include_non_finalized_blocks() -> Result<()> {
+    use zebra_state::constants::MAX_BLOCK_REORG_HEIGHT;
+
+    let _init_guard = zebra_test::init();
+
+    let network = Network::new_regtest(
+        ConfiguredActivationHeights {
+            nu5: Some(100),
+            ..Default::default()
+        }
+        .into(),
+    );
+    let mut config = os_assigned_rpc_port_config(false, &network)?;
+    config.mempool.debug_enable_at_height = Some(0);
+
+    let mut zebrad = testdir()?
+        .with_config(&mut config)?
+        .spawn_child(args!["start"])?;
+    let rpc_address = read_listen_addr_from_logs(&mut zebrad, OPENED_RPC_ENDPOINT_MSG)?;
+
+    tokio::time::sleep(LAUNCH_DELAY).await;
+
+    let client = RpcRequestClient::new(rpc_address);
+
+    // Mine enough blocks to push the first few blocks into the finalized state.
+    // Block at height 2 is finalized once tip > 2 + MAX_BLOCK_REORG_HEIGHT = 101.
+    let blocks_to_mine = MAX_BLOCK_REORG_HEIGHT + 10;
+    client.generate(blocks_to_mine).await?;
+
+    // Get the coinbase txid from block 2 (it will be in the finalized DB).
+    let block2 = client
+        .get_block(2)
+        .await
+        .map_err(|err| eyre::eyre!(err))?
+        .expect("block at height 2 should exist");
+    let txid = block2.transactions[0].hash();
+
+    // Confirm the tip height and compute expected confirmations.
+    let info = client.blockchain_info().await?;
+    let tip_height = info.blocks().0;
+    let expected_confirmations = 1 + tip_height - 2;
+
+    // getrawtransaction verbose=1 returns a JSON object that includes `confirmations`.
+    let response: Value = client
+        .json_result_from_call("getrawtransaction", format!(r#"["{txid}", 1]"#))
+        .await
+        .map_err(|err| eyre::eyre!(err))?;
+
+    let confirmations: u32 = response["confirmations"]
+        .as_u64()
+        .expect("confirmations should be a positive integer")
+        .try_into()
+        .expect("confirmations should fit in u32 because regtest block heights fit in u32");
+
+    assert_eq!(
+        confirmations, expected_confirmations,
+        "getrawtransaction must count confirmations against the full best-chain tip \
+         (including non-finalized blocks), not just the finalized-DB tip"
+    );
+
+    zebrad.kill(false)?;
+    let output = zebrad.wait_with_output()?;
+    output.assert_failure()?.assert_was_killed()?;
+
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     use std::sync::Arc;

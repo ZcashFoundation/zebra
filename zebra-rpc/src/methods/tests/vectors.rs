@@ -2325,6 +2325,7 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
         transaction: unmined_tx,
         miner_fee: 0.try_into().unwrap(),
         legacy_sigop_count: 0,
+        p2sh_sigop_count: 0,
         conventional_actions,
         unpaid_actions: 0,
         fee_weight_ratio: 1.0,

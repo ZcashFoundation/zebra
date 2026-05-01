@@ -3,15 +3,15 @@
 use hex::FromHex;
 use std::sync::Arc;
 use zebra_chain::{
-    block,
-    parameters::NetworkUpgrade,
+    block::{self, Height},
+    parameters::{Network, NetworkUpgrade},
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
     transaction::{self, HashType, LockTime, SigHasher, Transaction},
     transparent::{self, Output},
 };
 use zebra_test::prelude::*;
 
-use crate::Sigops;
+use crate::{p2sh_sigop_count, Sigops};
 
 lazy_static::lazy_static! {
     pub static ref SCRIPT_PUBKEY: Vec<u8> = <Vec<u8>>::from_hex("76a914f47cac1e6fec195c055994e8064ffccce0044dd788ac")
@@ -687,4 +687,313 @@ fn sighash_divergence_from_bits_canonicalization() {
             "valid byte {raw_byte:#x} should pass strict"
         );
     }
+}
+
+/// Regression test for [GHSA-jv4h-j224-23cc] (Trigger A, "Coinbase Hidden Legacy Sigops").
+///
+/// zcashd's `GetLegacySigOpCount()` counts sigops in the coinbase input's `scriptSig`. Zebra
+/// previously skipped the coinbase input entirely, so a miner could hide up to ~98 sigops (the
+/// coinbase script length limit is 100 bytes) inside the coinbase `scriptSig` and avoid them being
+/// charged against `MAX_BLOCK_SIGOPS`.
+///
+/// This test builds a v5 coinbase transaction whose `miner_data` consists entirely of `OP_CHECKSIG`
+/// (`0xac`) bytes and asserts that `tx.sigops()` now returns the expected count covering every
+/// `OP_CHECKSIG`.
+///
+/// [GHSA-jv4h-j224-23cc]: https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-jv4h-j224-23cc
+#[test]
+fn count_coinbase_legacy_sigops_includes_coinbase_script() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    // 80 bytes of OP_CHECKSIG fits within the 100-byte coinbase script limit
+    // even after the height prefix.
+    const OP_CHECKSIG: u8 = 0xac;
+    let miner_data = vec![OP_CHECKSIG; 80];
+
+    let dummy_output_script = transparent::Script::new(&[0x51]); // OP_TRUE
+    let output_amount = zebra_chain::amount::Amount::try_from(1_000_000)?;
+
+    // Use a height after NU5 activation on Mainnet so v5 is the effective version.
+    let network = Network::Mainnet;
+    let height = NetworkUpgrade::Nu5
+        .activation_height(&network)
+        .expect("NU5 has a Mainnet activation height");
+
+    let tx = Transaction::new_v5_coinbase(
+        &network,
+        height,
+        vec![(output_amount, dummy_output_script)],
+        miner_data,
+    );
+
+    // Before the fix, Zebra's `Sigops` impl skipped the coinbase input and returned 0 for a
+    // coinbase with no OP_CHECKSIG in its outputs. After the fix, every OP_CHECKSIG in the coinbase
+    // `scriptSig` must be counted.
+    let sigops = tx.sigops().expect("sigop count is finite");
+    assert_eq!(
+        sigops, 80,
+        "coinbase scriptSig OP_CHECKSIG bytes must be counted against \
+         MAX_BLOCK_SIGOPS (zcashd parity, GHSA-jv4h-j224-23cc)"
+    );
+
+    Ok(())
+}
+
+/// Regression test for [GHSA-jv4h-j224-23cc] (Trigger B, "Aggregate P2SH Sigops").
+///
+/// zcashd's `GetP2SHSigOpCount()` parses the redeem script (the last push in each P2SH input's
+/// `scriptSig`) with `accurate=true` and sums the sigops across all inputs. Previously Zebra only
+/// did this in the mempool policy, so a block containing P2SH inputs whose aggregate redeem-script
+/// sigops exceeded `MAX_BLOCK_SIGOPS` could be accepted by Zebra but rejected by zcashd as
+/// `bad-blk-sigops`.
+///
+/// This test exercises the free function `zebra_script::p2sh_sigop_count` directly on a synthetic
+/// transaction with one P2SH input whose redeem script is 15 x OP_CHECKSIG.
+///
+/// [GHSA-jv4h-j224-23cc]: https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-jv4h-j224-23cc
+#[test]
+fn p2sh_sigop_count_counts_redeem_script() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    const OP_CHECKSIG: u8 = 0xac;
+    const OP_HASH160: u8 = 0xa9;
+    const OP_EQUAL: u8 = 0x87;
+
+    // Redeem script: 15 x OP_CHECKSIG. Each OP_CHECKSIG counts as 1.
+    let redeem_script = vec![OP_CHECKSIG; 15];
+
+    // scriptSig consists solely of a direct push of the redeem script. For a 15-byte payload we can
+    // use the literal-length push opcode (0x01..=0x4b), which is just the length byte followed by
+    // the data.
+    let mut unlock_bytes = Vec::new();
+    unlock_bytes.push(redeem_script.len() as u8);
+    unlock_bytes.extend_from_slice(&redeem_script);
+    let unlock_script = transparent::Script::new(&unlock_bytes);
+
+    // scriptPubKey: OP_HASH160 <20 bytes> OP_EQUAL. The 20-byte payload value is irrelevant here:
+    // `is_pay_to_script_hash()` only checks the length (23) and the surrounding opcodes.
+    let mut lock_bytes = Vec::with_capacity(23);
+    lock_bytes.push(OP_HASH160);
+    lock_bytes.push(0x14);
+    lock_bytes.extend_from_slice(&[0u8; 20]);
+    lock_bytes.push(OP_EQUAL);
+    let lock_script = transparent::Script::new(&lock_bytes);
+
+    // Build a minimal non-coinbase transaction with a single P2SH input.
+    let input = transparent::Input::PrevOut {
+        outpoint: transparent::OutPoint {
+            hash: zebra_chain::transaction::Hash([0u8; 32]),
+            index: 0,
+        },
+        unlock_script,
+        sequence: u32::MAX,
+    };
+
+    let spent_output = transparent::Output {
+        value: zebra_chain::amount::Amount::try_from(1_000_000)?,
+        lock_script,
+    };
+
+    let tx = Transaction::V5 {
+        network_upgrade: NetworkUpgrade::Nu5,
+        inputs: vec![input],
+        outputs: vec![spent_output.clone()],
+        lock_time: LockTime::unlocked(),
+        expiry_height: Height(0),
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    };
+
+    assert_eq!(
+        p2sh_sigop_count(&tx, std::slice::from_ref(&spent_output)),
+        15,
+        "P2SH redeem-script sigops must be counted against block-path \
+         MAX_BLOCK_SIGOPS (zcashd parity, GHSA-jv4h-j224-23cc)"
+    );
+
+    // The `CachedFfiTransaction::p2sh_sigops()` method must delegate to the same counter, so the
+    // block-verifier path yields the same count.
+    let cached = super::CachedFfiTransaction::new(
+        Arc::new(tx),
+        Arc::new(vec![spent_output]),
+        NetworkUpgrade::Nu5,
+    )
+    .expect("network upgrade should be valid for tx");
+    assert_eq!(cached.p2sh_sigops(), 15);
+
+    Ok(())
+}
+
+/// Non-P2SH inputs, and coinbase inputs, must contribute zero P2SH sigops regardless of what bytes
+/// appear in their `scriptSig`. zcashd skips the coinbase input in [`GetP2SHSigOpCount()`].
+///
+/// [`GetP2SHSigOpCount()`]: https://github.com/zcash/zcash/blob/bad7f7eadbbb3466bebe3354266c7f69f607fcfd/src/main.cpp#L770-L772
+#[test]
+fn p2sh_sigop_count_is_zero_for_non_p2sh_and_coinbase() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    const OP_CHECKSIG: u8 = 0xac;
+
+    // Build a coinbase tx with OP_CHECKSIG-filled `miner_data`: legacy counting sees these (Trigger
+    // A), but P2SH counting must not.
+    let network = Network::Mainnet;
+    let nu5_height = NetworkUpgrade::Nu5
+        .activation_height(&network)
+        .expect("NU5 has a Mainnet activation height");
+    let dummy_output_script = transparent::Script::new(&[0x51]);
+    let output_amount = zebra_chain::amount::Amount::try_from(1_000_000)?;
+    let coinbase_tx = Transaction::new_v5_coinbase(
+        &network,
+        nu5_height,
+        vec![(output_amount, dummy_output_script.clone())],
+        vec![OP_CHECKSIG; 80],
+    );
+
+    // Coinbase inputs have no spent output; zcashd passes an empty vector.
+    assert_eq!(p2sh_sigop_count(&coinbase_tx, &[]), 0);
+
+    // A non-P2SH (p2pkh-shaped) lock script must also yield 0 P2SH sigops, even if the scriptSig's
+    // last push happens to contain OP_CHECKSIG.
+    let p2pkh_lock = transparent::Script::new(&hex::decode(
+        "76a914f47cac1e6fec195c055994e8064ffccce0044dd788ac",
+    )?);
+    let mut unlock_bytes = vec![0x01_u8]; // single-byte push
+    unlock_bytes.push(OP_CHECKSIG);
+    let input = transparent::Input::PrevOut {
+        outpoint: transparent::OutPoint {
+            hash: zebra_chain::transaction::Hash([0u8; 32]),
+            index: 0,
+        },
+        unlock_script: transparent::Script::new(&unlock_bytes),
+        sequence: u32::MAX,
+    };
+    let spent_output = transparent::Output {
+        value: zebra_chain::amount::Amount::try_from(1_000_000)?,
+        lock_script: p2pkh_lock,
+    };
+    let tx = Transaction::V5 {
+        network_upgrade: NetworkUpgrade::Nu5,
+        inputs: vec![input],
+        outputs: vec![],
+        lock_time: LockTime::unlocked(),
+        expiry_height: Height(0),
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    };
+    assert_eq!(p2sh_sigop_count(&tx, &[spent_output]), 0);
+
+    Ok(())
+}
+
+/// End-to-end regression test for [GHSA-jv4h-j224-23cc].
+///
+/// Reproduces the consensus-split condition: a block whose true `zcashd` transparent sigop total
+/// (legacy + P2SH, including coinbase legacy) exceeds `MAX_BLOCK_SIGOPS = 20000`. Before the fix,
+/// Zebra computed a reduced total that fit under the limit and accepted such a block.
+///
+/// This test exercises the same accumulation the block verifier performs in
+/// `zebra_consensus::block::verify_block` (`block.rs` `sigops += response.sigops()`), where each
+/// transaction's contribution is `tx.sigops() + cached.p2sh_sigops()` (set in
+/// `zebra_consensus::transaction.rs`'s `Block`-path response).
+///
+/// Asserts:
+/// - the legacy-only total (Zebra's pre-fix accounting) is below the limit;
+/// - the legacy + P2SH total (Zebra's post-fix, zcashd-equivalent accounting) exceeds the limit,
+///   demonstrating the consensus split is now visible to the block verifier.
+///
+/// [GHSA-jv4h-j224-23cc]: https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-jv4h-j224-23cc
+#[test]
+fn block_sigop_total_includes_coinbase_and_p2sh() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    /// Matches `zebra_consensus::MAX_BLOCK_SIGOPS`. Hard-coded to avoid a reverse dependency on
+    /// `zebra-consensus`.
+    const MAX_BLOCK_SIGOPS: u32 = 20_000;
+    const OP_CHECKSIG: u8 = 0xac;
+    const OP_HASH160: u8 = 0xa9;
+    const OP_EQUAL: u8 = 0x87;
+
+    // Surface A: 80 OP_CHECKSIG bytes hidden in the coinbase scriptSig
+    // (the coinbase script length limit is 100 bytes, including the height prefix).
+    let network = Network::Mainnet;
+    let nu5_height = NetworkUpgrade::Nu5
+        .activation_height(&network)
+        .expect("NU5 has a Mainnet activation height");
+    let dummy_output_script = transparent::Script::new(&[0x51]); // OP_TRUE
+    let output_amount = zebra_chain::amount::Amount::try_from(1_000_000)?;
+    let coinbase_tx = Transaction::new_v5_coinbase(
+        &network,
+        nu5_height,
+        vec![(output_amount, dummy_output_script)],
+        vec![OP_CHECKSIG; 80],
+    );
+
+    // Surface B: each non-coinbase transaction has one P2SH input whose
+    // 15-byte redeem script is 15 x OP_CHECKSIG, contributing 15 P2SH
+    // sigops (the maximum standard P2SH redeem-script sigop count).
+    let redeem_script = vec![OP_CHECKSIG; 15];
+    let mut unlock_bytes = vec![redeem_script.len() as u8];
+    unlock_bytes.extend_from_slice(&redeem_script);
+    let unlock_script = transparent::Script::new(&unlock_bytes);
+
+    let mut lock_bytes = Vec::with_capacity(23);
+    lock_bytes.push(OP_HASH160);
+    lock_bytes.push(0x14);
+    lock_bytes.extend_from_slice(&[0u8; 20]);
+    lock_bytes.push(OP_EQUAL);
+    let lock_script = transparent::Script::new(&lock_bytes);
+
+    let p2sh_input = transparent::Input::PrevOut {
+        outpoint: transparent::OutPoint {
+            hash: zebra_chain::transaction::Hash([0u8; 32]),
+            index: 0,
+        },
+        unlock_script,
+        sequence: u32::MAX,
+    };
+    let p2sh_spent_output = transparent::Output {
+        value: zebra_chain::amount::Amount::try_from(1_000_000)?,
+        lock_script,
+    };
+    let p2sh_tx_template = Transaction::V5 {
+        network_upgrade: NetworkUpgrade::Nu5,
+        inputs: vec![p2sh_input],
+        outputs: vec![],
+        lock_time: LockTime::unlocked(),
+        expiry_height: Height(0),
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    };
+
+    // 1334 P2SH spends * 15 sigops = 20010 P2SH sigops.
+    // Plus 80 coinbase legacy sigops = 20090 total, > MAX_BLOCK_SIGOPS.
+    // The legacy-only total Zebra used to compute is 0 (pre-fix coinbase)
+    // or 80 (post-fix coinbase), both well under the limit.
+    const N_P2SH_TXS: u32 = 1334;
+    let spent_outputs = std::slice::from_ref(&p2sh_spent_output);
+
+    let coinbase_legacy = coinbase_tx.sigops().expect("sigop count is finite");
+    let p2sh_legacy = p2sh_tx_template.sigops().expect("sigop count is finite");
+    let p2sh_per_tx = p2sh_sigop_count(&p2sh_tx_template, spent_outputs);
+    assert_eq!(coinbase_legacy, 80, "coinbase legacy sigops (Surface A)");
+    assert_eq!(p2sh_per_tx, 15, "per-tx P2SH sigops (Surface B)");
+
+    // Post-fix accounting matches what the block verifier accumulates in
+    // `zebra_consensus::block::verify_block` via `response.sigops()`, where the response is built
+    // in `zebra_consensus::transaction.rs`'s `Block`-path arm as `tx.sigops() +
+    // cached.p2sh_sigops()`.
+    //
+    // Non-coinbase txs contribute legacy sigops from their inputs and outputs; here `p2sh_legacy`
+    // is 0 (the redeem script bytes inside the scriptSig are NOT executed at the legacy level for a
+    // literal push-only scriptSig).
+    let post_fix_total = coinbase_legacy
+        .saturating_add(N_P2SH_TXS.saturating_mul(p2sh_legacy.saturating_add(p2sh_per_tx)));
+
+    assert!(
+        post_fix_total > MAX_BLOCK_SIGOPS,
+        "post-fix accounting must exceed MAX_BLOCK_SIGOPS to demonstrate \
+         the consensus split is now visible: got {post_fix_total}"
+    );
+
+    Ok(())
 }

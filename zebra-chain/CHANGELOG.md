@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- `transaction::VerifiedUnminedTx::new` now takes `p2sh_sigop_count: u32`.
+
+### Added
+
+- `transaction::VerifiedUnminedTx`:
+  - `p2sh_sigop_count: u32`.
+  - `block_sigop_count(&self) -> u32`.
+
 ## [6.0.2] - 2026-04-17
 
 This release fixes an important security issue:

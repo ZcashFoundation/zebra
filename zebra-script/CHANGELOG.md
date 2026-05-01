@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- `Sigops::scripts` now returns `impl Iterator<Item = Vec<u8>>` instead of `impl
+  Iterator<Item = &[u8]>`. This signature change ripples through all `Sigops`
+  implementations:
+  - `impl Sigops for zebra_chain::transaction::Transaction`
+  - `impl Sigops for zebra_chain::transaction::UnminedTx`
+  - `impl Sigops for CachedFfiTransaction`
+  - `impl Sigops for zcash_primitives::transaction::Transaction`
+
+### Added
+
+- `CachedFfiTransaction::p2sh_sigops(&self) -> u32`.
+- `p2sh_sigop_count(tx, spent_outputs) -> u32`.
+
 ## [5.0.1] - 2026-04-17
 
 This release fixes an important security issue:

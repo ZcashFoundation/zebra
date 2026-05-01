@@ -5,7 +5,6 @@
 //! `AreInputsStandard()`.
 
 use zcash_script::opcode::PossiblyBad;
-use zcash_script::script::Evaluable as _;
 use zcash_script::{script, solver, Opcode};
 use zebra_chain::{transaction::Transaction, transparent};
 
@@ -85,51 +84,8 @@ fn script_sig_args_expected(kind: &solver::ScriptKind) -> Option<usize> {
     }
 }
 
-/// Extracts the P2SH redeemed script's sigop count for a single input.
-///
-/// Returns `Some(count)` for P2SH inputs where a redeemed script was found,
-/// `None` for non-P2SH, coinbase, or P2SH inputs with an empty scriptSig.
-fn p2sh_redeemed_script_sigop_count(
-    input: &transparent::Input,
-    spent_output: &transparent::Output,
-) -> Option<u32> {
-    let unlock_script = match input {
-        transparent::Input::PrevOut { unlock_script, .. } => unlock_script,
-        transparent::Input::Coinbase { .. } => return None,
-    };
-
-    let lock_code = script::Code(spent_output.lock_script.as_raw_bytes().to_vec());
-    if !lock_code.is_pay_to_script_hash() {
-        return None;
-    }
-
-    let redeemed_bytes = extract_p2sh_redeemed_script(unlock_script)?;
-    let redeemed = script::Code(redeemed_bytes);
-    Some(redeemed.sig_op_count(true))
-}
-
-/// Returns the total number of P2SH sigops across all inputs of the transaction.
-///
-/// Mirrors zcashd's `GetP2SHSigOpCount()`:
-/// <https://github.com/zcash/zcash/blob/v6.11.0/src/main.cpp#L1191>
-///
-/// # Correctness
-///
-/// Callers must ensure `spent_outputs.len()` matches the number of transparent inputs.
-/// If the lengths differ, `zip()` silently truncates the longer iterator, which may
-/// cause incorrect sigop counts.
-pub(super) fn p2sh_sigop_count(tx: &Transaction, spent_outputs: &[transparent::Output]) -> u32 {
-    debug_assert_eq!(
-        tx.inputs().len(),
-        spent_outputs.len(),
-        "spent_outputs must align with transaction inputs"
-    );
-    tx.inputs()
-        .iter()
-        .zip(spent_outputs.iter())
-        .filter_map(|(input, spent_output)| p2sh_redeemed_script_sigop_count(input, spent_output))
-        .sum()
-}
+#[cfg(test)]
+pub(super) use zebra_script::p2sh_sigop_count;
 
 /// Returns `true` if all transparent inputs are standard.
 ///

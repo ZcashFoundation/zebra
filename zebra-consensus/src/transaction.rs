@@ -531,7 +531,7 @@ where
                         );
                         Ok(())
                     }
-                );
+                    );
 
                 async_checks.push(check_anchors_and_revealed_nullifiers_query);
             }
@@ -573,7 +573,13 @@ where
                 Request::Block { .. } => Response::Block {
                     tx_id,
                     miner_fee,
-                    sigops,
+                    // In block validation, the consensus sigop total must include P2SH
+                    // redeem-script sigops, matching zcashd's `ConnectBlock` which sums
+                    // `GetLegacySigOpCount` and `GetP2SHSigOpCount` per transaction before
+                    // comparing against `MAX_BLOCK_SIGOPS`. Coinbase inputs contribute zero P2SH
+                    // sigops. See
+                    // <https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-jv4h-j224-23cc>.
+                    sigops: sigops.saturating_add(cached_ffi_transaction.p2sh_sigops()),
                 },
                 Request::Mempool { transaction: tx, .. } => {
                     // TODO: `spent_outputs` may not align with `tx.inputs()` when a transaction
@@ -586,6 +592,7 @@ where
                         tx,
                         miner_fee.expect("fee should have been checked earlier"),
                         sigops,
+                        cached_ffi_transaction.p2sh_sigops(),
                         spent_outputs.into(),
                     )?;
 
@@ -609,12 +616,12 @@ where
 
             Ok(rsp)
         }
-        .inspect(move |result| {
-            // Hide the transaction data to avoid filling the logs
-            tracing::trace!(?tx_id, result = ?result.as_ref().map(|_tx| ()), "got tx verify result");
-        })
-        .instrument(span)
-        .boxed()
+            .inspect(move |result| {
+                // Hide the transaction data to avoid filling the logs
+                tracing::trace!(?tx_id, result = ?result.as_ref().map(|_tx| ()), "got tx verify result");
+            })
+            .instrument(span)
+            .boxed()
     }
 }
 

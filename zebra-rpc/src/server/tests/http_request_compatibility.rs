@@ -64,11 +64,29 @@ async fn request_body_error_returns_err_instead_of_panic() {
         .body(error_body)
         .expect("valid request");
 
-    let mut middleware = HttpRequestMiddleware::new(MockRpcService, None);
+    let mut middleware = HttpRequestMiddleware::new(MockRpcService, None, 2_097_152);
     let result = middleware.call(request).await;
 
     assert!(
         result.is_err(),
         "body collection error should return Err, not panic"
     );
+}
+
+/// Verifies that a request body exceeding `max_request_body_size` is rejected.
+#[tokio::test]
+async fn oversized_request_body_is_rejected() {
+    let limit = 64;
+    let oversized = vec![b'x'; limit + 1];
+    let body = HttpBody::from(oversized);
+    let request = HttpRequest::builder()
+        .method("POST")
+        .header("content-type", "application/json")
+        .body(body)
+        .expect("valid request");
+
+    let mut middleware = HttpRequestMiddleware::new(MockRpcService, None, limit);
+    let result = middleware.call(request).await;
+
+    assert!(result.is_err(), "oversized request body should be rejected");
 }
