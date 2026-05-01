@@ -3,7 +3,10 @@
 use std::io;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use zcash_script::opcode::{self, Evaluable, PushValue};
+use zcash_script::{
+    opcode::{self, Evaluable, PushValue},
+    pattern::push_num,
+};
 use zcash_transparent::coinbase::{
     MAX_COINBASE_HEIGHT_LEN, MAX_COINBASE_SCRIPT_LEN, MIN_COINBASE_SCRIPT_LEN,
 };
@@ -151,7 +154,27 @@ impl ZcashDeserialize for Input {
                     ))?
                 }
 
-                (height.to_num()?.try_into()?, data.to_vec())
+                let height_num = height.to_num()?;
+
+                // The genesis script_sig is special-cased above, so this branch
+                // covers the consensus rule for height > 0 only. Reject zero
+                // (e.g. `OP_0`) and negative encodings (e.g. `OP_1NEGATE`).
+                if height_num <= 0 {
+                    return Err(SerializationError::Parse(
+                        "Coinbase height must be positive outside the genesis block",
+                    ));
+                }
+
+                // BIP-34 requires the minimum-length encoding of `height_num`.
+                // Reject anything else (e.g. `0x01 0x01` for height 1, which
+                // must use `OP_1` / `0x51`).
+                if height != push_num(height_num) {
+                    return Err(SerializationError::Parse(
+                        "Coinbase height is not minimally encoded",
+                    ));
+                }
+
+                (height_num.try_into()?, data.to_vec())
             };
 
             Ok(Input::Coinbase {
