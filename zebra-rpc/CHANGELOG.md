@@ -5,7 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [7.0.0] - 2026-05-01
+
+This release fixes four RPC security issues:
+
+- [GHSA-jg86-rwhm-fhg4](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-jg86-rwhm-fhg4): cookie file is now written with explicit `0600` permissions on Unix; symlinks at the cookie path are rejected.
+- [GHSA-8r29-5wjm-jgvx](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-8r29-5wjm-jgvx): HTTP request bodies are bounded before allocation, with the limit derived from `MAX_BLOCK_BYTES` to accommodate `submitblock`.
+- [GHSA-826r-gfq8-x79q](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-826r-gfq8-x79q): gRPC indexer streams use `try_send` to drop slow subscribers instead of backpressuring the server; the buffer was reduced from 4000 to 64.
+- [GHSA-w23c-6rpp-ff87](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-w23c-6rpp-ff87): `getrawtransaction` reuses the caller-provided block hash and best-chain flag from the initial query, fixing a TOCTOU race against a third state lookup.
 
 ### Breaking Changes
 

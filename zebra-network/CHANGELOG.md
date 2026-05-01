@@ -5,7 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [6.0.0] - 2026-05-01
+
+This release adds defense in depth for inbound deserializers. The
+`zebra-chain` 7.0 cohort enforces 160-entry cap in `read_headers` and
+size-limits coinbase data and Equihash solutions before allocation
+([GHSA-438q-jx8f-cccv](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-438q-jx8f-cccv)).
 
 ### Breaking Changes
 
