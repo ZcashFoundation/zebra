@@ -99,22 +99,31 @@ window. On long-haul links this can cap single-peer throughput far below the
 available bandwidth — even between nodes with 1–2 Gbps connections, observed
 throughput during block propagation can be as low as ~6 Mbps.
 
-The most impactful setting to change is:
+> **Warning: these settings are system-wide.** They affect *every* TCP
+> connection on the host and every program using it, not just Zebra. Review
+> the implications before applying, particularly on multi-tenant or
+> production hosts running unrelated workloads.
+
+The recommended sysctl config is:
 
 ```text
+# Disable slow-start-after-idle so TCP doesn't reset its congestion window
+# between block requests. This is the highest-impact setting for full-block
+# propagation on long-haul links.
 net.ipv4.tcp_slow_start_after_idle=0
+
+# Use CUBIC congestion control (already the default on most Linux distros;
+# set explicitly so the configuration is self-documenting).
+net.ipv4.tcp_congestion_control=cubic
+
+# Use fq_codel as the default queueing discipline.
+net.core.default_qdisc=fq_codel
 ```
 
-You can either apply this manually, or run the helper script bundled with the
-Zebra repo:
-
-```sh
-sudo ./scripts/tune-sysctl.sh
-```
-
-The script also sets `net.core.default_qdisc=fq_codel` and pins
-`net.ipv4.tcp_congestion_control=cubic` for completeness. Settings are
-written to `/etc/sysctl.d/99-zebra-network.conf` so they survive reboot.
+To apply persistently, write the block above to
+`/etc/sysctl.d/99-zebra-network.conf` and reload with
+`sudo sysctl --system`. To apply for the current boot only, use
+`sudo sysctl -w <key>=<value>` for each line.
 
 Zebra logs a warning at startup on Linux if `tcp_slow_start_after_idle` is
 enabled.
@@ -123,6 +132,5 @@ enabled.
 
 These sysctls must be applied on the **host**, not inside the container.
 Containers share the host's network stack settings for these knobs, so
-setting them inside the container has no effect. Run
-`sudo ./scripts/tune-sysctl.sh` (or apply the equivalent settings) on the
-Docker host.
+setting them inside the container has no effect. Apply them on the
+Docker host (and remember the system-wide caveat above).

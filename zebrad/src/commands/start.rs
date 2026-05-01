@@ -114,7 +114,7 @@ pub struct StartCmd {
 /// Warns if Linux TCP slow-start-after-idle is enabled, which significantly
 /// reduces single-peer throughput for block propagation.
 ///
-/// See `book/src/user/troubleshooting.md` and `scripts/tune-sysctl.sh`.
+/// See `book/src/user/troubleshooting.md`.
 #[cfg(target_os = "linux")]
 fn check_tcp_slow_start_after_idle() {
     const PATH: &str = "/proc/sys/net/ipv4/tcp_slow_start_after_idle";
@@ -140,8 +140,7 @@ fn check_tcp_slow_start_after_idle() {
         "TCP slow-start-after-idle is enabled, which resets TCP's congestion window \
          between block requests and significantly reduces single-peer throughput for \
          block propagation. \
-         Hint: run `sudo ./scripts/tune-sysctl.sh` from the Zebra repo, or set \
-         `net.ipv4.tcp_slow_start_after_idle=0` via sysctl. \
+         Hint: set `net.ipv4.tcp_slow_start_after_idle=0` via sysctl. \
          See https://zebra.zfnd.org/user/troubleshooting.html#linux-tcp-tuning-for-block-propagation"
     );
 }
