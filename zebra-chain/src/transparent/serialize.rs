@@ -3,15 +3,14 @@
 use std::io;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use zcash_script::opcode::{self, Evaluable, PushValue};
-use zcash_transparent::coinbase::{
-    MAX_COINBASE_HEIGHT_LEN, MAX_COINBASE_SCRIPT_LEN, MIN_COINBASE_SCRIPT_LEN,
-};
+use zcash_script::{opcode::Evaluable, pattern};
+use zcash_transparent::coinbase::{MAX_COINBASE_SCRIPT_LEN, MIN_COINBASE_SCRIPT_LEN};
 
 use crate::{
     block::Height,
     serialization::{
-        ReadZcashExt, SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
+        zcash_deserialize_bytes_external_count, CompactSizeMessage, ReadZcashExt,
+        SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
     },
     transaction,
 };
@@ -28,6 +27,73 @@ pub const GENESIS_COINBASE_SCRIPT_SIG: [u8; 77] = [
     101, 97, 51, 53, 54, 56, 51, 97, 55, 99, 97, 99, 49, 52, 49, 97, 48, 52, 51, 99, 52, 50, 48,
     54, 52, 56, 51, 53, 100, 51, 52,
 ];
+
+/// Parses the BIP-34 block-height prefix of a non-genesis coinbase script and returns the height
+/// along with the trailing miner data.
+///
+/// # Consensus
+///
+/// > A coinbase transaction for a block at block height greater than 0 MUST have a script that, as
+/// > its first item, encodes the block height `height` as follows. For `height` in the range
+/// > {1 .. 16}, the encoding is a single byte of value `0x50` + `height`. Otherwise, let
+/// > `heightBytes` be the signed little-endian representation of `height`, using the minimum
+/// > nonzero number of bytes such that the most significant byte is < `0x80`. The length of
+/// > `heightBytes` MUST be in the range {1 .. 5}. Then the encoding is the length of `heightBytes`
+/// > encoded as one byte, followed by `heightBytes` itself. This matches the encoding used by
+/// > Bitcoin in the implementation of [BIP-34] (but the description here is to be considered
+/// > normative).
+///
+/// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+///
+/// [BIP-34]: <https://github.com/bitcoin/bips/blob/master/bip-0034.mediawiki>
+///
+/// # Strategy
+///
+/// Rather than parsing the height bytes ourselves, we read a candidate height directly off the
+/// wire (using the prefix shape to locate the bytes), then re-encode it via
+/// [`zcash_script::pattern::push_num`] — the same primitive used by
+/// [`zcash_transparent::bundle::TxIn::coinbase`] to build coinbase inputs — and require byte-exact
+/// equality. Any non-canonical input (wrong shape, non-minimal length, oversize, negative,
+/// signed-bit games) fails this check.
+fn parse_coinbase_height(script_sig: &[u8]) -> Result<(Height, Vec<u8>), SerializationError> {
+    let parse_err = SerializationError::Parse;
+
+    // Read a candidate height directly off the wire. The first byte tells us where the height
+    // bytes are; we don't validate them yet — the oracle below catches any non-canonical input.
+    let (h, len): (i64, usize) = match *script_sig
+        .first()
+        .ok_or(parse_err("Empty coinbase script"))?
+    {
+        op_n @ 0x51..=0x60 => (i64::from(op_n - 0x50), 1),
+        n @ 1..=5 => {
+            let bytes = script_sig
+                .get(1..=usize::from(n))
+                .ok_or(parse_err("Coinbase height push truncated"))?;
+            // Permissive read: zero-extend the wire bytes into an i64. The candidate is only
+            // trusted after the canonical-encode-and-compare check below.
+            let mut buf = [0u8; 8];
+            buf[..bytes.len()].copy_from_slice(bytes);
+            (i64::from_le_bytes(buf), 1 + bytes.len())
+        }
+        _ => return Err(parse_err("Invalid coinbase script prefix")),
+    };
+
+    // Oracle: re-encode the candidate the way zcash_transparent's coinbase builder does, and
+    // require byte-exact equality.
+    if script_sig
+        .get(..len)
+        .ok_or(parse_err("Coinbase script too short"))?
+        != pattern::push_num(h).to_bytes().as_slice()
+    {
+        return Err(parse_err("Non-canonical coinbase height encoding"));
+    }
+
+    let h = u32::try_from(h).map_err(|_| parse_err("Negative coinbase height"))?;
+    let height =
+        Height::try_from(h).map_err(|_| parse_err("Coinbase height exceeds Height::MAX"))?;
+
+    Ok((height, script_sig[len..].to_vec()))
+}
 
 impl ZcashSerialize for OutPoint {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
@@ -111,47 +177,31 @@ impl ZcashDeserialize for Input {
                 return Err(SerializationError::Parse("Wrong index in coinbase"));
             }
 
-            let script_sig = Vec::zcash_deserialize(&mut reader)?;
-
+            // Read the coinbase script length and validate it against the consensus
+            // bound *before* allocating any script bytes. The generic `Vec<u8>`
+            // deserializer would otherwise allocate up to MAX_PROTOCOL_MESSAGE_LEN
+            // bytes for an attacker-controlled CompactSize length and only reject
+            // afterwards, letting a peer force multi-MiB transient allocations per
+            // bogus block.
+            //
             // # Consensus
             //
             // > A coinbase transaction script MUST have length in {2 .. 100} bytes.
             //
             // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
-            if script_sig.len() < MIN_COINBASE_SCRIPT_LEN {
+            let len: CompactSizeMessage = (&mut reader).zcash_deserialize_into()?;
+            let len: usize = len.into();
+            if len < MIN_COINBASE_SCRIPT_LEN {
                 return Err(SerializationError::Parse("Coinbase script is too short"));
-            } else if script_sig.len() > MAX_COINBASE_SCRIPT_LEN {
+            } else if len > MAX_COINBASE_SCRIPT_LEN {
                 return Err(SerializationError::Parse("Coinbase script is too long"));
             }
+            let script_sig = zcash_deserialize_bytes_external_count(len, &mut reader)?;
 
             let (height, data) = if script_sig.as_slice() == GENESIS_COINBASE_SCRIPT_SIG {
                 (Height::MIN, GENESIS_COINBASE_SCRIPT_SIG.to_vec())
             } else {
-                // # Consensus
-                //
-                // > A coinbase transaction for a block at block height greater than 0 MUST have a script
-                // > that, as its first item, encodes the block height `height` as follows. For `height` in
-                // > the range {1 .. 16}, the encoding is a single byte of value `0x50` + `height`.
-                // > Otherwise, let `heightBytes` be the signed little-endian representation of `height`,
-                // > using the minimum nonzero number of bytes such that the most significant byte is <
-                // > `0x80`. The length of `heightBytes` MUST be in the range {1 .. 5}. Then the encoding is
-                // > the length of `heightBytes` encoded as one byte, followed by `heightBytes` itself. This
-                // > matches the encoding used by Bitcoin in the implementation of [BIP-34] (but the
-                // > description here is to be considered normative).
-                //
-                // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
-                //
-                // [BIP-34]: <https://github.com/bitcoin/bips/blob/master/bip-0034.mediawiki>
-                let (height, data) = opcode::PossiblyBad::parse(&script_sig);
-                let height = PushValue::restrict(height?)?;
-
-                if height.byte_len() > MAX_COINBASE_HEIGHT_LEN {
-                    Err(SerializationError::Parse(
-                        "Coinbase height encoding is too long",
-                    ))?
-                }
-
-                (height.to_num()?.try_into()?, data.to_vec())
+                parse_coinbase_height(&script_sig)?
             };
 
             Ok(Input::Coinbase {
