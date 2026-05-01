@@ -15,10 +15,12 @@ This release fixes four RPC security issues:
 - [GHSA-w23c-6rpp-ff87](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-w23c-6rpp-ff87): `getrawtransaction` reuses the caller-provided block hash and best-chain flag from the initial query, fixing a TOCTOU race against a third state lookup.
 
 ### Added
+
 - `methods::BlockObject::n_tx(&self) -> usize`, exposing the per-block
   transaction count in the verbose `getblock` response.
 
 ### Changed
+
 - Migrated to `zcash_primitives 0.27` (and the rest of the librustzcash 2026-04
   release wave), which replaces the yanked `core2` dependency with `corez`.
 - `methods::BlockObject::new` gained a required `n_tx: usize` parameter,

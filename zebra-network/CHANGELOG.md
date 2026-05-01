@@ -13,6 +13,7 @@ size-limits coinbase data and Equihash solutions before allocation
 ([GHSA-438q-jx8f-cccv](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-438q-jx8f-cccv)).
 
 ### Changed
+
 - `Request::AdvertiseBlock` now carries a second tuple field
   `Option<PeerSocketAddr>` so the inbound service can attribute the announcing
   peer when fanning out.

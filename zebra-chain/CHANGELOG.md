@@ -8,12 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [7.0.0] - 2026-05-01
 
 ### Added
+
 - `serialization::MAX_HEADERS_PER_MESSAGE: usize`.
 - `transaction::VerifiedUnminedTx`:
   - `p2sh_sigop_count: u32`.
   - `block_sigop_count(&self) -> u32`.
 
 ### Changed
+
 - Migrated to `zcash_primitives 0.27` (and the rest of the librustzcash 2026-04
   release wave), which replaces the yanked `core2` dependency with `corez`.
 - `transaction::VerifiedUnminedTx::new` now takes an additional
