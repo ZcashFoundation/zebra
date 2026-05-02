@@ -50,6 +50,24 @@ AQC1Wmyb9ul/2QNi//8sKNDfaYbn3h6OU45BTAWggp+ACQ==
 -----END PGP PUBLIC KEY BLOCK-----
 ```
 
+### Important Reporting Boundary
+
+Zcash Community Grants (ZCG) funds vulnerability payouts, but it is not a vulnerability disclosure intake or triage channel.
+
+- Do not send vulnerability details, PoCs, or exploit artifacts to ZCG.
+- Do not attempt to register with ZCG for bounty eligibility.
+- Submit Zebra and `zebrad` vulnerability reports through this policy (`security@zfnd.org`).
+
+### Recommended Report Contents
+
+To reduce triage delays, please include:
+
+- impacted component(s) and version(s),
+- a clear impact statement,
+- reproducible steps,
+- environment/configuration details,
+- and logs or PoC evidence where possible.
+
 ## Sending Disclosures
 
 In the case where we become aware of security issues affecting other projects that has never affected Zebra or Zcash, our intention is to inform those projects of security issues on a best effort basis.
