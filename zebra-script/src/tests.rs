@@ -434,6 +434,171 @@ fn sighash_divergence_v5_p2pkh_malformed_0x84_wrong_canonical_type_rejected() {
     );
 }
 
+/// Build a V5 transaction with two transparent inputs and one transparent output,
+/// sign the input at `signed_input_index` with SIGHASH_SINGLE (or
+/// SIGHASH_SINGLE|ANYONECANPAY when `anyone_can_pay` is set) using whatever
+/// digest Zebra computes for that input, and run that input through the script
+/// verifier.
+///
+/// This reproduces the ZIP-244 §S.2a "no corresponding output" scenario from
+/// GHSA-cwfq-rfcr-8hmp: the transaction has fewer transparent outputs than
+/// inputs, so for `signed_input_index >= 1` there is no `vout[k]` for the input
+/// being signed. `zcashd` rejects this at script verification; before the fix,
+/// Zebra accepted it because librustzcash returned a digest computed from an
+/// empty output list instead of failing.
+fn build_and_verify_v5_p2pkh_single_with_missing_output(
+    signed_input_index: usize,
+    anyone_can_pay: bool,
+) -> std::result::Result<(), crate::Error> {
+    use ripemd::{Digest as _, Ripemd160};
+    use secp256k1::{Message, Secp256k1, SecretKey};
+    use sha2::Sha256;
+
+    assert!(signed_input_index < 2, "test fixture only has two inputs");
+
+    let secp = Secp256k1::new();
+    let secret_key = SecretKey::from_slice(&[0xcd; 32]).expect("valid secret key");
+    let public_key = secp256k1::PublicKey::from_secret_key(&secp, &secret_key);
+    let pubkey_bytes = public_key.serialize();
+
+    // Standard P2PKH lock script reused for every prevout.
+    let sha_hash = Sha256::digest(pubkey_bytes);
+    let pub_key_hash: [u8; 20] = Ripemd160::digest(sha_hash).into();
+    let mut lock_script_bytes = vec![0x76, 0xa9, 0x14];
+    lock_script_bytes.extend_from_slice(&pub_key_hash);
+    lock_script_bytes.push(0x88);
+    lock_script_bytes.push(0xac);
+    let lock_script = transparent::Script::new(&lock_script_bytes);
+
+    let prevout = || transparent::Output {
+        value: 1_0000_0000u64.try_into().expect("valid amount"),
+        lock_script: lock_script.clone(),
+    };
+    let all_previous_outputs = Arc::new(vec![prevout(), prevout()]);
+
+    // Two inputs, one output: any input at index >= 1 has no corresponding
+    // output for SIGHASH_SINGLE.
+    let make_tx = |unlock_scripts: [Vec<u8>; 2]| Transaction::V5 {
+        network_upgrade: NetworkUpgrade::Nu5,
+        lock_time: LockTime::unlocked(),
+        expiry_height: block::Height(0),
+        inputs: vec![
+            transparent::Input::PrevOut {
+                outpoint: transparent::OutPoint {
+                    hash: transaction::Hash([0u8; 32]),
+                    index: 0,
+                },
+                unlock_script: transparent::Script::new(&unlock_scripts[0]),
+                sequence: u32::MAX,
+            },
+            transparent::Input::PrevOut {
+                outpoint: transparent::OutPoint {
+                    hash: transaction::Hash([1u8; 32]),
+                    index: 0,
+                },
+                unlock_script: transparent::Script::new(&unlock_scripts[1]),
+                sequence: u32::MAX,
+            },
+        ],
+        outputs: vec![transparent::Output {
+            value: 1_5000_0000u64.try_into().expect("valid amount"),
+            lock_script: transparent::Script::new(&[0x00]),
+        }],
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    };
+
+    let placeholder_tx = make_tx([Vec::new(), Vec::new()]);
+
+    let canonical_hash_type = if anyone_can_pay {
+        HashType::SINGLE | HashType::ANYONECANPAY
+    } else {
+        HashType::SINGLE
+    };
+    let raw_hash_type_byte = if anyone_can_pay { 0x83u8 } else { 0x03u8 };
+
+    let sighasher = SigHasher::new(
+        &placeholder_tx,
+        NetworkUpgrade::Nu5,
+        all_previous_outputs.clone(),
+    )
+    .expect("sighasher creation should succeed");
+    let sighash = sighasher.sighash(
+        canonical_hash_type,
+        Some((signed_input_index, lock_script_bytes.clone())),
+    );
+
+    let msg = Message::from_digest(*sighash.as_ref());
+    let signature = secp.sign_ecdsa(&msg, &secret_key);
+    let der_sig = signature.serialize_der();
+
+    let mut signed_unlock = Vec::new();
+    signed_unlock.push((der_sig.len() + 1) as u8);
+    signed_unlock.extend_from_slice(&der_sig);
+    signed_unlock.push(raw_hash_type_byte);
+    signed_unlock.push(pubkey_bytes.len() as u8);
+    signed_unlock.extend_from_slice(&pubkey_bytes);
+
+    // Other input is left empty; it isn't being verified by this call.
+    let mut unlock_scripts: [Vec<u8>; 2] = [Vec::new(), Vec::new()];
+    unlock_scripts[signed_input_index] = signed_unlock;
+
+    let final_tx = make_tx(unlock_scripts);
+
+    let verifier = super::CachedFfiTransaction::new(
+        Arc::new(final_tx),
+        all_previous_outputs,
+        NetworkUpgrade::Nu5,
+    )
+    .expect("network upgrade should be valid for v5 tx");
+    verifier.is_valid(signed_input_index)
+}
+
+/// V5 SIGHASH_SINGLE on input 1 of a 2-in/1-out transaction must be rejected:
+/// there is no `vout[1]` to commit to.
+///
+/// Before the fix, Zebra accepted this because librustzcash returns a digest
+/// computed from an empty output list when the input index is past the output
+/// vector. ZIP-244 §S.2a requires consensus-level rejection; zcashd enforces it.
+#[test]
+fn sighash_divergence_v5_sighash_single_no_corresponding_output_rejected() {
+    let _init_guard = zebra_test::init();
+
+    let result = build_and_verify_v5_p2pkh_single_with_missing_output(1, false);
+
+    assert!(
+        result.is_err(),
+        "V5 SIGHASH_SINGLE with no corresponding output must fail script verification, \
+         matching zcashd (ZIP-244 §S.2a)"
+    );
+}
+
+/// Same as above with SIGHASH_SINGLE|ANYONECANPAY (0x83). The
+/// corresponding-output rule applies regardless of the ANYONECANPAY flag.
+#[test]
+fn sighash_divergence_v5_sighash_single_anyonecanpay_no_corresponding_output_rejected() {
+    let _init_guard = zebra_test::init();
+
+    let result = build_and_verify_v5_p2pkh_single_with_missing_output(1, true);
+
+    assert!(
+        result.is_err(),
+        "V5 SIGHASH_SINGLE|ANYONECANPAY with no corresponding output must fail script \
+         verification, matching zcashd (ZIP-244 §S.2a)"
+    );
+}
+
+/// Positive control: SIGHASH_SINGLE on input 0 of a 2-in/1-out transaction is
+/// valid because `vout[0]` exists. This guards against the new check rejecting
+/// legitimate SIGHASH_SINGLE spends.
+#[test]
+fn sighash_divergence_v5_sighash_single_with_corresponding_output_accepted() {
+    let _init_guard = zebra_test::init();
+
+    build_and_verify_v5_p2pkh_single_with_missing_output(0, false)
+        .expect("V5 SIGHASH_SINGLE on an input with a corresponding output should be accepted");
+}
+
 /// Build a V4 P2PKH transparent spend, sign it under the supplied raw `hash_type`
 /// byte using the V4 raw-byte sighash semantics, and run it through the script
 /// verifier.
