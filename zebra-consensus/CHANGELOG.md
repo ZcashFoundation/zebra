@@ -5,7 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [6.0.0] - 2026-05-01
+
+### Added
+
+- `groth16`:
+  - `Item::from_joinsplit(joinsplit, joinsplit_pub_key) -> Result<Self, TransactionError>`,
+    replacing the removed `Description`-based conversions.
+
+### Removed
+
+- `groth16` (trimmed after the Sapling migration to `bellman`-free verification):
+  - `DescriptionWrapper`
+  - `SAPLING`
+  - `Description` trait
+  - `impl Description for (&sprout::joinsplit::JoinSplit<Groth16Proof>, &VerificationKeyBytes)`
+  - `impl TryFrom<DescriptionWrapper<&T>> for Item` (use `Item::from_joinsplit` instead).
 
 ## [5.0.2] - 2026-04-17
 
