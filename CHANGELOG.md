@@ -5,6 +5,22 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 4.4.1](https://github.com/ZcashFoundation/zebra/releases/tag/v4.4.1) - 2026-05-04
+
+This release fixes one critical security issue. We recommend node operators update to
+4.4.1.
+
+### Security
+
+- Reject V5 transparent inputs signed with `SIGHASH_SINGLE` (or
+  `SIGHASH_SINGLE|ANYONECANPAY`) when the input has no transparent output at the
+  same index
+  ([GHSA-pvmv-cwg8-v6c8](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-pvmv-cwg8-v6c8)).
+  Follow-up to
+  [GHSA-cwfq-rfcr-8hmp](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-cwfq-rfcr-8hmp).
+
+Thanks to @sangsoo-osec, @zmanian, and @fivelittleducks for reporting the issue.
+
 ## [Zebra 4.4.0](https://github.com/ZcashFoundation/zebra/releases/tag/v4.4.0) - 2026-05-01
 
 This release includes several security and bug fixes. We recommend node
