@@ -2232,31 +2232,31 @@ version = "0.7.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zebra-chain]]
-version = "6.0.2"
+version = "7.0.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zebra-consensus]]
-version = "5.0.2"
+version = "6.0.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zebra-network]]
-version = "5.0.1"
+version = "6.0.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zebra-node-services]]
-version = "4.0.0"
+version = "5.0.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zebra-rpc]]
-version = "6.0.2"
+version = "7.0.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zebra-script]]
-version = "5.0.1"
+version = "6.0.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zebra-state]]
-version = "5.0.0"
+version = "6.0.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zebra-test]]
@@ -2264,11 +2264,11 @@ version = "3.0.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zebra-utils]]
-version = "5.0.0"
+version = "6.0.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zebrad]]
-version = "4.3.1"
+version = "4.4.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zerocopy]]

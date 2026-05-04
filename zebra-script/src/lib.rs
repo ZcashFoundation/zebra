@@ -190,6 +190,19 @@ impl CachedFfiTransaction {
                         }
                     }
 
+                    // For v5+ transactions: reject SIGHASH_SINGLE when there is
+                    // no corresponding output (an output at the same index as
+                    // the input being verified). ZIP-244 §S.2a marks this as a
+                    // consensus failure; zcashd throws in `SignatureHash` and
+                    // `CheckSig` catches the exception to fail the script.
+                    if self.transaction.version() >= 5
+                        && hash_type.signed_outputs()
+                            == zcash_script::signature::SignedOutputs::Single
+                        && input_index >= self.transaction.outputs().len()
+                    {
+                        return None;
+                    }
+
                     let script_code_vec = script_code.0.clone();
 
                     // For pre-v5 (v4) transactions: zcashd serializes the raw

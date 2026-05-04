@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.0.1] - 2026-05-04
+
+This release fixes one security issue:
+
+- Reject V5 transparent inputs signed with `SIGHASH_SINGLE` (or
+  `SIGHASH_SINGLE|ANYONECANPAY`) when the input has no transparent output at the
+  same index
+  ([GHSA-pvmv-cwg8-v6c8](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-pvmv-cwg8-v6c8)).
+  Follow-up to
+  [GHSA-cwfq-rfcr-8hmp](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-cwfq-rfcr-8hmp).
+
+The impact of the issue for crate users will depend on the particular usage;
+if you use it as a building block for a consensus node, you should update.
+
+No public-API changes; internal-only fix.
+
 ## [6.0.0] - 2026-05-01
 
 This release fixes an important security issue:

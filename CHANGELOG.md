@@ -11,6 +11,22 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 - Startup warning on Linux when `net.ipv4.tcp_slow_start_after_idle` is enabled (which resets TCP congestion windows between block requests and significantly reduces single-peer block-propagation throughput on long-haul links), with a "Linux TCP tuning for block propagation" troubleshooting section ([#10513](https://github.com/ZcashFoundation/zebra/pull/10513))
 
+## [Zebra 4.4.1](https://github.com/ZcashFoundation/zebra/releases/tag/v4.4.1) - 2026-05-04
+
+This release fixes one critical security issue. We recommend node operators update to
+4.4.1.
+
+### Security
+
+- Reject V5 transparent inputs signed with `SIGHASH_SINGLE` (or
+  `SIGHASH_SINGLE|ANYONECANPAY`) when the input has no transparent output at the
+  same index
+  ([GHSA-pvmv-cwg8-v6c8](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-pvmv-cwg8-v6c8)).
+  Follow-up to
+  [GHSA-cwfq-rfcr-8hmp](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-cwfq-rfcr-8hmp).
+
+Thanks to @sangsoo-osec, @zmanian, and @fivelittleducks for reporting the issue.
+
 ## [Zebra 4.4.0](https://github.com/ZcashFoundation/zebra/releases/tag/v4.4.0) - 2026-05-01
 
 This release includes several security and bug fixes. We recommend node
