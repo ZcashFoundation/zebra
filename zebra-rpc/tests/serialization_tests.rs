@@ -812,7 +812,7 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
         let proof = bundle.proof().clone();
         let binding_sig = bundle.binding_sig();
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-        let burn_exists = bundle.burn_exists();
+        let burn_exists = *bundle.burn_exists();
         Orchard::new(
             actions,
             value_balance,
@@ -852,7 +852,7 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
     let block_hash = tx.block_hash();
     let block_time = tx.block_time();
     #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-    let issuance_exists = tx.issuance_exists();
+    let issuance_exists = *tx.issuance_exists();
 
     let new_obj = GetRawTransactionResponse::Object(Box::new(TransactionObject::new(
         in_active_chain,

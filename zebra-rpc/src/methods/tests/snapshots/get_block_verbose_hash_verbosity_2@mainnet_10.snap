@@ -56,8 +56,7 @@ expression: block
       "orchard": {
         "actions": [],
         "valueBalance": 0.0,
-        "valueBalanceZat": 0,
-        "burnexists": false
+        "valueBalanceZat": 0
       },
       "valueBalance": 0.0,
       "valueBalanceZat": 0,
@@ -68,8 +67,7 @@ expression: block
       "version": 1,
       "locktime": 0,
       "blockhash": "0007bc227e1c57a4a70e237cad00e7b7ce565155ab49166bc57397a26d339283",
-      "blocktime": 1477671596,
-      "issuanceexists": false
+      "blocktime": 1477671596
     }
   ],
   "time": 1477671596,

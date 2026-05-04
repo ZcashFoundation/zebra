@@ -302,9 +302,12 @@ pub struct TransactionObject {
 
     /// Whether this transaction contains OrchardZSA issuance data.
     #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-    #[serde(rename = "issuanceexists")]
-    #[getter(copy)]
-    pub(crate) issuance_exists: bool,
+    #[serde(
+        rename = "issuanceexists",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub(crate) issuance_exists: Option<bool>,
 }
 
 /// The transparent input of a transaction.
@@ -594,9 +597,12 @@ pub struct Orchard {
     binding_sig: Option<[u8; 64]>,
     /// Whether OrchardZSA burn data is present.
     #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-    #[serde(rename = "burnexists")]
-    #[getter(copy)]
-    pub(crate) burn_exists: bool,
+    #[serde(
+        rename = "burnexists",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub(crate) burn_exists: Option<bool>,
 }
 
 impl Orchard {
@@ -605,6 +611,7 @@ impl Orchard {
     fn from_shielded_data<Flavor: orchard::ShieldedDataFlavor>(
         shielded_data: &orchard::ShieldedData<Flavor>,
         value_balance: Amount<NegativeAllowed>,
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))] burn_exists: Option<bool>,
     ) -> Self {
         Self {
             actions: shielded_data
@@ -643,7 +650,7 @@ impl Orchard {
             proof: Some(shielded_data.proof.bytes_in_display_order()),
             binding_sig: Some(shielded_data.binding_sig.into()),
             #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            burn_exists: !shielded_data.burn.as_ref().is_empty(),
+            burn_exists,
         }
     }
 }
@@ -725,7 +732,7 @@ impl Default for TransactionObject {
             block_hash: None,
             block_time: None,
             #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            issuance_exists: false,
+            issuance_exists: None,
         }
     }
 }
@@ -934,6 +941,8 @@ impl TransactionObject {
                         Orchard::from_shielded_data(
                             data,
                             tx.orchard_value_balance().orchard_amount(),
+                            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+                            None,
                         )
                     }),
                     #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
@@ -944,6 +953,7 @@ impl TransactionObject {
                         Orchard::from_shielded_data(
                             data,
                             tx.orchard_value_balance().orchard_amount(),
+                            Some(!data.burn.as_ref().is_empty()),
                         )
                     }),
                     _ => None,
@@ -977,7 +987,13 @@ impl TransactionObject {
             block_hash,
             block_time,
             #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-            issuance_exists: tx.orchard_zsa_issue_data().is_some(),
+            issuance_exists: match tx.as_ref() {
+                Transaction::V6 {
+                    orchard_zsa_issue_data,
+                    ..
+                } => Some(orchard_zsa_issue_data.is_some()),
+                _ => None,
+            },
         }
     }
 }

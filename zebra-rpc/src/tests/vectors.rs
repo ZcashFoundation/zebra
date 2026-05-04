@@ -39,7 +39,7 @@ pub fn test_transaction_serialization() {
         block_hash: None,
         block_time: None,
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-        issuance_exists: false,
+        issuance_exists: None,
     }));
 
     assert_eq!(
@@ -76,7 +76,7 @@ pub fn test_transaction_serialization() {
         block_hash: None,
         block_time: None,
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-        issuance_exists: false,
+        issuance_exists: None,
     }));
 
     assert_eq!(
