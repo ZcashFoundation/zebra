@@ -852,6 +852,8 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
     let block_hash = tx.block_hash();
     let block_time = tx.block_time();
     #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+    let zip233_amount = tx.zip233_amount();
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
     let issuance_exists = *tx.issuance_exists();
 
     let new_obj = GetRawTransactionResponse::Object(Box::new(TransactionObject::new(
@@ -881,6 +883,8 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
         expiry_height,
         block_hash,
         block_time,
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+        zip233_amount,
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         issuance_exists,
     )));

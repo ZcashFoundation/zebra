@@ -39,6 +39,8 @@ pub fn test_transaction_serialization() {
         block_hash: None,
         block_time: None,
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+        zip233_amount: None,
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         issuance_exists: None,
     }));
 
@@ -75,6 +77,8 @@ pub fn test_transaction_serialization() {
         expiry_height: None,
         block_hash: None,
         block_time: None,
+        #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+        zip233_amount: None,
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         issuance_exists: None,
     }));

@@ -300,6 +300,16 @@ pub struct TransactionObject {
     #[getter(copy)]
     pub(crate) block_time: Option<i64>,
 
+    /// The burn amount for this transaction, if any.
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+    #[serde(
+        rename = "zip233amount",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    #[getter(copy)]
+    pub(crate) zip233_amount: Option<Amount<NonNegative>>,
+
     /// Whether this transaction contains OrchardZSA issuance data.
     #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
     #[serde(
@@ -732,6 +742,8 @@ impl Default for TransactionObject {
             block_hash: None,
             block_time: None,
             #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            zip233_amount: None,
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             issuance_exists: None,
         }
     }
@@ -986,6 +998,11 @@ impl TransactionObject {
             },
             block_hash,
             block_time,
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            zip233_amount: match tx.as_ref() {
+                Transaction::V6 { zip233_amount, .. } => Some(*zip233_amount),
+                _ => None,
+            },
             #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             issuance_exists: match tx.as_ref() {
                 Transaction::V6 {
