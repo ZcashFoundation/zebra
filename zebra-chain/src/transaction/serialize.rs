@@ -1027,8 +1027,9 @@ impl ZcashDeserialize for Transaction {
                 // Tachyon bundle. `TachyonBundle::read` consumes the
                 // `tachyonBundleState` byte and returns `None` for 0x00 or
                 // `Some(stamped|stripped)` for 0x01/0x02.
-                let tachyon_shielded_data = zcash_tachyon::TachyonBundle::read(&mut limited_reader)?
-                    .map(crate::transaction::TachyonShieldedData);
+                let tachyon_shielded_data =
+                    zcash_tachyon::TachyonBundle::read(&mut limited_reader)?
+                        .map(crate::transaction::TachyonShieldedData);
 
                 Ok(Transaction::V6 {
                     network_upgrade,
@@ -1039,7 +1040,7 @@ impl ZcashDeserialize for Transaction {
                     outputs,
                     sapling_shielded_data,
                     orchard_shielded_data,
-                    tachyon_shielded_data
+                    tachyon_shielded_data,
                 })
             }
             (_, _) => Err(SerializationError::Parse("bad tx header")),

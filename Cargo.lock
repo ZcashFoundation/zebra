@@ -1080,13 +1080,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
-name = "core2"
-version = "0.3.3"
+name = "corez"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "239fa3ae9b63c2dc74bd3fa852d4792b8b305ae64eeede946265b6af62f1fff3"
-dependencies = [
- "memchr",
-]
+checksum = "4df6f98652d30167eaeea34d77b730e07c8caba6df17bd4551842b9b8da01deb"
 
 [[package]]
 name = "cpufeatures"
@@ -1549,12 +1546,12 @@ dependencies = [
 
 [[package]]
 name = "equihash"
-version = "0.2.2"
-source = "git+https://github.com/S1nus/librustzcash.git?rev=ecee16972f87370773fe167d4c97ba3fecd891ca#ecee16972f87370773fe167d4c97ba3fecd891ca"
+version = "0.3.0"
+source = "git+https://github.com/tachyon-zcash/librustzcash.git?rev=f0d6caac797792c0b3eed70422ebc8126b751d4f#f0d6caac797792c0b3eed70422ebc8126b751d4f"
 dependencies = [
  "blake2b_simd",
  "cc",
- "core2",
+ "corez",
  "document-features",
 ]
 
@@ -1597,7 +1594,7 @@ dependencies = [
 [[package]]
 name = "f4jumble"
 version = "0.1.1"
-source = "git+https://github.com/S1nus/librustzcash.git?rev=ecee16972f87370773fe167d4c97ba3fecd891ca#ecee16972f87370773fe167d4c97ba3fecd891ca"
+source = "git+https://github.com/tachyon-zcash/librustzcash.git?rev=f0d6caac797792c0b3eed70422ebc8126b751d4f#f0d6caac797792c0b3eed70422ebc8126b751d4f"
 dependencies = [
  "blake2b_simd",
 ]
@@ -3016,7 +3013,7 @@ dependencies = [
 [[package]]
 name = "mock_ragu"
 version = "0.0.0"
-source = "git+https://github.com/tachyon-zcash/tachyon.git?rev=38b3e16ae68b3114e091af36ad68b657d18ac4e9#38b3e16ae68b3114e091af36ad68b657d18ac4e9"
+source = "git+https://github.com/tachyon-zcash/tachyon.git?rev=b537e18b52c54dd2abf426585a22653b6ae3e14e#b537e18b52c54dd2abf426585a22653b6ae3e14e"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -3193,14 +3190,14 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "orchard"
-version = "0.12.0"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c01cd4ea711aab5f263f2b7aa6966687a2d6c7df4f78eb1b97a66a7a4e78e3b"
+checksum = "497e74492624a1d1cc8c9675a7afb17b430d32fd9efc171513d0840140b5f0c7"
 dependencies = [
  "aes",
  "bitvec",
  "blake2b_simd",
- "core2",
+ "corez",
  "ff",
  "fpe",
  "getset",
@@ -4419,9 +4416,9 @@ dependencies = [
 
 [[package]]
 name = "sapling-crypto"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5433ab8c1cd52dfad3b903143e371d5bdd514ab7952f71414e6d66a5da8223cd"
+checksum = "2d70756ede56b5e4dd417979777bd87ddb83dfcbd0815dbf8175a9920537f8a0"
 dependencies = [
  "aes",
  "bellman",
@@ -4429,7 +4426,7 @@ dependencies = [
  "blake2b_simd",
  "blake2s_simd",
  "bls12_381",
- "core2",
+ "corez",
  "document-features",
  "ff",
  "fpe",
@@ -6556,12 +6553,12 @@ dependencies = [
 
 [[package]]
 name = "zcash_address"
-version = "0.10.1"
-source = "git+https://github.com/S1nus/librustzcash.git?rev=ecee16972f87370773fe167d4c97ba3fecd891ca#ecee16972f87370773fe167d4c97ba3fecd891ca"
+version = "0.11.0"
+source = "git+https://github.com/tachyon-zcash/librustzcash.git?rev=f0d6caac797792c0b3eed70422ebc8126b751d4f#f0d6caac797792c0b3eed70422ebc8126b751d4f"
 dependencies = [
  "bech32",
  "bs58",
- "core2",
+ "corez",
  "f4jumble",
  "zcash_encoding",
  "zcash_protocol",
@@ -6569,10 +6566,10 @@ dependencies = [
 
 [[package]]
 name = "zcash_encoding"
-version = "0.3.0"
-source = "git+https://github.com/S1nus/librustzcash.git?rev=ecee16972f87370773fe167d4c97ba3fecd891ca#ecee16972f87370773fe167d4c97ba3fecd891ca"
+version = "0.4.0"
+source = "git+https://github.com/tachyon-zcash/librustzcash.git?rev=f0d6caac797792c0b3eed70422ebc8126b751d4f#f0d6caac797792c0b3eed70422ebc8126b751d4f"
 dependencies = [
- "core2",
+ "corez",
  "hex",
  "nonempty",
 ]
@@ -6580,7 +6577,7 @@ dependencies = [
 [[package]]
 name = "zcash_history"
 version = "0.4.0"
-source = "git+https://github.com/S1nus/librustzcash.git?rev=ecee16972f87370773fe167d4c97ba3fecd891ca#ecee16972f87370773fe167d4c97ba3fecd891ca"
+source = "git+https://github.com/tachyon-zcash/librustzcash.git?rev=f0d6caac797792c0b3eed70422ebc8126b751d4f#f0d6caac797792c0b3eed70422ebc8126b751d4f"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -6589,14 +6586,14 @@ dependencies = [
 
 [[package]]
 name = "zcash_keys"
-version = "0.12.0"
-source = "git+https://github.com/S1nus/librustzcash.git?rev=ecee16972f87370773fe167d4c97ba3fecd891ca#ecee16972f87370773fe167d4c97ba3fecd891ca"
+version = "0.13.0"
+source = "git+https://github.com/tachyon-zcash/librustzcash.git?rev=f0d6caac797792c0b3eed70422ebc8126b751d4f#f0d6caac797792c0b3eed70422ebc8126b751d4f"
 dependencies = [
  "bech32",
  "blake2b_simd",
  "bls12_381",
  "bs58",
- "core2",
+ "corez",
  "document-features",
  "group",
  "memuse",
@@ -6629,21 +6626,16 @@ dependencies = [
 
 [[package]]
 name = "zcash_primitives"
-version = "0.26.4"
-source = "git+https://github.com/S1nus/librustzcash.git?rev=ecee16972f87370773fe167d4c97ba3fecd891ca#ecee16972f87370773fe167d4c97ba3fecd891ca"
+version = "0.27.0"
+source = "git+https://github.com/tachyon-zcash/librustzcash.git?rev=f0d6caac797792c0b3eed70422ebc8126b751d4f#f0d6caac797792c0b3eed70422ebc8126b751d4f"
 dependencies = [
- "bip32",
  "blake2b_simd",
  "block-buffer 0.11.0-rc.3",
- "bs58",
- "core2",
+ "corez",
  "crypto-common 0.2.0-rc.1",
  "document-features",
  "equihash",
  "ff",
- "fpe",
- "getset",
- "group",
  "hex",
  "incrementalmerkletree",
  "jubjub",
@@ -6651,30 +6643,23 @@ dependencies = [
  "nonempty",
  "orchard",
  "pasta_curves",
- "rand 0.8.5",
  "rand_core 0.6.4",
  "redjubjub",
- "ripemd 0.1.3",
  "sapling-crypto",
  "secp256k1",
  "sha2 0.10.9",
- "subtle",
- "tracing",
- "zcash_address",
  "zcash_encoding",
  "zcash_note_encryption",
  "zcash_protocol",
  "zcash_script",
- "zcash_spec",
  "zcash_tachyon",
  "zcash_transparent",
- "zip32",
 ]
 
 [[package]]
 name = "zcash_proofs"
-version = "0.26.1"
-source = "git+https://github.com/S1nus/librustzcash.git?rev=ecee16972f87370773fe167d4c97ba3fecd891ca#ecee16972f87370773fe167d4c97ba3fecd891ca"
+version = "0.27.0"
+source = "git+https://github.com/tachyon-zcash/librustzcash.git?rev=f0d6caac797792c0b3eed70422ebc8126b751d4f#f0d6caac797792c0b3eed70422ebc8126b751d4f"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -6695,10 +6680,10 @@ dependencies = [
 
 [[package]]
 name = "zcash_protocol"
-version = "0.7.2"
-source = "git+https://github.com/S1nus/librustzcash.git?rev=ecee16972f87370773fe167d4c97ba3fecd891ca#ecee16972f87370773fe167d4c97ba3fecd891ca"
+version = "0.8.0"
+source = "git+https://github.com/tachyon-zcash/librustzcash.git?rev=f0d6caac797792c0b3eed70422ebc8126b751d4f#f0d6caac797792c0b3eed70422ebc8126b751d4f"
 dependencies = [
- "core2",
+ "corez",
  "document-features",
  "hex",
  "memuse",
@@ -6707,9 +6692,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_script"
-version = "0.4.2"
+version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9bed6cf5b2b4361105d4ea06b2752f0c8af4641756c7fbc9858a80af186c234f"
+checksum = "774d808ab619b0f1887d7b90cd815c356101698d16aa681f3d2d9dea063de475"
 dependencies = [
  "bip32",
  "bitflags 2.9.4",
@@ -6734,10 +6719,10 @@ dependencies = [
 [[package]]
 name = "zcash_tachyon"
 version = "0.0.0"
-source = "git+https://github.com/tachyon-zcash/tachyon.git?rev=38b3e16ae68b3114e091af36ad68b657d18ac4e9#38b3e16ae68b3114e091af36ad68b657d18ac4e9"
+source = "git+https://github.com/tachyon-zcash/tachyon.git?rev=b537e18b52c54dd2abf426585a22653b6ae3e14e#b537e18b52c54dd2abf426585a22653b6ae3e14e"
 dependencies = [
  "blake2b_simd",
- "core2",
+ "corez",
  "ff",
  "group",
  "halo2_poseidon",
@@ -6750,13 +6735,12 @@ dependencies = [
 
 [[package]]
 name = "zcash_transparent"
-version = "0.6.3"
-source = "git+https://github.com/S1nus/librustzcash.git?rev=ecee16972f87370773fe167d4c97ba3fecd891ca#ecee16972f87370773fe167d4c97ba3fecd891ca"
+version = "0.7.0"
+source = "git+https://github.com/tachyon-zcash/librustzcash.git?rev=f0d6caac797792c0b3eed70422ebc8126b751d4f#f0d6caac797792c0b3eed70422ebc8126b751d4f"
 dependencies = [
  "bip32",
- "blake2b_simd",
  "bs58",
- "core2",
+ "corez",
  "document-features",
  "getset",
  "hex",

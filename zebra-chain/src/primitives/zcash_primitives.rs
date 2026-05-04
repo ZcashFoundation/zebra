@@ -316,8 +316,13 @@ pub(crate) fn sighash(
             let output = &precomputed_tx_data.all_previous_outputs[input_index];
             lock_script = output.lock_script.clone().into();
             unlock_script = zcash_transparent::address::Script(script::Code(script_code));
+            let transparent_bundle = precomputed_tx_data
+                .tx_data
+                .transparent_bundle()
+                .expect("transparent bundle is present when signing a transparent input");
             zp_tx::sighash::SignableInput::Transparent(
                 zcash_transparent::sighash::SignableInput::from_parts(
+                    transparent_bundle,
                     hash_type.try_into().expect("hash type should be ALL"),
                     input_index,
                     &unlock_script,
@@ -326,7 +331,8 @@ pub(crate) fn sighash(
                         .value
                         .try_into()
                         .expect("amount was previously validated"),
-                ),
+                )
+                .expect("input index was previously validated"),
             )
         }
         None => zp_tx::sighash::SignableInput::Shielded,

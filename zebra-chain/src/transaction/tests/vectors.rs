@@ -1220,9 +1220,7 @@ mod v6_tests {
         ];
 
         for (name, tx) in test_cases {
-            let bytes = tx
-                .zcash_serialize_to_vec()
-                .expect("tx should serialize");
+            let bytes = tx.zcash_serialize_to_vec().expect("tx should serialize");
 
             let tx2: Transaction = bytes
                 .zcash_deserialize_into()
@@ -1258,11 +1256,13 @@ mod v6_tests {
         ];
 
         for (name, tx, expected_hex) in test_cases {
-            let bytes = tx
-                .zcash_serialize_to_vec()
-                .expect("tx should serialize");
+            let bytes = tx.zcash_serialize_to_vec().expect("tx should serialize");
 
-            assert_eq!(hex::encode(&bytes), *expected_hex, "{name} encoding mismatch");
+            assert_eq!(
+                hex::encode(&bytes),
+                *expected_hex,
+                "{name} encoding mismatch"
+            );
         }
     }
 
