@@ -158,10 +158,36 @@ pub fn conventional_actions(transaction: &Transaction) -> u32 {
     let tx_in_logical_actions = div_ceil(tx_in_total_size, P2PKH_STANDARD_INPUT_SIZE);
     let tx_out_logical_actions = div_ceil(tx_out_total_size, P2PKH_STANDARD_OUTPUT_SIZE);
 
+    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+    let n_issue_actions = {
+        use zcash_primitives::transaction::fees::zip317::CREATION_COST;
+
+        let n_issue_notes = transaction
+            .orchard_zsa_issue_data()
+            .map_or(0, |issue_data| issue_data.inner().get_all_notes().len());
+
+        // TODO: Calculate the real `n_asset_creations`.
+        //
+        // This is simplified to zero for now because ZIP-317 defines `nAssetCreations` using
+        // the Global Issuance State, so it cannot be calculated from the transaction alone.
+        // Doing the exact calculation requires additional logic for querying the state task
+        // from the consensus task.
+        //
+        // See also the ZIP-317 fee calculation in librustzcash:
+        // zcash_primitives/src/transaction/fees/zip317.rs, FeeRule::fee_required
+        let n_asset_creations = 0;
+
+        n_issue_notes + (CREATION_COST * n_asset_creations)
+    };
+
+    #[cfg(not(all(zcash_unstable = "nu7", feature = "tx_v6")))]
+    let n_issue_actions = 0;
+
     let logical_actions = max(tx_in_logical_actions, tx_out_logical_actions)
         + 2 * n_join_split
         + max(n_spends_sapling, n_outputs_sapling)
-        + n_actions_orchard;
+        + n_actions_orchard
+        + n_issue_actions;
 
     // TODO: Add ZSA issuance-related ZIP-317 terms to logical_actions formula, like:
     //
