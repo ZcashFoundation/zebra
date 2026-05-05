@@ -57,7 +57,9 @@ resource "aws_iam_policy" "ecr_ecs_policy" {
         ]
         Resource = [
           "arn:aws:iam::${var.aws_account_id}:role/${var.env}-zebra-ecs_execution_role",
-          "arn:aws:iam::${var.aws_account_id}:role/${var.env}-zebra-ecs_task_role"
+          "arn:aws:iam::${var.aws_account_id}:role/${var.env}-zebra-ecs_task_role",
+          "arn:aws:iam::${var.aws_account_id}:role/${var.env}-zebra-swaps-ecs_execution_role",
+          "arn:aws:iam::${var.aws_account_id}:role/${var.env}-zebra-swaps-ecs_task_role"
         ]
       }
     ]
