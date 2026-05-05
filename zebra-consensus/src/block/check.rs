@@ -258,9 +258,7 @@ pub fn subsidy_is_valid(
         //
         // [ZIP-271]: <https://zips.z.cash/zip-0271>
         // [ZIP-1016]: <https://zips.z.cash/zip-101>
-        if Some(height) == NetworkUpgrade::Nu6_1.activation_height(net)
-            && !net.lockbox_disbursements(height).is_empty()
-        {
+        if Some(height) == NetworkUpgrade::Nu6_1.activation_height(net) {
             let lockbox_disbursements = net.lockbox_disbursements(height);
 
             if lockbox_disbursements.is_empty() {
