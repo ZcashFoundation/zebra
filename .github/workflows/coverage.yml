@@ -46,7 +46,7 @@ jobs:
           toolchain: stable
           components: llvm-tools-preview
           cache-on-failure: true
-      - uses: taiki-e/install-action@055f5df8c3f65ea01cd41e9dc855becd88953486 #v2.75.18
+      - uses: taiki-e/install-action@cca35edeb1d01366c2843b68fc3ca441446d73d3 #v2.77.1
         with:
           tool: cargo-llvm-cov,nextest
       - uses: ./.github/actions/setup-zebra-build
