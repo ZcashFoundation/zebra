@@ -68,9 +68,7 @@ impl NetworkKind {
     pub fn b58_pubkey_address_prefix(self) -> [u8; 2] {
         match self {
             Self::Mainnet => mainnet_constants::B58_PUBKEY_ADDRESS_PREFIX,
-            Self::Testnet | Self::Regtest => {
-                testnet_constants::B58_PUBKEY_ADDRESS_PREFIX
-            }
+            Self::Testnet | Self::Regtest => testnet_constants::B58_PUBKEY_ADDRESS_PREFIX,
         }
     }
 
@@ -79,9 +77,7 @@ impl NetworkKind {
     pub fn b58_script_address_prefix(self) -> [u8; 2] {
         match self {
             Self::Mainnet => mainnet_constants::B58_SCRIPT_ADDRESS_PREFIX,
-            Self::Testnet | Self::Regtest => {
-                testnet_constants::B58_SCRIPT_ADDRESS_PREFIX
-            }
+            Self::Testnet | Self::Regtest => testnet_constants::B58_SCRIPT_ADDRESS_PREFIX,
         }
     }
 

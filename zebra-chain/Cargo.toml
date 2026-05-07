@@ -86,7 +86,7 @@ ff.workspace = true
 pasta_curves.workspace = true
 halo2 = { package = "halo2_proofs", version = "0.3" }
 orchard.workspace = true
-zcash_tachyon = { workspace = true, features = ["serde"] }
+zcash_tachyon = { workspace = true }
 zcash_encoding.workspace = true
 zcash_history.workspace = true
 zcash_note_encryption = { workspace = true }
@@ -154,6 +154,9 @@ rand = { workspace = true }
 rand_chacha = { workspace = true }
 
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
+
+# Used by V6 transaction test vectors to construct mock tachyon stamp proofs.
+mock_ragu = { workspace = true }
 
 zebra-test = { path = "../zebra-test/", version = "2.0.1" }
 

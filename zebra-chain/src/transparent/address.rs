@@ -197,30 +197,22 @@ impl ZcashDeserialize for Address {
         reader.read_exact(&mut hash_bytes)?;
 
         match version_bytes {
-            mainnet_constants::B58_SCRIPT_ADDRESS_PREFIX => {
-                Ok(Address::PayToScriptHash {
-                    network_kind: NetworkKind::Mainnet,
-                    script_hash: hash_bytes,
-                })
-            }
-            testnet_constants::B58_SCRIPT_ADDRESS_PREFIX => {
-                Ok(Address::PayToScriptHash {
-                    network_kind: NetworkKind::Testnet,
-                    script_hash: hash_bytes,
-                })
-            }
-            mainnet_constants::B58_PUBKEY_ADDRESS_PREFIX => {
-                Ok(Address::PayToPublicKeyHash {
-                    network_kind: NetworkKind::Mainnet,
-                    pub_key_hash: hash_bytes,
-                })
-            }
-            testnet_constants::B58_PUBKEY_ADDRESS_PREFIX => {
-                Ok(Address::PayToPublicKeyHash {
-                    network_kind: NetworkKind::Testnet,
-                    pub_key_hash: hash_bytes,
-                })
-            }
+            mainnet_constants::B58_SCRIPT_ADDRESS_PREFIX => Ok(Address::PayToScriptHash {
+                network_kind: NetworkKind::Mainnet,
+                script_hash: hash_bytes,
+            }),
+            testnet_constants::B58_SCRIPT_ADDRESS_PREFIX => Ok(Address::PayToScriptHash {
+                network_kind: NetworkKind::Testnet,
+                script_hash: hash_bytes,
+            }),
+            mainnet_constants::B58_PUBKEY_ADDRESS_PREFIX => Ok(Address::PayToPublicKeyHash {
+                network_kind: NetworkKind::Mainnet,
+                pub_key_hash: hash_bytes,
+            }),
+            testnet_constants::B58_PUBKEY_ADDRESS_PREFIX => Ok(Address::PayToPublicKeyHash {
+                network_kind: NetworkKind::Testnet,
+                pub_key_hash: hash_bytes,
+            }),
             _ => Err(SerializationError::Parse("bad t-addr version/type")),
         }
     }

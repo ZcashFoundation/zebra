@@ -333,6 +333,7 @@ fn mock_transparent_transaction(
             zip233_amount,
             sapling_shielded_data: None,
             orchard_shielded_data: None,
+            tachyon_shielded_data: None,
             network_upgrade,
         },
         invalid_version => unreachable!("invalid transaction version: {}", invalid_version),
