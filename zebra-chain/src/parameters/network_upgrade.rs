@@ -226,7 +226,8 @@ pub(crate) const CONSENSUS_BRANCH_IDS: &[(NetworkUpgrade, ConsensusBranchId)] = 
     (Nu5, ConsensusBranchId(0xc2d6d0b4)),
     (Nu6, ConsensusBranchId(0xc8e71055)),
     (Nu6_1, ConsensusBranchId(0x4dec4df0)),
-    #[cfg(zcash_unstable = "nu7")]
+    // Registered unconditionally so chain history works in builds without
+    // `zcash_unstable="nu7"`; Nu7-specific code paths remain cfg-gated elsewhere.
     (Nu7, ConsensusBranchId(0x77190ad8)),
     #[cfg(zcash_unstable = "zfuture")]
     (ZFuture, ConsensusBranchId(0xffffffff)),
