@@ -8,7 +8,7 @@ use thiserror::Error;
 use crate::{
     fmt::HexDebug,
     parameters::Network,
-    serialization::{TrustedPreallocate, MAX_PROTOCOL_MESSAGE_LEN},
+    serialization::{TrustedPreallocate, MAX_HEADERS_PER_MESSAGE},
     work::{difficulty::CompactDifficulty, equihash::Solution},
 };
 
@@ -152,17 +152,6 @@ pub struct CountedHeader {
     pub header: Arc<Header>,
 }
 
-/// The serialized size of a Zcash block header.
-///
-/// Includes the equihash input, 32-byte nonce, 3-byte equihash length field, and equihash solution.
-const BLOCK_HEADER_LENGTH: usize =
-    crate::work::equihash::Solution::INPUT_LENGTH + 32 + 3 + crate::work::equihash::SOLUTION_SIZE;
-
-/// The minimum size for a serialized CountedHeader.
-///
-/// A CountedHeader has BLOCK_HEADER_LENGTH bytes + 1 or more bytes for the transaction count
-pub(crate) const MIN_COUNTED_HEADER_LEN: usize = BLOCK_HEADER_LENGTH + 1;
-
 /// The Zcash accepted block version.
 ///
 /// The consensus rules do not force the block version to be this value but just equal or greater than it.
@@ -170,9 +159,14 @@ pub(crate) const MIN_COUNTED_HEADER_LEN: usize = BLOCK_HEADER_LENGTH + 1;
 pub const ZCASH_BLOCK_VERSION: u32 = 4;
 
 impl TrustedPreallocate for CountedHeader {
+    /// Cap `CountedHeader` preallocation at the existing protocol-level
+    /// constant `MAX_HEADERS_PER_MESSAGE = 160`. The previous return value was
+    /// derived from `MAX_PROTOCOL_MESSAGE_LEN`, allowing peer-controlled
+    /// preallocation amplification — same shape as GHSA-xr93-pcq3-pxf8 for
+    /// `AddrV1`/`AddrV2` (PR #10494).
     fn max_allocation() -> u64 {
-        // Every vector type requires a length field of at least one byte for de/serialization.
-        // Therefore, we can never receive more than (MAX_PROTOCOL_MESSAGE_LEN - 1) / MIN_COUNTED_HEADER_LEN counted headers in a single message
-        ((MAX_PROTOCOL_MESSAGE_LEN - 1) / MIN_COUNTED_HEADER_LEN) as u64
+        // Cast safe: MAX_HEADERS_PER_MESSAGE is the constant 160, which fits
+        // trivially in u64 on every platform.
+        MAX_HEADERS_PER_MESSAGE as u64
     }
 }
