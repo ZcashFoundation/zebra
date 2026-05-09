@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Security
+
+- Cap `block::Hash::max_allocation` at `MAX_BLOCK_LOCATOR_LENGTH = 101`
+  (matching Bitcoin Core's `MAX_LOCATOR_SZ` in `net_processing.cpp`) and
+  `CountedHeader::max_allocation` at the existing
+  `MAX_HEADERS_PER_MESSAGE = 160` constant (already enforced on the
+  sending side and at the codec level for `read_headers`). The previous
+  values were derived from `MAX_PROTOCOL_MESSAGE_LEN` and returned 65,535
+  and ~1,409 respectively, allowing a post-handshake peer to force ~2 MiB
+  of upfront `Vec` preallocation per `getblocks`/`getheaders` message
+  before any payload bytes were read. Same fix shape as
+  GHSA-xr93-pcq3-pxf8 for `AddrV1`/`AddrV2` (PR #10494). CWE-770.
+
 ### Added
 
 - Startup warning on Linux when `net.ipv4.tcp_slow_start_after_idle` is enabled (which resets TCP congestion windows between block requests and significantly reduces single-peer block-propagation throughput on long-haul links), with a "Linux TCP tuning for block propagation" troubleshooting section ([#10513](https://github.com/ZcashFoundation/zebra/pull/10513))
