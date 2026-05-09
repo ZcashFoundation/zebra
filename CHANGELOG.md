@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Security
+
+- Use `subtle::ConstantTimeEq` for the RPC cookie authentication comparison
+  in `zebra-rpc/src/server/cookie.rs`. The previous `String == String`
+  comparison lowered to a `memcmp`-style block-wise compare with early-exit
+  on the first mismatching word, providing a timing oracle a network-side
+  adversary could use to recover the 44-character base64 cookie. Mirrors
+  `zcashd`'s `TimingResistantEqual` in `src/httprpc.cpp` (originally Bitcoin
+  Core PR #6390, 2015). CWE-208.
+
 ### Added
 
 - Startup warning on Linux when `net.ipv4.tcp_slow_start_after_idle` is enabled (which resets TCP congestion windows between block requests and significantly reduces single-peer block-propagation throughput on long-haul links), with a "Linux TCP tuning for block propagation" troubleshooting section ([#10513](https://github.com/ZcashFoundation/zebra/pull/10513))
