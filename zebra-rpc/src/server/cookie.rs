@@ -3,6 +3,7 @@
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use color_eyre::Result;
 use rand::RngCore;
+use subtle::ConstantTimeEq;
 
 use std::{
     fs::{remove_file, File},
@@ -22,8 +23,17 @@ pub struct Cookie(String);
 
 impl Cookie {
     /// Checks if the given passwd matches the contents of the cookie.
+    ///
+    /// The comparison is constant-time over the cookie length so that a
+    /// network-side adversary cannot recover the cookie byte-by-byte by
+    /// observing how long the equality check takes. The early-exit short
+    /// circuit on a length mismatch is intentional: only the cookie *contents*
+    /// are secret, not its length (which is fixed by `Cookie::default`).
     pub fn authenticate(&self, passwd: String) -> bool {
-        *passwd == self.0
+        if passwd.len() != self.0.len() {
+            return false;
+        }
+        passwd.as_bytes().ct_eq(self.0.as_bytes()).into()
     }
 }
 
@@ -85,4 +95,52 @@ pub fn remove_from_disk(dir: &Path) -> Result<()> {
     tracing::info!("RPC auth cookie removed from disk");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper that constructs a `Cookie` from a known string, bypassing
+    /// `Default` so the test value is reproducible.
+    fn cookie_from(s: &str) -> Cookie {
+        Cookie(s.to_string())
+    }
+
+    #[test]
+    fn authenticate_accepts_exact_match() {
+        let cookie = cookie_from("correct-cookie");
+        assert!(cookie.authenticate("correct-cookie".to_string()));
+    }
+
+    #[test]
+    fn authenticate_rejects_wrong_content_same_length() {
+        let cookie = cookie_from("correct-cookie");
+        // Same length, different content — the length short-circuit must not
+        // accept this; the constant-time comparison must reject it.
+        assert!(!cookie.authenticate("CORRECT-COOKIE".to_string()));
+        assert!(!cookie.authenticate("xxxxxxx-cookie".to_string()));
+        assert!(!cookie.authenticate("correct-xxxxxx".to_string()));
+    }
+
+    #[test]
+    fn authenticate_rejects_wrong_length() {
+        let cookie = cookie_from("correct-cookie");
+        // Shorter and longer guesses must both be rejected without invoking
+        // the constant-time comparison on mismatched-length slices.
+        assert!(!cookie.authenticate("correct".to_string()));
+        assert!(!cookie.authenticate("correct-cookie-extra".to_string()));
+        assert!(!cookie.authenticate(String::new()));
+    }
+
+    #[test]
+    fn authenticate_rejects_prefix_only_match() {
+        // Regression guard for the timing-oracle class: a guess that matches
+        // the cookie's prefix but differs at a later byte must be rejected
+        // exactly like any other wrong guess.
+        let cookie = cookie_from("0123456789abcdef0123456789abcdef0123456789a");
+        let mut guess = "0123456789abcdef0123456789abcdef0123456789a".to_string();
+        guess.replace_range(40..41, "X");
+        assert!(!cookie.authenticate(guess));
+    }
 }

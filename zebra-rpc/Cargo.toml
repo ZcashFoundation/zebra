@@ -61,6 +61,8 @@ derive-new = { workspace = true }
 # RPC endpoint basic auth
 base64 = { workspace = true }
 rand = { workspace = true }
+# Constant-time cookie comparison to prevent a timing oracle on RPC auth.
+subtle = { workspace = true }
 
 # Error handling
 color-eyre = { workspace = true }
