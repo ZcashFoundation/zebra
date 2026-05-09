@@ -93,7 +93,11 @@ pub fn zcash_deserialize_external_count<R: io::Read, T: ZcashDeserialize + Trust
         // for 128 bit memory spaces.)
         Err(_) => return Err(SerializationError::Parse("Vector longer than u64::MAX")),
     }
-    let mut vec = Vec::with_capacity(external_count);
+    // Cap the upfront reservation. The Vec grows via push() as elements
+    // arrive, so a peer-supplied `external_count` can't force a large
+    // allocation before any data is read. Fixes the deserializer-level
+    // case of GHSA-xr93-pcq3-pxf8.
+    let mut vec = Vec::with_capacity(external_count.min(1024));
     for _ in 0..external_count {
         vec.push(T::zcash_deserialize(&mut reader)?);
     }
