@@ -728,6 +728,152 @@ async fn mempool_request_with_unmined_output_spends_is_accepted() {
     );
 }
 
+/// When a mempool transaction spends a mempool-only UTXO at input index 0 and a chain UTXO at
+/// index 1, `spent_outputs` must stay aligned with input order (regression guard for #10356).
+#[tokio::test]
+async fn mempool_spent_outputs_order_matches_inputs_for_mempool_then_chain_utxos() {
+    let _init_guard = zebra_test::init();
+
+    let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
+    let mempool: MockService<_, _, _, _> = MockService::build().for_prop_tests();
+    let (mempool_setup_tx, mempool_setup_rx) = tokio::sync::oneshot::channel();
+    let verifier = Verifier::new(&Network::Mainnet, state.clone(), mempool_setup_rx);
+    mempool_setup_tx
+        .send(mempool.clone())
+        .ok()
+        .expect("send should succeed");
+
+    let height = NetworkUpgrade::Canopy
+        .activation_height(&Network::Mainnet)
+        .expect("Canopy activation height is specified");
+    let fund_height = (height - 1).expect("fake source fund block height is too small");
+
+    let (input_mempool_first, output_mempool, mut merged_utxos) = mock_transparent_transfer(
+        fund_height,
+        true,
+        0,
+        Amount::try_from(10001).expect("invalid value"),
+    );
+    let (input_chain_second, output_chain, map_chain) = mock_transparent_transfer(
+        fund_height,
+        true,
+        1,
+        Amount::try_from(10001).expect("invalid value"),
+    );
+    merged_utxos.extend(map_chain);
+
+    let out_mempool = match &input_mempool_first {
+        transparent::Input::PrevOut { outpoint, .. } => *outpoint,
+        transparent::Input::Coinbase { .. } => panic!("expected prevout"),
+    };
+    let out_chain = match &input_chain_second {
+        transparent::Input::PrevOut { outpoint, .. } => *outpoint,
+        transparent::Input::Coinbase { .. } => panic!("expected prevout"),
+    };
+
+    let utxo_chain = merged_utxos
+        .get(&out_chain)
+        .expect("chain outpoint in merged map")
+        .utxo
+        .clone();
+    let utxo_mempool = merged_utxos
+        .get(&out_mempool)
+        .expect("mempool outpoint in merged map")
+        .utxo
+        .clone();
+    let expected_chain_output = utxo_chain.output.clone();
+    let expected_mempool_output = utxo_mempool.output.clone();
+
+    let tx = Transaction::V4 {
+        inputs: vec![input_mempool_first, input_chain_second],
+        outputs: vec![output_mempool, output_chain],
+        lock_time: LockTime::min_lock_time_timestamp(),
+        expiry_height: height,
+        joinsplit_data: None,
+        sapling_shielded_data: None,
+    };
+
+    tokio::spawn(async move {
+        state
+            .expect_request(zebra_state::Request::BestChainNextMedianTimePast)
+            .await
+            .expect("verifier asks median time past")
+            .respond(zebra_state::Response::BestChainNextMedianTimePast(
+                DateTime32::MAX,
+            ));
+
+        state
+            .expect_request(zebra_state::Request::UnspentBestChainUtxo(out_mempool))
+            .await
+            .expect("first outpoint: not in best chain UTXO set")
+            .respond(zebra_state::Response::UnspentBestChainUtxo(None));
+
+        state
+            .expect_request(zebra_state::Request::UnspentBestChainUtxo(out_chain))
+            .await
+            .expect("second outpoint: in best chain UTXO set")
+            .respond(zebra_state::Response::UnspentBestChainUtxo(Some(
+                utxo_chain.clone(),
+            )));
+
+        state
+            .expect_request_that(|req| {
+                matches!(
+                    req,
+                    zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
+                )
+            })
+            .await
+            .expect("nullifiers check")
+            .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
+    });
+
+    let mempool_output = expected_mempool_output.clone();
+    let mut mempool_clone = mempool.clone();
+    tokio::spawn(async move {
+        mempool_clone
+            .expect_request(mempool::Request::AwaitOutput(out_mempool))
+            .await
+            .expect("await mempool-created output")
+            .respond(mempool::Response::UnspentOutput(mempool_output));
+    });
+
+    let verifier_response = verifier
+        .oneshot(Request::Mempool {
+            transaction: tx.into(),
+            height,
+        })
+        .await;
+
+    assert!(
+        verifier_response.is_ok(),
+        "expected successful verification, got: {verifier_response:?}"
+    );
+
+    let crate::transaction::Response::Mempool { transaction, .. } =
+        verifier_response.expect("already checked that response is ok")
+    else {
+        panic!("expected Mempool response from transaction verifier");
+    };
+
+    let spent = transaction.spent_outputs.as_ref();
+    assert_eq!(
+        spent.len(),
+        2,
+        "spent_outputs must include one entry per transparent input"
+    );
+    assert_eq!(
+        &spent[0],
+        &expected_mempool_output,
+        "input 0 (mempool-funded) must pair with the mempool previous output"
+    );
+    assert_eq!(
+        &spent[1],
+        &expected_chain_output,
+        "input 1 (chain-funded) must pair with the chain previous output"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn dont_skip_verification_of_block_transactions_in_mempool() {
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();

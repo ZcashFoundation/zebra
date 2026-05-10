@@ -383,6 +383,8 @@ pub struct VerifiedUnminedTx {
 
     /// The spent outputs for this transaction's transparent inputs.
     ///
+    /// One entry per transparent input, in the same order as the transparent inputs on the
+    /// wrapped transaction.
     /// Used by mempool policy checks (`AreInputsStandard`, `GetP2SHSigOpCount`).
     /// Empty for transactions with no transparent inputs or in test contexts.
     pub spent_outputs: Arc<Vec<transparent::Output>>,
