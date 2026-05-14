@@ -11,10 +11,11 @@ use zebra_chain::{
 };
 
 use crate::{
-    constants::{DEFAULT_MAX_CONNS_PER_IP, MAX_ADDRS_IN_ADDRESS_BOOK},
-    meta_addr::MetaAddr,
+    address_book_updater::AddressBookUpdater,
+    constants::{DEFAULT_MAX_CONNS_PER_IP, MAX_ADDRS_IN_ADDRESS_BOOK, MAX_PEER_MISBEHAVIOR_SCORE},
+    meta_addr::{MetaAddr, MetaAddrChange},
     protocol::external::types::PeerServices,
-    AddressBook,
+    AddressBook, Config,
 };
 
 /// Make sure an empty address book is actually empty.
@@ -34,6 +35,71 @@ fn address_book_empty() {
         None
     );
     assert_eq!(address_book.len(), 0);
+}
+
+/// Regression test for https://github.com/ZcashFoundation/zebra/issues/10580.
+///
+/// Applying a ban-threshold misbehavior update with
+/// `max_connections_per_ip > 1` previously panicked because the ban branch
+/// unconditionally unwrapped `most_recent_by_ip`, which is only populated when
+/// `max_connections_per_ip == 1`.
+#[test]
+fn misbehavior_ban_does_not_panic_with_max_connections_per_ip_above_one() {
+    let banned_addr = "127.0.0.1:8233".parse().unwrap();
+    let mut address_book =
+        AddressBook::new("0.0.0.0:0".parse().unwrap(), &Mainnet, 2, Span::current());
+
+    address_book.update(MetaAddrChange::UpdateMisbehavior {
+        addr: banned_addr,
+        score_increment: MAX_PEER_MISBEHAVIOR_SCORE,
+    });
+
+    assert!(
+        address_book.bans().contains_key(&banned_addr.ip()),
+        "ban-threshold misbehavior should ban the peer IP"
+    );
+    assert!(
+        address_book.get(banned_addr).is_none(),
+        "banned address should be removed from the address book"
+    );
+}
+
+/// Regression test for https://github.com/ZcashFoundation/zebra/issues/10580.
+///
+/// The live `AddressBookUpdater` task previously panicked and poisoned the
+/// shared address-book mutex when a ban-threshold misbehavior update arrived
+/// under `max_connections_per_ip > 1`.
+#[tokio::test]
+async fn misbehavior_ban_through_updater_does_not_poison_address_book() {
+    let _init_guard = zebra_test::init();
+
+    let config = Config {
+        max_connections_per_ip: 2,
+        ..Config::default()
+    };
+    let (address_book, _bans_receiver, address_book_updater, _address_metrics, updater_task) =
+        AddressBookUpdater::spawn(&config, config.listen_addr);
+
+    let banned_addr = "127.0.0.1:8233".parse().unwrap();
+    address_book_updater
+        .send(MetaAddrChange::UpdateMisbehavior {
+            addr: banned_addr,
+            score_increment: MAX_PEER_MISBEHAVIOR_SCORE,
+        })
+        .await
+        .expect("updater receiver should be live");
+
+    // Drop the sender so the updater task can exit cleanly.
+    drop(address_book_updater);
+    let _ = updater_task.await;
+
+    let guard = address_book
+        .lock()
+        .expect("address-book mutex should not be poisoned");
+    assert!(
+        guard.bans().contains_key(&banned_addr.ip()),
+        "ban-threshold misbehavior should ban the peer IP through the updater"
+    );
 }
 
 /// Make sure peers are attempted in priority order.
