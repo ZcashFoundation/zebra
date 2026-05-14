@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 - Startup warning on Linux when `net.ipv4.tcp_slow_start_after_idle` is enabled (which resets TCP congestion windows between block requests and significantly reduces single-peer block-propagation throughput on long-haul links), with a "Linux TCP tuning for block propagation" troubleshooting section ([#10513](https://github.com/ZcashFoundation/zebra/pull/10513))
 
+### Security
+
+- Cap the initial `Vec::with_capacity` allocation in `zcash_deserialize_external_count` so a peer-supplied CompactSize count cannot force a large upfront allocation before any element bytes are read. The `Vec` now grows via `push()` as elements are deserialized, matching the chunked-resize pattern used by `zcashd`. `TrustedPreallocate::max_allocation()` remains the upper bound ([#10545](https://github.com/ZcashFoundation/zebra/issues/10545))
+
 ## [Zebra 4.4.1](https://github.com/ZcashFoundation/zebra/releases/tag/v4.4.1) - 2026-05-04
 
 This release fixes one critical security issue. We recommend node operators update to

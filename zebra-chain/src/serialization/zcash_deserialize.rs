@@ -93,12 +93,32 @@ pub fn zcash_deserialize_external_count<R: io::Read, T: ZcashDeserialize + Trust
         // for 128 bit memory spaces.)
         Err(_) => return Err(SerializationError::Parse("Vector longer than u64::MAX")),
     }
-    let mut vec = Vec::with_capacity(external_count);
+    // Cap the initial allocation so a peer-supplied count cannot force a large
+    // upfront `Vec` allocation before any element bytes are read. The Vec
+    // grows naturally via `push()` as elements are deserialized, so memory
+    // tracks data actually received. `TrustedPreallocate::max_allocation()`
+    // remains as the upper bound, checked above; this cap is defense in depth
+    // against allocation amplification when an attacker sends a large count
+    // followed by a short or malformed body.
+    //
+    // Matches the chunked-resize pattern zcashd uses in `serialize.h`.
+    let mut vec = Vec::with_capacity(external_count.min(MAX_INITIAL_ALLOCATION));
     for _ in 0..external_count {
         vec.push(T::zcash_deserialize(&mut reader)?);
     }
     Ok(vec)
 }
+
+/// Initial-allocation cap for `zcash_deserialize_external_count`.
+///
+/// `Vec::with_capacity(external_count)` would honor an attacker-supplied
+/// CompactSize without reading any element bytes first. Capping the initial
+/// allocation here makes memory use track bytes actually received; the `Vec`
+/// then grows via `push()` as deserialization succeeds.
+///
+/// 1024 is large enough that honest messages amortize their growth to a few
+/// reallocations.
+const MAX_INITIAL_ALLOCATION: usize = 1024;
 
 /// `zcash_deserialize_external_count`, specialised for raw bytes.
 ///
