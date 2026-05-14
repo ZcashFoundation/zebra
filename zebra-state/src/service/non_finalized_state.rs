@@ -378,7 +378,11 @@ impl NonFinalizedState {
         };
 
         let invalidated_blocks = if chain.non_finalized_root_hash() == block_hash {
-            self.chain_set.remove(&chain);
+            // Retain by tip hash rather than calling `BTreeSet::remove(&chain)`,
+            // which would compare the stored chain against itself.
+            let tip_hash = chain.non_finalized_tip_hash();
+            self.chain_set
+                .retain(|c| c.non_finalized_tip_hash() != tip_hash);
             chain.blocks.values().cloned().collect()
         } else {
             let (new_chain, invalidated_blocks) = chain
@@ -423,25 +427,28 @@ impl NonFinalizedState {
         block_hash: block::Hash,
         finalized_state: &ZebraDb,
     ) -> Result<Vec<block::Hash>, ReconsiderError> {
-        // Get the invalidated blocks that were invalidated by the given block_hash
-        let height = self
+        // Locate the invalidated record without removing it. We must keep the
+        // record live across all fallible steps below: parent lookup and replay
+        // can fail, and the previous version's removal-from-a-clone left the
+        // live entry stale, which lets a second reconsider replay the same
+        // chain suffix into a chain set that already contains the restored tip
+        // and panic in `Chain::cmp`. Removing the live entry up front would
+        // instead permanently lose the invalidation record on a recoverable
+        // error. So: look up, replay against a clone, then `shift_remove`
+        // atomically with the insert below.
+        let (height, invalidated_blocks_arc) = self
             .invalidated_blocks
             .iter()
             .find_map(|(height, blocks)| {
                 if blocks.first()?.hash == block_hash {
-                    Some(height)
+                    Some((*height, blocks.clone()))
                 } else {
                     None
                 }
             })
             .ok_or(ReconsiderError::MissingInvalidatedBlock(block_hash))?;
 
-        let invalidated_blocks = Arc::unwrap_or_clone(
-            self.invalidated_blocks
-                .clone()
-                .shift_remove(height)
-                .ok_or(ReconsiderError::MissingInvalidatedBlock(block_hash))?,
-        );
+        let invalidated_blocks = Arc::unwrap_or_clone(invalidated_blocks_arc);
 
         let invalidated_block_hashes = invalidated_blocks
             .iter()
@@ -482,10 +489,15 @@ impl NonFinalizedState {
         for block in invalidated_blocks {
             modified_chain = modified_chain
                 .push(block)
-                .expect("previously invalidated block should be valid for chain");
+                .map_err(ReconsiderError::ReplayFailed)?;
         }
 
-        let (height, hash) = modified_chain.non_finalized_tip();
+        let (tip_height, tip_hash) = modified_chain.non_finalized_tip();
+
+        // All fallible steps have succeeded; remove the invalidation record
+        // atomically with installing the restored chain so a failed attempt
+        // does not destroy the record.
+        self.invalidated_blocks.shift_remove(&height);
 
         // Only track invalidated_blocks that are not yet finalized. Once blocks are finalized (below the best_chain_root_height)
         // we can discard the block.
@@ -498,7 +510,7 @@ impl NonFinalizedState {
             chain_set.retain(|chain| chain.non_finalized_tip_hash() != root_parent_hash)
         });
 
-        self.update_metrics_for_committed_block(height, hash);
+        self.update_metrics_for_committed_block(tip_height, tip_hash);
 
         Ok(invalidated_block_hashes)
     }
