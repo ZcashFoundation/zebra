@@ -37,6 +37,19 @@ fn address_book_empty() {
     assert_eq!(address_book.len(), 0);
 }
 
+/// Helper: build a `MetaAddrChange::NewGossiped` for a given address and
+/// last-seen time. Used to seed the address book before triggering a ban so
+/// the test exercises the by-IP cleanup loop on real entries.
+fn gossiped_change(
+    addr: crate::PeerSocketAddr,
+    services: PeerServices,
+    untrusted_last_seen: DateTime32,
+) -> MetaAddrChange {
+    MetaAddr::new_gossiped_meta_addr(addr, services, untrusted_last_seen)
+        .new_gossiped_change()
+        .expect("gossiped MetaAddr should produce a NewGossiped change")
+}
+
 /// Regression test for https://github.com/ZcashFoundation/zebra/issues/10580.
 ///
 /// Applying a ban-threshold misbehavior update with
@@ -45,9 +58,33 @@ fn address_book_empty() {
 /// `max_connections_per_ip == 1`.
 #[test]
 fn misbehavior_ban_does_not_panic_with_max_connections_per_ip_above_one() {
-    let banned_addr = "127.0.0.1:8233".parse().unwrap();
+    let banned_addr: crate::PeerSocketAddr = "127.0.0.1:8233".parse().unwrap();
+    let other_port_same_ip: crate::PeerSocketAddr = "127.0.0.1:8234".parse().unwrap();
+    let unrelated_addr: crate::PeerSocketAddr = "127.0.0.2:8233".parse().unwrap();
+
     let mut address_book =
         AddressBook::new("0.0.0.0:0".parse().unwrap(), &Mainnet, 2, Span::current());
+
+    // Seed two entries on the soon-to-be-banned IP plus an unrelated entry,
+    // so the ban path's `by_addr` cleanup loop has visible work to do.
+    address_book.update(gossiped_change(
+        banned_addr,
+        PeerServices::NODE_NETWORK,
+        DateTime32::MIN,
+    ));
+    address_book.update(gossiped_change(
+        other_port_same_ip,
+        PeerServices::NODE_NETWORK,
+        DateTime32::MIN.saturating_add(Duration32::from_seconds(1)),
+    ));
+    address_book.update(gossiped_change(
+        unrelated_addr,
+        PeerServices::NODE_NETWORK,
+        DateTime32::MIN.saturating_add(Duration32::from_seconds(2)),
+    ));
+
+    assert!(address_book.get(banned_addr).is_some());
+    assert!(address_book.get(other_port_same_ip).is_some());
 
     address_book.update(MetaAddrChange::UpdateMisbehavior {
         addr: banned_addr,
@@ -60,7 +97,11 @@ fn misbehavior_ban_does_not_panic_with_max_connections_per_ip_above_one() {
     );
     assert!(
         address_book.get(banned_addr).is_none(),
-        "banned address should be removed from the address book"
+        "primary banned address should be removed from the address book"
+    );
+    assert!(
+        address_book.get(unrelated_addr).is_some(),
+        "unrelated IP entries should remain after banning a different IP"
     );
 }
 
@@ -89,9 +130,13 @@ async fn misbehavior_ban_through_updater_does_not_poison_address_book() {
         .await
         .expect("updater receiver should be live");
 
-    // Drop the sender so the updater task can exit cleanly.
+    // Drop the sender so the updater task can exit cleanly. The inner result
+    // is the updater's normal "all senders closed" shutdown signal; the outer
+    // `JoinError` is what would expose a panic, so we propagate that.
     drop(address_book_updater);
-    let _ = updater_task.await;
+    let _ = updater_task
+        .await
+        .expect("address-book updater task should not panic");
 
     let guard = address_book
         .lock()
