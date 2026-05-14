@@ -2306,14 +2306,11 @@ impl Ord for Chain {
     /// `Chain::cmp` is used in a `BTreeSet`, so the fields accessed by `cmp` must not have
     /// interior mutability.
     ///
-    /// # Panics
-    ///
-    /// If two chains compare equal.
-    ///
-    /// This panic enforces the [`NonFinalizedState::chain_set`][2] unique chain invariant.
-    ///
-    /// If the chain set contains duplicate chains, the non-finalized state might
-    /// handle new blocks or block finalization incorrectly.
+    /// Two chains with the same cumulative work and tip hash compare equal. The
+    /// [`NonFinalizedState::chain_set`][2] is a `BTreeSet<Arc<Chain>>`, so an
+    /// attempt to insert a chain whose tip hash matches an existing chain is a
+    /// no-op rather than a process-fatal panic. Callers that need to replace a
+    /// chain with the same tip hash must remove the existing entry first.
     ///
     /// [1]: super::NonFinalizedState
     /// [2]: super::NonFinalizedState::chain_set
@@ -2338,10 +2335,7 @@ impl Ord for Chain {
 
             // This comparison is a tie-breaker within the local node, so it does not need to
             // be consistent with the ordering on `ExpandedDifficulty` and `block::Hash`.
-            match self_hash.0.cmp(&other_hash.0) {
-                Ordering::Equal => unreachable!("Chain tip block hashes are always unique"),
-                ordering => ordering,
-            }
+            self_hash.0.cmp(&other_hash.0)
         }
     }
 }
@@ -2356,11 +2350,8 @@ impl PartialEq for Chain {
     /// Chain equality for [`NonFinalizedState::chain_set`][1], using proof of
     /// work, then the tip block hash as a tie-breaker.
     ///
-    /// # Panics
-    ///
-    /// If two chains compare equal.
-    ///
-    /// See [`Chain::cmp`] for details.
+    /// Two chains with the same cumulative work and tip hash are equal; the
+    /// `chain_set` uses this to keep tip hashes unique.
     ///
     /// [1]: super::NonFinalizedState::chain_set
     fn eq(&self, other: &Self) -> bool {

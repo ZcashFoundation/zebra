@@ -17,6 +17,7 @@ use crate::{
     service::{
         finalized_state::FinalizedState,
         non_finalized_state::{Chain, NonFinalizedState, MIN_DURATION_BETWEEN_BACKUP_UPDATES},
+        ReconsiderError,
     },
     tests::FakeChainHelper,
     Config,
@@ -312,6 +313,159 @@ fn invalidate_block_removes_block_and_descendants_from_chain_for_network(
     }
 
     Ok(())
+}
+
+/// Regression test for https://github.com/ZcashFoundation/zebra/issues/10586.
+///
+/// Invalidating the non-finalized root of a tracked chain previously called
+/// `BTreeSet::remove(&chain)`, which compared the stored chain against
+/// itself via `Chain::cmp` and reached an `unreachable!()` for matching tip
+/// hashes. The root branch now retains by tip hash and the call returns
+/// successfully without panicking.
+#[test]
+fn invalidating_non_finalized_root_does_not_panic() {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let block2 = block1.make_fake_child().set_work(10);
+
+    let mut state = NonFinalizedState::new(&network);
+    let finalized_state = FinalizedState::new(
+        &Config::ephemeral(),
+        &network,
+        #[cfg(feature = "elasticsearch")]
+        false,
+    );
+    finalized_state.set_finalized_value_pool(ValueBalance::<NonNegative>::fake_populated_pool());
+
+    state
+        .commit_new_chain(block1.clone().prepare(), &finalized_state)
+        .expect("fake root block should commit to an empty non-finalized state");
+    state
+        .commit_block(block2.prepare(), &finalized_state)
+        .expect("fake child block should extend the fake root chain");
+
+    state
+        .invalidate_block(block1.hash())
+        .expect("invalidating the chain root should not panic");
+
+    assert!(
+        state.best_chain().is_none(),
+        "invalidating the root should leave no live non-finalized chain"
+    );
+}
+
+/// Regression test for https://github.com/ZcashFoundation/zebra/issues/10586.
+///
+/// Sequentially invalidating two same-height sibling fork tips with the same
+/// parent previously panicked. The second invalidation produced a shortened
+/// parent chain whose tip hash matched an existing entry, and `BTreeSet::insert`
+/// reached `Chain::cmp`'s `unreachable!()`. After the fix, `Chain::cmp` returns
+/// `Equal` for matching tip hashes, so the duplicate insert is a no-op and the
+/// pre-existing parent chain is retained.
+#[test]
+fn invalidating_same_height_fork_tips_is_idempotent() {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let block2a = block1.make_fake_child().set_work(10);
+    let block2b = block1.make_fake_child().set_work(11);
+
+    let mut state = NonFinalizedState::new(&network);
+    let finalized_state = FinalizedState::new(
+        &Config::ephemeral(),
+        &network,
+        #[cfg(feature = "elasticsearch")]
+        false,
+    );
+    finalized_state.set_finalized_value_pool(ValueBalance::<NonNegative>::fake_populated_pool());
+
+    state
+        .commit_new_chain(block1.clone().prepare(), &finalized_state)
+        .expect("fake root block should commit to an empty non-finalized state");
+    state
+        .commit_block(block2a.clone().prepare(), &finalized_state)
+        .expect("first fork tip should extend the root chain");
+    state
+        .commit_block(block2b.clone().prepare(), &finalized_state)
+        .expect("second fork tip should fork from the root chain");
+
+    state
+        .invalidate_block(block2a.hash())
+        .expect("first fork tip should invalidate cleanly");
+    state
+        .invalidate_block(block2b.hash())
+        .expect("second sibling fork tip should not panic on collapse to shared parent");
+
+    let best_chain = state
+        .best_chain()
+        .expect("the parent chain should remain after both sibling tips are invalidated");
+    assert!(best_chain.contains_block_hash(block1.hash()));
+    assert!(!best_chain.contains_block_hash(block2a.hash()));
+    assert!(!best_chain.contains_block_hash(block2b.hash()));
+}
+
+/// Regression test for https://github.com/ZcashFoundation/zebra/issues/10586.
+///
+/// `reconsider_block` previously removed the invalidation record from a clone
+/// of `invalidated_blocks` rather than from the live map. A second
+/// `reconsider_block` for the same hash then replayed the same chain suffix
+/// into a chain set that already contained the restored tip, panicking in
+/// `Chain::cmp`'s duplicate-tip check. After the fix, the live entry is
+/// removed and the second call returns `MissingInvalidatedBlock`.
+#[test]
+fn reconsider_block_removes_live_entry_and_second_call_returns_missing() {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let block2 = block1.make_fake_child().set_work(10);
+    let block3 = block2.make_fake_child().set_work(1);
+
+    let mut state = NonFinalizedState::new(&network);
+    let finalized_state = FinalizedState::new(
+        &Config::ephemeral(),
+        &network,
+        #[cfg(feature = "elasticsearch")]
+        false,
+    );
+    finalized_state.set_finalized_value_pool(ValueBalance::<NonNegative>::fake_populated_pool());
+
+    state
+        .commit_new_chain(block1.prepare(), &finalized_state)
+        .expect("fake root block should commit");
+    state
+        .commit_block(block2.clone().prepare(), &finalized_state)
+        .expect("fake child should extend the root chain");
+    state
+        .commit_block(block3.prepare(), &finalized_state)
+        .expect("fake grandchild should extend the child chain");
+
+    state
+        .invalidate_block(block2.hash())
+        .expect("invalidating the child should succeed");
+
+    state
+        .reconsider_block(block2.hash(), &finalized_state.db)
+        .expect("first reconsider should restore the invalidated chain");
+
+    assert!(
+        state.invalidated_blocks().values().all(|blocks| {
+            blocks
+                .first()
+                .map(|block| block.hash != block2.hash())
+                .unwrap_or(true)
+        }),
+        "first reconsider should remove the invalidated entry from the live map"
+    );
+
+    let second = state.reconsider_block(block2.hash(), &finalized_state.db);
+    assert!(
+        matches!(second, Err(ReconsiderError::MissingInvalidatedBlock(_))),
+        "a second reconsider for the same hash should return MissingInvalidatedBlock; got {second:?}"
+    );
 }
 
 #[test]

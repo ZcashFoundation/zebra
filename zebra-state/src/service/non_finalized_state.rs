@@ -378,7 +378,11 @@ impl NonFinalizedState {
         };
 
         let invalidated_blocks = if chain.non_finalized_root_hash() == block_hash {
-            self.chain_set.remove(&chain);
+            // Retain by tip hash rather than calling `BTreeSet::remove(&chain)`,
+            // which would compare the stored chain against itself.
+            let tip_hash = chain.non_finalized_tip_hash();
+            self.chain_set
+                .retain(|c| c.non_finalized_tip_hash() != tip_hash);
             chain.blocks.values().cloned().collect()
         } else {
             let (new_chain, invalidated_blocks) = chain
@@ -423,8 +427,10 @@ impl NonFinalizedState {
         block_hash: block::Hash,
         finalized_state: &ZebraDb,
     ) -> Result<Vec<block::Hash>, ReconsiderError> {
-        // Get the invalidated blocks that were invalidated by the given block_hash
-        let height = self
+        // Get the invalidated blocks that were invalidated by the given block_hash.
+        // Copy the height out so we can remove from the live map below without
+        // borrowing it twice.
+        let height = *self
             .invalidated_blocks
             .iter()
             .find_map(|(height, blocks)| {
@@ -436,10 +442,13 @@ impl NonFinalizedState {
             })
             .ok_or(ReconsiderError::MissingInvalidatedBlock(block_hash))?;
 
+        // Remove from the live map, not a clone. A previous version called
+        // `self.invalidated_blocks.clone().shift_remove(...)`, which left the
+        // record live and let a second reconsider replay the same chain
+        // suffix into a chain set that already contained the restored tip.
         let invalidated_blocks = Arc::unwrap_or_clone(
             self.invalidated_blocks
-                .clone()
-                .shift_remove(height)
+                .shift_remove(&height)
                 .ok_or(ReconsiderError::MissingInvalidatedBlock(block_hash))?,
         );
 
@@ -482,7 +491,7 @@ impl NonFinalizedState {
         for block in invalidated_blocks {
             modified_chain = modified_chain
                 .push(block)
-                .expect("previously invalidated block should be valid for chain");
+                .map_err(ReconsiderError::ReplayFailed)?;
         }
 
         let (height, hash) = modified_chain.non_finalized_tip();

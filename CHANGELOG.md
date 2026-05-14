@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 - Startup warning on Linux when `net.ipv4.tcp_slow_start_after_idle` is enabled (which resets TCP congestion windows between block requests and significantly reduces single-peer block-propagation throughput on long-haul links), with a "Linux TCP tuning for block propagation" troubleshooting section ([#10513](https://github.com/ZcashFoundation/zebra/pull/10513))
 
+### Fixed
+
+- Handle `invalidateblock` and `reconsiderblock` edge cases without panicking. Three previously process-fatal paths in the non-finalized state are now graceful: `invalidateblock` on the root of a tracked chain, `invalidateblock` on two same-height sibling fork tips, and a repeated `reconsiderblock` for the same hash. `Chain::cmp` no longer panics on matching tip hashes; the root invalidation path retains by tip hash; `reconsider_block` removes the invalidation record from the live map; and replay errors propagate as a typed `ReconsiderError::ReplayFailed` rather than `expect()` ([#10586](https://github.com/ZcashFoundation/zebra/issues/10586))
+
 ## [Zebra 4.4.1](https://github.com/ZcashFoundation/zebra/releases/tag/v4.4.1) - 2026-05-04
 
 This release fixes one critical security issue. We recommend node operators update to
