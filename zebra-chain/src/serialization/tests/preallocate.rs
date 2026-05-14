@@ -5,7 +5,8 @@ use proptest::{collection::size_range, prelude::*};
 use std::matches;
 
 use crate::serialization::{
-    arbitrary::max_allocation_is_big_enough, zcash_deserialize::MAX_U8_ALLOCATION,
+    arbitrary::max_allocation_is_big_enough,
+    zcash_deserialize::{zcash_deserialize_external_count, MAX_U8_ALLOCATION},
     SerializationError, TrustedPreallocate, ZcashDeserialize, ZcashSerialize,
     MAX_PROTOCOL_MESSAGE_LEN,
 };
@@ -71,6 +72,54 @@ fn u8_deser_throws_when_input_too_large() {
             "Byte vector longer than MAX_U8_ALLOCATION"
         ))
     ))
+}
+
+/// Regression test for https://github.com/ZcashFoundation/zebra/issues/10545.
+///
+/// `zcash_deserialize_external_count` previously did a single
+/// `Vec::with_capacity(external_count)` allocation based on the peer-supplied
+/// count, before reading any element bytes. Capping the initial allocation
+/// must not break correctness for legitimately large vectors: the `Vec` should
+/// still grow via `push()` to hold all elements when the body is complete.
+#[test]
+fn external_count_above_initial_cap_still_deserializes() {
+    use crate::block;
+
+    // A count well above the initial-allocation cap (1024) but well within
+    // `block::Hash::max_allocation()`. A full body of 32-byte hashes follows.
+    let count = 4 * 1024;
+    let body = vec![0u8; count * 32];
+
+    let deserialized: Vec<block::Hash> = zcash_deserialize_external_count(count, &body[..])
+        .expect("a full body should deserialize regardless of the initial allocation cap");
+
+    assert_eq!(deserialized.len(), count);
+}
+
+/// Regression test for https://github.com/ZcashFoundation/zebra/issues/10545.
+///
+/// An inflated count followed by a short body must surface as a read error,
+/// not as a successful giant pre-allocation. With the initial-allocation cap
+/// in place, the failure path runs after a small allocation and before any
+/// peer-driven amplification.
+#[test]
+fn external_count_with_truncated_body_errors() {
+    use crate::block;
+    use std::io::Cursor;
+
+    let inflated_count: usize = block::Hash::max_allocation()
+        .try_into()
+        .expect("max_allocation fits in usize on supported targets");
+    // Far fewer bytes than `inflated_count * 32` requires.
+    let body: Vec<u8> = vec![0u8; 64];
+
+    let result: Result<Vec<block::Hash>, _> =
+        zcash_deserialize_external_count(inflated_count, Cursor::new(body));
+
+    assert!(
+        matches!(result, Err(SerializationError::Io(_))),
+        "truncated body under an inflated count should fail with an I/O error"
+    );
 }
 
 #[test]
