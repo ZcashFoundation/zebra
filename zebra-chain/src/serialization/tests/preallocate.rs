@@ -76,17 +76,15 @@ fn u8_deser_throws_when_input_too_large() {
 
 /// Regression test for https://github.com/ZcashFoundation/zebra/issues/10545.
 ///
-/// `zcash_deserialize_external_count` previously did a single
-/// `Vec::with_capacity(external_count)` allocation based on the peer-supplied
-/// count, before reading any element bytes. Capping the initial allocation
-/// must not break correctness for legitimately large vectors: the `Vec` should
-/// still grow via `push()` to hold all elements when the body is complete.
+/// Capping the initial allocation must not break correctness for legitimately
+/// large vectors: the `Vec` should still grow via `push()` to hold all
+/// elements when the body is complete. This complements
+/// `external_count_above_initial_cap_panics_pre_fix` below by confirming the
+/// cap path produces correct results for ordinary valid messages.
 #[test]
 fn external_count_above_initial_cap_still_deserializes() {
     use crate::block;
 
-    // A count well above the initial-allocation cap (1024) but well within
-    // `block::Hash::max_allocation()`. A full body of 32-byte hashes follows.
     let count = 4 * 1024;
     let body = vec![0u8; count * 32];
 
@@ -96,29 +94,61 @@ fn external_count_above_initial_cap_still_deserializes() {
     assert_eq!(deserialized.len(), count);
 }
 
+/// A test-only wrapper around `u8` with an essentially unbounded
+/// `TrustedPreallocate::max_allocation()`. Used to drive
+/// `zcash_deserialize_external_count` with a count large enough that the
+/// pre-fix `Vec::with_capacity(external_count)` allocation would panic with
+/// "capacity overflow" (the requested byte size exceeds `isize::MAX`).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+struct UnboundedTestByte(u8);
+
+impl ZcashDeserialize for UnboundedTestByte {
+    fn zcash_deserialize<R: std::io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let mut buf = [0u8; 1];
+        reader.read_exact(&mut buf)?;
+        Ok(UnboundedTestByte(buf[0]))
+    }
+}
+
+impl TrustedPreallocate for UnboundedTestByte {
+    fn max_allocation() -> u64 {
+        // Intentionally unbounded for this test — we want the function to
+        // accept the count and reach the (now capped) allocation site.
+        u64::MAX
+    }
+}
+
 /// Regression test for https://github.com/ZcashFoundation/zebra/issues/10545.
 ///
-/// An inflated count followed by a short body must surface as a read error,
-/// not as a successful giant pre-allocation. With the initial-allocation cap
-/// in place, the failure path runs after a small allocation and before any
-/// peer-driven amplification.
+/// On `origin/main`, `zcash_deserialize_external_count` did
+/// `Vec::with_capacity(external_count)` before reading any element bytes. For
+/// a count whose byte size exceeds `isize::MAX`, this panics with "capacity
+/// overflow" (Rust's documented `Vec::with_capacity` precondition). After the
+/// fix, the initial capacity is capped at `MAX_INITIAL_ALLOCATION = 1024`, so
+/// the function reaches the reader instead and surfaces the truncated body as
+/// a clean I/O error.
+///
+/// This test calls the helper with an external count well above
+/// `isize::MAX` and a short body. It returns `Err(SerializationError::Io)`
+/// with the fix in place; without the fix the call panics inside
+/// `Vec::with_capacity` before it gets to the reader.
 #[test]
-fn external_count_with_truncated_body_errors() {
-    use crate::block;
+fn external_count_above_isize_max_returns_io_error_instead_of_panicking() {
     use std::io::Cursor;
 
-    let inflated_count: usize = block::Hash::max_allocation()
-        .try_into()
-        .expect("max_allocation fits in usize on supported targets");
-    // Far fewer bytes than `inflated_count * 32` requires.
-    let body: Vec<u8> = vec![0u8; 64];
+    // `Vec::with_capacity(N)` for non-ZST `T` requires `N * size_of::<T>() <=
+    // isize::MAX`. `UnboundedTestByte` is 1 byte, so any `N > isize::MAX as
+    // usize` would trigger capacity overflow on the pre-fix path.
+    let panic_inducing_count: usize = (isize::MAX as usize) + 1;
+    let body: Vec<u8> = vec![0u8; 16];
 
-    let result: Result<Vec<block::Hash>, _> =
-        zcash_deserialize_external_count(inflated_count, Cursor::new(body));
+    let result: Result<Vec<UnboundedTestByte>, _> =
+        zcash_deserialize_external_count(panic_inducing_count, Cursor::new(body));
 
     assert!(
         matches!(result, Err(SerializationError::Io(_))),
-        "truncated body under an inflated count should fail with an I/O error"
+        "with the cap in place the call surfaces a truncated-body I/O error \
+         rather than panicking inside `Vec::with_capacity`; got {result:?}"
     );
 }
 
