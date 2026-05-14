@@ -30,7 +30,7 @@ use zebra_chain::{
     transaction::UnminedTxId,
 };
 use zebra_consensus::{router::RouterError, VerifyBlockError};
-use zebra_network::{AddressBook, InventoryResponse};
+use zebra_network::{AddressBookService, InventoryResponse};
 use zebra_node_services::mempool;
 
 use crate::BoxError;
@@ -88,8 +88,8 @@ type GossipedBlockDownloads =
 
 /// The services used by the [`Inbound`] service.
 pub struct InboundSetupData {
-    /// A shared list of peer addresses.
-    pub address_book: Arc<std::sync::Mutex<AddressBook>>,
+    /// A handle to the address book service.
+    pub address_book: AddressBookService,
 
     /// A service that can be used to download gossiped blocks.
     pub block_download_peer_set: BlockDownloadPeerSet,

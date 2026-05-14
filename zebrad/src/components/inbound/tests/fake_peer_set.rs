@@ -785,7 +785,7 @@ async fn caches_getaddr_response() {
             addrs,
         );
 
-        let address_book = Arc::new(std::sync::Mutex::new(address_book));
+        let address_book = zebra_network::AddressBookService::from_book_for_tests(address_book);
 
         // UTXO verification doesn't matter for these tests.
         let (state, _read_only_state_service, latest_chain_tip, _chain_tip_change) =
@@ -898,7 +898,7 @@ async fn setup(
         DEFAULT_MAX_CONNS_PER_IP,
         Span::none(),
     );
-    let address_book = Arc::new(std::sync::Mutex::new(address_book));
+    let address_book = zebra_network::AddressBookService::from_book_for_tests(address_book);
     let (sync_status, mut recent_syncs) = SyncStatus::new();
 
     // UTXO verification doesn't matter for these tests.

@@ -1,23 +1,12 @@
 //! The timestamp collector collects liveness information from peers.
 
-use std::{
-    cmp::max,
-    net::{IpAddr, SocketAddr},
-    sync::Arc,
-    time::Instant,
-};
+use std::{cmp::max, net::SocketAddr, sync::Arc};
 
-use indexmap::IndexMap;
 use thiserror::Error;
-use tokio::{
-    sync::{mpsc, watch},
-    task::JoinHandle,
-};
+use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::{Level, Span};
 
-use crate::{
-    address_book::AddressMetrics, meta_addr::MetaAddrChange, AddressBook, BoxError, Config,
-};
+use crate::{AddressBook, AddressBookService, BoxError, Config};
 
 /// The minimum size of the address book updater channel.
 pub const MIN_CHANNEL_SIZE: usize = 10;
@@ -37,23 +26,19 @@ impl AddressBookUpdater {
     /// Spawn a new [`AddressBookUpdater`] task, updating a new [`AddressBook`]
     /// configured with Zebra's actual `local_listener` address.
     ///
-    /// Returns handles for:
-    /// - the address book,
-    /// - the transmission channel for address book update events,
-    /// - a watch channel for address book metrics, and
-    /// - the address book updater task join handle.
+    /// Returns:
+    /// - the [`AddressBookService`] handle, which exposes the Tower
+    ///   request/response interface, the metrics and bans watch channels, and
+    ///   the high-throughput batched-update sender used by peer connection
+    ///   tasks; and
+    /// - the join handle for the background updater worker.
     ///
-    /// The task exits with an error when the returned [`mpsc::Sender`] is closed.
+    /// The worker task exits with an error when every sender returned by
+    /// [`AddressBookService::update_sender`] has been dropped.
     pub fn spawn(
         config: &Config,
         local_listener: SocketAddr,
-    ) -> (
-        Arc<std::sync::Mutex<AddressBook>>,
-        watch::Receiver<Arc<IndexMap<IpAddr, Instant>>>,
-        mpsc::Sender<MetaAddrChange>,
-        watch::Receiver<AddressMetrics>,
-        JoinHandle<Result<(), BoxError>>,
-    ) {
+    ) -> (AddressBookService, JoinHandle<Result<(), BoxError>>) {
         // Create an mpsc channel for peerset address book updates,
         // based on the maximum number of inbound and outbound peers.
         let (worker_tx, mut worker_rx) = mpsc::channel(max(
@@ -161,12 +146,14 @@ impl AddressBookUpdater {
         let address_book_updater_task_handle =
             tokio::task::spawn_blocking(move || span.in_scope(worker));
 
-        (
+        let service = AddressBookService::new(
             address_book,
+            address_metrics,
             bans_receiver,
             worker_tx,
-            address_metrics,
-            address_book_updater_task_handle,
-        )
+            Span::current(),
+        );
+
+        (service, address_book_updater_task_handle)
     }
 }

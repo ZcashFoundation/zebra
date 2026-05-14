@@ -44,7 +44,7 @@ use crate::{
     },
     peer_cache_updater::peer_cache_updater,
     peer_set::{set::MorePeers, ActiveConnectionCounter, CandidateSet, ConnectionTracker, PeerSet},
-    AddressBook, BoxError, Config, PeerSocketAddr, Request, Response,
+    AddressBookService, BoxError, Config, PeerSocketAddr, Request, Response,
 };
 
 #[cfg(test)]
@@ -83,10 +83,9 @@ type DiscoveredPeer = (PeerSocketAddr, peer::Client);
 /// Use [`NoChainTip`][1] to explicitly provide no chain tip receiver.
 ///
 /// In addition to returning a service for outbound requests, this method
-/// returns a shared [`AddressBook`] updated with last-seen timestamps for
-/// connected peers. The shared address book should be accessed using a
-/// [blocking thread](https://docs.rs/tokio/1.15.0/tokio/task/index.html#blocking-and-yielding),
-/// to avoid async task deadlocks.
+/// returns an [`AddressBookService`] that can be cloned and queried for the
+/// current peer state. The service performs all underlying address book locks
+/// on a blocking thread, so callers don't need to manage that themselves.
 ///
 /// # Panics
 ///
@@ -101,7 +100,7 @@ pub async fn init<S, C>(
     user_agent: String,
 ) -> (
     Buffer<BoxService<Request, Response, BoxError>, Request>,
-    Arc<std::sync::Mutex<AddressBook>>,
+    AddressBookService,
     mpsc::Sender<(PeerSocketAddr, u32)>,
 )
 where
@@ -111,13 +110,12 @@ where
 {
     let (tcp_listener, listen_addr) = open_listener(&config.clone()).await;
 
-    let (
-        address_book,
-        bans_receiver,
-        address_book_updater,
-        address_metrics,
-        address_book_updater_guard,
-    ) = AddressBookUpdater::spawn(&config, listen_addr);
+    let (address_book, address_book_updater_guard) =
+        AddressBookUpdater::spawn(&config, listen_addr);
+
+    let address_book_updater = address_book.update_sender();
+    let bans_receiver = address_book.bans_watcher();
+    let address_metrics = address_book.metrics_watcher();
 
     let (misbehavior_tx, mut misbehavior_rx) = mpsc::channel(
         // Leave enough room for a misbehaviour update on every peer connection

@@ -1,24 +1,22 @@
 //! An async task that regularly updates the peer cache on disk from the current address book.
 
-use std::{
-    io,
-    sync::{Arc, Mutex},
-};
+use std::io;
 
-use chrono::Utc;
 use tokio::time::sleep;
+use tower::{Service, ServiceExt};
 
 use crate::{
+    address_book_service::{AddressBookRequest, AddressBookResponse},
     constants::{DNS_LOOKUP_TIMEOUT, PEER_DISK_CACHE_UPDATE_INTERVAL},
     meta_addr::MetaAddr,
-    AddressBook, BoxError, Config,
+    AddressBookService, BoxError, Config,
 };
 
 /// An ongoing task that regularly caches the current `address_book` to disk, based on `config`.
 #[instrument(skip(config, address_book))]
 pub async fn peer_cache_updater(
     config: Config,
-    address_book: Arc<Mutex<AddressBook>>,
+    address_book: AddressBookService,
 ) -> Result<(), BoxError> {
     // Wait until we've queried DNS and (hopefully) sent peers to the address book.
     // Ideally we'd wait for at least one peer crawl, but that makes tests very slow.
@@ -39,9 +37,10 @@ pub async fn peer_cache_updater(
 /// Caches peers from the current `address_book` to disk, based on `config`.
 pub async fn update_peer_cache_once(
     config: &Config,
-    address_book: &Arc<Mutex<AddressBook>>,
+    address_book: &AddressBookService,
 ) -> io::Result<()> {
     let peer_list = cacheable_peers(address_book)
+        .await
         .iter()
         .map(|meta_addr| meta_addr.addr)
         .collect();
@@ -50,15 +49,21 @@ pub async fn update_peer_cache_once(
 }
 
 /// Returns a list of cacheable peers, blocking for as short a time as possible.
-fn cacheable_peers(address_book: &Arc<Mutex<AddressBook>>) -> Vec<MetaAddr> {
-    // TODO: use spawn_blocking() here, if needed to handle address book mutex load
-    let now = Utc::now();
-
-    // # Concurrency
-    //
-    // We return from this function immediately to make sure the address book is unlocked.
-    address_book
-        .lock()
-        .expect("unexpected panic in previous thread while accessing the address book")
-        .cacheable(now)
+async fn cacheable_peers(address_book: &AddressBookService) -> Vec<MetaAddr> {
+    let mut svc = address_book.clone();
+    let result = match svc.ready().await {
+        Ok(svc) => svc.call(AddressBookRequest::Cacheable).await,
+        Err(error) => Err(error),
+    };
+    match result {
+        Ok(AddressBookResponse::Peers(peers)) => peers,
+        Ok(other) => unreachable!("Cacheable returns Peers, got {other:?}"),
+        Err(error) => {
+            tracing::warn!(
+                ?error,
+                "address book service failed to return cacheable peers"
+            );
+            Vec::new()
+        }
+    }
 }

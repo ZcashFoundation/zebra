@@ -3,7 +3,6 @@
 use std::{
     net::{IpAddr, SocketAddr},
     str::FromStr,
-    sync::Arc,
     time::Duration as StdDuration,
 };
 
@@ -17,7 +16,7 @@ use zebra_test::mock_service::{MockService, PanicAssertion};
 use crate::{
     constants::{DEFAULT_MAX_CONNS_PER_IP, GET_ADDR_FANOUT, MIN_PEER_GET_ADDR_INTERVAL},
     types::{MetaAddr, PeerServices},
-    AddressBook, Request, Response,
+    AddressBook, AddressBookService, Request, Response,
 };
 
 use super::super::{validate_addrs, CandidateSet};
@@ -146,7 +145,7 @@ fn candidate_set_updates_are_rate_limited() {
     );
     let mut peer_service = MockService::build().for_unit_tests();
     let mut candidate_set = CandidateSet::new(
-        Arc::new(std::sync::Mutex::new(address_book)),
+        AddressBookService::from_book_for_tests(address_book),
         peer_service.clone(),
     );
 
@@ -192,7 +191,7 @@ fn candidate_set_update_after_update_initial_is_rate_limited() {
     );
     let mut peer_service = MockService::build().for_unit_tests();
     let mut candidate_set = CandidateSet::new(
-        Arc::new(std::sync::Mutex::new(address_book)),
+        AddressBookService::from_book_for_tests(address_book),
         peer_service.clone(),
     );
 

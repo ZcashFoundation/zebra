@@ -1430,6 +1430,7 @@ async fn local_listener_port_with(listen_addr: SocketAddr, network: Network) {
     )
     .await;
     let local_listener = address_book
+        .shared()
         .lock()
         .unwrap()
         .local_listener_meta_addr(Utc::now());
@@ -1461,7 +1462,7 @@ async fn local_listener_port_with(listen_addr: SocketAddr, network: Network) {
 /// Otherwise, binds the network listener to an unused port on all network interfaces.
 /// Uses `default_config` or Zebra's defaults for the rest of the configuration.
 ///
-/// Returns the newly created [`AddressBook`] for testing.
+/// Returns the underlying `Arc<Mutex<AddressBook>>` for testing.
 async fn init_with_peer_limit<S>(
     peerset_initial_target_size: usize,
     inbound_service: S,
@@ -1496,7 +1497,7 @@ where
     )
     .await;
 
-    address_book
+    address_book.shared()
 }
 
 /// Run a peer crawler with `peerset_initial_target_size` and `outbound_connector`.
@@ -1525,33 +1526,31 @@ where
         config.peerset_initial_target_size = peerset_initial_target_size;
     }
 
-    let (
-        address_book,
-        _bans_receiver,
-        address_book_updater,
-        _address_metrics,
-        _address_book_updater_guard,
-    ) = AddressBookUpdater::spawn(&config, config.listen_addr);
+    let (address_book, _address_book_updater_guard) =
+        AddressBookUpdater::spawn(&config, config.listen_addr);
+    let address_book_updater = address_book.update_sender();
 
     // Add enough fake peers to go over the limit, even if the limit is zero.
     let over_limit_peers = config.peerset_outbound_connection_limit() * 2 + 1;
     let mut fake_peer = None;
-    for address_number in 0..over_limit_peers {
-        let addr = SocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number as _).into(), 1);
-        let addr = MetaAddr::new_gossiped_meta_addr(
-            addr.into(),
-            PeerServices::NODE_NETWORK,
-            DateTime32::now(),
-        );
-        fake_peer = Some(addr);
-        let addr = addr
-            .new_gossiped_change()
-            .expect("created MetaAddr contains enough information to represent a gossiped address");
-
-        address_book
+    {
+        let shared = address_book.shared();
+        let mut book = shared
             .lock()
-            .expect("panic in previous thread while accessing the address book")
-            .update(addr);
+            .expect("panic in previous thread while accessing the address book");
+        for address_number in 0..over_limit_peers {
+            let addr = SocketAddr::new(Ipv4Addr::new(127, 1, 1, address_number as _).into(), 1);
+            let addr = MetaAddr::new_gossiped_meta_addr(
+                addr.into(),
+                PeerServices::NODE_NETWORK,
+                DateTime32::now(),
+            );
+            fake_peer = Some(addr);
+            let addr = addr.new_gossiped_change().expect(
+                "created MetaAddr contains enough information to represent a gossiped address",
+            );
+            book.update(addr);
+        }
     }
 
     // Create a fake peer set.
@@ -1609,12 +1608,13 @@ where
     );
 
     // Check the final address book contents.
+    let shared = address_book.shared();
     assert_eq!(
-        address_book.lock().unwrap().peers().count(),
+        shared.lock().unwrap().peers().count(),
         over_limit_peers,
         "expected {} peers in Mainnet address book, but got: {:?}",
         over_limit_peers,
-        address_book.lock().unwrap().address_metrics(Utc::now())
+        shared.lock().unwrap().address_metrics(Utc::now())
     );
 
     (config, peerset_rx)
@@ -1775,13 +1775,8 @@ where
 
     let (peerset_tx, peerset_rx) = mpsc::channel::<DiscoveredPeer>(peer_count + 1);
 
-    let (
-        _address_book,
-        _bans_receiver,
-        address_book_updater,
-        _address_metrics,
-        address_book_updater_guard,
-    ) = AddressBookUpdater::spawn(&config, unused_v4);
+    let (_address_book, address_book_updater_guard) = AddressBookUpdater::spawn(&config, unused_v4);
+    let address_book_updater = _address_book.update_sender();
 
     let add_fut = add_initial_peers(config, outbound_connector, peerset_tx, address_book_updater);
     let add_task_handle = tokio::spawn(add_fut);

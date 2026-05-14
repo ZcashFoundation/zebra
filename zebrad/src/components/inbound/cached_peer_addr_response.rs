@@ -3,9 +3,11 @@
 //! Used to avoid giving out Zebra's entire address book over a short duration.
 
 use std::{
-    sync::{Mutex, TryLockError},
+    sync::{Arc, Mutex, TryLockError},
     time::Instant,
 };
+
+use zebra_network::{AddressBook, AddressBookService};
 
 use super::*;
 
@@ -16,9 +18,14 @@ use super::*;
 pub const CACHED_ADDRS_REFRESH_INTERVAL: Duration = Duration::from_secs(10 * 60);
 
 /// Caches and refreshes a partial list of peer addresses to be returned as a `GetAddr` response.
+///
+/// The refresh path uses [`Mutex::try_lock`] on the underlying address book so it never blocks
+/// the inbound service's hot path on the address book mutex; if the lock is contended we keep
+/// serving the previous cached response.
 pub struct CachedPeerAddrResponse {
-    /// A shared list of peer addresses.
-    address_book: Arc<Mutex<zn::AddressBook>>,
+    /// A direct handle to the underlying address book mutex used for the
+    /// synchronous `try_lock` refresh fast path.
+    inner_book: Arc<Mutex<AddressBook>>,
 
     /// An owned list of peer addresses used as a `GetAddr` response.
     value: zn::Response,
@@ -29,9 +36,10 @@ pub struct CachedPeerAddrResponse {
 
 impl CachedPeerAddrResponse {
     /// Creates a new empty [`CachedPeerAddrResponse`].
-    pub(super) fn new(address_book: Arc<Mutex<AddressBook>>) -> Self {
+    pub(super) fn new(address_book: AddressBookService) -> Self {
+        let inner_book = address_book.shared();
         Self {
-            address_book,
+            inner_book,
             value: zn::Response::Nil,
             refresh_time: Instant::now(),
         }
@@ -41,7 +49,7 @@ impl CachedPeerAddrResponse {
         self.value.clone()
     }
 
-    /// Refreshes the `cached_addrs` if the time has past `refresh_time` or the cache is empty
+    /// Refreshes the `cached_addrs` if the time has past `refresh_time` or the cache is empty.
     pub(super) fn try_refresh(&mut self) {
         let now = Instant::now();
 
@@ -52,9 +60,9 @@ impl CachedPeerAddrResponse {
 
         let cache_expiry = self.refresh_time + CACHED_ADDRS_REFRESH_INTERVAL;
 
-        // try getting a lock on the address book if it's time to refresh the cached addresses
+        // Use try_lock so the inbound service's hot path never blocks on the address book mutex.
         match self
-            .address_book
+            .inner_book
             .try_lock()
             .map(|book| book.fresh_get_addr_response())
         {
@@ -95,4 +103,5 @@ impl CachedPeerAddrResponse {
             }
         };
     }
+
 }

@@ -342,7 +342,10 @@ proptest! {
             addrs,
         )));
         let peer_service = service_fn(|_| async { unreachable!("Service should not be called") });
-        let mut candidate_set = CandidateSet::new(address_book.clone(), peer_service);
+        let mut candidate_set = CandidateSet::new(
+            crate::AddressBookService::from_shared_for_tests(address_book.clone()),
+            peer_service,
+        );
 
         runtime.block_on(async move {
             tokio::time::pause();

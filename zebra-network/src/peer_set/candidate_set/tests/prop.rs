@@ -4,7 +4,6 @@ use std::{
     env,
     net::SocketAddr,
     str::FromStr,
-    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -21,7 +20,7 @@ use crate::{
     canonical_peer_addr,
     constants::{DEFAULT_MAX_CONNS_PER_IP, MIN_OUTBOUND_PEER_CONNECTION_INTERVAL},
     meta_addr::{MetaAddr, MetaAddrChange},
-    AddressBook, BoxError, Request, Response,
+    AddressBook, AddressBookService, BoxError, Request, Response,
 };
 
 use super::super::{validate_addrs, CandidateSet};
@@ -73,7 +72,7 @@ proptest! {
         // Since the address book is empty, there won't be any available peers
         let address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), &Mainnet, DEFAULT_MAX_CONNS_PER_IP, Span::none());
 
-        let mut candidate_set = CandidateSet::new(Arc::new(std::sync::Mutex::new(address_book)), peer_service);
+        let mut candidate_set = CandidateSet::new(AddressBookService::from_book_for_tests(address_book), peer_service);
 
         // Make sure that the rate-limit is never triggered, even after multiple calls
         for _ in 0..next_peer_attempts {
@@ -116,7 +115,7 @@ proptest! {
         let mut address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), &Mainnet, DEFAULT_MAX_CONNS_PER_IP, Span::none());
         address_book.extend(peers);
 
-        let mut candidate_set = CandidateSet::new(Arc::new(std::sync::Mutex::new(address_book)), peer_service);
+        let mut candidate_set = CandidateSet::new(AddressBookService::from_book_for_tests(address_book), peer_service);
 
         let checks = async move {
             // Check rate limiting for initial peers

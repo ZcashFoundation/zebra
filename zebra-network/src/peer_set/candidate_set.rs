@@ -1,18 +1,20 @@
 //! Candidate peer selection for outbound connections using the [`CandidateSet`].
 
-use std::{any::type_name, cmp::min, sync::Arc};
+use std::{any::type_name, cmp::min};
 
-use chrono::Utc;
 use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::time::{sleep_until, timeout, Instant};
 use tower::{Service, ServiceExt};
-use tracing::Span;
 
-use zebra_chain::{diagnostic::task::WaitForPanics, serialization::DateTime32};
+use zebra_chain::serialization::DateTime32;
 
 use crate::{
-    constants, meta_addr::MetaAddrChange, peer_set::set::MorePeers, types::MetaAddr, AddressBook,
-    BoxError, Request, Response,
+    address_book_service::{AddressBookRequest, AddressBookResponse},
+    constants,
+    meta_addr::MetaAddrChange,
+    peer_set::set::MorePeers,
+    types::MetaAddr,
+    AddressBookService, BoxError, Request, Response,
 };
 
 #[cfg(test)]
@@ -130,9 +132,10 @@ where
     ///
     /// # Correctness
     ///
-    /// The address book must be private, so all operations are performed on a blocking thread
-    /// (see #1976).
-    address_book: Arc<std::sync::Mutex<AddressBook>>,
+    /// The address book is exposed as a Tower service that runs all locking on
+    /// a blocking thread (see #1976), so callers can drive it directly from
+    /// async code.
+    address_book: AddressBookService,
 
     /// The peer set used to crawl the network for peers.
     peer_service: S,
@@ -165,10 +168,7 @@ where
     S::Future: Send + 'static,
 {
     /// Uses `address_book` and `peer_service` to manage a [`CandidateSet`] of peers.
-    pub fn new(
-        address_book: Arc<std::sync::Mutex<AddressBook>>,
-        peer_service: S,
-    ) -> CandidateSet<S> {
+    pub fn new(address_book: AddressBookService, peer_service: S) -> CandidateSet<S> {
         CandidateSet {
             address_book,
             peer_service,
@@ -360,17 +360,19 @@ where
 
         // # Correctness
         //
-        // Spawn address book accesses on a blocking thread,
-        // to avoid deadlocks (see #1976).
-        //
-        // Extend handles duplicate addresses internally.
-        let address_book = self.address_book.clone();
-        let span = Span::current();
-        tokio::task::spawn_blocking(move || {
-            span.in_scope(|| address_book.lock().unwrap().extend(addrs))
-        })
-        .wait_for_panics()
-        .await
+        // The address book service runs the lock on a blocking thread for us.
+        // `Extend` handles duplicate addresses internally.
+        let mut address_book = self.address_book.clone();
+        let result = match address_book.ready().await {
+            Ok(svc) => svc.call(AddressBookRequest::Extend(addrs)).await,
+            Err(error) => Err(error),
+        };
+        if let Err(error) = result {
+            warn!(
+                ?error,
+                "address book service failed to extend gossiped peers"
+            );
+        }
     }
 
     /// Returns the next candidate for a connection attempt, if any are available.
@@ -398,35 +400,38 @@ where
     ///
     /// [`Responded`]: crate::PeerAddrState::Responded
     pub async fn next(&mut self) -> Option<MetaAddr> {
-        // Correctness: To avoid hangs, computation in the critical section should be kept to a minimum.
-        let address_book = self.address_book.clone();
-        let next_peer = move || -> Option<MetaAddr> {
-            let mut guard = address_book.lock().unwrap();
-
-            // Now we have the lock, get the current time
-            let instant_now = std::time::Instant::now();
-            let chrono_now = Utc::now();
-
-            // It's okay to return without sleeping here, because we're returning
-            // `None`. We only need to sleep before yielding an address.
-            let next_peer = guard.reconnection_peers(instant_now, chrono_now).next()?;
-
-            // TODO: only mark the peer as AttemptPending when it is actually used (#1976)
-            //
-            // If the future is dropped before `next` returns, the peer will be marked as AttemptPending,
-            // even if its address is not actually used for a connection.
-            //
-            // We could send a reconnect change to the AddressBookUpdater when the peer is actually used,
-            // but channel order is not guaranteed, so we could accidentally re-use the same peer.
-            let next_peer = MetaAddr::new_reconnect(next_peer.addr);
-            guard.update(next_peer)
+        // Atomically pick the next eligible peer and transition it to
+        // `AttemptPending`, all under a single address book lock.
+        //
+        // TODO: only mark the peer as AttemptPending when it is actually used (#1976)
+        //
+        // If the future is dropped before `next` returns, the peer will be marked as AttemptPending,
+        // even if its address is not actually used for a connection.
+        //
+        // We could send a reconnect change to the AddressBookUpdater when the peer is actually used,
+        // but channel order is not guaranteed, so we could accidentally re-use the same peer.
+        let next_peer = match self
+            .address_book
+            .ready()
+            .await
+            .ok()?
+            .call(AddressBookRequest::NextReconnectionPeer)
+            .await
+        {
+            Ok(AddressBookResponse::MaybePeer(Some(peer))) => peer,
+            Ok(AddressBookResponse::MaybePeer(None)) => return None,
+            Ok(other) => unreachable!(
+                "NextReconnectionPeer must return MaybePeer; got {:?}",
+                other
+            ),
+            Err(error) => {
+                warn!(
+                    ?error,
+                    "address book service returned an error for next reconnection peer"
+                );
+                return None;
+            }
         };
-
-        // Correctness: Spawn address book accesses on a blocking thread, to avoid deadlocks (see #1976).
-        let span = Span::current();
-        let next_peer = tokio::task::spawn_blocking(move || span.in_scope(next_peer))
-            .wait_for_panics()
-            .await?;
 
         // Security: rate-limit new outbound peer connections
         sleep_until(self.min_next_handshake).await;
@@ -435,10 +440,10 @@ where
         Some(next_peer)
     }
 
-    /// Returns the address book for this `CandidateSet`.
+    /// Returns the address book service for this `CandidateSet`.
     #[cfg(any(test, feature = "proptest-impl"))]
     #[allow(dead_code)]
-    pub async fn address_book(&self) -> Arc<std::sync::Mutex<AddressBook>> {
+    pub async fn address_book(&self) -> AddressBookService {
         self.address_book.clone()
     }
 }

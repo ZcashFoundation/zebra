@@ -670,7 +670,11 @@ async fn setup(
     .await;
 
     // Inbound listener
-    let listen_addr = address_book.lock().unwrap().local_listener_socket_addr();
+    let listen_addr = address_book
+        .shared()
+        .lock()
+        .unwrap()
+        .local_listener_socket_addr();
 
     assert_ne!(
         listen_addr.port(),
