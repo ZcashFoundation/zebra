@@ -1078,6 +1078,10 @@ where
     /// - the prepared `cached_ffi_transaction` used by the script verifier
     /// - the sapling shielded data of the transaction, if any
     /// - the orchard shielded data of the transaction, if any
+    // FIXME: This function performs no V6-specific issuance or burn semantic checks
+    // (ZIP-226 / ZIP-227). Those rules are enforced only in `zebra-state` via
+    // `IssuedAssetChanges::validate_and_get_changes`. Either move that validation here
+    // or document the contract that the state layer cannot be bypassed.
     #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
     fn verify_v6_transaction(
         request: &Request,

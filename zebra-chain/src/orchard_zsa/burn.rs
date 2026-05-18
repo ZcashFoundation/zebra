@@ -160,6 +160,9 @@ pub(crate) fn compute_burn_value_commitment(burn: &[BurnItem]) -> ValueCommitmen
         .map(|&BurnItem(asset, amount)| {
             ValueCommitment::new(
                 pallas::Scalar::zero(),
+                // TODO: `amount - NoteValue::from_raw(0)` is an obscure way to widen
+                // `NoteValue` into `ValueSum`. Replace with a direct/explicit conversion
+                // once the upstream Orchard API exposes one.
                 amount - NoteValue::from_raw(0),
                 asset,
             )

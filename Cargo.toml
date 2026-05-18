@@ -30,6 +30,8 @@ edition = "2021"
 
 [workspace.dependencies]
 incrementalmerkletree = { version = "0.8.2", features = ["legacy-api"] }
+# TODO: Remove the `temporary-zebra` feature once upstream `orchard` exposes the APIs
+# Zebra needs without this transition feature.
 orchard = { version = "0.12", features = ["zsa-issuance", "temporary-zebra"] }
 sapling-crypto = "0.6"
 zcash_address = "0.10.1"

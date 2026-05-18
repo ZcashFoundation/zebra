@@ -438,6 +438,11 @@ impl ZcashSerialize for orchard::ShieldedData<OrchardZSA> {
         zcash_serialize_external_count(&sigs, &mut writer)?;
 
         // Denoted as `valueBalanceOrchard` in the spec.
+        // FIXME: `valueBalanceOrchard` and `bindingSigOrchard` are per-transaction fields,
+        // not per-action-group fields. They are serialized here because today the V6
+        // transaction has exactly one action group. Once multi-action-group support is
+        // added (ZIP-230), move this serialization up to the caller in the V6 branch of
+        // `Transaction::zcash_serialize`.
         self.value_balance.zcash_serialize(&mut writer)?;
 
         // Denoted as `bindingSigOrchard` in the spec.
@@ -868,6 +873,9 @@ impl ZcashSerialize for Transaction {
                 writer.write_u32::<LittleEndian>(expiry_height.0)?;
 
                 // Denoted as `zip233_amount` in the spec.
+                // FIXME: ZIP-230 places this *after* the 8-byte `fee` field which is currently
+                // missing (see TODO on the Transaction::V6 variant). Once `fee` is added, the
+                // byte offset of zip233_amount will shift to match the spec.
                 zip233_amount.zcash_serialize(&mut writer)?;
 
                 // Denoted as `tx_in_count` and `tx_in` in the spec.

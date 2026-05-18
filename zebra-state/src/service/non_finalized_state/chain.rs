@@ -1005,7 +1005,11 @@ impl Chain {
     }
 
     #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-    /// Remove the History tree index at `height`.
+    /// Revert the issued-asset state changes recorded for a block.
+    ///
+    /// At `RevertPosition::Tip`, restores `issued_assets` to the per-asset `old_state`
+    /// captured when the block was applied. At `RevertPosition::Root` this is a no-op
+    /// because finalized issuance state lives in the on-disk column family.
     fn revert_issued_assets(
         &mut self,
         position: RevertPosition,
