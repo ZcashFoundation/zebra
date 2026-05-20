@@ -128,6 +128,11 @@ impl<C> Amount<C> {
     {
         0.try_into().expect("an amount of 0 is always valid")
     }
+
+    /// Returns true if this amount is zero.
+    pub fn is_zero(&self) -> bool {
+        self.0 == 0
+    }
 }
 
 impl<C> std::ops::Add<Amount<C>> for Amount<C>

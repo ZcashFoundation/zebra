@@ -119,9 +119,15 @@ impl ShieldedData {
     }
 }
 
-impl AtLeastOne<AuthorizedAction> {
+/// A trait for types that can provide Orchard actions.
+pub trait OrchardActions {
+    /// Returns an iterator over the actions in this type.
+    fn actions(&self) -> impl Iterator<Item = &Action> + '_;
+}
+
+impl OrchardActions for AtLeastOne<AuthorizedAction> {
     /// Iterate over the [`Action`]s of each [`AuthorizedAction`].
-    pub fn actions(&self) -> impl Iterator<Item = &Action> {
+    fn actions(&self) -> impl Iterator<Item = &Action> + '_ {
         self.iter()
             .map(|authorized_action| &authorized_action.action)
     }

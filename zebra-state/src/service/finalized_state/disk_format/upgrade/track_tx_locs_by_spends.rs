@@ -87,9 +87,7 @@ pub fn run(
                         .zs_insert(&spent_output_location, &tx_loc);
                 }
 
-                batch
-                    .prepare_nullifier_batch(zebra_db, &tx, tx_loc)
-                    .expect("method should never return an error");
+                batch.prepare_nullifier_batch(zebra_db, &tx, tx_loc);
             }
 
             if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {

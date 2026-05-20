@@ -460,7 +460,7 @@ impl DbFormatChange {
             track_tx_locs_by_spends::run(initial_tip_height, db, cancel_receiver)?;
             info!("finished checking/adding indexes for spending tx ids");
 
-            timer.finish(module_path!(), line!(), "indexing spending transaction ids");
+            timer.finish_desc("indexing spending transaction ids");
         };
 
         #[cfg(not(feature = "indexer"))]
@@ -487,7 +487,7 @@ impl DbFormatChange {
                 db.update_format_version_on_disk(&version)
                     .expect("unable to write database format version file to disk");
 
-                timer.finish(module_path!(), line!(), "removing spending transaction ids");
+                timer.finish_desc("removing spending transaction ids");
             }
         };
 
@@ -580,7 +580,7 @@ impl DbFormatChange {
                     .validate(db, cancel_receiver)?
                     .expect("db should be valid after upgrade");
 
-                timer.finish(module_path!(), line!(), upgrade.description());
+                timer.finish_desc(upgrade.description());
             }
 
             // Mark the database as upgraded. Zebra won't repeat the upgrade anymore once the
@@ -613,7 +613,7 @@ impl DbFormatChange {
         results.push(fix_tree_key_type::quick_check(db));
 
         // The work is done in the functions we just called.
-        timer.finish(module_path!(), line!(), "format_validity_checks_quick()");
+        timer.finish_desc("format_validity_checks_quick()");
 
         if results.iter().any(Result::is_err) {
             let err = Err(format!("invalid quick check: {results:?}"));
@@ -643,7 +643,7 @@ impl DbFormatChange {
         }
 
         // The work is done in the functions we just called.
-        timer.finish(module_path!(), line!(), "format_validity_checks_detailed()");
+        timer.finish_desc("format_validity_checks_detailed()");
 
         if results.iter().any(Result::is_err) {
             let err = Err(format!("invalid detailed check: {results:?}"));

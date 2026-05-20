@@ -12,7 +12,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `RequestWeight` trait and changed to a `max_items_weight_in_batch` field in the
   `BatchLayer` struct ([#9308](https://github.com/ZcashFoundation/zebra/pull/9308))
 
-
 ## [0.2.41] - 2025-07-11
 
 First "stable" release. However, be advised that the API may still greatly

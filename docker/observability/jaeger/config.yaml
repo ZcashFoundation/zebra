@@ -1,0 +1,86 @@
+# Jaeger v2 Configuration
+# Based on OpenTelemetry Collector architecture
+# Reference: https://www.jaegertracing.io/docs/2.0/getting-started/
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+
+connectors:
+  # Spanmetrics connector generates metrics from spans for Jaeger SPM
+  # Reference: https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/connector/spanmetricsconnector
+  spanmetrics:
+    namespace: span_metrics
+    metrics_flush_interval: 15s
+    # Histogram buckets for latency distribution
+    histogram:
+      explicit:
+        buckets: [1ms, 5ms, 10ms, 25ms, 50ms, 100ms, 250ms, 500ms, 1s, 2.5s, 5s, 10s]
+    dimensions:
+      - name: rpc.method
+      - name: rpc.system
+      - name: otel.status_code
+
+exporters:
+  # Jaeger storage (in-memory for development)
+  jaeger_storage_exporter:
+    trace_storage: memstore
+
+  # Prometheus metrics endpoint for spanmetrics (used by Jaeger SPM)
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    namespace: traces
+    const_labels:
+      service: zebra
+
+extensions:
+  jaeger_storage:
+    backends:
+      memstore:
+        memory:
+          max_traces: 100000
+    # Metrics storage for SPM - reads from Prometheus
+    metric_backends:
+      prometheus:
+        prometheus:
+          endpoint: http://prometheus:9090
+          normalize_calls: true
+          normalize_duration: true
+
+  jaeger_query:
+    storage:
+      traces: memstore
+      metrics: prometheus
+    ui:
+      config_file: ""
+
+  healthcheckv2:
+    use_v2: true
+    http:
+      endpoint: 0.0.0.0:13133
+
+service:
+  extensions:
+    - jaeger_storage
+    - jaeger_query
+    - healthcheckv2
+
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [jaeger_storage_exporter, spanmetrics]
+
+    # Spanmetrics pipeline - exports to Prometheus
+    metrics/spanmetrics:
+      receivers: [spanmetrics]
+      exporters: [prometheus]

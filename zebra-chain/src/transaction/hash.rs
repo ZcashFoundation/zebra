@@ -299,7 +299,7 @@ impl TryFrom<&Vec<u8>> for WtxId {
     type Error = SerializationError;
 
     fn try_from(bytes: &Vec<u8>) -> Result<Self, Self::Error> {
-        bytes.clone().try_into()
+        bytes.as_slice().try_into()
     }
 }
 

@@ -6,18 +6,21 @@
 - Zebra Issue: [ZcashFoundation/zebra#682](https://github.com/ZcashFoundation/zebra/issues/682)
 
 # Summary
+
 [summary]: #summary
 
 Zebra verifies blocks in several stages, most of which can be executed in
 parallel.
 
 We use several different design patterns to enable this parallelism:
-* We download blocks and start verifying them in parallel,
-* We batch signature and proof verification using verification services, and
-* We defer data dependencies until just before the block is committed to the
+
+- We download blocks and start verifying them in parallel,
+- We batch signature and proof verification using verification services, and
+- We defer data dependencies until just before the block is committed to the
   state (see the detailed design RFCs).
 
 # Motivation
+
 [motivation]: #motivation
 
 Zcash (and Bitcoin) are designed to verify each block in sequence, starting
@@ -31,41 +34,47 @@ By parallelising block and transaction verification, we can use multithreading
 and batch verification for signatures, proofs, scripts, and hashes.
 
 # Definitions
+
 [definitions]: #definitions
 
 Blockchain:
-* **chain fork:** Zcash is implemented using a tree of blocks. Each block has a
-                  single previous block, and zero to many next blocks. A chain
-                  fork consists of a tip and all its previous blocks, back to
-                  the genesis block.
-* **genesis:** The root of the tree of blocks is called the genesis block. It has
-               no previous block.
-* **tip:** A block which has no next block is called a tip. Each chain fork can
-           be identified using its tip.
+
+- **chain fork:** Zcash is implemented using a tree of blocks. Each block has a
+  single previous block, and zero to many next blocks. A chain
+  fork consists of a tip and all its previous blocks, back to
+  the genesis block.
+- **genesis:** The root of the tree of blocks is called the genesis block. It has
+  no previous block.
+- **tip:** A block which has no next block is called a tip. Each chain fork can
+  be identified using its tip.
 
 Data:
-* **consensus rule:** A protocol rule which all nodes must apply consistently,
-                      so they can converge on the same chain fork.
-* **context-free:** Consensus rules which do not have a data dependency on
-                    previous blocks.
-* **data dependency:** Information contained in the previous block and its
-                       chain fork, which is required to verify the current block.
-* **state:** The set of verified blocks. The state might also cache some
-             dependent data, so that we can efficiently verify subsequent blocks.
+
+- **consensus rule:** A protocol rule which all nodes must apply consistently,
+  so they can converge on the same chain fork.
+- **context-free:** Consensus rules which do not have a data dependency on
+  previous blocks.
+- **data dependency:** Information contained in the previous block and its
+  chain fork, which is required to verify the current block.
+- **state:** The set of verified blocks. The state might also cache some
+  dependent data, so that we can efficiently verify subsequent blocks.
 
 Verification Stages:
+
 <!-- The verification stages are listed in chronological order -->
-* **structural verification:** Parsing raw bytes into the data structures defined
-                               by the protocol.
-* **semantic verification:** Verifying the consensus rules on the data structures
-                             defined by the protocol.
-* **contextual verification:** Verifying the current block, once its data
-                               dependencies have been satisfied by a verified
-                               previous block. This verification might also use
-                               the cached state corresponding to the previous
-                               block.
+
+- **structural verification:** Parsing raw bytes into the data structures defined
+  by the protocol.
+- **semantic verification:** Verifying the consensus rules on the data structures
+  defined by the protocol.
+- **contextual verification:** Verifying the current block, once its data
+  dependencies have been satisfied by a verified
+  previous block. This verification might also use
+  the cached state corresponding to the previous
+  block.
 
 # Guide-level explanation
+
 [guide-level-explanation]: #guide-level-explanation
 
 In Zebra, we want to verify blocks in parallel. Some fields can be verified
@@ -77,6 +86,7 @@ If we delay checking some of these data dependencies, then we can do more of
 the verification in parallel.
 
 ## Example: BlockHeight
+
 [block-height]: #block-height
 
 Here's how Zebra can verify the different Block Height consensus rules in
@@ -88,12 +98,12 @@ parallel:
 
 **Semantic Verification: No Data Dependencies:**
 
-2. Check that the first input of the first transaction in the block is a coinbase
+1. Check that the first input of the first transaction in the block is a coinbase
    input with a valid block height in its data field.
 
 **Semantic Verification: Deferring a Data Dependency:**
 
-3. Verify other consensus rules that depend on Block Height, assuming that the
+1. Verify other consensus rules that depend on Block Height, assuming that the
    Block Height is correct. For example, many consensus rules depend on the
    current Network Upgrade, which is determined by the Block Height. We verify
    these consensus rules, assuming the Block Height and Network Upgrade are
@@ -101,7 +111,7 @@ parallel:
 
 **Contextual Verification:**
 
-4. Submit the block to the state for contextual verification. When it is ready to
+1. Submit the block to the state for contextual verification. When it is ready to
    be committed (it may arrive before the previous block), check all deferred
    constraints, including the constraint that the block height of this block is
    one more than the block height of its parent block. If all constraints are
@@ -109,18 +119,22 @@ parallel:
    invalid.
 
 ## Zebra Design
+
 [zebra-design]: #zebra-design
 
 ### Design Patterns
+
 [design-patterns]: #design-patterns
 
 When designing changes to Zebra verification, use these design patterns:
-* perform context-free verification as soon as possible,
+
+- perform context-free verification as soon as possible,
   (that is, verification which has no data dependencies on previous blocks),
-* defer data dependencies as long as possible, then
-* check the data dependencies.
+- defer data dependencies as long as possible, then
+- check the data dependencies.
 
 ### Minimise Deferred Data
+
 [minimise-deferred-data]: #minimise-deferred-data
 
 Keep the data dependencies and checks as simple as possible.
@@ -134,32 +148,36 @@ reject the entire block, including all the verification we performed using the
 assumed Network Upgrade.
 
 ### Implementation Strategy
+
 [implementation-strategy]: #implementation-strategy
 
 When implementing these designs, perform as much verification as possible, await
 any dependencies, then perform the necessary checks.
 
 # Reference-level explanation
+
 [reference-level-explanation]: #reference-level-explanation
 
 ## Verification Stages
+
 [verification-stages]: #verification-stages
 
 In Zebra, verification occurs in the following stages:
-* **Structural Verification:** Raw block data is parsed into a block header and
+
+- **Structural Verification:** Raw block data is parsed into a block header and
   transactions. Invalid data is not representable in these structures:
   deserialization (parsing) can fail, but serialization always succeeds.
-* **Semantic Verification:** Parsed block fields are verified, based on their
+- **Semantic Verification:** Parsed block fields are verified, based on their
   data dependencies:
-  * Context-free fields have no data dependencies, so they can be verified as
+  - Context-free fields have no data dependencies, so they can be verified as
     needed.
-  * Fields with simple data dependencies defer that dependency as long as
+  - Fields with simple data dependencies defer that dependency as long as
     possible, so they can perform more verification in parallel. Then they await
     the required data, which is typically the previous block. (And potentially
     older blocks in its chain fork.)
-  * Fields with complex data dependencies require their own parallel verification
+  - Fields with complex data dependencies require their own parallel verification
     designs. These designs are out of scope for this RFC.
-* **Contextual Verification:** After a block is verified, it is added to the state. The
+- **Contextual Verification:** After a block is verified, it is added to the state. The
   details of state updates, and their interaction with semantic verification,
   are out of scope for this RFC.
 
@@ -167,24 +185,27 @@ This RFC focuses on Semantic Verification, and the design patterns that enable
 blocks to be verified in parallel.
 
 ## Verification Interfaces
+
 [verification-interfaces]: #verification-interfaces
 
 Verification is implemented by the following traits and services:
-* **Structural Verification:**
-  * `zebra_chain::ZcashDeserialize`: A trait for parsing consensus-critical
+
+- **Structural Verification:**
+  - `zebra_chain::ZcashDeserialize`: A trait for parsing consensus-critical
     data structures from a byte buffer.
-* **Semantic Verification:**
-  * `ChainVerifier`: Provides a verifier service that accepts a `Block` request,
+- **Semantic Verification:**
+  - `ChainVerifier`: Provides a verifier service that accepts a `Block` request,
     performs verification on the block, and responds with a `block::Hash` on
     success.
-  * Internally, the `ChainVerifier` selects between a `CheckpointVerifier` for
+  - Internally, the `ChainVerifier` selects between a `CheckpointVerifier` for
     blocks that are within the checkpoint range, and a `BlockVerifier` for
     recent blocks.
-* **Contextual Verification:**
-  * `zebra_state::init`: Provides the state update service, which accepts
+- **Contextual Verification:**
+  - `zebra_state::init`: Provides the state update service, which accepts
     requests to add blocks to the state.
 
 ### Checkpoint Verification
+
 [checkpoint-verification]: #checkpoint-verification
 
 The `CheckpointVerifier` performs rapid verification of blocks, based on a set
@@ -199,74 +220,80 @@ functions within the CheckpointVerifier service.
 
 Here is how the `CheckpointVerifier` implements each verification stage:
 
-* **Structural Verification:**
-  * *As Above:* the `CheckpointVerifier` accepts parsed `Block` structs.
-* **Semantic Verification:**
-  * `check_height`: makes sure the block height is within the unverified
+- **Structural Verification:**
+  - _As Above:_ the `CheckpointVerifier` accepts parsed `Block` structs.
+- **Semantic Verification:**
+  - `check_height`: makes sure the block height is within the unverified
     checkpoint range, and adds the block to its internal queue.
-  * `target_checkpoint_height`: Checks for a continuous range of blocks from
+  - `target_checkpoint_height`: Checks for a continuous range of blocks from
     the previous checkpoint to a subsequent checkpoint. If the chain is
     incomplete, returns a future, and waits for more blocks. If the chain is
     complete, assumes that the `previous_block_hash` fields of these blocks
     form an unbroken chain from checkpoint to checkpoint, and starts
     processing the checkpoint range. (This constraint is an implicit part of
     the `CheckpointVerifier` design.)
-  * `process_checkpoint_range`: makes sure that the blocks in the checkpoint
+  - `process_checkpoint_range`: makes sure that the blocks in the checkpoint
     range have an unbroken chain of previous block hashes.
-* **Contextual Verification:**
-  * *As Above:* the `CheckpointVerifier` returns success to the `ChainVerifier`,
+- **Contextual Verification:**
+  - _As Above:_ the `CheckpointVerifier` returns success to the `ChainVerifier`,
     which sends verified `Block`s to the state service.
 
 ### Block Verification
+
 [block-verification]: #block-verification
 
 The `BlockVerifier` performs detailed verification of recent blocks, in parallel.
 
 Here is how the `BlockVerifier` implements each verification stage:
 
-* **Structural Verification:**
-  * *As Above:* the `BlockVerifier` accepts parsed `Block` structs.
-* **Semantic Verification:**
-  * *As Above:* verifies each field in the block. Defers any data dependencies as
+- **Structural Verification:**
+  - _As Above:_ the `BlockVerifier` accepts parsed `Block` structs.
+- **Semantic Verification:**
+  - _As Above:_ verifies each field in the block. Defers any data dependencies as
     long as possible, awaits those data dependencies, then performs data
     dependent checks.
-  * Note: Since futures are executed concurrently, we can use the same function
+  - Note: Since futures are executed concurrently, we can use the same function
     to:
-    * perform context-free verification,
-    * perform verification with deferred data dependencies,
-    * await data dependencies, and
-    * check data dependencies.
-    To maximise concurrency, we should write verification functions in this
-    specific order, so the awaits are as late as possible.
-* **Contextual Verification:**
-  * *As Above:* the `BlockVerifier` returns success to the `ChainVerifier`,
+    - perform context-free verification,
+    - perform verification with deferred data dependencies,
+    - await data dependencies, and
+    - check data dependencies.
+      To maximise concurrency, we should write verification functions in this
+      specific order, so the awaits are as late as possible.
+- **Contextual Verification:**
+  - _As Above:_ the `BlockVerifier` returns success to the `ChainVerifier`,
     which sends verified `Block`s to the state service.
 
 ## Zcash Protocol Design
+
 [zcash-protocol]: #zcash-protocol
 
 When designing a change to the Zcash protocol, minimise the data dependencies
 between blocks.
 
 Try to create designs that:
-* Eliminate data dependencies,
-* Make the changes depend on a version field in the block header or transaction,
-* Make the changes depend on the current Network Upgrade, or
-* Make the changes depend on a field in the current block, with an additional
+
+- Eliminate data dependencies,
+- Make the changes depend on a version field in the block header or transaction,
+- Make the changes depend on the current Network Upgrade, or
+- Make the changes depend on a field in the current block, with an additional
   consensus rule to check that field against previous blocks.
 
 When making decisions about these design tradeoffs, consider:
-* how the data dependency could be deferred, and
-* the CPU cost of the verification - if it is trivial, then it does not matter if
+
+- how the data dependency could be deferred, and
+- the CPU cost of the verification - if it is trivial, then it does not matter if
   the verification is parallelised.
 
 # Drawbacks
+
 [drawbacks]: #drawbacks
 
 This design is a bit complicated, but we think it's necessary to achieve our
 goals.
 
 # Rationale and alternatives
+
 [rationale-and-alternatives]: #rationale-and-alternatives
 
 - What makes this design a good design?
@@ -292,15 +319,18 @@ goals.
     verification
 
 # Prior art
+
 [prior-art]: #prior-art
 
 **TODO: expand this section**
-  - zcashd
-    - serial block verification
-    - Zebra implements the same consensus rules, but a different design
-  - tower
+
+- zcashd
+  - serial block verification
+  - Zebra implements the same consensus rules, but a different design
+- tower
 
 # Unresolved questions
+
 [unresolved-questions]: #unresolved-questions
 
 - [ ] Is this design good enough to use as a framework for future RFCs?
@@ -312,6 +342,7 @@ goals.
     - check deferred data dependencies
 
 Out of Scope:
+
 - What is the most efficient design for parallel verification?
   - (Optimisations are out of scope.)
 
@@ -325,10 +356,11 @@ Out of Scope:
 - Moving the verifiers into the state service
 
 # Future possibilities
+
 [future-possibilities]: #future-possibilities
 
-  - Separate RFCs for other data dependencies
-    - Recent blocks
-    - Overall chain summaries (for example, total work)
-    - Reorganisation limit: multiple chains to single chain transition
-  - Optimisations for parallel verification
+- Separate RFCs for other data dependencies
+  - Recent blocks
+  - Overall chain summaries (for example, total work)
+  - Reorganisation limit: multiple chains to single chain transition
+- Optimisations for parallel verification

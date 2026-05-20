@@ -27,9 +27,10 @@ use zebra_db::{
 
 use crate::{
     constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
+    error::CommitCheckpointVerifiedError,
     request::{FinalizableBlock, FinalizedBlock, Treestate},
     service::{check, QueuedCheckpointVerified},
-    BoxError, CheckpointVerifiedBlock, CloneError, Config,
+    CheckpointVerifiedBlock, Config, ValidateContextError,
 };
 
 pub mod column_family;
@@ -274,7 +275,7 @@ impl FinalizedState {
         &mut self,
         ordered_block: QueuedCheckpointVerified,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
-    ) -> Result<(CheckpointVerifiedBlock, NoteCommitmentTrees), BoxError> {
+    ) -> Result<(CheckpointVerifiedBlock, NoteCommitmentTrees), CommitCheckpointVerifiedError> {
         let (checkpoint_verified, rsp_tx) = ordered_block;
         let result = self.commit_finalized_direct(
             checkpoint_verified.clone().into(),
@@ -299,15 +300,9 @@ impl FinalizedState {
                 .set(checkpoint_verified.height.0 as f64);
         };
 
-        // Make the error cloneable, so we can send it to the block verify future,
-        // and the block write task.
-        let result = result.map_err(CloneError::from);
+        let _ = rsp_tx.send(result.clone().map(|(hash, _)| hash));
 
-        let _ = rsp_tx.send(result.clone().map(|(hash, _)| hash).map_err(BoxError::from));
-
-        result
-            .map(|(_hash, note_commitment_trees)| (checkpoint_verified, note_commitment_trees))
-            .map_err(BoxError::from)
+        result.map(|(_hash, note_commitment_trees)| (checkpoint_verified, note_commitment_trees))
     }
 
     /// Immediately commit a `finalized` block to the finalized state.
@@ -329,7 +324,7 @@ impl FinalizedState {
         finalizable_block: FinalizableBlock,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
         source: &str,
-    ) -> Result<(block::Hash, NoteCommitmentTrees), BoxError> {
+    ) -> Result<(block::Hash, NoteCommitmentTrees), CommitCheckpointVerifiedError> {
         let (height, hash, finalized, prev_note_commitment_trees) = match finalizable_block {
             FinalizableBlock::Checkpoint {
                 checkpoint_verified,
@@ -347,7 +342,9 @@ impl FinalizedState {
 
                 // Update the note commitment trees.
                 let mut note_commitment_trees = prev_note_commitment_trees.clone();
-                note_commitment_trees.update_trees_parallel(&block)?;
+                note_commitment_trees
+                    .update_trees_parallel(&block)
+                    .map_err(ValidateContextError::from)?;
 
                 // Check the block commitment if the history tree was not
                 // supplied by the non-finalized state. Note that we don't do
@@ -379,12 +376,11 @@ impl FinalizedState {
                 let history_tree_mut = Arc::make_mut(&mut history_tree);
                 let sapling_root = note_commitment_trees.sapling.root();
                 let orchard_root = note_commitment_trees.orchard.root();
-                history_tree_mut.push(
-                    &self.network(),
-                    block.clone(),
-                    &sapling_root,
-                    &orchard_root,
-                )?;
+                history_tree_mut
+                    .push(&self.network(), block.clone(), &sapling_root, &orchard_root)
+                    .map_err(Arc::new)
+                    .map_err(ValidateContextError::from)?;
+
                 let treestate = Treestate {
                     note_commitment_trees,
                     history_tree,

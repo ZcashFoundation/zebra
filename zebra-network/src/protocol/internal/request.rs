@@ -6,6 +6,7 @@ use zebra_chain::{
 };
 
 use super::super::types::Nonce;
+use crate::PeerSocketAddr;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -181,10 +182,16 @@ pub enum Request {
     /// the available peers. See [`number_of_peers_to_broadcast()`](crate::PeerSet::number_of_peers_to_broadcast)
     /// for more details.
     ///
+    /// The second field is the address of the peer that sent us this `inv`:
+    /// `Some(addr)` when the advertisement was relayed from a remote peer,
+    /// and `None` when Zebra originates the advertisement itself (for
+    /// example from the sync gossip task). Consumers use the address to
+    /// apply per-peer policies such as the inbound download per-IP cap.
+    ///
     /// # Returns
     ///
     /// Returns [`Response::Nil`](super::Response::Nil).
-    AdvertiseBlock(block::Hash),
+    AdvertiseBlock(block::Hash, Option<PeerSocketAddr>),
 
     /// Advertise a block to all ready peers. This is equivalent to
     /// [`Request::AdvertiseBlock`] except that the peer set will route
@@ -227,7 +234,7 @@ impl fmt::Display for Request {
                 format!("AdvertiseTransactionIds({})", ids.len())
             }
 
-            Request::AdvertiseBlock(_) => "AdvertiseBlock".to_string(),
+            Request::AdvertiseBlock(_, _) => "AdvertiseBlock".to_string(),
             Request::AdvertiseBlockToAll(_) => "AdvertiseBlockToAll".to_string(),
             Request::MempoolTransactionIds => "MempoolTransactionIds".to_string(),
         })
@@ -250,7 +257,7 @@ impl Request {
             Request::PushTransaction(_) => "PushTransaction",
             Request::AdvertiseTransactionIds(_) => "AdvertiseTransactionIds",
 
-            Request::AdvertiseBlock(_) | Request::AdvertiseBlockToAll(_) => "AdvertiseBlock",
+            Request::AdvertiseBlock(_, _) | Request::AdvertiseBlockToAll(_) => "AdvertiseBlock",
             Request::MempoolTransactionIds => "MempoolTransactionIds",
         }
     }

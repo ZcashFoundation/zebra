@@ -40,5 +40,6 @@ pub use zcash_deserialize::{
 };
 pub use zcash_serialize::{
     zcash_serialize_bytes, zcash_serialize_bytes_external_count, zcash_serialize_empty_list,
-    zcash_serialize_external_count, FakeWriter, ZcashSerialize, MAX_PROTOCOL_MESSAGE_LEN,
+    zcash_serialize_external_count, FakeWriter, ZcashSerialize, MAX_HEADERS_PER_MESSAGE,
+    MAX_PROTOCOL_MESSAGE_LEN,
 };

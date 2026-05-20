@@ -1,7 +1,13 @@
 use std::sync::Arc;
 
 use super::super::serialize::parse_coinbase_height;
-use crate::{block::Block, parameters::Network, serialization::ZcashDeserializeInto, transaction};
+use super::super::Input;
+use crate::{
+    block::Block,
+    parameters::Network,
+    serialization::{SerializationError, ZcashDeserialize, ZcashDeserializeInto},
+    transaction,
+};
 use hex::FromHex;
 
 use zebra_test::prelude::*;
@@ -88,6 +94,43 @@ fn get_transparent_output_address_with_blocks() {
     for network in Network::iter() {
         get_transparent_output_address_with_blocks_for_network(network);
     }
+}
+
+/// Build a coinbase `Input` byte sequence: 32 zero bytes for the null outpoint
+/// hash, the coinbase index `0xffffffff` little-endian, and a coinbase-script
+/// CompactSize length followed by `payload`.
+///
+/// Used by the regression tests below to confirm that `Input::zcash_deserialize`
+/// rejects attacker-controlled coinbase script lengths *before* allocating or
+/// reading the script bytes.
+fn coinbase_input_bytes(compactsize_len: &[u8], payload: &[u8]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(32 + 4 + compactsize_len.len() + payload.len());
+    bytes.extend_from_slice(&[0u8; 32]);
+    bytes.extend_from_slice(&0xffff_ffffu32.to_le_bytes());
+    bytes.extend_from_slice(compactsize_len);
+    bytes.extend_from_slice(payload);
+    bytes
+}
+
+/// Coinbase scripts longer than the consensus maximum (100 bytes) must be
+/// rejected at length-decode time, not after allocating the bytes.
+///
+/// Regression test: encoding a CompactSize length of 101 with no payload would
+/// have made the previous implementation try to `read_exact(101)` and surface
+/// an `io::Error`; the fix returns the consensus error string before the read.
+#[test]
+fn coinbase_script_oversize_rejected_before_allocation() {
+    let _init_guard = zebra_test::init();
+
+    let bytes = coinbase_input_bytes(&[101u8], &[]);
+    let result = Input::zcash_deserialize(std::io::Cursor::new(&bytes));
+    assert!(
+        matches!(
+            result,
+            Err(SerializationError::Parse("coinbase data is too long"))
+        ),
+        "expected `coinbase data is too long`, got {result:?}",
+    );
 }
 
 /// Test that the block test vector indexes match the heights in the block data,

@@ -171,6 +171,8 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
                 transaction,
                 Amount::try_from(1_000_000).expect("valid amount"),
                 0,
+                0,
+                std::sync::Arc::new(vec![]),
             )
             .expect("verification should pass"),
         ));
@@ -279,6 +281,8 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
                 transaction,
                 Amount::try_from(1_000_000).expect("valid amount"),
                 0,
+                0,
+                std::sync::Arc::new(vec![]),
             )
             .expect("verification should pass"),
         ));
@@ -381,6 +385,8 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
                 transaction,
                 Amount::try_from(1_000_000).expect("valid amount"),
                 0,
+                0,
+                std::sync::Arc::new(vec![]),
             )
             .expect("verification should pass"),
         ));
@@ -429,7 +435,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     tokio::time::sleep(PEER_GOSSIP_DELAY).await;
     let possible_requests = &mut [
         Request::AdvertiseTransactionIds(hs),
-        Request::AdvertiseBlock(block_two.hash()),
+        Request::AdvertiseBlock(block_two.hash(), None),
     ]
     .to_vec();
 
@@ -497,7 +503,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
     // Test the block is gossiped, after waiting for the multi-gossip delay
     tokio::time::sleep(PEER_GOSSIP_DELAY).await;
     peer_set
-        .expect_request(Request::AdvertiseBlock(block_three.hash()))
+        .expect_request(Request::AdvertiseBlock(block_three.hash(), None))
         .await
         .respond(Response::Nil);
 
@@ -520,6 +526,8 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
                 transaction,
                 Amount::try_from(1_000_000).expect("valid amount"),
                 0,
+                0,
+                std::sync::Arc::new(vec![]),
             )
             .expect("verification should pass"),
         ));
@@ -605,7 +613,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         // Test the block is gossiped, after waiting for the multi-gossip delay
         tokio::time::sleep(PEER_GOSSIP_DELAY).await;
         peer_set
-            .expect_request(Request::AdvertiseBlock(block.hash()))
+            .expect_request(Request::AdvertiseBlock(block.hash(), None))
             .await
             .respond(Response::Nil);
 
@@ -673,7 +681,7 @@ async fn inbound_block_height_lookahead_limit() -> Result<(), crate::BoxError> {
     // Push test block hash
     let _request = inbound_service
         .clone()
-        .oneshot(Request::AdvertiseBlock(block_hash))
+        .oneshot(Request::AdvertiseBlock(block_hash, None))
         .await?;
 
     // Block is fetched, and committed to the state
@@ -709,7 +717,7 @@ async fn inbound_block_height_lookahead_limit() -> Result<(), crate::BoxError> {
     // Push test block hash
     let _request = inbound_service
         .clone()
-        .oneshot(Request::AdvertiseBlock(block_hash))
+        .oneshot(Request::AdvertiseBlock(block_hash, None))
         .await?;
 
     // Block is fetched, but the downloader drops it because it is too high
@@ -1007,7 +1015,7 @@ async fn setup(
         tokio::time::sleep(PEER_GOSSIP_DELAY).await;
 
         peer_set
-            .expect_request(Request::AdvertiseBlock(block.hash()))
+            .expect_request(Request::AdvertiseBlock(block.hash(), None))
             .await
             .respond(Response::Nil);
     }

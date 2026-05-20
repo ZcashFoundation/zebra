@@ -1,17 +1,24 @@
 //! Types and implementation for Testnet consensus parameters
+
 use std::{collections::BTreeMap, fmt, sync::Arc};
 
 use crate::{
     amount::{Amount, NonNegative},
     block::{self, Height, HeightDiff},
     parameters::{
-        checkpoint::list::{CheckpointList, TESTNET_CHECKPOINTS},
+        checkpoint::list::{CheckpointList, TESTNET_CHECKPOINT_LIST},
         constants::{magics, SLOW_START_INTERVAL, SLOW_START_SHIFT},
         network::error::ParametersBuilderError,
         network_upgrade::TESTNET_ACTIVATION_HEIGHTS,
         subsidy::{
-            funding_stream_address_period, FUNDING_STREAMS_MAINNET, FUNDING_STREAMS_TESTNET,
-            FUNDING_STREAM_RECEIVER_DENOMINATOR, NU6_1_LOCKBOX_DISBURSEMENTS_TESTNET,
+            constants::mainnet,
+            constants::testnet,
+            constants::{
+                BLOSSOM_POW_TARGET_SPACING_RATIO, FUNDING_STREAM_RECEIVER_DENOMINATOR,
+                POST_BLOSSOM_HALVING_INTERVAL, PRE_BLOSSOM_HALVING_INTERVAL,
+            },
+            funding_stream_address_period, FundingStreamReceiver, FundingStreamRecipient,
+            FundingStreams,
         },
         Network, NetworkKind, NetworkUpgrade,
     },
@@ -19,14 +26,7 @@ use crate::{
     work::difficulty::{ExpandedDifficulty, U256},
 };
 
-use super::{
-    magic::Magic,
-    subsidy::{
-        FundingStreamReceiver, FundingStreamRecipient, FundingStreams,
-        BLOSSOM_POW_TARGET_SPACING_RATIO, POST_BLOSSOM_HALVING_INTERVAL,
-        PRE_BLOSSOM_HALVING_INTERVAL,
-    },
-};
+use super::magic::Magic;
 
 /// Reserved network names that should not be allowed for configured Testnets.
 pub const RESERVED_NETWORK_NAMES: [&str; 6] = [
@@ -69,6 +69,46 @@ pub struct ConfiguredFundingStreamRecipient {
 }
 
 impl ConfiguredFundingStreamRecipient {
+    /// Creates a new [`ConfiguredFundingStreamRecipient`] with the provided receiver and default
+    /// values for other fields.
+    pub fn new_for(receiver: FundingStreamReceiver) -> Self {
+        use FundingStreamReceiver::*;
+        match receiver {
+            Ecc => Self {
+                receiver: Ecc,
+                numerator: 7,
+                addresses: Some(
+                    testnet::FUNDING_STREAM_ECC_ADDRESSES
+                        .map(ToString::to_string)
+                        .to_vec(),
+                ),
+            },
+            ZcashFoundation => Self {
+                receiver: ZcashFoundation,
+                numerator: 5,
+                addresses: Some(
+                    testnet::FUNDING_STREAM_ZF_ADDRESSES
+                        .map(ToString::to_string)
+                        .to_vec(),
+                ),
+            },
+            MajorGrants => Self {
+                receiver: MajorGrants,
+                numerator: 8,
+                addresses: Some(
+                    testnet::FUNDING_STREAM_MG_ADDRESSES
+                        .map(ToString::to_string)
+                        .to_vec(),
+                ),
+            },
+            Deferred => Self {
+                receiver,
+                numerator: 0,
+                addresses: None,
+            },
+        }
+    }
+
     /// Converts a [`ConfiguredFundingStreamRecipient`] to a [`FundingStreamReceiver`] and [`FundingStreamRecipient`].
     pub fn into_recipient(self) -> (FundingStreamReceiver, FundingStreamRecipient) {
         (
@@ -463,19 +503,16 @@ impl Default for ParametersBuilder {
                 .to_expanded()
                 .expect("difficulty limits are valid expanded values"),
             disable_pow: false,
-            funding_streams: FUNDING_STREAMS_TESTNET.clone(),
+            funding_streams: testnet::FUNDING_STREAMS.clone(),
             should_lock_funding_stream_address_period: false,
             pre_blossom_halving_interval: PRE_BLOSSOM_HALVING_INTERVAL,
             post_blossom_halving_interval: POST_BLOSSOM_HALVING_INTERVAL,
             should_allow_unshielded_coinbase_spends: false,
-            lockbox_disbursements: NU6_1_LOCKBOX_DISBURSEMENTS_TESTNET
+            lockbox_disbursements: testnet::NU6_1_LOCKBOX_DISBURSEMENTS
                 .iter()
                 .map(|(addr, amount)| (addr.to_string(), *amount))
                 .collect(),
-            checkpoints: TESTNET_CHECKPOINTS
-                .parse()
-                .map(Arc::new)
-                .expect("must be able to parse checkpoints"),
+            checkpoints: TESTNET_CHECKPOINT_LIST.clone(),
         }
     }
 }
@@ -636,14 +673,14 @@ impl ParametersBuilder {
     ///
     /// # Panics
     ///
-    /// If `funding_streams` is longer than `FUNDING_STREAMS_TESTNET`, and one
+    /// If `funding_streams` is longer than `testnet::FUNDING_STREAMS`, and one
     /// of the extra streams requires a default value.
     pub fn with_funding_streams(mut self, funding_streams: Vec<ConfiguredFundingStreams>) -> Self {
         self.funding_streams = funding_streams
             .into_iter()
             .enumerate()
             .map(|(idx, streams)| {
-                let default_streams = FUNDING_STREAMS_TESTNET.get(idx).cloned();
+                let default_streams = testnet::FUNDING_STREAMS.get(idx).cloned();
                 streams.convert_with_default(default_streams)
             })
             .collect();
@@ -662,8 +699,6 @@ impl ParametersBuilder {
     ///
     /// This should be called after configuring the desired network upgrade activation heights.
     pub fn extend_funding_streams(mut self) -> Self {
-        // self.funding_streams.extend(FUNDING_STREAMS_TESTNET);
-
         let network = self.to_network_unchecked();
 
         for funding_streams in &mut self.funding_streams {
@@ -739,14 +774,12 @@ impl ParametersBuilder {
         mut self,
         checkpoints: impl Into<ConfiguredCheckpoints>,
     ) -> Result<Self, ParametersBuilderError> {
-        self.checkpoints = Arc::new(match checkpoints.into() {
-            ConfiguredCheckpoints::Default(true) => TESTNET_CHECKPOINTS
-                .parse()
-                .map_err(|_| ParametersBuilderError::InvalidCheckpointsFormat)?,
-            ConfiguredCheckpoints::Default(false) => {
+        self.checkpoints = match checkpoints.into() {
+            ConfiguredCheckpoints::Default(true) => TESTNET_CHECKPOINT_LIST.clone(),
+            ConfiguredCheckpoints::Default(false) => Arc::new(
                 CheckpointList::from_list([(block::Height(0), self.genesis_hash)])
-                    .map_err(|_| ParametersBuilderError::FailedToParseDefaultCheckpoint)?
-            }
+                    .map_err(|_| ParametersBuilderError::FailedToParseDefaultCheckpoint)?,
+            ),
             ConfiguredCheckpoints::Path(path_buf) => {
                 let Ok(raw_checkpoints_str) = std::fs::read_to_string(&path_buf) else {
                     return Err(ParametersBuilderError::FailedToReadCheckpointFile {
@@ -754,16 +787,20 @@ impl ParametersBuilder {
                     });
                 };
 
-                raw_checkpoints_str
-                    .parse::<CheckpointList>()
-                    .map_err(|err| ParametersBuilderError::FailedToParseCheckpointFile {
-                        path_buf: path_buf.clone(),
-                        err: err.to_string(),
-                    })?
+                Arc::new(
+                    raw_checkpoints_str
+                        .parse::<CheckpointList>()
+                        .map_err(|err| ParametersBuilderError::FailedToParseCheckpointFile {
+                            path_buf: path_buf.clone(),
+                            err: err.to_string(),
+                        })?,
+                )
             }
-            ConfiguredCheckpoints::HeightsAndHashes(items) => CheckpointList::from_list(items)
-                .map_err(|_| ParametersBuilderError::InvalidCustomCheckpoints)?,
-        });
+            ConfiguredCheckpoints::HeightsAndHashes(items) => Arc::new(
+                CheckpointList::from_list(items)
+                    .map_err(|_| ParametersBuilderError::InvalidCustomCheckpoints)?,
+            ),
+        };
 
         Ok(self)
     }
@@ -1161,7 +1198,7 @@ impl Network {
         if let Self::Testnet(params) = self {
             params.funding_streams()
         } else {
-            &FUNDING_STREAMS_MAINNET
+            &mainnet::FUNDING_STREAMS
         }
     }
 
@@ -1172,6 +1209,14 @@ impl Network {
             params.should_allow_unshielded_coinbase_spends()
         } else {
             false
+        }
+    }
+
+    /// Returns the list of founders' reward addresses for this network.
+    pub fn founder_address_list(&self) -> &[&str] {
+        match self {
+            Network::Mainnet => &mainnet::FOUNDER_ADDRESS_LIST,
+            Network::Testnet(_) => &testnet::FOUNDER_ADDRESS_LIST,
         }
     }
 }

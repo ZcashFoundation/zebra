@@ -22,16 +22,28 @@ proptest! {
     fn transaction_roundtrip(tx in any::<Transaction>()) {
         let _init_guard = zebra_test::init();
 
+        let has_coinbase_sapling_spends = tx.is_coinbase()
+            && tx.sapling_spends_per_anchor().count() > 0;
+
         let data = tx.zcash_serialize_to_vec().expect("tx should serialize");
-        let tx2 = data.zcash_deserialize_into().expect("randomized tx should deserialize");
 
-        prop_assert_eq![&tx, &tx2];
+        if has_coinbase_sapling_spends {
+            // GHSA-rgwx-8r98-p34c fix: the parser now rejects coinbase
+            // transactions with Sapling spends before allocating.
+            data.zcash_deserialize_into::<Transaction>()
+                .expect_err("coinbase with Sapling spends must be rejected");
+        } else {
+            let tx2 = data.zcash_deserialize_into()
+                .expect("randomized tx should deserialize");
 
-        let data2 = tx2
-            .zcash_serialize_to_vec()
-            .expect("vec serialization is infallible");
+            prop_assert_eq![&tx, &tx2];
 
-        prop_assert_eq![data, data2, "data must be equal if structs are equal"];
+            let data2 = tx2
+                .zcash_serialize_to_vec()
+                .expect("vec serialization is infallible");
+
+            prop_assert_eq![data, data2, "data must be equal if structs are equal"];
+        }
     }
 
     #[test]

@@ -1,6 +1,9 @@
 //! Writing blocks to the finalized and non-finalized states.
 
-use std::sync::Arc;
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use indexmap::IndexMap;
 use tokio::sync::{
@@ -72,6 +75,9 @@ pub(crate) fn validate_and_commit_non_finalized(
 ///
 /// `last_zebra_mined_log_height` is used to rate-limit logging.
 ///
+/// If `backup_dir_path` is `Some`, the non-finalized state is written to the backup
+/// directory before updating the channels.
+///
 /// Returns the latest non-finalized chain tip height.
 ///
 /// # Panics
@@ -83,7 +89,8 @@ pub(crate) fn validate_and_commit_non_finalized(
         non_finalized_state,
         chain_tip_sender,
         non_finalized_state_sender,
-        last_zebra_mined_log_height
+        last_zebra_mined_log_height,
+        backup_dir_path,
     ),
     fields(chains = non_finalized_state.chain_count())
 )]
@@ -92,6 +99,7 @@ fn update_latest_chain_channels(
     chain_tip_sender: &mut ChainTipSender,
     non_finalized_state_sender: &watch::Sender<NonFinalizedState>,
     last_zebra_mined_log_height: &mut Option<Height>,
+    backup_dir_path: Option<&Path>,
 ) -> block::Height {
     let best_chain = non_finalized_state.best_chain().expect("unexpected empty non-finalized state: must commit at least one block before updating channels");
 
@@ -104,6 +112,10 @@ fn update_latest_chain_channels(
     log_if_mined_by_zebra(&tip_block, last_zebra_mined_log_height);
 
     let tip_block_height = tip_block.height;
+
+    if let Some(backup_dir_path) = backup_dir_path {
+        non_finalized_state.write_to_backup(backup_dir_path);
+    }
 
     // If the final receiver was just dropped, ignore the error.
     let _ = non_finalized_state_sender.send(non_finalized_state.clone());
@@ -123,6 +135,9 @@ struct WriteBlockWorkerTask {
     invalid_block_reset_sender: UnboundedSender<block::Hash>,
     chain_tip_sender: ChainTipSender,
     non_finalized_state_sender: watch::Sender<NonFinalizedState>,
+    /// If `Some`, the non-finalized state is written to this backup directory
+    /// synchronously before each channel update, instead of via the async backup task.
+    backup_dir_path: Option<PathBuf>,
 }
 
 /// The message type for the non-finalized block write task channel.
@@ -182,6 +197,7 @@ impl BlockWriteSender {
         chain_tip_sender: ChainTipSender,
         non_finalized_state_sender: watch::Sender<NonFinalizedState>,
         should_use_finalized_block_write_sender: bool,
+        backup_dir_path: Option<PathBuf>,
     ) -> (
         Self,
         tokio::sync::mpsc::UnboundedReceiver<block::Hash>,
@@ -207,6 +223,7 @@ impl BlockWriteSender {
                     invalid_block_reset_sender,
                     chain_tip_sender,
                     non_finalized_state_sender,
+                    backup_dir_path,
                 }
                 .run()
             })
@@ -244,6 +261,7 @@ impl WriteBlockWorkerTask {
             invalid_block_reset_sender,
             chain_tip_sender,
             non_finalized_state_sender,
+            backup_dir_path,
         } = &mut self;
 
         let mut last_zebra_mined_log_height = None;
@@ -355,6 +373,7 @@ impl WriteBlockWorkerTask {
                     chain_tip_sender,
                     non_finalized_state_sender,
                     &mut last_zebra_mined_log_height,
+                    backup_dir_path.as_deref(),
                 );
                 continue;
             };
@@ -384,9 +403,6 @@ impl WriteBlockWorkerTask {
             //       and send the result on rsp_tx here
 
             if let Err(ref error) = result {
-                // Update the caller with the error.
-                let _ = rsp_tx.send(result.clone().map(|()| child_hash).map_err(Into::into));
-
                 // If the block is invalid, mark any descendant blocks as rejected.
                 parent_error_map.insert(child_hash, error.clone());
 
@@ -395,6 +411,9 @@ impl WriteBlockWorkerTask {
                     // We only add one hash at a time, so we only need to remove one extra here.
                     parent_error_map.shift_remove_index(0);
                 }
+
+                // Update the caller with the error.
+                let _ = rsp_tx.send(result.map(|()| child_hash).map_err(Into::into));
 
                 // Skip the things we only need to do for successfully committed blocks
                 continue;
@@ -411,10 +430,11 @@ impl WriteBlockWorkerTask {
                 chain_tip_sender,
                 non_finalized_state_sender,
                 &mut last_zebra_mined_log_height,
+                backup_dir_path.as_deref(),
             );
 
             // Update the caller with the result.
-            let _ = rsp_tx.send(result.clone().map(|()| child_hash).map_err(Into::into));
+            let _ = rsp_tx.send(result.map(|()| child_hash).map_err(Into::into));
 
             while non_finalized_state
                 .best_chain_len()

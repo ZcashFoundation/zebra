@@ -148,6 +148,18 @@ impl TryFrom<u32> for Height {
     }
 }
 
+impl From<Height> for u32 {
+    fn from(height: Height) -> Self {
+        height.0
+    }
+}
+
+impl From<Height> for u64 {
+    fn from(height: Height) -> Self {
+        height.0.into()
+    }
+}
+
 /// Convenience trait for converting a type into a valid Zcash [`Height`].
 pub trait TryIntoHeight {
     /// The error type returned by [`Height`] conversion failures.

@@ -14,11 +14,11 @@ set -eo pipefail
 : "${ZEBRA_STATE__CACHE_DIR:=${HOME}/.cache/zebra}"
 : "${ZEBRA_RPC__COOKIE_DIR:=${HOME}/.cache/zebra}"
 
-# Use gosu to drop privileges and execute the given command as the specified UID:GID
+# Use setpriv to drop privileges and execute the given command as the specified UID:GID
 exec_as_user() {
   user=$(id -u)
   if [[ ${user} == '0' ]]; then
-    exec gosu "${UID}:${GID}" "$@"
+    exec setpriv --reuid="${UID}" --regid="${GID}" --init-groups "$@"
   else
     exec "$@"
   fi

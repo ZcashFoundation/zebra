@@ -52,9 +52,7 @@ pub fn run(
                     continue;
                 }
 
-                batch
-                    .prepare_nullifier_batch(zebra_db, &tx)
-                    .expect("method should never return an error");
+                batch.prepare_nullifier_batch(zebra_db, &tx);
             }
 
             if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {

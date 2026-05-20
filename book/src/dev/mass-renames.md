@@ -11,12 +11,14 @@ so changing them can lead to unexpected test failures or hangs.
 ## Universal Renames with `sed`
 
 You can use `sed` to rename all the instances of a name in Zebra's code, documentation, and tests:
+
 ```sh
 git ls-tree --full-tree -r --name-only HEAD | \
 xargs sed -i -e 's/OldName/NewName/g' -e 's/OtherOldName/OtherNewName/g'
 ```
 
 Or excluding specific paths:
+
 ```sh
 git ls-tree --full-tree -r --name-only HEAD | \
 grep -v -e 'path-to-skip' -e 'other-path-to-skip' | \
@@ -26,12 +28,15 @@ xargs sed -i -e 's/OldName/NewName/g' -e 's/OtherOldName/OtherNewName/g'
 `sed` also supports regular expressions to replace a pattern with another pattern.
 
 Here's how to make a PR with these replacements:
+
 1. Run the `sed` commands
 2. Run `cargo fmt --all` after doing all the replacements
 3. Put the commands in the commit message and pull request, so the reviewer can check them
 
 Here's how to review that PR:
+
 1. Check out two copies of the repository, one with the PR, and one without:
+
 ```sh
 cd zebra
 git fetch --all
@@ -42,7 +47,8 @@ git worktree add ../zebra-sed main
 git worktree add ../zebra-pr origin/pr-branch-name
 ```
 
-2. Run the scripts on the repository without the PR:
+1. Run the scripts on the repository without the PR:
+
 ```sh
 cd ../zebra-sed
 # run the scripts in the PR or commit message
@@ -52,7 +58,8 @@ xargs sed -i -e 's/OldName/NewName/g' -e 's/OtherOldName/OtherNewName/g'
 cargo fmt --all
 ```
 
-3. Automatically check that they match
+1. Automatically check that they match:
+
 ```sh
 cd ..
 git diff zebra-sed zebra-pr
@@ -66,6 +73,7 @@ and ask the author to re-run the script on the latest `main`.
 ## Interactive Renames with `fastmod`
 
 You can use `fastmod` to rename some instances, but skip others:
+
 ```sh
 fastmod --hidden --fixed-strings "OldName" "NewName" [paths to change]
 ```
@@ -75,6 +83,7 @@ Using the `--hidden` flag does renames in `.github` workflows, issue templates, 
 `fastmod` also supports regular expressions to replace a pattern with another pattern.
 
 Here's how to make a PR with these replacements:
+
 1. Run the `fastmod` commands, choosing which instances to replace
 2. Run `cargo fmt --all` after doing all the replacements
 3. Put the commands in the commit message and pull request, so the reviewer can check them
@@ -83,6 +92,7 @@ Here's how to make a PR with these replacements:
    - do a cleanup using `fastmod` in the next PR.
 
 Here's how to review that PR:
+
 1. Manually review each replacement (there's no shortcut)
 
 ## Using `rustdoc` links to detect name changes
@@ -106,6 +116,7 @@ and our `rustdoc` lint will detect any typos or name changes.
 
 If a type isn't imported in the module or Rust prelude,
 then it needs a fully-qualified path in the docs, or an unused import:
+
 ```rust
 // For rustdoc
 #[allow(unused_imports)]

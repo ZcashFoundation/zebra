@@ -582,6 +582,31 @@ where
         + Copy
         + 'static,
 {
+    // Coinbase transactions must not contain Sapling spends (GHSA-rgwx-8r98-p34c).
+    // The arbitrary `Transaction` strategy generates these independently, so clear
+    // any generated Sapling shielded data on coinbase transactions before the chain
+    // builder commits them. The deserialization rejection path is still exercised
+    // by the `transaction_roundtrip` proptest and the GHSA-rgwx-8r98-p34c reproduction
+    // vector in `zebra-chain`.
+    if transaction.is_coinbase() {
+        match &mut transaction {
+            Transaction::V4 {
+                sapling_shielded_data,
+                ..
+            } => *sapling_shielded_data = None,
+            Transaction::V5 {
+                sapling_shielded_data,
+                ..
+            } => *sapling_shielded_data = None,
+            #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            Transaction::V6 {
+                sapling_shielded_data,
+                ..
+            } => *sapling_shielded_data = None,
+            Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => {}
+        }
+    }
+
     let mut spend_restriction = transaction.coinbase_spend_restriction(&Network::Mainnet, height);
     let mut new_inputs = Vec::new();
     let mut spent_outputs = HashMap::new();

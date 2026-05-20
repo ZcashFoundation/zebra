@@ -9,6 +9,11 @@ use super::{AtLeastOne, CompactSizeMessage};
 /// This value is used to calculate safe preallocation limits for some types
 pub const MAX_PROTOCOL_MESSAGE_LEN: usize = 2 * 1024 * 1024;
 
+/// The maximum number of block headers in a single `headers` protocol message.
+///
+/// <https://zips.z.cash/protocol/protocol.pdf#page=108>
+pub const MAX_HEADERS_PER_MESSAGE: usize = 160;
+
 /// Consensus-critical serialization for Zcash.
 ///
 /// This trait provides a generic serialization for consensus-critical

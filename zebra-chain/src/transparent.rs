@@ -432,8 +432,8 @@ pub struct Output {
 }
 
 impl Output {
-    /// Returns a new coinbase output that pays `amount` using `lock_script`.
-    pub fn new_coinbase(amount: Amount<NonNegative>, lock_script: Script) -> Output {
+    /// Returns a new [`Output`].
+    pub fn new(amount: Amount<NonNegative>, lock_script: Script) -> Output {
         Output {
             value: amount,
             lock_script,

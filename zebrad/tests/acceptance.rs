@@ -1396,8 +1396,8 @@ fn sync_full_testnet() -> Result<()> {
     )
 }
 
-#[cfg(all(feature = "prometheus", not(target_os = "windows")))]
 #[tokio::test]
+#[cfg(all(feature = "prometheus", not(target_os = "windows")))]
 async fn metrics_endpoint() -> Result<()> {
     use bytes::Bytes;
     use http_body_util::BodyExt;
@@ -1916,7 +1916,7 @@ async fn lightwalletd_test_suite() -> Result<()> {
 ///
 /// Set `FullSyncFromGenesis { allow_lightwalletd_cached_state: true }` to speed up manual full sync tests.
 ///
-/// # Relibility
+/// # Reliability
 ///
 /// The random ports in this test can cause [rare port conflicts.](#Note on port conflict)
 ///
@@ -3009,6 +3009,78 @@ async fn regtest_block_templates_are_valid_block_submissions() -> Result<()> {
     Ok(())
 }
 
+/// Regression test for <https://github.com/ZcashFoundation/zebra/issues/10470>.
+///
+/// `getrawtransaction` must count confirmations against the full best-chain tip
+/// (including non-finalized blocks), not just the finalized-database tip.
+#[tokio::test]
+async fn getrawtransaction_confirmations_include_non_finalized_blocks() -> Result<()> {
+    use zebra_state::constants::MAX_BLOCK_REORG_HEIGHT;
+
+    let _init_guard = zebra_test::init();
+
+    let network = Network::new_regtest(
+        ConfiguredActivationHeights {
+            nu5: Some(100),
+            ..Default::default()
+        }
+        .into(),
+    );
+    let mut config = os_assigned_rpc_port_config(false, &network)?;
+    config.mempool.debug_enable_at_height = Some(0);
+
+    let mut zebrad = testdir()?
+        .with_config(&mut config)?
+        .spawn_child(args!["start"])?;
+    let rpc_address = read_listen_addr_from_logs(&mut zebrad, OPENED_RPC_ENDPOINT_MSG)?;
+
+    tokio::time::sleep(LAUNCH_DELAY).await;
+
+    let client = RpcRequestClient::new(rpc_address);
+
+    // Mine enough blocks to push the first few blocks into the finalized state.
+    // Block at height 2 is finalized once tip > 2 + MAX_BLOCK_REORG_HEIGHT = 101.
+    let blocks_to_mine = MAX_BLOCK_REORG_HEIGHT + 10;
+    client.generate(blocks_to_mine).await?;
+
+    // Get the coinbase txid from block 2 (it will be in the finalized DB).
+    let block2 = client
+        .get_block(2)
+        .await
+        .map_err(|err| eyre::eyre!(err))?
+        .expect("block at height 2 should exist");
+    let txid = block2.transactions[0].hash();
+
+    // Confirm the tip height and compute expected confirmations.
+    let info = client.blockchain_info().await?;
+    let tip_height = info.blocks().0;
+    let expected_confirmations = 1 + tip_height - 2;
+
+    // getrawtransaction verbose=1 returns a JSON object that includes `confirmations`.
+    let response: Value = client
+        .json_result_from_call("getrawtransaction", format!(r#"["{txid}", 1]"#))
+        .await
+        .map_err(|err| eyre::eyre!(err))?;
+
+    let confirmations: u32 = response["confirmations"]
+        .as_u64()
+        .expect("confirmations should be a positive integer")
+        .try_into()
+        .expect("confirmations should fit in u32 because regtest block heights fit in u32");
+
+    assert_eq!(
+        confirmations, expected_confirmations,
+        "getrawtransaction must count confirmations against the full best-chain tip \
+         (including non-finalized blocks), not just the finalized-DB tip"
+    );
+
+    zebrad.kill(false)?;
+    let output = zebrad.wait_with_output()?;
+    output.assert_failure()?.assert_was_killed()?;
+
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     use std::sync::Arc;
@@ -3308,7 +3380,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     use zebra_chain::{
         chain_sync_status::MockSyncStatus,
         parameters::{
-            subsidy::{FundingStreamReceiver, FUNDING_STREAM_MG_ADDRESSES_TESTNET},
+            subsidy::FundingStreamReceiver,
             testnet::{
                 self, ConfiguredActivationHeights, ConfiguredFundingStreamRecipient,
                 ConfiguredFundingStreams,
@@ -3494,15 +3566,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
                 numerator,
                 addresses: None,
             },
-            ConfiguredFundingStreamRecipient {
-                receiver: FundingStreamReceiver::MajorGrants,
-                numerator: 8,
-                addresses: Some(
-                    FUNDING_STREAM_MG_ADDRESSES_TESTNET
-                        .map(ToString::to_string)
-                        .to_vec(),
-                ),
-            },
+            ConfiguredFundingStreamRecipient::new_for(FundingStreamReceiver::MajorGrants),
         ])
     };
 
@@ -3686,8 +3750,11 @@ async fn nu7_nsm_transactions() -> Result<()> {
     let base_network_params = testnet::Parameters::build()
         // Regtest genesis hash
         .with_genesis_hash("029f11d80ef9765602235e1bc9727e3eb6ba20839319f761fee920d63401e327")
+        .unwrap()
         .with_checkpoints(false)
+        .unwrap()
         .with_target_difficulty_limit(U256::from_big_endian(&[0x0f; 32]))
+        .unwrap()
         .with_disable_pow(true)
         .with_slow_start_interval(Height::MIN)
         .with_lockbox_disbursements(vec![])
@@ -3698,13 +3765,15 @@ async fn nu7_nsm_transactions() -> Result<()> {
 
     let network = base_network_params
         .clone()
+        .unwrap()
         .with_funding_streams(vec![ConfiguredFundingStreams {
             // Start checking funding streams from block height 1
             height_range: Some(Height(1)..Height(100)),
             // Use default post-NU6 recipients
             recipients: None,
         }])
-        .to_network();
+        .to_network()
+        .unwrap();
 
     tracing::info!("built configured Testnet, starting state service and block verifier");
 
@@ -4089,7 +4158,10 @@ async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
     tokio::time::sleep(Duration::from_secs(6)).await;
 
     child.kill(true)?;
-    // Wait for Zebra to shut down.
+    // Wait for zebrad to fully terminate to ensure database lock is released.
+    child
+        .wait_with_output()
+        .wrap_err("failed to wait for zebrad to fully terminate")?;
     tokio::time::sleep(Duration::from_secs(3)).await;
     // Prepare checkpoint heights/hashes
     let last_hash = *generated_block_hashes
@@ -4149,7 +4221,10 @@ async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
          the finalized tip is below the max checkpoint height"
     );
     child.kill(true)?;
-    // Wait for Zebra to shut down.
+    // Wait for zebrad to fully terminate to ensure database lock is released.
+    child
+        .wait_with_output()
+        .wrap_err("failed to wait for zebrad to fully terminate")?;
     tokio::time::sleep(Duration::from_secs(3)).await;
 
     // Check that the non-finalized state is not restored from backup when the finalized tip height is below the
@@ -4197,6 +4272,11 @@ async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
         .expect("should successfully commit more blocks to the state");
 
     child.kill(true)?;
+    // Wait for zebrad to fully terminate to ensure database lock is released.
+    child
+        .wait_with_output()
+        .wrap_err("failed to wait for zebrad process to exit after kill")?;
+    tokio::time::sleep(Duration::from_secs(3)).await;
 
     // Check that Zebra will can commit blocks to its state when its finalized tip is past the max checkpoint height
     // and the non-finalized backup cache is disabled or empty.

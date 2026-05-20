@@ -80,7 +80,15 @@ impl ZcashDeserialize for Action {
             // https://zips.z.cash/protocol/protocol.pdf#concretereddsa
             // This only reads the 32-byte buffer. The type is enforced
             // on signature verification; see [`reddsa::batch`]
-            rk: reader.read_32_bytes()?.into(),
+            rk: {
+                let rk_bytes = reader.read_32_bytes()?;
+                if rk_bytes == [0u8; 32] {
+                    return Err(SerializationError::Parse(
+                        "Orchard action rk must not be the identity point",
+                    ));
+                }
+                rk_bytes.into()
+            },
             // Type is `{0 .. 𝑞_ℙ − 1}`. Note that the second rule quoted above
             // is also enforced here and it is technically redundant with the first.
             // See [`pallas::Base::zcash_deserialize`].

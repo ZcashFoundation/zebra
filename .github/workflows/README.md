@@ -73,7 +73,7 @@ graph TB
   class PR,Push,Schedule,Manual trigger
 ```
 
-*The diagram above illustrates the parallel execution patterns in our CI/CD system. All triggers can initiate the pipeline concurrently, unit tests run in parallel after the Docker image build, and integration tests follow a mix of parallel and sequential steps. The infrastructure components support their respective workflow parts concurrently.*
+_The diagram above illustrates the parallel execution patterns in our CI/CD system. All triggers can initiate the pipeline concurrently, unit tests run in parallel after the Docker image build, and integration tests follow a mix of parallel and sequential steps. The infrastructure components support their respective workflow parts concurrently._
 
 ## Core Infrastructure
 
@@ -93,8 +93,8 @@ graph TB
 
 #### Docker-based Testing
 
-- Most tests run in containers defined by our [Dockerfile](http://../../docker/Dockerfile)
-- The [entrypoint script](http://../../docker/entrypoint.sh) manages:
+- Most tests run in containers defined by our [Dockerfile](../../docker/Dockerfile)
+- The [entrypoint script](../../docker/entrypoint.sh) manages:
   - Test execution
   - Environment configuration
   - Resource cleanup
@@ -130,12 +130,12 @@ graph TB
 
 ### 5. Queue Management
 
-[Mergify](https://mergify.yml)
+[Mergify](https://mergify.com)
 
 - Automated PR merging and queue-based testing
 - Priority management
 - Ensures code quality before merge
-- See our [`.mergify.yml`](http://../../.mergify.yml) for configuration
+- See our [`.mergify.yml`](../../.mergify.yml) for configuration
 
 ## Workflow Organization
 
@@ -165,7 +165,7 @@ graph TB
 
 ### Test Orchestration with Nextest
 
-Our test execution is centralized through our Docker [entrypoint script](http://../../docker/entrypoint.sh) and orchestrated by `cargo nextest`. This provides a unified and efficient way to run tests both in CI and locally.
+Our test execution is centralized through our Docker [entrypoint script](../../docker/entrypoint.sh) and orchestrated by `cargo nextest`. This provides a unified and efficient way to run tests both in CI and locally.
 
 #### Nextest Profile-driven Testing
 
@@ -190,7 +190,6 @@ Our tests are organized into different categories:
 - **Checkpoint Tests**: Blockchain checkpoint generation and validation
 
 Each test category has specific profiles that can be run individually using the `NEXTEST_PROFILE` environment variable.
-
 
 ### Pull Request Testing
 

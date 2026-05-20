@@ -376,6 +376,14 @@ impl ZebraDb {
         self.db.print_db_metrics();
     }
 
+    /// Exports RocksDB metrics to Prometheus.
+    ///
+    /// This function collects database statistics and exposes them as Prometheus metrics.
+    /// Call this periodically (e.g., every 30 seconds) from a background task.
+    pub(crate) fn export_metrics(&self) {
+        self.db.export_metrics();
+    }
+
     /// Returns the estimated total disk space usage of the database.
     pub fn size(&self) -> u64 {
         self.db.size()

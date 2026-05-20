@@ -4,6 +4,7 @@
 - Zebra Issue: [ZcashFoundation/zebra#1593](https://github.com/ZcashFoundation/zebra/issues/1593)
 
 # Summary
+
 [summary]: #summary
 
 Zebra programmers need to carefully write async code so it doesn't deadlock or hang.
@@ -18,6 +19,7 @@ and our own [`tower-batch-control`](https://github.com/ZcashFoundation/zebra/tre
 implementation.
 
 # Motivation
+
 [motivation]: #motivation
 
 Like all concurrent codebases, Zebra needs to obey certain constraints to avoid
@@ -26,34 +28,37 @@ Zebra developers need to manually check these constraints during design,
 development, reviews, and testing.
 
 # Definitions
+
 [definitions]: #definitions
 
 - `hang`: a Zebra component stops making progress.
 - `constraint`: a rule that Zebra must follow to prevent `hang`s.
 - `CORRECTNESS comment`: the documentation for a `constraint` in Zebra's code.
 - `task`: an async task can execute code independently of other tasks, using
-        cooperative multitasking.
+  cooperative multitasking.
 - `contention`: slower execution because multiple tasks are waiting to
-        acquire a lock, buffer/batch slot, or readiness.
+  acquire a lock, buffer/batch slot, or readiness.
 - `missed wakeup`: a task `hang`s because it is never scheduled for wakeup.
 - `lock`: exclusive access to a shared resource. Locks stop other code from
-          running until they are released. For example, a mutex, buffer slot,
-          or service readiness.
+  running until they are released. For example, a mutex, buffer slot,
+  or service readiness.
 - `critical section`: code that is executed while holding a lock.
 - `deadlock`: a `hang` that stops an async task executing code, because it
-        is waiting for a lock, slot, or task readiness.
-        For example: a task is waiting for a service to be ready, but the
-        service readiness depends on that task making progress.
+  is waiting for a lock, slot, or task readiness.
+  For example: a task is waiting for a service to be ready, but the
+  service readiness depends on that task making progress.
 - `starvation` or `livelock`: a `hang` that executes code, but doesn't do
-        anything useful. For example: a loop never terminates.
+  anything useful. For example: a loop never terminates.
 
 # Guide-level explanation
+
 [guide-level-explanation]: #guide-level-explanation
 
 If you are designing, developing, or testing concurrent Zebra code, follow the
 patterns in these examples to avoid hangs.
 
 If you are reviewing concurrent Zebra designs or code, make sure that:
+
 - it is clear how the design or code avoids hangs
 - the design or code follows the patterns in these examples (as much as possible)
 - the concurrency constraints and risks are documented
@@ -64,6 +69,7 @@ background information about Rust async concurrency in Zebra.
 Here are some examples of concurrent designs and documentation in Zebra:
 
 ## Registering Wakeups Before Returning Poll::Pending
+
 [wakeups-poll-pending]: #wakeups-poll-pending
 
 To avoid missed wakeups, futures must schedule a wakeup before they return
@@ -77,6 +83,7 @@ You can see some similar constraints in
 [pull request #1954](https://github.com/ZcashFoundation/zebra/pull/1954).
 
 <!-- copied from commit de6d1c93f3e4f9f4fd849176bea6b39ffc5b260f on 2020-04-07 -->
+
 ```rust
 // CORRECTNESS
 //
@@ -95,6 +102,7 @@ let res = ready!(this
 ```
 
 ## Futures-Aware Mutexes
+
 [futures-aware-mutexes]: #futures-aware-mutexes
 
 To avoid hangs or slowdowns, prefer futures-aware types,
@@ -106,6 +114,7 @@ Zebra's [`Handshake`](https://github.com/ZcashFoundation/zebra/blob/a63c2e8c40fa
 won't block other tasks on its thread, because it uses `futures::lock::Mutex`:
 
 <!-- copied from commit a63c2e8c40fa847a86d00c754fb10a4729ba34e5 on 2020-04-30 -->
+
 ```rust
 pub async fn negotiate_version(
     peer_conn: &mut Framed<TcpStream, Codec>,
@@ -135,6 +144,7 @@ with non-async code. It only holds the mutex to clone the address book, reducing
 the amount of time that other tasks on its thread are blocked:
 
 <!-- copied from commit 0203d1475a95e90eb6fd7c4101caa26aeddece5b on 2020-04-30 -->
+
 ```rust
 // # Correctness
 //
@@ -146,6 +156,7 @@ let mut peers = peers.sanitized();
 ```
 
 ## Avoiding Deadlocks when Acquiring Buffer or Service Readiness
+
 [readiness-deadlock-avoidance]: #readiness-deadlock-avoidance
 
 To avoid deadlocks, readiness and locks must be acquired in a consistent order.
@@ -154,6 +165,7 @@ section.
 
 Zebra's [`ChainVerifier`](https://github.com/ZcashFoundation/zebra/blob/3af57ece7ae5d43cfbcb6a9215433705aad70b80/zebra-consensus/src/chain.rs#L73)
 avoids deadlocks, contention, and errors by:
+
 - calling `poll_ready` before each `call`
 - acquiring buffer slots for the earlier verifier first (based on blockchain order)
 - ensuring that buffers are large enough for concurrent tasks
@@ -162,6 +174,7 @@ avoids deadlocks, contention, and errors by:
 a partial revert, so the PR is a bit confusing. -->
 
 <!-- edited from commit 306fa882148382299c8c31768d5360c0fa23c4d0 on 2020-04-07 -->
+
 ```rust
 // We acquire checkpoint readiness before block readiness, to avoid an unlikely
 // hang during the checkpoint to block verifier transition. If the checkpoint and
@@ -181,6 +194,7 @@ Poll::Ready(Ok(()))
 ```
 
 ## Critical Section Compiler Errors
+
 [critical-section-compiler-errors]: #critical-section-compiler-errors
 
 To avoid deadlocks or slowdowns, critical sections should be as short as
@@ -197,6 +211,7 @@ If the lock isn't dropped, compilation fails, because the mutex lock can't be
 sent between threads.
 
 <!-- edited from commit 0203d1475a95e90eb6fd7c4101caa26aeddece5b on 2020-04-30 -->
+
 ```rust
 // # Correctness
 //
@@ -224,6 +239,7 @@ sleep.await;
 ```
 
 ## Sharing Progress between Multiple Futures
+
 [progress-multiple-futures]: #progress-multiple-futures
 
 To avoid starvation and deadlocks, tasks that depend on multiple futures
@@ -234,6 +250,7 @@ section.
 
 Zebra's [peer crawler task](https://github.com/ZcashFoundation/zebra/blob/375c8d8700764534871f02d2d44f847526179dab/zebra-network/src/peer_set/initialize.rs#L326)
 avoids starvation and deadlocks by:
+
 - sharing progress between any ready futures using the `select!` macro
 - spawning independent tasks to avoid hangs (see [Acquiring Buffer Slots, Mutexes, or Readiness](#acquiring-buffer-slots-mutexes-readiness))
 - using timeouts to avoid hangs
@@ -241,6 +258,7 @@ avoids starvation and deadlocks by:
 You can see a range of hang fixes in [pull request #1950](https://github.com/ZcashFoundation/zebra/pull/1950).
 
 <!-- edited from commit 375c8d8700764534871f02d2d44f847526179dab on 2020-04-08 -->
+
 ```rust
 // CORRECTNESS
 //
@@ -284,6 +302,7 @@ loop {
 ```
 
 ## Prioritising Cancellation Futures
+
 [prioritising-cancellation-futures]: #prioritising-cancellation-futures
 
 To avoid starvation, cancellation futures must take priority over other futures,
@@ -298,6 +317,7 @@ be ready with a new message, starving the cancel or timer futures.
 You can see a range of hang fixes in [pull request #1950](https://github.com/ZcashFoundation/zebra/pull/1950).
 
 <!-- copied from commit 375c8d8700764534871f02d2d44f847526179dab on 2020-04-08 -->
+
 ```rust
 // CORRECTNESS
 //
@@ -313,6 +333,7 @@ match future::select(cancel, peer_rx.next()) {
 ```
 
 ## Atomic Shutdown Flag
+
 [atomic-shutdown-flag]: #atomic-shutdown-flag
 
 As of April 2021, Zebra implements some shutdown checks using an atomic `bool`.
@@ -324,6 +345,7 @@ ordering ([`SeqCst`](https://doc.rust-lang.org/nomicon/atomics.html#sequentially
 We plan to replace this raw atomic code with a channel, see [#1678](https://github.com/ZcashFoundation/zebra/issues/1678).
 
 <!-- edited from commit 24bf952e982bde28eb384b211659159d46150f63 on 2020-04-22 -->
+
 ```rust
 /// A flag to indicate if Zebra is shutting down.
 ///
@@ -348,6 +370,7 @@ pub fn set_shutting_down() {
 ```
 
 ## Integration Testing Async Code
+
 [integration-testing]: #integration-testing
 
 Sometimes, it is difficult to unit test async code, because it has complex
@@ -357,6 +380,7 @@ section.
 [`zebrad`'s acceptance tests](https://github.com/ZcashFoundation/zebra/blob/5bf0a2954e9df3fad53ad57f6b3a673d9df47b9a/zebrad/tests/acceptance.rs#L699)
 run short Zebra syncs on the Zcash mainnet or testnet. These acceptance tests
 make sure that `zebrad` can:
+
 - sync blocks using its async block download and verification pipeline
 - cancel a sync
 - reload disk state after a restart
@@ -364,6 +388,7 @@ make sure that `zebrad` can:
 These tests were introduced in [pull request #1193](https://github.com/ZcashFoundation/zebra/pull/1193).
 
 <!-- edited from commit 5bf0a2954e9df3fad53ad57f6b3a673d9df47b9a on 2020-04-07 -->
+
 ```rust
 /// Test if `zebrad` can sync some larger checkpoints on mainnet.
 #[test]
@@ -392,6 +417,7 @@ fn sync_large_checkpoints_mainnet() -> Result<()> {
 ```
 
 ## Instrumenting Async Functions
+
 [instrumenting-async-functions]: #instrumenting-async-functions
 
 Sometimes, it is difficult to debug async code, because there are many tasks
@@ -400,9 +426,11 @@ section.
 
 Zebra runs instrumentation on some of its async function using `tracing`.
 Here's an instrumentation example from Zebra's [sync block downloader](https://github.com/ZcashFoundation/zebra/blob/306fa882148382299c8c31768d5360c0fa23c4d0/zebrad/src/components/sync/downloads.rs#L128):
+
 <!-- there is no original PR for this code, it has been changed a lot -->
 
 <!-- copied from commit 306fa882148382299c8c31768d5360c0fa23c4d0 on 2020-04-08 -->
+
 ```rust
 /// Queue a block for download and verification.
 ///
@@ -416,6 +444,7 @@ pub async fn download_and_verify(&mut self, hash: block::Hash) -> Result<(), Rep
 ```
 
 ## Tracing and Metrics in Async Functions
+
 [tracing-metrics-async-functions]: #tracing-metrics-async-functions
 
 Sometimes, it is difficult to monitor async code, because there are many tasks
@@ -424,6 +453,7 @@ section.
 
 Zebra's [client requests](https://github.com/ZcashFoundation/zebra/blob/375c8d8700764534871f02d2d44f847526179dab/zebra-network/src/peer/connection.rs#L585)
 are monitored via:
+
 - trace and debug logs using `tracing` crate
 - related work spans using the `tracing` crate
 - counters using the `metrics` crate
@@ -431,6 +461,7 @@ are monitored via:
 <!-- there is no original PR for this code, it has been changed a lot -->
 
 <!-- copied from commit 375c8d8700764534871f02d2d44f847526179dab on 2020-04-08 -->
+
 ```rust
 /// Handle an incoming client request, possibly generating outgoing messages to the
 /// remote peer.
@@ -451,9 +482,11 @@ async fn handle_client_request(&mut self, req: InProgressClientRequest) {
 ```
 
 # Reference-level explanation
+
 [reference-level-explanation]: #reference-level-explanation
 
 The reference section contains in-depth information about concurrency in Zebra:
+
 - [After an await, the rest of the Future might not be run](#cancellation-safe)
 - [Task starvation](#starvation)
 - [`Poll::Pending` and Wakeups](#poll-pending-and-wakeups)
@@ -472,15 +505,17 @@ The reference section contains in-depth information about concurrency in Zebra:
 Most Zebra designs or code changes will only touch on one or two of these areas.
 
 ## After an await, the rest of the Future might not be run
+
 [cancellation-safe]: #cancellation-safe
 
 > Futures can be "canceled" at any await point. Authors of futures must be aware that after an await, the code might not run.
 > Futures might be polled to completion causing the code to work. But then many years later, the code is changed and the future might conditionally not be polled to completion which breaks things.
 > The burden falls on the user of the future to poll to completion, and there is no way for the lib author to enforce this - they can only document this invariant.
 
-https://github.com/rust-lang/wg-async-foundations/blob/master/src/vision/submitted_stories/status_quo/alan_builds_a_cache.md#-frequently-asked-questions
+<https://github.com/rust-lang/wg-async-foundations/blob/master/src/vision/submitted_stories/status_quo/alan_builds_a_cache.md#-frequently-asked-questions>
 
 In particular, [`FutureExt::now_or_never`](https://docs.rs/futures/0.3.17/futures/future/trait.FutureExt.html#method.now_or_never):
+
 - drops the future, and
 - doesn't schedule the task for wakeups.
 
@@ -488,9 +523,11 @@ So even if the future or service passed to `now_or_never` is cloned,
 the task won't be awoken when it is ready again.
 
 ## Task starvation
+
 [starvation]: #starvation
 
 Tokio [tasks are scheduled cooperatively](https://docs.rs/tokio/1.15.0/tokio/task/index.html#what-are-tasks):
+
 > a task is allowed to run until it yields, indicating to the Tokio runtime’s scheduler
 > that it cannot currently continue executing.
 > When a task yields, the Tokio runtime switches to executing the next task.
@@ -499,10 +536,12 @@ If a task doesn't yield during a CPU-intensive operation, or a tight loop,
 it can starve other tasks on the same thread. This can cause hangs or timeouts.
 
 There are a few different ways to avoid task starvation:
+
 - run the operation on another thread using [`spawn_blocking`](https://docs.rs/tokio/1.15.0/tokio/task/fn.spawn_blocking.html) or [`block_in_place`](https://docs.rs/tokio/1.15.0/tokio/task/fn.block_in_place.html)
 - [manually yield using `yield_now`](https://docs.rs/tokio/1.15.0/tokio/task/fn.yield_now.html)
 
 ## `Poll::Pending` and Wakeups
+
 [poll-pending-and-wakeups]: #poll-pending-and-wakeups
 
 When returning `Poll::Pending`, `poll` functions must ensure that the task will be woken up when it is ready to make progress.
@@ -510,18 +549,21 @@ When returning `Poll::Pending`, `poll` functions must ensure that the task will 
 In most cases, the `poll` function calls another `poll` function that schedules the task for wakeup.
 
 Any code that generates a new `Poll::Pending` should either have:
-* a `CORRECTNESS` comment explaining how the task is scheduled for wakeup, or
-* a wakeup implementation, with tests to ensure that the wakeup functions as expected.
+
+- a `CORRECTNESS` comment explaining how the task is scheduled for wakeup, or
+- a wakeup implementation, with tests to ensure that the wakeup functions as expected.
 
 Note: `poll` functions often have a qualifier, like `poll_ready` or `poll_next`.
 
 ## Futures-Aware Types
+
 [futures-aware-types]: #futures-aware-types
 
 Prefer futures-aware types in complex locking or waiting code,
 rather than types which will block the current thread.
 
 For example:
+
 - Use `futures::lock::Mutex` rather than `std::sync::Mutex`
 - Use `tokio::time::{sleep, timeout}` rather than `std::thread::sleep`
 
@@ -529,15 +571,18 @@ Always qualify ambiguous names like `Mutex` and `sleep`, so that it is obvious
 when a call will block.
 
 If you are unable to use futures-aware types:
+
 - block the thread for as short a time as possible
 - document the correctness of each blocking call
 - consider re-designing the code to use `tower::Services`, or other futures-aware types
 
 In some simple cases, `std::sync::Mutex` is correct and more efficient, when:
+
 - the value behind the mutex is just data, and
 - the locking behaviour is simple.
 
 In these cases:
+
 > wrap the `Arc<Mutex<...>>` in a struct
 > that provides non-async methods for performing operations on the data within,
 > and only lock the mutex inside these methods
@@ -545,9 +590,11 @@ In these cases:
 For more details, see [the tokio documentation](https://docs.rs/tokio/1.15.0/tokio/sync/struct.Mutex.html#which-kind-of-mutex-should-you-use).
 
 ## Acquiring Buffer Slots, Mutexes, or Readiness
+
 [acquiring-buffer-slots-mutexes-readiness]: #acquiring-buffer-slots-mutexes-readiness
 
 Ideally, buffer slots, mutexes, or readiness should be:
+
 - acquired with one lock per critical section, and
 - held for as short a time as possible.
 
@@ -572,6 +619,7 @@ same time, the write lock will also never finish acquiring, because it waits for
 be released, and the first read lock won't be released before the second read lock is acquired.
 
 In all of these cases:
+
 - make critical sections as short as possible, and
 - do not depend on other tasks or locks inside the critical section.
 
@@ -581,9 +629,11 @@ Note: do not call `poll_ready` on multiple tasks, then match against the results
 macro instead, to acquire service readiness in a consistent order.
 
 ## Buffer and Batch
+
 [buffer-and-batch]: #buffer-and-batch
 
 The constraints imposed by the `tower::Buffer` and `tower::Batch` implementations are:
+
 1. `poll_ready` must be called **at least once** for each `call`
 2. Once we've reserved a buffer slot, we always get `Poll::Ready` from a buffer, regardless of the
    current readiness of the buffer or its underlying service
@@ -594,35 +644,41 @@ The constraints imposed by the `tower::Buffer` and `tower::Batch` implementation
    maximum number of concurrently waiting tasks**, or Zebra could deadlock (hang).
 
 We also avoid hangs because:
+
 - the timeouts on network messages, block downloads, and block verification will restart verification if it hangs
 - `Buffer` and `Batch` release their reservations when response future is returned by the buffered/batched service, even if the returned future hangs
   - in general, we should move as much work into futures as possible, unless the design requires sequential `call`s
 - larger `Buffer`/`Batch` bounds
 
 ### Buffered Services
+
 [buffered-services]: #buffered-services
 
 A service should be provided wrapped in a `Buffer` if:
-* it is a complex service
-* it has multiple callers, or
-* it has a single caller that calls it multiple times concurrently.
+
+- it is a complex service
+- it has multiple callers, or
+- it has a single caller that calls it multiple times concurrently.
 
 Services might also have other reasons for using a `Buffer`. These reasons should be documented.
 
 #### Choosing Buffer Bounds
+
 [choosing-buffer-bounds]: #choosing-buffer-bounds
 
 Zebra's `Buffer` bounds should be set to the maximum number of concurrent requests, plus 1:
+
 > it's advisable to set bound to be at least the maximum number of concurrent requests the `Buffer` will see
-https://docs.rs/tower/0.4.3/tower/buffer/struct.Buffer.html#method.new
+> <https://docs.rs/tower/0.4.3/tower/buffer/struct.Buffer.html#method.new>
 
 The extra slot protects us from future changes that add an extra caller, or extra concurrency.
 
 As a general rule, Zebra `Buffer`s should all have at least 5 slots, because most Zebra services can
 be called concurrently by:
-* the sync service,
-* the inbound service, and
-* multiple concurrent `zebra-client` blockchain scanning tasks.
+
+- the sync service,
+- the inbound service, and
+- multiple concurrent `zebra-client` blockchain scanning tasks.
 
 Services might also have other reasons for a larger bound. These reasons should be documented.
 
@@ -637,6 +693,7 @@ Long `Buffer`s can also increase request latency. Latency isn't a concern for Ze
 software, but it might be an issue if wallets, exchanges, or block explorers want to use Zebra.
 
 ## Awaiting Multiple Futures
+
 [awaiting-multiple-futures]: #awaiting-multiple-futures
 
 When awaiting multiple futures, Zebra can use biased or unbiased selection.
@@ -646,6 +703,7 @@ they each have a chance of completing. But if one of the futures needs to take
 priority (for example, cancellation), you might want to use biased selection.
 
 ### Unbiased Selection
+
 [unbiased-selection]: #unbiased-selection
 
 The [`futures::select!`](https://docs.rs/futures/0.3.13/futures/macro.select.html) and
@@ -661,6 +719,7 @@ type.
 Consider mapping the returned type to a custom enum with module-specific names.
 
 ### Biased Selection
+
 [biased-selection]: #biased-selection
 
 The [`futures::select`](https://docs.rs/futures/0.3.13/futures/future/fn.select.html)
@@ -668,6 +727,7 @@ is biased towards its first argument. If the first argument is always ready, the
 argument will never be returned. (This behavior is not documented or guaranteed.) This
 bias can cause starvation or hangs. Consider edge cases where queues are full, or there
 are a lot of messages. If in doubt:
+
 - put shutdown or cancel oneshots first, then timers, then other futures
 - use the `select!` macro to ensure fairness
 
@@ -680,6 +740,7 @@ The `futures::select` `Either` return type is complex, particularly when nested.
 makes code hard to read and maintain. Map the `Either` to a custom enum.
 
 ## Replacing Atomics with Channels
+
 [replacing-atomics]: #replacing-atomics
 [using-atomics]: #using-atomics
 
@@ -696,6 +757,7 @@ We are [gradually replacing atomics with channels](https://github.com/ZcashFound
 in Zebra.
 
 ### Atomic Risks
+
 [atomic-risks]: #atomic-risks
 [atomic-details]: #atomic-details
 
@@ -703,7 +765,7 @@ Some atomic sizes and atomic operations [are not available on some platforms](ht
 Others come with a performance penalty on some platforms.
 
 It's also easy to use a memory ordering that's too weak. Future code changes might require
-a stronger memory ordering. But it's hard to test for these kinds of memory ordering bugs. 
+a stronger memory ordering. But it's hard to test for these kinds of memory ordering bugs.
 
 Some memory ordering bugs can only be discovered on non-x86 platforms. And when they do occur,
 they can be rare. x86 processors [guarantee strong orderings, even for `Relaxed` accesses](https://stackoverflow.com/questions/10537810/memory-ordering-restrictions-on-x86-architecture#18512212).
@@ -713,16 +775,19 @@ when we specify `Relaxed`. But ARM processors like the Apple M1
 section of the Rust nomicon.
 
 But if a Zebra feature requires atomics:
+
 1. use an `AtomicUsize` with the strongest memory ordering ([`SeqCst`](https://doc.rust-lang.org/nomicon/atomics.html#sequentially-consistent))
 2. use a weaker memory ordering, with:
-  - a correctness comment,
-  - multithreaded tests with a concurrency permutation harness like [loom](https://github.com/tokio-rs/loom), on x86 and ARM, and
-  - benchmarks to prove that the low-level code is faster.
+
+- a correctness comment,
+- multithreaded tests with a concurrency permutation harness like [loom](https://github.com/tokio-rs/loom), on x86 and ARM, and
+- benchmarks to prove that the low-level code is faster.
 
 Tokio's watch channel [uses `SeqCst` for reads and writes](https://docs.rs/tokio/1.6.1/src/tokio/sync/watch.rs.html#286)
 to its internal "version" atomic. So Zebra should do the same.
 
 ## Testing Async Code
+
 [testing-async-code]: #testing-async-code
 
 Zebra's existing acceptance and integration tests will catch most hangs and deadlocks.
@@ -733,6 +798,7 @@ we revert the PR, and fix the failure.
 Some concurrency bugs only happen intermittently. Zebra developers should run regular
 full syncs to ensure that their code doesn't cause intermittent hangs. This is
 particularly important for code that modifies Zebra's highly concurrent crates:
+
 - `zebrad`
 - `zebra-network`
 - `zebra-state`
@@ -741,20 +807,24 @@ particularly important for code that modifies Zebra's highly concurrent crates:
 - `tower-fallback`
 
 ## Monitoring Async Code
+
 [monitoring-async-code]: #monitoring-async-code
 
 Zebra uses the following crates for monitoring and diagnostics:
+
 - [tracing](https://tracing.rs/tracing/): tracing events, spans, logging
 - [tracing-futures](https://docs.rs/tracing-futures/): future and async function instrumentation
 - [metrics](https://docs.rs/metrics-core/) with a [prometheus exporter](https://docs.rs/metrics-exporter-prometheus/)
 
 These introspection tools are also useful during testing:
+
 - `tracing` logs individual events
   - spans track related work through the download and verification pipeline
 - `metrics` monitors overall progress and error rates
   - labels split counters or gauges into different categories (for example, by peer address)
 
 # Drawbacks
+
 [drawbacks]: #drawbacks
 
 Implementing and reviewing these constraints creates extra work for developers.
@@ -762,12 +832,14 @@ But concurrency bugs slow down every developer, and impact users. And diagnosing
 those bugs can take a lot of developer effort.
 
 # Unresolved questions
+
 [unresolved-questions]: #unresolved-questions
 
 Can we catch these bugs using automated tests?
 
 How can we diagnose these kinds of issues faster and more reliably?
-  - [TurboWish](https://blog.pnkfx.org/blog/2021/04/26/road-to-turbowish-part-1-goals/)
-    (also known as `tokio-console`)
-    looks really promising for task, channel, and future introspection. As of May 2020,
-    there is an [early prototype available](https://github.com/tokio-rs/console).
+
+- [TurboWish](https://blog.pnkfx.org/blog/2021/04/26/road-to-turbowish-part-1-goals/)
+  (also known as `tokio-console`)
+  looks really promising for task, channel, and future introspection. As of May 2020,
+  there is an [early prototype available](https://github.com/tokio-rs/console).

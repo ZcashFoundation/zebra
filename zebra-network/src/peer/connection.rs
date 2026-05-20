@@ -1154,7 +1154,7 @@ where
                          Handler::Finished(Ok(Response::Nil))
                     )
             }
-            (AwaitingRequest, AdvertiseBlock(hash) | AdvertiseBlockToAll(hash)) => {
+            (AwaitingRequest, AdvertiseBlock(hash, _) | AdvertiseBlockToAll(hash)) => {
                 self
                     .peer_tx
                     .send(Message::Inv(vec![hash.into()]))
@@ -1279,7 +1279,11 @@ where
             Message::Inv(ref items) => match &items[..] {
                 // We don't expect to be advertised multiple blocks at a time,
                 // so we ignore any advertisements of multiple blocks.
-                [InventoryHash::Block(hash)] => Request::AdvertiseBlock(*hash).into(),
+                [InventoryHash::Block(hash)] => Request::AdvertiseBlock(
+                    *hash,
+                    self.connection_info.connected_addr.get_transient_addr(),
+                )
+                .into(),
 
                 // Some peers advertise invs with mixed item types.
                 // But we're just interested in the transaction invs.

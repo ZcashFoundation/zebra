@@ -15,9 +15,10 @@ use zebra_chain::{
     block::{self, Block},
     parameters::{Magic, Network},
     serialization::{
-        sha256d, zcash_deserialize_bytes_external_count, zcash_deserialize_string_external_count,
-        CompactSizeMessage, FakeWriter, ReadZcashExt, SerializationError as Error,
-        ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize, MAX_PROTOCOL_MESSAGE_LEN,
+        sha256d, zcash_deserialize_bytes_external_count, zcash_deserialize_external_count,
+        zcash_deserialize_string_external_count, CompactSizeMessage, FakeWriter, ReadZcashExt,
+        SerializationError as Error, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
+        MAX_HEADERS_PER_MESSAGE, MAX_PROTOCOL_MESSAGE_LEN,
     },
     transaction::Transaction,
 };
@@ -678,7 +679,19 @@ impl Codec {
     ///
     /// [Zcash block header](https://zips.z.cash/protocol/protocol.pdf#page=84)
     fn read_headers<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
-        Ok(Message::Headers(Vec::zcash_deserialize(&mut reader)?))
+        // CompactSizeMessage is bounded to MAX_PROTOCOL_MESSAGE_LEN on deserialization.
+        let count: CompactSizeMessage = (&mut reader).zcash_deserialize_into()?;
+        // Infallible: CompactSizeMessage wraps u32, which always fits in usize.
+        let count: usize = count.into();
+        if count > MAX_HEADERS_PER_MESSAGE {
+            return Err(Error::Parse(
+                "headers message exceeds the protocol limit of 160 entries",
+            ));
+        }
+        Ok(Message::Headers(zcash_deserialize_external_count(
+            count,
+            &mut reader,
+        )?))
     }
 
     fn read_getheaders<R: Read>(&self, mut reader: R) -> Result<Message, Error> {

@@ -1,6 +1,10 @@
 //! Provides high-level database metrics.
 
-use zebra_chain::block::{self, Block};
+use zebra_chain::{
+    amount::NonNegative,
+    block::{self, Block},
+    value_balance::ValueBalance,
+};
 
 /// Update metrics before committing a block.
 ///
@@ -58,4 +62,37 @@ pub(crate) fn block_precommit_metrics(block: &Block, hash: block::Hash, height: 
         metrics::counter!("state.finalized.cumulative.transparent_newouts")
             .increment(transparent_newout_count as u64);
     }
+}
+
+/// Update value pool metrics after calculating the new chain value pool.
+///
+/// These metrics expose the current balances of each shielded pool and total supply
+/// for monitoring and observability purposes.
+///
+/// These metrics enable:
+/// - Visualizing pool balances over time in Grafana dashboards
+/// - Setting up alerts for anomalous conditions
+/// - Monitoring total chain supply
+///
+/// The values are in zatoshis (1 ZEC = 100,000,000 zatoshis).
+pub(crate) fn value_pool_metrics(value_pool: &ValueBalance<NonNegative>) {
+    // Individual pool balances (zatoshis)
+    metrics::gauge!("state.finalized.value_pool.transparent")
+        .set(u64::from(value_pool.transparent_amount()) as f64);
+    metrics::gauge!("state.finalized.value_pool.sprout")
+        .set(u64::from(value_pool.sprout_amount()) as f64);
+    metrics::gauge!("state.finalized.value_pool.sapling")
+        .set(u64::from(value_pool.sapling_amount()) as f64);
+    metrics::gauge!("state.finalized.value_pool.orchard")
+        .set(u64::from(value_pool.orchard_amount()) as f64);
+    metrics::gauge!("state.finalized.value_pool.deferred")
+        .set(u64::from(value_pool.deferred_amount()) as f64);
+
+    // Total chain supply (sum of all pools)
+    let total_supply = u64::from(value_pool.transparent_amount())
+        + u64::from(value_pool.sprout_amount())
+        + u64::from(value_pool.sapling_amount())
+        + u64::from(value_pool.orchard_amount())
+        + u64::from(value_pool.deferred_amount());
+    metrics::gauge!("state.finalized.chain_supply.total").set(total_supply as f64);
 }

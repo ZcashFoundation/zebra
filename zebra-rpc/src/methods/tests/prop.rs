@@ -48,6 +48,8 @@ proptest! {
     /// Test that when sending a raw transaction, it is received by the mempool service.
     #[test]
     fn mempool_receives_raw_tx(transaction in any::<Transaction>(), network in any::<Network>()) {
+        prop_assume!(!(transaction.is_coinbase() && transaction.sapling_spends_per_anchor().count() > 0));
+
         let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
         let (mut mempool, mut state, rpc, mempool_tx_queue) = mock_services(network, NoChainTip);
@@ -93,6 +95,8 @@ proptest! {
     /// Mempool service errors should become server errors.
     #[test]
     fn mempool_errors_are_forwarded(transaction in any::<Transaction>(), network in any::<Network>()) {
+        prop_assume!(!(transaction.is_coinbase() && transaction.sapling_spends_per_anchor().count() > 0));
+
         let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
         let (mut mempool, mut state, rpc, mempool_tx_queue) = mock_services(network, NoChainTip);
@@ -147,6 +151,8 @@ proptest! {
     /// Test that when the mempool rejects a transaction the caller receives an error.
     #[test]
     fn rejected_txs_are_reported(transaction in any::<Transaction>(), network in any::<Network>()) {
+        prop_assume!(!(transaction.is_coinbase() && transaction.sapling_spends_per_anchor().count() > 0));
+
         let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
         let (mut mempool, mut state, rpc, mempool_tx_queue) = mock_services(network, NoChainTip);
@@ -714,6 +720,8 @@ proptest! {
     /// Test the queue functionality using `send_raw_transaction`
     #[test]
     fn rpc_queue_main_loop(tx in any::<Transaction>(), network in any::<Network>()) {
+        prop_assume!(!(tx.is_coinbase() && tx.sapling_spends_per_anchor().count() > 0));
+
         let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
         let (mut mempool, mut state, rpc, mempool_tx_queue) = mock_services(network, NoChainTip);
@@ -792,6 +800,7 @@ proptest! {
     #[test]
     fn rpc_queue_receives_all_txs_from_channel(txs in any::<[Transaction; 2]>(),
                                                network in any::<Network>()) {
+        prop_assume!(txs.iter().all(|tx| !(tx.is_coinbase() && tx.sapling_spends_per_anchor().count() > 0)));
         let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
         let (mut mempool, mut state, rpc, mempool_tx_queue) = mock_services(network, NoChainTip);

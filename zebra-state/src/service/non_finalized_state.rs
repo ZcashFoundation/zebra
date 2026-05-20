@@ -5,7 +5,7 @@
 use std::{
     collections::{BTreeSet, HashMap},
     mem,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::Arc,
 };
 
@@ -129,13 +129,26 @@ impl NonFinalizedState {
         }
     }
 
+    /// Writes the current non-finalized state to the backup directory at `backup_dir_path`.
+    ///
+    /// Reads the existing backup directory contents, writes any blocks that are in the
+    /// non-finalized state but missing from the backup, and deletes any backup files that
+    /// are no longer present in the non-finalized state.
+    ///
+    /// This method performs blocking I/O and should only be called from a blocking context.
+    pub(crate) fn write_to_backup(&self, backup_dir_path: &Path) {
+        let backup_blocks: HashMap<block::Hash, PathBuf> =
+            backup::list_backup_dir_entries(backup_dir_path).collect();
+        backup::update_non_finalized_state_backup(backup_dir_path, self, backup_blocks);
+    }
+
     /// Accepts an optional path to the non-finalized state backup directory and a handle to the database.
     ///
     /// If a backup directory path is provided:
     /// - Creates a new backup directory at the provided path if none exists,
     /// - Restores non-finalized blocks from the backup directory, if any, and
-    /// - Spawns a task that updates the non-finalized backup cache with
-    ///   the latest non-finalized state sent to the returned watch channel.
+    /// - Unless `skip_backup_task` is true, spawns a task that updates the non-finalized
+    ///   backup cache with the latest non-finalized state sent to the returned watch channel.
     ///
     /// Returns the non-finalized state with a watch channel sender and receiver.
     pub async fn with_backup(
@@ -143,6 +156,7 @@ impl NonFinalizedState {
         backup_dir_path: Option<PathBuf>,
         finalized_state: &ZebraDb,
         should_restore_backup: bool,
+        skip_backup_task: bool,
     ) -> (
         Self,
         watch::Sender<NonFinalizedState>,
@@ -157,10 +171,17 @@ impl NonFinalizedState {
             return with_watch_channel(self);
         };
 
-        tracing::info!(
-            ?backup_dir_path,
-            "restoring non-finalized blocks from backup and spawning backup task"
-        );
+        if skip_backup_task {
+            tracing::info!(
+                ?backup_dir_path,
+                "restoring non-finalized blocks from backup (sync write mode, backup task skipped)"
+            );
+        } else {
+            tracing::info!(
+                ?backup_dir_path,
+                "restoring non-finalized blocks from backup and spawning backup task"
+            );
+        }
 
         let non_finalized_state = {
             let backup_dir_path = backup_dir_path.clone();
@@ -182,7 +203,9 @@ impl NonFinalizedState {
 
         let (non_finalized_state, sender, receiver) = with_watch_channel(non_finalized_state);
 
-        tokio::spawn(backup::run_backup_task(receiver.clone(), backup_dir_path));
+        if !skip_backup_task {
+            tokio::spawn(backup::run_backup_task(receiver.clone(), backup_dir_path));
+        }
 
         if !non_finalized_state.is_chain_set_empty() {
             let num_blocks_restored = non_finalized_state

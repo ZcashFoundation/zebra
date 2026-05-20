@@ -17,10 +17,17 @@ use tower_batch_control::{Batch, BatchControl, RequestWeight};
 use tower_fallback::Fallback;
 
 use sapling_crypto::{bundle::Authorized, BatchValidator, Bundle};
+use zcash_proofs::prover::LocalTxProver;
 use zcash_protocol::value::ZatBalance;
 use zebra_chain::transaction::SigHash;
 
-use crate::groth16::SAPLING;
+/// Sapling prover containing spend and output params for the Sapling circuit.
+///
+/// Used to:
+///
+/// - construct Sapling outputs in coinbase txs, and
+/// - verify Sapling shielded data in the tx verifier.
+static SAPLING: Lazy<LocalTxProver> = Lazy::new(LocalTxProver::bundled);
 
 #[derive(Clone)]
 pub struct Item {
@@ -115,10 +122,10 @@ impl Service<BatchControl<Item>> for Verifier {
                             rx.borrow()
                                 .ok_or("threadpool unexpectedly dropped channel sender")?
                                 .then(|| {
-                                    metrics::counter!("proofs.groth16.verified").increment(1);
+                                    metrics::counter!("proofs.sapling.verified").increment(1);
                                 })
                                 .ok_or_else(|| {
-                                    metrics::counter!("proofs.groth16.invalid").increment(1);
+                                    metrics::counter!("proofs.sapling.invalid").increment(1);
                                     "batch verification of Sapling shielded data failed"
                                 })
                         })
@@ -132,14 +139,29 @@ impl Service<BatchControl<Item>> for Verifier {
                 let tx = mem::take(&mut self.tx);
 
                 async move {
-                    tokio::task::spawn_blocking(move || {
+                    let start = std::time::Instant::now();
+                    let spawn_result = tokio::task::spawn_blocking(move || {
                         let (spend_vk, output_vk) = SAPLING.verifying_keys();
-
-                        let res = batch.validate(&spend_vk, &output_vk, thread_rng());
-                        let _ = tx.send(Some(res));
+                        batch.validate(&spend_vk, &output_vk, thread_rng())
                     })
-                    .await
-                    .map_err(Self::Error::from)
+                    .await;
+                    let duration = start.elapsed().as_secs_f64();
+
+                    let result_label = match &spawn_result {
+                        Ok(true) => "success",
+                        _ => "failure",
+                    };
+                    metrics::histogram!(
+                        "zebra.consensus.batch.duration_seconds",
+                        "verifier" => "groth16_sapling",
+                        "result" => result_label
+                    )
+                    .record(duration);
+
+                    // Extract the value before consuming spawn_result
+                    let is_valid = spawn_result.as_ref().ok().copied();
+                    let _ = tx.send(is_valid);
+                    spawn_result.map(|_| ()).map_err(Self::Error::from)
                 }
                 .boxed()
             }

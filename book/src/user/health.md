@@ -12,9 +12,11 @@ disabled by default and can be enabled via configuration.
   - `503 Service Unavailable`: not enough peers
 
 - `GET /ready`
-  - `200 OK`: node is near the network tip and the estimated block lag is within
-    the configured threshold (default: 2 blocks)
-  - `503 Service Unavailable`: still syncing or lag exceeds threshold
+  - `200 OK`: node is near the network tip, the estimated block lag is within
+    the configured threshold (default: 2 blocks), and the tip is recent enough
+    (default: 5 minutes)
+  - `503 Service Unavailable`: still syncing, lag exceeds threshold, tip is too
+    old, or insufficient peers
 
 ## Configuration
 
@@ -24,7 +26,8 @@ Add a `health` section to your `zebrad.toml`:
 [health]
 listen_addr = "0.0.0.0:8080"      # enable server; omit to disable
 min_connected_peers = 1            # /healthy threshold
-ready_max_blocks_behind = 2        # /ready threshold
+ready_max_blocks_behind = 2        # /ready block lag threshold
+ready_max_tip_age = "5m"           # /ready tip age threshold (default: 5 minutes)
 enforce_on_test_networks = false   # if false, /ready is always 200 on regtest/testnet
 ```
 

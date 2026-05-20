@@ -119,7 +119,9 @@ impl LongPollInput {
 ///
 /// `zcashd` IDs are currently 69 hex/decimal digits long.
 /// Since Zebra's IDs are only 46 hex/decimal digits, mining pools should be able to handle them.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Getters, new)]
+#[derive(
+    Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Getters, new, schemars::JsonSchema,
+)]
 #[serde(try_from = "String", into = "String")]
 pub struct LongPollId {
     // Fields that invalidate old work:
