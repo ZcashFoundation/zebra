@@ -1256,3 +1256,186 @@ mod v6_tests {
         }
     }
 }
+
+/// Regression test for the Orchard `rk` identity-point DoS vulnerability.
+///
+/// A v5 transaction whose Orchard action has `rk = [0u8; 32]` (the Pallas
+/// identity point) **deserializes successfully** — Zebra performs no
+/// identity-point check in [`crate::orchard::Action::zcash_deserialize`].
+///
+/// When the same transaction is subsequently fed to the Orchard Halo2 batch
+/// verifier via [`orchard::bundle::BatchValidator::add_bundle`], the call
+/// chain reaches `orchard::circuit::to_halo2_instance()`, which calls
+/// `.coordinates().unwrap()` on the identity point.  `coordinates()` returns
+/// `None` for the identity, so the `unwrap` **panics**, crashing the node.
+///
+/// ## Root cause
+///
+/// `zebra-chain/src/orchard/action.rs:83` reads `rk` as raw bytes with no
+/// identity-point check: `reader.read_32_bytes()?.into()`.  The upstream
+/// `orchard` crate defers validation to signature verification, but
+/// `to_halo2_instance()` unwraps the coordinate extraction unconditionally.
+///
+/// An analogous identity check already exists for `ephemeral_key`
+/// (`zebra-chain/src/orchard/keys.rs:225-238`), demonstrating the correct
+/// pattern.
+#[test]
+fn orchard_rk_identity_point() {
+    use group::prime::PrimeCurveAffine;
+    use reddsa::Signature;
+
+    use crate::{
+        at_least_one,
+        block::Height,
+        orchard::{
+            keys::EphemeralPublicKey, tree, Action, AuthorizedAction, EncryptedNote, Flags,
+            NoteCommitment, Nullifier, ShieldedData, ValueCommitment, WrappedNoteKey,
+        },
+        primitives::Halo2Proof,
+        serialization::ZcashSerialize,
+    };
+    use halo2::pasta::pallas;
+
+    let _init_guard = zebra_test::init();
+
+    // Construct an Orchard action with rk = [0u8; 32] (identity point).
+    // Other fields use the Pallas generator or the identity as appropriate.
+    let action = Action {
+        // cv can be any valid Pallas point; identity is accepted here.
+        cv: ValueCommitment(pallas::Affine::identity()),
+        nullifier: Nullifier(pallas::Base::zero()),
+        // rk = identity point — this is the vulnerability trigger.
+        rk: [0u8; 32].into(),
+        // cm_x is the x-coordinate of the note commitment.
+        cm_x: NoteCommitment(pallas::Affine::identity()).extract_x(),
+        // ephemeral_key must be non-identity; use the generator.
+        ephemeral_key: EphemeralPublicKey(pallas::Affine::generator()),
+        enc_ciphertext: EncryptedNote([0u8; 580]),
+        out_ciphertext: WrappedNoteKey([0u8; 80]),
+    };
+
+    let shielded_data = ShieldedData {
+        flags: Flags::ENABLE_SPENDS | Flags::ENABLE_OUTPUTS,
+        value_balance: crate::amount::Amount::try_from(0).expect("zero is a valid amount"),
+        shared_anchor: tree::Root::default(),
+        // An empty proof is accepted at deserialization time.
+        proof: Halo2Proof(vec![]),
+        actions: at_least_one![AuthorizedAction {
+            action,
+            spend_auth_sig: Signature::from([0u8; 64]),
+        }],
+        binding_sig: Signature::from([0u8; 64]),
+    };
+
+    let tx = Transaction::V5 {
+        network_upgrade: NetworkUpgrade::Nu5,
+        lock_time: LockTime::unlocked(),
+        expiry_height: Height(0),
+        inputs: vec![],
+        outputs: vec![],
+        sapling_shielded_data: None,
+        orchard_shielded_data: Some(shielded_data),
+    };
+
+    // Step 1: serialize the transaction.
+    let tx_bytes = tx
+        .zcash_serialize_to_vec()
+        .expect("crafted transaction must serialize without error");
+
+    // Step 2: deserialize
+    Transaction::zcash_deserialize(&tx_bytes[..]).expect_err("rk = identity should fail");
+}
+
+/// Reproduction for GHSA-rgwx-8r98-p34c:
+/// Coinbase Sapling spend vectors allocate before zero-spend consensus rule.
+///
+/// A V5 coinbase transaction with Sapling spends can be serialized and
+/// deserialized — the parser allocates Sapling spend vectors (bounded by
+/// `TrustedPreallocate::max_allocation()`) before any coinbase-specific
+/// check. The consensus rule rejecting coinbase Sapling spends only runs
+/// later in `zebra-consensus`, not during deserialization.
+#[test]
+fn coinbase_v5_with_sapling_spends_deserializes_successfully() {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+
+    // Find a real V4 transaction with Sapling spends from the test block vectors.
+    let tx_with_spends = arbitrary::test_transactions(&network)
+        .find(|(_, tx)| tx.sapling_spends_per_anchor().count() > 0);
+
+    let Some((height, original_tx)) = tx_with_spends else {
+        panic!("test block vectors must contain at least one transaction with Sapling spends");
+    };
+
+    let original_spend_count = original_tx.sapling_spends_per_anchor().count();
+    assert!(
+        original_spend_count > 0,
+        "source transaction must have Sapling spends"
+    );
+
+    // Convert the V4 transaction to a fake V5 — this preserves valid Sapling data.
+    let fake_v5 = arbitrary::transaction_to_fake_v5(&original_tx, &network, height);
+
+    // Replace transparent inputs with a single coinbase input.
+    let Transaction::V5 {
+        lock_time,
+        expiry_height,
+        outputs,
+        sapling_shielded_data,
+        orchard_shielded_data,
+        ..
+    } = fake_v5
+    else {
+        panic!("transaction_to_fake_v5 must return V5");
+    };
+
+    // Confirm the fake V5 still has Sapling spends.
+    let sapling_shielded_data =
+        sapling_shielded_data.expect("converted V5 must retain Sapling shielded data with spends");
+
+    let coinbase_tx = Transaction::V5 {
+        network_upgrade: NetworkUpgrade::Nu5,
+        lock_time,
+        expiry_height,
+        inputs: vec![transparent::Input::Coinbase {
+            height,
+            data: transparent::CoinbaseData(vec![0x00; 4]),
+            sequence: 0xFFFF_FFFF,
+        }],
+        outputs: if outputs.is_empty() {
+            vec![transparent::Output {
+                value: crate::amount::Amount::zero(),
+                lock_script: Script::new(&[0u8; 20]),
+            }]
+        } else {
+            outputs
+        },
+        sapling_shielded_data: Some(sapling_shielded_data),
+        orchard_shielded_data,
+    };
+
+    // The constructed transaction must look like a coinbase with Sapling spends.
+    assert!(coinbase_tx.is_coinbase(), "transaction must be coinbase");
+    assert!(
+        coinbase_tx.sapling_spends_per_anchor().count() > 0,
+        "coinbase transaction has Sapling spends"
+    );
+
+    // Serialize it.
+    let serialized = coinbase_tx
+        .zcash_serialize_to_vec()
+        .expect("coinbase V5 with Sapling spends must serialize");
+
+    // Deserialize it — the parser must now reject coinbase transactions with
+    // Sapling spends before allocating spend vectors (GHSA-rgwx-8r98-p34c fix).
+    let err = serialized
+        .zcash_deserialize_into::<Transaction>()
+        .expect_err("coinbase with Sapling spends must be rejected during deserialization");
+
+    assert!(
+        err.to_string()
+            .contains("coinbase transaction must not have Sapling spends"),
+        "unexpected error: {err}"
+    );
+}

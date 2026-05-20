@@ -1,10 +1,9 @@
 ---
 name: "📋 Usability Testing Plan"
 about: Create a Usability Testing Plan
-title: 'Usability Testing Plan'
+title: "Usability Testing Plan"
 labels: C-research
-assignees: ''
-
+assignees: ""
 ---
 
 # Usability Testing Plan
@@ -53,7 +52,6 @@ assignees: ''
 
 <!-- What needs to happen for the participant to successfully complete the task -->
 
-
 ## Session Outline and timing
 
 <!-- The following sections provide some space to plan out the script and tasks for your participants -->
@@ -81,4 +79,3 @@ assignees: ''
 ## Required documentation
 
 <!-- List the documents you will need to produce and bring to the usability testing sessions, e.g consent forms, usability testing script, questionnaires, etc... -->
-

@@ -132,7 +132,11 @@ impl ZebradConfig {
 
         // 2. Add TOML configuration file as a source if provided
         if let Some(path) = config_path {
-            builder = builder.add_source(config::File::from(path).required(true));
+            builder = builder.add_source(
+                config::File::from(path)
+                    .format(config::FileFormat::Toml)
+                    .required(true),
+            );
         }
 
         // 3. Load from environment variables (with a sensitive-leaf deny-list)

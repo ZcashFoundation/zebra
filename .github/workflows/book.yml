@@ -28,12 +28,13 @@ jobs:
   build:
     name: Build Docs
     permissions:
+      contents: read
       id-token: write
       statuses: write
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
 
@@ -44,14 +45,11 @@ jobs:
           mdbook-version: ~0.5
           use-linkcheck: true
           use-mermaid: true
-      - name: Install last version of Protoc
-        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3.0.0
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8 #v1.15.1
+      - uses: actions-rust-lang/setup-rust-toolchain@2b1f5e9b395427c92ee4e3331786ca3c37afe2d7 #v1.16.0
         with:
           toolchain: nightly
           cache-on-failure: true
+      - uses: ./.github/actions/setup-zebra-build
 
       - name: Build Zebra book
         run: |
@@ -73,11 +71,31 @@ jobs:
           # https://github.com/ZcashFoundation/zebra/blob/main/.cargo/config.toml#L87
           RUSTDOCFLAGS: --html-in-header katex-header.html -D warnings -A rustdoc::private_intra_doc_links --cfg docsrs --show-type-layout --generate-link-to-definition --enable-index-page -Zunstable-options
 
+      - name: Include benchmark dashboard
+        # Snapshots `gh-pages/dev/bench` (published by `benchmarks.yml`) into
+        # the docs artifact so it is reachable at `/dev/bench`.
+        run: |
+          if ! git fetch origin gh-pages --depth=1 2>/dev/null; then
+            echo "gh-pages branch does not exist yet, skipping benchmark dashboard"
+            exit 0
+          fi
+
+          if ! git show origin/gh-pages:dev/bench/index.html >/dev/null 2>&1; then
+            echo "gh-pages has no benchmark data yet, skipping benchmark dashboard"
+            exit 0
+          fi
+
+          # index.html and data.js are published atomically by
+          # github-action-benchmark, so data.js isn't guarded separately.
+          mkdir -p target/docs/dev/bench
+          git show origin/gh-pages:dev/bench/index.html > target/docs/dev/bench/index.html
+          git show origin/gh-pages:dev/bench/data.js > target/docs/dev/bench/data.js
+
       - name: Setup Pages
-        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b #v5.0.0
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d #v6.0.0
 
       - name: Upload site
-        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b #v4.0.0
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 #v5.0.0
         with:
           path: ./target/docs
 
@@ -102,7 +120,7 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e #v4.0.5
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 #v5.0.0
 
   book-success:
     name: book success

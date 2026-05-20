@@ -1,15 +1,17 @@
-This page is copyright Zcash Foundation, 2021. It is posted in order to conform to this standard: https://github.com/RD-Crypto-Spec/Responsible-Disclosure/tree/d47a5a3dafa5942c8849a93441745fdd186731e6
+This page is copyright Zcash Foundation, 2021. It is posted in order to conform to this standard: <https://github.com/RD-Crypto-Spec/Responsible-Disclosure/tree/d47a5a3dafa5942c8849a93441745fdd186731e6>
 
 # Security Disclosures
 
 ## Disclosure Principles
 
 The Zcash Foundation's security disclosure process aims to achieve the following goals:
+
 - protecting Zcash users and the wider Zcash ecosystem
 - respecting the work of security researchers
 - improving the ongoing health of the Zcash ecosystem
 
 Specifically, we will:
+
 - assume good faith from researchers and ecosystem partners
 - operate a no fault process, focusing on the technical issues
 - work with security researchers, regardless of how they choose to disclose issues
@@ -18,13 +20,41 @@ Specifically, we will:
 
 The Zcash Foundation is committed to working with researchers who submit security vulnerability notifications to us to resolve those issues on an appropriate timeline and perform a coordinated release, giving credit to the reporter if they would like.
 
-Our best contact for security issues is security@zfnd.org.
+Please submit issues to <security@zfnd.org>, using the following PGP Key:
+
+```
+-----BEGIN PGP PUBLIC KEY BLOCK-----
+
+mDMEaXswoxYJKwYBBAHaRw8BAQdA/CQqZ79S7A9OWZeYhY3AbMuTx2d41/pcehNc
+Z1ZF7r6IeAQgFgoAIBYhBOezJEDaeE6/uKooRf1tVVkb+SvKBQJpezIJAh0AAAoJ
+EP1tVVkb+SvKmqQBAMzp/pOZ/ifM0Tjuqzy4nTo8HT5xZwTfL84A40VURuElAP91
+/9wi+5ZKW09pdjHjag6tz0FhheinX1BEDbgww2u3CbQkWmNhc2ggRm91bmRhdGlv
+biA8c2VjdXJpdHlAemZuZC5vcmc+iJYEExYKAD4WIQTnsyRA2nhOv7iqKEX9bVVZ
+G/krygUCaXswowIbAwUJACeNAAULCQgHAwUVCgkICwUWAgMBAAIeAQIXgAAKCRD9
+bVVZG/kryrS4AQCiyknTREsLCICWdbaJUARuZifhDxXIKH0oest8y8HQQwD9HuRd
+936Cg5FbXHpBuF71fGU213OSgulG4+hr7rXdfgy4OARpezCjEgorBgEEAZdVAQUB
+AQdAw5WBljp9hoqi8lu2KU5QzNuv/1lpeGWoESdWg/GZKUIDAQgHiH4EGBYKACYW
+IQTnsyRA2nhOv7iqKEX9bVVZG/krygUCaXswowIbDAUJACeNAAAKCRD9bVVZG/kr
+yjsWAQCiRiecQ9P3DPyQ/E/N0Dl3z4jE2fM2NjhROnX4jB/lDgD8Cru6rg2sdxTc
+RHrjNOriwH3PxwALJorvERC1gl47jQ2YMwRpqByGFgkrBgEEAdpHDwEBB0DV0fxs
+U5skejT0UERNZbec7GGe7Vs7s1h0moC4vkuY87QyWmNhc2ggRm91bmRhdGlvbiBT
+ZWN1cml0eSBUZWFtIDxzZWN1cml0eUB6Zm5kLm9yZz6IlgQTFgoAPhYhBHVQw2w9
+9hamnx7+AGBG3e+Uz5m1BQJpqByGAhsDBQkDwmcABQsJCAcDBRUKCQgLBRYCAwEA
+Ah4BAheAAAoJEGBG3e+Uz5m18MoBAOulghTZ717buHwBKBZupdXMdYPZcNSxlFC1
++ROt3iYAAP0RfQPw/UYLQlsnc5JEov2pExVpdXJH4waJjh+r26ZQCbg4BGmoHIYS
+CisGAQQBl1UBBQEBB0BXtdSydYIV586tkyNwAefvnQM0pJapklUbVD9f9AmQHAMB
+CAeIfgQYFgoAJhYhBHVQw2w99hamnx7+AGBG3e+Uz5m1BQJpqByGAhsMBQkDwmcA
+AAoJEGBG3e+Uz5m14rEA/0x/2XNwKd4buCm1tOGpTMaLQRoWhos6L/0wV9LExEKG
+AQC1Wmyb9ul/2QNi//8sKNDfaYbn3h6OU45BTAWggp+ACQ==
+=RIK0
+-----END PGP PUBLIC KEY BLOCK-----
+```
 
 ## Sending Disclosures
 
 In the case where we become aware of security issues affecting other projects that has never affected Zebra or Zcash, our intention is to inform those projects of security issues on a best effort basis.
 
-In the case where we fix a security issue in Zebra or Zcash that also affects the following neighboring projects, our intention is to engage in responsible disclosures with them as described in https://github.com/RD-Crypto-Spec/Responsible-Disclosure, subject to the deviations described in the section at the bottom of this document.
+In the case where we fix a security issue in Zebra or Zcash that also affects the following neighboring projects, our intention is to engage in responsible disclosures with them as described in <https://github.com/RD-Crypto-Spec/Responsible-Disclosure>, subject to the deviations described in the section at the bottom of this document.
 
 ## Bilateral Responsible Disclosure Agreements
 
@@ -32,7 +62,7 @@ We have set up agreements with the following neighboring projects to share vulne
 
 Specifically, we have agreed to engage in responsible disclosures for security issues affecting Zebra or Zcash technology with the following contacts:
 
-- The Electric Coin Company - security@z.cash via PGP
+- The Electric Coin Company - <security@z.cash> via PGP
 
 ## Deviations from the Standard
 
@@ -43,7 +73,3 @@ Zcash is a technology that provides strong privacy. Notes are encrypted to their
 The standard describes reporters of vulnerabilities including full details of an issue, in order to reproduce it. This is necessary for instance in the case of an external researcher both demonstrating and proving that there really is a security issue, and that security issue really has the impact that they say it has - allowing the development team to accurately prioritize and resolve the issue.
 
 In the case of a counterfeiting bug, we might decide not to include those details with our reports to partners ahead of coordinated release, so long as we are sure that they are vulnerable.
-
-### Alpha Release Disclosures
-
-The Zcash Foundation will generate encryption keys for security disclosures for our first stable release. Until then, disclosures should be sent to security@zfnd.org unencrypted.

@@ -111,8 +111,47 @@ pub struct StartCmd {
     filters: Vec<String>,
 }
 
+/// Warns if Linux TCP slow-start-after-idle is enabled, which significantly
+/// reduces single-peer throughput for block propagation.
+///
+/// See `book/src/user/troubleshooting.md`.
+#[cfg(target_os = "linux")]
+fn check_tcp_slow_start_after_idle() {
+    const PATH: &str = "/proc/sys/net/ipv4/tcp_slow_start_after_idle";
+
+    let raw = match std::fs::read_to_string(PATH) {
+        Ok(raw) => raw,
+        Err(error) => {
+            debug!(
+                ?error,
+                path = PATH,
+                "could not read TCP sysctl, skipping check"
+            );
+            return;
+        }
+    };
+
+    if raw.trim() == "0" {
+        return;
+    }
+
+    warn!(
+        setting = "net.ipv4.tcp_slow_start_after_idle",
+        "TCP slow-start-after-idle is enabled, which resets TCP's congestion window \
+         between block requests and significantly reduces single-peer throughput for \
+         block propagation. \
+         Hint: set `net.ipv4.tcp_slow_start_after_idle=0` via sysctl. \
+         See https://zebra.zfnd.org/user/troubleshooting.html#linux-tcp-tuning-for-block-propagation"
+    );
+}
+
+#[cfg(not(target_os = "linux"))]
+fn check_tcp_slow_start_after_idle() {}
+
 impl StartCmd {
     async fn start(&self) -> Result<(), Report> {
+        check_tcp_slow_start_after_idle();
+
         let config = APPLICATION.config();
         let is_regtest = config.network.network.is_regtest();
 
@@ -370,28 +409,29 @@ impl StartCmd {
         );
 
         info!("spawning syncer task");
-        let syncer_task_handle = if is_regtest {
-            if !syncer
+        // In regtest, commit the genesis block directly (bypassing the syncer's genesis
+        // download, which requires a connected peer). Then run the syncer normally so
+        // that multi-hop block propagation works: gossiped blocks that arrive out of
+        // order (e.g. only the latest tip hash was gossiped) will be recovered by the
+        // syncer using block locators within REGTEST_SYNC_RESTART_DELAY (2 seconds).
+        if is_regtest
+            && !syncer
                 .state_contains(config.network.network.genesis_hash())
                 .await?
-            {
-                let genesis_hash = block_verifier_router
-                    .clone()
-                    .oneshot(zebra_consensus::Request::Commit(regtest_genesis_block()))
-                    .await
-                    .expect("should validate Regtest genesis block");
+        {
+            let genesis_hash = block_verifier_router
+                .clone()
+                .oneshot(zebra_consensus::Request::Commit(regtest_genesis_block()))
+                .await
+                .expect("should validate Regtest genesis block");
 
-                assert_eq!(
-                    genesis_hash,
-                    config.network.network.genesis_hash(),
-                    "validated block hash should match network genesis hash"
-                )
-            }
-
-            tokio::spawn(std::future::pending().in_current_span())
-        } else {
-            tokio::spawn(syncer.sync().in_current_span())
-        };
+            assert_eq!(
+                genesis_hash,
+                config.network.network.genesis_hash(),
+                "validated block hash should match network genesis hash"
+            )
+        }
+        let syncer_task_handle = tokio::spawn(syncer.sync().in_current_span());
 
         // And finally, spawn the internal Zcash miner, if it is enabled.
         //

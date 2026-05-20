@@ -16,7 +16,8 @@ services:
       - ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:8232
       - ZEBRA_RPC__ENABLE_COOKIE_AUTH=false
     ports:
-      - "8232:8232"
+      - "8233:8233"   # P2P (inbound peer connections)
+      - "8232:8232"   # RPC (used by lightwalletd)
 
   lightwalletd:
     image: electriccoinco/lightwalletd

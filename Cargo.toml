@@ -17,22 +17,31 @@ members = [
 # Use the edition 2021 dependency resolver in the workspace, to match the crates
 resolver = "2"
 
+[workspace.package]
+authors = ["Zcash Foundation <zebra@zfnd.org>"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ZcashFoundation/zebra"
+homepage = "https://zfnd.org/zebra/"
+keywords = ["zebra", "zcash"]
+rust-version = "1.85.1"
+edition = "2021"
+
 # `cargo release` settings
 
 [workspace.dependencies]
 incrementalmerkletree = { version = "0.8.2", features = ["legacy-api"] }
-orchard = "0.12"
+orchard = "0.13"
 zcash_tachyon = {git = "https://github.com/tachyon-zcash/tachyon.git", rev="a441c0cba73c9accebac324abdbd28b2f9701dd5"}
-sapling-crypto = "0.6"
-zcash_address = {git = "https://github.com/tachyon-zcash/librustzcash.git", branch = "main"}
-zcash_encoding = {git = "https://github.com/tachyon-zcash/librustzcash.git", branch = "main"}
-zcash_history = {git = "https://github.com/tachyon-zcash/librustzcash.git", branch = "main"}
-zcash_keys = {git = "https://github.com/tachyon-zcash/librustzcash.git", branch = "main"}
-zcash_primitives = {git = "https://github.com/tachyon-zcash/librustzcash.git", branch = "main"}
-zcash_proofs = {git = "https://github.com/tachyon-zcash/librustzcash.git", branch = "main"}
-zcash_transparent = {git = "https://github.com/tachyon-zcash/librustzcash.git", branch = "main"}
-zcash_protocol = {git = "https://github.com/tachyon-zcash/librustzcash.git", branch = "main"}
-equihash = {git = "https://github.com/tachyon-zcash/librustzcash.git", branch = "main"}
+sapling-crypto = "0.7"
+zcash_address = {git = "https://github.com/tachyon-zcash/librustzcash.git", rev = "f0d6caac797792c0b3eed70422ebc8126b751d4f"}
+zcash_encoding = {git = "https://github.com/tachyon-zcash/librustzcash.git", rev = "f0d6caac797792c0b3eed70422ebc8126b751d4f"}
+zcash_history = {git = "https://github.com/tachyon-zcash/librustzcash.git", rev = "f0d6caac797792c0b3eed70422ebc8126b751d4f"}
+zcash_keys = {git = "https://github.com/tachyon-zcash/librustzcash.git", rev = "f0d6caac797792c0b3eed70422ebc8126b751d4f"}
+zcash_primitives = {git = "https://github.com/tachyon-zcash/librustzcash.git", rev = "f0d6caac797792c0b3eed70422ebc8126b751d4f"}
+zcash_proofs = {git = "https://github.com/tachyon-zcash/librustzcash.git", rev = "f0d6caac797792c0b3eed70422ebc8126b751d4f"}
+zcash_transparent = {git = "https://github.com/tachyon-zcash/librustzcash.git", rev = "f0d6caac797792c0b3eed70422ebc8126b751d4f"}
+zcash_protocol = {git = "https://github.com/tachyon-zcash/librustzcash.git", rev = "f0d6caac797792c0b3eed70422ebc8126b751d4f"}
+equihash = {git = "https://github.com/tachyon-zcash/librustzcash.git", rev = "f0d6caac797792c0b3eed70422ebc8126b751d4f"}
 zip32 = "0.2"
 abscissa_core = "0.7"
 atty = "0.2.14"
@@ -69,6 +78,7 @@ halo2 = "0.3"
 hex = "0.4.3"
 hex-literal = "0.4"
 howudoin = "0.1"
+http-body = "1.0.1"
 http-body-util = "0.1.3"
 human_bytes = { version = "0.4", default-features = false }
 humantime = "2.2"
@@ -91,12 +101,14 @@ log = "0.4.27"
 metrics = "0.24"
 metrics-exporter-prometheus = { version = "0.16", default-features = false }
 mset = "0.1"
-nix = "0.29"
+nix = "0.30"
 num-integer = "0.1.46"
 once_cell = "1.21"
+openrpsee = "0.1.0"
 ordered-map = "0.4.2"
 owo-colors = "4.2.0"
 pasta_curves = "0.5.1"
+phf = "0.12"
 pin-project = "1.1.10"
 primitive-types = "0.12"
 proptest = "1.6"
@@ -116,13 +128,14 @@ rlimit = "0.10"
 rocksdb = { version = "0.22", default-features = false }
 secp256k1 = "0.29"
 semver = "1.0.26"
-sentry = { version = "0.40", default-features = false }
+sentry = { version = "0.47", default-features = false }
 serde = "1.0.219"
 serde-big-array = "0.5"
 serde_json = "1.0.140"
 serde_with = "3.12"
 serde_yml = "0.0"
 sha2 = "0.10"
+schemars = "1"
 spandoc = "0.2"
 static_assertions = "1.1"
 structopt = "0.3"
@@ -150,11 +163,15 @@ tracing-futures = "0.2.5"
 tracing-journald = "0.3"
 tracing-subscriber = "0.3.19"
 tracing-test = "0.2.4"
+tracing-opentelemetry = "0.29"
+opentelemetry = "0.28"
+opentelemetry_sdk = "0.28"
+opentelemetry-otlp = "0.28"
 uint = "0.10"
-vergen-git2 = { version = "1.0", default-features = false }
+vergen-git2 = { version = "9", default-features = false }
 x25519-dalek = "2.0.1"
 zcash_note_encryption = "0.4.1"
-zcash_script = "0.4.2"
+zcash_script = "0.4.4"
 config = { version = "0.15.14", features = ["toml"] }
 which = "8.0.0"
 
@@ -272,6 +289,19 @@ overflow-checks = false
 incremental = false
 codegen-units = 16
 
+# The advisory
+# https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-gq4h-3grw-2rhv
+# only reproduces reliably when the bundled libzcash_script C++ code is compiled
+# in release mode since it relies on a buffer to not be zeroed out (arrays in
+# C++ are usually zeroed out when allocated in debug mode). To reliably test
+# against that issue, and to also better simulate real-world usage of
+# libzcash_script, we enable optimizations for it in dev builds.
+[profile.dev.package.libzcash_script]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.release]
 panic = "abort"
@@ -298,5 +328,52 @@ debug = false
 # The linter should ignore these expected config flags/values
 unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(tokio_unstable)', # Used by tokio-console
-    'cfg(zcash_unstable, values("zfuture", "nu6.1", "nu7"))' # Used in Zebra and librustzcash
+    'cfg(zcash_unstable, values("zfuture", "nu6.1", "nu7", "zip235"))' # Used in Zebra and librustzcash
 ] }
+
+# High-risk code
+unsafe_code = "deny"
+non_ascii_idents = "deny"
+
+# Compatibility
+rust_2021_compatibility = { level = "warn", priority = -1 }
+nonstandard_style = { level = "warn", priority = -1 }
+future_incompatible = { level = "warn", priority = -1 }
+
+# Documentation
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+# Async code
+await_holding_lock = "warn"
+await_holding_refcell_ref = "warn"
+
+# Pointers
+cast_ptr_alignment = "warn"
+fn_to_numeric_cast_any = "warn"
+
+# Integers
+checked_conversions = "warn"
+implicit_saturating_sub = "warn"
+invalid_upcast_comparisons = "warn"
+range_minus_one = "warn"
+range_plus_one = "warn"
+unnecessary_cast = "warn"
+
+# Incomplete code
+dbg_macro = "warn"
+todo = "warn"
+
+# Manual debugging output — use tracing::trace!() or tracing::debug!() instead
+print_stdout = "warn"
+print_stderr = "warn"
+
+# Code styles we want to accept
+try_err = "allow"
+
+# Panics
+fallible_impl_from = "warn"
+unwrap_in_result = "warn"
+
+# TODOs: fix this lint eventually
+result_large_err = "allow"

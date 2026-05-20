@@ -68,9 +68,7 @@ impl NetworkKind {
     pub fn b58_pubkey_address_prefix(self) -> [u8; 2] {
         match self {
             Self::Mainnet => mainnet_constants::B58_PUBKEY_ADDRESS_PREFIX,
-            Self::Testnet | Self::Regtest => {
-                testnet_constants::B58_PUBKEY_ADDRESS_PREFIX
-            }
+            Self::Testnet | Self::Regtest => testnet_constants::B58_PUBKEY_ADDRESS_PREFIX,
         }
     }
 
@@ -79,9 +77,7 @@ impl NetworkKind {
     pub fn b58_script_address_prefix(self) -> [u8; 2] {
         match self {
             Self::Mainnet => mainnet_constants::B58_SCRIPT_ADDRESS_PREFIX,
-            Self::Testnet | Self::Regtest => {
-                testnet_constants::B58_SCRIPT_ADDRESS_PREFIX
-            }
+            Self::Testnet | Self::Regtest => testnet_constants::B58_SCRIPT_ADDRESS_PREFIX,
         }
     }
 
@@ -98,7 +94,7 @@ impl NetworkKind {
     /// Returns the 2 bytes prefix for Bech32m-encoded transparent TEX
     /// payment addresses for the network as defined in [ZIP-320](https://zips.z.cash/zip-0320.html).
     pub fn tex_address_prefix(self) -> [u8; 2] {
-        // TODO: Add this bytes to `zcash_primitives::constants`?
+        // TODO: Add this bytes to `zcash_protocol::constants`?
         match self {
             Self::Mainnet => [0x1c, 0xb8],
             Self::Testnet | Self::Regtest => [0x1d, 0x25],
@@ -295,9 +291,11 @@ impl Network {
         };
 
         match self {
-            Self::Mainnet => subsidy::EXPECTED_NU6_1_LOCKBOX_DISBURSEMENTS_TOTAL_MAINNET,
+            Self::Mainnet => {
+                subsidy::constants::mainnet::EXPECTED_NU6_1_LOCKBOX_DISBURSEMENTS_TOTAL
+            }
             Self::Testnet(params) if params.is_default_testnet() => {
-                subsidy::EXPECTED_NU6_1_LOCKBOX_DISBURSEMENTS_TOTAL_TESTNET
+                subsidy::constants::testnet::EXPECTED_NU6_1_LOCKBOX_DISBURSEMENTS_TOTAL
             }
             Self::Testnet(params) => params.lockbox_disbursement_total_amount(),
         }
@@ -313,9 +311,9 @@ impl Network {
         };
 
         let expected_lockbox_disbursements = match self {
-            Self::Mainnet => subsidy::NU6_1_LOCKBOX_DISBURSEMENTS_MAINNET.to_vec(),
+            Self::Mainnet => subsidy::constants::mainnet::NU6_1_LOCKBOX_DISBURSEMENTS.to_vec(),
             Self::Testnet(params) if params.is_default_testnet() => {
-                subsidy::NU6_1_LOCKBOX_DISBURSEMENTS_TESTNET.to_vec()
+                subsidy::constants::testnet::NU6_1_LOCKBOX_DISBURSEMENTS.to_vec()
             }
             Self::Testnet(params) => return params.lockbox_disbursements(),
         };

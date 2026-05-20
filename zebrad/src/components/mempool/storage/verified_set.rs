@@ -91,6 +91,11 @@ impl VerifiedSet {
         self.created_outputs.get(outpoint).cloned()
     }
 
+    /// Returns true if a tx in the set has spent the output at the provided outpoint.
+    pub fn has_spent_outpoint(&self, outpoint: &transparent::OutPoint) -> bool {
+        self.spent_outpoints.contains(outpoint)
+    }
+
     /// Returns the number of verified transactions in the set.
     pub fn transaction_count(&self) -> usize {
         self.transactions.len()

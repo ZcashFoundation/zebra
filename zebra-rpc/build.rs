@@ -5,12 +5,18 @@ use std::{
     process::Command,
 };
 
-// 0.1.0-alpha.2
+// 0.1.0-alpha.2 - https://github.com/zcash/wallet/commit/027e5e2139b2ca8f0317edb9d802b03a46e9aa4c
 const ZALLET_COMMIT: Option<&str> = Some("027e5e2139b2ca8f0317edb9d802b03a46e9aa4c");
+
+// Zaino last tested commit - https://github.com/zingolabs/zaino/commit/559510ffcc62a5a6e7bb20db5e3329654542c8b1
+// TODO: Zaino is not currently built by this build script.
+#[allow(dead_code)]
+const ZAINO_COMMIT: Option<&str> = Some("559510ffcc62a5a6e7bb20db5e3329654542c8b1");
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     build_or_copy_proto()?;
     build_zallet_for_qa_tests();
+    build_rpc_schema()?;
 
     Ok(())
 }
@@ -109,4 +115,13 @@ fn build_zallet_for_qa_tests() {
             )
         });
     }
+}
+
+fn build_rpc_schema() -> Result<(), Box<dyn std::error::Error>> {
+    let out_dir = env::var("OUT_DIR").map(PathBuf::from)?;
+    let json_rpc_methods_rs = "src/methods.rs";
+    let trait_names = ["Rpc"];
+    openrpsee::generate_openrpc(json_rpc_methods_rs, &trait_names, false, &out_dir)?;
+
+    Ok(())
 }

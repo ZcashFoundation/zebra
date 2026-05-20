@@ -8,28 +8,21 @@ To get Zebra quickly up and running, you can use an off-the-rack image from
 [Docker Hub](https://hub.docker.com/r/zfnd/zebra/tags):
 
 ```shell
-docker run --name zebra zfnd/zebra
-```
-
-If you want to preserve Zebra's state, you can create a Docker volume:
-
-```shell
-docker volume create zebrad-cache
-```
-
-And mount it before you start the container:
-
-```shell
-docker run \
-  --mount source=zebrad-cache,target=/home/zebra/.cache/zebra \
+docker run -d \
   --name zebra \
+  -p 8233:8233 \
+  -v zebrad-cache:/home/zebra/.cache/zebra \
   zfnd/zebra
 ```
+
+The `-p 8233:8233` flag publishes Zebra's P2P port so other Zcash nodes can
+connect to yours (use `-p 18233:18233` for Testnet), and `-v` mounts a named
+volume so the chain state survives container restarts.
 
 You can also use `docker compose`, which we recommend. First get the repo:
 
 ```shell
-git clone --depth 1 --branch v2.5.0 https://github.com/ZcashFoundation/zebra.git
+git clone --depth 1 https://github.com/ZcashFoundation/zebra.git
 cd zebra
 ```
 
@@ -38,6 +31,8 @@ Then run:
 ```shell
 docker compose -f docker/docker-compose.yml up
 ```
+
+The default compose file already exposes the Mainnet P2P port.
 
 ## Custom Images
 
@@ -62,16 +57,18 @@ See [Building Zebra](https://github.com/ZcashFoundation/zebra#manual-build) for 
 
 Zebra supports various features that can be enabled during build time using the `FEATURES` build argument:
 
-For example, if we'd like to enable metrics on the image, we'd build it using the following `build-arg`:
+For example, if you'd like to add an extra feature on top of the default release feature set, you'd build it using the following `build-arg`:
 
 > [!IMPORTANT]
-> To fully use and display the metrics, you'll need to run a Prometheus and Grafana server, and configure it to scrape and visualize the metrics endpoint. This is explained in more detailed in the [Metrics](https://zebra.zfnd.org/user/metrics.html#zebra-metrics) section of the User Guide.
+> Some optional features need extra runtime services or configuration. Check the
+> matching User Guide page for the feature you enable before using the image in
+> production.
 
 ```shell
 # Build with specific features
 docker build -f ./docker/Dockerfile --target runtime \
-    --build-arg FEATURES="default-release-binaries prometheus" \
-    --tag zebra:metrics .
+    --build-arg FEATURES="default-release-binaries elasticsearch" \
+    --tag zebra:custom-features .
 ```
 
 All available Cargo features are listed at
@@ -91,23 +88,24 @@ You can verify your configuration by inspecting Zebra's logs at startup.
 
 Zebra's RPC server is disabled by default. Enable and configure it via the TOML configuration file, or configuration environment variables:
 
-* **Using a config file:** Add or uncomment the `[rpc]` section in your `zebrad.toml`. Set `listen_addr` (e.g., `"0.0.0.0:8232"` for Mainnet).
-* **Using environment variables:** Set `ZEBRA_RPC__LISTEN_ADDR` (e.g., `0.0.0.0:8232`). To disable cookie auth, set `ZEBRA_RPC__ENABLE_COOKIE_AUTH=false`. To change the cookie directory, set `ZEBRA_RPC__COOKIE_DIR=/path/inside/container`.
+- **Using a config file:** Add or uncomment the `[rpc]` section in your `zebrad.toml`. Set `listen_addr` (e.g., `"0.0.0.0:8232"` for Mainnet).
+- **Using environment variables:** Set `ZEBRA_RPC__LISTEN_ADDR` (e.g., `0.0.0.0:8232`). To disable cookie auth, set `ZEBRA_RPC__ENABLE_COOKIE_AUTH=false`. To change the cookie directory, set `ZEBRA_RPC__COOKIE_DIR=/path/inside/container`.
 
 **Cookie Authentication:**
 
 By default, Zebra uses cookie-based authentication for RPC requests (`enable_cookie_auth = true`). When enabled, Zebra generates a unique, random cookie file required for client authentication.
 
-* **Cookie Location:** By default, the cookie is stored at `<cache_dir>/.cookie`, where `<cache_dir>` is Zebra's cache directory (for the `zebra` user in the container this is typically `/home/zebra/.cache/zebra/.cookie`).
-* **Viewing the Cookie:** If the container is running and RPC is enabled with authentication, you can view the cookie content using:
+- **Cookie Location:** By default, the cookie is stored at `<cache_dir>/.cookie`, where `<cache_dir>` is Zebra's cache directory (for the `zebra` user in the container this is typically `/home/zebra/.cache/zebra/.cookie`).
+- **Viewing the Cookie:** If the container is running and RPC is enabled with authentication, you can view the cookie content using:
 
-    ```bash
-    docker exec <container_name> cat /home/zebra/.cache/zebra/.cookie
-    ```
+  ```bash
+  docker exec <container_name> cat /home/zebra/.cache/zebra/.cookie
+  ```
 
-    (Replace `<container_name>` with your container's name, typically `zebra` if using the default `docker-compose.yml`). Your RPC client will need this value.
-* **Disabling Authentication:** If you need to disable cookie authentication (e.g., for compatibility with tools like `lightwalletd`):
-  * If using a **config file**, set `enable_cookie_auth = false` within the `[rpc]` section:
+  (Replace `<container_name>` with your container's name, typically `zebra` if using the default `docker-compose.yml`). Your RPC client will need this value.
+
+- **Disabling Authentication:** If you need to disable cookie authentication (e.g., for compatibility with tools like `lightwalletd`):
+  - If using a **config file**, set `enable_cookie_auth = false` within the `[rpc]` section:
 
     ```toml
     [rpc]
@@ -115,23 +113,23 @@ By default, Zebra uses cookie-based authentication for RPC requests (`enable_coo
     enable_cookie_auth = false
     ```
 
-  * If using **environment variables**, set `ZEBRA_RPC__ENABLE_COOKIE_AUTH=false`.
+  - If using **environment variables**, set `ZEBRA_RPC__ENABLE_COOKIE_AUTH=false`.
 
-Remember that Zebra only generates the cookie file if the RPC server is enabled *and* `enable_cookie_auth` is set to `true` (or omitted, as `true` is the default).
+Remember that Zebra only generates the cookie file if the RPC server is enabled _and_ `enable_cookie_auth` is set to `true` (or omitted, as `true` is the default).
 
 Environment variable examples for health endpoints:
 
-* `ZEBRA_HEALTH__LISTEN_ADDR=0.0.0.0:8080`
-* `ZEBRA_HEALTH__MIN_CONNECTED_PEERS=1`
-* `ZEBRA_HEALTH__READY_MAX_BLOCKS_BEHIND=2`
-* `ZEBRA_HEALTH__ENFORCE_ON_TEST_NETWORKS=false`
+- `ZEBRA_HEALTH__LISTEN_ADDR=0.0.0.0:8080`
+- `ZEBRA_HEALTH__MIN_CONNECTED_PEERS=1`
+- `ZEBRA_HEALTH__READY_MAX_BLOCKS_BEHIND=2`
+- `ZEBRA_HEALTH__ENFORCE_ON_TEST_NETWORKS=false`
 
 ### Health Endpoints
 
 Zebra can expose two lightweight HTTP endpoints for liveness and readiness:
 
-* `GET /healthy`: returns `200 OK` when the process is up and has at least the configured number of recently live peers; otherwise `503`.
-* `GET /ready`: returns `200 OK` when the node is near the tip and within the configured lag threshold; otherwise `503`.
+- `GET /healthy`: returns `200 OK` when the process is up and has at least the configured number of recently live peers; otherwise `503`.
+- `GET /ready`: returns `200 OK` when the node is near the tip and within the configured lag threshold; otherwise `503`.
 
 Enable the endpoints by adding a `[health]` section to your config (see the default Docker config at `docker/default-zebra-config.toml`):
 
@@ -147,10 +145,38 @@ If you want to expose the endpoints to the host, add a port mapping to your comp
 
 ```yaml
 ports:
-  - "8080:8080"   # Health endpoints (/healthy, /ready)
+  - "8080:8080" # Health endpoints (/healthy, /ready)
 ```
 
 For Kubernetes, configure liveness and readiness probes against `/healthy` and `/ready` respectively. See the [Health Endpoints](./health.md) page for details.
+
+### P2P Networking
+
+Zebra uses TCP port 8233 on Mainnet and 18233 on Testnet for peer-to-peer connections. When running in Docker, publish this port with `-p` (as shown in the [Quick Start](#quick-start)) so other nodes can connect to yours. Without it, Zebra still syncs via outbound connections but does not accept inbound peers.
+
+If Zebra is behind a NAT, firewall, or load balancer, set `external_addr` so it advertises your public address to peers instead of the internal bind address:
+
+```toml
+[network]
+external_addr = "203.0.113.42:8233"
+```
+
+Or via environment variable:
+
+```shell
+-e ZEBRA_NETWORK__EXTERNAL_ADDR=203.0.113.42:8233
+```
+
+For reference, the ports Zebra can use are:
+
+| Port  | Protocol | Purpose            | Default  |
+|-------|----------|--------------------|----------|
+| 8233  | TCP      | P2P (Mainnet)      | Enabled  |
+| 18233 | TCP      | P2P (Testnet)      | Enabled  |
+| 8232  | TCP      | RPC (Mainnet)      | Disabled |
+| 18232 | TCP      | RPC (Testnet)      | Disabled |
+| 9999  | TCP      | Prometheus metrics | Disabled |
+| 8080  | TCP      | Health endpoints   | Disabled |
 
 ## Examples
 
@@ -173,28 +199,22 @@ directly in `docker/docker-compose.lwd.yml` (or an accompanying `.env` file).
 
 ### Running Zebra with Prometheus and Grafana
 
-The following commands will run Zebra with Prometheus and Grafana:
+The following commands will run Zebra with the observability stack (Prometheus,
+Grafana, Jaeger, and AlertManager):
 
 ```shell
-docker compose -f docker/docker-compose.grafana.yml build --no-cache
-docker compose -f docker/docker-compose.grafana.yml up
+docker compose -f docker/docker-compose.observability.yml build --no-cache
+docker compose -f docker/docker-compose.observability.yml up
 ```
 
-In this example, we build a local Zebra image with the `prometheus` Cargo
-compilation feature. Note that we enable this feature by specifying its name in
-the build arguments. Having this Cargo feature specified at build time makes
-`cargo` compile Zebra with the metrics support for Prometheus enabled. Note that
-we also specify this feature as an environment variable at run time. Having this
-feature specified at run time makes Docker's entrypoint script configure Zebra
-to open a scraping endpoint on `localhost:9999` for Prometheus.
+This builds a local Zebra image with the default release feature set, which now includes OpenTelemetry support, and starts all observability services. Once running:
 
-Once all services are up, the Grafana web UI should be available at
-`localhost:3000`, the Prometheus web UI should be at `localhost:9090`, and
-Zebra's scraping page should be at `localhost:9999`. The default login and
-password for Grafana are both `admin`. To make Grafana use Prometheus, you need
-to add Prometheus as a data source with the URL `http://localhost:9090` in
-Grafana's UI. You can then import various Grafana dashboards from the `grafana`
-directory in the Zebra repo.
+- Grafana: `http://localhost:3000` (default login: admin/admin)
+- Prometheus: `http://localhost:9094`
+- Jaeger: `http://localhost:16686`
+- Zebra metrics: `http://localhost:9999`
+
+See `docker/observability/README.md` for dashboard setup and configuration.
 
 ### Running CI Tests Locally
 

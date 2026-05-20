@@ -14,7 +14,9 @@ pub const TRACKED_SUBTREE_HEIGHT: u8 = 16;
 
 /// A note commitment subtree index, used to identify a subtree in a shielded pool.
 /// Also used to count subtrees.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(
+    Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 #[serde(transparent)]
 pub struct NoteCommitmentSubtreeIndex(pub u16);

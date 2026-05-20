@@ -2,6 +2,7 @@
 
 use std::{array::TryFromSliceError, io, num::TryFromIntError, str::Utf8Error, sync::Arc};
 
+use bounded_vec::BoundedVecOutOfBounds;
 use hex::FromHexError;
 use thiserror::Error;
 
@@ -95,5 +96,11 @@ impl From<crate::Error> for SerializationError {
 impl From<io::Error> for SerializationError {
     fn from(value: io::Error) -> Self {
         Arc::new(value).into()
+    }
+}
+
+impl From<BoundedVecOutOfBounds> for SerializationError {
+    fn from(_: BoundedVecOutOfBounds) -> Self {
+        SerializationError::Parse("vector length out of bounds")
     }
 }

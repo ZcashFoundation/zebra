@@ -41,7 +41,7 @@ use zebra_node_services::mempool;
 use zebra_script::{CachedFfiTransaction, Sigops};
 use zebra_state as zs;
 
-use crate::{error::TransactionError, groth16::DescriptionWrapper, primitives, script, BoxError};
+use crate::{error::TransactionError, primitives, script, BoxError};
 
 pub mod check;
 #[cfg(test)]
@@ -347,7 +347,7 @@ impl Response {
     pub fn sigops(&self) -> u32 {
         match self {
             Response::Block { sigops, .. } => *sigops,
-            Response::Mempool { transaction, .. } => transaction.sigops,
+            Response::Mempool { transaction, .. } => transaction.legacy_sigop_count,
         }
     }
 
@@ -400,16 +400,6 @@ where
 
         async move {
             tracing::trace!(?tx_id, ?req, "got tx verify request");
-
-            if let Some(result) = Self::find_verified_unmined_tx(&req, mempool.clone(), state.clone()).await {
-                let verified_tx = result?;
-
-                return Ok(Response::Block {
-                    tx_id,
-                    miner_fee: Some(verified_tx.miner_fee),
-                    sigops: verified_tx.sigops
-                });
-            }
 
             // Do quick checks first
             check::has_inputs_and_outputs(&tx)?;
@@ -541,7 +531,7 @@ where
                         );
                         Ok(())
                     }
-                );
+                    );
 
                 async_checks.push(check_anchors_and_revealed_nullifiers_query);
             }
@@ -583,13 +573,27 @@ where
                 Request::Block { .. } => Response::Block {
                     tx_id,
                     miner_fee,
-                    sigops,
+                    // In block validation, the consensus sigop total must include P2SH
+                    // redeem-script sigops, matching zcashd's `ConnectBlock` which sums
+                    // `GetLegacySigOpCount` and `GetP2SHSigOpCount` per transaction before
+                    // comparing against `MAX_BLOCK_SIGOPS`. Coinbase inputs contribute zero P2SH
+                    // sigops. See
+                    // <https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-jv4h-j224-23cc>.
+                    sigops: sigops.saturating_add(cached_ffi_transaction.p2sh_sigops()),
                 },
                 Request::Mempool { transaction: tx, .. } => {
+                    // TODO: `spent_outputs` may not align with `tx.inputs()` when a transaction
+                    // spends both chain and mempool UTXOs (mempool outputs are appended last by
+                    // `spent_utxos()`), causing policy checks to pair the wrong input with
+                    // the wrong spent output.
+                    // https://github.com/ZcashFoundation/zebra/issues/10346
+                    let spent_outputs = cached_ffi_transaction.all_previous_outputs().clone();
                     let transaction = VerifiedUnminedTx::new(
                         tx,
                         miner_fee.expect("fee should have been checked earlier"),
                         sigops,
+                        cached_ffi_transaction.p2sh_sigops(),
+                        spent_outputs.into(),
                     )?;
 
                     if let Some(mut mempool) = mempool {
@@ -612,12 +616,12 @@ where
 
             Ok(rsp)
         }
-        .inspect(move |result| {
-            // Hide the transaction data to avoid filling the logs
-            tracing::trace!(?tx_id, result = ?result.as_ref().map(|_tx| ()), "got tx verify result");
-        })
-        .instrument(span)
-        .boxed()
+            .inspect(move |result| {
+                // Hide the transaction data to avoid filling the logs
+                tracing::trace!(?tx_id, result = ?result.as_ref().map(|_tx| ()), "got tx verify result");
+            })
+            .instrument(span)
+            .boxed()
     }
 }
 
@@ -652,74 +656,6 @@ where
         }
     }
 
-    /// Attempts to find a transaction in the mempool by its transaction hash and checks
-    /// that all of its dependencies are available in the block or in the state.  Waits
-    /// for UTXOs being spent by the given transaction to arrive in the state if they're
-    /// not found elsewhere.
-    ///
-    /// Returns [`Some(Ok(VerifiedUnminedTx))`](VerifiedUnminedTx) if successful,
-    /// None if the transaction id was not found in the mempool,
-    /// or `Some(Err(TransparentInputNotFound))` if the transaction was found, but some of its
-    /// dependencies were not found in the block or state after a timeout.
-    async fn find_verified_unmined_tx(
-        req: &Request,
-        mempool: Option<Timeout<Mempool>>,
-        state: Timeout<ZS>,
-    ) -> Option<Result<VerifiedUnminedTx, TransactionError>> {
-        let tx = req.transaction();
-
-        if req.is_mempool() || tx.is_coinbase() {
-            return None;
-        }
-
-        let mempool = mempool?;
-        let known_outpoint_hashes = req.known_outpoint_hashes();
-        let tx_id = req.tx_mined_id();
-
-        let mempool::Response::TransactionWithDeps {
-            transaction: verified_tx,
-            dependencies,
-        } = mempool
-            .oneshot(mempool::Request::TransactionWithDepsByMinedId(tx_id))
-            .await
-            .ok()?
-        else {
-            panic!("unexpected response to TransactionWithDepsByMinedId request");
-        };
-
-        // Note: This does not verify that the spends are in order, the spend order
-        //       should be verified during contextual validation in zebra-state.
-        let missing_deps: HashSet<_> = dependencies
-            .into_iter()
-            .filter(|dependency_id| !known_outpoint_hashes.contains(dependency_id))
-            .collect();
-
-        if missing_deps.is_empty() {
-            return Some(Ok(verified_tx));
-        }
-
-        let missing_outpoints = tx.inputs().iter().filter_map(|input| {
-            if let transparent::Input::PrevOut { outpoint, .. } = input {
-                missing_deps.contains(&outpoint.hash).then_some(outpoint)
-            } else {
-                None
-            }
-        });
-
-        for missing_outpoint in missing_outpoints {
-            let query = state
-                .clone()
-                .oneshot(zebra_state::Request::AwaitUtxo(*missing_outpoint));
-            match query.await {
-                Ok(zebra_state::Response::Utxo(_)) => {}
-                Err(_) => return Some(Err(TransactionError::TransparentInputNotFound)),
-                _ => unreachable!("AwaitUtxo always responds with Utxo"),
-            };
-        }
-
-        Some(Ok(verified_tx))
-    }
-
     /// Wait for the UTXOs that are being spent by the given transaction.
     ///
     /// Looks up UTXOs that are being spent by the given transaction in the state or waits
@@ -749,10 +685,13 @@ where
 
         let inputs = tx.inputs();
         let mut spent_utxos = HashMap::new();
-        let mut spent_outputs = Vec::new();
-        let mut spent_mempool_outpoints = Vec::new();
+        // Pre-allocate with None so we can fill each slot by input index, preserving input order
+        // even when chain and mempool UTXOs are fetched in separate passes.
+        let mut spent_outputs: Vec<Option<transparent::Output>> = vec![None; inputs.len()];
+        // Stores (input_idx, outpoint) for UTXOs not found in the best chain (fetched from mempool later).
+        let mut spent_mempool_outpoints: Vec<(usize, transparent::OutPoint)> = Vec::new();
 
-        for input in inputs {
+        for (input_idx, input) in inputs.iter().enumerate() {
             if let transparent::Input::PrevOut { outpoint, .. } = input {
                 tracing::trace!("awaiting outpoint lookup");
                 let utxo = if let Some(output) = known_utxos.get(outpoint) {
@@ -771,7 +710,7 @@ where
                     };
 
                     let Some(utxo) = utxo else {
-                        spent_mempool_outpoints.push(*outpoint);
+                        spent_mempool_outpoints.push((input_idx, *outpoint));
                         continue;
                     };
 
@@ -787,7 +726,7 @@ where
                     }
                 };
                 tracing::trace!(?utxo, "got UTXO");
-                spent_outputs.push(utxo.output.clone());
+                spent_outputs[input_idx] = Some(utxo.output.clone());
                 spent_utxos.insert(*outpoint, utxo);
             } else {
                 continue;
@@ -795,7 +734,7 @@ where
         }
 
         if let Some(mempool) = mempool {
-            for &spent_mempool_outpoint in &spent_mempool_outpoints {
+            for &(input_idx, spent_mempool_outpoint) in &spent_mempool_outpoints {
                 let query = mempool
                     .clone()
                     .oneshot(mempool::Request::AwaitOutput(spent_mempool_outpoint));
@@ -811,7 +750,7 @@ where
                     }
                 };
 
-                spent_outputs.push(output.clone());
+                spent_outputs[input_idx] = Some(output.clone());
                 spent_utxos.insert(
                     spent_mempool_outpoint,
                     // Assume the Utxo height will be next height after the best chain tip height
@@ -826,6 +765,13 @@ where
         } else if !spent_mempool_outpoints.is_empty() {
             return Err(TransactionError::TransparentInputNotFound);
         }
+
+        // Convert back to return types; slots are in input order.
+        let spent_outputs: Vec<transparent::Output> = spent_outputs.into_iter().flatten().collect();
+        let spent_mempool_outpoints: Vec<transparent::OutPoint> = spent_mempool_outpoints
+            .into_iter()
+            .map(|(_, op)| op)
+            .collect();
 
         Ok((spent_utxos, spent_outputs, spent_mempool_outpoints))
     }
@@ -1097,7 +1043,7 @@ where
                 // checks that (at a minimum) must pass for the
                 // transaction to verify.
                 checks.push(primitives::groth16::JOINSPLIT_VERIFIER.oneshot(
-                    DescriptionWrapper(&(joinsplit, &joinsplit_data.pub_key)).try_into()?,
+                    primitives::groth16::Item::from_joinsplit(joinsplit, &joinsplit_data.pub_key)?,
                 ));
             }
 

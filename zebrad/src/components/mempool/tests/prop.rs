@@ -25,6 +25,7 @@ use zebra_test::mock_service::{MockService, PropTestAssertion};
 use zs::CheckpointVerifiedBlock;
 
 use crate::components::{
+    mempool::tests::standard_verified_unmined_tx_strategy,
     mempool::{config::Config, Mempool},
     sync::{RecentSyncLengths, SyncStatus},
 };
@@ -42,6 +43,13 @@ const CHAIN_LENGTH: usize = 5;
 
 const DEFAULT_MEMPOOL_PROPTEST_CASES: u32 = 8;
 
+fn standard_verified_unmined_tx_display_strategy(
+) -> BoxedStrategy<DisplayToDebug<VerifiedUnminedTx>> {
+    standard_verified_unmined_tx_strategy()
+        .prop_map(DisplayToDebug)
+        .boxed()
+}
+
 proptest! {
     // The mempool tests can generate very verbose logs, so we use fewer cases by
     // default. Set the PROPTEST_CASES env var to override this default.
@@ -54,7 +62,7 @@ proptest! {
     #[test]
     fn storage_is_cleared_on_single_chain_reset(
         network in any::<Network>(),
-        transaction in any::<DisplayToDebug<VerifiedUnminedTx>>(),
+        transaction in standard_verified_unmined_tx_display_strategy(),
         chain_tip in any::<DisplayToDebug<ChainTipBlock>>(),
     ) {
         let (runtime, _init_guard) = zebra_test::init_async();
@@ -104,7 +112,7 @@ proptest! {
     fn storage_is_cleared_on_multiple_chain_resets(
         network in any::<Network>(),
         mut previous_chain_tip in any::<DisplayToDebug<ChainTipBlock>>(),
-        mut transactions in vec(any::<DisplayToDebug<VerifiedUnminedTx>>(), 0..CHAIN_LENGTH),
+        mut transactions in vec(standard_verified_unmined_tx_display_strategy(), 0..CHAIN_LENGTH),
         fake_chain_tips in vec(any::<TypeNameToDebug<FakeChainTip>>(), 0..CHAIN_LENGTH),
     ) {
         let (runtime, _init_guard) = zebra_test::init_async();
@@ -186,7 +194,7 @@ proptest! {
     #[test]
     fn storage_is_cleared_if_syncer_falls_behind(
         network in any::<Network>(),
-        transaction in any::<VerifiedUnminedTx>(),
+        transaction in standard_verified_unmined_tx_strategy(),
     ) {
         let (runtime, _init_guard) = zebra_test::init_async();
 

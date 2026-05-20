@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# check=skip=UndefinedVar,UserExist # We use gosu in the entrypoint instead of USER directive
+# check=skip=UndefinedVar,UserExist # We use setpriv in the entrypoint instead of USER directive
 
 # If you want to include a file in the Docker image, add it to .dockerignore.
 #
@@ -13,7 +13,7 @@
 # We first set default values for build arguments used across the stages.
 # Each stage must define the build arguments (ARGs) it uses.
 
-ARG RUST_VERSION=1.89.0
+ARG RUST_VERSION=1.91.0
 
 ARG FEATURES="default-release-binaries"
 
@@ -83,9 +83,9 @@ WORKDIR ${HOME}
 ARG CARGO_HOME
 ARG CARGO_TARGET_DIR
 
-# Download and install the pre-built cargo-nextest binary.
+# Download and install cargo-nextest, curl and librocksdb-dev.
 RUN apt-get -qq update && \
-    apt-get -qq install -y --no-install-recommends curl && \
+    apt-get -qq install -y --no-install-recommends librocksdb-dev curl && \
     mkdir -p "${CARGO_HOME}/bin" && \
     case ${BUILDPLATFORM:-linux/$(uname -m)} in \
         "linux/amd64"|"linux/x86_64") ARCH="linux" ;; \
@@ -96,6 +96,9 @@ RUN apt-get -qq update && \
     apt-get -qq remove --purge -y curl && \
     apt-get -qq autoremove -y && \
     rm -rf /var/lib/apt/lists/* /tmp/*
+
+# Link RocksDB dynamically for faster test builds.
+ENV ROCKSDB_LIB_DIR="/usr/lib/"
 
 # Copy source code first to ensure consistent timestamps
 COPY --link --chown=${UID}:${GID} ./ ${HOME}
@@ -116,10 +119,6 @@ RUN [ -n "${SHORT_SHA}" ] && export SHORT_SHA="${SHORT_SHA}" || true; \
 
 # Copy the lightwalletd binary and source files to be able to run tests
 COPY --link --from=electriccoinco/lightwalletd:v0.4.17 /usr/local/bin/lightwalletd /usr/local/bin/
-
-# Copy the gosu binary to be able to run the entrypoint as non-root user
-# and allow to change permissions for mounted cache directories
-COPY --link --from=tianon/gosu:trixie /gosu /usr/local/bin/
 
 COPY --link --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
@@ -178,7 +177,7 @@ ENV FEATURES=${FEATURES}
 #
 # We do not use the `--system` flag for user creation since:
 # 1. System user ranges (100-999) can collide with host system users
-#   (see: https://github.com/nginxinc/docker-nginx/issues/490)
+#   (see: https://github.com/nginx/docker-nginx/issues/490)
 # 2. There's no value added and warning messages can be raised at build time
 #   (see: https://github.com/dotnet/dotnet-docker/issues/4624)
 #
@@ -207,13 +206,12 @@ WORKDIR ${HOME}
 RUN chown -R ${UID}:${GID} ${HOME}
 
 # We're explicitly NOT using the USER directive here.
-# Instead, we run as root initially and use gosu in the entrypoint.sh
+# Instead, we run as root initially and use setpriv in the entrypoint.sh
 # to step down to the non-privileged user. This allows us to change permissions
 # on mounted volumes before running the application as a non-root user.
-# User with UID=${UID} is created above and used via gosu in entrypoint.sh.
+# User with UID=${UID} is created above and used via setpriv in entrypoint.sh.
+# setpriv is part of util-linux, already included in debian:trixie-slim.
 
-# Copy the gosu binary to be able to run the entrypoint as non-root user
-COPY --link --from=tianon/gosu:trixie /gosu /usr/local/bin/
 COPY --link --from=release /usr/local/bin/zebrad /usr/local/bin/
 COPY --link --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
