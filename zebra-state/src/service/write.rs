@@ -126,6 +126,14 @@ struct WriteBlockWorkerTask {
     finalized_state: FinalizedState,
     non_finalized_state: NonFinalizedState,
     invalid_block_reset_sender: UnboundedSender<block::Hash>,
+    /// Signals the [`crate::service::StateService`] that a non-finalized block was rejected by
+    /// the write task, so its hash should be removed from
+    /// `non_finalized_block_write_sent_hashes`.
+    ///
+    /// Without this, a rejected same-hash block locks out a later honest
+    /// re-delivery of a block at the same hash as a "duplicate" until restart
+    /// or reorg.
+    non_finalized_rejected_sender: UnboundedSender<block::Hash>,
     chain_tip_sender: ChainTipSender,
     non_finalized_state_sender: watch::Sender<NonFinalizedState>,
     /// If `Some`, the non-finalized state is written to this backup directory
@@ -194,6 +202,7 @@ impl BlockWriteSender {
     ) -> (
         Self,
         tokio::sync::mpsc::UnboundedReceiver<block::Hash>,
+        tokio::sync::mpsc::UnboundedReceiver<block::Hash>,
         Option<Arc<std::thread::JoinHandle<()>>>,
     ) {
         // Security: The number of blocks in these channels is limited by
@@ -203,6 +212,8 @@ impl BlockWriteSender {
         let (finalized_block_write_sender, finalized_block_write_receiver) =
             tokio::sync::mpsc::unbounded_channel();
         let (invalid_block_reset_sender, invalid_block_write_reset_receiver) =
+            tokio::sync::mpsc::unbounded_channel();
+        let (non_finalized_rejected_sender, non_finalized_rejected_receiver) =
             tokio::sync::mpsc::unbounded_channel();
 
         let span = Span::current();
@@ -214,6 +225,7 @@ impl BlockWriteSender {
                     finalized_state,
                     non_finalized_state,
                     invalid_block_reset_sender,
+                    non_finalized_rejected_sender,
                     chain_tip_sender,
                     non_finalized_state_sender,
                     backup_dir_path,
@@ -229,6 +241,7 @@ impl BlockWriteSender {
                     .then_some(finalized_block_write_sender),
             },
             invalid_block_write_reset_receiver,
+            non_finalized_rejected_receiver,
             Some(Arc::new(task)),
         )
     }
@@ -252,6 +265,7 @@ impl WriteBlockWorkerTask {
             finalized_state,
             non_finalized_state,
             invalid_block_reset_sender,
+            non_finalized_rejected_sender,
             chain_tip_sender,
             non_finalized_state_sender,
             backup_dir_path,
@@ -399,6 +413,17 @@ impl WriteBlockWorkerTask {
                     // We only add one hash at a time, so we only need to remove one extra here.
                     parent_error_map.shift_remove_index(0);
                 }
+
+                // Signal the StateService to drop this hash from
+                // `non_finalized_block_write_sent_hashes`, so a subsequent
+                // re-delivery of a block at the same hash is not short-circuited
+                // as a "duplicate" against a rejected variant that never reached
+                // any chain.
+                //
+                // If the receiver was dropped (the StateService is shutting
+                // down), ignore the error: the lockout cannot matter once the
+                // service exits.
+                let _ = non_finalized_rejected_sender.send(child_hash);
 
                 // Update the caller with the error.
                 let _ = rsp_tx.send(result.map(|()| child_hash).map_err(Into::into));

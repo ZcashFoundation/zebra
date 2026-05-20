@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Security
 
+- Remove rejected block hashes from `SentHashes` ([GHSA-4m69-67m6-prqp](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-4m69-67m6-prqp)).
 - Cap the upfront `Vec::with_capacity` reservation in
   `zcash_deserialize_external_count` so a peer-supplied `CompactSize`
   cannot force a large allocation before any element bytes are read. The
