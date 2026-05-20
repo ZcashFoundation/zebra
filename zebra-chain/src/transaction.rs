@@ -11,8 +11,13 @@ mod lock_time;
 mod memo;
 mod serialize;
 mod sighash;
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+mod tachyon_shielded;
 mod txid;
 mod unmined;
+
+#[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+pub use tachyon_shielded::TachyonShieldedData;
 
 pub mod builder;
 
@@ -172,7 +177,7 @@ pub enum Transaction {
         /// The orchard data for this transaction, if any.
         orchard_shielded_data: Option<orchard::ShieldedData>,
         /// The tachyon data for this transaction, if any.
-        tachyon_shielded_data: Option<zcash_tachyon::Bundle<Option<zcash_tachyon::Stamp>>>,
+        tachyon_shielded_data: Option<TachyonShieldedData>,
     },
 }
 

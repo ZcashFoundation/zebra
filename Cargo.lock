@@ -2645,7 +2645,7 @@ checksum = "e04d7f318608d35d4b61ddd75cbdaee86b023ebe2bd5a66ee0915f0bf93095a9"
 dependencies = [
  "hermit-abi 0.5.2",
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3141,7 +3141,7 @@ dependencies = [
 [[package]]
 name = "mock_ragu"
 version = "0.0.0"
-source = "git+https://github.com/tachyon-zcash/tachyon?rev=b537e18b52c54dd2abf426585a22653b6ae3e14e#b537e18b52c54dd2abf426585a22653b6ae3e14e"
+source = "git+https://github.com/tachyon-zcash/tachyon.git?rev=b537e18b52c54dd2abf426585a22653b6ae3e14e#b537e18b52c54dd2abf426585a22653b6ae3e14e"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -7219,16 +7219,18 @@ dependencies = [
 [[package]]
 name = "zcash_tachyon"
 version = "0.0.0"
-source = "git+https://github.com/tachyon-zcash/tachyon.git?rev=a441c0cba73c9accebac324abdbd28b2f9701dd5#a441c0cba73c9accebac324abdbd28b2f9701dd5"
+source = "git+https://github.com/tachyon-zcash/tachyon.git?rev=b537e18b52c54dd2abf426585a22653b6ae3e14e#b537e18b52c54dd2abf426585a22653b6ae3e14e"
 dependencies = [
  "blake2b_simd",
+ "corez",
  "ff",
  "group",
+ "halo2_poseidon",
  "lazy_static",
+ "mock_ragu",
  "pasta_curves",
  "rand_core 0.6.4",
  "reddsa",
- "serde",
 ]
 
 [[package]]
@@ -7302,6 +7304,7 @@ dependencies = [
  "itertools 0.14.0",
  "jubjub",
  "lazy_static",
+ "mock_ragu",
  "num-integer",
  "orchard",
  "pasta_curves",
