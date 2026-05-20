@@ -1889,3 +1889,87 @@ async fn setup_with_mempool_config(
         mempool_transaction_subscriber.subscribe(),
     )
 }
+
+/// Regression test for GHSA-65jj-fmw8-468q.
+///
+/// Before the fix, when the outer `tokio::time::timeout(RATE_LIMIT_DELAY, ..)`
+/// wrapping mempool tx verification fired, `Downloads::poll_next` propagated
+/// the `Elapsed` error without dropping the corresponding `cancel_handles`
+/// entry. Each retained entry held a full `Gossip::Tx(UnminedTx)`, was never
+/// garbage-collected (since `cancel(mined_ids)` only matches mined txids),
+/// and the structure grew without bound under sustained adversarial input.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn cancel_handles_drained_after_verification_timeout() {
+    use futures::stream::StreamExt;
+    use tower::timeout::Timeout;
+    use zebra_node_services::mempool::Gossip;
+
+    use crate::components::mempool::{
+        crawler::RATE_LIMIT_DELAY,
+        downloads::{Downloads, TRANSACTION_DOWNLOAD_TIMEOUT, TRANSACTION_VERIFY_TIMEOUT},
+    };
+
+    let _init_guard = zebra_test::init();
+
+    let peer_set: MockPeerSet = MockService::build().for_unit_tests();
+    let state: MockService<zs::Request, zs::Response, PanicAssertion> =
+        MockService::build().for_unit_tests();
+    let tx_verifier: MockTxVerifier = MockService::build().for_unit_tests();
+
+    let mut downloads = Box::pin(Downloads::new(
+        Timeout::new(peer_set, TRANSACTION_DOWNLOAD_TIMEOUT),
+        Timeout::new(tx_verifier, TRANSACTION_VERIFY_TIMEOUT),
+        state,
+    ));
+
+    let mut iter = Network::Mainnet.unmined_transactions_in_blocks(1..=10);
+    let v1 = iter.next().expect("vector tx 1").transaction;
+    let v2 = iter.next().expect("vector tx 2").transaction;
+    let v3 = iter.next().expect("vector tx 3").transaction;
+
+    downloads
+        .as_mut()
+        .download_if_needed_and_verify(Gossip::Tx(v1), None)
+        .expect("queue tx 1");
+    downloads
+        .as_mut()
+        .download_if_needed_and_verify(Gossip::Tx(v2), None)
+        .expect("queue tx 2");
+    downloads
+        .as_mut()
+        .download_if_needed_and_verify(Gossip::Tx(v3), None)
+        .expect("queue tx 3");
+
+    assert_eq!(downloads.in_flight(), 3);
+    assert_eq!(downloads.transaction_requests().count(), 3);
+
+    // Advance past the RATE_LIMIT_DELAY so every spawned task hits the
+    // outer timeout. We don't service the mocked state/network/verifier,
+    // so verification never makes progress and the timeout deterministically
+    // fires.
+    time::advance(RATE_LIMIT_DELAY + Duration::from_secs(5)).await;
+    tokio::task::yield_now().await;
+
+    let mut elapsed_count = 0usize;
+    for _ in 0..3 {
+        match downloads.as_mut().next().await {
+            Some(Err(_)) => elapsed_count += 1,
+            Some(Ok(other)) => panic!(
+                "expected Err(Elapsed); got Ok with inner is_ok={}",
+                other.is_ok()
+            ),
+            None => panic!("Downloads stream ended before all tasks resolved"),
+        }
+    }
+    assert_eq!(
+        elapsed_count, 3,
+        "all 3 tasks should have hit RATE_LIMIT_DELAY"
+    );
+    assert_eq!(downloads.in_flight(), 0, "pending should be drained");
+
+    let leaked = downloads.transaction_requests().count();
+    assert_eq!(
+        leaked, 0,
+        "regression GHSA-65jj-fmw8-468q: cancel_handles must be drained after timeout"
+    );
+}

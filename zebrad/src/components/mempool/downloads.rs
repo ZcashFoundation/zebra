@@ -169,7 +169,7 @@ where
                     ),
                     Box<(TransactionDownloadVerifyError, UnminedTxId)>,
                 >,
-                tokio::time::error::Elapsed,
+                (UnminedTxId, tokio::time::error::Elapsed),
             >,
         >,
     >,
@@ -198,7 +198,7 @@ where
             ),
             Box<(UnminedTxId, TransactionDownloadVerifyError)>,
         >,
-        tokio::time::error::Elapsed,
+        (UnminedTxId, tokio::time::error::Elapsed),
     >;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
@@ -224,7 +224,14 @@ where
                     this.cancel_handles.remove(&hash);
                     Ok(Err(Box::new((hash, e))))
                 }
-                Err(elapsed) => Err(elapsed),
+                Err((txid, elapsed)) => {
+                    // Remove the cancel handle so the spawned task's queued `Gossip`
+                    // doesn't stay resident in `cancel_handles` after a verification
+                    // timeout. Without this, a peer that gets each transaction to
+                    // hit `RATE_LIMIT_DELAY` can leak ~2 MB per tx until OOM.
+                    this.cancel_handles.remove(&txid);
+                    Err((txid, elapsed))
+                }
             };
 
             Some(result)
@@ -431,6 +438,7 @@ where
                                 let _ = rsp_tx.send(Err("timeout waiting for verification result".into()));
                             }
                         })
+                        .map_err(|elapsed| (txid, elapsed))
                         .map(|inner_result| {
                             match inner_result {
                                 Ok((transaction, spent_mempool_outpoints, tip_height)) => Ok((transaction, spent_mempool_outpoints, tip_height, rsp_tx)),

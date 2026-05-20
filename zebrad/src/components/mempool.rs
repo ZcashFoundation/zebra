@@ -660,13 +660,13 @@ impl Service<Request> for Mempool {
                         invalidated_ids.insert(tx_id);
                         storage.reject_if_needed(tx_id, error);
                     }
-                    Err(_elapsed) => {
-                        // A timeout happens when the stream hangs waiting for another service,
-                        // so there is no specific transaction ID.
+                    Err((tx_id, _elapsed)) => {
+                        tracing::info!(
+                            ?tx_id,
+                            "mempool transaction failed to verify due to timeout"
+                        );
 
-                        // TODO: Return the transaction id that timed out during verification so it can be
-                        //       included in the list of invalidated transactions and change `warn!` to `info!`.
-                        tracing::warn!("mempool transaction failed to verify due to timeout");
+                        invalidated_ids.insert(tx_id);
 
                         metrics::counter!("mempool.failed.verify.tasks.total", "reason" => "timeout").increment(1);
                     }

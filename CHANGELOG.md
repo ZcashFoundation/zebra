@@ -38,6 +38,15 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Avoid panicking in the address-book ban path when `network.max_connections_per_ip > 1`. Guard the optional `most_recent_by_ip` cache instead of unwrapping it, so a ban-threshold misbehavior update no longer crashes the address-book updater and poisons the shared mutex ([#10580](https://github.com/ZcashFoundation/zebra/issues/10580))
 - Propagate transaction-level value-balance errors from `Block::chain_value_pool_change()` instead of silently dropping them. The previous `flat_map(Result)` aggregation relied on `Result<T, E>: IntoIterator` and yielded zero items on `Err`, so a failing transaction was omitted from the block sum rather than surfacing as a `ValueBalanceError` ([#10585](https://github.com/ZcashFoundation/zebra/issues/10585))
 
+### Security
+
+- Drain the mempool downloader's `cancel_handles` entry when the outer
+  verification timeout fires, so the queued `Gossip::Tx(UnminedTx)` is not
+  retained until the process runs out of memory. Without the fix, a single peer
+  that gets each pushed transaction to hit `RATE_LIMIT_DELAY` could leak up to
+  ~2 MB per transaction monotonically
+  ([GHSA-65jj-fmw8-468q](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-65jj-fmw8-468q)).
+
 ## [Zebra 4.4.1](https://github.com/ZcashFoundation/zebra/releases/tag/v4.4.1) - 2026-05-04
 
 This release fixes one critical security issue. We recommend node operators update to
