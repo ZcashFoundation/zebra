@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Breaking Changes
+
+- `MinedTx` gains a public `best_chain_tip_hash: block::Hash` field, captured from the same chain snapshot used to compute `confirmations`. `MinedTx::new` now takes this hash as its fifth argument. Consumers should pin follow-up state queries to this hash (or to the resolved block hash) instead of issuing a separate `Tip` / `BestChainBlockHash` request. See [#10550](https://github.com/ZcashFoundation/zebra/issues/10550).
+
 ## [6.0.0] - 2026-05-01
 
 ### Changed
