@@ -60,6 +60,10 @@ async fn populated_read_state_responds_correctly() -> Result<()> {
         populated_state(blocks.clone(), &Mainnet).await;
 
     let tip_height = Height(blocks.len() as u32 - 1);
+    let tip_hash = blocks
+        .last()
+        .expect("populated state has at least one block")
+        .hash();
 
     let empty_cases = Transcript::from(empty_state_test_cases());
     empty_cases.check(read_state.clone()).await?;
@@ -92,6 +96,7 @@ async fn populated_read_state_responds_correctly() -> Result<()> {
                     height: block.coinbase_height().unwrap(),
                     confirmations: 1 + tip_height.0 - block.coinbase_height().unwrap().0,
                     block_time: block.header.time,
+                    best_chain_tip_hash: tip_hash,
                 }))),
             )];
 

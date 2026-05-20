@@ -175,6 +175,16 @@ pub struct MinedTx {
 
     /// The time of the block where the transaction was mined.
     pub block_time: DateTime<Utc>,
+
+    /// The best-chain tip hash captured in the same state snapshot used to
+    /// compute `confirmations`.
+    ///
+    /// Callers that combine this response with other state queries should
+    /// pin those follow-up queries to this hash (or to the resolved block
+    /// hash for the transaction) rather than issuing a separate `Tip` /
+    /// `BestChainBlockHash` request, which would re-sample the chain and
+    /// can race with reorgs or new blocks. See issue #10550.
+    pub best_chain_tip_hash: block::Hash,
 }
 
 impl MinedTx {
@@ -184,12 +194,14 @@ impl MinedTx {
         height: block::Height,
         confirmations: u32,
         block_time: DateTime<Utc>,
+        best_chain_tip_hash: block::Hash,
     ) -> Self {
         Self {
             tx,
             height,
             confirmations,
             block_time,
+            best_chain_tip_hash,
         }
     }
 }

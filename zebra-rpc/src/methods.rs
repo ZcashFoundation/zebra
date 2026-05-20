@@ -1283,17 +1283,26 @@ where
                 next_block_hash,
             } = *block_header;
 
+            // # Concurrency
+            //
+            // We look up by block hash so the hash, transaction IDs, and confirmations
+            // are consistent. Bind every follow-up read to the resolved block hash
+            // rather than the caller-supplied hash-or-height, so a reorg between the
+            // header lookup and these reads cannot mix block A's header with block B's
+            // contents. See issue #10550.
+            let hash_or_height = hash.into();
             let transactions_request = match verbosity {
                 1 => zebra_state::ReadRequest::TransactionIdsForBlock(hash_or_height),
                 2 => zebra_state::ReadRequest::BlockAndSize(hash_or_height),
                 _other => panic!("get_block_header_fut should be none"),
             };
 
-            // # Concurrency
-            //
-            // We look up by block hash so the hash, transaction IDs, and confirmations
-            // are consistent.
-            let hash_or_height = hash.into();
+            // Confirmations is `-1` when the resolved header is no longer on the
+            // best chain. Avoid panicking on `try_into()` in the verbosity-2 path,
+            // and label such transactions as not in the active chain.
+            let in_active_chain = confirmations >= 0;
+            let confirmations_u32 = u32::try_from(confirmations).ok();
+
             let requests = vec![
                 // Get transaction IDs from the transaction index by block hash
                 //
@@ -1329,27 +1338,24 @@ where
                 zebra_state::ReadResponse::BlockAndSize(block_and_size) => {
                     let (block, size) = block_and_size.ok_or_misc_error("Block not found")?;
                     let block_time = block.header.time;
-                    let transactions =
-                        block
-                            .transactions
-                            .iter()
-                            .map(|tx| {
-                                GetBlockTransaction::Object(Box::new(
-                                    TransactionObject::from_transaction(
-                                        tx.clone(),
-                                        Some(height),
-                                        Some(confirmations.try_into().expect(
-                                            "should be less than max block height, i32::MAX",
-                                        )),
-                                        &network,
-                                        Some(block_time),
-                                        Some(hash),
-                                        Some(true),
-                                        tx.hash(),
-                                    ),
-                                ))
-                            })
-                            .collect();
+                    let transactions = block
+                        .transactions
+                        .iter()
+                        .map(|tx| {
+                            GetBlockTransaction::Object(Box::new(
+                                TransactionObject::from_transaction(
+                                    tx.clone(),
+                                    Some(height),
+                                    confirmations_u32,
+                                    &network,
+                                    Some(block_time),
+                                    Some(hash),
+                                    Some(in_active_chain),
+                                    tx.hash(),
+                                ),
+                            ))
+                        })
+                        .collect();
                     (transactions, Some(size))
                 }
                 _ => unreachable!("unmatched response to a transaction_ids_for_block request"),
@@ -1481,10 +1487,15 @@ where
         let response = if !verbose {
             GetBlockHeaderResponse::Raw(HexData(header.zcash_serialize_to_vec().map_misc_error()?))
         } else {
+            // Bind follow-up reads to the resolved block hash so the SaplingTree
+            // and Depth lookups are taken from the same chain view as the header.
+            // Using the caller-supplied `hash_or_height` here would re-sample the
+            // best chain and could mix a header from block A with a Sapling tree
+            // from block B at the same height. See issue #10550.
             let zebra_state::ReadResponse::SaplingTree(sapling_tree) = self
                 .read_state
                 .clone()
-                .oneshot(zebra_state::ReadRequest::SaplingTree(hash_or_height))
+                .oneshot(zebra_state::ReadRequest::SaplingTree(hash.into()))
                 .await
                 .map_misc_error()?
             else {
@@ -3110,23 +3121,12 @@ where
             };
         }
 
-        // TODO: Ensure that the returned tip hash is always valid for the response, i.e. that Zebra can't return a tip that
-        //       hadn't yet included the queried transaction output.
-
-        // Get the best block tip hash
-        let tip_rsp = self
-            .read_state
-            .clone()
-            .oneshot(zebra_state::ReadRequest::Tip)
-            .await
-            .map_misc_error()?;
-
-        let best_block_hash = match tip_rsp {
-            zebra_state::ReadResponse::Tip(tip) => tip.ok_or_misc_error("No blocks in state")?.1,
-            _ => unreachable!("unmatched response to a `Tip` request"),
-        };
-
-        // State path
+        // Issue the Transaction query first and reuse the best-chain tip hash
+        // captured in that same chain snapshot, instead of doing a separate Tip
+        // query that re-samples the chain. The follow-up IsTransparentOutputSpent
+        // query may still observe a later tip, but the response's `bestblock`
+        // field is now anchored to the same view used to compute confirmations.
+        // See issue #10550.
         let rsp = self
             .read_state
             .clone()
@@ -3136,6 +3136,7 @@ where
 
         match rsp {
             zebra_state::ReadResponse::Transaction(Some(tx)) => {
+                let best_block_hash = tx.best_chain_tip_hash;
                 let outputs = tx.tx.outputs();
                 let index: usize = n.try_into().expect("u32 always fits in usize");
                 let output = match outputs.get(index) {

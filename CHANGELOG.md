@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 - Startup warning on Linux when `net.ipv4.tcp_slow_start_after_idle` is enabled (which resets TCP congestion windows between block requests and significantly reduces single-peer block-propagation throughput on long-haul links), with a "Linux TCP tuning for block propagation" troubleshooting section ([#10513](https://github.com/ZcashFoundation/zebra/pull/10513))
 
+### Fixed
+
+- `getblock`, `getblockheader`, and `gettxout` RPC methods now bind their follow-up state queries to the block hash resolved by the first read, avoiding internally inconsistent responses when a reorg or tip advance occurs mid-call ([#10550](https://github.com/ZcashFoundation/zebra/issues/10550)).
+- `getblock` verbosity 2 no longer panics during transaction serialization when the requested block is no longer on the best chain (`confirmations = -1`); the response is now labeled as not in the active chain instead ([#10550](https://github.com/ZcashFoundation/zebra/issues/10550)).
+
 ## [Zebra 4.4.1](https://github.com/ZcashFoundation/zebra/releases/tag/v4.4.1) - 2026-05-04
 
 This release fixes one critical security issue. We recommend node operators update to
