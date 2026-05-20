@@ -37,7 +37,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions-rust-lang/setup-rust-toolchain@2b1f5e9b395427c92ee4e3331786ca3c37afe2d7 #v1.16.0
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           toolchain: stable
           cache-on-failure: true
@@ -80,7 +80,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Store benchmark results
-        uses: benchmark-action/github-action-benchmark@a60cea5bc7b49e15c1f58f411161f99e0df48372 #v1
+        uses: benchmark-action/github-action-benchmark@52576c92bccf6ac60c8223ec7eb2565637cae9ba #v1
         with:
           tool: customSmallerIsBetter
           output-file-path: bench_results.json
@@ -113,7 +113,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      - uses: actions-rust-lang/setup-rust-toolchain@2b1f5e9b395427c92ee4e3331786ca3c37afe2d7 #v1.16.0
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           toolchain: stable
           cache-on-failure: true
