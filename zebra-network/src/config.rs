@@ -609,13 +609,37 @@ struct DTestnetParameters {
     extend_funding_stream_addresses_as_required: Option<bool>,
 }
 
+/// Network configuration used during deserialization.
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+enum DNetwork {
+    DefaultForKind(NetworkKind),
+    ConfiguredRegtest {
+        params: Box<DTestnetParameters>,
+
+        #[serde(default, skip_serializing)]
+        regtest: Option<bool>,
+    },
+    ConfiguredTestnet(Box<DTestnetParameters>),
+}
+
+impl Default for DNetwork {
+    fn default() -> Self {
+        DNetwork::DefaultForKind(NetworkKind::Mainnet)
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 struct DConfig {
     listen_addr: String,
     external_addr: Option<String>,
-    network: NetworkKind,
+    network: DNetwork,
+
+    /// Legacy testnet parameters, kept for backwards compatibility.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     testnet_parameters: Option<DTestnetParameters>,
+
     initial_mainnet_peers: IndexSet<String>,
     initial_testnet_peers: IndexSet<String>,
     cache_dir: CacheDir,
@@ -693,16 +717,32 @@ impl From<Config> for DConfig {
             max_connections_per_ip,
         }: Config,
     ) -> Self {
-        let testnet_parameters = network
-            .parameters()
-            .filter(|params| !params.is_default_testnet())
-            .map(Into::into);
+        let dnetwork = match network.kind() {
+            NetworkKind::Testnet => match network
+                .parameters()
+                .filter(|params| !params.is_default_testnet())
+                .map(Into::into)
+            {
+                Some(params) => DNetwork::ConfiguredTestnet(Box::new(params)),
+                None => DNetwork::DefaultForKind(NetworkKind::Testnet),
+            },
+
+            NetworkKind::Regtest => match network.parameters().map(Into::into) {
+                Some(params) => DNetwork::ConfiguredRegtest {
+                    params: Box::new(params),
+                    regtest: Some(true),
+                },
+                None => DNetwork::DefaultForKind(NetworkKind::Regtest),
+            },
+
+            other_kind => DNetwork::DefaultForKind(other_kind),
+        };
 
         DConfig {
             listen_addr: listen_addr.to_string(),
             external_addr: external_addr.map(|addr| addr.to_string()),
-            network: network.into(),
-            testnet_parameters,
+            network: dnetwork,
+            testnet_parameters: None,
             initial_mainnet_peers,
             initial_testnet_peers,
             cache_dir,
@@ -721,7 +761,7 @@ impl<'de> Deserialize<'de> for Config {
         let DConfig {
             listen_addr,
             external_addr,
-            network: network_kind,
+            network: dnetwork,
             testnet_parameters,
             initial_mainnet_peers,
             initial_testnet_peers,
@@ -731,176 +771,25 @@ impl<'de> Deserialize<'de> for Config {
             max_connections_per_ip,
         } = DConfig::deserialize(deserializer)?;
 
-        /// Accepts an [`IndexSet`] of initial peers,
-        ///
-        /// Returns true if any of them are the default Testnet or Mainnet initial peers.
-        fn contains_default_initial_peers(initial_peers: &IndexSet<String>) -> bool {
-            let Config {
-                initial_mainnet_peers: mut default_initial_peers,
-                initial_testnet_peers: default_initial_testnet_peers,
-                ..
-            } = Config::default();
-            default_initial_peers.extend(default_initial_testnet_peers);
-
-            initial_peers
-                .intersection(&default_initial_peers)
-                .next()
-                .is_some()
-        }
-
-        let network = match (network_kind, testnet_parameters) {
-            (NetworkKind::Mainnet, _) => Network::Mainnet,
-            (NetworkKind::Testnet, None) => Network::new_default_testnet(),
-            (NetworkKind::Regtest, testnet_parameters) => {
-                let params = testnet_parameters
-                    .map(
-                        |DTestnetParameters {
-                             activation_heights,
-                             pre_nu6_funding_streams,
-                             post_nu6_funding_streams,
-                             funding_streams,
-                             lockbox_disbursements,
-                             checkpoints,
-                             extend_funding_stream_addresses_as_required,
-                             ..
-                         }| {
-                            let mut funding_streams_vec = funding_streams.unwrap_or_default();
-                            if let Some(funding_streams) = post_nu6_funding_streams {
-                                funding_streams_vec.insert(0, funding_streams);
-                            }
-                            if let Some(funding_streams) = pre_nu6_funding_streams {
-                                funding_streams_vec.insert(0, funding_streams);
-                            }
-
-                            RegtestParameters {
-                                activation_heights: activation_heights.unwrap_or_default(),
-                                funding_streams: Some(funding_streams_vec),
-                                lockbox_disbursements,
-                                checkpoints: Some(checkpoints),
-                                extend_funding_stream_addresses_as_required,
-                            }
-                        },
-                    )
-                    .unwrap_or_default();
-
-                Network::new_regtest(params)
+        let network = match (dnetwork, testnet_parameters) {
+            (DNetwork::ConfiguredTestnet(params), _) => {
+                build_configured_testnet::<D>(*params, &initial_testnet_peers)?
             }
-            (
-                NetworkKind::Testnet,
-                Some(DTestnetParameters {
-                    network_name,
-                    network_magic,
-                    slow_start_interval,
-                    target_difficulty_limit,
-                    disable_pow,
-                    genesis_hash,
-                    activation_heights,
-                    pre_nu6_funding_streams,
-                    post_nu6_funding_streams,
-                    funding_streams,
-                    pre_blossom_halving_interval,
-                    lockbox_disbursements,
-                    checkpoints,
-                    extend_funding_stream_addresses_as_required,
-                }),
-            ) => {
-                let mut params_builder = testnet::Parameters::build();
-
-                if let Some(network_name) = network_name.clone() {
-                    params_builder = params_builder
-                        .with_network_name(network_name)
-                        .map_err(de::Error::custom)?
-                }
-
-                if let Some(network_magic) = network_magic {
-                    params_builder = params_builder
-                        .with_network_magic(Magic(network_magic))
-                        .map_err(de::Error::custom)?;
-                }
-
-                if let Some(genesis_hash) = genesis_hash {
-                    params_builder = params_builder
-                        .with_genesis_hash(genesis_hash)
-                        .map_err(de::Error::custom)?;
-                }
-
-                if let Some(slow_start_interval) = slow_start_interval {
-                    params_builder = params_builder.with_slow_start_interval(
-                        slow_start_interval.try_into().map_err(de::Error::custom)?,
-                    );
-                }
-
-                if let Some(target_difficulty_limit) = target_difficulty_limit.clone() {
-                    params_builder = params_builder
-                        .with_target_difficulty_limit(
-                            target_difficulty_limit
-                                .parse::<U256>()
-                                .map_err(de::Error::custom)?,
-                        )
-                        .map_err(de::Error::custom)?;
-                }
-
-                if let Some(disable_pow) = disable_pow {
-                    params_builder = params_builder.with_disable_pow(disable_pow);
-                }
-
-                // Retain default Testnet activation heights unless there's an empty [testnet_parameters.activation_heights] section.
-                if let Some(activation_heights) = activation_heights {
-                    params_builder = params_builder
-                        .with_activation_heights(activation_heights)
-                        .map_err(de::Error::custom)?
-                }
-
-                if let Some(halving_interval) = pre_blossom_halving_interval {
-                    params_builder = params_builder
-                        .with_halving_interval(halving_interval.into())
-                        .map_err(de::Error::custom)?
-                }
-
-                // Set configured funding streams after setting any parameters that affect the funding stream address period.
-                let mut funding_streams_vec = funding_streams.unwrap_or_default();
-
-                if let Some(funding_streams) = post_nu6_funding_streams {
-                    funding_streams_vec.insert(0, funding_streams);
-                }
-
-                if let Some(funding_streams) = pre_nu6_funding_streams {
-                    funding_streams_vec.insert(0, funding_streams);
-                }
-
-                if !funding_streams_vec.is_empty() {
-                    params_builder = params_builder.with_funding_streams(funding_streams_vec);
-                }
-
-                if let Some(lockbox_disbursements) = lockbox_disbursements {
-                    params_builder =
-                        params_builder.with_lockbox_disbursements(lockbox_disbursements);
-                }
-
-                params_builder = params_builder
-                    .with_checkpoints(checkpoints)
-                    .map_err(de::Error::custom)?;
-
-                if let Some(true) = extend_funding_stream_addresses_as_required {
-                    params_builder = params_builder.extend_funding_streams();
-                }
-
-                // Return an error if the initial testnet peers includes any of the default initial Mainnet or Testnet
-                // peers and the configured network parameters are incompatible with the default public Testnet.
-                if !params_builder.is_compatible_with_default_parameters()
-                    && contains_default_initial_peers(&initial_testnet_peers)
-                {
-                    return Err(de::Error::custom(
-                        "cannot use default initials peers with incompatible testnet",
-                    ));
-                };
-
-                // Return the default Testnet if no network name was configured and all parameters match the default Testnet
-                if network_name.is_none() && params_builder == testnet::Parameters::build() {
-                    Network::new_default_testnet()
-                } else {
-                    params_builder.to_network().map_err(de::Error::custom)?
-                }
+            (DNetwork::ConfiguredRegtest { params, .. }, _) => {
+                Network::new_regtest(build_regtest_params(*params))
+            }
+            (DNetwork::DefaultForKind(NetworkKind::Mainnet), _) => Network::Mainnet,
+            (DNetwork::DefaultForKind(NetworkKind::Testnet), Some(params)) => {
+                build_configured_testnet::<D>(params, &initial_testnet_peers)?
+            }
+            (DNetwork::DefaultForKind(NetworkKind::Testnet), None) => {
+                Network::new_default_testnet()
+            }
+            (DNetwork::DefaultForKind(NetworkKind::Regtest), Some(params)) => {
+                Network::new_regtest(build_regtest_params(params))
+            }
+            (DNetwork::DefaultForKind(NetworkKind::Regtest), None) => {
+                Network::new_regtest(Default::default())
             }
         };
 
@@ -956,5 +845,174 @@ impl<'de> Deserialize<'de> for Config {
             crawl_new_peer_interval,
             max_connections_per_ip,
         })
+    }
+}
+
+/// Accepts an [`IndexSet`] of initial peers,
+///
+/// Returns true if any of them are the default Testnet or Mainnet initial peers.
+fn contains_default_initial_peers(initial_peers: &IndexSet<String>) -> bool {
+    let Config {
+        initial_mainnet_peers: mut default_initial_peers,
+        initial_testnet_peers: default_initial_testnet_peers,
+        ..
+    } = Config::default();
+    default_initial_peers.extend(default_initial_testnet_peers);
+
+    initial_peers
+        .intersection(&default_initial_peers)
+        .next()
+        .is_some()
+}
+
+fn build_configured_testnet<'de, D>(
+    params: DTestnetParameters,
+    initial_testnet_peers: &IndexSet<String>,
+) -> Result<Network, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let DTestnetParameters {
+        network_name,
+        network_magic,
+        slow_start_interval,
+        target_difficulty_limit,
+        disable_pow,
+        genesis_hash,
+        activation_heights,
+        pre_nu6_funding_streams,
+        post_nu6_funding_streams,
+        funding_streams,
+        pre_blossom_halving_interval,
+        lockbox_disbursements,
+        checkpoints,
+        extend_funding_stream_addresses_as_required,
+    } = params;
+
+    let mut params_builder = testnet::Parameters::build();
+
+    if let Some(network_name) = network_name.clone() {
+        params_builder = params_builder
+            .with_network_name(network_name)
+            .map_err(de::Error::custom)?
+    }
+
+    if let Some(network_magic) = network_magic {
+        params_builder = params_builder
+            .with_network_magic(Magic(network_magic))
+            .map_err(de::Error::custom)?;
+    }
+
+    if let Some(genesis_hash) = genesis_hash {
+        params_builder = params_builder
+            .with_genesis_hash(genesis_hash)
+            .map_err(de::Error::custom)?;
+    }
+
+    if let Some(slow_start_interval) = slow_start_interval {
+        params_builder = params_builder
+            .with_slow_start_interval(slow_start_interval.try_into().map_err(de::Error::custom)?);
+    }
+
+    if let Some(target_difficulty_limit) = target_difficulty_limit.clone() {
+        params_builder = params_builder
+            .with_target_difficulty_limit(
+                target_difficulty_limit
+                    .parse::<U256>()
+                    .map_err(de::Error::custom)?,
+            )
+            .map_err(de::Error::custom)?;
+    }
+
+    if let Some(disable_pow) = disable_pow {
+        params_builder = params_builder.with_disable_pow(disable_pow);
+    }
+
+    // Retain default Testnet activation heights unless there's an empty [testnet_parameters.activation_heights] section.
+    if let Some(activation_heights) = activation_heights {
+        params_builder = params_builder
+            .with_activation_heights(activation_heights)
+            .map_err(de::Error::custom)?
+    }
+
+    if let Some(halving_interval) = pre_blossom_halving_interval {
+        params_builder = params_builder
+            .with_halving_interval(halving_interval.into())
+            .map_err(de::Error::custom)?
+    }
+
+    // Set configured funding streams after setting any parameters that affect the funding stream address period.
+    let mut funding_streams_vec = funding_streams.unwrap_or_default();
+
+    if let Some(funding_streams) = post_nu6_funding_streams {
+        funding_streams_vec.insert(0, funding_streams);
+    }
+
+    if let Some(funding_streams) = pre_nu6_funding_streams {
+        funding_streams_vec.insert(0, funding_streams);
+    }
+
+    if !funding_streams_vec.is_empty() {
+        params_builder = params_builder.with_funding_streams(funding_streams_vec);
+    }
+
+    if let Some(lockbox_disbursements) = lockbox_disbursements {
+        params_builder = params_builder.with_lockbox_disbursements(lockbox_disbursements);
+    }
+
+    params_builder = params_builder
+        .with_checkpoints(checkpoints)
+        .map_err(de::Error::custom)?;
+
+    if let Some(true) = extend_funding_stream_addresses_as_required {
+        params_builder = params_builder.extend_funding_streams();
+    }
+
+    // Return an error if the initial testnet peers includes any of the default initial Mainnet or Testnet
+    // peers and the configured network parameters are incompatible with the default public Testnet.
+    if !params_builder.is_compatible_with_default_parameters()
+        && contains_default_initial_peers(initial_testnet_peers)
+    {
+        return Err(de::Error::custom(
+            "cannot use default initials peers with incompatible testnet",
+        ));
+    };
+
+    // Return the default Testnet if no network name was configured and all parameters match the default Testnet
+    if network_name.is_none() && params_builder == testnet::Parameters::build() {
+        Ok(Network::new_default_testnet())
+    } else {
+        Ok(params_builder.to_network().map_err(de::Error::custom)?)
+    }
+}
+
+fn build_regtest_params(params: DTestnetParameters) -> RegtestParameters {
+    let DTestnetParameters {
+        activation_heights,
+        pre_nu6_funding_streams,
+        post_nu6_funding_streams,
+        funding_streams,
+        lockbox_disbursements,
+        checkpoints,
+        extend_funding_stream_addresses_as_required,
+        ..
+    } = params;
+
+    let mut funding_streams_vec = funding_streams.unwrap_or_default();
+
+    if let Some(funding_streams) = post_nu6_funding_streams {
+        funding_streams_vec.insert(0, funding_streams);
+    }
+
+    if let Some(funding_streams) = pre_nu6_funding_streams {
+        funding_streams_vec.insert(0, funding_streams);
+    }
+
+    RegtestParameters {
+        activation_heights: activation_heights.unwrap_or_default(),
+        funding_streams: Some(funding_streams_vec),
+        lockbox_disbursements,
+        checkpoints: Some(checkpoints),
+        extend_funding_stream_addresses_as_required,
     }
 }
