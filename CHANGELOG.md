@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Security
+
+- Cap the upfront `Vec::with_capacity` reservation in
+  `zcash_deserialize_external_count` so a peer-supplied `CompactSize`
+  cannot force a large allocation before any element bytes are read. The
+  `Vec` grows naturally via `push()` as real data arrives. Complements
+  the per-type `max_allocation()` caps from PR #10494
+  ([GHSA-xr93-pcq3-pxf8](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-xr93-pcq3-pxf8)).
+  CWE-770.
+
 ### Added
 
 - Startup warning on Linux when `net.ipv4.tcp_slow_start_after_idle` is enabled (which resets TCP congestion windows between block requests and significantly reduces single-peer block-propagation throughput on long-haul links), with a "Linux TCP tuning for block propagation" troubleshooting section ([#10513](https://github.com/ZcashFoundation/zebra/pull/10513))
