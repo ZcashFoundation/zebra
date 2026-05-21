@@ -2965,6 +2965,70 @@ async fn rpc_z_listunifiedreceivers() {
     assert_eq!(*response.p2sh(), None);
 }
 
+/// Check that `z_listunifiedreceivers` returns an RPC error (instead of panicking and
+/// aborting `zebrad`) when given a unified address whose Sapling receiver has a valid
+/// length and typecode but a non-canonical Jubjub `pk_d`.
+///
+/// The unified-address decoder validates only the typecode and length of inner receivers,
+/// not their contents, so this used to reach `sapling_crypto::PaymentAddress::from_bytes`
+/// returning `None` and then panic on `.expect(...)`. Under `panic = "abort"` (Zebra's
+/// release and dev profiles) that aborts the process.
+///
+/// Regression test for
+/// [GHSA-c8w6-x74f-vmg3](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-c8w6-x74f-vmg3).
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_z_listunifiedreceivers_rejects_bad_sapling_receiver() {
+    use zcash_address::unified::{Address as UnifiedAddress, Encoding, Receiver};
+
+    let _init_guard = zebra_test::init();
+
+    // Construct a Sapling receiver whose 43 bytes pass the typecode/length checks
+    // performed by `unified::Encoding::decode`, but whose trailing 32 bytes are not a
+    // canonical Jubjub `DiversifiedTransmissionKey`. `0xFF` * 32 is the simplest such
+    // value: `sapling_crypto::PaymentAddress::from_bytes` returns `None`.
+    let mut bad_sapling = [0u8; 43];
+    bad_sapling[..11].copy_from_slice(&[0x11; 11]);
+    bad_sapling[11..].copy_from_slice(&[0xFF; 32]);
+
+    // A placeholder Orchard receiver is needed to satisfy the unified-container rule
+    // that forbids `OnlyTransparent` UAs. The bytes themselves are never validated by
+    // the decoder, so any 43 bytes work.
+    let placeholder_orchard = [0x22u8; 43];
+
+    let unified = UnifiedAddress::try_from_items(vec![
+        Receiver::Sapling(bad_sapling),
+        Receiver::Orchard(placeholder_orchard),
+    ])
+    .expect("unified container construction does not validate inner bytes");
+    let encoded = unified.encode(&NetworkType::Main);
+
+    // Init RPC
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    let result = rpc.z_list_unified_receivers(encoded).await;
+    assert!(
+        result.is_err(),
+        "z_listunifiedreceivers must return an error for a malformed Sapling receiver, \
+         got {result:?}",
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_addnode() {
     let _init_guard = zebra_test::init();

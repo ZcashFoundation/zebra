@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   before any payload bytes were read. Same fix shape as
   GHSA-xr93-pcq3-pxf8 for `AddrV1`/`AddrV2` (PR #10494). CWE-770.
 - Reject non-ASCII `longpollid` values in the `getblocktemplate` RPC ([GHSA-qv2r-v3mx-f4pf](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-qv2r-v3mx-f4pf)).
+- Return error for malformed Sapling receiver in `z_listunifiedreceivers` RPC
+([GHSA-c8w6-x74f-vmg3](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-c8w6-x74f-vmg3)).
 
 ### Added
 
