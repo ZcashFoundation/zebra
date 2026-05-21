@@ -50,6 +50,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   ~2 MB per transaction monotonically
   ([GHSA-65jj-fmw8-468q](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-65jj-fmw8-468q)).
 
+### Security
+
+- Pop Sapling/Orchard subtrees when popping non-finalized tip ([GHSA-2gf8-q9rr-jq3h](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-2gf8-q9rr-jq3h)).
+
 ## [Zebra 4.4.1](https://github.com/ZcashFoundation/zebra/releases/tag/v4.4.1) - 2026-05-04
 
 This release fixes one critical security issue. We recommend node operators update to

@@ -1240,6 +1240,25 @@ impl Chain {
             .remove(&block_height)
             .expect("only called while blocks is populated");
 
+        // If the popped block completed a Sapling or Orchard subtree, remove the corresponding
+        // subtree from this chain too. Subtrees are inserted by `push` keyed by the highest subtree
+        // index, so the last entry's `end_height` matches the popped block iff a subtree was
+        // completed at that height.
+        if self
+            .sapling_subtrees
+            .last_key_value()
+            .is_some_and(|(_, subtree)| subtree.end_height == block_height)
+        {
+            self.sapling_subtrees.pop_last();
+        }
+        if self
+            .orchard_subtrees
+            .last_key_value()
+            .is_some_and(|(_, subtree)| subtree.end_height == block_height)
+        {
+            self.orchard_subtrees.pop_last();
+        }
+
         assert!(
             !self.blocks.is_empty(),
             "Non-finalized chains must have at least one block to be valid"

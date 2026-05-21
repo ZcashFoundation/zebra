@@ -6,8 +6,10 @@ use zebra_chain::{
     amount::NonNegative,
     block::{self, Block, Height},
     history_tree::NonEmptyHistoryTree,
+    orchard,
     parameters::{Network, NetworkUpgrade},
     serialization::ZcashDeserializeInto,
+    subtree::NoteCommitmentSubtree,
     value_balance::ValueBalance,
 };
 use zebra_test::prelude::*;
@@ -824,4 +826,63 @@ async fn non_finalized_state_writes_blocks_to_and_restores_blocks_from_backup_ca
         "non-finalized state should have restored the block committed \
         to the previous non-finalized state"
     );
+}
+
+/// Regression test for
+/// [GHSA-2gf8-q9rr-jq3h](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-2gf8-q9rr-jq3h).
+///
+/// `Chain::pop_tip` used to leave entries in `sapling_subtrees` and `orchard_subtrees`,
+/// so a chain forked below a subtree boundary inherited stale subtrees from the
+/// abandoned branch. Forking should drop any subtree whose `end_height` is above the
+/// new tip.
+#[test]
+fn fork_drops_subtrees_above_fork_point() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let block2 = block1.make_fake_child().set_work(10);
+    let block3 = block2.make_fake_child().set_work(1);
+
+    let mut chain = Chain::new(
+        &network,
+        (block1.coinbase_height().unwrap() - 1).unwrap(),
+        Default::default(),
+        Default::default(),
+        Default::default(),
+        Default::default(),
+        ValueBalance::fake_populated_pool(),
+    );
+    chain = chain.push(block1.clone().prepare().test_with_zero_spent_utxos())?;
+    chain = chain.push(block2.clone().prepare().test_with_zero_spent_utxos())?;
+    chain = chain.push(block3.clone().prepare().test_with_zero_spent_utxos())?;
+
+    // Inject a Sapling and an Orchard subtree whose `end_height` is the chain's tip.
+    // The block-push pipeline above doesn't complete subtrees on its own for these
+    // fixture blocks, so we install them directly via the test-only helpers.
+    let tip_height = block3.coinbase_height().unwrap();
+    let sapling_node = sapling_crypto::Node::from_bytes([0; 32]).unwrap();
+    chain.insert_sapling_subtree(NoteCommitmentSubtree::new(0u16, tip_height, sapling_node));
+    let orchard_node = orchard::tree::Node::default();
+    chain.insert_orchard_subtree(NoteCommitmentSubtree::new(0u16, tip_height, orchard_node));
+
+    assert_eq!(chain.sapling_subtrees.len(), 1);
+    assert_eq!(chain.orchard_subtrees.len(), 1);
+
+    // Fork at `block1`, so `pop_tip` runs twice (for block3 then block2). The
+    // subtree at block3's height must be removed; without the fix, it would survive
+    // into the forked chain.
+    let forked = chain.fork(block1.hash()).expect("block1 is in the chain");
+
+    assert_eq!(forked.non_finalized_tip_hash(), block1.hash());
+    assert!(
+        forked.sapling_subtrees.is_empty(),
+        "fork should have dropped the Sapling subtree completed above the fork point"
+    );
+    assert!(
+        forked.orchard_subtrees.is_empty(),
+        "fork should have dropped the Orchard subtree completed above the fork point"
+    );
+
+    Ok(())
 }
