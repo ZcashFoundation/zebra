@@ -586,7 +586,14 @@ impl DiskWriteBatch {
 
         self.update_history_tree(zebra_db, history_tree);
 
-        // Store the new history nodes, if they exist
+        // Store the new history nodes, if they exist.
+        //
+        // History nodes are indexed per network upgrade: each upgrade resets its tree, and the
+        // `HistoryNodeIndex` DB key includes both the upgrade and a per-upgrade index starting at
+        // 0. At an upgrade activation block, `finalized.treestate.history_tree` is the new
+        // upgrade's tree (which has no nodes at the previous height), so `node_count_at` returns
+        // `None` and `prev_node_count` is 0 — correct for the start of a new per-upgrade index
+        // sequence.
         if let Some(history_nodes) = new_history_nodes {
             let network = zebra_db.network();
             let network_upgrade = NetworkUpgrade::current(&network, finalized.height);
@@ -601,8 +608,10 @@ impl DiskWriteBatch {
                 },
             );
             for (i, node) in history_nodes.iter().enumerate() {
+                let i = u32::try_from(i)
+                    .expect("a single block produces fewer than u32::MAX history nodes");
                 let index = HistoryNodeIndex {
-                    index: i as u32 + prev_node_count,
+                    index: i + prev_node_count,
                     upgrade: network_upgrade,
                 };
 
