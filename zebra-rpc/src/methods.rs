@@ -2309,13 +2309,12 @@ where
                     "network_upgrade is in UPGRADE_LIST (Heartwood and later) \
                          and Heartwood activation was checked above",
                 );
-                let mut subtree_total_work: [u8; 32] = bytemuck::cast(node.subtree_total_work().0);
+                let subtree_total_work = node.subtree_total_work().to_big_endian();
                 let mut subtree_commitment = node.subtree_commitment();
                 let mut start_sapling_root = node.start_sapling_root();
                 let mut end_sapling_root = node.end_sapling_root();
                 let mut start_orchard_root = node.start_orchard_root();
                 let mut end_orchard_root = node.end_orchard_root();
-                subtree_total_work.reverse();
                 subtree_commitment.reverse();
                 start_sapling_root.reverse();
                 end_sapling_root.reverse();
