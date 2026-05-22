@@ -248,21 +248,14 @@ impl ZebraDb {
         if history_tree_upgrades.contains(&upgrade) {
             // Get the last block height of this upgrade, or the tip height if this is the last upgrade
             let tip_height = self.finalized_tip_height()?;
-            let last_height = upgrade.next_upgrade().map_or_else(
-                || tip_height,
-                |next| {
-                    next.activation_height(&self.network()).map_or_else(
-                        || tip_height,
-                        |height| {
-                            if height <= tip_height {
-                                (height - 1).expect("height must be greater than zero")
-                            } else {
-                                tip_height
-                            }
-                        },
-                    )
+            let last_height = match upgrade.next_upgrade() {
+                None => tip_height,
+                Some(next) => match next.activation_height(&self.network()) {
+                    None => tip_height,
+                    Some(height) if height <= tip_height => (height - 1)?,
+                    Some(_) => tip_height,
                 },
-            );
+            };
 
             self.history_tree_by_height(last_height)
         } else {
@@ -292,7 +285,7 @@ impl ZebraDb {
         self.history_node_cf().zs_get(&index)
     }
 
-    /// Returns the last history node index.                                                                                            
+    /// Returns the last history node index.
     pub fn last_history_node_index(&self) -> Option<HistoryNodeIndex> {
         self.history_node_cf()
             .zs_last_key_value()
