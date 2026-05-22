@@ -113,28 +113,23 @@ impl DiskFormatUpgrade for AddHistoryNodes {
 
             let mut batch = DiskWriteBatch::new();
             let mut index = 0u32;
-            for h in activation_height.as_usize()..=last_block_height.as_usize() {
+            for h in activation_height.0..=last_block_height.0 {
                 // Return early if the upgrade is cancelled.
                 if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
                     return Err(CancelFormatChange);
                 }
 
+                let height = Height(h);
                 let block = zebra_db
-                    .block(HashOrHeight::Height(
-                        Height::try_from(h as u32).expect("the value was already a valid height"),
-                    ))
-                    .unwrap();
+                    .block(HashOrHeight::Height(height))
+                    .expect("block at height between activation and tip must exist");
                 let sapling_root = zebra_db
-                    .sapling_tree_by_height(
-                        &Height::try_from(h as u32).expect("the value was already a valid height"),
-                    )
-                    .unwrap()
+                    .sapling_tree_by_height(&height)
+                    .expect("sapling tree at finalized height must exist")
                     .root();
                 let orchard_root = zebra_db
-                    .orchard_tree_by_height(
-                        &Height::try_from(h as u32).expect("the value was already a valid height"),
-                    )
-                    .unwrap()
+                    .orchard_tree_by_height(&height)
+                    .expect("orchard tree at finalized height must exist")
                     .root();
 
                 let nodes = match inner_tree {
@@ -254,40 +249,30 @@ impl DiskFormatUpgrade for AddHistoryNodes {
                 .unwrap_or(height)
                 .min(height);
 
-            for h in activation_height.as_usize()..last_block_height.as_usize() {
+            for h in activation_height.0..last_block_height.0 {
                 // Return early if the upgrade is cancelled.
                 if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
                     return Err(CancelFormatChange);
                 }
 
+                let height = Height(h);
+
                 // Get the next block which contains the tree commitment
                 let next_block = zebra_db
-                    .block(HashOrHeight::Height(
-                        Height::try_from(1 + h as u32)
-                            .expect("the value was already a valid height"),
-                    ))
-                    .unwrap();
+                    .block(HashOrHeight::Height(Height(h + 1)))
+                    .expect("next block within upgrade range must exist");
 
                 // Update the inner tree with the new peaks after activation
-                if h > activation_height.as_usize() {
-                    inner_tree = update_inner_tree(
-                        zebra_db,
-                        inner_tree,
-                        &network,
-                        *upgrade,
-                        Height(h as u32),
-                    );
+                if h > activation_height.0 {
+                    inner_tree =
+                        update_inner_tree(zebra_db, inner_tree, &network, *upgrade, height);
                 }
 
                 // Compare hashes and return an error if they do not match
                 let new_tree = HistoryTree::from(inner_tree.clone());
-                if let Err(e) = compare_hashes(
-                    &network,
-                    *upgrade,
-                    Height(h as u32),
-                    new_tree.into(),
-                    next_block,
-                ) {
+                if let Err(e) =
+                    compare_hashes(&network, *upgrade, height, new_tree.into(), next_block)
+                {
                     return Ok(Err(e));
                 }
             }
