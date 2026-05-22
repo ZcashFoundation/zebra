@@ -7803,7 +7803,6 @@ version = "4.4.1"
 dependencies = [
  "abscissa_core",
  "anyhow",
- "atty",
  "bytes",
  "chrono",
  "clap 4.6.1",

@@ -193,7 +193,6 @@ tracing = { workspace = true }
 metrics = { workspace = true }
 
 dirs = { workspace = true }
-atty = { workspace = true }
 
 # Health check server dependencies
 hyper = { workspace = true, features = ["server", "http1"] }
