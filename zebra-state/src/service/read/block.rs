@@ -170,16 +170,23 @@ pub fn any_transaction<'a>(
     //
     // It is ok to do this lookup in multiple different calls. Finalized state updates
     // can only add overlapping blocks, and hashes are unique.
-    let mut best_chain = None;
+    //
+    // Capture the best chain tip before searching, not inside the search closure.
+    // The closure only runs when the tx is found in a non-finalized chain; if the tx
+    // is only in the finalized DB, the closure never fires and best_chain would stay
+    // None, causing tip_height to undercount confirmations by ~MAX_BLOCK_REORG_HEIGHT.
+    // See <https://github.com/ZcashFoundation/zebra/issues/10470>.
+    // peekable() reads the first element without consuming it, so the iterator can
+    // still be used in find_map below.
+    let mut chains = chains.peekable();
+    let best_chain = chains.peek().copied();
     let (tx, height, time, in_best_chain, containing_chain) = chains
         .enumerate()
         .find_map(|(i, chain)| {
-            chain.as_ref().transaction(hash).map(|(tx, height, time)| {
-                if i == 0 {
-                    best_chain = Some(chain);
-                }
-                (tx.clone(), height, time, i == 0, Some(chain))
-            })
+            chain
+                .as_ref()
+                .transaction(hash)
+                .map(|(tx, height, time)| (tx.clone(), height, time, i == 0, Some(chain)))
         })
         .or_else(|| {
             db.transaction(hash)

@@ -5,11 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [5.0.0] - 2026-05-01
+
+### Changed
+
+- `zebra-chain` bumped to `7.0.0`. No direct public-API changes in this crate,
+  but consumers of re-exported `zebra-chain` items (e.g. `constants` from
+  `parameters::checkpoint`) inherit that crate's breaking changes.
+
+## [4.0.0] - 2026-03-12
+
+### Breaking Changes
+
+- `zebra-chain` dependency bumped to `6.0.0`.
 
 ### Added
 
-- Added `Request::UnspentOutput`, and `Response::TransparentOutput` and `CreatedOrSpent` to the mempool service ([#10235](https://github.com/ZcashFoundation/zebra/pull/10235)).
+- Added `Request::UnspentOutput`, `Response::TransparentOutput` and `CreatedOrSpent` to the mempool service.
 
 ## [3.0.0] - 2026-02-05
 

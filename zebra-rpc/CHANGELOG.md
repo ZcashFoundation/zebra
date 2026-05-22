@@ -5,7 +5,61 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [7.0.0] - 2026-05-01
+
+This release fixes four RPC security issues:
+
+- [GHSA-jg86-rwhm-fhg4](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-jg86-rwhm-fhg4): cookie file is now written with explicit `0600` permissions on Unix; symlinks at the cookie path are rejected.
+- [GHSA-8r29-5wjm-jgvx](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-8r29-5wjm-jgvx): HTTP request bodies are bounded before allocation, with the limit derived from `MAX_BLOCK_BYTES` to accommodate `submitblock`.
+- [GHSA-826r-gfq8-x79q](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-826r-gfq8-x79q): gRPC indexer streams use `try_send` to drop slow subscribers instead of backpressuring the server; the buffer was reduced from 4000 to 64.
+- [GHSA-w23c-6rpp-ff87](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-w23c-6rpp-ff87): `getrawtransaction` reuses the caller-provided block hash and best-chain flag from the initial query, fixing a TOCTOU race against a third state lookup.
+
+### Added
+
+- `methods::BlockObject::n_tx(&self) -> usize`, exposing the per-block
+  transaction count in the verbose `getblock` response.
+
+### Changed
+
+- Migrated to `zcash_primitives 0.27` (and the rest of the librustzcash 2026-04
+  release wave), which replaces the yanked `core2` dependency with `corez`.
+- `methods::BlockObject::new` gained a required `n_tx: usize` parameter,
+  inserted positionally between `final_orchard_root` and `tx`.
+- `server::http_request_compatibility`:
+  - `HttpRequestMiddleware::new` gained a required
+    `max_request_body_size: usize` parameter.
+  - `HttpRequestMiddlewareLayer::new` gained a required
+    `max_request_body_size: usize` parameter.
+  Both bound HTTP request bodies before allocation; see
+  [GHSA-8r29-5wjm-jgvx](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-8r29-5wjm-jgvx).
+
+## [6.0.2] - 2026-04-17
+
+### Fixed
+
+- Fixed a [panic that could be triggered in the RPC interface on HTTP
+  errors](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-29x4-r6jv-ff4w),
+  such as resetting the connection halfway through a request. We do not consider
+  this a critical issue since the RPC port is security-sensitive and should not
+  be opened publicly, but we plan to update our documentation to make this
+  clear.
+
+## [6.0.1] - 2026-03-26
+
+### Fixed
+
+- Fixed the computation of miner rewards in `getblocksubsidy` RPC
+
+## [6.0.0] - 2026-03-12
+
+### Breaking Changes
+
+- `zebra-chain` bumped to `6.0.0`
+- `zebra-script` bumped to `5.0.0`
+- `zebra-state` bumped to `5.0.0`
+- `zebra-node-services` bumped to `4.0.0`
+- `zebra-consensus` bumped to `5.0.0`
+- `zebra-network` bumped to `5.0.0`
 
 ### Removed
 
@@ -13,7 +67,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added `get_tx_out` method and `OutputObject` response. ([#10235](https://github.com/ZcashFoundation/zebra/pull/10235))
+- Added `get_tx_out` method and `OutputObject` response.
 - OpenRPC support (#10201):
   - `openrpsee` dependency
   - Added `build_rpc_schema()` to generate a map of the node's supported RPC interface at build time
@@ -23,7 +77,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `GetBlockTemplateRequestMode`, `GetBlockTemplateCapability`, `GetBlockTemplateParameters`, `LongPollId`,
   `SubmitBlockParameters`, `GetAddressBalanceRequest`, `DGetAddressBalanceRequest`, `GetAddressUtxosRequest`,
-  `DGetAddressUtxosRequest`, `DGetAddressTxIdsRequest` and `AddNodeCommand` now derives `schemars::JsonSchema` (#10201)
+  `DGetAddressUtxosRequest`, `DGetAddressTxIdsRequest` and `AddNodeCommand` now derives `schemars::JsonSchema`
 
 ## [5.0.0] - 2026-02-05
 

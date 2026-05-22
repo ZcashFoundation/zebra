@@ -17,8 +17,8 @@ use super::{
     MempoolChangeMessage,
 };
 
-/// The maximum number of messages that can be queued to be streamed to a client
-const RESPONSE_BUFFER_SIZE: usize = 4_000;
+/// The maximum number of messages that can be queued to be streamed to a client.
+const RESPONSE_BUFFER_SIZE: usize = 64;
 
 #[tonic::async_trait]
 impl<ReadStateService, Tip> Indexer for IndexerRPC<ReadStateService, Tip>
@@ -50,14 +50,20 @@ where
                     continue;
                 };
 
-                if let Err(error) = response_sender
-                    .send(Ok(BlockHashAndHeight::new(tip_hash, tip_height)))
-                    .await
-                {
-                    span.in_scope(|| {
-                        tracing::info!(?error, "failed to send chain tip change, dropping task");
-                    });
-                    return;
+                match response_sender.try_send(Ok(BlockHashAndHeight::new(tip_hash, tip_height))) {
+                    Ok(()) => {}
+                    Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                        span.in_scope(|| {
+                            tracing::info!("client disconnected, dropping chain_tip_change task");
+                        });
+                        return;
+                    }
+                    Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                        span.in_scope(|| {
+                            tracing::warn!("slow consumer, dropping chain_tip_change stream");
+                        });
+                        return;
+                    }
                 }
             }
 
@@ -110,17 +116,24 @@ where
 
             // Notify the client of chain tip changes until the channel is closed
             while let Some((hash, block)) = non_finalized_state_change.recv().await {
-                if let Err(error) = response_sender
-                    .send(Ok(BlockAndHash::new(hash, block)))
-                    .await
-                {
-                    span.in_scope(|| {
-                        tracing::info!(
-                            ?error,
-                            "failed to send non-finalized state change, dropping task"
-                        );
-                    });
-                    return;
+                match response_sender.try_send(Ok(BlockAndHash::new(hash, block))) {
+                    Ok(()) => {}
+                    Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                        span.in_scope(|| {
+                            tracing::info!(
+                                "client disconnected, dropping non_finalized_state_change task"
+                            );
+                        });
+                        return;
+                    }
+                    Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                        span.in_scope(|| {
+                            tracing::warn!(
+                                "slow consumer, dropping non_finalized_state_change stream"
+                            );
+                        });
+                        return;
+                    }
                 }
             }
 
@@ -155,25 +168,33 @@ where
                         tracing::debug!("mempool change: {:?}", change);
                     });
 
-                    if let Err(error) = response_sender
-                        .send(Ok(MempoolChangeMessage {
-                            change_type: match change.kind() {
-                                MempoolChangeKind::Added => 0,
-                                MempoolChangeKind::Invalidated => 1,
-                                MempoolChangeKind::Mined => 2,
-                            },
-                            tx_hash: tx_id.mined_id().bytes_in_display_order().to_vec(),
-                            auth_digest: tx_id
-                                .auth_digest()
-                                .map(|d| d.bytes_in_display_order().to_vec())
-                                .unwrap_or_default(),
-                        }))
-                        .await
-                    {
-                        span.in_scope(|| {
-                            tracing::info!(?error, "failed to send mempool change, dropping task");
-                        });
-                        return;
+                    let msg = Ok(MempoolChangeMessage {
+                        change_type: match change.kind() {
+                            MempoolChangeKind::Added => 0,
+                            MempoolChangeKind::Invalidated => 1,
+                            MempoolChangeKind::Mined => 2,
+                        },
+                        tx_hash: tx_id.mined_id().bytes_in_display_order().to_vec(),
+                        auth_digest: tx_id
+                            .auth_digest()
+                            .map(|d| d.bytes_in_display_order().to_vec())
+                            .unwrap_or_default(),
+                    });
+
+                    match response_sender.try_send(msg) {
+                        Ok(()) => {}
+                        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                            span.in_scope(|| {
+                                tracing::info!("client disconnected, dropping mempool_change task");
+                            });
+                            return;
+                        }
+                        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                            span.in_scope(|| {
+                                tracing::warn!("slow consumer, dropping mempool_change stream");
+                            });
+                            return;
+                        }
                     }
                 }
             }

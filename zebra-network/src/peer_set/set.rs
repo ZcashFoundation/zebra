@@ -116,7 +116,7 @@ use indexmap::IndexMap;
 use itertools::Itertools;
 use num_integer::div_ceil;
 use tokio::{
-    sync::{broadcast, watch},
+    sync::{broadcast, mpsc as tokio_mpsc, watch},
     task::JoinHandle,
 };
 use tower::{
@@ -132,6 +132,7 @@ use crate::{
     constants::MIN_PEER_SET_LOG_INTERVAL,
     peer::{LoadTrackedClient, MinimumPeerVersion},
     peer_set::{
+        stall_tracker::FindResponseStallTracker,
         unready_service::{Error as UnreadyError, UnreadyService},
         InventoryChange, InventoryRegistry,
     },
@@ -162,6 +163,26 @@ pub struct CancelClientWork;
 
 type ResponseFuture = Pin<Box<dyn Future<Output = Result<Response, BoxError>> + Send + 'static>>;
 
+/// Classification of a `FindBlocks`/`FindHeaders` response, sent from a
+/// response-wrapping future to [`PeerSet::poll_ready`] via an mpsc channel so
+/// the stall tracker can be updated and the peer disconnected if needed.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum StallOutcome {
+    Stall,
+    Clear,
+}
+
+fn classify_find_response<E>(result: &Result<Response, E>) -> Option<StallOutcome> {
+    match result {
+        Ok(Response::BlockHashes(hashes)) if hashes.is_empty() => Some(StallOutcome::Stall),
+        Ok(Response::BlockHashes(_)) => Some(StallOutcome::Clear),
+        Ok(Response::BlockHeaders(headers)) if headers.is_empty() => Some(StallOutcome::Stall),
+        Ok(Response::BlockHeaders(_)) => Some(StallOutcome::Clear),
+        Ok(_) => None,
+        Err(_) => Some(StallOutcome::Stall),
+    }
+}
+
 /// A [`tower::Service`] that abstractly represents "the rest of the network".
 ///
 /// # Security
@@ -189,6 +210,19 @@ where
 
     /// A watch channel receiver with a copy of banned IP addresses.
     bans_receiver: watch::Receiver<Arc<IndexMap<IpAddr, std::time::Instant>>>,
+
+    /// Tracks peers returning empty `FindBlocks`/`FindHeaders` responses.
+    /// Mutated only from [`Self::poll_ready`] via [`Self::stall_event_rx`].
+    find_response_stalls: FindResponseStallTracker,
+
+    /// Receives stall/clear events from tracked routing futures in
+    /// [`Self::route_p2c`]. The channel keeps the tracker single-owner (no
+    /// `Mutex`) and confines mutation to `poll_ready`, where the peer set can
+    /// call [`Self::remove`] directly.
+    stall_event_rx: tokio_mpsc::UnboundedReceiver<(PeerSocketAddr, StallOutcome)>,
+
+    /// Producer clones handed to each tracked request's response wrapper.
+    stall_event_tx: tokio_mpsc::UnboundedSender<(PeerSocketAddr, StallOutcome)>,
 
     // Peer Tracking: Ready Peers
     //
@@ -314,12 +348,18 @@ where
         minimum_peer_version: MinimumPeerVersion<C>,
         max_conns_per_ip: Option<usize>,
     ) -> Self {
+        let (stall_event_tx, stall_event_rx) = tokio_mpsc::unbounded_channel();
         Self {
             // New peers
             discover,
             demand_signal,
             // Banned peers
             bans_receiver,
+
+            // Stall tracking
+            find_response_stalls: FindResponseStallTracker::new(),
+            stall_event_rx,
+            stall_event_tx,
 
             // Ready peers
             ready_services: HashMap::new(),
@@ -736,11 +776,34 @@ where
         }
     }
 
+    /// Drains pending stall/clear events from tracked routing futures and
+    /// disconnects peers that have exceeded the stall threshold. The peer's
+    /// TCP connection is closed when its service is dropped; address book and
+    /// ban list are untouched, so the peer is free to reconnect.
+    fn drain_stall_events(&mut self, cx: &mut Context<'_>) {
+        while let Poll::Ready(Some((addr, outcome))) = self.stall_event_rx.poll_recv(cx) {
+            match outcome {
+                StallOutcome::Stall => {
+                    if self.find_response_stalls.record_stall(addr) {
+                        info!(
+                            ?addr,
+                            "dropping stalled peer: exceeded FindBlocks/FindHeaders stall threshold",
+                        );
+                        self.remove(&addr);
+                    }
+                }
+                StallOutcome::Clear => self.find_response_stalls.clear(addr),
+            }
+        }
+    }
+
     /// Remove the service corresponding to `key` from the peer set.
     ///
     /// Drops the service, cancelling any pending request or response to that peer.
     /// If the peer does not exist, does nothing.
     fn remove(&mut self, key: &D::Key) {
+        self.find_response_stalls.clear(*key);
+
         if let Some(ready_service) = self.take_ready_service(key) {
             // A ready service has no work to cancel, so just drop it.
             std::mem::drop(ready_service);
@@ -880,8 +943,25 @@ where
                 .take_ready_service(&p2c_key)
                 .expect("selected peer must be ready");
 
+            let track_stalls = matches!(
+                &req,
+                Request::FindBlocks { .. } | Request::FindHeaders { .. }
+            );
+
             let fut = svc.call(req);
             self.push_unready(p2c_key, svc);
+
+            if track_stalls {
+                let stall_tx = self.stall_event_tx.clone();
+                return async move {
+                    let result = fut.await;
+                    if let Some(outcome) = classify_find_response(&result) {
+                        let _ = stall_tx.send((p2c_key, outcome));
+                    }
+                    result.map_err(Into::into)
+                }
+                .boxed();
+            }
 
             return fut.map_err(Into::into).boxed();
         }
@@ -1268,6 +1348,10 @@ where
         // - an unready peer becomes ready, or
         // - a new peer arrives.
 
+        // Drain stall events first, so disconnects free up slots that
+        // `poll_discover` can fill in the same poll cycle.
+        self.drain_stall_events(cx);
+
         // Check for new peers, and register a task wakeup when the next new peers arrive. New peers
         // can be infrequent if our connection slots are full, or we're connected to all
         // available/useful peers.
@@ -1330,7 +1414,7 @@ where
 
             // Broadcast advertisements to lots of peers
             Request::AdvertiseTransactionIds(_) => self.route_broadcast(req),
-            Request::AdvertiseBlock(_) => self.route_broadcast(req),
+            Request::AdvertiseBlock(_, _) => self.route_broadcast(req),
             Request::AdvertiseBlockToAll(_) => self.broadcast_all(req),
 
             // Choose a random less-loaded peer for all other requests

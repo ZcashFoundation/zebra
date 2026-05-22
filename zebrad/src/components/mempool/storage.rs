@@ -300,9 +300,7 @@ impl Storage {
             // Rule: per-transaction sigops (legacy + P2SH) must not exceed the limit.
             // zcashd sums GetLegacySigOpCount + GetP2SHSigOpCount for AcceptToMemoryPool:
             // https://github.com/zcash/zcash/blob/v6.11.0/src/main.cpp#L1819
-            let total_sigops = tx
-                .legacy_sigop_count
-                .saturating_add(policy::p2sh_sigop_count(transaction, spent_outputs));
+            let total_sigops = tx.block_sigop_count();
             if total_sigops > policy::MAX_STANDARD_TX_SIGOPS {
                 return self.reject_non_standard(tx, NonStandardTransactionError::TooManySigops);
             }

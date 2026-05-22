@@ -66,9 +66,9 @@ impl NetworkKind {
     /// pay-to-public-key-hash payment addresses for the network.
     pub fn b58_pubkey_address_prefix(self) -> [u8; 2] {
         match self {
-            Self::Mainnet => zcash_primitives::constants::mainnet::B58_PUBKEY_ADDRESS_PREFIX,
+            Self::Mainnet => zcash_protocol::constants::mainnet::B58_PUBKEY_ADDRESS_PREFIX,
             Self::Testnet | Self::Regtest => {
-                zcash_primitives::constants::testnet::B58_PUBKEY_ADDRESS_PREFIX
+                zcash_protocol::constants::testnet::B58_PUBKEY_ADDRESS_PREFIX
             }
         }
     }
@@ -77,9 +77,9 @@ impl NetworkKind {
     /// payment addresses for the network.
     pub fn b58_script_address_prefix(self) -> [u8; 2] {
         match self {
-            Self::Mainnet => zcash_primitives::constants::mainnet::B58_SCRIPT_ADDRESS_PREFIX,
+            Self::Mainnet => zcash_protocol::constants::mainnet::B58_SCRIPT_ADDRESS_PREFIX,
             Self::Testnet | Self::Regtest => {
-                zcash_primitives::constants::testnet::B58_SCRIPT_ADDRESS_PREFIX
+                zcash_protocol::constants::testnet::B58_SCRIPT_ADDRESS_PREFIX
             }
         }
     }
@@ -97,7 +97,7 @@ impl NetworkKind {
     /// Returns the 2 bytes prefix for Bech32m-encoded transparent TEX
     /// payment addresses for the network as defined in [ZIP-320](https://zips.z.cash/zip-0320.html).
     pub fn tex_address_prefix(self) -> [u8; 2] {
-        // TODO: Add this bytes to `zcash_primitives::constants`?
+        // TODO: Add this bytes to `zcash_protocol::constants`?
         match self {
             Self::Mainnet => [0x1c, 0xb8],
             Self::Testnet | Self::Regtest => [0x1d, 0x25],

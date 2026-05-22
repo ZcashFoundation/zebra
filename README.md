@@ -31,10 +31,17 @@ image](https://hub.docker.com/r/zfnd/zebra/tags) or you can install it manually.
 This command will run our latest release, and sync it to the tip:
 
 ```sh
-docker run zfnd/zebra:latest
+docker run -d \
+  --name zebra \
+  -p 8233:8233 \
+  -v zebrad-cache:/home/zebra/.cache/zebra \
+  zfnd/zebra:latest
 ```
 
-For more information, read our [Docker documentation](https://zebra.zfnd.org/user/docker.html).
+The `-p 8233:8233` flag exposes the P2P port so other Zcash nodes can connect to
+yours, and `-v` persists the chain state across restarts (use port `18233` for
+Testnet). For more information, read our [Docker
+documentation](https://zebra.zfnd.org/user/docker.html).
 
 ### Manual Install
 
@@ -90,7 +97,7 @@ cargo install --locked zebrad
 Alternatively, you can install it from GitHub:
 
 ```sh
-cargo install --git https://github.com/ZcashFoundation/zebra --tag v2.5.0 zebrad
+cargo install --git https://github.com/ZcashFoundation/zebra --tag v4.4.1 zebrad
 ```
 
 You can start Zebra by running

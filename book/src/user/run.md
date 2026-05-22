@@ -49,6 +49,7 @@ Zebra release builds include several features by default:
 - `progress-bar` for terminal progress bars (see above)
 - `prometheus` for [Prometheus metrics](https://zebra.zfnd.org/user/metrics.html)
 - `sentry` for [Sentry monitoring](https://zebra.zfnd.org/user/tracing.html#sentry-production-monitoring)
+- `opentelemetry` for [OpenTelemetry trace export](https://zebra.zfnd.org/user/tracing.html#opentelemetry-export)
 
 Additional [Cargo features](https://doc.rust-lang.org/cargo/reference/features.html#command-line-feature-options) that require explicit enabling:
 

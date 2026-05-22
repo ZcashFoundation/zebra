@@ -168,3 +168,8 @@ zebra-rpc/qa/cache/
 # Lychee link checker cache
 .lycheecache
 /.agent-shell/
+
+# fuzzing artifacts
+zebra-chain/fuzz/artifacts
+zebra-chain/fuzz/corpus
+

@@ -209,6 +209,7 @@ fn test_get_block_1() -> Result<(), Box<dyn std::error::Error>> {
     let final_sapling_root = block.final_sapling_root();
     let final_orchard_root = block.final_orchard_root();
     let chain_history_root = block.chain_history_root();
+    let n_tx = block.n_tx();
     let tx = block
         .tx()
         .iter()
@@ -256,6 +257,7 @@ fn test_get_block_1() -> Result<(), Box<dyn std::error::Error>> {
         final_sapling_root,
         final_orchard_root,
         *chain_history_root,
+        n_tx,
         tx.iter()
             .map(|h| GetBlockTransaction::Hash(zebra_chain::transaction::Hash(*h)))
             .collect(),
@@ -299,6 +301,7 @@ fn test_get_block_2() -> Result<(), Box<dyn std::error::Error>> {
     let final_sapling_root = block.final_sapling_root();
     let final_orchard_root = block.final_orchard_root();
     let chain_history_root = block.chain_history_root();
+    let n_tx = block.n_tx();
     // We don't unpack the transaction object because we test that in the
     // get_raw_transaction test.
     let tx = block
@@ -334,6 +337,7 @@ fn test_get_block_2() -> Result<(), Box<dyn std::error::Error>> {
         final_sapling_root,
         final_orchard_root,
         *chain_history_root,
+        n_tx,
         tx.iter()
             .cloned()
             .map(GetBlockTransaction::Object)

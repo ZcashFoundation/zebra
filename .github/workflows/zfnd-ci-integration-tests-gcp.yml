@@ -53,7 +53,7 @@ on:
 
   pull_request:
     branches: [main]
-    types: [labeled]
+    types: [labeled, synchronize, reopened]
 
   push:
     # Run only on main branch updates that modify Rust code or dependencies.
@@ -126,7 +126,7 @@ jobs:
   build:
     name: Build CI Docker
     # Skip PRs from external repositories, let them pass, and then GitHub's Merge Queue will check them
-    if: ${{ (!startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork) && (github.event_name != 'pull_request' || github.event.label.name == 'run-stateful-tests') }}
+    if: ${{ (!startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork) && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-stateful-tests')) }}
     permissions:
       contents: read
       id-token: write
@@ -155,7 +155,7 @@ jobs:
   get-available-disks:
     name: Check if cached state disks exist for ${{ inputs.network || vars.ZCASH_NETWORK }}
     # Skip PRs from external repositories, let them pass, and then GitHub's Merge Queue will check them
-    if: ${{ (!startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork) && (github.event_name != 'pull_request' || github.event.label.name == 'run-stateful-tests') }}
+    if: ${{ (!startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork) && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-stateful-tests')) }}
     permissions:
       contents: read
       id-token: write
@@ -169,7 +169,7 @@ jobs:
   # Some outputs are ignored, because we don't run those jobs on testnet.
   get-available-disks-testnet:
     name: Check if cached state disks exist for testnet
-    if: ${{ (!startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork) && (github.event_name != 'pull_request' || github.event.label.name == 'run-stateful-tests') }}
+    if: ${{ (!startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork) && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-stateful-tests')) }}
     permissions:
       contents: read
       id-token: write
@@ -649,6 +649,9 @@ jobs:
     # (PR statuses are already reported in the PR jobs list, and checked by GitHub's Merge Queue.)
     if: (failure() && github.event.pull_request == null) || (cancelled() && github.event.pull_request == null)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
     steps:
       - uses: jayqi/failed-build-issue-action@1a893bbf43ef1c2a8705e2b115cd4f0fe3c5649b #v1.2.0
         with:
@@ -666,7 +669,7 @@ jobs:
       ${{
         always() &&
         (!startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork) &&
-        (github.event_name != 'pull_request' || github.event.label.name == 'run-stateful-tests')
+        (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-stateful-tests'))
       }}
     needs:
       - build

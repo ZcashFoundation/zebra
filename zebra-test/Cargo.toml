@@ -1,6 +1,6 @@
 [package]
 name = "zebra-test"
-version = "2.0.1"
+version = "3.0.0"
 authors.workspace = true
 description = "Test harnesses and test vectors for Zebra"
 license.workspace = true

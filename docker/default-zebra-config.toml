@@ -14,6 +14,11 @@
 [network]
 network = "Mainnet"
 listen_addr = "[::]:8233"
+
+# Set to your public IP:port if behind a NAT or load balancer.
+
+# external_addr = "203.0.113.42:8233"
+
 cache_dir = "/home/zebra/.cache/zebra"
 
 [rpc]

@@ -6,7 +6,7 @@ use crate::{
     amount::{Amount, NonNegative},
     block::{self, Height, HeightDiff},
     parameters::{
-        checkpoint::list::{CheckpointList, TESTNET_CHECKPOINTS},
+        checkpoint::list::{CheckpointList, TESTNET_CHECKPOINT_LIST},
         constants::{magics, SLOW_START_INTERVAL, SLOW_START_SHIFT},
         network::error::ParametersBuilderError,
         network_upgrade::TESTNET_ACTIVATION_HEIGHTS,
@@ -512,10 +512,7 @@ impl Default for ParametersBuilder {
                 .iter()
                 .map(|(addr, amount)| (addr.to_string(), *amount))
                 .collect(),
-            checkpoints: TESTNET_CHECKPOINTS
-                .parse()
-                .map(Arc::new)
-                .expect("must be able to parse checkpoints"),
+            checkpoints: TESTNET_CHECKPOINT_LIST.clone(),
         }
     }
 }
@@ -777,14 +774,12 @@ impl ParametersBuilder {
         mut self,
         checkpoints: impl Into<ConfiguredCheckpoints>,
     ) -> Result<Self, ParametersBuilderError> {
-        self.checkpoints = Arc::new(match checkpoints.into() {
-            ConfiguredCheckpoints::Default(true) => TESTNET_CHECKPOINTS
-                .parse()
-                .map_err(|_| ParametersBuilderError::InvalidCheckpointsFormat)?,
-            ConfiguredCheckpoints::Default(false) => {
+        self.checkpoints = match checkpoints.into() {
+            ConfiguredCheckpoints::Default(true) => TESTNET_CHECKPOINT_LIST.clone(),
+            ConfiguredCheckpoints::Default(false) => Arc::new(
                 CheckpointList::from_list([(block::Height(0), self.genesis_hash)])
-                    .map_err(|_| ParametersBuilderError::FailedToParseDefaultCheckpoint)?
-            }
+                    .map_err(|_| ParametersBuilderError::FailedToParseDefaultCheckpoint)?,
+            ),
             ConfiguredCheckpoints::Path(path_buf) => {
                 let Ok(raw_checkpoints_str) = std::fs::read_to_string(&path_buf) else {
                     return Err(ParametersBuilderError::FailedToReadCheckpointFile {
@@ -792,16 +787,20 @@ impl ParametersBuilder {
                     });
                 };
 
-                raw_checkpoints_str
-                    .parse::<CheckpointList>()
-                    .map_err(|err| ParametersBuilderError::FailedToParseCheckpointFile {
-                        path_buf: path_buf.clone(),
-                        err: err.to_string(),
-                    })?
+                Arc::new(
+                    raw_checkpoints_str
+                        .parse::<CheckpointList>()
+                        .map_err(|err| ParametersBuilderError::FailedToParseCheckpointFile {
+                            path_buf: path_buf.clone(),
+                            err: err.to_string(),
+                        })?,
+                )
             }
-            ConfiguredCheckpoints::HeightsAndHashes(items) => CheckpointList::from_list(items)
-                .map_err(|_| ParametersBuilderError::InvalidCustomCheckpoints)?,
-        });
+            ConfiguredCheckpoints::HeightsAndHashes(items) => Arc::new(
+                CheckpointList::from_list(items)
+                    .map_err(|_| ParametersBuilderError::InvalidCustomCheckpoints)?,
+            ),
+        };
 
         Ok(self)
     }

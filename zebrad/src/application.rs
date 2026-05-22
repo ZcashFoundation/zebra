@@ -403,11 +403,7 @@ impl Application for ZebradApp {
         // environment variable.
         if env::var_os("SENTRY_DSN").is_some() {
             #[cfg(feature = "sentry")]
-            let guard = sentry::init(sentry::ClientOptions {
-                debug: true,
-                release: Some(build_version().to_string().into()),
-                ..Default::default()
-            });
+            let guard = crate::sentry::init();
 
             std::panic::set_hook(Box::new(move |panic_info| {
                 let panic_report = panic_hook.panic_report(panic_info);

@@ -1,16 +1,20 @@
-# Google Cloud node deployments and tests that run when Rust code or dependencies are modified,
-# but only on PRs from the ZcashFoundation/zebra repository.
-# (External PRs are tested/deployed by GitHub's Merge Queue.)
+# Deploy Zebra nodes to Google Cloud Platform.
 #
-# 1. `versioning`: Extracts the major version from the release semver. Useful for segregating instances based on major versions.
-# 2. `build`: Builds a Docker image named `zebrad` with the necessary tags derived from Git.
-# 3. `test-docker-configurations`: Validates all Zebra Docker configurations by running a matrix of configuration tests.
-# 6. `deploy-nodes`: Deploys Managed Instance Groups (MiGs) with 2-3 instances (1 per zone) for Mainnet and Testnet.
-#    - Stateful disks preserve state across updates (rolling updates with health checks)
-#    - Instance count matches available zones (up to 3), with 1 instance per zone
-#    - Main and release instances get static IPs (manual deployments get ephemeral IPs)
-#    - If triggered by main branch pushes, it always replaces the MIG. For releases, MIGs are replaced only if deploying the same major version; otherwise, a new major version is deployed.
-# 7. `deploy-instance`: Deploys a single node in a specified GCP zone for testing specific commits. Instances from this job aren't auto-replaced or deleted.
+# One zonal MIG per (environment, branch, network, zone). MIG names:
+#   - release:          zebrad-${network}-${zone-letter}
+#   - push to main:     zebrad-main-${network}-${zone-letter}
+#   - workflow_dispatch: zebrad-${branch}-${network}-${zone-letter}
+#
+# Push and release fan out to 6 cells (2 networks × 3 zones);
+# workflow_dispatch deploys one cell (user picks network + zone).
+#
+# Design rationale: docs/decisions/devops/0006-gcp-deployment-naming.md
+# Operations: book/src/dev/gcp-deployment-operations.md
+#
+# See ADR docs/decisions/devops/0006-gcp-deployment-naming.md for the design
+# rationale and book/src/dev/gcp-deployment-operations.md for operational
+# procedures (PR-deploy cleanup, disk-corruption recovery, DB-format-version-break
+# release).
 name: Deploy Nodes to GCP
 
 # Ensures that only one workflow task will run at a time. Previous deployments, if
@@ -23,7 +27,7 @@ name: Deploy Nodes to GCP
 # For pull requests, we only run the tests from this workflow, and don't do any deployments.
 # So an in-progress pull request gets cancelled, just like other tests.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}-${{ inputs.environment }}-${{ inputs.network }}-${{ inputs.zone }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 on:
@@ -39,6 +43,15 @@ on:
         options:
           - Mainnet
           - Testnet
+      zone:
+        description: "GCP zone for the workflow_dispatch deploy (single zone)"
+        required: true
+        type: choice
+        default: us-east1-b
+        options:
+          - us-east1-b
+          - us-east1-c
+          - us-east1-d
       environment:
         description: "Environment to deploy to"
         required: true
@@ -119,52 +132,107 @@ permissions:
   contents: read
 
 jobs:
-  # If a release was made we want to extract the first part of the semver from the
-  # tag_name
-  #
-  # Generate the following output to pass to subsequent jobs
-  # - If our semver is `v1.3.0` the resulting output from this job would be `v1`
-  #
-  # Note: We just use the first part of the version to replace old instances, and change
-  # it when a major version is released, to keep a segregation between new and old
-  # versions.
-  versioning:
-    name: Versioning
+  # Build the (network, zone) matrix and resolve the target environment from
+  # the trigger. Downstream jobs read `set-matrix` outputs so the event →
+  # environment mapping is computed once.
+  set-matrix:
     runs-on: ubuntu-latest
     outputs:
-      major_version: ${{ steps.set.outputs.major_version }}
-    if: ${{ github.event_name == 'release' }}
+      networks: ${{ steps.set-matrix.outputs.networks }}
+      zones: ${{ steps.set-matrix.outputs.zones }}
+      environment: ${{ steps.set-matrix.outputs.environment }}
     steps:
-      - name: Getting Zebrad Version
-        id: get
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd #v8.0.0
-        with:
-          result-encoding: string
-          script: |
-            return context.payload.release.tag_name.substring(0,2)
-      - name: Setting API Version
-        id: set
-        run: echo "major_version=${{ steps.get.outputs.result }}" >> "$GITHUB_OUTPUT"
+      - id: set-matrix
+        run: |
+          case "${{ github.event_name }}" in
+            release)           ENV="prod" ;;
+            workflow_dispatch) ENV="${{ inputs.environment }}" ;;
+            push)              ENV="stage" ;;
+            *)                 ENV="dev" ;;
+          esac
 
-  # Finds a cached state disk for zebra
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            NETWORKS='["${{ inputs.network }}"]'
+            ZONES='["${{ inputs.zone }}"]'
+          else
+            NETWORKS='["Mainnet","Testnet"]'
+            ZONES='["us-east1-b","us-east1-c","us-east1-d"]'
+          fi
+
+          {
+            echo "networks=${NETWORKS}"
+            echo "zones=${ZONES}"
+            echo "environment=${ENV}"
+          } >> "$GITHUB_OUTPUT"
+
+  # Per-network cache-disk lookup. Cache images are network-specific
+  # (`zebrad-cache-…-mainnet-tip` vs `…-testnet-tip`), so the lookup must
+  # run once per network the matrix deploys to. Running a single workflow-
+  # level lookup with `inputs.network || vars.ZCASH_NETWORK` would return
+  # the wrong image for the other matrix row.
   #
-  # Passes the disk name to subsequent jobs using `cached_disk_name` output
-  #
-  # For push events, this job always runs.
-  # For workflow_dispatch events, it runs only if inputs.need_cached_disk is true.
-  # For release events, this job is skipped (releases use fixed disk names, not cached images).
-  # PRs from forked repositories are skipped.
-  get-disk-name:
-    name: Get disk name
+  # Skipped for releases (they do not use cached images) and for
+  # workflow_dispatch with `need_cached_disk=false`.
+  # One-shot upsert of the HTTP health checks used by the zonal MIGs.
+  # These are global, network-scoped resources (one per network), so running
+  # them once per push instead of once per zonal-MIG cell saves 2/3 of the
+  # upsert calls and avoids concurrent create/update races.
+  ensure-health-checks:
+    name: Ensure health checks exist
+    needs: [set-matrix]
+    runs-on: ubuntu-latest
+    environment: ${{ needs.set-matrix.outputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+    if: ${{ github.event_name != 'pull_request' }}
+    steps:
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 #v3.0.0
+        with:
+          workload_identity_provider: "${{ vars.GCP_WIF }}"
+          service_account: "${{ vars.GCP_DEPLOYMENTS_SA }}"
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db #v3.0.1
+      - run: |
+          for NET in $(echo '${{ needs.set-matrix.outputs.networks }}' | jq -r '.[] | ascii_downcase'); do
+            gcloud compute health-checks describe "zebra-${NET}-health" --global &>/dev/null \
+            || gcloud compute health-checks create http "zebra-${NET}-health" \
+              --port=8080 --request-path=/healthy \
+              --check-interval=60s --timeout=10s \
+              --unhealthy-threshold=3 --healthy-threshold=2 \
+              --global
+          done
+
+  get-disk-name-mainnet:
+    name: Get Mainnet cached disk
+    needs: [set-matrix]
     permissions:
       contents: read
       id-token: write
     uses: ./.github/workflows/zfnd-find-cached-disks.yml
-    # Skip for releases (they use fixed disk names like 'zebrad-cache-mainnet-tip')
-    # For workflow_dispatch: only run if need_cached_disk is true
-    if: ${{ github.event_name != 'release' && !(github.event.pull_request.head.repo.fork) && (github.event_name != 'workflow_dispatch' || inputs.need_cached_disk) }}
+    if: ${{ github.event_name != 'release'
+      && !(github.event.pull_request.head.repo.fork)
+      && (github.event_name != 'workflow_dispatch' || inputs.need_cached_disk)
+      && contains(fromJSON(needs.set-matrix.outputs.networks), 'Mainnet') }}
     with:
-      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
+      network: Mainnet
+      environment: ${{ needs.set-matrix.outputs.environment }}
+      disk_prefix: zebrad-cache
+      disk_suffix: ${{ inputs.cached_disk_type || 'tip' }}
+
+  get-disk-name-testnet:
+    name: Get Testnet cached disk
+    needs: [set-matrix]
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/zfnd-find-cached-disks.yml
+    if: ${{ github.event_name != 'release'
+      && !(github.event.pull_request.head.repo.fork)
+      && (github.event_name != 'workflow_dispatch' || inputs.need_cached_disk)
+      && contains(fromJSON(needs.set-matrix.outputs.networks), 'Testnet') }}
+    with:
+      network: Testnet
+      environment: ${{ needs.set-matrix.outputs.environment }}
       disk_prefix: zebrad-cache
       disk_suffix: ${{ inputs.cached_disk_type || 'tip' }}
 
@@ -174,6 +242,7 @@ jobs:
   # The image will be commonly named `zebrad:<short-hash | github-ref | semver>`
   build:
     name: Build CD Docker
+    needs: [set-matrix]
     permissions:
       contents: read
       id-token: write
@@ -192,62 +261,38 @@ jobs:
       no_cache: ${{ inputs.no_cache || false }}
       rust_log: info
       features: ${{ format('{0} {1}', vars.RUST_PROD_FEATURES, vars.RUST_TEST_FEATURES) }}
-      environment: ${{ github.event_name == 'release' && 'prod' || (github.event_name == 'workflow_dispatch' && inputs.environment) || 'dev' }}
+      environment: ${{ needs.set-matrix.outputs.environment }}
     # This step needs access to Docker Hub secrets to run successfully
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
-  # Deploy Managed Instance Groups (MiGs) for Mainnet and Testnet,
-  # with one node in the configured GCP region.
+  # Create or update one zonal MIG per matrix cell. Each cell is a
+  # (network, zone) tuple. MIG identity is the tuple plus environment +
+  # branch. No two MIGs ever share a disk; rolling updates are per-zone.
   #
-  # Separate Mainnet and Testnet MiGs are deployed whenever there are:
-  # - pushes to the main branch, or
-  # - version releases of Zebra.
-  #
-  # Once this workflow is triggered:
-  # - by pushes to main: the MiG is always replaced,
-  # - by releases: the MiG is only replaced if the same major version is being deployed,
-  #   otherwise a new major version is deployed in a new MiG.
-  #
-  # Runs:
-  # - on every push to the `main` branch
-  # - on every release, when it's published
-  # - on workflow_dispatch for manual deployments
-
-  # Determine which networks to deploy based on the trigger
-  set-matrix:
-    runs-on: ubuntu-latest
-    outputs:
-      networks: ${{ steps.set-networks.outputs.matrix }}
-    steps:
-      - id: set-networks
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            # Manually triggered deployment: output a valid JSON array with the single chosen network.
-            echo "matrix=[\"${{ inputs.network }}\"]" >> $GITHUB_OUTPUT
-          else
-            echo 'matrix=["Mainnet","Testnet"]' >> $GITHUB_OUTPUT
-          fi
-
+  # `fail-fast: false` keeps each (network, zone) independent: one cell's
+  # failure must not cancel the five sister cells.
   deploy-nodes:
     strategy:
+      fail-fast: false
       matrix:
         network: ${{ fromJSON(needs.set-matrix.outputs.networks) }}
-    name: Deploy ${{ matrix.network }} nodes
-    needs:
-      [
-        set-matrix,
-        build,
-        versioning,
-        get-disk-name,
-      ]
+        zone: ${{ fromJSON(needs.set-matrix.outputs.zones) }}
+    name: Deploy ${{ matrix.network }} ${{ matrix.zone }}
+    needs: [set-matrix, build, get-disk-name-mainnet, get-disk-name-testnet, ensure-health-checks]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      CACHED_DISK_NAME: ${{ needs.get-disk-name.outputs.cached_disk_name }}
-    # Use prod environment for releases, allow manual selection for workflow_dispatch, default to dev for others
-    environment: ${{ github.event_name == 'release' && 'prod' || (github.event_name == 'workflow_dispatch' && inputs.environment) || 'dev' }}
+      # Pick the cache image for this matrix row's network. One image seeds
+      # all three zones for a given network. Released deploys skip the
+      # cache lookup entirely and get an empty value here.
+      CACHED_DISK_NAME: >-
+        ${{ matrix.network == 'Mainnet'
+            && needs.get-disk-name-mainnet.outputs.cached_disk_name
+            || needs.get-disk-name-testnet.outputs.cached_disk_name }}
+    # Use the workflow environment consistently across GitHub, GCP labels, and runtime metadata.
+    environment: ${{ needs.set-matrix.outputs.environment }}
     permissions:
       contents: read
       id-token: write
@@ -264,22 +309,20 @@ jobs:
           persist-credentials: false
 
       - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@9e7def61550737ba68c62d34a32dd31792e3f429 #v5.5.0
+        uses: rlespinasse/github-slug-action@e6f261660910b273384c5c42b17a0217881b217a #v5.6.0
         with:
           short-length: 7
 
-      # Makes the Zcash network name lowercase.
-      #
-      # Labels in GCP are required to be in lowercase, but the blockchain network
-      # uses sentence case, so we need to downcase the network.
-      #
-      # Passes lowercase network to subsequent steps using $NETWORK env variable.
-      - name: Downcase network name for labels
+      - name: Extract matrix values
         run: |
-          NETWORK_CAPS="${{ matrix.network }}"
-          echo "NETWORK=${NETWORK_CAPS,,}" >> "$GITHUB_ENV"
+          ZONE="${{ matrix.zone }}"
+          NET_CAPS="${{ matrix.network }}"
+          {
+            echo "NETWORK=${NET_CAPS,,}"
+            echo "ZONE=${ZONE}"
+            echo "ZONE_LETTER=${ZONE##*-}"
+          } >> "$GITHUB_ENV"
 
-      # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 #v3.0.0
@@ -292,232 +335,207 @@ jobs:
         with:
           install_components: 'beta'
 
-      - name: Create instance template for ${{ matrix.network }}
+      - name: Compute MIG and disk naming
+        env:
+          ENV: ${{ needs.set-matrix.outputs.environment }}
+          REF_NAME: ${{ github.ref_name }}
+          REF_SLUG: ${{ env.GITHUB_REF_SLUG_URL }}
+          SHA_SHORT: ${{ env.GITHUB_SHA_SHORT }}
         run: |
-          # Set common naming variables (exported for use in subsequent steps)
-          GIT_PREFIX="${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}"
-          MIG_NAME="zebrad-${GIT_PREFIX}-${NETWORK}"
-          TEMPLATE_NAME="zebrad-${GIT_PREFIX}-${{ env.GITHUB_SHA_SHORT }}-${NETWORK}"
-          echo "MIG_NAME=${MIG_NAME}" >> $GITHUB_ENV
-          echo "TEMPLATE_NAME=${TEMPLATE_NAME}" >> $GITHUB_ENV
-
-          # Constant DISK_NAME per deployment type enables disk preservation across updates
-          if [ ${{ github.event_name == 'release' }} ]; then
-            DISK_NAME="zebrad-cache-${NETWORK}"
+          if [ "${ENV}" = "prod" ]; then
+            PREFIX=""
+          elif [ "${REF_NAME}" = "main" ]; then
+            PREFIX="main-"
           else
-            # Use git prefix (branch/ref name) so each deployment gets its own disk
-            DISK_NAME="zebrad-cache-${GIT_PREFIX}-${NETWORK}"
+            PREFIX="${REF_SLUG}-"
           fi
-          echo "DISK_NAME=${DISK_NAME}" >> $GITHUB_ENV
+          {
+            echo "MIG_NAME=zebrad-${PREFIX}${NETWORK}-${ZONE_LETTER}"
+            echo "DISK_NAME=zebrad-cache-${PREFIX}${NETWORK}-${ZONE_LETTER}"
+            echo "TEMPLATE_NAME=zebrad-${PREFIX}${SHA_SHORT}-${NETWORK}-${ZONE_LETTER}"
+          } >> "$GITHUB_ENV"
 
-          # Fixed disk name is safe since we use 1 instance per zone (no conflicts)
-          DISK_PARAMS="name=${DISK_NAME},device-name=${DISK_NAME},size=400GB,type=pd-balanced"
+      # Reject early if the zonal disk is held by an instance from another MIG.
+      - name: Pre-flight check for stateful disk squatter
+        run: |
+          users=$(gcloud compute disks describe "${DISK_NAME}" --zone="${ZONE}" \
+            --format="value(users.basename())" 2>/dev/null || true)
+          for user in ${users}; do
+            owner=$(gcloud compute instances describe "${user}" --zone="${ZONE}" \
+              --format="value(metadata.items.filter(key:created-by).extract(value))" 2>/dev/null \
+              | grep -oE 'instanceGroupManagers/[a-z0-9-]+' | cut -d/ -f2 || true)
+            if [ -n "${owner}" ] && [ "${owner}" != "${MIG_NAME}" ]; then
+              echo "::error::${DISK_NAME} in ${ZONE} is held by ${user} (MIG ${owner}). See gcp-deployment-operations.md."
+              exit 1
+            fi
+          done
 
-          # Use cached image if available to speed up initial sync
-          if [ -n "${{ env.CACHED_DISK_NAME }}" ]; then
-            DISK_PARAMS+=",image=${{ env.CACHED_DISK_NAME }}"
+      # Create zonal disk from cache image on first deploy; attach existing on
+      # subsequent deploys or after a manual bootstrap.
+      - name: Ensure zonal disk exists
+        env:
+          ENV: ${{ needs.set-matrix.outputs.environment }}
+        run: |
+          if gcloud compute disks describe "${DISK_NAME}" --zone="${ZONE}" &>/dev/null; then
+            exit 0
           fi
+          if [ -z "${CACHED_DISK_NAME}" ]; then
+            echo "::error::No ${DISK_NAME} and no cache image. Seed via integration-tests or manual snapshot."
+            exit 1
+          fi
+          gcloud compute disks create "${DISK_NAME}" --zone="${ZONE}" \
+            --image="${CACHED_DISK_NAME}" \
+            --size=400 --type=pd-balanced \
+            --labels="app=zebrad,environment=${ENV},network=${NETWORK},zone=${ZONE_LETTER},created_by=${{ github.event_name }},github_ref=${{ env.GITHUB_REF_SLUG_URL }},github_sha=${{ env.GITHUB_SHA_SHORT }}"
 
-          # Set log file based on input or default
-          if [ ${{ github.event_name == 'workflow_dispatch' && inputs.log_file != '' }} ]; then
+      - name: Create instance template
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.log_file }}" ]; then
             LOG_FILE="${{ inputs.log_file }}"
           else
             LOG_FILE="${{ vars.CD_LOG_FILE }}"
           fi
-
-          # Set RPC port based on network
           if [ "${{ matrix.network }}" = "Mainnet" ]; then
-            RPC_PORT="8232"
+            P2P=8233; RPC=8232
           else
-            RPC_PORT="18232"
+            P2P=18233; RPC=18232
           fi
-
-          # Check if template already exists (templates are immutable, same commit = same config)
           if gcloud compute instance-templates describe "${TEMPLATE_NAME}" &>/dev/null; then
-            echo "Template ${TEMPLATE_NAME} already exists, reusing existing template"
-          else
-            gcloud compute instance-templates create-with-container "${TEMPLATE_NAME}" \
-            --machine-type ${{ vars.GCP_SMALL_MACHINE }} \
-            --provisioning-model=SPOT \
-            --boot-disk-size=10GB \
-            --boot-disk-type=pd-standard \
-            --image-project=cos-cloud \
-            --image-family=cos-stable \
-            --subnet=${{ vars.GCP_SUBNETWORK }} \
-            --no-address \
-            --create-disk="${DISK_PARAMS}" \
-            --container-mount-disk=mount-path='/home/zebra/.cache/zebra',name=${DISK_NAME},mode=rw \
-            --container-stdin \
-            --container-tty \
-            --container-image ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
-            --container-env "ZEBRA_NETWORK__NETWORK=${{ matrix.network }},ZEBRA_NETWORK__LISTEN_ADDR=0.0.0.0,LOG_FILE=${LOG_FILE},SENTRY_DSN=${{ vars.SENTRY_DSN }},ZEBRA_HEALTH__LISTEN_ADDR=0.0.0.0:8080,ZEBRA_HEALTH__MIN_CONNECTED_PEERS=1,ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:${RPC_PORT}" \
-            --service-account ${{ vars.GCP_DEPLOYMENTS_SA }} \
-            --scopes cloud-platform \
-            --metadata google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true \
-            --labels=app=zebrad,environment=${{ github.event_name == 'release' && 'prod' || (github.event_name == 'workflow_dispatch' && inputs.environment) || 'dev' }},network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }} \
-            --tags zebrad
+            exit 0
           fi
+          gcloud compute instance-templates create-with-container "${TEMPLATE_NAME}" \
+            --machine-type=${{ vars.GCP_SMALL_MACHINE }} \
+            --provisioning-model=SPOT \
+            --boot-disk-size=10GB --boot-disk-type=pd-standard \
+            --image-project=cos-cloud --image-family=cos-stable \
+            --subnet=${{ vars.GCP_SUBNETWORK }} --no-address \
+            --disk="name=${DISK_NAME},device-name=${DISK_NAME},mode=rw,auto-delete=no,boot=no" \
+            --container-mount-disk="mount-path=/home/zebra/.cache/zebra,name=${DISK_NAME},mode=rw" \
+            --container-stdin --container-tty \
+            --container-image="${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}" \
+            --container-env="ZEBRA_NETWORK__NETWORK=${{ matrix.network }},ZEBRA_NETWORK__LISTEN_ADDR=0.0.0.0:${P2P},LOG_FILE=${LOG_FILE},SENTRY_DSN=${{ vars.SENTRY_DSN }},SENTRY_ENVIRONMENT=${{ needs.set-matrix.outputs.environment }},GITHUB_ACTIONS=${GITHUB_ACTIONS},GITHUB_EVENT_NAME=${GITHUB_EVENT_NAME},GITHUB_REF_POINT_SLUG_URL=${GITHUB_REF_POINT_SLUG_URL},GITHUB_SHA=${GITHUB_SHA},GITHUB_RUN_ID=${GITHUB_RUN_ID},GITHUB_RUN_ATTEMPT=${GITHUB_RUN_ATTEMPT},GITHUB_WORKFLOW=${GITHUB_WORKFLOW},GITHUB_JOB=${GITHUB_JOB},CI_PR_NUMBER=${{ github.event.pull_request.number || '' }},ZEBRA_HEALTH__LISTEN_ADDR=0.0.0.0:8080,ZEBRA_HEALTH__MIN_CONNECTED_PEERS=1,ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:${RPC}" \
+            --service-account=${{ vars.GCP_DEPLOYMENTS_SA }} --scopes=cloud-platform \
+            --metadata=google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true \
+            --labels="app=zebrad,environment=${{ needs.set-matrix.outputs.environment }},network=${NETWORK},zone=${ZONE_LETTER},created_by=${{ github.event_name }},github_ref=${{ env.GITHUB_REF_SLUG_URL }},github_sha=${{ env.GITHUB_SHA_SHORT }}" \
+            --tags=zebrad
 
-      # HTTP health check on /healthy endpoint (sync-aware: 200 during sync, 503 on failure)
-      - name: Create or update health check
-        run: |
-          gcloud compute health-checks create http zebra-${NETWORK}-health \
-            --port=8080 \
-            --request-path=/healthy \
-            --check-interval=60s \
-            --timeout=10s \
-            --unhealthy-threshold=3 \
-            --healthy-threshold=2 \
-            --global 2>/dev/null || \
-          gcloud compute health-checks update http zebra-${NETWORK}-health \
-            --request-path=/healthy \
-            --check-interval=60s \
-            --timeout=10s \
-            --unhealthy-threshold=3 \
-            --healthy-threshold=2 \
-            --global
-
-      # Check if our destination instance group exists already
-      - name: Check if ${{ matrix.network }} instance group exists
+      - name: Check if zonal MIG exists
         id: does-group-exist
         continue-on-error: true
         run: |
-          gcloud compute instance-groups list | grep "${MIG_NAME}" | grep "${{ vars.GCP_REGION }}"
+          gcloud compute instance-groups managed describe "${MIG_NAME}" --zone="${ZONE}" >/dev/null 2>&1
 
-      # Deploy new managed instance group with 1 instance per zone (2-3 total)
-      - name: Create managed instance group for ${{ matrix.network }}
+      # Fresh MIG: size=1 (one instance per zonal MIG). The template's
+      # `--disk=name=…` attaches the pre-created zonal disk.
+      - name: Create zonal MIG
         if: steps.does-group-exist.outcome == 'failure'
         run: |
-          # Query available zones (up to 3) and set instance count to match
-          ZONES=$(gcloud compute zones list \
-            --filter="region:${{ vars.GCP_REGION }}" \
-            --format="value(name)" \
-            --limit=3 | paste -sd,)
+          gcloud compute instance-groups managed create "${MIG_NAME}" \
+            --template="${TEMPLATE_NAME}" \
+            --zone="${ZONE}" \
+            --size=1 \
+            --health-check="zebra-${NETWORK}-health" \
+            --initial-delay=3600
 
-          ZONE_COUNT=$(echo "${ZONES}" | tr ',' '\n' | wc -l)
-
-          echo "Using ${ZONE_COUNT} zones: ${ZONES}"
-
-          gcloud compute instance-groups managed create \
-          "${MIG_NAME}" \
-          --template "${TEMPLATE_NAME}" \
-          --region "${{ vars.GCP_REGION }}" \
-          --size "${ZONE_COUNT}" \
-          --health-check="zebra-${NETWORK}-health" \
-          --initial-delay=3600 \
-          --instance-redistribution-type=NONE \
-          --target-distribution-shape=EVEN \
-          --zones="${ZONES}"
-
-      # Stateful policy preserves disks across updates (auto-delete on MIG deletion)
-      - name: Configure stateful disk policy
+      - name: Apply stateful disk policy (fresh MIG)
         if: steps.does-group-exist.outcome == 'failure'
         run: |
           gcloud compute instance-groups managed update "${MIG_NAME}" \
-            --stateful-disk "device-name=${DISK_NAME},auto-delete=on-permanent-instance-deletion" \
-            --region "${{ vars.GCP_REGION }}"
+            --stateful-disk="device-name=${DISK_NAME},auto-delete=on-permanent-instance-deletion" \
+            --zone="${ZONE}"
 
-      # Assign static IPs to instances (only for main branch and releases, not manual deployments)
-      - name: Assign static IPs to instances
-        if: ${{ steps.does-group-exist.outcome == 'failure' && github.event_name != 'workflow_dispatch' }}
+      # Assign one static IP per zone, deterministically:
+      #   zone b -> primary (`zebra-${network}`)
+      #   zone c -> secondary (`zebra-${network}-secondary`)
+      #   zone d -> tertiary (`zebra-${network}-tertiary`)
+      # Skipped for feature-branch dispatches to dev (PR smoke tests use ephemeral IPs).
+      # Empirically `instance-configs create --stateful-external-ip` accepts
+      # STAGING / RUNNING-UNKNOWN instances; a short bounded poll handles the
+      # async gap between MIG-create returning and list-instances reporting.
+      - name: Assign static IP (fresh MIG, stable deploy)
+        if: ${{ steps.does-group-exist.outcome == 'failure' && (needs.set-matrix.outputs.environment == 'prod' || github.ref_name == 'main') }}
         run: |
-          # Wait for MIG to be stable (all instances created)
-          gcloud compute instance-groups managed wait-until "${MIG_NAME}" \
-            --stable \
-            --region "${{ vars.GCP_REGION }}" \
-            --timeout=1200
-
-          # Get static IPs and instances
-          IP_NAMES=("zebra-${NETWORK}" "zebra-${NETWORK}-secondary" "zebra-${NETWORK}-tertiary")
-          mapfile -t IP_ADDRESSES < <(
-            for ip_name in "${IP_NAMES[@]}"; do
-              gcloud compute addresses describe "$ip_name" \
-                --region ${{ vars.GCP_REGION }} \
-                --format='value(address)' 2>/dev/null || echo ""
-            done
-          )
-
-          mapfile -t INSTANCES < <(
-            gcloud compute instance-groups managed list-instances "${MIG_NAME}" \
-              --region "${{ vars.GCP_REGION }}" \
-              --format="value(instance.basename())" | sort
-          )
-
-          # Assign IPs via stateful instance config (creates config + assigns IP in one command)
-          for i in "${!INSTANCES[@]}"; do
-            [ -z "${IP_ADDRESSES[$i]}" ] && continue
-
-            echo "Assigning ${IP_ADDRESSES[$i]} to ${INSTANCES[$i]}"
-            gcloud compute instance-groups managed instance-configs create "${MIG_NAME}" \
-              --instance="${INSTANCES[$i]}" \
-              --stateful-external-ip="address=${IP_ADDRESSES[$i]},interface-name=nic0,auto-delete=never" \
-              --region "${{ vars.GCP_REGION }}"
+          case "${ZONE_LETTER}" in
+            b) SUFFIX="" ;;
+            c) SUFFIX="-secondary" ;;
+            d) SUFFIX="-tertiary" ;;
+          esac
+          IP_NAME="zebra-${NETWORK}${SUFFIX}"
+          IP_ADDRESS=$(gcloud compute addresses describe "${IP_NAME}" \
+            --region="${{ vars.GCP_REGION }}" --format='value(address)' 2>/dev/null || true)
+          if [ -z "${IP_ADDRESS}" ]; then
+            echo "::warning::${IP_NAME} not reserved; skipping"
+            exit 0
+          fi
+          for _ in $(seq 1 30); do
+            INSTANCE=$(gcloud compute instance-groups managed list-instances "${MIG_NAME}" \
+              --zone="${ZONE}" --format='value(instance.basename())' | head -1)
+            [ -n "${INSTANCE}" ] && break
+            sleep 2
           done
+          [ -z "${INSTANCE}" ] && { echo "::error::instance did not appear within 60s"; exit 1; }
+          gcloud compute instance-groups managed instance-configs create "${MIG_NAME}" \
+            --instance="${INSTANCE}" --zone="${ZONE}" \
+            --stateful-external-ip="address=${IP_ADDRESS},interface-name=nic0,auto-delete=never"
 
-      # Detect how many zones the MIG spans (needed for max-unavailable constraint)
-      - name: Get zone count for MIG
-        if: steps.does-group-exist.outcome == 'success'
-        id: zone-count
-        run: |
-          ZONE_COUNT=$(gcloud compute instance-groups managed describe "${MIG_NAME}" \
-            --region "${{ vars.GCP_REGION }}" \
-            --format="value(distributionPolicy.zones.len())")
-          echo "count=${ZONE_COUNT}" >> $GITHUB_OUTPUT
-          echo "MIG spans ${ZONE_COUNT} zones"
-
-      # Rolling update (RECREATE method requires max-surge=0, max-unavailable >= zone count)
-      - name: Update managed instance group for ${{ matrix.network }}
+      # Rolling update waits only for the new template to start rolling out;
+      # full health convergence is the verify-nodes job's concern.
+      - name: Rolling update on existing MIG
         if: steps.does-group-exist.outcome == 'success'
         run: |
-          gcloud compute instance-groups managed rolling-action start-update \
-          "${MIG_NAME}" \
-          --version template="${TEMPLATE_NAME}" \
-          --replacement-method=recreate \
-          --max-surge=0 \
-          --max-unavailable=${{ steps.zone-count.outputs.count }} \
-          --region "${{ vars.GCP_REGION }}"
+          gcloud compute instance-groups managed rolling-action start-update "${MIG_NAME}" \
+            --version=template="${TEMPLATE_NAME}" \
+            --replacement-method=recreate \
+            --max-surge=0 --max-unavailable=1 \
+            --zone="${ZONE}"
 
-      # Re-assign static IPs after rolling update (instances are recreated without external IPs)
-      - name: Re-assign static IPs after rolling update
-        if: ${{ steps.does-group-exist.outcome == 'success' && github.event_name != 'workflow_dispatch' }}
+  # Waits for each zonal MIG to reach HEALTHY (app-level: peer mesh + chain
+  # tip). Runs async from deploy-nodes. Skipped for workflow_dispatch.
+  verify-nodes:
+    name: Verify ${{ matrix.network }} ${{ matrix.zone }}
+    strategy:
+      fail-fast: false
+      matrix:
+        network: ${{ fromJSON(needs.set-matrix.outputs.networks) }}
+        zone: ${{ fromJSON(needs.set-matrix.outputs.zones) }}
+    needs: [set-matrix, deploy-nodes]
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment: ${{ needs.set-matrix.outputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+    if: >-
+      ${{
+        !cancelled() && !failure() &&
+        needs.deploy-nodes.result == 'success' &&
+        github.event_name != 'workflow_dispatch' &&
+        github.repository_owner == 'ZcashFoundation'
+      }}
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 #v3.0.0
+        with:
+          workload_identity_provider: "${{ vars.GCP_WIF }}"
+          service_account: "${{ vars.GCP_DEPLOYMENTS_SA }}"
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db #v3.0.1
+
+      - name: Wait for MIG stable
         run: |
-          # Wait for rolling update to complete
+          ZONE="${{ matrix.zone }}"
+          NET_CAPS="${{ matrix.network }}"
+          NETWORK="${NET_CAPS,,}"
+          ZONE_LETTER="${ZONE##*-}"
+          case "${{ github.event_name }}" in
+            release) PREFIX="" ;;
+            push)    PREFIX="main-" ;;
+            *) echo "::error::unsupported event"; exit 1 ;;
+          esac
+          MIG_NAME="zebrad-${PREFIX}${NETWORK}-${ZONE_LETTER}"
           gcloud compute instance-groups managed wait-until "${MIG_NAME}" \
-            --stable \
-            --region "${{ vars.GCP_REGION }}" \
-            --timeout=1200
-
-          # Get static IPs and instances
-          IP_NAMES=("zebra-${NETWORK}" "zebra-${NETWORK}-secondary" "zebra-${NETWORK}-tertiary")
-          mapfile -t IP_ADDRESSES < <(
-            for ip_name in "${IP_NAMES[@]}"; do
-              gcloud compute addresses describe "$ip_name" \
-                --region ${{ vars.GCP_REGION }} \
-                --format='value(address)' 2>/dev/null || echo ""
-            done
-          )
-
-          mapfile -t INSTANCES < <(
-            gcloud compute instance-groups managed list-instances "${MIG_NAME}" \
-              --region "${{ vars.GCP_REGION }}" \
-              --format="value(instance.basename())" | sort
-          )
-
-          # Assign IPs via stateful instance config (creates config + assigns IP in one command)
-          for i in "${!INSTANCES[@]}"; do
-            [ -z "${IP_ADDRESSES[$i]}" ] && continue
-
-            echo "Assigning ${IP_ADDRESSES[$i]} to ${INSTANCES[$i]}"
-            gcloud compute instance-groups managed instance-configs create "${MIG_NAME}" \
-              --instance="${INSTANCES[$i]}" \
-              --stateful-external-ip="address=${IP_ADDRESSES[$i]},interface-name=nic0,auto-delete=never" \
-              --region "${{ vars.GCP_REGION }}" \
-              --update-instance 2>/dev/null || \
-            gcloud compute instance-groups managed instance-configs update "${MIG_NAME}" \
-              --instance="${INSTANCES[$i]}" \
-              --stateful-external-ip="address=${IP_ADDRESSES[$i]},interface-name=nic0,auto-delete=never" \
-              --region "${{ vars.GCP_REGION }}"
-          done
+            --stable --zone="${ZONE}" --timeout=5400
 
   deploy-nodes-success:
     name: Deploy nodes success
@@ -528,29 +546,26 @@ jobs:
         always() &&
         needs.deploy-nodes.result != 'skipped'
       }}
-    needs:
-      - versioning
-      - get-disk-name
-      - build
-      - set-matrix
-      - deploy-nodes
+    needs: [set-matrix, get-disk-name-mainnet, get-disk-name-testnet, ensure-health-checks, build, deploy-nodes]
     timeout-minutes: 1
     steps:
-      - name: Decide whether the needed jobs succeeded or failed
-        uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe #v1.2.2
+      - uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe #v1.2.2
         with:
           jobs: ${{ toJSON(needs) }}
-          allowed-skips: versioning, get-disk-name, build
+          allowed-skips: get-disk-name-mainnet, get-disk-name-testnet, build
 
   failure-issue:
-    name: Open or update issues for release failures
+    name: Open or update issues for deploy failures
     # When a new job is added to this workflow, add it to this list.
-    needs: [versioning, build, deploy-nodes]
+    needs: [build, deploy-nodes]
 
     # Only open tickets for failed or cancelled jobs that are not coming from PRs.
     # (PR statuses are already reported in the PR jobs list, and checked by GitHub's Merge Queue.)
     if: (failure() && github.event.pull_request == null) || (cancelled() && github.event.pull_request == null)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
     steps:
       - uses: jayqi/failed-build-issue-action@1a893bbf43ef1c2a8705e2b115cd4f0fe3c5649b #v1.2.0
         with:
@@ -558,5 +573,25 @@ jobs:
           # New failures open an issue with this label.
           label-name: S-ci-fail-release-auto-issue
           # If there is already an open issue with this label, any failures become comments on that issue.
+          always-create-new-issue: false
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  verify-failure-issue:
+    name: Open or update issues for verify failures
+    needs: [verify-nodes]
+    # Deploy succeeded but the node did not reach HEALTHY within the verify
+    # window. Separate from `failure-issue` so on-call can distinguish an
+    # infrastructure problem (deploy-nodes) from a node-level warmup/sync
+    # problem (verify-nodes).
+    if: (failure() && github.event.pull_request == null) || (cancelled() && github.event.pull_request == null)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: jayqi/failed-build-issue-action@1a893bbf43ef1c2a8705e2b115cd4f0fe3c5649b #v1.2.0
+        with:
+          title-template: "{{refname}} verify failed: {{eventName}} in {{workflow}}"
+          label-name: S-ci-fail-verify-auto-issue
           always-create-new-issue: false
           github-token: ${{ secrets.GITHUB_TOKEN }}

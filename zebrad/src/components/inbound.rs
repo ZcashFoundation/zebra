@@ -540,8 +540,8 @@ impl Service<zn::Request> for Inbound {
                     .map_ok(|_resp| zn::Response::Nil)
                     .boxed()
             }
-            zn::Request::AdvertiseBlock(hash) => {
-                block_downloads.download_and_verify(hash);
+            zn::Request::AdvertiseBlock(hash, advertiser) => {
+                block_downloads.download_and_verify(hash, advertiser);
                 async { Ok(zn::Response::Nil) }.boxed()
             }
             // The size of this response is limited by the `Connection` state machine in the network layer

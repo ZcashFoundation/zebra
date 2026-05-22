@@ -25,6 +25,7 @@ This step can be skipped if there is a large pending dependency upgrade. (For ex
 Here's how we make sure we got everything:
 
 - [ ] Run `cargo update` on the latest `main` branch, and keep the output
+- [ ] Until we bump the workspace MSRV to 1.88 or higher, `home` must be downgraded manually: `cargo update home@0.5.12 --precise 0.5.11`
 - [ ] If needed, [add duplicate dependency exceptions to deny.toml](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/continuous-integration.md#fixing-duplicate-dependencies-in-check-denytoml-bans)
 - [ ] If needed, remove resolved duplicate dependencies from `deny.toml`
 - [ ] Open a separate PR with the changes
@@ -130,7 +131,8 @@ Check that the release will work:
 
 ```sh
 cargo release version --verbose --execute --allow-branch '*' -p <crate> patch # [ major | minor ]
-cargo release replace --verbose --execute --allow-branch '*' -p <crate>
+# zebrad only
+cargo release replace --verbose --execute --allow-branch '*' -p zebrad
 ```
 
 - [ ] Commit and push the above version changes to the release branch.

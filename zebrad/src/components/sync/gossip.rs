@@ -131,7 +131,7 @@ where
         let request = if is_block_submission {
             zn::Request::AdvertiseBlockToAll(hash)
         } else {
-            zn::Request::AdvertiseBlock(hash)
+            zn::Request::AdvertiseBlock(hash, None)
         };
 
         info!(?height, ?request, log_msg);

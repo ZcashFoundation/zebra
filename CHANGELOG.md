@@ -7,15 +7,194 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
-This release adds the `gettxout` RPC method.
+### Security
+
+- Cap the upfront `Vec::with_capacity` reservation in
+  `zcash_deserialize_external_count` so a peer-supplied `CompactSize`
+  cannot force a large allocation before any element bytes are read. The
+  `Vec` grows naturally via `push()` as real data arrives. Complements
+  the per-type `max_allocation()` caps from PR #10494
+  ([GHSA-xr93-pcq3-pxf8](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-xr93-pcq3-pxf8)).
+  CWE-770.
 
 ### Added
 
-- Added `UnspentOutput` to mempool component service ([#10235](https://github.com/ZcashFoundation/zebra/pull/10235))
+- Startup warning on Linux when `net.ipv4.tcp_slow_start_after_idle` is enabled (which resets TCP congestion windows between block requests and significantly reduces single-peer block-propagation throughput on long-haul links), with a "Linux TCP tuning for block propagation" troubleshooting section ([#10513](https://github.com/ZcashFoundation/zebra/pull/10513))
+
+## [Zebra 4.4.1](https://github.com/ZcashFoundation/zebra/releases/tag/v4.4.1) - 2026-05-04
+
+This release fixes one critical security issue. We recommend node operators update to
+4.4.1.
+
+### Security
+
+- Reject V5 transparent inputs signed with `SIGHASH_SINGLE` (or
+  `SIGHASH_SINGLE|ANYONECANPAY`) when the input has no transparent output at the
+  same index
+  ([GHSA-pvmv-cwg8-v6c8](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-pvmv-cwg8-v6c8)).
+  Follow-up to
+  [GHSA-cwfq-rfcr-8hmp](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-cwfq-rfcr-8hmp).
+
+Thanks to @sangsoo-osec, @zmanian, and @fivelittleducks for reporting the issue.
+
+## [Zebra 4.4.0](https://github.com/ZcashFoundation/zebra/releases/tag/v4.4.0) - 2026-05-01
+
+This release includes several security and bug fixes. We recommend node
+operators update to 4.4.0.
+
+### Security
+
+- Fix sigops counting ([GHSA-jv4h-j224-23cc](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-jv4h-j224-23cc)).
+- Consensus-divergence defense-in-depth follow-up to GHSA-8m29-fpq5-89jj:
+  the V5 sighash callback now substitutes a per-call CSPRNG-derived sighash
+  when rejecting undefined ZIP 244 hash-type bytes, so any peer-supplied
+  signature fails to verify and the block is rejected in agreement with
+  `zcashd` ([GHSA-gq4h-3grw-2rhv](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-gq4h-3grw-2rhv), [#10524](https://github.com/ZcashFoundation/zebra/pull/10524)).
+- Allocation amplification in inbound network deserializers: validate
+  coinbase Sapling spend count, coinbase data size, and Equihash solution
+  size before allocating, and enforce the 160-entry cap in `read_headers`
+  ([GHSA-438q-jx8f-cccv](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-438q-jx8f-cccv),
+  [#10525](https://github.com/ZcashFoundation/zebra/pull/10525),
+  [#10526](https://github.com/ZcashFoundation/zebra/pull/10526),
+  [#10527](https://github.com/ZcashFoundation/zebra/pull/10527),
+  [#10528](https://github.com/ZcashFoundation/zebra/pull/10528)).
+- Validate transparent input/output alignment before script verification, so
+  malformed verifier requests return an error instead of panicking or
+  verifying against a misaligned previous output ([#10510](https://github.com/ZcashFoundation/zebra/pull/10510)).
+- RPC hardening ([#10523](https://github.com/ZcashFoundation/zebra/pull/10523)):
+  - Cookie file is now written with explicit `0600` permissions on Unix; symlinks at the cookie path are rejected ([GHSA-jg86-rwhm-fhg4](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-jg86-rwhm-fhg4)).
+  - HTTP request bodies are bounded before allocation, with the limit derived from `MAX_BLOCK_BYTES` to accommodate `submitblock` ([GHSA-8r29-5wjm-jgvx](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-8r29-5wjm-jgvx)).
+  - gRPC indexer streams use `try_send` to drop slow subscribers instead of backpressuring the server; the buffer was reduced from 4000 to 64. Well-behaved clients are unaffected ([GHSA-826r-gfq8-x79q](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-826r-gfq8-x79q)).
+  - `getrawtransaction` reuses the caller-provided block hash and best-chain flag from the initial query, fixing a TOCTOU race against a third state lookup ([GHSA-w23c-6rpp-ff87](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-w23c-6rpp-ff87)).
+- Disconnect peers that persistently return empty or bad `FindBlocks` /
+  `FindHeaders` responses, freeing fanout slots for useful peers. Stall
+  classification happens inside `PeerSet::route_p2c`, so coverage spans both
+  request types without a separate per-IP guard.
+
+### Added
+
+- `nTx` (per-block transaction count) field in the verbose `getblock` RPC response ([#10498](https://github.com/ZcashFoundation/zebra/pull/10498)).
+- Public benchmark dashboard at [zebra.zfnd.org/dev/bench](https://zebra.zfnd.org/dev/bench) covering Groth16, Halo2, Sapling, RedPallas, block, and transaction benchmarks ([#10444](https://github.com/ZcashFoundation/zebra/pull/10444)).
+
+### Changed
+
+- Refreshed the Sentry/OpenTelemetry observability stack ([#10490](https://github.com/ZcashFoundation/zebra/pull/10490)): Sentry SDK upgraded to `0.47` (transport switched from `reqwest` to `ureq`); Sentry events now carry `SENTRY_ENVIRONMENT`, `git.ref`, `git.sha`, and CI context (`CI_PR_NUMBER`, `CI_TEST_ID`, `GITHUB_*`) when present; `opentelemetry` is now part of the `default-release-binaries` feature set, with export still gated on `OTEL_EXPORTER_OTLP_ENDPOINT` (or the tracing config); and `zebrad::sentry` is now crate-private.
+- Upgraded the librustzcash crate cohort (`equihash` 0.3, `orchard` 0.13, `sapling-crypto` 0.7, `zcash_address` 0.11, `zcash_encoding` 0.4, `zcash_keys` 0.13, `zcash_primitives` 0.27, `zcash_proofs` 0.27, `zcash_protocol` 0.8, `zcash_transparent` 0.7) to the 2026-04 release wave, which migrates off the yanked `core2` crate to `corez 0.1.1` and clears RUSTSEC-2026-0105 ([#10522](https://github.com/ZcashFoundation/zebra/pull/10522)).
+- Bumped workspace MSRV from 1.85.0 to 1.85.1, required by the new librustzcash releases. Also bumped `zebrad` MSRV from 1.89 to 1.91, required by `cargo-platform 0.3.3` (transitively via `vergen-git2`).
+
+### Fixed
+
+- `getrawtransaction` now reports correct `confirmations` ([#10507](https://github.com/ZcashFoundation/zebra/pull/10507)).
+
+## [Zebra 4.3.1](https://github.com/ZcashFoundation/zebra/releases/tag/v4.3.1) - 2026-04-17
+
+This release fixes **four important security issues**:
+
+- [CVE-2026-40880: Cached Mempool Verification Bypasses Consensus Rules for Ahead-of-Tip Blocks](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-xvj8-ph7x-65gf)
+- [CVE-2026-XXXXX: Consensus Divergence in Transparent Sighash Hash-Type Handling](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-8m29-fpq5-89jj)
+- [CVE-2026-XXXXX: rk Identity Point Panic in Transaction Verification](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-452v-w3gx-72wg)
+- [CVE-2026-40881: addr/addrv2 Deserialization Resource Exhaustion](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-xr93-pcq3-pxf8)
+
+We recommend node operators to update to 4.3.1 as soon as possible. All previous
+Zebra versions are vulnerable to these issues.
+
+### Added
+
+- Dockerized mining setup ([#10301](https://github.com/ZcashFoundation/zebra/pull/10301))
+
+### Fixed
+
+- Fixed [a panic that could be triggered in the RPC interface on HTTP
+  errors](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-29x4-r6jv-ff4w),
+  such as resetting the connection halfway through a request. We do not consider
+  this a critical issue since the RPC port is security-sensitive and should not
+  be opened publicly, but we plan to update our documentation to make this
+  clear.
+
+### Changed
+
+- The Dockerfile and docker-compose.yml were changed to expose the P2P port by
+  default. This is important for the network since it allows other peers to
+  connect to the node. Note that if you deploy Zebra behind a firewall or NAT
+  you might require additional configuration
+  ([#10464](https://github.com/ZcashFoundation/zebra/pull/10464)).
+
+## [Zebra 4.3.0](https://github.com/ZcashFoundation/zebra/releases/tag/v4.3.0) - 2026-03-12
+
+This release fixes **two important security issues**:
+
+- [CVE-2026-34202: Remote Denial of Service via Crafted V5 Transactions](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-qp6f-w4r3-h8wg)
+- [CVE-2026-34377: Consensus Failure via Crafted V5 Authorization Data](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-3vmh-33xr-9cqh)
+
+We recommend node operators to update to 4.3.0 as soon as possible. All previous
+Zebra versions are vulnerable to these issues.
+
+This release adds support for [ZIP-235](https://zips.z.cash/zip-0235) and
+extends the documentation on performance profiling. It also fixes issues with
+block propagation on Regtest, the computation of miner rewards for pre-Canopy
+blocks in the `getblocksubsidy` RPC, and a performance regression on Testnet
+where Zebra would hog a single CPU thread.
+
+### Added
+
+- Network Sustainability Mechanism: ZIP-235 ([#10357](https://github.com/ZcashFoundation/zebra/pull/10357))
+- Add `profiling` Cargo profile and use it in profiling docs ([#10411](https://github.com/ZcashFoundation/zebra/pull/10411))
+
+### Fixed
+
+- Fix block propagation on Regtest ([#10403](https://github.com/ZcashFoundation/zebra/pull/10403))
+- Subtract Founders' Reward from block subsidy ([#10338](https://github.com/ZcashFoundation/zebra/pull/10338))
+- Cache parsed checkpoints ([#10409](https://github.com/ZcashFoundation/zebra/pull/10409))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@gustavovalverde, @judah-caruso, @nuttycom, @oxarbitrage and @upbqdn.
+
+## [Zebra 4.2.0](https://github.com/ZcashFoundation/zebra/releases/tag/v4.2.0) - 2026-03-12
+
+This release expands Zebra’s RPC functionality, improves mempool policy,
+adds more state querying capabilities, and replaces the legacy OpenAPI
+documentation with OpenRPC.
+
+### Added
+
+- `UnspentOutput` request to mempool component service ([#10235](https://github.com/ZcashFoundation/zebra/pull/10235))
+- Founders reward addresses ([#10188](https://github.com/ZcashFoundation/zebra/pull/10188))
+- Support for pre-Canopy block subsidies ([#10191](https://github.com/ZcashFoundation/zebra/pull/10191))
+- AI contribution policy and agent guidance files ([#10318](https://github.com/ZcashFoundation/zebra/pull/10318))
+- `rpc.discover` endpoint ([#10201](https://github.com/ZcashFoundation/zebra/pull/10201))
+- `gettxout` RPC method ([#10235](https://github.com/ZcashFoundation/zebra/pull/10235))
+- `AnyChainBlock` state request for querying blocks in side chains ([#10325](https://github.com/ZcashFoundation/zebra/pull/10325))
+- Remaining non-standard mempool transaction filters ([#10314](https://github.com/ZcashFoundation/zebra/pull/10314))
+
+### Fixed
+
+- Subtract Founders' Reward from block subsidy ([#10338](https://github.com/ZcashFoundation/zebra/pull/10338))
 
 ### Removed
 
-- Removed the Python QA RPC test framework (`zebra-rpc/qa/`) in favour of the new [integration-tests](https://github.com/zcash/integration-tests) project, which captures all previous work in [zcash/integration-tests#1](https://github.com/zcash/integration-tests/pull/1) ([#10363](https://github.com/ZcashFoundation/zebra/pull/10363))
+- Python QA RPC test framework (`zebra-rpc/qa/`) in favour of the new [integration-tests](https://github.com/zcash/integration-tests) project, which captures all previous work in [zcash/integration-tests#1](https://github.com/zcash/integration-tests/pull/1) ([#10363](https://github.com/ZcashFoundation/zebra/pull/10363))
+- OpenAPI specification and related functionality ([#10298](https://github.com/ZcashFoundation/zebra/pull/10298)) in favour of [OpenRPC](https://github.com/ZcashFoundation/zebra/pull/10201)
+
+### Changed
+
+- Simplify `ReadStateService::call()` method ([#10335](https://github.com/ZcashFoundation/zebra/pull/10335))
+- Replace `NETWORK_UPGRADES_IN_ORDER` with `strum::EnumIter` ([#10096](https://github.com/ZcashFoundation/zebra/pull/10096))
+
+### Fixed
+
+- Preserve input order in `spent_outputs` for mixed chain/mempool transactions ([#10356](https://github.com/ZcashFoundation/zebra/pull/10356))
+- Clarify `TransparentInputNotFound` error message ([#10302](https://github.com/ZcashFoundation/zebra/pull/10302))
+- Improve `getrawtransaction` compatibility with `zcashd` ([#10307](https://github.com/ZcashFoundation/zebra/pull/10307))
+- Peerset banned cancel handles ([#10258](https://github.com/ZcashFoundation/zebra/pull/10258))
+- Support writing non-finalized state backups to disk before broadcasting updated chainstate ([#10361](https://github.com/ZcashFoundation/zebra/pull/10361))
+- Fix bug in `ActiveConnectionCounter` and inaccurate connection count metrics ([#10311](https://github.com/ZcashFoundation/zebra/pull/10311))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@VolodymyrBg, @arya2, @conradoplg, @gustavovalverde, @mpguerra, @oxarbitrage, @syszery, @upbqdn and @zmanian
 
 ## [Zebra 4.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v4.1.0) - 2026-02-05
 

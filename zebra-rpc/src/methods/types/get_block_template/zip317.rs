@@ -27,10 +27,10 @@ use zebra_node_services::mempool::TransactionDependencies;
 use crate::methods::types::transaction::TransactionTemplate;
 
 #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-use crate::methods::{Amount, NonNegative};
+use crate::methods::Amount;
 
 #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-use zebra_chain::parameters::NetworkUpgrade;
+use zebra_chain::{amount::NonNegative, parameters::NetworkUpgrade};
 
 #[cfg(test)]
 mod tests;
@@ -179,8 +179,16 @@ pub fn fake_coinbase_transaction(
         if network_upgrade < NetworkUpgrade::Nu7 {
             Transaction::new_v5_coinbase(net, height, outputs, extra_coinbase_data).into()
         } else {
-            Transaction::new_v6_coinbase(net, height, outputs, extra_coinbase_data, zip233_amount)
-                .into()
+            Transaction::new_v6_coinbase(
+                net,
+                height,
+                outputs,
+                extra_coinbase_data,
+                zip233_amount,
+                #[cfg(zcash_unstable = "zip235")]
+                miner_fee,
+            )
+            .into()
         }
     };
 
@@ -379,14 +387,17 @@ impl TryUpdateBlockLimits for VerifiedUnminedTx {
         // > and block_unpaid_actions <=  block_unpaid_action_limit,
         // > add the transaction to the block template
         //
-        // Unpaid actions are always zero for transactions that pay the conventional fee,
-        // so the unpaid action check always passes for those transactions.
+        // Unpaid actions are always zero for transactions that pay the conventional fee, so the
+        // unpaid action check always passes for those transactions. Use the full block-level sigop
+        // count (legacy + P2SH) so template selection cannot produce blocks that the block verifier
+        // would reject for exceeding `MAX_BLOCK_SIGOPS`.
+        let tx_block_sigops = self.block_sigop_count();
         if self.transaction.size <= *remaining_block_bytes
-            && self.legacy_sigop_count <= *remaining_block_sigops
+            && tx_block_sigops <= *remaining_block_sigops
             && self.unpaid_actions <= *remaining_block_unpaid_actions
         {
             *remaining_block_bytes -= self.transaction.size;
-            *remaining_block_sigops -= self.legacy_sigop_count;
+            *remaining_block_sigops -= tx_block_sigops;
 
             // Unpaid actions are always zero for transactions that pay the conventional fee,
             // so this limit always remains the same after they are added.

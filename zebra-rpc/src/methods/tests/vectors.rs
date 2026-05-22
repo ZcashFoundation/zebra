@@ -332,6 +332,7 @@ async fn rpc_getblock() {
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: Some(Height(i.try_into().expect("valid u32"))),
                 time: Some(block.header.time.timestamp()),
+                n_tx: block.transactions.len(),
                 tx: block
                     .transactions
                     .iter()
@@ -391,6 +392,7 @@ async fn rpc_getblock() {
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: Some(Height(i.try_into().expect("valid u32"))),
                 time: Some(block.header.time.timestamp()),
+                n_tx: block.transactions.len(),
                 tx: block
                     .transactions
                     .iter()
@@ -449,6 +451,7 @@ async fn rpc_getblock() {
                 confirmations,
                 height,
                 time,
+                n_tx,
                 tx,
                 trees,
                 size,
@@ -472,6 +475,7 @@ async fn rpc_getblock() {
             assert_eq!(confirmations, &((blocks.len() - i) as i64));
             assert_eq!(height, &Some(Height(i.try_into().expect("valid u32"))));
             assert_eq!(time, &Some(block.header.time.timestamp()));
+            assert_eq!(*n_tx, block.transactions.len());
             assert_eq!(trees, trees);
             assert_eq!(size, &Some(block.zcash_serialized_size() as i64));
             assert_eq!(version, &Some(block.header.version));
@@ -551,6 +555,7 @@ async fn rpc_getblock() {
                 confirmations,
                 height,
                 time,
+                n_tx,
                 tx,
                 trees,
                 size,
@@ -574,6 +579,7 @@ async fn rpc_getblock() {
             assert_eq!(confirmations, &((blocks.len() - i) as i64));
             assert_eq!(height, &Some(Height(i.try_into().expect("valid u32"))));
             assert_eq!(time, &Some(block.header.time.timestamp()));
+            assert_eq!(*n_tx, block.transactions.len());
             assert_eq!(trees, trees);
             assert_eq!(size, &Some(block.zcash_serialized_size() as i64));
             assert_eq!(version, &Some(block.header.version));
@@ -653,6 +659,7 @@ async fn rpc_getblock() {
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: Some(Height(i.try_into().expect("valid u32"))),
                 time: Some(block.header.time.timestamp()),
+                n_tx: block.transactions.len(),
                 tx: block
                     .transactions
                     .iter()
@@ -711,6 +718,7 @@ async fn rpc_getblock() {
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: Some(Height(i.try_into().expect("valid u32"))),
                 time: Some(block.header.time.timestamp()),
+                n_tx: block.transactions.len(),
                 tx: block
                     .transactions
                     .iter()
@@ -2391,6 +2399,7 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
         transaction: unmined_tx,
         miner_fee: 0.try_into().unwrap(),
         legacy_sigop_count: 0,
+        p2sh_sigop_count: 0,
         conventional_actions,
         unpaid_actions: 0,
         fee_weight_ratio: 1.0,

@@ -28,7 +28,7 @@ impl Arbitrary for Input {
 
     fn arbitrary_with(height: Self::Parameters) -> Self::Strategy {
         if let Some(height) = height {
-            (vec(any::<u8>(), 0..95), any::<u32>())
+            (vec(any::<u8>(), 1..95), any::<u32>())
                 .prop_map(move |(data, sequence)| Input::Coinbase {
                     height,
                     data: if height == block::Height(0) {

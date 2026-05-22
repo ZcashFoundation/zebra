@@ -41,7 +41,7 @@ use zebra_node_services::mempool;
 use zebra_script::{CachedFfiTransaction, Sigops};
 use zebra_state as zs;
 
-use crate::{error::TransactionError, groth16::DescriptionWrapper, primitives, script, BoxError};
+use crate::{error::TransactionError, primitives, script, BoxError};
 
 pub mod check;
 #[cfg(test)]
@@ -401,16 +401,6 @@ where
         async move {
             tracing::trace!(?tx_id, ?req, "got tx verify request");
 
-            if let Some(result) = Self::find_verified_unmined_tx(&req, mempool.clone(), state.clone()).await {
-                let verified_tx = result?;
-
-                return Ok(Response::Block {
-                    tx_id,
-                    miner_fee: Some(verified_tx.miner_fee),
-                    sigops: verified_tx.legacy_sigop_count
-                });
-            }
-
             // Do quick checks first
             check::has_inputs_and_outputs(&tx)?;
             check::has_enough_orchard_flags(&tx)?;
@@ -541,7 +531,7 @@ where
                         );
                         Ok(())
                     }
-                );
+                    );
 
                 async_checks.push(check_anchors_and_revealed_nullifiers_query);
             }
@@ -583,7 +573,13 @@ where
                 Request::Block { .. } => Response::Block {
                     tx_id,
                     miner_fee,
-                    sigops,
+                    // In block validation, the consensus sigop total must include P2SH
+                    // redeem-script sigops, matching zcashd's `ConnectBlock` which sums
+                    // `GetLegacySigOpCount` and `GetP2SHSigOpCount` per transaction before
+                    // comparing against `MAX_BLOCK_SIGOPS`. Coinbase inputs contribute zero P2SH
+                    // sigops. See
+                    // <https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-jv4h-j224-23cc>.
+                    sigops: sigops.saturating_add(cached_ffi_transaction.p2sh_sigops()),
                 },
                 Request::Mempool { transaction: tx, .. } => {
                     // TODO: `spent_outputs` may not align with `tx.inputs()` when a transaction
@@ -596,6 +592,7 @@ where
                         tx,
                         miner_fee.expect("fee should have been checked earlier"),
                         sigops,
+                        cached_ffi_transaction.p2sh_sigops(),
                         spent_outputs.into(),
                     )?;
 
@@ -619,12 +616,12 @@ where
 
             Ok(rsp)
         }
-        .inspect(move |result| {
-            // Hide the transaction data to avoid filling the logs
-            tracing::trace!(?tx_id, result = ?result.as_ref().map(|_tx| ()), "got tx verify result");
-        })
-        .instrument(span)
-        .boxed()
+            .inspect(move |result| {
+                // Hide the transaction data to avoid filling the logs
+                tracing::trace!(?tx_id, result = ?result.as_ref().map(|_tx| ()), "got tx verify result");
+            })
+            .instrument(span)
+            .boxed()
     }
 }
 
@@ -657,74 +654,6 @@ where
         } else {
             unreachable!("Request::BestChainNextMedianTimePast always responds with BestChainNextMedianTimePast")
         }
-    }
-
-    /// Attempts to find a transaction in the mempool by its transaction hash and checks
-    /// that all of its dependencies are available in the block or in the state.  Waits
-    /// for UTXOs being spent by the given transaction to arrive in the state if they're
-    /// not found elsewhere.
-    ///
-    /// Returns [`Some(Ok(VerifiedUnminedTx))`](VerifiedUnminedTx) if successful,
-    /// None if the transaction id was not found in the mempool,
-    /// or `Some(Err(TransparentInputNotFound))` if the transaction was found, but some of its
-    /// dependencies were not found in the block or state after a timeout.
-    async fn find_verified_unmined_tx(
-        req: &Request,
-        mempool: Option<Timeout<Mempool>>,
-        state: Timeout<ZS>,
-    ) -> Option<Result<VerifiedUnminedTx, TransactionError>> {
-        let tx = req.transaction();
-
-        if req.is_mempool() || tx.is_coinbase() {
-            return None;
-        }
-
-        let mempool = mempool?;
-        let known_outpoint_hashes = req.known_outpoint_hashes();
-        let tx_id = req.tx_mined_id();
-
-        let mempool::Response::TransactionWithDeps {
-            transaction: verified_tx,
-            dependencies,
-        } = mempool
-            .oneshot(mempool::Request::TransactionWithDepsByMinedId(tx_id))
-            .await
-            .ok()?
-        else {
-            panic!("unexpected response to TransactionWithDepsByMinedId request");
-        };
-
-        // Note: This does not verify that the spends are in order, the spend order
-        //       should be verified during contextual validation in zebra-state.
-        let missing_deps: HashSet<_> = dependencies
-            .into_iter()
-            .filter(|dependency_id| !known_outpoint_hashes.contains(dependency_id))
-            .collect();
-
-        if missing_deps.is_empty() {
-            return Some(Ok(verified_tx));
-        }
-
-        let missing_outpoints = tx.inputs().iter().filter_map(|input| {
-            if let transparent::Input::PrevOut { outpoint, .. } = input {
-                missing_deps.contains(&outpoint.hash).then_some(outpoint)
-            } else {
-                None
-            }
-        });
-
-        for missing_outpoint in missing_outpoints {
-            let query = state
-                .clone()
-                .oneshot(zebra_state::Request::AwaitUtxo(*missing_outpoint));
-            match query.await {
-                Ok(zebra_state::Response::Utxo(_)) => {}
-                Err(_) => return Some(Err(TransactionError::TransparentInputNotFound)),
-                _ => unreachable!("AwaitUtxo always responds with Utxo"),
-            };
-        }
-
-        Some(Ok(verified_tx))
     }
 
     /// Wait for the UTXOs that are being spent by the given transaction.
@@ -1114,7 +1043,7 @@ where
                 // checks that (at a minimum) must pass for the
                 // transaction to verify.
                 checks.push(primitives::groth16::JOINSPLIT_VERIFIER.oneshot(
-                    DescriptionWrapper(&(joinsplit, &joinsplit_data.pub_key)).try_into()?,
+                    primitives::groth16::Item::from_joinsplit(joinsplit, &joinsplit_data.pub_key)?,
                 ));
             }
 

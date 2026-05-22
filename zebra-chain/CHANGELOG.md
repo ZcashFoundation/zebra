@@ -5,27 +5,74 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [7.0.0] - 2026-05-01
 
 ### Added
 
-- `amount::Amount::is_zero`
-- `parameters::network::subsidy::constants` module.
-- `impl From<block::Height> for u64`
-- `impl From<block::Height> for u32`
-- `parameters::network::testnet::founder_address_list`
-- `parameters::network::subsidy::founders_reward`
-- `parameters::network::subsidy::founders_reward_address`
-- `diagnostics::CodeTimer::{start_desc, finish_desc, finish_inner}`
+- `serialization::MAX_HEADERS_PER_MESSAGE: usize`.
+- `transaction::VerifiedUnminedTx`:
+  - `p2sh_sigop_count: u32`.
+  - `block_sigop_count(&self) -> u32`.
 
 ### Changed
 
-- `parameters::network::subsidy::SubsidyError::` has new variants:
-  `FoundersRewardNotFound` and `Underflow`, and the variant `SumOverflow` was
-  renamed to `Overflow`.
-- `parameters::network::subsidy::num_halvings` was renamed to `halving`.
-- `transparent::Output::new_coinbase` was renamed to `new`.
-- `NoteCommitmentSubtreeIndex` now derives `schemars::JsonSchema` (#10201)
+- Migrated to `zcash_primitives 0.27` (and the rest of the librustzcash 2026-04
+  release wave), which replaces the yanked `core2` dependency with `corez`.
+- `transaction::VerifiedUnminedTx::new` now takes an additional
+  `p2sh_sigop_count: u32` parameter.
+
+## [6.0.2] - 2026-04-17
+
+This release fixes an important security issue:
+
+- [CVE-2026-XXXXX: rk Identity Point Panic in Transaction Verification](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-452v-w3gx-72wg)
+
+The impact of the issue for crate users will depend on the particular usage;
+if you use it as a building block for a consensus node, you should update.
+
+## [6.0.1] - 2026-03-26
+
+This release fixes an important security issue:
+
+- [CVE-2026-34202: Remote Denial of Service via Crafted V5 Transactions](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-qp6f-w4r3-h8wg)
+
+The impact of the issue for crate users will depend on the particular usage;
+if you use zebra-chain to parse untrusted transactions, a particularly crafted
+transaction will raise a panic which will crash your application; you should
+update.
+
+### Fixed
+
+- Fixed miner subsidy computation.
+
+## [6.0.0] - 2026-03-12
+
+### Breaking Changes
+
+- Removed `zebra_chain::diagnostic::CodeTimer::finish` — replaced by `finish_desc` and `finish_inner`
+- Removed `SubsidyError::SumOverflow` variant — replaced by `SubsidyError::Overflow` and `SubsidyError::Underflow`
+- Removed `zebra_chain::parameters::subsidy::num_halvings` — replaced by `halving`
+- Removed `VerifiedUnminedTx::sigops` field — replaced by `legacy_sigop_count`
+- Removed `transparent::Output::new_coinbase` — replaced by `Output::new`
+- Changed `block_subsidy` parameter renamed from `network` to `net` (no behavioral change)
+- Changed `VerifiedUnminedTx::new` — added required `spent_outputs: Arc<Vec<Output>>` parameter
+
+### Added
+
+- Added `Amount::is_zero(&self) -> bool`
+- Added `From<Height> for u32` and `From<Height> for u64` conversions
+- Added `CodeTimer::start_desc(description: &'static str) -> Self`
+- Added `CodeTimer::finish_desc(self, description: &'static str)`
+- Added `CodeTimer::finish_inner` with optional file/line and description
+- Added `SubsidyError::FoundersRewardNotFound`, `SubsidyError::Overflow`, `SubsidyError::Underflow` variants
+- Added `founders_reward(net, height) -> Amount` — returns the founders reward amount for a given height
+- Added `founders_reward_address(net, height) -> Option<Address>` — returns the founders reward address for a given height
+- Added `halving(height, network) -> u32` — replaces removed `num_halvings`
+- Added `Network::founder_address_list(&self) -> &[&str]`
+- Added `NetworkUpgradeIter` struct
+- Added `VerifiedUnminedTx::legacy_sigop_count: u32` field
+- Added `VerifiedUnminedTx::spent_outputs: Arc<Vec<Output>>` field
+- Added `transparent::Output::new(amount, lock_script) -> Output` — replaces removed `new_coinbase`
 
 ## [5.0.0] - 2026-02-05
 

@@ -13,12 +13,21 @@ use zebra_chain::{
 };
 
 use crate::{
+    constants::MAX_ADDRS_IN_MESSAGE,
     meta_addr::MetaAddr,
     protocol::external::{
-        addr::{AddrV1, AddrV2, ADDR_V1_SIZE, ADDR_V2_MIN_SIZE},
+        addr::{AddrV1, AddrV2},
         inv::{InventoryHash, MAX_INV_IN_RECEIVED_MESSAGE},
     },
 };
+
+/// A serialized `addr` (v1) has a 4 byte time, 8 byte services, 16 byte IP addr, and 2 byte port.
+const ADDR_V1_SIZE: usize = 4 + 8 + 16 + 2;
+
+/// Minimum size of a serialized `addrv2`: 4 byte time + 1 byte services + 1 byte networkID
+/// + 1 byte sizeAddr + 0 bytes addr + 2 bytes port.
+#[allow(clippy::identity_op)]
+const ADDR_V2_MIN_SIZE: usize = 4 + 1 + 1 + 1 + 0 + 2;
 
 /// The number of test cases to use for expensive proptests.
 const DEFAULT_PROPTEST_CASES: u32 = 8;
@@ -108,8 +117,12 @@ proptest! {
     }
 
     /// Verifies that...
-    /// 1. The smallest disallowed vector of `AddrV1`s is too large to fit in a legal Zcash message
+    /// 1. `max_allocation()` equals the protocol cap (MAX_ADDRS_IN_MESSAGE)
     /// 2. The largest allowed vector is small enough to fit in a legal Zcash message
+    ///
+    /// Note: `max_allocation()` is set to the protocol cap of 1,000 entries
+    /// (not derived from the message size limit) to prevent resource exhaustion.
+    /// See GHSA-xr93-pcq3-pxf8.
     #[test]
     fn addr_v1_max_allocation_is_correct(addr in MetaAddr::arbitrary()) {
         let _init_guard = zebra_test::init();
@@ -121,16 +134,14 @@ proptest! {
         let addr: AddrV1 = addr.unwrap().into();
 
         let (
-            smallest_disallowed_vec_len,
-            smallest_disallowed_serialized_len,
+            _smallest_disallowed_vec_len,
+            _smallest_disallowed_serialized_len,
             largest_allowed_vec_len,
             largest_allowed_serialized_len,
         ) = max_allocation_is_big_enough(addr);
 
-        // Check that our smallest_disallowed_vec is only one item larger than the limit
-        prop_assert!(((smallest_disallowed_vec_len - 1) as u64) == AddrV1::max_allocation());
-        // Check that our smallest_disallowed_vec is too big to send in a valid Zcash message
-        prop_assert!(smallest_disallowed_serialized_len > MAX_PROTOCOL_MESSAGE_LEN);
+        // max_allocation must equal the protocol cap
+        prop_assert_eq!(AddrV1::max_allocation(), MAX_ADDRS_IN_MESSAGE as u64);
 
         // Check that our largest_allowed_vec contains the maximum number of AddrV1s
         prop_assert!((largest_allowed_vec_len as u64) == AddrV1::max_allocation());
@@ -165,8 +176,12 @@ proptest! {
     }
 
     /// Verifies that...
-    /// 1. The smallest disallowed vector of `AddrV2`s is too large to fit in a legal Zcash message
+    /// 1. `max_allocation()` equals the protocol cap (MAX_ADDRS_IN_MESSAGE)
     /// 2. The largest allowed vector is small enough to fit in a legal Zcash message
+    ///
+    /// Note: `max_allocation()` is set to the protocol cap of 1,000 entries
+    /// (not derived from the message size limit) to prevent resource exhaustion.
+    /// See GHSA-xr93-pcq3-pxf8.
     #[test]
     fn addr_v2_max_allocation_is_correct(addr in MetaAddr::arbitrary()) {
         let _init_guard = zebra_test::init();
@@ -178,19 +193,17 @@ proptest! {
         let addr: AddrV2 = addr.unwrap().into();
 
         let (
-            smallest_disallowed_vec_len,
-            smallest_disallowed_serialized_len,
+            _smallest_disallowed_vec_len,
+            _smallest_disallowed_serialized_len,
             largest_allowed_vec_len,
             _largest_allowed_serialized_len,
         ) = max_allocation_is_big_enough(addr);
 
-        // Check that our smallest_disallowed_vec is only one item larger than the limit
-        prop_assert!(((smallest_disallowed_vec_len - 1) as u64) == AddrV2::max_allocation());
-        // Check that our smallest_disallowed_vec is too big to send in a valid Zcash message
-        prop_assert!(smallest_disallowed_serialized_len > MAX_PROTOCOL_MESSAGE_LEN);
+        // max_allocation must equal the protocol cap
+        prop_assert_eq!(AddrV2::max_allocation(), MAX_ADDRS_IN_MESSAGE as u64);
 
         // Check that our largest_allowed_vec contains the maximum number of AddrV2s
         prop_assert!((largest_allowed_vec_len as u64) == AddrV2::max_allocation());
-        // This is a variable-sized type, so largest_allowed_serialized_len can exceed the length limit
+        // 1,000 entries easily fits in a Zcash message for both fixed and variable-sized types
     }
 }

@@ -23,23 +23,23 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/ZcashFoundation/zebra"
 homepage = "https://zfnd.org/zebra/"
 keywords = ["zebra", "zcash"]
-rust-version = "1.85.0"
+rust-version = "1.85.1"
 edition = "2021"
 
 # `cargo release` settings
 
 [workspace.dependencies]
 incrementalmerkletree = { version = "0.8.2", features = ["legacy-api"] }
-orchard = "0.11"
-sapling-crypto = "0.5"
-zcash_address = "0.10"
-zcash_encoding = "0.3"
+orchard = "0.13"
+sapling-crypto = "0.7"
+zcash_address = "0.11"
+zcash_encoding = "0.4"
 zcash_history = "0.4"
-zcash_keys = "0.12"
-zcash_primitives = "0.26"
-zcash_proofs = "0.26"
-zcash_transparent = "0.6"
-zcash_protocol = "0.7"
+zcash_keys = "0.13"
+zcash_primitives = "0.27"
+zcash_proofs = "0.27"
+zcash_transparent = "0.7"
+zcash_protocol = "0.8"
 zip32 = "0.2"
 abscissa_core = "0.7"
 atty = "0.2.14"
@@ -67,7 +67,7 @@ derive-new = "0.5"
 dirs = "6.0"
 ed25519-zebra = "4.0.3"
 elasticsearch = { version = "8.17.0-alpha.1", default-features = false }
-equihash = "0.2.2"
+equihash = "0.3"
 ff = "0.13"
 futures = "0.3.31"
 futures-core = "0.3.31"
@@ -77,6 +77,7 @@ halo2 = "0.3"
 hex = "0.4.3"
 hex-literal = "0.4"
 howudoin = "0.1"
+http-body = "1.0.1"
 http-body-util = "0.1.3"
 human_bytes = { version = "0.4", default-features = false }
 humantime = "2.2"
@@ -125,7 +126,7 @@ rlimit = "0.10"
 rocksdb = { version = "0.22", default-features = false }
 secp256k1 = "0.29"
 semver = "1.0.26"
-sentry = { version = "0.40", default-features = false }
+sentry = { version = "0.47", default-features = false }
 serde = "1.0.219"
 serde-big-array = "0.5"
 serde_json = "1.0.140"
@@ -169,7 +170,7 @@ uint = "0.10"
 vergen-git2 = { version = "9", default-features = false }
 x25519-dalek = "2.0.1"
 zcash_note_encryption = "0.4.1"
-zcash_script = "0.4.3"
+zcash_script = "0.4.4"
 config = { version = "0.15.14", features = ["toml"] }
 which = "8.0.0"
 
@@ -287,6 +288,19 @@ overflow-checks = false
 incremental = false
 codegen-units = 16
 
+# The advisory
+# https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-gq4h-3grw-2rhv
+# only reproduces reliably when the bundled libzcash_script C++ code is compiled
+# in release mode since it relies on a buffer to not be zeroed out (arrays in
+# C++ are usually zeroed out when allocated in debug mode). To reliably test
+# against that issue, and to also better simulate real-world usage of
+# libzcash_script, we enable optimizations for it in dev builds.
+[profile.dev.package.libzcash_script]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.release]
 panic = "abort"
@@ -313,5 +327,52 @@ debug = false
 # The linter should ignore these expected config flags/values
 unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(tokio_unstable)', # Used by tokio-console
-    'cfg(zcash_unstable, values("zfuture", "nu6.1", "nu7"))' # Used in Zebra and librustzcash
+    'cfg(zcash_unstable, values("zfuture", "nu6.1", "nu7", "zip235"))' # Used in Zebra and librustzcash
 ] }
+
+# High-risk code
+unsafe_code = "deny"
+non_ascii_idents = "deny"
+
+# Compatibility
+rust_2021_compatibility = { level = "warn", priority = -1 }
+nonstandard_style = { level = "warn", priority = -1 }
+future_incompatible = { level = "warn", priority = -1 }
+
+# Documentation
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+# Async code
+await_holding_lock = "warn"
+await_holding_refcell_ref = "warn"
+
+# Pointers
+cast_ptr_alignment = "warn"
+fn_to_numeric_cast_any = "warn"
+
+# Integers
+checked_conversions = "warn"
+implicit_saturating_sub = "warn"
+invalid_upcast_comparisons = "warn"
+range_minus_one = "warn"
+range_plus_one = "warn"
+unnecessary_cast = "warn"
+
+# Incomplete code
+dbg_macro = "warn"
+todo = "warn"
+
+# Manual debugging output — use tracing::trace!() or tracing::debug!() instead
+print_stdout = "warn"
+print_stderr = "warn"
+
+# Code styles we want to accept
+try_err = "allow"
+
+# Panics
+fallible_impl_from = "warn"
+unwrap_in_result = "warn"
+
+# TODOs: fix this lint eventually
+result_large_err = "allow"
