@@ -982,7 +982,7 @@ version = "0.2.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.metrics]]
-version = "0.24.5"
+version = "0.24.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.metrics-exporter-prometheus]]
