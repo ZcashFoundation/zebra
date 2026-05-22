@@ -13,7 +13,8 @@ yanked = "deny"
 # Remove each ignore entry as the dependency chain is upgraded.
 ignore = [
     "RUSTSEC-2021-0139", # ansi_term — transitive via abscissa_core -> structopt
-    "RUSTSEC-2024-0375", # atty — transitive via abscissa_core -> structopt
+    "RUSTSEC-2024-0375", # atty (unmaintained) — transitive via abscissa_core -> structopt
+    "RUSTSEC-2021-0145", # atty (unsound) — transitive via abscissa_core -> structopt
     "RUSTSEC-2024-0370", # proc-macro-error — transitive via abscissa_core -> structopt
     "RUSTSEC-2025-0119", # number_prefix — transitive via indicatif
     "RUSTSEC-2025-0141", # bincode — direct dependency
@@ -164,6 +165,8 @@ skip-tree = [
     { name = "indexmap", version = "1.9" },
 
     { name = "hashbrown", version = "0.12" },
+    # hashbrown 0.14.x pulled by indexmap 1.9 (transitive of librustzcash)
+    { name = "hashbrown", version = "0.14" },
     # hashbrown 0.15.x pulled by various deps; 0.16.x pulled by indexmap 2.x
     { name = "hashbrown", version = "0.15" },
 
