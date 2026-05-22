@@ -2360,6 +2360,8 @@ where
             // The clone preserves the seen status of the chain tip.
             let mut wait_for_new_tip = latest_chain_tip.clone();
             let wait_for_new_tip = wait_for_new_tip.best_tip_changed();
+            // `+2`: we expect the tip to advance by one block before waking us up.
+            let precomputed_height = Height(chain_info.tip_height.0 + 2);
             let wait_for_new_tip = async {
                 // Precompute the coinbase tx for an empty block that will sit on the new tip. We
                 // will return this provisional block upon a chain tip change so that miners can
@@ -2377,7 +2379,7 @@ where
 
                 let precomputed_coinbase = precompute_coinbase(
                     self.network.clone(),
-                    Height(chain_info.tip_height.0 + 2),
+                    precomputed_height,
                     miner_params.clone(),
                 )
                 .await
@@ -2445,12 +2447,19 @@ where
                         .as_ref()
                         .map(|old_long_poll_id| server_long_poll_id.submit_old(old_long_poll_id));
 
+                    // Discard the precomputed coinbase if our `+2` guess was wrong
+                    // (multi-block advance, reorg, or spurious notification) — its
+                    // BIP-34 height and subsidies wouldn't match the block.
+                    let next_height = chain_info.tip_height.next().map_misc_error()?;
+                    let precomputed_coinbase = (next_height == precomputed_height)
+                        .then_some(precomputed_coinbase);
+
                     // Respond instantly with an empty block upon a chain tip change so that
                     // the miner doesn't waste their effort trying to extend a shorter
                     // chain.
                     return Ok(BlockTemplateResponse::new_internal(
                         &self.network,
-                        Some(precomputed_coinbase),
+                        precomputed_coinbase,
                         miner_params,
                         &chain_info,
                         server_long_poll_id,
