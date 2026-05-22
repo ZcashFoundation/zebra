@@ -258,9 +258,9 @@ impl NonEmptyHistoryTree {
                 .append_leaf(block, sapling_root, orchard_root)
                 .map_err(|e| HistoryTreeError::InnerError { inner: e })?,
         };
-        for entry in new_entries.clone() {
+        for entry in &new_entries {
             // Not every entry is a peak; those will be trimmed later
-            self.peaks.insert(self.size, entry);
+            self.peaks.insert(self.size, entry.clone());
             self.size += 1;
         }
         self.prune()?;
