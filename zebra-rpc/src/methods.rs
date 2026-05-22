@@ -2298,15 +2298,17 @@ where
             .await
             .map_misc_error()?
         else {
-            panic!("unexpected response to HistoryNode request")
+            unreachable!("unmatched response to a HistoryNode request")
         };
 
         if let Some(entry) = entry {
             let response = if verbose == 0 {
                 GetHistoryNode::Raw(HexData(entry.inner().to_vec()))
             } else {
-                let node = HistoryNodeData::from_entry(&network, &entry, network_upgrade)
-                    .expect("The network upgrade must be active here");
+                let node = HistoryNodeData::from_entry(&network, &entry, network_upgrade).expect(
+                    "network_upgrade is in UPGRADE_LIST (Heartwood and later) \
+                         and Heartwood activation was checked above",
+                );
                 let mut subtree_total_work: [u8; 32] = bytemuck::cast(node.subtree_total_work().0);
                 let mut subtree_commitment = node.subtree_commitment();
                 let mut start_sapling_root = node.start_sapling_root();
@@ -2362,7 +2364,7 @@ where
             .await
             .map_misc_error()?
         else {
-            panic!("unexpected response to AuthDataRoot request")
+            unreachable!("unmatched response to a AuthDataRoot request")
         };
 
         if let Some(auth_data_root) = auth_data_root {
@@ -2410,7 +2412,7 @@ where
             .await
             .map_misc_error()?
         else {
-            panic!("unexpected response to TotalWork request")
+            unreachable!("unmatched response to a TotalWork request")
         };
 
         if let Some(value) = total_work {
@@ -2442,12 +2444,12 @@ where
             .await
             .map_misc_error()?
         else {
-            panic!("unexpected response to FirstBlockWithTotalWork request")
+            unreachable!("unmatched response to a FirstBlockWithTotalWork request")
         };
 
         if let Some(block_index) = block_index {
             Ok(GetFirstBlockWithTotalWork {
-                height: block_index.0.as_usize() as u64,
+                height: block_index.0.into(),
                 hash: block_index.1.bytes_in_display_order(),
             })
         } else {
