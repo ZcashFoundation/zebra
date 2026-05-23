@@ -2,7 +2,7 @@
 //!
 //! A service that manages known unmined Zcash transactions.
 
-use std::collections::HashSet;
+use std::{collections::HashSet, net::SocketAddr};
 
 use tokio::sync::oneshot;
 use zebra_chain::{
@@ -84,6 +84,16 @@ pub enum Request {
     ///
     /// The transaction downloader checks for duplicates across IDs and transactions.
     Queue(Vec<Gossip>),
+
+    /// Queue transaction IDs advertised by a specific peer via an `Inv`
+    /// message, tagging each one with the announcing peer so the downloader
+    /// can enforce a per-peer queue cap. See `GHSA-4fc2-h7jh-287c`.
+    QueueFromPeer {
+        /// The transaction IDs advertised by the peer.
+        txids: HashSet<UnminedTxId>,
+        /// The address of the peer that advertised them.
+        source: SocketAddr,
+    },
 
     /// Check for newly verified transactions.
     ///

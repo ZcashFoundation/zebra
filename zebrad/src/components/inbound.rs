@@ -531,11 +531,22 @@ impl Service<zn::Request> for Inbound {
                     .map_ok(|_resp| zn::Response::Nil)
                     .boxed()
             }
-            zn::Request::AdvertiseTransactionIds(transactions) => {
-                let transactions = transactions.into_iter().map(Into::into).collect();
+            zn::Request::AdvertiseTransactionIds(transactions, advertiser) => {
+                // Tag the advertised txids with the announcing peer so the
+                // mempool downloader can enforce a per-peer queue cap.
+                // See `GHSA-4fc2-h7jh-287c`.
+                let request = match advertiser {
+                    Some(peer_addr) => mempool::Request::QueueFromPeer {
+                        txids: transactions,
+                        source: *peer_addr,
+                    },
+                    None => mempool::Request::Queue(
+                        transactions.into_iter().map(Into::into).collect(),
+                    ),
+                };
                 mempool
                     .clone()
-                    .oneshot(mempool::Request::Queue(transactions))
+                    .oneshot(request)
                     // The response just indicates if processing was queued or not; ignore it
                     .map_ok(|_resp| zn::Response::Nil)
                     .boxed()

@@ -1929,15 +1929,15 @@ async fn cancel_handles_drained_after_verification_timeout() {
 
     downloads
         .as_mut()
-        .download_if_needed_and_verify(Gossip::Tx(v1), None)
+        .download_if_needed_and_verify(Gossip::Tx(v1), None, None)
         .expect("queue tx 1");
     downloads
         .as_mut()
-        .download_if_needed_and_verify(Gossip::Tx(v2), None)
+        .download_if_needed_and_verify(Gossip::Tx(v2), None, None)
         .expect("queue tx 2");
     downloads
         .as_mut()
-        .download_if_needed_and_verify(Gossip::Tx(v3), None)
+        .download_if_needed_and_verify(Gossip::Tx(v3), None, None)
         .expect("queue tx 3");
 
     assert_eq!(downloads.in_flight(), 3);
