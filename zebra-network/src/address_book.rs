@@ -452,10 +452,13 @@ impl AddressBook {
                     bans_by_ip.shift_remove_index(0);
                 }
 
-                self.most_recent_by_ip
-                    .as_mut()
-                    .expect("should be some when should_remove_most_recent_by_ip is true")
-                    .remove(&banned_ip);
+                // `most_recent_by_ip` is only populated when
+                // `max_connections_per_ip == 1`. The ban path runs for any
+                // configured value, so we must guard the optional cache rather
+                // than unwrap it.
+                if let Some(most_recent_by_ip) = self.most_recent_by_ip.as_mut() {
+                    most_recent_by_ip.remove(&banned_ip);
+                }
 
                 let banned_addrs: Vec<_> = self
                     .by_addr
