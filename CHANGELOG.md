@@ -7,12 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Security
+
+- Cap the upfront `Vec::with_capacity` reservation in
+  `zcash_deserialize_external_count` so a peer-supplied `CompactSize`
+  cannot force a large allocation before any element bytes are read. The
+  `Vec` grows naturally via `push()` as real data arrives. Complements
+  the per-type `max_allocation()` caps from PR #10494
+  ([GHSA-xr93-pcq3-pxf8](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-xr93-pcq3-pxf8)).
+  CWE-770.
+- Cap `block::Hash::max_allocation` at `MAX_BLOCK_LOCATOR_LENGTH = 101`
+  (matching Bitcoin Core's `MAX_LOCATOR_SZ` in `net_processing.cpp`) and
+  `CountedHeader::max_allocation` at the existing
+  `MAX_HEADERS_PER_MESSAGE = 160` constant (already enforced on the
+  sending side and at the codec level for `read_headers`). The previous
+  values were derived from `MAX_PROTOCOL_MESSAGE_LEN` and returned 65,535
+  and ~1,409 respectively, allowing a post-handshake peer to force ~2 MiB
+  of upfront `Vec` preallocation per `getblocks`/`getheaders` message
+  before any payload bytes were read. Same fix shape as
+  GHSA-xr93-pcq3-pxf8 for `AddrV1`/`AddrV2` (PR #10494). CWE-770.
+
 ### Added
 
 - Startup warning on Linux when `net.ipv4.tcp_slow_start_after_idle` is enabled (which resets TCP congestion windows between block requests and significantly reduces single-peer block-propagation throughput on long-haul links), with a "Linux TCP tuning for block propagation" troubleshooting section ([#10513](https://github.com/ZcashFoundation/zebra/pull/10513))
 
 ### Fixed
 
+- Avoid panicking in the address-book ban path when `network.max_connections_per_ip > 1`. Guard the optional `most_recent_by_ip` cache instead of unwrapping it, so a ban-threshold misbehavior update no longer crashes the address-book updater and poisons the shared mutex ([#10580](https://github.com/ZcashFoundation/zebra/issues/10580))
+- Propagate transaction-level value-balance errors from `Block::chain_value_pool_change()` instead of silently dropping them. The previous `flat_map(Result)` aggregation relied on `Result<T, E>: IntoIterator` and yielded zero items on `Err`, so a failing transaction was omitted from the block sum rather than surfacing as a `ValueBalanceError` ([#10585](https://github.com/ZcashFoundation/zebra/issues/10585))
 - `getblock`, `getblockheader`, and `gettxout` RPC methods now bind their follow-up state queries to the block hash resolved by the first read, avoiding internally inconsistent responses when a reorg or tip advance occurs mid-call ([#10550](https://github.com/ZcashFoundation/zebra/issues/10550)).
 - `getblock` verbosity 2 no longer panics during transaction serialization when the requested block is no longer on the best chain (`confirmations = -1`); the response is now labeled as not in the active chain instead ([#10550](https://github.com/ZcashFoundation/zebra/issues/10550)).
 
