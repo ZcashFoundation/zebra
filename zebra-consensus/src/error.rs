@@ -474,3 +474,8 @@ impl BlockError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+}
