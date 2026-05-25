@@ -333,7 +333,7 @@ impl BlockTemplateResponse {
             .sum::<amount::Result<Amount<NonNegative>>>()
             .expect("mempool tx fees must be non-negative");
 
-        let coinbase_txn = precomputed_coinbase.unwrap_or(
+        let coinbase_txn = precomputed_coinbase.unwrap_or_else(|| {
             TransactionTemplate::new_coinbase(
                 net,
                 height,
@@ -342,8 +342,8 @@ impl BlockTemplateResponse {
                 #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
                 zip233_amount,
             )
-            .expect("valid coinbase tx"),
-        );
+            .expect("valid coinbase tx")
+        });
 
         let default_roots = DefaultRoots::from_coinbase(
             net,
