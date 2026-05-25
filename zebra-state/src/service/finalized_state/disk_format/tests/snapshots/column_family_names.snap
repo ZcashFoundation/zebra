@@ -10,6 +10,7 @@ expression: cf_names
   "hash_by_height",
   "hash_by_tx_loc",
   "height_by_hash",
+  "history_node",
   "history_tree",
   "orchard_anchors",
   "orchard_note_commitment_subtree",

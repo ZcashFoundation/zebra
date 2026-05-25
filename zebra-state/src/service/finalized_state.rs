@@ -95,6 +95,7 @@ pub const STATE_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
     "orchard_note_commitment_subtree",
     // Chain
     "history_tree",
+    "history_node",
     "tip_chain_value_pool",
     BLOCK_INFO,
 ];
@@ -376,7 +377,7 @@ impl FinalizedState {
                 let history_tree_mut = Arc::make_mut(&mut history_tree);
                 let sapling_root = note_commitment_trees.sapling.root();
                 let orchard_root = note_commitment_trees.orchard.root();
-                history_tree_mut
+                let new_history_nodes = history_tree_mut
                     .push(&self.network(), block.clone(), &sapling_root, &orchard_root)
                     .map_err(Arc::new)
                     .map_err(ValidateContextError::from)?;
@@ -384,6 +385,7 @@ impl FinalizedState {
                 let treestate = Treestate {
                     note_commitment_trees,
                     history_tree,
+                    new_history_nodes,
                 };
 
                 (
@@ -399,7 +401,7 @@ impl FinalizedState {
             } => (
                 contextually_verified.height,
                 contextually_verified.hash,
-                FinalizedBlock::from_contextually_verified(contextually_verified, treestate),
+                FinalizedBlock::from_contextually_verified(*contextually_verified, treestate),
                 prev_note_commitment_trees,
             ),
         };
