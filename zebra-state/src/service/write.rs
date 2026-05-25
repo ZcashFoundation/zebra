@@ -1,6 +1,7 @@
 //! Writing blocks to the finalized and non-finalized states.
 
 use std::{
+    collections::HashSet,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -14,7 +15,7 @@ use tokio::sync::{
 use tracing::Span;
 use zebra_chain::{
     block::{self, Height},
-    transparent::EXTRA_ZEBRA_COINBASE_DATA,
+    transparent::{CoinbaseData, EXTRA_ZEBRA_COINBASE_DATA},
 };
 
 use crate::{
@@ -90,6 +91,7 @@ pub(crate) fn validate_and_commit_non_finalized(
         chain_tip_sender,
         non_finalized_state_sender,
         last_zebra_mined_log_height,
+        zebra_mined_block_progress,
         backup_dir_path,
     ),
     fields(chains = non_finalized_state.chain_count())
@@ -99,6 +101,7 @@ fn update_latest_chain_channels(
     chain_tip_sender: &mut ChainTipSender,
     non_finalized_state_sender: &watch::Sender<NonFinalizedState>,
     last_zebra_mined_log_height: &mut Option<Height>,
+    zebra_mined_block_progress: &mut ZebraMinedBlockProgress,
     backup_dir_path: Option<&Path>,
 ) -> block::Height {
     let best_chain = non_finalized_state.best_chain().expect("unexpected empty non-finalized state: must commit at least one block before updating channels");
@@ -109,7 +112,11 @@ fn update_latest_chain_channels(
         .clone();
     let tip_block = ChainTipBlock::from(tip_block);
 
-    log_if_mined_by_zebra(&tip_block, last_zebra_mined_log_height);
+    record_zebra_mined_block(
+        &tip_block,
+        last_zebra_mined_log_height,
+        zebra_mined_block_progress,
+    );
 
     let tip_block_height = tip_block.height;
 
@@ -265,6 +272,7 @@ impl WriteBlockWorkerTask {
         } = &mut self;
 
         let mut last_zebra_mined_log_height = None;
+        let mut zebra_mined_block_progress = ZebraMinedBlockProgress::default();
         let mut prev_finalized_note_commitment_trees = None;
 
         // Write all the finalized blocks sent by the state,
@@ -311,7 +319,11 @@ impl WriteBlockWorkerTask {
                     let tip_block = ChainTipBlock::from(finalized);
                     prev_finalized_note_commitment_trees = Some(note_commitment_trees);
 
-                    log_if_mined_by_zebra(&tip_block, &mut last_zebra_mined_log_height);
+                    record_zebra_mined_block(
+                        &tip_block,
+                        &mut last_zebra_mined_log_height,
+                        &mut zebra_mined_block_progress,
+                    );
 
                     chain_tip_sender.set_finalized_tip(tip_block);
                 }
@@ -373,6 +385,7 @@ impl WriteBlockWorkerTask {
                     chain_tip_sender,
                     non_finalized_state_sender,
                     &mut last_zebra_mined_log_height,
+                    &mut zebra_mined_block_progress,
                     backup_dir_path.as_deref(),
                 );
                 continue;
@@ -430,6 +443,7 @@ impl WriteBlockWorkerTask {
                 chain_tip_sender,
                 non_finalized_state_sender,
                 &mut last_zebra_mined_log_height,
+                &mut zebra_mined_block_progress,
                 backup_dir_path.as_deref(),
             );
 
@@ -474,12 +488,66 @@ impl WriteBlockWorkerTask {
     }
 }
 
+#[derive(Default)]
+struct ZebraMinedBlockProgress {
+    count: u64,
+    seen_hashes: HashSet<block::Hash>,
+    #[cfg(feature = "progress-bar")]
+    bar: Option<howudoin::Tx>,
+}
+
+impl ZebraMinedBlockProgress {
+    fn record(&mut self, tip_block: &ChainTipBlock) {
+        if !self.seen_hashes.insert(tip_block.hash) {
+            return;
+        }
+
+        self.count += 1;
+
+        metrics::counter!("state.zebra_mined.block.count").increment(1);
+
+        #[cfg(feature = "progress-bar")]
+        if !matches!(howudoin::cancelled(), Some(true)) {
+            let bar = self
+                .bar
+                .get_or_insert_with(|| howudoin::new_root().label("Zebra-Mined Blocks"));
+
+            bar.set_pos(self.count)
+                .desc(format!("Latest height {}", tip_block.height.0));
+        }
+    }
+}
+
 /// Log a message if this block was mined by Zebra.
 ///
 /// Does not detect early Zebra blocks, and blocks with custom coinbase transactions.
 /// Rate-limited to every 1000 blocks using `last_zebra_mined_log_height`.
+fn record_zebra_mined_block(
+    tip_block: &ChainTipBlock,
+    last_zebra_mined_log_height: &mut Option<Height>,
+    zebra_mined_block_progress: &mut ZebraMinedBlockProgress,
+) {
+    let Some(coinbase_data) = zebra_mined_coinbase_data(tip_block) else {
+        return;
+    };
+
+    zebra_mined_block_progress.record(tip_block);
+
+    log_if_mined_by_zebra(tip_block, coinbase_data, last_zebra_mined_log_height);
+}
+
+fn zebra_mined_coinbase_data(tip_block: &ChainTipBlock) -> Option<&CoinbaseData> {
+    let coinbase_data = tip_block.transactions[0].inputs()[0].extra_coinbase_data()?;
+
+    coinbase_data
+        .as_ref()
+        .starts_with(EXTRA_ZEBRA_COINBASE_DATA.as_bytes())
+        .then_some(coinbase_data)
+}
+
 fn log_if_mined_by_zebra(
     tip_block: &ChainTipBlock,
+    coinbase_data: &CoinbaseData,
     last_zebra_mined_log_height: &mut Option<Height>,
 ) {
     // This logs at most every 2-3 checkpoints, which seems fine.
@@ -494,51 +562,40 @@ fn log_if_mined_by_zebra(
         }
     };
 
-    // This code is rate-limited, so we can do expensive transformations here.
-    let coinbase_data = tip_block.transactions[0].inputs()[0]
-        .extra_coinbase_data()
-        .expect("valid blocks must start with a coinbase input")
-        .clone();
+    let text = String::from_utf8_lossy(coinbase_data.as_ref());
 
-    if coinbase_data
-        .as_ref()
-        .starts_with(EXTRA_ZEBRA_COINBASE_DATA.as_bytes())
-    {
-        let text = String::from_utf8_lossy(coinbase_data.as_ref());
+    *last_zebra_mined_log_height = Some(Height(height));
 
-        *last_zebra_mined_log_height = Some(Height(height));
+    // No need for hex-encoded data if it's exactly what we expected.
+    if coinbase_data.as_ref() == EXTRA_ZEBRA_COINBASE_DATA.as_bytes() {
+        info!(
+            %text,
+            %height,
+            hash = %tip_block.hash,
+            "looks like this block was mined by Zebra!"
+        );
+    } else {
+        // # Security
+        //
+        // Use the extra data as an allow-list, replacing unknown characters.
+        // This makes sure control characters and harmful messages don't get logged
+        // to the terminal.
+        let text = text.replace(
+            |c: char| {
+                !EXTRA_ZEBRA_COINBASE_DATA
+                    .to_ascii_lowercase()
+                    .contains(c.to_ascii_lowercase())
+            },
+            "?",
+        );
+        let data = hex::encode(coinbase_data.as_ref());
 
-        // No need for hex-encoded data if it's exactly what we expected.
-        if coinbase_data.as_ref() == EXTRA_ZEBRA_COINBASE_DATA.as_bytes() {
-            info!(
-                %text,
-                %height,
-                hash = %tip_block.hash,
-                "looks like this block was mined by Zebra!"
-            );
-        } else {
-            // # Security
-            //
-            // Use the extra data as an allow-list, replacing unknown characters.
-            // This makes sure control characters and harmful messages don't get logged
-            // to the terminal.
-            let text = text.replace(
-                |c: char| {
-                    !EXTRA_ZEBRA_COINBASE_DATA
-                        .to_ascii_lowercase()
-                        .contains(c.to_ascii_lowercase())
-                },
-                "?",
-            );
-            let data = hex::encode(coinbase_data.as_ref());
-
-            info!(
-                %text,
-                %data,
-                %height,
-                hash = %tip_block.hash,
-                "looks like this block was mined by Zebra!"
-            );
-        }
+        info!(
+            %text,
+            %data,
+            %height,
+            hash = %tip_block.hash,
+            "looks like this block was mined by Zebra!"
+        );
     }
 }
