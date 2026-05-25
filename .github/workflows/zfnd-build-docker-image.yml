@@ -387,7 +387,7 @@ jobs:
       # - `dev` for a pull request event
       - name: Docker Scout
         id: docker-scout
-        uses: docker/scout-action@bacf462e8d090c09660de30a6ccc718035f961e3 #v1.20.4
+        uses: docker/scout-action@cd72f264beff1cd72735de31148b9d3244a0234a #v1.21.0
         # We only run Docker Scout on the `runtime` target, as the other targets are not meant to be released
         # and are commonly used for testing, and thus are ephemeral.
         # TODO: Remove the `contains` check once we have a better way to determine if just new vulnerabilities are present.
