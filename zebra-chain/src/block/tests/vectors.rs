@@ -81,7 +81,11 @@ fn chain_value_pool_change_propagates_transaction_value_balance_errors() {
     // Two `MAX_MONEY` transparent outputs make the transaction-level output
     // sum exceed `MAX_MONEY`, so `value_balance` returns `Err`.
     let coinbase = Transaction::V1 {
-        inputs: vec![transparent::Input::new_coinbase(Height(1), vec![], None)],
+        inputs: vec![transparent::Input::Coinbase {
+            height: Height(1),
+            data: vec![],
+            sequence: 0xFFFF_FFFF,
+        }],
         outputs: vec![
             transparent::Output::new(max_money, transparent::Script::new(&[])),
             transparent::Output::new(max_money, transparent::Script::new(&[])),

@@ -22,6 +22,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `impl Description for (&sprout::joinsplit::JoinSplit<Groth16Proof>, &VerificationKeyBytes)`
   - `impl TryFrom<DescriptionWrapper<&T>> for Item` (use `Item::from_joinsplit` instead).
 
+### Added
+
+- `error::TransactionError`:
+  - `Amount`, `Balance`, `CoinbaseConstruction`, `Io`, `Other`, `TryFromSlice` variants
+  - `impl From<core::array::TryFromSliceError> for TransactionError`
+  - `impl From<zcash_script::Error> for TransactionError`
+  - `impl From<io::Error> for TransactionError`
+  - `impl From<zcash_primitives::transaction::builder::Error> for TransactionError`
+  - `impl From<zcash_protocol::value::BalanceError> for TransactionError`
+  - `impl From<zcash_transparent::builder::Error> for TransactionError`
+  - `impl From<zebra_chain::amount::Error> for TransactionError`
+
 ## [5.0.2] - 2026-04-17
 
 This release fixes an important security issue:
