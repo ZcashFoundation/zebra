@@ -16,6 +16,16 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   the per-type `max_allocation()` caps from PR #10494
   ([GHSA-xr93-pcq3-pxf8](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-xr93-pcq3-pxf8)).
   CWE-770.
+- Cap `block::Hash::max_allocation` at `MAX_BLOCK_LOCATOR_LENGTH = 101`
+  (matching Bitcoin Core's `MAX_LOCATOR_SZ` in `net_processing.cpp`) and
+  `CountedHeader::max_allocation` at the existing
+  `MAX_HEADERS_PER_MESSAGE = 160` constant (already enforced on the
+  sending side and at the codec level for `read_headers`). The previous
+  values were derived from `MAX_PROTOCOL_MESSAGE_LEN` and returned 65,535
+  and ~1,409 respectively, allowing a post-handshake peer to force ~2 MiB
+  of upfront `Vec` preallocation per `getblocks`/`getheaders` message
+  before any payload bytes were read. Same fix shape as
+  GHSA-xr93-pcq3-pxf8 for `AddrV1`/`AddrV2` (PR #10494). CWE-770.
 
 ### Added
 
