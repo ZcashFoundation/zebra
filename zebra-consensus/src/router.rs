@@ -143,6 +143,14 @@ impl RouterError {
         }
     }
 
+    /// Returns `true` if this error is a transparent input timeout.
+    pub fn is_transparent_input_not_found(&self) -> bool {
+        match self {
+            RouterError::Block { source, .. } => source.is_transparent_input_not_found(),
+            RouterError::Checkpoint { .. } => false,
+        }
+    }
+
     /// Returns a suggested misbehaviour score increment for a certain error.
     pub fn misbehavior_score(&self) -> u32 {
         // TODO: Adjust these values based on zcashd (#9258).

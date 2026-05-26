@@ -1223,6 +1223,16 @@ where
                 debug!(error = ?e, "block was already verified or committed, possibly from a previous sync run, continuing");
                 false
             }
+            BlockDownloadVerifyError::Invalid { error, .. }
+                if error.is_transparent_input_not_found() =>
+            {
+                debug!(
+                    error = ?e,
+                    "transparent input UTXO lookup timed out, \
+                     will retry on next sync attempt, continuing"
+                );
+                false
+            }
 
             // Structural matches: direct
             BlockDownloadVerifyError::CancelledDuringDownload { .. }

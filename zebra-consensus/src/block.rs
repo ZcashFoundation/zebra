@@ -106,6 +106,12 @@ impl VerifyBlockError {
         }
     }
 
+    /// Returns `true` if this error is a transparent input timeout
+    /// (`TransparentInputNotFound` from an `AwaitUtxo` `Elapsed`).
+    pub fn is_transparent_input_not_found(&self) -> bool {
+        matches!(self, VerifyBlockError::Transaction(TransactionError::TransparentInputNotFound))
+    }
+
     /// Returns a suggested misbehaviour score increment for a certain error.
     pub fn misbehavior_score(&self) -> u32 {
         // TODO: Adjust these values based on zcashd (#9258).
