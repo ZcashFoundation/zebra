@@ -203,10 +203,10 @@ use common::{
     },
     lightwalletd::{can_spawn_lightwalletd_for_rpc, spawn_lightwalletd_for_rpc},
     sync::{
-        create_cached_database_height, sync_until, MempoolBehavior, LARGE_CHECKPOINT_TEST_HEIGHT,
-        LARGE_CHECKPOINT_TIMEOUT, MEDIUM_CHECKPOINT_TEST_HEIGHT, STOP_AT_HEIGHT_REGEX,
-        STOP_ON_LOAD_TIMEOUT, SYNC_FINISHED_REGEX, TINY_CHECKPOINT_TEST_HEIGHT,
-        TINY_CHECKPOINT_TIMEOUT,
+        create_cached_database_height, sync_until, MempoolBehavior,
+        LARGE_CHECKPOINT_MEMPOOL_TIMEOUT, LARGE_CHECKPOINT_TEST_HEIGHT, LARGE_CHECKPOINT_TIMEOUT,
+        MEDIUM_CHECKPOINT_TEST_HEIGHT, STOP_AT_HEIGHT_REGEX, STOP_ON_LOAD_TIMEOUT,
+        SYNC_FINISHED_REGEX, TINY_CHECKPOINT_TEST_HEIGHT, TINY_CHECKPOINT_TIMEOUT,
     },
     test_type::TestType::{self, *},
 };
@@ -1214,7 +1214,7 @@ fn sync_large_checkpoints_mempool_mainnet() -> Result<()> {
         MEDIUM_CHECKPOINT_TEST_HEIGHT,
         &Mainnet,
         STOP_AT_HEIGHT_REGEX,
-        LARGE_CHECKPOINT_TIMEOUT,
+        LARGE_CHECKPOINT_MEMPOOL_TIMEOUT,
         None,
         MempoolBehavior::ForceActivationAt(TINY_CHECKPOINT_TEST_HEIGHT),
         // checkpoint sync is irrelevant here - all tested checkpoints are mandatory

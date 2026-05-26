@@ -68,6 +68,11 @@ pub const TINY_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(240);
 // TODO: reduce to 180 when #6506 is fixed
 pub const LARGE_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(240);
 
+/// The maximum amount of time Zebra should take to sync medium checkpoints with mempool enabled.
+///
+/// This path depends on external network peers and can be slower than empty-checkpoint sync in CI.
+pub const LARGE_CHECKPOINT_MEMPOOL_TIMEOUT: Duration = Duration::from_secs(360);
+
 /// The maximum time to wait for Zebrad to synchronize up to the chain tip starting from a
 /// partially synchronized state.
 ///
