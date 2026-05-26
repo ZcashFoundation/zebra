@@ -11,7 +11,7 @@ use zebra_test::service_extensions::IsReady;
 
 use crate::{
     peer::{client::MissingInventoryCollector, ClientTestHarness},
-    protocol::external::InventoryHash,
+    protocol::{external::InventoryHash, internal::InventoryResponse},
     PeerError, Request, SharedPeerError,
 };
 
@@ -245,6 +245,69 @@ fn missing_inv_collector_ignores_local_registry_errors() {
     let response = Err(SharedPeerError::from(PeerError::NotFoundRegistry(vec![
         InventoryHash::from(block_hash),
     ])));
+
+    let (inv_collector, mut inv_receiver) = broadcast::channel(1);
+    let transient_addr = "0.0.0.0:0".parse().unwrap();
+
+    // Keep the channel open, so we don't get a `Closed` error.
+    let _inv_channel_guard = inv_collector.clone();
+
+    let missing_inv =
+        MissingInventoryCollector::new(&request, Some(inv_collector), Some(transient_addr))
+            .expect("unexpected invalid collector: arguments should be valid");
+
+    missing_inv.send(&response);
+
+    let recv_result = inv_receiver.try_recv();
+    assert_eq!(recv_result, Err(broadcast::error::TryRecvError::Empty));
+}
+
+/// Make sure MissingInventoryCollector forwards real peer `notfound` responses.
+#[test]
+fn missing_inv_collector_reports_peer_notfound_inventory() {
+    let _init_guard = zebra_test::init();
+
+    let block_hash = block::Hash([0; 32]);
+    let request = Request::BlocksByHash(iter::once(block_hash).collect());
+    let response = Err(SharedPeerError::from(PeerError::NotFoundResponse(vec![
+        InventoryHash::from(block_hash),
+    ])));
+
+    let (inv_collector, mut inv_receiver) = broadcast::channel(1);
+    let transient_addr = "0.0.0.0:0".parse().unwrap();
+
+    // Keep the channel open, so we don't get a `Closed` error.
+    let _inv_channel_guard = inv_collector.clone();
+
+    let missing_inv =
+        MissingInventoryCollector::new(&request, Some(inv_collector), Some(transient_addr))
+            .expect("unexpected invalid collector: arguments should be valid");
+
+    missing_inv.send(&response);
+
+    let recv_result = inv_receiver
+        .try_recv()
+        .expect("notfound response should update the missing inventory registry");
+
+    let InventoryResponse::Missing((hashes, peer)) = recv_result else {
+        panic!("expected a missing inventory update");
+    };
+
+    assert_eq!(peer, transient_addr);
+    assert_eq!(
+        hashes.iter().copied().collect::<Vec<_>>(),
+        vec![InventoryHash::from(block_hash)]
+    );
+}
+
+/// Make sure MissingInventoryCollector does not treat transport failures as missing inventory.
+#[test]
+fn missing_inv_collector_ignores_transport_errors() {
+    let _init_guard = zebra_test::init();
+
+    let block_hash = block::Hash([0; 32]);
+    let request = Request::BlocksByHash(iter::once(block_hash).collect());
+    let response = Err(SharedPeerError::from(PeerError::ConnectionReceiveTimeout));
 
     let (inv_collector, mut inv_receiver) = broadcast::channel(1);
     let transient_addr = "0.0.0.0:0".parse().unwrap();

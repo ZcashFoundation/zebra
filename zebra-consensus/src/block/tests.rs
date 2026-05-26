@@ -4,7 +4,7 @@
 
 use color_eyre::eyre::{eyre, Report};
 use once_cell::sync::Lazy;
-use tower::{buffer::Buffer, util::BoxService};
+use tower::{buffer::Buffer, service_fn, util::BoxService};
 
 use zebra_chain::{
     amount::{DeferredPoolBalanceChange, MAX_MONEY},
@@ -14,7 +14,7 @@ use zebra_chain::{
         },
         Block, Height,
     },
-    parameters::{subsidy::block_subsidy, NetworkUpgrade},
+    parameters::{subsidy::block_subsidy, Network, NetworkUpgrade},
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
     transaction::{arbitrary::transaction_to_fake_v5, LockTime, Transaction},
     work::difficulty::{ParameterDifficulty as _, INVALID_COMPACT_DIFFICULTY},
@@ -122,6 +122,54 @@ static INVALID_COINBASE_TRANSCRIPT: Lazy<
         ),
     ]
 });
+
+#[tokio::test]
+async fn wrapped_duplicate_commit_error_is_returned_as_commit_error() -> Result<(), Report> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let block: Arc<Block> =
+        Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])?.into();
+
+    let state_service = service_fn(|request| async move {
+        match request {
+            zs::Request::KnownBlock(_) => Ok(zs::Response::KnownBlock(None)),
+            zs::Request::CommitSemanticallyVerifiedBlock(_) => {
+                let duplicate =
+                    zs::CommitBlockError::new_duplicate(None, zs::KnownBlock::Finalized);
+                let wrapped = zs::CommitSemanticallyVerifiedError::from(duplicate);
+
+                Err::<zs::Response, BoxError>(Box::new(wrapped))
+            }
+            _ => unreachable!("unexpected state request"),
+        }
+    });
+
+    let transaction_verifier = service_fn(|request: transaction::Request| async move {
+        match request {
+            transaction::Request::Block { transaction, .. } => Ok(transaction::Response::Block {
+                tx_id: transaction.unmined_id(),
+                miner_fee: None,
+                sigops: 0,
+            }),
+            _ => unreachable!("unexpected transaction request"),
+        }
+    });
+
+    let mut verifier = SemanticBlockVerifier::new(&network, state_service, transaction_verifier);
+
+    let error = verifier
+        .ready()
+        .await?
+        .call(Request::Commit(block))
+        .await
+        .expect_err("duplicate commit should fail verification");
+
+    assert!(matches!(error, VerifyBlockError::Commit(_)));
+    assert!(error.is_duplicate_request());
+
+    Ok(())
+}
 
 // TODO: enable this test after implementing contextual verification
 // #[tokio::test]

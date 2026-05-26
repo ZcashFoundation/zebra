@@ -23,6 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Fixed
 
+- Prevent high-concurrency block sync from poisoning peer routing after
+  transport failures or timeouts. Zebra now updates the missing-inventory
+  registry only for explicit `notfound` responses, gives missing block
+  downloads a bounded in-place retry before newer in-flight blocks, and uses a
+  short restart backoff when a failed sync run still makes progress.
+
 - Avoid panicking in the address-book ban path when `network.max_connections_per_ip > 1`. Guard the optional `most_recent_by_ip` cache instead of unwrapping it, so a ban-threshold misbehavior update no longer crashes the address-book updater and poisons the shared mutex ([#10580](https://github.com/ZcashFoundation/zebra/issues/10580))
 
 ## [Zebra 4.4.1](https://github.com/ZcashFoundation/zebra/releases/tag/v4.4.1) - 2026-05-04

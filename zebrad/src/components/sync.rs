@@ -2,7 +2,14 @@
 //!
 //! It is used when Zebra is a long way behind the current chain tip.
 
-use std::{cmp::max, collections::HashSet, convert, pin::Pin, task::Poll, time::Duration};
+use std::{
+    cmp::max,
+    collections::{HashMap, HashSet},
+    convert,
+    pin::Pin,
+    task::Poll,
+    time::Duration,
+};
 
 use color_eyre::eyre::{eyre, Report};
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -47,6 +54,47 @@ pub use progress::show_block_chain_progress;
 pub use recent_sync_lengths::RecentSyncLengths;
 pub use status::SyncStatus;
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum MissingInventorySource {
+    Peer,
+    Registry,
+}
+
+#[derive(Debug)]
+struct PendingBlockHashes {
+    hashes: IndexSet<block::Hash>,
+    has_missing_inventory_retry: bool,
+}
+
+impl PendingBlockHashes {
+    fn new(hashes: IndexSet<block::Hash>) -> Self {
+        Self {
+            hashes,
+            has_missing_inventory_retry: false,
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.hashes.is_empty()
+    }
+
+    fn len(&self) -> usize {
+        self.hashes.len()
+    }
+
+    fn prepend_missing_inventory_retry<I>(&mut self, hash: block::Hash, interrupted_hashes: I)
+    where
+        I: IntoIterator<Item = block::Hash>,
+    {
+        let existing_hashes = std::mem::take(&mut self.hashes);
+
+        self.hashes.insert(hash);
+        self.hashes.extend(interrupted_hashes);
+        self.hashes.extend(existing_hashes);
+        self.has_missing_inventory_retry = true;
+    }
+}
+
 /// Controls the number of peers used for each ObtainTips and ExtendTips request.
 const FANOUT: usize = 3;
 
@@ -59,6 +107,13 @@ const FANOUT: usize = 3;
 /// We also hedge requests, so we may retry up to twice this many times. Hedged
 /// retries may be concurrent, inner retries are sequential.
 const BLOCK_DOWNLOAD_RETRY_LIMIT: usize = 3;
+
+/// Controls how many times one sync run will prioritize a missing-inventory
+/// retry for the same block hash before restarting sync.
+///
+/// Counts prioritized requeues, not the failed download that discovered the
+/// missing inventory.
+const MISSING_INVENTORY_RETRY_LIMIT: usize = 3;
 
 /// A lower bound on the user-specified checkpoint verification concurrency limit.
 ///
@@ -204,6 +259,12 @@ const FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT: HeightDiff = 100;
 /// sometimes get stuck in a failure loop, due to leftover downloads from
 /// previous sync runs.
 const SYNC_RESTART_DELAY: Duration = Duration::from_secs(67);
+
+/// The delay after a failed sync run that still advanced the best chain tip.
+///
+/// This keeps progress responsive without turning repeated "one block then
+/// failure" cycles into a tight peer-set loop.
+const SYNC_FAILED_PROGRESS_RESTART_DELAY: Duration = Duration::from_secs(5);
 
 /// In regtest, use a much shorter restart delay so that downstream nodes pick up
 /// newly-mined blocks quickly (e.g. after `generate(N)` in integration tests).
@@ -381,6 +442,9 @@ where
     /// The tips that the syncer is currently following.
     prospective_tips: HashSet<CheckedTip>,
 
+    /// Missing-inventory retries for each block hash in the current sync run.
+    missing_inventory_retry_count_by_hash: HashMap<block::Hash, usize>,
+
     /// The lengths of recent sync responses.
     recent_syncs: RecentSyncLengths,
 
@@ -523,6 +587,7 @@ where
             state,
             latest_chain_tip,
             prospective_tips: HashSet::new(),
+            missing_inventory_retry_count_by_hash: HashMap::new(),
             recent_syncs,
             past_lookahead_limit_receiver,
             misbehavior_sender,
@@ -539,23 +604,39 @@ where
         self.request_genesis().await?;
 
         loop {
-            if self.try_to_sync().await.is_err() {
+            let start_height = self.latest_chain_tip.best_tip_height();
+            let sync_result = self.try_to_sync().await;
+            let sync_failed = sync_result.is_err();
+
+            if sync_failed {
                 self.downloads.cancel_all();
             }
 
             self.update_metrics();
 
-            let restart_delay = if self.is_regtest {
-                REGTEST_SYNC_RESTART_DELAY
-            } else {
-                SYNC_RESTART_DELAY
+            let made_progress = self.latest_chain_tip.best_tip_height() > start_height;
+            let restart_delay = match (self.is_regtest, made_progress, sync_failed) {
+                (true, _, _) => REGTEST_SYNC_RESTART_DELAY,
+                (false, true, false) => Duration::ZERO,
+                (false, true, true) => SYNC_FAILED_PROGRESS_RESTART_DELAY,
+                (false, false, _) => SYNC_RESTART_DELAY,
             };
-            info!(
-                timeout = ?restart_delay,
-                state_tip = ?self.latest_chain_tip.best_tip_height(),
-                "waiting to restart sync"
-            );
-            sleep(restart_delay).await;
+
+            if restart_delay.is_zero() {
+                info!(
+                    state_tip = ?self.latest_chain_tip.best_tip_height(),
+                    "continuing sync after progress"
+                );
+            } else {
+                info!(
+                    timeout = ?restart_delay,
+                    made_progress,
+                    sync_failed,
+                    state_tip = ?self.latest_chain_tip.best_tip_height(),
+                    "waiting to restart sync"
+                );
+                sleep(restart_delay).await;
+            }
         }
     }
 
@@ -574,12 +655,13 @@ where
     #[instrument(skip(self))]
     async fn try_to_sync(&mut self) -> Result<(), Report> {
         self.prospective_tips = HashSet::new();
+        self.missing_inventory_retry_count_by_hash.clear();
 
         info!(
             state_tip = ?self.latest_chain_tip.best_tip_height(),
             "starting sync, obtaining new tips"
         );
-        let mut extra_hashes = timeout(SYNC_RESTART_DELAY, self.obtain_tips())
+        let mut pending_hashes = timeout(SYNC_RESTART_DELAY, self.obtain_tips())
             .await
             .map_err(Into::into)
             // TODO: replace with flatten() when it stabilises (#70142)
@@ -590,9 +672,12 @@ where
             })?;
         self.update_metrics();
 
-        while !self.prospective_tips.is_empty() || !extra_hashes.is_empty() {
+        while !self.prospective_tips.is_empty()
+            || !pending_hashes.is_empty()
+            || !self.downloads.is_empty()
+        {
             // Avoid hangs due to service readiness or other internal operations
-            extra_hashes = timeout(BLOCK_VERIFY_TIMEOUT, self.try_to_sync_once(extra_hashes))
+            pending_hashes = timeout(BLOCK_VERIFY_TIMEOUT, self.try_to_sync_once(pending_hashes))
                 .await
                 .map_err(Into::into)
                 // TODO: replace with flatten() when it stabilises (#70142)
@@ -604,20 +689,28 @@ where
         Ok(())
     }
 
-    /// Tries to synchronize the chain once, using the existing `extra_hashes`.
+    /// Tries to synchronize the chain once, using the existing pending block hashes.
     ///
     /// Tries to extend the existing tips and download the missing blocks.
     ///
-    /// Returns `Ok(extra_hashes)` if it was able to extend once and synchronize sone of the chain.
+    /// Returns `Ok(pending_hashes)` if it was able to extend once and synchronize some of the chain.
     /// Returns `Err` if there was an unrecoverable error and restarting the synchronization is
     /// necessary.
-    #[instrument(skip(self, extra_hashes))]
+    #[instrument(skip(self, pending_hashes))]
     async fn try_to_sync_once(
         &mut self,
-        mut extra_hashes: IndexSet<block::Hash>,
-    ) -> Result<IndexSet<block::Hash>, Report> {
+        mut pending_hashes: PendingBlockHashes,
+    ) -> Result<PendingBlockHashes, Report> {
+        // Sync advances through four paths: drain ready in-flight blocks, wait
+        // for lookahead capacity, retry a missing predecessor in isolation, or
+        // request pending blocks and more hashes from the current tips.
         // Check whether any block tasks are currently ready.
         while let Poll::Ready(Some(rsp)) = futures::poll!(self.downloads.next()) {
+            if self.queue_peer_missing_inventory_retry(&mut pending_hashes, &rsp)? {
+                self.update_metrics();
+                continue;
+            }
+
             // Some temporary errors are ignored, and syncing continues with other blocks.
             // If it turns out they were actually important, syncing will run out of blocks, and
             // the syncer will reset itself.
@@ -629,62 +722,102 @@ where
         //
         // To avoid a deadlock or long waits for blocks to expire, we ignore the download
         // lookahead limit when there are only a small number of blocks waiting.
-        while self.downloads.in_flight() >= self.lookahead_limit(extra_hashes.len())
-            || (self.downloads.in_flight() >= self.lookahead_limit(extra_hashes.len()) / 2
-                && self.past_lookahead_limit_receiver.cloned_watch_data())
+        while !pending_hashes.has_missing_inventory_retry
+            && (self.downloads.in_flight() >= self.lookahead_limit(pending_hashes.len())
+                || (self.downloads.in_flight() >= self.lookahead_limit(pending_hashes.len()) / 2
+                    && self.past_lookahead_limit_receiver.cloned_watch_data()))
         {
             trace!(
                 tips.len = self.prospective_tips.len(),
                 in_flight = self.downloads.in_flight(),
-                extra_hashes = extra_hashes.len(),
-                lookahead_limit = self.lookahead_limit(extra_hashes.len()),
+                pending_hashes = pending_hashes.len(),
+                lookahead_limit = self.lookahead_limit(pending_hashes.len()),
                 state_tip = ?self.latest_chain_tip.best_tip_height(),
                 "waiting for pending blocks",
             );
 
             let response = self.downloads.next().await.expect("downloads is nonempty");
 
+            if self.queue_peer_missing_inventory_retry(&mut pending_hashes, &response)? {
+                self.update_metrics();
+                continue;
+            }
+
             self.handle_block_response(response)?;
             self.update_metrics();
         }
 
         // Once we're below the lookahead limit, we can request more blocks or hashes.
-        if !extra_hashes.is_empty() {
+        if pending_hashes.is_empty()
+            && self.prospective_tips.is_empty()
+            && !self.downloads.is_empty()
+        {
+            debug!(
+                in_flight = self.downloads.in_flight(),
+                state_tip = ?self.latest_chain_tip.best_tip_height(),
+                "waiting for in-flight blocks before restarting sync",
+            );
+
+            let response = self.downloads.next().await.expect("downloads is nonempty");
+
+            if self.queue_peer_missing_inventory_retry(&mut pending_hashes, &response)? {
+                self.update_metrics();
+                return Ok(pending_hashes);
+            }
+
+            self.handle_block_response(response)?;
+        } else if pending_hashes.has_missing_inventory_retry && !pending_hashes.is_empty() {
             debug!(
                 tips.len = self.prospective_tips.len(),
                 in_flight = self.downloads.in_flight(),
-                extra_hashes = extra_hashes.len(),
-                lookahead_limit = self.lookahead_limit(extra_hashes.len()),
+                pending_hashes = pending_hashes.len(),
+                lookahead_limit = self.lookahead_limit(pending_hashes.len()),
+                state_tip = ?self.latest_chain_tip.best_tip_height(),
+                "requesting missing block retry before waiting for in-flight blocks",
+            );
+
+            // Isolate the missing predecessor so its retry does not compete
+            // with newer hashes for lookahead capacity.
+            let remaining_hashes = pending_hashes.hashes.split_off(1);
+            let response = self.request_blocks(pending_hashes.hashes).await;
+            pending_hashes = Self::handle_hash_response(response)?;
+            pending_hashes.hashes.extend(remaining_hashes);
+        } else if !pending_hashes.is_empty() {
+            debug!(
+                tips.len = self.prospective_tips.len(),
+                in_flight = self.downloads.in_flight(),
+                pending_hashes = pending_hashes.len(),
+                lookahead_limit = self.lookahead_limit(pending_hashes.len()),
                 state_tip = ?self.latest_chain_tip.best_tip_height(),
                 "requesting more blocks",
             );
 
-            let response = self.request_blocks(extra_hashes).await;
-            extra_hashes = Self::handle_hash_response(response)?;
+            let response = self.request_blocks(pending_hashes.hashes).await;
+            pending_hashes = Self::handle_hash_response(response)?;
         } else {
             info!(
                 tips.len = self.prospective_tips.len(),
                 in_flight = self.downloads.in_flight(),
-                extra_hashes = extra_hashes.len(),
-                lookahead_limit = self.lookahead_limit(extra_hashes.len()),
+                pending_hashes = pending_hashes.len(),
+                lookahead_limit = self.lookahead_limit(pending_hashes.len()),
                 state_tip = ?self.latest_chain_tip.best_tip_height(),
                 "extending tips",
             );
 
-            extra_hashes = self.extend_tips().await.map_err(|e| {
+            pending_hashes = self.extend_tips().await.map_err(|e| {
                 info!("temporary error extending tips: {:#}", e);
                 e
             })?;
         }
         self.update_metrics();
 
-        Ok(extra_hashes)
+        Ok(pending_hashes)
     }
 
     /// Given a block_locator list fan out request for subsequent hashes to
     /// multiple peers
     #[instrument(skip(self))]
-    async fn obtain_tips(&mut self) -> Result<IndexSet<block::Hash>, Report> {
+    async fn obtain_tips(&mut self) -> Result<PendingBlockHashes, Report> {
         let stage_start = std::time::Instant::now();
 
         let block_locator = self
@@ -752,9 +885,9 @@ where
                     // block we want to download. So we just accept any
                     // out-of-order first hashes.
 
-                    // We use the last hash for the tip, and we want to avoid bad
-                    // tips from zcashd's quirk of appending an unrelated hash.
-                    // So we discard the last hash on mainnet/testnet.
+                    // We use the last hash for the tip. zcashd can append
+                    // unrelated inventory, so we discard the last hash from
+                    // multi-hash responses on mainnet/testnet.
                     // (We don't need to worry about missed downloads, because we
                     // will pick them up again in ExtendTips.)
                     //
@@ -769,6 +902,10 @@ where
                     } else {
                         match hashes.as_slice() {
                             [] => continue,
+                            // A single hash can be the next near-tip block. It
+                            // does not form a prospective tip yet, but it is
+                            // still worth downloading.
+                            [_single] => hashes.as_slice(),
                             [rest @ .., _last] => rest,
                         }
                     };
@@ -794,29 +931,28 @@ where
 
                     trace!(?unknown_hashes);
 
-                    let new_tip = if let Some(end) = unknown_hashes.rchunks_exact(2).next() {
-                        CheckedTip {
+                    if let Some(end) = unknown_hashes.rchunks_exact(2).next() {
+                        let new_tip = CheckedTip {
                             tip: end[0],
                             expected_next: end[1],
+                        };
+
+                        // Make sure we get the same tips, regardless of the
+                        // order of peer responses
+                        if !download_set.contains(&new_tip.expected_next) {
+                            debug!(?new_tip,
+                                        "adding new prospective tip, and removing existing tips in the new block hash list");
+                            self.prospective_tips
+                                .retain(|t| !unknown_hashes.contains(&t.expected_next));
+                            self.prospective_tips.insert(new_tip);
+                        } else {
+                            debug!(
+                                ?new_tip,
+                                "discarding prospective tip: already in download set"
+                            );
                         }
                     } else {
-                        debug!("discarding response that extends only one block");
-                        continue;
-                    };
-
-                    // Make sure we get the same tips, regardless of the
-                    // order of peer responses
-                    if !download_set.contains(&new_tip.expected_next) {
-                        debug!(?new_tip,
-                                        "adding new prospective tip, and removing existing tips in the new block hash list");
-                        self.prospective_tips
-                            .retain(|t| !unknown_hashes.contains(&t.expected_next));
-                        self.prospective_tips.insert(new_tip);
-                    } else {
-                        debug!(
-                            ?new_tip,
-                            "discarding prospective tip: already in download set"
-                        );
+                        debug!("downloading one-block extension without adding a prospective tip");
                     }
 
                     // security: the first response determines our download order
@@ -863,7 +999,7 @@ where
     }
 
     #[instrument(skip(self))]
-    async fn extend_tips(&mut self) -> Result<IndexSet<block::Hash>, Report> {
+    async fn extend_tips(&mut self) -> Result<PendingBlockHashes, Report> {
         let stage_start = std::time::Instant::now();
 
         let tips = std::mem::take(&mut self.prospective_tips);
@@ -898,9 +1034,9 @@ where
                         debug!(first = ?hashes.first(), len = ?hashes.len());
                         trace!(?hashes);
 
-                        // zcashd sometimes appends an unrelated hash at the
-                        // start or end of its response. Check the first hash
-                        // against the previous response, and discard mismatches.
+                        // zcashd can append unrelated inventory at the start
+                        // or end of a response. Check the first hash against
+                        // the previous response, and discard mismatches.
                         let unknown_hashes = match hashes.as_slice() {
                             [expected_hash, rest @ ..] if expected_hash == &tip.expected_next => {
                                 rest
@@ -935,41 +1071,45 @@ where
                             }
                         };
 
-                        // We use the last hash for the tip, and we want to avoid
-                        // bad tips. So we discard the last hash. (We don't need
-                        // to worry about missed downloads, because we will pick
-                        // them up again in the next ExtendTips.)
+                        // We use the last hash for the tip. To avoid bad tips
+                        // from unrelated trailing inventory, discard the last
+                        // hash from multi-hash responses.
                         let unknown_hashes = match unknown_hashes {
                             [] => continue,
+                            // Near the tip, a single matching successor is a
+                            // useful block even before it can form a new
+                            // prospective tip.
+                            [_single] => unknown_hashes,
                             [rest @ .., _last] => rest,
                         };
 
-                        let new_tip = if let Some(end) = unknown_hashes.rchunks_exact(2).next() {
-                            CheckedTip {
+                        if let Some(end) = unknown_hashes.rchunks_exact(2).next() {
+                            let new_tip = CheckedTip {
                                 tip: end[0],
                                 expected_next: end[1],
+                            };
+
+                            // Make sure we get the same tips, regardless of the
+                            // order of peer responses
+                            if !download_set.contains(&new_tip.expected_next) {
+                                debug!(?new_tip,
+                                            "adding new prospective tip, and removing any existing tips in the new block hash list");
+                                self.prospective_tips
+                                    .retain(|t| !unknown_hashes.contains(&t.expected_next));
+                                self.prospective_tips.insert(new_tip);
+                            } else {
+                                debug!(
+                                    ?new_tip,
+                                    "discarding prospective tip: already in download set"
+                                );
                             }
                         } else {
-                            debug!("discarding response that extends only one block");
-                            continue;
-                        };
-
-                        trace!(?unknown_hashes);
-
-                        // Make sure we get the same tips, regardless of the
-                        // order of peer responses
-                        if !download_set.contains(&new_tip.expected_next) {
-                            debug!(?new_tip,
-                                            "adding new prospective tip, and removing any existing tips in the new block hash list");
-                            self.prospective_tips
-                                .retain(|t| !unknown_hashes.contains(&t.expected_next));
-                            self.prospective_tips.insert(new_tip);
-                        } else {
                             debug!(
-                                ?new_tip,
-                                "discarding prospective tip: already in download set"
+                                "downloading one-block extension without adding a prospective tip"
                             );
                         }
+
+                        trace!(?unknown_hashes);
 
                         // security: the first response determines our download order
                         //
@@ -1072,7 +1212,7 @@ where
     async fn request_blocks(
         &mut self,
         mut hashes: IndexSet<block::Hash>,
-    ) -> Result<IndexSet<block::Hash>, BlockDownloadVerifyError> {
+    ) -> Result<PendingBlockHashes, BlockDownloadVerifyError> {
         let lookahead_limit = self.lookahead_limit(hashes.len());
 
         debug!(
@@ -1081,17 +1221,26 @@ where
             "requesting blocks",
         );
 
-        let extra_hashes = if hashes.len() > lookahead_limit {
+        let deferred_hashes = if hashes.len() > lookahead_limit {
             hashes.split_off(lookahead_limit)
         } else {
             IndexSet::new()
         };
 
-        for hash in hashes.into_iter() {
-            self.downloads.download_and_verify(hash).await?;
+        for hash in hashes {
+            match self.downloads.download_and_verify(hash).await {
+                Ok(()) => {}
+                Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { hash }) => {
+                    debug!(
+                        ?hash,
+                        "block request was already queued, continuing with newer hashes"
+                    );
+                }
+                Err(error) => return Err(error),
+            }
         }
 
-        Ok(extra_hashes)
+        Ok(PendingBlockHashes::new(deferred_hashes))
     }
 
     /// The configured lookahead limit, based on the currently verified height,
@@ -1161,11 +1310,13 @@ where
     /// See [`Self::handle_response`] for more details.
     #[allow(unknown_lints)]
     fn handle_hash_response(
-        response: Result<IndexSet<block::Hash>, BlockDownloadVerifyError>,
-    ) -> Result<IndexSet<block::Hash>, BlockDownloadVerifyError> {
+        response: Result<PendingBlockHashes, BlockDownloadVerifyError>,
+    ) -> Result<PendingBlockHashes, BlockDownloadVerifyError> {
         match response {
-            Ok(extra_hashes) => Ok(extra_hashes),
-            Err(_) => Self::handle_response(response).map(|()| IndexSet::new()),
+            Ok(pending_hashes) => Ok(pending_hashes),
+            Err(_) => {
+                Self::handle_response(response).map(|()| PendingBlockHashes::new(IndexSet::new()))
+            }
         }
     }
 
@@ -1214,6 +1365,92 @@ where
         metrics::gauge!("sync.downloads.in_flight",).set(self.downloads.in_flight() as f64);
     }
 
+    fn missing_inventory_source_from_download_error(
+        error: &BoxError,
+    ) -> Option<MissingInventorySource> {
+        let peer_error = error.downcast_ref::<zn::SharedPeerError>()?;
+
+        if peer_error.is_inventory_not_found_by_registry() {
+            Some(MissingInventorySource::Registry)
+        } else if peer_error.is_inventory_not_found() {
+            Some(MissingInventorySource::Peer)
+        } else {
+            None
+        }
+    }
+
+    fn missing_inventory_hash_from_peer_response(
+        response: &Result<(Height, block::Hash), BlockDownloadVerifyError>,
+    ) -> Option<block::Hash> {
+        let Err(BlockDownloadVerifyError::DownloadFailed { error, hash }) = response else {
+            return None;
+        };
+
+        if Self::missing_inventory_source_from_download_error(error)
+            == Some(MissingInventorySource::Peer)
+        {
+            Some(*hash)
+        } else {
+            None
+        }
+    }
+
+    fn queue_peer_missing_inventory_retry(
+        &mut self,
+        pending_hashes: &mut PendingBlockHashes,
+        response: &Result<(Height, block::Hash), BlockDownloadVerifyError>,
+    ) -> Result<bool, BlockDownloadVerifyError> {
+        let Some(hash) = Self::missing_inventory_hash_from_peer_response(response) else {
+            return Ok(false);
+        };
+
+        let retry_count = self.record_missing_inventory_retry(hash)?;
+        let interrupted_hashes = self.downloads.cancel_all_and_return_hashes();
+        let interrupted_hash_count = interrupted_hashes.len();
+
+        // Missing inventory is not a sync-run failure. Cancel newer in-flight
+        // work and keep it behind the missing hash, so verifier capacity is not
+        // occupied by blocks waiting on a predecessor gap.
+        pending_hashes.prepend_missing_inventory_retry(hash, interrupted_hashes);
+        metrics::counter!("sync.missing_inventory.retry.count").increment(1);
+        metrics::counter!("sync.missing_inventory.cancelled.in_flight.count")
+            .increment(interrupted_hash_count as u64);
+        debug!(
+            ?hash,
+            retry_count,
+            retry_limit = MISSING_INVENTORY_RETRY_LIMIT,
+            interrupted_hashes = interrupted_hash_count,
+            "block was not found, retrying before newer in-flight blocks"
+        );
+
+        Ok(true)
+    }
+
+    fn record_missing_inventory_retry(
+        &mut self,
+        hash: block::Hash,
+    ) -> Result<usize, BlockDownloadVerifyError> {
+        let retry_count = self
+            .missing_inventory_retry_count_by_hash
+            .entry(hash)
+            .or_default();
+
+        if *retry_count >= MISSING_INVENTORY_RETRY_LIMIT {
+            metrics::counter!("sync.missing_inventory.retry.exhausted.count").increment(1);
+            debug!(
+                ?hash,
+                retry_limit = MISSING_INVENTORY_RETRY_LIMIT,
+                "missing inventory retry limit reached, restarting sync"
+            );
+
+            return Err(BlockDownloadVerifyError::MissingInventoryRetryLimitExceeded { hash });
+        }
+
+        *retry_count += 1;
+
+        Ok(*retry_count)
+    }
+
     /// Return if the sync should be restarted based on the given error
     /// from the block downloader and verifier stream.
     fn should_restart_sync(e: &BlockDownloadVerifyError) -> bool {
@@ -1247,38 +1484,28 @@ where
                 false
             }
 
+            BlockDownloadVerifyError::MissingInventoryRetryLimitExceeded { .. } => {
+                debug!(error = ?e, "missing inventory retry limit reached, restarting sync");
+                true
+            }
+
             BlockDownloadVerifyError::DownloadFailed { ref error, .. }
-                if format!("{error:?}").contains("NotFound") =>
+                if Self::missing_inventory_source_from_download_error(error)
+                    == Some(MissingInventorySource::Peer) =>
             {
-                // Covers these errors:
-                // - NotFoundResponse
-                // - NotFoundRegistry
-                //
-                // TODO: improve this by checking the type (#2908)
-                //       restart after a certain number of NotFound errors?
-                debug!(error = ?e, "block was not found, possibly from a peer that doesn't have the block yet, continuing");
+                debug!(error = ?e, "block was not found, continuing after queueing retry");
                 false
             }
 
-            _ => {
-                // download_and_verify downcasts errors from the block verifier
-                // into VerifyChainError, and puts the result inside one of the
-                // BlockDownloadVerifyError enumerations. This downcast could
-                // become incorrect e.g. after some refactoring, and it is difficult
-                // to write a test to check it. The test below is a best-effort
-                // attempt to catch if that happens and log it.
-                //
-                // TODO: add a proper test and remove this
-                // https://github.com/ZcashFoundation/zebra/issues/2909
-                let err_str = format!("{e:?}");
-                if err_str.contains("NotFound") {
-                    error!(?e,
-                        "a BlockDownloadVerifyError that should have been filtered out was detected, \
-                        which possibly indicates a programming error in the downcast inside \
-                        zebrad::components::sync::downloads::Downloads::download_and_verify"
-                    )
-                }
+            BlockDownloadVerifyError::DownloadFailed { ref error, .. }
+                if Self::missing_inventory_source_from_download_error(error)
+                    == Some(MissingInventorySource::Registry) =>
+            {
+                debug!(error = ?e, "all ready peers are missing the block, restarting sync after delay");
+                true
+            }
 
+            _ => {
                 warn!(?e, "error downloading and verifying block");
                 true
             }

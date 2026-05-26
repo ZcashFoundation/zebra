@@ -1,7 +1,6 @@
 //! A download stream for Zebra's block syncer.
 
 use std::{
-    collections::HashMap,
     convert,
     pin::Pin,
     sync::Arc,
@@ -13,6 +12,7 @@ use futures::{
     ready,
     stream::{FuturesUnordered, Stream},
 };
+use indexmap::IndexMap;
 use pin_project::pin_project;
 use thiserror::Error;
 use tokio::{
@@ -95,6 +95,9 @@ pub enum BlockDownloadVerifyError {
         error: BoxError,
         hash: block::Hash,
     },
+
+    #[error("missing inventory retry limit exceeded: {hash:?}")]
+    MissingInventoryRetryLimitExceeded { hash: block::Hash },
 
     /// A downloaded block was a long way ahead of the state chain tip.
     /// This error should be very rare during normal operation.
@@ -222,7 +225,7 @@ where
 
     /// A list of channels that can be used to cancel pending block download and
     /// verify tasks.
-    cancel_handles: HashMap<block::Hash, oneshot::Sender<()>>,
+    cancel_handles: IndexMap<block::Hash, oneshot::Sender<()>>,
 }
 
 impl<ZN, ZV, ZSTip> Stream for Downloads<ZN, ZV, ZSTip>
@@ -253,12 +256,12 @@ where
         if let Some(join_result) = ready!(this.pending.poll_next(cx)) {
             match join_result.expect("block download and verify tasks must not panic") {
                 Ok((height, hash)) => {
-                    this.cancel_handles.remove(&hash);
+                    this.cancel_handles.swap_remove(&hash);
 
                     Poll::Ready(Some(Ok((height, hash))))
                 }
                 Err((e, hash)) => {
-                    this.cancel_handles.remove(&hash);
+                    this.cancel_handles.swap_remove(&hash);
                     Poll::Ready(Some(Err(e)))
                 }
             }
@@ -316,7 +319,7 @@ where
             )),
             past_lookahead_limit_receiver,
             pending: FuturesUnordered::new(),
-            cancel_handles: HashMap::new(),
+            cancel_handles: IndexMap::new(),
         }
     }
 
@@ -588,13 +591,32 @@ where
 
     /// Cancel all running tasks and reset the downloader state.
     pub fn cancel_all(&mut self) {
+        self.cancel_all_tasks(None);
+    }
+
+    /// Cancel all running tasks, reset the downloader state, and return interrupted block hashes.
+    ///
+    /// Callers use the hashes to requeue interrupted work after a missing predecessor;
+    /// the returned order is not stable.
+    pub(super) fn cancel_all_and_return_hashes(&mut self) -> Vec<block::Hash> {
+        let mut interrupted_hashes = Vec::with_capacity(self.cancel_handles.len());
+        self.cancel_all_tasks(Some(&mut interrupted_hashes));
+
+        interrupted_hashes
+    }
+
+    fn cancel_all_tasks(&mut self, mut interrupted_hashes: Option<&mut Vec<block::Hash>>) {
         // Replace the pending task list with an empty one and drop it.
         let _ = std::mem::take(&mut self.pending);
 
         // Signal cancellation to all running tasks.
         // Since we already dropped the JoinHandles above, they should
         // fail silently.
-        for (_hash, cancel) in self.cancel_handles.drain() {
+        for (hash, cancel) in self.cancel_handles.drain(..) {
+            if let Some(interrupted_hashes) = interrupted_hashes.as_deref_mut() {
+                interrupted_hashes.push(hash);
+            }
+
             let _ = cancel.send(());
         }
 
@@ -618,7 +640,6 @@ where
     }
 
     /// Returns true if there are no in-flight download and verify tasks.
-    #[allow(dead_code)]
     pub fn is_empty(&mut self) -> bool {
         self.pending.is_empty()
     }

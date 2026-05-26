@@ -359,13 +359,16 @@ impl MissingInventoryCollector {
         }
     }
 
-    /// Forwards any missing inventory to the registry.
+    /// Forwards explicitly observed missing inventory to the registry.
     ///
-    /// `zcashd` doesn't send `notfound` messages for blocks,
-    /// so we need to track missing blocks ourselves.
+    /// Transport failures and timeouts only prove that the request failed.
+    /// They do not prove the peer lacks the requested inventory, so they are
+    /// handled by the request retry path instead of updating the missing
+    /// inventory registry.
     ///
-    /// This can sometimes send duplicate missing inventory,
-    /// but the registry ignores duplicates anyway.
+    /// `zcashd` silently skips missing block responses. Those misses may wait
+    /// for a timeout, but treating every transport error as missing inventory
+    /// can poison routing under high sync concurrency.
     pub fn send(self, response: &Result<Response, SharedPeerError>) {
         let missing_inv: HashSet<InventoryHash> = match (self.request, response) {
             // Missing block hashes from partial responses.
@@ -385,31 +388,13 @@ impl MissingInventoryCollector {
             // Other response types never contain missing inventory.
             (_, Ok(_)) => iter::empty().collect(),
 
-            // We don't forward NotFoundRegistry errors,
-            // because the errors are generated locally from the registry,
-            // so those statuses are already in the registry.
-            //
-            // Unfortunately, we can't access the inner error variant here,
-            // due to TracedError.
-            (_, Err(e)) if e.inner_debug().contains("NotFoundRegistry") => iter::empty().collect(),
+            (_, Err(e)) if e.is_inventory_not_found_by_registry() => iter::empty().collect(),
 
-            // Missing inventory from other errors, including NotFoundResponse, timeouts,
-            // and dropped connections.
-            (request, Err(_)) => {
-                // The request either contains blocks or transactions,
-                // but this is a convenient way to collect them both.
-                let missing_blocks = request
-                    .block_hash_inventory()
-                    .into_iter()
-                    .map(InventoryHash::Block);
-
-                let missing_txs = request
-                    .transaction_id_inventory()
-                    .into_iter()
-                    .map(InventoryHash::from);
-
-                missing_blocks.chain(missing_txs).collect()
+            (_, Err(e)) if e.is_inventory_not_found() => {
+                e.missing_inventory().iter().copied().collect()
             }
+
+            (_, Err(_)) => iter::empty().collect(),
         };
 
         if let Some(missing_inv) =

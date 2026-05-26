@@ -6,6 +6,7 @@ use std::{collections::HashMap, iter, sync::Arc, time::Duration};
 
 use color_eyre::Report;
 use futures::{Future, FutureExt};
+use indexmap::IndexSet;
 
 use zebra_chain::{
     block::{self, Block, Height},
@@ -22,7 +23,7 @@ use zebra_state as zs;
 
 use crate::{
     components::{
-        sync::{self, downloads::BlockDownloadVerifyError, SyncStatus},
+        sync::{self, downloads::BlockDownloadVerifyError, PendingBlockHashes, SyncStatus},
         ChainSync,
     },
     config::ZebradConfig,
@@ -267,6 +268,115 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
     );
 
     // Check that nothing unexpected happened.
+    block_verifier_router.expect_no_requests().await;
+    state_service.expect_no_requests().await;
+
+    let chain_sync_result = chain_sync_task_handle.now_or_never();
+    assert!(
+        chain_sync_result.is_none(),
+        "unexpected error or panic in chain sync task: {chain_sync_result:?}",
+    );
+
+    Ok(())
+}
+
+/// Test that obtain_tips downloads a single unknown block even when it cannot form a new tip.
+#[tokio::test]
+async fn sync_one_block_obtain_tips_ok() -> Result<(), crate::BoxError> {
+    let (
+        chain_sync_future,
+        _sync_status,
+        mut block_verifier_router,
+        mut peer_set,
+        mut state_service,
+        _mock_chain_tip_sender,
+    ) = setup();
+
+    let block0: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES.zcash_deserialize_into()?;
+    let block0_hash = block0.hash();
+
+    let block1: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
+    let block1_hash = block1.hash();
+
+    let chain_sync_task_handle = tokio::spawn(chain_sync_future);
+
+    state_service
+        .expect_request(zs::Request::KnownBlock(block0_hash))
+        .await
+        .respond(zs::Response::KnownBlock(None));
+
+    peer_set
+        .expect_request(zn::Request::BlocksByHash(iter::once(block0_hash).collect()))
+        .await
+        .respond(zn::Response::Blocks(vec![Available((
+            block0.clone(),
+            None,
+        ))]));
+
+    block_verifier_router
+        .expect_request(zebra_consensus::Request::Commit(block0))
+        .await
+        .respond(block0_hash);
+
+    peer_set.expect_no_requests().await;
+    block_verifier_router.expect_no_requests().await;
+
+    state_service
+        .expect_request(zs::Request::KnownBlock(block0_hash))
+        .await
+        .respond(zs::Response::KnownBlock(Some(zs::KnownBlock::BestChain)));
+
+    state_service
+        .expect_request(zs::Request::BlockLocator)
+        .await
+        .respond(zs::Response::BlockLocator(vec![block0_hash]));
+
+    peer_set
+        .expect_request(zn::Request::FindBlocks {
+            known_blocks: vec![block0_hash],
+            stop: None,
+        })
+        .await
+        .respond(zn::Response::BlockHashes(vec![block1_hash]));
+
+    state_service
+        .expect_request(zs::Request::KnownBlock(block1_hash))
+        .await
+        .respond(zs::Response::KnownBlock(None));
+
+    for _ in 0..(sync::FANOUT - 1) {
+        peer_set
+            .expect_request(zn::Request::FindBlocks {
+                known_blocks: vec![block0_hash],
+                stop: None,
+            })
+            .await
+            .respond(Err(zn::BoxError::from("synthetic test obtain tips error")));
+    }
+
+    peer_set.expect_no_requests().await;
+    block_verifier_router.expect_no_requests().await;
+
+    state_service
+        .expect_request(zs::Request::KnownBlock(block1_hash))
+        .await
+        .respond(zs::Response::KnownBlock(None));
+
+    peer_set
+        .expect_request(zn::Request::BlocksByHash(iter::once(block1_hash).collect()))
+        .await
+        .respond(zn::Response::Blocks(vec![Available((
+            block1.clone(),
+            None,
+        ))]));
+
+    block_verifier_router
+        .expect_request(zebra_consensus::Request::Commit(block1))
+        .await
+        .respond(block1_hash);
+
+    peer_set.expect_no_requests().await;
     block_verifier_router.expect_no_requests().await;
     state_service.expect_no_requests().await;
 
@@ -1020,16 +1130,297 @@ async fn should_restart_sync_returns_false() {
     );
 }
 
+/// Tests that peer `notfound` responses do not trigger a sync restart.
+#[tokio::test]
+async fn should_restart_sync_returns_false_for_peer_missing_block_downloads() {
+    let hash = block::Hash::from([0xAA; 32]);
+    let missing_block = zn::types::InventoryHash::Block(hash);
+
+    let err = BlockDownloadVerifyError::DownloadFailed {
+        error: Box::new(zn::SharedPeerError::from(zn::PeerError::NotFoundResponse(
+            vec![missing_block],
+        ))),
+        hash,
+    };
+
+    let restart = ChainSync::<
+        MockService<zn::Request, zn::Response, PanicAssertion>,
+        MockService<zs::Request, zs::Response, PanicAssertion>,
+        MockService<zebra_consensus::Request, block::Hash, PanicAssertion>,
+        MockChainTip,
+    >::should_restart_sync(&err);
+
+    assert!(
+        !restart,
+        "peer notfound responses should be retried inside the current sync run"
+    );
+}
+
+/// Tests that local inventory registry misses restart the sync run.
+#[tokio::test]
+async fn should_restart_sync_returns_true_for_inventory_registry_misses() {
+    let hash = block::Hash::from([0xAA; 32]);
+    let missing_block = zn::types::InventoryHash::Block(hash);
+
+    let err = BlockDownloadVerifyError::DownloadFailed {
+        error: Box::new(zn::SharedPeerError::from(zn::PeerError::NotFoundRegistry(
+            vec![missing_block],
+        ))),
+        hash,
+    };
+
+    let restart = ChainSync::<
+        MockService<zn::Request, zn::Response, PanicAssertion>,
+        MockService<zs::Request, zs::Response, PanicAssertion>,
+        MockService<zebra_consensus::Request, block::Hash, PanicAssertion>,
+        MockChainTip,
+    >::should_restart_sync(&err);
+
+    assert!(
+        restart,
+        "local registry misses should restart after the normal sync delay"
+    );
+}
+
+/// Tests that peer `notfound` responses are classified for in-place retry.
+#[tokio::test]
+async fn peer_missing_block_downloads_are_classified_for_retry() {
+    let missing_hash = block::Hash::from([0xAA; 32]);
+    let missing_block = zn::types::InventoryHash::Block(missing_hash);
+
+    let err = Err(BlockDownloadVerifyError::DownloadFailed {
+        error: Box::new(zn::SharedPeerError::from(zn::PeerError::NotFoundResponse(
+            vec![missing_block],
+        ))),
+        hash: missing_hash,
+    });
+
+    let retry_hash = ChainSync::<
+        MockService<zn::Request, zn::Response, PanicAssertion>,
+        MockService<zs::Request, zs::Response, PanicAssertion>,
+        MockService<zebra_consensus::Request, block::Hash, PanicAssertion>,
+        MockChainTip,
+    >::missing_inventory_hash_from_peer_response(&err);
+
+    assert_eq!(
+        retry_hash,
+        Some(missing_hash),
+        "peer missing block downloads should be retried"
+    );
+}
+
+/// Tests that missing block retries run before interrupted and pending newer hashes.
+#[tokio::test]
+async fn peer_missing_block_downloads_are_retried_first() {
+    let missing_hash = block::Hash::from([0xAA; 32]);
+    let interrupted_hash = block::Hash::from([0xBB; 32]);
+    let future_hash = block::Hash::from([0xCC; 32]);
+    let mut pending_hashes = PendingBlockHashes::new(IndexSet::from_iter([future_hash]));
+
+    pending_hashes.prepend_missing_inventory_retry(missing_hash, [interrupted_hash]);
+
+    assert!(
+        pending_hashes.has_missing_inventory_retry,
+        "missing inventory retries should be preserved across sync iterations"
+    );
+    assert_eq!(
+        pending_hashes.hashes.iter().copied().collect::<Vec<_>>(),
+        vec![missing_hash, interrupted_hash, future_hash],
+        "missing predecessor blocks must be retried before interrupted and pending newer hashes"
+    );
+}
+
+/// Tests that a peer `notfound` response cancels newer in-flight block downloads
+/// and schedules the missing predecessor before interrupted and pending hashes.
+#[tokio::test]
+async fn peer_missing_block_cancels_in_flight_for_retry() -> Result<(), crate::BoxError> {
+    let (
+        mut chain_sync,
+        _sync_status,
+        mut block_verifier_router,
+        mut peer_set,
+        _state_service,
+        _mock_chain_tip_sender,
+    ) = setup_chain_sync();
+
+    let missing_hash = block::Hash::from([0xAA; 32]);
+    let interrupted_hash = block::Hash::from([0xBB; 32]);
+    let pending_hash = block::Hash::from([0xCC; 32]);
+
+    chain_sync
+        .downloads
+        .download_and_verify(missing_hash)
+        .await?;
+    let missing_request = peer_set
+        .expect_request(zn::Request::BlocksByHash(
+            iter::once(missing_hash).collect(),
+        ))
+        .await;
+
+    chain_sync
+        .downloads
+        .download_and_verify(interrupted_hash)
+        .await?;
+    let interrupted_request = peer_set
+        .expect_request(zn::Request::BlocksByHash(
+            iter::once(interrupted_hash).collect(),
+        ))
+        .await;
+
+    let response = Err(BlockDownloadVerifyError::DownloadFailed {
+        error: Box::new(zn::SharedPeerError::from(zn::PeerError::NotFoundResponse(
+            vec![zn::types::InventoryHash::Block(missing_hash)],
+        ))),
+        hash: missing_hash,
+    });
+    let mut pending_hashes = PendingBlockHashes::new(IndexSet::from_iter([pending_hash]));
+
+    assert!(
+        chain_sync.queue_peer_missing_inventory_retry(&mut pending_hashes, &response)?,
+        "peer missing inventory should trigger an in-place retry"
+    );
+    assert!(
+        chain_sync.downloads.is_empty(),
+        "newer in-flight downloads should be cancelled"
+    );
+    assert!(
+        pending_hashes.has_missing_inventory_retry,
+        "the next sync iteration should bypass the in-flight wait"
+    );
+    assert_eq!(
+        pending_hashes.hashes.iter().copied().collect::<Vec<_>>(),
+        vec![missing_hash, interrupted_hash, pending_hash],
+        "the missing predecessor should run before interrupted and pending newer hashes"
+    );
+
+    drop(missing_request);
+    drop(interrupted_request);
+    block_verifier_router.expect_no_requests().await;
+
+    Ok(())
+}
+
+/// Tests that repeated peer missing inventory for the same hash restarts sync
+/// instead of spinning on an in-place retry loop.
+#[tokio::test]
+async fn peer_missing_block_retry_limit_restarts_sync() -> Result<(), crate::BoxError> {
+    let (
+        mut chain_sync,
+        _sync_status,
+        _block_verifier_router,
+        _peer_set,
+        _state_service,
+        _mock_chain_tip_sender,
+    ) = setup_chain_sync();
+
+    let missing_hash = block::Hash::from([0xAA; 32]);
+    let response = Err(BlockDownloadVerifyError::DownloadFailed {
+        error: Box::new(zn::SharedPeerError::from(zn::PeerError::NotFoundResponse(
+            vec![zn::types::InventoryHash::Block(missing_hash)],
+        ))),
+        hash: missing_hash,
+    });
+    let mut pending_hashes = PendingBlockHashes::new(IndexSet::new());
+
+    for retry_count in 1..=sync::MISSING_INVENTORY_RETRY_LIMIT {
+        assert!(
+            chain_sync.queue_peer_missing_inventory_retry(&mut pending_hashes, &response)?,
+            "peer missing inventory should be retried while under the retry limit"
+        );
+        assert_eq!(
+            chain_sync
+                .missing_inventory_retry_count_by_hash
+                .get(&missing_hash),
+            Some(&retry_count),
+            "retry count should track repeated peer misses for one sync run"
+        );
+    }
+
+    let error = chain_sync
+        .queue_peer_missing_inventory_retry(&mut pending_hashes, &response)
+        .expect_err("retry limit should stop repeated peer missing inventory");
+
+    assert!(matches!(
+        error,
+        BlockDownloadVerifyError::MissingInventoryRetryLimitExceeded { hash }
+            if hash == missing_hash
+    ));
+    assert!(
+        ChainSync::<TestPeerSet, TestStateService, TestBlockVerifier, MockChainTip>::should_restart_sync(&error),
+        "exhausting missing inventory retries should restart sync"
+    );
+
+    Ok(())
+}
+
+/// Tests that local registry misses are not retried in a tight in-place loop.
+#[tokio::test]
+async fn inventory_registry_misses_are_not_retried_in_place() {
+    let missing_hash = block::Hash::from([0xAA; 32]);
+    let missing_block = zn::types::InventoryHash::Block(missing_hash);
+
+    let err = Err(BlockDownloadVerifyError::DownloadFailed {
+        error: Box::new(zn::SharedPeerError::from(zn::PeerError::NotFoundRegistry(
+            vec![missing_block],
+        ))),
+        hash: missing_hash,
+    });
+
+    let retry_hash = ChainSync::<
+        MockService<zn::Request, zn::Response, PanicAssertion>,
+        MockService<zs::Request, zs::Response, PanicAssertion>,
+        MockService<zebra_consensus::Request, block::Hash, PanicAssertion>,
+        MockChainTip,
+    >::missing_inventory_hash_from_peer_response(&err);
+
+    assert!(
+        retry_hash.is_none(),
+        "local registry misses should restart after the normal sync delay"
+    );
+}
+
+type TestPeerSet = MockService<zn::Request, zn::Response, PanicAssertion>;
+type TestStateService = MockService<zs::Request, zs::Response, PanicAssertion>;
+type TestBlockVerifier = MockService<zebra_consensus::Request, block::Hash, PanicAssertion>;
+
 fn setup() -> (
     // ChainSync
     impl Future<Output = Result<(), Report>> + Send,
     SyncStatus,
     // BlockVerifierRouter
-    MockService<zebra_consensus::Request, block::Hash, PanicAssertion>,
+    TestBlockVerifier,
     // PeerSet
-    MockService<zebra_network::Request, zebra_network::Response, PanicAssertion>,
+    TestPeerSet,
     // StateService
-    MockService<zebra_state::Request, zebra_state::Response, PanicAssertion>,
+    TestStateService,
+    MockChainTipSender,
+) {
+    let (
+        chain_sync,
+        sync_status,
+        block_verifier_router,
+        peer_set,
+        state_service,
+        mock_chain_tip_sender,
+    ) = setup_chain_sync();
+    let chain_sync_future = chain_sync.sync();
+
+    (
+        chain_sync_future,
+        sync_status,
+        block_verifier_router,
+        peer_set,
+        state_service,
+        mock_chain_tip_sender,
+    )
+}
+
+fn setup_chain_sync() -> (
+    ChainSync<TestPeerSet, TestStateService, TestBlockVerifier, MockChainTip>,
+    SyncStatus,
+    TestBlockVerifier,
+    TestPeerSet,
+    TestStateService,
     MockChainTipSender,
 ) {
     let _init_guard = zebra_test::init();
@@ -1070,10 +1461,8 @@ fn setup() -> (
         misbehavior_tx,
     );
 
-    let chain_sync_future = chain_sync.sync();
-
     (
-        chain_sync_future,
+        chain_sync,
         sync_status,
         block_verifier_router,
         peer_set,

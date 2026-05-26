@@ -269,22 +269,4 @@ impl Request {
             Request::BlocksByHash(_) | Request::TransactionsById(_)
         )
     }
-
-    /// Returns the block hash inventory downloads from the request, if any.
-    pub fn block_hash_inventory(&self) -> HashSet<block::Hash> {
-        if let Request::BlocksByHash(block_hashes) = self {
-            block_hashes.clone()
-        } else {
-            HashSet::new()
-        }
-    }
-
-    /// Returns the transaction ID inventory downloads from the request, if any.
-    pub fn transaction_id_inventory(&self) -> HashSet<UnminedTxId> {
-        if let Request::TransactionsById(transaction_ids) = self {
-            transaction_ids.clone()
-        } else {
-            HashSet::new()
-        }
-    }
 }

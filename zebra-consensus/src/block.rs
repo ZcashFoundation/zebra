@@ -381,8 +381,12 @@ where
                 }
 
                 Err(source) => {
-                    if let Some(commit_err) = source.downcast_ref::<zs::CommitBlockError>() {
-                        return Err(VerifyBlockError::Commit(commit_err.clone()));
+                    if let Some(commit_err) =
+                        source.downcast_ref::<zs::CommitSemanticallyVerifiedError>()
+                    {
+                        return Err(VerifyBlockError::Commit(
+                            commit_err.as_commit_block_error().clone(),
+                        ));
                     }
 
                     Err(VerifyBlockError::StateService { source, hash })

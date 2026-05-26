@@ -83,6 +83,18 @@ impl From<ValidateContextError> for CommitSemanticallyVerifiedError {
     }
 }
 
+impl CommitSemanticallyVerifiedError {
+    /// Returns the underlying commit error.
+    pub fn as_commit_block_error(&self) -> &CommitBlockError {
+        &self.0
+    }
+
+    /// Returns `true` if this is definitely a duplicate commit request.
+    pub fn is_duplicate_request(&self) -> bool {
+        self.0.is_duplicate_request()
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum LayeredStateError<E: std::error::Error + std::fmt::Display> {
     #[error("{0}")]
