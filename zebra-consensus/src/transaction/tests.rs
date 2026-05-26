@@ -3100,8 +3100,7 @@ async fn block_request_with_await_utxo_timeout_returns_transparent_input_not_fou
         })
         .await;
 
-    let err = verifier_response
-        .expect_err("expected failed verification due to AwaitUtxo timeout");
+    let err = verifier_response.expect_err("expected failed verification due to AwaitUtxo timeout");
 
     assert_eq!(
         err,
