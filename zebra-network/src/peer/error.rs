@@ -47,6 +47,7 @@ impl fmt::Display for SharedPeerError {
 
 impl std::error::Error for SharedPeerError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        // Delegate to TracedError so error-chain walkers can extract its captured span trace.
         std::error::Error::source(self.source.as_ref())
     }
 }
