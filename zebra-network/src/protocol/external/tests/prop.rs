@@ -89,7 +89,9 @@ proptest! {
     fn inv_and_getdata_message_roundtrip(
         message in prop_oneof!(Message::inv_strategy(), Message::get_data_strategy()),
     ) {
-        let mut codec = Codec::builder().finish();
+        let mut codec = Codec::builder()
+            .with_max_body_len(MAX_PROTOCOL_MESSAGE_LEN)
+            .finish();
         let mut bytes = BytesMut::with_capacity(MAX_PROTOCOL_MESSAGE_LEN);
 
         let encoding_result = codec.encode(message.clone(), &mut bytes);
