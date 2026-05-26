@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 - Avoid panicking in the address-book ban path when `network.max_connections_per_ip > 1`. Guard the optional `most_recent_by_ip` cache instead of unwrapping it, so a ban-threshold misbehavior update no longer crashes the address-book updater and poisons the shared mutex ([#10580](https://github.com/ZcashFoundation/zebra/issues/10580))
 - Propagate transaction-level value-balance errors from `Block::chain_value_pool_change()` instead of silently dropping them. The previous `flat_map(Result)` aggregation relied on `Result<T, E>: IntoIterator` and yielded zero items on `Err`, so a failing transaction was omitted from the block sum rather than surfacing as a `ValueBalanceError` ([#10585](https://github.com/ZcashFoundation/zebra/issues/10585))
+- Handle `Elapsed` timeout at the `AwaitUtxo` call site in the transaction verifier so it maps to `TransparentInputNotFound` instead of `InternalDowncastError`. Fixes a sync stall loop near the chain tip that surfaced after the mempool bypass removal in #10494 ([#10629](https://github.com/ZcashFoundation/zebra/issues/10629))
 
 ## [Zebra 4.4.1](https://github.com/ZcashFoundation/zebra/releases/tag/v4.4.1) - 2026-05-04
 
