@@ -9,7 +9,7 @@ use std::{
     collections::BTreeMap,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::Arc,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use futures::FutureExt;
@@ -215,8 +215,11 @@ async fn test_rpc_response_data_for_network(network: &Network) {
         .map(|block_bytes| block_bytes.zcash_deserialize_into().unwrap())
         .collect();
 
-    let mut mempool: MockService<_, _, _, zebra_node_services::BoxError> =
-        MockService::build().for_unit_tests();
+    let mut mempool: MockService<_, _, _, zebra_node_services::BoxError> = MockService::build()
+        // This test runs multiple network snapshots concurrently; on busy CI runners the default
+        // mock request timeout can elapse before the GBT long-poll request is observed.
+        .with_max_request_delay(Duration::from_secs(2))
+        .for_unit_tests();
 
     // Create a populated state service
     let (state, read_state, tip, _) = zebra_state::populated_state(blocks.clone(), network).await;
