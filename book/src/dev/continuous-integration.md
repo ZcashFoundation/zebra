@@ -77,7 +77,7 @@ To change branch protection rules:
 
 Any developer:
 
-0. Run a PR containing the new aggregator, so its `name:` is available to autocomplete.
+1. Run a PR containing the new aggregator, so its `name:` is available to autocomplete.
 
 Admin:
 
