@@ -719,10 +719,15 @@ where
                     let query = state
                         .clone()
                         .oneshot(zebra_state::Request::AwaitUtxo(*outpoint));
-                    if let zebra_state::Response::Utxo(utxo) = query.await? {
-                        utxo
-                    } else {
-                        unreachable!("AwaitUtxo always responds with Utxo")
+                    match query.await {
+                        Ok(zebra_state::Response::Utxo(utxo)) => utxo,
+                        Ok(_) => unreachable!("AwaitUtxo always responds with Utxo"),
+                        Err(err) => {
+                            return match err.downcast::<Elapsed>() {
+                                Ok(_) => Err(TransactionError::TransparentInputNotFound),
+                                Err(err) => Err(err.into()),
+                            };
+                        }
                     }
                 };
                 tracing::trace!(?utxo, "got UTXO");

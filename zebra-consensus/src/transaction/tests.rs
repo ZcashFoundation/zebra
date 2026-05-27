@@ -3041,6 +3041,74 @@ async fn v5_consensus_branch_ids() {
 ///
 /// Note: `known_utxos` is only intended to be used for UTXOs within the same block,
 /// so future verification changes might break this mocking function.
+/// Tests that a block verification request returns `TransparentInputNotFound`
+/// when the `AwaitUtxo` state call times out (returns `Elapsed`).
+///
+/// This is the fix for #10629: before this change, `Elapsed` fell through all
+/// downcast attempts in `From<BoxError> for TransactionError` and became
+/// `InternalDowncastError`, causing a sync stall loop near the chain tip.
+#[tokio::test]
+async fn block_request_with_await_utxo_timeout_returns_transparent_input_not_found() {
+    let _init_guard = zebra_test::init();
+
+    let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
+    let verifier = Verifier::new_for_tests(&Network::Mainnet, state.clone());
+
+    let height = NetworkUpgrade::Canopy
+        .activation_height(&Network::Mainnet)
+        .expect("Canopy activation height is specified");
+    let fund_height = (height - 1).expect("fake source fund block height is too small");
+    let (input, output, _known_utxos) = mock_transparent_transfer(
+        fund_height,
+        true,
+        0,
+        Amount::try_from(10001).expect("invalid value"),
+    );
+
+    let tx = Transaction::V4 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::unlocked(),
+        expiry_height: height,
+        joinsplit_data: None,
+        sapling_shielded_data: None,
+    };
+
+    let input_outpoint = match tx.inputs()[0] {
+        transparent::Input::PrevOut { outpoint, .. } => outpoint,
+        transparent::Input::Coinbase { .. } => panic!("requires a non-coinbase transaction"),
+    };
+
+    tokio::spawn(async move {
+        state
+            .expect_request(zebra_state::Request::AwaitUtxo(input_outpoint))
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(Err::<zebra_state::Response, zebra_state::BoxError>(
+                tower::timeout::error::Elapsed::new().into(),
+            ));
+    });
+
+    let verifier_response = verifier
+        .oneshot(Request::Block {
+            transaction_hash: tx.hash(),
+            transaction: Arc::new(tx),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
+            known_utxos: Arc::new(HashMap::new()),
+            height,
+            time: Utc::now(),
+        })
+        .await;
+
+    let err = verifier_response.expect_err("expected failed verification due to AwaitUtxo timeout");
+
+    assert_eq!(
+        err,
+        TransactionError::TransparentInputNotFound,
+        "AwaitUtxo Elapsed timeout should map to TransparentInputNotFound, not InternalDowncastError"
+    );
+}
+
 fn mock_transparent_transfer(
     previous_utxo_height: block::Height,
     script_should_succeed: bool,
