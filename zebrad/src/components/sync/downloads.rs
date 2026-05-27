@@ -418,6 +418,7 @@ where
             peer = tracing::field::Empty,
             request_command = "BlocksByHash",
             result = tracing::field::Empty,
+            error_kind = tracing::field::Empty,
         )
     )]
     pub async fn download_and_verify(
@@ -426,6 +427,8 @@ where
     ) -> Result<(), BlockDownloadVerifyError> {
         if self.cancel_handles.contains_key(&hash) {
             metrics::counter!("sync.already.queued.dropped.block.hash.count").increment(1);
+            tracing::Span::current().record("result", "duplicate_block");
+            tracing::Span::current().record("error_kind", "duplicate_block");
             return Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { hash });
         }
 
@@ -436,12 +439,14 @@ where
         // if we waited for readiness and did the service call in the spawned
         // tasks, all of the spawned tasks would race each other waiting for the
         // network to become ready.
-        let block_req = self
-            .network
-            .ready()
-            .await
-            .map_err(|error| BlockDownloadVerifyError::NetworkServiceError { error })?
-            .call(zn::Request::BlocksByHash(std::iter::once(hash).collect()));
+        let block_req = self.network.ready().await.map_err(|error| {
+            tracing::Span::current().record("result", "network_service_error");
+            tracing::Span::current().record("error_kind", "network_service");
+
+            BlockDownloadVerifyError::NetworkServiceError { error }
+        })?;
+
+        let block_req = block_req.call(zn::Request::BlocksByHash(std::iter::once(hash).collect()));
 
         // This oneshot is used to signal cancellation to the download task.
         let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();
@@ -472,14 +477,17 @@ where
                         metrics::histogram!("sync.download.slot.age.seconds")
                             .record(slot_start.elapsed().as_secs_f64());
                         tracing::Span::current().record("result", "cancelled_download");
+                        tracing::Span::current().record("error_kind", "cancelled_download");
                         return Err(BlockDownloadVerifyError::CancelledDuringDownload { hash })
                     }
                     rsp = block_req => match rsp {
                         Ok(rsp) => rsp,
                         Err(error) => {
+                            let error_kind = classified_error_kind(error.as_ref());
                             metrics::histogram!("sync.download.slot.age.seconds")
                                 .record(slot_start.elapsed().as_secs_f64());
                             tracing::Span::current().record("result", "download_failed");
+                            tracing::Span::current().record("error_kind", error_kind);
                             return Err(BlockDownloadVerifyError::DownloadFailed { error, hash });
                         }
                     },
@@ -561,6 +569,7 @@ where
                     metrics::histogram!("sync.download.slot.age.seconds")
                         .record(slot_start.elapsed().as_secs_f64());
                     tracing::Span::current().record("result", "invalid_height");
+                    tracing::Span::current().record("error_kind", "invalid_height");
 
                     return Err(BlockDownloadVerifyError::InvalidHeight { hash });
                 };
@@ -570,6 +579,7 @@ where
                     metrics::histogram!("sync.download.slot.age.seconds")
                         .record(slot_start.elapsed().as_secs_f64());
                     tracing::Span::current().record("result", "above_lookahead_height_limit");
+                    tracing::Span::current().record("error_kind", "above_lookahead_height_limit");
                     Err(BlockDownloadVerifyError::AboveLookaheadHeightLimit { height: block_height, hash })?;
                 } else if block_height > lookahead_pause_height {
                     // This log can be very verbose, usually hundreds of blocks are dropped.
@@ -629,6 +639,7 @@ where
                     metrics::histogram!("sync.download.slot.age.seconds")
                         .record(slot_start.elapsed().as_secs_f64());
                     tracing::Span::current().record("result", "behind_tip_height_limit");
+                    tracing::Span::current().record("error_kind", "behind_tip_height_limit");
 
                     Err(BlockDownloadVerifyError::BehindTipHeightLimit { height: block_height, hash })?;
                 }
@@ -638,6 +649,7 @@ where
                     %hash,
                     ?block_height,
                     result = tracing::field::Empty,
+                    error_kind = tracing::field::Empty,
                 );
 
                 // Wait for the verifier service to be ready.
@@ -651,16 +663,26 @@ where
                         metrics::histogram!("sync.download.slot.age.seconds")
                             .record(slot_start.elapsed().as_secs_f64());
                         tracing::Span::current().record("result", "cancelled_verify_ready");
+                        tracing::Span::current().record("error_kind", "cancelled_verify_ready");
                         verify_span.record("result", "cancelled_ready");
+                        verify_span.record("error_kind", "cancelled_verify_ready");
                         return Err(BlockDownloadVerifyError::CancelledAwaitingVerifierReadiness { height: block_height, hash })
                     }
                     verifier = readiness.instrument(verify_span.clone()) => verifier,
                 };
 
+                let verifier = verifier.map_err(|error| {
+                    tracing::Span::current().record("result", "verifier_service_error");
+                    tracing::Span::current().record("error_kind", "verifier_service");
+                    verify_span.record("result", "verifier_service_error");
+                    verify_span.record("error_kind", "verifier_service");
+
+                    BlockDownloadVerifyError::VerifierServiceError { error }
+                })?;
+
                 // Verify the block.
                 let verify_start = std::time::Instant::now();
                 let mut rsp = verifier
-                    .map_err(|error| BlockDownloadVerifyError::VerifierServiceError { error })?
                     .call(zebra_consensus::Request::Commit(block)).boxed();
 
                 // Add a shorter timeout to workaround a known bug (#5125)
@@ -681,19 +703,28 @@ where
                         metrics::histogram!("sync.download.slot.age.seconds")
                             .record(slot_start.elapsed().as_secs_f64());
                         tracing::Span::current().record("result", "cancelled_verify");
+                        tracing::Span::current().record("error_kind", "cancelled_verify");
                         verify_span.record("result", "cancelled");
+                        verify_span.record("error_kind", "cancelled_verify");
                         return Err(BlockDownloadVerifyError::CancelledDuringVerification { height: block_height, hash })
                     }
                     verification = rsp.instrument(verify_span.clone()) => verification,
                 };
 
                 let verify_result = if verification.is_ok() { "success" } else { "failure" };
+                let verify_error_kind = verification
+                    .as_ref()
+                    .err()
+                    .map(|error| classified_error_kind(error.as_ref()))
+                    .unwrap_or("none");
                 metrics::histogram!("sync.block.verify.duration_seconds", "result" => verify_result)
                     .record(verify_start.elapsed().as_secs_f64());
                 metrics::histogram!("sync.download.slot.age.seconds")
                     .record(slot_start.elapsed().as_secs_f64());
                 tracing::Span::current().record("result", verify_result);
+                tracing::Span::current().record("error_kind", verify_error_kind);
                 verify_span.record("result", verify_result);
+                verify_span.record("error_kind", verify_error_kind);
 
                 if verification.is_ok() {
                     metrics::counter!("sync.verified.block.count").increment(1);

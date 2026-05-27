@@ -196,6 +196,7 @@ where
     let request_start = Instant::now();
     let result = fut.await;
     let outcome = if result.is_ok() { "success" } else { "error" };
+    tracing::Span::current().record("outcome", outcome);
 
     metrics::histogram!(
         "peer.request.duration.seconds",
@@ -206,6 +207,7 @@ where
 
     if let Err(error) = &result {
         let error_kind = peer_error_kind(error);
+        tracing::Span::current().record("error_kind", error_kind);
         metrics::counter!(
             "peer.request.error.count",
             "command" => command,
@@ -223,6 +225,8 @@ where
             )
             .increment(1);
         }
+    } else {
+        tracing::Span::current().record("error_kind", "none");
     }
 
     result
@@ -1067,8 +1071,15 @@ where
             let fut = svc.call(req);
             self.push_unready(p2c_key, svc);
             let fut = observe_peer_request(command, source, user_agent_family, fut);
-            let span =
-                tracing::debug_span!("peer.route_p2c", ?p2c_key, command, user_agent_family,);
+            let span = tracing::debug_span!(
+                "peer.route_p2c",
+                ?p2c_key,
+                command,
+                source,
+                user_agent_family,
+                outcome = tracing::field::Empty,
+                error_kind = tracing::field::Empty,
+            );
 
             if track_stalls {
                 let stall_tx = self.stall_event_tx.clone();
@@ -1155,6 +1166,9 @@ where
                 source,
                 user_agent_family,
                 advertising_peers = advertising_peer_list.len(),
+                missing_peers = 0,
+                outcome = tracing::field::Empty,
+                error_kind = tracing::field::Empty,
             );
             metrics::counter!(
                 "peer.route_inv.count",
@@ -1200,6 +1214,8 @@ where
                 user_agent_family,
                 advertising_peers = advertising_peer_list.len(),
                 missing_peers = missing_peer_list.len(),
+                outcome = tracing::field::Empty,
+                error_kind = tracing::field::Empty,
             );
             metrics::counter!(
                 "peer.route_inv.count",
@@ -1235,6 +1251,19 @@ where
         )
         .increment(1);
 
+        let span = tracing::debug_span!(
+            "peer.route_inv",
+            route = "missing_inventory_exhausted",
+            ?hash,
+            command,
+            source = "none",
+            user_agent_family = "unknown",
+            advertising_peers = advertising_peer_list.len(),
+            missing_peers = missing_peer_list.len(),
+            outcome = "error",
+            error_kind = "not_found_registry",
+        );
+
         async move {
             // Let other tasks run, so a retry request might get different ready peers.
             tokio::task::yield_now().await;
@@ -1248,6 +1277,7 @@ where
                 hash,
             ])))
         }
+        .instrument(span)
         .map_err(Into::into)
         .boxed()
     }
