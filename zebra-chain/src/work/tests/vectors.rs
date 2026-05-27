@@ -1,6 +1,9 @@
 use crate::{
     block::{Block, MAX_BLOCK_BYTES},
-    serialization::{CompactSizeMessage, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
+    serialization::{
+        CompactSizeMessage, SerializationError, ZcashDeserialize, ZcashDeserializeInto,
+        ZcashSerialize,
+    },
     work::equihash::{Solution, SOLUTION_SIZE},
 };
 
@@ -78,4 +81,31 @@ fn equihash_solution_size_field() {
             result.expect_err("Wrong size field in EquihashSolution should fail on deserialize");
         }
     }
+}
+
+#[test]
+fn equihash_solution_rejects_oversize_compactsize_before_allocating() {
+    let _init_guard = zebra_test::init();
+
+    let mut data = Vec::new();
+    let oversize: CompactSizeMessage = (SOLUTION_SIZE + 1)
+        .try_into()
+        .expect("fits in MAX_PROTOCOL_MESSAGE_LEN");
+    oversize
+        .zcash_serialize(&mut data)
+        .expect("CompactSize should serialize");
+
+    let err = Solution::zcash_deserialize(data.as_slice())
+        .expect_err("oversize equihash CompactSize must fail to deserialize");
+
+    // This is fragile, but the only current way to check if the deserializer
+    // rejected the size before allocating.
+    // If this fails, double check if the message error has not changed.
+    assert!(
+        matches!(
+            err,
+            SerializationError::Parse("incorrect equihash solution size"),
+        ),
+        "expected size-rejection Parse error, got: {err:?}",
+    );
 }

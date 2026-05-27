@@ -1,4 +1,9 @@
-//! Benchmarks for batch verifiication of RedPallas signatures.
+//! Benchmarks for batch verification of RedPallas signatures.
+//!
+//! Group name `redpallas` matches the `verifier` label in
+//! `zebra.consensus.batch.duration_seconds` emitted from
+//! `zebra-consensus/src/primitives/redpallas.rs`, so a prod regression on
+//! that histogram maps to this file by name.
 
 // Disabled due to warnings in criterion macros
 #![allow(missing_docs)]
@@ -37,7 +42,6 @@ enum Item {
 fn sigs_with_distinct_keys() -> impl Iterator<Item = Item> {
     std::iter::repeat_with(|| {
         let mut rng = thread_rng();
-        // let msg = b"";
         match rng.gen::<u8>() % 2 {
             0 => {
                 let sk = SigningKey::<SpendAuth>::new(thread_rng());
@@ -60,7 +64,7 @@ fn sigs_with_distinct_keys() -> impl Iterator<Item = Item> {
 ///
 /// Includes heterogeneous groups across [SigType], [SigningKey]s, and messages.
 fn bench_batch_verify(c: &mut Criterion) {
-    let mut group = c.benchmark_group("Batch Verification");
+    let mut group = c.benchmark_group("redpallas");
     for &n in [8usize, 16, 24, 32, 40, 48, 56, 64].iter() {
         group.throughput(Throughput::Elements(n as u64));
 
@@ -121,5 +125,9 @@ fn bench_batch_verify(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_batch_verify);
+criterion_group! {
+    name = benches;
+    config = Criterion::default().noise_threshold(0.1).sample_size(50);
+    targets = bench_batch_verify
+}
 criterion_main!(benches);

@@ -149,14 +149,14 @@ proptest! {
             }
 
             // Send a request to all peers
-            let response_future = peer_set.route_broadcast(Request::AdvertiseBlock(block_hash));
+            let response_future = peer_set.route_broadcast(Request::AdvertiseBlock(block_hash, None));
             std::mem::drop(response_future);
 
             // Check how many peers received the request
             let mut received = 0;
             for mut h in handles {
                 if let ReceiveRequestAttempt::Request(client_request) = h.try_to_receive_outbound_client_request() {
-                    prop_assert_eq!(client_request.request, Request::AdvertiseBlock(block_hash));
+                    prop_assert_eq!(client_request.request, Request::AdvertiseBlock(block_hash, None));
                     received += 1;
                 };
             }
@@ -219,14 +219,14 @@ proptest! {
                 let number_of_peers_to_broadcast = peer_set.number_of_peers_to_broadcast();
 
                 // Send a request to all peers we have now
-                let response_future = peer_set.route_broadcast(Request::AdvertiseBlock(block_hash));
+                let response_future = peer_set.route_broadcast(Request::AdvertiseBlock(block_hash, None));
                 std::mem::drop(response_future);
 
                 // Check how many peers received the request
                 let mut received = 0;
                 for h in &mut handles {
                     if let ReceiveRequestAttempt::Request(client_request) = h.try_to_receive_outbound_client_request() {
-                        prop_assert_eq!(client_request.request, Request::AdvertiseBlock(block_hash));
+                        prop_assert_eq!(client_request.request, Request::AdvertiseBlock(block_hash, None));
                         received += 1;
                     };
                 }
@@ -281,7 +281,7 @@ proptest! {
             }
 
             // this will panic as expected
-            let response_future = peer_set.route_broadcast(Request::AdvertiseBlock(block_hash));
+            let response_future = peer_set.route_broadcast(Request::AdvertiseBlock(block_hash, None));
             std::mem::drop(response_future);
 
             Ok::<_, TestCaseError>(())

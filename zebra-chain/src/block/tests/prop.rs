@@ -99,6 +99,10 @@ proptest! {
     fn block_roundtrip(block in any::<Block>(), network in any::<Network>()) {
         let _init_guard = zebra_test::init();
 
+        let has_coinbase_sapling_spends = block.transactions.iter().any(|tx| {
+            tx.is_coinbase() && tx.sapling_spends_per_anchor().count() > 0
+        });
+
         let bytes = block.zcash_serialize_to_vec()?;
 
         // Check the block commitment
@@ -108,8 +112,12 @@ proptest! {
             prop_assert_eq![block.header.commitment_bytes.0, commitment_bytes];
         }
 
-        // Check the block size limit
-        if bytes.len() <= MAX_BLOCK_BYTES as _ {
+        if has_coinbase_sapling_spends {
+            // GHSA-rgwx-8r98-p34c fix: the parser now rejects coinbase
+            // transactions with Sapling spends before allocating.
+            bytes.zcash_deserialize_into::<Block>()
+                .expect_err("block with coinbase Sapling spends must be rejected");
+        } else if bytes.len() <= MAX_BLOCK_BYTES as _ {
             // Check deserialization
             let other_block = bytes.zcash_deserialize_into()?;
 

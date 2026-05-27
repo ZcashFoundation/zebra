@@ -118,13 +118,25 @@ impl VerifyBlockError {
     }
 }
 
-/// The maximum allowed number of legacy signature check operations in a block.
+/// The maximum number of transparent signature operations allowed in a block.
 ///
-/// This consensus rule is not documented, so Zebra follows the `zcashd` implementation.
-/// We re-use some `zcashd` C++ script code via `zebra-script` and `zcash_script`.
+/// # Consensus
 ///
-/// See:
-/// <https://github.com/zcash/zcash/blob/bad7f7eadbbb3466bebe3354266c7f69f607fcfd/src/consensus/consensus.h#L30>
+/// For every block, the sum of legacy and P2SH transparent signature operations across all
+/// transactions must not exceed [20_000].
+///
+/// ## Notes
+///
+/// This rule is inherited from pre-SegWit Bitcoin, and is not explicitly stated in the Zcash
+/// protocol spec. It is covered implicitly in [§7.6], which closes with "Other rules inherited from
+/// Bitcoin". The inclusion of this rule is tracked in [`zcash/zips#568`].
+///
+/// Zebra mirrors `zcashd`'s `ConnectBlock`, which sums `GetLegacySigOpCount()` and
+/// `GetP2SHSigOpCount()` per transaction before comparing against this constant.
+///
+/// [20_000]: <https://github.com/zcash/zcash/blob/bad7f7eadbbb3466bebe3354266c7f69f607fcfd/src/consensus/consensus.h#L30>
+/// [`zcash/zips#568`]: <https://github.com/zcash/zips/issues/568>
+/// [§7.6]: <https://zips.z.cash/protocol/protocol.pdf#blockheader>
 pub const MAX_BLOCK_SIGOPS: u32 = 20_000;
 
 impl<S, V> SemanticBlockVerifier<S, V>

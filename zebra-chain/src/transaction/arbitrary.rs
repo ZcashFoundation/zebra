@@ -817,6 +817,7 @@ impl Arbitrary for VerifiedUnminedTx {
             any::<UnminedTx>(),
             any::<Amount<NonNegative>>(),
             any::<u32>(),
+            any::<u32>(),
             any::<(u16, u16)>().prop_map(|(unpaid_actions, conventional_actions)| {
                 (
                     unpaid_actions % conventional_actions.saturating_add(1),
@@ -832,6 +833,7 @@ impl Arbitrary for VerifiedUnminedTx {
                     transaction,
                     miner_fee,
                     sigops,
+                    p2sh_sigops,
                     (conventional_actions, mut unpaid_actions),
                     fee_weight_ratio,
                     time,
@@ -848,6 +850,7 @@ impl Arbitrary for VerifiedUnminedTx {
                         transaction,
                         miner_fee,
                         legacy_sigop_count: sigops,
+                        p2sh_sigop_count: p2sh_sigops,
                         conventional_actions,
                         unpaid_actions,
                         fee_weight_ratio,

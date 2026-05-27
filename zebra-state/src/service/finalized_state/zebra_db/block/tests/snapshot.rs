@@ -551,7 +551,7 @@ fn snapshot_transparent_address_data(state: &FinalizedState, height: u32) {
         // The default raw data serialization is very verbose, so we hex-encode the bytes.
         stored_address_balances.push((address.to_string(), stored_address_balance_location));
         stored_address_utxo_locations.push((stored_address_location, stored_utxo_locations));
-        stored_address_utxos.push((address.clone(), stored_utxos));
+        stored_address_utxos.push((address, stored_utxos));
         stored_address_transaction_locations.push((address, stored_transaction_locations));
     }
 

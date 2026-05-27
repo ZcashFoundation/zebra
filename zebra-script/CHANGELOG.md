@@ -5,7 +5,58 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [6.0.1] - 2026-05-04
+
+This release fixes one security issue:
+
+- Reject V5 transparent inputs signed with `SIGHASH_SINGLE` (or
+  `SIGHASH_SINGLE|ANYONECANPAY`) when the input has no transparent output at the
+  same index
+  ([GHSA-pvmv-cwg8-v6c8](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-pvmv-cwg8-v6c8)).
+  Follow-up to
+  [GHSA-cwfq-rfcr-8hmp](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-cwfq-rfcr-8hmp).
+
+The impact of the issue for crate users will depend on the particular usage;
+if you use it as a building block for a consensus node, you should update.
+
+No public-API changes; internal-only fix.
+
+## [6.0.0] - 2026-05-01
+
+This release fixes an important security issue:
+
+- [CVE-2026-XXXXX: Consensus Divergence in Transparent Sighash Hash-Type
+  Handling due to Stale
+  Buffer](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-gq4h-3grw-2rhv)
+
+The impact of the issue for crate users will depend on the particular usage;
+if you use it as a building block for a consensus node, you should update.
+
+### Added
+
+- `CachedFfiTransaction::p2sh_sigops(&self) -> u32`.
+- `p2sh_sigop_count(tx, spent_outputs) -> u32`.
+
+### Changed
+
+- Migrated to `zcash_primitives 0.27` (and the rest of the librustzcash 2026-04
+  release wave), which replaces the yanked `core2` dependency with `corez`.
+- `Sigops::scripts` now returns `impl Iterator<Item = Vec<u8>>` instead of
+  `impl Iterator<Item = &[u8]>`. The change ripples through every `Sigops`
+  implementation:
+  - `impl Sigops for zebra_chain::transaction::Transaction`
+  - `impl Sigops for zebra_chain::transaction::UnminedTx`
+  - `impl Sigops for CachedFfiTransaction`
+  - `impl Sigops for zcash_primitives::transaction::Transaction`
+
+## [5.0.1] - 2026-04-17
+
+This release fixes an important security issue:
+
+- [CVE-2026-XXXXX: Consensus Divergence in Transparent Sighash Hash-Type Handling](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-8m29-fpq5-89jj)
+
+The impact of the issue for crate users will depend on the particular usage;
+if you use it as a building block for a consensus node, you should update.
 
 ## [5.0.0] - 2026-03-12
 

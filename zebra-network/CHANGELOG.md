@@ -5,7 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [6.0.0] - 2026-05-01
+
+This release adds defense in depth for inbound deserializers. The
+`zebra-chain` 7.0 cohort enforces 160-entry cap in `read_headers` and
+size-limits coinbase data and Equihash solutions before allocation
+([GHSA-438q-jx8f-cccv](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-438q-jx8f-cccv)).
+
+### Changed
+
+- `Request::AdvertiseBlock` now carries a second tuple field
+  `Option<PeerSocketAddr>` so the inbound service can attribute the announcing
+  peer when fanning out.
+
+## [5.0.1] - 2026-04-17
+
+This release fixes an important security issue:
+
+- [CVE-2026-40881: addr/addrv2 Deserialization Resource Exhaustion](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-xr93-pcq3-pxf8)
+
+The impact of the issue for crate users will depend on the particular usage; if
+your application allows deserializing arbitrary `addr` and/or `addrv2` messages,
+you should update.
 
 ## [5.0.0] - 2026-03-12
 

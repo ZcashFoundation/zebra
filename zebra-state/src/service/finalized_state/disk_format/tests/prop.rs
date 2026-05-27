@@ -94,7 +94,14 @@ fn roundtrip_transaction_hash() {
 fn roundtrip_transaction() {
     let _init_guard = zebra_test::init();
 
-    proptest!(|(val in any::<Transaction>())| assert_value_properties(val));
+    proptest!(|(val in any::<Transaction>())| {
+        // Coinbase transactions with Sapling spends are rejected during deserialization
+        // (GHSA-rgwx-8r98-p34c), so they cannot round-trip through `IntoDisk`/`FromDisk`.
+        // The arbitrary `Transaction` strategy still produces them so the
+        // `transaction_roundtrip` proptest in `zebra-chain` can exercise the rejection path.
+        prop_assume!(!(val.is_coinbase() && val.sapling_spends_per_anchor().count() > 0));
+        assert_value_properties(val)
+    });
 }
 
 // Transparent

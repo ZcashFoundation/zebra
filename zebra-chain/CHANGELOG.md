@@ -5,7 +5,63 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [7.0.0] - 2026-05-01
+
+### Removed
+
+- `block::Height::coinbase_zcash_serialized_size()`
+- `transaction`:
+  - `builder` module
+  - `Transaction::new_v4_coinbase()` and `new_v5_coinbase()`
+- `transparent`:
+  - `Input::new_coinbase()` and `extra_coinbase_data()`
+  - `CoinbaseData` struct and its impls
+  - `EXTRA_ZEBRA_COINBASE_DATA`, `GENESIS_COINBASE_DATA`, `MAX_COINBASE_DATA_LEN`,
+    `MAX_COINBASE_HEIGHT_DATA_LEN` constants
+
+### Changed
+
+- `transparent::Input::Coinbase`:
+  - `data` field type changed from `CoinbaseData` to `Vec<u8>`
+  - `data` now stores only miner data (without height encoding)
+
+### Added
+
+- `serialization::MAX_HEADERS_PER_MESSAGE: usize`.
+- `transaction::VerifiedUnminedTx`:
+  - `p2sh_sigop_count: u32`.
+  - `block_sigop_count(&self) -> u32`.
+- `block::Height`:
+  - `impl From<block::Height> for i64`
+  - `impl From<&block::Height> for i64`
+  - `impl TryFrom<i64> for block::Height`
+- `transparent`:
+  - `Input::miner_data()`
+  - `Input::coinbase_script()`
+  - `impl TryFrom<transparent::Address> for zcash_transparent::address::TransparentAddress`
+- `transaction`:
+  - `impl TryFrom<&[u8]> for AuthDigest`
+  - `impl AsRef<[u8; 32]> for Hash`
+  - `impl From<&[u8; 32]> for Hash`
+- `serialization`:
+  - `SerializationError::{Num, Opcode, Script}` variants
+  - `impl ZcashSerialize for u8`
+
+### Changed
+
+- Migrated to `zcash_primitives 0.27` (and the rest of the librustzcash 2026-04
+  release wave), which replaces the yanked `core2` dependency with `corez`.
+- `transaction::VerifiedUnminedTx::new` now takes an additional
+  `p2sh_sigop_count: u32` parameter.
+
+## [6.0.2] - 2026-04-17
+
+This release fixes an important security issue:
+
+- [CVE-2026-XXXXX: rk Identity Point Panic in Transaction Verification](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-452v-w3gx-72wg)
+
+The impact of the issue for crate users will depend on the particular usage;
+if you use it as a building block for a consensus node, you should update.
 
 ## [6.0.1] - 2026-03-26
 
@@ -21,7 +77,6 @@ update.
 ### Fixed
 
 - Fixed miner subsidy computation.
-
 
 ## [6.0.0] - 2026-03-12
 

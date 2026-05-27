@@ -343,6 +343,13 @@ pub struct VerifiedUnminedTx {
     /// `MAX_STANDARD_TX_SIGOPS`.
     pub legacy_sigop_count: u32,
 
+    /// The number of P2SH redeem-script signature operations in this transaction.
+    ///
+    /// This mirrors zcashd's `GetP2SHSigOpCount()`. It must be added to `legacy_sigop_count` for
+    /// the block-level `MAX_BLOCK_SIGOPS` check and for `getblocktemplate` sigop budgeting,
+    /// matching zcashd's consensus behavior.
+    pub p2sh_sigop_count: u32,
+
     /// The number of conventional actions for `transaction`, as defined by [ZIP-317].
     ///
     /// The number of actions is limited by [`MAX_BLOCK_BYTES`], so it fits in a u32.
@@ -400,12 +407,13 @@ impl fmt::Display for VerifiedUnminedTx {
 }
 
 impl VerifiedUnminedTx {
-    /// Create a new verified unmined transaction from an unmined transaction,
-    /// its miner fee, its legacy sigop count, and the spent outputs for its transparent inputs.
+    /// Create a new verified unmined transaction from an unmined transaction, its miner fee, its
+    /// legacy and P2SH sigop counts, and the spent outputs for its transparent inputs.
     pub fn new(
         transaction: UnminedTx,
         miner_fee: Amount<NonNegative>,
         legacy_sigop_count: u32,
+        p2sh_sigop_count: u32,
         spent_outputs: Arc<Vec<transparent::Output>>,
     ) -> Result<Self, zip317::Error> {
         let fee_weight_ratio = zip317::conventional_fee_weight_ratio(&transaction, miner_fee);
@@ -418,6 +426,7 @@ impl VerifiedUnminedTx {
             transaction,
             miner_fee,
             legacy_sigop_count,
+            p2sh_sigop_count,
             fee_weight_ratio,
             conventional_actions,
             unpaid_actions,
@@ -425,6 +434,16 @@ impl VerifiedUnminedTx {
             height: None,
             spent_outputs,
         })
+    }
+
+    /// The total number of transparent signature operations for block-level accounting: legacy +
+    /// P2SH.
+    ///
+    /// This is the value that must be used for the consensus `MAX_BLOCK_SIGOPS` limit and for
+    /// `getblocktemplate` sigop budgeting.
+    pub fn block_sigop_count(&self) -> u32 {
+        self.legacy_sigop_count
+            .saturating_add(self.p2sh_sigop_count)
     }
 
     /// Returns `true` if the transaction pays at least the [ZIP-317] conventional fee.

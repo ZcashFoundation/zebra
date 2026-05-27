@@ -111,8 +111,47 @@ pub struct StartCmd {
     filters: Vec<String>,
 }
 
+/// Warns if Linux TCP slow-start-after-idle is enabled, which significantly
+/// reduces single-peer throughput for block propagation.
+///
+/// See `book/src/user/troubleshooting.md`.
+#[cfg(target_os = "linux")]
+fn check_tcp_slow_start_after_idle() {
+    const PATH: &str = "/proc/sys/net/ipv4/tcp_slow_start_after_idle";
+
+    let raw = match std::fs::read_to_string(PATH) {
+        Ok(raw) => raw,
+        Err(error) => {
+            debug!(
+                ?error,
+                path = PATH,
+                "could not read TCP sysctl, skipping check"
+            );
+            return;
+        }
+    };
+
+    if raw.trim() == "0" {
+        return;
+    }
+
+    warn!(
+        setting = "net.ipv4.tcp_slow_start_after_idle",
+        "TCP slow-start-after-idle is enabled, which resets TCP's congestion window \
+         between block requests and significantly reduces single-peer throughput for \
+         block propagation. \
+         Hint: set `net.ipv4.tcp_slow_start_after_idle=0` via sysctl. \
+         See https://zebra.zfnd.org/user/troubleshooting.html#linux-tcp-tuning-for-block-propagation"
+    );
+}
+
+#[cfg(not(target_os = "linux"))]
+fn check_tcp_slow_start_after_idle() {}
+
 impl StartCmd {
     async fn start(&self) -> Result<(), Report> {
+        check_tcp_slow_start_after_idle();
+
         let config = APPLICATION.config();
         let is_regtest = config.network.network.is_regtest();
 

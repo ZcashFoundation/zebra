@@ -4,6 +4,52 @@
 # * allow - No warning or error will be produced, though in some cases a note
 # will be
 
+# This section is considered when running `cargo deny check advisories`.
+# https://embarkstudios.github.io/cargo-deny/checks/advisories/cfg.html
+[advisories]
+version = 2
+yanked = "deny"
+# Unmaintained crate advisories — all transitive via abscissa_core/structopt or direct.
+# Remove each ignore entry as the dependency chain is upgraded.
+ignore = [
+    "RUSTSEC-2021-0139", # ansi_term — transitive via abscissa_core -> structopt
+    "RUSTSEC-2024-0375", # atty (unmaintained) — transitive via abscissa_core -> structopt
+    "RUSTSEC-2021-0145", # atty (unsound) — transitive via abscissa_core -> structopt
+    "RUSTSEC-2024-0370", # proc-macro-error — transitive via abscissa_core -> structopt
+    "RUSTSEC-2025-0119", # number_prefix — transitive via indicatif
+    "RUSTSEC-2025-0141", # bincode — direct dependency
+]
+
+# This section is considered when running `cargo deny check licenses`.
+# https://embarkstudios.github.io/cargo-deny/checks/licenses/cfg.html
+[licenses]
+confidence-threshold = 0.8
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "CC0-1.0",
+    "MPL-2.0",
+    "Unlicense",
+    "0BSD",
+    "MIT-0",
+    "CDLA-Permissive-2.0",
+    "CDDL-1.0",
+]
+exceptions = []
+
+# rustls-webpki uses a custom ISC-style license
+[[licenses.clarify]]
+name = "rustls-webpki"
+expression = "ISC"
+license-files = [{ path = "LICENSE", hash = 0x001c7e6c }]
+
 # This section is considered when running `cargo deny check bans`.
 # More documentation about the 'bans' section can be found here:
 # https://embarkstudios.github.io/cargo-deny/checks/bans/cfg.html
@@ -50,6 +96,9 @@ skip = [
 # dependencies starting at the specified crate, up to a certain depth, which is
 # by default infinite
 skip-tree = [
+    # wait for bindgen to update itertools
+    { name = "itertools", version = "0.13" },
+
     # wait for ordered-map to release a dependency fix
     { name = "ordered-map", version = "=0.4.2" },
 
@@ -58,9 +107,6 @@ skip-tree = [
 
     # wait for abscissa_core to upgrade
     {name = "tracing-log", version = "=0.1.4" },
-
-    # Multiple base64 versions through different dependencies
-    { name = "base64", version = "=0.21.7" },
 
     # wait for abscissa_core to update toml
     { name = "toml", version = "=0.5.11" },
@@ -85,18 +131,38 @@ skip-tree = [
     { name = "sha2", version = "=0.10.9" },
     { name = "ripemd", version = "=0.1.3" },
 
+    # pre-release RustCrypto crates pulled in by librustzcash 2026-04 release wave;
+    # remove once the broader ecosystem catches up to the same pre-release line
+    { name = "block-buffer", version = "=0.11.0-rc.3" },
+    { name = "crypto-common", version = "=0.2.0-rc.1" },
+    { name = "digest", version = "=0.11.0-pre.9" },
+
+    # console 0.15.x is pulled by indicatif (via howudoin); 0.16.x by insta (dev-dep).
+    # remove once indicatif/howudoin update to console 0.16.
+    { name = "console", version = "=0.15.11" },
+
+    # hashbrown 0.16.x pulled by ed25519-zebra; 0.17.x by indexmap 2.14 (transitive of librustzcash).
+    # remove once ed25519-zebra updates hashbrown.
+    { name = "hashbrown", version = "=0.16.1" },
+
+    # toml 0.9.x pulled by zebrad direct; 1.1.x by config 0.15 (also via zebrad).
+    # toml 1.x is the spec-1.1 line; remove once zebrad migrates its direct dep.
+    { name = "toml", version = "=0.9.12+spec-1.1.0" },
+
+    # winnow 0.7.x pulled by toml 0.9.x; 1.x by toml 1.x / config 0.15.
+    # resolved together with the toml entry above.
+    { name = "winnow", version = "=0.7.15" },
+
     # wait for abscissa_core to update synstructure
     { name = "synstructure", version = "=0.12.6" },
-
-    # wait for librustzcash to update tonic
-    { name = "tonic", version = "0.12" },
-    { name = "prost-types", version = "0.13" },
 
     { name = "windows-sys", version = "=0.52.0" },
 
     { name = "indexmap", version = "1.9" },
 
     { name = "hashbrown", version = "0.12" },
+    # hashbrown 0.14.x pulled by indexmap 1.9 (transitive of librustzcash)
+    { name = "hashbrown", version = "0.14" },
     # hashbrown 0.15.x pulled by various deps; 0.16.x pulled by indexmap 2.x
     { name = "hashbrown", version = "0.15" },
 
@@ -104,13 +170,11 @@ skip-tree = [
     { name = "itertools", version = "0.13" },
 
     { name = "getrandom", version = "0.2" },
+    { name = "getrandom", version = "0.3" },
 
     { name = "rand", version = "0.8" },
     { name = "rand_core", version = "0.6" },
     { name = "rand_chacha", version = "0.3" },
-
-    # TODO: Remove once https://github.com/zcash/librustzcash/pull/1893 merges.
-    { name = "equihash", version = "0.2" },
 
     # wait for derive_builder to update
     { name = "darling", version = "0.20.11" },
@@ -118,11 +182,8 @@ skip-tree = [
     # wait until `config` updates `convert_case`
     { name = "convert_case", version = "0.6.0" },
 
-    # wait until `config` updates `toml`
-    { name = "toml_datetime", version = "0.7.5"},
-
-    #
-    { name = "getrandom", version = "0.3.4" },
+    # wait for hashlink/petgraph/metrics-util to update hashbrown and foldhash
+    { name = "hashbrown", version = "0.15" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
@@ -132,18 +193,19 @@ skip-tree = [
 # Lint level for what to happen when a crate from a crate registry that is not
 # in the allow list is encountered
 unknown-registry = "deny"
+
 # Lint level for what to happen when a crate from a git repository that is not
 # in the allow list is encountered
 unknown-git = "deny"
+
 # List of URLs for allowed crate registries. Defaults to the crates.io index
 # if not specified. If it is specified but empty, no registries are allowed.
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+
 # List of URLs for allowed Git repositories
+# TODO: Remove the URLs once the patch table in Cargo.toml is removed.
 allow-git = [
     "https://github.com/zcash/librustzcash.git",
-    "https://github.com/zcash/incrementalmerkletree",
-    "https://github.com/zcash/orchard",
-    "https://github.com/zcash/sapling-crypto"
 ]
 
 [sources.allow-org]

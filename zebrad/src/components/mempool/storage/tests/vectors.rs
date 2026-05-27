@@ -277,6 +277,7 @@ fn mempool_expired_basic_for_network(network: Network) -> Result<()> {
             tx.into(),
             Amount::try_from(1_000_000).expect("valid amount"),
             0,
+            0,
             std::sync::Arc::new(vec![]),
         )
         .expect("verification should pass"),

@@ -1,0 +1,232 @@
+name: Benchmarks
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [labeled, synchronize]
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# Bench list shared by both jobs. New benches need a `[[bench]]` stanza
+# with `harness = false` in the crate's `Cargo.toml`.
+env:
+  BENCHES: |
+    criterion -p zebra-consensus --bench groth16
+    criterion -p zebra-consensus --bench halo2
+    criterion -p zebra-consensus --bench sapling
+    criterion -p zebra-chain --bench transaction
+    criterion -p zebra-chain --bench block --features bench
+    criterion -p zebra-chain --bench redpallas
+
+jobs:
+  # Runs all benchmarks and publishes results to gh-pages for historical
+  # tracking. Triggered manually via workflow_dispatch.
+  benchmark:
+    name: Run Benchmarks
+    if: github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
+        with:
+          toolchain: stable
+          cache-on-failure: true
+
+      - name: Install cargo-criterion
+        run: cargo install cargo-criterion --locked
+
+      - name: Run benchmarks
+        run: |
+          : > bench_output.json
+          while IFS= read -r bench; do
+            [ -z "$bench" ] && continue
+            echo "::group::cargo $bench"
+            # shellcheck disable=SC2086
+            cargo $bench --message-format=json >> bench_output.json
+            echo "::endgroup::"
+          done <<< "$BENCHES"
+
+      - name: Convert criterion JSON to github-action-benchmark format
+        run: |
+          jq -s '[.[] | select(.reason == "benchmark-complete") | {
+            name: .id,
+            unit: .typical.unit,
+            value: .typical.estimate,
+            range: "\(.typical.lower_bound as $lo | .typical.upper_bound as $hi | (($hi - $lo) / 2 | . * 100 | round / 100)) \(.typical.unit)"
+          }]' bench_output.json > bench_results.json
+
+      - name: Generate summary
+        run: |
+          {
+            echo "## Benchmark Results"
+            echo ""
+            echo "| Benchmark | Time | ±CI |"
+            echo "|-----------|------|-----|"
+            jq -r 'select(.reason == "benchmark-complete") |
+              "| \(.id) | \(.typical.estimate | . / 1e3 | if . >= 1000 then "\(. / 1000 | . * 100 | round / 100) ms" elif . >= 1 then "\(. * 100 | round / 100) µs" else "\(. * 1000 | . * 100 | round / 100) ns" end) | ±\(.typical.lower_bound as $lo | .typical.upper_bound as $hi | (($hi - $lo) / 2 / .typical.estimate * 10000 | round / 100))% |"' \
+              bench_output.json
+            echo ""
+            echo "**Total benchmarks:** $(grep -c '"benchmark-complete"' bench_output.json)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Store benchmark results
+        uses: benchmark-action/github-action-benchmark@52576c92bccf6ac60c8223ec7eb2565637cae9ba # v1.22.1
+        with:
+          tool: customSmallerIsBetter
+          output-file-path: bench_results.json
+          gh-pages-branch: gh-pages
+          benchmark-data-dir-path: dev/bench
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          # 150% = 1.5x slower than the previous run. Stays above ~10-20%
+          # runner noise while catching real regressions.
+          alert-threshold: "150%"
+          comment-on-alert: true
+          fail-on-alert: false
+
+  # Compares benchmarks between the PR branch and the base branch.
+  # Runs when the `C-benchmark` label is present: both when it is first added
+  # and on subsequent pushes to the PR.
+  compare:
+    name: Compare Benchmarks
+    if: >-
+      github.event_name == 'pull_request' &&
+      contains(github.event.pull_request.labels.*.name, 'C-benchmark')
+    permissions:
+      contents: read
+      pull-requests: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
+        with:
+          toolchain: stable
+          cache-on-failure: true
+
+      - name: Install critcmp
+        run: cargo install critcmp --locked
+
+      - name: Benchmark base branch
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git checkout "$BASE_SHA"
+          failures=()
+          while IFS= read -r bench; do
+            [ -z "$bench" ] && continue
+            # Strip the `criterion ` prefix so we can run via `cargo bench`.
+            cmd="${bench#criterion }"
+            echo "::group::base: cargo bench $cmd"
+            # shellcheck disable=SC2086
+            if ! cargo bench $cmd -- --save-baseline base; then
+              failures+=("$cmd")
+            fi
+            echo "::endgroup::"
+          done <<< "$BENCHES"
+          if [ "${#failures[@]}" -gt 0 ]; then
+            {
+              echo "### Base-branch benchmark failures"
+              echo ""
+              echo "The following benches failed on the base branch (likely because they are new in this PR):"
+              echo ""
+              for f in "${failures[@]}"; do
+                echo "- \`cargo bench $f\`"
+              done
+              echo ""
+              echo "critcmp will show no comparison for these."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Benchmark PR branch
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git checkout "$HEAD_SHA"
+          while IFS= read -r bench; do
+            [ -z "$bench" ] && continue
+            cmd="${bench#criterion }"
+            echo "::group::pr: cargo bench $cmd"
+            # shellcheck disable=SC2086
+            cargo bench $cmd -- --save-baseline pr
+            echo "::endgroup::"
+          done <<< "$BENCHES"
+
+      - name: Compare results
+        id: compare
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          # Branch names are attacker-controlled. Strip anything that isn't a
+          # conventional ref character before rendering them inside markdown.
+          sanitize() { printf '%s' "$1" | tr -cd 'A-Za-z0-9._/-'; }
+          base_ref=$(sanitize "$BASE_REF")
+          head_ref=$(sanitize "$HEAD_REF")
+
+          {
+            echo "## Benchmark Comparison: base vs PR"
+            echo ""
+            echo '```'
+            critcmp base pr
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          {
+            echo 'COMMENT<<EOF'
+            echo "## Benchmark Comparison"
+            echo ""
+            echo "Comparing \`${base_ref}\` (base) vs \`${head_ref}\` (PR)"
+            echo ""
+            echo '```'
+            critcmp base pr
+            echo '```'
+            echo ""
+            echo "*Benchmarks ran on CI: results may have higher variance than local runs.*"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Post PR comment
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 #v9.0.0
+        env:
+          COMMENT: ${{ steps.compare.outputs.COMMENT }}
+        with:
+          script: |
+            const body = process.env.COMMENT;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c =>
+              c.user.type === 'Bot' && c.body.startsWith('## Benchmark Comparison')
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }

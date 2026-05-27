@@ -208,6 +208,7 @@ fn test_get_block_1() -> Result<(), Box<dyn std::error::Error>> {
     let block_commitments = block.block_commitments();
     let final_sapling_root = block.final_sapling_root();
     let final_orchard_root = block.final_orchard_root();
+    let n_tx = block.n_tx();
     let tx = block
         .tx()
         .iter()
@@ -254,6 +255,7 @@ fn test_get_block_1() -> Result<(), Box<dyn std::error::Error>> {
         block_commitments,
         final_sapling_root,
         final_orchard_root,
+        n_tx,
         tx.iter()
             .map(|h| GetBlockTransaction::Hash(zebra_chain::transaction::Hash(*h)))
             .collect(),
@@ -296,6 +298,7 @@ fn test_get_block_2() -> Result<(), Box<dyn std::error::Error>> {
     let block_commitments = block.block_commitments();
     let final_sapling_root = block.final_sapling_root();
     let final_orchard_root = block.final_orchard_root();
+    let n_tx = block.n_tx();
     // We don't unpack the transaction object because we test that in the
     // get_raw_transaction test.
     let tx = block
@@ -330,6 +333,7 @@ fn test_get_block_2() -> Result<(), Box<dyn std::error::Error>> {
         block_commitments,
         final_sapling_root,
         final_orchard_root,
+        n_tx,
         tx.iter()
             .cloned()
             .map(GetBlockTransaction::Object)
@@ -910,7 +914,7 @@ fn test_get_address_utxos_chain_info_false() -> Result<(), Box<dyn std::error::E
         .iter()
         .map(|utxo| {
             // Address extractability was checked manually
-            let address = utxo.address().clone();
+            let address = utxo.address();
             // Hash extractability was checked in other test
             let txid = utxo.txid();
             let output_index = utxo.output_index().index();
@@ -921,7 +925,7 @@ fn test_get_address_utxos_chain_info_false() -> Result<(), Box<dyn std::error::E
             let height = utxo.height();
 
             Utxo::new(
-                address,
+                *address,
                 txid,
                 OutputIndex::from_index(output_index),
                 script,
@@ -968,7 +972,7 @@ fn test_get_address_utxos_chain_info_true() -> Result<(), Box<dyn std::error::Er
             .iter()
             .map(|utxo| {
                 // Address extractability was checked manually
-                let address = utxo.address().clone();
+                let address = utxo.address();
                 // Hash extractability was checked in other test
                 let txid = utxo.txid();
                 let output_index = utxo.output_index().index();
@@ -979,7 +983,7 @@ fn test_get_address_utxos_chain_info_true() -> Result<(), Box<dyn std::error::Er
                 let height = utxo.height();
 
                 Utxo::new(
-                    address,
+                    *address,
                     txid,
                     OutputIndex::from_index(output_index),
                     script,
@@ -1396,9 +1400,9 @@ fn test_get_block_subsidy() -> Result<(), Box<dyn std::error::Error>> {
             let specification = stream.specification().clone();
             let value = stream.value();
             let value_zat = stream.value_zat();
-            let address = stream.address().clone();
+            let address = stream.address();
 
-            FundingStream::new(recipient, specification, value, value_zat, address)
+            FundingStream::new(recipient, specification, value, value_zat, *address)
         })
         .collect::<Vec<_>>();
     let lockbox_streams = obj.lockbox_streams().clone();

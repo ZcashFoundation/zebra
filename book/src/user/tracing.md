@@ -32,9 +32,28 @@ Zebra can generate [flamegraphs] of tracing spans.
 Activate flamegraphs using the `flamegraph` compile-time feature,
 and the [`flamegraph`][flamegraph] runtime config option.
 
+## OpenTelemetry Export
+
+Official Zebra release builds include OpenTelemetry support. Export is disabled
+until you configure an OpenTelemetry endpoint using the tracing config or the
+`OTEL_EXPORTER_OTLP_ENDPOINT` environment variable.
+
 ## Sentry Production Monitoring
 
-Compile Zebra with `--features sentry` to monitor it using [Sentry][sentry] in production.
+Official Zebra release builds include Sentry support. Sentry is only activated
+when the `SENTRY_DSN` environment variable is set.
+
+You can optionally set `SENTRY_ENVIRONMENT` to control the environment name
+attached to Sentry events. Zebra also tags events with the git SHA when
+available, preferring the runtime `GITHUB_SHA` (full commit SHA on GitHub
+Actions) and falling back to the build-baked `SHORT_SHA` or `VERGEN_GIT_SHA`.
+When it runs under GitHub Actions it reads standard `GITHUB_*` metadata plus
+the optional `CI_TEST_ID` runtime variable for CI context. If `github-slug-action` exports `GITHUB_REF_POINT_SLUG_URL`, Zebra
+uses that slugged branch or tag name for the `git.ref` tag, and CI workflows
+can pass `CI_PR_NUMBER` and `CI_TEST_ID` for additional correlation. These
+values are read at runtime, so container images do not need CI-specific build
+arguments, and the `ZEBRA_*` environment namespace remains reserved for Zebra
+configuration.
 
 [tracing_section]: https://docs.rs/zebrad/latest/zebrad/components/tracing/struct.InnerConfig.html
 [filter]: https://docs.rs/zebrad/latest/zebrad/components/tracing/struct.InnerConfig.html#structfield.filter

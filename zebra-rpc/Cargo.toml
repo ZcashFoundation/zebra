@@ -1,6 +1,6 @@
 [package]
 name = "zebra-rpc"
-version = "6.0.1"
+version = "7.0.0"
 authors.workspace = true
 description = "A Zebra JSON Remote Procedure Call (JSON-RPC) interface"
 license.workspace = true
@@ -24,7 +24,7 @@ categories = [
 exclude = ["*.proto"]
 
 [features]
-tx_v6 = ["zebra-chain/tx_v6", "zebra-state/tx_v6", "zebra-consensus/tx_v6"]
+tx_v6 = ["zebra-chain/tx_v6", "zebra-state/tx_v6", "zebra-consensus/tx_v6", "zcash_primitives/zip-233"]
 
 # Production features that activate extra dependencies, or extra features in
 # dependencies
@@ -57,6 +57,10 @@ serde_with = { workspace = true, features = ["hex"] }
 indexmap = { workspace = true, features = ["serde"] }
 derive-getters = { workspace = true, features = ["auto_copy_getters"] }
 derive-new = { workspace = true }
+thiserror = { workspace = true }
+lazy_static = { workspace = true }
+strum = { workspace = true }
+strum_macros = { workspace = true }
 
 # RPC endpoint basic auth
 base64 = { workspace = true }
@@ -91,28 +95,30 @@ openrpsee = { workspace = true }
 phf = { workspace = true, features = ["macros"] }
 schemars = { workspace = true }
 
+orchard = { workspace = true }
+sapling-crypto = { workspace = true }
+
 zcash_address = { workspace = true }
-zcash_keys = { workspace = true }
-zcash_primitives = { workspace = true, features = ["transparent-inputs"] }
+zcash_keys = { workspace = true, features = ["orchard", "sapling"] }
+zcash_primitives = { workspace = true, features = ["transparent-inputs", "non-standard-fees"] }
+zcash_proofs = { workspace = true }
 zcash_protocol = { workspace = true }
 zcash_script = { workspace = true }
 zcash_transparent = { workspace = true }
 
-sapling-crypto = { workspace = true }
-
 # Test-only feature proptest-impl
 proptest = { workspace = true, optional = true }
 
-zebra-chain = { path = "../zebra-chain", version = "6.0.1", features = [
+zebra-chain = { path = "../zebra-chain", version = "7.0.0", features = [
     "json-conversion",
 ] }
-zebra-consensus = { path = "../zebra-consensus", version = "5.0.1" }
-zebra-network = { path = "../zebra-network", version = "5.0.0" }
-zebra-node-services = { path = "../zebra-node-services", version = "4.0.0", features = [
+zebra-consensus = { path = "../zebra-consensus", version = "6.0.0" }
+zebra-network = { path = "../zebra-network", version = "6.0.0" }
+zebra-node-services = { path = "../zebra-node-services", version = "5.0.0", features = [
     "rpc-client",
 ] }
-zebra-script = { path = "../zebra-script", version = "5.0.0" }
-zebra-state = { path = "../zebra-state", version = "5.0.0" }
+zebra-script = { path = "../zebra-script", version = "6.0.1" }
+zebra-state = { path = "../zebra-state", version = "6.0.0" }
 
 [build-dependencies]
 openrpsee = { workspace = true }
@@ -120,23 +126,26 @@ tonic-prost-build = { workspace = true }
 which = { workspace = true }
 
 [dev-dependencies]
+bytes = { workspace = true }
+http-body = { workspace = true }
 insta = { workspace = true, features = ["redactions", "json", "ron"] }
+anyhow = { workspace = true }
+tempfile = { workspace = true }
 
 proptest = { workspace = true }
 
-thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 
-zebra-chain = { path = "../zebra-chain", version = "6.0.1", features = [
+zebra-chain = { path = "../zebra-chain", version = "7.0.0", features = [
     "proptest-impl",
 ] }
-zebra-consensus = { path = "../zebra-consensus", version = "5.0.1", features = [
+zebra-consensus = { path = "../zebra-consensus", version = "6.0.0", features = [
     "proptest-impl",
 ] }
-zebra-network = { path = "../zebra-network", version = "5.0.0", features = [
+zebra-network = { path = "../zebra-network", version = "6.0.0", features = [
     "proptest-impl",
 ] }
-zebra-state = { path = "../zebra-state", version = "5.0.0", features = [
+zebra-state = { path = "../zebra-state", version = "6.0.0", features = [
     "proptest-impl",
 ] }
 
