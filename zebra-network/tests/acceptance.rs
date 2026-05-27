@@ -10,7 +10,7 @@ use chrono::Utc;
 use zebra_chain::block::Height;
 use zebra_network::{
     types::{AddrInVersion, Nonce, PeerServices},
-    ConnectedAddr, ConnectionInfo, PeerSocketAddr, Version, VersionMessage,
+    ConnectedAddr, ConnectionInfo, PeerSocketAddr, PeerSource, Version, VersionMessage,
 };
 
 /// Test that the types used in [`ConnectionInfo`] are public,
@@ -41,5 +41,6 @@ fn connection_info_types_are_public() {
         connected_addr,
         remote,
         negotiated_version,
+        source: PeerSource::Configured,
     });
 }

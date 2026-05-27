@@ -1028,14 +1028,22 @@ impl Service<Request> for StateService {
                 // Await the channel response, flatten the result, map receive errors to
                 // `CommitSemanticallyVerifiedError::WriteTaskExited`.
                 // Then flatten the nested Result and convert any errors to a BoxError.
-                let span = Span::current();
+                let span = tracing::debug_span!(
+                    "sync.commit_block",
+                    kind = "semantic",
+                    result = tracing::field::Empty,
+                );
                 async move {
-                    rsp_rx
+                    let result = rsp_rx
                         .await
                         .map_err(|_recv_error| CommitBlockError::WriteTaskExited.into())
                         .and_then(|result| result)
-                        .map_err(BoxError::from)
-                        .map(Response::Committed)
+                        .map_err(BoxError::from);
+
+                    Span::current()
+                        .record("result", if result.is_ok() { "success" } else { "failure" });
+
+                    result.map(Response::Committed)
                 }
                 .instrument(span)
                 .boxed()
@@ -1079,13 +1087,22 @@ impl Service<Request> for StateService {
                 // Await the channel response, flatten the result, map receive errors to
                 // `CommitCheckpointVerifiedError::WriteTaskExited`.
                 // Then flatten the nested Result and convert any errors to a BoxError.
+                let span = tracing::debug_span!(
+                    "sync.commit_block",
+                    kind = "checkpoint",
+                    result = tracing::field::Empty,
+                );
                 async move {
-                    rsp_rx
+                    let result = rsp_rx
                         .await
                         .map_err(|_recv_error| CommitBlockError::WriteTaskExited.into())
                         .and_then(|result| result)
-                        .map_err(BoxError::from)
-                        .map(Response::Committed)
+                        .map_err(BoxError::from);
+
+                    Span::current()
+                        .record("result", if result.is_ok() { "success" } else { "failure" });
+
+                    result.map(Response::Committed)
                 }
                 .instrument(span)
                 .boxed()
@@ -1095,12 +1112,18 @@ impl Service<Request> for StateService {
             // If the UTXO isn't in the queued blocks, runs concurrently using the ReadStateService.
             Request::AwaitUtxo(outpoint) => {
                 let timer = CodeTimer::start();
+                let await_utxo_span = tracing::info_span!(
+                    parent: &span,
+                    "state.await_utxo",
+                    ?outpoint,
+                    result = tracing::field::Empty,
+                );
                 // Prepare the AwaitUtxo future from PendingUxtos.
                 let response_fut = self.pending_utxos.queue(outpoint);
                 // Only instrument `response_fut`, the ReadStateService already
                 // instruments its requests with the same span.
 
-                let response_fut = response_fut.instrument(span).boxed();
+                let response_fut = response_fut.instrument(await_utxo_span.clone()).boxed();
 
                 // Check the non-finalized block queue outside the returned future,
                 // so we can access mutable state fields.
@@ -1109,6 +1132,7 @@ impl Service<Request> for StateService {
 
                     // We're finished, the returned future gets the UTXO from the respond() channel.
                     timer.finish_desc("AwaitUtxo/queued-non-finalized");
+                    await_utxo_span.record("result", "queued_non_finalized");
 
                     return response_fut;
                 }
@@ -1119,6 +1143,7 @@ impl Service<Request> for StateService {
 
                     // We're finished, the returned future gets the UTXO from the respond() channel.
                     timer.finish_desc("AwaitUtxo/sent-non-finalized");
+                    await_utxo_span.record("result", "sent_non_finalized");
 
                     return response_fut;
                 }
@@ -1132,6 +1157,7 @@ impl Service<Request> for StateService {
                 // Manually send a request to the ReadStateService,
                 // to get UTXOs from any non-finalized chain or the finalized chain.
                 let read_service = self.read_service.clone();
+                let await_utxo_result_span = await_utxo_span.clone();
 
                 // Run the request in an async block, so we can await the response.
                 async move {
@@ -1154,15 +1180,18 @@ impl Service<Request> for StateService {
                     if let ReadResponse::AnyChainUtxo(Some(utxo)) = rsp {
                         // We got a UTXO, so we replace the response future with the result own.
                         timer.finish_desc("AwaitUtxo/any-chain");
+                        await_utxo_result_span.record("result", "any_chain");
 
                         return Ok(Response::Utxo(utxo));
                     }
 
                     // We're finished, but the returned future is waiting on the respond() channel.
                     timer.finish_desc("AwaitUtxo/waiting");
+                    await_utxo_result_span.record("result", "waiting");
 
                     response_fut.await
                 }
+                .instrument(await_utxo_span)
                 .boxed()
             }
 

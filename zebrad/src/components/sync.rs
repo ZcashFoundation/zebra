@@ -311,6 +311,39 @@ struct CheckedTip {
     expected_next: block::Hash,
 }
 
+fn bool_label(value: bool) -> &'static str {
+    if value {
+        "true"
+    } else {
+        "false"
+    }
+}
+
+fn sync_made_progress(starting_tip: Option<Height>, ending_tip: Option<Height>) -> bool {
+    match (starting_tip, ending_tip) {
+        (Some(starting_tip), Some(ending_tip)) => ending_tip > starting_tip,
+        (None, Some(_)) => true,
+        _ => false,
+    }
+}
+
+fn sync_restart_reason(result: &Result<(), Report>) -> &'static str {
+    let Err(error) = result else {
+        return "exhausted_prospective_tips";
+    };
+
+    let error = format!("{error:?}");
+    if error.contains("Elapsed") || error.contains("deadline has elapsed") {
+        "timeout"
+    } else if error.contains("NotFoundRegistry") {
+        "not_found_registry"
+    } else if error.contains("NotFoundResponse") {
+        "not_found_response"
+    } else {
+        "error"
+    }
+}
+
 pub struct ChainSync<ZN, ZS, ZV, ZSTip>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError>
@@ -539,7 +572,22 @@ where
         self.request_genesis().await?;
 
         loop {
-            if self.try_to_sync().await.is_err() {
+            let starting_tip = self.latest_chain_tip.best_tip_height();
+            let sync_result = self.try_to_sync().await;
+            let ending_tip = self.latest_chain_tip.best_tip_height();
+            let made_progress = sync_made_progress(starting_tip, ending_tip);
+            let sync_failed = sync_result.is_err();
+            let restart_reason = sync_restart_reason(&sync_result);
+
+            metrics::counter!(
+                "sync.restart.count",
+                "reason" => restart_reason,
+                "made_progress" => bool_label(made_progress),
+                "sync_failed" => bool_label(sync_failed),
+            )
+            .increment(1);
+
+            if sync_failed {
                 self.downloads.cancel_all();
             }
 
@@ -571,7 +619,7 @@ where
     /// Returns `Err` if there was an unrecoverable error and restarting the synchronization is
     /// necessary. This includes outer timeouts, where an entire syncing step takes an extremely
     /// long time. (These usually indicate hangs.)
-    #[instrument(skip(self))]
+    #[instrument(name = "sync.try", skip(self))]
     async fn try_to_sync(&mut self) -> Result<(), Report> {
         self.prospective_tips = HashSet::new();
 
@@ -600,6 +648,7 @@ where
         }
 
         info!("exhausted prospective tip set");
+        metrics::counter!("sync.exhausted_prospective_tips.count").increment(1);
 
         Ok(())
     }
@@ -611,11 +660,36 @@ where
     /// Returns `Ok(extra_hashes)` if it was able to extend once and synchronize sone of the chain.
     /// Returns `Err` if there was an unrecoverable error and restarting the synchronization is
     /// necessary.
-    #[instrument(skip(self, extra_hashes))]
+    #[instrument(
+        name = "sync.try_once",
+        skip(self, extra_hashes),
+        fields(
+            extra_hashes = extra_hashes.len(),
+            tips = self.prospective_tips.len(),
+            in_flight = tracing::field::Empty,
+            lookahead_limit = tracing::field::Empty,
+            state_tip = tracing::field::Empty,
+        )
+    )]
     async fn try_to_sync_once(
         &mut self,
         mut extra_hashes: IndexSet<block::Hash>,
     ) -> Result<IndexSet<block::Hash>, Report> {
+        metrics::gauge!("sync.pending_hashes.count", "source" => "extra_hashes")
+            .set(extra_hashes.len() as f64);
+        tracing::Span::current().record(
+            "in_flight",
+            tracing::field::debug(self.downloads.in_flight()),
+        );
+        tracing::Span::current().record(
+            "lookahead_limit",
+            tracing::field::debug(self.lookahead_limit(extra_hashes.len())),
+        );
+        tracing::Span::current().record(
+            "state_tip",
+            tracing::field::debug(self.latest_chain_tip.best_tip_height()),
+        );
+
         // Check whether any block tasks are currently ready.
         while let Poll::Ready(Some(rsp)) = futures::poll!(self.downloads.next()) {
             // Some temporary errors are ignored, and syncing continues with other blocks.
@@ -683,7 +757,7 @@ where
 
     /// Given a block_locator list fan out request for subsequent hashes to
     /// multiple peers
-    #[instrument(skip(self))]
+    #[instrument(name = "sync.obtain_tips", skip(self))]
     async fn obtain_tips(&mut self) -> Result<IndexSet<block::Hash>, Report> {
         let stage_start = std::time::Instant::now();
 
@@ -849,6 +923,8 @@ where
         let new_downloads = download_set.len();
         debug!(new_downloads, "queueing new downloads");
         metrics::gauge!("sync.obtain.queued.hash.count").set(new_downloads as f64);
+        metrics::gauge!("sync.pending_hashes.count", "source" => "obtain_tips")
+            .set(new_downloads as f64);
 
         // security: use the actual number of new downloads from all peers,
         // so the last peer to respond can't toggle our mempool
@@ -862,7 +938,7 @@ where
         Self::handle_hash_response(response).map_err(Into::into)
     }
 
-    #[instrument(skip(self))]
+    #[instrument(name = "sync.extend_tips", skip(self))]
     async fn extend_tips(&mut self) -> Result<IndexSet<block::Hash>, Report> {
         let stage_start = std::time::Instant::now();
 
@@ -992,6 +1068,8 @@ where
         let new_downloads = download_set.len();
         debug!(new_downloads, "queueing new downloads");
         metrics::gauge!("sync.extend.queued.hash.count").set(new_downloads as f64);
+        metrics::gauge!("sync.pending_hashes.count", "source" => "extend_tips")
+            .set(new_downloads as f64);
 
         // security: use the actual number of new downloads from all peers,
         // so the last peer to respond can't toggle our mempool
@@ -1069,11 +1147,24 @@ where
     /// Queue download and verify tasks for each block that isn't currently known to our node.
     ///
     /// TODO: turn obtain and extend tips into a separate task, which sends hashes via a channel?
+    #[instrument(
+        name = "sync.request_blocks",
+        level = "debug",
+        skip(self, hashes),
+        fields(
+            hash_count = hashes.len(),
+            lookahead_limit = tracing::field::Empty,
+            queued_hashes = tracing::field::Empty,
+            deferred_hashes = tracing::field::Empty,
+            result = tracing::field::Empty,
+        )
+    )]
     async fn request_blocks(
         &mut self,
         mut hashes: IndexSet<block::Hash>,
     ) -> Result<IndexSet<block::Hash>, BlockDownloadVerifyError> {
         let lookahead_limit = self.lookahead_limit(hashes.len());
+        tracing::Span::current().record("lookahead_limit", tracing::field::debug(lookahead_limit));
 
         debug!(
             hashes.len = hashes.len(),
@@ -1087,9 +1178,19 @@ where
             IndexSet::new()
         };
 
+        tracing::Span::current().record("queued_hashes", hashes.len());
+        tracing::Span::current().record("deferred_hashes", extra_hashes.len());
+
+        metrics::gauge!("sync.pending_hashes.count", "source" => "queued_for_download")
+            .set(hashes.len() as f64);
+        metrics::gauge!("sync.pending_hashes.count", "source" => "deferred_by_lookahead")
+            .set(extra_hashes.len() as f64);
+
         for hash in hashes.into_iter() {
             self.downloads.download_and_verify(hash).await?;
         }
+
+        tracing::Span::current().record("result", "success");
 
         Ok(extra_hashes)
     }
@@ -1182,6 +1283,8 @@ where
         match response {
             Ok(_t) => Ok(()),
             Err(error) => {
+                error.count_metrics();
+
                 // TODO: exit syncer on permanent service errors (NetworkError, VerifierError)
                 if Self::should_restart_sync(&error) {
                     Err(error)
@@ -1211,7 +1314,12 @@ where
 
     fn update_metrics(&mut self) {
         metrics::gauge!("sync.prospective_tips.len",).set(self.prospective_tips.len() as f64);
-        metrics::gauge!("sync.downloads.in_flight",).set(self.downloads.in_flight() as f64);
+        let in_flight = self.downloads.in_flight();
+        let lookahead_limit = self.lookahead_limit(0);
+        metrics::gauge!("sync.downloads.in_flight",).set(in_flight as f64);
+        metrics::gauge!("sync.download.slots", "state" => "in_flight").set(in_flight as f64);
+        metrics::gauge!("sync.download.slots", "state" => "available")
+            .set(lookahead_limit.saturating_sub(in_flight) as f64);
     }
 
     /// Return if the sync should be restarted based on the given error

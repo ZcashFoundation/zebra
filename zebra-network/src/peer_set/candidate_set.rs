@@ -352,6 +352,11 @@ where
             .collect();
 
         debug!(count = ?addrs.len(), "sending gossiped addresses to the address book");
+        metrics::counter!(
+            "peer.discovery.candidate.count",
+            "source" => "gossip",
+        )
+        .increment(addrs.len() as u64);
 
         // Don't bother spawning a task if there are no addresses left.
         if addrs.is_empty() {

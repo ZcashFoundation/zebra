@@ -19,6 +19,7 @@ use std::{
     pin::Pin,
     sync::{mpsc, Arc},
     task::{Context, Poll},
+    time::Instant,
 };
 
 use futures::{Future, FutureExt, TryFutureExt};
@@ -815,6 +816,7 @@ where
                 .expect("earlier code checks if verification has finished"),
             Included(target_checkpoint_height),
         );
+        let range_start = Instant::now();
         let range_heights: Vec<block::Height> = self
             .queued
             .range_mut(current_range)
@@ -871,6 +873,9 @@ where
                     "we must decrease or eliminate our target on failure"
                 );
 
+                metrics::histogram!("sync.checkpoint.range.duration.seconds", "result" => "failure")
+                    .record(range_start.elapsed().as_secs_f64());
+
                 // Stop verifying, and wait for the next valid block
                 return;
             }
@@ -886,6 +891,8 @@ where
         let block_count = rev_valid_blocks.len();
         tracing::info!(?block_count, ?current_range, "verified checkpoint range");
         metrics::counter!("checkpoint.verified.block.count").increment(block_count as u64);
+        metrics::histogram!("sync.checkpoint.range.duration.seconds", "result" => "success")
+            .record(range_start.elapsed().as_secs_f64());
 
         // All the blocks we've kept are valid, so let's verify them
         // in height order.

@@ -124,6 +124,7 @@ use tower::{
     load::Load,
     Service,
 };
+use tracing_futures::Instrument;
 
 use zebra_chain::{chain_tip::ChainTip, parameters::Network};
 
@@ -181,6 +182,94 @@ fn classify_find_response<E>(result: &Result<Response, E>) -> Option<StallOutcom
         Ok(_) => None,
         Err(_) => Some(StallOutcome::Stall),
     }
+}
+
+async fn observe_peer_request<F>(
+    command: &'static str,
+    source: &'static str,
+    user_agent_family: &'static str,
+    fut: F,
+) -> Result<Response, SharedPeerError>
+where
+    F: std::future::Future<Output = Result<Response, SharedPeerError>> + Send,
+{
+    let request_start = Instant::now();
+    let result = fut.await;
+    let outcome = if result.is_ok() { "success" } else { "error" };
+
+    metrics::histogram!(
+        "peer.request.duration.seconds",
+        "command" => command,
+        "outcome" => outcome,
+    )
+    .record(request_start.elapsed().as_secs_f64());
+
+    if let Err(error) = &result {
+        let error_kind = peer_error_kind(error);
+        metrics::counter!(
+            "peer.request.error.count",
+            "command" => command,
+            "error_kind" => error_kind,
+            "user_agent_family" => user_agent_family,
+        )
+        .increment(1);
+
+        if is_request_timeout(error_kind) {
+            metrics::counter!(
+                "peer.request.timeout.count",
+                "command" => command,
+                "source" => source,
+                "user_agent_family" => user_agent_family,
+            )
+            .increment(1);
+        }
+    }
+
+    result
+}
+
+fn peer_error_kind(error: &SharedPeerError) -> &'static str {
+    let error = error.inner_debug();
+
+    if error.contains("NotFoundRegistry") {
+        "not_found_registry"
+    } else if error.contains("NotFoundResponse") {
+        "not_found_response"
+    } else if error.contains("NoReadyPeers") {
+        "no_ready_peers"
+    } else if error.contains("ConnectionClosed") {
+        "connection_closed"
+    } else if error.contains("ConnectionDropped") {
+        "connection_dropped"
+    } else if error.contains("ConnectionSendTimeout") {
+        "connection_send_timeout"
+    } else if error.contains("ConnectionReceiveTimeout") {
+        "connection_receive_timeout"
+    } else if error.contains("InboundTimeout") {
+        "inbound_timeout"
+    } else if error.contains("Overloaded") {
+        "overloaded"
+    } else if error.contains("ServiceShutdown") {
+        "service_shutdown"
+    } else {
+        "other"
+    }
+}
+
+fn is_request_timeout(error_kind: &'static str) -> bool {
+    matches!(
+        error_kind,
+        "connection_send_timeout" | "connection_receive_timeout" | "inbound_timeout" | "timeout"
+    )
+}
+
+fn count_peer_connection_churn(reason: &'static str, user_agent_family: &'static str) {
+    metrics::counter!(
+        "peer.connection.churn.count",
+        "reason" => reason,
+        "user_agent_family" => user_agent_family,
+    )
+    .increment(1);
 }
 
 /// A [`tower::Service`] that abstractly represents "the rest of the network".
@@ -563,6 +652,7 @@ where
 
                     if self.bans_receiver.borrow().contains_key(&key.ip()) {
                         warn!(?key, "service is banned, dropping service");
+                        count_peer_connection_churn("banned", svc.user_agent_family());
                         std::mem::drop(svc);
                         let cancel = self.cancel_handles.remove(&key);
                         debug_assert!(
@@ -583,6 +673,7 @@ where
                     // A service be canceled because we've connected to the same service twice.
                     // In that case, there is a cancel handle for the peer address,
                     // but it belongs to the service for the newer connection.
+                    count_peer_connection_churn("canceled", "unknown");
                     trace!(
                         ?key,
                         duplicate_connection = self.cancel_handles.contains_key(&key),
@@ -591,6 +682,7 @@ where
                 }
                 Some(Err((key, UnreadyError::CancelHandleDropped(_)))) => {
                     // Similarly, services with dropped cancel handes can have duplicates.
+                    count_peer_connection_churn("cancel_handle_dropped", "unknown");
                     trace!(
                         ?key,
                         duplicate_connection = self.cancel_handles.contains_key(&key),
@@ -601,6 +693,7 @@ where
                 // Unready -> Errored
                 Some(Err((key, UnreadyError::Inner(error)))) => {
                     debug!(%error, "service failed while unready, dropping service");
+                    count_peer_connection_churn("unready_error", "unknown");
 
                     let cancel = self.cancel_handles.remove(&key);
                     assert!(cancel.is_some(), "missing cancel handle");
@@ -644,6 +737,7 @@ where
                 Ok(()) => {
                     if self.bans_receiver.borrow().contains_key(&key.ip()) {
                         debug!(?key, "service ip is banned, dropping service");
+                        count_peer_connection_churn("banned", svc.user_agent_family());
                         std::mem::drop(svc);
                         continue;
                     }
@@ -654,6 +748,7 @@ where
                 // Ready -> Errored
                 Err(error) => {
                     debug!(%error, "service failed while ready, dropping service");
+                    count_peer_connection_churn("ready_error", svc.user_agent_family());
 
                     // Ready services can just be dropped, they don't need any cleanup.
                     std::mem::drop(svc);
@@ -732,6 +827,7 @@ where
                     // Drop the new peer if we are already connected to it.
                     // Preferring old connections avoids connection thrashing.
                     if self.has_peer_with_addr(key) {
+                        count_peer_connection_churn("duplicate", svc.user_agent_family());
                         std::mem::drop(svc);
                         continue;
                     }
@@ -741,10 +837,21 @@ where
                     // drop the new peer if there are already `max_conns_per_ip` peers with
                     // the same IP address in the peer set.
                     if self.num_peers_with_ip(key.ip()) >= self.max_conns_per_ip {
+                        count_peer_connection_churn(
+                            "max_connections_per_ip",
+                            svc.user_agent_family(),
+                        );
                         std::mem::drop(svc);
                         continue;
                     }
 
+                    metrics::counter!(
+                        "peer.ready.count",
+                        "source" => svc.source_label(),
+                        "user_agent_family" => svc.user_agent_family(),
+                    )
+                    .increment(1);
+                    count_peer_connection_churn("inserted", svc.user_agent_family());
                     self.push_unready(key, svc);
                 }
             }
@@ -806,11 +913,13 @@ where
 
         if let Some(ready_service) = self.take_ready_service(key) {
             // A ready service has no work to cancel, so just drop it.
+            count_peer_connection_churn("removed", ready_service.user_agent_family());
             std::mem::drop(ready_service);
         } else if let Some(handle) = self.cancel_handles.remove(key) {
             // Cancel the work, implicitly dropping the cancel handle.
             // The service future returns a `Canceled` error,
             // making `poll_unready` drop the service.
+            count_peer_connection_churn("removed", "unknown");
             let _ = handle.send(CancelClientWork);
         }
     }
@@ -830,6 +939,7 @@ where
         if svc.remote_version() >= self.minimum_peer_version.current() {
             self.ready_services.insert(key, svc);
         } else {
+            count_peer_connection_churn("outdated", svc.user_agent_family());
             std::mem::drop(svc);
         }
     }
@@ -841,6 +951,7 @@ where
     /// service is dropped.
     fn push_unready(&mut self, key: D::Key, svc: D::Service) {
         let peer_version = svc.remote_version();
+        let user_agent_family = svc.user_agent_family();
         let (tx, rx) = oneshot::channel();
 
         self.unready_services.push(UnreadyService {
@@ -855,6 +966,7 @@ where
         } else {
             // Cancel any request made to the service because it is using an outdated protocol
             // version.
+            count_peer_connection_churn("outdated", user_agent_family);
             let _ = tx.send(CancelClientWork);
         }
     }
@@ -936,6 +1048,8 @@ where
 
     /// Routes a request using P2C load-balancing.
     fn route_p2c(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
+        let command = req.command();
+
         if let Some(p2c_key) = self.select_ready_p2c_peer() {
             tracing::trace!(?p2c_key, "routing based on p2c");
 
@@ -943,6 +1057,8 @@ where
                 .take_ready_service(&p2c_key)
                 .expect("selected peer must be ready");
 
+            let user_agent_family = svc.user_agent_family();
+            let source = svc.source_label();
             let track_stalls = matches!(
                 &req,
                 Request::FindBlocks { .. } | Request::FindHeaders { .. }
@@ -950,6 +1066,9 @@ where
 
             let fut = svc.call(req);
             self.push_unready(p2c_key, svc);
+            let fut = observe_peer_request(command, source, user_agent_family, fut);
+            let span =
+                tracing::debug_span!("peer.route_p2c", ?p2c_key, command, user_agent_family,);
 
             if track_stalls {
                 let stall_tx = self.stall_event_tx.clone();
@@ -960,11 +1079,20 @@ where
                     }
                     result.map_err(Into::into)
                 }
+                .instrument(span)
                 .boxed();
             }
 
-            return fut.map_err(Into::into).boxed();
+            return fut.instrument(span).map_err(Into::into).boxed();
         }
+
+        metrics::counter!(
+            "peer.request.error.count",
+            "command" => command,
+            "error_kind" => "no_ready_peers",
+            "user_agent_family" => "unknown",
+        )
+        .increment(1);
 
         async move {
             // Let other tasks run, so a retry request might get different ready peers.
@@ -993,6 +1121,7 @@ where
         req: Request,
         hash: InventoryHash,
     ) -> <Self as tower::Service<Request>>::Future {
+        let command = req.command();
         let advertising_peer_list = self
             .inventory_registry
             .advertising_peers(hash)
@@ -1012,10 +1141,31 @@ where
 
         if let Some(mut svc) = peer.and_then(|key| self.take_ready_service(&key)) {
             let peer = peer.expect("just checked peer is Some");
+            let user_agent_family = svc.user_agent_family();
+            let source = svc.source_label();
             tracing::trace!(?hash, ?peer, "routing to a peer which advertised inventory");
             let fut = svc.call(req);
             self.push_unready(peer, svc);
-            return fut.map_err(Into::into).boxed();
+            let span = tracing::debug_span!(
+                "peer.route_inv",
+                route = "advertised",
+                ?hash,
+                ?peer,
+                command,
+                source,
+                user_agent_family,
+                advertising_peers = advertising_peer_list.len(),
+            );
+            metrics::counter!(
+                "peer.route_inv.count",
+                "route" => "advertised",
+                "command" => command,
+            )
+            .increment(1);
+            return observe_peer_request(command, source, user_agent_family, fut)
+                .instrument(span)
+                .map_err(Into::into)
+                .boxed();
         }
 
         let missing_peer_list: HashSet<PeerSocketAddr> = self
@@ -1035,16 +1185,55 @@ where
 
         if let Some(mut svc) = peer.and_then(|key| self.take_ready_service(&key)) {
             let peer = peer.expect("just checked peer is Some");
+            let user_agent_family = svc.user_agent_family();
+            let source = svc.source_label();
             tracing::trace!(?hash, ?peer, "routing to a peer that might have inventory");
             let fut = svc.call(req);
             self.push_unready(peer, svc);
-            return fut.map_err(Into::into).boxed();
+            let span = tracing::debug_span!(
+                "peer.route_inv",
+                route = "fallback",
+                ?hash,
+                ?peer,
+                command,
+                source,
+                user_agent_family,
+                advertising_peers = advertising_peer_list.len(),
+                missing_peers = missing_peer_list.len(),
+            );
+            metrics::counter!(
+                "peer.route_inv.count",
+                "route" => "fallback",
+                "command" => command,
+            )
+            .increment(1);
+            if !missing_peer_list.is_empty() {
+                metrics::counter!("sync.missing_inventory.retry.count").increment(1);
+            }
+            return observe_peer_request(command, source, user_agent_family, fut)
+                .instrument(span)
+                .map_err(Into::into)
+                .boxed();
         }
 
         tracing::debug!(
             ?hash,
             "all ready peers are missing inventory, failing request"
         );
+        metrics::counter!(
+            "peer.route_inv.count",
+            "route" => "missing_inventory_exhausted",
+            "command" => command,
+        )
+        .increment(1);
+        metrics::counter!("sync.missing_inventory.retry.exhausted.count").increment(1);
+        metrics::counter!(
+            "peer.request.error.count",
+            "command" => command,
+            "error_kind" => "not_found_registry",
+            "user_agent_family" => "unknown",
+        )
+        .increment(1);
 
         async move {
             // Let other tasks run, so a retry request might get different ready peers.
@@ -1099,11 +1288,17 @@ where
         peers: Vec<D::Key>,
     ) -> <Self as tower::Service<Request>>::Future {
         let futs = FuturesUnordered::new();
+        let command = req.command();
         for key in peers {
             let mut svc = self
                 .take_ready_service(&key)
                 .expect("selected peers are ready");
-            futs.push(svc.call(req.clone()).map_err(|_| ()));
+            let user_agent_family = svc.user_agent_family();
+            let source = svc.source_label();
+            futs.push(
+                observe_peer_request(command, source, user_agent_family, svc.call(req.clone()))
+                    .map_err(|_| ()),
+            );
             self.push_unready(key, svc);
         }
 

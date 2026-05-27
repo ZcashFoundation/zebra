@@ -168,6 +168,89 @@ impl From<tokio::time::error::Elapsed> for BlockDownloadVerifyError {
     }
 }
 
+impl BlockDownloadVerifyError {
+    /// Returns the low-cardinality error kind used by sync metrics.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            BlockDownloadVerifyError::NetworkServiceError { .. } => "network_service",
+            BlockDownloadVerifyError::VerifierServiceError { .. } => "verifier_service",
+            BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. } => "duplicate_block",
+            BlockDownloadVerifyError::DownloadFailed { error, .. } => {
+                classified_error_kind(error.as_ref())
+            }
+            BlockDownloadVerifyError::AboveLookaheadHeightLimit { .. } => {
+                "above_lookahead_height_limit"
+            }
+            BlockDownloadVerifyError::BehindTipHeightLimit { .. } => "behind_tip_height_limit",
+            BlockDownloadVerifyError::InvalidHeight { .. } => "invalid_height",
+            BlockDownloadVerifyError::Invalid { error, .. } if error.is_duplicate_request() => {
+                "duplicate_request"
+            }
+            BlockDownloadVerifyError::Invalid { .. } => "invalid",
+            BlockDownloadVerifyError::ValidationRequestError { error, .. } => {
+                classified_error_kind(error.as_ref())
+            }
+            BlockDownloadVerifyError::CancelledDuringDownload { .. } => "cancelled_download",
+            BlockDownloadVerifyError::CancelledAwaitingVerifierReadiness { .. } => {
+                "cancelled_verify_ready"
+            }
+            BlockDownloadVerifyError::CancelledDuringVerification { .. } => "cancelled_verify",
+            BlockDownloadVerifyError::Timeout => "timeout",
+        }
+    }
+
+    /// Count sync error metrics for this failure at the boundary where the
+    /// download slot finishes.
+    pub(super) fn count_metrics(&self) {
+        match self {
+            BlockDownloadVerifyError::NetworkServiceError { .. }
+            | BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. }
+            | BlockDownloadVerifyError::DownloadFailed { .. }
+            | BlockDownloadVerifyError::AboveLookaheadHeightLimit { .. }
+            | BlockDownloadVerifyError::BehindTipHeightLimit { .. }
+            | BlockDownloadVerifyError::InvalidHeight { .. }
+            | BlockDownloadVerifyError::CancelledDuringDownload { .. }
+            | BlockDownloadVerifyError::Timeout => {
+                metrics::counter!("sync.block_download.error.count", "kind" => self.kind())
+                    .increment(1);
+            }
+
+            BlockDownloadVerifyError::VerifierServiceError { .. }
+            | BlockDownloadVerifyError::Invalid { .. }
+            | BlockDownloadVerifyError::ValidationRequestError { .. }
+            | BlockDownloadVerifyError::CancelledAwaitingVerifierReadiness { .. }
+            | BlockDownloadVerifyError::CancelledDuringVerification { .. } => {
+                metrics::counter!("sync.block_verify.error.count", "kind" => self.kind())
+                    .increment(1);
+            }
+        }
+
+        if let BlockDownloadVerifyError::ValidationRequestError { error, .. } = self {
+            if classified_error_kind(error.as_ref()) == "timeout" {
+                metrics::counter!("sync.validation_request.elapsed.count").increment(1);
+            }
+        }
+    }
+}
+
+fn classified_error_kind(error: &(dyn std::error::Error + Send + Sync + 'static)) -> &'static str {
+    let error = format!("{error:?}");
+
+    if error.contains("NotFoundRegistry") {
+        "not_found_registry"
+    } else if error.contains("NotFoundResponse") {
+        "not_found_response"
+    } else if error.contains("Elapsed") || error.contains("timed out") {
+        "timeout"
+    } else if error.contains("ConnectionClosed") {
+        "connection_closed"
+    } else if error.contains("ConnectionDropped") {
+        "connection_dropped"
+    } else {
+        "other"
+    }
+}
+
 /// Represents a [`Stream`] of download and verification tasks during chain sync.
 #[pin_project]
 #[derive(Debug)]
@@ -325,7 +408,18 @@ where
     /// This method waits for the network to become ready, and returns an error
     /// only if the network service fails. It returns immediately after queuing
     /// the request.
-    #[instrument(level = "debug", skip(self), fields(%hash))]
+    #[instrument(
+        name = "sync.download_block",
+        level = "debug",
+        skip(self),
+        fields(
+            %hash,
+            height = tracing::field::Empty,
+            peer = tracing::field::Empty,
+            request_command = "BlocksByHash",
+            result = tracing::field::Empty,
+        )
+    )]
     pub async fn download_and_verify(
         &mut self,
         hash: block::Hash,
@@ -363,6 +457,8 @@ where
 
         let task = tokio::spawn(
             async move {
+                let slot_start = std::time::Instant::now();
+
                 // Download the block.
                 // Prefer the cancel handle if both are ready.
                 let download_start = std::time::Instant::now();
@@ -373,9 +469,20 @@ where
                         metrics::counter!("sync.cancelled.download.count").increment(1);
                         metrics::histogram!("sync.block.download.duration_seconds", "result" => "cancelled")
                             .record(download_start.elapsed().as_secs_f64());
+                        metrics::histogram!("sync.download.slot.age.seconds")
+                            .record(slot_start.elapsed().as_secs_f64());
+                        tracing::Span::current().record("result", "cancelled_download");
                         return Err(BlockDownloadVerifyError::CancelledDuringDownload { hash })
                     }
-                    rsp = block_req => rsp.map_err(|error| BlockDownloadVerifyError::DownloadFailed { error, hash})?,
+                    rsp = block_req => match rsp {
+                        Ok(rsp) => rsp,
+                        Err(error) => {
+                            metrics::histogram!("sync.download.slot.age.seconds")
+                                .record(slot_start.elapsed().as_secs_f64());
+                            tracing::Span::current().record("result", "download_failed");
+                            return Err(BlockDownloadVerifyError::DownloadFailed { error, hash });
+                        }
+                    },
                 };
 
                 let (block, advertiser_addr) = if let zn::Response::Blocks(blocks) = rsp {
@@ -396,6 +503,10 @@ where
                 metrics::counter!("sync.downloaded.block.count").increment(1);
                 metrics::histogram!("sync.block.download.duration_seconds", "result" => "success")
                     .record(download_start.elapsed().as_secs_f64());
+                tracing::Span::current().record(
+                    "peer",
+                    tracing::field::display(advertiser_addr.unwrap_or_else(PeerSocketAddr::unspecified)),
+                );
 
                 // Security & Performance: reject blocks that are too far ahead of our tip.
                 // Avoids denial of service attacks, and reduces wasted work on high blocks
@@ -447,11 +558,18 @@ where
                         "synced block with no height: dropped downloaded block"
                     );
                     metrics::counter!("sync.no.height.dropped.block.count").increment(1);
+                    metrics::histogram!("sync.download.slot.age.seconds")
+                        .record(slot_start.elapsed().as_secs_f64());
+                    tracing::Span::current().record("result", "invalid_height");
 
                     return Err(BlockDownloadVerifyError::InvalidHeight { hash });
                 };
+                tracing::Span::current().record("height", tracing::field::debug(block_height));
 
                 if block_height > lookahead_drop_height {
+                    metrics::histogram!("sync.download.slot.age.seconds")
+                        .record(slot_start.elapsed().as_secs_f64());
+                    tracing::Span::current().record("result", "above_lookahead_height_limit");
                     Err(BlockDownloadVerifyError::AboveLookaheadHeightLimit { height: block_height, hash })?;
                 } else if block_height > lookahead_pause_height {
                     // This log can be very verbose, usually hundreds of blocks are dropped.
@@ -508,9 +626,19 @@ where
                         "synced block height behind the finalized tip: dropped downloaded block"
                     );
                     metrics::counter!("gossip.min.height.limit.dropped.block.count").increment(1);
+                    metrics::histogram!("sync.download.slot.age.seconds")
+                        .record(slot_start.elapsed().as_secs_f64());
+                    tracing::Span::current().record("result", "behind_tip_height_limit");
 
                     Err(BlockDownloadVerifyError::BehindTipHeightLimit { height: block_height, hash })?;
                 }
+
+                let verify_span = tracing::debug_span!(
+                    "sync.verify_block",
+                    %hash,
+                    ?block_height,
+                    result = tracing::field::Empty,
+                );
 
                 // Wait for the verifier service to be ready.
                 let readiness = verifier.ready();
@@ -520,9 +648,13 @@ where
                     _ = &mut cancel_rx => {
                         trace!("task cancelled waiting for verifier service readiness");
                         metrics::counter!("sync.cancelled.verify.ready.count").increment(1);
+                        metrics::histogram!("sync.download.slot.age.seconds")
+                            .record(slot_start.elapsed().as_secs_f64());
+                        tracing::Span::current().record("result", "cancelled_verify_ready");
+                        verify_span.record("result", "cancelled_ready");
                         return Err(BlockDownloadVerifyError::CancelledAwaitingVerifierReadiness { height: block_height, hash })
                     }
-                    verifier = readiness => verifier,
+                    verifier = readiness.instrument(verify_span.clone()) => verifier,
                 };
 
                 // Verify the block.
@@ -546,14 +678,22 @@ where
                         metrics::counter!("sync.cancelled.verify.count").increment(1);
                         metrics::histogram!("sync.block.verify.duration_seconds", "result" => "cancelled")
                             .record(verify_start.elapsed().as_secs_f64());
+                        metrics::histogram!("sync.download.slot.age.seconds")
+                            .record(slot_start.elapsed().as_secs_f64());
+                        tracing::Span::current().record("result", "cancelled_verify");
+                        verify_span.record("result", "cancelled");
                         return Err(BlockDownloadVerifyError::CancelledDuringVerification { height: block_height, hash })
                     }
-                    verification = rsp => verification,
+                    verification = rsp.instrument(verify_span.clone()) => verification,
                 };
 
                 let verify_result = if verification.is_ok() { "success" } else { "failure" };
                 metrics::histogram!("sync.block.verify.duration_seconds", "result" => verify_result)
                     .record(verify_start.elapsed().as_secs_f64());
+                metrics::histogram!("sync.download.slot.age.seconds")
+                    .record(slot_start.elapsed().as_secs_f64());
+                tracing::Span::current().record("result", verify_result);
+                verify_span.record("result", verify_result);
 
                 if verification.is_ok() {
                     metrics::counter!("sync.verified.block.count").increment(1);

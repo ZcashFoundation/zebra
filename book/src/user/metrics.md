@@ -60,4 +60,36 @@ front end that you can visualize:
 
 ![image info](grafana.png)
 
+## Sync Stall Metrics
+
+Zebra exposes low-cardinality metrics for diagnosing stalled or slow syncs:
+
+- `sync.restart.count{reason,made_progress,sync_failed}`
+- `sync.block_download.error.count{kind}`
+- `sync.block_verify.error.count{kind}`
+- `sync.validation_request.elapsed.count`
+- `sync.state_request.timeout.count{request}`
+- `sync.missing_inventory.retry.count`
+- `sync.missing_inventory.retry.exhausted.count`
+- `sync.download.slot.age.seconds`
+- `sync.download.slots{state}`
+- `sync.pending_hashes.count{source}`
+- `sync.checkpoint.range.duration.seconds{result}`
+- `sync.exhausted_prospective_tips.count`
+- `peer.request.error.count{command,error_kind,user_agent_family}`
+- `peer.request.duration.seconds{command,outcome}`
+- `peer.request.timeout.count{command,source,user_agent_family}`
+- `peer.connection.churn.count{reason,user_agent_family}`
+- `peer.discovery.resolved.count{source}`
+- `peer.discovery.candidate.count{source}`
+- `peer.handshake.count{source,outcome,error_kind}`
+- `peer.ready.count{source,user_agent_family}`
+
+Peer `source` labels are bounded values such as `dnsseed_str4d`,
+`dnsseed_zcash`, `dnsseed_shieldedinfra`, `dnsseed_zfnd`, `peer_cache`,
+`gossip`, and `configured`.
+
+High-cardinality details such as block hashes, outpoints, and redacted peer
+addresses are recorded on tracing spans instead of Prometheus labels.
+
 [metrics_section]: https://docs.rs/zebrad/latest/zebrad/components/metrics/struct.Config.html

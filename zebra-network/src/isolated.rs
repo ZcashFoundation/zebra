@@ -107,6 +107,7 @@ where
             data_stream,
             connected_addr,
             connection_tracker,
+            source: peer::PeerSource::Isolated,
         },
     )
 }

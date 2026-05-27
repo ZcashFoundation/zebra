@@ -78,6 +78,10 @@ const MEMPOOL_OUTPUT_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::
 /// response from the transaction verifier.
 const POLL_MEMPOOL_DELAY: std::time::Duration = Duration::from_millis(50);
 
+fn count_state_request_timeout(request: &'static str) {
+    metrics::counter!("sync.state_request.timeout.count", "request" => request).increment(1);
+}
+
 /// Asynchronous transaction verification.
 ///
 /// # Correctness
@@ -702,10 +706,19 @@ where
                         .clone()
                         .oneshot(zs::Request::UnspentBestChainUtxo(*outpoint));
 
-                    let zebra_state::Response::UnspentBestChainUtxo(utxo) = query
-                        .await
-                        .map_err(|_| TransactionError::TransparentInputNotFound)?
-                    else {
+                    let state_response = query.await.map_err(|error| {
+                        if error.is::<Elapsed>() {
+                            count_state_request_timeout("unspent_best_chain_utxo");
+                            tracing::warn!(
+                                ?outpoint,
+                                "timed out waiting for UnspentBestChainUtxo state request"
+                            );
+                        }
+
+                        TransactionError::TransparentInputNotFound
+                    })?;
+
+                    let zebra_state::Response::UnspentBestChainUtxo(utxo) = state_response else {
                         unreachable!("UnspentBestChainUtxo always responds with Option<Utxo>")
                     };
 
@@ -719,10 +732,21 @@ where
                     let query = state
                         .clone()
                         .oneshot(zebra_state::Request::AwaitUtxo(*outpoint));
-                    if let zebra_state::Response::Utxo(utxo) = query.await? {
-                        utxo
-                    } else {
-                        unreachable!("AwaitUtxo always responds with Utxo")
+
+                    match query.await {
+                        Ok(zebra_state::Response::Utxo(utxo)) => utxo,
+                        Ok(_) => unreachable!("AwaitUtxo always responds with Utxo"),
+                        Err(error) => {
+                            if error.is::<Elapsed>() {
+                                count_state_request_timeout("await_utxo");
+                                tracing::warn!(
+                                    ?outpoint,
+                                    "timed out waiting for AwaitUtxo state request"
+                                );
+                            }
+
+                            return Err(error.into());
+                        }
                     }
                 };
                 tracing::trace!(?utxo, "got UTXO");

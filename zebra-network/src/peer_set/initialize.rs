@@ -5,7 +5,7 @@
 //! [tower-balance]: https://github.com/tower-rs/tower/tree/master/tower/src/balance
 
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, HashMap},
     convert::Infallible,
     net::{IpAddr, SocketAddr},
     pin::Pin,
@@ -40,7 +40,7 @@ use crate::{
     meta_addr::{MetaAddr, MetaAddrChange},
     peer::{
         self, address_is_valid_for_inbound_listeners, HandshakeRequest, MinimumPeerVersion,
-        OutboundConnectorRequest, PeerPreference,
+        OutboundConnectorRequest, PeerPreference, PeerSource,
     },
     peer_cache_updater::peer_cache_updater,
     peer_set::{set::MorePeers, ActiveConnectionCounter, CandidateSet, ConnectionTracker, PeerSet},
@@ -347,8 +347,14 @@ where
     );
 
     // TODO: update when we add Tor peers or other kinds of addresses.
-    let ipv4_peer_count = initial_peers.iter().filter(|ip| ip.is_ipv4()).count();
-    let ipv6_peer_count = initial_peers.iter().filter(|ip| ip.is_ipv6()).count();
+    let ipv4_peer_count = initial_peers
+        .keys()
+        .filter(|peer_addr| peer_addr.is_ipv4())
+        .count();
+    let ipv6_peer_count = initial_peers
+        .keys()
+        .filter(|peer_addr| peer_addr.is_ipv6())
+        .count();
     info!(
         ?ipv4_peer_count,
         ?ipv6_peer_count,
@@ -369,11 +375,12 @@ where
     let mut handshakes: FuturesUnordered<_> = initial_peers
         .into_iter()
         .enumerate()
-        .map(|(i, addr)| {
+        .map(|(i, (addr, source))| {
             let connection_tracker = active_outbound_connections.track_connection();
             let req = OutboundConnectorRequest {
                 addr,
                 connection_tracker,
+                source,
             };
             let outbound_connector = outbound_connector.clone();
 
@@ -475,9 +482,10 @@ where
 async fn limit_initial_peers(
     config: &Config,
     address_book_updater: tokio::sync::mpsc::Sender<MetaAddrChange>,
-) -> HashSet<PeerSocketAddr> {
-    let all_peers: HashSet<PeerSocketAddr> = config.initial_peers().await;
+) -> HashMap<PeerSocketAddr, PeerSource> {
+    let all_peers = config.initial_peers_with_sources().await;
     let mut preferred_peers: BTreeMap<PeerPreference, Vec<PeerSocketAddr>> = BTreeMap::new();
+    let mut source_by_addr: HashMap<PeerSocketAddr, PeerSource> = HashMap::new();
 
     let all_peers_count = all_peers.len();
     if all_peers_count > config.peerset_initial_target_size {
@@ -489,14 +497,17 @@ async fn limit_initial_peers(
 
     // Filter out invalid initial peers, and prioritise valid peers for initial connections.
     // (This treats initial peers the same way we treat gossiped peers.)
-    for peer_addr in all_peers {
+    for (peer_addr, source) in all_peers {
         let preference = PeerPreference::new(peer_addr, config.network.clone());
 
         match preference {
-            Ok(preference) => preferred_peers
-                .entry(preference)
-                .or_default()
-                .push(peer_addr),
+            Ok(preference) => {
+                source_by_addr.insert(peer_addr, source);
+                preferred_peers
+                    .entry(preference)
+                    .or_default()
+                    .push(peer_addr);
+            }
             Err(error) => info!(
                 ?peer_addr,
                 ?error,
@@ -522,7 +533,7 @@ async fn limit_initial_peers(
 
     // Split out the `initial_peers` that will be shuffled and returned,
     // choosing preferred peers first.
-    let mut initial_peers: HashSet<PeerSocketAddr> = HashSet::new();
+    let mut initial_peers: HashMap<PeerSocketAddr, PeerSource> = HashMap::new();
     for better_peers in preferred_peers.values() {
         let mut better_peers = better_peers.clone();
         let (chosen_peers, _unused_peers) = better_peers.partial_shuffle(
@@ -530,7 +541,18 @@ async fn limit_initial_peers(
             config.peerset_initial_target_size - initial_peers.len(),
         );
 
-        initial_peers.extend(chosen_peers.iter());
+        for peer in chosen_peers {
+            let source = source_by_addr
+                .get(&*peer)
+                .copied()
+                .expect("preferred peers have source labels");
+            metrics::counter!(
+                "peer.discovery.candidate.count",
+                "source" => source.label(),
+            )
+            .increment(1);
+            initial_peers.insert(*peer, source);
+        }
 
         if initial_peers.len() >= config.peerset_initial_target_size {
             break;
@@ -745,6 +767,7 @@ where
         data_stream: tcp_stream,
         connected_addr,
         connection_tracker,
+        source: PeerSource::Inbound,
     });
     // ... instead, spawn a new task to handle this connection
     let mut peerset_tx = peerset_tx.clone();
@@ -1127,6 +1150,7 @@ where
     let req = OutboundConnectorRequest {
         addr: candidate.addr,
         connection_tracker: outbound_connection_tracker,
+        source: PeerSource::Gossip,
     };
 
     // the handshake has timeouts, so it shouldn't hang

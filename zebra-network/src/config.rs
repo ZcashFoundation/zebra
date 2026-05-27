@@ -1,7 +1,7 @@
 //! Configuration for Zebra's network communication.
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     io::{self, ErrorKind},
     net::{IpAddr, SocketAddr},
     sync::Arc,
@@ -31,6 +31,7 @@ use crate::{
         DEFAULT_PEERSET_INITIAL_TARGET_SIZE, DNS_LOOKUP_TIMEOUT, INBOUND_PEER_LIMIT_MULTIPLIER,
         MAX_PEER_DISK_CACHE_SIZE, OUTBOUND_PEER_LIMIT_MULTIPLIER,
     },
+    peer::PeerSource,
     protocol::external::{canonical_peer_addr, canonical_socket_addr},
     BoxError, PeerSocketAddr,
 };
@@ -255,30 +256,45 @@ impl Config {
     ///
     /// If a configured address is an invalid [`SocketAddr`] or DNS name.
     pub async fn initial_peers(&self) -> HashSet<PeerSocketAddr> {
+        self.initial_peers_with_sources()
+            .await
+            .into_keys()
+            .collect()
+    }
+
+    /// Resolve initial seed peer IP addresses with bounded source labels, and
+    /// load cached peers from disk if available.
+    pub(crate) async fn initial_peers_with_sources(&self) -> HashMap<PeerSocketAddr, PeerSource> {
         // TODO: do DNS and disk in parallel if startup speed becomes important
-        let dns_peers =
-            Config::resolve_peers(&self.initial_peer_hostnames().iter().cloned().collect()).await;
+        let dns_peers = Config::resolve_peers_with_sources(
+            &self.initial_peer_hostnames().iter().cloned().collect(),
+        )
+        .await;
 
         if self.network.is_regtest() {
             // Only return local peer addresses and skip loading the peer cache on Regtest.
             dns_peers
                 .into_iter()
-                .filter(PeerSocketAddr::is_localhost)
+                .filter(|(addr, _source)| addr.is_localhost())
                 .collect()
         } else {
             // Ignore disk errors because the cache is optional and the method already logs them.
             let disk_peers = self.load_peer_cache().await.unwrap_or_default();
+            let mut peers = dns_peers;
 
-            dns_peers.into_iter().chain(disk_peers).collect()
+            for peer in disk_peers {
+                peers.entry(peer).or_insert(PeerSource::PeerCache);
+            }
+
+            peers
         }
     }
 
-    /// Concurrently resolves `peers` into zero or more IP addresses, with a
-    /// timeout of a few seconds on each DNS request.
-    ///
-    /// If DNS resolution fails or times out for all peers, continues retrying
-    /// until at least one peer is found.
-    async fn resolve_peers(peers: &HashSet<String>) -> HashSet<PeerSocketAddr> {
+    /// Concurrently resolves `peers` into zero or more IP addresses with
+    /// bounded source labels, with a timeout of a few seconds on each DNS request.
+    async fn resolve_peers_with_sources(
+        peers: &HashSet<String>,
+    ) -> HashMap<PeerSocketAddr, PeerSource> {
         use futures::stream::StreamExt;
 
         if peers.is_empty() {
@@ -288,7 +304,7 @@ impl Config {
                  give it some previously cached peer IP addresses on disk, \
                  or make sure Zebra's listener port gets inbound connections."
             );
-            return HashSet::new();
+            return HashMap::new();
         }
 
         loop {
@@ -298,9 +314,18 @@ impl Config {
             // address peers. Individual retries avoid this issue.
             let peer_addresses = peers
                 .iter()
-                .map(|s| Config::resolve_host(s, MAX_SINGLE_SEED_PEER_DNS_RETRIES))
+                .map(|s| Config::resolve_host_with_source(s, MAX_SINGLE_SEED_PEER_DNS_RETRIES))
                 .collect::<futures::stream::FuturesUnordered<_>>()
-                .concat()
+                .fold(
+                    HashMap::new(),
+                    |mut peers_by_addr, host_addresses| async move {
+                        for (addr, source) in host_addresses {
+                            peers_by_addr.entry(addr).or_insert(source);
+                        }
+
+                        peers_by_addr
+                    },
+                )
                 .await;
 
             if peer_addresses.is_empty() {
@@ -317,18 +342,17 @@ impl Config {
         }
     }
 
-    /// Resolves `host` into zero or more IP addresses, retrying up to
-    /// `max_retries` times.
-    ///
-    /// If DNS continues to fail, returns an empty list of addresses.
-    ///
-    /// # Panics
-    ///
-    /// If a configured address is an invalid [`SocketAddr`] or DNS name.
-    async fn resolve_host(host: &str, max_retries: usize) -> HashSet<PeerSocketAddr> {
+    /// Resolves `host` into zero or more IP addresses and bounded source labels,
+    /// retrying up to `max_retries` times.
+    async fn resolve_host_with_source(
+        host: &str,
+        max_retries: usize,
+    ) -> HashMap<PeerSocketAddr, PeerSource> {
         for retries in 0..=max_retries {
             if let Ok(addresses) = Config::resolve_host_once(host).await {
-                return addresses;
+                let source = PeerSource::from_initial_peer_host(host);
+
+                return addresses.into_iter().map(|addr| (addr, source)).collect();
             }
 
             if retries < max_retries {
@@ -347,7 +371,7 @@ impl Config {
             }
         }
 
-        HashSet::new()
+        HashMap::new()
     }
 
     /// Resolves `host` into zero or more IP addresses.
@@ -385,6 +409,11 @@ impl Config {
                     )
                     .increment(1);
                 }
+                metrics::counter!(
+                    "peer.discovery.resolved.count",
+                    "source" => PeerSource::from_initial_peer_host(host).label(),
+                )
+                .increment(ip_addrs.len() as u64);
 
                 Ok(ip_addrs.into_iter().collect())
             }
@@ -472,6 +501,11 @@ impl Config {
             )
             .increment(1);
         }
+        metrics::counter!(
+            "peer.discovery.resolved.count",
+            "source" => PeerSource::PeerCache.label(),
+        )
+        .increment(peer_list.len() as u64);
 
         Ok(peer_list)
     }

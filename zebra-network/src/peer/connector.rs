@@ -13,10 +13,35 @@ use tracing_futures::Instrument;
 use zebra_chain::chain_tip::{ChainTip, NoChainTip};
 
 use crate::{
-    peer::{Client, ConnectedAddr, Handshake, HandshakeRequest},
+    peer::{Client, ConnectedAddr, Handshake, HandshakeRequest, PeerSource},
     peer_set::ConnectionTracker,
     BoxError, PeerSocketAddr, Request, Response,
 };
+
+fn io_error_kind(error: &std::io::Error) -> &'static str {
+    use std::io::ErrorKind::*;
+
+    match error.kind() {
+        TimedOut => "timeout",
+        ConnectionRefused => "connection_refused",
+        ConnectionReset => "connection_reset",
+        ConnectionAborted => "connection_aborted",
+        NotConnected => "not_connected",
+        AddrNotAvailable => "addr_not_available",
+        AddrInUse => "addr_in_use",
+        _ => "io_error",
+    }
+}
+
+fn count_peer_handshake(source: PeerSource, outcome: &'static str, error_kind: &'static str) {
+    metrics::counter!(
+        "peer.handshake.count",
+        "source" => source.label(),
+        "outcome" => outcome,
+        "error_kind" => error_kind,
+    )
+    .increment(1);
+}
 
 /// A wrapper around [`Handshake`] that opens a TCP connection before
 /// forwarding to the inner handshake service. Writing this as its own
@@ -64,6 +89,9 @@ pub struct OutboundConnectorRequest {
     ///
     /// Used to limit the number of open connections in Zebra.
     pub connection_tracker: ConnectionTracker,
+
+    /// The low-cardinality source of this peer address.
+    pub source: PeerSource,
 }
 
 impl<S, C> Service<OutboundConnectorRequest> for Connector<S, C>
@@ -85,6 +113,7 @@ where
         let OutboundConnectorRequest {
             addr,
             connection_tracker,
+            source,
         }: OutboundConnectorRequest = req;
 
         let hs = self.handshaker.clone();
@@ -96,12 +125,19 @@ where
         // `zebra_network::init()` implements a connection timeout on this future.
         // Any code outside this future does not have a timeout.
         async move {
-            let tcp_stream = TcpStream::connect(*addr).await?;
+            let tcp_stream = match TcpStream::connect(*addr).await {
+                Ok(tcp_stream) => tcp_stream,
+                Err(error) => {
+                    count_peer_handshake(source, "failure", io_error_kind(&error));
+                    return Err(error.into());
+                }
+            };
             let client = hs
                 .oneshot(HandshakeRequest::<TcpStream> {
                     data_stream: tcp_stream,
                     connected_addr,
                     connection_tracker,
+                    source,
                 })
                 .await?;
             Ok((addr, client))

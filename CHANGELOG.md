@@ -30,6 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 ### Added
 
 - Startup warning on Linux when `net.ipv4.tcp_slow_start_after_idle` is enabled (which resets TCP congestion windows between block requests and significantly reduces single-peer block-propagation throughput on long-haul links), with a "Linux TCP tuning for block propagation" troubleshooting section ([#10513](https://github.com/ZcashFoundation/zebra/pull/10513))
+- Sync-stall observability for node operators: restart-cause counters, typed
+  block download/verify error counters, missing-inventory retry counters,
+  pending-hash and download-slot gauges, checkpoint range timing, state request
+  timeout counters, peer discovery/handshake/source metrics, peer request
+  duration/error/timeout metrics, and redacted tracing spans for sync, peer
+  routing, block downloads, and `AwaitUtxo` requests.
 - Support ZIP-213
 
 ### Fixed

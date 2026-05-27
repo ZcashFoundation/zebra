@@ -13,7 +13,7 @@ use tower::{
 
 use crate::{
     constants::{EWMA_DECAY_TIME_NANOS, EWMA_DEFAULT_RTT},
-    peer::{Client, ConnectionInfo},
+    peer::{user_agent_family, Client, ConnectionInfo},
     protocol::external::types::Version,
 };
 
@@ -52,6 +52,16 @@ impl LoadTrackedClient {
     /// Retrieve the peer's reported protocol version.
     pub fn remote_version(&self) -> Version {
         self.connection_info.remote.version
+    }
+
+    /// Returns a low-cardinality user-agent family for metrics labels.
+    pub fn user_agent_family(&self) -> &'static str {
+        user_agent_family(self.connection_info.remote.user_agent.as_str())
+    }
+
+    /// Returns the low-cardinality peer source label for metrics.
+    pub fn source_label(&self) -> &'static str {
+        self.connection_info.source.label()
     }
 }
 

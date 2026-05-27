@@ -38,7 +38,7 @@ use crate::{
     meta_addr::MetaAddrChange,
     peer::{
         CancelHeartbeatTask, Client, ClientRequest, Connection, ErrorSlot, HandshakeError,
-        MinimumPeerVersion, PeerError,
+        MinimumPeerVersion, PeerError, PeerSource,
     },
     peer_set::{ConnectionTracker, InventoryChange},
     protocol::{
@@ -139,6 +139,9 @@ pub struct ConnectionInfo {
     /// Derived from `remote.version` and the
     /// [current `zebra_network` protocol version](constants::CURRENT_NETWORK_PROTOCOL_VERSION).
     pub negotiated_version: Version,
+
+    /// The low-cardinality source of this peer address.
+    pub source: PeerSource,
 }
 
 /// The peer address that we are handshaking with.
@@ -204,6 +207,29 @@ pub fn get_unspecified_ipv4_addr(network: Network) -> SocketAddr {
 }
 
 use ConnectedAddr::*;
+
+fn handshake_error_kind(error: &HandshakeError) -> &'static str {
+    match error {
+        HandshakeError::UnexpectedMessage(_) => "unexpected_message",
+        HandshakeError::RemoteNonceReuse => "nonce_reuse",
+        HandshakeError::LocalDuplicateNonce => "duplicate_nonce",
+        HandshakeError::ConnectionClosed => "connection_closed",
+        HandshakeError::Io(_) => "io_error",
+        HandshakeError::Serialization(_) => "serialization",
+        HandshakeError::ObsoleteVersion(_) => "obsolete_version",
+        HandshakeError::Timeout => "timeout",
+    }
+}
+
+fn count_peer_handshake(source: PeerSource, outcome: &'static str, error_kind: &'static str) {
+    metrics::counter!(
+        "peer.handshake.count",
+        "source" => source.label(),
+        "outcome" => outcome,
+        "error_kind" => error_kind,
+    )
+    .increment(1);
+}
 
 impl ConnectedAddr {
     /// Returns a new outbound directly connected addr.
@@ -574,6 +600,7 @@ where
 pub async fn negotiate_version<PeerTransport>(
     peer_conn: &mut Framed<PeerTransport, Codec>,
     connected_addr: &ConnectedAddr,
+    source: PeerSource,
     config: Config,
     nonces: Arc<futures::lock::Mutex<IndexSet<Nonce>>>,
     user_agent: String,
@@ -784,6 +811,7 @@ where
         connected_addr: *connected_addr,
         remote,
         negotiated_version,
+        source,
     });
 
     debug!(
@@ -858,6 +886,9 @@ where
     ///
     /// Used to limit the number of open connections in Zebra.
     pub connection_tracker: ConnectionTracker,
+
+    /// The low-cardinality source of this peer address.
+    pub source: PeerSource,
 }
 
 impl<S, PeerTransport, C> Service<HandshakeRequest<PeerTransport>> for Handshake<S, C>
@@ -881,6 +912,7 @@ where
             data_stream,
             connected_addr,
             mut connection_tracker,
+            source,
         } = req;
 
         let negotiator_span = debug_span!("negotiator", peer = ?connected_addr);
@@ -925,6 +957,7 @@ where
             let connection_info = match negotiate_version(
                 &mut peer_conn,
                 &connected_addr,
+                source,
                 config,
                 nonces,
                 user_agent,
@@ -942,21 +975,13 @@ where
                         "result" => "success"
                     )
                     .record(duration);
+                    count_peer_handshake(source, "success", "none");
                     info
                 }
                 Err(err) => {
                     // Record failed handshake duration and failure reason
                     let duration = handshake_start.elapsed().as_secs_f64();
-                    let reason = match &err {
-                        HandshakeError::UnexpectedMessage(_) => "unexpected_message",
-                        HandshakeError::RemoteNonceReuse => "nonce_reuse",
-                        HandshakeError::LocalDuplicateNonce => "duplicate_nonce",
-                        HandshakeError::ConnectionClosed => "connection_closed",
-                        HandshakeError::Io(_) => "io_error",
-                        HandshakeError::Serialization(_) => "serialization",
-                        HandshakeError::ObsoleteVersion(_) => "obsolete_version",
-                        HandshakeError::Timeout => "timeout",
-                    };
+                    let reason = handshake_error_kind(&err);
                     metrics::histogram!(
                         "zcash.net.peer.handshake.duration_seconds",
                         "result" => "failure"
@@ -967,6 +992,7 @@ where
                         "reason" => reason
                     )
                     .increment(1);
+                    count_peer_handshake(source, "failure", reason);
                     return Err(err);
                 }
             };
@@ -1169,14 +1195,17 @@ where
         // Spawn a new task to drive this handshake, forwarding panics to the calling task.
         tokio::spawn(fut.instrument(negotiator_span))
             .map(
-                |join_result: Result<
+                move |join_result: Result<
                     Result<Result<Client, HandshakeError>, error::Elapsed>,
                     JoinError,
                 >| {
                     match join_result {
                         Ok(Ok(Ok(connection_client))) => Ok(connection_client),
                         Ok(Ok(Err(handshake_error))) => Err(handshake_error.into()),
-                        Ok(Err(timeout_error)) => Err(timeout_error.into()),
+                        Ok(Err(timeout_error)) => {
+                            count_peer_handshake(source, "failure", "timeout");
+                            Err(timeout_error.into())
+                        }
                         Err(join_error) => match join_error.try_into_panic() {
                             // Forward panics to the calling task
                             Ok(panic_reason) => panic::resume_unwind(panic_reason),

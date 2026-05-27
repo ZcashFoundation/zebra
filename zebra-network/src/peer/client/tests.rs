@@ -327,6 +327,7 @@ where
             connected_addr: crate::peer::ConnectedAddr::Isolated,
             remote,
             negotiated_version,
+            source: crate::peer::PeerSource::Isolated,
         });
 
         let client = Client {

@@ -35,7 +35,7 @@ use crate::{
     config::CacheDir,
     constants, init,
     meta_addr::{MetaAddr, PeerAddrState},
-    peer::{self, ClientTestHarness, HandshakeRequest, OutboundConnectorRequest},
+    peer::{self, ClientTestHarness, HandshakeRequest, OutboundConnectorRequest, PeerSource},
     peer_set::{
         initialize::{
             accept_inbound_connections, add_initial_peers, crawl_and_dial, open_listener,
@@ -468,6 +468,7 @@ async fn crawler_peer_limit_one_connect_ok_then_drop() {
             let OutboundConnectorRequest {
                 addr,
                 connection_tracker,
+                source: _,
             } = req;
 
             let (fake_client, _harness) = ClientTestHarness::build().finish();
@@ -520,6 +521,7 @@ async fn crawler_peer_limit_one_connect_ok_stay_open() {
             let OutboundConnectorRequest {
                 addr,
                 connection_tracker,
+                source: _,
             } = req;
 
             let (fake_client, _harness) = ClientTestHarness::build().finish();
@@ -616,6 +618,7 @@ async fn crawler_peer_limit_default_connect_ok_then_drop() {
             let OutboundConnectorRequest {
                 addr,
                 connection_tracker,
+                source: _,
             } = req;
 
             let (fake_client, _harness) = ClientTestHarness::build().finish();
@@ -670,6 +673,7 @@ async fn crawler_peer_limit_default_connect_ok_stay_open() {
             let OutboundConnectorRequest {
                 addr,
                 connection_tracker,
+                source: _,
             } = req;
 
             let (fake_client, _harness) = ClientTestHarness::build().finish();
@@ -798,6 +802,7 @@ async fn listener_peer_limit_one_handshake_ok_then_drop() {
                 data_stream: tcp_stream,
                 connected_addr: _,
                 connection_tracker,
+                source: _,
             } = req;
 
             let (fake_client, _harness) = ClientTestHarness::build().finish();
@@ -859,6 +864,7 @@ async fn listener_peer_limit_one_handshake_ok_stay_open() {
                     data_stream: tcp_stream,
                     connected_addr: _,
                     connection_tracker,
+                    source: _,
                 } = req;
 
                 let (fake_client, _harness) = ClientTestHarness::build().finish();
@@ -965,6 +971,7 @@ async fn listener_peer_limit_default_handshake_ok_then_drop() {
                 data_stream: tcp_stream,
                 connected_addr: _,
                 connection_tracker,
+                source: _,
             } = req;
 
             let (fake_client, _harness) = ClientTestHarness::build().finish();
@@ -1026,6 +1033,7 @@ async fn listener_peer_limit_default_handshake_ok_stay_open() {
                     data_stream: tcp_stream,
                     connected_addr: _,
                     connection_tracker,
+                    source: _,
                 } = req;
 
                 let (fake_client, _harness) = ClientTestHarness::build().finish();
@@ -1327,6 +1335,7 @@ async fn remnant_nonces_from_outbound_connections_are_limited() {
         let req = OutboundConnectorRequest {
             addr: addr.into(),
             connection_tracker,
+            source: PeerSource::Configured,
         };
 
         outbound_connector
