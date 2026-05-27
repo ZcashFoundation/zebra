@@ -721,12 +721,24 @@ impl StateService {
         // that are a child of the last block we sent.
         //
         // TODO: configure the state with the last checkpoint hash instead?
+        // Check if the last checkpoint block has been committed — either to disk
+        // (finalized tip) or to the non-finalized state (pipelined to disk).
+        let last_sent_hash_is_committed = {
+            let on_disk = self.read_service.db.finalized_tip_hash()
+                == self.finalized_block_write_last_sent_hash;
+            let in_nfs = self
+                .read_service
+                .latest_non_finalized_state()
+                .best_tip()
+                .map(|(_, hash)| hash)
+                == Some(self.finalized_block_write_last_sent_hash);
+            on_disk || in_nfs
+        };
         if self.block_write_sender.finalized.is_some()
             && self
                 .non_finalized_state_queued_blocks
                 .has_queued_children(self.finalized_block_write_last_sent_hash)
-            && self.read_service.db.finalized_tip_hash()
-                == self.finalized_block_write_last_sent_hash
+            && last_sent_hash_is_committed
         {
             // Tell the block write task to stop committing checkpoint verified blocks to the finalized state,
             // and move on to committing semantically verified blocks to the non-finalized state.

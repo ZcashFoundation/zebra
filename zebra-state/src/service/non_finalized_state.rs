@@ -338,6 +338,29 @@ impl NonFinalizedState {
         FinalizableBlock::new(best_chain_root, root_treestate)
     }
 
+    /// Returns a [`FinalizableBlock::Contextual`] for the tip of the best
+    /// chain by cloning data already computed during the chain update,
+    /// **without** mutating the non-finalized state.
+    ///
+    /// This is used to send the tip block to the disk writer immediately
+    /// after committing it to the non-finalized state, so the block
+    /// remains queryable in memory until the disk writer confirms the
+    /// commit and the prune loop removes it.
+    ///
+    /// Returns `None` if the non-finalized state is empty.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn peek_finalize_tip(&self) -> Option<FinalizableBlock> {
+        let best_chain = self.best_chain()?;
+        let tip = best_chain
+            .tip_block()
+            .expect("best chain is not empty because we just checked it");
+        let tip_height = tip.height;
+        let treestate = best_chain
+            .treestate(tip_height.into())
+            .expect("treestate exists for the tip height because the block is in the chain");
+        Some(FinalizableBlock::new(tip.clone(), treestate))
+    }
+
     /// Commit block to the non-finalized state, on top of:
     /// - an existing chain's tip, or
     /// - a newly forked chain.
@@ -367,6 +390,93 @@ impl NonFinalizedState {
         self.update_metrics_for_committed_block(height, hash);
 
         Ok(())
+    }
+
+    /// Commit a checkpoint-verified block to the non-finalized state.
+    ///
+    /// This is the fast in-memory commit path for the pipelined checkpoint sync.
+    /// The block is added to the single best chain without the full contextual
+    /// validation that semantically-verified blocks go through (transparent spend
+    /// checks, anchor checks, etc.), because the checkpoint verifier has already
+    /// validated the entire chain of block hashes.
+    ///
+    /// Returns a `ChainTipBlock` for chain tip updates.
+    ///
+    /// The block can later be finalized to disk by calling [`finalize`](Self::finalize).
+    #[tracing::instrument(level = "debug", skip(self, finalized_state, checkpoint_verified))]
+    pub fn commit_checkpoint_block(
+        &mut self,
+        checkpoint_verified: crate::CheckpointVerifiedBlock,
+        finalized_state: &ZebraDb,
+    ) -> Result<crate::service::ChainTipBlock, ValidateContextError> {
+        let prepared: SemanticallyVerifiedBlock = checkpoint_verified.clone().into();
+        let height = prepared.height;
+        let hash = prepared.hash;
+
+        // Build a ContextuallyVerifiedBlock. For checkpoint blocks we skip the
+        // full contextual validation (transparent spend, anchor, etc.) because
+        // the checkpoint hash chain already guarantees validity.
+        //
+        // We still need the spent_utxos for UTXO tracking. Look them up from
+        // the chain (for same-chain spends) and the finalized state (for
+        // finalized spends).
+        let chain = if self.chain_set.is_empty() {
+            // First block after the finalized tip — create a new chain.
+            Arc::new(Chain::new(
+                &self.network,
+                finalized_state.finalized_tip_height().unwrap_or(Height(0)),
+                finalized_state.sprout_tree_for_tip(),
+                finalized_state.sapling_tree_for_tip(),
+                finalized_state.orchard_tree_for_tip(),
+                finalized_state.history_tree(),
+                finalized_state.finalized_value_pool(),
+            ))
+        } else {
+            // Continue the existing best chain.
+            self.chain_set
+                .iter()
+                .next_back()
+                .cloned()
+                .expect("chain_set is not empty")
+        };
+
+        let spent_utxos = check::utxo::transparent_spend(
+            &prepared,
+            &chain.unspent_utxos(),
+            &chain.spent_utxos,
+            finalized_state,
+        )?;
+
+        let contextual =
+            ContextuallyVerifiedBlock::with_block_and_spent_utxos(prepared, spent_utxos).map_err(
+                |value_balance_error| ValidateContextError::CalculateBlockChainValueChange {
+                    value_balance_error,
+                    height,
+                    block_hash: hash,
+                    transaction_count: checkpoint_verified.block.transactions.len(),
+                    spent_utxo_count: 0,
+                },
+            )?;
+
+        // Push onto chain — this updates trees, nullifiers, UTXOs, etc.
+        // Skip the block commitment and sprout anchor validation that
+        // `validate_and_update_parallel` performs, because checkpoint
+        // verification has already guaranteed the block's validity.
+        let chain = Arc::try_unwrap(chain).unwrap_or_else(|shared_chain| (*shared_chain).clone());
+        let chain = Arc::new(chain.push(contextual)?);
+
+        // Replace the best chain in the set.
+        // Remove old best chain first (if any), then insert the updated one.
+        #[allow(clippy::mutable_key_type)]
+        let mut chains = mem::take(&mut self.chain_set);
+        chains.pop_last(); // remove the old best chain
+        chains.insert(chain);
+        self.chain_set = chains;
+
+        self.update_metrics_for_committed_block(height, hash);
+
+        let tip_block = crate::service::ChainTipBlock::from(checkpoint_verified);
+        Ok(tip_block)
     }
 
     /// Invalidate block with hash `block_hash` and all descendants from the non-finalized state. Insert

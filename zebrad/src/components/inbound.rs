@@ -434,24 +434,22 @@ impl Service<zn::Request> for Inbound {
                             break;
                         }
 
-                        let response = state.clone().ready().await?.call(zs::Request::Block(hash.into())).await?;
+                        let response = state.clone().ready().await?.call(zs::Request::BlockAndSize(hash.into())).await?;
 
                         // Add the block responses to the list, while updating the size limit.
                         //
                         // If there was a database error, return the error,
                         // and stop processing further chunks.
                         match response {
-                            zs::Response::Block(Some(block)) => {
-                                // If checking the serialized size of the block performs badly,
-                                // return the size from the state using a wrapper type.
-                                total_size += block.zcash_serialized_size();
+                            zs::Response::BlockAndSize(Some((block, size))) => {
+                                total_size += size;
 
                                 blocks.push(Available((hash, block, None)))
                             },
                             // We don't need to limit the size of the missing block IDs list,
                             // because it is already limited to the size of the getdata request
                             // sent by the peer. (Their content and encodings are the same.)
-                            zs::Response::Block(None) => blocks.push(Missing(hash)),
+                            zs::Response::BlockAndSize(None) => blocks.push(Missing(hash)),
                             _ => unreachable!("wrong response from state"),
                         }
 
