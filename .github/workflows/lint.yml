@@ -83,7 +83,7 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           cache-on-failure: true
-      - uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 #v2.79.3
+      - uses: taiki-e/install-action@60ae4ce63c7aeb6e96d7f572c1ec7fafbb17ca80 #v2.79.10
         with:
           tool: cargo-hack
       - uses: ./.github/actions/setup-zebra-build
@@ -165,7 +165,7 @@ jobs:
         with:
           toolchain: nightly
           cache-on-failure: true
-      - uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 #v2.79.3
+      - uses: taiki-e/install-action@60ae4ce63c7aeb6e96d7f572c1ec7fafbb17ca80 #v2.79.10
         with:
           tool: cargo-udeps
       - uses: ./.github/actions/setup-zebra-build
@@ -203,7 +203,7 @@ jobs:
           toolchain: nightly
           cache-on-failure: true
       - name: cargo install cargo-hack
-        uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 #v2.79.3
+        uses: taiki-e/install-action@60ae4ce63c7aeb6e96d7f572c1ec7fafbb17ca80 #v2.79.10
         with:
           tool: cargo-hack
       - uses: ./.github/actions/setup-zebra-build
@@ -260,7 +260,7 @@ jobs:
         with:
           cache-on-failure: true
       - name: Check ${{ matrix.checks }} with features ${{ matrix.features }}
-        uses: EmbarkStudios/cargo-deny-action@6c8f9facfa5047ec02d8485b6bf52b587b7777d1 #v2.0.18
+        uses: EmbarkStudios/cargo-deny-action@a531616d8ce3b9177443e48a1159bc945a099823 #v2.0.19
         with:
           # --all-features spuriously activates openssl, but we want to ban that dependency in
           # all of zebrad's production features for security reasons. But the --all-features job is
@@ -283,7 +283,7 @@ jobs:
         with:
           cache-on-failure: true
       - name: Install cargo-vet
-        uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 #v2.79.3
+        uses: taiki-e/install-action@60ae4ce63c7aeb6e96d7f572c1ec7fafbb17ca80 #v2.79.10
         with:
           tool: cargo-vet
       - name: Run cargo-vet check
