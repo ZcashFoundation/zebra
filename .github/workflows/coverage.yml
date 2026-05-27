@@ -32,6 +32,7 @@ env:
 jobs:
   coverage:
     permissions:
+      contents: read
       id-token: write
       statuses: write
     runs-on: ubuntu-latest

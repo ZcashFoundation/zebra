@@ -21,6 +21,7 @@ jobs:
     name: Validate PR title
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       pull-requests: write
     steps:
       - name: Check PR title

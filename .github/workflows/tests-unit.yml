@@ -41,6 +41,7 @@ jobs:
   unit-tests:
     name: ${{ matrix.rust-version }} on ${{ matrix.os }}
     permissions:
+      contents: read
       id-token: write
       statuses: write
     runs-on: ${{ matrix.os }}
@@ -99,6 +100,7 @@ jobs:
   check-no-git-dependencies:
     name: Check no git dependencies
     permissions:
+      contents: read
       id-token: write
       statuses: write
     runs-on: ubuntu-latest

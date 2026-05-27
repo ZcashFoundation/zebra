@@ -41,6 +41,7 @@ jobs:
   clippy:
     name: clippy ${{ matrix.rust-version }} / ${{ matrix.type }}
     permissions:
+      contents: read
       id-token: write
       statuses: write
     runs-on: ubuntu-latest
@@ -73,6 +74,7 @@ jobs:
 
   crate-checks:
     permissions:
+      contents: read
       statuses: write
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -92,6 +94,7 @@ jobs:
   msrv:
     name: MSRV
     permissions:
+      contents: read
       id-token: write
       statuses: write
     runs-on: ubuntu-latest
@@ -114,6 +117,7 @@ jobs:
   docs:
     name: docs
     permissions:
+      contents: read
       statuses: write
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -136,6 +140,7 @@ jobs:
   fmt:
     name: fmt
     permissions:
+      contents: read
       statuses: write
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -153,6 +158,7 @@ jobs:
   unused-deps:
     name: unused-deps
     permissions:
+      contents: read
       id-token: write
       statuses: write
     runs-on: ubuntu-latest
@@ -190,6 +196,7 @@ jobs:
   features:
     name: features
     permissions:
+      contents: read
       id-token: write
       statuses: write
     runs-on: ubuntu-latest
@@ -214,6 +221,7 @@ jobs:
   check-cargo-lock:
     name: check-cargo-lock
     permissions:
+      contents: read
       id-token: write
       statuses: write
     runs-on: ubuntu-latest
@@ -231,6 +239,7 @@ jobs:
   deny:
     name: Check deny ${{ matrix.checks }} ${{ matrix.features }}
     permissions:
+      contents: read
       statuses: write
     runs-on: ubuntu-latest
     strategy:
@@ -272,6 +281,7 @@ jobs:
   vet:
     name: cargo-vet check
     permissions:
+      contents: read
       statuses: write
     runs-on: ubuntu-latest
     timeout-minutes: 10
