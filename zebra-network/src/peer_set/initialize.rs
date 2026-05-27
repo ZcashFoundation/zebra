@@ -959,10 +959,9 @@ where
 
                             Ok(HandshakeFinished)
                         } else {
-                            // There weren't any peers, so try to get more peers.
-                            debug!("demand for peers but no available candidates");
-
-                            crawl(candidates, demand_tx, false).await?;
+                            // There weren't any peers, but we skip crawling to avoid
+                            // flooding the address book with stalled gossiped peers.
+                            debug!("demand for peers but no available candidates, skipping crawl");
 
                             Ok(DemandCrawlFinished)
                         }
@@ -974,26 +973,8 @@ where
                 handshakes.push(handshake_or_crawl_handle);
             }
             Ok(TimerCrawl { tick }) => {
-                let candidates = candidates.clone();
-                let demand_tx = demand_tx.clone();
-                let should_always_dial = active_outbound_connections.update_count() == 0;
-
-                let crawl_handle = tokio::spawn(
-                    async move {
-                        debug!(
-                            ?tick,
-                            "crawling for more peers in response to the crawl timer"
-                        );
-
-                        crawl(candidates, demand_tx, should_always_dial).await?;
-
-                        Ok(TimerCrawlFinished)
-                    }
-                    .in_current_span(),
-                )
-                .wait_for_panics();
-
-                handshakes.push(crawl_handle);
+                // Skip crawling to avoid flooding the address book with stalled gossiped peers.
+                debug!(?tick, "skipping timer crawl to limit peer discovery");
             }
 
             // Completed spawned tasks
