@@ -102,7 +102,7 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use futures::{
@@ -125,7 +125,7 @@ use tower::{
     Service,
 };
 
-use zebra_chain::{chain_tip::ChainTip, parameters::Network};
+use zebra_chain::{block::Height, chain_tip::ChainTip, parameters::Network};
 
 use crate::{
     address_book::AddressMetrics,
@@ -152,6 +152,13 @@ mod tests;
 /// distinct peers for each. We track triple the fanout to ensure diversity
 /// across consecutive sync rounds.
 const MAX_RECENT_TIP_PEERS: usize = 6;
+
+/// How long the best chain tip height can stay the same before the peer set
+/// evicts a random peer, to try to recover from a stalled sync.
+///
+/// A stalled tip can mean we're connected to peers that aren't serving us new
+/// blocks. Dropping a random peer frees a slot for the crawler to replace.
+const TIP_STALL_EVICTION_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 /// A signal sent by the [`PeerSet`] when it has no ready peers, and gets a request from Zebra.
 ///
@@ -272,6 +279,19 @@ where
     /// The last time we logged a message about the peer set size
     last_peer_log: Option<Instant>,
 
+    // Stalled Sync Detection
+    //
+    /// The highest best-chain-tip height the peer set has observed so far.
+    ///
+    /// Used to detect when the chain tip stops growing.
+    last_observed_tip_height: Option<Height>,
+
+    /// The last time the best chain tip height grew (or the peer set started).
+    ///
+    /// If the tip does not grow within [`TIP_STALL_EVICTION_TIMEOUT`], the peer set
+    /// evicts a random peer to try to recover from a stalled sync.
+    last_tip_growth: Instant,
+
     /// The configured maximum number of peers that can be in the
     /// peer set per IP, defaults to [`crate::constants::DEFAULT_MAX_CONNS_PER_IP`]
     max_conns_per_ip: usize,
@@ -359,6 +379,10 @@ where
             // Metrics
             last_peer_log: None,
             address_metrics,
+
+            // Stalled sync detection
+            last_observed_tip_height: None,
+            last_tip_growth: Instant::now(),
 
             max_conns_per_ip: max_conns_per_ip.unwrap_or(config.max_connections_per_ip),
 
@@ -892,6 +916,66 @@ where
             .choose_multiple(&mut rand::thread_rng(), max_peers)
     }
 
+    /// Randomly selects one connected peer (ready or unready), if any exist.
+    fn select_random_peer(&self) -> Option<D::Key> {
+        use rand::seq::IteratorRandom;
+
+        // `cancel_handles` holds the unready peers, `ready_services` the ready ones.
+        self.ready_services
+            .keys()
+            .chain(self.cancel_handles.keys())
+            .copied()
+            .choose(&mut rand::thread_rng())
+    }
+
+    /// Evicts a random peer if the best chain tip height hasn't grown for at least
+    /// [`TIP_STALL_EVICTION_TIMEOUT`].
+    ///
+    /// A stalled chain tip can indicate that we're connected to peers that aren't
+    /// serving us new blocks (for example, peers on a stuck or minority chain, or
+    /// unresponsive peers holding download slots). Dropping a random peer frees a
+    /// connection slot, prompting the crawler to connect to a different peer that
+    /// might let our sync make progress.
+    ///
+    /// At most one peer is evicted per stall window.
+    fn evict_peer_if_tip_stalled(&mut self) {
+        let tip_height = self.minimum_peer_version.chain_tip_height();
+
+        // The tip grew (or we're seeing it for the first time): reset the stall timer.
+        if self
+            .last_observed_tip_height
+            .is_none_or(|last| tip_height > last)
+        {
+            self.last_observed_tip_height = Some(tip_height);
+            self.last_tip_growth = Instant::now();
+            return;
+        }
+
+        // The tip hasn't grown yet: wait until the stall timeout elapses.
+        if self.last_tip_growth.elapsed() < TIP_STALL_EVICTION_TIMEOUT {
+            return;
+        }
+
+        // Reset the timer so we evict at most one peer per stall window, even if
+        // the tip stays stuck.
+        self.last_tip_growth = Instant::now();
+
+        if let Some(key) = self.select_random_peer() {
+            info!(
+                ?key,
+                ?tip_height,
+                stall = ?TIP_STALL_EVICTION_TIMEOUT,
+                "chain tip has not grown recently, evicting a random peer to recover sync"
+            );
+
+            // `remove()` drops ready peers and cancels in-flight work for unready peers.
+            self.remove(&key);
+
+            // Prompt the crawler to open a replacement connection.
+            let _ = self.demand_signal.try_send(MorePeers);
+        }
+    }
+
     /// Accesses a ready endpoint by `key` and returns its current load.
     ///
     /// Returns `None` if the service is not in the ready service list.
@@ -1377,6 +1461,10 @@ where
         let _poll_pending_or_ready: Poll<()> = self.inventory_registry.poll_inventory(cx)?;
 
         let ready_peers = self.poll_peers(cx)?;
+
+        // If the chain tip has stalled for too long, drop a random peer to try to
+        // recover sync. The elapsed-time guard makes this cheap to run every poll.
+        self.evict_peer_if_tip_stalled();
 
         // These metrics should run last, to report the most up-to-date information.
         self.log_peer_set_size();

@@ -1,6 +1,13 @@
 //! Fixed test vectors for the peer set.
 
-use std::{cmp::max, collections::HashSet, iter, net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+    cmp::max,
+    collections::HashSet,
+    iter,
+    net::SocketAddr,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use tokio::time::timeout;
 use tower::{Service, ServiceExt};
@@ -176,6 +183,130 @@ fn peer_set_ready_multiple_connections() {
         // Peer set hangs when no more connections are present
         let peer_ready = peer_set.ready();
         assert!(timeout(Duration::from_secs(10), peer_ready).await.is_err());
+    });
+}
+
+/// Check that the peer set evicts a random peer when the best chain tip height
+/// has not grown for longer than [`TIP_STALL_EVICTION_TIMEOUT`].
+///
+/// [`TIP_STALL_EVICTION_TIMEOUT`]: super::super::TIP_STALL_EVICTION_TIMEOUT
+#[test]
+fn peer_set_evicts_random_peer_on_stalled_tip() {
+    // Use three peers with the same version.
+    let peer_version = Version::min_specified_for_upgrade(&Network::Mainnet, NetworkUpgrade::Nu6);
+    let peer_versions = PeerVersions {
+        peer_versions: vec![peer_version, peer_version, peer_version],
+    };
+
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    let (discovered_peers, _handles) = peer_versions.mock_peer_discovery();
+    let (minimum_peer_version, best_tip_height) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+
+    // Set an initial tip height, so the first poll seeds the stall detector.
+    best_tip_height.send_best_tip_height(block::Height(100));
+
+    runtime.block_on(async move {
+        let (mut peer_set, mut peer_set_guard) = PeerSetBuilder::new()
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version.clone())
+            .max_conns_per_ip(max(3, DEFAULT_MAX_CONNS_PER_IP))
+            .build();
+
+        // Drive a first poll to make all peers ready and seed the stall detector
+        // with the current tip height.
+        let peer_ready = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+        assert_eq!(peer_ready.ready_services.len(), 3);
+
+        // Pretend the tip last grew more than the eviction timeout ago, while
+        // leaving the tip height unchanged so it counts as stalled.
+        peer_set.last_tip_growth = Instant::now() - (super::super::TIP_STALL_EVICTION_TIMEOUT * 2);
+
+        // Driving another poll should now evict exactly one random peer.
+        let peer_ready = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+        assert_eq!(
+            peer_ready.ready_services.len(),
+            2,
+            "a stalled tip should evict exactly one peer"
+        );
+
+        // The eviction should have asked the crawler for a replacement peer.
+        assert!(
+            peer_set_guard
+                .demand_receiver()
+                .as_mut()
+                .expect("demand receiver is created by the builder")
+                .try_recv()
+                .is_ok(),
+            "evicting a peer should send a MorePeers demand signal"
+        );
+    });
+}
+
+/// Check that the peer set does *not* evict a peer when the best chain tip height
+/// is still growing, even if a long time has passed since the last poll.
+#[test]
+fn peer_set_keeps_peers_when_tip_grows() {
+    // Use three peers with the same version.
+    let peer_version = Version::min_specified_for_upgrade(&Network::Mainnet, NetworkUpgrade::Nu6);
+    let peer_versions = PeerVersions {
+        peer_versions: vec![peer_version, peer_version, peer_version],
+    };
+
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    let (discovered_peers, _handles) = peer_versions.mock_peer_discovery();
+    let (minimum_peer_version, best_tip_height) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+
+    best_tip_height.send_best_tip_height(block::Height(100));
+
+    runtime.block_on(async move {
+        let (mut peer_set, mut peer_set_guard) = PeerSetBuilder::new()
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version.clone())
+            .max_conns_per_ip(max(3, DEFAULT_MAX_CONNS_PER_IP))
+            .build();
+
+        let peer_ready = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+        assert_eq!(peer_ready.ready_services.len(), 3);
+
+        // Force the stall timer well into the past, but also grow the tip height.
+        peer_set.last_tip_growth = Instant::now() - (super::super::TIP_STALL_EVICTION_TIMEOUT * 2);
+        best_tip_height.send_best_tip_height(block::Height(101));
+
+        let peer_ready = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+        assert_eq!(
+            peer_ready.ready_services.len(),
+            3,
+            "a growing tip should not evict any peers"
+        );
+
+        // No replacement peer should have been requested.
+        assert!(
+            peer_set_guard
+                .demand_receiver()
+                .as_mut()
+                .expect("demand receiver is created by the builder")
+                .try_recv()
+                .is_err(),
+            "a growing tip should not send a MorePeers demand signal"
+        );
     });
 }
 
