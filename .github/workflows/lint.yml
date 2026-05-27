@@ -3,25 +3,8 @@ name: Lint
 on:
   pull_request:
     branches: [main]
-    paths:
-      - "**/*.rs"
-      - "**/Cargo.toml"
-      - "**/Cargo.lock"
-      - clippy.toml
-      - .cargo/config.toml
-      - .github/workflows/lint.yml
-      - supply-chain/**
-
   push:
     branches: [main]
-    paths:
-      - "**/*.rs"
-      - "**/Cargo.toml"
-      - "**/Cargo.lock"
-      - clippy.toml
-      - .cargo/config.toml
-      - .github/workflows/lint.yml
-      - supply-chain/**
 
 # Ensures that only one workflow task will run at a time. Previous builds, if
 # already in process, will get cancelled. Only the latest commit will be allowed
@@ -38,8 +21,26 @@ env:
   CLICOLOR: 1
 
 jobs:
+  plan:
+    name: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      rust: ${{ steps.changes.outputs.matched }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/detect-changes
+        id: changes
+        with:
+          pattern: '\.rs$|(^|/)Cargo\.(toml|lock)$|(^|/)clippy\.toml$|^\.cargo/config\.toml$|^\.github/workflows/lint\.yml$|^supply-chain/'
+
   clippy:
     name: clippy ${{ matrix.rust-version }} / ${{ matrix.type }}
+    needs: plan
+    if: needs.plan.outputs.rust == 'true'
     permissions:
       contents: read
       id-token: write
@@ -73,6 +74,8 @@ jobs:
         run: cargo clippy ${{ matrix.args }} --features "${{ matrix.features }}"
 
   crate-checks:
+    needs: plan
+    if: needs.plan.outputs.rust == 'true'
     permissions:
       contents: read
       statuses: write
@@ -93,6 +96,8 @@ jobs:
 
   msrv:
     name: MSRV
+    needs: plan
+    if: needs.plan.outputs.rust == 'true'
     permissions:
       contents: read
       id-token: write
@@ -116,6 +121,8 @@ jobs:
 
   docs:
     name: docs
+    needs: plan
+    if: needs.plan.outputs.rust == 'true'
     permissions:
       contents: read
       statuses: write
@@ -139,6 +146,8 @@ jobs:
 
   fmt:
     name: fmt
+    needs: plan
+    if: needs.plan.outputs.rust == 'true'
     permissions:
       contents: read
       statuses: write
@@ -157,6 +166,8 @@ jobs:
 
   unused-deps:
     name: unused-deps
+    needs: plan
+    if: needs.plan.outputs.rust == 'true'
     permissions:
       contents: read
       id-token: write
@@ -178,6 +189,8 @@ jobs:
       - run: cargo udeps --workspace --all-targets --all-features --locked
 
   no-test-deps:
+    needs: plan
+    if: needs.plan.outputs.rust == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -195,6 +208,8 @@ jobs:
   # Checks that selected rates can compile with power set of features
   features:
     name: features
+    needs: plan
+    if: needs.plan.outputs.rust == 'true'
     permissions:
       contents: read
       id-token: write
@@ -220,6 +235,8 @@ jobs:
 
   check-cargo-lock:
     name: check-cargo-lock
+    needs: plan
+    if: needs.plan.outputs.rust == 'true'
     permissions:
       contents: read
       id-token: write
@@ -238,6 +255,8 @@ jobs:
 
   deny:
     name: Check deny ${{ matrix.checks }} ${{ matrix.features }}
+    needs: plan
+    if: needs.plan.outputs.rust == 'true'
     permissions:
       contents: read
       statuses: write
@@ -280,6 +299,8 @@ jobs:
 
   vet:
     name: cargo-vet check
+    needs: plan
+    if: needs.plan.outputs.rust == 'true'
     permissions:
       contents: read
       statuses: write
@@ -304,8 +325,10 @@ jobs:
     runs-on: ubuntu-latest
     if: always()
     needs:
+      - plan
       - clippy
       - crate-checks
+      - msrv
       - docs
       - fmt
       - unused-deps
@@ -320,3 +343,4 @@ jobs:
         uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe #v1.2.2
         with:
           jobs: ${{ toJSON(needs) }}
+          allowed-skips: clippy, crate-checks, msrv, docs, fmt, unused-deps, check-cargo-lock, no-test-deps, features, deny, vet

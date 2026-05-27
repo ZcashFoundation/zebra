@@ -48,10 +48,7 @@ Some PRs don't use Mergify:
 Merging with failing CI is usually disabled by our branch protection rules.
 See the `Admin: Manually Merging PRs` section below for manual merge instructions.
 
-We use workflow conditions to skip some checks on PRs, Mergify, or the `main` branch.
-For example, some workflow changes skip Rust code checks. When a workflow can skip a check, we need to create [a patch workflow](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks#handling-skipped-but-required-checks)
-with an empty job with the same name. This is a [known Actions issue](https://github.com/orgs/community/discussions/13690#discussioncomment-6653382).
-This lets the branch protection rules pass when the job is skipped. In Zebra, we name these workflows with the extension `.patch.yml`.
+Each required status check is produced by exactly one workflow. A `plan` job calls [`.github/actions/detect-changes`](https://github.com/ZcashFoundation/zebra/blob/main/.github/actions/detect-changes/action.yml) to gate worker jobs via `if:`; the `*-success` aggregator runs with `if: always()` and is the sole producer of the check context. No workflow-level `paths:` filters and no same-`name:` jobs across workflows.
 
 ### Branch Protection Rules
 
@@ -66,9 +63,9 @@ But the following jobs don't need branch protection rules:
 - Setup jobs that will fail another later job which always runs, for example: Google Cloud setup jobs.
   We have branch protection rules for build jobs, but we could remove them if we want.
 
-When a new job is added in a PR, use the `#devops` Slack channel to ask a GitHub admin to add a branch protection rule after it merges.
-Adding a new Zebra crate automatically adds a new job to build that crate by itself in [test-crates.yml](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/test-crates.yml),
-so new crate PRs also need to add a branch protection rule.
+To add a new gated job to an existing required check, add it to the producing workflow, then add its job ID to the `*-success` aggregator under both `needs:` and `allowed-skips:`. To add a brand-new required check, build a workflow with the `plan` + aggregator pattern and ask `#devops` to add the aggregator `name:` to the ruleset.
+
+Adding a new Zebra crate automatically extends the `build` matrix in [test-crates.yml](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/test-crates.yml); no manual step is required.
 
 #### Admin: Changing Branch Protection Rules
 
@@ -80,10 +77,7 @@ To change branch protection rules:
 
 Any developer:
 
-0. Run a PR containing the new rule, so its name is available to autocomplete.
-1. If the job doesn't run on all PRs, add a patch job with the name of the job.
-   If the job calls a reusable workflow, the name is `Caller job / Reusable step`.
-   (The name of the job inside the reusable workflow is ignored.)
+0. Run a PR containing the new aggregator, so its `name:` is available to autocomplete.
 
 Admin:
 
