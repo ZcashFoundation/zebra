@@ -14,7 +14,9 @@ use crate::{
             block_subsidy, constants::POST_BLOSSOM_HALVING_INTERVAL, halving, halving_divisor,
             height_for_halving, ParameterSubsidy as _,
         },
-        NetworkUpgrade,
+        testnet::{self, ConfiguredActivationHeights},
+        NetworkUpgrade, NU7_POW_TARGET_SPACING_RATIO, POST_BLOSSOM_POW_TARGET_SPACING,
+        POST_NU7_POW_TARGET_SPACING,
     },
 };
 
@@ -287,6 +289,86 @@ fn block_subsidy_for_network(network: &Network) -> Result<(), Report> {
     assert_eq!(
         Amount::<NonNegative>::try_from(0)?,
         block_subsidy(Height::MAX, network)?
+    );
+
+    Ok(())
+}
+
+/// Tests `halving` and `block_subsidy` across the NU7 activation boundary on a
+/// configured Testnet, exercising the post-NU7 cases added by the draft
+/// "Shorter Block Target Spacing" ZIP.
+#[test]
+fn post_nu7_halving_and_subsidy() -> Result<(), Report> {
+    let _init_guard = zebra_test::init();
+
+    // Pick parameters where slow_start_shift = blossom_height, so the pre-Blossom
+    // term in the spec halving sum is exactly zero and boundaries land cleanly at
+    // multiples of the post-Blossom / post-NU7 halving intervals.
+    let blossom = 1u32;
+    let canopy = blossom + u32::try_from(POST_BLOSSOM_HALVING_INTERVAL).unwrap();
+    let nu7 = canopy + u32::try_from(POST_BLOSSOM_HALVING_INTERVAL * 2).unwrap();
+
+    let network = testnet::Parameters::build()
+        // slow_start_shift = slow_start_interval / 2 = 1, equal to Blossom height.
+        .with_slow_start_interval(Height(2))
+        .with_activation_heights(ConfiguredActivationHeights {
+            blossom: Some(blossom),
+            canopy: Some(canopy),
+            nu7: Some(nu7),
+            ..Default::default()
+        })
+        .expect("activation heights are valid")
+        .clear_funding_streams()
+        .to_network()
+        .expect("configured testnet is valid");
+
+    let nu7_height = Height(nu7);
+
+    // Target spacing shortens from the post-Blossom value to the post-NU7 value
+    // exactly at the NU7 activation height.
+    assert_eq!(
+        i64::from(POST_BLOSSOM_POW_TARGET_SPACING),
+        NetworkUpgrade::target_spacing_for_height(&network, (nu7_height - 1).unwrap())
+            .num_seconds()
+    );
+    assert_eq!(
+        i64::from(POST_NU7_POW_TARGET_SPACING),
+        NetworkUpgrade::target_spacing_for_height(&network, nu7_height).num_seconds()
+    );
+
+    // At NU7 activation, three post-Blossom halvings have elapsed:
+    //   Halving = floor(0/PreBlossom + 1 + 2) = 3
+    assert_eq!(3, halving(nu7_height, &network));
+    assert_eq!(8, halving_divisor(nu7_height, &network).unwrap());
+
+    // BlockSubsidy(NU7) = floor(MAX / (BlossomRatio * NU7Ratio * 2^Halving))
+    //                   = floor(1_250_000_000 / (2 * 3 * 8))
+    //                   = floor(1_250_000_000 / 48) = 26_041_666 zatoshi
+    assert_eq!(
+        Amount::<NonNegative>::try_from(26_041_666)?,
+        block_subsidy(nu7_height, &network)?,
+    );
+
+    // The 3rd halving boundary lands exactly at NU7 in this configuration, so the
+    // block immediately before NU7 is still in halving era 2 (post-Blossom, pre-NU7):
+    //   floor(1_250_000_000 / (2 * 4)) = 156_250_000 zatoshi.
+    assert_eq!(2, halving((nu7_height - 1).unwrap(), &network));
+    assert_eq!(
+        Amount::<NonNegative>::try_from(156_250_000)?,
+        block_subsidy((nu7_height - 1).unwrap(), &network)?,
+    );
+
+    // The halving counter does not reset at NU7. The next halving boundary is
+    // reached after one PostNU7HalvingInterval (=PostBlossomHalvingInterval * 3)
+    // of post-NU7 blocks.
+    let post_nu7_halving_interval =
+        POST_BLOSSOM_HALVING_INTERVAL * i64::from(NU7_POW_TARGET_SPACING_RATIO);
+    let next_halving = (nu7_height + post_nu7_halving_interval).unwrap();
+    assert_eq!(4, halving(next_halving, &network));
+    assert_eq!(16, halving_divisor(next_halving, &network).unwrap());
+    assert_eq!(
+        Amount::<NonNegative>::try_from(13_020_833)?,
+        block_subsidy(next_halving, &network)?,
     );
 
     Ok(())
