@@ -5,7 +5,16 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Unreleased]
+## [Zebra 4.5.0](https://github.com/ZcashFoundation/zebra/releases/tag/v4.5.0) - 2026-05-28
+
+This release fixes several critical security issues. We recommend node operators update to
+4.5.0 as soon as possible.
+
+The release also adds support for mining to a shielded address.
+
+### Breaking Changes
+
+This release has the following breaking changes:
 
 ### Security
 
@@ -15,8 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   cannot force a large allocation before any element bytes are read. The
   `Vec` grows naturally via `push()` as real data arrives. Complements
   the per-type `max_allocation()` caps from PR #10494
-  ([GHSA-xr93-pcq3-pxf8](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-xr93-pcq3-pxf8)).
-  CWE-770.
+  ([GHSA-xr93-pcq3-pxf8](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-xr93-pcq3-pxf8),
+  [#10563](https://github.com/ZcashFoundation/zebra/pull/10563)). CWE-770.
 - Cap `block::Hash::max_allocation` at `MAX_BLOCK_LOCATOR_LENGTH = 101`
   (matching Bitcoin Core's `MAX_LOCATOR_SZ` in `net_processing.cpp`) and
   `CountedHeader::max_allocation` at the existing
@@ -26,7 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   and ~1,409 respectively, allowing a post-handshake peer to force ~2 MiB
   of upfront `Vec` preallocation per `getblocks`/`getheaders` message
   before any payload bytes were read. Same fix shape as
-  GHSA-xr93-pcq3-pxf8 for `AddrV1`/`AddrV2` (PR #10494). CWE-770.
+  GHSA-xr93-pcq3-pxf8 for `AddrV1`/`AddrV2` (PR #10494)
+  ([#10570](https://github.com/ZcashFoundation/zebra/pull/10570)). CWE-770.
 - Reject non-ASCII `longpollid` values in the `getblocktemplate` RPC ([GHSA-qv2r-v3mx-f4pf](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-qv2r-v3mx-f4pf)).
 - Return error for malformed Sapling receiver in `z_listunifiedreceivers` RPC
 ([GHSA-c8w6-x74f-vmg3](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-c8w6-x74f-vmg3)).
@@ -34,12 +44,24 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 ### Added
 
 - Startup warning on Linux when `net.ipv4.tcp_slow_start_after_idle` is enabled (which resets TCP congestion windows between block requests and significantly reduces single-peer block-propagation throughput on long-haul links), with a "Linux TCP tuning for block propagation" troubleshooting section ([#10513](https://github.com/ZcashFoundation/zebra/pull/10513))
-- Support ZIP-213
+- Support for ZIP-213 (Shielded Coinbase) ([#10048](https://github.com/ZcashFoundation/zebra/pull/10048))
+
+### Changed
+
+- Renamed `testnet_parameters` in the network config; use `[network.params]`
+  instead ([#10051](https://github.com/ZcashFoundation/zebra/pull/10051)). The
+  old format is still accepted.
 
 ### Fixed
 
-- Avoid panicking in the address-book ban path when `network.max_connections_per_ip > 1`. Guard the optional `most_recent_by_ip` cache instead of unwrapping it, so a ban-threshold misbehavior update no longer crashes the address-book updater and poisons the shared mutex ([#10580](https://github.com/ZcashFoundation/zebra/issues/10580))
-- Propagate transaction-level value-balance errors from `Block::chain_value_pool_change()` instead of silently dropping them. The previous `flat_map(Result)` aggregation relied on `Result<T, E>: IntoIterator` and yielded zero items on `Err`, so a failing transaction was omitted from the block sum rather than surfacing as a `ValueBalanceError` ([#10585](https://github.com/ZcashFoundation/zebra/issues/10585))
+- Avoid panicking in the address-book ban path when `network.max_connections_per_ip > 1`. Guard the optional `most_recent_by_ip` cache instead of unwrapping it, so a ban-threshold misbehavior update no longer crashes the address-book updater and poisons the shared mutex ([#10589](https://github.com/ZcashFoundation/zebra/pull/10589))
+- Propagate transaction-level value-balance errors from `Block::chain_value_pool_change()` instead of silently dropping them. The previous `flat_map(Result)` aggregation relied on `Result<T, E>: IntoIterator` and yielded zero items on `Err`, so a failing transaction was omitted from the block sum rather than surfacing as a `ValueBalanceError` ([#10590](https://github.com/ZcashFoundation/zebra/pull/10590))
+- Solve Rust 1.97 beta clippy lints ([#10644](https://github.com/ZcashFoundation/zebra/pull/10644))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@ValarDragon, @andres-pcg, @conradoplg, @dingledropper, @evan-forbes, @gustavovalverde, @oxarbitrage, @syszery, @upbqdn, @zmanian.
 
 ### Security
 
