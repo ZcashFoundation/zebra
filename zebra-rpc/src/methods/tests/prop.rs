@@ -408,7 +408,7 @@ proptest! {
                             cur_time: DateTime32::now(),
                             min_time: DateTime32::now(),
                             max_time: DateTime32::now(),
-                            #[cfg(zcash_unstable = "zip234")]
+                            #[cfg(any(zcash_unstable = "zip234", zcash_unstable = "zip234alt"))]
                             value_pools: Default::default(),
                         }));
                 }
@@ -484,7 +484,7 @@ proptest! {
                             cur_time: DateTime32::now(),
                             min_time: DateTime32::now(),
                             max_time: DateTime32::now(),
-                            #[cfg(zcash_unstable = "zip234")]
+                            #[cfg(any(zcash_unstable = "zip234", zcash_unstable = "zip234alt"))]
                             value_pools: Default::default(),
                         }));
                 }

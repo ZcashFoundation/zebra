@@ -65,7 +65,7 @@ pub fn get_block_template_chain_info(
     let (best_tip_height, best_tip_hash, best_relevant_chain, best_tip_history_tree) =
         best_relevant_chain_and_history_tree_result?;
 
-    #[cfg(zcash_unstable = "zip234")]
+    #[cfg(any(zcash_unstable = "zip234", zcash_unstable = "zip234alt"))]
     let value_pools = read::find::tip_with_value_balance(non_finalized_state.best_chain(), db)?
         .map(|(_, _, vp)| vp)
         .ok_or("tip with value balance must exist when chain tip is known")?;
@@ -76,7 +76,7 @@ pub fn get_block_template_chain_info(
         best_tip_hash,
         network,
         best_tip_history_tree,
-        #[cfg(zcash_unstable = "zip234")]
+        #[cfg(any(zcash_unstable = "zip234", zcash_unstable = "zip234alt"))]
         value_pools,
     ))
 }
@@ -212,7 +212,7 @@ fn difficulty_time_and_history_tree(
     tip_hash: block::Hash,
     network: &Network,
     history_tree: Arc<HistoryTree>,
-    #[cfg(zcash_unstable = "zip234")] value_pools: zebra_chain::value_balance::ValueBalance<
+    #[cfg(any(zcash_unstable = "zip234", zcash_unstable = "zip234alt"))] value_pools: zebra_chain::value_balance::ValueBalance<
         zebra_chain::amount::NonNegative,
     >,
 ) -> GetBlockTemplateChainInfo {
@@ -265,7 +265,7 @@ fn difficulty_time_and_history_tree(
         cur_time,
         min_time,
         max_time,
-        #[cfg(zcash_unstable = "zip234")]
+        #[cfg(any(zcash_unstable = "zip234", zcash_unstable = "zip234alt"))]
         value_pools,
     };
 

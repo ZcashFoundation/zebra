@@ -246,7 +246,7 @@ where
             let coinbase_tx = check::coinbase_is_first(&block)?;
 
             // After ZIP-234 activation, block subsidies require a money reserve which can be derived from the parent block's BlockInfo.
-            #[cfg(zcash_unstable = "zip234")]
+            #[cfg(any(zcash_unstable = "zip234", zcash_unstable = "zip234alt"))]
             let money_reserve = match zebra_chain::parameters::subsidy::zip234_start_height(&network)
             {
                 Some(start) if height >= start => {
@@ -273,7 +273,7 @@ where
                 }
                 _ => None,
             };
-            #[cfg(not(zcash_unstable = "zip234"))]
+            #[cfg(not(any(zcash_unstable = "zip234", zcash_unstable = "zip234alt")))]
             let money_reserve = None;
 
             let expected_block_subsidy = zebra_chain::parameters::subsidy::block_subsidy(

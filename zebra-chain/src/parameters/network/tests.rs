@@ -351,7 +351,7 @@ fn check_block_subsidy_reserve_decreases() -> Result<(), Report> {
 }
 
 /// Testnet with NU7 at `nu7` and no funding streams.
-#[cfg(zcash_unstable = "zip234")]
+#[cfg(any(zcash_unstable = "zip234", zcash_unstable = "zip234alt"))]
 fn zip234_testnet(nu7: u32) -> Network {
     use crate::parameters::testnet::{self, ConfiguredActivationHeights};
     testnet::Parameters::build()
@@ -484,6 +484,75 @@ fn check_zip234_money_reserve_recovers_from_burns() -> Result<(), Report> {
     let recovery: Amount<NegativeAllowed> = (reserve_with_burn.constrain::<NegativeAllowed>()?
         - reserve_without_burn.constrain::<NegativeAllowed>()?)?;
     assert_eq!(recovery, burned_signed);
+
+    Ok(())
+}
+
+#[cfg(zcash_unstable = "zip234alt")]
+#[test]
+fn check_zip234alt_zero_deficit_equals_halving() -> Result<(), Report> {
+    use crate::{
+        amount::MAX_MONEY,
+        parameters::subsidy::{cumulative_halving_subsidies, halving_subsidy_at, zip234_start_height},
+    };
+
+    let net = zip234_testnet(1);
+    let height = zip234_start_height(&net).expect("NU7 configured");
+    let parent = height.previous().unwrap();
+
+    // money_reserve corresponding to *zero* burns: actual_supply == expected_supply.
+    let expected: i64 = cumulative_halving_subsidies(&net, parent).into();
+    let money_reserve = Amount::<NonNegative>::try_from(MAX_MONEY - expected)?;
+
+    let nsmalt = block_subsidy(height, &net, Some(money_reserve))?;
+    assert_eq!(nsmalt, halving_subsidy_at(height, &net));
+
+    Ok(())
+}
+
+#[cfg(zcash_unstable = "zip234alt")]
+#[test]
+fn check_zip234alt_bonus_exact_fraction() -> Result<(), Report> {
+    use crate::{
+        amount::MAX_MONEY,
+        parameters::subsidy::{cumulative_halving_subsidies, halving_subsidy_at, zip234_start_height},
+    };
+
+    let net = zip234_testnet(1);
+    let height = zip234_start_height(&net).expect("NU7 configured");
+    let parent = height.previous().unwrap();
+
+    // Construct money_reserve so deficit == 10¹⁰ zat (denominator).
+    let expected: i64 = cumulative_halving_subsidies(&net, parent).into();
+    let actual_supply = expected - 10_000_000_000;
+    let money_reserve = Amount::<NonNegative>::try_from(MAX_MONEY - actual_supply)?;
+
+    let nsmalt = block_subsidy(height, &net, Some(money_reserve))?;
+    let bonus = (nsmalt - halving_subsidy_at(height, &net))?;
+    assert_eq!(bonus, Amount::<NonNegative>::try_from(4_126)?);
+
+    Ok(())
+}
+
+#[cfg(zcash_unstable = "zip234alt")]
+#[test]
+fn check_zip234alt_bonus_ceiling_at_one_zat_deficit() -> Result<(), Report> {
+    use crate::{
+        amount::MAX_MONEY,
+        parameters::subsidy::{cumulative_halving_subsidies, halving_subsidy_at, zip234_start_height},
+    };
+
+    let net = zip234_testnet(1);
+    let height = zip234_start_height(&net).expect("NU7 configured");
+    let parent = height.previous().unwrap();
+
+    let expected: i64 = cumulative_halving_subsidies(&net, parent).into();
+    let actual_supply = expected - 1;
+    let money_reserve = Amount::<NonNegative>::try_from(MAX_MONEY - actual_supply)?;
+
+    let nsmalt = block_subsidy(height, &net, Some(money_reserve))?;
+    let bonus = (nsmalt - halving_subsidy_at(height, &net))?;
+    assert_eq!(bonus, Amount::<NonNegative>::try_from(1)?);
 
     Ok(())
 }

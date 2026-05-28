@@ -10,7 +10,12 @@ use std::{borrow::Borrow, collections::HashMap};
 #[cfg(any(test, feature = "proptest-impl"))]
 use crate::{transaction::Transaction, transparent};
 
-#[cfg(any(test, feature = "proptest-impl", zcash_unstable = "zip234"))]
+#[cfg(any(
+    test,
+    feature = "proptest-impl",
+    zcash_unstable = "zip234",
+    zcash_unstable = "zip234alt"
+))]
 use crate::amount::MAX_MONEY;
 
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -298,7 +303,7 @@ impl ValueBalance<NonNegative> {
     }
 
     /// ZIP-234 money reserve: `MAX_MONEY − IssuedSupply`.
-    #[cfg(zcash_unstable = "zip234")]
+    #[cfg(any(zcash_unstable = "zip234", zcash_unstable = "zip234alt"))]
     pub fn money_reserve(&self) -> Amount<NonNegative> {
         let max_money = Amount::<NonNegative>::try_from(MAX_MONEY)
             .expect("MAX_MONEY must be a valid NonNegative Amount");

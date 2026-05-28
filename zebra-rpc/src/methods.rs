@@ -2797,10 +2797,10 @@ where
             None => best_chain_tip_height(&self.latest_chain_tip)?,
         };
 
-        #[cfg(not(zcash_unstable = "zip234"))]
+        #[cfg(not(any(zcash_unstable = "zip234", zcash_unstable = "zip234alt")))]
         let money_reserve = None;
 
-        #[cfg(zcash_unstable = "zip234")]
+        #[cfg(any(zcash_unstable = "zip234", zcash_unstable = "zip234alt"))]
         let money_reserve = match zebra_chain::parameters::subsidy::zip234_start_height(&net) {
             Some(start) if height >= start => {
                 let parent =

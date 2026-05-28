@@ -495,7 +495,7 @@ pub struct GetBlockTemplateChainInfo {
     pub max_time: DateTime32,
 
     /// Tip's chain value pools (parent `money_reserve` for ZIP-234).
-    #[cfg(zcash_unstable = "zip234")]
+    #[cfg(any(zcash_unstable = "zip234", zcash_unstable = "zip234alt"))]
     pub value_pools: ValueBalance<NonNegative>,
 }
 
