@@ -31,6 +31,9 @@ env:
 
 jobs:
   coverage:
+    # `contents: read` is intentionally omitted: this job uploads source to a
+    # public Codecov project, so missing checkout permission keeps it inert
+    # on private forks as a fail-closed safeguard.
     permissions:
       id-token: write
       statuses: write

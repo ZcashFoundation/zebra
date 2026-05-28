@@ -20,6 +20,7 @@ jobs:
   validate:
     name: Validate PR title
     runs-on: ubuntu-latest
+    # No checkout; runs on pull_request_target. Keep token scope minimal.
     permissions:
       pull-requests: write
     steps:
