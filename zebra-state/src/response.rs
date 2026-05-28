@@ -70,6 +70,9 @@ pub enum Response {
     /// Response to [`Request::BlockAndSize`] with the specified block and size.
     BlockAndSize(Option<(Arc<Block>, usize)>),
 
+    /// Response to [`Request::BlockInfo`].
+    BlockInfo(Option<BlockInfo>),
+
     /// The response to a `BlockHeader` request.
     BlockHeader {
         /// The header of the requested block
@@ -490,6 +493,10 @@ pub struct GetBlockTemplateChainInfo {
     /// The maximum time the miner can use in this block.
     /// Depends on the `tip_hash`, and the local clock on testnet.
     pub max_time: DateTime32,
+
+    /// Tip's chain value pools (parent `money_reserve` for ZIP-234).
+    #[cfg(zcash_unstable = "zip234")]
+    pub value_pools: ValueBalance<NonNegative>,
 }
 
 /// Conversion from read-only [`ReadResponse`]s to read-write [`Response`]s.
@@ -507,6 +514,7 @@ impl TryFrom<ReadResponse> for Response {
 
             ReadResponse::Block(block) => Ok(Response::Block(block)),
             ReadResponse::BlockAndSize(block) => Ok(Response::BlockAndSize(block)),
+            ReadResponse::BlockInfo(info) => Ok(Response::BlockInfo(info)),
             ReadResponse::BlockHeader {
                 header,
                 hash,
@@ -536,7 +544,6 @@ impl TryFrom<ReadResponse> for Response {
 
             ReadResponse::UsageInfo(_)
             | ReadResponse::TipPoolValues { .. }
-            | ReadResponse::BlockInfo(_)
             | ReadResponse::TransactionIdsForBlock(_)
             | ReadResponse::AnyChainTransactionIdsForBlock(_)
             | ReadResponse::SaplingTree(_)

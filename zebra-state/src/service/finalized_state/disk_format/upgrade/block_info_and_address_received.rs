@@ -178,11 +178,18 @@ impl DiskFormatUpgrade for Upgrade {
 
             // Get the deferred amount which is required to update the value pool.
             let deferred_pool_balance_change = if height > network.slow_start_interval() {
+                #[cfg(zcash_unstable = "zip234")]
+                let money_reserve = zebra_chain::parameters::subsidy::zip234_start_height(&network)
+                    .filter(|start| height >= *start)
+                    .map(|_| value_pool.money_reserve());
+                #[cfg(not(zcash_unstable = "zip234"))]
+                let money_reserve = None;
+
                 // See [ZIP-1015](https://zips.z.cash/zip-1015).
                 let deferred_pool_balance_change = funding_stream_values(
                     height,
                     &network,
-                    block_subsidy(height, &network).unwrap_or_default(),
+                    block_subsidy(height, &network, money_reserve).unwrap_or_default(),
                 )
                 .expect("should have valid funding stream values")
                 .remove(&FundingStreamReceiver::Deferred)

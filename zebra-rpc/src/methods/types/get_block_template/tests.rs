@@ -83,6 +83,7 @@ fn coinbase() -> anyhow::Result<()> {
                         Amount::zero(),
                         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
                         None,
+                        None,
                     )?
                     .data()
                     .as_ref()

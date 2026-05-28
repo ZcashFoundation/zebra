@@ -333,6 +333,13 @@ impl BlockTemplateResponse {
             .sum::<amount::Result<Amount<NonNegative>>>()
             .expect("mempool tx fees must be non-negative");
 
+        #[cfg(zcash_unstable = "zip234")]
+        let money_reserve = zebra_chain::parameters::subsidy::zip234_start_height(net)
+            .filter(|start| height >= *start)
+            .map(|_| chain_info.value_pools.money_reserve());
+        #[cfg(not(zcash_unstable = "zip234"))]
+        let money_reserve = None;
+
         let coinbase_txn = precomputed_coinbase.unwrap_or_else(|| {
             TransactionTemplate::new_coinbase(
                 net,
@@ -341,6 +348,7 @@ impl BlockTemplateResponse {
                 txs_fee,
                 #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
                 zip233_amount,
+                money_reserve,
             )
             .expect("valid coinbase tx")
         });

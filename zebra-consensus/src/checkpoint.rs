@@ -611,9 +611,12 @@ where
         }
 
         // See [ZIP-1015](https://zips.z.cash/zip-1015).
-        let expected_deferred_amount =
-            funding_stream_values(height, &self.network, block_subsidy(height, &self.network)?)?
-                .remove(&FundingStreamReceiver::Deferred);
+        let expected_deferred_amount = funding_stream_values(
+            height,
+            &self.network,
+            block_subsidy(height, &self.network, None)?,
+        )?
+        .remove(&FundingStreamReceiver::Deferred);
 
         let deferred_pool_balance_change = expected_deferred_amount
             .unwrap_or_default()

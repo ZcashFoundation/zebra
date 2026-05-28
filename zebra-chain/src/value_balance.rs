@@ -8,7 +8,10 @@ use core::fmt;
 use std::{borrow::Borrow, collections::HashMap};
 
 #[cfg(any(test, feature = "proptest-impl"))]
-use crate::{amount::MAX_MONEY, transaction::Transaction, transparent};
+use crate::{transaction::Transaction, transparent};
+
+#[cfg(any(test, feature = "proptest-impl", zcash_unstable = "zip234"))]
+use crate::amount::MAX_MONEY;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;
@@ -292,6 +295,15 @@ impl ValueBalance<NonNegative> {
         chain_value_pool = (chain_value_pool + chain_value_pool_change)?;
 
         chain_value_pool.constrain()
+    }
+
+    /// ZIP-234 money reserve: `MAX_MONEY − IssuedSupply`.
+    #[cfg(zcash_unstable = "zip234")]
+    pub fn money_reserve(&self) -> Amount<NonNegative> {
+        let max_money = Amount::<NonNegative>::try_from(MAX_MONEY)
+            .expect("MAX_MONEY must be a valid NonNegative Amount");
+        (max_money - self.transparent - self.sprout - self.sapling - self.orchard - self.deferred)
+            .expect("result must be bounded by MAX_MONEY via consensus rules")
     }
 
     /// Create a fake value pool for testing purposes.

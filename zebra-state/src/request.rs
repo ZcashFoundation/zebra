@@ -914,6 +914,10 @@ pub enum Request {
     /// * [`ReadResponse::BlockAndSize(None)`](ReadResponse::BlockAndSize) otherwise.
     BlockAndSize(HashOrHeight),
 
+    /// Looks up [`BlockInfo`] in any non-finalized chain, falling back to
+    /// the finalized state. Hash queries are fork-aware.
+    BlockInfo(HashOrHeight),
+
     /// Looks up a block header by hash or height in the current best chain.
     ///
     /// Returns
@@ -1055,6 +1059,7 @@ impl Request {
             Request::AnyChainTransaction(_) => "any_chain_transaction",
             Request::UnspentBestChainUtxo { .. } => "unspent_best_chain_utxo",
             Request::Block(_) => "block",
+            Request::BlockInfo(_) => "block_info",
             Request::AnyChainBlock(_) => "any_chain_block",
             Request::BlockAndSize(_) => "block_and_size",
             Request::BlockHeader(_) => "block_header",
@@ -1099,10 +1104,8 @@ pub enum ReadRequest {
     /// with the pool values of the current best chain tip.
     TipPoolValues,
 
-    /// Looks up the block info after a block by hash or height in the current best chain.
-    ///
-    /// * [`ReadResponse::BlockInfo(Some(pool_values))`](ReadResponse::BlockInfo) if the block is in the best chain;
-    /// * [`ReadResponse::BlockInfo(None)`](ReadResponse::BlockInfo) otherwise.
+    /// Looks up [`BlockInfo`] in any non-finalized chain, falling back to
+    /// the finalized state. Hash queries are fork-aware.
     BlockInfo(HashOrHeight),
 
     /// Computes the depth in the current best chain of the block identified by the given hash.
@@ -1486,6 +1489,7 @@ impl TryFrom<Request> for ReadRequest {
                 Ok(ReadRequest::AnyChainBlock(hash_or_height))
             }
             Request::BlockAndSize(hash_or_height) => Ok(ReadRequest::BlockAndSize(hash_or_height)),
+            Request::BlockInfo(hash_or_height) => Ok(ReadRequest::BlockInfo(hash_or_height)),
             Request::BlockHeader(hash_or_height) => Ok(ReadRequest::BlockHeader(hash_or_height)),
             Request::Transaction(tx_hash) => Ok(ReadRequest::Transaction(tx_hash)),
             Request::AnyChainTransaction(tx_hash) => Ok(ReadRequest::AnyChainTransaction(tx_hash)),

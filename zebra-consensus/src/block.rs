@@ -245,8 +245,42 @@ where
                 .map_err(VerifyBlockError::Time)?;
             let coinbase_tx = check::coinbase_is_first(&block)?;
 
-            let expected_block_subsidy =
-                zebra_chain::parameters::subsidy::block_subsidy(height, &network)?;
+            // After ZIP-234 activation, block subsidies require a money reserve which can be derived from the parent block's BlockInfo.
+            #[cfg(zcash_unstable = "zip234")]
+            let money_reserve = match zebra_chain::parameters::subsidy::zip234_start_height(&network)
+            {
+                Some(start) if height >= start => {
+                    let parent_hash = block.header.previous_block_hash;
+                    let zs::Response::BlockInfo(info) = state_service
+                        .ready()
+                        .await
+                        .map_err(|source| VerifyBlockError::StateService { source, hash })?
+                        .call(zs::Request::BlockInfo(parent_hash.into()))
+                        .await
+                        .map_err(|source| VerifyBlockError::StateService { source, hash })?
+                    else {
+                        unreachable!("wrong response to Request::BlockInfo");
+                    };
+
+                    Some(
+                        info.ok_or(BlockError::Other(format!(
+                            "parent block {parent_hash:?} of {hash:?} not found in any chain; \
+                             cannot derive ZIP-234 money reserve"
+                        )))?
+                        .value_pools()
+                        .money_reserve(),
+                    )
+                }
+                _ => None,
+            };
+            #[cfg(not(zcash_unstable = "zip234"))]
+            let money_reserve = None;
+
+            let expected_block_subsidy = zebra_chain::parameters::subsidy::block_subsidy(
+                height,
+                &network,
+                money_reserve,
+            )?;
 
             // See [ZIP-1015](https://zips.z.cash/zip-1015).
             let deferred_pool_balance_change =

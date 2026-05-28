@@ -306,7 +306,7 @@ fn subsidy_is_valid_for_network(network: Network) -> Result<(), Report> {
         // TODO: first halving, second halving, third halving, and very large halvings
         if height >= canopy_activation_height {
             let expected_block_subsidy =
-                zebra_chain::parameters::subsidy::block_subsidy(height, &network)
+                zebra_chain::parameters::subsidy::block_subsidy(height, &network, None)
                     .expect("valid block subsidy");
 
             check::subsidy_is_valid(&block, &network, expected_block_subsidy)
@@ -334,6 +334,7 @@ fn coinbase_validation_failure() -> Result<(), Report> {
             .coinbase_height()
             .expect("block should have coinbase height"),
         &network,
+        None,
     )
     .expect("valid block subsidy");
 
@@ -360,6 +361,7 @@ fn coinbase_validation_failure() -> Result<(), Report> {
             .coinbase_height()
             .expect("block should have coinbase height"),
         &network,
+        None,
     )
     .expect("valid block subsidy");
 
@@ -400,6 +402,7 @@ fn coinbase_validation_failure() -> Result<(), Report> {
             .coinbase_height()
             .expect("block should have coinbase height"),
         &network,
+        None,
     )
     .expect("valid block subsidy");
 
@@ -432,7 +435,7 @@ fn funding_stream_validation_for_network(network: Network) -> Result<(), Report>
         if height >= canopy_activation_height {
             let block = Block::zcash_deserialize(&block[..]).expect("block should deserialize");
             let expected_block_subsidy =
-                zebra_chain::parameters::subsidy::block_subsidy(height, &network)
+                zebra_chain::parameters::subsidy::block_subsidy(height, &network, None)
                     .expect("valid block subsidy");
 
             // Validate
@@ -485,6 +488,7 @@ fn funding_stream_validation_failure() -> Result<(), Report> {
             .coinbase_height()
             .expect("block should have coinbase height"),
         &network,
+        None,
     )
     .expect("valid block subsidy");
 
@@ -516,7 +520,7 @@ fn miner_fees_validation_for_network(network: Network) -> Result<(), Report> {
             let block = Block::zcash_deserialize(&block[..]).expect("block should deserialize");
             let coinbase_tx = check::coinbase_is_first(&block)?;
 
-            let expected_block_subsidy = block_subsidy(height, &network)?;
+            let expected_block_subsidy = block_subsidy(height, &network, None)?;
             // See [ZIP-1015](https://zips.z.cash/zip-1015).
             let deferred_pool_balance_change =
                 match NetworkUpgrade::Canopy.activation_height(&network) {
@@ -549,7 +553,7 @@ fn miner_fees_validation_failure() -> Result<(), Report> {
     let block = Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_347499_BYTES[..])
         .expect("block should deserialize");
     let height = block.coinbase_height().expect("valid coinbase height");
-    let expected_block_subsidy = block_subsidy(height, &network)?;
+    let expected_block_subsidy = block_subsidy(height, &network, None)?;
     // See [ZIP-1015](https://zips.z.cash/zip-1015).
     let deferred_pool_balance_change = match NetworkUpgrade::Canopy.activation_height(&network) {
         Some(activation_height) if height >= activation_height => {

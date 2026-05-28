@@ -445,10 +445,55 @@ pub fn halving(height: Height, network: &Network) -> u32 {
         .expect("already checked for negatives")
 }
 
+/// Returns the height at which ZIP-234 applies (lowest height after the second halving following NU7).
+///
+/// Returns `None` when NU7 isn't configured.
+#[cfg(zcash_unstable = "zip234")]
+pub fn zip234_start_height(net: &Network) -> Option<Height> {
+    let nu7 = NetworkUpgrade::Nu7.activation_height(net)?;
+    let target_halving = halving(nu7, net).checked_add(2)?;
+    height_for_halving(target_halving, net)
+}
+
 /// `BlockSubsidy(height)` as described in [protocol specification §7.8][7.8]
+/// and [ZIP-234] for post-activation smoothed issuance.
 ///
 /// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
-pub fn block_subsidy(height: Height, net: &Network) -> Result<Amount<NonNegative>, SubsidyError> {
+/// [ZIP-234]: https://zips.z.cash/zip-0234
+pub fn block_subsidy(
+    height: Height,
+    net: &Network,
+    money_reserve: Option<Amount<NonNegative>>,
+) -> Result<Amount<NonNegative>, SubsidyError> {
+    #[cfg(zcash_unstable = "zip234")]
+    if let Some(start) = zip234_start_height(net) {
+        if height >= start {
+            // ZIP-234 `BLOCK_SUBSIDY_FRACTION`, calibrated so
+            // `(1 − 4126/10¹⁰)^POST_BLOSSOM_HALVING_INTERVAL ≈ 0.5` within ±0.002%.
+            const NUMERATOR: u128 = 4_126;
+            const DENOMINATOR: u128 = 10_000_000_000;
+
+            let money_reserve = money_reserve
+                .expect("money_reserve is required at post-activation heights");
+            let reserve = u128::from(
+                u64::try_from(i64::from(money_reserve))
+                    .expect("money_reserve is Amount<NonNegative> so its i64 is >= 0"),
+            );
+            let subsidy_u128 = reserve
+                .checked_mul(NUMERATOR)
+                .expect("reserve <= MAX_MONEY ~ 2.1e15, * 4126 ~ 8.7e18 fits in u128")
+                .div_ceil(DENOMINATOR);
+
+            let subsidy = i64::try_from(subsidy_u128)
+                .expect("subsidy <= MAX_MONEY * 4126 / 10^10 ~ 8.66e8 zat, fits in i64");
+            return Ok(subsidy
+                .try_into()
+                .expect("subsidy is non-negative and <= MAX_MONEY"));
+        }
+    }
+
+    // Pre ZIP-234 subsidy calculation.
+    //
     let Some(halving_div) = halving_divisor(height, net) else {
         return Ok(Amount::zero());
     };
@@ -543,7 +588,7 @@ pub fn founders_reward(net: &Network, height: Height) -> Amount<NonNegative> {
     // inconsistency in the definition of the founders reward, which should occur only before
     // Canopy, so we check if Canopy is active as well.
     if halving(height, net) < 1 && NetworkUpgrade::current(net, height) < NetworkUpgrade::Canopy {
-        block_subsidy(height, net)
+        block_subsidy(height, net, None)
             .map(|subsidy| subsidy.div_exact(5))
             .expect("block subsidy must be valid for founders rewards")
     } else {

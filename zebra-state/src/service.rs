@@ -1248,6 +1248,7 @@ impl Service<Request> for StateService {
             | Request::Block(_)
             | Request::AnyChainBlock(_)
             | Request::BlockAndSize(_)
+            | Request::BlockInfo(_)
             | Request::BlockHeader(_)
             | Request::FindBlockHashes { .. }
             | Request::FindBlockHeaders { .. }
@@ -1350,9 +1351,12 @@ impl Service<ReadRequest> for ReadStateService {
                 })
             }
 
-            // Used by getblock
             ReadRequest::BlockInfo(hash_or_height) => Ok(ReadResponse::BlockInfo(
-                read::block_info(state.latest_best_chain(), &state.db, hash_or_height),
+                read::block_info(
+                    state.latest_non_finalized_state().chain_iter(),
+                    &state.db,
+                    hash_or_height,
+                ),
             )),
 
             // Used by the StateService.
@@ -1698,7 +1702,7 @@ impl Service<ReadRequest> for ReadStateService {
                         .best_tip()
                         .and_then(|(tip_height, _)| {
                             read::block_info(
-                                state.latest_best_chain(),
+                                state.latest_non_finalized_state().chain_iter(),
                                 &state.db,
                                 tip_height.into(),
                             )

@@ -133,8 +133,9 @@ impl TransactionTemplate<NegativeOrZero> {
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))] zip233_amount: Option<
             Amount<NonNegative>,
         >,
+        money_reserve: Option<Amount<NonNegative>>,
     ) -> Result<Self, TransactionError> {
-        let block_subsidy = block_subsidy(height, net)?;
+        let block_subsidy = block_subsidy(height, net, money_reserve)?;
         let miner_reward = miner_subsidy(height, net, block_subsidy)? + txs_fee;
         let miner_reward = Zatoshis::try_from(miner_reward?)?;
 

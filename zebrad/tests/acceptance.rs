@@ -3601,6 +3601,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         Amount::zero(),
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         None,
+        None,
     )
     .expect("coinbase transaction should be valid under the given parameters");
 
@@ -3667,6 +3668,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         &miner_params,
         Amount::zero(),
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+        None,
         None,
     )
     .expect("coinbase transaction should be valid under the given parameters");

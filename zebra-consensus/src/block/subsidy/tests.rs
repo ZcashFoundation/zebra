@@ -87,7 +87,8 @@ fn test_funding_stream_values() -> Result<(), Report> {
         nu6_1_fund_height_range.end,
         nu6_1_fund_height_range.end.next().unwrap(),
     ] {
-        let fsv = funding_stream_values(height, network, block_subsidy(height, network)?).unwrap();
+        let fsv =
+            funding_stream_values(height, network, block_subsidy(height, network, None)?).unwrap();
 
         if height < canopy_activation_height {
             assert!(fsv.is_empty());

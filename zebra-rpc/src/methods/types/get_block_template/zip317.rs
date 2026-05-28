@@ -14,7 +14,7 @@ use rand::{
 };
 
 use zebra_chain::{
-    amount::Amount,
+    amount::{Amount, NonNegative},
     block::{Height, MAX_BLOCK_BYTES},
     parameters::Network,
     transaction::{self, zip317::BLOCK_UNPAID_ACTION_LIMIT, VerifiedUnminedTx},
@@ -66,6 +66,7 @@ pub fn select_mempool_transactions(
     #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))] zip233_amount: Option<
         Amount<NonNegative>,
     >,
+    money_reserve: Option<Amount<NonNegative>>,
 ) -> Vec<SelectedMempoolTx> {
     // Use a fake coinbase transaction to break the dependency between transaction
     // selection, the miner fee, and the fee payment in the coinbase transaction.
@@ -76,6 +77,7 @@ pub fn select_mempool_transactions(
         Amount::zero(),
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         zip233_amount,
+        money_reserve,
     )
     .expect("valid coinbase transaction template");
 
