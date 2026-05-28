@@ -154,13 +154,17 @@ pub const INVENTORY_ROTATION_INTERVAL: Duration = Duration::from_secs(53);
 
 /// The default peer address crawler interval.
 ///
-/// This should be at least [`HANDSHAKE_TIMEOUT`] lower than all other crawler
-/// intervals.
+/// This should be at least [`HANDSHAKE_TIMEOUT`] lower than crawler intervals
+/// that depend on freshly connected peers.
 ///
 /// This makes the following sequence of events more likely:
 /// 1. a peer address crawl,
 /// 2. new peer connections,
 /// 3. peer requests from other crawlers.
+///
+/// The mempool transaction crawler intentionally runs more frequently after
+/// NU7's shorter block spacing so it can crawl transactions within a 25-second
+/// block target spacing. It is excluded from this ordering heuristic.
 ///
 /// Using a prime number makes sure that peer address crawls
 /// don't synchronise with other crawls.

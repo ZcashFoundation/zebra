@@ -79,9 +79,13 @@ const FANOUT: usize = 3;
 /// This should be less than the target block interval,
 /// so that we crawl peer mempools at least once per block.
 ///
+/// This node-local cadence intentionally applies before NU7 activation: Zebra
+/// needs to be ready to crawl within the 25-second block target spacing as soon
+/// as NU7 activates.
+///
 /// Using a prime number makes sure that mempool crawler fanouts
 /// don't synchronise with other crawls.
-pub const RATE_LIMIT_DELAY: Duration = Duration::from_secs(73);
+pub const RATE_LIMIT_DELAY: Duration = Duration::from_secs(17);
 
 /// The time to wait for a peer response.
 ///

@@ -97,7 +97,7 @@ fn ensure_timeouts_consistent() {
     );
 
     // The default peer crawler interval should be at least
-    // `HANDSHAKE_TIMEOUT` lower than all other crawler intervals.
+    // `HANDSHAKE_TIMEOUT` lower than the sync crawler interval.
     //
     // See `DEFAULT_CRAWL_NEW_PEER_INTERVAL` for details.
     assert!(

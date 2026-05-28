@@ -32,6 +32,12 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Startup warning on Linux when `net.ipv4.tcp_slow_start_after_idle` is enabled (which resets TCP congestion windows between block requests and significantly reduces single-peer block-propagation throughput on long-haul links), with a "Linux TCP tuning for block propagation" troubleshooting section ([#10513](https://github.com/ZcashFoundation/zebra/pull/10513))
 - Support ZIP-213
 
+### Changed
+
+- Reduced the mempool transaction crawler delay from 73 seconds to 17 seconds
+  so Zebra can crawl peer mempools within NU7's 25-second block target spacing.
+  This node-local timing change takes effect immediately.
+
 ### Fixed
 
 - Avoid panicking in the address-book ban path when `network.max_connections_per_ip > 1`. Guard the optional `most_recent_by_ip` cache instead of unwrapping it, so a ban-threshold misbehavior update no longer crashes the address-book updater and poisons the shared mutex ([#10580](https://github.com/ZcashFoundation/zebra/issues/10580))
