@@ -239,6 +239,34 @@ const PRE_BLOSSOM_POW_TARGET_SPACING: i64 = 150;
 /// The target block spacing after Blossom activation.
 pub const POST_BLOSSOM_POW_TARGET_SPACING: u32 = 75;
 
+/// Per-block limit on the total number of Orchard actions, applied from NU7
+/// activation onwards.
+///
+/// `OrchardBlockActionLimit` in the draft "Shorter Block Target Spacing" ZIP.
+pub const ORCHARD_BLOCK_ACTION_LIMIT: u32 = 306;
+
+/// Per-block limit on the total number of Sapling spends + outputs, applied
+/// from NU7 activation onwards.
+///
+/// `SaplingBlockIOLimit` in the draft "Shorter Block Target Spacing" ZIP.
+pub const SAPLING_BLOCK_IO_LIMIT: u32 = 300;
+
+/// Per-block limit on the total number of Sprout JoinSplits, applied from NU7
+/// activation onwards.
+///
+/// `SproutBlockJoinSplitLimit` in the draft "Shorter Block Target Spacing" ZIP.
+// TODO: Remove this when disallowing
+pub const SPROUT_BLOCK_JOINSPLIT_LIMIT: u32 = 25;
+
+/// Per-block global shielded budget, applied from NU7 activation onwards.
+///
+/// Bounds the worst-case shielded sync bandwidth per block independently of
+/// which combination of pools is used. Sprout JoinSplits are weighted by 2
+/// because each JoinSplit produces 2 shielded outputs.
+///
+/// `GlobalShieldedBudget` in the draft "Shorter Block Target Spacing" ZIP.
+pub const GLOBAL_SHIELDED_BUDGET: u32 = 306;
+
 /// The averaging window for difficulty threshold arithmetic mean calculations.
 ///
 /// `PoWAveragingWindow` in the Zcash specification.
@@ -310,6 +338,19 @@ impl NetworkUpgrade {
             .map(|(_, nu)| *nu)
             .next_back()
             .expect("every height has a current network upgrade")
+    }
+
+    /// Returns `true` if NU7 is configured on `network` and active at `height`.
+    ///
+    /// NU7 has no default mainnet or testnet activation height, so this also
+    /// checks that `network` explicitly configures one before treating it as
+    /// active.
+    pub fn is_nu7_active(network: &Network, height: block::Height) -> bool {
+        let nu7_configured = network
+            .activation_list()
+            .values()
+            .any(|upgrade| *upgrade == NetworkUpgrade::Nu7);
+        nu7_configured && NetworkUpgrade::current(network, height) >= NetworkUpgrade::Nu7
     }
 
     /// Returns the next expected network upgrade after this network upgrade.

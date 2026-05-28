@@ -230,6 +230,22 @@ pub enum TransactionError {
     #[error("wrong tx format: tx version is ≥ 5, but `nConsensusBranchId` is missing")]
     MissingConsensusBranchId,
 
+    #[error("Orchard action count {actions} exceeds the per-block limit of {limit}")]
+    OrchardActionsExceedBlockLimit { actions: u32, limit: u32 },
+
+    #[error("Sapling spends + outputs count {ios} exceeds the per-block limit of {limit}")]
+    SaplingIOsExceedBlockLimit { ios: u32, limit: u32 },
+
+    #[error("Sprout JoinSplit count {joinsplits} exceeds the per-block limit of {limit}")]
+    SproutJoinSplitsExceedBlockLimit { joinsplits: u32, limit: u32 },
+
+    #[error(
+        "shielded cost {cost} \
+         (Orchard actions + Sapling spends + Sapling outputs + 2 * Sprout JoinSplits) \
+         exceeds the per-block global shielded budget of {limit}"
+    )]
+    ShieldedCostExceedsBlockBudget { cost: u32, limit: u32 },
+
     #[error("input/output error")]
     Io(String),
 
@@ -357,7 +373,11 @@ impl TransactionError {
             | DisabledAddToSproutPool
             | NotEnoughFlags
             | WrongConsensusBranchId
-            | MissingConsensusBranchId => 100,
+            | MissingConsensusBranchId
+            | OrchardActionsExceedBlockLimit { .. }
+            | SaplingIOsExceedBlockLimit { .. }
+            | SproutJoinSplitsExceedBlockLimit { .. }
+            | ShieldedCostExceedsBlockBudget { .. } => 100,
 
             _other => 0,
         }

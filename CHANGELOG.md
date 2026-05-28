@@ -31,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 - Startup warning on Linux when `net.ipv4.tcp_slow_start_after_idle` is enabled (which resets TCP congestion windows between block requests and significantly reduces single-peer block-propagation throughput on long-haul links), with a "Linux TCP tuning for block propagation" troubleshooting section ([#10513](https://github.com/ZcashFoundation/zebra/pull/10513))
 - Support ZIP-213
+- Added NU7 shielded action limits for block verification, mempool admission,
+  and `getblocktemplate` transaction selection. These consensus checks only
+  activate on networks with NU7 configured, at and after the NU7 activation
+  height.
 
 ### Fixed
 

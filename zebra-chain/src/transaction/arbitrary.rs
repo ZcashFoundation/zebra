@@ -1098,3 +1098,58 @@ pub fn insert_fake_orchard_shielded_data(
         _ => panic!("Fake V5 transaction is not V5"),
     }
 }
+
+/// Returns an empty V5 transaction with no shielded data, for use as a base in
+/// shielded-action test fixtures.
+pub fn empty_v5_transaction() -> Transaction {
+    Transaction::V5 {
+        network_upgrade: NetworkUpgrade::Nu5,
+        lock_time: LockTime::unlocked(),
+        expiry_height: block::Height(100),
+        inputs: Vec::new(),
+        outputs: Vec::new(),
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    }
+}
+
+/// Returns a V5 transaction containing `count` Orchard actions.
+pub fn fake_v5_with_orchard_actions(count: usize) -> Arc<Transaction> {
+    let mut tx = empty_v5_transaction();
+    let shielded_data = insert_fake_orchard_shielded_data(&mut tx);
+    let action = shielded_data
+        .actions
+        .iter()
+        .next()
+        .expect("fake shielded data has an action")
+        .clone();
+    shielded_data.actions = at_least_one![action; count];
+    Arc::new(tx)
+}
+
+/// Returns a V5 transaction containing `count` Sapling outputs.
+pub fn fake_v5_with_sapling_outputs(count: usize) -> Arc<Transaction> {
+    let mut runner = TestRunner::default();
+    let mut shielded_data = any::<sapling::ShieldedData<sapling::SharedAnchor>>()
+        .new_tree(&mut runner)
+        .expect("sapling shielded data strategy is valid")
+        .current();
+    let output = any::<sapling::Output>()
+        .new_tree(&mut runner)
+        .expect("sapling output strategy is valid")
+        .current();
+
+    shielded_data.transfers = sapling::TransferData::JustOutputs {
+        outputs: at_least_one![output; count],
+    };
+
+    let mut tx = empty_v5_transaction();
+    match &mut tx {
+        Transaction::V5 {
+            sapling_shielded_data,
+            ..
+        } => *sapling_shielded_data = Some(shielded_data),
+        _ => unreachable!("empty_v5_transaction returns V5"),
+    }
+    Arc::new(tx)
+}
