@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.0.0] - 2026-05-28
+
+### Added
+
+- `mempool::Request::QueueFromPeer { txids: HashSet<UnminedTxId>, source: SocketAddr }`
+  variant, used to attribute mempool advertisements to the announcing peer for
+  per-peer queue caps
+  ([GHSA-4fc2-h7jh-287c](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-4fc2-h7jh-287c)).
+
+### Changed
+
+- `zebra-chain` dependency bumped to `8.0.0`. Consumers of re-exported
+  `zebra-chain` items inherit that crate's breaking changes.
+
 ## [5.0.0] - 2026-05-01
 
 ### Changed

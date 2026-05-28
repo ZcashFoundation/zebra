@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.0.0] - 2026-05-28
+
+### Added
+
+- `error::TransactionError`:
+  - `Amount`, `Balance`, `CoinbaseConstruction`, `Io`, `Other`, `TryFromSlice` variants
+  - `impl From<core::array::TryFromSliceError> for TransactionError`
+  - `impl From<zcash_script::Error> for TransactionError`
+  - `impl From<io::Error> for TransactionError`
+  - `impl From<zcash_primitives::transaction::builder::Error> for TransactionError`
+  - `impl From<zcash_protocol::value::BalanceError> for TransactionError`
+  - `impl From<zcash_transparent::builder::Error> for TransactionError`
+  - `impl From<zebra_chain::amount::Error> for TransactionError`
+
+### Changed
+
+- Misbehavior scoring expanded to attribute more error classes to the
+  announcing peer
+  ([GHSA-gvjc-3w7c-92jx](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-gvjc-3w7c-92jx),
+  [GHSA-rj6c-83wx-jxf2](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-rj6c-83wx-jxf2),
+  [GHSA-hwxr-r2v4-9f2p](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-hwxr-r2v4-9f2p)):
+  - `VerifyBlockError::misbehavior_score()` now scores `Subsidy`,
+    `Transaction`, and `Commit` (delegating where appropriate) in addition to
+    `Equihash`.
+  - `BlockError::misbehavior_score()` now scores `NoTransactions`,
+    `BadMerkleRoot`, `WrongTransactionConsensusBranchId`, and
+    `TooManyTransparentSignatureOperations` as `100`, and delegates on
+    `Transaction`.
+  - `TransactionError::mempool_misbehavior_score()` now also scores
+    `LockedUntilAfterBlockHeight` and `LockedUntilAfterBlockTime` as `100`.
+- `zebra-chain` dependency bumped to `8.0.0`.
+- `zebra-node-services` dependency bumped to `6.0.0`.
+- `zebra-script` dependency bumped to `7.0.0`.
+- `zebra-state` dependency bumped to `7.0.0`.
+
 ## [6.0.0] - 2026-05-01
 
 ### Added
@@ -21,18 +56,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `Description` trait
   - `impl Description for (&sprout::joinsplit::JoinSplit<Groth16Proof>, &VerificationKeyBytes)`
   - `impl TryFrom<DescriptionWrapper<&T>> for Item` (use `Item::from_joinsplit` instead).
-
-### Added
-
-- `error::TransactionError`:
-  - `Amount`, `Balance`, `CoinbaseConstruction`, `Io`, `Other`, `TryFromSlice` variants
-  - `impl From<core::array::TryFromSliceError> for TransactionError`
-  - `impl From<zcash_script::Error> for TransactionError`
-  - `impl From<io::Error> for TransactionError`
-  - `impl From<zcash_primitives::transaction::builder::Error> for TransactionError`
-  - `impl From<zcash_protocol::value::BalanceError> for TransactionError`
-  - `impl From<zcash_transparent::builder::Error> for TransactionError`
-  - `impl From<zebra_chain::amount::Error> for TransactionError`
 
 ## [5.0.2] - 2026-04-17
 
