@@ -876,6 +876,43 @@ fn merkle_root_fake_v5_for_network(network: Network) -> Result<(), Report> {
     Ok(())
 }
 
+/// A block whose transaction list contains the same `transaction::Hash`
+/// twice must be rejected with [`BlockError::DuplicateTransaction`].
+///
+/// This guards against Bitcoin's Merkle tree malleability (CVE-2012-2459),
+/// where two identical transaction hashes can produce the same Merkle root
+/// as the underlying unique list.
+#[test]
+fn merkle_root_validity_rejects_duplicate_transaction_hash() -> Result<(), Report> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+
+    let mut block = Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1180900_BYTES[..])
+        .expect("block should deserialize");
+
+    // Duplicate the coinbase transaction so the block contains two
+    // transactions with the same hash.
+    let duplicate = block
+        .transactions
+        .first()
+        .expect("block has coinbase")
+        .clone();
+    block.transactions.push(duplicate);
+
+    let transaction_hashes: Vec<_> = block.transactions.iter().map(|tx| tx.hash()).collect();
+
+    // Recompute the Merkle root from the duplicated transaction list so
+    // that `merkle_root_validity` passes the `BadMerkleRoot` check and
+    // reaches the duplicate-hash check.
+    Arc::make_mut(&mut block.header).merkle_root = transaction_hashes.iter().cloned().collect();
+
+    let result = check::merkle_root_validity(&network, &block, &transaction_hashes);
+    assert_eq!(result, Err(BlockError::DuplicateTransaction));
+
+    Ok(())
+}
+
 #[test]
 fn legacy_sigops_count_for_large_generated_blocks() {
     let _init_guard = zebra_test::init();
