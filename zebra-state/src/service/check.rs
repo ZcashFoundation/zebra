@@ -13,7 +13,7 @@ use zebra_chain::{
 
 use crate::{
     service::{
-        block_iter::any_ancestor_blocks, check::difficulty::POW_ADJUSTMENT_BLOCK_SPAN,
+        block_iter::any_ancestor_blocks, check::difficulty::pow_adjustment_block_span_for_height,
         finalized_state::ZebraDb, non_finalized_state::NonFinalizedState,
     },
     BoxError, SemanticallyVerifiedBlock, ValidateContextError,
@@ -62,9 +62,12 @@ where
         .expect("finalized state must contain at least one block to do contextual validation");
     check::block_is_not_orphaned(finalized_tip_height, semantically_verified.height)?;
 
+    let pow_adjustment_block_span =
+        pow_adjustment_block_span_for_height(network, semantically_verified.height);
+
     let relevant_chain: Vec<_> = relevant_chain
         .into_iter()
-        .take(POW_ADJUSTMENT_BLOCK_SPAN)
+        .take(pow_adjustment_block_span)
         .collect();
 
     let Some(parent_block) = relevant_chain.first() else {
@@ -89,7 +92,7 @@ where
     //
     // TODO: accept a NotReadyToBeCommitted error in those tests instead
     #[cfg(test)]
-    if relevant_chain.len() < POW_ADJUSTMENT_BLOCK_SPAN {
+    if relevant_chain.len() < pow_adjustment_block_span {
         return Ok(());
     }
 
@@ -101,11 +104,11 @@ where
     // verified blocks, so there will be at least 1 million blocks in the state when it is
     // called. So this error should never happen on Mainnet or the default Testnet.
     //
-    // It's okay to use a relevant chain of fewer than `POW_ADJUSTMENT_BLOCK_SPAN` blocks, because
+    // It's okay to use a relevant chain of fewer than `PoWAveragingWindow + PoWMedianBlockSpan` blocks, because
     // the MedianTime function uses height 0 if passed a negative height by the ActualTimespan function:
     // > ActualTimespan(height : N) := MedianTime(height) − MedianTime(height − PoWAveragingWindow)
     // > MedianTime(height : N) := median([[ nTime(𝑖) for 𝑖 from max(0, height − PoWMedianBlockSpan) up to height − 1 ]])
-    // and the MeanTarget function only requires the past `PoWAveragingWindow` (17) blocks for heights above 17,
+    // and the MeanTarget function only requires the past `PoWAveragingWindow` blocks for heights above that window,
     // > PoWLimit, if height ≤ PoWAveragingWindow
     // > ([ToTarget(nBits(𝑖)) for 𝑖 from height−PoWAveragingWindow up to height−1]) otherwise
     //

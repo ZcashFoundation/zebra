@@ -251,10 +251,23 @@ pub const POST_NU7_POW_TARGET_SPACING: u32 = 25;
 pub const NU7_POW_TARGET_SPACING_RATIO: u32 =
     POST_BLOSSOM_POW_TARGET_SPACING / POST_NU7_POW_TARGET_SPACING;
 
-/// The averaging window for difficulty threshold arithmetic mean calculations.
+/// Alias of [`PRE_NU7_POW_AVERAGING_WINDOW`], retained for pre-NU7 call sites.
+///
+/// Prefer [`NetworkUpgrade::averaging_window`] or
+/// [`NetworkUpgrade::averaging_window_for_height`] for the active network value.
+pub const POW_AVERAGING_WINDOW: usize = PRE_NU7_POW_AVERAGING_WINDOW;
+
+/// The averaging window for difficulty threshold arithmetic mean calculations before NU7.
 ///
 /// `PoWAveragingWindow` in the Zcash specification.
-pub const POW_AVERAGING_WINDOW: usize = 17;
+pub const PRE_NU7_POW_AVERAGING_WINDOW: usize = 17;
+
+/// The averaging window for difficulty threshold arithmetic mean calculations from NU7 onward.
+///
+/// Scaled so that the wall-clock timespan of the averaging window matches a
+/// reference of 17 blocks at 150 s per block (2550 s), which at the post-NU7
+/// 25 s target spacing equals `17 * (150 / 25) = 102` blocks.
+pub const POST_NU7_POW_AVERAGING_WINDOW: usize = 102;
 
 /// The multiplier used to derive the testnet minimum difficulty block time gap
 /// threshold.
@@ -504,7 +517,21 @@ impl NetworkUpgrade {
     ///
     /// `AveragingWindowTimespan` from the Zcash specification.
     pub fn averaging_window_timespan(&self) -> Duration {
-        self.target_spacing() * POW_AVERAGING_WINDOW.try_into().expect("fits in i32")
+        self.target_spacing() * self.averaging_window().try_into().expect("fits in i32")
+    }
+
+    /// Returns the averaging window for difficulty threshold arithmetic mean calculations.
+    ///
+    /// `PoWAveragingWindow` from the Zcash specification.
+    pub fn averaging_window(&self) -> usize {
+        match self {
+            Genesis | BeforeOverwinter | Overwinter | Sapling | Blossom | Heartwood | Canopy
+            | Nu5 | Nu6 | Nu6_1 => PRE_NU7_POW_AVERAGING_WINDOW,
+            Nu7 => POST_NU7_POW_AVERAGING_WINDOW,
+
+            #[cfg(zcash_unstable = "zfuture")]
+            ZFuture => POST_NU7_POW_AVERAGING_WINDOW,
+        }
     }
 
     /// Returns the averaging window timespan for `network` and `height`.
@@ -515,6 +542,13 @@ impl NetworkUpgrade {
         height: block::Height,
     ) -> Duration {
         NetworkUpgrade::current(network, height).averaging_window_timespan()
+    }
+
+    /// Returns the averaging window for `network` and `height`.
+    ///
+    /// See [`NetworkUpgrade::averaging_window`] for details.
+    pub fn averaging_window_for_height(network: &Network, height: block::Height) -> usize {
+        NetworkUpgrade::current(network, height).averaging_window()
     }
 
     /// Returns an iterator over [`NetworkUpgrade`] variants.

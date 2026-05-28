@@ -16,9 +16,40 @@ use crate::{
         },
         testnet::{self, ConfiguredActivationHeights},
         NetworkUpgrade, NU7_POW_TARGET_SPACING_RATIO, POST_BLOSSOM_POW_TARGET_SPACING,
-        POST_NU7_POW_TARGET_SPACING,
+        POST_NU7_POW_AVERAGING_WINDOW, POST_NU7_POW_TARGET_SPACING, PRE_NU7_POW_AVERAGING_WINDOW,
     },
 };
+
+#[test]
+fn averaging_window_changes_at_nu7_activation_height() -> Result<(), Report> {
+    let network = testnet::Parameters::build()
+        .with_activation_heights(ConfiguredActivationHeights {
+            blossom: Some(1),
+            nu7: Some(10),
+            ..Default::default()
+        })
+        .expect("activation heights are valid")
+        .clear_funding_streams()
+        .to_network()
+        .expect("configured testnet is valid");
+
+    assert_eq!(
+        PRE_NU7_POW_AVERAGING_WINDOW,
+        NetworkUpgrade::averaging_window_for_height(&network, Height(9))
+    );
+
+    assert_eq!(
+        POST_NU7_POW_AVERAGING_WINDOW,
+        NetworkUpgrade::averaging_window_for_height(&network, Height(10))
+    );
+
+    assert_eq!(
+        POST_NU7_POW_AVERAGING_WINDOW,
+        NetworkUpgrade::averaging_window_for_height(&network, Height(11))
+    );
+
+    Ok(())
+}
 
 #[test]
 fn halving_test() -> Result<(), Report> {

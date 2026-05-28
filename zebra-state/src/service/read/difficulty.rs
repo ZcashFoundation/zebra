@@ -275,6 +275,8 @@ fn adjust_difficulty_and_time_for_testnet(
         return;
     }
 
+    let candidate_block_height = (previous_block_height + 1).expect("next block height is valid");
+
     // On testnet, changing the block time can also change the difficulty,
     // due to the minimum difficulty consensus rule:
     // > if the block time of a block at height `height ≥ 299188`
@@ -303,7 +305,7 @@ fn adjust_difficulty_and_time_for_testnet(
         .expect("valid blocks have in-range times");
 
     let Some(minimum_difficulty_spacing) =
-        NetworkUpgrade::minimum_difficulty_spacing_for_height(network, previous_block_height)
+        NetworkUpgrade::minimum_difficulty_spacing_for_height(network, candidate_block_height)
     else {
         // Returns early if the testnet minimum difficulty consensus rule is not active
         return;
@@ -363,5 +365,63 @@ fn adjust_difficulty_and_time_for_testnet(
             relevant_data.iter().cloned(),
         )
         .expected_difficulty_threshold();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use zebra_chain::{
+        block, parameters::testnet, serialization::Duration32,
+        work::difficulty::ParameterDifficulty,
+    };
+
+    #[test]
+    fn get_block_template_testnet_min_difficulty_uses_candidate_height_spacing() {
+        let previous_block_height = Height(2_999_999);
+        let candidate_block_height = (previous_block_height + 1).unwrap();
+        let previous_block_time = DateTime32::from(1_000u32);
+
+        let network = testnet::Parameters::build()
+            .with_activation_heights(testnet::ConfiguredActivationHeights {
+                nu7: Some(candidate_block_height.0),
+                ..Default::default()
+            })
+            .expect("activation heights are valid")
+            .clear_funding_streams()
+            .to_network()
+            .expect("configured testnet is valid");
+
+        let difficulty = network.target_difficulty_limit().to_compact();
+        let mut result = GetBlockTemplateChainInfo {
+            tip_hash: block::Hash([0; 32]),
+            tip_height: previous_block_height,
+            chain_history_root: None,
+            expected_difficulty: difficulty,
+            cur_time: previous_block_time
+                .checked_add(Duration32::from_seconds(151))
+                .expect("test time is in-range"),
+            min_time: previous_block_time
+                .checked_add(Duration32::from_seconds(1))
+                .expect("test time is in-range"),
+            max_time: previous_block_time
+                .checked_add(Duration32::from_seconds(2_000))
+                .expect("test time is in-range"),
+        };
+
+        adjust_difficulty_and_time_for_testnet(
+            &mut result,
+            &network,
+            previous_block_height,
+            vec![(difficulty, previous_block_time.to_chrono())],
+        );
+
+        assert_eq!(
+            previous_block_time
+                .checked_add(Duration32::from_seconds(151))
+                .expect("test time is in-range"),
+            result.min_time
+        );
     }
 }
