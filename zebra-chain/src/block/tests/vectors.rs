@@ -7,14 +7,14 @@ use std::{
 use chrono::{DateTime, Duration, LocalResult, TimeZone, Utc};
 
 use crate::{
-    amount::{Amount, NonNegative, MAX_MONEY},
+    amount::{Amount, DeferredPoolBalanceChange, MAX_MONEY, NonNegative},
     block::{
-        serialize::MAX_BLOCK_BYTES, Block, BlockTimeError, Commitment::*, Hash, Header, Height,
+        Block, BlockTimeError, Commitment::*, Hash, Header, Height, serialize::MAX_BLOCK_BYTES
     },
     parameters::{Network, NetworkUpgrade::*},
     sapling,
     serialization::{
-        sha256d, SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
+        SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize, sha256d
     },
     transaction::{LockTime, Transaction},
     transparent,
@@ -108,7 +108,7 @@ fn chain_value_pool_change_propagates_transaction_value_balance_errors() {
     };
 
     assert!(
-        block.chain_value_pool_change(&utxos, None).is_err(),
+        block.chain_value_pool_change(&utxos, DeferredPoolBalanceChange::zero()).is_err(),
         "block-level aggregation should propagate transaction value-balance errors"
     );
 }
