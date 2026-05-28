@@ -97,6 +97,8 @@ operators update to 4.4.0.
   `FindHeaders` responses, freeing fanout slots for useful peers. Stall
   classification happens inside `PeerSet::route_p2c`, so coverage spans both
   request types without a separate per-IP guard.
+- Prevent sync restart from poisoning the peer inventory registry ([GHSA-gvjc-3w7c-92jx](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-gvjc-3w7c-92jx)).
+- Score and penalize peers that send consensus-invalid blocks ([GHSA-rj6c-83wx-jxf2](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-rj6c-83wx-jxf2), [GHSA-hwxr-r2v4-9f2p](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-hwxr-r2v4-9f2p)).
 
 ### Added
 

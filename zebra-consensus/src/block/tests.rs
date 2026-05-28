@@ -961,3 +961,35 @@ fn transaction_expiration_height_for_network(network: &Network) -> Result<(), Re
 
     Ok(())
 }
+
+#[test]
+fn block_error_misbehavior_scores() {
+    use crate::error::BlockError;
+
+    assert_eq!(BlockError::NoTransactions.misbehavior_score(), 100);
+    assert_eq!(
+        BlockError::BadMerkleRoot {
+            actual: zebra_chain::block::merkle::Root([0; 32]),
+            expected: zebra_chain::block::merkle::Root([1; 32]),
+        }
+        .misbehavior_score(),
+        100
+    );
+    assert_eq!(
+        BlockError::WrongTransactionConsensusBranchId.misbehavior_score(),
+        100
+    );
+    assert_eq!(
+        BlockError::MissingHeight(zebra_chain::block::Hash([0; 32])).misbehavior_score(),
+        100
+    );
+}
+
+#[test]
+fn verify_block_error_misbehavior_scores() {
+    let dup_err = zebra_state::CommitBlockError::Duplicate {
+        hash_or_height: None,
+        location: zebra_state::KnownBlock::BestChain,
+    };
+    assert_eq!(VerifyBlockError::Commit(dup_err).misbehavior_score(), 0);
+}

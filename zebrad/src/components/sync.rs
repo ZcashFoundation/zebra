@@ -1150,6 +1150,20 @@ where
                     .try_send((advertiser_addr, error.misbehavior_score()));
             }
 
+            Err(BlockDownloadVerifyError::AboveLookaheadHeightLimit {
+                advertiser_addr: Some(advertiser_addr),
+                ..
+            }) => {
+                let _ = self.misbehavior_sender.try_send((advertiser_addr, 100));
+            }
+
+            Err(BlockDownloadVerifyError::InvalidHeight {
+                advertiser_addr: Some(advertiser_addr),
+                ..
+            }) => {
+                let _ = self.misbehavior_sender.try_send((advertiser_addr, 100));
+            }
+
             Err(_) => {}
         };
 
@@ -1235,6 +1249,22 @@ where
                     error = ?e,
                     "block height is behind the current state tip, \
                      assuming the syncer will eventually catch up to the state, continuing"
+                );
+                false
+            }
+            BlockDownloadVerifyError::AboveLookaheadHeightLimit { .. } => {
+                debug!(
+                    error = ?e,
+                    "block height is above the lookahead limit, \
+                     dropping the block and continuing sync"
+                );
+                false
+            }
+            BlockDownloadVerifyError::InvalidHeight { .. } => {
+                debug!(
+                    error = ?e,
+                    "block has no valid height, \
+                     dropping the block and continuing sync"
                 );
                 false
             }
