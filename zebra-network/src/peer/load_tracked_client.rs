@@ -2,7 +2,10 @@
 //! reported protocol version.
 
 use std::{
-    sync::Arc,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
     task::{Context, Poll},
 };
 
@@ -27,6 +30,12 @@ pub struct LoadTrackedClient {
 
     /// The metadata for the connected peer `service`.
     connection_info: Arc<ConnectionInfo>,
+
+    /// The number of blocks downloaded from this peer over the connection's lifetime.
+    ///
+    /// Shared with the block-download response futures routed to this peer, which
+    /// increment it when a `Blocks` response arrives. Used for sync diagnostics.
+    blocks_received: Arc<AtomicU64>,
 }
 
 /// Create a new [`LoadTrackedClient`] wrapping the provided `client` service.
@@ -44,6 +53,7 @@ impl From<Client> for LoadTrackedClient {
         LoadTrackedClient {
             service,
             connection_info,
+            blocks_received: Arc::new(AtomicU64::new(0)),
         }
     }
 }
@@ -62,6 +72,18 @@ impl LoadTrackedClient {
     /// useful lower bound for filtering out peers that are behind.
     pub fn remote_height(&self) -> zebra_chain::block::Height {
         self.connection_info.remote.start_height
+    }
+
+    /// Returns the number of blocks downloaded from this peer over the
+    /// connection's lifetime.
+    pub fn blocks_received(&self) -> u64 {
+        self.blocks_received.load(Ordering::Relaxed)
+    }
+
+    /// Returns a handle to this peer's block-download counter, so a response
+    /// future can record blocks received after the request completes.
+    pub fn blocks_received_handle(&self) -> Arc<AtomicU64> {
+        self.blocks_received.clone()
     }
 }
 

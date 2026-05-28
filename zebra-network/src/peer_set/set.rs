@@ -100,7 +100,10 @@ use std::{
     marker::PhantomData,
     net::IpAddr,
     pin::Pin,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
     task::{Context, Poll},
     time::{Duration, Instant},
 };
@@ -129,7 +132,7 @@ use zebra_chain::{block::Height, chain_tip::ChainTip, parameters::Network};
 
 use crate::{
     address_book::AddressMetrics,
-    constants::MIN_PEER_SET_LOG_INTERVAL,
+    constants::{MIN_PEER_SET_LOG_INTERVAL, PEER_STATS_LOG_INTERVAL},
     peer::{LoadTrackedClient, MinimumPeerVersion},
     peer_set::{
         stall_tracker::FindResponseStallTracker,
@@ -196,6 +199,33 @@ fn classify_find_response<E>(result: &Result<Response, E>) -> Option<StallOutcom
         Ok(_) => None,
         Err(_) => Some(StallOutcome::Stall),
     }
+}
+
+/// Wraps a block-download response future so that the number of blocks it
+/// returns is added to the routed peer's `counter` once the request completes.
+///
+/// Used for per-peer sync diagnostics: it lets the peer set track how many
+/// blocks each peer has actually served, without scanning responses on the
+/// request hot path.
+fn count_block_response<Fut, E>(
+    counter: Arc<AtomicU64>,
+    fut: Fut,
+) -> Pin<Box<dyn Future<Output = Result<Response, BoxError>> + Send + 'static>>
+where
+    Fut: Future<Output = Result<Response, E>> + Send + 'static,
+    E: Into<BoxError>,
+{
+    async move {
+        let response = fut.await.map_err(Into::into);
+        if let Ok(Response::Blocks(blocks)) = &response {
+            let received = blocks.iter().filter(|block| block.is_available()).count();
+            // Cast: a single response can't contain more blocks than fit in a
+            // `usize`, which is at most `u64` on supported platforms.
+            counter.fetch_add(received as u64, Ordering::Relaxed);
+        }
+        response
+    }
+    .boxed()
 }
 
 /// A [`tower::Service`] that abstractly represents "the rest of the network".
@@ -313,6 +343,9 @@ where
     /// The last time we logged a message about the peer set size
     last_peer_log: Option<Instant>,
 
+    /// The last time we logged detailed per-peer sync diagnostics at info level.
+    last_peer_stats_log: Option<Instant>,
+
     // Stalled Sync Detection
     //
     /// The highest best-chain-tip height the peer set has observed so far.
@@ -418,6 +451,7 @@ where
 
             // Metrics
             last_peer_log: None,
+            last_peer_stats_log: None,
             address_metrics,
 
             // Stalled sync detection
@@ -810,9 +844,18 @@ where
         let mut svc = self
             .take_ready_service(&key)
             .expect("selected peer must be ready");
+
+        // Track how many blocks this peer serves, for sync diagnostics.
+        let block_counter =
+            matches!(&req, Request::BlocksByHash(_)).then(|| svc.blocks_received_handle());
+
         let fut = svc.call(req);
         self.push_unready(key, svc);
-        fut.map_err(Into::into).boxed()
+
+        match block_counter {
+            Some(counter) => count_block_response(counter, fut),
+            None => fut.map_err(Into::into).boxed(),
+        }
     }
 
     /// Takes a ready service by key.
@@ -1061,6 +1104,13 @@ where
                 Request::FindBlocks { .. } | Request::FindHeaders { .. }
             );
 
+            // Track how many blocks this peer serves, for sync diagnostics.
+            // Block requests reach `route_p2c` via the `route_block_download`
+            // fallback, and are never `FindBlocks`/`FindHeaders`, so at most one
+            // of these wrappers applies.
+            let block_counter =
+                matches!(&req, Request::BlocksByHash(_)).then(|| svc.blocks_received_handle());
+
             let fut = svc.call(req);
             self.push_unready(p2c_key, svc);
 
@@ -1076,7 +1126,10 @@ where
                 .boxed();
             }
 
-            return fut.map_err(Into::into).boxed();
+            return match block_counter {
+                Some(counter) => count_block_response(counter, fut),
+                None => fut.map_err(Into::into).boxed(),
+            };
         }
 
         async move {
@@ -1437,6 +1490,9 @@ where
 
         self.last_peer_log = Some(now);
 
+        // Log per-peer sync diagnostics (heights, blocks downloaded, load).
+        self.log_peer_stats(ready_services_len, unready_services_len);
+
         // Log potential duplicate connections.
         let peers = self.peer_set_addresses();
 
@@ -1490,6 +1546,67 @@ where
         } else {
             info!(?address_metrics, "network request with no ready peers: finding more peers, waiting for {} peers to answer requests",
                   unready_services_len);
+        }
+    }
+
+    /// Logs sync diagnostics about the connected peers.
+    ///
+    /// Emits a compact summary line every [`MIN_PEER_SET_LOG_INTERVAL`]
+    /// (ready/unready counts, how many ready peers are at or above our chain
+    /// tip, and the spread of reported peer heights). Every
+    /// [`PEER_STATS_LOG_INTERVAL`] it also emits one line per ready peer with
+    /// its reported height, blocks downloaded so far, and load (a peak-EWMA
+    /// latency estimate). The per-peer detail uses a longer interval because
+    /// it logs one line per connected peer, which is too verbose to emit every
+    /// minute.
+    ///
+    /// Stats for peers that are currently handling a request (unready) are not
+    /// readable here, so the per-peer lines only cover ready peers. Counts are
+    /// cumulative over each peer connection's lifetime.
+    fn log_peer_stats(&mut self, ready: usize, unready: usize) {
+        let tip_height = self.minimum_peer_version.chain_tip_height();
+
+        let mut heights: Vec<Height> = self
+            .ready_services
+            .values()
+            .map(|svc| svc.remote_height())
+            .collect();
+        heights.sort_unstable();
+
+        let peers_at_or_above_tip = heights.iter().filter(|&&h| h >= tip_height).count();
+        let min_height = heights.first().copied();
+        let max_height = heights.last().copied();
+        let median_height = heights.get(heights.len() / 2).copied();
+
+        info!(
+            ready_peers = ready,
+            unready_peers = unready,
+            ?tip_height,
+            peers_at_or_above_tip,
+            ?min_height,
+            ?median_height,
+            ?max_height,
+            "peer set status",
+        );
+
+        // The per-peer lines are verbose (one per connected peer), so only emit
+        // them at info level every few minutes.
+        let now = Instant::now();
+        if let Some(last) = self.last_peer_stats_log {
+            if now.duration_since(last) < PEER_STATS_LOG_INTERVAL {
+                return;
+            }
+        }
+        self.last_peer_stats_log = Some(now);
+
+        for (addr, svc) in &self.ready_services {
+            info!(
+                ?addr,
+                height = ?svc.remote_height(),
+                blocks_downloaded = svc.blocks_received(),
+                load = ?svc.load(),
+                "ready peer sync status",
+            );
         }
     }
 
