@@ -50,7 +50,7 @@ use zebra_consensus::halo2::{Item, VERIFYING_KEY};
 fn extract_halo2_items_from_blocks() -> Vec<Item> {
     let mut items = Vec::new();
 
-    for (_height, bytes) in zebra_test::vectors::MAINNET_BLOCKS.iter() {
+    for bytes in zebra_test::vectors::MAINNET_BLOCKS.values() {
         let block: Block = bytes.zcash_deserialize_into().expect("valid block");
 
         for tx in &block.transactions {

@@ -225,8 +225,8 @@ impl BlockWriteSender {
         (
             Self {
                 non_finalized: Some(non_finalized_block_write_sender),
-                finalized: Some(finalized_block_write_sender)
-                    .filter(|_| should_use_finalized_block_write_sender),
+                finalized: should_use_finalized_block_write_sender
+                    .then_some(finalized_block_write_sender),
             },
             invalid_block_write_reset_receiver,
             Some(Arc::new(task)),
