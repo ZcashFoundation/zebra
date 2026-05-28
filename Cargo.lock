@@ -7440,7 +7440,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-chain"
-version = "7.0.0"
+version = "8.0.0"
 dependencies = [
  "bech32",
  "bitflags 2.11.1",
@@ -7510,7 +7510,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-consensus"
-version = "6.0.0"
+version = "7.0.0"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -7562,7 +7562,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-network"
-version = "6.0.0"
+version = "7.0.0"
 dependencies = [
  "bitflags 2.11.1",
  "byteorder",
@@ -7604,7 +7604,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-node-services"
-version = "5.0.0"
+version = "6.0.0"
 dependencies = [
  "color-eyre",
  "jsonrpsee-types",
@@ -7618,7 +7618,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-rpc"
-version = "7.0.0"
+version = "8.0.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -7683,7 +7683,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-script"
-version = "6.0.1"
+version = "7.0.0"
 dependencies = [
  "hex",
  "lazy_static",
@@ -7701,7 +7701,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-state"
-version = "6.0.0"
+version = "7.0.0"
 dependencies = [
  "bincode",
  "chrono",
@@ -7799,7 +7799,7 @@ dependencies = [
 
 [[package]]
 name = "zebrad"
-version = "4.4.1"
+version = "4.5.0"
 dependencies = [
  "abscissa_core",
  "anyhow",
