@@ -396,7 +396,18 @@ fn p2sh_input_sigop_count(input: &transparent::Input, spent_output: &transparent
         return 0;
     };
 
-    script::Code(redeemed_bytes).sig_op_count(true)
+    // Route through the C++ FFI (same path used by `Sigops::sigops` for legacy sigops).
+    // The pure-Rust `script::Code::sig_op_count` short-circuits on the first byte that
+    // the parser classifies as a "disabled" opcode (0x7e, 0x7f, 0x80, 0x81, 0x83-0x86,
+    // 0x8d, 0x8e, 0x95-0x99, 0xab), returning a partial sum that does not match zcashd's
+    // `CScript::GetSigOpCount(true)` — see
+    // https://github.com/zcash/zcash/blob/v6.12.3/src/script/script.cpp#L152-L174. Using
+    // the FFI counter keeps Zebra's P2SH sigop accounting byte-for-byte aligned with
+    // zcashd, avoiding a consensus split on attacker-chosen redeem scripts.
+    let interpreter = get_interpreter(&|_, _| None, 0, true);
+    interpreter
+        .legacy_sigop_count_script(&script::Code(redeemed_bytes))
+        .unwrap_or(0)
 }
 
 /// Returns the total number of P2SH sigops across all inputs of `tx`.

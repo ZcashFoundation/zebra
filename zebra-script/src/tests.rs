@@ -1000,6 +1000,95 @@ fn p2sh_sigop_count_counts_redeem_script() -> Result<()> {
     Ok(())
 }
 
+/// Regression test: `p2sh_sigop_count` must agree with zcashd's
+/// `GetP2SHSigOpCount()` when the redeem script contains a "disabled" opcode such as
+/// `OP_CODESEPARATOR` (0xab).
+#[test]
+fn p2sh_sigop_count_matches_zcashd_when_redeem_script_contains_disabled_opcode() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    const OP_HASH160: u8 = 0xa9;
+    const OP_EQUAL: u8 = 0x87;
+    const OP_CODESEPARATOR: u8 = 0xab; // "disabled" in the Rust parser; valid byte in zcashd's GetOp2
+    const OP_CHECKMULTISIG: u8 = 0xae;
+
+    // Redeem script: OP_CODESEPARATOR followed by 50 x OP_CHECKMULTISIG.
+    // zcashd's GetSigOpCount(true): lastOpcode is OP_INVALIDOPCODE before the first
+    // CHECKMULTISIG (and OP_CODESEPARATOR after it), so the `fAccurate && lastOpcode in
+    // OP_1..=OP_16` branch never fires; every CHECKMULTISIG contributes the fallback
+    // count of 20. Total: 50 * 20 = 1000.
+    let mut redeem_script = vec![OP_CODESEPARATOR];
+    redeem_script.extend(std::iter::repeat_n(OP_CHECKMULTISIG, 50));
+    assert_eq!(redeem_script.len(), 51);
+
+    // scriptSig: a single direct push of the 51-byte redeem script. 51 <= 0x4b, so the
+    // literal-length push opcode is just the length byte followed by the payload.
+    let mut unlock_bytes = Vec::with_capacity(1 + redeem_script.len());
+    unlock_bytes.push(redeem_script.len() as u8);
+    unlock_bytes.extend_from_slice(&redeem_script);
+    let unlock_script = transparent::Script::new(&unlock_bytes);
+
+    // scriptPubKey: OP_HASH160 <20 bytes> OP_EQUAL. The hash value is irrelevant: only
+    // the shape (23 bytes, surrounding opcodes) is checked by `is_pay_to_script_hash`.
+    let mut lock_bytes = Vec::with_capacity(23);
+    lock_bytes.push(OP_HASH160);
+    lock_bytes.push(0x14);
+    lock_bytes.extend_from_slice(&[0u8; 20]);
+    lock_bytes.push(OP_EQUAL);
+    let lock_script = transparent::Script::new(&lock_bytes);
+
+    let input = transparent::Input::PrevOut {
+        outpoint: transparent::OutPoint {
+            hash: zebra_chain::transaction::Hash([0u8; 32]),
+            index: 0,
+        },
+        unlock_script,
+        sequence: u32::MAX,
+    };
+
+    let spent_output = transparent::Output {
+        value: zebra_chain::amount::Amount::try_from(1_000_000)?,
+        lock_script,
+    };
+
+    let tx = Transaction::V5 {
+        network_upgrade: NetworkUpgrade::Nu5,
+        inputs: vec![input],
+        outputs: vec![spent_output.clone()],
+        lock_time: LockTime::unlocked(),
+        expiry_height: Height(0),
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    };
+
+    // zcashd's GetP2SHSigOpCount() returns 1000 here; Zebra's pure-Rust counter
+    // short-circuits at the leading 0xab and returns 0. Failing this assertion is the
+    // consensus-split bug.
+    assert_eq!(
+        p2sh_sigop_count(&tx, std::slice::from_ref(&spent_output)),
+        1000,
+        "P2SH redeem scripts containing a disabled opcode (e.g. OP_CODESEPARATOR) must \
+         agree with zcashd's GetP2SHSigOpCount; the pure-Rust parser short-circuits on \
+         disabled bytes, undercounting sigops and opening a chain split against zcashd"
+    );
+
+    // Same expectation through the block-verifier entry point.
+    let cached = super::CachedFfiTransaction::new(
+        Arc::new(tx),
+        Arc::new(vec![spent_output]),
+        NetworkUpgrade::Nu5,
+    )
+    .expect("network upgrade should be valid for tx");
+    assert_eq!(
+        cached.p2sh_sigops(),
+        1000,
+        "CachedFfiTransaction::p2sh_sigops must agree with zcashd on redeem scripts \
+         containing disabled opcodes"
+    );
+
+    Ok(())
+}
+
 /// Non-P2SH inputs, and coinbase inputs, must contribute zero P2SH sigops regardless of what bytes
 /// appear in their `scriptSig`. zcashd skips the coinbase input in [`GetP2SHSigOpCount()`].
 ///
