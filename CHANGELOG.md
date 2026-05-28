@@ -18,7 +18,9 @@ This release has the following breaking changes:
 
 ### Security
 
-- Remove rejected block hashes from `SentHashes` ([GHSA-4m69-67m6-prqp](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-4m69-67m6-prqp)).
+- Remove rejected block hashes from `SentHashes` so honest re-deliveries are
+  not short-circuited as duplicates
+  ([GHSA-4m69-67m6-prqp](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-4m69-67m6-prqp).
 - Cap the upfront `Vec::with_capacity` reservation in
   `zcash_deserialize_external_count` so a peer-supplied `CompactSize`
   cannot force a large allocation before any element bytes are read. The
@@ -40,6 +42,39 @@ This release has the following breaking changes:
 - Reject non-ASCII `longpollid` values in the `getblocktemplate` RPC ([GHSA-qv2r-v3mx-f4pf](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-qv2r-v3mx-f4pf)).
 - Return error for malformed Sapling receiver in `z_listunifiedreceivers` RPC
 ([GHSA-c8w6-x74f-vmg3](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-c8w6-x74f-vmg3)).
+- Prevent sync restart from poisoning the peer inventory registry, and score
+  peers that send consensus-invalid blocks
+  ([GHSA-gvjc-3w7c-92jx](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-gvjc-3w7c-92jx),
+  [GHSA-rj6c-83wx-jxf2](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-rj6c-83wx-jxf2),
+  [GHSA-hwxr-r2v4-9f2p](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-hwxr-r2v4-9f2p)).
+- Avoid panic in address-balance computation on same-address self-spend chains
+  by applying transparent debits before credits per transaction
+  ([GHSA-w834-cf6p-9m9w](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-w834-cf6p-9m9w)).
+- Reject repeated shielded transactions cleanly before the defence-in-depth
+  `tx_loc_by_hash` assertion, avoiding a panic
+  ([GHSA-hhm7-qrv5-h4r6](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-hhm7-qrv5-h4r6)).
+- Cap pre-handshake message body length in `Codec` to 1 KB; the cap is raised
+  to `MAX_PROTOCOL_MESSAGE_LEN` after handshake completion
+  ([GHSA-h72h-ppcx-998p](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-h72h-ppcx-998p)).
+- Fix sigop undercount in P2SH inputs by routing through the
+  `legacy_sigop_count_script` FFI to match `zcashd`'s
+  `CScript::GetSigOpCount(true)` exactly, preventing a consensus split on
+  attacker-chosen redeem scripts
+  ([GHSA-gf9r-m956-97qx](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-gf9r-m956-97qx)).
+- Cap the inbound mempool download queue per advertising peer so a single
+  peer cannot monopolize verification capacity
+  ([GHSA-4fc2-h7jh-287c](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-4fc2-h7jh-287c)).
+- Canonicalize IPv4-mapped addresses on the misbehavior path so a peer cannot
+  evade scoring by alternating between IPv4 and IPv4-mapped-IPv6 forms of the
+  same address
+  ([GHSA-63wg-wjjj-7cp8](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-63wg-wjjj-7cp8)).
+- Drain the mempool downloader's `cancel_handles` entry when the outer
+  verification timeout fires, so the queued `Gossip::Tx(UnminedTx)` is not
+  retained until the process runs out of memory. Without the fix, a single peer
+  that gets each pushed transaction to hit `RATE_LIMIT_DELAY` could leak up to
+  ~2 MB per transaction monotonically
+  ([GHSA-65jj-fmw8-468q](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-65jj-fmw8-468q)).
+- Pop Sapling/Orchard subtrees when popping non-finalized tip ([GHSA-2gf8-q9rr-jq3h](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-2gf8-q9rr-jq3h)).
 
 ### Added
 
@@ -62,19 +97,6 @@ This release has the following breaking changes:
 
 Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
 @ValarDragon, @andres-pcg, @conradoplg, @dingledropper, @evan-forbes, @gustavovalverde, @oxarbitrage, @syszery, @upbqdn, @zmanian.
-
-### Security
-
-- Drain the mempool downloader's `cancel_handles` entry when the outer
-  verification timeout fires, so the queued `Gossip::Tx(UnminedTx)` is not
-  retained until the process runs out of memory. Without the fix, a single peer
-  that gets each pushed transaction to hit `RATE_LIMIT_DELAY` could leak up to
-  ~2 MB per transaction monotonically
-  ([GHSA-65jj-fmw8-468q](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-65jj-fmw8-468q)).
-
-### Security
-
-- Pop Sapling/Orchard subtrees when popping non-finalized tip ([GHSA-2gf8-q9rr-jq3h](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-2gf8-q9rr-jq3h)).
 
 ## [Zebra 4.4.1](https://github.com/ZcashFoundation/zebra/releases/tag/v4.4.1) - 2026-05-04
 
