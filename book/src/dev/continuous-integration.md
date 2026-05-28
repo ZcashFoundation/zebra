@@ -48,7 +48,9 @@ Some PRs don't use Mergify:
 Merging with failing CI is usually disabled by our branch protection rules.
 See the `Admin: Manually Merging PRs` section below for manual merge instructions.
 
-Each required status check is produced by exactly one workflow. A `plan` job calls [`.github/actions/detect-changes`](https://github.com/ZcashFoundation/zebra/blob/main/.github/actions/detect-changes/action.yml) to gate worker jobs via `if:`; the `*-success` aggregator runs with `if: always()` and is the sole producer of the check context. No workflow-level `paths:` filters and no same-`name:` jobs across workflows.
+Each required status check is produced by exactly one workflow. A `changes` job uses [`dorny/paths-filter`](https://github.com/dorny/paths-filter) against [`.github/path-filters.yml`](https://github.com/ZcashFoundation/zebra/blob/main/.github/path-filters.yml) to gate worker jobs via `if:`; an aggregator job named after the workflow basename (`lint`, `unit-tests`, `test-crates`, ...) runs with `if: always()` and `re-actors/alls-green`, and is the sole producer of the required-check context. The aggregator job ID, the workflow file basename, and the ruleset context name are kept identical so `grep -r '<context>:' .github/workflows/` finds the producer in one hop.
+
+On `pull_request` events the filter narrows what runs; on `push` to `main` and `merge_group` events the filter step is skipped and every gated worker runs (the `|| 'true'` default on the `changes` job outputs makes this explicit).
 
 ### Branch Protection Rules
 
@@ -63,7 +65,11 @@ But the following jobs don't need branch protection rules:
 - Setup jobs that will fail another later job which always runs, for example: Google Cloud setup jobs.
   We have branch protection rules for build jobs, but we could remove them if we want.
 
-To add a new gated job to an existing required check, add it to the producing workflow, then add its job ID to the `*-success` aggregator under both `needs:` and `allowed-skips:`. To add a brand-new required check, build a workflow with the `plan` + aggregator pattern and ask `#devops` to add the aggregator `name:` to the ruleset.
+To add a new gated job to an existing required check, add it to the producing workflow, then add its job ID to the aggregator under both `needs:` and `allowed-skips:`. To add a brand-new required check:
+
+1. Add an entry to `.github/path-filters.yml` named after the workflow basename (use underscores in the filter key to avoid expression-syntax ambiguity).
+2. Build the workflow with a `changes` job that reads the filter, gated workers, and an aggregator job whose ID matches the workflow basename.
+3. Ask `#devops` to add the aggregator job ID to the GitHub ruleset.
 
 Adding a new Zebra crate automatically extends the `build` matrix in [test-crates.yml](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/test-crates.yml); no manual step is required.
 
@@ -77,7 +83,7 @@ To change branch protection rules:
 
 Any developer:
 
-1. Run a PR containing the new aggregator, so its `name:` is available to autocomplete.
+1. Run a PR containing the new aggregator, so its job ID is available to autocomplete in the ruleset UI.
 
 Admin:
 

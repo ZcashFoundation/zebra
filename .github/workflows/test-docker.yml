@@ -5,6 +5,7 @@ on:
     branches: [main]
   push:
     branches: [main]
+  merge_group:
 
 # Ensures that only one workflow task will run at a time. Previous builds, if
 # already in process, will get cancelled. Only the latest commit will be allowed
@@ -25,26 +26,22 @@ env:
   COLORBT_SHOW_HIDDEN: 1
 
 jobs:
-  plan:
-    name: plan
+  changes:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      docker: ${{ steps.changes.outputs.matched }}
+      test_docker: ${{ steps.filter.outputs.test_docker || 'true' }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        id: filter
+        if: github.event_name == 'pull_request'
         with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: ./.github/actions/detect-changes
-        id: changes
-        with:
-          pattern: '\.rs$|(^|/)Cargo\.(toml|lock)$|^docker/Dockerfile$|^docker/entrypoint\.sh$|^docker/.*\.toml$|^zebrad/tests/common/configs/|^\.github/workflows/test-docker\.yml$'
+          filters: .github/path-filters.yml
 
   build-docker-image:
     name: Build Docker Image
-    needs: plan
-    if: needs.plan.outputs.docker == 'true'
+    needs: changes
+    if: needs.changes.outputs.test_docker == 'true'
     permissions:
       contents: read
       id-token: write
@@ -82,8 +79,8 @@ jobs:
 
   test-configurations:
     name: Test ${{ matrix.name }}
-    needs: [plan, build-docker-image]
-    if: needs.plan.outputs.docker == 'true'
+    needs: [changes, build-docker-image]
+    if: needs.changes.outputs.test_docker == 'true'
     permissions:
       contents: read
       actions: read
@@ -216,12 +213,11 @@ jobs:
             exit 0;
           fi
 
-  test-docker-config-success:
-    name: Test Docker Config Success
+  test-docker:
     runs-on: ubuntu-latest
     if: always()
     needs:
-      - plan
+      - changes
       - build-docker-image
       - test-configurations
     timeout-minutes: 30

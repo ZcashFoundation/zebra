@@ -5,6 +5,7 @@ on:
     branches: [main]
   push:
     branches: [main]
+  merge_group:
 
 # Ensures that only one workflow task will run at a time. Previous builds, if
 # already in process, will get cancelled. Only the latest commit will be allowed
@@ -21,26 +22,22 @@ env:
   CLICOLOR: 1
 
 jobs:
-  plan:
-    name: plan
+  changes:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      rust: ${{ steps.changes.outputs.matched }}
+      lint: ${{ steps.filter.outputs.lint || 'true' }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        id: filter
+        if: github.event_name == 'pull_request'
         with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: ./.github/actions/detect-changes
-        id: changes
-        with:
-          pattern: '\.rs$|(^|/)Cargo\.(toml|lock)$|(^|/)clippy\.toml$|^\.cargo/config\.toml$|^\.github/workflows/lint\.yml$|^supply-chain/'
+          filters: .github/path-filters.yml
 
   clippy:
     name: clippy ${{ matrix.rust-version }} / ${{ matrix.type }}
-    needs: plan
-    if: needs.plan.outputs.rust == 'true'
+    needs: changes
+    if: needs.changes.outputs.lint == 'true'
     permissions:
       contents: read
       id-token: write
@@ -74,8 +71,8 @@ jobs:
         run: cargo clippy ${{ matrix.args }} --features "${{ matrix.features }}"
 
   crate-checks:
-    needs: plan
-    if: needs.plan.outputs.rust == 'true'
+    needs: changes
+    if: needs.changes.outputs.lint == 'true'
     permissions:
       contents: read
       statuses: write
@@ -96,8 +93,8 @@ jobs:
 
   msrv:
     name: MSRV
-    needs: plan
-    if: needs.plan.outputs.rust == 'true'
+    needs: changes
+    if: needs.changes.outputs.lint == 'true'
     permissions:
       contents: read
       id-token: write
@@ -121,8 +118,8 @@ jobs:
 
   docs:
     name: docs
-    needs: plan
-    if: needs.plan.outputs.rust == 'true'
+    needs: changes
+    if: needs.changes.outputs.lint == 'true'
     permissions:
       contents: read
       statuses: write
@@ -146,8 +143,8 @@ jobs:
 
   fmt:
     name: fmt
-    needs: plan
-    if: needs.plan.outputs.rust == 'true'
+    needs: changes
+    if: needs.changes.outputs.lint == 'true'
     permissions:
       contents: read
       statuses: write
@@ -166,8 +163,8 @@ jobs:
 
   unused-deps:
     name: unused-deps
-    needs: plan
-    if: needs.plan.outputs.rust == 'true'
+    needs: changes
+    if: needs.changes.outputs.lint == 'true'
     permissions:
       contents: read
       id-token: write
@@ -189,8 +186,8 @@ jobs:
       - run: cargo udeps --workspace --all-targets --all-features --locked
 
   no-test-deps:
-    needs: plan
-    if: needs.plan.outputs.rust == 'true'
+    needs: changes
+    if: needs.changes.outputs.lint == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -208,8 +205,8 @@ jobs:
   # Checks that selected rates can compile with power set of features
   features:
     name: features
-    needs: plan
-    if: needs.plan.outputs.rust == 'true'
+    needs: changes
+    if: needs.changes.outputs.lint == 'true'
     permissions:
       contents: read
       id-token: write
@@ -235,8 +232,8 @@ jobs:
 
   check-cargo-lock:
     name: check-cargo-lock
-    needs: plan
-    if: needs.plan.outputs.rust == 'true'
+    needs: changes
+    if: needs.changes.outputs.lint == 'true'
     permissions:
       contents: read
       id-token: write
@@ -255,8 +252,8 @@ jobs:
 
   deny:
     name: Check deny ${{ matrix.checks }} ${{ matrix.features }}
-    needs: plan
-    if: needs.plan.outputs.rust == 'true'
+    needs: changes
+    if: needs.changes.outputs.lint == 'true'
     permissions:
       contents: read
       statuses: write
@@ -299,8 +296,8 @@ jobs:
 
   vet:
     name: cargo-vet check
-    needs: plan
-    if: needs.plan.outputs.rust == 'true'
+    needs: changes
+    if: needs.changes.outputs.lint == 'true'
     permissions:
       contents: read
       statuses: write
@@ -320,12 +317,11 @@ jobs:
       - name: Run cargo-vet check
         run: cargo vet check
 
-  lint-success:
-    name: lint success
+  lint:
     runs-on: ubuntu-latest
     if: always()
     needs:
-      - plan
+      - changes
       - clippy
       - crate-checks
       - msrv

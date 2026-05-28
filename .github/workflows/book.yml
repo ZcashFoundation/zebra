@@ -16,26 +16,22 @@ permissions:
   pull-requests: read
 
 jobs:
-  plan:
-    name: plan
+  changes:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      book: ${{ steps.changes.outputs.matched }}
+      book: ${{ steps.filter.outputs.book || 'true' }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        id: filter
+        if: github.event_name == 'pull_request'
         with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: ./.github/actions/detect-changes
-        id: changes
-        with:
-          pattern: '^book/|^katex-header\.html$|\.rs$|(^|/)Cargo\.(toml|lock)$|^\.cargo/config\.toml$|(^|/)clippy\.toml$|^\.github/workflows/book\.yml$'
+          filters: .github/path-filters.yml
 
   build:
     name: Build Docs
-    needs: plan
-    if: needs.plan.outputs.book == 'true'
+    needs: changes
+    if: needs.changes.outputs.book == 'true'
     permissions:
       contents: read
       id-token: write
@@ -113,8 +109,8 @@ jobs:
     # Only deploy if a push to main
     # TODO: Uncomment this before merging
     # if: github.ref_name == 'main' && github.event_name == 'push'
-    needs: [plan, build]
-    if: needs.plan.outputs.book == 'true'
+    needs: [changes, build]
+    if: needs.changes.outputs.book == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -135,12 +131,11 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 #v5.0.0
 
-  book-success:
-    name: book success
+  book:
     runs-on: ubuntu-latest
     if: always()
     needs:
-      - plan
+      - changes
       - build
       - deploy
     timeout-minutes: 30

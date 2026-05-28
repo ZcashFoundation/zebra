@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  merge_group:
 
 # Ensures that only one workflow task will run at a time. Previous builds, if
 # already in process, will get cancelled. Only the latest commit will be allowed
@@ -17,21 +18,17 @@ permissions:
   pull-requests: read
 
 jobs:
-  plan:
-    name: plan
+  changes:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      docs: ${{ steps.changes.outputs.matched }}
+      docs_check: ${{ steps.filter.outputs.docs_check || 'true' }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        id: filter
+        if: github.event_name == 'pull_request'
         with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: ./.github/actions/detect-changes
-        id: changes
-        with:
-          pattern: '\.md$|^book/|^\.lychee\.toml$|^\.codespellrc$|^\.trunk/configs/\.markdownlint\.yaml$|^\.github/workflows/docs-check\.yml$'
+          filters: .github/path-filters.yml
 
   # TODO: this always ends up failing due to random issues. Possibly move to a weekly job
   # link-check:
@@ -69,8 +66,8 @@ jobs:
 
   spell-check:
     name: spell-check
-    needs: plan
-    if: needs.plan.outputs.docs == 'true'
+    needs: changes
+    if: needs.changes.outputs.docs_check == 'true'
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -88,8 +85,8 @@ jobs:
 
   markdown-lint:
     name: markdown-lint
-    needs: plan
-    if: needs.plan.outputs.docs == 'true'
+    needs: changes
+    if: needs.changes.outputs.docs_check == 'true'
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -115,12 +112,11 @@ jobs:
             --ignore .git \
             --config .trunk/configs/.markdownlint.yaml
 
-  docs-check-success:
-    name: docs check success
+  docs-check:
     runs-on: ubuntu-latest
     if: always()
     needs:
-      - plan
+      - changes
       # - link-check
       - spell-check
       - markdown-lint
