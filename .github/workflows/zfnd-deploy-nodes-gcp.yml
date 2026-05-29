@@ -404,14 +404,9 @@ jobs:
             exit 0
           fi
 
-          # Bake ZEBRA_NETWORK__EXTERNAL_ADDR=<IP>:<port> into --container-env
-          # using the static IP pinned per-(network, zone) by the "Assign static
-          # IP" step below. Without this, zebrad advertises 0.0.0.0:${P2P} (the
-          # listen address) in outgoing Version messages, the address sanitizer
-          # in zebra-network/src/meta_addr.rs refuses to gossip unspecified
-          # addresses, and the node is silently undiscoverable to other peers.
-          # The IP lookup itself gates this: deploys without a reserved IP
-          # (PR/feature branches today) get an empty result and skip the env var.
+          # Inline the reserved per-zone IP as ZEBRA_NETWORK__EXTERNAL_ADDR
+          # in --container-env. The zone-suffix mapping must match the
+          # "Assign static IP" step below. Empty lookup leaves it unset.
           case "${ZONE_LETTER}" in
             b) SUFFIX="" ;;
             c) SUFFIX="-secondary" ;;
