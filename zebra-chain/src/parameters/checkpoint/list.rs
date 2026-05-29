@@ -14,37 +14,65 @@ use std::{
 
 use crate::{block, parameters::Network, BoxError};
 
+/// The number of bytes used to encode a single block hash in the binary
+/// every-block checkpoint format.
+///
+/// Each hash is stored in Zebra's internal serialized byte order (the `.0`
+/// field of [`block::Hash`]), with no header, delimiter, or byte reversal.
+const HASH_BYTES: usize = 32;
+
 #[cfg(test)]
 mod tests;
 
-/// The hard-coded checkpoints for mainnet, generated using the
-/// `zebra-checkpoints` tool.
+/// The hard-coded every-block checkpoints for mainnet, in the binary format
+/// parsed by [`CheckpointList::from_bytes`] (a concatenation of 32-byte block
+/// hashes in ascending height order; the hash of height `N` is at byte offset
+/// `N * 32`).
 ///
-/// To regenerate the latest checkpoints, use the following commands:
-/// ```sh
-/// LAST_CHECKPOINT=$(tail -1 main-checkpoints.txt | cut -d' ' -f1)
-/// echo "$LAST_CHECKPOINT"
-/// zebra-checkpoints --cli /path/to/zcash-cli --last-checkpoint "$LAST_CHECKPOINT" >> main-checkpoints.txt &
-/// tail -f main-checkpoints.txt
-/// ```
+/// This contains the hash of *every* mainnet block, so the syncer can download
+/// the chain directly by known hash without discovering hashes from peers.
 ///
-/// See the checkpoints [./README.md] for more details.
-const MAINNET_CHECKPOINTS: &str = include_str!("main-checkpoints.txt");
+/// The list is split into 150k-block chunks (`150_000 * 32` bytes each, except
+/// the last) so every committed file stays well under GitHub's 100 MiB per-file
+/// limit. The chunks are concatenated, in order, at load time.
+const MAINNET_CHECKPOINT_CHUNKS: &[&[u8]] = &[
+    include_bytes!("main-checkpoints-00.bin"),
+    include_bytes!("main-checkpoints-01.bin"),
+    include_bytes!("main-checkpoints-02.bin"),
+    include_bytes!("main-checkpoints-03.bin"),
+    include_bytes!("main-checkpoints-04.bin"),
+    include_bytes!("main-checkpoints-05.bin"),
+    include_bytes!("main-checkpoints-06.bin"),
+    include_bytes!("main-checkpoints-07.bin"),
+    include_bytes!("main-checkpoints-08.bin"),
+    include_bytes!("main-checkpoints-09.bin"),
+    include_bytes!("main-checkpoints-10.bin"),
+    include_bytes!("main-checkpoints-11.bin"),
+    include_bytes!("main-checkpoints-12.bin"),
+    include_bytes!("main-checkpoints-13.bin"),
+    include_bytes!("main-checkpoints-14.bin"),
+    include_bytes!("main-checkpoints-15.bin"),
+    include_bytes!("main-checkpoints-16.bin"),
+    include_bytes!("main-checkpoints-17.bin"),
+    include_bytes!("main-checkpoints-18.bin"),
+    include_bytes!("main-checkpoints-19.bin"),
+    include_bytes!("main-checkpoints-20.bin"),
+    include_bytes!("main-checkpoints-21.bin"),
+    include_bytes!("main-checkpoints-22.bin"),
+];
 
 /// The hard-coded checkpoints for testnet, generated using the
 /// `zebra-checkpoints` tool.
 ///
 /// To use testnet, use the testnet checkpoints file, and run
 /// `zebra-checkpoints [other args] -- -testnet`.
-///
-/// See [`MAINNET_CHECKPOINTS`] for detailed `zebra-checkpoints` usage
-/// information.
 pub(crate) const TESTNET_CHECKPOINTS: &str = include_str!("test-checkpoints.txt");
 
 lazy_static::lazy_static! {
     /// Parsed mainnet checkpoint list, cached to avoid re-parsing on every use.
     static ref MAINNET_CHECKPOINT_LIST: Arc<CheckpointList> =
-        Arc::new(MAINNET_CHECKPOINTS.parse().expect("hard-coded mainnet checkpoint list parses"));
+        Arc::new(CheckpointList::from_bytes(&MAINNET_CHECKPOINT_CHUNKS.concat(), &Network::Mainnet)
+            .expect("hard-coded mainnet checkpoint list parses"));
 
     /// Parsed testnet checkpoint list, cached to avoid re-parsing on every use.
     pub(crate) static ref TESTNET_CHECKPOINT_LIST: Arc<CheckpointList> =
@@ -163,6 +191,79 @@ impl CheckpointList {
         }
 
         Ok(checkpoints)
+    }
+
+    /// Create a checkpoint list for `network` from the raw binary every-block
+    /// checkpoint format in `bytes`.
+    ///
+    /// # Format
+    ///
+    /// `bytes` is a raw concatenation of 32-byte block hashes in ascending
+    /// height order, with no header or delimiters. The block at height `N`
+    /// occupies bytes `[N * 32, N * 32 + 32)`, so the height is implicit in the
+    /// byte offset and the file starts at the genesis block (height 0).
+    ///
+    /// Each 32-byte hash is in Zebra's **internal serialized byte order** (the
+    /// `.0` field of [`block::Hash`]), so the bytes are read directly into
+    /// `block::Hash` with no reversal — the reverse of the big-endian hex shown
+    /// by `getblockhash`, block explorers, and the committed `*-checkpoints.txt`
+    /// files.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the input is empty, its length is not a multiple of
+    /// 32, the genesis hash does not match `network.genesis_hash()`, or any
+    /// [`CheckpointList::from_list`] invariant is violated.
+    //
+    // The `expect`s below are infallible: the length checks guarantee a 32-byte
+    // first chunk, and `chunks_exact` only yields `HASH_BYTES`-long chunks.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn from_bytes(bytes: &[u8], network: &Network) -> Result<Self, BoxError> {
+        if bytes.is_empty() {
+            Err("binary checkpoint list is empty: there must be at least the genesis hash")?;
+        }
+
+        if bytes.len() % HASH_BYTES != 0 {
+            Err(format!(
+                "binary checkpoint list length {} is not a multiple of {HASH_BYTES} bytes",
+                bytes.len(),
+            ))?;
+        }
+
+        // Validate the genesis hash up front, so a mismatched network produces a
+        // clear error rather than a downstream verification failure.
+        let expected_genesis = network.genesis_hash();
+        let genesis_hash = block::Hash(
+            bytes[..HASH_BYTES]
+                .try_into()
+                .expect("a non-empty list with a multiple-of-32 length has a 32-byte first hash"),
+        );
+        if genesis_hash != expected_genesis {
+            Err(format!(
+                "binary checkpoint list genesis hash {genesis_hash:?} does not match \
+                 {network} genesis hash {expected_genesis:?}",
+            ))?;
+        }
+
+        // The height is the index of each hash, so consecutive 32-byte chunks
+        // map to heights `0..count`. Pass the iterator straight to `from_list`
+        // to avoid materialising a second multi-million-entry `Vec`. `from_list`
+        // rejects any height past `block::Height::MAX`, so the `index as u32`
+        // cast cannot silently produce a valid-but-wrong height.
+        let list = bytes
+            .chunks_exact(HASH_BYTES)
+            .enumerate()
+            .map(|(index, chunk)| {
+                let height = block::Height(index as u32);
+                let hash = block::Hash(
+                    chunk
+                        .try_into()
+                        .expect("chunks_exact always yields HASH_BYTES-long chunks"),
+                );
+                (height, hash)
+            });
+
+        CheckpointList::from_list(list)
     }
 
     /// Return true if there is a checkpoint at `height`.

@@ -2,7 +2,9 @@
 //!
 //! It is used when Zebra is a long way behind the current chain tip.
 
-use std::{cmp::max, collections::HashSet, convert, pin::Pin, task::Poll, time::Duration};
+use std::{
+    cmp::max, collections::HashSet, convert, pin::Pin, sync::Arc, task::Poll, time::Duration,
+};
 
 use color_eyre::eyre::{eyre, Report};
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -21,6 +23,7 @@ use tower::{
 use zebra_chain::{
     block::{self, Height, HeightDiff},
     chain_tip::ChainTip,
+    parameters::checkpoint::list::CheckpointList,
 };
 use zebra_network::{self as zn, PeerSocketAddr};
 use zebra_state as zs;
@@ -341,6 +344,14 @@ where
     /// The largest block height for the checkpoint verifier, based on the current config.
     max_checkpoint_height: Height,
 
+    /// The checkpoint list (`block::Height` → `block::Hash`) used to drive the
+    /// checkpoint sync phase.
+    ///
+    /// When this contains every block hash up to `max_checkpoint_height`, the
+    /// syncer downloads checkpoint-range blocks directly by their known hashes
+    /// and skips peer tip discovery (`obtain_tips`/`extend_tips`) entirely.
+    checkpoint_list: Arc<CheckpointList>,
+
     /// The configured checkpoint verification concurrency limit, after applying the minimum limit.
     checkpoint_verify_concurrency_limit: usize,
 
@@ -515,6 +526,9 @@ where
         let new_syncer = Self {
             genesis_hash: config.network.network.genesis_hash(),
             max_checkpoint_height,
+            // The hard-coded every-block checkpoint list for the network, used
+            // to drive the checkpoint phase by known hash (see `checkpoint_sync`).
+            checkpoint_list: config.network.network.checkpoint_list(),
             checkpoint_verify_concurrency_limit,
             full_verify_concurrency_limit,
             is_regtest: config.network.network.is_regtest(),
@@ -537,6 +551,16 @@ where
         // We can't download the genesis block using our normal algorithm,
         // due to protocol limitations
         self.request_genesis().await?;
+
+        // Checkpoint phase: while below the checkpoint tip, download blocks
+        // directly by the hashes we already know from the checkpoint list,
+        // instead of discovering them from peers with obtain/extend tips. This
+        // is a no-op (and immediately hands off below) unless the configured
+        // checkpoint list contains every block hash in the range.
+        if let Err(error) = self.checkpoint_sync().await {
+            info!(%error, "checkpoint sync ended with an error, falling back to peer tip-following");
+            self.downloads.cancel_all();
+        }
 
         loop {
             if self.try_to_sync().await.is_err() {
@@ -1064,6 +1088,61 @@ where
         let response = self.downloads.next().await.expect("downloads is nonempty");
 
         Ok(response)
+    }
+
+    /// Downloads and checkpoint-verifies blocks from the current verified tip up
+    /// to `max_checkpoint_height`, taking each block hash directly from the
+    /// checkpoint list instead of discovering it from peers with
+    /// `obtain_tips`/`extend_tips`.
+    ///
+    /// Blocks are requested strictly in order, one at a time, so this relies on
+    /// the configured checkpoint list containing every block hash up to
+    /// `max_checkpoint_height` (see `[consensus] checkpoint_list_path`). With the
+    /// built-in spaced list the first lookup misses, so this returns immediately
+    /// and the caller falls back to peer tip-following.
+    ///
+    /// Returns `Err` only on a fatal download or verification error, after which
+    /// the caller falls back to peer tip-following.
+    #[instrument(skip(self))]
+    async fn checkpoint_sync(&mut self) -> Result<(), Report> {
+        // Genesis (height 0) is committed by `request_genesis`, so start at the
+        // next height — never at height 0, even if the tip is not yet available.
+        let mut next_height = self
+            .latest_chain_tip
+            .best_tip_height()
+            .map_or(1, |tip| tip.0.saturating_add(1));
+
+        // Nothing to drive directly unless the list covers the next height (the
+        // built-in spaced list does not); hand off to peer tip-following.
+        if self.checkpoint_list.hash(Height(next_height)).is_none() {
+            return Ok(());
+        }
+
+        info!(
+            next_height,
+            max_checkpoint_height = self.max_checkpoint_height.0,
+            "starting checkpoint sync from the checkpoint list, skipping tip discovery",
+        );
+
+        // Download and verify each block in order, one at a time, using the hash
+        // we already know from the checkpoint list.
+        while next_height <= self.max_checkpoint_height.0 {
+            let Some(hash) = self.checkpoint_list.hash(Height(next_height)) else {
+                break;
+            };
+
+            self.downloads.download_and_verify(hash).await?;
+            let (height, _) = self
+                .downloads
+                .next()
+                .await
+                .expect("a block download was just queued")?;
+
+            next_height = height.0.saturating_add(1);
+            self.update_metrics();
+        }
+
+        Ok(())
     }
 
     /// Queue download and verify tasks for each block that isn't currently known to our node.

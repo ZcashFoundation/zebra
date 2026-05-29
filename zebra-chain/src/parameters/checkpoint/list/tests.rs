@@ -232,9 +232,9 @@ fn checkpoint_list_duplicate_hashes_fail() -> Result<(), BoxError> {
 fn checkpoint_list_load_hard_coded() -> Result<(), BoxError> {
     let _init_guard = zebra_test::init();
 
-    let _: CheckpointList = MAINNET_CHECKPOINTS
-        .parse()
-        .expect("hard-coded Mainnet checkpoint list should parse");
+    let _: CheckpointList =
+        CheckpointList::from_bytes(&MAINNET_CHECKPOINT_CHUNKS.concat(), &Mainnet)
+            .expect("hard-coded Mainnet checkpoint list should parse");
     let _: CheckpointList = TESTNET_CHECKPOINTS
         .parse()
         .expect("hard-coded Testnet checkpoint list should parse");
@@ -291,13 +291,24 @@ fn checkpoint_list_hard_coded_max_gap_testnet() -> Result<(), BoxError> {
 fn checkpoint_list_hard_coded_max_gap(network: Network) -> Result<(), BoxError> {
     let _init_guard = zebra_test::init();
 
+    let list = network.checkpoint_list();
+
+    // An every-block checkpoint list (Mainnet) has a checkpoint at every height
+    // from genesis to the tip, so the spaced-gap bounds below do not apply.
+    // `from_list` guarantees unique heights starting at genesis, so a length of
+    // `max_height + 1` means the list is contiguous (every gap is 1).
+    if u64::try_from(list.len()).expect("checkpoint count fits in u64")
+        == u64::from(list.max_height().0) + 1
+    {
+        return Ok(());
+    }
+
     let max_checkpoint_height_gap =
         HeightDiff::try_from(MAX_CHECKPOINT_HEIGHT_GAP).expect("constant fits in HeightDiff");
     let min_checkpoint_height_gap =
         HeightDiff::try_from(div_ceil(MAX_CHECKPOINT_BYTE_COUNT, MAX_BLOCK_BYTES))
             .expect("constant fits in HeightDiff");
 
-    let list = network.checkpoint_list();
     let mut heights = list.0.keys();
 
     // Check that we start at the genesis height
@@ -328,6 +339,66 @@ fn checkpoint_list_hard_coded_max_gap(network: Network) -> Result<(), BoxError> 
 
         previous_height = *height;
     }
+
+    Ok(())
+}
+
+/// Round-trip the binary every-block format through `from_bytes`.
+#[test]
+fn checkpoint_list_from_bytes_round_trip() -> Result<(), BoxError> {
+    let _init_guard = zebra_test::init();
+
+    // Height 0 must be the network genesis hash (in internal serialized order),
+    // height 1 is an arbitrary distinct, non-null hash.
+    let genesis = Mainnet.genesis_hash();
+    let height_one = block::Hash([1; 32]);
+
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&genesis.0);
+    bytes.extend_from_slice(&height_one.0);
+
+    let list = CheckpointList::from_bytes(&bytes, &Mainnet)?;
+
+    assert_eq!(list.len(), 2);
+    assert_eq!(list.hash(block::Height(0)), Some(genesis));
+    assert_eq!(list.hash(block::Height(1)), Some(height_one));
+    assert_eq!(list.max_height(), block::Height(1));
+
+    Ok(())
+}
+
+/// A binary blob whose length is not a multiple of 32 must be rejected.
+#[test]
+fn checkpoint_list_from_bytes_misaligned_fail() -> Result<(), BoxError> {
+    let _init_guard = zebra_test::init();
+
+    let genesis = Mainnet.genesis_hash();
+
+    // Truncated to a non-multiple-of-32 length.
+    let _ = CheckpointList::from_bytes(&genesis.0[..31], &Mainnet)
+        .expect_err("a misaligned binary checkpoint list must fail");
+
+    // A trailing partial hash must also be rejected.
+    let mut bytes = genesis.0.to_vec();
+    bytes.push(0x00);
+    let _ = CheckpointList::from_bytes(&bytes, &Mainnet)
+        .expect_err("a binary checkpoint list with a trailing partial hash must fail");
+
+    Ok(())
+}
+
+/// An empty blob, and a blob whose first hash is not the network genesis, must
+/// be rejected.
+#[test]
+fn checkpoint_list_from_bytes_genesis_checks() -> Result<(), BoxError> {
+    let _init_guard = zebra_test::init();
+
+    let _ = CheckpointList::from_bytes(&[], &Mainnet)
+        .expect_err("an empty binary checkpoint list must fail");
+
+    // A non-genesis hash at height 0.
+    let _ = CheckpointList::from_bytes(&[0xab; 32], &Mainnet)
+        .expect_err("a binary checkpoint list with the wrong genesis hash must fail");
 
     Ok(())
 }
