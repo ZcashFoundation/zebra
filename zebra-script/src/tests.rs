@@ -1621,10 +1621,6 @@ fn poc_p2sh_accurate_multisig_should_count_one_not_twenty() -> Result<()> {
 
     let zebra_count = p2sh_sigop_count(&tx, std::slice::from_ref(&spent_output));
 
-    println!(
-        "single P2SH 1-of-1 CHECKMULTISIG: Zebra returned {zebra_count}, zcashd accurate expected 1"
-    );
-
     assert_eq!(
         zebra_count, 1,
         "P2SH OP_1 <pubkey> OP_1 OP_CHECKMULTISIG must use accurate sigop mode"
@@ -1679,10 +1675,6 @@ fn poc_p2sh_1001_accurate_multisigs_should_stay_below_block_sigop_limit() -> Res
 
     let zebra_count = p2sh_sigop_count(&tx, &spent_outputs);
     let zcashd_accurate_count = SPENDS as u32;
-
-    println!(
-        "{SPENDS} P2SH 1-of-1 CHECKMULTISIG spends: Zebra returned {zebra_count}, zcashd accurate expected {zcashd_accurate_count}"
-    );
 
     assert_eq!(
         zebra_count, zcashd_accurate_count,
