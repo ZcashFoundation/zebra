@@ -11,8 +11,7 @@ This release fixes four state security issues:
 
 - Drop rejected block hashes from `SentHashes` so honest re-deliveries of a
   block are no longer short-circuited as duplicates
-  ([GHSA-4m69-67m6-prqp](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-4m69-67m6-prqp),
-  [GHSA-rpcw-q5mr-gq35](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-rpcw-q5mr-gq35)).
+  ([GHSA-4m69-67m6-prqp](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-4m69-67m6-prqp).
 - Apply transparent address-balance updates per-transaction in
   debit-before-credit order so same-address self-spend chains do not push
   intermediate balances above `MAX_MONEY` and panic
