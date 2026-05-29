@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.0.1] - 2026-05-29
+
+This release fixes one consensus security issue:
+
+- The last P2SH input sigop count fix was incorrect. Properly fixed it to match zcashd
+  ([GHSA-2prc-cj5x-4443](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-2prc-cj5x-4443)).
+
+The impact of the issue for crate users will depend on the particular usage;
+if you use it as a building block for a consensus node, you should update.
+
 ## [7.0.0] - 2026-05-28
 
 This release fixes one consensus security issue:

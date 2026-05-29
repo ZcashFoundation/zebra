@@ -1,6 +1,6 @@
 [package]
 name = "zebra-script"
-version = "7.0.0"
+version = "7.0.1"
 authors.workspace = true
 description = "Zebra script verification wrapping zcashd's zcash_script library"
 license.workspace = true

@@ -5,16 +5,24 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 4.5.1](https://github.com/ZcashFoundation/zebra/releases/tag/v4.5.0) - 2026-05-29
+
+This hotfix release fixes a critical security issues that was not correctly
+addressed in 4.5.0. We recommend node operators update to 4.5.1 as soon as
+possible.
+
+### Security
+
+- The last P2SH input sigop count fix was incorrect. Properly fixed it to match zcashd
+  ([GHSA-2prc-cj5x-4443](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-2prc-cj5x-4443)).
+  Thanks to @sangsoo-osec for reporting the issue.
+
 ## [Zebra 4.5.0](https://github.com/ZcashFoundation/zebra/releases/tag/v4.5.0) - 2026-05-28
 
 This release fixes several critical security issues. We recommend node operators update to
 4.5.0 as soon as possible.
 
 The release also adds support for mining to a shielded address.
-
-### Breaking Changes
-
-This release has the following breaking changes:
 
 ### Security
 
