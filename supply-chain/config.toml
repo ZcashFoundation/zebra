@@ -661,14 +661,6 @@ criteria = "safe-to-deploy"
 version = "0.14.5"
 criteria = "safe-to-deploy"
 
-[[exemptions.hashbrown]]
-version = "0.16.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.hashbrown]]
-version = "0.17.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.hashlink]]
 version = "0.7.0"
 criteria = "safe-to-deploy"
@@ -1001,10 +993,6 @@ criteria = "safe-to-deploy"
 version = "0.4.6"
 criteria = "safe-to-deploy"
 
-[[exemptions.num-conv]]
-version = "0.2.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.num-format]]
 version = "0.4.4"
 criteria = "safe-to-deploy"
@@ -1239,10 +1227,6 @@ criteria = "safe-to-deploy"
 version = "3.5.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.proc-macro2]]
-version = "1.0.106"
-criteria = "safe-to-deploy"
-
 [[exemptions.proptest]]
 version = "1.11.0"
 criteria = "safe-to-deploy"
@@ -1303,10 +1287,6 @@ criteria = "safe-to-deploy"
 version = "0.11.14"
 criteria = "safe-to-deploy"
 
-[[exemptions.quote]]
-version = "1.0.45"
-criteria = "safe-to-deploy"
-
 [[exemptions.r-efi]]
 version = "5.2.0"
 criteria = "safe-to-deploy"
@@ -1321,10 +1301,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.rand]]
 version = "0.7.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.rand]]
-version = "0.9.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.rand_chacha]]
@@ -1903,10 +1879,6 @@ criteria = "safe-to-deploy"
 version = "1.0.24"
 criteria = "safe-to-deploy"
 
-[[exemptions.unicode-segmentation]]
-version = "1.13.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.untrusted]]
 version = "0.9.0"
 criteria = "safe-to-deploy"
@@ -2168,7 +2140,7 @@ version = "0.8.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zcash_script]]
-version = "0.4.4"
+version = "0.4.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.zcash_spec]]
@@ -2180,31 +2152,31 @@ version = "0.7.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zebra-chain]]
-version = "7.0.0"
+version = "8.0.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zebra-consensus]]
-version = "6.0.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.zebra-network]]
-version = "6.0.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.zebra-node-services]]
-version = "5.0.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.zebra-rpc]]
 version = "7.0.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.zebra-script]]
+[[exemptions.zebra-network]]
+version = "7.0.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.zebra-node-services]]
 version = "6.0.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.zebra-rpc]]
+version = "8.0.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.zebra-script]]
+version = "7.0.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.zebra-state]]
-version = "6.0.0"
+version = "7.0.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zebra-test]]
@@ -2216,7 +2188,7 @@ version = "6.0.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zebrad]]
-version = "4.4.0"
+version = "4.5.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zerocopy]]
