@@ -106,7 +106,7 @@ jobs:
   check-no-git-dependencies:
     name: Check no git dependencies
     needs: changes
-    if: needs.changes.outputs.unit_tests == 'true' && contains(github.event.pull_request.labels.*.name, 'A-release')
+    if: needs.changes.outputs.unit_tests == 'true' && github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'A-release')
     permissions:
       contents: read
       id-token: write
