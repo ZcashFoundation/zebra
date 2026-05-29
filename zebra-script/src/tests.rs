@@ -1541,3 +1541,158 @@ fn p2sh_sigop_count_uses_accurate_multisig_mode() -> Result<()> {
     assert_eq!(p2sh_sigop_count(&tx, std::slice::from_ref(&spent)), 1);
     Ok(())
 }
+
+fn poc_p2sh_1_of_1_multisig_scripts() -> (transparent::Script, transparent::Script) {
+    const OP_1: u8 = 0x51;
+    const OP_HASH160: u8 = 0xa9;
+    const OP_EQUAL: u8 = 0x87;
+    const OP_CHECKMULTISIG: u8 = 0xae;
+
+    // Redeem script:
+    //   OP_1 <33-byte compressed pubkey> OP_1 OP_CHECKMULTISIG
+    //
+    // zcashd's P2SH path calls GetSigOpCount(true), so this counts as 1 sigop.
+    // Zebra's vulnerable path calls legacy_sigop_count_script -> GetSigOpCount(false),
+    // so this counts as 20 sigops.
+    let pubkey = [0x02u8; 33];
+
+    let mut redeem_script = Vec::with_capacity(37);
+    redeem_script.push(OP_1);
+    redeem_script.push(0x21); // push 33-byte pubkey
+    redeem_script.extend_from_slice(&pubkey);
+    redeem_script.push(OP_1);
+    redeem_script.push(OP_CHECKMULTISIG);
+    assert_eq!(redeem_script.len(), 37);
+
+    // scriptSig: push redeem_script as the final push.
+    // The actual HASH160 match/signature validity is irrelevant for this accounting PoC;
+    // p2sh_sigop_count only checks the spent output is P2SH-shaped and extracts the last push.
+    let mut unlock_bytes = Vec::with_capacity(1 + redeem_script.len());
+    unlock_bytes.push(redeem_script.len() as u8);
+    unlock_bytes.extend_from_slice(&redeem_script);
+    let unlock_script = transparent::Script::new(&unlock_bytes);
+
+    // P2SH scriptPubKey shape:
+    //   OP_HASH160 <20-byte hash> OP_EQUAL
+    //
+    // The hash value is intentionally dummy. p2sh_sigop_count only needs IsPayToScriptHash shape.
+    let mut lock_bytes = Vec::with_capacity(23);
+    lock_bytes.push(OP_HASH160);
+    lock_bytes.push(0x14);
+    lock_bytes.extend_from_slice(&[0u8; 20]);
+    lock_bytes.push(OP_EQUAL);
+    let lock_script = transparent::Script::new(&lock_bytes);
+
+    (unlock_script, lock_script)
+}
+
+#[test]
+fn poc_p2sh_accurate_multisig_should_count_one_not_twenty() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let (unlock_script, lock_script) = poc_p2sh_1_of_1_multisig_scripts();
+
+    let input = transparent::Input::PrevOut {
+        outpoint: transparent::OutPoint {
+            hash: zebra_chain::transaction::Hash([0u8; 32]),
+            index: 0,
+        },
+        unlock_script,
+        sequence: u32::MAX,
+    };
+
+    let spent_output = transparent::Output {
+        value: zebra_chain::amount::Amount::try_from(1_000_000)?,
+        lock_script,
+    };
+
+    let tx = Transaction::V5 {
+        network_upgrade: NetworkUpgrade::Nu5,
+        inputs: vec![input],
+        outputs: vec![transparent::Output {
+            value: zebra_chain::amount::Amount::try_from(1_000_000)?,
+            lock_script: transparent::Script::new(&[0x51]), // OP_TRUE dummy output
+        }],
+        lock_time: LockTime::unlocked(),
+        expiry_height: Height(0),
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    };
+
+    let zebra_count = p2sh_sigop_count(&tx, std::slice::from_ref(&spent_output));
+
+    println!(
+        "single P2SH 1-of-1 CHECKMULTISIG: Zebra returned {zebra_count}, zcashd accurate expected 1"
+    );
+
+    assert_eq!(
+        zebra_count, 1,
+        "P2SH OP_1 <pubkey> OP_1 OP_CHECKMULTISIG must use accurate sigop mode"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn poc_p2sh_1001_accurate_multisigs_should_stay_below_block_sigop_limit() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    const SPENDS: usize = 1_001;
+
+    let (unlock_script, lock_script) = poc_p2sh_1_of_1_multisig_scripts();
+
+    let inputs: Vec<_> = (0..SPENDS)
+        .map(|i| {
+            let mut hash = [0u8; 32];
+            hash[..8].copy_from_slice(&(i as u64).to_le_bytes());
+
+            transparent::Input::PrevOut {
+                outpoint: transparent::OutPoint {
+                    hash: zebra_chain::transaction::Hash(hash),
+                    index: 0,
+                },
+                unlock_script: unlock_script.clone(),
+                sequence: u32::MAX,
+            }
+        })
+        .collect();
+
+    let spent_output = transparent::Output {
+        value: zebra_chain::amount::Amount::try_from(1_000_000)?,
+        lock_script,
+    };
+
+    let spent_outputs = vec![spent_output; SPENDS];
+
+    let tx = Transaction::V5 {
+        network_upgrade: NetworkUpgrade::Nu5,
+        inputs,
+        outputs: vec![transparent::Output {
+            value: zebra_chain::amount::Amount::try_from(1_000_000)?,
+            lock_script: transparent::Script::new(&[0x51]), // OP_TRUE dummy output
+        }],
+        lock_time: LockTime::unlocked(),
+        expiry_height: Height(0),
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    };
+
+    let zebra_count = p2sh_sigop_count(&tx, &spent_outputs);
+    let zcashd_accurate_count = SPENDS as u32;
+
+    println!(
+        "{SPENDS} P2SH 1-of-1 CHECKMULTISIG spends: Zebra returned {zebra_count}, zcashd accurate expected {zcashd_accurate_count}"
+    );
+
+    assert_eq!(
+        zebra_count, zcashd_accurate_count,
+        "Zebra should count each accurate 1-of-1 P2SH multisig spend as 1 sigop, not 20"
+    );
+
+    assert!(
+        zebra_count <= 20_000,
+        "A zcashd-valid block-level sigop total should not cross Zebra's MAX_BLOCK_SIGOPS"
+    );
+
+    Ok(())
+}
