@@ -377,3 +377,6 @@ unwrap_in_result = "warn"
 
 # TODOs: fix this lint eventually
 result_large_err = "allow"
+
+[patch.crates-io]
+zcash_script = { git = "https://github.com/ZcashFoundation/zcash_script", rev = "5db94de239f79fb6a26df17c3c6e7c748a0dec31" }

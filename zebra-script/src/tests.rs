@@ -1492,3 +1492,52 @@ fn stale_sighash_buffer_v5_two_checksig_rejected() {
          byte (0x50) must be rejected, matching zcashd"
     );
 }
+
+#[test]
+fn p2sh_sigop_count_uses_accurate_multisig_mode() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    // P2SH redeem script: OP_1 <33-byte pubkey> OP_1 OP_CHECKMULTISIG (a 1-of-1 multisig).
+    // zcashd's GetP2SHSigOpCount counts the redeem script with GetSigOpCount(true), so an
+    // OP_N-prefixed CHECKMULTISIG counts as N (here 1). The legacy mode counts it as 20;
+    // over-counting here lets a zcashd-valid block exceed Zebra's MAX_BLOCK_SIGOPS and splits
+    // Zebra off the chain. This guards the accurate-mode P2SH counter.
+    let mut redeem = vec![0x51u8, 0x21u8];
+    redeem.extend_from_slice(&[0x02u8; 33]);
+    redeem.extend_from_slice(&[0x51u8, 0xaeu8]);
+
+    let mut unlock = vec![redeem.len() as u8];
+    unlock.extend_from_slice(&redeem);
+
+    let mut lock = vec![0xa9u8, 0x14u8];
+    lock.extend_from_slice(&[0u8; 20]);
+    lock.push(0x87u8);
+
+    let tx = Transaction::V5 {
+        network_upgrade: NetworkUpgrade::Nu5,
+        inputs: vec![transparent::Input::PrevOut {
+            outpoint: transparent::OutPoint {
+                hash: transaction::Hash([0u8; 32]),
+                index: 0,
+            },
+            unlock_script: transparent::Script::new(&unlock),
+            sequence: u32::MAX,
+        }],
+        outputs: vec![transparent::Output {
+            value: zebra_chain::amount::Amount::try_from(1_000_000)?,
+            lock_script: transparent::Script::new(&[0x51]),
+        }],
+        lock_time: LockTime::unlocked(),
+        expiry_height: Height(0),
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    };
+    let spent = transparent::Output {
+        value: zebra_chain::amount::Amount::try_from(1_000_000)?,
+        lock_script: transparent::Script::new(&lock),
+    };
+
+    // Accurate mode: 1. (Legacy mode would return 20.)
+    assert_eq!(p2sh_sigop_count(&tx, std::slice::from_ref(&spent)), 1);
+    Ok(())
+}
