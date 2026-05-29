@@ -108,6 +108,7 @@ pub enum BlockDownloadVerifyError {
     AboveLookaheadHeightLimit {
         height: block::Height,
         hash: block::Hash,
+        advertiser_addr: Option<PeerSocketAddr>,
     },
 
     #[error("downloaded block was too far behind the chain tip: {height:?} {hash:?}")]
@@ -117,7 +118,10 @@ pub enum BlockDownloadVerifyError {
     },
 
     #[error("downloaded block had an invalid height: {hash:?}")]
-    InvalidHeight { hash: block::Hash },
+    InvalidHeight {
+        hash: block::Hash,
+        advertiser_addr: Option<PeerSocketAddr>,
+    },
 
     #[error("block failed consensus validation: {error:?} {height:?} {hash:?}")]
     Invalid {
@@ -448,11 +452,11 @@ where
                     );
                     metrics::counter!("sync.no.height.dropped.block.count").increment(1);
 
-                    return Err(BlockDownloadVerifyError::InvalidHeight { hash });
+                    return Err(BlockDownloadVerifyError::InvalidHeight { hash, advertiser_addr });
                 };
 
                 if block_height > lookahead_drop_height {
-                    Err(BlockDownloadVerifyError::AboveLookaheadHeightLimit { height: block_height, hash })?;
+                    Err(BlockDownloadVerifyError::AboveLookaheadHeightLimit { height: block_height, hash, advertiser_addr })?;
                 } else if block_height > lookahead_pause_height {
                     // This log can be very verbose, usually hundreds of blocks are dropped.
                     // So we only log at info level for the first above-height block.

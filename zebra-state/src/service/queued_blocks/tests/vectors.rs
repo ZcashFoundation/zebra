@@ -9,7 +9,7 @@ use zebra_test::prelude::*;
 
 use crate::{
     arbitrary::Prepare,
-    service::queued_blocks::{QueuedBlocks, QueuedSemanticallyVerified},
+    service::queued_blocks::{QueuedBlocks, QueuedSemanticallyVerified, SentHashes},
     tests::FakeChainHelper,
 };
 
@@ -134,6 +134,66 @@ fn prune_removes_right_children() -> Result<()> {
     assert!(queue.get_mut(&child1.hash()).is_none());
     assert!(queue.get_mut(&child2.hash()).is_none());
     assert_eq!(0, queue.known_utxos.len());
+
+    Ok(())
+}
+
+/// `SentHashes::remove` must drop the hash, its outpoints from `known_utxos`,
+/// and the corresponding `(hash, height)` entry from `curr_buf` (or whichever
+/// batch buffer holds it). Without this, a rejected same-hash block would
+/// keep a later honest re-delivery of a block at the same hash locked out as
+/// a "duplicate" forever.
+#[test]
+fn sent_hashes_remove_drops_rejected_hash_and_utxos() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let block1: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
+    let block2: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_419201_BYTES.zcash_deserialize_into()?;
+
+    let prepared1 = block1.clone().prepare();
+    let prepared2 = block2.clone().prepare();
+
+    let mut sent = SentHashes::default();
+    sent.add(&prepared1);
+    sent.add(&prepared2);
+
+    // Both hashes are present, and `known_utxos` contains every outpoint from
+    // both blocks' coinbase + transparent outputs.
+    let utxos_after_add = sent.known_utxos.len();
+    assert!(sent.contains(&prepared1.hash));
+    assert!(sent.contains(&prepared2.hash));
+    assert!(utxos_after_add > 0);
+
+    // Remove block1. block1's hash disappears, block2's stays, and the
+    // total number of known utxos shrinks by exactly block1's contribution.
+    let block1_utxos = prepared1.new_outputs.len();
+    sent.remove(&prepared1.hash);
+
+    assert!(
+        !sent.contains(&prepared1.hash),
+        "removed hash must not satisfy contains()"
+    );
+    assert!(sent.contains(&prepared2.hash));
+    assert_eq!(
+        sent.known_utxos.len(),
+        utxos_after_add - block1_utxos,
+        "remove must drop only the removed block's outpoints"
+    );
+
+    // The (hash, height) entry must be gone from the batch buffer too,
+    // otherwise a later `prune_by_height` could re-insert into `sent`.
+    assert!(
+        !sent.curr_buf.iter().any(|(h, _)| h == &prepared1.hash),
+        "remove must drop the (hash, height) entry from curr_buf"
+    );
+    assert!(sent.curr_buf.iter().any(|(h, _)| h == &prepared2.hash));
+
+    // Removing a hash that isn't tracked is a no-op.
+    let block3 = block1.make_fake_child();
+    sent.remove(&block3.hash());
+    assert!(sent.contains(&prepared2.hash));
 
     Ok(())
 }

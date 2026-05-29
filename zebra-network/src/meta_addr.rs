@@ -445,6 +445,19 @@ impl MetaAddr {
         }
     }
 
+    /// Returns a [`MetaAddrChange::UpdateMisbehavior`] for a peer that has misbehaved.
+    ///
+    /// Canonicalizes the address to match the form stored by a successful handshake
+    /// (`new_connected`). On Linux dual-stack sockets, inbound IPv4 connections
+    /// arrive as IPv4-mapped IPv6 addresses (`::ffff:A.B.C.D`); without
+    /// canonicalization, `apply_to_meta_addr` panics on the addr invariant.
+    pub fn new_misbehavior(addr: PeerSocketAddr, score_increment: u32) -> MetaAddrChange {
+        UpdateMisbehavior {
+            addr: canonical_peer_addr(*addr),
+            score_increment,
+        }
+    }
+
     /// Create a new `MetaAddr` for a peer that has just shut down.
     pub fn new_shutdown(addr: PeerSocketAddr) -> MetaAddrChange {
         // TODO: if the peer shut down in the Responded state, preserve that

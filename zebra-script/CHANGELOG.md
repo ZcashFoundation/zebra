@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.0.0] - 2026-05-28
+
+This release fixes one consensus security issue:
+
+- Route P2SH input sigop counts through the C++ FFI (`legacy_sigop_count_script`)
+  instead of the pure-Rust `script::Code::sig_op_count` so the result matches
+  `zcashd`'s `CScript::GetSigOpCount(true)` exactly. Prevents a consensus split
+  on attacker-chosen redeem scripts
+  ([GHSA-gf9r-m956-97qx](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-gf9r-m956-97qx)).
+
+The impact of the issue for crate users will depend on the particular usage;
+if you use it as a building block for a consensus node, you should update.
+
+### Changed
+
+- `zebra-chain` dependency bumped to `8.0.0`. No direct public-API changes in
+  this crate beyond the consensus fix above, but consumers inherit
+  `zebra-chain`'s breaking changes (notably `transparent::Input::Coinbase.data`
+  changing from `CoinbaseData` to `Vec<u8>`).
+
 ## [6.0.1] - 2026-05-04
 
 This release fixes one security issue:

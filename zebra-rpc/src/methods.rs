@@ -2881,7 +2881,7 @@ where
                 }
                 zcash_address::unified::Receiver::Sapling(data) => {
                     let addr = zebra_chain::primitives::Address::try_from_sapling(network, data)
-                        .expect("using data already decoded as valid");
+                        .map_error(server::error::LegacyCode::InvalidParameter)?;
                     sapling = Some(addr.payment_address().unwrap_or_default());
                 }
                 zcash_address::unified::Receiver::P2pkh(data) => {

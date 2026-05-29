@@ -373,6 +373,27 @@ impl SentHashes {
         self.sent.contains_key(hash)
     }
 
+    /// Removes a `hash` from `SentHashes`, dropping its outpoints from `known_utxos`
+    /// and its entry from whichever batch buffer holds it.
+    ///
+    /// Called when the block write task rejects a block, so that a subsequent
+    /// re-delivery of a block with the same hash is not short-circuited as a
+    /// "duplicate" against a rejected variant that never reached any chain.
+    pub fn remove(&mut self, hash: &block::Hash) {
+        let Some(outpoints) = self.sent.remove(hash) else {
+            return;
+        };
+
+        for outpoint in &outpoints {
+            self.known_utxos.remove(outpoint);
+        }
+
+        self.curr_buf.retain(|(h, _)| h != hash);
+        for buf in &mut self.bufs {
+            buf.retain(|(h, _)| h != hash);
+        }
+    }
+
     /// Returns true if the chain can be forked at the provided hash
     pub fn can_fork_chain_at(&self, hash: &block::Hash) -> bool {
         self.can_fork_chain_at_hashes && self.contains(hash)

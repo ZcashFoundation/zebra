@@ -357,7 +357,9 @@ impl TransactionError {
             | DisabledAddToSproutPool
             | NotEnoughFlags
             | WrongConsensusBranchId
-            | MissingConsensusBranchId => 100,
+            | MissingConsensusBranchId
+            | LockedUntilAfterBlockHeight(_)
+            | LockedUntilAfterBlockTime(_) => 100,
 
             _other => 0,
         }
@@ -469,7 +471,12 @@ impl BlockError {
             | MaxHeight(_, _, _)
             | InvalidDifficulty(_, _)
             | TargetDifficultyLimit(_, _, _, _, _)
-            | DifficultyFilter(_, _, _, _) => 100,
+            | DifficultyFilter(_, _, _, _)
+            | NoTransactions
+            | BadMerkleRoot { .. }
+            | WrongTransactionConsensusBranchId
+            | TooManyTransparentSignatureOperations { .. } => 100,
+            Transaction(err) => err.mempool_misbehavior_score(),
             _other => 0,
         }
     }

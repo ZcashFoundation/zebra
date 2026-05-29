@@ -5,17 +5,30 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Unreleased]
+## [Zebra 4.5.0](https://github.com/ZcashFoundation/zebra/releases/tag/v4.5.0) - 2026-05-28
+
+This release fixes several critical security issues. We recommend node operators update to
+4.5.0 as soon as possible.
+
+The release also adds support for mining to a shielded address.
+
+### Breaking Changes
+
+This release has the following breaking changes:
 
 ### Security
 
+- Remove rejected block hashes from `SentHashes` so honest re-deliveries are
+  not short-circuited as duplicates
+  ([GHSA-4m69-67m6-prqp](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-4m69-67m6-prqp)).
+  Thanks to @ipwning and @x15-eth for reporting the issue.
 - Cap the upfront `Vec::with_capacity` reservation in
   `zcash_deserialize_external_count` so a peer-supplied `CompactSize`
   cannot force a large allocation before any element bytes are read. The
   `Vec` grows naturally via `push()` as real data arrives. Complements
   the per-type `max_allocation()` caps from PR #10494
-  ([GHSA-xr93-pcq3-pxf8](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-xr93-pcq3-pxf8)).
-  CWE-770.
+  ([GHSA-xr93-pcq3-pxf8](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-xr93-pcq3-pxf8),
+  [#10563](https://github.com/ZcashFoundation/zebra/pull/10563)). CWE-770.
 - Cap `block::Hash::max_allocation` at `MAX_BLOCK_LOCATOR_LENGTH = 101`
   (matching Bitcoin Core's `MAX_LOCATOR_SZ` in `net_processing.cpp`) and
   `CountedHeader::max_allocation` at the existing
@@ -25,17 +38,79 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   and ~1,409 respectively, allowing a post-handshake peer to force ~2 MiB
   of upfront `Vec` preallocation per `getblocks`/`getheaders` message
   before any payload bytes were read. Same fix shape as
-  GHSA-xr93-pcq3-pxf8 for `AddrV1`/`AddrV2` (PR #10494). CWE-770.
+  GHSA-xr93-pcq3-pxf8 for `AddrV1`/`AddrV2` (PR #10494)
+  ([#10570](https://github.com/ZcashFoundation/zebra/pull/10570)). CWE-770.
+- Reject non-ASCII `longpollid` values in the `getblocktemplate` RPC
+  ([GHSA-qv2r-v3mx-f4pf](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-qv2r-v3mx-f4pf)).
+  Thanks to @sangsoo-osec for reporting the issue.
+- Return error for malformed Sapling receiver in `z_listunifiedreceivers` RPC
+  ([GHSA-c8w6-x74f-vmg3](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-c8w6-x74f-vmg3)).
+  Thanks to @robustfengbin for reporting the issue.
+- Prevent sync restart from poisoning the peer inventory registry, and score
+  peers that send consensus-invalid blocks
+  ([GHSA-gvjc-3w7c-92jx](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-gvjc-3w7c-92jx),
+  [GHSA-rj6c-83wx-jxf2](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-rj6c-83wx-jxf2),
+  [GHSA-hwxr-r2v4-9f2p](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-hwxr-r2v4-9f2p)).
+  Thanks to @ipwning and @sangsoo-osec for reporting the issues.
+- Avoid panic in address-balance computation on same-address self-spend chains
+  by applying transparent debits before credits per transaction
+  ([GHSA-w834-cf6p-9m9w](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-w834-cf6p-9m9w)).
+  Thanks to @sangsoo-osec for reporting the issue.
+- Reject repeated shielded transactions cleanly before the defence-in-depth
+  `tx_loc_by_hash` assertion, avoiding a panic
+  ([GHSA-hhm7-qrv5-h4r6](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-hhm7-qrv5-h4r6)).
+  Thanks to @Haxatron for reporting the issue.
+- Cap pre-handshake message body length in `Codec` to 1 KB; the cap is raised
+  to `MAX_PROTOCOL_MESSAGE_LEN` after handshake completion
+  ([GHSA-h72h-ppcx-998p](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-h72h-ppcx-998p)).
+  Thanks to @ouicate for reporting the issue.
+- Fix sigop undercount in P2SH inputs by routing through the
+  `legacy_sigop_count_script` FFI to match `zcashd`'s
+  `CScript::GetSigOpCount(true)` exactly, preventing a consensus split on
+  attacker-chosen redeem scripts
+  ([GHSA-gf9r-m956-97qx](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-gf9r-m956-97qx)).
+  Thanks to @samsulselfut for reporting the issue.
+- Cap the inbound mempool download queue per advertising peer so a single
+  peer cannot monopolize verification capacity
+  ([GHSA-4fc2-h7jh-287c](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-4fc2-h7jh-287c)).
+  Thanks to @dingledropper for reporting the issue.
+- Canonicalize IPv4-mapped addresses on the misbehavior path so a peer cannot
+  evade scoring by alternating between IPv4 and IPv4-mapped-IPv6 forms of the
+  same address
+  ([GHSA-63wg-wjjj-7cp8](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-63wg-wjjj-7cp8)).
+  Thanks to @Haxatron for reporting the issue.
+- Drain the mempool downloader's `cancel_handles` entry when the outer
+  verification timeout fires, so the queued `Gossip::Tx(UnminedTx)` is not
+  retained until the process runs out of memory. Without the fix, a single peer
+  that gets each pushed transaction to hit `RATE_LIMIT_DELAY` could leak up to
+  ~2 MB per transaction monotonically
+  ([GHSA-65jj-fmw8-468q](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-65jj-fmw8-468q)).
+  Thanks to @AnticsDecoded for reporting the issue.
+- Pop Sapling/Orchard subtrees when popping non-finalized tip
+  ([GHSA-2gf8-q9rr-jq3h](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-2gf8-q9rr-jq3h)).
+  Thanks to @dingledropper for reporting the issue.
 
 ### Added
 
 - Startup warning on Linux when `net.ipv4.tcp_slow_start_after_idle` is enabled (which resets TCP congestion windows between block requests and significantly reduces single-peer block-propagation throughput on long-haul links), with a "Linux TCP tuning for block propagation" troubleshooting section ([#10513](https://github.com/ZcashFoundation/zebra/pull/10513))
-- Support ZIP-213
+- Support for ZIP-213 (Shielded Coinbase) ([#10048](https://github.com/ZcashFoundation/zebra/pull/10048))
+
+### Changed
+
+- Renamed `testnet_parameters` in the network config; use `[network.params]`
+  instead ([#10051](https://github.com/ZcashFoundation/zebra/pull/10051)). The
+  old format is still accepted.
 
 ### Fixed
 
-- Avoid panicking in the address-book ban path when `network.max_connections_per_ip > 1`. Guard the optional `most_recent_by_ip` cache instead of unwrapping it, so a ban-threshold misbehavior update no longer crashes the address-book updater and poisons the shared mutex ([#10580](https://github.com/ZcashFoundation/zebra/issues/10580))
-- Propagate transaction-level value-balance errors from `Block::chain_value_pool_change()` instead of silently dropping them. The previous `flat_map(Result)` aggregation relied on `Result<T, E>: IntoIterator` and yielded zero items on `Err`, so a failing transaction was omitted from the block sum rather than surfacing as a `ValueBalanceError` ([#10585](https://github.com/ZcashFoundation/zebra/issues/10585))
+- Avoid panicking in the address-book ban path when `network.max_connections_per_ip > 1`. Guard the optional `most_recent_by_ip` cache instead of unwrapping it, so a ban-threshold misbehavior update no longer crashes the address-book updater and poisons the shared mutex ([#10589](https://github.com/ZcashFoundation/zebra/pull/10589))
+- Propagate transaction-level value-balance errors from `Block::chain_value_pool_change()` instead of silently dropping them. The previous `flat_map(Result)` aggregation relied on `Result<T, E>: IntoIterator` and yielded zero items on `Err`, so a failing transaction was omitted from the block sum rather than surfacing as a `ValueBalanceError` ([#10590](https://github.com/ZcashFoundation/zebra/pull/10590))
+- Solve Rust 1.97 beta clippy lints ([#10644](https://github.com/ZcashFoundation/zebra/pull/10644))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@ValarDragon, @andres-pcg, @conradoplg, @dingledropper, @evan-forbes, @gustavovalverde, @oxarbitrage, @syszery, @upbqdn, @zmanian.
 
 ## [Zebra 4.4.1](https://github.com/ZcashFoundation/zebra/releases/tag/v4.4.1) - 2026-05-04
 
@@ -86,6 +161,9 @@ operators update to 4.4.0.
   `FindHeaders` responses, freeing fanout slots for useful peers. Stall
   classification happens inside `PeerSet::route_p2c`, so coverage spans both
   request types without a separate per-IP guard.
+- Prevent sync restart from poisoning the peer inventory registry ([GHSA-gvjc-3w7c-92jx](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-gvjc-3w7c-92jx)).
+- Score and penalize peers that send consensus-invalid blocks ([GHSA-rj6c-83wx-jxf2](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-rj6c-83wx-jxf2), [GHSA-hwxr-r2v4-9f2p](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-hwxr-r2v4-9f2p)).
+- Cap pre-handshake message body length in Codec to 1 KB ([GHSA-h72h-ppcx-998p](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-h72h-ppcx-998p)).
 
 ### Added
 
