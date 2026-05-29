@@ -403,6 +403,28 @@ jobs:
           if gcloud compute instance-templates describe "${TEMPLATE_NAME}" &>/dev/null; then
             exit 0
           fi
+
+          # Bake ZEBRA_NETWORK__EXTERNAL_ADDR=<IP>:<port> into --container-env
+          # using the static IP pinned per-(network, zone) by the "Assign static
+          # IP" step below. Without this, zebrad advertises 0.0.0.0:${P2P} (the
+          # listen address) in outgoing Version messages, the address sanitizer
+          # in zebra-network/src/meta_addr.rs refuses to gossip unspecified
+          # addresses, and the node is silently undiscoverable to other peers.
+          # The IP lookup itself gates this: deploys without a reserved IP
+          # (PR/feature branches today) get an empty result and skip the env var.
+          case "${ZONE_LETTER}" in
+            b) SUFFIX="" ;;
+            c) SUFFIX="-secondary" ;;
+            d) SUFFIX="-tertiary" ;;
+          esac
+          IP_NAME="zebra-${NETWORK}${SUFFIX}"
+          IP_ADDRESS=$(gcloud compute addresses describe "${IP_NAME}" \
+            --region="${{ vars.GCP_REGION }}" --format='value(address)' 2>/dev/null || true)
+          EXTERNAL_ADDR_ENV=""
+          if [ -n "${IP_ADDRESS}" ]; then
+            EXTERNAL_ADDR_ENV=",ZEBRA_NETWORK__EXTERNAL_ADDR=${IP_ADDRESS}:${P2P}"
+          fi
+
           gcloud compute instance-templates create-with-container "${TEMPLATE_NAME}" \
             --machine-type=${{ vars.GCP_SMALL_MACHINE }} \
             --provisioning-model=SPOT \
@@ -413,7 +435,7 @@ jobs:
             --container-mount-disk="mount-path=/home/zebra/.cache/zebra,name=${DISK_NAME},mode=rw" \
             --container-stdin --container-tty \
             --container-image="${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}" \
-            --container-env="ZEBRA_NETWORK__NETWORK=${{ matrix.network }},ZEBRA_NETWORK__LISTEN_ADDR=0.0.0.0:${P2P},LOG_FILE=${LOG_FILE},SENTRY_DSN=${{ vars.SENTRY_DSN }},SENTRY_ENVIRONMENT=${{ needs.set-matrix.outputs.environment }},GITHUB_ACTIONS=${GITHUB_ACTIONS},GITHUB_EVENT_NAME=${GITHUB_EVENT_NAME},GITHUB_REF_POINT_SLUG_URL=${GITHUB_REF_POINT_SLUG_URL},GITHUB_SHA=${GITHUB_SHA},GITHUB_RUN_ID=${GITHUB_RUN_ID},GITHUB_RUN_ATTEMPT=${GITHUB_RUN_ATTEMPT},GITHUB_WORKFLOW=${GITHUB_WORKFLOW},GITHUB_JOB=${GITHUB_JOB},CI_PR_NUMBER=${{ github.event.pull_request.number || '' }},ZEBRA_HEALTH__LISTEN_ADDR=0.0.0.0:8080,ZEBRA_HEALTH__MIN_CONNECTED_PEERS=1,ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:${RPC}" \
+            --container-env="ZEBRA_NETWORK__NETWORK=${{ matrix.network }},ZEBRA_NETWORK__LISTEN_ADDR=0.0.0.0:${P2P},LOG_FILE=${LOG_FILE},SENTRY_DSN=${{ vars.SENTRY_DSN }},SENTRY_ENVIRONMENT=${{ needs.set-matrix.outputs.environment }},GITHUB_ACTIONS=${GITHUB_ACTIONS},GITHUB_EVENT_NAME=${GITHUB_EVENT_NAME},GITHUB_REF_POINT_SLUG_URL=${GITHUB_REF_POINT_SLUG_URL},GITHUB_SHA=${GITHUB_SHA},GITHUB_RUN_ID=${GITHUB_RUN_ID},GITHUB_RUN_ATTEMPT=${GITHUB_RUN_ATTEMPT},GITHUB_WORKFLOW=${GITHUB_WORKFLOW},GITHUB_JOB=${GITHUB_JOB},CI_PR_NUMBER=${{ github.event.pull_request.number || '' }},ZEBRA_HEALTH__LISTEN_ADDR=0.0.0.0:8080,ZEBRA_HEALTH__MIN_CONNECTED_PEERS=1,ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:${RPC}${EXTERNAL_ADDR_ENV}" \
             --service-account=${{ vars.GCP_DEPLOYMENTS_SA }} --scopes=cloud-platform \
             --metadata=google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true \
             --labels="app=zebrad,environment=${{ needs.set-matrix.outputs.environment }},network=${NETWORK},zone=${ZONE_LETTER},created_by=${{ github.event_name }},github_ref=${{ env.GITHUB_REF_SLUG_URL }},github_sha=${{ env.GITHUB_SHA_SHORT }}" \
