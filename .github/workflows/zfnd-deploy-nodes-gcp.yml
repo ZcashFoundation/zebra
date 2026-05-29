@@ -388,6 +388,25 @@ jobs:
             --size=400 --type=pd-balanced \
             --labels="app=zebrad,environment=${ENV},network=${NETWORK},zone=${ZONE_LETTER},created_by=${{ github.event_name }},github_ref=${{ env.GITHUB_REF_SLUG_URL }},github_sha=${{ env.GITHUB_SHA_SHORT }}"
 
+      # Single source of truth for the zone-suffix to reserved-IP mapping.
+      # Gated to stable deploys so feature-branch dispatches to dev can't
+      # advertise a prod IP that isn't actually attached to the MIG.
+      - name: Resolve reserved external IP
+        if: ${{ needs.set-matrix.outputs.environment == 'prod' || github.ref_name == 'main' }}
+        env:
+          GCP_REGION: ${{ vars.GCP_REGION }}
+        run: |
+          case "${ZONE_LETTER}" in
+            b) SUFFIX="" ;;
+            c) SUFFIX="-secondary" ;;
+            d) SUFFIX="-tertiary" ;;
+          esac
+          IP_NAME="zebra-${NETWORK}${SUFFIX}"
+          IP_ADDRESS=$(gcloud compute addresses describe "${IP_NAME}" \
+            --region="${GCP_REGION}" --format='value(address)' 2>/dev/null || true)
+          echo "IP_NAME=${IP_NAME}" >> "$GITHUB_ENV"
+          echo "IP_ADDRESS=${IP_ADDRESS}" >> "$GITHUB_ENV"
+
       - name: Create instance template
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.log_file }}" ]; then
@@ -404,19 +423,8 @@ jobs:
             exit 0
           fi
 
-          # Inline the reserved per-zone IP as ZEBRA_NETWORK__EXTERNAL_ADDR
-          # in --container-env. The zone-suffix mapping must match the
-          # "Assign static IP" step below. Empty lookup leaves it unset.
-          case "${ZONE_LETTER}" in
-            b) SUFFIX="" ;;
-            c) SUFFIX="-secondary" ;;
-            d) SUFFIX="-tertiary" ;;
-          esac
-          IP_NAME="zebra-${NETWORK}${SUFFIX}"
-          IP_ADDRESS=$(gcloud compute addresses describe "${IP_NAME}" \
-            --region="${{ vars.GCP_REGION }}" --format='value(address)' 2>/dev/null || true)
           EXTERNAL_ADDR_ENV=""
-          if [ -n "${IP_ADDRESS}" ]; then
+          if [ -n "${IP_ADDRESS:-}" ]; then
             EXTERNAL_ADDR_ENV=",ZEBRA_NETWORK__EXTERNAL_ADDR=${IP_ADDRESS}:${P2P}"
           fi
 
@@ -461,27 +469,15 @@ jobs:
             --stateful-disk="device-name=${DISK_NAME},auto-delete=on-permanent-instance-deletion" \
             --zone="${ZONE}"
 
-      # Assign one static IP per zone, deterministically:
-      #   zone b -> primary (`zebra-${network}`)
-      #   zone c -> secondary (`zebra-${network}-secondary`)
-      #   zone d -> tertiary (`zebra-${network}-tertiary`)
-      # Skipped for feature-branch dispatches to dev (PR smoke tests use ephemeral IPs).
-      # Empirically `instance-configs create --stateful-external-ip` accepts
-      # STAGING / RUNNING-UNKNOWN instances; a short bounded poll handles the
-      # async gap between MIG-create returning and list-instances reporting.
+      # Bind the reserved IP resolved earlier to the fresh MIG instance.
+      # `instance-configs create --stateful-external-ip` accepts STAGING /
+      # RUNNING-UNKNOWN instances; the short poll handles the async gap
+      # between MIG-create returning and list-instances reporting.
       - name: Assign static IP (fresh MIG, stable deploy)
         if: ${{ steps.does-group-exist.outcome == 'failure' && (needs.set-matrix.outputs.environment == 'prod' || github.ref_name == 'main') }}
         run: |
-          case "${ZONE_LETTER}" in
-            b) SUFFIX="" ;;
-            c) SUFFIX="-secondary" ;;
-            d) SUFFIX="-tertiary" ;;
-          esac
-          IP_NAME="zebra-${NETWORK}${SUFFIX}"
-          IP_ADDRESS=$(gcloud compute addresses describe "${IP_NAME}" \
-            --region="${{ vars.GCP_REGION }}" --format='value(address)' 2>/dev/null || true)
-          if [ -z "${IP_ADDRESS}" ]; then
-            echo "::warning::${IP_NAME} not reserved; skipping"
+          if [ -z "${IP_ADDRESS:-}" ]; then
+            echo "::warning::${IP_NAME:-zebra-${NETWORK}} not reserved; skipping"
             exit 0
           fi
           for _ in $(seq 1 30); do
