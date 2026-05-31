@@ -2,6 +2,9 @@ name: Basic checks
 
 on: [push]
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -19,7 +22,10 @@ jobs:
       SNAPPY_LIB_DIR: /usr/lib/x86_64-linux-gnu
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
       - name: Show system resource summary (before cleanup)
         run: |
           df -h
@@ -35,6 +41,7 @@ jobs:
 
       - name: Install dependencies on Ubuntu
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler librocksdb-dev
+
       - name: Install formatting & linting tools
         run: rustup component add rustfmt clippy
 
@@ -47,16 +54,44 @@ jobs:
           sed -i 's|.*"--cfg", .feature="tx_v6".*|# &|' .cargo/config.toml
           sed -i 's|.*"--cfg", "zcash_unstable=\\"nu7\\"".*|# &|' .cargo/config.toml
 
-      - name: Run tests
+      - name: Run non-network tests
+        env:
+          SKIP_NETWORK_TESTS: "1"
         run: timeout --preserve-status 1h cargo test --verbose --locked
+
+      - name: Run network-sensitive tests
+        run: |
+          for attempt in 1 2 3; do
+            echo "network-sensitive tests attempt ${attempt}"
+
+            timeout --preserve-status 45m bash -c '
+              set -euo pipefail
+              cargo test -p zebra-network --lib --verbose --locked -- --test-threads=1
+              cargo test -p zebrad --test acceptance --verbose --locked -- --test-threads=1
+            ' && exit 0
+
+            status=$?
+            echo "network-sensitive tests attempt ${attempt} failed with status ${status}"
+
+            if [ "${attempt}" = "3" ]; then
+              exit "${status}"
+            fi
+
+            sleep 30
+          done
+
       - name: Run doc check
         run: cargo doc --workspace --no-deps --all-features --document-private-items --locked
+
       - name: Run format check
         run: cargo fmt -- --check
+
       - name: Run clippy
         run: cargo clippy --workspace --all-targets --features "default-release-binaries proptest-impl lightwalletd-grpc-tests zebra-checkpoints"
+
       - name: Restore cargo config
         run: git checkout -- .cargo/config.toml
+
       - name: Verify working directory is clean
         run: git diff --exit-code
 
