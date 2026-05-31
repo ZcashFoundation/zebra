@@ -19,6 +19,8 @@ pub mod testnet;
 #[cfg(test)]
 mod tests;
 
+const MAINNET_TEMPORARY_ORCHARD_DISABLING_SOFT_FORK_HEIGHT: Height = Height(3_364_000);
+
 /// An enum describing the kind of network, whether it's the production mainnet or a testnet.
 // Note: The order of these variants is important for correct bincode (de)serialization
 //       of history trees in the db format.
@@ -330,6 +332,18 @@ impl Network {
                 )
             })
             .collect()
+    }
+
+    /// Returns whether Orchard has been temporarily disabled in transactions.
+    pub fn temporary_orchard_disabling_soft_fork_active(&self, height: Height) -> bool {
+        let soft_fork_height = match self {
+            Network::Mainnet => Some(MAINNET_TEMPORARY_ORCHARD_DISABLING_SOFT_FORK_HEIGHT),
+            Network::Testnet(parameters) => {
+                parameters.temporary_orchard_disabling_soft_fork_height()
+            }
+        };
+
+        soft_fork_height.is_some_and(|h| height >= h)
     }
 }
 
