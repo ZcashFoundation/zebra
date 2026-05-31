@@ -21,7 +21,10 @@ use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{self, Block, Height},
     orchard::{Action, AuthorizedAction, Flags},
-    parameters::{testnet::ConfiguredActivationHeights, Network, NetworkUpgrade},
+    parameters::{
+        testnet::{ConfiguredActivationHeights, Parameters},
+        Network, NetworkUpgrade,
+    },
     primitives::{ed25519, x25519, Groth16Proof},
     sapling,
     serialization::{AtLeastOne, DateTime32, ZcashDeserialize, ZcashDeserializeInto},
@@ -2852,6 +2855,142 @@ async fn v5_with_duplicate_orchard_action() {
             ))
         );
     }
+}
+
+/// Checks the activation boundary of the temporary Orchard-disabling soft fork:
+/// it is inactive below the configured height and active at and above it, can be
+/// disabled entirely, and Mainnet uses its fixed activation height.
+#[test]
+fn orchard_disabling_soft_fork_activation_boundary() {
+    let _init_guard = zebra_test::init();
+
+    let soft_fork_height = Height(2_000_000);
+
+    // A Testnet with the soft fork configured to activate at `soft_fork_height`.
+    let network = Parameters::build()
+        .with_temporary_orchard_disabling_soft_fork_height(soft_fork_height)
+        .to_network()
+        .expect("failed to build configured network");
+
+    assert!(
+        !network.temporary_orchard_disabling_soft_fork_active(Height(1_999_999)),
+        "soft fork must be inactive below the configured height",
+    );
+    assert!(
+        network.temporary_orchard_disabling_soft_fork_active(soft_fork_height),
+        "soft fork must be active at the configured height",
+    );
+    assert!(
+        network.temporary_orchard_disabling_soft_fork_active(Height(2_000_001)),
+        "soft fork must be active above the configured height",
+    );
+
+    // A Testnet with the soft fork disabled is never active.
+    let disabled = Parameters::build()
+        .disable_temporary_orchard_disabling_soft_fork()
+        .to_network()
+        .expect("failed to build configured network");
+
+    assert!(
+        !disabled.temporary_orchard_disabling_soft_fork_active(Height(4_042_000)),
+        "a disabled soft fork must never be active",
+    );
+
+    // Mainnet uses a fixed activation height (3_364_000).
+    assert!(
+        !Network::Mainnet.temporary_orchard_disabling_soft_fork_active(Height(3_363_999)),
+        "Mainnet soft fork must be inactive below its fixed height",
+    );
+    assert!(
+        Network::Mainnet.temporary_orchard_disabling_soft_fork_active(Height(3_364_000)),
+        "Mainnet soft fork must be active at its fixed height",
+    );
+}
+
+/// The temporary Orchard-disabling soft fork must reject transactions that
+/// contain Orchard actions once it is active, in both block and mempool
+/// verification contexts.
+#[tokio::test]
+async fn orchard_disabling_soft_fork_rejects_orchard_actions_in_blocks_and_mempool() {
+    let _init_guard = zebra_test::init();
+
+    // Find a V5 transaction whose only shielded data is Orchard, so it both
+    // contains Orchard actions and can pass `has_inputs_and_outputs` once the
+    // Orchard flags are set below.
+    let default_testnet = Network::new_default_testnet();
+    let mut tx = v5_transactions(default_testnet.block_iter())
+        .rev()
+        .find(|transaction| {
+            transaction.inputs().is_empty()
+                && transaction.outputs().is_empty()
+                && transaction.sapling_spends_per_anchor().next().is_none()
+                && transaction.sapling_outputs().next().is_none()
+                && transaction.joinsplit_count() == 0
+        })
+        .expect("V5 tx with only Orchard actions");
+
+    // Enable spends and outputs so the transaction passes `has_inputs_and_outputs`
+    // and `has_enough_orchard_flags`, reaching the soft-fork check.
+    tx.orchard_shielded_data_mut()
+        .expect("tx without transparent, Sprout, or Sapling data must have Orchard actions")
+        .flags = Flags::ENABLE_SPENDS | Flags::ENABLE_OUTPUTS;
+
+    // Verify at the transaction's own expiry height, where its NU5 consensus
+    // branch id is valid on the default Testnet activation schedule.
+    let height = tx.expiry_height().expect("V5 tx has an expiry height");
+
+    // Configure a Testnet identical to the default public Testnet except that the
+    // Orchard-disabling soft fork activates at `height`, so it is active for this
+    // transaction.
+    let network = Parameters::build()
+        .with_temporary_orchard_disabling_soft_fork_height(height)
+        .to_network()
+        .expect("failed to build configured network");
+
+    assert!(
+        network.temporary_orchard_disabling_soft_fork_active(height),
+        "soft fork must be active at the transaction's height",
+    );
+
+    let expected = Err(TransactionError::Other(
+        "transaction has Orchard actions (temporarily disabled)".into(),
+    ));
+
+    // The soft-fork check runs before any state-service query, so the state
+    // service must never be called.
+    let block_response = Verifier::new_for_tests(
+        &network,
+        service_fn(|_| async { unreachable!("state service should not be called") }),
+    )
+    .oneshot(Request::Block {
+        transaction_hash: tx.hash(),
+        transaction: Arc::new(tx.clone()),
+        known_utxos: Arc::new(HashMap::new()),
+        known_outpoint_hashes: Arc::new(HashSet::new()),
+        height,
+        time: DateTime::<Utc>::MAX_UTC,
+    })
+    .await;
+
+    assert_eq!(
+        block_response, expected,
+        "block verification must reject a transaction with Orchard actions after the soft fork",
+    );
+
+    let mempool_response = Verifier::new_for_tests(
+        &network,
+        service_fn(|_| async { unreachable!("state service should not be called") }),
+    )
+    .oneshot(Request::Mempool {
+        transaction: tx.into(),
+        height,
+    })
+    .await;
+
+    assert_eq!(
+        mempool_response, expected,
+        "mempool verification must reject a transaction with Orchard actions after the soft fork",
+    );
 }
 
 /// Checks that the tx verifier handles consensus branch ids in V5 txs correctly.

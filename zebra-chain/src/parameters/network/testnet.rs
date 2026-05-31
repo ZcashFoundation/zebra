@@ -911,6 +911,7 @@ impl ParametersBuilder {
             post_blossom_halving_interval,
             lockbox_disbursements,
             checkpoints: _,
+            temporary_orchard_disabling_soft_fork_height: _,
         } = Self::default();
 
         self.activation_heights == activation_heights
