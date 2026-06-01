@@ -331,7 +331,8 @@ where
     /// the request.
     #[instrument(level = "debug", skip(self), fields(%hash))]
     /// Download and verify a block, routing the request to a specific source peer.
-    /// Falls back to normal routing if the source peer is not available.
+    /// If the source peer is busy, the peer set returns an error; the syncer's
+    /// retry layer handles re-requesting after a delay.
     pub async fn download_and_verify_from(
         &mut self,
         hash: block::Hash,

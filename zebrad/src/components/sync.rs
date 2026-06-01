@@ -67,6 +67,17 @@ const FANOUT: usize = 3;
 /// retries may be concurrent, inner retries are sequential.
 const BLOCK_DOWNLOAD_RETRY_LIMIT: usize = 3;
 
+/// Controls how many times the syncer will re-request a block whose download
+/// failed because no peer delivered it (a `NotFound`), before giving up and
+/// letting the normal tip re-walk handle it.
+///
+/// Without this re-request, a single missing block at the checkpoint frontier
+/// is dropped and never re-fetched, wedging the whole verify pipeline until the
+/// 8-minute `BLOCK_VERIFY_TIMEOUT` fires (#5709). Each attempt already goes
+/// through the tower-level `BLOCK_DOWNLOAD_RETRY_LIMIT` (and hedging), so this
+/// is a coarse, hash-scoped retry on top of an exhausted per-request retry.
+const MAX_BLOCK_REOBTAIN_RETRIES: u8 = 3;
+
 /// A lower bound on the user-specified checkpoint verification concurrency limit.
 ///
 /// Set to the maximum checkpoint interval, so the pipeline holds around a checkpoint's
@@ -405,9 +416,15 @@ where
     misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
 
     /// Maps block hashes to the peer that announced them via FindBlocks/ExtendTips.
-    /// Used for source-aware routing: requests are batched by source peer so the
-    /// getdata goes to a peer that actually has the block.
     source_by_hash: HashMap<block::Hash, PeerSocketAddr>,
+
+    /// Blocks whose download failed with `NotFound` and should be re-requested on
+    /// the next sync round, instead of being silently dropped (#5709).
+    reobtain_hashes: IndexSet<block::Hash>,
+
+    /// Per-hash count of how many times a `NotFound` block has been re-requested,
+    /// bounded by [`MAX_BLOCK_REOBTAIN_RETRIES`].
+    block_reobtain_retries: HashMap<block::Hash, u8>,
 }
 
 /// Polls the network to determine whether further blocks are available and
@@ -545,6 +562,8 @@ where
             past_lookahead_limit_receiver,
             misbehavior_sender,
             source_by_hash: HashMap::new(),
+            reobtain_hashes: IndexSet::new(),
+            block_reobtain_retries: HashMap::new(),
         };
 
         (new_syncer, sync_status)
@@ -595,6 +614,8 @@ where
         self.prospective_tips = HashSet::new();
 
         self.source_by_hash.clear();
+        self.reobtain_hashes.clear();
+        self.block_reobtain_retries.clear();
 
         info!(
             state_tip = ?self.latest_chain_tip.best_tip_height(),
@@ -644,6 +665,9 @@ where
             // the syncer will reset itself.
             self.handle_block_response(rsp)?;
         }
+        // Re-request any blocks that just failed with `NotFound`, before pausing
+        // on the lookahead limit (#5709).
+        self.reobtain_missing_blocks().await;
         self.update_metrics();
 
         // Pause new downloads while the syncer or downloader are past their lookahead limits.
@@ -666,6 +690,10 @@ where
             let response = self.downloads.next().await.expect("downloads is nonempty");
 
             self.handle_block_response(response)?;
+            // A block that just failed with `NotFound` is what unblocks the
+            // verifier, so re-request it now rather than waiting for the pause
+            // loop to clear — which it cannot until this block arrives (#5709).
+            self.reobtain_missing_blocks().await;
             self.update_metrics();
         }
 
@@ -700,6 +728,28 @@ where
         self.update_metrics();
 
         Ok(extra_hashes)
+    }
+
+    /// Re-issues downloads for blocks that failed with `NotFound` (#5709).
+    ///
+    /// These are re-requested even while the download pipeline is past its
+    /// lookahead limit, because a missing low block is exactly what stops the
+    /// checkpoint verifier from advancing. Waiting for the lookahead pause to
+    /// clear would deadlock — the pause cannot clear until this block arrives.
+    /// The per-hash retry count is bounded by [`MAX_BLOCK_REOBTAIN_RETRIES`].
+    async fn reobtain_missing_blocks(&mut self) {
+        if self.reobtain_hashes.is_empty() {
+            return;
+        }
+
+        for hash in std::mem::take(&mut self.reobtain_hashes) {
+            // The block was removed from the in-flight set when its download
+            // failed, so this re-queues it. A residual duplicate/queue error is
+            // benign — it means the block is already being handled.
+            if let Err(error) = self.downloads.download_and_verify(hash).await {
+                trace!(?hash, ?error, "re-download of missing block not queued");
+            }
+        }
     }
 
     /// Given a block_locator list fan out request for subsequent hashes to
@@ -1186,6 +1236,9 @@ where
             Ok((height, hash)) => {
                 trace!(?height, ?hash, "verified and committed block to state");
 
+                // The block arrived, so forget any re-request bookkeeping for it.
+                self.block_reobtain_retries.remove(&hash);
+
                 return Ok(());
             }
 
@@ -1215,6 +1268,33 @@ where
 
             Err(_) => {}
         };
+
+        // A block whose download failed because no peer delivered it (`NotFound`)
+        // is otherwise dropped here and never re-requested, which wedges the
+        // checkpoint frontier until the verify timeout (#5709). Re-queue it for
+        // the next sync round, bounded by `MAX_BLOCK_REOBTAIN_RETRIES`. Consensus
+        // failures (`Invalid`/`ValidationRequestError`) are deliberately excluded —
+        // re-downloading a block the network already rejected is pointless.
+        if let Err(BlockDownloadVerifyError::DownloadFailed { error, hash }) = &response {
+            if format!("{error:?}").contains("NotFound") {
+                let attempts = self.block_reobtain_retries.entry(*hash).or_insert(0);
+                if *attempts < MAX_BLOCK_REOBTAIN_RETRIES {
+                    *attempts += 1;
+                    self.reobtain_hashes.insert(*hash);
+                    debug!(
+                        ?hash,
+                        attempts = *attempts,
+                        "re-queueing missing block for re-download"
+                    );
+                } else {
+                    debug!(
+                        ?hash,
+                        "missing block exceeded re-download retries, dropping"
+                    );
+                    self.block_reobtain_retries.remove(hash);
+                }
+            }
+        }
 
         Self::handle_response(response)
     }
