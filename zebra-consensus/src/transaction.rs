@@ -414,7 +414,7 @@ where
             //
             // This will be treated as "Rules that apply generally before the next NU"
             // when we add the NU that re-enables Orchard actions.
-            if network.temporary_orchard_disabling_soft_fork_active(req.height()) && tx.orchard_shielded_data().is_some() {
+            if network.is_orchard_temporarily_disabled(req.height()) && tx.orchard_shielded_data().is_some() {
                 return Err(TransactionError::Other("transaction has Orchard actions (temporarily disabled)".into()));
             }
 
@@ -909,7 +909,8 @@ where
             | NetworkUpgrade::Canopy
             | NetworkUpgrade::Nu5
             | NetworkUpgrade::Nu6
-            | NetworkUpgrade::Nu6_1 => Ok(()),
+            | NetworkUpgrade::Nu6_1
+            | NetworkUpgrade::Nu6_2 => Ok(()),
 
             #[cfg(zcash_unstable = "zfuture")]
             NetworkUpgrade::ZFuture => Ok(()),
@@ -993,6 +994,7 @@ where
             NetworkUpgrade::Nu5
             | NetworkUpgrade::Nu6
             | NetworkUpgrade::Nu6_1
+            | NetworkUpgrade::Nu6_2
             | NetworkUpgrade::Nu7 => Ok(()),
 
             #[cfg(zcash_unstable = "zfuture")]

@@ -58,6 +58,9 @@ pub enum NetworkUpgrade {
     /// The Zcash protocol after the NU6.1 upgrade.
     #[serde(rename = "NU6.1")]
     Nu6_1,
+    /// The Zcash protocol after the NU6.2 upgrade.
+    #[serde(rename = "NU6.2")]
+    Nu6_2,
     /// The Zcash protocol after the NU7 upgrade.
     #[serde(rename = "NU7")]
     Nu7,
@@ -108,6 +111,9 @@ pub(super) const MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
         (NU5, Nu5),
         (NU6, Nu6),
         (NU6_1, Nu6_1),
+        // NU6.2 is left UNSCHEDULED on Mainnet so it stays inert until a height is committed.
+        // Provisional Mainnet activation height (per zcashd PR #176): 3_364_000.
+        // TODO(NU6.2): add (NU6_2, Nu6_2) once the activation height is finalized.
     ]
 };
 /// Testnet network upgrade activation heights.
@@ -133,6 +139,9 @@ pub(super) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
         (NU5, Nu5),
         (NU6, Nu6),
         (NU6_1, Nu6_1),
+        // NU6.2 is left UNSCHEDULED on default Testnet so it stays inert until a height is committed.
+        // Provisional Testnet activation height (per zcashd PR #176): 4_042_000.
+        // TODO(NU6.2): add (NU6_2, Nu6_2) once the activation height is finalized.
     ]
 };
 
@@ -226,6 +235,7 @@ pub(crate) const CONSENSUS_BRANCH_IDS: &[(NetworkUpgrade, ConsensusBranchId)] = 
     (Nu5, ConsensusBranchId(0xc2d6d0b4)),
     (Nu6, ConsensusBranchId(0xc8e71055)),
     (Nu6_1, ConsensusBranchId(0x4dec4df0)),
+    (Nu6_2, ConsensusBranchId(0x5437f330)),
     // TODO: set below to (Nu7, ConsensusBranchId(0x77190ad8)), once the same value is set in librustzcash
     #[cfg(any(test, feature = "zebra-test"))]
     (Nu7, ConsensusBranchId(0xffffffff)),
@@ -395,7 +405,7 @@ impl NetworkUpgrade {
     pub fn target_spacing(&self) -> Duration {
         let spacing_seconds = match self {
             Genesis | BeforeOverwinter | Overwinter | Sapling => PRE_BLOSSOM_POW_TARGET_SPACING,
-            Blossom | Heartwood | Canopy | Nu5 | Nu6 | Nu6_1 | Nu7 => {
+            Blossom | Heartwood | Canopy | Nu5 | Nu6 | Nu6_1 | Nu6_2 | Nu7 => {
                 POST_BLOSSOM_POW_TARGET_SPACING.into()
             }
 

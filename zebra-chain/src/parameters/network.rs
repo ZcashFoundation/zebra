@@ -19,6 +19,7 @@ pub mod testnet;
 #[cfg(test)]
 mod tests;
 
+// TODO(NU6.2): reconcile with zcashd PR #176 (3_364_000)
 const MAINNET_TEMPORARY_ORCHARD_DISABLING_SOFT_FORK_HEIGHT: Height = Height(3_363_426);
 
 /// An enum describing the kind of network, whether it's the production mainnet or a testnet.
@@ -351,6 +352,19 @@ impl Network {
             .is_some_and(|h| height >= h)
     }
 
+    /// Returns whether Orchard is temporarily disabled in transactions at `height`.
+    ///
+    /// The temporary-disable soft fork is bounded above by NU6.2, which re-enables
+    /// Orchard actions: once NU6.2 is active the temporary-disable rule no longer
+    /// applies. While NU6.2 is unscheduled this matches
+    /// [`Self::temporary_orchard_disabling_soft_fork_active`].
+    pub fn is_orchard_temporarily_disabled(&self, height: Height) -> bool {
+        self.temporary_orchard_disabling_soft_fork_active(height)
+            && NetworkUpgrade::Nu6_2
+                .activation_height(self)
+                .is_none_or(|nu6_2| height < nu6_2)
+    }
+
     /// Returns whether `height` is the first height at which the soft fork that
     /// temporarily disables Orchard actions applies.
     ///
@@ -368,17 +382,14 @@ impl Network {
     /// is active at `height`.
     ///
     /// This rule activates with the network upgrade that re-enables Orchard actions
-    /// (NU6.2), which is not yet defined; until an activation height is set it is always
-    /// inactive. It is a constricting rule, so it must not become active without a height
-    /// gate, or it would reject historical Orchard actions mined before the soft fork
-    /// that temporarily disabled them, and prevent syncing.
-    //
-    // TODO: once NU6.2 is defined, resolve its activation height per network — mirroring
-    // `temporary_orchard_disabling_soft_fork_height` (including Testnet configurability) —
-    // instead of always returning `None`.
+    /// (NU6.2). While NU6.2 is unscheduled the rule is always inactive. It is a
+    /// constricting rule, so it must stay height-gated, or it would reject historical
+    /// Orchard actions mined before the soft fork that temporarily disabled them, and
+    /// prevent syncing.
     pub fn orchard_canonical_proof_size_rule_active(&self, height: Height) -> bool {
-        let activation_height: Option<Height> = None;
-        activation_height.is_some_and(|h| height >= h)
+        NetworkUpgrade::Nu6_2
+            .activation_height(self)
+            .is_some_and(|h| height >= h)
     }
 }
 

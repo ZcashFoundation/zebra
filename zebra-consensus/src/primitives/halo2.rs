@@ -49,6 +49,37 @@ pub type BatchVerifyingKey = ItemVerifyingKey;
 /// This is the key used to verify individual items.
 pub type ItemVerifyingKey = VerifyingKey;
 
+// TODO(NU6.2): post-NU6.2 Orchard verification cannot be implemented here yet.
+//
+// NU6.2 re-enables Orchard actions and ships the *fixed* variable-base
+// scalar-multiplication Orchard circuit (the circuit bug that caused Orchard to
+// be temporarily disabled; see GHSA-2x4w-pxqw-58v9). Correctly verifying both
+// eras requires changes that depend entirely on UNRELEASED crates and APIs that
+// do not exist in the currently pinned `orchard 0.13`:
+//
+//   1. Dependency bump (blocked): the fixed circuit and the new verifying-key
+//      construction API (`VerifyingKey::build::<C>()` with circuit type params)
+//      live only in an unreleased `orchard`/`halo2`/`librustzcash` release.
+//      `orchard 0.13` exposes only the parameterless `VerifyingKey::build()`
+//      used below, so this cannot be changed without breaking the build.
+//
+//   2. Two verifying keys (blocked on 1): the verifying key changes at NU6.2 and
+//      one key cannot verify both eras. This static must become TWO keys — an
+//      insecure pre-NU6.2 key and the fixed post-NU6.2 key — once the typed
+//      `build::<C>()` API is available.
+//
+//   3. Height/era-based key selection (blocked on 1 & 2): pre-NU6.2 bundles must
+//      verify under the insecure key and NU6.2+ bundles under the fixed key.
+//      No height/era is currently threaded into halo2 verification, so the
+//      activation height (`NetworkUpgrade::Nu6_2.activation_height(network)`)
+//      must be plumbed from transaction verification
+//      (`zebra-consensus/src/transaction.rs`) through `Item`/`Verifier` into the
+//      key selection here, before `BatchValidator::validate`. NOTE: do NOT copy
+//      zcashd PR #176's shortcut of validating everything against the fixed key;
+//      that is incorrect for re-syncing pre-soft-fork Orchard blocks.
+//
+// See /tmp/nu6.2-gap-analysis.md blockers B1, B2, B3 for full detail. Until the
+// fixed-circuit crates are released, only the single key below is available.
 lazy_static::lazy_static! {
     /// The halo2 proof verifying key.
     pub static ref VERIFYING_KEY: ItemVerifyingKey = ItemVerifyingKey::build();

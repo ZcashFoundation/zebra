@@ -116,8 +116,14 @@ impl Version {
                 170_130
             }
             (Mainnet, Nu6_1) => 170_140,
-            (Testnet(params), Nu7) if params.is_default_testnet() || params.is_regtest() => 170_150,
-            (Mainnet, Nu7) => 170_160,
+            (Testnet(params), Nu6_2) if params.is_default_testnet() || params.is_regtest() => {
+                170_150
+            }
+            (Mainnet, Nu6_2) => 170_160,
+            // TODO(NU6.2): these Nu7 protocol versions are provisional, bumped above Nu6_2's
+            // 170_150/170_160. Update them when the real Nu7 values are specified.
+            (Testnet(params), Nu7) if params.is_default_testnet() || params.is_regtest() => 170_160,
+            (Mainnet, Nu7) => 170_170,
 
             // It should be fine to reject peers with earlier network protocol versions on custom testnets for now.
             (Testnet(_), _) => CURRENT_NETWORK_PROTOCOL_VERSION.0,

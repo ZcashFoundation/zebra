@@ -781,6 +781,7 @@ impl Arbitrary for Transaction {
             NetworkUpgrade::Nu5
             | NetworkUpgrade::Nu6
             | NetworkUpgrade::Nu6_1
+            | NetworkUpgrade::Nu6_2
             | NetworkUpgrade::Nu7 => prop_oneof![
                 Self::v4_strategy(ledger_state.clone()),
                 Self::v5_strategy(ledger_state)
