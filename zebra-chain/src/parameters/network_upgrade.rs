@@ -243,7 +243,7 @@ pub const POST_BLOSSOM_POW_TARGET_SPACING: u32 = 75;
 /// activation onwards.
 ///
 /// `OrchardBlockActionLimit` in the draft "Shorter Block Target Spacing" ZIP.
-pub const ORCHARD_BLOCK_ACTION_LIMIT: u32 = 306;
+pub const ORCHARD_BLOCK_ACTION_LIMIT: u32 = 330;
 
 /// Per-block limit on the total number of Sapling spends + outputs, applied
 /// from NU7 activation onwards.
@@ -265,7 +265,7 @@ pub const SPROUT_BLOCK_JOINSPLIT_LIMIT: u32 = 25;
 /// because each JoinSplit produces 2 shielded outputs.
 ///
 /// `GlobalShieldedBudget` in the draft "Shorter Block Target Spacing" ZIP.
-pub const GLOBAL_SHIELDED_BUDGET: u32 = 306;
+pub const GLOBAL_SHIELDED_BUDGET: u32 = 330;
 
 /// The averaging window for difficulty threshold arithmetic mean calculations.
 ///
