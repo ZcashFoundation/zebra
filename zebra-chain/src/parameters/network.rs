@@ -334,16 +334,34 @@ impl Network {
             .collect()
     }
 
-    /// Returns whether Orchard has been temporarily disabled in transactions.
-    pub fn temporary_orchard_disabling_soft_fork_active(&self, height: Height) -> bool {
-        let soft_fork_height = match self {
+    /// Returns the height at which the soft fork that temporarily disables Orchard
+    /// actions in transactions activates, if it is configured for this network.
+    pub fn temporary_orchard_disabling_soft_fork_height(&self) -> Option<Height> {
+        match self {
             Network::Mainnet => Some(MAINNET_TEMPORARY_ORCHARD_DISABLING_SOFT_FORK_HEIGHT),
             Network::Testnet(parameters) => {
                 parameters.temporary_orchard_disabling_soft_fork_height()
             }
-        };
+        }
+    }
 
-        soft_fork_height.is_some_and(|h| height >= h)
+    /// Returns whether Orchard has been temporarily disabled in transactions.
+    pub fn temporary_orchard_disabling_soft_fork_active(&self, height: Height) -> bool {
+        self.temporary_orchard_disabling_soft_fork_height()
+            .is_some_and(|h| height >= h)
+    }
+
+    /// Returns whether `height` is the first height at which the soft fork that
+    /// temporarily disables Orchard actions applies.
+    ///
+    /// This is the boundary at which the mempool must revalidate its contents, to drop
+    /// any transactions containing Orchard actions that were accepted before the soft
+    /// fork activated.
+    pub fn is_temporary_orchard_disabling_soft_fork_activation_height(
+        &self,
+        height: Height,
+    ) -> bool {
+        self.temporary_orchard_disabling_soft_fork_height() == Some(height)
     }
 }
 
