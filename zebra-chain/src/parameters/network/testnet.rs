@@ -56,8 +56,6 @@ const TESTNET_GENESIS_HASH: &str =
 /// [zcashd regtest halving interval](https://github.com/zcash/zcash/blob/v5.10.0/src/consensus/params.h#L252)
 const PRE_BLOSSOM_REGTEST_HALVING_INTERVAL: HeightDiff = 144;
 
-const TEMPORARY_ORCHARD_DISABLING_SOFT_FORK_HEIGHT: Height = Height(4_042_000);
-
 /// Configurable funding stream recipient for configured Testnets.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(deny_unknown_fields)]
@@ -517,9 +515,7 @@ impl Default for ParametersBuilder {
                 .map(|(addr, amount)| (addr.to_string(), *amount))
                 .collect(),
             checkpoints: TESTNET_CHECKPOINT_LIST.clone(),
-            temporary_orchard_disabling_soft_fork_height: Some(
-                TEMPORARY_ORCHARD_DISABLING_SOFT_FORK_HEIGHT,
-            ),
+            temporary_orchard_disabling_soft_fork_height: None,
         }
     }
 }
