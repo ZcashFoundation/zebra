@@ -418,6 +418,30 @@ where
                 return Err(TransactionError::Other("transaction has Orchard actions (temporarily disabled)".into()));
             }
 
+            // From the network upgrade that re-enables Orchard actions (NU6.2), require
+            // that any Orchard proof has the canonical length for its number of actions.
+            // A proof that is present but not canonically sized can be padded with
+            // arbitrary trailing data without affecting its validity, allowing excess
+            // bandwidth and storage costs to be imposed while paying only fees sized to a
+            // canonical proof (GHSA-2x4w-pxqw-58v9).
+            //
+            // This is a constricting rule, so it is gated on that network upgrade:
+            // Orchard actions mined before it, under earlier rules that did not enforce
+            // the proof size, must remain valid so that nodes can sync and reindex the
+            // chain before the soft fork that temporarily disabled Orchard. Orchard
+            // bundles are deserialized leniently, so the size is checked here, where the
+            // block height is available, rather than during parsing.
+            //
+            // The gate is currently inert pending the definition of NU6.2; see
+            // `Network::orchard_canonical_proof_size_rule_active`.
+            if network.orchard_canonical_proof_size_rule_active(req.height()) {
+                if let Some(orchard_shielded_data) = tx.orchard_shielded_data() {
+                    if !orchard_shielded_data.proof_size_is_canonical() {
+                        return Err(TransactionError::OrchardProofSize);
+                    }
+                }
+            }
+
             // Validate the coinbase input consensus rules
             if req.is_mempool() && tx.is_coinbase() {
                 return Err(TransactionError::CoinbaseInMempool);

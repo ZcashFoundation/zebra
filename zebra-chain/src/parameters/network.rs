@@ -363,6 +363,23 @@ impl Network {
     ) -> bool {
         self.temporary_orchard_disabling_soft_fork_height() == Some(height)
     }
+
+    /// Returns whether the consensus rule requiring a canonically-sized Orchard proof
+    /// is active at `height`.
+    ///
+    /// This rule activates with the network upgrade that re-enables Orchard actions
+    /// (NU6.2), which is not yet defined; until an activation height is set it is always
+    /// inactive. It is a constricting rule, so it must not become active without a height
+    /// gate, or it would reject historical Orchard actions mined before the soft fork
+    /// that temporarily disabled them, and prevent syncing.
+    //
+    // TODO: once NU6.2 is defined, resolve its activation height per network — mirroring
+    // `temporary_orchard_disabling_soft_fork_height` (including Testnet configurability) —
+    // instead of always returning `None`.
+    pub fn orchard_canonical_proof_size_rule_active(&self, height: Height) -> bool {
+        let activation_height: Option<Height> = None;
+        activation_height.is_some_and(|h| height >= h)
+    }
 }
 
 // This is used for parsing a command-line argument for the `TipHeight` command in zebrad.
