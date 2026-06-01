@@ -2993,6 +2993,204 @@ async fn orchard_disabling_soft_fork_rejects_orchard_actions_in_blocks_and_mempo
     );
 }
 
+/// Negative control mirroring the zcashd test: a transaction without Orchard
+/// actions is unaffected by the soft fork and is still accepted while it is
+/// active.
+#[tokio::test]
+async fn orchard_disabling_soft_fork_accepts_non_orchard_transactions() {
+    let _init_guard = zebra_test::init();
+
+    // A Testnet with the Orchard-disabling soft fork active from height 1.
+    let network = Parameters::build()
+        .with_temporary_orchard_disabling_soft_fork_height(Height(1))
+        .to_network()
+        .expect("failed to build configured network");
+
+    let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
+
+    let canopy_activation_height = NetworkUpgrade::Canopy
+        .activation_height(&network)
+        .expect("Canopy activation height is specified");
+
+    let transaction_block_height =
+        (canopy_activation_height + 10).expect("transaction block height is too large");
+    let fake_source_fund_height =
+        (transaction_block_height - 1).expect("fake source fund block height is too small");
+
+    assert!(
+        network.temporary_orchard_disabling_soft_fork_active(transaction_block_height),
+        "soft fork must be active at the transaction's height",
+    );
+
+    // A transparent transfer has no Orchard actions, so the soft fork must not
+    // affect it. The input must exceed the output by enough to pay the ZIP-317
+    // conventional fee, so the transaction is otherwise valid.
+    let (input, output, known_utxos) = mock_transparent_transfer(
+        fake_source_fund_height,
+        true,
+        0,
+        Amount::try_from(10001).expect("valid amount"),
+    );
+
+    let transaction = Transaction::V4 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::Height(block::Height(0)),
+        expiry_height: (transaction_block_height + 1).expect("expiry height is too large"),
+        joinsplit_data: None,
+        sapling_shielded_data: None,
+    };
+
+    let input_outpoint = match transaction.inputs()[0] {
+        transparent::Input::PrevOut { outpoint, .. } => outpoint,
+        transparent::Input::Coinbase { .. } => panic!("requires a non-coinbase transaction"),
+    };
+
+    let verifier = Verifier::new_for_tests(&network, state.clone());
+
+    tokio::spawn(async move {
+        state
+            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::UnspentBestChainUtxo(
+                known_utxos
+                    .get(&input_outpoint)
+                    .map(|utxo| utxo.utxo.clone()),
+            ));
+
+        state
+            .expect_request_that(|req| {
+                matches!(
+                    req,
+                    zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
+                )
+            })
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
+    });
+
+    let response = verifier
+        .oneshot(Request::Mempool {
+            transaction: transaction.into(),
+            height: transaction_block_height,
+        })
+        .await;
+
+    assert!(
+        response.is_ok(),
+        "non-Orchard transaction must be accepted while the soft fork is active, got: {response:?}",
+    );
+}
+
+/// Mirrors the zcashd boundary test: the soft fork must accept an Orchard
+/// transaction one block below its activation height but reject the same
+/// transaction at the activation height.
+#[tokio::test]
+async fn orchard_disabling_soft_fork_accepts_orchard_actions_below_activation_height() {
+    let _init_guard = zebra_test::init();
+
+    // Use an unmodified Orchard-only V5 transaction from the test vectors so its
+    // proofs remain valid for the acceptance path.
+    let default_testnet = Network::new_default_testnet();
+    let tx = v5_transactions(default_testnet.block_iter())
+        .rev()
+        .find(|transaction| {
+            transaction.inputs().is_empty()
+                && transaction.outputs().is_empty()
+                && transaction.sapling_spends_per_anchor().next().is_none()
+                && transaction.sapling_outputs().next().is_none()
+                && transaction.joinsplit_count() == 0
+        })
+        .expect("V5 tx with only Orchard actions");
+
+    assert!(
+        tx.orchard_shielded_data().is_some(),
+        "test transaction must contain Orchard actions",
+    );
+
+    let height = tx.expiry_height().expect("V5 tx has an expiry height");
+
+    // The soft fork activates one block above the transaction's height, so it is
+    // inactive for this transaction and verification proceeds normally.
+    let accepting_network = Parameters::build()
+        .with_temporary_orchard_disabling_soft_fork_height(
+            (height + 1).expect("height is too large"),
+        )
+        .to_network()
+        .expect("failed to build configured network");
+
+    assert!(
+        !accepting_network.temporary_orchard_disabling_soft_fork_active(height),
+        "soft fork must be inactive below its activation height",
+    );
+
+    // The only state request for an Orchard-only transaction verified as part of
+    // a block is the nullifier and anchor check.
+    let mut state: MockService<zebra_state::Request, zebra_state::Response, _, _> =
+        MockService::build().for_prop_tests();
+    let accept_verifier = Verifier::new_for_tests(&accepting_network, state.clone());
+
+    tokio::spawn(async move {
+        state
+            .expect_request_that(|req| {
+                matches!(
+                    req,
+                    zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
+                )
+            })
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
+    });
+
+    let accept_response = accept_verifier
+        .oneshot(Request::Block {
+            transaction_hash: tx.hash(),
+            transaction: Arc::new(tx.clone()),
+            known_utxos: Arc::new(HashMap::new()),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
+            height,
+            time: DateTime::<Utc>::MAX_UTC,
+        })
+        .await;
+
+    assert!(
+        accept_response.is_ok(),
+        "Orchard transaction must be accepted below the soft fork height, got: {accept_response:?}",
+    );
+
+    // At the activation height the same transaction is rejected. The soft-fork
+    // check runs before any state query, so the state service is never called.
+    let rejecting_network = Parameters::build()
+        .with_temporary_orchard_disabling_soft_fork_height(height)
+        .to_network()
+        .expect("failed to build configured network");
+
+    let reject_response = Verifier::new_for_tests(
+        &rejecting_network,
+        service_fn(|_| async { unreachable!("state service should not be called") }),
+    )
+    .oneshot(Request::Block {
+        transaction_hash: tx.hash(),
+        transaction: Arc::new(tx),
+        known_utxos: Arc::new(HashMap::new()),
+        known_outpoint_hashes: Arc::new(HashSet::new()),
+        height,
+        time: DateTime::<Utc>::MAX_UTC,
+    })
+    .await;
+
+    assert_eq!(
+        reject_response,
+        Err(TransactionError::Other(
+            "transaction has Orchard actions (temporarily disabled)".into()
+        )),
+        "Orchard transaction must be rejected at the soft fork height",
+    );
+}
+
 /// Checks that the tx verifier handles consensus branch ids in V5 txs correctly.
 #[tokio::test]
 async fn v5_consensus_branch_ids() {
