@@ -1193,11 +1193,13 @@ where
     /// Verifies a transaction's Orchard shielded data.
     ///
     /// `network_upgrade` is the network upgrade active at the verified transaction's block
-    /// height. It selects the Orchard verifying key: the Orchard Action circuit (and its
-    /// verifying key) changed at NU6.2 to fix the variable-base scalar-multiplication bug
+    /// height. It selects the Orchard verifier: the Orchard Action circuit (and its verifying
+    /// key) changed at NU6.2 to fix the variable-base scalar-multiplication bug
     /// (GHSA-2x4w-pxqw-58v9), so pre-NU6.2 bundles must be verified against the historical
-    /// (insecure) key and NU6.2+ bundles against the fixed key. A proof from one era does
-    /// not verify under the other era's key.
+    /// (insecure) key and NU6.2+ bundles against the fixed key. A proof from one era does not
+    /// verify under the other era's key. [`primitives::halo2::verifier_for`] maps the upgrade to
+    /// the verifier holding the matching key; the two verifiers keep separate batches, so eras
+    /// are never mixed.
     fn verify_orchard_bundle(
         bundle: Option<::orchard::bundle::Bundle<::orchard::bundle::Authorized, ZatBalance>>,
         sighash: &SigHash,
@@ -1206,12 +1208,6 @@ where
         let mut async_checks = AsyncChecks::new();
 
         if let Some(bundle) = bundle {
-            let era = if network_upgrade >= NetworkUpgrade::Nu6_2 {
-                primitives::halo2::OrchardEra::PostNu6_2
-            } else {
-                primitives::halo2::OrchardEra::PreNu6_2
-            };
-
             // # Consensus
             //
             // > The proof 𝜋 MUST be valid given a primary input (cv, rt^{Orchard},
@@ -1223,10 +1219,13 @@ where
             // aggregated Halo2 proof per transaction, even with multiple
             // Actions in one transaction. So we queue it for verification
             // only once instead of queuing it up for every Action description.
+            //
+            // Route the bundle to the verifier for its circuit era: pre-NU6.2 bundles only
+            // verify under the insecure key, NU6.2+ bundles only under the fixed key.
             async_checks.push(
-                primitives::halo2::VERIFIER
+                primitives::halo2::verifier_for(network_upgrade)
                     .clone()
-                    .oneshot(primitives::halo2::Item::new(bundle, *sighash, era)),
+                    .oneshot(primitives::halo2::Item::new(bundle, *sighash)),
             );
         }
 
