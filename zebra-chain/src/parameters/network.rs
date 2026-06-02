@@ -19,7 +19,10 @@ pub mod testnet;
 #[cfg(test)]
 mod tests;
 
-// TODO(NU6.2): reconcile with zcashd PR #176 (3_364_000)
+// Mainnet temporary Orchard-disabling soft-fork height, shipped publicly in Zebra v4.5.3.
+// This is DISTINCT from the NU6.2 *activation* (re-enable) height (provisionally 3_364_000,
+// see `network_upgrade.rs`), which lands ~574 blocks later. Do NOT change this value: it is
+// already deployed, so changing it would fork from live v4.5.3 nodes in the disable window.
 const MAINNET_TEMPORARY_ORCHARD_DISABLING_SOFT_FORK_HEIGHT: Height = Height(3_363_426);
 
 /// An enum describing the kind of network, whether it's the production mainnet or a testnet.

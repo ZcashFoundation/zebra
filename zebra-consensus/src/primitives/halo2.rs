@@ -46,11 +46,6 @@ type VerifyResult = bool;
 /// The type of the batch sender channel.
 type Sender = watch::Sender<Option<VerifyResult>>;
 
-/// Temporary substitute type for fake batch verification.
-///
-/// TODO: implement batch verification
-pub type BatchVerifyingKey = ItemVerifyingKey;
-
 /// The type of a prepared verifying key.
 /// This is the key used to verify individual items.
 pub type ItemVerifyingKey = VerifyingKey;

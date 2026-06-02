@@ -5,6 +5,21 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Security
+
+- Add a consensus rule that rejects Orchard bundles whose proof has a non-canonical size,
+  effective from the NU6.2 network upgrade (GHSA-2x4w-pxqw-58v9). The rule is inert until
+  NU6.2 is assigned an activation height.
+
+### Added
+
+- Add NU6.2 network-upgrade scaffolding (consensus branch id `0x5437f330`). NU6.2 re-enables
+  Orchard actions with the fixed Orchard Action circuit and routes Orchard proofs to a
+  per-circuit verifying key (`InsecurePreNu6_2` / `FixedPostNu6_2`). NU6.2 has no committed
+  Mainnet activation height yet, so the re-enable and the proof-size rule remain inert.
+
 ## [Zebra 4.5.3](https://github.com/ZcashFoundation/zebra/releases/tag/v4.5.3) - 2026-06-01
 
 This hotfix release adds a soft fork that temporarily disables Orchard actions in

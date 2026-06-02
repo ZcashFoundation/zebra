@@ -432,7 +432,9 @@ where
             // bundles are deserialized leniently, so the size is checked here, where the
             // block height is available, rather than during parsing.
             //
-            // The gate is currently inert pending the definition of NU6.2; see
+            // The gate is currently inert because NU6.2 has no committed activation height on
+            // Mainnet or the default Testnet; it activates automatically once that height is
+            // added to MAINNET/TESTNET_ACTIVATION_HEIGHTS. See
             // `Network::orchard_canonical_proof_size_rule_active`.
             if network.orchard_canonical_proof_size_rule_active(req.height()) {
                 if let Some(orchard_shielded_data) = tx.orchard_shielded_data() {
