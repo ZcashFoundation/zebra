@@ -10,7 +10,10 @@ use std::{
 
 use futures::{future::BoxFuture, FutureExt};
 use once_cell::sync::Lazy;
-use orchard::{bundle::BatchValidator, circuit::VerifyingKey};
+use orchard::{
+    bundle::BatchValidator,
+    circuit::{FixedPostNu6_2, InsecurePreNu6_2, VerifyingKey},
+};
 use rand::thread_rng;
 use zcash_protocol::value::ZatBalance;
 use zebra_chain::transaction::SigHash;
@@ -49,40 +52,71 @@ pub type BatchVerifyingKey = ItemVerifyingKey;
 /// This is the key used to verify individual items.
 pub type ItemVerifyingKey = VerifyingKey;
 
-// TODO(NU6.2): post-NU6.2 Orchard verification cannot be implemented here yet.
-//
 // NU6.2 re-enables Orchard actions and ships the *fixed* variable-base
-// scalar-multiplication Orchard circuit (the circuit bug that caused Orchard to
-// be temporarily disabled; see GHSA-2x4w-pxqw-58v9). Correctly verifying both
-// eras requires changes that depend entirely on UNRELEASED crates and APIs that
-// do not exist in the currently pinned `orchard 0.13`:
+// scalar-multiplication Orchard circuit (the circuit bug that caused Orchard to be
+// temporarily disabled; see GHSA-2x4w-pxqw-58v9). The fix changes the Orchard Action
+// circuit, and therefore its verifying key: a proof produced under one circuit version
+// does not verify under the other key. So we must keep BOTH keys and select per bundle by
+// the block's network upgrade (era):
 //
-//   1. Dependency bump (blocked): the fixed circuit and the new verifying-key
-//      construction API (`VerifyingKey::build::<C>()` with circuit type params)
-//      live only in an unreleased `orchard`/`halo2`/`librustzcash` release.
-//      `orchard 0.13` exposes only the parameterless `VerifyingKey::build()`
-//      used below, so this cannot be changed without breaking the build.
+//   * Orchard bundles mined before NU6.2 (NU5..NU6.2) were produced by the historical,
+//     insecure circuit and only verify under the [`InsecurePreNu6_2`] key. These must keep
+//     verifying so that nodes can re-sync and reindex pre-soft-fork Orchard history.
 //
-//   2. Two verifying keys (blocked on 1): the verifying key changes at NU6.2 and
-//      one key cannot verify both eras. This static must become TWO keys — an
-//      insecure pre-NU6.2 key and the fixed post-NU6.2 key — once the typed
-//      `build::<C>()` API is available.
+//   * Orchard bundles mined at NU6.2 onward are produced by the fixed circuit and only
+//     verify under the [`FixedPostNu6_2`] key.
 //
-//   3. Height/era-based key selection (blocked on 1 & 2): pre-NU6.2 bundles must
-//      verify under the insecure key and NU6.2+ bundles under the fixed key.
-//      No height/era is currently threaded into halo2 verification, so the
-//      activation height (`NetworkUpgrade::Nu6_2.activation_height(network)`)
-//      must be plumbed from transaction verification
-//      (`zebra-consensus/src/transaction.rs`) through `Item`/`Verifier` into the
-//      key selection here, before `BatchValidator::validate`. NOTE: do NOT copy
-//      zcashd PR #176's shortcut of validating everything against the fixed key;
-//      that is incorrect for re-syncing pre-soft-fork Orchard blocks.
+// The era is threaded in from transaction verification
+// (`zebra-consensus/src/transaction.rs`, via `request.upgrade(network)`) through
+// [`Item`] into the [`Verifier`], which keeps a separate batch per era and validates each
+// batch against the matching key.
 //
-// See /tmp/nu6.2-gap-analysis.md blockers B1, B2, B3 for full detail. Until the
-// fixed-circuit crates are released, only the single key below is available.
+// NOTE: this deliberately does NOT copy zcashd PR #176's WIP shortcut of validating
+// everything against the fixed key; that is incorrect for re-syncing pre-soft-fork Orchard
+// blocks, whose proofs only verify under the insecure key.
 lazy_static::lazy_static! {
-    /// The halo2 proof verifying key.
-    pub static ref VERIFYING_KEY: ItemVerifyingKey = ItemVerifyingKey::build();
+    /// The fixed (post-NU6.2) halo2 proof verifying key.
+    ///
+    /// Built from the fixed variable-base scalar-multiplication Orchard Action circuit
+    /// shipped in NU6.2. Use this for Orchard bundles in blocks at or after the NU6.2
+    /// activation height.
+    pub static ref VERIFYING_KEY_POST_NU6_2: ItemVerifyingKey =
+        ItemVerifyingKey::build::<FixedPostNu6_2>();
+
+    /// The historical, insecure (pre-NU6.2) halo2 proof verifying key.
+    ///
+    /// Reconstructs the verifying key of the original (NU5..NU6.2) Orchard Action circuit.
+    /// Use this ONLY to verify Orchard bundles in blocks mined before the NU6.2 activation
+    /// height, so that pre-soft-fork Orchard history can be re-synced and reindexed. It must
+    /// never be used to verify post-NU6.2 bundles.
+    pub static ref VERIFYING_KEY_PRE_NU6_2: ItemVerifyingKey =
+        ItemVerifyingKey::build::<InsecurePreNu6_2>();
+}
+
+/// The Orchard circuit era of a bundle, which selects the verifying key it is checked
+/// against.
+///
+/// The Orchard Action circuit — and therefore its verifying key — changed at NU6.2 (the
+/// fixed variable-base scalar-multiplication circuit; see GHSA-2x4w-pxqw-58v9). A proof
+/// produced under one era does not verify under the other era's key, so each bundle must be
+/// checked against the key for the era of the block it appears in.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub enum OrchardEra {
+    /// Blocks before the NU6.2 activation height, verified with [`VERIFYING_KEY_PRE_NU6_2`].
+    PreNu6_2,
+    /// Blocks at or after the NU6.2 activation height, verified with
+    /// [`VERIFYING_KEY_POST_NU6_2`].
+    PostNu6_2,
+}
+
+impl OrchardEra {
+    /// Returns the verifying key for this era.
+    fn verifying_key(self) -> &'static ItemVerifyingKey {
+        match self {
+            OrchardEra::PreNu6_2 => &VERIFYING_KEY_PRE_NU6_2,
+            OrchardEra::PostNu6_2 => &VERIFYING_KEY_POST_NU6_2,
+        }
+    }
 }
 
 /// A Halo2 verification item, used as the request type of the service.
@@ -90,6 +124,9 @@ lazy_static::lazy_static! {
 pub struct Item {
     bundle: orchard::bundle::Bundle<orchard::bundle::Authorized, ZatBalance>,
     sighash: SigHash,
+    /// The Orchard circuit era of the block this bundle appears in, which selects the
+    /// verifying key. See [`OrchardEra`].
+    era: OrchardEra,
 }
 
 impl RequestWeight for Item {
@@ -99,19 +136,31 @@ impl RequestWeight for Item {
 }
 
 impl Item {
-    /// Creates a new [`Item`] from a bundle and sighash.
+    /// Creates a new [`Item`] from a bundle, sighash, and the Orchard circuit era of the
+    /// block the bundle appears in.
     pub fn new(
         bundle: orchard::bundle::Bundle<orchard::bundle::Authorized, ZatBalance>,
         sighash: SigHash,
+        era: OrchardEra,
     ) -> Self {
-        Self { bundle, sighash }
+        Self {
+            bundle,
+            sighash,
+            era,
+        }
     }
 
-    /// Perform non-batched verification of this [`Item`].
+    /// The Orchard circuit era of this item.
+    pub fn era(&self) -> OrchardEra {
+        self.era
+    }
+
+    /// Perform non-batched verification of this [`Item`] against its era's verifying key.
     ///
     /// This is useful (in combination with `Item::clone`) for implementing
     /// fallback logic when batch verification fails.
-    pub fn verify_single(self, vk: &ItemVerifyingKey) -> bool {
+    pub fn verify_single(self) -> bool {
+        let vk = self.era.verifying_key();
         let mut batch = BatchValidator::default();
         batch.queue(self);
         batch.validate(vk, thread_rng())
@@ -123,7 +172,12 @@ trait QueueBatchVerify {
 }
 
 impl QueueBatchVerify for BatchValidator {
-    fn queue(&mut self, Item { bundle, sighash }: Item) {
+    fn queue(
+        &mut self,
+        Item {
+            bundle, sighash, ..
+        }: Item,
+    ) {
         self.add_bundle(&bundle, sighash.0);
     }
 }
@@ -169,7 +223,7 @@ pub static VERIFIER: Lazy<
 > = Lazy::new(|| {
     Fallback::new(
         Batch::new(
-            Verifier::new(&VERIFYING_KEY),
+            Verifier::new(),
             HALO2_MAX_BATCH_SIZE,
             None,
             super::MAX_BATCH_LATENCY,
@@ -183,9 +237,11 @@ pub static VERIFIER: Lazy<
         // (which is possible because it doesn't capture any state), and use a BoxFuture
         // to erase the result type.
         // (We can't use BoxCloneService to erase the service type, because it is !Sync.)
+        //
+        // The fallback verifies each item against its own era's verifying key (see
+        // [`Item::verify_single`]).
         tower::service_fn(
-            (|item: Item| Verifier::verify_single_spawning(item, &VERIFYING_KEY).boxed())
-                as fn(_) -> _,
+            (|item: Item| Verifier::verify_single_spawning(item).boxed()) as fn(_) -> _,
         ),
     )
 });
@@ -196,13 +252,21 @@ pub static VERIFIER: Lazy<
 /// Halo2 verifier. It handles batching incoming requests, driving batches to
 /// completion, and reporting results.
 pub struct Verifier {
-    /// The synchronous Halo2 batch validator.
-    batch: BatchValidator,
-
-    /// The halo2 proof verification key.
+    /// The per-era synchronous Halo2 batch validators.
     ///
-    /// Making this 'static makes managing lifetimes much easier.
-    vk: &'static ItemVerifyingKey,
+    /// Orchard's verifying key changed at NU6.2 (see [`OrchardEra`]), and a single
+    /// [`BatchValidator`] is validated against exactly one verifying key. So we keep a
+    /// separate batch per era and route each incoming [`Item`] into the batch for its era,
+    /// flushing each batch against the matching key. This keeps the batching optimization
+    /// while never mixing proofs from different circuit eras into a single batch.
+    pre_nu6_2: EraBatch,
+    post_nu6_2: EraBatch,
+}
+
+/// A single-era batch and its result-broadcast channel.
+struct EraBatch {
+    /// The synchronous Halo2 batch validator for this era.
+    batch: BatchValidator,
 
     /// A channel for broadcasting the result of a batch to the futures for each batch item.
     ///
@@ -211,23 +275,44 @@ pub struct Verifier {
     tx: Sender,
 }
 
-impl Verifier {
-    fn new(vk: &'static ItemVerifyingKey) -> Self {
-        let batch = BatchValidator::default();
+impl Default for EraBatch {
+    fn default() -> Self {
         let (tx, _) = watch::channel(None);
-        Self { batch, vk, tx }
+        Self {
+            batch: BatchValidator::default(),
+            tx,
+        }
+    }
+}
+
+impl Verifier {
+    fn new() -> Self {
+        Self {
+            pre_nu6_2: EraBatch::default(),
+            post_nu6_2: EraBatch::default(),
+        }
     }
 
-    /// Returns the batch verifier and channel sender from `self`,
-    /// replacing them with a new empty batch.
-    fn take(&mut self) -> (BatchValidator, &'static BatchVerifyingKey, Sender) {
+    /// Returns a mutable reference to the [`EraBatch`] for `era`.
+    fn era_batch(&mut self, era: OrchardEra) -> &mut EraBatch {
+        match era {
+            OrchardEra::PreNu6_2 => &mut self.pre_nu6_2,
+            OrchardEra::PostNu6_2 => &mut self.post_nu6_2,
+        }
+    }
+
+    /// Returns the batch verifier, verifying key, and channel sender for `era`,
+    /// replacing the batch and channel with new empty ones.
+    fn take(&mut self, era: OrchardEra) -> (BatchValidator, &'static BatchVerifyingKey, Sender) {
+        let vk = era.verifying_key();
+        let era_batch = self.era_batch(era);
+
         // Use a new verifier and channel for each batch.
-        let batch = mem::take(&mut self.batch);
-
+        let batch = mem::take(&mut era_batch.batch);
         let (tx, _) = watch::channel(None);
-        let tx = mem::replace(&mut self.tx, tx);
+        let tx = mem::replace(&mut era_batch.tx, tx);
 
-        (batch, self.vk, tx)
+        (batch, vk, tx)
     }
 
     /// Synchronously process the batch, and send the result using the channel sender.
@@ -237,15 +322,17 @@ impl Verifier {
         let _ = tx.send(Some(result));
     }
 
-    /// Flush the batch using a thread pool, and return the result via the channel.
-    /// This returns immediately, usually before the batch is completed.
+    /// Flush all per-era batches using a thread pool, sending each result via its channel.
+    /// This returns immediately, usually before the batches are completed.
     fn flush_blocking(&mut self) {
-        let (batch, vk, tx) = self.take();
+        for era in [OrchardEra::PreNu6_2, OrchardEra::PostNu6_2] {
+            let (batch, vk, tx) = self.take(era);
 
-        // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
-        //
-        // We don't care about execution order here, because this method is only called on drop.
-        tokio::task::block_in_place(|| rayon::spawn_fifo(|| Self::verify(batch, vk, tx)));
+            // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
+            //
+            // We don't care about execution order here, because this method is only called on drop.
+            tokio::task::block_in_place(|| rayon::spawn_fifo(move || Self::verify(batch, vk, tx)));
+        }
     }
 
     /// Flush the batch using a thread pool, and return the result via the channel.
@@ -271,13 +358,11 @@ impl Verifier {
     }
 
     /// Verify a single item using a thread pool, and return the result.
-    async fn verify_single_spawning(
-        item: Item,
-        pvk: &'static ItemVerifyingKey,
-    ) -> Result<(), BoxError> {
-        // TODO: Restore code for verifying single proofs or return a result from batch.validate()
+    ///
+    /// The item is verified against its own era's verifying key (see [`Item::verify_single`]).
+    async fn verify_single_spawning(item: Item) -> Result<(), BoxError> {
         // Correctness: Do CPU-intensive work on a dedicated thread, to avoid blocking other futures.
-        if spawn_fifo(move || item.verify_single(pvk)).await? {
+        if spawn_fifo(move || item.verify_single()).await? {
             Ok(())
         } else {
             Err("could not validate orchard proof".into())
@@ -289,9 +374,8 @@ impl fmt::Debug for Verifier {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let name = "Verifier";
         f.debug_struct(name)
-            .field("batch", &"..")
-            .field("vk", &"..")
-            .field("tx", &self.tx)
+            .field("pre_nu6_2", &"..")
+            .field("post_nu6_2", &"..")
             .finish()
     }
 }
@@ -308,9 +392,14 @@ impl Service<BatchControl<Item>> for Verifier {
     fn call(&mut self, req: BatchControl<Item>) -> Self::Future {
         match req {
             BatchControl::Item(item) => {
-                tracing::trace!("got item");
-                self.batch.queue(item);
-                let mut rx = self.tx.subscribe();
+                let era = item.era();
+                tracing::trace!(?era, "got item");
+                // Route the item into the batch for its era, and subscribe its future to
+                // that era's result channel, so each item is verified against the verifying
+                // key for the circuit era of its block.
+                let era_batch = self.era_batch(era);
+                era_batch.batch.queue(item);
+                let mut rx = era_batch.tx.subscribe();
                 Box::pin(async move {
                     match rx.changed().await {
                         Ok(()) => {
@@ -339,9 +428,18 @@ impl Service<BatchControl<Item>> for Verifier {
             BatchControl::Flush => {
                 tracing::trace!("got halo2 flush command");
 
-                let (batch, vk, tx) = self.take();
+                // Flush both era batches, each against its own verifying key. The future is
+                // ready only once both batches have completed and broadcast their results.
+                let (pre_batch, pre_vk, pre_tx) = self.take(OrchardEra::PreNu6_2);
+                let (post_batch, post_vk, post_tx) = self.take(OrchardEra::PostNu6_2);
 
-                Box::pin(Self::flush_spawning(batch, vk, tx).map(Ok))
+                Box::pin(
+                    futures::future::join(
+                        Self::flush_spawning(pre_batch, pre_vk, pre_tx),
+                        Self::flush_spawning(post_batch, post_vk, post_tx),
+                    )
+                    .map(|((), ())| Ok(())),
+                )
             }
         }
     }

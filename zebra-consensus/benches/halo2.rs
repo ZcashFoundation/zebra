@@ -38,7 +38,7 @@ use zebra_chain::{
 };
 
 use tower_batch_control::RequestWeight;
-use zebra_consensus::halo2::{Item, VERIFYING_KEY};
+use zebra_consensus::halo2::{Item, OrchardEra};
 
 /// Extracts valid Halo2 items (Orchard bundles + sighashes) from NU5+ mainnet
 /// test blocks.
@@ -74,7 +74,9 @@ fn extract_halo2_items_from_blocks() -> Vec<Item> {
 
             let sighash = sighasher.sighash(zebra_chain::transaction::HashType::ALL, None);
 
-            items.push(Item::new(bundle, sighash));
+            // These mainnet test blocks are NU5-era Orchard history (mined before NU6.2),
+            // so they verify under the pre-NU6.2 verifying key.
+            items.push(Item::new(bundle, sighash, OrchardEra::PreNu6_2));
         }
     }
 
@@ -87,7 +89,6 @@ fn extract_halo2_items_from_blocks() -> Vec<Item> {
 }
 
 fn bench_halo2_verify(c: &mut Criterion) {
-    let vk = &*VERIFYING_KEY;
     let source_items = extract_halo2_items_from_blocks();
 
     let mut group = c.benchmark_group("halo2");
@@ -96,7 +97,7 @@ fn bench_halo2_verify(c: &mut Criterion) {
     group.bench_function("single bundle", |b| {
         let item = source_items[0].clone();
         b.iter(|| {
-            assert!(item.clone().verify_single(vk));
+            assert!(item.clone().verify_single());
         })
     });
 
@@ -113,7 +114,7 @@ fn bench_halo2_verify(c: &mut Criterion) {
             |b, items: &Vec<Item>| {
                 b.iter(|| {
                     for item in items {
-                        assert!(item.clone().verify_single(vk));
+                        assert!(item.clone().verify_single());
                     }
                 })
             },

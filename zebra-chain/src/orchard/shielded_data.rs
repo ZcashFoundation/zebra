@@ -20,32 +20,17 @@ use crate::{
     },
 };
 
-/// The number of bytes a canonical Orchard proof grows by for each additional action.
+/// Returns the canonical size in bytes of an Orchard proof for `num_actions` actions.
 ///
 /// An Orchard proof is a Halo2 proof whose length is exactly linear in the number of
-/// actions (circuit instances). This constant and [`ORCHARD_PROOF_BASE_BYTES`] are
-/// derived from the Orchard circuit's `halo2_proofs` `CircuitCost`, which gives a proof
-/// size of 4992 bytes for 1 action and 7264 bytes for 2 actions, i.e. a slope of
-/// `7264 - 4992 = 2272` bytes per action.
-//
-// TODO: replace these constants and `expected_proof_size` with
-// `orchard::Proof::expected_proof_size` once Zebra upgrades to an `orchard` release
-// that exposes it (0.14+).
-const ORCHARD_PROOF_BYTES_PER_ACTION: usize = 2272;
-
-/// The size in bytes of the fixed portion of a canonical Orchard proof.
-///
-/// See [`ORCHARD_PROOF_BYTES_PER_ACTION`] for the derivation: with a slope of 2272
-/// bytes per action and a proof size of 4992 bytes for 1 action, the fixed portion is
-/// `4992 - 2272 = 2720` bytes.
-const ORCHARD_PROOF_BASE_BYTES: usize = 2720;
-
-/// Returns the canonical size in bytes of an Orchard proof for `num_actions` actions.
+/// actions (circuit instances): 4992 bytes for 1 action and 7264 bytes for 2 actions,
+/// i.e. a fixed base plus 2272 bytes per action. The exact constants are owned by the
+/// `orchard` crate, which derives them from the action circuit's `halo2_proofs`
+/// `CircuitCost` and cross-checks them in its circuit tests, so we delegate to
+/// [`orchard::Proof::expected_proof_size`] rather than re-deriving them here. The
+/// `expected_proof_size_known_values` guard test cross-checks the returned values.
 pub(crate) fn expected_proof_size(num_actions: usize) -> usize {
-    // Saturating arithmetic: this feeds an untrusted-input consensus check, so avoid any
-    // possibility of an overflow panic even though `num_actions` is bounded on parse.
-    ORCHARD_PROOF_BASE_BYTES
-        .saturating_add(ORCHARD_PROOF_BYTES_PER_ACTION.saturating_mul(num_actions))
+    orchard::Proof::expected_proof_size(num_actions)
 }
 
 /// A bundle of [`Action`] descriptions and signature data.

@@ -175,6 +175,26 @@ zcash_script = "0.4.5"
 config = { version = "0.15.14", features = ["toml"] }
 which = "8.0.0"
 
+# TEMPORARY: git patches to the NU6.2 security-fix crates — the fixed Orchard
+# variable-base scalar-multiplication circuit (the bug that disabled Orchard) and
+# `orchard::Proof::expected_proof_size` — pending public releases. This is the same set
+# of crates zcashd patched in zodl-inc/zcash-security-fixes#176 (which used local path
+# checkouts), pinned to the git revisions used by zodl-inc/librustzcash-security-fixes#6
+# (branch `orchard-update`). Drop this block once the dependencies are published.
+[patch.crates-io]
+orchard = { git = "https://github.com/zodl-inc/orchard-security-fixes.git", rev = "6e76352618b6b4a7448645f0f8afae18855d5fa1" }
+halo2_proofs = { git = "https://github.com/zodl-inc/halo2-security-fixes.git", rev = "a101adb907869062593242a1946a7d6157d11899" }
+halo2_gadgets = { git = "https://github.com/zodl-inc/halo2-security-fixes.git", rev = "a101adb907869062593242a1946a7d6157d11899" }
+halo2_poseidon = { git = "https://github.com/zodl-inc/halo2-security-fixes.git", rev = "a101adb907869062593242a1946a7d6157d11899" }
+equihash = { git = "https://github.com/zodl-inc/librustzcash-security-fixes.git", rev = "2501696f47b322e1dbeb1e59910b89d87a1dd7f5" }
+zcash_address = { git = "https://github.com/zodl-inc/librustzcash-security-fixes.git", rev = "2501696f47b322e1dbeb1e59910b89d87a1dd7f5" }
+zcash_encoding = { git = "https://github.com/zodl-inc/librustzcash-security-fixes.git", rev = "2501696f47b322e1dbeb1e59910b89d87a1dd7f5" }
+zcash_history = { git = "https://github.com/zodl-inc/librustzcash-security-fixes.git", rev = "2501696f47b322e1dbeb1e59910b89d87a1dd7f5" }
+zcash_primitives = { git = "https://github.com/zodl-inc/librustzcash-security-fixes.git", rev = "2501696f47b322e1dbeb1e59910b89d87a1dd7f5" }
+zcash_proofs = { git = "https://github.com/zodl-inc/librustzcash-security-fixes.git", rev = "2501696f47b322e1dbeb1e59910b89d87a1dd7f5" }
+zcash_protocol = { git = "https://github.com/zodl-inc/librustzcash-security-fixes.git", rev = "2501696f47b322e1dbeb1e59910b89d87a1dd7f5" }
+zcash_transparent = { git = "https://github.com/zodl-inc/librustzcash-security-fixes.git", rev = "2501696f47b322e1dbeb1e59910b89d87a1dd7f5" }
+
 [workspace.metadata.release]
 
 # We always do releases from the main branch
