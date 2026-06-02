@@ -595,8 +595,18 @@ impl ChainTipChange {
         // Skipped blocks can include network upgrade activation blocks.
         // Fork changes can activate or deactivate a network upgrade.
         // So we must perform the same actions for network upgrades and skipped blocks.
+        //
+        // The soft fork that temporarily disables Orchard actions is not a network
+        // upgrade, but it has the same memory-pool requirement: once the chain tip
+        // reaches its activation height, the mempool must drop any transactions
+        // that are no longer valid under the new rule. So we also reset there.
         if Some(block.previous_block_hash) != self.last_change_hash
-            || NetworkUpgrade::is_activation_height(&self.network, block.height)
+            || NetworkUpgrade::is_activation_height(&self.network, block.height.next().unwrap())
+            || self
+                .network
+                .is_temporary_orchard_disabling_soft_fork_activation_height(
+                    block.height.next().unwrap(),
+                )
         {
             TipAction::reset_with(block)
         } else {

@@ -406,6 +406,18 @@ where
             check::has_enough_orchard_flags(&tx)?;
             check::consensus_branch_id(&tx, req.height(), &network)?;
 
+            // Soft fork: temporarily require transactions to not contain Orchard actions.
+            //
+            // This soft fork was added while NU 6.1 was the active epoch on the Zcash
+            // chain, but we apply it uniformly even if NU 6.1 is not active in case it is
+            // ported to other chains with a different sequence of NUs.
+            //
+            // This will be treated as "Rules that apply generally before the next NU"
+            // when we add the NU that re-enables Orchard actions.
+            if network.temporary_orchard_disabling_soft_fork_active(req.height()) && tx.orchard_shielded_data().is_some() {
+                return Err(TransactionError::Other("transaction has Orchard actions (temporarily disabled)".into()));
+            }
+
             // Validate the coinbase input consensus rules
             if req.is_mempool() && tx.is_coinbase() {
                 return Err(TransactionError::CoinbaseInMempool);

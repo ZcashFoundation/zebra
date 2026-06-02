@@ -477,6 +477,8 @@ pub struct ParametersBuilder {
     lockbox_disbursements: Vec<(String, Amount<NonNegative>)>,
     /// Checkpointed block hashes and heights for this network.
     checkpoints: Arc<CheckpointList>,
+    /// Height at which the soft-fork to temporarily disable Orchard in transactions activates
+    temporary_orchard_disabling_soft_fork_height: Option<Height>,
 }
 
 impl Default for ParametersBuilder {
@@ -513,6 +515,7 @@ impl Default for ParametersBuilder {
                 .map(|(addr, amount)| (addr.to_string(), *amount))
                 .collect(),
             checkpoints: TESTNET_CHECKPOINT_LIST.clone(),
+            temporary_orchard_disabling_soft_fork_height: None,
         }
     }
 }
@@ -810,6 +813,19 @@ impl ParametersBuilder {
         self.with_checkpoints(ConfiguredCheckpoints::Default(false))
     }
 
+    /// Sets the height for this network at which the soft fork that temporarily disables
+    /// Orchard transactions will activate.
+    pub fn with_temporary_orchard_disabling_soft_fork_height(mut self, height: Height) -> Self {
+        self.temporary_orchard_disabling_soft_fork_height = Some(height);
+        self
+    }
+
+    /// Disables the soft fork that would temporarily disable Orchard transactions.
+    pub fn disable_temporary_orchard_disabling_soft_fork(mut self) -> Self {
+        self.temporary_orchard_disabling_soft_fork_height = None;
+        self
+    }
+
     /// Converts the builder to a [`Parameters`] struct
     fn finish(self) -> Parameters {
         let Self {
@@ -827,6 +843,7 @@ impl ParametersBuilder {
             post_blossom_halving_interval,
             lockbox_disbursements,
             checkpoints,
+            temporary_orchard_disabling_soft_fork_height,
         } = self;
         Parameters {
             network_name,
@@ -843,6 +860,7 @@ impl ParametersBuilder {
             post_blossom_halving_interval,
             lockbox_disbursements,
             checkpoints,
+            temporary_orchard_disabling_soft_fork_height,
         }
     }
 
@@ -889,6 +907,7 @@ impl ParametersBuilder {
             post_blossom_halving_interval,
             lockbox_disbursements,
             checkpoints: _,
+            temporary_orchard_disabling_soft_fork_height: _,
         } = Self::default();
 
         self.activation_heights == activation_heights
@@ -962,6 +981,8 @@ pub struct Parameters {
     lockbox_disbursements: Vec<(String, Amount<NonNegative>)>,
     /// List of checkpointed block heights and hashes
     checkpoints: Arc<CheckpointList>,
+    /// Height at which the soft-fork to temporarily disable Orchard in transactions activates
+    temporary_orchard_disabling_soft_fork_height: Option<Height>,
 }
 
 impl Default for Parameters {
@@ -1046,6 +1067,7 @@ impl Parameters {
             post_blossom_halving_interval,
             lockbox_disbursements: _,
             checkpoints: _,
+            temporary_orchard_disabling_soft_fork_height: _,
         } = Self::new_regtest(Default::default()).expect("default regtest parameters are valid");
 
         self.network_name == network_name
@@ -1146,6 +1168,12 @@ impl Parameters {
     /// Returns the checkpoints for this network.
     pub fn checkpoints(&self) -> Arc<CheckpointList> {
         self.checkpoints.clone()
+    }
+
+    /// Returns the height at which the soft-fork to temporarily disable Orchard in
+    /// transactions activates.
+    pub fn temporary_orchard_disabling_soft_fork_height(&self) -> Option<Height> {
+        self.temporary_orchard_disabling_soft_fork_height
     }
 }
 

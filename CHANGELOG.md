@@ -5,6 +5,21 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 4.5.3](https://github.com/ZcashFoundation/zebra/releases/tag/v4.5.3) - 2026-06-01
+
+This hotfix release adds a soft fork that temporarily disables Orchard actions in
+transactions, to mitigate a security issue. We recommend node operators update to
+4.5.3 as soon as possible.
+
+### Security
+
+- Add a soft fork that temporarily rejects transactions containing Orchard actions.
+  It activates at a fixed height on Mainnet and at a configurable height on Testnet
+  (`temporary_orchard_disabling_soft_fork_height` in the network config), and the
+  mempool is revalidated at the activation height to drop any Orchard transactions
+  accepted beforehand
+  ([GHSA-jfw5-j458-pfv6](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-jfw5-j458-pfv6)).
+
 ## [Zebra 4.5.1](https://github.com/ZcashFoundation/zebra/releases/tag/v4.5.0) - 2026-05-29
 
 This hotfix release fixes a critical security issues that was not correctly
