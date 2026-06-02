@@ -1592,7 +1592,7 @@ dependencies = [
 [[package]]
 name = "equihash"
 version = "0.3.0"
-source = "git+https://github.com/zodl-inc/librustzcash-security-fixes.git?rev=2501696f47b322e1dbeb1e59910b89d87a1dd7f5#2501696f47b322e1dbeb1e59910b89d87a1dd7f5"
+source = "git+https://github.com/zodl-inc/librustzcash-security-fixes.git?rev=646f65deeafe755d82dfe9f2e554b499fdd59562#646f65deeafe755d82dfe9f2e554b499fdd59562"
 dependencies = [
  "blake2b_simd",
  "cc",
@@ -1640,7 +1640,7 @@ dependencies = [
 [[package]]
 name = "f4jumble"
 version = "0.1.1"
-source = "git+https://github.com/zodl-inc/librustzcash-security-fixes.git?rev=2501696f47b322e1dbeb1e59910b89d87a1dd7f5#2501696f47b322e1dbeb1e59910b89d87a1dd7f5"
+source = "git+https://github.com/zodl-inc/librustzcash-security-fixes.git?rev=646f65deeafe755d82dfe9f2e554b499fdd59562#646f65deeafe755d82dfe9f2e554b499fdd59562"
 dependencies = [
  "blake2b_simd",
 ]
@@ -3624,7 +3624,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 [[package]]
 name = "orchard"
 version = "0.13.1"
-source = "git+https://github.com/zodl-inc/orchard-security-fixes.git?rev=6e76352618b6b4a7448645f0f8afae18855d5fa1#6e76352618b6b4a7448645f0f8afae18855d5fa1"
+source = "git+https://github.com/zodl-inc/orchard-security-fixes.git?rev=9c1b5af87a04a4b5c4d9616c359ebcee341a37b3#9c1b5af87a04a4b5c4d9616c359ebcee341a37b3"
 dependencies = [
  "aes",
  "bitvec",
@@ -7240,7 +7240,7 @@ dependencies = [
 [[package]]
 name = "zcash_address"
 version = "0.11.0"
-source = "git+https://github.com/zodl-inc/librustzcash-security-fixes.git?rev=2501696f47b322e1dbeb1e59910b89d87a1dd7f5#2501696f47b322e1dbeb1e59910b89d87a1dd7f5"
+source = "git+https://github.com/zodl-inc/librustzcash-security-fixes.git?rev=646f65deeafe755d82dfe9f2e554b499fdd59562#646f65deeafe755d82dfe9f2e554b499fdd59562"
 dependencies = [
  "bech32",
  "bs58",
@@ -7253,7 +7253,7 @@ dependencies = [
 [[package]]
 name = "zcash_encoding"
 version = "0.4.0"
-source = "git+https://github.com/zodl-inc/librustzcash-security-fixes.git?rev=2501696f47b322e1dbeb1e59910b89d87a1dd7f5#2501696f47b322e1dbeb1e59910b89d87a1dd7f5"
+source = "git+https://github.com/zodl-inc/librustzcash-security-fixes.git?rev=646f65deeafe755d82dfe9f2e554b499fdd59562#646f65deeafe755d82dfe9f2e554b499fdd59562"
 dependencies = [
  "corez",
  "hex",
@@ -7263,7 +7263,8 @@ dependencies = [
 [[package]]
 name = "zcash_history"
 version = "0.4.0"
-source = "git+https://github.com/zodl-inc/librustzcash-security-fixes.git?rev=2501696f47b322e1dbeb1e59910b89d87a1dd7f5#2501696f47b322e1dbeb1e59910b89d87a1dd7f5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2fde17bf53792f9c756b313730da14880257d7661b5bfc69d0571c3a7c11a76d"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -7273,8 +7274,7 @@ dependencies = [
 [[package]]
 name = "zcash_keys"
 version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b340e2bc20698c4d784d920dcda1f270d076bef2b0726b732ca9ca7574d61241"
+source = "git+https://github.com/zodl-inc/librustzcash-security-fixes.git?rev=646f65deeafe755d82dfe9f2e554b499fdd59562#646f65deeafe755d82dfe9f2e554b499fdd59562"
 dependencies = [
  "bech32",
  "blake2b_simd",
@@ -7314,7 +7314,7 @@ dependencies = [
 [[package]]
 name = "zcash_primitives"
 version = "0.27.1"
-source = "git+https://github.com/zodl-inc/librustzcash-security-fixes.git?rev=2501696f47b322e1dbeb1e59910b89d87a1dd7f5#2501696f47b322e1dbeb1e59910b89d87a1dd7f5"
+source = "git+https://github.com/zodl-inc/librustzcash-security-fixes.git?rev=646f65deeafe755d82dfe9f2e554b499fdd59562#646f65deeafe755d82dfe9f2e554b499fdd59562"
 dependencies = [
  "blake2b_simd",
  "block-buffer 0.11.0-rc.3",
@@ -7344,7 +7344,7 @@ dependencies = [
 [[package]]
 name = "zcash_proofs"
 version = "0.27.0"
-source = "git+https://github.com/zodl-inc/librustzcash-security-fixes.git?rev=2501696f47b322e1dbeb1e59910b89d87a1dd7f5#2501696f47b322e1dbeb1e59910b89d87a1dd7f5"
+source = "git+https://github.com/zodl-inc/librustzcash-security-fixes.git?rev=646f65deeafe755d82dfe9f2e554b499fdd59562#646f65deeafe755d82dfe9f2e554b499fdd59562"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -7366,7 +7366,7 @@ dependencies = [
 [[package]]
 name = "zcash_protocol"
 version = "0.8.0"
-source = "git+https://github.com/zodl-inc/librustzcash-security-fixes.git?rev=2501696f47b322e1dbeb1e59910b89d87a1dd7f5#2501696f47b322e1dbeb1e59910b89d87a1dd7f5"
+source = "git+https://github.com/zodl-inc/librustzcash-security-fixes.git?rev=646f65deeafe755d82dfe9f2e554b499fdd59562#646f65deeafe755d82dfe9f2e554b499fdd59562"
 dependencies = [
  "corez",
  "document-features",
@@ -7404,7 +7404,7 @@ dependencies = [
 [[package]]
 name = "zcash_transparent"
 version = "0.7.0"
-source = "git+https://github.com/zodl-inc/librustzcash-security-fixes.git?rev=2501696f47b322e1dbeb1e59910b89d87a1dd7f5#2501696f47b322e1dbeb1e59910b89d87a1dd7f5"
+source = "git+https://github.com/zodl-inc/librustzcash-security-fixes.git?rev=646f65deeafe755d82dfe9f2e554b499fdd59562#646f65deeafe755d82dfe9f2e554b499fdd59562"
 dependencies = [
  "bip32",
  "bs58",
