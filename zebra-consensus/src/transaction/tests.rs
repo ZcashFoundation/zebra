@@ -2249,7 +2249,7 @@ async fn v5_transaction_with_exceeding_expiry_height() {
         expiry_height,
         sapling_shielded_data: None,
         orchard_shielded_data: None,
-        network_upgrade: NetworkUpgrade::Nu6_1,
+        network_upgrade: NetworkUpgrade::Nu6_2,
     };
 
     let transaction_hash = transaction.hash();
