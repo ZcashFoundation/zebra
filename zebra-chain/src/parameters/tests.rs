@@ -288,7 +288,7 @@ fn full_activation_list_contains_all_upgrades() {
     let network = Network::Mainnet;
     let full_list = network.full_activation_list();
 
-    // NU6.2 and NU7 are both unscheduled on Mainnet (no activation height committed), so they
-    // are absent from the full activation list even though they are always present in the iter.
-    assert_eq!(full_list.len(), NetworkUpgrade::iter().count() - 2);
+    // NU7 is unscheduled on Mainnet (no activation height committed), so it is absent from the
+    // full activation list even though it is always present in the iter.
+    assert_eq!(full_list.len(), NetworkUpgrade::iter().count() - 1);
 }

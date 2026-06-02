@@ -20,10 +20,15 @@ pub mod testnet;
 mod tests;
 
 // Mainnet temporary Orchard-disabling soft-fork height, shipped publicly in Zebra v4.5.3.
-// This is DISTINCT from the NU6.2 *activation* (re-enable) height (provisionally 3_364_000,
-// see `network_upgrade.rs`), which lands ~574 blocks later. Do NOT change this value: it is
+// This is DISTINCT from the NU6.2 *activation* (re-enable) height (3_364_600, see
+// `network_upgrade.rs`), which lands 1_174 blocks later. Do NOT change this value: it is
 // already deployed, so changing it would fork from live v4.5.3 nodes in the disable window.
 const MAINNET_TEMPORARY_ORCHARD_DISABLING_SOFT_FORK_HEIGHT: Height = Height(3_363_426);
+
+// Default Testnet temporary Orchard-disabling soft-fork height. As on Mainnet, this is DISTINCT
+// from the NU6.2 *activation* (re-enable) height (4_052_000, see `network_upgrade.rs`), which
+// lands 3_500 blocks later.
+const TESTNET_TEMPORARY_ORCHARD_DISABLING_SOFT_FORK_HEIGHT: Height = Height(4_048_500);
 
 /// An enum describing the kind of network, whether it's the production mainnet or a testnet.
 // Note: The order of these variants is important for correct bincode (de)serialization
@@ -359,7 +364,7 @@ impl Network {
     ///
     /// The temporary-disable soft fork is bounded above by NU6.2, which re-enables
     /// Orchard actions: once NU6.2 is active the temporary-disable rule no longer
-    /// applies. While NU6.2 is unscheduled this matches
+    /// applies. On networks where NU6.2 is unscheduled this matches
     /// [`Self::temporary_orchard_disabling_soft_fork_active`].
     pub fn is_orchard_temporarily_disabled(&self, height: Height) -> bool {
         self.temporary_orchard_disabling_soft_fork_active(height)
@@ -385,7 +390,7 @@ impl Network {
     /// is active at `height`.
     ///
     /// This rule activates with the network upgrade that re-enables Orchard actions
-    /// (NU6.2). While NU6.2 is unscheduled the rule is always inactive. It is a
+    /// (NU6.2). On networks where NU6.2 is unscheduled the rule is always inactive. It is a
     /// constricting rule, so it must stay height-gated, or it would reject historical
     /// Orchard actions mined before the soft fork that temporarily disabled them, and
     /// prevent syncing.

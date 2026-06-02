@@ -521,7 +521,9 @@ impl Default for ParametersBuilder {
                 .map(|(addr, amount)| (addr.to_string(), *amount))
                 .collect(),
             checkpoints: TESTNET_CHECKPOINT_LIST.clone(),
-            temporary_orchard_disabling_soft_fork_height: None,
+            temporary_orchard_disabling_soft_fork_height: Some(
+                super::TESTNET_TEMPORARY_ORCHARD_DISABLING_SOFT_FORK_HEIGHT,
+            ),
         }
     }
 }
@@ -1028,6 +1030,9 @@ impl Parameters {
             .with_disable_pow(true)
             .with_unshielded_coinbase_spends(true)
             .with_slow_start_interval(Height::MIN)
+            // Like the default Testnet activation heights stripped below, the default Testnet's
+            // temporary Orchard-disabling soft fork does not apply to Regtest.
+            .disable_temporary_orchard_disabling_soft_fork()
             // Removes default Testnet activation heights if not configured,
             // most network upgrades are disabled by default for Regtest in zcashd
             .with_activation_heights(activation_heights.for_regtest())?

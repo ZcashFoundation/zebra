@@ -111,9 +111,7 @@ pub(super) const MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
         (NU5, Nu5),
         (NU6, Nu6),
         (NU6_1, Nu6_1),
-        // NU6.2 is left UNSCHEDULED on Mainnet so it stays inert until a height is committed.
-        // Provisional Mainnet activation height (per zcashd PR #176): 3_364_000.
-        // TODO(NU6.2): add (NU6_2, Nu6_2) once the activation height is finalized.
+        (NU6_2, Nu6_2),
     ]
 };
 /// Testnet network upgrade activation heights.
@@ -139,9 +137,7 @@ pub(super) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
         (NU5, Nu5),
         (NU6, Nu6),
         (NU6_1, Nu6_1),
-        // NU6.2 is left UNSCHEDULED on default Testnet so it stays inert until a height is committed.
-        // Provisional Testnet activation height (per zcashd PR #176): 4_042_000.
-        // TODO(NU6.2): add (NU6_2, Nu6_2) once the activation height is finalized.
+        (NU6_2, Nu6_2),
     ]
 };
 
