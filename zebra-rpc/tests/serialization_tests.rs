@@ -1259,7 +1259,7 @@ fn test_get_peer_info() -> Result<(), Box<dyn std::error::Error>> {
     "banscore": 0,
     "subver": "/Zebra:2.1.0/",
     "version": 170140,
-    "connection_state": "Responded"
+    "connection_state": "connected"
   },
   {
     "addr": "[2000:2000:2000:0000::]:8233",
@@ -1269,7 +1269,7 @@ fn test_get_peer_info() -> Result<(), Box<dyn std::error::Error>> {
     "banscore": 0,
     "subver": "/zcashd:5.8.0/",
     "version": 170100,
-    "connection_state": "Responded"
+    "connection_state": "connected"
   }
 ]
 "#;
@@ -1281,7 +1281,7 @@ fn test_get_peer_info() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(obj[0].banscore(), 0);
     assert_eq!(obj[0].subver().as_str(), "/Zebra:2.1.0/");
     assert_eq!(obj[0].version(), 170140);
-    assert_eq!(obj[0].connection_state().as_str(), "Responded");
+    assert_eq!(obj[0].connection_state().as_str(), "connected");
 
     Ok(())
 }
@@ -1298,7 +1298,7 @@ fn test_get_peer_info_with_ping_values_serialization() -> Result<(), Box<dyn std
     "banscore": 0,
     "subver": "/Zebra:2.1.0/",
     "version": 170140,
-    "connection_state": "Responded",
+    "connection_state": "connected",
     "pingtime": 123,
     "pingwait": 45
   },
@@ -1310,7 +1310,7 @@ fn test_get_peer_info_with_ping_values_serialization() -> Result<(), Box<dyn std
     "banscore": 0,
     "subver": "/zcashd:5.8.0/",
     "version": 170100,
-    "connection_state": "Responded",
+    "connection_state": "connected",
     "pingtime": 67,
     "pingwait": 89
   }

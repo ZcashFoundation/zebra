@@ -69,6 +69,17 @@ pub enum PeerAddrState {
     AttemptPending,
 }
 
+impl std::fmt::Display for PeerAddrState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Responded => write!(f, "connected"),
+            NeverAttemptedGossiped => write!(f, "never_connected"),
+            Failed => write!(f, "failed"),
+            AttemptPending => write!(f, "connecting"),
+        }
+    }
+}
+
 impl PeerAddrState {
     /// Return true if this state is a "never attempted" state.
     pub fn is_never_attempted(&self) -> bool {

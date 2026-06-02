@@ -11,6 +11,6 @@ expression: get_peer_info
     "banscore": 0,
     "subver": "/Zebra:2.1.0/",
     "version": 170140,
-    "connection_state": "Responded"
+    "connection_state": "connected"
   }
 ]

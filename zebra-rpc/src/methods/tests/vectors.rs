@@ -3101,7 +3101,7 @@ async fn rpc_addnode() {
     assert_eq!(peer.pingwait(), &None);
     assert_eq!(peer.services().as_str(), "0000000000000000");
     assert_eq!(peer.banscore(), 0);
-    assert_eq!(peer.connection_state().as_str(), "Responded");
+    assert_eq!(peer.connection_state().as_str(), "connected");
     assert!(peer.lastrecv() > 0);
 
     mempool.expect_no_requests().await;

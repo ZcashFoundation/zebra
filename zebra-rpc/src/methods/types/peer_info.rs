@@ -30,7 +30,7 @@ pub struct PeerInfo {
     /// The negotiated protocol version
     pub(crate) version: u32,
 
-    /// The connection state (e.g. "Responded", "NeverAttemptedGossiped", "Failed", "AttemptPending")
+    /// The connection state (e.g. "connected", "never_connected", "failed", "connecting")
     pub(crate) connection_state: String,
 
     /// The round-trip ping time in seconds.
@@ -54,7 +54,7 @@ impl From<MetaAddr> for PeerInfo {
 
         let lastrecv = meta_addr.last_seen().map(|t| t.timestamp()).unwrap_or(0);
 
-        let connection_state = format!("{:?}", meta_addr.last_connection_state());
+        let connection_state = meta_addr.last_connection_state().to_string();
 
         let subver = meta_addr.user_agent().unwrap_or("").to_string();
 

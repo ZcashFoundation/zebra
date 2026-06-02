@@ -489,11 +489,17 @@ fn ipv4_mapped_misbehavior_panics_without_fix() {
     );
 
     // Handshake succeeds → address book stores the canonical (IPv4) address.
-    let previous = MetaAddr::new_connected(raw_addr, &PeerServices::NODE_NETWORK, true)
-        .into_new_meta_addr(
-            instant_now,
-            chrono_now.try_into().expect("will succeed until 2038"),
-        );
+    let previous = MetaAddr::new_connected(
+        raw_addr,
+        &PeerServices::NODE_NETWORK,
+        true,
+        String::new(),
+        crate::protocol::external::types::Version(170_100),
+    )
+    .into_new_meta_addr(
+        instant_now,
+        chrono_now.try_into().expect("will succeed until 2038"),
+    );
 
     assert_eq!(
         previous.addr(),
@@ -534,11 +540,17 @@ fn new_misbehavior_canonicalizes_ipv4_mapped_addr() {
     assert_ne!(raw_addr, canonical_addr);
 
     // Handshake stores canonical IPv4 address.
-    let previous = MetaAddr::new_connected(raw_addr, &PeerServices::NODE_NETWORK, true)
-        .into_new_meta_addr(
-            instant_now,
-            chrono_now.try_into().expect("will succeed until 2038"),
-        );
+    let previous = MetaAddr::new_connected(
+        raw_addr,
+        &PeerServices::NODE_NETWORK,
+        true,
+        String::new(),
+        crate::protocol::external::types::Version(170_100),
+    )
+    .into_new_meta_addr(
+        instant_now,
+        chrono_now.try_into().expect("will succeed until 2038"),
+    );
 
     assert_eq!(previous.addr(), canonical_addr);
 
