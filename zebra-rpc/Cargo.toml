@@ -109,16 +109,16 @@ zcash_transparent = { workspace = true }
 # Test-only feature proptest-impl
 proptest = { workspace = true, optional = true }
 
-zebra-chain = { path = "../zebra-chain", version = "8.0.0", features = [
+zebra-chain = { path = "../zebra-chain", version = "8.0.1", features = [
     "json-conversion",
 ] }
-zebra-consensus = { path = "../zebra-consensus", version = "7.0.0" }
-zebra-network = { path = "../zebra-network", version = "7.0.0" }
+zebra-consensus = { path = "../zebra-consensus", version = "7.0.1" }
+zebra-network = { path = "../zebra-network", version = "7.0.1" }
 zebra-node-services = { path = "../zebra-node-services", version = "6.0.0", features = [
     "rpc-client",
 ] }
 zebra-script = { path = "../zebra-script", version = "7.0.1" }
-zebra-state = { path = "../zebra-state", version = "7.0.0" }
+zebra-state = { path = "../zebra-state", version = "7.0.1" }
 
 [build-dependencies]
 openrpsee = { workspace = true }
@@ -136,16 +136,16 @@ proptest = { workspace = true }
 
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 
-zebra-chain = { path = "../zebra-chain", version = "8.0.0", features = [
+zebra-chain = { path = "../zebra-chain", version = "8.0.1", features = [
     "proptest-impl",
 ] }
-zebra-consensus = { path = "../zebra-consensus", version = "7.0.0", features = [
+zebra-consensus = { path = "../zebra-consensus", version = "7.0.1", features = [
     "proptest-impl",
 ] }
-zebra-network = { path = "../zebra-network", version = "7.0.0", features = [
+zebra-network = { path = "../zebra-network", version = "7.0.1", features = [
     "proptest-impl",
 ] }
-zebra-state = { path = "../zebra-state", version = "7.0.0", features = [
+zebra-state = { path = "../zebra-state", version = "7.0.1", features = [
     "proptest-impl",
 ] }
 
