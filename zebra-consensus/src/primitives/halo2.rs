@@ -269,6 +269,13 @@ pub fn verifier_for(network_upgrade: NetworkUpgrade) -> &'static VerifierService
         // NU6.2 ships the fixed circuit, and every upgrade after it inherits that fixed circuit,
         // so all of them verify under the fixed key.
         Nu6_2 | Nu7 => &VERIFIER_POST_NU6_2,
+
+        // `ZFuture` only exists under the `zcash_unstable = "zfuture"` cfg. It is a post-NU6.2
+        // upgrade, so it inherits the fixed circuit and is bound to the fixed key here on purpose
+        // (rather than via a wildcard) to keep this match exhaustive and fail-closed under every
+        // build configuration.
+        #[cfg(zcash_unstable = "zfuture")]
+        ZFuture => &VERIFIER_POST_NU6_2,
     }
 }
 
