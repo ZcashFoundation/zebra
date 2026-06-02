@@ -2896,13 +2896,13 @@ fn orchard_disabling_soft_fork_activation_boundary() {
         "a disabled soft fork must never be active",
     );
 
-    // Mainnet uses a fixed activation height (3_363_366).
+    // Mainnet uses a fixed activation height (3_363_426).
     assert!(
-        !Network::Mainnet.temporary_orchard_disabling_soft_fork_active(Height(3_363_365)),
+        !Network::Mainnet.temporary_orchard_disabling_soft_fork_active(Height(3_363_425)),
         "Mainnet soft fork must be inactive below its fixed height",
     );
     assert!(
-        Network::Mainnet.temporary_orchard_disabling_soft_fork_active(Height(3_363_366)),
+        Network::Mainnet.temporary_orchard_disabling_soft_fork_active(Height(3_363_426)),
         "Mainnet soft fork must be active at its fixed height",
     );
 }

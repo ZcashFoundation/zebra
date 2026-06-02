@@ -696,7 +696,7 @@ fn temporary_orchard_disabling_soft_fork_heights() {
     let _init_guard = zebra_test::init();
 
     // Mainnet uses a fixed activation height.
-    let mainnet_height = Height(3_363_366);
+    let mainnet_height = Height(3_363_426);
     assert_eq!(
         Network::Mainnet.temporary_orchard_disabling_soft_fork_height(),
         Some(mainnet_height),
