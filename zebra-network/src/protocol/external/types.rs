@@ -119,9 +119,9 @@ impl Version {
             (Testnet(params), Nu6_2) if params.is_default_testnet() || params.is_regtest() => {
                 170_150
             }
-            (Mainnet, Nu6_2) => 170_160,
+            (Mainnet, Nu6_2) => 170_150,
             // TODO(NU6.2): these Nu7 protocol versions are provisional, bumped above Nu6_2's
-            // 170_150/170_160. Update them when the real Nu7 values are specified.
+            // 170_150. Update them when the real Nu7 values are specified.
             (Testnet(params), Nu7) if params.is_default_testnet() || params.is_regtest() => 170_160,
             (Mainnet, Nu7) => 170_170,
 
