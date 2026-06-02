@@ -7322,9 +7322,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_primitives"
-version = "0.27.0"
+version = "0.27.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a59f418f8b1274a526d57dfa3b1a7b3724f04926c84712a27c1602e4b44bfacd"
+checksum = "6043f775b7b57e1400c248bb2f65d6fe34827d87d8a438307e4440501cf179ff"
 dependencies = [
  "blake2b_simd",
  "block-buffer 0.11.0-rc.3",
