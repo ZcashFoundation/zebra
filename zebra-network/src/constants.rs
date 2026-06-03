@@ -342,8 +342,8 @@ pub const TIMESTAMP_TRUNCATION_SECONDS: u32 = 30 * 60;
 /// [ZIP-255](https://zips.z.cash/zip-0255).
 // TODO: Update this constant to the correct value after NU7 activation (see NU deployment ZIPs),
 pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_150); // NU6.2 (Mainnet + Testnet).
-// pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_160); // NU7 Testnet.
-// pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_170); // NU7 Mainnet.
+                                                                        // pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_160); // NU7 Testnet.
+                                                                        // pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_170); // NU7 Mainnet.
 
 /// The default RTT estimate for peer responses.
 ///

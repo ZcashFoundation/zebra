@@ -711,23 +711,25 @@ impl Arbitrary for orchard::ShieldedData {
             ),
             any::<BindingSignature>(),
         )
-            .prop_flat_map(|(flags, value_balance, shared_anchor, actions, binding_sig)| {
-                // Since NU6.2, an Orchard proof must have the canonical length for its number of
-                // actions (`2272 * num_actions + 2720` bytes), otherwise it is rejected as
-                // non-canonical (GHSA-jfw5-j458-pfv6). The V5 txid is computed by round-tripping
-                // through `librustzcash`, which enforces this length, so a proof of any other
-                // size makes the round-trip (and thus `Transaction::hash`) fail. Generate a proof
-                // of exactly the expected length, which depends on the number of actions.
-                let proof_size = orchard::shielded_data::expected_proof_size(actions.len());
-                (
-                    Just(flags),
-                    Just(value_balance),
-                    Just(shared_anchor),
-                    vec(any::<u8>(), proof_size).prop_map(Halo2Proof),
-                    Just(actions),
-                    Just(binding_sig),
-                )
-            })
+            .prop_flat_map(
+                |(flags, value_balance, shared_anchor, actions, binding_sig)| {
+                    // Since NU6.2, an Orchard proof must have the canonical length for its number of
+                    // actions (`2272 * num_actions + 2720` bytes), otherwise it is rejected as
+                    // non-canonical (GHSA-jfw5-j458-pfv6). The V5 txid is computed by round-tripping
+                    // through `librustzcash`, which enforces this length, so a proof of any other
+                    // size makes the round-trip (and thus `Transaction::hash`) fail. Generate a proof
+                    // of exactly the expected length, which depends on the number of actions.
+                    let proof_size = orchard::shielded_data::expected_proof_size(actions.len());
+                    (
+                        Just(flags),
+                        Just(value_balance),
+                        Just(shared_anchor),
+                        vec(any::<u8>(), proof_size).prop_map(Halo2Proof),
+                        Just(actions),
+                        Just(binding_sig),
+                    )
+                },
+            )
             .prop_map(
                 |(flags, value_balance, shared_anchor, proof, actions, binding_sig)| Self {
                     flags,
