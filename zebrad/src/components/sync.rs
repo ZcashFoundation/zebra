@@ -183,22 +183,24 @@ const FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT: Duration = Duration::from_secs(2 * 
 /// We've only seen this error on the first few blocks after the final checkpoint.
 const FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT: HeightDiff = 100;
 
-/// Controls how long we wait to restart syncing after finishing a sync run.
+/// Controls how long we wait for sync restart operations, including obtaining
+/// tips and retrying the genesis block.
 ///
-/// This fork keeps the restart delay deliberately short so a thin or flaky peer
-/// set does not park sync for over a minute after each failed round. This value
-/// also bounds `obtain_tips`, so failed tip requests retry quickly.
+/// This should be long enough for peers to respond to tip requests on a thin or
+/// flaky peer set. Shorter values can cause Zebra to loop on `obtain_tips`
+/// timeouts without making progress.
+const SYNC_RESTART_DELAY: Duration = Duration::from_secs(30);
+
+/// Controls how long the syncer sleeps between sync runs before obtaining new
+/// tips and restarting downloads.
 ///
-/// ## Correctness
-///
-/// Lower values can re-enter sync while cancelled downloads from the previous
-/// round are still draining. This fork accepts that tradeoff to improve recovery
-/// time on public sync nodes.
-const SYNC_RESTART_DELAY: Duration = Duration::from_secs(2);
+/// This fork keeps the post-round idle short enough to recover quickly without
+/// immediately hammering the same weak peer set after a failed sync round.
+const SYNC_RESTART_SLEEP: Duration = Duration::from_secs(10);
 
 /// In regtest, use a much shorter restart delay so that downstream nodes pick up
 /// newly-mined blocks quickly (e.g. after `generate(N)` in integration tests).
-/// The default restart delay matches the typical fast-retry cadence for this fork.
+/// The default restart sleep matches the typical fast-retry cadence for this fork.
 const REGTEST_SYNC_RESTART_DELAY: Duration = Duration::from_secs(2);
 
 /// Controls how long we wait to retry a failed attempt to download
@@ -539,7 +541,7 @@ where
             let restart_delay = if self.is_regtest {
                 REGTEST_SYNC_RESTART_DELAY
             } else {
-                SYNC_RESTART_DELAY
+                SYNC_RESTART_SLEEP
             };
             info!(
                 timeout = ?restart_delay,
