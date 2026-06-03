@@ -46,22 +46,14 @@ use zebra_chain::{
 /// But some peers only make outbound connections, because they are behind a firewall,
 /// or their lister port address is misconfigured.
 ///
-/// Zebra allows extra inbound connection slots,
-/// to prevent accidental connection slot exhaustion.
-/// (`zcashd` also allows a large number of extra inbound slots.)
+/// This fork prioritizes fast outbound sync over inbound-serving capacity.
+/// Inbound peers do not help us download the chain, and they can add handshake
+/// churn and CPU load, so the inbound limit is capped at the peer set target
+/// size. This also keeps a majority of connections in the outbound set chosen
+/// from our address book.
 ///
-/// ## Security Tradeoff
-///
-/// Since the inbound peer limit is higher than the outbound peer limit,
-/// Zebra can be connected to a majority of peers
-/// that it has *not* chosen from its [`crate::AddressBook`].
-///
-/// Inbound peer connections are initiated by the remote peer,
-/// so inbound peer selection is not controlled by the local node.
-/// This means that an attacker can easily become a majority of a node's peers.
-///
-/// However, connection exhaustion is a higher priority.
-pub const INBOUND_PEER_LIMIT_MULTIPLIER: usize = 5;
+/// Raise this again if these nodes need to prioritize public inbound serving.
+pub const INBOUND_PEER_LIMIT_MULTIPLIER: usize = 1;
 
 /// A multiplier used to calculate the outbound connection limit for the peer set,
 ///
@@ -83,7 +75,7 @@ pub const DEFAULT_MAX_CONNS_PER_IP: usize = 1;
 /// The default peerset target size.
 ///
 /// This will be used as `Config.peerset_initial_target_size` if no valid value is provided.
-pub const DEFAULT_PEERSET_INITIAL_TARGET_SIZE: usize = 25;
+pub const DEFAULT_PEERSET_INITIAL_TARGET_SIZE: usize = 100;
 
 /// The maximum number of peers we will add to the address book after each `getaddr` request.
 pub const PEER_ADDR_RESPONSE_LIMIT: usize =

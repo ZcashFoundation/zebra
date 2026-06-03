@@ -51,15 +51,14 @@ fn parse_config_listen_addr() {
 fn ensure_peer_connection_limits_consistent() {
     let _init_guard = zebra_test::init();
 
-    // Zebra should allow more inbound connections, to avoid connection exhaustion
-    const_assert!(INBOUND_PEER_LIMIT_MULTIPLIER > OUTBOUND_PEER_LIMIT_MULTIPLIER);
+    // This fork prioritizes fast outbound sync over inbound-serving capacity.
+    const_assert!(INBOUND_PEER_LIMIT_MULTIPLIER <= OUTBOUND_PEER_LIMIT_MULTIPLIER);
 
     let config = Config::default();
 
     assert!(
-        config.peerset_inbound_connection_limit() - config.peerset_outbound_connection_limit()
-            >= 50,
-        "default config should allow more inbound connections, to avoid connection exhaustion",
+        config.peerset_inbound_connection_limit() <= config.peerset_outbound_connection_limit(),
+        "this fork caps inbound connections at or below the outbound limit, to prioritize sync",
     );
 }
 

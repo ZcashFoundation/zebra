@@ -185,29 +185,20 @@ const FINAL_CHECKPOINT_BLOCK_VERIFY_TIMEOUT_LIMIT: HeightDiff = 100;
 
 /// Controls how long we wait to restart syncing after finishing a sync run.
 ///
-/// This delay should be long enough to:
-///   - allow zcashd peers to process pending requests. If the node only has a
-///     few peers, we want to clear as much peer state as possible. In
-///     particular, zcashd sends "next block range" hints, based on zcashd's
-///     internal model of our sync progress. But we want to discard these hints,
-///     so they don't get confused with ObtainTips and ExtendTips responses, and
-///   - allow in-progress downloads to time out.
-///
-/// This delay is particularly important on instances with slow or unreliable
-/// networks, and on testnet, which has a small number of slow peers.
-///
-/// Using a prime number makes sure that syncer fanouts don't synchronise with other crawls.
+/// This fork keeps the restart delay deliberately short so a thin or flaky peer
+/// set does not park sync for over a minute after each failed round. This value
+/// also bounds `obtain_tips`, so failed tip requests retry quickly.
 ///
 /// ## Correctness
 ///
-/// If this delay is removed (or set too low), the syncer will
-/// sometimes get stuck in a failure loop, due to leftover downloads from
-/// previous sync runs.
-const SYNC_RESTART_DELAY: Duration = Duration::from_secs(67);
+/// Lower values can re-enter sync while cancelled downloads from the previous
+/// round are still draining. This fork accepts that tradeoff to improve recovery
+/// time on public sync nodes.
+const SYNC_RESTART_DELAY: Duration = Duration::from_secs(2);
 
 /// In regtest, use a much shorter restart delay so that downstream nodes pick up
 /// newly-mined blocks quickly (e.g. after `generate(N)` in integration tests).
-/// The default 67-second delay exceeds the typical `sync_all` timeout of 60 seconds.
+/// The default restart delay matches the typical fast-retry cadence for this fork.
 const REGTEST_SYNC_RESTART_DELAY: Duration = Duration::from_secs(2);
 
 /// Controls how long we wait to retry a failed attempt to download
@@ -276,8 +267,8 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            // 2/3 of the default outbound peer limit.
-            download_concurrency_limit: 50,
+            // 1/3 of the default outbound peer limit.
+            download_concurrency_limit: 100,
 
             // A few max-length checkpoints.
             checkpoint_verify_concurrency_limit: DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT,

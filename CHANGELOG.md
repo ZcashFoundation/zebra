@@ -11,7 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 - Include the `zebra-rollback-state` utility alongside `zebrad` in release
   Docker images and Docker CI builds.
-- Use the `5.0.0-rc.0` release identity for this fork's v5 rollback build.
+- Use the `5.0.0-rc.1` release identity for this fork's v5 rollback build.
+
+### Changed
+
+- Tune public-fork sync defaults for faster block sync: retry sync rounds and tip
+  acquisition after 2 seconds, increase default block download concurrency to 100,
+  increase the default peer target size to 100, and cap inbound peers at the peer
+  target size.
 
 ### Fixed
 
