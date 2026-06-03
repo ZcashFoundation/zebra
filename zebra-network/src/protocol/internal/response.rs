@@ -40,12 +40,17 @@ pub enum Response {
     /// Returned after a ping/pong exchange to measure RTT.
     Pong(Duration),
 
-    /// An ordered list of block hashes.
+    /// An ordered list of block hashes, with the address of the responding peer.
     ///
     /// The list contains zero or more block hashes.
     //
     // TODO: make this into an IndexMap - an ordered unique list of hashes (#2244)
-    BlockHashes(Vec<block::Hash>),
+    BlockHashes {
+        /// The block hashes returned by the peer.
+        hashes: Vec<block::Hash>,
+        /// The address of the peer that responded.
+        source: PeerSocketAddr,
+    },
 
     /// An ordered list of block headers.
     ///
@@ -92,7 +97,9 @@ impl fmt::Display for Response {
 
             Response::Pong(duration) => format!("Pong {{ latency: {duration:?} }}"),
 
-            Response::BlockHashes(hashes) => format!("BlockHashes {{ hashes: {} }}", hashes.len()),
+            Response::BlockHashes { hashes, .. } => {
+                format!("BlockHashes {{ hashes: {} }}", hashes.len())
+            }
             Response::BlockHeaders(headers) => {
                 format!("BlockHeaders {{ headers: {} }}", headers.len())
             }
@@ -138,7 +145,7 @@ impl Response {
 
             Response::Pong(_) => "Pong",
 
-            Response::BlockHashes(_) => "BlockHashes",
+            Response::BlockHashes { .. } => "BlockHashes",
             Response::BlockHeaders(_) => "BlockHeaders",
             Response::TransactionIds(_) => "TransactionIds",
 

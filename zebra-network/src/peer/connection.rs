@@ -404,9 +404,10 @@ impl Handler {
                     .iter()
                     .all(|item| matches!(item, InventoryHash::Block(_))) =>
             {
-                Handler::Finished(Ok(Response::BlockHashes(
-                    block_hashes(&items[..]).collect(),
-                )))
+                Handler::Finished(Ok(Response::BlockHashes {
+                    hashes: block_hashes(&items[..]).collect(),
+                    source: transient_addr.unwrap_or_else(PeerSocketAddr::unspecified),
+                }))
             }
             (Handler::FindHeaders, Message::Headers(headers)) => {
                 Handler::Finished(Ok(Response::BlockHeaders(headers)))
@@ -1057,7 +1058,8 @@ where
                     .map(|()| Handler::Ping { nonce, ping_sent_at })
             }
 
-            (AwaitingRequest, BlocksByHash(hashes)) => {
+            (AwaitingRequest, BlocksByHash(hashes))
+            | (AwaitingRequest, BlocksByHashFrom { hashes, .. }) => {
                 self
                     .peer_tx
                     .send(Message::GetData(
@@ -1524,7 +1526,7 @@ where
                     }
                 }
             }
-            Response::BlockHashes(hashes) => {
+            Response::BlockHashes { hashes, .. } => {
                 if let Err(e) = self
                     .peer_tx
                     .send(Message::Inv(hashes.into_iter().map(Into::into).collect()))

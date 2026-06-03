@@ -125,7 +125,7 @@ use tower::{
     Service,
 };
 
-use zebra_chain::{chain_tip::ChainTip, parameters::Network};
+use zebra_chain::{block, chain_tip::ChainTip, parameters::Network};
 
 use crate::{
     address_book::AddressMetrics,
@@ -174,8 +174,10 @@ enum StallOutcome {
 
 fn classify_find_response<E>(result: &Result<Response, E>) -> Option<StallOutcome> {
     match result {
-        Ok(Response::BlockHashes(hashes)) if hashes.is_empty() => Some(StallOutcome::Stall),
-        Ok(Response::BlockHashes(_)) => Some(StallOutcome::Clear),
+        Ok(Response::BlockHashes { ref hashes, .. }) if hashes.is_empty() => {
+            Some(StallOutcome::Stall)
+        }
+        Ok(Response::BlockHashes { .. }) => Some(StallOutcome::Clear),
         Ok(Response::BlockHeaders(headers)) if headers.is_empty() => Some(StallOutcome::Stall),
         Ok(Response::BlockHeaders(_)) => Some(StallOutcome::Clear),
         Ok(_) => None,
@@ -1063,6 +1065,34 @@ where
         .boxed()
     }
 
+    /// Routes a request to a specific source peer. If that peer is not ready,
+    /// falls back to normal inventory routing for single-hash requests,
+    /// or P2C load balancing for multi-hash requests.
+    fn route_source(
+        &mut self,
+        hashes: HashSet<block::Hash>,
+        source: PeerSocketAddr,
+    ) -> <Self as tower::Service<Request>>::Future {
+        if let Some(mut svc) = self.take_ready_service(&source) {
+            tracing::trace!(?source, hashes = hashes.len(), "routing to source peer");
+            let fut = svc.call(Request::BlocksByHash(hashes));
+            self.push_unready(source, svc);
+            return fut.map_err(Into::into).boxed();
+        }
+
+        tracing::trace!(
+            ?source,
+            hashes = hashes.len(),
+            "source peer not ready, falling back"
+        );
+        if hashes.len() == 1 {
+            let hash = InventoryHash::from(*hashes.iter().next().unwrap());
+            self.route_inv(Request::BlocksByHash(hashes), hash)
+        } else {
+            self.route_p2c(Request::BlocksByHash(hashes))
+        }
+    }
+
     /// Routes the same request to up to `max_peers` ready peers, ignoring return values.
     ///
     /// `max_peers` must be at least one, and at most the number of ready peers.
@@ -1402,6 +1432,9 @@ where
 
     fn call(&mut self, req: Request) -> Self::Future {
         let fut = match req {
+            // Source-aware routing: try the announcing peer first.
+            Request::BlocksByHashFrom { hashes, source } => self.route_source(hashes, source),
+
             // Only do inventory-aware routing on individual items.
             Request::BlocksByHash(ref hashes) if hashes.len() == 1 => {
                 let hash = InventoryHash::from(*hashes.iter().next().unwrap());

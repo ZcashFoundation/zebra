@@ -412,7 +412,7 @@ impl Service<zn::Request> for Inbound {
                     Ok(response)
                 }.boxed()
             }
-            zn::Request::BlocksByHash(hashes) => {
+            zn::Request::BlocksByHashFrom { hashes, .. } | zn::Request::BlocksByHash(hashes) => {
                 // We return an available or missing response to each inventory request,
                 // unless the request is empty, or it reaches a response limit.
                 if hashes.is_empty() {
@@ -509,7 +509,10 @@ impl Service<zn::Request> for Inbound {
                 let request = zs::Request::FindBlockHashes { known_blocks, stop };
                 state.clone().oneshot(request).map_ok(|resp| match resp {
                     zs::Response::BlockHashes(hashes) if hashes.is_empty() => zn::Response::Nil,
-                    zs::Response::BlockHashes(hashes) => zn::Response::BlockHashes(hashes),
+                    zs::Response::BlockHashes(hashes) => zn::Response::BlockHashes {
+                        hashes,
+                        source: zebra_network::PeerSocketAddr::unspecified(),
+                    },
                     _ => unreachable!("zebra-state should always respond to a `FindBlockHashes` request with a `BlockHashes` response"),
                 })
                     .boxed()

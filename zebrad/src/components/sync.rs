@@ -2,7 +2,14 @@
 //!
 //! It is used when Zebra is a long way behind the current chain tip.
 
-use std::{cmp::max, collections::HashSet, convert, pin::Pin, task::Poll, time::Duration};
+use std::{
+    cmp::max,
+    collections::{HashMap, HashSet},
+    convert,
+    pin::Pin,
+    task::Poll,
+    time::Duration,
+};
 
 use color_eyre::eyre::{eyre, Report};
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -99,6 +106,12 @@ pub const MIN_CONCURRENCY_LIMIT: usize = 1;
 ///
 /// See [`MIN_CHECKPOINT_CONCURRENCY_LIMIT`] for details.
 pub const MAX_TIPS_RESPONSE_HASH_COUNT: usize = 500;
+
+/// Number of hashes at the front of each download batch that are forced to use
+/// reliable P2C routing instead of source-aware routing. The checkpoint verifier
+/// commits strictly contiguous ranges, so the next-needed block must be delivered
+/// reliably; source-aware routing can scatter delivery when the source peer is busy.
+const CONTIGUOUS_PREFIX_P2C: usize = 32;
 
 /// Controls how long we wait for a tips response to return.
 ///
@@ -390,6 +403,11 @@ where
 
     /// Sender for reporting peer addresses that advertised unexpectedly invalid transactions.
     misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
+
+    /// Maps block hashes to the peer that announced them via FindBlocks/ExtendTips.
+    /// Used for source-aware routing: requests are batched by source peer so the
+    /// getdata goes to a peer that actually has the block.
+    source_by_hash: HashMap<block::Hash, PeerSocketAddr>,
 }
 
 /// Polls the network to determine whether further blocks are available and
@@ -526,6 +544,7 @@ where
             recent_syncs,
             past_lookahead_limit_receiver,
             misbehavior_sender,
+            source_by_hash: HashMap::new(),
         };
 
         (new_syncer, sync_status)
@@ -574,6 +593,8 @@ where
     #[instrument(skip(self))]
     async fn try_to_sync(&mut self) -> Result<(), Report> {
         self.prospective_tips = HashSet::new();
+
+        self.source_by_hash.clear();
 
         info!(
             state_tip = ?self.latest_chain_tip.best_tip_height(),
@@ -742,7 +763,7 @@ where
                 })
                 .map_err::<Report, _>(|e| eyre!(e))
             {
-                Ok(zn::Response::BlockHashes(hashes)) => {
+                Ok(zn::Response::BlockHashes { hashes, source }) => {
                     trace!(?hashes);
 
                     // zcashd sometimes appends an unrelated hash at the start
@@ -829,6 +850,12 @@ where
                     debug!(new_hashes, "added hashes to download set");
                     metrics::histogram!("sync.obtain.response.hash.count")
                         .record(new_hashes as f64);
+
+                    if !source.ip().is_unspecified() {
+                        for &hash in unknown_hashes {
+                            self.source_by_hash.insert(hash, source);
+                        }
+                    }
                 }
                 Ok(_) => unreachable!("network returned wrong response"),
                 // We ignore this error because we made multiple fanout requests.
@@ -894,7 +921,7 @@ where
                     .expect("panic in spawned extend tips request")
                     .map_err::<Report, _>(|e| eyre!(e))
                 {
-                    Ok(zn::Response::BlockHashes(hashes)) => {
+                    Ok(zn::Response::BlockHashes { hashes, source }) => {
                         debug!(first = ?hashes.first(), len = ?hashes.len());
                         trace!(?hashes);
 
@@ -981,6 +1008,12 @@ where
                         debug!(new_hashes, "added hashes to download set");
                         metrics::histogram!("sync.extend.response.hash.count")
                             .record(new_hashes as f64);
+
+                        if !source.ip().is_unspecified() {
+                            for &hash in unknown_hashes {
+                                self.source_by_hash.insert(hash, source);
+                            }
+                        }
                     }
                     Ok(_) => unreachable!("network returned wrong response"),
                     // We ignore this error because we made multiple fanout requests.
@@ -1087,8 +1120,24 @@ where
             IndexSet::new()
         };
 
-        for hash in hashes.into_iter() {
-            self.downloads.download_and_verify(hash).await?;
+        // Force the contiguous prefix to use reliable P2C routing (no source
+        // peer) so the checkpoint verifier always gets its next-needed block.
+        // Beyond the prefix, use source-aware routing for the frontier blocks.
+        let hash_list: Vec<_> = hashes.into_iter().collect();
+        for (i, &hash) in hash_list.iter().enumerate() {
+            if i < CONTIGUOUS_PREFIX_P2C {
+                self.source_by_hash.remove(&hash);
+            }
+        }
+
+        for &hash in &hash_list {
+            if let Some(source) = self.source_by_hash.remove(&hash) {
+                self.downloads
+                    .download_and_verify_from(hash, source)
+                    .await?;
+            } else {
+                self.downloads.download_and_verify(hash).await?;
+            }
         }
 
         Ok(extra_hashes)
