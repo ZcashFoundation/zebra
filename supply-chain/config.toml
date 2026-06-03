@@ -642,7 +642,7 @@ version = "2.7.1"
 criteria = "safe-to-run"
 
 [[exemptions.halo2_gadgets]]
-version = "0.4.0"
+version = "0.5.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.halo2_legacy_pdqsort]]
@@ -1088,7 +1088,7 @@ version = "0.4.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.orchard]]
-version = "0.13.1"
+version = "0.14.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.ordered-map]]
@@ -2112,7 +2112,7 @@ version = "0.10.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.zcash_address]]
-version = "0.11.0"
+version = "0.12.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zcash_encoding]]
@@ -2124,19 +2124,19 @@ version = "0.4.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zcash_keys]]
-version = "0.13.0"
+version = "0.14.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zcash_primitives]]
-version = "0.27.0"
+version = "0.28.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zcash_proofs]]
-version = "0.27.0"
+version = "0.28.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zcash_protocol]]
-version = "0.8.0"
+version = "0.9.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zcash_script]]
@@ -2148,35 +2148,35 @@ version = "0.2.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.zcash_transparent]]
-version = "0.7.0"
+version = "0.8.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zebra-chain]]
-version = "8.0.0"
+version = "9.0.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zebra-consensus]]
-version = "7.0.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.zebra-network]]
-version = "7.0.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.zebra-node-services]]
-version = "6.0.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.zebra-rpc]]
 version = "8.0.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.zebra-script]]
+[[exemptions.zebra-network]]
+version = "8.0.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.zebra-node-services]]
 version = "7.0.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.zebra-rpc]]
+version = "9.0.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.zebra-script]]
+version = "8.0.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.zebra-state]]
-version = "7.0.0"
+version = "8.0.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zebra-test]]
@@ -2184,11 +2184,11 @@ version = "3.0.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zebra-utils]]
-version = "6.0.0"
+version = "7.0.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zebrad]]
-version = "4.5.0"
+version = "5.0.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zerocopy]]
