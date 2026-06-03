@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   Docker images and Docker CI builds.
 - Use the `5.0.0-rc.0` release identity for this fork's v5 rollback build.
 
+### Fixed
+
+- Make `zebra-rollback-state` rollback existing v5 databases without replaying
+  note commitment trees from genesis for modern rollback targets whose removed
+  blocks did not change the Sprout tree. If rolled-back blocks contain Sprout
+  commitments, rollback keeps the full rebuild path so the Sprout tip is reset
+  correctly.
+
 ## [Zebra 5.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.0.0) - 2026-06-02
 
 This release activates the NU6.2 network upgrade. NU6.2 re-enables Orchard

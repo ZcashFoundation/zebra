@@ -735,4 +735,14 @@ impl DiskWriteBatch {
             self.zs_insert(&tx_loc_by_hash, transaction_hash, transaction_location);
         }
     }
+
+    /// Deletes the block header at `height`.
+    ///
+    /// This is only used by rollback tests to prove modern rollback targets do not need pre-upgrade
+    /// blocks for note commitment tree replay.
+    #[cfg(test)]
+    pub fn delete_block_header(&mut self, zebra_db: &ZebraDb, height: Height) {
+        let block_header_by_height = zebra_db.db.cf_handle("block_header_by_height").unwrap();
+        self.zs_delete(&block_header_by_height, height);
+    }
 }

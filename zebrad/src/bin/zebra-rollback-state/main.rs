@@ -1,5 +1,9 @@
 //! Standalone finalized-state rollback utility.
 
+// This binary reports startup and rollback failures directly to the terminal before any tracing
+// subscriber is installed.
+#![allow(clippy::print_stderr)]
+
 use clap::Parser;
 use zebrad::commands::rollback_state::RollbackStateCmd;
 

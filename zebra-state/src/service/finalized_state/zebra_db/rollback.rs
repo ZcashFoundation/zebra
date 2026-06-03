@@ -14,7 +14,7 @@ use zebra_chain::{
     parallel::tree::{NoteCommitmentTreeError, NoteCommitmentTrees},
     parameters::{
         subsidy::{block_subsidy, funding_stream_values, FundingStreamReceiver, SubsidyError},
-        Network,
+        Network, NetworkUpgrade,
     },
     subtree::NoteCommitmentSubtreeIndex,
     transaction,
@@ -192,6 +192,20 @@ pub enum RollbackFinalizedStateError {
         address: transparent::Address,
     },
 
+    /// A Sapling note commitment tree required for rollback could not be loaded.
+    #[error("missing Sapling note commitment tree at height {height:?}")]
+    MissingSaplingTree {
+        /// Missing tree height.
+        height: block::Height,
+    },
+
+    /// An Orchard note commitment tree required for rollback could not be loaded.
+    #[error("missing Orchard note commitment tree at height {height:?}")]
+    MissingOrchardTree {
+        /// Missing tree height.
+        height: block::Height,
+    },
+
     /// Address balance arithmetic failed while reversing transparent indexes.
     #[error("transparent address balance update failed")]
     AddressBalance(#[from] amount::Error),
@@ -310,7 +324,11 @@ fn open_rollback_db(config: &Config, network: &Network, read_only: bool) -> Zebr
         STATE_DATABASE_KIND,
         &state_database_format_version_in_code(),
         network,
-        false,
+        // Skip format upgrades: `check_format_version` already confirmed the on-disk format matches
+        // the running code, so no upgrade is needed. Skipping also avoids spawning the background
+        // format-change thread, which could otherwise mutate the database concurrently with the
+        // rollback's own batch write.
+        true,
         STATE_COLUMN_FAMILIES_IN_CODE
             .iter()
             .map(ToString::to_string),
@@ -414,7 +432,6 @@ fn prepare_rollback(
     let bounds = validate_rollback(db, options)?;
     let (old_tip_height, _) = bounds.old_tip;
 
-    let target_treestate = rebuild_treestate_to_height(db, network, options.target_height)?;
     let target_value_pool = db
         .block_info(options.target_height.into())
         .ok_or(RollbackFinalizedStateError::MissingTarget {
@@ -426,6 +443,7 @@ fn prepare_rollback(
     let mut batch = DiskWriteBatch::new();
     let mut address_balances = HashMap::new();
     let mut removed_blocks = Vec::new();
+    let mut removed_blocks_have_sprout_commitments = false;
 
     for height in ((options.target_height.0 + 1)..=old_tip_height.0)
         .rev()
@@ -448,8 +466,16 @@ fn prepare_rollback(
         delete_shielded_block(db, &mut batch, &block);
         delete_block_and_transaction_data(db, &mut batch, height, &block)?;
 
+        removed_blocks_have_sprout_commitments |= block_has_sprout_commitments(&block);
         removed_blocks.push(semantically_verified);
     }
+
+    let target_treestate = prepare_target_treestate(
+        db,
+        network,
+        options.target_height,
+        removed_blocks_have_sprout_commitments,
+    )?;
 
     write_address_balances(db, &mut batch, address_balances);
     reset_tip_trees(db, &mut batch, &target_treestate);
@@ -469,9 +495,98 @@ fn prepare_rollback(
 }
 
 struct RebuiltTreestate {
-    note_commitment_trees: NoteCommitmentTrees,
+    sprout_tree: Arc<zebra_chain::sprout::tree::NoteCommitmentTree>,
     history_tree: HistoryTree,
-    retained_sprout_roots: HashSet<zebra_chain::sprout::tree::Root>,
+    retained_sprout_roots: Option<HashSet<zebra_chain::sprout::tree::Root>>,
+}
+
+fn prepare_target_treestate(
+    db: &ZebraDb,
+    network: &Network,
+    target_height: Height,
+    removed_blocks_have_sprout_commitments: bool,
+) -> Result<RebuiltTreestate, RollbackFinalizedStateError> {
+    if NetworkUpgrade::current(network, target_height) >= NetworkUpgrade::Canopy
+        && !removed_blocks_have_sprout_commitments
+    {
+        return load_modern_treestate_at_height(db, network, target_height);
+    }
+
+    rebuild_treestate_to_height(db, network, target_height)
+}
+
+fn load_modern_treestate_at_height(
+    db: &ZebraDb,
+    network: &Network,
+    target_height: Height,
+) -> Result<RebuiltTreestate, RollbackFinalizedStateError> {
+    let sprout_tree = db.sprout_tree_for_tip();
+    let history_tree = rebuild_history_tree_from_upgrade_activation(db, network, target_height)?;
+
+    Ok(RebuiltTreestate {
+        sprout_tree,
+        history_tree,
+        // No removed block changed the Sprout note commitment tree, so the current tip tree is
+        // exactly the target tree and no Sprout anchors above the target were created.
+        retained_sprout_roots: None,
+    })
+}
+
+fn block_has_sprout_commitments(block: &Block) -> bool {
+    block.sprout_note_commitments().next().is_some()
+}
+
+fn rebuild_history_tree_from_upgrade_activation(
+    db: &ZebraDb,
+    network: &Network,
+    target_height: Height,
+) -> Result<HistoryTree, RollbackFinalizedStateError> {
+    let network_upgrade = NetworkUpgrade::current(network, target_height);
+
+    if network_upgrade < NetworkUpgrade::Heartwood {
+        return Ok(HistoryTree::default());
+    }
+
+    let start_height = network_upgrade
+        .activation_height(network)
+        .expect("current network upgrade must have an activation height");
+
+    let (block, sapling_root, orchard_root) = history_rebuild_inputs_at_height(db, start_height)?;
+    let mut history_tree = HistoryTree::from_block(network, block, &sapling_root, &orchard_root)?;
+
+    for height in ((start_height.0 + 1)..=target_height.0).map(Height) {
+        let (block, sapling_root, orchard_root) = history_rebuild_inputs_at_height(db, height)?;
+
+        history_tree.push(network, block, &sapling_root, &orchard_root)?;
+    }
+
+    Ok(history_tree)
+}
+
+fn history_rebuild_inputs_at_height(
+    db: &ZebraDb,
+    height: Height,
+) -> Result<
+    (
+        Arc<Block>,
+        zebra_chain::sapling::tree::Root,
+        zebra_chain::orchard::tree::Root,
+    ),
+    RollbackFinalizedStateError,
+> {
+    let block = db
+        .block(height.into())
+        .ok_or(RollbackFinalizedStateError::MissingBlock { height })?;
+    let sapling_root = db
+        .sapling_tree_by_height(&height)
+        .ok_or(RollbackFinalizedStateError::MissingSaplingTree { height })?
+        .root();
+    let orchard_root = db
+        .orchard_tree_by_height(&height)
+        .ok_or(RollbackFinalizedStateError::MissingOrchardTree { height })?
+        .root();
+
+    Ok((block, sapling_root, orchard_root))
 }
 
 fn rebuild_treestate_to_height(
@@ -497,9 +612,9 @@ fn rebuild_treestate_to_height(
     }
 
     Ok(RebuiltTreestate {
-        note_commitment_trees,
+        sprout_tree: note_commitment_trees.sprout,
         history_tree,
-        retained_sprout_roots,
+        retained_sprout_roots: Some(retained_sprout_roots),
     })
 }
 
@@ -609,6 +724,7 @@ fn reverse_transparent_block(
     Ok(())
 }
 
+#[allow(clippy::unwrap_in_result)]
 fn finalized_output(
     db: &ZebraDb,
     outpoint: &transparent::OutPoint,
@@ -649,15 +765,13 @@ fn cached_address_balance<'a>(
     address: &transparent::Address,
 ) -> Result<&'a mut AddressBalanceLocation, RollbackFinalizedStateError> {
     if !address_balances.contains_key(address) {
-        address_balances.insert(address.clone(), db.address_balance_location(address));
+        address_balances.insert(*address, db.address_balance_location(address));
     }
 
     address_balances
         .get_mut(address)
         .and_then(Option::as_mut)
-        .ok_or_else(|| RollbackFinalizedStateError::MissingAddressBalance {
-            address: address.clone(),
-        })
+        .ok_or(RollbackFinalizedStateError::MissingAddressBalance { address: *address })
 }
 
 fn add_address_balance(
@@ -762,7 +876,7 @@ fn delete_block_and_transaction_data(
 fn reset_tip_trees(db: &ZebraDb, batch: &mut DiskWriteBatch, treestate: &RebuiltTreestate) {
     // The sprout and history tip trees live in single-entry column families, so overwrite them
     // with the trees rebuilt up to the target height.
-    batch.update_sprout_tree(db, &treestate.note_commitment_trees.sprout);
+    batch.update_sprout_tree(db, &treestate.sprout_tree);
     batch.update_history_tree(db, &treestate.history_tree);
 
     // The sapling and orchard trees are height-keyed and de-duplicated: the forward write only
@@ -788,7 +902,7 @@ fn prune_tree_indexes(
     db: &ZebraDb,
     batch: &mut DiskWriteBatch,
     target_height: Height,
-    retained_sprout_roots: &HashSet<zebra_chain::sprout::tree::Root>,
+    retained_sprout_roots: &Option<HashSet<zebra_chain::sprout::tree::Root>>,
 ) {
     let sapling_trees: BTreeMap<_, _> = db
         .sapling_tree_by_height_range((
@@ -834,9 +948,11 @@ fn prune_tree_indexes(
     // Sprout has no by-height anchor index, so enumerate every anchor and drop the ones not seen
     // while rebuilding the tree up to the target. This loads each historical sprout tree, but the
     // sprout pool has been inactive since before Sapling, so the anchor set is small and fixed.
-    for (root, _) in db.sprout_trees_full_map() {
-        if !retained_sprout_roots.contains(&root) {
-            batch.delete_sprout_anchor(db, &root);
+    if let Some(retained_sprout_roots) = retained_sprout_roots {
+        for (root, _) in db.sprout_trees_full_map() {
+            if !retained_sprout_roots.contains(&root) {
+                batch.delete_sprout_anchor(db, &root);
+            }
         }
     }
 
