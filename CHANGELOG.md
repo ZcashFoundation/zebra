@@ -5,6 +5,14 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Added
+
+- Include the `zebra-rollback-state` utility alongside `zebrad` in release
+  Docker images and Docker CI builds.
+- Use the `5.0.0-rc.0` release identity for this fork's v5 rollback build.
+
 ## [Zebra 5.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.0.0) - 2026-06-02
 
 This release activates the NU6.2 network upgrade. NU6.2 re-enables Orchard

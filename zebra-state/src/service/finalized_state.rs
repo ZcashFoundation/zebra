@@ -60,6 +60,10 @@ pub use zebra_db::ZebraDb;
 pub use disk_format::KV;
 
 pub use disk_format::upgrade::restorable_db_versions;
+pub use zebra_db::rollback::{
+    preview_rollback_finalized_state, rollback_finalized_state, RollbackBackupSummary,
+    RollbackFinalizedStateError, RollbackFinalizedStateOptions, RollbackFinalizedStateSummary,
+};
 
 /// The column families supported by the running `zebra-state` database code.
 ///

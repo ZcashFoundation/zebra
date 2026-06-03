@@ -1,0 +1,784 @@
+//! Offline rollback support for the finalized state database.
+
+use std::{
+    collections::{BTreeMap, HashMap, HashSet},
+    path::PathBuf,
+    sync::Arc,
+};
+
+use semver::Version;
+use zebra_chain::{
+    amount::{self, Amount, DeferredPoolBalanceChange, NonNegative},
+    block::{self, Block, Height},
+    history_tree::{HistoryTree, HistoryTreeError},
+    parallel::tree::{NoteCommitmentTreeError, NoteCommitmentTrees},
+    parameters::{
+        subsidy::{block_subsidy, funding_stream_values, FundingStreamReceiver, SubsidyError},
+        Network,
+    },
+    transaction,
+    transparent::{self, Input},
+    value_balance::ValueBalance,
+};
+
+use crate::{
+    config::state_database_format_version_on_disk,
+    constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
+    service::{
+        finalized_state::{
+            disk_db::{DiskWriteBatch, WriteDisk},
+            disk_format::{
+                transparent::{
+                    AddressBalanceLocation, AddressTransaction, AddressUnspentOutput,
+                    OutputLocation,
+                },
+                TransactionLocation,
+            },
+            zebra_db::{
+                chain::BLOCK_INFO,
+                transparent::{BALANCE_BY_TRANSPARENT_ADDR, TX_LOC_BY_SPENT_OUT_LOC},
+                ZebraDb,
+            },
+            STATE_COLUMN_FAMILIES_IN_CODE,
+        },
+        non_finalized_state::write_semantically_verified_backup_block,
+    },
+    Config, SemanticallyVerifiedBlock,
+};
+
+/// Options for rolling back the finalized state.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RollbackFinalizedStateOptions {
+    /// Roll the finalized tip back to this height.
+    pub target_height: block::Height,
+
+    /// Write removed finalized blocks to the non-finalized backup cache.
+    pub keep_rolled_back_blocks: bool,
+}
+
+/// Details about non-finalized backup files written by rollback.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RollbackBackupSummary {
+    /// Backup directory used for rolled-back blocks.
+    pub path: PathBuf,
+
+    /// Number of rolled-back blocks written to the backup cache.
+    pub block_count: usize,
+}
+
+/// Summary of a finalized-state rollback.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RollbackFinalizedStateSummary {
+    /// Finalized tip before rollback.
+    pub old_tip: (block::Height, block::Hash),
+
+    /// Finalized tip after rollback.
+    pub new_tip: (block::Height, block::Hash),
+
+    /// Number of finalized blocks removed.
+    pub rolled_back_count: u32,
+
+    /// Backup details when rolled-back blocks were kept.
+    pub backup: Option<RollbackBackupSummary>,
+}
+
+/// Errors returned by finalized-state rollback.
+#[derive(Debug, thiserror::Error)]
+pub enum RollbackFinalizedStateError {
+    /// The on-disk state database format does not match the running code.
+    #[error(
+        "state database format mismatch: on disk {on_disk:?}, running code {in_code}; \
+         use a Zebra binary with the same state format"
+    )]
+    FormatMismatch {
+        /// Version read from disk.
+        on_disk: Option<Version>,
+        /// Version implemented by the running code.
+        in_code: Version,
+    },
+
+    /// The state database has no finalized tip.
+    #[error("state database is empty")]
+    EmptyState,
+
+    /// The requested target height is above the finalized tip.
+    #[error("target height {target:?} is above finalized tip {tip:?}")]
+    TargetAboveTip {
+        /// Requested rollback height.
+        target: block::Height,
+        /// Current finalized tip height.
+        tip: block::Height,
+    },
+
+    /// The requested target height is the finalized tip.
+    #[error("target height {target:?} is already the finalized tip")]
+    TargetIsTip {
+        /// Requested rollback height.
+        target: block::Height,
+    },
+
+    /// The requested target height is missing from the finalized chain.
+    #[error("target height {target:?} is missing from hash_by_height")]
+    MissingTarget {
+        /// Requested rollback height.
+        target: block::Height,
+    },
+
+    /// Keeping rolled-back blocks is bounded by Zebra's non-finalized restore window.
+    #[error(
+        "cannot keep {count} rolled-back blocks: maximum non-finalized restore depth is {max}"
+    )]
+    KeepDepthTooLarge {
+        /// Requested number of kept blocks.
+        count: u32,
+        /// Maximum supported number of kept blocks.
+        max: u32,
+    },
+
+    /// Non-finalized backup is disabled for this state configuration.
+    #[error("cannot keep rolled-back blocks because non-finalized backup is disabled")]
+    BackupDisabled,
+
+    /// A block required for rollback could not be loaded.
+    #[error("missing finalized block at height {height:?}")]
+    MissingBlock {
+        /// Missing block height.
+        height: block::Height,
+    },
+
+    /// A transaction required for rollback could not be loaded.
+    #[error("missing finalized transaction {hash:?}")]
+    MissingTransaction {
+        /// Missing transaction hash.
+        hash: transaction::Hash,
+    },
+
+    /// A transparent output required for rollback could not be loaded.
+    #[error("missing transparent output {outpoint:?}")]
+    MissingTransparentOutput {
+        /// Missing transparent outpoint.
+        outpoint: transparent::OutPoint,
+    },
+
+    /// A transparent address balance required for rollback could not be loaded.
+    #[error("missing transparent address balance for {address:?}")]
+    MissingAddressBalance {
+        /// Missing transparent address.
+        address: transparent::Address,
+    },
+
+    /// Address balance arithmetic failed while reversing transparent indexes.
+    #[error("transparent address balance update failed")]
+    AddressBalance(#[from] amount::Error),
+
+    /// Rebuilding note commitment trees failed.
+    #[error("failed to rebuild note commitment trees")]
+    NoteCommitmentTree(#[from] NoteCommitmentTreeError),
+
+    /// Rebuilding the history tree failed.
+    #[error("failed to rebuild history tree")]
+    HistoryTree(#[from] HistoryTreeError),
+
+    /// Computing a block subsidy failed.
+    #[error("failed to compute block subsidy")]
+    Subsidy(#[from] SubsidyError),
+
+    /// Amount arithmetic failed while computing deferred pool balance changes.
+    #[error("failed to compute deferred pool balance change")]
+    DeferredPoolBalance(#[source] amount::Error),
+
+    /// RocksDB failed while writing the rollback batch.
+    #[error("failed to write rollback batch")]
+    RocksDb(#[from] rocksdb::Error),
+
+    /// Non-finalized backup file I/O failed.
+    #[error("failed to update non-finalized backup cache")]
+    BackupIo(#[from] std::io::Error),
+}
+
+/// Preview a finalized-state rollback without mutating the database.
+pub fn preview_rollback_finalized_state(
+    config: Config,
+    network: &Network,
+    options: RollbackFinalizedStateOptions,
+) -> Result<RollbackFinalizedStateSummary, RollbackFinalizedStateError> {
+    check_format_version(&config, network)?;
+
+    let db = open_rollback_db(&config, network, true);
+    let prepared = prepare_rollback(&db, network, &options)?;
+
+    Ok(prepared.summary(None))
+}
+
+/// Roll back the finalized state database to `options.target_height`.
+///
+/// The database is opened writable. If another Zebra process is running, RocksDB's
+/// lock prevents this function from opening the state.
+pub fn rollback_finalized_state(
+    config: Config,
+    network: &Network,
+    options: RollbackFinalizedStateOptions,
+) -> Result<RollbackFinalizedStateSummary, RollbackFinalizedStateError> {
+    check_format_version(&config, network)?;
+
+    let db = open_rollback_db(&config, network, false);
+    let prepared = prepare_rollback(&db, network, &options)?;
+
+    let backup = if options.keep_rolled_back_blocks {
+        let backup_dir = config
+            .non_finalized_state_backup_dir(network)
+            .ok_or(RollbackFinalizedStateError::BackupDisabled)?;
+
+        clear_backup_dir(&backup_dir)?;
+
+        for block in prepared.removed_blocks.iter().rev() {
+            write_semantically_verified_backup_block(&backup_dir, block)?;
+        }
+
+        Some(RollbackBackupSummary {
+            path: backup_dir,
+            block_count: prepared.removed_blocks.len(),
+        })
+    } else {
+        if let Some(backup_dir) = config.non_finalized_state_backup_dir(network) {
+            clear_backup_dir(&backup_dir)?;
+        }
+
+        None
+    };
+
+    let summary = prepared.summary(backup);
+
+    db.write_batch(prepared.batch)?;
+
+    Ok(summary)
+}
+
+fn check_format_version(
+    config: &Config,
+    network: &Network,
+) -> Result<(), RollbackFinalizedStateError> {
+    let in_code = state_database_format_version_in_code();
+    let on_disk = state_database_format_version_on_disk(config, network).map_err(|_| {
+        RollbackFinalizedStateError::FormatMismatch {
+            on_disk: None,
+            in_code: in_code.clone(),
+        }
+    })?;
+
+    match on_disk {
+        Some(on_disk) if on_disk == in_code => Ok(()),
+        Some(on_disk) => Err(RollbackFinalizedStateError::FormatMismatch {
+            on_disk: Some(on_disk),
+            in_code,
+        }),
+        None => Err(RollbackFinalizedStateError::EmptyState),
+    }
+}
+
+fn open_rollback_db(config: &Config, network: &Network, read_only: bool) -> ZebraDb {
+    ZebraDb::new(
+        config,
+        STATE_DATABASE_KIND,
+        &state_database_format_version_in_code(),
+        network,
+        false,
+        STATE_COLUMN_FAMILIES_IN_CODE
+            .iter()
+            .map(ToString::to_string),
+        read_only,
+    )
+}
+
+struct PreparedRollback {
+    old_tip: (block::Height, block::Hash),
+    new_tip: (block::Height, block::Hash),
+    batch: DiskWriteBatch,
+    removed_blocks: Vec<SemanticallyVerifiedBlock>,
+}
+
+impl PreparedRollback {
+    fn summary(&self, backup: Option<RollbackBackupSummary>) -> RollbackFinalizedStateSummary {
+        RollbackFinalizedStateSummary {
+            old_tip: self.old_tip,
+            new_tip: self.new_tip,
+            rolled_back_count: self.old_tip.0 .0 - self.new_tip.0 .0,
+            backup,
+        }
+    }
+}
+
+fn prepare_rollback(
+    db: &ZebraDb,
+    network: &Network,
+    options: &RollbackFinalizedStateOptions,
+) -> Result<PreparedRollback, RollbackFinalizedStateError> {
+    let old_tip = db.tip().ok_or(RollbackFinalizedStateError::EmptyState)?;
+    let (old_tip_height, _) = old_tip;
+
+    if options.target_height > old_tip_height {
+        return Err(RollbackFinalizedStateError::TargetAboveTip {
+            target: options.target_height,
+            tip: old_tip_height,
+        });
+    }
+
+    if options.target_height == old_tip_height {
+        return Err(RollbackFinalizedStateError::TargetIsTip {
+            target: options.target_height,
+        });
+    }
+
+    let target_hash =
+        db.hash(options.target_height)
+            .ok_or(RollbackFinalizedStateError::MissingTarget {
+                target: options.target_height,
+            })?;
+
+    let rollback_count = old_tip_height.0 - options.target_height.0;
+    if options.keep_rolled_back_blocks && rollback_count > crate::MAX_BLOCK_REORG_HEIGHT {
+        return Err(RollbackFinalizedStateError::KeepDepthTooLarge {
+            count: rollback_count,
+            max: crate::MAX_BLOCK_REORG_HEIGHT,
+        });
+    }
+
+    let target_treestate = rebuild_treestate_to_height(db, network, options.target_height)?;
+    let target_value_pool = db
+        .block_info(options.target_height.into())
+        .ok_or(RollbackFinalizedStateError::MissingTarget {
+            target: options.target_height,
+        })?
+        .value_pools()
+        .to_owned();
+
+    let mut batch = DiskWriteBatch::new();
+    let mut address_balances = HashMap::new();
+    let mut removed_blocks = Vec::new();
+
+    for height in ((options.target_height.0 + 1)..=old_tip_height.0)
+        .rev()
+        .map(Height)
+    {
+        let block = db
+            .block(height.into())
+            .ok_or(RollbackFinalizedStateError::MissingBlock { height })?;
+        let semantically_verified = SemanticallyVerifiedBlock::from(block.clone())
+            .with_deferred_pool_balance_change(deferred_pool_balance_change(height, network)?);
+
+        reverse_transparent_block(
+            db,
+            network,
+            &mut batch,
+            &mut address_balances,
+            height,
+            &block,
+        )?;
+        delete_shielded_block(db, &mut batch, &block);
+        delete_block_and_transaction_data(db, &mut batch, height, &block)?;
+
+        removed_blocks.push(semantically_verified);
+    }
+
+    write_address_balances(db, &mut batch, address_balances);
+    reset_tip_trees(db, &mut batch, options.target_height, &target_treestate);
+    reset_value_pool(db, &mut batch, &target_value_pool);
+    prune_tree_indexes(
+        db,
+        &mut batch,
+        options.target_height,
+        &target_treestate.retained_sprout_roots,
+    );
+
+    Ok(PreparedRollback {
+        old_tip,
+        new_tip: (options.target_height, target_hash),
+        batch,
+        removed_blocks,
+    })
+}
+
+struct RebuiltTreestate {
+    note_commitment_trees: NoteCommitmentTrees,
+    history_tree: HistoryTree,
+    retained_sprout_roots: HashSet<zebra_chain::sprout::tree::Root>,
+}
+
+fn rebuild_treestate_to_height(
+    db: &ZebraDb,
+    network: &Network,
+    target_height: Height,
+) -> Result<RebuiltTreestate, RollbackFinalizedStateError> {
+    let mut note_commitment_trees = NoteCommitmentTrees::default();
+    let mut history_tree = HistoryTree::default();
+    let mut retained_sprout_roots = HashSet::new();
+
+    for height in (Height::MIN.0..=target_height.0).map(Height) {
+        let block = db
+            .block(height.into())
+            .ok_or(RollbackFinalizedStateError::MissingBlock { height })?;
+
+        note_commitment_trees.update_trees_parallel(&block)?;
+        retained_sprout_roots.insert(note_commitment_trees.sprout.root());
+
+        let sapling_root = note_commitment_trees.sapling.root();
+        let orchard_root = note_commitment_trees.orchard.root();
+        history_tree.push(network, block, &sapling_root, &orchard_root)?;
+    }
+
+    Ok(RebuiltTreestate {
+        note_commitment_trees,
+        history_tree,
+        retained_sprout_roots,
+    })
+}
+
+fn deferred_pool_balance_change(
+    height: Height,
+    network: &Network,
+) -> Result<Option<DeferredPoolBalanceChange>, RollbackFinalizedStateError> {
+    if height <= network.slow_start_interval() {
+        return Ok(None);
+    }
+
+    let deferred_amount = funding_stream_values(height, network, block_subsidy(height, network)?)?
+        .remove(&FundingStreamReceiver::Deferred)
+        .unwrap_or_default()
+        .checked_sub(network.lockbox_disbursement_total_amount(height))
+        .ok_or_else(|| {
+            RollbackFinalizedStateError::DeferredPoolBalance(amount::Error::Constraint {
+                value: i64::MIN,
+                range: -zebra_chain::amount::MAX_MONEY..=zebra_chain::amount::MAX_MONEY,
+            })
+        })?;
+
+    Ok(Some(DeferredPoolBalanceChange::new(deferred_amount)))
+}
+
+fn reverse_transparent_block(
+    db: &ZebraDb,
+    network: &Network,
+    batch: &mut DiskWriteBatch,
+    address_balances: &mut HashMap<transparent::Address, Option<AddressBalanceLocation>>,
+    height: Height,
+    block: &Arc<Block>,
+) -> Result<(), RollbackFinalizedStateError> {
+    // Undo the forward write transaction-by-transaction in reverse order, un-crediting each
+    // transaction's created outputs before un-debiting its spent inputs.
+    //
+    // The forward write debits inputs before crediting outputs within each transaction so that
+    // every intermediate per-address balance stays within the consensus range, even for a
+    // same-address self-spend chain whose credit-first intermediate balance would exceed MAX_MONEY
+    // (see `prepare_transparent_transaction_batch`). Undoing the operations in the exact reverse
+    // order retraces those same in-range intermediate balances, so the checked balance arithmetic
+    // below cannot spuriously overflow or underflow.
+    for (tx_index, transaction) in block.transactions.iter().enumerate().rev() {
+        let tx_location = TransactionLocation::from_usize(height, tx_index);
+
+        // Un-credit the outputs this transaction created.
+        for (output_index, output) in transaction.outputs().iter().enumerate() {
+            let created_output_location =
+                OutputLocation::from_usize(height, tx_index, output_index);
+
+            if let Some(address) = output.address(network) {
+                let address_location =
+                    cached_address_balance(db, address_balances, &address)?.address_location();
+
+                batch.zs_delete(
+                    db.db.cf_handle("tx_loc_by_transparent_addr_loc").unwrap(),
+                    AddressTransaction::new(address_location, tx_location),
+                );
+                batch.zs_delete(
+                    db.db.cf_handle("utxo_loc_by_transparent_addr_loc").unwrap(),
+                    AddressUnspentOutput::new(address_location, created_output_location),
+                );
+
+                sub_address_balance(db, address_balances, &address, output.value())?;
+                sub_address_received(db, address_balances, &address, output.value());
+            }
+
+            batch.zs_delete(
+                db.db.cf_handle("utxo_by_out_loc").unwrap(),
+                created_output_location,
+            );
+        }
+
+        // Un-debit the outputs this transaction spent.
+        for spent_outpoint in transaction.inputs().iter().filter_map(Input::outpoint) {
+            let (spent_output_location, spent_utxo) = finalized_output(db, &spent_outpoint)?;
+
+            if let Some(address) = spent_utxo.output.address(network) {
+                let address_location =
+                    cached_address_balance(db, address_balances, &address)?.address_location();
+
+                batch.zs_delete(
+                    db.db.cf_handle("tx_loc_by_transparent_addr_loc").unwrap(),
+                    AddressTransaction::new(address_location, tx_location),
+                );
+                batch.zs_insert(
+                    db.db.cf_handle("utxo_loc_by_transparent_addr_loc").unwrap(),
+                    AddressUnspentOutput::new(address_location, spent_output_location),
+                    (),
+                );
+
+                add_address_balance(db, address_balances, &address, spent_utxo.output.value())?;
+            }
+
+            batch.zs_insert(
+                db.db.cf_handle("utxo_by_out_loc").unwrap(),
+                spent_output_location,
+                &spent_utxo.output,
+            );
+            batch.zs_delete(
+                db.db.cf_handle(TX_LOC_BY_SPENT_OUT_LOC).unwrap(),
+                spent_output_location,
+            );
+        }
+    }
+
+    Ok(())
+}
+
+fn finalized_output(
+    db: &ZebraDb,
+    outpoint: &transparent::OutPoint,
+) -> Result<(OutputLocation, transparent::Utxo), RollbackFinalizedStateError> {
+    let transaction_location = db.transaction_location(outpoint.hash).ok_or(
+        RollbackFinalizedStateError::MissingTransaction {
+            hash: outpoint.hash,
+        },
+    )?;
+    let transaction =
+        db.transaction(outpoint.hash)
+            .ok_or(RollbackFinalizedStateError::MissingTransaction {
+                hash: outpoint.hash,
+            })?;
+    let output = transaction
+        .0
+        .outputs()
+        .get(usize::try_from(outpoint.index).expect("valid output indexes fit in usize"))
+        .ok_or(RollbackFinalizedStateError::MissingTransparentOutput {
+            outpoint: *outpoint,
+        })?
+        .clone();
+    let output_location = OutputLocation::from_outpoint(transaction_location, outpoint);
+
+    Ok((
+        output_location,
+        transparent::Utxo::from_location(
+            output,
+            transaction_location.height,
+            transaction_location.index.as_usize(),
+        ),
+    ))
+}
+
+fn cached_address_balance<'a>(
+    db: &ZebraDb,
+    address_balances: &'a mut HashMap<transparent::Address, Option<AddressBalanceLocation>>,
+    address: &transparent::Address,
+) -> Result<&'a mut AddressBalanceLocation, RollbackFinalizedStateError> {
+    if !address_balances.contains_key(address) {
+        address_balances.insert(address.clone(), db.address_balance_location(address));
+    }
+
+    address_balances
+        .get_mut(address)
+        .and_then(Option::as_mut)
+        .ok_or_else(|| RollbackFinalizedStateError::MissingAddressBalance {
+            address: address.clone(),
+        })
+}
+
+fn add_address_balance(
+    db: &ZebraDb,
+    address_balances: &mut HashMap<transparent::Address, Option<AddressBalanceLocation>>,
+    address: &transparent::Address,
+    value: Amount<NonNegative>,
+) -> Result<(), RollbackFinalizedStateError> {
+    let balance = cached_address_balance(db, address_balances, address)?;
+    *balance.balance_mut() = (balance.balance() + value)?;
+    Ok(())
+}
+
+fn sub_address_balance(
+    db: &ZebraDb,
+    address_balances: &mut HashMap<transparent::Address, Option<AddressBalanceLocation>>,
+    address: &transparent::Address,
+    value: Amount<NonNegative>,
+) -> Result<(), RollbackFinalizedStateError> {
+    let balance = cached_address_balance(db, address_balances, address)?;
+    *balance.balance_mut() = (balance.balance() - value)?;
+    Ok(())
+}
+
+fn sub_address_received(
+    db: &ZebraDb,
+    address_balances: &mut HashMap<transparent::Address, Option<AddressBalanceLocation>>,
+    address: &transparent::Address,
+    value: Amount<NonNegative>,
+) {
+    let balance = cached_address_balance(db, address_balances, address)
+        .expect("address balance was loaded before subtracting received value");
+    let value = u64::try_from(value.zatoshis()).expect("non-negative zatoshi amount fits in u64");
+    *balance.received_mut() = balance.received().saturating_sub(value);
+}
+
+fn write_address_balances(
+    db: &ZebraDb,
+    batch: &mut DiskWriteBatch,
+    address_balances: HashMap<transparent::Address, Option<AddressBalanceLocation>>,
+) {
+    let balance_cf = db.db.cf_handle(BALANCE_BY_TRANSPARENT_ADDR).unwrap();
+
+    for (address, balance) in address_balances {
+        match balance {
+            Some(balance) if balance.balance().is_zero() && balance.received() == 0 => {
+                batch.zs_delete(&balance_cf, address);
+            }
+            Some(balance) => batch.zs_insert(&balance_cf, address, balance),
+            None => batch.zs_delete(&balance_cf, address),
+        }
+    }
+}
+
+fn delete_shielded_block(db: &ZebraDb, batch: &mut DiskWriteBatch, block: &Block) {
+    let sprout_nullifiers = db.db.cf_handle("sprout_nullifiers").unwrap();
+    let sapling_nullifiers = db.db.cf_handle("sapling_nullifiers").unwrap();
+    let orchard_nullifiers = db.db.cf_handle("orchard_nullifiers").unwrap();
+
+    for transaction in &block.transactions {
+        for nullifier in transaction.sprout_nullifiers() {
+            batch.zs_delete(&sprout_nullifiers, nullifier);
+        }
+        for nullifier in transaction.sapling_nullifiers() {
+            batch.zs_delete(&sapling_nullifiers, nullifier);
+        }
+        for nullifier in transaction.orchard_nullifiers() {
+            batch.zs_delete(&orchard_nullifiers, nullifier);
+        }
+    }
+}
+
+fn delete_block_and_transaction_data(
+    db: &ZebraDb,
+    batch: &mut DiskWriteBatch,
+    height: Height,
+    block: &Block,
+) -> Result<(), RollbackFinalizedStateError> {
+    let block_hash = db
+        .hash(height)
+        .ok_or(RollbackFinalizedStateError::MissingBlock { height })?;
+
+    batch.zs_delete(db.db.cf_handle("block_header_by_height").unwrap(), height);
+    batch.zs_delete(db.db.cf_handle("hash_by_height").unwrap(), height);
+    batch.zs_delete(db.db.cf_handle("height_by_hash").unwrap(), block_hash);
+    batch.zs_delete(db.db.cf_handle(BLOCK_INFO).unwrap(), height);
+
+    for tx_index in 0..block.transactions.len() {
+        let tx_location = TransactionLocation::from_usize(height, tx_index);
+        let tx_hash = db
+            .transaction_hash(tx_location)
+            .ok_or(RollbackFinalizedStateError::MissingBlock { height })?;
+
+        batch.zs_delete(db.db.cf_handle("tx_by_loc").unwrap(), tx_location);
+        batch.zs_delete(db.db.cf_handle("hash_by_tx_loc").unwrap(), tx_location);
+        batch.zs_delete(db.db.cf_handle("tx_loc_by_hash").unwrap(), tx_hash);
+    }
+
+    Ok(())
+}
+
+fn reset_tip_trees(
+    db: &ZebraDb,
+    batch: &mut DiskWriteBatch,
+    target_height: Height,
+    treestate: &RebuiltTreestate,
+) {
+    batch.update_sprout_tree(db, &treestate.note_commitment_trees.sprout);
+    batch.create_sapling_tree(db, &target_height, &treestate.note_commitment_trees.sapling);
+    batch.create_orchard_tree(db, &target_height, &treestate.note_commitment_trees.orchard);
+    batch.update_history_tree(db, &treestate.history_tree);
+}
+
+fn reset_value_pool(
+    db: &ZebraDb,
+    batch: &mut DiskWriteBatch,
+    value_pool: &ValueBalance<NonNegative>,
+) {
+    let _ = db
+        .chain_value_pools_cf()
+        .with_batch_for_writing(batch)
+        .zs_insert(&(), value_pool);
+}
+
+fn prune_tree_indexes(
+    db: &ZebraDb,
+    batch: &mut DiskWriteBatch,
+    target_height: Height,
+    retained_sprout_roots: &HashSet<zebra_chain::sprout::tree::Root>,
+) {
+    let sapling_trees: BTreeMap<_, _> = db
+        .sapling_tree_by_height_range((
+            std::ops::Bound::Excluded(target_height),
+            std::ops::Bound::Unbounded,
+        ))
+        .collect();
+    for (height, tree) in sapling_trees {
+        batch.delete_sapling_tree(db, &height);
+        batch.delete_sapling_anchor(db, &tree.root());
+    }
+
+    let orchard_trees: BTreeMap<_, _> = db
+        .orchard_tree_by_height_range((
+            std::ops::Bound::Excluded(target_height),
+            std::ops::Bound::Unbounded,
+        ))
+        .collect();
+    for (height, tree) in orchard_trees {
+        batch.delete_orchard_tree(db, &height);
+        batch.delete_orchard_anchor(db, &tree.root());
+    }
+
+    let sapling_subtrees = db.sapling_subtree_list_by_index_range(..);
+    for (index, subtree) in sapling_subtrees {
+        if subtree.end_height > target_height {
+            batch.delete_range_sapling_subtree(
+                db,
+                index,
+                zebra_chain::subtree::NoteCommitmentSubtreeIndex(index.0 + 1),
+            );
+        }
+    }
+
+    let orchard_subtrees = db.orchard_subtree_list_by_index_range(..);
+    for (index, subtree) in orchard_subtrees {
+        if subtree.end_height > target_height {
+            batch.delete_range_orchard_subtree(
+                db,
+                index,
+                zebra_chain::subtree::NoteCommitmentSubtreeIndex(index.0 + 1),
+            );
+        }
+    }
+
+    for (root, _) in db.sprout_trees_full_map() {
+        if !retained_sprout_roots.contains(&root) {
+            batch.delete_sprout_anchor(db, &root);
+        }
+    }
+
+    let next_height = Height(target_height.0 + 1);
+    batch.delete_range_history_tree(db, &next_height, &Height::MAX);
+    batch.delete_range_sprout_tree(db, &next_height, &Height::MAX);
+}
+
+fn clear_backup_dir(path: &PathBuf) -> Result<(), std::io::Error> {
+    match std::fs::remove_dir_all(path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+
+    std::fs::create_dir_all(path)
+}

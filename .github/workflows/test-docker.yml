@@ -101,6 +101,12 @@ jobs:
             test_cmd: id
             grep_patterns: -e "uid=10001\\(zebra\\).*gid=10001\\(zebra\\)"
 
+          - id: rollback-tool
+            name: Rollback tool
+            env_vars: ""
+            test_cmd: zebra-rollback-state --help
+            grep_patterns: -e "rollback.*finalized.*state|Rollback.*finalized.*state|zebra-rollback-state"
+
           # Basic network configurations
           - id: default-conf
             name: Default config

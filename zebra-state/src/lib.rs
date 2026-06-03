@@ -71,6 +71,10 @@ pub use service::{
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use service::finalized_state::{ReadDisk, TypedColumnFamily, WriteTypedBatch};
 
+pub use service::finalized_state::{
+    preview_rollback_finalized_state, rollback_finalized_state, RollbackBackupSummary,
+    RollbackFinalizedStateError, RollbackFinalizedStateOptions, RollbackFinalizedStateSummary,
+};
 pub use service::{
     finalized_state::{DiskWriteBatch, FromDisk, IntoDisk, WriteDisk, ZebraDb},
     ReadStateService,

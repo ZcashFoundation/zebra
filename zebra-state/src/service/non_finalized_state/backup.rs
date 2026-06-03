@@ -214,6 +214,34 @@ fn write_backup_block(backup_dir_path: &Path, block: &ContextuallyVerifiedBlock)
     }
 }
 
+/// Writes a semantically verified block to the non-finalized backup cache format.
+///
+/// This is used by offline finalized-state rollback, where blocks have already been
+/// finalized and are being moved back into the non-finalized restore window.
+pub(crate) fn write_semantically_verified_backup_block(
+    backup_dir_path: &Path,
+    block: &SemanticallyVerifiedBlock,
+) -> io::Result<PathBuf> {
+    std::fs::create_dir_all(backup_dir_path)?;
+
+    let backup_block_file_name: String = block.hash.encode_hex();
+    let backup_block_file_path = backup_dir_path.join(backup_block_file_name);
+    let non_finalized_block_backup = NonFinalizedBlockBackup {
+        block: block.block.clone(),
+        deferred_pool_balance_change: block
+            .deferred_pool_balance_change
+            .map(|change| change.value())
+            .unwrap_or_default(),
+    };
+
+    std::fs::write(
+        &backup_block_file_path,
+        non_finalized_block_backup.as_bytes(),
+    )?;
+
+    Ok(backup_block_file_path)
+}
+
 /// Reads blocks from the provided non-finalized state backup directory path.
 ///
 /// Returns any blocks that are valid and not present in the finalized state.

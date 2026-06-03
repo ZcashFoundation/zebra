@@ -106,9 +106,11 @@ COPY --link --chown=${UID}:${GID} ./ ${HOME}
 # Build Zebra test binaries using nextest, but don't run them.
 # This also copies the necessary binaries to /usr/local/bin.
 RUN [ -n "${SHORT_SHA}" ] && export SHORT_SHA="${SHORT_SHA}" || true; \
+    cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad --bin zebra-rollback-state && \
     cargo nextest run --locked --release --no-run --features "${FEATURES}" && \
     # Copy binaries to standard location
     cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin && \
+    cp ${CARGO_TARGET_DIR}/release/zebra-rollback-state /usr/local/bin && \
     # Only copy zebra-checkpoints if the feature is enabled
     if echo "${FEATURES}" | grep -q "zebra-checkpoints"; then \
         cp ${CARGO_TARGET_DIR}/release/zebra-checkpoints /usr/local/bin; \
@@ -125,10 +127,10 @@ COPY --link --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoi
 ENTRYPOINT [ "entrypoint.sh", "test" ]
 CMD [ "cargo", "test" ]
 
-# This stage builds the zebrad release binary.
+# This stage builds the zebrad release binaries.
 #
 # It also adds `cache mounts` as this stage is completely independent from the
-# `test` stage. The resulting zebrad binary is used in the `runtime` stage.
+# `test` stage. The resulting binaries are used in the `runtime` stage.
 FROM deps AS release
 
 ARG SHORT_SHA
@@ -159,10 +161,11 @@ RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     --mount=type=cache,target=${CARGO_TARGET_DIR} \
     --mount=type=cache,target=${CARGO_HOME} \
     [ -n "${SHORT_SHA}" ] && export SHORT_SHA="${SHORT_SHA}" || true; \
-    cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad && \
-    cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin
+    cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad --bin zebra-rollback-state && \
+    cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin && \
+    cp ${CARGO_TARGET_DIR}/release/zebra-rollback-state /usr/local/bin
 
-# This stage starts from scratch using Debian and copies the built zebrad binary
+# This stage starts from scratch using Debian and copies the built Zebra binaries
 # from the `release` stage along with other binaries and files.
 FROM debian:trixie-slim AS runtime
 
@@ -213,6 +216,7 @@ RUN chown -R ${UID}:${GID} ${HOME}
 # setpriv is part of util-linux, already included in debian:trixie-slim.
 
 COPY --link --from=release /usr/local/bin/zebrad /usr/local/bin/
+COPY --link --from=release /usr/local/bin/zebra-rollback-state /usr/local/bin/
 COPY --link --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 ENTRYPOINT [ "entrypoint.sh" ]

@@ -34,6 +34,7 @@ use super::disk_format::upgrade::restorable_db_versions;
 pub mod block;
 pub mod chain;
 pub mod metrics;
+pub mod rollback;
 pub mod shielded;
 pub mod transparent;
 
