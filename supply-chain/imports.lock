@@ -1,14 +1,6 @@
 
 # cargo-vet imports lock
 
-[[unpublished.zebra-script]]
-version = "7.0.1"
-audited_as = "7.0.0"
-
-[[unpublished.zebrad]]
-version = "4.5.1"
-audited_as = "4.5.0"
-
 [[publisher.bumpalo]]
 version = "3.20.2"
 when = "2026-02-19"

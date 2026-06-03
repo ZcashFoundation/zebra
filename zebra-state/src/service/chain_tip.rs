@@ -600,13 +600,20 @@ impl ChainTipChange {
         // upgrade, but it has the same memory-pool requirement: once the chain tip
         // reaches its activation height, the mempool must drop any transactions
         // that are no longer valid under the new rule. So we also reset there.
+        // The next height is what the mempool verifies against; it always exists because the
+        // chain tip height is far below `Height::MAX`.
+        // TODO: confirm whether resetting at `activation_height - 1` (the `.next()` semantics
+        // below) is intended for every network upgrade, or only for the temporary-disable soft
+        // fork; ZIP-200 phrases the reset as "when the tip reaches ACTIVATION_HEIGHT".
+        let next_height = block
+            .height
+            .next()
+            .expect("chain tip height is far below Height::MAX");
         if Some(block.previous_block_hash) != self.last_change_hash
-            || NetworkUpgrade::is_activation_height(&self.network, block.height.next().unwrap())
+            || NetworkUpgrade::is_activation_height(&self.network, next_height)
             || self
                 .network
-                .is_temporary_orchard_disabling_soft_fork_activation_height(
-                    block.height.next().unwrap(),
-                )
+                .is_temporary_orchard_disabling_soft_fork_activation_height(next_height)
         {
             TipAction::reset_with(block)
         } else {

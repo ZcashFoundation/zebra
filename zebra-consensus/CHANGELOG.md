@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [8.0.0] - 2026-06-02
+
+### Added
+
+- `error::TransactionError::OrchardProofSize`.
+- Per-Orchard-circuit verifying keys and batch verifiers: `VERIFYING_KEY_PRE_NU6_2`,
+  `VERIFYING_KEY_POST_NU6_2`, `VERIFIER_PRE_NU6_2`, `VERIFIER_POST_NU6_2`, and `verifier_for()`
+  to select the verifier for a network upgrade.
+
+### Removed
+
+- `VERIFYING_KEY` and `VERIFIER`; replaced by the per-circuit pairs above.
+
+### Changed
+
+- Enforce a canonical Orchard proof size from the NU6.2 network upgrade, and verify Orchard
+  proofs against the fixed circuit's verifying key from NU6.2 onward.
+
 ## [7.0.0] - 2026-05-28
 
 ### Added

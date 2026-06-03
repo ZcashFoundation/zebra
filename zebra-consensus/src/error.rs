@@ -242,6 +242,9 @@ pub enum TransactionError {
     #[error("invalid balance")]
     Balance(String),
 
+    #[error("Orchard proof has a non-canonical size")]
+    OrchardProofSize,
+
     #[error("unexpected error")]
     Other(String),
 }

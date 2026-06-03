@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.0.0] - 2026-06-02
+
+### Added
+
+- `NetworkUpgrade::Nu6_2` (consensus branch id `0x5437f330`), with activation heights
+  3,364,600 on Mainnet and 4,052,000 on Testnet.
+- `OrchardShieldedData::proof_size_is_canonical()`.
+- `Network::orchard_canonical_proof_size_rule_active()` and
+  `Network::is_orchard_temporarily_disabled()`.
+- A configurable NU6.2 activation height for Testnets (`ConfiguredActivationHeights::nu6_2`).
+
+### Changed
+
+- The default Testnet's temporary Orchard-disabling soft-fork height now defaults to
+  4,048,500; Regtest leaves it unset.
+
 ## [8.0.0] - 2026-05-28
 
 ### Removed
