@@ -582,7 +582,7 @@ impl ChainTipChange {
         //
         // https://zips.z.cash/zip-0200#chain-reorganization
 
-        // If we're at a network upgrade activation block, reset.
+        // If the block *before* a network upgrade activation block becomes the tip, reset.
         //
         // Consensus rules:
         //
@@ -592,19 +592,23 @@ impl ChainTipChange {
         //
         // https://zips.z.cash/zip-0200#memory-pool
         //
+        // ZIP-200 phrases this as "when the tip reaches ACTIVATION_HEIGHT", but the mempool
+        // verifies its transactions against the *next* block, i.e. the child of the current tip.
+        // A transaction in the mempool becomes invalid as soon as the next block it could be
+        // mined into is the activation block, which happens when the tip reaches
+        // `ACTIVATION_HEIGHT - 1`. So we reset when the *next* height is an activation height,
+        // one block earlier than the literal wording, so the mempool is already cleared by the
+        // time the activation block is mined on top of the tip.
+        //
         // Skipped blocks can include network upgrade activation blocks.
         // Fork changes can activate or deactivate a network upgrade.
         // So we must perform the same actions for network upgrades and skipped blocks.
         //
-        // The soft fork that temporarily disables Orchard actions is not a network
-        // upgrade, but it has the same memory-pool requirement: once the chain tip
-        // reaches its activation height, the mempool must drop any transactions
-        // that are no longer valid under the new rule. So we also reset there.
-        // The next height is what the mempool verifies against; it always exists because the
-        // chain tip height is far below `Height::MAX`.
-        // TODO: confirm whether resetting at `activation_height - 1` (the `.next()` semantics
-        // below) is intended for every network upgrade, or only for the temporary-disable soft
-        // fork; ZIP-200 phrases the reset as "when the tip reaches ACTIVATION_HEIGHT".
+        // The soft fork that temporarily disables Orchard actions is not a network upgrade, but
+        // it has the same memory-pool requirement and is verified against the next height in the
+        // same way, so we also reset when the next height is its activation height.
+        //
+        // The next height always exists because the chain tip height is far below `Height::MAX`.
         let next_height = block
             .height
             .next()
