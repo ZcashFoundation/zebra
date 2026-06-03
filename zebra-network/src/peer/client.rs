@@ -359,13 +359,12 @@ impl MissingInventoryCollector {
         }
     }
 
-    /// Forwards any missing inventory to the registry.
+    /// Forwards explicitly observed missing inventory to the registry.
     ///
-    /// `zcashd` doesn't send `notfound` messages for blocks,
-    /// so we need to track missing blocks ourselves.
-    ///
-    /// This can sometimes send duplicate missing inventory,
-    /// but the registry ignores duplicates anyway.
+    /// Only explicit `notfound` responses update the registry. Transport
+    /// failures and timeouts do not prove the peer lacks the inventory,
+    /// so they are not forwarded (prevents registry poisoning under
+    /// high sync concurrency).
     pub fn send(self, response: &Result<Response, SharedPeerError>) {
         let missing_inv: HashSet<InventoryHash> = match (self.request, response) {
             // Missing block hashes from partial responses.
@@ -385,31 +384,28 @@ impl MissingInventoryCollector {
             // Other response types never contain missing inventory.
             (_, Ok(_)) => iter::empty().collect(),
 
-            // We don't forward NotFoundRegistry errors,
-            // because the errors are generated locally from the registry,
-            // so those statuses are already in the registry.
-            //
-            // Unfortunately, we can't access the inner error variant here,
-            // due to TracedError.
+            // Registry-generated errors are already tracked — don't re-forward.
             (_, Err(e)) if e.inner_debug().contains("NotFoundRegistry") => iter::empty().collect(),
 
-            // Missing inventory from other errors, including NotFoundResponse, timeouts,
-            // and dropped connections.
-            (request, Err(_)) => {
-                // The request either contains blocks or transactions,
-                // but this is a convenient way to collect them both.
-                let missing_blocks = request
-                    .block_hash_inventory()
-                    .into_iter()
-                    .map(InventoryHash::Block);
+            // Only mark inventory as missing for explicit notfound responses.
+            // Transport failures (timeouts, dropped connections) do not prove
+            // the peer lacks the inventory — they only prove the request failed.
+            // Treating them as missing poisons the routing registry under high
+            // sync concurrency.
+            (ref request, Err(e)) if e.inner_debug().contains("NotFoundResponse") => request
+                .block_hash_inventory()
+                .into_iter()
+                .map(InventoryHash::Block)
+                .chain(
+                    request
+                        .transaction_id_inventory()
+                        .into_iter()
+                        .map(InventoryHash::from),
+                )
+                .collect(),
 
-                let missing_txs = request
-                    .transaction_id_inventory()
-                    .into_iter()
-                    .map(InventoryHash::from);
-
-                missing_blocks.chain(missing_txs).collect()
-            }
+            // All other errors (timeouts, drops, overload): don't poison.
+            (_, Err(_)) => iter::empty().collect(),
         };
 
         if let Some(missing_inv) =
