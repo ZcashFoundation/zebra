@@ -13,7 +13,10 @@ use zebra_chain::{
     amount::Amount,
     block::Block,
     fmt::humantime_seconds,
-    parameters::Network,
+    parameters::{
+        testnet::{ConfiguredActivationHeights, ParametersBuilder},
+        Network,
+    },
     serialization::ZcashDeserializeInto,
     transaction::{Transaction, VerifiedUnminedTx},
     transparent::{self, OutPoint},
@@ -613,16 +616,48 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> {
-    let block1: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+    // Use a configured Testnet where a network upgrade activates at height 2.
+    //
+    // The mempool resets (and cancels pending downloads) when the chain tip reaches the block
+    // *before* a network upgrade activation height, because that next height is what the next
+    // block is verified against (see `ChainTipChange::action`). So committing the block at
+    // height 1, whose next height (2) is the Overwinter activation height, triggers a
+    // network-upgrade reset that must cancel all pending transaction downloads.
+    //
+    // We can't use Mainnet here: the only activation height reachable with the available block
+    // vectors is `BeforeOverwinter` (height 1), whose reset fires at the genesis block (height
+    // 0). That reset is consumed while enabling the mempool, so it can't cancel a later download.
+    let network = ParametersBuilder::default()
+        .with_activation_heights(ConfiguredActivationHeights {
+            before_overwinter: Some(1),
+            overwinter: Some(2),
+            sapling: Some(3),
+            blossom: Some(4),
+            heartwood: Some(5),
+            canopy: Some(6),
+            nu5: Some(7),
+            nu6: Some(8),
+            nu6_1: Some(9),
+            nu6_2: Some(10),
+            nu7: Some(11),
+        })
+        .expect("activation heights are valid")
+        .extend_funding_streams()
+        .to_network()
+        .expect("configured network is valid");
+
+    let genesis_block: Arc<Block> = zebra_test::vectors::BLOCK_TESTNET_GENESIS_BYTES
         .zcash_deserialize_into()
         .unwrap();
-    let block2: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_2_BYTES
+    let block1: Arc<Block> = zebra_test::vectors::BLOCK_TESTNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let block2: Arc<Block> = zebra_test::vectors::BLOCK_TESTNET_2_BYTES
         .zcash_deserialize_into()
         .unwrap();
 
-    // Using the mainnet for now
-    let network = Network::Mainnet;
-
+    // Don't commit the genesis block during setup: we commit it below so we control when the
+    // mempool first sees a chain tip (it can only be enabled once there is a tip).
     let (
         mut mempool,
         mut peer_set,
@@ -631,13 +666,29 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
         _tx_verifier,
         mut recent_syncs,
         _mempool_transaction_receiver,
-    ) = setup(&network, u64::MAX, true).await;
+    ) = setup(&network, u64::MAX, false).await;
+
+    // Commit the genesis block so the mempool can be enabled (it requires a chain tip).
+    state_service
+        .ready()
+        .await
+        .unwrap()
+        .call(zebra_state::Request::CommitCheckpointVerifiedBlock(
+            genesis_block.clone().into(),
+        ))
+        .await
+        .unwrap();
+    chain_tip_change
+        .wait_for_tip_change()
+        .await
+        .expect("unexpected chain tip update failure");
 
     // Enable the mempool
     mempool.enable(&mut recent_syncs).await;
     assert!(mempool.is_enabled());
 
-    // Queue transaction from block 2 for download
+    // Queue transaction from block 2 for download. Block 2 is never committed, so the
+    // transaction is never mined and the download can be retried after the reset.
     let txid = block2.transactions[0].unmined_id();
     let response = mempool
         .ready()
@@ -657,8 +708,8 @@ async fn mempool_cancel_downloads_after_network_upgrade() -> Result<(), Report> 
     // Query the mempool to make it poll chain_tip_change
     mempool.dummy_call().await;
 
-    // Push block 1 to the state. This is considered a network upgrade,
-    // and thus must cancel all pending transaction downloads.
+    // Push block 1 to the state. Its next height (2) is the Overwinter activation height, so this
+    // triggers a network-upgrade reset, which must cancel all pending transaction downloads.
     state_service
         .ready()
         .await
