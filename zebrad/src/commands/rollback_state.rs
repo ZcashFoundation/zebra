@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use abscissa_core::{Application, Command, Runnable};
 use clap::Parser;
-use color_eyre::eyre::{eyre, Result};
+use color_eyre::eyre::Result;
 
 use zebra_chain::{block, parameters::Network};
 use zebra_state::{RollbackFinalizedStateOptions, RollbackFinalizedStateSummary};
@@ -19,6 +19,11 @@ pub struct RollbackStateCmd {
     height: u32,
 
     /// Path to Zebra's cached state.
+    ///
+    /// The `zebrad rollback-state` subcommand defaults to `state.cache_dir` from the loaded
+    /// `zebrad.toml`, while the standalone `zebra-rollback-state` binary defaults to
+    /// `zebra_state::Config::default()`. Pass `--cache-dir` to be explicit and avoid rolling back
+    /// the wrong (or an empty) state directory.
     #[clap(long, short, help = "path to directory with the Zebra chain state")]
     cache_dir: Option<PathBuf>,
 
@@ -35,47 +40,57 @@ pub struct RollbackStateCmd {
     #[clap(long, help = "keep rolled-back blocks for non-finalized restore")]
     keep_rolled_back_blocks: bool,
 
-    /// Actually mutate the state after printing the rollback plan.
-    #[clap(long, help = "required to mutate the finalized state")]
-    force: bool,
+    /// Preview the rollback plan without mutating finalized state.
+    #[clap(long, help = "show the rollback plan without changing finalized state")]
+    dry_run: bool,
 }
 
 impl Runnable for RollbackStateCmd {
     /// `rollback-state` sub-command entrypoint.
     fn run(&self) {
-        let config = APPLICATION.config().state.clone();
+        let config = APPLICATION.config();
 
-        if let Err(error) = self.run_with_config(config) {
+        if let Err(error) = self.run_with_config(config.state.clone(), config.consensus.clone()) {
             tracing::error!("Failed to roll back finalized state: {error}");
+            // Exit non-zero so the subcommand matches the standalone `zebra-rollback-state` binary
+            // and scripts can detect the failure (abscissa would otherwise exit 0).
+            std::process::exit(1);
         }
     }
 }
 
 impl RollbackStateCmd {
     /// Runs rollback using `state_config` as the base state configuration.
+    ///
+    /// `consensus_config` supplies `checkpoint_sync`, which sets the max checkpoint height used to
+    /// guard `--keep-rolled-back-blocks`: blocks kept below it would be discarded on the next start.
     #[allow(clippy::print_stdout)]
-    pub fn run_with_config(&self, mut state_config: zebra_state::Config) -> Result<()> {
+    pub fn run_with_config(
+        &self,
+        mut state_config: zebra_state::Config,
+        consensus_config: zebra_consensus::config::Config,
+    ) -> Result<()> {
         if let Some(cache_dir) = self.cache_dir.clone() {
             state_config.cache_dir = cache_dir;
         }
 
+        let (_, max_checkpoint_height) =
+            zebra_consensus::router::init_checkpoint_list(consensus_config, &self.network);
+
         let options = RollbackFinalizedStateOptions {
             target_height: block::Height(self.height),
             keep_rolled_back_blocks: self.keep_rolled_back_blocks,
+            max_checkpoint_height: Some(max_checkpoint_height),
         };
 
-        let preview = zebra_state::preview_rollback_finalized_state(
-            state_config.clone(),
-            &self.network,
-            options.clone(),
-        )?;
-
-        print_summary("rollback plan", &preview);
-
-        if !self.force {
-            return Err(eyre!(
-                "rollback-state requires --force after reviewing the rollback plan"
-            ));
+        if self.dry_run {
+            let preview = zebra_state::preview_rollback_finalized_state(
+                state_config,
+                &self.network,
+                options,
+            )?;
+            print_summary("rollback plan", &preview);
+            return Ok(());
         }
 
         let summary = zebra_state::rollback_finalized_state(state_config, &self.network, options)?;

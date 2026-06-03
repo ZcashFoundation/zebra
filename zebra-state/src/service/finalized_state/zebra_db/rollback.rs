@@ -16,6 +16,7 @@ use zebra_chain::{
         subsidy::{block_subsidy, funding_stream_values, FundingStreamReceiver, SubsidyError},
         Network,
     },
+    subtree::NoteCommitmentSubtreeIndex,
     transaction,
     transparent::{self, Input},
     value_balance::ValueBalance,
@@ -54,6 +55,15 @@ pub struct RollbackFinalizedStateOptions {
 
     /// Write removed finalized blocks to the non-finalized backup cache.
     pub keep_rolled_back_blocks: bool,
+
+    /// The maximum checkpoint height the node will use at its next startup.
+    ///
+    /// When `keep_rolled_back_blocks` is set, the kept blocks are only loaded back into the
+    /// non-finalized state on the next start if the new finalized tip is at or above this height
+    /// (see `StateService::new`'s `is_finalized_tip_past_max_checkpoint` gate). Rolling back below
+    /// it would silently discard the backup, so rollback refuses that combination when this is
+    /// `Some`. Callers that cannot determine the height (or want to skip the check) pass `None`.
+    pub max_checkpoint_height: Option<block::Height>,
 }
 
 /// Details about non-finalized backup files written by rollback.
@@ -135,6 +145,21 @@ pub enum RollbackFinalizedStateError {
         max: u32,
     },
 
+    /// Keeping rolled-back blocks below the max checkpoint height would silently discard them.
+    #[error(
+        "cannot keep rolled-back blocks: new finalized tip height {target:?} is below the max \
+         checkpoint height {max_checkpoint:?}. The non-finalized restore only reloads blocks once \
+         the finalized tip is past the last checkpoint, so the kept blocks would be deleted on the \
+         next start. Roll back to a height at or above the max checkpoint, or omit \
+         --keep-rolled-back-blocks."
+    )]
+    KeepBelowMaxCheckpoint {
+        /// Requested new finalized tip height.
+        target: block::Height,
+        /// Max checkpoint height the node will use at its next startup.
+        max_checkpoint: block::Height,
+    },
+
     /// Non-finalized backup is disabled for this state configuration.
     #[error("cannot keep rolled-back blocks because non-finalized backup is disabled")]
     BackupDisabled,
@@ -205,9 +230,12 @@ pub fn preview_rollback_finalized_state(
     check_format_version(&config, network)?;
 
     let db = open_rollback_db(&config, network, true);
-    let prepared = prepare_rollback(&db, network, &options)?;
+    let bounds = validate_rollback(&db, &options)?;
 
-    Ok(prepared.summary(None))
+    // A dry run only reports the plan, so it deliberately skips the genesis-to-target treestate
+    // rebuild and batch construction that `rollback_finalized_state` performs. The real run
+    // recomputes those; doing them here would make the preview as slow as the rollback itself.
+    Ok(bounds.summary(None))
 }
 
 /// Roll back the finalized state database to `options.target_height`.
@@ -290,14 +318,16 @@ fn open_rollback_db(config: &Config, network: &Network, read_only: bool) -> Zebr
     )
 }
 
-struct PreparedRollback {
+/// The validated bounds of a rollback: where the finalized tip is now, and where it will end up.
+///
+/// Computing these is cheap (a couple of index lookups), so the dry-run preview stops here
+/// instead of building the full rollback batch.
+struct RollbackBounds {
     old_tip: (block::Height, block::Hash),
     new_tip: (block::Height, block::Hash),
-    batch: DiskWriteBatch,
-    removed_blocks: Vec<SemanticallyVerifiedBlock>,
 }
 
-impl PreparedRollback {
+impl RollbackBounds {
     fn summary(&self, backup: Option<RollbackBackupSummary>) -> RollbackFinalizedStateSummary {
         RollbackFinalizedStateSummary {
             old_tip: self.old_tip,
@@ -308,11 +338,24 @@ impl PreparedRollback {
     }
 }
 
-fn prepare_rollback(
+struct PreparedRollback {
+    bounds: RollbackBounds,
+    batch: DiskWriteBatch,
+    removed_blocks: Vec<SemanticallyVerifiedBlock>,
+}
+
+impl PreparedRollback {
+    fn summary(&self, backup: Option<RollbackBackupSummary>) -> RollbackFinalizedStateSummary {
+        self.bounds.summary(backup)
+    }
+}
+
+/// Validate a rollback request against the finalized state, without rebuilding any treestate or
+/// building the rollback batch.
+fn validate_rollback(
     db: &ZebraDb,
-    network: &Network,
     options: &RollbackFinalizedStateOptions,
-) -> Result<PreparedRollback, RollbackFinalizedStateError> {
+) -> Result<RollbackBounds, RollbackFinalizedStateError> {
     let old_tip = db.tip().ok_or(RollbackFinalizedStateError::EmptyState)?;
     let (old_tip_height, _) = old_tip;
 
@@ -335,13 +378,41 @@ fn prepare_rollback(
                 target: options.target_height,
             })?;
 
-    let rollback_count = old_tip_height.0 - options.target_height.0;
-    if options.keep_rolled_back_blocks && rollback_count > crate::MAX_BLOCK_REORG_HEIGHT {
-        return Err(RollbackFinalizedStateError::KeepDepthTooLarge {
-            count: rollback_count,
-            max: crate::MAX_BLOCK_REORG_HEIGHT,
-        });
+    if options.keep_rolled_back_blocks {
+        let rollback_count = old_tip_height.0 - options.target_height.0;
+        if rollback_count > crate::MAX_BLOCK_REORG_HEIGHT {
+            return Err(RollbackFinalizedStateError::KeepDepthTooLarge {
+                count: rollback_count,
+                max: crate::MAX_BLOCK_REORG_HEIGHT,
+            });
+        }
+
+        // The non-finalized restore only reloads the kept blocks once the finalized tip is past
+        // the last checkpoint, so refuse rather than silently discarding them on the next start.
+        if let Some(max_checkpoint) = options
+            .max_checkpoint_height
+            .filter(|&max| options.target_height < max)
+        {
+            return Err(RollbackFinalizedStateError::KeepBelowMaxCheckpoint {
+                target: options.target_height,
+                max_checkpoint,
+            });
+        }
     }
+
+    Ok(RollbackBounds {
+        old_tip,
+        new_tip: (options.target_height, target_hash),
+    })
+}
+
+fn prepare_rollback(
+    db: &ZebraDb,
+    network: &Network,
+    options: &RollbackFinalizedStateOptions,
+) -> Result<PreparedRollback, RollbackFinalizedStateError> {
+    let bounds = validate_rollback(db, options)?;
+    let (old_tip_height, _) = bounds.old_tip;
 
     let target_treestate = rebuild_treestate_to_height(db, network, options.target_height)?;
     let target_value_pool = db
@@ -381,7 +452,7 @@ fn prepare_rollback(
     }
 
     write_address_balances(db, &mut batch, address_balances);
-    reset_tip_trees(db, &mut batch, options.target_height, &target_treestate);
+    reset_tip_trees(db, &mut batch, &target_treestate);
     reset_value_pool(db, &mut batch, &target_value_pool);
     prune_tree_indexes(
         db,
@@ -391,8 +462,7 @@ fn prepare_rollback(
     );
 
     Ok(PreparedRollback {
-        old_tip,
-        new_tip: (options.target_height, target_hash),
+        bounds,
         batch,
         removed_blocks,
     })
@@ -689,16 +759,18 @@ fn delete_block_and_transaction_data(
     Ok(())
 }
 
-fn reset_tip_trees(
-    db: &ZebraDb,
-    batch: &mut DiskWriteBatch,
-    target_height: Height,
-    treestate: &RebuiltTreestate,
-) {
+fn reset_tip_trees(db: &ZebraDb, batch: &mut DiskWriteBatch, treestate: &RebuiltTreestate) {
+    // The sprout and history tip trees live in single-entry column families, so overwrite them
+    // with the trees rebuilt up to the target height.
     batch.update_sprout_tree(db, &treestate.note_commitment_trees.sprout);
-    batch.create_sapling_tree(db, &target_height, &treestate.note_commitment_trees.sapling);
-    batch.create_orchard_tree(db, &target_height, &treestate.note_commitment_trees.orchard);
     batch.update_history_tree(db, &treestate.history_tree);
+
+    // The sapling and orchard trees are height-keyed and de-duplicated: the forward write only
+    // stores a tree when its root changes, and reads find the tip tree by searching backwards.
+    // Deleting the trees above the target height (see `prune_tree_indexes`) therefore already
+    // leaves the correct de-duplicated trees for the new tip. Writing a tree at the target height
+    // here would instead create a duplicate entry whenever the target block added no notes, which
+    // the de-duplicate-tree format check rejects on the next startup.
 }
 
 fn reset_value_pool(
@@ -740,28 +812,28 @@ fn prune_tree_indexes(
         batch.delete_orchard_anchor(db, &tree.root());
     }
 
-    let sapling_subtrees = db.sapling_subtree_list_by_index_range(..);
-    for (index, subtree) in sapling_subtrees {
-        if subtree.end_height > target_height {
-            batch.delete_range_sapling_subtree(
-                db,
-                index,
-                zebra_chain::subtree::NoteCommitmentSubtreeIndex(index.0 + 1),
-            );
-        }
+    // Delete every sapling/orchard subtree whose notes extend past the target height. Subtree
+    // indexes are read back from the database and number far fewer than `u16::MAX`, so `index.0 + 1`
+    // (the exclusive end of the single-index delete range) cannot overflow.
+    for (index, _) in db
+        .sapling_subtree_list_by_index_range(..)
+        .into_iter()
+        .filter(|(_, subtree)| subtree.end_height > target_height)
+    {
+        batch.delete_range_sapling_subtree(db, index, NoteCommitmentSubtreeIndex(index.0 + 1));
     }
 
-    let orchard_subtrees = db.orchard_subtree_list_by_index_range(..);
-    for (index, subtree) in orchard_subtrees {
-        if subtree.end_height > target_height {
-            batch.delete_range_orchard_subtree(
-                db,
-                index,
-                zebra_chain::subtree::NoteCommitmentSubtreeIndex(index.0 + 1),
-            );
-        }
+    for (index, _) in db
+        .orchard_subtree_list_by_index_range(..)
+        .into_iter()
+        .filter(|(_, subtree)| subtree.end_height > target_height)
+    {
+        batch.delete_range_orchard_subtree(db, index, NoteCommitmentSubtreeIndex(index.0 + 1));
     }
 
+    // Sprout has no by-height anchor index, so enumerate every anchor and drop the ones not seen
+    // while rebuilding the tree up to the target. This loads each historical sprout tree, but the
+    // sprout pool has been inactive since before Sapling, so the anchor set is small and fixed.
     for (root, _) in db.sprout_trees_full_map() {
         if !retained_sprout_roots.contains(&root) {
             batch.delete_sprout_anchor(db, &root);

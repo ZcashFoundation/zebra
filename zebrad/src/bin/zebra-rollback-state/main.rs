@@ -12,7 +12,10 @@ fn main() {
 
     let command = RollbackStateCmd::parse();
 
-    if let Err(error) = command.run_with_config(zebra_state::Config::default()) {
+    if let Err(error) = command.run_with_config(
+        zebra_state::Config::default(),
+        zebra_consensus::Config::default(),
+    ) {
         eprintln!("failed to roll back finalized state: {error}");
         std::process::exit(1);
     }
