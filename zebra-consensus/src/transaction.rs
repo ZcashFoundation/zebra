@@ -423,7 +423,7 @@ where
             // A proof that is present but not canonically sized can be padded with
             // arbitrary trailing data without affecting its validity, allowing excess
             // bandwidth and storage costs to be imposed while paying only fees sized to a
-            // canonical proof (GHSA-2x4w-pxqw-58v9).
+            // canonical proof (GHSA-jfw5-j458-pfv6).
             //
             // This is a constricting rule, so it is gated on that network upgrade:
             // Orchard actions mined before it, under earlier rules that did not enforce
@@ -1196,7 +1196,7 @@ where
     /// `network_upgrade` is the network upgrade active at the verified transaction's block
     /// height. It selects the Orchard verifier: the Orchard Action circuit (and its verifying
     /// key) changed at NU6.2 to fix the variable-base scalar-multiplication bug
-    /// (GHSA-2x4w-pxqw-58v9), so pre-NU6.2 bundles must be verified against the historical
+    /// (GHSA-jfw5-j458-pfv6), so pre-NU6.2 bundles must be verified against the historical
     /// (insecure) key and NU6.2+ bundles against the fixed key. A proof from one era does not
     /// verify under the other era's key. [`primitives::halo2::verifier_for`] maps the upgrade to
     /// the verifier holding the matching key; the two verifiers keep separate batches, so eras

@@ -85,7 +85,7 @@ impl ShieldedData {
     /// present but not canonically sized can be padded with arbitrary trailing data
     /// without affecting its validity. Bundles are parsed leniently (so that historical
     /// transactions remain deserializable), so this is enforced separately as a
-    /// height-gated consensus rule. See `GHSA-2x4w-pxqw-58v9`.
+    /// height-gated consensus rule. See `GHSA-jfw5-j458-pfv6`.
     pub fn proof_size_is_canonical(&self) -> bool {
         self.proof.0.len() == expected_proof_size(self.actions.len())
     }

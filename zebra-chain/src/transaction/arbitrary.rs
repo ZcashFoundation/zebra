@@ -714,7 +714,7 @@ impl Arbitrary for orchard::ShieldedData {
             .prop_flat_map(|(flags, value_balance, shared_anchor, actions, binding_sig)| {
                 // Since NU6.2, an Orchard proof must have the canonical length for its number of
                 // actions (`2272 * num_actions + 2720` bytes), otherwise it is rejected as
-                // non-canonical (GHSA-2x4w-pxqw-58v9). The V5 txid is computed by round-tripping
+                // non-canonical (GHSA-jfw5-j458-pfv6). The V5 txid is computed by round-tripping
                 // through `librustzcash`, which enforces this length, so a proof of any other
                 // size makes the round-trip (and thus `Transaction::hash`) fail. Generate a proof
                 // of exactly the expected length, which depends on the number of actions.

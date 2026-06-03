@@ -33,7 +33,7 @@ height, you can sync from that.
 ### Security
 
 - Add a consensus rule that rejects Orchard bundles whose proof has a non-canonical size,
-  effective from the NU6.2 network upgrade (GHSA-2x4w-pxqw-58v9).
+  effective from the NU6.2 network upgrade (GHSA-jfw5-j458-pfv6).
 
 ## [Zebra 4.5.3](https://github.com/ZcashFoundation/zebra/releases/tag/v4.5.3) - 2026-06-01
 

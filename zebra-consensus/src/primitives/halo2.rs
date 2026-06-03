@@ -52,7 +52,7 @@ pub type ItemVerifyingKey = VerifyingKey;
 
 // NU6.2 re-enables Orchard actions and ships the *fixed* variable-base
 // scalar-multiplication Orchard circuit (the circuit bug that caused Orchard to be temporarily
-// disabled; see GHSA-2x4w-pxqw-58v9). The fix changes the Orchard Action circuit, and therefore
+// disabled; see GHSA-jfw5-j458-pfv6). The fix changes the Orchard Action circuit, and therefore
 // its verifying key: a proof produced under one circuit version does not verify under the other
 // key. So we keep BOTH keys, each in its own dedicated verifier, and route each bundle to the
 // correct verifier by the block's network upgrade (see [`verifier_for`]):
@@ -240,7 +240,7 @@ pub static VERIFIER_POST_NU6_2: Lazy<VerifierService> =
 /// Returns the global Halo2 verifier for Orchard bundles in blocks at `network_upgrade`.
 ///
 /// The Orchard Action circuit — and therefore its verifying key — changed at NU6.2 (the fixed
-/// variable-base scalar-multiplication circuit; see GHSA-2x4w-pxqw-58v9), and a proof produced
+/// variable-base scalar-multiplication circuit; see GHSA-jfw5-j458-pfv6), and a proof produced
 /// under one circuit does not verify under the other key. So each bundle must be checked against
 /// the key for the upgrade of the block it appears in:
 ///

@@ -844,7 +844,7 @@ fn zip244_sighash() -> Result<()> {
 }
 
 /// Real Orchard proofs from mined transactions must have the canonical size, and padding
-/// a proof with trailing bytes must make it non-canonical (GHSA-2x4w-pxqw-58v9). This
+/// a proof with trailing bytes must make it non-canonical (GHSA-jfw5-j458-pfv6). This
 /// also cross-checks `expected_proof_size` against real proofs produced by the chain.
 #[test]
 fn orchard_proof_size_is_canonical() {

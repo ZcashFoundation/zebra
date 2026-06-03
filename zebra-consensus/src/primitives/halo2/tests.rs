@@ -2,7 +2,7 @@
 //!
 //! The key correctness property of this module is the **era split**: the Orchard Action circuit
 //! (and therefore its verifying key) changed at NU6.2 to fix a variable-base scalar-multiplication
-//! soundness bug (GHSA-2x4w-pxqw-58v9). A proof produced under one circuit does not verify under
+//! soundness bug (GHSA-jfw5-j458-pfv6). A proof produced under one circuit does not verify under
 //! the other key. These tests guard that:
 //!
 //!   * a real pre-NU6.2 Orchard proof verifies under the pre-NU6.2 (insecure) key, so historical
