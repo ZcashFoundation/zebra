@@ -166,6 +166,28 @@ pub enum BlockDownloadVerifyError {
     Timeout,
 }
 
+impl BlockDownloadVerifyError {
+    /// Returns the missing block hash for network `notfound` download failures.
+    pub(super) fn not_found_download_hash(&self) -> Option<block::Hash> {
+        match self {
+            BlockDownloadVerifyError::DownloadFailed { error, hash }
+                if error
+                    .downcast_ref::<zn::SharedPeerError>()
+                    .is_some_and(shared_peer_error_is_not_found) =>
+            {
+                Some(*hash)
+            }
+            _ => None,
+        }
+    }
+}
+
+fn shared_peer_error_is_not_found(error: &zn::SharedPeerError) -> bool {
+    let inner = error.inner_debug();
+
+    inner.contains("NotFoundResponse") || inner.contains("NotFoundRegistry")
+}
+
 impl From<tokio::time::error::Elapsed> for BlockDownloadVerifyError {
     fn from(_value: tokio::time::error::Elapsed) -> Self {
         BlockDownloadVerifyError::Timeout

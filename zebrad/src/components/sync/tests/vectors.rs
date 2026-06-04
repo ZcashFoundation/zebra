@@ -30,6 +30,13 @@ use crate::{
 
 use InventoryResponse::*;
 
+type TestChainSync = ChainSync<
+    MockService<zn::Request, zn::Response, PanicAssertion>,
+    MockService<zs::Request, zs::Response, PanicAssertion>,
+    MockService<zebra_consensus::Request, block::Hash, PanicAssertion>,
+    MockChainTip,
+>;
+
 /// Maximum time to wait for a request to any test service.
 ///
 /// The default [`MockService`] value can be too short for some of these tests that take a little
@@ -1141,6 +1148,98 @@ async fn invalid_height_does_not_restart_sync() {
     );
 }
 
+/// Tests that a `notfound` block download failure requeues the missing block
+/// before the syncer restarts the whole sync round.
+#[tokio::test]
+async fn not_found_download_requeues_missing_block() -> Result<(), crate::BoxError> {
+    let (
+        mut chain_sync,
+        _sync_status,
+        mut block_verifier_router,
+        mut peer_set,
+        _state_service,
+        _mock_chain_tip_sender,
+    ) = setup_chain_sync();
+
+    let block1: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.zcash_deserialize_into()?;
+    let block1_hash = block1.hash();
+
+    let error = BlockDownloadVerifyError::DownloadFailed {
+        error: not_found_block_error(block1_hash),
+        hash: block1_hash,
+    };
+
+    let requeue = tokio::spawn(async move {
+        chain_sync
+            .handle_block_response_with_missing_retry(Err(error))
+            .await
+    });
+
+    peer_set
+        .expect_request(zn::Request::BlocksByHash(iter::once(block1_hash).collect()))
+        .await
+        .respond(Err(not_found_block_error(block1_hash)));
+
+    requeue
+        .await
+        .expect("missing block retry task should not panic")?;
+
+    block_verifier_router.expect_no_requests().await;
+
+    Ok(())
+}
+
+/// Tests that queue-level `notfound` retries are bounded.
+#[tokio::test]
+async fn not_found_download_restarts_after_queue_retry_limit() {
+    let (
+        mut chain_sync,
+        _sync_status,
+        _block_verifier_router,
+        mut peer_set,
+        _state_service,
+        _mock_chain_tip_sender,
+    ) = setup_chain_sync();
+
+    let block_hash = block::Hash::from([0xAB; 32]);
+    chain_sync
+        .missing_block_retry_counts
+        .insert(block_hash, sync::MISSING_BLOCK_DOWNLOAD_RETRY_LIMIT);
+
+    let error = BlockDownloadVerifyError::DownloadFailed {
+        error: not_found_block_error(block_hash),
+        hash: block_hash,
+    };
+
+    let result = chain_sync
+        .handle_block_response_with_missing_retry(Err(error))
+        .await;
+
+    assert!(
+        result.is_err(),
+        "notfound downloads should restart sync after queue retry limit"
+    );
+
+    peer_set.expect_no_requests().await;
+}
+
+/// Tests that a `notfound` block download triggers sync restart once the
+/// queue-level retry handler has exhausted its retries.
+#[tokio::test]
+async fn not_found_download_restarts_sync() {
+    let block_hash = block::Hash::from([0xCD; 32]);
+    let err = BlockDownloadVerifyError::DownloadFailed {
+        error: not_found_block_error(block_hash),
+        hash: block_hash,
+    };
+
+    let restart = TestChainSync::should_restart_sync(&err);
+    assert!(
+        restart,
+        "notfound block downloads should restart sync after queue retries"
+    );
+}
+
 fn setup() -> (
     // ChainSync
     impl Future<Output = Result<(), Report>> + Send,
@@ -1150,6 +1249,35 @@ fn setup() -> (
     // PeerSet
     MockService<zebra_network::Request, zebra_network::Response, PanicAssertion>,
     // StateService
+    MockService<zebra_state::Request, zebra_state::Response, PanicAssertion>,
+    MockChainTipSender,
+) {
+    let (
+        chain_sync,
+        sync_status,
+        block_verifier_router,
+        peer_set,
+        state_service,
+        mock_chain_tip_sender,
+    ) = setup_chain_sync();
+
+    let chain_sync_future = chain_sync.sync();
+
+    (
+        chain_sync_future,
+        sync_status,
+        block_verifier_router,
+        peer_set,
+        state_service,
+        mock_chain_tip_sender,
+    )
+}
+
+fn setup_chain_sync() -> (
+    TestChainSync,
+    SyncStatus,
+    MockService<zebra_consensus::Request, block::Hash, PanicAssertion>,
+    MockService<zebra_network::Request, zebra_network::Response, PanicAssertion>,
     MockService<zebra_state::Request, zebra_state::Response, PanicAssertion>,
     MockChainTipSender,
 ) {
@@ -1191,14 +1319,16 @@ fn setup() -> (
         misbehavior_tx,
     );
 
-    let chain_sync_future = chain_sync.sync();
-
     (
-        chain_sync_future,
+        chain_sync,
         sync_status,
         block_verifier_router,
         peer_set,
         state_service,
         mock_chain_tip_sender,
     )
+}
+
+fn not_found_block_error(_hash: block::Hash) -> crate::BoxError {
+    zn::SharedPeerError::from(zn::PeerError::NotFoundResponse(Vec::new())).into()
 }
