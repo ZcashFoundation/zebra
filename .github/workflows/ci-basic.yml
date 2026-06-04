@@ -59,19 +59,47 @@ jobs:
           SKIP_NETWORK_TESTS: "1"
         run: timeout --preserve-status 1h cargo test --verbose --locked
 
-      - name: Run network-sensitive tests
+      # Build the network-sensitive test binaries outside the retry loops so
+      # compile failures fail once instead of being retried, and retry
+      # attempts below contain only test runtime.
+      - name: Build network-sensitive tests
+        run: |
+          cargo test -p zebra-network --lib --verbose --locked --no-run
+          cargo test -p zebrad --test acceptance --verbose --locked --no-run
+
+      # The two network-sensitive suites are retried independently so a flaky
+      # failure in one does not re-run the other. Per-attempt timeouts are
+      # sized from measured serial test runtimes (~15m and ~19m) plus headroom.
+      - name: Run zebra-network tests
         run: |
           for attempt in 1 2 3; do
-            echo "network-sensitive tests attempt ${attempt}"
+            echo "zebra-network tests attempt ${attempt}"
 
-            timeout --preserve-status 45m bash -c '
-              set -euo pipefail
-              cargo test -p zebra-network --lib --verbose --locked -- --test-threads=1
-              cargo test -p zebrad --test acceptance --verbose --locked -- --test-threads=1
-            ' && exit 0
+            timeout --preserve-status 25m \
+              cargo test -p zebra-network --lib --verbose --locked -- --test-threads=1 \
+              && exit 0
 
             status=$?
-            echo "network-sensitive tests attempt ${attempt} failed with status ${status}"
+            echo "zebra-network tests attempt ${attempt} failed with status ${status}"
+
+            if [ "${attempt}" = "3" ]; then
+              exit "${status}"
+            fi
+
+            sleep 30
+          done
+
+      - name: Run zebrad acceptance tests
+        run: |
+          for attempt in 1 2 3; do
+            echo "zebrad acceptance tests attempt ${attempt}"
+
+            timeout --preserve-status 30m \
+              cargo test -p zebrad --test acceptance --verbose --locked -- --test-threads=1 \
+              && exit 0
+
+            status=$?
+            echo "zebrad acceptance tests attempt ${attempt} failed with status ${status}"
 
             if [ "${attempt}" = "3" ]; then
               exit "${status}"

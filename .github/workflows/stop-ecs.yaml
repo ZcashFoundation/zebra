@@ -1,0 +1,73 @@
+name: Stop All ECS Tasks
+
+on:
+  workflow_dispatch:
+
+jobs:
+  stop-tasks:
+    name: Stop All ECS Tasks
+    runs-on: ubuntu-latest
+    environment: dev
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      ECS_SERVICE: ${{ vars.ECS_SERVICE }}
+      ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Stop all running tasks
+        id: stop-tasks
+        run: |
+          echo "Fetching running tasks for service: $ECS_SERVICE in cluster: $ECS_CLUSTER"
+          
+          TASK_ARNS=$(aws ecs list-tasks \
+            --cluster "$ECS_CLUSTER" \
+            --service-name "$ECS_SERVICE" \
+            --query 'taskArns[]' \
+            --output text)
+          echo "task_arns=$TASK_ARNS" >> "$GITHUB_OUTPUT"
+          
+          if [ -z "$TASK_ARNS" ]; then
+            echo "No running tasks found."
+            exit 0
+          fi
+          
+          echo "Found tasks: $TASK_ARNS"
+          
+          for TASK_ARN in $TASK_ARNS; do
+            echo "Stopping task: $TASK_ARN"
+            aws ecs stop-task \
+              --cluster "$ECS_CLUSTER" \
+              --task "$TASK_ARN" \
+              --reason "Manually stopped via GitHub Actions"
+          done
+          
+          echo "Stop requests submitted for all running tasks."
+
+      - name: Wait for tasks to stop
+        run: |
+          TASK_ARNS="${{ steps.stop-tasks.outputs.task_arns }}"
+          
+          if [ -z "$TASK_ARNS" ]; then
+            echo "No tasks were stopped."
+            exit 0
+          fi
+          
+          echo "Waiting for stopped tasks..."
+          aws ecs wait tasks-stopped \
+            --cluster "$ECS_CLUSTER" \
+            --tasks $TASK_ARNS
+          
+          echo "All tasks stopped."
+          
+          echo "Stopped task status:"
+          aws ecs describe-tasks \
+            --cluster "$ECS_CLUSTER" \
+            --tasks $TASK_ARNS \
+            --query 'tasks[].{Task:taskArn,LastStatus:lastStatus,StoppedReason:stoppedReason}' \
+            --output table
