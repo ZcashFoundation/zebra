@@ -258,6 +258,25 @@ async fn try_validate_block_template(client: &RpcRequestClient, net: &Network) -
                         .expect("response should be success output with a serialized `BlockProposalResponse`");
 
                     if let BlockProposalResponse::Rejected(reject_reason) = proposal_result {
+                        // The chain tip can advance between getting the template and validating
+                        // the proposal. When it does, the template's `previous_block_hash` is no
+                        // longer the best chain tip and the state rejects the proposal. This is a
+                        // benign race (the long-poll `submit_old: false` notification just didn't
+                        // arrive before the proposal request finished), not a validation bug, so
+                        // we skip this iteration and let the caller retry with a fresh template.
+                        const STALE_TIP_REJECTION: &str =
+                            "proposal-is-not-based-on-the-current-best-chain-tip";
+                        if reject_reason.contains(STALE_TIP_REJECTION) {
+                            tracing::info!(
+                                ?reject_reason,
+                                ?time_source,
+                                "skipping benign proposal rejection: chain tip advanced before \
+                                 the proposal was validated"
+                            );
+
+                            break;
+                        }
+
                         tracing::info!(
                             ?reject_reason,
                             ?template,
