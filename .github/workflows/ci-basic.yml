@@ -48,7 +48,12 @@ jobs:
           sed -i 's|.*"--cfg", "zcash_unstable=\\"nu7\\"".*|# &|' .cargo/config.toml
 
       - name: Run tests
-        run: timeout --preserve-status 1h cargo test --verbose --locked
+        run: |
+          # FIXME: Restore the full test run later.
+          # Temporarily skip this acceptance test in QEDIT CI because it starts a Mainnet zebrad
+          # and can be flaky due to external network/Mainnet conditions.
+          timeout --preserve-status 1h cargo test --verbose --locked -- \
+            --skip trusted_chain_sync_handles_forks_correctly
       - name: Run doc check
         run: cargo doc --workspace --no-deps --all-features --document-private-items --locked
       - name: Run format check
