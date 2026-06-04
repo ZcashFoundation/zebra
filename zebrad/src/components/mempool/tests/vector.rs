@@ -943,6 +943,9 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
     let block3: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_3_BYTES
         .zcash_deserialize_into()
         .unwrap();
+    let block4: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_4_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
 
     let (
         mut mempool,
@@ -958,9 +961,11 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
     mempool.enable(&mut recent_syncs).await;
     assert!(mempool.is_enabled());
 
-    // Queue transaction from block 3 for download
-    let tx = block3.transactions[0].clone();
-    let txid = block3.transactions[0].unmined_id();
+    // Queue transaction from block 4 for download.
+    // Blocks 1-3 are committed to the state below, so the transaction must come from a
+    // later block, or it would be cancelled as a mined transaction instead of re-verified.
+    let tx = block4.transactions[0].clone();
+    let txid = block4.transactions[0].unmined_id();
     let response = mempool
         .ready()
         .await
@@ -1010,24 +1015,28 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
         })
         .await;
 
-    // Push block 1 to the state. This is considered a network upgrade,
-    // and must cancel all pending transaction downloads with a `TipAction::Reset`.
-    state_service
-        .ready()
-        .await
-        .unwrap()
-        .call(zebra_state::Request::CommitCheckpointVerifiedBlock(
-            block1.clone().into(),
-        ))
-        .await
-        .unwrap();
+    // Push blocks 1 and 2 to the state before the mempool polls its chain tip change
+    // receiver again. The mempool then sees the tip jump from the genesis block to
+    // block 2, skipping block 1, which must cancel all pending transaction downloads
+    // with a `TipAction::Reset`.
+    for block in [block1.clone(), block2.clone()] {
+        state_service
+            .ready()
+            .await
+            .unwrap()
+            .call(zebra_state::Request::CommitCheckpointVerifiedBlock(
+                block.into(),
+            ))
+            .await
+            .unwrap();
 
-    // Wait for the chain tip update without a timeout
-    // (skipping the chain tip change here will fail the test)
-    chain_tip_change
-        .wait_for_tip_change()
-        .await
-        .expect("unexpected chain tip update failure");
+        // Wait for the chain tip update without a timeout
+        // (skipping the chain tip change here will fail the test)
+        chain_tip_change
+            .wait_for_tip_change()
+            .await
+            .expect("unexpected chain tip update failure");
+    }
 
     // Query the mempool to make it poll chain_tip_change and try reverifying its state for the `TipAction::Reset`
     mempool.dummy_call().await;
@@ -1072,14 +1081,14 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
         })
         .await;
 
-    // Push block 2 to the state. This will increase the tip height past the expected
+    // Push block 3 to the state. This will increase the tip height past the expected
     // tip height that the tx was verified at.
     state_service
         .ready()
         .await
         .unwrap()
         .call(zebra_state::Request::CommitCheckpointVerifiedBlock(
-            block2.clone().into(),
+            block3.clone().into(),
         ))
         .await
         .unwrap();
