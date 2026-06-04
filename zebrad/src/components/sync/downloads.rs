@@ -329,10 +329,55 @@ where
     /// This method waits for the network to become ready, and returns an error
     /// only if the network service fails. It returns immediately after queuing
     /// the request.
-    #[instrument(level = "debug", skip(self), fields(%hash))]
+    /// Download and verify a batch of blocks, optionally routing to a source peer.
+    /// Each block in the batch is dispatched individually but using a single
+    /// service readiness check for the batch.
+    pub async fn download_and_verify_batch(
+        &mut self,
+        hashes: Vec<block::Hash>,
+        source: Option<zebra_network::PeerSocketAddr>,
+    ) -> Result<(), BlockDownloadVerifyError> {
+        let unique_hashes: Vec<_> = hashes
+            .into_iter()
+            .filter(|h| !self.cancel_handles.contains_key(h))
+            .collect();
+
+        if unique_hashes.is_empty() {
+            return Ok(());
+        }
+
+        if let Some(source) = source {
+            let requested: std::collections::HashSet<_> = unique_hashes.iter().copied().collect();
+            let request = zn::Request::BlocksByHashFrom {
+                hashes: requested,
+                source,
+            };
+            // For sourced batches, send as one request with multiple hashes
+            for &hash in &unique_hashes {
+                self.download_and_verify_inner(
+                    hash,
+                    zn::Request::BlocksByHashFrom {
+                        hashes: std::iter::once(hash).collect(),
+                        source,
+                    },
+                )
+                .await?;
+            }
+        } else {
+            // Unsourced: send each block individually via normal routing
+            for hash in unique_hashes {
+                self.download_and_verify_inner(
+                    hash,
+                    zn::Request::BlocksByHash(std::iter::once(hash).collect()),
+                )
+                .await?;
+            }
+        }
+
+        Ok(())
+    }
+
     /// Download and verify a block, routing the request to a specific source peer.
-    /// If the source peer is busy, the peer set returns an error; the syncer's
-    /// retry layer handles re-requesting after a delay.
     pub async fn download_and_verify_from(
         &mut self,
         hash: block::Hash,

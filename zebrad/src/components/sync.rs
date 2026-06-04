@@ -122,7 +122,10 @@ pub const MAX_TIPS_RESPONSE_HASH_COUNT: usize = 500;
 /// reliable P2C routing instead of source-aware routing. The checkpoint verifier
 /// commits strictly contiguous ranges, so the next-needed block must be delivered
 /// reliably; source-aware routing can scatter delivery when the source peer is busy.
-const CONTIGUOUS_PREFIX_P2C: usize = 32;
+const CONTIGUOUS_PREFIX_P2C: usize = 2000;
+
+/// Maximum number of blocks in a single source-aware batch request.
+const SOURCE_BLOCK_BATCH_LIMIT: usize = 8;
 
 /// Controls how long we wait for a tips response to return.
 ///
@@ -1172,7 +1175,6 @@ where
 
         // Force the contiguous prefix to use reliable P2C routing (no source
         // peer) so the checkpoint verifier always gets its next-needed block.
-        // Beyond the prefix, use source-aware routing for the frontier blocks.
         let hash_list: Vec<_> = hashes.into_iter().collect();
         for (i, &hash) in hash_list.iter().enumerate() {
             if i < CONTIGUOUS_PREFIX_P2C {
@@ -1180,13 +1182,41 @@ where
             }
         }
 
+        // Batch blocks by source peer. Unsourced blocks go one-at-a-time via P2C.
+        // Sourced blocks are batched (up to SOURCE_BLOCK_BATCH_LIMIT) per peer.
+        let mut batches: Vec<(Vec<block::Hash>, Option<PeerSocketAddr>)> = Vec::new();
+        let mut current_hashes: Vec<block::Hash> = Vec::new();
+        let mut current_source: Option<PeerSocketAddr> = None;
+
         for &hash in &hash_list {
-            if let Some(source) = self.source_by_hash.remove(&hash) {
-                self.downloads
-                    .download_and_verify_from(hash, source)
-                    .await?;
-            } else {
-                self.downloads.download_and_verify(hash).await?;
+            let source = self.source_by_hash.remove(&hash);
+            let source_changed = !current_hashes.is_empty() && source != current_source;
+            let source_batch_full =
+                source.is_some() && current_hashes.len() >= SOURCE_BLOCK_BATCH_LIMIT;
+            let unsourced_batch_full = source.is_none() && !current_hashes.is_empty();
+
+            if source_changed || source_batch_full || unsourced_batch_full {
+                batches.push((std::mem::take(&mut current_hashes), current_source));
+            }
+
+            current_source = source;
+            current_hashes.push(hash);
+        }
+        if !current_hashes.is_empty() {
+            batches.push((current_hashes, current_source));
+        }
+
+        for (batch_hashes, source) in batches {
+            match self
+                .downloads
+                .download_and_verify_batch(batch_hashes, source)
+                .await
+            {
+                Ok(()) => {}
+                Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. }) => {
+                    debug!("block request was already queued, continuing");
+                }
+                Err(error) => return Err(error),
             }
         }
 
