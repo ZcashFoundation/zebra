@@ -11,6 +11,8 @@ rustdocflags = [
 
 [env]
 RUST_BACKTRACE="1"
+# Workaround for GCC 15+: librocksdb-sys / libzcash_script vendored C++ relies on transitive <cstdint>.
+CXXFLAGS = { value = "-include cstdint", force = false, relative = false }
 
 [profile.profiling]
 inherits = "release"
