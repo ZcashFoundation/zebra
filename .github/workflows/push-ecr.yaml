@@ -1,7 +1,6 @@
 # This GitHub Actions workflow automates pushing the Zebra Server Docker image to Amazon ECR.
 # It triggers on any tag push or manual dispatch, builds a Docker image, and pushes it to Amazon Elastic Container Registry (ECR).
 name: Push to Amazon ECR
-
 on:
   push:
     tags:
@@ -12,7 +11,10 @@ on:
         description: 'Version to tag the Docker image (e.g., v1.0.0-ZSA)'
         required: true
         type: string
-
+      source_ref:
+        description: 'Branch or tag to build from (leave empty to use the current ref)'
+        required: false
+        type: string
 jobs:
   push-to-ecr:
     name: Push to ECR
@@ -22,24 +24,21 @@ jobs:
       AWS_REGION: ${{ vars.AWS_REGION }}
       ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
       DOCKERFILE_PATH: docker/Dockerfile
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
+          ref: ${{ github.event.inputs.source_ref }}
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
-
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
-
       - name: Get Git tags and set image tags
         id: vars
         run: |
@@ -62,7 +61,6 @@ jobs:
           # Set the input IMAGE_TAG_VERSION
           echo "IMAGE_TAG_VERSION=$IMAGE_TAG_VERSION" >> "$GITHUB_ENV"
           echo "  User-provided IMAGE_TAG_VERSION: $IMAGE_TAG_VERSION"
-
       - name: Build, tag, and push image to Amazon ECR
         id: build-image
         env:
