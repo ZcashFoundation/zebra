@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   blocks did not change the Sprout tree. If rolled-back blocks contain Sprout
   commitments, rollback keeps the full rebuild path so the Sprout tip is reset
   correctly.
+- Retry missing block downloads inside the active sync round, avoiding long
+  stalls when a peer reports `notfound` for a required block hash.
 
 ## [Zebra 5.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.0.0) - 2026-06-02
 

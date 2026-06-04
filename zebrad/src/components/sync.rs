@@ -2,7 +2,14 @@
 //!
 //! It is used when Zebra is a long way behind the current chain tip.
 
-use std::{cmp::max, collections::HashSet, convert, pin::Pin, task::Poll, time::Duration};
+use std::{
+    cmp::max,
+    collections::{HashMap, HashSet},
+    convert,
+    pin::Pin,
+    task::Poll,
+    time::Duration,
+};
 
 use color_eyre::eyre::{eyre, Report};
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -59,6 +66,13 @@ const FANOUT: usize = 3;
 /// We also hedge requests, so we may retry up to twice this many times. Hedged
 /// retries may be concurrent, inner retries are sequential.
 const BLOCK_DOWNLOAD_RETRY_LIMIT: usize = 3;
+
+/// Controls how many times the syncer requeues a required block hash after
+/// exhausting the network service's block download retries with a `notfound`.
+///
+/// This retry happens at the sync queue level, so it can run after other peer
+/// requests finish and newly ready peers become available.
+const MISSING_BLOCK_DOWNLOAD_RETRY_LIMIT: usize = 2;
 
 /// A lower bound on the user-specified checkpoint verification concurrency limit.
 ///
@@ -377,6 +391,9 @@ where
     /// The lengths of recent sync responses.
     recent_syncs: RecentSyncLengths,
 
+    /// Queue-level retry counts for block hashes whose download failed with `notfound`.
+    missing_block_retry_counts: HashMap<block::Hash, usize>,
+
     /// Receiver that is `true` when the downloader is past the lookahead limit.
     /// This is based on the downloaded block height and the state tip height.
     past_lookahead_limit_receiver: zs::WatchReceiver<bool>,
@@ -517,6 +534,7 @@ where
             latest_chain_tip,
             prospective_tips: HashSet::new(),
             recent_syncs,
+            missing_block_retry_counts: HashMap::new(),
             past_lookahead_limit_receiver,
             misbehavior_sender,
         };
@@ -567,6 +585,7 @@ where
     #[instrument(skip(self))]
     async fn try_to_sync(&mut self) -> Result<(), Report> {
         self.prospective_tips = HashSet::new();
+        self.missing_block_retry_counts.clear();
 
         info!(
             state_tip = ?self.latest_chain_tip.best_tip_height(),
@@ -614,7 +633,7 @@ where
             // Some temporary errors are ignored, and syncing continues with other blocks.
             // If it turns out they were actually important, syncing will run out of blocks, and
             // the syncer will reset itself.
-            self.handle_block_response(rsp)?;
+            self.handle_block_response_with_missing_retry(rsp).await?;
         }
         self.update_metrics();
 
@@ -637,7 +656,8 @@ where
 
             let response = self.downloads.next().await.expect("downloads is nonempty");
 
-            self.handle_block_response(response)?;
+            self.handle_block_response_with_missing_retry(response)
+                .await?;
             self.update_metrics();
         }
 
@@ -1163,6 +1183,63 @@ where
         Self::handle_response(response)
     }
 
+    /// Handles a downloaded block response, requeueing required missing block hashes.
+    ///
+    /// The block download service already retries each `BlocksByHash` request and
+    /// may hedge it to another peer. If all those attempts fail with `notfound`,
+    /// the syncer gives the required hash a small number of urgent queue-level
+    /// retries before restarting the sync round.
+    async fn handle_block_response_with_missing_retry(
+        &mut self,
+        response: Result<(Height, block::Hash), BlockDownloadVerifyError>,
+    ) -> Result<(), Report> {
+        if let Ok((_height, hash)) = response.as_ref() {
+            self.missing_block_retry_counts.remove(hash);
+        }
+
+        if let Some(hash) = response
+            .as_ref()
+            .err()
+            .and_then(BlockDownloadVerifyError::not_found_download_hash)
+        {
+            let retry_count = self.missing_block_retry_counts.entry(hash).or_default();
+
+            if *retry_count < MISSING_BLOCK_DOWNLOAD_RETRY_LIMIT {
+                *retry_count += 1;
+
+                info!(
+                    ?hash,
+                    retry_attempt = *retry_count,
+                    retry_limit = MISSING_BLOCK_DOWNLOAD_RETRY_LIMIT,
+                    "missing sync block download failed, retrying required block"
+                );
+                metrics::counter!("sync.missing.block.requeued.count").increment(1);
+
+                match self.downloads.download_and_verify(hash).await {
+                    Ok(()) => return Ok(()),
+                    Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. }) => {
+                        return Ok(());
+                    }
+                    Err(error) => self.handle_block_response(Err(error))?,
+                }
+            } else {
+                self.missing_block_retry_counts.remove(&hash);
+
+                warn!(
+                    ?hash,
+                    retry_limit = MISSING_BLOCK_DOWNLOAD_RETRY_LIMIT,
+                    error = ?response.as_ref().expect_err("checked for notfound error"),
+                    "missing sync block retry limit exhausted, restarting sync"
+                );
+                metrics::counter!("sync.missing.block.retry.limit.count").increment(1);
+            }
+        }
+
+        self.handle_block_response(response)?;
+
+        Ok(())
+    }
+
     /// Handles a response to block hash submission, passing through any extra hashes.
     ///
     /// See [`Self::handle_response`] for more details.
@@ -1270,17 +1347,14 @@ where
                 false
             }
 
-            BlockDownloadVerifyError::DownloadFailed { ref error, .. }
-                if format!("{error:?}").contains("NotFound") =>
+            BlockDownloadVerifyError::DownloadFailed { .. }
+                if e.not_found_download_hash().is_some() =>
             {
-                // Covers these errors:
-                // - NotFoundResponse
-                // - NotFoundRegistry
-                //
-                // TODO: improve this by checking the type (#2908)
-                //       restart after a certain number of NotFound errors?
-                debug!(error = ?e, "block was not found, possibly from a peer that doesn't have the block yet, continuing");
-                false
+                warn!(
+                    error = ?e,
+                    "required sync block was not found after retries, restarting sync"
+                );
+                true
             }
 
             _ => {
