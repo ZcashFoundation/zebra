@@ -88,6 +88,23 @@ export CXXFLAGS="$CXXFLAGS -include cstdint"
 
 </details>
 
+<details><summary>
+
+#### GCC 15 workaround
+
+</summary>
+
+GCC 15, which is the default on many recent distros like Arch Linux and Ubuntu
+25 onwards, introduces a compiling failure in the version of the `rocksdb`
+dependency used by Zebra. A workaround is running the following before
+installing Zebra:
+
+```sh
+export CXXFLAGS="$CXXFLAGS -include cstdint"
+```
+
+</details>
+
 Once you have the dependencies in place, you can install Zebra with:
 
 ```sh
