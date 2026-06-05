@@ -113,6 +113,7 @@ pub struct InboundSetupData {
 }
 
 /// Tracks the internal state of the [`Inbound`] service during setup.
+#[allow(clippy::large_enum_variant)]
 pub enum Setup {
     /// Waiting for service setup to complete.
     ///
