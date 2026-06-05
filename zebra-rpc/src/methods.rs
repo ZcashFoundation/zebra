@@ -1634,6 +1634,10 @@ where
                 last_seen_tip_hash: _,
             } => {
                 if verbose {
+                    let transactions_by_id = transactions
+                        .iter()
+                        .map(|unmined_tx| (unmined_tx.transaction.id.mined_id(), unmined_tx))
+                        .collect::<HashMap<_, _>>();
                     let map = transactions
                         .iter()
                         .map(|unmined_tx| {
@@ -1641,7 +1645,7 @@ where
                                 unmined_tx.transaction.id.mined_id().encode_hex(),
                                 get_raw_mempool::MempoolObject::from_verified_unmined_tx(
                                     unmined_tx,
-                                    &transactions,
+                                    &transactions_by_id,
                                     &transaction_dependencies,
                                 ),
                             )
