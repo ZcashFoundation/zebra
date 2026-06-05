@@ -746,6 +746,9 @@ where
         }
 
         for hash in std::mem::take(&mut self.reobtain_hashes) {
+            // Re-requests deliberately go through plain P2C routing (no source peer)
+            // to avoid re-asking the peer that just NotFound'd the block.
+            //
             // The block was removed from the in-flight set when its download
             // failed, so this re-queues it. A residual duplicate/queue error is
             // benign — it means the block is already being handled.

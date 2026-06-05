@@ -330,8 +330,9 @@ where
     /// only if the network service fails. It returns immediately after queuing
     /// the request.
     /// Download and verify a batch of blocks, optionally routing to a source peer.
-    /// Each block in the batch is dispatched individually but using a single
-    /// service readiness check for the batch.
+    /// Each block is dispatched individually (separate readiness + call per hash)
+    /// but grouped by source so all blocks from the same announcer are requested
+    /// sequentially, reducing the chance of the source going busy mid-batch.
     pub async fn download_and_verify_batch(
         &mut self,
         hashes: Vec<block::Hash>,
