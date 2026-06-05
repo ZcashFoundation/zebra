@@ -1260,4 +1260,5 @@ impl Network {
             Network::Testnet(_) => &testnet::FOUNDER_ADDRESS_LIST,
         }
     }
+
 }

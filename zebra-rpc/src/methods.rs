@@ -2372,7 +2372,7 @@ where
                 // when the tip changes.
                 let precompute_coinbase = |network, height, params| {
                     tokio::task::spawn_blocking(move || {
-                        TransactionTemplate::new_coinbase(&network, height, &params, Amount::zero())
+                        TransactionTemplate::new_coinbase(&network, height, &params, Amount::zero(), None)
                             .expect("valid coinbase tx")
                     })
                 };
@@ -2510,6 +2510,7 @@ where
             mempool_txs,
             mempool_tx_deps,
             #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
+            None,
             None,
         );
 
@@ -2796,7 +2797,34 @@ where
             None => best_chain_tip_height(&self.latest_chain_tip)?,
         };
 
-        let subsidy = block_subsidy(height, &net).map_misc_error()?;
+        #[cfg(not(any(zcash_unstable = "zip234", zcash_unstable = "zip234alt")))]
+        let money_reserve = None;
+
+        #[cfg(any(zcash_unstable = "zip234", zcash_unstable = "zip234alt"))]
+        let money_reserve = match zebra_chain::parameters::subsidy::zip234_start_height(&net) {
+            Some(start) if height >= start => {
+                let parent =
+                    (height - 1).ok_or_misc_error("cannot get block subsidy for height 0")?;
+                let ReadResponse::BlockInfo(info) = self
+                    .read_state
+                    .clone()
+                    .oneshot(ReadRequest::BlockInfo(parent.into()))
+                    .await
+                    .map_misc_error()?
+                else {
+                    unreachable!("unmatched response for BlockInfo request")
+                };
+
+                Some(
+                    info.ok_or_misc_error("no block info available for parent height")?
+                        .value_pools()
+                        .money_reserve(),
+                )
+            }
+            _ => None,
+        };
+
+        let subsidy = block_subsidy(height, &net, money_reserve).map_misc_error()?;
 
         let (lockbox_streams, mut funding_streams): (Vec<_>, Vec<_>) =
             funding_stream_values(height, &net, subsidy)
