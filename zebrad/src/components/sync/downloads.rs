@@ -347,12 +347,6 @@ where
         }
 
         if let Some(source) = source {
-            let requested: std::collections::HashSet<_> = unique_hashes.iter().copied().collect();
-            let request = zn::Request::BlocksByHashFrom {
-                hashes: requested,
-                source,
-            };
-            // For sourced batches, send as one request with multiple hashes
             for &hash in &unique_hashes {
                 self.download_and_verify_inner(
                     hash,
@@ -375,22 +369,6 @@ where
         }
 
         Ok(())
-    }
-
-    /// Download and verify a block, routing the request to a specific source peer.
-    pub async fn download_and_verify_from(
-        &mut self,
-        hash: block::Hash,
-        source: zebra_network::PeerSocketAddr,
-    ) -> Result<(), BlockDownloadVerifyError> {
-        self.download_and_verify_inner(
-            hash,
-            zn::Request::BlocksByHashFrom {
-                hashes: std::iter::once(hash).collect(),
-                source,
-            },
-        )
-        .await
     }
 
     pub async fn download_and_verify(
