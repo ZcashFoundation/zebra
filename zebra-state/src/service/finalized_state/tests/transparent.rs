@@ -16,7 +16,7 @@ use std::{
 };
 
 use zebra_chain::{
-    amount::{Amount, NonNegative, MAX_MONEY},
+    amount::{Amount, DeferredPoolBalanceChange, NonNegative, MAX_MONEY},
     block::{self, Block, Height},
     parameters::{Network, NetworkKind},
     serialization::ZcashDeserializeInto,
@@ -127,11 +127,11 @@ fn intra_block_self_spend_chain_in_finalized_state() {
         height,
         new_outputs,
         transaction_hashes,
-        deferred_pool_balance_change: None,
     };
     let finalized = FinalizedBlock::from_checkpoint_verified(
         CheckpointVerifiedBlock(semantically_verified),
         Treestate::default(),
+        DeferredPoolBalanceChange::zero(),
     );
 
     // Inputs to `prepare_transparent_transaction_batch`, prepared the way `write_block` does.

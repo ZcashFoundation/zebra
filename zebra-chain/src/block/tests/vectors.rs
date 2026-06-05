@@ -7,7 +7,7 @@ use std::{
 use chrono::{DateTime, Duration, LocalResult, TimeZone, Utc};
 
 use crate::{
-    amount::{Amount, NonNegative, MAX_MONEY},
+    amount::{Amount, DeferredPoolBalanceChange, NonNegative, MAX_MONEY},
     block::{
         serialize::MAX_BLOCK_BYTES, Block, BlockTimeError, Commitment::*, Hash, Header, Height,
     },
@@ -108,7 +108,9 @@ fn chain_value_pool_change_propagates_transaction_value_balance_errors() {
     };
 
     assert!(
-        block.chain_value_pool_change(&utxos, None).is_err(),
+        block
+            .chain_value_pool_change(&utxos, DeferredPoolBalanceChange::zero())
+            .is_err(),
         "block-level aggregation should propagate transaction value-balance errors"
     );
 }
