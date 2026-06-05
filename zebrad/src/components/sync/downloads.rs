@@ -329,76 +329,29 @@ where
     /// This method waits for the network to become ready, and returns an error
     /// only if the network service fails. It returns immediately after queuing
     /// the request.
-    /// Download and verify a batch of blocks, optionally routing to a source peer.
-    /// Each block is dispatched individually (separate readiness + call per hash)
-    /// but grouped by source so all blocks from the same announcer are requested
-    /// sequentially, reducing the chance of the source going busy mid-batch.
-    pub async fn download_and_verify_batch(
-        &mut self,
-        hashes: Vec<block::Hash>,
-        source: Option<zebra_network::PeerSocketAddr>,
-    ) -> Result<(), BlockDownloadVerifyError> {
-        let unique_hashes: Vec<_> = hashes
-            .into_iter()
-            .filter(|h| !self.cancel_handles.contains_key(h))
-            .collect();
-
-        if unique_hashes.is_empty() {
-            return Ok(());
-        }
-
-        if let Some(source) = source {
-            for &hash in &unique_hashes {
-                self.download_and_verify_inner(
-                    hash,
-                    zn::Request::BlocksByHashFrom {
-                        hashes: std::iter::once(hash).collect(),
-                        source,
-                    },
-                )
-                .await?;
-            }
-        } else {
-            // Unsourced: send each block individually via normal routing
-            for hash in unique_hashes {
-                self.download_and_verify_inner(
-                    hash,
-                    zn::Request::BlocksByHash(std::iter::once(hash).collect()),
-                )
-                .await?;
-            }
-        }
-
-        Ok(())
-    }
-
+    #[instrument(level = "debug", skip(self), fields(%hash))]
     pub async fn download_and_verify(
         &mut self,
         hash: block::Hash,
-    ) -> Result<(), BlockDownloadVerifyError> {
-        self.download_and_verify_inner(
-            hash,
-            zn::Request::BlocksByHash(std::iter::once(hash).collect()),
-        )
-        .await
-    }
-
-    async fn download_and_verify_inner(
-        &mut self,
-        hash: block::Hash,
-        request: zn::Request,
     ) -> Result<(), BlockDownloadVerifyError> {
         if self.cancel_handles.contains_key(&hash) {
             metrics::counter!("sync.already.queued.dropped.block.hash.count").increment(1);
             return Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { hash });
         }
 
+        // We construct the block requests sequentially, waiting for the peer
+        // set to be ready to process each request. This ensures that we start
+        // block downloads in the order we want them (though they may resolve
+        // out of order), and it means that we respect backpressure. Otherwise,
+        // if we waited for readiness and did the service call in the spawned
+        // tasks, all of the spawned tasks would race each other waiting for the
+        // network to become ready.
         let block_req = self
             .network
             .ready()
             .await
             .map_err(|error| BlockDownloadVerifyError::NetworkServiceError { error })?
-            .call(request);
+            .call(zn::Request::BlocksByHash(std::iter::once(hash).collect()));
 
         // This oneshot is used to signal cancellation to the download task.
         let (cancel_tx, mut cancel_rx) = oneshot::channel::<()>();

@@ -124,14 +124,11 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
             stop: None,
         })
         .await
-        .respond(zn::Response::BlockHashes {
-            hashes: vec![
-                block1_hash, // tip
-                block2_hash, // expected_next
-                block3_hash, // (discarded - last hash, possibly incorrect)
-            ],
-            source: zebra_network::PeerSocketAddr::unspecified(),
-        });
+        .respond(zn::Response::BlockHashes(vec![
+            block1_hash, // tip
+            block2_hash, // expected_next
+            block3_hash, // (discarded - last hash, possibly incorrect)
+        ]));
 
     // State is checked for the first unknown block (block 1)
     state_service
@@ -212,15 +209,12 @@ async fn sync_blocks_ok() -> Result<(), crate::BoxError> {
             stop: None,
         })
         .await
-        .respond(zn::Response::BlockHashes {
-            hashes: vec![
-                block2_hash, // tip (discarded - already fetched)
-                block3_hash, // expected_next
-                block4_hash,
-                block5_hash, // (discarded - last hash, possibly incorrect)
-            ],
-            source: zebra_network::PeerSocketAddr::unspecified(),
-        });
+        .respond(zn::Response::BlockHashes(vec![
+            block2_hash, // tip (discarded - already fetched)
+            block3_hash, // expected_next
+            block4_hash,
+            block5_hash, // (discarded - last hash, possibly incorrect)
+        ]));
 
     // Clear remaining block locator requests
     for _ in 0..(sync::FANOUT - 1) {
@@ -372,16 +366,13 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
             stop: None,
         })
         .await
-        .respond(zn::Response::BlockHashes {
-            hashes: vec![
-                block1_hash,
-                block1_hash,
-                block1_hash, // tip
-                block2_hash, // expected_next
-                block3_hash, // (discarded - last hash, possibly incorrect)
-            ],
-            source: zebra_network::PeerSocketAddr::unspecified(),
-        });
+        .respond(zn::Response::BlockHashes(vec![
+            block1_hash,
+            block1_hash,
+            block1_hash, // tip
+            block2_hash, // expected_next
+            block3_hash, // (discarded - last hash, possibly incorrect)
+        ]));
 
     // State is checked for the first unknown block (block 1)
     state_service
@@ -462,17 +453,14 @@ async fn sync_blocks_duplicate_hashes_ok() -> Result<(), crate::BoxError> {
             stop: None,
         })
         .await
-        .respond(zn::Response::BlockHashes {
-            hashes: vec![
-                block2_hash, // tip (discarded - already fetched)
-                block3_hash, // expected_next
-                block4_hash,
-                block3_hash,
-                block4_hash,
-                block5_hash, // (discarded - last hash, possibly incorrect)
-            ],
-            source: zebra_network::PeerSocketAddr::unspecified(),
-        });
+        .respond(zn::Response::BlockHashes(vec![
+            block2_hash, // tip (discarded - already fetched)
+            block3_hash, // expected_next
+            block4_hash,
+            block3_hash,
+            block4_hash,
+            block5_hash, // (discarded - last hash, possibly incorrect)
+        ]));
 
     // Clear remaining block locator requests
     for _ in 0..(sync::FANOUT - 1) {
@@ -678,15 +666,12 @@ async fn sync_block_too_high_obtain_tips() -> Result<(), crate::BoxError> {
             stop: None,
         })
         .await
-        .respond(zn::Response::BlockHashes {
-            hashes: vec![
-                block982k_hash,
-                block1_hash, // tip
-                block2_hash, // expected_next
-                block3_hash, // (discarded - last hash, possibly incorrect)
-            ],
-            source: zebra_network::PeerSocketAddr::unspecified(),
-        });
+        .respond(zn::Response::BlockHashes(vec![
+            block982k_hash,
+            block1_hash, // tip
+            block2_hash, // expected_next
+            block3_hash, // (discarded - last hash, possibly incorrect)
+        ]));
 
     // State is checked for the first unknown block (block 982k)
     state_service
@@ -854,14 +839,11 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
             stop: None,
         })
         .await
-        .respond(zn::Response::BlockHashes {
-            hashes: vec![
-                block1_hash, // tip
-                block2_hash, // expected_next
-                block3_hash, // (discarded - last hash, possibly incorrect)
-            ],
-            source: zebra_network::PeerSocketAddr::unspecified(),
-        });
+        .respond(zn::Response::BlockHashes(vec![
+            block1_hash, // tip
+            block2_hash, // expected_next
+            block3_hash, // (discarded - last hash, possibly incorrect)
+        ]));
 
     // State is checked for the first unknown block (block 1)
     state_service
@@ -942,16 +924,13 @@ async fn sync_block_too_high_extend_tips() -> Result<(), crate::BoxError> {
             stop: None,
         })
         .await
-        .respond(zn::Response::BlockHashes {
-            hashes: vec![
-                block2_hash, // tip (discarded - already fetched)
-                block3_hash, // expected_next
-                block4_hash,
-                block982k_hash,
-                block5_hash, // (discarded - last hash, possibly incorrect)
-            ],
-            source: zebra_network::PeerSocketAddr::unspecified(),
-        });
+        .respond(zn::Response::BlockHashes(vec![
+            block2_hash, // tip (discarded - already fetched)
+            block3_hash, // expected_next
+            block4_hash,
+            block982k_hash,
+            block5_hash, // (discarded - last hash, possibly incorrect)
+        ]));
 
     // Clear remaining block locator requests
     for _ in 0..(sync::FANOUT - 1) {

@@ -118,15 +118,6 @@ pub const MIN_CONCURRENCY_LIMIT: usize = 1;
 /// See [`MIN_CHECKPOINT_CONCURRENCY_LIMIT`] for details.
 pub const MAX_TIPS_RESPONSE_HASH_COUNT: usize = 500;
 
-/// Number of hashes at the front of each download batch that are forced to use
-/// reliable P2C routing instead of source-aware routing. The checkpoint verifier
-/// commits strictly contiguous ranges, so the next-needed block must be delivered
-/// reliably; source-aware routing can scatter delivery when the source peer is busy.
-const CONTIGUOUS_PREFIX_P2C: usize = 2000;
-
-/// Maximum number of blocks in a single source-aware batch request.
-const SOURCE_BLOCK_BATCH_LIMIT: usize = 8;
-
 /// Controls how long we wait for a tips response to return.
 ///
 /// ## Correctness
@@ -418,9 +409,6 @@ where
     /// Sender for reporting peer addresses that advertised unexpectedly invalid transactions.
     misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
 
-    /// Maps block hashes to the peer that announced them via FindBlocks/ExtendTips.
-    source_by_hash: HashMap<block::Hash, PeerSocketAddr>,
-
     /// Blocks whose download failed with `NotFound` and should be re-requested on
     /// the next sync round, instead of being silently dropped (#5709).
     reobtain_hashes: IndexSet<block::Hash>,
@@ -564,7 +552,6 @@ where
             recent_syncs,
             past_lookahead_limit_receiver,
             misbehavior_sender,
-            source_by_hash: HashMap::new(),
             reobtain_hashes: IndexSet::new(),
             block_reobtain_retries: HashMap::new(),
         };
@@ -616,7 +603,6 @@ where
     async fn try_to_sync(&mut self) -> Result<(), Report> {
         self.prospective_tips = HashSet::new();
 
-        self.source_by_hash.clear();
         self.reobtain_hashes.clear();
         self.block_reobtain_retries.clear();
 
@@ -746,9 +732,6 @@ where
         }
 
         for hash in std::mem::take(&mut self.reobtain_hashes) {
-            // Re-requests deliberately go through plain P2C routing (no source peer)
-            // to avoid re-asking the peer that just NotFound'd the block.
-            //
             // The block was removed from the in-flight set when its download
             // failed, so this re-queues it. A residual duplicate/queue error is
             // benign — it means the block is already being handled.
@@ -819,7 +802,7 @@ where
                 })
                 .map_err::<Report, _>(|e| eyre!(e))
             {
-                Ok(zn::Response::BlockHashes { hashes, source }) => {
+                Ok(zn::Response::BlockHashes(hashes)) => {
                     trace!(?hashes);
 
                     // zcashd sometimes appends an unrelated hash at the start
@@ -906,12 +889,6 @@ where
                     debug!(new_hashes, "added hashes to download set");
                     metrics::histogram!("sync.obtain.response.hash.count")
                         .record(new_hashes as f64);
-
-                    if !source.ip().is_unspecified() {
-                        for &hash in unknown_hashes {
-                            self.source_by_hash.insert(hash, source);
-                        }
-                    }
                 }
                 Ok(_) => unreachable!("network returned wrong response"),
                 // We ignore this error because we made multiple fanout requests.
@@ -977,7 +954,7 @@ where
                     .expect("panic in spawned extend tips request")
                     .map_err::<Report, _>(|e| eyre!(e))
                 {
-                    Ok(zn::Response::BlockHashes { hashes, source }) => {
+                    Ok(zn::Response::BlockHashes(hashes)) => {
                         debug!(first = ?hashes.first(), len = ?hashes.len());
                         trace!(?hashes);
 
@@ -1064,12 +1041,6 @@ where
                         debug!(new_hashes, "added hashes to download set");
                         metrics::histogram!("sync.extend.response.hash.count")
                             .record(new_hashes as f64);
-
-                        if !source.ip().is_unspecified() {
-                            for &hash in unknown_hashes {
-                                self.source_by_hash.insert(hash, source);
-                            }
-                        }
                     }
                     Ok(_) => unreachable!("network returned wrong response"),
                     // We ignore this error because we made multiple fanout requests.
@@ -1176,45 +1147,12 @@ where
             IndexSet::new()
         };
 
-        // Force the contiguous prefix to use reliable P2C routing (no source
-        // peer) so the checkpoint verifier always gets its next-needed block.
-        let hash_list: Vec<_> = hashes.into_iter().collect();
-        for (i, &hash) in hash_list.iter().enumerate() {
-            if i < CONTIGUOUS_PREFIX_P2C {
-                self.source_by_hash.remove(&hash);
-            }
-        }
-
-        // Batch blocks by source peer. Unsourced blocks go one-at-a-time via P2C.
-        // Sourced blocks are batched (up to SOURCE_BLOCK_BATCH_LIMIT) per peer.
-        let mut batches: Vec<(Vec<block::Hash>, Option<PeerSocketAddr>)> = Vec::new();
-        let mut current_hashes: Vec<block::Hash> = Vec::new();
-        let mut current_source: Option<PeerSocketAddr> = None;
-
-        for &hash in &hash_list {
-            let source = self.source_by_hash.remove(&hash);
-            let source_changed = !current_hashes.is_empty() && source != current_source;
-            let source_batch_full =
-                source.is_some() && current_hashes.len() >= SOURCE_BLOCK_BATCH_LIMIT;
-            let unsourced_batch_full = source.is_none() && !current_hashes.is_empty();
-
-            if source_changed || source_batch_full || unsourced_batch_full {
-                batches.push((std::mem::take(&mut current_hashes), current_source));
-            }
-
-            current_source = source;
-            current_hashes.push(hash);
-        }
-        if !current_hashes.is_empty() {
-            batches.push((current_hashes, current_source));
-        }
-
-        for (batch_hashes, source) in batches {
-            match self
-                .downloads
-                .download_and_verify_batch(batch_hashes, source)
-                .await
-            {
+        // Dispatch blocks with duplicate-tolerant error handling.
+        // DuplicateBlockQueuedForDownload is caught and skipped instead of
+        // propagating — this prevents dropping unprocessed hashes from the
+        // batch, which would create frontier gaps and stalls (#5709).
+        for hash in hashes.into_iter() {
+            match self.downloads.download_and_verify(hash).await {
                 Ok(()) => {}
                 Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. }) => {
                     debug!("block request was already queued, continuing");

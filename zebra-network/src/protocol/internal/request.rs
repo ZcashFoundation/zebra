@@ -71,21 +71,6 @@ pub enum Request {
     /// Returns [`Response::Blocks`](super::Response::Blocks).
     BlocksByHash(HashSet<block::Hash>),
 
-    /// Request blocks by hash, preferring a specific source peer.
-    ///
-    /// The peer set will try to route the request to `source` first.
-    /// If that peer is not ready, it falls back to normal inventory routing.
-    ///
-    /// # Returns
-    ///
-    /// Returns [`Response::Blocks`](super::Response::Blocks).
-    BlocksByHashFrom {
-        /// The block hashes to download.
-        hashes: HashSet<block::Hash>,
-        /// The peer that announced these blocks.
-        source: PeerSocketAddr,
-    },
-
     /// Request transactions by their unmined transaction ID.
     ///
     /// v4 transactions use a legacy transaction ID, and
@@ -237,9 +222,6 @@ impl fmt::Display for Request {
             Request::BlocksByHash(hashes) => {
                 format!("BlocksByHash({})", hashes.len())
             }
-            Request::BlocksByHashFrom { hashes, source } => {
-                format!("BlocksByHashFrom({}, {source})", hashes.len())
-            }
             Request::TransactionsById(ids) => format!("TransactionsById({})", ids.len()),
 
             Request::FindBlocks { known_blocks, stop } => format!(
@@ -272,7 +254,7 @@ impl Request {
             Request::Peers => "Peers",
             Request::Ping(_) => "Ping",
 
-            Request::BlocksByHash(_) | Request::BlocksByHashFrom { .. } => "BlocksByHash",
+            Request::BlocksByHash(_) => "BlocksByHash",
             Request::TransactionsById(_) => "TransactionsById",
 
             Request::FindBlocks { .. } => "FindBlocks",
@@ -290,18 +272,16 @@ impl Request {
     pub fn is_inventory_download(&self) -> bool {
         matches!(
             self,
-            Request::BlocksByHash(_)
-                | Request::BlocksByHashFrom { .. }
-                | Request::TransactionsById(_)
+            Request::BlocksByHash(_) | Request::TransactionsById(_)
         )
     }
 
     /// Returns the block hash inventory downloads from the request, if any.
     pub fn block_hash_inventory(&self) -> HashSet<block::Hash> {
-        match self {
-            Request::BlocksByHash(block_hashes) => block_hashes.clone(),
-            Request::BlocksByHashFrom { hashes, .. } => hashes.clone(),
-            _ => HashSet::new(),
+        if let Request::BlocksByHash(block_hashes) = self {
+            block_hashes.clone()
+        } else {
+            HashSet::new()
         }
     }
 
