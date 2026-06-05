@@ -27,9 +27,14 @@ pub(crate) async fn regtest_coinbase() -> eyre::Result<()> {
     async fn regtest_coinbase(addr_type: MinerAddressType) -> eyre::Result<()> {
         let _init_guard = zebra_test::init();
 
+        // NU6.2 must be active for the blocks being mined: coinbase transactions for
+        // unified miner addresses contain an Orchard output, and the `orchard` crate
+        // only supports proving with the fixed (NU6.2+) Action circuit, so Orchard
+        // proofs in blocks mined at earlier heights would fail to verify against the
+        // historical pre-NU6.2 verifying key.
         let net = Network::new_regtest(
             ConfiguredActivationHeights {
-                nu5: Some(1),
+                nu6_2: Some(1),
                 ..Default::default()
             }
             .into(),

@@ -507,9 +507,14 @@ proptest! {
         for block in finalized_blocks {
             let expected_block = block.clone();
 
-            let expected_action = if expected_block.height <= block::Height(1) {
-                // 0: reset by both initialization and the Genesis network upgrade
-                // 1: reset by the BeforeOverwinter network upgrade
+            let expected_action = if expected_block.height == block::Height(0) {
+                // 0: reset on initialization.
+                //
+                // The mempool verifies transactions against the next block height, so the
+                // reset for an upgrade activating at height `H` happens when the tip reaches
+                // `H - 1`. The only activation height whose predecessor is in the test vectors
+                // is BeforeOverwinter (height 1), so its reset coincides with the genesis block
+                // at height 0, which already resets on initialization.
                 TipAction::reset_with(expected_block.clone().into())
             } else {
                 TipAction::grow_with(expected_block.clone().into())
@@ -531,12 +536,13 @@ proptest! {
         for block in non_finalized_blocks {
             let expected_block = block.clone();
 
-            let expected_action = if expected_block.height == block::Height(1) {
-                // 1: reset by the BeforeOverwinter network upgrade
-                TipAction::reset_with(expected_block.clone().into())
-            } else {
-                TipAction::grow_with(expected_block.clone().into())
-            };
+            // Non-finalized blocks are continuous with the finalized tip and always at height
+            // >= 1 (genesis is always finalized). The reset for an upgrade activating at height
+            // `H` happens when the tip reaches `H - 1`, and the only activation height with a
+            // predecessor in the test vectors is BeforeOverwinter (height 1, predecessor height
+            // 0, which is always finalized). So no non-finalized block triggers an activation
+            // reset: they all grow.
+            let expected_action = TipAction::grow_with(expected_block.clone().into());
 
             let result_receiver = state_service.queue_and_commit_to_non_finalized_state(block);
             let result = result_receiver.blocking_recv();
