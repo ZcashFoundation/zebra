@@ -7828,6 +7828,7 @@ dependencies = [
  "log",
  "metrics",
  "metrics-exporter-prometheus",
+ "nix",
  "num-integer",
  "once_cell",
  "opentelemetry",

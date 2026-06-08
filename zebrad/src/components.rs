@@ -16,6 +16,7 @@ pub mod sync;
 pub mod tokio;
 #[allow(missing_docs)]
 pub mod tracing;
+pub mod zcashd_compat;
 
 #[cfg(feature = "internal-miner")]
 pub mod miner;

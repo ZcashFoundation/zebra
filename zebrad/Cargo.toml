@@ -175,7 +175,7 @@ toml = { workspace = true }
 
 futures = { workspace = true }
 rayon = { workspace = true }
-tokio = { workspace = true, features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
+tokio = { workspace = true, features = ["time", "rt-multi-thread", "macros", "tracing", "signal", "process", "io-util"] }
 tokio-stream = { workspace = true, features = ["time"] }
 tower = { workspace = true, features = ["hedge", "limit"] }
 pin-project = { workspace = true }
@@ -204,6 +204,7 @@ config = { workspace = true }
 
 num-integer = { workspace = true }
 rand = { workspace = true }
+nix = { workspace = true }
 
 # prod feature internal-miner
 thread-priority = { workspace = true, optional = true }

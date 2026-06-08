@@ -18,6 +18,7 @@
     - [Testnet Mining with s-nomp](user/mining-testnet-s-nomp.md)
     - [Mining with Zebra in Docker](user/mining-docker.md)
   - [Kibana blockchain explorer](user/elasticsearch.md)
+  - [zcashd-compat Mode](user/zcashd-compat.md)
   - [Forking the Zcash Testnet with Zebra](user/fork-zebra-testnet.md)
   - [Custom Testnets](user/custom-testnets.md)
     - [Regtest with Zebra](user/regtest.md)
