@@ -222,6 +222,40 @@ mod test {
         version_consistent(&Network::new_default_testnet())
     }
 
+    #[test]
+    fn initial_min_version_tracks_latest_settled_upgrade_mainnet() {
+        initial_min_version_tracks_latest_settled_upgrade(&Mainnet);
+    }
+
+    #[test]
+    fn initial_min_version_tracks_latest_settled_upgrade_testnet() {
+        initial_min_version_tracks_latest_settled_upgrade(&Network::new_default_testnet());
+    }
+
+    /// Verify that `INITIAL_MIN_NETWORK_PROTOCOL_VERSION` matches the latest
+    /// settled network upgrade for `network`. If this test fails after adding a
+    /// new network upgrade, update `INITIAL_MIN_NETWORK_PROTOCOL_VERSION` in
+    /// `constants.rs` to the new upgrade.
+    fn initial_min_version_tracks_latest_settled_upgrade(network: &Network) {
+        let _init_guard = zebra_test::init();
+
+        let latest_upgrade = network
+            .activation_list()
+            .into_values()
+            .next_back()
+            .expect("there is always at least one activated upgrade");
+
+        let expected = Version::min_specified_for_upgrade(network, latest_upgrade);
+        let actual = Version::initial_min_for_network(network);
+
+        assert_eq!(
+            actual, expected,
+            "INITIAL_MIN_NETWORK_PROTOCOL_VERSION for {network:?} is {actual:?}, \
+             but the latest settled upgrade {latest_upgrade:?} requires {expected:?}. \
+             Update INITIAL_MIN_NETWORK_PROTOCOL_VERSION to use the latest settled upgrade.",
+        );
+    }
+
     /// Check that the min_specified_for_upgrade and min_specified_for_height functions
     /// are consistent for `network`.
     fn version_consistent(network: &Network) {
