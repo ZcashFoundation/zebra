@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     path::{Path, PathBuf},
     process::Stdio,
 };
@@ -197,6 +198,8 @@ where
         let mut reader = BufReader::new(stream).lines();
 
         while let Ok(Some(line)) = reader.next_line().await {
+            let line = sanitize_child_log_line(&line);
+
             if stream_name == "stderr" {
                 error!(target: "zcashd_compat.zcashd", stream = stream_name, "{line}");
             } else {
@@ -204,6 +207,63 @@ where
             }
         }
     })
+}
+
+/// Returns a sanitized log line with ANSI escape/control noise removed.
+fn sanitize_child_log_line(line: &str) -> Cow<'_, str> {
+    let has_escape_or_control = line
+        .bytes()
+        .any(|byte| byte == 0x1b || (byte.is_ascii_control() && byte != b'\t'));
+
+    if !has_escape_or_control {
+        return Cow::Borrowed(line);
+    }
+
+    let mut output = String::with_capacity(line.len());
+    let mut chars = line.chars().peekable();
+
+    enum ParseState {
+        Normal,
+        Escape,
+        Csi,
+        Osc,
+    }
+
+    let mut state = ParseState::Normal;
+
+    while let Some(ch) = chars.next() {
+        match state {
+            ParseState::Normal => {
+                if ch == '\u{1b}' {
+                    state = ParseState::Escape;
+                } else if !(ch.is_control() && ch != '\t') {
+                    output.push(ch);
+                }
+            }
+            ParseState::Escape => {
+                state = match ch {
+                    '[' => ParseState::Csi,
+                    ']' => ParseState::Osc,
+                    _ => ParseState::Normal,
+                };
+            }
+            ParseState::Csi => {
+                if ('@'..='~').contains(&ch) {
+                    state = ParseState::Normal;
+                }
+            }
+            ParseState::Osc => {
+                if ch == '\u{7}' {
+                    state = ParseState::Normal;
+                } else if ch == '\u{1b}' && chars.peek() == Some(&'\\') {
+                    let _ = chars.next();
+                    state = ParseState::Normal;
+                }
+            }
+        }
+    }
+
+    Cow::Owned(output)
 }
 
 enum ChildOutcome {
@@ -451,5 +511,29 @@ mod tests {
             .expect("wait task should not panic");
 
         assert!(was_shutdown);
+    }
+
+    #[test]
+    fn sanitize_child_log_line_strips_ansi_csi_sequences() {
+        let line = "\u{1b}[32mINFO\u{1b}[0m ProcessNewTrustedBlockBatch";
+        let sanitized = super::sanitize_child_log_line(line);
+
+        assert_eq!(sanitized, "INFO ProcessNewTrustedBlockBatch");
+    }
+
+    #[test]
+    fn sanitize_child_log_line_removes_control_chars() {
+        let line = "good\u{0}text\u{8}\tkeeps-tab";
+        let sanitized = super::sanitize_child_log_line(line);
+
+        assert_eq!(sanitized, "goodtext\tkeeps-tab");
+    }
+
+    #[test]
+    fn sanitize_child_log_line_keeps_clean_lines_unchanged() {
+        let line = "UpdateTip: new best hash=abc height=42";
+        let sanitized = super::sanitize_child_log_line(line);
+
+        assert_eq!(sanitized, line);
     }
 }
