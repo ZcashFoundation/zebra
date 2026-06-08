@@ -1,6 +1,6 @@
 use std::{path::PathBuf, time::Duration};
 
-use serde::{Deserialize, Serialize};
+use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
 
 /// Configuration for Zebra zcashd-compat mode.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
@@ -25,6 +25,12 @@ pub struct Config {
     pub zcashd_datadir: Option<PathBuf>,
 
     /// Extra command-line arguments passed to `zcashd`.
+    ///
+    /// This can be provided as:
+    /// - a TOML array: `zcashd_extra_args = ["-printtoconsole"]`
+    /// - a JSON array string (useful for environment variable overrides):
+    ///   `ZEBRA_ZCASHD_COMPAT__ZCASHD_EXTRA_ARGS='["-printtoconsole"]'`
+    #[serde(default, deserialize_with = "deserialize_zcashd_extra_args")]
     pub zcashd_extra_args: Vec<String>,
 
     /// Optional RPC URL passed to `zcashd` via `-unityzebra`.
@@ -66,5 +72,86 @@ impl Default for Config {
             max_restarts: 10,
             shutdown_grace_period: Duration::from_secs(10),
         }
+    }
+}
+
+/// Deserializes `zcashd_extra_args` from either a sequence or a JSON-array string.
+fn deserialize_zcashd_extra_args<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum ExtraArgsField {
+        Sequence(Vec<String>),
+        JsonString(String),
+    }
+
+    match ExtraArgsField::deserialize(deserializer)? {
+        ExtraArgsField::Sequence(args) => Ok(args),
+        ExtraArgsField::JsonString(args) => {
+            serde_json::from_str(&args).map_err(|error| {
+                D::Error::custom(format!(
+                    "zcashd_extra_args must be a sequence or a JSON string array, got: {args:?}. parse error: {error}"
+                ))
+            })
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Config;
+
+    #[test]
+    fn deserialize_extra_args_from_sequence() {
+        let config: Config = toml::from_str(
+            r#"
+            zcashd_extra_args = ["-conf=/tmp/zcash.conf", "-printtoconsole"]
+            "#,
+        )
+        .expect("valid sequence should deserialize");
+
+        assert_eq!(
+            config.zcashd_extra_args,
+            vec![
+                "-conf=/tmp/zcash.conf".to_string(),
+                "-printtoconsole".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn deserialize_extra_args_from_json_string() {
+        let config: Config = toml::from_str(
+            r#"
+            zcashd_extra_args = "[\"-conf=/tmp/zcash.conf\",\"-printtoconsole\"]"
+            "#,
+        )
+        .expect("valid JSON string array should deserialize");
+
+        assert_eq!(
+            config.zcashd_extra_args,
+            vec![
+                "-conf=/tmp/zcash.conf".to_string(),
+                "-printtoconsole".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn reject_non_array_string_extra_args() {
+        let error = toml::from_str::<Config>(
+            r#"
+            zcashd_extra_args = "-printtoconsole"
+            "#,
+        )
+        .expect_err("plain strings should be rejected");
+
+        let error_message = error.to_string();
+        assert!(
+            error_message.contains("JSON string array"),
+            "error should explain expected format: {error_message}"
+        );
     }
 }

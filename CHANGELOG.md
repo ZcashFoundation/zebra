@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Include the `zebra-rollback-state` utility alongside `zebrad` in release
   Docker images and Docker CI builds.
 - Use the `5.0.0-rc.3` release identity for this fork's v5 rollback build.
+- zcashd-compat mode for managing zcashd as a wallet while leveraging zebra for p2p.
 
 ### Changed
 

@@ -48,6 +48,12 @@ max_restarts = 10
 shutdown_grace_period = "10s"
 ```
 
+When overriding `zcashd_extra_args` via environment variables, pass a JSON array string:
+
+```console
+ZEBRA_ZCASHD_COMPAT__ZCASHD_EXTRA_ARGS='["-conf=/path/to/zcash.conf","-printtoconsole"]'
+```
+
 If `manage_zcashd = false`, Zebra still applies zcashd-compat RPC guardrails, but
 does not spawn `zcashd`.
 
