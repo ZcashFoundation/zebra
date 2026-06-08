@@ -107,7 +107,14 @@ impl QueuedBlocks {
             .collect::<Vec<_>>();
 
         for queued in &queued_children {
-            self.by_height.remove(&queued.0.height);
+            if let Some(hashes) = self.by_height.get_mut(&queued.0.height) {
+                hashes.remove(&queued.0.hash);
+
+                if hashes.is_empty() {
+                    self.by_height.remove(&queued.0.height);
+                }
+            }
+
             // TODO: only remove UTXOs if there are no queued blocks with that UTXO
             //       (known_utxos is best-effort, so this is ok for now)
             for outpoint in queued.0.new_outputs.keys() {

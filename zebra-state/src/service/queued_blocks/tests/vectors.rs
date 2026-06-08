@@ -197,3 +197,51 @@ fn sent_hashes_remove_drops_rejected_hash_and_utxos() -> Result<()> {
 
     Ok(())
 }
+
+// Ensures `dequeue_children` does not remove same-height sibling blocks from other forks.
+#[test]
+fn dequeue_children_preserves_same_height_siblings() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let root_block: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_419200_BYTES.zcash_deserialize_into()?;
+
+    let left_child: Arc<Block> =
+        zebra_test::vectors::BLOCK_MAINNET_419201_BYTES.zcash_deserialize_into()?;
+    let left_grandchild = left_child.make_fake_child();
+
+    let right_child = root_block.make_fake_child();
+    let right_grandchild = right_child.make_fake_child();
+
+    let mut queue = QueuedBlocks::default();
+    queue.queue(left_grandchild.clone().into_queued());
+    queue.queue(right_grandchild.clone().into_queued());
+
+    let height = left_grandchild.coinbase_height().unwrap();
+
+    // Sanity check: both entries are indexed under the same height bucket
+    assert_eq!(
+        queue.by_height.get(&height).unwrap().len(),
+        2,
+        "expected both fork grandchildren to be in the same height bucket"
+    );
+
+    // Dequeue only one branch
+    queue.dequeue_children(left_child.hash());
+
+    assert!(
+        queue.blocks.contains_key(&right_grandchild.hash()),
+        "sibling block must remain in queue after unrelated dequeue"
+    );
+
+    assert!(
+        queue
+            .by_height
+            .get(&height)
+            .unwrap()
+            .contains(&right_grandchild.hash()),
+        "sibling must remain indexed by height after unrelated dequeue"
+    );
+
+    Ok(())
+}
