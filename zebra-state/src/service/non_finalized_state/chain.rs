@@ -1240,6 +1240,25 @@ impl Chain {
             .remove(&block_height)
             .expect("only called while blocks is populated");
 
+        // If the popped block completed a Sapling or Orchard subtree, remove the corresponding
+        // subtree from this chain too. Subtrees are inserted by `push` keyed by the highest subtree
+        // index, so the last entry's `end_height` matches the popped block iff a subtree was
+        // completed at that height.
+        if self
+            .sapling_subtrees
+            .last_key_value()
+            .is_some_and(|(_, subtree)| subtree.end_height == block_height)
+        {
+            self.sapling_subtrees.pop_last();
+        }
+        if self
+            .orchard_subtrees
+            .last_key_value()
+            .is_some_and(|(_, subtree)| subtree.end_height == block_height)
+        {
+            self.orchard_subtrees.pop_last();
+        }
+
         assert!(
             !self.blocks.is_empty(),
             "Non-finalized chains must have at least one block to be valid"
@@ -1605,6 +1624,29 @@ impl Chain {
                 ),
             };
 
+            // Shielded-data updates run before the transparent updates and
+            // the `tx_loc_by_hash` insert so that a duplicate transaction
+            // (same hash → same nullifiers) is rejected with a clean
+            // `Duplicate{Sprout|Sapling|Orchard}Nullifier` error by
+            // `add_to_non_finalized_chain_unique` before reaching the
+            // defense-in-depth assertions on `tx_loc_by_hash`,
+            // `created_utxos`, and `spent_utxos` below.
+            {
+                #[cfg(not(feature = "indexer"))]
+                let transaction_hash = ();
+
+                self.update_chain_tip_with(&(joinsplit_data, &transaction_hash))?;
+                self.update_chain_tip_with(&(
+                    sapling_shielded_data_per_spend_anchor,
+                    &transaction_hash,
+                ))?;
+                self.update_chain_tip_with(&(
+                    sapling_shielded_data_shared_anchor,
+                    &transaction_hash,
+                ))?;
+                self.update_chain_tip_with(&(orchard_shielded_data, &transaction_hash))?;
+            }
+
             // add key `transaction.hash` and value `(height, tx_index)` to `tx_loc_by_hash`
             let transaction_location = TransactionLocation::from_usize(height, transaction_index);
             let prior_pair = self
@@ -1619,19 +1661,6 @@ impl Chain {
             self.update_chain_tip_with(&(outputs, &transaction_hash, new_outputs))?;
             // delete the utxos this consumed
             self.update_chain_tip_with(&(inputs, &transaction_hash, spent_outputs))?;
-
-            // add the shielded data
-
-            #[cfg(not(feature = "indexer"))]
-            let transaction_hash = ();
-
-            self.update_chain_tip_with(&(joinsplit_data, &transaction_hash))?;
-            self.update_chain_tip_with(&(
-                sapling_shielded_data_per_spend_anchor,
-                &transaction_hash,
-            ))?;
-            self.update_chain_tip_with(&(sapling_shielded_data_shared_anchor, &transaction_hash))?;
-            self.update_chain_tip_with(&(orchard_shielded_data, &transaction_hash))?;
         }
 
         // update the chain value pool balances

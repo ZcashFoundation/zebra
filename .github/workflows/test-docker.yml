@@ -47,6 +47,7 @@ jobs:
   build-docker-image:
     name: Build Docker Image
     permissions:
+      contents: read
       id-token: write
       statuses: write
     runs-on: ${{ vars.DOCKER_BUILD_RUNNER_AMD64 || 'ubuntu-latest' }}
@@ -116,7 +117,7 @@ jobs:
           - id: custom-conf
             name: Custom config
             env_vars: -e CONFIG_FILE_PATH=/home/zebra/zebrad/tests/common/configs/custom-conf.toml
-            grep_patterns: -e "extra_coinbase_data:\\sSome\\(\\\"do you even shield\\?\\\"\\)"
+            grep_patterns: -e "extra_coinbase_data:\\sSome\\(\\\"Do you even shield\\?\\\"\\)"
 
           # RPC configuration tests
           - id: rpc-conf

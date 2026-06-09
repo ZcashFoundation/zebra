@@ -8,7 +8,7 @@
 
 mod vectors;
 
-use std::{io::Cursor, ops::Deref};
+use std::io::Cursor;
 
 use vectors::{
     GET_BLOCKCHAIN_INFO_RESPONSE, GET_BLOCK_RESPONSE_1, GET_BLOCK_RESPONSE_2,
@@ -32,7 +32,7 @@ use zebra_rpc::client::{
     GetBlockchainInfoResponse, GetInfoResponse, GetMiningInfoResponse, GetNetworkInfoResponse,
     GetPeerInfoResponse, GetRawMempoolResponse, GetRawTransactionResponse,
     GetSubtreesByIndexResponse, GetTreestateResponse, Hash, Input, JoinSplit, MempoolObject,
-    Orchard, OrchardAction, OrchardFlags, Output, PeerInfo, ScriptPubKey, ScriptSig,
+    Orchard, OrchardAction, OrchardFlags, Output, ScriptPubKey, ScriptSig,
     SendRawTransactionResponse, ShieldedOutput, ShieldedSpend, SubmitBlockErrorResponse,
     SubmitBlockResponse, SubtreeRpcData, TransactionObject, TransactionTemplate, Treestate, Utxo,
     ValidateAddressResponse, ZListUnifiedReceiversResponse, ZValidateAddressResponse,
@@ -914,7 +914,7 @@ fn test_get_address_utxos_chain_info_false() -> Result<(), Box<dyn std::error::E
         .iter()
         .map(|utxo| {
             // Address extractability was checked manually
-            let address = utxo.address().clone();
+            let address = utxo.address();
             // Hash extractability was checked in other test
             let txid = utxo.txid();
             let output_index = utxo.output_index().index();
@@ -925,7 +925,7 @@ fn test_get_address_utxos_chain_info_false() -> Result<(), Box<dyn std::error::E
             let height = utxo.height();
 
             Utxo::new(
-                address,
+                *address,
                 txid,
                 OutputIndex::from_index(output_index),
                 script,
@@ -972,7 +972,7 @@ fn test_get_address_utxos_chain_info_true() -> Result<(), Box<dyn std::error::Er
             .iter()
             .map(|utxo| {
                 // Address extractability was checked manually
-                let address = utxo.address().clone();
+                let address = utxo.address();
                 // Hash extractability was checked in other test
                 let txid = utxo.txid();
                 let output_index = utxo.output_index().index();
@@ -983,7 +983,7 @@ fn test_get_address_utxos_chain_info_true() -> Result<(), Box<dyn std::error::Er
                 let height = utxo.height();
 
                 Utxo::new(
-                    address,
+                    *address,
                     txid,
                     OutputIndex::from_index(output_index),
                     script,
@@ -1253,26 +1253,35 @@ fn test_get_peer_info() -> Result<(), Box<dyn std::error::Error>> {
 [
   {
     "addr": "192.168.0.1:8233",
-    "inbound": false
+    "services": "0000000000000001",
+    "lastrecv": 1700000000,
+    "inbound": false,
+    "banscore": 0,
+    "subver": "/Zebra:2.1.0/",
+    "version": 170140,
+    "connection_state": "connected"
   },
   {
     "addr": "[2000:2000:2000:0000::]:8233",
-    "inbound": false
+    "services": "0000000000000001",
+    "lastrecv": 1700000000,
+    "inbound": false,
+    "banscore": 0,
+    "subver": "/zcashd:5.8.0/",
+    "version": 170100,
+    "connection_state": "connected"
   }
 ]
 "#;
     let obj: GetPeerInfoResponse = serde_json::from_str(json)?;
 
-    let addr0 = *obj[0].addr().deref();
-    let inbound0 = obj[0].inbound();
-    let addr1 = *obj[1].addr().deref();
-    let inbound1 = obj[1].inbound();
-
-    let new_obj = vec![
-        PeerInfo::new(addr0.into(), inbound0, None, None),
-        PeerInfo::new(addr1.into(), inbound1, None, None),
-    ];
-    assert_eq!(obj, new_obj);
+    assert_eq!(obj.len(), 2);
+    assert_eq!(obj[0].services().as_str(), "0000000000000001");
+    assert_eq!(obj[0].lastrecv(), 1700000000);
+    assert_eq!(obj[0].banscore(), 0);
+    assert_eq!(obj[0].subver().as_str(), "/Zebra:2.1.0/");
+    assert_eq!(obj[0].version(), 170140);
+    assert_eq!(obj[0].connection_state().as_str(), "connected");
 
     Ok(())
 }
@@ -1283,13 +1292,25 @@ fn test_get_peer_info_with_ping_values_serialization() -> Result<(), Box<dyn std
 [
   {
     "addr": "192.168.0.1:8233",
+    "services": "0000000000000001",
+    "lastrecv": 1700000000,
     "inbound": false,
+    "banscore": 0,
+    "subver": "/Zebra:2.1.0/",
+    "version": 170140,
+    "connection_state": "connected",
     "pingtime": 123,
     "pingwait": 45
   },
   {
     "addr": "[2000:2000:2000:0000::]:8233",
+    "services": "0000000000000001",
+    "lastrecv": 1700000000,
     "inbound": false,
+    "banscore": 0,
+    "subver": "/zcashd:5.8.0/",
+    "version": 170100,
+    "connection_state": "connected",
     "pingtime": 67,
     "pingwait": 89
   }
@@ -1297,21 +1318,11 @@ fn test_get_peer_info_with_ping_values_serialization() -> Result<(), Box<dyn std
 "#;
     let obj: GetPeerInfoResponse = serde_json::from_str(json)?;
 
-    let addr0 = *obj[0].addr().deref();
-    let inbound0 = obj[0].inbound();
-    let pingtime0 = obj[0].pingtime();
-    let pingwait0 = obj[0].pingwait();
-
-    let addr1 = *obj[1].addr().deref();
-    let inbound1 = obj[1].inbound();
-    let pingtime1 = obj[1].pingtime();
-    let pingwait1 = obj[1].pingwait();
-
-    let new_obj = vec![
-        PeerInfo::new(addr0.into(), inbound0, *pingtime0, *pingwait0),
-        PeerInfo::new(addr1.into(), inbound1, *pingtime1, *pingwait1),
-    ];
-    assert_eq!(obj, new_obj);
+    assert_eq!(obj.len(), 2);
+    assert_eq!(*obj[0].pingtime(), Some(123.0));
+    assert_eq!(*obj[0].pingwait(), Some(45.0));
+    assert_eq!(*obj[1].pingtime(), Some(67.0));
+    assert_eq!(*obj[1].pingwait(), Some(89.0));
 
     Ok(())
 }
@@ -1400,9 +1411,9 @@ fn test_get_block_subsidy() -> Result<(), Box<dyn std::error::Error>> {
             let specification = stream.specification().clone();
             let value = stream.value();
             let value_zat = stream.value_zat();
-            let address = stream.address().clone();
+            let address = stream.address();
 
-            FundingStream::new(recipient, specification, value, value_zat, address)
+            FundingStream::new(recipient, specification, value, value_zat, *address)
         })
         .collect::<Vec<_>>();
     let lockbox_streams = obj.lockbox_streams().clone();

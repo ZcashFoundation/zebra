@@ -22,3 +22,9 @@ pub mod miner;
 
 pub use inbound::Inbound;
 pub use sync::ChainSync;
+
+/// Consumes, updates, and returns `Self`.
+pub trait With<T> {
+    /// Consumes `self`, updates it, and returns the updated version.
+    fn with(self, _: T) -> Self;
+}

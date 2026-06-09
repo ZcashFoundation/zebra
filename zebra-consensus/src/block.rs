@@ -108,11 +108,12 @@ impl VerifyBlockError {
 
     /// Returns a suggested misbehaviour score increment for a certain error.
     pub fn misbehavior_score(&self) -> u32 {
-        // TODO: Adjust these values based on zcashd (#9258).
         use VerifyBlockError::*;
         match self {
             Block { source } => source.misbehavior_score(),
-            Equihash { .. } => 100,
+            Equihash { .. } | Subsidy(_) => 100,
+            Transaction(err) => err.mempool_misbehavior_score(),
+            Commit(err) => err.misbehavior_score(),
             _other => 0,
         }
     }
@@ -350,7 +351,6 @@ where
                 height,
                 new_outputs,
                 transaction_hashes,
-                deferred_pool_balance_change: Some(deferred_pool_balance_change),
             };
 
             // Return early for proposal requests.

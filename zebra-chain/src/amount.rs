@@ -462,9 +462,9 @@ where
     }
 }
 
+/// Errors that can be returned when validating [`Amount`]s.
 #[allow(missing_docs)]
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
-/// Errors that can be returned when validating [`Amount`]s.
 pub enum Error {
     /// input {value} is outside of valid range for zatoshi Amount, valid_range={range:?}
     Constraint {

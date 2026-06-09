@@ -70,6 +70,11 @@ impl CommitBlockError {
     pub fn is_duplicate_request(&self) -> bool {
         matches!(self, CommitBlockError::Duplicate { .. })
     }
+
+    /// Returns a suggested misbehaviour score increment for a certain error.
+    pub fn misbehavior_score(&self) -> u32 {
+        0
+    }
 }
 
 /// An error describing why a `CommitSemanticallyVerified` request failed.
@@ -426,5 +431,28 @@ impl DuplicateNullifierError for orchard::Nullifier {
             nullifier: *self,
             in_finalized_state,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zebra_chain::block::Height;
+
+    #[test]
+    fn commit_block_error_misbehavior_scores() {
+        let context_err = CommitBlockError::ValidateContextError(Box::new(
+            ValidateContextError::NonSequentialBlock {
+                candidate_height: Height(5),
+                parent_height: Height(3),
+            },
+        ));
+        assert_eq!(context_err.misbehavior_score(), 0);
+
+        let dup_err = CommitBlockError::Duplicate {
+            hash_or_height: None,
+            location: KnownBlock::BestChain,
+        };
+        assert_eq!(dup_err.misbehavior_score(), 0);
     }
 }

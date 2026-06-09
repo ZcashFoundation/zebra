@@ -45,6 +45,7 @@ jobs:
   matrix:
     name: Generate crates matrix
     permissions:
+      contents: read
       statuses: write
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -89,6 +90,7 @@ jobs:
   build:
     name: Build ${{ matrix.crate }} crate
     permissions:
+      contents: read
       id-token: write
       statuses: write
     timeout-minutes: 90
@@ -144,6 +146,7 @@ jobs:
   build-msrv:
     name: Build ${{ matrix.crate }} crate with MSRV
     permissions:
+      contents: read
       id-token: write
       statuses: write
     timeout-minutes: 90
