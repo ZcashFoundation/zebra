@@ -948,6 +948,9 @@ pub struct RegtestParameters {
     pub checkpoints: Option<ConfiguredCheckpoints>,
     /// Whether funding stream addresses should be repeated to fill all required funding stream periods.
     pub extend_funding_stream_addresses_as_required: Option<bool>,
+    /// Whether to allow coinbase spends to have transparent outputs (inverse of
+    /// zcashd's `-regtestshieldcoinbase`).
+    pub should_allow_unshielded_coinbase_spends: Option<bool>,
 }
 
 impl From<ConfiguredActivationHeights> for RegtestParameters {
@@ -1021,6 +1024,7 @@ impl Parameters {
             lockbox_disbursements,
             checkpoints,
             extend_funding_stream_addresses_as_required,
+            should_allow_unshielded_coinbase_spends,
         }: RegtestParameters,
     ) -> Result<Self, ParametersBuilderError> {
         let mut parameters = Self::build()
@@ -1028,7 +1032,9 @@ impl Parameters {
             // This value is chosen to match zcashd, see: <https://github.com/zcash/zcash/blob/master/src/chainparams.cpp#L654>
             .with_target_difficulty_limit(U256::from_big_endian(&[0x0f; 32]))?
             .with_disable_pow(true)
-            .with_unshielded_coinbase_spends(true)
+            .with_unshielded_coinbase_spends(
+                should_allow_unshielded_coinbase_spends.unwrap_or(true),
+            )
             .with_slow_start_interval(Height::MIN)
             // Like the default Testnet activation heights stripped below, the default Testnet's
             // temporary Orchard-disabling soft fork does not apply to Regtest.
