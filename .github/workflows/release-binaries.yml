@@ -259,6 +259,7 @@ jobs:
       - name: Upload assets to release
         env:
           GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
           RELEASE_TAG: ${{ needs.resolve-release.outputs.release_tag }}
         run: |
           set -euo pipefail
@@ -266,6 +267,7 @@ jobs:
             ./publish/final/zebrad-*.tar.gz \
             ./publish/final/zebrad-manifest-*.json \
             ./publish/final/SHA256SUMS.txt \
+            --repo "$REPOSITORY" \
             --clobber
 
   build:
