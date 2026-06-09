@@ -172,6 +172,16 @@ FROM debian:trixie-slim AS runtime
 ARG FEATURES
 ENV FEATURES=${FEATURES}
 
+# Optional zcashd compatibility artifact.
+#
+# Set ZCASHD_COMPAT_ENABLED=true to vendor a verified `zcashd` binary at
+# /usr/local/bin/zcashd so containers can run zcashd-compat mode without
+# downloading executables at startup. Set ZCASHD_COMPAT_URL and
+# ZCASHD_COMPAT_SHA256 to provide the exact artifact to vendor.
+ARG ZCASHD_COMPAT_ENABLED="false"
+ARG ZCASHD_COMPAT_URL=""
+ARG ZCASHD_COMPAT_SHA256=""
+
 # Create a non-privileged user for running `zebrad`.
 #
 # We use a high UID/GID (10001) to avoid overlap with host system users.
@@ -218,6 +228,30 @@ RUN chown -R ${UID}:${GID} ${HOME}
 COPY --link --from=release /usr/local/bin/zebrad /usr/local/bin/
 COPY --link --from=release /usr/local/bin/zebra-rollback-state /usr/local/bin/
 COPY --link --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+
+RUN set -e; \
+    case "${ZCASHD_COMPAT_ENABLED}" in \
+      true|TRUE|1|yes|YES|on|ON) zcashd_compat_enabled=true ;; \
+      false|FALSE|0|no|NO|off|OFF|"") zcashd_compat_enabled=false ;; \
+      *) echo "ZCASHD_COMPAT_ENABLED must be true or false" >&2; exit 1 ;; \
+    esac; \
+    if [ "${zcashd_compat_enabled}" = true ]; then \
+      zcashd_compat_url="${ZCASHD_COMPAT_URL}"; \
+      zcashd_compat_sha256="${ZCASHD_COMPAT_SHA256}"; \
+      if [ -z "${zcashd_compat_url}" ] || [ -z "${zcashd_compat_sha256}" ]; then \
+        echo "ZCASHD_COMPAT_URL and ZCASHD_COMPAT_SHA256 must either both be set or both be empty" >&2; \
+        exit 1; \
+      fi; \
+      tmpdir="$(mktemp -d)"; \
+      curl -fsSL "${zcashd_compat_url}" -o "${tmpdir}/zcashd-compat.tar.gz"; \
+      echo "${zcashd_compat_sha256}  ${tmpdir}/zcashd-compat.tar.gz" | sha256sum -c -; \
+      tar -xzf "${tmpdir}/zcashd-compat.tar.gz" -C "${tmpdir}"; \
+      install -m 0755 "${tmpdir}/bin/zcashd" /usr/local/bin/zcashd; \
+      rm -rf "${tmpdir}"; \
+    elif [ -n "${ZCASHD_COMPAT_URL}" ] || [ -n "${ZCASHD_COMPAT_SHA256}" ]; then \
+      echo "ZCASHD_COMPAT_URL and ZCASHD_COMPAT_SHA256 require ZCASHD_COMPAT_ENABLED=true" >&2; \
+      exit 1; \
+    fi
 
 ENTRYPOINT [ "entrypoint.sh" ]
 CMD ["zebrad"]

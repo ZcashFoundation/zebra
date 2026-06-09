@@ -24,6 +24,11 @@ on:
         required: false
         type: string
         default: auto
+      checkout_ref:
+        description: "Git ref to checkout before building. Defaults to the triggering commit SHA."
+        required: false
+        type: string
+        default: ''
       rust_backtrace:
         required: false
         type: string
@@ -37,6 +42,31 @@ on:
       features:
         required: false
         type: string
+      zcashd_compat_enabled:
+        description: "Whether to vendor zcashd compatibility artifacts into the runtime image"
+        required: false
+        type: boolean
+        default: false
+      zcashd_compat_url_amd64:
+        description: "Artifact URL for the linux/amd64 zcashd compatibility runtime build"
+        required: false
+        type: string
+        default: ''
+      zcashd_compat_sha256_amd64:
+        description: "SHA256 for the linux-x86_64 zcashd compatibility runtime artifact"
+        required: false
+        type: string
+        default: ''
+      zcashd_compat_url_arm64:
+        description: "Artifact URL for the linux/arm64 zcashd compatibility runtime build"
+        required: false
+        type: string
+        default: ''
+      zcashd_compat_sha256_arm64:
+        description: "SHA256 for the linux-aarch64 zcashd compatibility runtime artifact"
+        required: false
+        type: string
+        default: ''
       no_cache:
         description: Disable the Docker cache for this build
         required: false
@@ -145,6 +175,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
+          ref: ${{ inputs.checkout_ref || github.sha }}
 
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@e6f261660910b273384c5c42b17a0217881b217a #v5.6.0
@@ -238,6 +269,9 @@ jobs:
             RUST_LOG=${{ env.RUST_LOG }}
             CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}
             FEATURES=${{ env.FEATURES }}
+            ZCASHD_COMPAT_ENABLED=${{ inputs.zcashd_compat_enabled }}
+            ZCASHD_COMPAT_URL=${{ matrix.platform == 'linux/amd64' && inputs.zcashd_compat_url_amd64 || inputs.zcashd_compat_url_arm64 }}
+            ZCASHD_COMPAT_SHA256=${{ matrix.platform == 'linux/amd64' && inputs.zcashd_compat_sha256_amd64 || inputs.zcashd_compat_sha256_arm64 }}
           outputs: type=image,name=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }},push-by-digest=true,name-canonical=true,push=true
           # It's recommended to build images with max-level provenance attestations
           # https://docs.docker.com/build/ci/github-actions/attestations/
@@ -264,6 +298,9 @@ jobs:
             RUST_LOG=${{ env.RUST_LOG }}
             CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}
             FEATURES=${{ env.FEATURES }}
+            ZCASHD_COMPAT_ENABLED=${{ inputs.zcashd_compat_enabled }}
+            ZCASHD_COMPAT_URL=${{ matrix.platform == 'linux/amd64' && inputs.zcashd_compat_url_amd64 || inputs.zcashd_compat_url_arm64 }}
+            ZCASHD_COMPAT_SHA256=${{ matrix.platform == 'linux/amd64' && inputs.zcashd_compat_sha256_amd64 || inputs.zcashd_compat_sha256_arm64 }}
           outputs: type=image,name=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }},push-by-digest=true,name-canonical=true,push=true
           # Don't read from the cache if the caller disabled it.
           # https://docs.docker.com/engine/reference/commandline/buildx_build/#options
@@ -303,6 +340,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
+          ref: ${{ inputs.checkout_ref || github.sha }}
 
       - name: Inject slug/short variables
         uses: rlespinasse/github-slug-action@e6f261660910b273384c5c42b17a0217881b217a #v5.6.0

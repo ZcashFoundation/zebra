@@ -205,8 +205,14 @@ for c in zebra-test tower-fallback zebra-chain tower-batch-control zebra-node-se
 
 ## Publish Docker Images
 
+- [ ] Confirm the zcashd compat release inputs are set before publishing:
+  - [ ] Set `ZCASHD_COMPAT_RELEASE_TAG` repository variable to the intended `zcashd` compat release tag (or pass `zcashd_compat_release_tag` when manually dispatching `release-binaries.yml`).
+  - [ ] Confirm the resolved release contains `x86_64-pc-linux-gnu` and `aarch64-linux-gnu` artifacts in `zcashd-zebra-compat-manifest-<tag>.json`.
+- [ ] If needed, update [`zebrad/src/components/zcashd_compat/manifest.rs`](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/src/components/zcashd_compat/manifest.rs) so managed downloads use the same zcashd compat release used by Docker builds.
 - [ ] Wait for the [the Docker images to be published successfully](https://github.com/ZcashFoundation/zebra/actions/workflows/release-binaries.yml?query=event%3Arelease).
+- [ ] Confirm `release-binaries.yml` published `zebrad-<tag>-linux-x86_64.tar.gz`, `zebrad-<tag>-linux-aarch64.tar.gz`, `zebrad-manifest-<tag>.json`, and `SHA256SUMS.txt` to the GitHub release.
 - [ ] Wait for the new tag in the [dockerhub zebra space](https://hub.docker.com/r/zfnd/zebra/tags)
+- [ ] Confirm both `zfnd/zebra:<version>` and `zfnd/zebra-zcashd-compat:<version>` include `linux/amd64` and `linux/arm64` manifests.
 - [ ] Un-freeze the [`batched` queue](https://dashboard.mergify.com/github/ZcashFoundation/repo/zebra/queues) using Mergify.
 - [ ] Remove `do-not-merge` from the PRs you added it to
 

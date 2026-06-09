@@ -1,85 +1,370 @@
-# This workflow is meant to trigger a build of Docker binaries when a release
-# is published, it uses the existing `zfnd-build-docker-image.yml` workflow
-#
-# We use a separate action as we might want to trigger this under
-# different circumstances than a Continuous Deployment, for example.
-#
-# This workflow is triggered if:
-# - A release is published
-# - A pre-release is changed to a release
+# This workflow builds and publishes zebrad release assets when a release is
+# published. Docker image publishing is handled separately.
 name: Release binaries
 
 on:
   release:
     types:
       - released
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag to publish assets to (for example v2.6.0)"
+        required: false
+        type: string
+      zcashd_compat_release_tag:
+        description: "zcashd compat release tag (for example v6.2.1-alpha)"
+        required: false
+        type: string
+      zcashd_compat_manifest_url:
+        description: "Optional full manifest URL override"
+        required: false
+        type: string
+      publish_assets_to_release:
+        description: "Upload zebrad assets to the GitHub release tag"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
-  # The image will be named `zebra:<semver>`
-  build:
-    name: Build Release Docker
-    permissions:
-      contents: read
-      id-token: write
-      pull-requests: write
-    uses: ./.github/workflows/zfnd-build-docker-image.yml
-    with:
-      dockerfile_path: ./docker/Dockerfile
-      dockerfile_target: runtime
-      image_name: zebra
-      short_sha: ''
-      features: ${{ vars.RUST_PROD_FEATURES }}
-      rust_log: ${{ vars.RUST_LOG }}
-      # Enable Docker Hub publishing for official releases (this is the single source of truth for production images)
-      # The deploy-nodes workflow also builds for releases but doesn't publish to Docker Hub (defaults to false)
-      publish_to_dockerhub: true
-    # This step needs access to Docker Hub secrets to run successfully
-    secrets:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-
-  dockerhub-description:
-    if: github.repository_owner == 'ZcashFoundation'
+  resolve-release:
+    name: Resolve release metadata
     runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.resolve.outputs.release_tag }}
+    steps:
+      - name: Resolve release tag
+        id: resolve
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
+          EVENT_RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "release" ]; then
+            release_tag="$EVENT_RELEASE_TAG"
+          else
+            release_tag="$INPUT_RELEASE_TAG"
+          fi
+
+          if [ -z "$release_tag" ]; then
+            echo "A release tag is required. Set workflow_dispatch input release_tag." >&2
+            exit 1
+          fi
+
+          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
+
+  resolve-zcashd-compat-manifest:
+    name: Resolve zcashd compat manifest
+    runs-on: ubuntu-latest
+    outputs:
+      manifest_url: ${{ steps.resolve.outputs.manifest_url }}
+      release_tag: ${{ steps.resolve.outputs.release_tag }}
+      url_amd64: ${{ steps.resolve.outputs.url_amd64 }}
+      sha256_amd64: ${{ steps.resolve.outputs.sha256_amd64 }}
+      url_arm64: ${{ steps.resolve.outputs.url_arm64 }}
+      sha256_arm64: ${{ steps.resolve.outputs.sha256_arm64 }}
+    steps:
+      - name: Resolve and parse manifest
+        id: resolve
+        env:
+          INPUT_MANIFEST_URL: ${{ inputs.zcashd_compat_manifest_url }}
+          INPUT_RELEASE_TAG: ${{ inputs.zcashd_compat_release_tag }}
+          DEFAULT_RELEASE_TAG: ${{ vars.ZCASHD_COMPAT_RELEASE_TAG }}
+        run: |
+          set -euo pipefail
+          zcashd_compat_release_tag="${INPUT_RELEASE_TAG:-${DEFAULT_RELEASE_TAG:-v6.2.1-alpha}}"
+          manifest_url="$INPUT_MANIFEST_URL"
+          if [ -z "$manifest_url" ]; then
+            manifest_url="https://github.com/valargroup/zcashd/releases/download/${zcashd_compat_release_tag}/zcashd-zebra-compat-manifest-${zcashd_compat_release_tag}.json"
+          fi
+
+          curl -fsSL "$manifest_url" -o manifest.json
+
+          manifest_release_tag="$(jq -r '.release_tag' manifest.json)"
+          amd64_entry="$(jq -er '.artifacts[] | select(.target_triple == "x86_64-pc-linux-gnu")' manifest.json)"
+          arm64_entry="$(jq -er '.artifacts[] | select(.target_triple == "aarch64-linux-gnu")' manifest.json)"
+
+          {
+            echo "manifest_url=$manifest_url"
+            echo "release_tag=$manifest_release_tag"
+            echo "url_amd64=$(jq -r '.runtime.url' <<< "$amd64_entry")"
+            echo "sha256_amd64=$(jq -r '.runtime.sha256' <<< "$amd64_entry")"
+            echo "url_arm64=$(jq -r '.runtime.url' <<< "$arm64_entry")"
+            echo "sha256_arm64=$(jq -r '.runtime.sha256' <<< "$arm64_entry")"
+          } >> "$GITHUB_OUTPUT"
+
+  build-zebrad-assets:
+    name: Build zebrad assets (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    needs: [resolve-release]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            runner: ${{ vars.DOCKER_BUILD_RUNNER_AMD64 || 'ubuntu-latest' }}
+            platform: linux/amd64
+            target_triple: x86_64-unknown-linux-gnu
+          - name: linux-aarch64
+            runner: ${{ vars.DOCKER_BUILD_RUNNER_ARM64 || 'ubuntu-24.04-arm' }}
+            platform: linux/arm64
+            target_triple: aarch64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
+          ref: ${{ needs.resolve-release.outputs.release_tag }}
 
-      - name: Docker Hub Description
-        uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa #v5.0.0
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd #v4.0.0 # zizmor: ignore[cache-poisoning] -- shared Docker Build Cloud cache across envs, isolation fix pending
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_PASSWORD }}
-          repository: zfnd/zebra
-          short-description: ${{ github.event.repository.description }}
+          version: lab:latest
+          driver: docker
+
+      - name: Build release binary
+        env:
+          FEATURES: ${{ vars.RUST_PROD_FEATURES || 'default-release-binaries' }}
+        run: |
+          set -euo pipefail
+          mkdir -p ./out
+          docker buildx build \
+            --platform "${{ matrix.platform }}" \
+            --target release \
+            --file ./docker/Dockerfile \
+            --build-arg "FEATURES=${FEATURES}" \
+            --output "type=local,dest=./out" \
+            .
+          test -x ./out/usr/local/bin/zebrad
+
+      - name: Validate binary
+        run: ./out/usr/local/bin/zebrad --version
+
+      - name: Package archive and metadata
+        env:
+          RELEASE_TAG: ${{ needs.resolve-release.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p ./artifacts/bin ./artifacts/metadata
+          cp ./out/usr/local/bin/zebrad ./artifacts/bin/zebrad
+          archive_name="zebrad-${RELEASE_TAG}-${{ matrix.name }}.tar.gz"
+          (
+            cd ./artifacts
+            tar --sort=name \
+              --mtime='UTC 2020-01-01' \
+              --owner=0 --group=0 --numeric-owner \
+              -czf "$archive_name" ./bin/zebrad
+          )
+          archive_sha256="$(sha256sum "./artifacts/${archive_name}" | awk '{print $1}')"
+          archive_size="$(stat --printf='%s' "./artifacts/${archive_name}")"
+          cat > "./artifacts/metadata/${{ matrix.name }}.metadata.json" <<EOF
+          {
+            "platform_id": "${{ matrix.name }}",
+            "target_triple": "${{ matrix.target_triple }}",
+            "archive": "${archive_name}",
+            "sha256": "${archive_sha256}",
+            "size": ${archive_size},
+            "archive_member_binary_path": "./bin/zebrad"
+          }
+          EOF
+
+      - name: Upload matrix artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a #v7.0.1
+        with:
+          name: zebrad-assets-${{ matrix.name }}
+          path: ./artifacts
+
+  publish-zebrad-assets:
+    name: Publish zebrad assets
+    needs: [resolve-release, build-zebrad-assets]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    if: github.event_name == 'release' || inputs.publish_assets_to_release
+    steps:
+      - name: Download built artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c #v8.0.1
+        with:
+          path: ./publish
+          pattern: zebrad-assets-*
+          merge-multiple: true
+
+      - name: Build manifest and checksums
+        env:
+          RELEASE_TAG: ${{ needs.resolve-release.outputs.release_tag }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p ./publish/final
+          RELEASE_TAG="$RELEASE_TAG" REPOSITORY="$REPOSITORY" python3 - <<'PY'
+          import glob
+          import json
+          import os
+          from pathlib import Path
+
+          release_tag = os.environ["RELEASE_TAG"]
+          repository = os.environ["REPOSITORY"]
+          base_url = f"https://github.com/{repository}/releases/download/{release_tag}"
+          metadata_files = sorted(glob.glob("./publish/**/*.metadata.json", recursive=True))
+          if not metadata_files:
+              raise SystemExit("No metadata files found.")
+
+          artifacts = []
+          for file_path in metadata_files:
+              item = json.loads(Path(file_path).read_text(encoding="utf-8"))
+              item["url"] = f"{base_url}/{item['archive']}"
+              artifacts.append(item)
+
+          manifest = {
+              "schema_version": 1,
+              "release_tag": release_tag,
+              "repository": repository,
+              "artifacts": artifacts,
+          }
+          Path("./publish/final").mkdir(parents=True, exist_ok=True)
+          Path(f"./publish/final/zebrad-manifest-{release_tag}.json").write_text(
+              json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+          find ./publish -type f -name 'zebrad-*.tar.gz' -exec cp {} ./publish/final/ \;
+          (
+            cd ./publish/final
+            sha256sum ./* > SHA256SUMS.txt
+          )
+
+      - name: Upload assets to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.resolve-release.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          gh release upload "$RELEASE_TAG" \
+            ./publish/final/zebrad-*.tar.gz \
+            ./publish/final/zebrad-manifest-*.json \
+            ./publish/final/SHA256SUMS.txt \
+            --clobber
+
+  build:
+    name: Build Release Docker (${{ matrix.name }})
+    needs: [resolve-release]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            runner: ${{ vars.DOCKER_BUILD_RUNNER_AMD64 || 'ubuntu-latest' }}
+            platform: linux/amd64
+          - name: linux-aarch64
+            runner: ${{ vars.DOCKER_BUILD_RUNNER_ARM64 || 'ubuntu-24.04-arm' }}
+            platform: linux/arm64
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          persist-credentials: false
+          ref: ${{ needs.resolve-release.outputs.release_tag }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd #v4.0.0 # zizmor: ignore[cache-poisoning] -- shared Docker Build Cloud cache across envs, isolation fix pending
+        with:
+          version: lab:latest
+          driver: docker
+
+      - name: Build runtime image
+        env:
+          FEATURES: ${{ vars.RUST_PROD_FEATURES || 'default-release-binaries' }}
+          IMAGE_TAG: valaroman/zebra:release-ci-${{ matrix.name }}
+        run: |
+          set -euo pipefail
+          docker buildx build \
+            --platform "${{ matrix.platform }}" \
+            --target runtime \
+            --file ./docker/Dockerfile \
+            --build-arg "FEATURES=${FEATURES}" \
+            --tag "$IMAGE_TAG" \
+            --load \
+            .
+          docker image inspect "$IMAGE_TAG" >/dev/null
+
+  build-zcashd-compat:
+    name: Build Release Docker zcashd Compat (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    needs: [resolve-release, resolve-zcashd-compat-manifest]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            runner: ${{ vars.DOCKER_BUILD_RUNNER_AMD64 || 'ubuntu-latest' }}
+            platform: linux/amd64
+            zcashd_compat_url_output: url_amd64
+            zcashd_compat_sha256_output: sha256_amd64
+          - name: linux-aarch64
+            runner: ${{ vars.DOCKER_BUILD_RUNNER_ARM64 || 'ubuntu-24.04-arm' }}
+            platform: linux/arm64
+            zcashd_compat_url_output: url_arm64
+            zcashd_compat_sha256_output: sha256_arm64
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          persist-credentials: false
+          ref: ${{ needs.resolve-release.outputs.release_tag }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd #v4.0.0 # zizmor: ignore[cache-poisoning] -- shared Docker Build Cloud cache across envs, isolation fix pending
+        with:
+          version: lab:latest
+          driver: docker
+
+      - name: Build zcashd compat runtime image
+        env:
+          FEATURES: ${{ vars.RUST_PROD_FEATURES || 'default-release-binaries' }}
+          IMAGE_TAG: valaroman/zebra-zcashd-compat:release-ci-${{ matrix.name }}
+          ZCASHD_COMPAT_URL: ${{ needs.resolve-zcashd-compat-manifest.outputs[matrix.zcashd_compat_url_output] }}
+          ZCASHD_COMPAT_SHA256: ${{ needs.resolve-zcashd-compat-manifest.outputs[matrix.zcashd_compat_sha256_output] }}
+        run: |
+          set -euo pipefail
+          docker buildx build \
+            --platform "${{ matrix.platform }}" \
+            --target runtime \
+            --file ./docker/Dockerfile \
+            --build-arg "FEATURES=${FEATURES}" \
+            --build-arg "ZCASHD_COMPAT_ENABLED=true" \
+            --build-arg "ZCASHD_COMPAT_URL=${ZCASHD_COMPAT_URL}" \
+            --build-arg "ZCASHD_COMPAT_SHA256=${ZCASHD_COMPAT_SHA256}" \
+            --tag "$IMAGE_TAG" \
+            --load \
+            .
+          docker image inspect "$IMAGE_TAG" >/dev/null
 
   release-binaries-success:
     name: Release binaries success
     runs-on: ubuntu-latest
-    # Only run when the Docker Hub update job is allowed to execute
-    if: >-
-      ${{
-        always() &&
-        github.repository_owner == 'ZcashFoundation'
-      }}
+    if: always()
     needs:
+      - resolve-release
+      - resolve-zcashd-compat-manifest
+      - build-zebrad-assets
+      - publish-zebrad-assets
       - build
-      - dockerhub-description
+      - build-zcashd-compat
     timeout-minutes: 1
     steps:
       - name: Decide whether the needed jobs succeeded or failed
         uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe #v1.2.2
         with:
           jobs: ${{ toJSON(needs) }}
+          allowed-skips: publish-zebrad-assets
 
   failure-issue:
     name: Open or update issues for release binaries failures
     # When a new job is added to this workflow, add it to this list.
-    needs: [ build, dockerhub-description ]
+    needs: [ resolve-release, resolve-zcashd-compat-manifest, build-zebrad-assets, publish-zebrad-assets, build, build-zcashd-compat ]
     # Open tickets for any failed build in this workflow.
     if: failure() || cancelled()
     runs-on: ubuntu-latest
