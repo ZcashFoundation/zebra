@@ -277,7 +277,6 @@ Zebra versions are vulnerable to these issues.
   ([#10464](https://github.com/ZcashFoundation/zebra/pull/10464)).
 
 ## [Zebra 4.3.0](https://github.com/ZcashFoundation/zebra/releases/tag/v4.3.0) - 2026-03-12
-## [Zebra 4.3.0](https://github.com/ZcashFoundation/zebra/releases/tag/v4.3.0) - 2026-03-12
 
 This release fixes **two important security issues**:
 

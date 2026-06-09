@@ -16,6 +16,7 @@ ignore = [
     "RUSTSEC-2024-0375", # atty (unmaintained) — transitive via abscissa_core -> structopt
     "RUSTSEC-2021-0145", # atty (unsound) — transitive via abscissa_core -> structopt
     "RUSTSEC-2024-0370", # proc-macro-error — transitive via abscissa_core -> structopt
+    "RUSTSEC-2026-0173", # proc-macro-error2 (unmaintained fork of proc-macro-error) — transitive via abscissa_core -> structopt
     "RUSTSEC-2025-0119", # number_prefix — transitive via indicatif
     "RUSTSEC-2025-0141", # bincode — direct dependency
 ]
