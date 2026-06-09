@@ -1,5 +1,6 @@
 //! Converting Zcash consensus-critical data structures into bytes.
 
+use byteorder::WriteBytesExt;
 use std::{io, net::Ipv6Addr};
 
 use super::{AtLeastOne, CompactSizeMessage};
@@ -8,6 +9,11 @@ use super::{AtLeastOne, CompactSizeMessage};
 ///
 /// This value is used to calculate safe preallocation limits for some types
 pub const MAX_PROTOCOL_MESSAGE_LEN: usize = 2 * 1024 * 1024;
+
+/// The maximum number of block headers in a single `headers` protocol message.
+///
+/// <https://zips.z.cash/protocol/protocol.pdf#page=108>
+pub const MAX_HEADERS_PER_MESSAGE: usize = 160;
 
 /// Consensus-critical serialization for Zcash.
 ///
@@ -42,6 +48,12 @@ pub trait ZcashSerialize: Sized {
         self.zcash_serialize(&mut writer)
             .expect("writer should never fail");
         writer.0
+    }
+}
+
+impl ZcashSerialize for u8 {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        writer.write_u8(*self)
     }
 }
 

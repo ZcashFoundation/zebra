@@ -10,6 +10,7 @@ on:
       - clippy.toml
       - .cargo/config.toml
       - .github/workflows/lint.yml
+      - supply-chain/**
 
   push:
     branches: [main]
@@ -20,6 +21,7 @@ on:
       - clippy.toml
       - .cargo/config.toml
       - .github/workflows/lint.yml
+      - supply-chain/**
 
 # Ensures that only one workflow task will run at a time. Previous builds, if
 # already in process, will get cancelled. Only the latest commit will be allowed
@@ -39,6 +41,7 @@ jobs:
   clippy:
     name: clippy ${{ matrix.rust-version }} / ${{ matrix.type }}
     permissions:
+      contents: read
       id-token: write
       statuses: write
     runs-on: ubuntu-latest
@@ -60,7 +63,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           components: clippy
           toolchain: ${{ matrix.rust-version }}
@@ -71,6 +74,7 @@ jobs:
 
   crate-checks:
     permissions:
+      contents: read
       statuses: write
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -78,10 +82,10 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           cache-on-failure: true
-      - uses: taiki-e/install-action@305bebabd4457bed9b82541755f034994382465b #v2.68.10
+      - uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 #v2.79.3
         with:
           tool: cargo-hack
       - uses: ./.github/actions/setup-zebra-build
@@ -90,6 +94,7 @@ jobs:
   msrv:
     name: MSRV
     permissions:
+      contents: read
       id-token: write
       statuses: write
     runs-on: ubuntu-latest
@@ -102,9 +107,9 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
-          toolchain: 1.89 # MSRV
+          toolchain: 1.91 # MSRV
           cache-on-failure: true
       - uses: ./.github/actions/setup-zebra-build
       - run: cargo build --bin "${{ matrix.binary }}" --workspace
@@ -112,6 +117,7 @@ jobs:
   docs:
     name: docs
     permissions:
+      contents: read
       statuses: write
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -119,7 +125,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           toolchain: nightly
           cache-on-failure: true
@@ -134,6 +140,7 @@ jobs:
   fmt:
     name: fmt
     permissions:
+      contents: read
       statuses: write
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -141,7 +148,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           toolchain: nightly
           components: rustfmt
@@ -151,6 +158,7 @@ jobs:
   unused-deps:
     name: unused-deps
     permissions:
+      contents: read
       id-token: write
       statuses: write
     runs-on: ubuntu-latest
@@ -159,11 +167,11 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           toolchain: nightly
           cache-on-failure: true
-      - uses: taiki-e/install-action@305bebabd4457bed9b82541755f034994382465b #v2.68.10
+      - uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 #v2.79.3
         with:
           tool: cargo-udeps
       - uses: ./.github/actions/setup-zebra-build
@@ -177,7 +185,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           toolchain: stable
           cache-on-failure: true
@@ -188,6 +196,7 @@ jobs:
   features:
     name: features
     permissions:
+      contents: read
       id-token: write
       statuses: write
     runs-on: ubuntu-latest
@@ -196,12 +205,12 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           toolchain: nightly
           cache-on-failure: true
       - name: cargo install cargo-hack
-        uses: taiki-e/install-action@305bebabd4457bed9b82541755f034994382465b #v2.68.10
+        uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 #v2.79.3
         with:
           tool: cargo-hack
       - uses: ./.github/actions/setup-zebra-build
@@ -212,6 +221,7 @@ jobs:
   check-cargo-lock:
     name: check-cargo-lock
     permissions:
+      contents: read
       id-token: write
       statuses: write
     runs-on: ubuntu-latest
@@ -219,7 +229,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           toolchain: stable
           cache-on-failure: true
@@ -229,6 +239,7 @@ jobs:
   deny:
     name: Check deny ${{ matrix.checks }} ${{ matrix.features }}
     permissions:
+      contents: read
       statuses: write
     runs-on: ubuntu-latest
     strategy:
@@ -254,11 +265,11 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           cache-on-failure: true
       - name: Check ${{ matrix.checks }} with features ${{ matrix.features }}
-        uses: EmbarkStudios/cargo-deny-action@3fd3802e88374d3fe9159b834c7714ec57d6c979 #v2.0.15
+        uses: EmbarkStudios/cargo-deny-action@6c8f9facfa5047ec02d8485b6bf52b587b7777d1 #v2.0.18
         with:
           # --all-features spuriously activates openssl, but we want to ban that dependency in
           # all of zebrad's production features for security reasons. But the --all-features job is
@@ -270,6 +281,7 @@ jobs:
   vet:
     name: cargo-vet check
     permissions:
+      contents: read
       statuses: write
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -277,11 +289,11 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@1780873c7b576612439a134613cc4cc74ce5538c #v1.15.2
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           cache-on-failure: true
       - name: Install cargo-vet
-        uses: taiki-e/install-action@305bebabd4457bed9b82541755f034994382465b #v2.68.10
+        uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 #v2.79.3
         with:
           tool: cargo-vet
       - name: Run cargo-vet check

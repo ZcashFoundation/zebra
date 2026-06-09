@@ -21,14 +21,14 @@ services:
       - source: zebra-config
         target: /home/zebra/.config/zebrad.toml
 
-    # Uncomment the `ports` mapping below to map ports between the container and
-    # host.
-    #
-    # ports:
+    # P2P port for inbound peer connections (recommended).
+    ports:
+      - "8233:8233"   # P2P on Mainnet (use 18233:18233 for Testnet)
+
+    # Uncomment any of these to expose additional services:
+    #   - "18233:18233" # P2P on Testnet
     #   - "8232:8232"   # RPC endpoint on Mainnet
     #   - "18232:18232" # RPC endpoint on Testnet
-    #   - "8233:8233"   # peer connections on Mainnet
-    #   - "18233:18233" # peer connections on Testnet
     #   - "9999:9999"   # Metrics
     #   - "3000:3000"   # Tracing
     #   - "8080:8080"   # Health endpoints (/healthy, /ready)

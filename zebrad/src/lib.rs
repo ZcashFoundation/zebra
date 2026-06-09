@@ -151,4 +151,4 @@ pub mod config;
 pub mod prelude;
 
 #[cfg(feature = "sentry")]
-pub mod sentry;
+pub(crate) mod sentry;

@@ -62,6 +62,12 @@ use super::{txid::TxIdBuilder, AuthDigest, Transaction};
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct Hash(pub [u8; 32]);
 
+impl AsRef<[u8; 32]> for Hash {
+    fn as_ref(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
 impl From<Transaction> for Hash {
     fn from(transaction: Transaction) -> Self {
         // use the ref implementation, to avoid cloning the transaction
@@ -87,6 +93,12 @@ impl From<Arc<Transaction>> for Hash {
 impl From<[u8; 32]> for Hash {
     fn from(bytes: [u8; 32]) -> Self {
         Self(bytes)
+    }
+}
+
+impl From<&[u8; 32]> for Hash {
+    fn from(bytes: &[u8; 32]) -> Self {
+        Self::from(*bytes)
     }
 }
 

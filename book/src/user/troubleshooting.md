@@ -88,3 +88,49 @@ filter = 'info,zebra_network=debug'
 
 If you keep on seeing multiple info logs per second, please
 [open a bug.](https://github.com/ZcashFoundation/zebra/issues/new/choose)
+
+### Linux TCP tuning for block propagation
+
+On Linux, the kernel resets each TCP connection's congestion window after a short idle period
+(`net.ipv4.tcp_slow_start_after_idle=1`, the default on most distros). Zcash's
+pull-based, single-request-per-block propagation means most peer connections are
+idle between blocks, so every full-block transfer starts from a cold congestion
+window. On long-haul links this can cap single-peer throughput far below the
+available bandwidth — even between nodes with 1–2 Gbps connections, observed
+throughput during block propagation can be as low as ~6 Mbps.
+
+> **Warning: these settings are system-wide.** They affect _every_ TCP
+> connection on the host and every program using it, not just Zebra. Review
+> the implications before applying, particularly on multi-tenant or
+> production hosts running unrelated workloads.
+
+The recommended sysctl config is:
+
+```text
+# Disable slow-start-after-idle so TCP doesn't reset its congestion window
+# between block requests. This is the highest-impact setting for full-block
+# propagation on long-haul links.
+net.ipv4.tcp_slow_start_after_idle=0
+
+# Use CUBIC congestion control (already the default on most Linux distros;
+# set explicitly so the configuration is self-documenting).
+net.ipv4.tcp_congestion_control=cubic
+
+# Use fq_codel as the default queueing discipline.
+net.core.default_qdisc=fq_codel
+```
+
+To apply persistently, write the block above to
+`/etc/sysctl.d/99-zebra-network.conf` and reload with
+`sudo sysctl --system`. To apply for the current boot only, use
+`sudo sysctl -w <key>=<value>` for each line.
+
+Zebra logs a warning at startup on Linux if `tcp_slow_start_after_idle` is
+enabled.
+
+#### Running Zebra in Docker
+
+These sysctls must be applied on the **host**, not inside the container.
+Containers share the host's network stack settings for these knobs, so
+setting them inside the container has no effect. Apply them on the
+Docker host (and remember the system-wide caveat above).

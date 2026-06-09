@@ -5,7 +5,104 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [9.0.0] - 2026-06-02
+
+### Added
+
+- `NetworkUpgrade::Nu6_2` (consensus branch id `0x5437f330`), with activation heights
+  3,364,600 on Mainnet and 4,052,000 on Testnet.
+- `OrchardShieldedData::proof_size_is_canonical()`.
+- `Network::orchard_canonical_proof_size_rule_active()` and
+  `Network::is_orchard_temporarily_disabled()`.
+- A configurable NU6.2 activation height for Testnets (`ConfiguredActivationHeights::nu6_2`).
+
+### Changed
+
+- The default Testnet's temporary Orchard-disabling soft-fork height now defaults to
+  4,048,500; Regtest leaves it unset.
+
+## [8.0.0] - 2026-05-28
+
+### Removed
+
+- `block::Height::coinbase_zcash_serialized_size()`
+- `transaction`:
+  - `builder` module
+  - `Transaction::new_v4_coinbase()` and `new_v5_coinbase()`
+- `transparent`:
+  - `Input::new_coinbase()` and `extra_coinbase_data()`
+  - `CoinbaseData` struct and its impls
+  - `EXTRA_ZEBRA_COINBASE_DATA`, `GENESIS_COINBASE_DATA`, `MAX_COINBASE_DATA_LEN`,
+    `MAX_COINBASE_HEIGHT_DATA_LEN` constants
+
+### Changed
+
+- `transparent::Input::Coinbase`:
+  - `data` field type changed from `CoinbaseData` to `Vec<u8>`
+  - `data` now stores only miner data (without height encoding)
+- `block::Hash::max_allocation()` now returns `MAX_BLOCK_LOCATOR_LENGTH` (`101`,
+  matching Bitcoin Core's `MAX_LOCATOR_SZ`); previously derived from
+  `MAX_PROTOCOL_MESSAGE_LEN` (~65,535).
+- `block::CountedHeader::max_allocation()` now returns `MAX_HEADERS_PER_MESSAGE`
+  (`160`); previously ~1,409. Mitigates upfront preallocation by a
+  post-handshake peer on `getblocks`/`getheaders` (CWE-770; same fix shape as
+  [GHSA-xr93-pcq3-pxf8](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-xr93-pcq3-pxf8)).
+- `serialization::zcash_deserialize_external_count` now caps the initial
+  `Vec::with_capacity` reservation at `MAX_INITIAL_ALLOCATION = 1024` so a
+  peer-supplied `CompactSize` cannot force a large allocation before any
+  element bytes are read; the `Vec` grows naturally via `push()`. Complements
+  the per-type `max_allocation()` caps (CWE-770).
+
+### Added
+
+- `block::MAX_BLOCK_LOCATOR_LENGTH: u64 = 101`.
+- `block::Height`:
+  - `impl From<block::Height> for i64`
+  - `impl From<&block::Height> for i64`
+  - `impl TryFrom<i64> for block::Height`
+- `transparent`:
+  - `Input::miner_data()`
+  - `Input::coinbase_script()`
+  - `impl TryFrom<transparent::Address> for zcash_transparent::address::TransparentAddress`
+  - `derive(Copy)` on `transparent::Address`
+- `transaction`:
+  - `impl TryFrom<&[u8]> for AuthDigest`
+  - `impl AsRef<[u8; 32]> for Hash`
+  - `impl From<&[u8; 32]> for Hash`
+- `serialization`:
+  - `SerializationError::{Num, Opcode, Script}` variants
+  - `impl ZcashSerialize for u8`
+
+### Fixed
+
+- `Block::chain_value_pool_change()` now propagates per-transaction
+  `ValueBalanceError`s instead of silently dropping them via `flat_map(Result)`
+  ([#10585](https://github.com/ZcashFoundation/zebra/issues/10585)).
+
+## [7.0.0] - 2026-05-01
+
+### Added
+
+- `serialization::MAX_HEADERS_PER_MESSAGE: usize`.
+- `transaction::VerifiedUnminedTx`:
+  - `p2sh_sigop_count: u32`.
+  - `block_sigop_count(&self) -> u32`.
+
+### Changed
+
+- Migrated to `zcash_primitives 0.27` (and the rest of the librustzcash 2026-04
+  release wave), which replaces the yanked `core2` dependency with `corez`.
+- `transaction::VerifiedUnminedTx::new` now takes an additional
+  `p2sh_sigop_count: u32` parameter.
+
+## [6.0.2] - 2026-04-17
+
+This release fixes an important security issue:
+
+- [CVE-2026-XXXXX: rk Identity Point Panic in Transaction Verification](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-452v-w3gx-72wg)
+
+The impact of the issue for crate users will depend on the particular usage;
+if you use it as a building block for a consensus node, you should update.
 
 ## [6.0.1] - 2026-03-26
 

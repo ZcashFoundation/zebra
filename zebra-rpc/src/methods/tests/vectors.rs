@@ -24,7 +24,7 @@ use zebra_chain::{
     },
     serialization::{DateTime32, ZcashDeserializeInto, ZcashSerialize},
     transaction::{zip317, UnminedTxId, VerifiedUnminedTx},
-    work::difficulty::{CompactDifficulty, ExpandedDifficulty, ParameterDifficulty as _, U256},
+    work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
 };
 use zebra_consensus::MAX_BLOCK_SIGOPS;
 use zebra_network::{
@@ -307,6 +307,7 @@ async fn rpc_getblock() {
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: Some(Height(i.try_into().expect("valid u32"))),
                 time: Some(block.header.time.timestamp()),
+                n_tx: block.transactions.len(),
                 tx: block
                     .transactions
                     .iter()
@@ -364,6 +365,7 @@ async fn rpc_getblock() {
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: Some(Height(i.try_into().expect("valid u32"))),
                 time: Some(block.header.time.timestamp()),
+                n_tx: block.transactions.len(),
                 tx: block
                     .transactions
                     .iter()
@@ -420,6 +422,7 @@ async fn rpc_getblock() {
                 confirmations,
                 height,
                 time,
+                n_tx,
                 tx,
                 trees,
                 size,
@@ -441,6 +444,7 @@ async fn rpc_getblock() {
             assert_eq!(confirmations, &((blocks.len() - i) as i64));
             assert_eq!(height, &Some(Height(i.try_into().expect("valid u32"))));
             assert_eq!(time, &Some(block.header.time.timestamp()));
+            assert_eq!(*n_tx, block.transactions.len());
             assert_eq!(trees, trees);
             assert_eq!(size, &Some(block.zcash_serialized_size() as i64));
             assert_eq!(version, &Some(block.header.version));
@@ -518,6 +522,7 @@ async fn rpc_getblock() {
                 confirmations,
                 height,
                 time,
+                n_tx,
                 tx,
                 trees,
                 size,
@@ -539,6 +544,7 @@ async fn rpc_getblock() {
             assert_eq!(confirmations, &((blocks.len() - i) as i64));
             assert_eq!(height, &Some(Height(i.try_into().expect("valid u32"))));
             assert_eq!(time, &Some(block.header.time.timestamp()));
+            assert_eq!(*n_tx, block.transactions.len());
             assert_eq!(trees, trees);
             assert_eq!(size, &Some(block.zcash_serialized_size() as i64));
             assert_eq!(version, &Some(block.header.version));
@@ -616,6 +622,7 @@ async fn rpc_getblock() {
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: Some(Height(i.try_into().expect("valid u32"))),
                 time: Some(block.header.time.timestamp()),
+                n_tx: block.transactions.len(),
                 tx: block
                     .transactions
                     .iter()
@@ -672,6 +679,7 @@ async fn rpc_getblock() {
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: Some(Height(i.try_into().expect("valid u32"))),
                 time: Some(block.header.time.timestamp()),
+                n_tx: block.transactions.len(),
                 tx: block
                     .transactions
                     .iter()
@@ -1779,6 +1787,8 @@ async fn rpc_getpeerinfo() {
         .into(),
         &PeerServices::NODE_NETWORK,
         false,
+        "/Zebra:2.1.0/".to_string(),
+        zebra_network::constants::CURRENT_NETWORK_PROTOCOL_VERSION,
     )
     .into_new_meta_addr(
         std::time::Instant::now(),
@@ -1794,6 +1804,8 @@ async fn rpc_getpeerinfo() {
         .into(),
         &PeerServices::NODE_NETWORK,
         true,
+        "/zcashd:5.8.0/".to_string(),
+        zebra_network::constants::CURRENT_NETWORK_PROTOCOL_VERSION,
     )
     .into_new_meta_addr(
         std::time::Instant::now(),
@@ -1814,8 +1826,8 @@ async fn rpc_getpeerinfo() {
     );
 
     let mock_address_book = MockAddressBookPeers::new(vec![
-        outbound_mock_peer_address,
-        inbound_mock_peer_address,
+        outbound_mock_peer_address.clone(),
+        inbound_mock_peer_address.clone(),
         not_connected_mock_peer_adderess,
     ]);
 
@@ -2065,6 +2077,7 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
     let mining_conf = crate::config::mining::Config {
         miner_address: Some(addr.clone()),
         extra_coinbase_data: None,
+        miner_memo: None,
         internal_miner: true,
     };
 
@@ -2317,6 +2330,7 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
         transaction: unmined_tx,
         miner_fee: 0.try_into().unwrap(),
         legacy_sigop_count: 0,
+        p2sh_sigop_count: 0,
         conventional_actions,
         unpaid_actions: 0,
         fee_weight_ratio: 1.0,
@@ -2395,7 +2409,7 @@ async fn rpc_submitblock_errors() {
     );
 
     // Try to submit pre-populated blocks and assert that it responds with duplicate.
-    for (_height, &block_bytes) in zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS.iter() {
+    for &block_bytes in zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS.values() {
         let submit_block_response = rpc.submit_block(HexData(block_bytes.into()), None).await;
 
         assert_eq!(
@@ -2758,6 +2772,7 @@ async fn rpc_getdifficulty() {
     let mining_conf = mining::Config {
         miner_address: None,
         extra_coinbase_data: None,
+        miner_memo: None,
         internal_miner: true,
     };
 
@@ -2954,6 +2969,70 @@ async fn rpc_z_listunifiedreceivers() {
     assert_eq!(*response.p2sh(), None);
 }
 
+/// Check that `z_listunifiedreceivers` returns an RPC error (instead of panicking and
+/// aborting `zebrad`) when given a unified address whose Sapling receiver has a valid
+/// length and typecode but a non-canonical Jubjub `pk_d`.
+///
+/// The unified-address decoder validates only the typecode and length of inner receivers,
+/// not their contents, so this used to reach `sapling_crypto::PaymentAddress::from_bytes`
+/// returning `None` and then panic on `.expect(...)`. Under `panic = "abort"` (Zebra's
+/// release and dev profiles) that aborts the process.
+///
+/// Regression test for
+/// [GHSA-c8w6-x74f-vmg3](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-c8w6-x74f-vmg3).
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_z_listunifiedreceivers_rejects_bad_sapling_receiver() {
+    use zcash_address::unified::{Address as UnifiedAddress, Encoding, Receiver};
+
+    let _init_guard = zebra_test::init();
+
+    // Construct a Sapling receiver whose 43 bytes pass the typecode/length checks
+    // performed by `unified::Encoding::decode`, but whose trailing 32 bytes are not a
+    // canonical Jubjub `DiversifiedTransmissionKey`. `0xFF` * 32 is the simplest such
+    // value: `sapling_crypto::PaymentAddress::from_bytes` returns `None`.
+    let mut bad_sapling = [0u8; 43];
+    bad_sapling[..11].copy_from_slice(&[0x11; 11]);
+    bad_sapling[11..].copy_from_slice(&[0xFF; 32]);
+
+    // A placeholder Orchard receiver is needed to satisfy the unified-container rule
+    // that forbids `OnlyTransparent` UAs. The bytes themselves are never validated by
+    // the decoder, so any 43 bytes work.
+    let placeholder_orchard = [0x22u8; 43];
+
+    let unified = UnifiedAddress::try_from_items(vec![
+        Receiver::Sapling(bad_sapling),
+        Receiver::Orchard(placeholder_orchard),
+    ])
+    .expect("unified container construction does not validate inner bytes");
+    let encoded = unified.encode(&NetworkType::Main);
+
+    // Init RPC
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    let result = rpc.z_list_unified_receivers(encoded).await;
+    assert!(
+        result.is_err(),
+        "z_listunifiedreceivers must return an error for a malformed Sapling receiver, \
+         got {result:?}",
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_addnode() {
     let _init_guard = zebra_test::init();
@@ -3014,16 +3093,16 @@ async fn rpc_addnode() {
         .await
         .expect("We should have an array of addresses");
 
-    assert_eq!(
-        get_peer_info,
-        [PeerInfo {
-            addr,
-            inbound: false,
-            // TODO: Fix this when mock address book provides other values
-            pingtime: Some(0.1f64),
-            pingwait: None,
-        }]
-    );
+    assert_eq!(get_peer_info.len(), 1);
+    let peer = &get_peer_info[0];
+    assert_eq!(peer.addr(), addr);
+    assert!(!peer.inbound());
+    assert_eq!(peer.pingtime(), &Some(0.1f64));
+    assert_eq!(peer.pingwait(), &None);
+    assert_eq!(peer.services().as_str(), "0000000000000000");
+    assert_eq!(peer.banscore(), 0);
+    assert_eq!(peer.connection_state().as_str(), "connected");
+    assert!(peer.lastrecv() > 0);
 
     mempool.expect_no_requests().await;
 }

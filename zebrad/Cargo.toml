@@ -1,7 +1,7 @@
 [package]
 # Crate metadata
 name = "zebrad"
-version = "4.3.0"
+version = "5.0.0"
 authors.workspace = true
 description = "The Zcash Foundation's independent, consensus-compatible implementation of a Zcash node"
 license.workspace = true
@@ -18,7 +18,7 @@ categories = ["command-line-utilities", "cryptography::cryptocurrencies"]
 edition.workspace = true
 
 # Zebra can have a higher MSRV than the other crates since it is a binary.
-rust-version = "1.89"
+rust-version = "1.91"
 
 # Settings that impact runtime behaviour
 
@@ -29,9 +29,7 @@ default-run = "zebrad"
 # `cargo release` settings
 [package.metadata.release]
 pre-release-replacements = [
-  {file="../book/src/user/install.md", search="git checkout [a-z0-9\\.-]+", replace="git checkout v{{version}}"},
-  {file="../book/src/user/install.md", search="--tag [a-z0-9\\.-]+", replace="--tag v{{version}}"},
-  {file="../book/src/user/docker.md", search="--branch [a-z0-9\\.-]+", replace="--branch v{{version}}"},
+  {file="../README.md", search="--tag [a-z0-9\\.-]+", replace="--tag v{{version}}"},
 ]
 
 [package.metadata.docs.rs]
@@ -53,7 +51,7 @@ features = [
 
 [features]
 # In release builds, don't compile debug logging code, to improve performance.
-default-release-binaries = ["release_max_level_info", "progress-bar", "prometheus", "sentry"]
+default-release-binaries = ["release_max_level_info", "progress-bar", "prometheus", "sentry", "opentelemetry"]
 
 
 # Default features for official ZF binary release builds
@@ -150,20 +148,20 @@ tx_v6 = ["zebra-chain/tx_v6", "zebra-state/tx_v6", "zebra-consensus/tx_v6", "zeb
 comparison-interpreter = ["zebra-script/comparison-interpreter"]
 
 [dependencies]
-zebra-chain = { path = "../zebra-chain", version = "6.0.1" }
-zebra-consensus = { path = "../zebra-consensus", version = "5.0.1" }
-zebra-network = { path = "../zebra-network", version = "5.0.0" }
-zebra-node-services = { path = "../zebra-node-services", version = "4.0.0", features = ["rpc-client"] }
-zebra-rpc = { path = "../zebra-rpc", version = "6.0.1" }
-zebra-state = { path = "../zebra-state", version = "5.0.0" }
+zebra-chain = { path = "../zebra-chain", version = "9.0.0" }
+zebra-consensus = { path = "../zebra-consensus", version = "8.0.0" }
+zebra-network = { path = "../zebra-network", version = "8.0.0" }
+zebra-node-services = { path = "../zebra-node-services", version = "7.0.0", features = ["rpc-client"] }
+zebra-rpc = { path = "../zebra-rpc", version = "9.0.0" }
+zebra-state = { path = "../zebra-state", version = "8.0.0" }
 # zebra-script is not used directly, but we list it here to enable the
 # "comparison-interpreter" feature. (Feature unification will take care of
 # enabling it in the other imports of zcash-script.)
-zebra-script = { path = "../zebra-script", version = "5.0.0" }
+zebra-script = { path = "../zebra-script", version = "8.0.0" }
 zcash_script = { workspace = true }
 
 # Required for crates.io publishing, but it's only used in tests
-zebra-utils = { path = "../zebra-utils", version = "5.0.0", optional = true }
+zebra-utils = { path = "../zebra-utils", version = "7.0.0", optional = true }
 
 abscissa_core = { workspace = true }
 clap = { workspace = true, features = ["cargo"] }
@@ -195,7 +193,6 @@ tracing = { workspace = true }
 metrics = { workspace = true }
 
 dirs = { workspace = true }
-atty = { workspace = true }
 
 # Health check server dependencies
 hyper = { workspace = true, features = ["server", "http1"] }
@@ -212,7 +209,7 @@ rand = { workspace = true }
 thread-priority = { workspace = true, optional = true }
 
 # prod feature sentry
-sentry = { workspace = true, features = ["backtrace", "contexts", "reqwest", "rustls", "tracing"], optional = true }
+sentry = { workspace = true, features = ["backtrace", "contexts", "logs", "rustls", "tracing", "ureq"], optional = true }
 
 # prod feature flamegraph
 tracing-flame = { workspace = true, optional = true }
@@ -260,6 +257,7 @@ tonic-prost-build = { workspace = true, optional = true }
 
 [dev-dependencies]
 abscissa_core = { workspace = true, features = ["testing"] }
+anyhow = { workspace = true }
 hex = { workspace = true }
 hex-literal = { workspace = true }
 jsonrpsee-types = { workspace = true }
@@ -269,6 +267,8 @@ insta = { workspace = true, features = ["json"] }
 bytes = { workspace = true }
 http-body-util = { workspace = true }
 hyper-util = { workspace = true }
+strum = { workspace = true }
+strum_macros = { workspace = true }
 
 # zebra-rpc needs the preserve_order feature, it also makes test results more stable
 serde_json = { workspace = true, features = ["preserve_order"] }
@@ -293,10 +293,10 @@ proptest-derive = { workspace = true }
 # enable span traces and track caller in tests
 color-eyre = { workspace = true }
 
-zebra-chain = { path = "../zebra-chain", version = "6.0.1", features = ["proptest-impl"] }
-zebra-consensus = { path = "../zebra-consensus", version = "5.0.1", features = ["proptest-impl"] }
-zebra-network = { path = "../zebra-network", version = "5.0.0", features = ["proptest-impl"] }
-zebra-state = { path = "../zebra-state", version = "5.0.0", features = ["proptest-impl"] }
+zebra-chain = { path = "../zebra-chain", version = "9.0.0", features = ["proptest-impl"] }
+zebra-consensus = { path = "../zebra-consensus", version = "8.0.0", features = ["proptest-impl"] }
+zebra-network = { path = "../zebra-network", version = "8.0.0", features = ["proptest-impl"] }
+zebra-state = { path = "../zebra-state", version = "8.0.0", features = ["proptest-impl"] }
 
 zebra-test = { path = "../zebra-test", version = "3.0.0" }
 
@@ -309,7 +309,7 @@ zebra-test = { path = "../zebra-test", version = "3.0.0" }
 # When `-Z bindeps` is stabilised, enable this binary dependency instead:
 # https://github.com/rust-lang/cargo/issues/9096
 # zebra-utils { path = "../zebra-utils", artifact = "bin:zebra-checkpoints" }
-zebra-utils = { path = "../zebra-utils", version = "5.0.0" }
+zebra-utils = { path = "../zebra-utils", version = "7.0.0" }
 
 [package.metadata.cargo-udeps.ignore]
 # These dependencies are false positives - they are actually used

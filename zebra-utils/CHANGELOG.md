@@ -5,7 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [7.0.0] - 2026-06-02
+
+### Changed
+
+- Update to `zebra-chain` 9.0.0, `zebra-rpc` 9.0.0, and `zebra-node-services` 7.0.0
+  (NU6.2 support). No other changes to this crate.
+
+## [6.0.0] - 2026-05-01
+
+### Changed
+
+- `zebra-chain` bumped to `7.0.0`.
+- `zebra-rpc` bumped to `7.0.0`.
+- `zebra-node-services` bumped to `5.0.0`.
 
 ## [5.0.0] - 2026-03-12
 

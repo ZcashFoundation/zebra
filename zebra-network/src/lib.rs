@@ -200,7 +200,7 @@ pub mod types {
     pub use crate::{
         meta_addr::MetaAddr,
         protocol::{
-            external::{AddrInVersion, Nonce},
+            external::{types::Version, AddrInVersion, Nonce},
             types::PeerServices,
         },
     };

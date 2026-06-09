@@ -15,9 +15,10 @@ use zebra_chain::{
     block::{self, Block},
     parameters::{Magic, Network},
     serialization::{
-        sha256d, zcash_deserialize_bytes_external_count, zcash_deserialize_string_external_count,
-        CompactSizeMessage, FakeWriter, ReadZcashExt, SerializationError as Error,
-        ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize, MAX_PROTOCOL_MESSAGE_LEN,
+        sha256d, zcash_deserialize_bytes_external_count, zcash_deserialize_external_count,
+        zcash_deserialize_string_external_count, CompactSizeMessage, FakeWriter, ReadZcashExt,
+        SerializationError as Error, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
+        MAX_HEADERS_PER_MESSAGE, MAX_PROTOCOL_MESSAGE_LEN,
     },
     transaction::Transaction,
 };
@@ -38,6 +39,12 @@ mod tests;
 
 /// The length of a Bitcoin message header.
 const HEADER_LEN: usize = 24usize;
+
+/// The maximum body length allowed before the handshake completes.
+///
+/// Version messages are ~344 bytes max (including a 256-byte user agent);
+/// verack is 0 bytes. 1 KB provides headroom for future protocol changes.
+const MAX_HANDSHAKE_BODY_LEN: usize = 1024;
 
 /// A codec which produces Bitcoin messages from byte streams and vice versa.
 pub struct Codec {
@@ -63,7 +70,7 @@ impl Codec {
         Builder {
             network: Network::Mainnet,
             version: constants::CURRENT_NETWORK_PROTOCOL_VERSION,
-            max_len: MAX_PROTOCOL_MESSAGE_LEN,
+            max_len: MAX_HANDSHAKE_BODY_LEN,
             metrics_addr_label: None,
         }
     }
@@ -71,6 +78,14 @@ impl Codec {
     /// Reconfigure the version used by the codec, e.g., after completing a handshake.
     pub fn reconfigure_version(&mut self, version: Version) {
         self.builder.version = version;
+    }
+
+    /// Raise the maximum accepted body length to the full protocol limit.
+    ///
+    /// Called after a successful handshake so post-handshake messages (blocks,
+    /// transactions) can use the full `MAX_PROTOCOL_MESSAGE_LEN`.
+    pub fn reconfigure_full_body_len(&mut self) {
+        self.builder.max_len = MAX_PROTOCOL_MESSAGE_LEN;
     }
 }
 
@@ -278,7 +293,10 @@ impl Codec {
 
                 // Regardless of the way we received the address,
                 // Zebra always sends `addr` messages
-                let v1_addrs: Vec<AddrV1> = addrs.iter().map(|addr| AddrV1::from(*addr)).collect();
+                let v1_addrs: Vec<AddrV1> = addrs
+                    .iter()
+                    .map(|addr| AddrV1::from(addr.clone()))
+                    .collect();
                 v1_addrs.zcash_serialize(&mut writer)?
             }
             Message::GetAddr => { /* Empty payload -- no-op */ }
@@ -678,7 +696,19 @@ impl Codec {
     ///
     /// [Zcash block header](https://zips.z.cash/protocol/protocol.pdf#page=84)
     fn read_headers<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
-        Ok(Message::Headers(Vec::zcash_deserialize(&mut reader)?))
+        // CompactSizeMessage is bounded to MAX_PROTOCOL_MESSAGE_LEN on deserialization.
+        let count: CompactSizeMessage = (&mut reader).zcash_deserialize_into()?;
+        // Infallible: CompactSizeMessage wraps u32, which always fits in usize.
+        let count: usize = count.into();
+        if count > MAX_HEADERS_PER_MESSAGE {
+            return Err(Error::Parse(
+                "headers message exceeds the protocol limit of 160 entries",
+            ));
+        }
+        Ok(Message::Headers(zcash_deserialize_external_count(
+            count,
+            &mut reader,
+        )?))
     }
 
     fn read_getheaders<R: Read>(&self, mut reader: R) -> Result<Message, Error> {

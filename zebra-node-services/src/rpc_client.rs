@@ -50,7 +50,7 @@ impl RpcRequestClient {
         let params = params.as_ref();
 
         self.client
-            .post(format!("http://{}", &self.rpc_address))
+            .post(format!("http://{}", self.rpc_address))
             .body(format!(
                 r#"{{"jsonrpc": "2.0", "method": "{method}", "params": {params}, "id":123 }}"#
             ))
@@ -70,7 +70,7 @@ impl RpcRequestClient {
         let params = params.as_ref();
 
         self.client
-            .post(format!("http://{}", &self.rpc_address))
+            .post(format!("http://{}", self.rpc_address))
             .body(format!(
                 r#"{{"jsonrpc": "2.0", "method": "{method}", "params": {params}, "id":123 }}"#
             ))
@@ -89,7 +89,7 @@ impl RpcRequestClient {
         let params = params.as_ref();
 
         self.client
-            .post(format!("http://{}", &self.rpc_address))
+            .post(format!("http://{}", self.rpc_address))
             .body(format!(
                 r#"{{"jsonrpc": "2.0", "method": "{method}", "params": {params}, "id":123 }}"#
             ))

@@ -5,7 +5,132 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [9.0.0] - 2026-06-02
+
+### Changed
+
+- `getblocktemplate` block proposals now support the NU6.2 network upgrade.
+
+## [8.0.0] - 2026-05-28
+
+This release fixes two RPC security issues:
+
+- Reject non-ASCII `longpollid` values in the `getblocktemplate` RPC before
+  fixed-field slicing
+  ([GHSA-qv2r-v3mx-f4pf](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-qv2r-v3mx-f4pf)).
+- Return an `InvalidParameter` error for malformed Sapling receivers in the
+  `z_listunifiedreceivers` RPC instead of panicking
+  ([GHSA-c8w6-x74f-vmg3](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-c8w6-x74f-vmg3)).
+
+### Removed
+
+- `client::TransactionTemplate::from_coinbase()`; replaced by `new_coinbase()`
+- `server::http_request_compatibility::With` trait and its impls on `HttpRequestMiddleware`
+- `fetch_state_tip_and_local_time()`; replaced by `fetch_chain_info()`
+- `generate_coinbase_and_roots()`; replaced by `TransactionTemplate::new_coinbase()` and `DefaultRoots::from_coinbase()`
+- `calculate_miner_fee()`, `standard_coinbase_outputs()`, `fake_coinbase_transaction()`
+- `GetBlockTemplateHandler::{miner_address, extra_coinbase_data, set_extra_coinbase_data}()`
+
+### Changed
+
+- `client::DefaultRoots::from_coinbase()` return type changed from `Result<Self, Box<dyn Error>>` to `Self`
+- `client::TransactionTemplate::new_coinbase()` parameter changed from `mempool_txs` to `txs_fee: Amount<NonNegative>`
+- `BlockTemplateResponse::new_internal` signature reworked: now takes
+  `(net, precomputed_coinbase: Option<TransactionTemplate<NegativeOrZero>>, miner_params: &MinerParams, chain_info: &GetBlockTemplateChainInfo, long_poll_id, mempool_txs, submit_old, [zip233_amount])`.
+- `validate_block_proposal` now takes `&Network` instead of `Network`.
+- `select_mempool_transactions` signature reworked: now takes
+  `(net, height, miner_params: &MinerParams, mempool_txs, mempool_tx_deps, [zip233_amount])`;
+  the `extra_coinbase_data` argument has been removed.
+- `GetBlockTemplateHandler::new` no longer panics on an invalid miner address;
+  it stores `Option<MinerParams>` and the request handler returns an error if
+  miner parameters are missing.
+- `long_poll::LongPollId::from_str` now requires ASCII input
+  ([GHSA-qv2r-v3mx-f4pf](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-qv2r-v3mx-f4pf)).
+- `zebra-chain` dependency bumped to `8.0.0`.
+- `zebra-consensus` dependency bumped to `7.0.0`.
+- `zebra-network` dependency bumped to `7.0.0`.
+- `zebra-node-services` dependency bumped to `6.0.0`.
+- `zebra-script` dependency bumped to `7.0.0`.
+- `zebra-state` dependency bumped to `7.0.0`.
+
+### Added
+
+- `client`:
+  - `DefaultRoots::from_coinbase()`
+  - `TransactionTemplate::new_coinbase(net, height, miner_params, txs_fee, [zip233_amount])`
+- `MinerParams` struct and `MinerParamsError` enum
+  (`MissingAddr`, `InvalidAddr`, `OversizedData`, `InvalidMemo`):
+  - `addr()`, `data()`, `memo()`, `new()`
+  - `randomize_memo()`, `randomize_data()`
+  - `impl From<zcash_keys::address::Address>`
+- `config::mining`:
+  - `MinerAddressType` enum (`Transparent`, `Sapling`, `Unified`)
+  - `MinerAddressTypeIter` struct (strum-derived iterator for `MinerAddressType`)
+  - `Config::miner_memo` field
+  - `default_miner_address()` function
+- `methods::types::get_block_template::constants::MAX_MINER_DATA_LEN`.
+- `GetBlockTemplateHandler::randomize_coinbase_data(&mut self)` and
+  `GetBlockTemplateHandler::miner_params(&self) -> Option<&MinerParams>`.
+- `fetch_chain_info()`; replacement for removed `fetch_state_tip_and_local_time()`.
+
+### Fixed
+
+- `getblocktemplate` now precomputes a coinbase transaction for `tip_height + 2`
+  and, on a chain-tip change, immediately returns an empty-block template using
+  that precomputed coinbase
+  ([#10170](https://github.com/ZcashFoundation/zebra/pull/10170)).
+
+## [7.0.0] - 2026-05-01
+
+This release fixes four RPC security issues:
+
+- [GHSA-jg86-rwhm-fhg4](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-jg86-rwhm-fhg4): cookie file is now written with explicit `0600` permissions on Unix; symlinks at the cookie path are rejected.
+- [GHSA-8r29-5wjm-jgvx](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-8r29-5wjm-jgvx): HTTP request bodies are bounded before allocation, with the limit derived from `MAX_BLOCK_BYTES` to accommodate `submitblock`.
+- [GHSA-826r-gfq8-x79q](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-826r-gfq8-x79q): gRPC indexer streams use `try_send` to drop slow subscribers instead of backpressuring the server; the buffer was reduced from 4000 to 64.
+- [GHSA-w23c-6rpp-ff87](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-w23c-6rpp-ff87): `getrawtransaction` reuses the caller-provided block hash and best-chain flag from the initial query, fixing a TOCTOU race against a third state lookup.
+
+### Added
+
+- `methods::BlockObject::n_tx(&self) -> usize`, exposing the per-block
+  transaction count in the verbose `getblock` response.
+
+### Changed
+
+- Migrated to `zcash_primitives 0.27` (and the rest of the librustzcash 2026-04
+  release wave), which replaces the yanked `core2` dependency with `corez`.
+- `methods::BlockObject::new` gained a required `n_tx: usize` parameter,
+  inserted positionally between `final_orchard_root` and `tx`.
+- `server::http_request_compatibility`:
+  - `HttpRequestMiddleware::new` gained a required
+    `max_request_body_size: usize` parameter.
+  - `HttpRequestMiddlewareLayer::new` gained a required
+    `max_request_body_size: usize` parameter.
+  Both bound HTTP request bodies before allocation; see
+  [GHSA-8r29-5wjm-jgvx](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-8r29-5wjm-jgvx).
+
+## [6.0.2] - 2026-04-17
+
+### Fixed
+
+- Fixed a [panic that could be triggered in the RPC interface on HTTP
+  errors](https://github.com/ZcashFoundation/zebra/security/advisories/GHSA-29x4-r6jv-ff4w),
+  such as resetting the connection halfway through a request. We do not consider
+  this a critical issue since the RPC port is security-sensitive and should not
+  be opened publicly, but we plan to update our documentation to make this
+  clear.
+
+### Breaking Changes
+
+- Changed `client::PeerInfo::new()` to take additional `services`, `lastrecv`, `banscore`, `subver`, `version`, and `connection_state` parameters
+
+### Added
+
+- Added `client::PeerInfo::services()` accessor
+- Added `client::PeerInfo::lastrecv()` accessor
+- Added `client::PeerInfo::banscore()` accessor
+- Added `client::PeerInfo::subver()` accessor
+- Added `client::PeerInfo::version()` accessor
+- Added `client::PeerInfo::connection_state()` accessor
 
 ## [6.0.1] - 2026-03-26
 

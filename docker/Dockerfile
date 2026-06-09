@@ -13,7 +13,7 @@
 # We first set default values for build arguments used across the stages.
 # Each stage must define the build arguments (ARGs) it uses.
 
-ARG RUST_VERSION=1.89.0
+ARG RUST_VERSION=1.91.0
 
 ARG FEATURES="default-release-binaries"
 
@@ -83,9 +83,9 @@ WORKDIR ${HOME}
 ARG CARGO_HOME
 ARG CARGO_TARGET_DIR
 
-# Download and install the pre-built cargo-nextest binary.
+# Download and install cargo-nextest, curl and librocksdb-dev.
 RUN apt-get -qq update && \
-    apt-get -qq install -y --no-install-recommends curl && \
+    apt-get -qq install -y --no-install-recommends librocksdb-dev curl && \
     mkdir -p "${CARGO_HOME}/bin" && \
     case ${BUILDPLATFORM:-linux/$(uname -m)} in \
         "linux/amd64"|"linux/x86_64") ARCH="linux" ;; \
@@ -96,6 +96,9 @@ RUN apt-get -qq update && \
     apt-get -qq remove --purge -y curl && \
     apt-get -qq autoremove -y && \
     rm -rf /var/lib/apt/lists/* /tmp/*
+
+# Link RocksDB dynamically for faster test builds.
+ENV ROCKSDB_LIB_DIR="/usr/lib/"
 
 # Copy source code first to ensure consistent timestamps
 COPY --link --chown=${UID}:${GID} ./ ${HOME}

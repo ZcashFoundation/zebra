@@ -463,7 +463,7 @@ async fn connection_run_loop_send_timeout_nil_response() {
     // Simulate a message send timeout
     let (request_tx, mut request_rx) = oneshot::channel();
     let request = ClientRequest {
-        request: Request::AdvertiseTransactionIds(HashSet::new()),
+        request: Request::AdvertiseTransactionIds(HashSet::new(), None),
         tx: request_tx,
         inv_collector: None,
         transient_addr: None,
@@ -927,7 +927,7 @@ async fn connection_ping_pong_round_trip() {
 
     let ping_nonce = match outbound_msg {
         Message::Ping(nonce) => nonce,
-        msg => panic!("expected Ping message, but got: {:?}", msg),
+        msg => panic!("expected Ping message, but got: {msg:?}"),
     };
 
     assert_eq!(

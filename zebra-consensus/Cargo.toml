@@ -1,12 +1,16 @@
 [package]
 name = "zebra-consensus"
-version = "5.0.1"
+version = "8.0.0"
 authors.workspace = true
 description = "Implementation of Zcash consensus checks"
 license.workspace = true
 repository.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+
+# Disable bench auto-discovery so `benches/common.rs` is only compiled when
+# explicitly imported via `mod common;` from a bench.
+autobenches = false
 
 readme = "../README.md"
 homepage.workspace = true
@@ -58,14 +62,18 @@ sapling-crypto = { workspace = true, features = ["multicore"]}
 orchard.workspace = true
 
 zcash_proofs = { workspace = true, features = ["multicore", "bundled-prover"] }
+zcash_transparent = { workspace = true }
+libzcash_script = { workspace = true }
+zcash_script = { workspace = true }
+zcash_primitives = { workspace = true }
 
 tower-fallback = { path = "../tower-fallback/", version = "0.2.41" }
 tower-batch-control = { path = "../tower-batch-control/", version = "1.0.1" }
 
-zebra-script = { path = "../zebra-script", version = "5.0.0" }
-zebra-state = { path = "../zebra-state", version = "5.0.0" }
-zebra-node-services = { path = "../zebra-node-services", version = "4.0.0" }
-zebra-chain = { path = "../zebra-chain", version = "6.0.1" }
+zebra-script = { path = "../zebra-script", version = "8.0.0" }
+zebra-state = { path = "../zebra-state", version = "8.0.0" }
+zebra-node-services = { path = "../zebra-node-services", version = "7.0.0" }
+zebra-chain = { path = "../zebra-chain", version = "9.0.0" }
 
 zcash_protocol.workspace = true
 
@@ -89,9 +97,23 @@ tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 tracing-error = { workspace = true }
 tracing-subscriber = { workspace = true }
 
-zebra-state = { path = "../zebra-state", version = "5.0.0", features = ["proptest-impl"] }
-zebra-chain = { path = "../zebra-chain", version = "6.0.1", features = ["proptest-impl"] }
+zebra-state = { path = "../zebra-state", version = "8.0.0", features = ["proptest-impl"] }
+zebra-chain = { path = "../zebra-chain", version = "9.0.0", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/", version = "3.0.0" }
+
+criterion = { workspace = true, features = ["html_reports"] }
+
+[[bench]]
+name = "groth16"
+harness = false
+
+[[bench]]
+name = "halo2"
+harness = false
+
+[[bench]]
+name = "sapling"
+harness = false
 
 [lints]
 workspace = true

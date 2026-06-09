@@ -147,7 +147,12 @@ fn filterload_message_round_trip() {
     let v_bytes = rt.block_on(async {
         let mut bytes = Vec::new();
         {
-            let mut fw = FramedWrite::new(&mut bytes, Codec::builder().finish());
+            let mut fw = FramedWrite::new(
+                &mut bytes,
+                Codec::builder()
+                    .with_max_body_len(MAX_PROTOCOL_MESSAGE_LEN)
+                    .finish(),
+            );
             fw.send(v.clone())
                 .await
                 .expect("message should be serialized");
@@ -156,7 +161,12 @@ fn filterload_message_round_trip() {
     });
 
     let v_parsed = rt.block_on(async {
-        let mut fr = FramedRead::new(Cursor::new(&v_bytes), Codec::builder().finish());
+        let mut fr = FramedRead::new(
+            Cursor::new(&v_bytes),
+            Codec::builder()
+                .with_max_body_len(MAX_PROTOCOL_MESSAGE_LEN)
+                .finish(),
+        );
         fr.next()
             .await
             .expect("a next message should be available")
@@ -249,7 +259,12 @@ fn filterload_message_too_large_round_trip() {
     let v_bytes = rt.block_on(async {
         let mut bytes = Vec::new();
         {
-            let mut fw = FramedWrite::new(&mut bytes, Codec::builder().finish());
+            let mut fw = FramedWrite::new(
+                &mut bytes,
+                Codec::builder()
+                    .with_max_body_len(MAX_PROTOCOL_MESSAGE_LEN)
+                    .finish(),
+            );
             fw.send(v.clone())
                 .await
                 .expect("message should be serialized");
@@ -258,7 +273,12 @@ fn filterload_message_too_large_round_trip() {
     });
 
     rt.block_on(async {
-        let mut fr = FramedRead::new(Cursor::new(&v_bytes), Codec::builder().finish());
+        let mut fr = FramedRead::new(
+            Cursor::new(&v_bytes),
+            Codec::builder()
+                .with_max_body_len(MAX_PROTOCOL_MESSAGE_LEN)
+                .finish(),
+        );
         fr.next()
             .await
             .expect("a next message should be available")
@@ -585,6 +605,72 @@ fn reject_command_and_reason_size_limits() {
             Err(Error::Parse(error_msg)) if error_msg.contains(expected_err_msg) => {}
             result => panic!("expected read error: {expected_err_msg}, got: {result:?}"),
         };
+    }
+}
+
+/// Regression test for GHSA-438q-jx8f-cccv: read_headers() must reject
+/// inbound `headers` messages with more than 160 entries.
+#[test]
+fn headers_message_exceeding_protocol_cap_is_rejected() {
+    use zebra_chain::serialization::ZcashDeserializeInto;
+
+    let _init_guard = zebra_test::init();
+
+    let header: block::Header = zebra_test::vectors::DUMMY_HEADER
+        .zcash_deserialize_into()
+        .expect("dummy header should deserialize");
+    let counted = block::CountedHeader {
+        header: header.into(),
+    };
+
+    // 161 headers — one more than the protocol limit of 160.
+    let msg = Message::Headers(vec![counted.clone(); 161]);
+
+    let mut codec = Codec::builder()
+        .with_max_body_len(MAX_PROTOCOL_MESSAGE_LEN)
+        .finish();
+    let mut bytes = BytesMut::new();
+    codec
+        .encode(msg, &mut bytes)
+        .expect("encoding should succeed");
+
+    codec
+        .decode(&mut bytes)
+        .expect_err("decoding 161 headers should be rejected");
+}
+
+/// Verify that a headers message at exactly the protocol cap (160) is accepted.
+#[test]
+fn headers_message_at_protocol_cap_is_accepted() {
+    use zebra_chain::serialization::ZcashDeserializeInto;
+
+    let _init_guard = zebra_test::init();
+
+    let header: block::Header = zebra_test::vectors::DUMMY_HEADER
+        .zcash_deserialize_into()
+        .expect("dummy header should deserialize");
+    let counted = block::CountedHeader {
+        header: header.into(),
+    };
+
+    let msg = Message::Headers(vec![counted; 160]);
+
+    let mut codec = Codec::builder()
+        .with_max_body_len(MAX_PROTOCOL_MESSAGE_LEN)
+        .finish();
+    let mut bytes = BytesMut::new();
+    codec
+        .encode(msg, &mut bytes)
+        .expect("encoding should succeed");
+
+    let decoded = codec
+        .decode(&mut bytes)
+        .expect("decoding should not error")
+        .expect("a message should be present");
+
+    match decoded {
+        Message::Headers(headers) => assert_eq!(headers.len(), 160),
+        other => panic!("expected Headers, got {other:?}"),
     }
 }
 
