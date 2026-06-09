@@ -12,10 +12,6 @@ on:
         description: "Release tag to publish assets to (for example v2.6.0)"
         required: false
         type: string
-      zcashd_compat_release_tag:
-        description: "zcashd compat release tag (for example v6.2.1-alpha)"
-        required: false
-        type: string
       zcashd_compat_manifest_url:
         description: "Optional full manifest URL override"
         required: false
@@ -35,6 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       release_tag: ${{ steps.resolve.outputs.release_tag }}
+      checkout_ref: ${{ steps.resolve.outputs.checkout_ref }}
     steps:
       - name: Resolve release tag
         id: resolve
@@ -42,12 +39,15 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
           EVENT_RELEASE_TAG: ${{ github.event.release.tag_name }}
+          GITHUB_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           if [ "$EVENT_NAME" = "release" ]; then
             release_tag="$EVENT_RELEASE_TAG"
+            checkout_ref="$EVENT_RELEASE_TAG"
           else
             release_tag="$INPUT_RELEASE_TAG"
+            checkout_ref="$GITHUB_SHA"
           fi
 
           if [ -z "$release_tag" ]; then
@@ -56,11 +56,14 @@ jobs:
           fi
 
           echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
+          echo "checkout_ref=$checkout_ref" >> "$GITHUB_OUTPUT"
 
   resolve-zcashd-compat-manifest:
     name: Resolve zcashd compat manifest
     runs-on: ubuntu-latest
+    needs: [resolve-release]
     outputs:
+      available: ${{ steps.resolve.outputs.available }}
       manifest_url: ${{ steps.resolve.outputs.manifest_url }}
       release_tag: ${{ steps.resolve.outputs.release_tag }}
       url_amd64: ${{ steps.resolve.outputs.url_amd64 }}
@@ -71,24 +74,35 @@ jobs:
       - name: Resolve and parse manifest
         id: resolve
         env:
+          EVENT_NAME: ${{ github.event_name }}
           INPUT_MANIFEST_URL: ${{ inputs.zcashd_compat_manifest_url }}
-          INPUT_RELEASE_TAG: ${{ inputs.zcashd_compat_release_tag }}
-          DEFAULT_RELEASE_TAG: ${{ vars.ZCASHD_COMPAT_RELEASE_TAG }}
+          RELEASE_TAG: ${{ needs.resolve-release.outputs.release_tag }}
         run: |
           set -euo pipefail
-          zcashd_compat_release_tag="${INPUT_RELEASE_TAG:-${DEFAULT_RELEASE_TAG:-v6.2.1-alpha}}"
           manifest_url="$INPUT_MANIFEST_URL"
           if [ -z "$manifest_url" ]; then
-            manifest_url="https://github.com/valargroup/zcashd/releases/download/${zcashd_compat_release_tag}/zcashd-zebra-compat-manifest-${zcashd_compat_release_tag}.json"
+            manifest_url="https://github.com/valargroup/zcashd/releases/download/${RELEASE_TAG}/zcashd-zebra-compat-manifest-${RELEASE_TAG}.json"
           fi
 
-          curl -fsSL "$manifest_url" -o manifest.json
+          if ! curl -fsSL "$manifest_url" -o manifest.json; then
+            if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+              echo "::warning::Skipping zcashd compat image build because manifest was not found: $manifest_url"
+              {
+                echo "available=false"
+                echo "manifest_url=$manifest_url"
+              } >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            exit 1
+          fi
 
           manifest_release_tag="$(jq -r '.release_tag' manifest.json)"
           amd64_entry="$(jq -er '.artifacts[] | select(.target_triple == "x86_64-pc-linux-gnu")' manifest.json)"
           arm64_entry="$(jq -er '.artifacts[] | select(.target_triple == "aarch64-linux-gnu")' manifest.json)"
 
           {
+            echo "available=true"
             echo "manifest_url=$manifest_url"
             echo "release_tag=$manifest_release_tag"
             echo "url_amd64=$(jq -r '.runtime.url' <<< "$amd64_entry")"
@@ -117,7 +131,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
-          ref: ${{ needs.resolve-release.outputs.release_tag }}
+          ref: ${{ needs.resolve-release.outputs.checkout_ref }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd #v4.0.0 # zizmor: ignore[cache-poisoning] -- shared Docker Build Cloud cache across envs, isolation fix pending
@@ -267,7 +281,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
-          ref: ${{ needs.resolve-release.outputs.release_tag }}
+          ref: ${{ needs.resolve-release.outputs.checkout_ref }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd #v4.0.0 # zizmor: ignore[cache-poisoning] -- shared Docker Build Cloud cache across envs, isolation fix pending
@@ -293,6 +307,7 @@ jobs:
 
   build-zcashd-compat:
     name: Build Release Docker zcashd Compat (${{ matrix.name }})
+    if: needs.resolve-zcashd-compat-manifest.outputs.available == 'true'
     runs-on: ${{ matrix.runner }}
     needs: [resolve-release, resolve-zcashd-compat-manifest]
     strategy:
@@ -313,7 +328,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
-          ref: ${{ needs.resolve-release.outputs.release_tag }}
+          ref: ${{ needs.resolve-release.outputs.checkout_ref }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd #v4.0.0 # zizmor: ignore[cache-poisoning] -- shared Docker Build Cloud cache across envs, isolation fix pending
@@ -324,7 +339,7 @@ jobs:
       - name: Build zcashd compat runtime image
         env:
           FEATURES: ${{ vars.RUST_PROD_FEATURES || 'default-release-binaries' }}
-          IMAGE_TAG: valaroman/zebra-zcashd-compat:release-ci-${{ matrix.name }}
+          IMAGE_TAG: valaroman/zebra:zcashd-compat-release-ci-${{ matrix.name }}
           ZCASHD_COMPAT_URL: ${{ needs.resolve-zcashd-compat-manifest.outputs[matrix.zcashd_compat_url_output] }}
           ZCASHD_COMPAT_SHA256: ${{ needs.resolve-zcashd-compat-manifest.outputs[matrix.zcashd_compat_sha256_output] }}
         run: |
@@ -359,24 +374,4 @@ jobs:
         uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe #v1.2.2
         with:
           jobs: ${{ toJSON(needs) }}
-          allowed-skips: publish-zebrad-assets
-
-  failure-issue:
-    name: Open or update issues for release binaries failures
-    # When a new job is added to this workflow, add it to this list.
-    needs: [ resolve-release, resolve-zcashd-compat-manifest, build-zebrad-assets, publish-zebrad-assets, build, build-zcashd-compat ]
-    # Open tickets for any failed build in this workflow.
-    if: failure() || cancelled()
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      issues: write
-    steps:
-      - uses: jayqi/failed-build-issue-action@1a893bbf43ef1c2a8705e2b115cd4f0fe3c5649b #v1.2.0
-        with:
-          title-template: "{{refname}} branch CI failed: {{eventName}} in {{workflow}}"
-          # New failures open an issue with this label.
-          label-name: S-ci-fail-binaries-auto-issue
-          # If there is already an open issue with this label, any failures become comments on that issue.
-          always-create-new-issue: false
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          allowed-skips: publish-zebrad-assets,build-zcashd-compat
