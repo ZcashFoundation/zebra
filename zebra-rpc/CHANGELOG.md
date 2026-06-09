@@ -119,6 +119,19 @@ This release fixes four RPC security issues:
   be opened publicly, but we plan to update our documentation to make this
   clear.
 
+### Breaking Changes
+
+- Changed `client::PeerInfo::new()` to take additional `services`, `lastrecv`, `banscore`, `subver`, `version`, and `connection_state` parameters
+
+### Added
+
+- Added `client::PeerInfo::services()` accessor
+- Added `client::PeerInfo::lastrecv()` accessor
+- Added `client::PeerInfo::banscore()` accessor
+- Added `client::PeerInfo::subver()` accessor
+- Added `client::PeerInfo::version()` accessor
+- Added `client::PeerInfo::connection_state()` accessor
+
 ## [6.0.1] - 2026-03-26
 
 ### Fixed

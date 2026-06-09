@@ -5,6 +5,12 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Added
+
+- Extended `getpeerinfo` RPC with `subver`, `version`, `services`, `lastrecv`, `banscore`, and `connection_state` fields
+
 ## [Zebra 5.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.0.0) - 2026-06-02
 
 This release activates the NU6.2 network upgrade. NU6.2 re-enables Orchard
@@ -270,6 +276,7 @@ Zebra versions are vulnerable to these issues.
   you might require additional configuration
   ([#10464](https://github.com/ZcashFoundation/zebra/pull/10464)).
 
+## [Zebra 4.3.0](https://github.com/ZcashFoundation/zebra/releases/tag/v4.3.0) - 2026-03-12
 ## [Zebra 4.3.0](https://github.com/ZcashFoundation/zebra/releases/tag/v4.3.0) - 2026-03-12
 
 This release fixes **two important security issues**:

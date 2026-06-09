@@ -85,6 +85,19 @@ The impact of the issue for crate users will depend on the particular usage; if
 your application allows deserializing arbitrary `addr` and/or `addrv2` messages,
 you should update.
 
+### Breaking Changes
+
+- Removed `Copy` derive from `types::MetaAddr` (now only `Clone`) to support `String` fields
+- Changed `types::MetaAddr::new_connected()` to take additional `user_agent` and `negotiated_version` parameters
+
+### Added
+
+- Added `types::MetaAddr::user_agent()` accessor returning `Option<&str>`
+- Added `types::MetaAddr::negotiated_version()` accessor returning `Option<Version>`
+- Added `types::MetaAddr::services()` accessor returning `Option<PeerServices>`
+- Added `types::MetaAddr::last_connection_state()` accessor returning `PeerAddrState`
+- Made `types::Version` type public with `Display` impl
+
 ## [5.0.0] - 2026-03-12
 
 ### Breaking Changes
