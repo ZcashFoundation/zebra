@@ -41,7 +41,7 @@ async fn metrics_endpoint() -> Result<()> {
     let url = format!("http://{endpoint}");
 
     // Write a configuration that has metrics endpoint_addr set
-    let mut config = default_test_config(&Mainnet)?;
+    let mut config = default_test_config(&Mainnet);
     config.metrics.endpoint_addr = Some(endpoint.parse().unwrap());
 
     let dir = testdir()?.with_config(&mut config)?;
@@ -110,7 +110,7 @@ async fn tracing_endpoint() -> Result<()> {
     let url_filter = format!("{url_default}/filter");
 
     // Write a configuration that has tracing endpoint_addr option set
-    let mut config = default_test_config(&Mainnet)?;
+    let mut config = default_test_config(&Mainnet);
     config.tracing.endpoint_addr = Some(endpoint.parse().unwrap());
 
     let dir = testdir()?.with_config(&mut config)?;

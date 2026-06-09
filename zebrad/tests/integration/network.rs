@@ -57,7 +57,7 @@ fn zebra_zcash_listener_conflict() -> Result<()> {
     let listen_addr = format!("127.0.0.1:{port}");
 
     // Write a configuration that has our created network listen_addr
-    let mut config = default_test_config(&Mainnet)?;
+    let mut config = default_test_config(&Mainnet);
     config.network.listen_addr = listen_addr.parse().unwrap();
     let dir1 = testdir()?.with_config(&mut config)?;
     let regex1 = regex::escape(&format!("Opened Zcash protocol endpoint at {listen_addr}"));
@@ -86,7 +86,7 @@ fn zebra_metrics_conflict() -> Result<()> {
     let listen_addr = format!("127.0.0.1:{port}");
 
     // Write a configuration that has our created metrics endpoint_addr
-    let mut config = default_test_config(&Mainnet)?;
+    let mut config = default_test_config(&Mainnet);
     config.metrics.endpoint_addr = Some(listen_addr.parse().unwrap());
     let dir1 = testdir()?.with_config(&mut config)?;
     let regex1 = regex::escape(&format!(r"Opened metrics endpoint at {listen_addr}"));
@@ -115,7 +115,7 @@ fn zebra_tracing_conflict() -> Result<()> {
     let listen_addr = format!("127.0.0.1:{port}");
 
     // Write a configuration that has our created tracing endpoint_addr
-    let mut config = default_test_config(&Mainnet)?;
+    let mut config = default_test_config(&Mainnet);
     config.tracing.endpoint_addr = Some(listen_addr.parse().unwrap());
     let dir1 = testdir()?.with_config(&mut config)?;
     let regex1 = regex::escape(&format!(r"Opened tracing endpoint at {listen_addr}"));

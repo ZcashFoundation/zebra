@@ -16,7 +16,7 @@ fn generate_no_args() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     let child = testdir()?
-        .with_config(&mut default_test_config(&Mainnet)?)?
+        .with_config(&mut default_test_config(&Mainnet))?
         .spawn_child(args!["generate"])?;
 
     let output = child.wait_with_output()?;
@@ -78,7 +78,7 @@ fn generate_args() -> Result<()> {
 fn help_no_args() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let testdir = testdir()?.with_config(&mut default_test_config(&Mainnet)?)?;
+    let testdir = testdir()?.with_config(&mut default_test_config(&Mainnet))?;
 
     let child = testdir.spawn_child(args!["help"])?;
     let output = child.wait_with_output()?;
@@ -150,7 +150,7 @@ fn start_no_args() -> Result<()> {
 fn start_args() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let testdir = testdir()?.with_config(&mut default_test_config(&Mainnet)?)?;
+    let testdir = testdir()?.with_config(&mut default_test_config(&Mainnet))?;
     let testdir = &testdir;
 
     let mut child = testdir.spawn_child(args!["start"])?;
@@ -176,7 +176,7 @@ fn start_args() -> Result<()> {
 fn version_no_args() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let testdir = testdir()?.with_config(&mut default_test_config(&Mainnet)?)?;
+    let testdir = testdir()?.with_config(&mut default_test_config(&Mainnet))?;
 
     let child = testdir.spawn_child(args!["--version"])?;
     let output = child.wait_with_output()?;
@@ -197,7 +197,7 @@ fn version_no_args() -> Result<()> {
 fn version_args() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let testdir = testdir()?.with_config(&mut default_test_config(&Mainnet)?)?;
+    let testdir = testdir()?.with_config(&mut default_test_config(&Mainnet))?;
     let testdir = &testdir;
 
     // unrecognized option `-f`

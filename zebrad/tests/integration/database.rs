@@ -29,7 +29,7 @@ pub const MAX_ASYNC_BLOCKING_TIME: Duration = zebra_test::mock_service::DEFAULT_
 #[tokio::test]
 async fn db_init_outside_future_executor() -> Result<()> {
     let _init_guard = zebra_test::init();
-    let config = default_test_config(&Mainnet)?;
+    let config = default_test_config(&Mainnet);
 
     let start = Instant::now();
 
@@ -189,7 +189,7 @@ fn delete_old_databases() -> Result<()> {
         return Ok(());
     }
 
-    let mut config = default_test_config(&Mainnet)?;
+    let mut config = default_test_config(&Mainnet);
     let run_dir = testdir()?;
     let cache_dir = run_dir.path().join("state");
 

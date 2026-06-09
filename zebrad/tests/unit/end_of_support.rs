@@ -22,7 +22,7 @@ const ESTIMATED_BLOCKS_PER_DAY: u32 = 1152;
 #[test]
 fn end_of_support_is_checked_at_start() -> Result<()> {
     let _init_guard = zebra_test::init();
-    let testdir = testdir()?.with_config(&mut default_test_config(&Mainnet)?)?;
+    let testdir = testdir()?.with_config(&mut default_test_config(&Mainnet))?;
     let mut child = testdir.spawn_child(args!["start"])?;
 
     // Give enough time to start up the eos task.

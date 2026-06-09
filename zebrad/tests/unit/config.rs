@@ -100,7 +100,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
 
     let _init_guard = zebra_test::init();
 
-    let mut config = default_test_config(&Mainnet)?;
+    let mut config = default_test_config(&Mainnet);
     let run_dir = testdir()?;
 
     let ignored_cache_dir = run_dir.path().join("state");
