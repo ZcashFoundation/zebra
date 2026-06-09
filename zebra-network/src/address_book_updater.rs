@@ -56,7 +56,7 @@ impl AddressBookUpdater {
     ) {
         // Create an mpsc channel for peerset address book updates,
         // based on the maximum number of inbound and outbound peers.
-        let (worker_tx, mut worker_rx) = mpsc::channel(max(
+        let (worker_tx, mut worker_rx) = mpsc::channel::<MetaAddrChange>(max(
             config.peerset_total_connection_limit(),
             MIN_CHANNEL_SIZE,
         ));
@@ -98,6 +98,7 @@ impl AddressBookUpdater {
                 //
                 // Briefly hold the address book threaded mutex, to update the
                 // state for a single address.
+                let event_ip = event.addr().ip();
                 let updated = worker_address_book
                     .lock()
                     .expect("mutex should be unpoisoned")
@@ -111,7 +112,7 @@ impl AddressBookUpdater {
                         .expect("mutex should be unpoisoned")
                         .bans();
 
-                    if bans.contains_key(&event.addr().ip()) {
+                    if bans.contains_key(&event_ip) {
                         let _ = bans_sender.send(bans);
                     }
                 }

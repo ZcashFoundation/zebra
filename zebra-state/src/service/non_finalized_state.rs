@@ -22,7 +22,11 @@ use crate::{
     constants::{MAX_INVALIDATED_BLOCKS, MAX_NON_FINALIZED_CHAIN_FORKS},
     error::ReconsiderError,
     request::{ContextuallyVerifiedBlock, FinalizableBlock},
-    service::{check, finalized_state::ZebraDb, InvalidateError},
+    service::{
+        check,
+        finalized_state::{calculate_deferred_pool_balance_change, ZebraDb},
+        InvalidateError,
+    },
     SemanticallyVerifiedBlock, ValidateContextError, WatchReceiver,
 };
 
@@ -592,6 +596,7 @@ impl NonFinalizedState {
         let contextual = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
             prepared.clone(),
             spent_utxos.clone(),
+            calculate_deferred_pool_balance_change(prepared.height, &self.network),
         )
         .map_err(|value_balance_error| {
             ValidateContextError::CalculateBlockChainValueChange {

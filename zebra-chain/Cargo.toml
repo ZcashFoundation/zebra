@@ -1,6 +1,6 @@
 [package]
 name = "zebra-chain"
-version = "7.0.0"
+version = "9.0.0"
 authors.workspace = true
 description = "Core Zcash data structures"
 license.workspace = true
@@ -93,7 +93,7 @@ zcash_primitives = { workspace = true, features = ["transparent-inputs"] }
 sapling-crypto.workspace = true
 zcash_protocol.workspace = true
 zcash_address.workspace = true
-zcash_transparent.workspace = true
+zcash_transparent = { workspace = true }
 sinsemilla = { version = "0.1" }
 
 # Time

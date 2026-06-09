@@ -45,6 +45,7 @@ jobs:
   matrix:
     name: Generate crates matrix
     permissions:
+      contents: read
       statuses: write
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -55,7 +56,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions-rust-lang/setup-rust-toolchain@2b1f5e9b395427c92ee4e3331786ca3c37afe2d7 #v1.16.0
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           toolchain: stable
           components: clippy
@@ -89,6 +90,7 @@ jobs:
   build:
     name: Build ${{ matrix.crate }} crate
     permissions:
+      contents: read
       id-token: write
       statuses: write
     timeout-minutes: 90
@@ -107,7 +109,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions-rust-lang/setup-rust-toolchain@2b1f5e9b395427c92ee4e3331786ca3c37afe2d7 #v1.16.0
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           toolchain: stable
           components: clippy
@@ -144,6 +146,7 @@ jobs:
   build-msrv:
     name: Build ${{ matrix.crate }} crate with MSRV
     permissions:
+      contents: read
       id-token: write
       statuses: write
     timeout-minutes: 90
@@ -168,7 +171,7 @@ jobs:
           echo "version=$MSRV" >> "$GITHUB_OUTPUT"
           echo "Extracted MSRV: $MSRV"
 
-      - uses: actions-rust-lang/setup-rust-toolchain@2b1f5e9b395427c92ee4e3331786ca3c37afe2d7 #v1.16.0
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           toolchain: ${{ steps.msrv.outputs.version }}
           components: clippy

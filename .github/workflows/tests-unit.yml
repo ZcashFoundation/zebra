@@ -41,6 +41,7 @@ jobs:
   unit-tests:
     name: ${{ matrix.rust-version }} on ${{ matrix.os }}
     permissions:
+      contents: read
       id-token: write
       statuses: write
     runs-on: ${{ matrix.os }}
@@ -63,12 +64,12 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@2b1f5e9b395427c92ee4e3331786ca3c37afe2d7 #v1.16.0
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           toolchain: ${{ matrix.rust-version }}
           cache-key: unit-tests-${{ matrix.os }}-${{ matrix.rust-version }}-${{ matrix.features }}
           cache-on-failure: true
-      - uses: taiki-e/install-action@055f5df8c3f65ea01cd41e9dc855becd88953486 #v2.75.18
+      - uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 #v2.79.3
         with:
           tool: cargo-nextest
       - uses: ./.github/actions/setup-zebra-build
@@ -99,6 +100,7 @@ jobs:
   check-no-git-dependencies:
     name: Check no git dependencies
     permissions:
+      contents: read
       id-token: write
       statuses: write
     runs-on: ubuntu-latest
@@ -108,11 +110,11 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@2b1f5e9b395427c92ee4e3331786ca3c37afe2d7 #v1.16.0
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           toolchain: stable
           cache-on-failure: true
-      - uses: taiki-e/install-action@055f5df8c3f65ea01cd41e9dc855becd88953486 #v2.75.18
+      - uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 #v2.79.3
         with:
           tool: cargo-nextest
       - uses: ./.github/actions/setup-zebra-build

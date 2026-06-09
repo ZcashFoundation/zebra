@@ -45,7 +45,7 @@ jobs:
           mdbook-version: ~0.5
           use-linkcheck: true
           use-mermaid: true
-      - uses: actions-rust-lang/setup-rust-toolchain@2b1f5e9b395427c92ee4e3331786ca3c37afe2d7 #v1.16.0
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           toolchain: nightly
           cache-on-failure: true
@@ -108,7 +108,10 @@ jobs:
     needs: [build]
     timeout-minutes: 30
 
-    # Grant GITHUB_TOKEN the permissions required to make a Pages deployment
+    # Grant GITHUB_TOKEN the permissions required to make a Pages deployment.
+    # `contents: read` is intentionally omitted: this job publishes rendered
+    # source to a public site, so missing checkout permission keeps it inert
+    # on private forks as a fail-closed safeguard.
     permissions:
       pages: write
       id-token: write

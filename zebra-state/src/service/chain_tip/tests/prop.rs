@@ -128,11 +128,22 @@ proptest! {
             let old_last_change_hash = chain_tip_change.last_change_hash;
 
             let new_action = expected_tip.and_then(|(chain_tip, block)| {
+                // Mirror `ChainTipChange::action`: the mempool verifies against the *next*
+                // height, so a reset happens at `activation_height - 1`, and also at the
+                // temporary-Orchard-disabling soft fork's activation height (see commit
+                // 548672c5e). `next` always succeeds because the tip is far below `Height::MAX`.
+                let next_height = chain_tip
+                    .height
+                    .next()
+                    .expect("chain tip height is far below Height::MAX");
+
                 if Some(chain_tip.hash) == old_last_change_hash {
                     // some updates don't do anything, so there's no new action
                     None
                 } else if Some(chain_tip.previous_block_hash) != old_last_change_hash
-                    || NetworkUpgrade::is_activation_height(&network, chain_tip.height)
+                    || NetworkUpgrade::is_activation_height(&network, next_height)
+                    || network
+                        .is_temporary_orchard_disabling_soft_fork_activation_height(next_height)
                 {
                     Some(TipAction::reset_with(block.0.into()))
                 } else {
