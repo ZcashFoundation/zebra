@@ -89,7 +89,9 @@ proptest! {
     fn inv_and_getdata_message_roundtrip(
         message in prop_oneof!(Message::inv_strategy(), Message::get_data_strategy()),
     ) {
-        let mut codec = Codec::builder().finish();
+        let mut codec = Codec::builder()
+            .with_max_body_len(MAX_PROTOCOL_MESSAGE_LEN)
+            .finish();
         let mut bytes = BytesMut::with_capacity(MAX_PROTOCOL_MESSAGE_LEN);
 
         let encoding_result = codec.encode(message.clone(), &mut bytes);
@@ -120,7 +122,7 @@ proptest! {
         //
         // If this is a gossiped or DNS seeder address,
         // we're also checking that malicious peers can't make Zebra's serialization fail.
-        let addr_bytes = AddrV1::from(sanitized_addr).zcash_serialize_to_vec();
+        let addr_bytes = AddrV1::from(sanitized_addr.clone()).zcash_serialize_to_vec();
         prop_assert!(
             addr_bytes.is_ok(),
             "unexpected serialization error: {:?}, addr: {:?}",
@@ -142,8 +144,8 @@ proptest! {
 
         // Check that the addrs are equal
         prop_assert_eq!(
-            sanitized_addr,
-            deserialized_addr,
+            sanitized_addr.clone(),
+            deserialized_addr.clone(),
             "unexpected round-trip mismatch with bytes: {:?}",
             hex::encode(addr_bytes),
         );
@@ -153,7 +155,7 @@ proptest! {
 
         // Now check that the re-serialized bytes are equal
         // (`impl PartialEq for MetaAddr` might not match serialization equality)
-        let addr_bytes2 = AddrV1::from(deserialized_addr).zcash_serialize_to_vec();
+        let addr_bytes2 = AddrV1::from(deserialized_addr.clone()).zcash_serialize_to_vec();
         prop_assert!(
             addr_bytes2.is_ok(),
             "unexpected serialization error after round-trip: {:?}, original addr: {:?}, bytes: {:?}, deserialized addr: {:?}",
@@ -193,7 +195,7 @@ proptest! {
         //
         // If this is a gossiped or DNS seeder address,
         // we're also checking that malicious peers can't make Zebra's serialization fail.
-        let addr_bytes = AddrV2::from(sanitized_addr).zcash_serialize_to_vec();
+        let addr_bytes = AddrV2::from(sanitized_addr.clone()).zcash_serialize_to_vec();
         prop_assert!(
             addr_bytes.is_ok(),
             "unexpected serialization error: {:?}, addr: {:?}",
@@ -216,8 +218,8 @@ proptest! {
 
         // Check that the addrs are equal
         prop_assert_eq!(
-            sanitized_addr,
-            deserialized_addr,
+            sanitized_addr.clone(),
+            deserialized_addr.clone(),
             "unexpected round-trip mismatch with bytes: {:?}",
             hex::encode(addr_bytes),
         );
@@ -227,7 +229,7 @@ proptest! {
 
         // Now check that the re-serialized bytes are equal
         // (`impl PartialEq for MetaAddr` might not match serialization equality)
-        let addr_bytes2 = AddrV2::from(deserialized_addr).zcash_serialize_to_vec();
+        let addr_bytes2 = AddrV2::from(deserialized_addr.clone()).zcash_serialize_to_vec();
         prop_assert!(
             addr_bytes2.is_ok(),
             "unexpected serialization error after round-trip: {:?}, original addr: {:?}, bytes: {:?}, deserialized addr: {:?}",

@@ -406,6 +406,43 @@ where
             check::has_enough_orchard_flags(&tx)?;
             check::consensus_branch_id(&tx, req.height(), &network)?;
 
+            // Soft fork: temporarily require transactions to not contain Orchard actions.
+            //
+            // This soft fork was added while NU 6.1 was the active epoch on the Zcash
+            // chain, but we apply it uniformly even if NU 6.1 is not active in case it is
+            // ported to other chains with a different sequence of NUs.
+            //
+            // This will be treated as "Rules that apply generally before the next NU"
+            // when we add the NU that re-enables Orchard actions.
+            if network.is_orchard_temporarily_disabled(req.height()) && tx.orchard_shielded_data().is_some() {
+                return Err(TransactionError::Other("transaction has Orchard actions (temporarily disabled)".into()));
+            }
+
+            // From the network upgrade that re-enables Orchard actions (NU6.2), require
+            // that any Orchard proof has the canonical length for its number of actions.
+            // A proof that is present but not canonically sized can be padded with
+            // arbitrary trailing data without affecting its validity, allowing excess
+            // bandwidth and storage costs to be imposed while paying only fees sized to a
+            // canonical proof (GHSA-jfw5-j458-pfv6).
+            //
+            // This is a constricting rule, so it is gated on that network upgrade:
+            // Orchard actions mined before it, under earlier rules that did not enforce
+            // the proof size, must remain valid so that nodes can sync and reindex the
+            // chain before the soft fork that temporarily disabled Orchard. Orchard
+            // bundles are deserialized leniently, so the size is checked here, where the
+            // block height is available, rather than during parsing.
+            //
+            // The gate activates at the NU6.2 activation height committed in
+            // MAINNET/TESTNET_ACTIVATION_HEIGHTS. See
+            // `Network::orchard_canonical_proof_size_rule_active`.
+            if network.orchard_canonical_proof_size_rule_active(req.height()) {
+                if let Some(orchard_shielded_data) = tx.orchard_shielded_data() {
+                    if !orchard_shielded_data.proof_size_is_canonical() {
+                        return Err(TransactionError::OrchardProofSize);
+                    }
+                }
+            }
+
             // Validate the coinbase input consensus rules
             if req.is_mempool() && tx.is_coinbase() {
                 return Err(TransactionError::CoinbaseInMempool);
@@ -873,7 +910,8 @@ where
             | NetworkUpgrade::Canopy
             | NetworkUpgrade::Nu5
             | NetworkUpgrade::Nu6
-            | NetworkUpgrade::Nu6_1 => Ok(()),
+            | NetworkUpgrade::Nu6_1
+            | NetworkUpgrade::Nu6_2 => Ok(()),
 
             #[cfg(zcash_unstable = "zfuture")]
             NetworkUpgrade::ZFuture => Ok(()),
@@ -933,7 +971,7 @@ where
             cached_ffi_transaction,
         )?
         .and(Self::verify_sapling_bundle(sapling_bundle, &sighash))
-        .and(Self::verify_orchard_bundle(orchard_bundle, &sighash)))
+        .and(Self::verify_orchard_bundle(orchard_bundle, &sighash, nu)))
     }
 
     /// Verifies if a V5 `transaction` is supported by `network_upgrade`.
@@ -957,6 +995,7 @@ where
             NetworkUpgrade::Nu5
             | NetworkUpgrade::Nu6
             | NetworkUpgrade::Nu6_1
+            | NetworkUpgrade::Nu6_2
             | NetworkUpgrade::Nu7 => Ok(()),
 
             #[cfg(zcash_unstable = "zfuture")]
@@ -1153,9 +1192,19 @@ where
     }
 
     /// Verifies a transaction's Orchard shielded data.
+    ///
+    /// `network_upgrade` is the network upgrade active at the verified transaction's block
+    /// height. It selects the Orchard verifier: the Orchard Action circuit (and its verifying
+    /// key) changed at NU6.2 to fix the variable-base scalar-multiplication bug
+    /// (GHSA-jfw5-j458-pfv6), so pre-NU6.2 bundles must be verified against the historical
+    /// (insecure) key and NU6.2+ bundles against the fixed key. A proof from one era does not
+    /// verify under the other era's key. [`primitives::halo2::verifier_for`] maps the upgrade to
+    /// the verifier holding the matching key; the two verifiers keep separate batches, so eras
+    /// are never mixed.
     fn verify_orchard_bundle(
         bundle: Option<::orchard::bundle::Bundle<::orchard::bundle::Authorized, ZatBalance>>,
         sighash: &SigHash,
+        network_upgrade: NetworkUpgrade,
     ) -> AsyncChecks {
         let mut async_checks = AsyncChecks::new();
 
@@ -1171,8 +1220,11 @@ where
             // aggregated Halo2 proof per transaction, even with multiple
             // Actions in one transaction. So we queue it for verification
             // only once instead of queuing it up for every Action description.
+            //
+            // Route the bundle to the verifier for its circuit era: pre-NU6.2 bundles only
+            // verify under the insecure key, NU6.2+ bundles only under the fixed key.
             async_checks.push(
-                primitives::halo2::VERIFIER
+                primitives::halo2::verifier_for(network_upgrade)
                     .clone()
                     .oneshot(primitives::halo2::Item::new(bundle, *sighash)),
             );

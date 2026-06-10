@@ -19,7 +19,12 @@ use std::{
     sync::Arc,
 };
 
-use zebra_chain::{block, parallel::tree::NoteCommitmentTrees, parameters::Network};
+use zebra_chain::{
+    amount::DeferredPoolBalanceChange,
+    block,
+    parallel::tree::NoteCommitmentTrees,
+    parameters::{subsidy::block_subsidy, Network},
+};
 use zebra_db::{
     chain::BLOCK_INFO,
     transparent::{BALANCE_BY_TRANSPARENT_ADDR, TX_LOC_BY_SPENT_OUT_LOC},
@@ -386,22 +391,35 @@ impl FinalizedState {
                     history_tree,
                 };
 
+                let height = checkpoint_verified.height;
+
                 (
-                    checkpoint_verified.height,
+                    height,
                     checkpoint_verified.hash,
-                    FinalizedBlock::from_checkpoint_verified(checkpoint_verified, treestate),
+                    FinalizedBlock::from_checkpoint_verified(
+                        checkpoint_verified,
+                        treestate,
+                        calculate_deferred_pool_balance_change(height, &self.network()),
+                    ),
                     Some(prev_note_commitment_trees),
                 )
             }
             FinalizableBlock::Contextual {
                 contextually_verified,
                 treestate,
-            } => (
-                contextually_verified.height,
-                contextually_verified.hash,
-                FinalizedBlock::from_contextually_verified(contextually_verified, treestate),
-                prev_note_commitment_trees,
-            ),
+            } => {
+                let height = contextually_verified.height;
+                (
+                    height,
+                    contextually_verified.hash,
+                    FinalizedBlock::from_contextually_verified(
+                        contextually_verified,
+                        treestate,
+                        calculate_deferred_pool_balance_change(height, &self.network()),
+                    ),
+                    prev_note_commitment_trees,
+                )
+            }
         };
 
         let committed_tip_hash = self.db.finalized_tip_hash();
@@ -594,5 +612,29 @@ impl FinalizedState {
         // dropping any lines that haven't already been written to stdout.
         // This is okay for now because this is test-only code
         std::process::exit(0);
+    }
+}
+
+/// Calculates the deferred pool balance change for a given height and network.
+///
+/// Returns a deferred pool balance change of zero if it cannot be calculated.
+pub(crate) fn calculate_deferred_pool_balance_change(
+    height: block::Height,
+    network: &Network,
+) -> DeferredPoolBalanceChange {
+    if height > network.slow_start_interval() {
+        zebra_chain::parameters::subsidy::funding_stream_values(
+            height,
+            network,
+            block_subsidy(height, network).unwrap_or_default(),
+        )
+        .unwrap_or_default()
+        .remove(&zebra_chain::parameters::subsidy::FundingStreamReceiver::Deferred)
+        .unwrap_or_default()
+        .checked_sub(network.lockbox_disbursement_total_amount(height))
+        .map(DeferredPoolBalanceChange::new)
+        .unwrap_or_default()
+    } else {
+        DeferredPoolBalanceChange::zero()
     }
 }

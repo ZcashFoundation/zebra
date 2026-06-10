@@ -362,7 +362,7 @@ fn sanitize_transaction_version(
             Overwinter => 3,
             Sapling | Blossom | Heartwood | Canopy => 4,
             // FIXME: Use 6 for Nu7
-            Nu5 | Nu6 | Nu6_1 | Nu7 => 5,
+            Nu5 | Nu6 | Nu6_1 | Nu6_2 | Nu7 => 5,
 
             #[cfg(zcash_unstable = "zfuture")]
             NetworkUpgrade::ZFuture => u8::MAX,

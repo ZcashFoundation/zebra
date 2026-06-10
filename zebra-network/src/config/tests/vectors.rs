@@ -1,7 +1,13 @@
 //! Fixed test vectors for zebra-network configuration.
 
 use static_assertions::const_assert;
-use zebra_chain::parameters::testnet::{self, ConfiguredFundingStreams};
+use zebra_chain::{
+    block::Height,
+    parameters::{
+        testnet::{self, ConfiguredFundingStreams},
+        Network,
+    },
+};
 
 use crate::{
     constants::{INBOUND_PEER_LIMIT_MULTIPLIER, OUTBOUND_PEER_LIMIT_MULTIPLIER},
@@ -108,4 +114,36 @@ fn funding_streams_serialization_roundtrip() {
     let deserialized: Config = toml::from_str(&serialized).unwrap();
 
     assert_eq!(config, deserialized);
+}
+
+/// Checks that a configured Testnet's temporary Orchard-disabling soft fork height
+/// survives a serialization round-trip.
+#[test]
+fn temporary_orchard_disabling_soft_fork_height_serialization_roundtrip() {
+    let _init_guard = zebra_test::init();
+
+    let soft_fork_height = Height(2_000_000);
+
+    let config = Config {
+        network: testnet::Parameters::build()
+            .with_temporary_orchard_disabling_soft_fork_height(soft_fork_height)
+            .to_network()
+            .expect("failed to build configured network"),
+        initial_testnet_peers: [].into(),
+        ..Config::default()
+    };
+
+    let serialized = toml::to_string(&config).unwrap();
+    let deserialized: Config = toml::from_str(&serialized).unwrap();
+
+    assert_eq!(config, deserialized);
+
+    // The configured height must be preserved through the round-trip.
+    let Network::Testnet(params) = &deserialized.network else {
+        panic!("deserialized network must be a Testnet");
+    };
+    assert_eq!(
+        params.temporary_orchard_disabling_soft_fork_height(),
+        Some(soft_fork_height),
+    );
 }

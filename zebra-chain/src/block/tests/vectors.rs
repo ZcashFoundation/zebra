@@ -7,7 +7,7 @@ use std::{
 use chrono::{DateTime, Duration, LocalResult, TimeZone, Utc};
 
 use crate::{
-    amount::{Amount, NonNegative, MAX_MONEY},
+    amount::{Amount, DeferredPoolBalanceChange, NonNegative, MAX_MONEY},
     block::{
         serialize::MAX_BLOCK_BYTES, Block, BlockTimeError, Commitment::*, Hash, Header, Height,
     },
@@ -81,7 +81,11 @@ fn chain_value_pool_change_propagates_transaction_value_balance_errors() {
     // Two `MAX_MONEY` transparent outputs make the transaction-level output
     // sum exceed `MAX_MONEY`, so `value_balance` returns `Err`.
     let coinbase = Transaction::V1 {
-        inputs: vec![transparent::Input::new_coinbase(Height(1), vec![], None)],
+        inputs: vec![transparent::Input::Coinbase {
+            height: Height(1),
+            data: vec![],
+            sequence: 0xFFFF_FFFF,
+        }],
         outputs: vec![
             transparent::Output::new(max_money, transparent::Script::new(&[])),
             transparent::Output::new(max_money, transparent::Script::new(&[])),
@@ -104,7 +108,9 @@ fn chain_value_pool_change_propagates_transaction_value_balance_errors() {
     };
 
     assert!(
-        block.chain_value_pool_change(&utxos, None).is_err(),
+        block
+            .chain_value_pool_change(&utxos, DeferredPoolBalanceChange::zero())
+            .is_err(),
         "block-level aggregation should propagate transaction value-balance errors"
     );
 }

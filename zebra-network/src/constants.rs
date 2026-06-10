@@ -341,9 +341,9 @@ pub const TIMESTAMP_TRUNCATION_SECONDS: u32 = 30 * 60;
 /// This version of Zebra draws the current network protocol version from
 /// [ZIP-255](https://zips.z.cash/zip-0255).
 // TODO: Update this constant to the correct value after NU7 activation (see NU deployment ZIPs),
-pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_140);
-// pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_150); // NU7 Testnet.
-// pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_160); // NU7 Mainnet.
+pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_150); // NU6.2 (Mainnet + Testnet).
+                                                                        // pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_160); // NU7 Testnet.
+                                                                        // pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_170); // NU7 Mainnet.
 
 /// The default RTT estimate for peer responses.
 ///
@@ -406,14 +406,14 @@ lazy_static! {
     ///
     /// The minimum network protocol version typically changes after Mainnet and
     /// Testnet network upgrades.
-    // TODO: Change `Nu6` to `Nu7` after NU7 activation.
+    // TODO: Change `Nu6_2` to `Nu7` after NU7 activation.
     // TODO: Move the value here to a field on `testnet::Parameters` (#8367)
     pub static ref INITIAL_MIN_NETWORK_PROTOCOL_VERSION: HashMap<NetworkKind, Version> = {
         let mut hash_map = HashMap::new();
 
-        hash_map.insert(NetworkKind::Mainnet, Version::min_specified_for_upgrade(&Mainnet, Nu6));
-        hash_map.insert(NetworkKind::Testnet, Version::min_specified_for_upgrade(&Network::new_default_testnet(), Nu6));
-        hash_map.insert(NetworkKind::Regtest, Version::min_specified_for_upgrade(&Network::new_regtest(Default::default()), Nu6));
+        hash_map.insert(NetworkKind::Mainnet, Version::min_specified_for_upgrade(&Mainnet, Nu6_2));
+        hash_map.insert(NetworkKind::Testnet, Version::min_specified_for_upgrade(&Network::new_default_testnet(), Nu6_2));
+        hash_map.insert(NetworkKind::Regtest, Version::min_specified_for_upgrade(&Network::new_regtest(Default::default()), Nu6_2));
 
         hash_map
     };

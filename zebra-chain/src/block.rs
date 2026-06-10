@@ -228,7 +228,7 @@ impl Block {
     pub fn chain_value_pool_change(
         &self,
         utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
-        deferred_pool_balance_change: Option<DeferredPoolBalanceChange>,
+        deferred_pool_balance_change: DeferredPoolBalanceChange,
     ) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
         // `Result<T, E>` implements `IntoIterator`, so a `flat_map(|t| t.value_balance(utxos))`
         // would silently drop transactions whose value balance returns `Err`. Use `try_fold`
@@ -240,11 +240,9 @@ impl Block {
                 acc + tx.value_balance(utxos)?
             })?;
 
-        Ok(*tx_pool_sum.neg().set_deferred_amount(
-            deferred_pool_balance_change
-                .map(DeferredPoolBalanceChange::value)
-                .unwrap_or_default(),
-        ))
+        Ok(*tx_pool_sum
+            .neg()
+            .set_deferred_amount(deferred_pool_balance_change.value()))
     }
 
     /// Compute the root of the authorizing data Merkle tree,

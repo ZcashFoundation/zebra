@@ -984,6 +984,8 @@ where
                         book_addr,
                         &remote_services,
                         connected_addr.is_inbound(),
+                        connection_info.remote.user_agent.clone(),
+                        connection_info.negotiated_version,
                     ))
                     .await;
             }
@@ -995,6 +997,7 @@ where
             // stream from the unversioned Framed wrapper and construct a new one with a versioned codec.
             let bare_codec = peer_conn.codec_mut();
             bare_codec.reconfigure_version(connection_info.negotiated_version);
+            bare_codec.reconfigure_full_body_len();
 
             debug!("constructing client, spawning server");
 

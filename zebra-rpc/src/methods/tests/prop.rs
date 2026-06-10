@@ -257,6 +257,10 @@ proptest! {
         runtime.block_on(async move {
             if verbose.unwrap_or(false) {
                 let (expected_response, mempool_query) = {
+                    let transactions_by_id = transactions
+                        .iter()
+                        .map(|unmined_tx| {(unmined_tx.transaction.id.mined_id(), unmined_tx)})
+                        .collect::<HashMap<_, _>>();
                     let transaction_dependencies = Default::default();
                     let txs = transactions
                         .iter()
@@ -265,7 +269,7 @@ proptest! {
                                 unmined_tx.transaction.id.mined_id().encode_hex(),
                                 MempoolObject::from_verified_unmined_tx(
                                     unmined_tx,
-                                    &transactions,
+                                    &transactions_by_id,
                                     &transaction_dependencies,
                                 ),
                             )

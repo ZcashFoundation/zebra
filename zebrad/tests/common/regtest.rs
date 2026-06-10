@@ -37,14 +37,14 @@ const NUM_BLOCKS_TO_SUBMIT: usize = 200;
 pub(crate) async fn submit_blocks_test() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let network = Network::new_regtest(
+    let net = Network::new_regtest(
         ConfiguredActivationHeights {
             nu5: Some(100),
             ..Default::default()
         }
         .into(),
     );
-    let mut config = os_assigned_rpc_port_config(false, &network)?;
+    let mut config = os_assigned_rpc_port_config(false, &net)?;
     config.mempool.debug_enable_at_height = Some(0);
 
     let mut zebrad = testdir()?
@@ -58,10 +58,10 @@ pub(crate) async fn submit_blocks_test() -> Result<()> {
     let client = RpcRequestClient::new(rpc_address);
 
     for _ in 1..=NUM_BLOCKS_TO_SUBMIT {
-        let (mut block, height) = client.block_from_template(&network).await?;
+        let (mut block, height) = client.block_from_template(&net).await?;
 
-        while !network.disable_pow()
-            && zebra_consensus::difficulty_is_valid(&block.header, &network, &height, &block.hash())
+        while !net.disable_pow()
+            && zebra_consensus::difficulty_is_valid(&block.header, &net, &height, &block.hash())
                 .is_err()
         {
             increment_big_endian(Arc::make_mut(&mut block.header).nonce.as_mut());

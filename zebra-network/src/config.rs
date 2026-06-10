@@ -607,6 +607,11 @@ struct DTestnetParameters {
     /// If `true`, automatically repeats configured funding stream addresses to fill
     /// all required periods.
     extend_funding_stream_addresses_as_required: Option<bool>,
+    /// Height at which the soft fork that temporarily disables Orchard actions activates.
+    ///
+    /// If unset, the default activation height for the network is used; the soft fork
+    /// cannot be disabled via configuration.
+    temporary_orchard_disabling_soft_fork_height: Option<u32>,
 }
 
 /// Network configuration used during deserialization.
@@ -699,6 +704,9 @@ impl From<Arc<testnet::Parameters>> for DTestnetParameters {
                 params.checkpoints().into()
             },
             extend_funding_stream_addresses_as_required: None,
+            temporary_orchard_disabling_soft_fork_height: params
+                .temporary_orchard_disabling_soft_fork_height()
+                .map(|height| height.0),
         }
     }
 }
@@ -887,6 +895,7 @@ where
         lockbox_disbursements,
         checkpoints,
         extend_funding_stream_addresses_as_required,
+        temporary_orchard_disabling_soft_fork_height,
     } = params;
 
     let mut params_builder = testnet::Parameters::build();
@@ -966,6 +975,13 @@ where
 
     if let Some(true) = extend_funding_stream_addresses_as_required {
         params_builder = params_builder.extend_funding_streams();
+    }
+
+    // Retain the default soft-fork activation height unless one is configured.
+    if let Some(height) = temporary_orchard_disabling_soft_fork_height {
+        params_builder = params_builder.with_temporary_orchard_disabling_soft_fork_height(
+            height.try_into().map_err(de::Error::custom)?,
+        );
     }
 
     // Return an error if the initial testnet peers includes any of the default initial Mainnet or Testnet

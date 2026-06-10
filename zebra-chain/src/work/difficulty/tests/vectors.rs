@@ -403,7 +403,7 @@ fn testnet_minimum_difficulty() -> Result<(), Report> {
         block::Height(1_028_500),
     ];
 
-    for (&height, _block) in zebra_test::vectors::TESTNET_BLOCKS.iter() {
+    for &height in zebra_test::vectors::TESTNET_BLOCKS.keys() {
         let height = block::Height(height);
 
         /// SPANDOC: Do minimum difficulty checks for testnet block {?height}

@@ -261,7 +261,13 @@ pub fn subsidy_is_valid(
         if Some(height) == NetworkUpgrade::Nu6_1.activation_height(net) {
             let lockbox_disbursements = net.lockbox_disbursements(height);
 
-            if lockbox_disbursements.is_empty() {
+            // The Mainnet and default Testnet disbursement lists are hardcoded and must be
+            // non-empty. Custom testnets and Regtest may configure no disbursements, in which
+            // case the NU6.1 activation block is not required to contain any disbursement
+            // outputs.
+            let must_have_disbursements =
+                matches!(net, Network::Mainnet) || net.is_default_testnet();
+            if lockbox_disbursements.is_empty() && must_have_disbursements {
                 Err(BlockError::Other(
                     "missing lockbox disbursements for NU6.1 activation block".to_string(),
                 ))?;

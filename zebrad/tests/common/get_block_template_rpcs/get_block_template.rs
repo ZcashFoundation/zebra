@@ -258,6 +258,8 @@ async fn try_validate_block_template(client: &RpcRequestClient, net: &Network) -
                         .expect("response should be success output with a serialized `BlockProposalResponse`");
 
                     if let BlockProposalResponse::Rejected(reject_reason) = proposal_result {
+                        if reject_reason.contains("best-chain-tip") { continue; }
+
                         tracing::info!(
                             ?reject_reason,
                             ?template,

@@ -189,6 +189,7 @@ impl From<&BTreeMap<Height, NetworkUpgrade>> for ConfiguredActivationHeights {
                 NetworkUpgrade::Nu5 => &mut configured_activation_heights.nu5,
                 NetworkUpgrade::Nu6 => &mut configured_activation_heights.nu6,
                 NetworkUpgrade::Nu6_1 => &mut configured_activation_heights.nu6_1,
+                NetworkUpgrade::Nu6_2 => &mut configured_activation_heights.nu6_2,
                 NetworkUpgrade::Nu7 => &mut configured_activation_heights.nu7,
                 #[cfg(zcash_unstable = "zfuture")]
                 NetworkUpgrade::ZFuture => &mut configured_activation_heights.zfuture,
@@ -362,6 +363,9 @@ pub struct ConfiguredActivationHeights {
     /// Activation height for `NU6.1` network upgrade.
     #[serde(rename = "NU6.1")]
     pub nu6_1: Option<u32>,
+    /// Activation height for `NU6.2` network upgrade.
+    #[serde(rename = "NU6.2")]
+    pub nu6_2: Option<u32>,
     /// Activation height for `NU7` network upgrade.
     #[serde(rename = "NU7")]
     pub nu7: Option<u32>,
@@ -385,6 +389,7 @@ impl ConfiguredActivationHeights {
             nu5,
             nu6,
             nu6_1,
+            nu6_2,
             nu7,
             #[cfg(zcash_unstable = "zfuture")]
             zfuture,
@@ -406,6 +411,7 @@ impl ConfiguredActivationHeights {
             nu5,
             nu6,
             nu6_1,
+            nu6_2,
             nu7,
             #[cfg(zcash_unstable = "zfuture")]
             zfuture,
@@ -477,6 +483,8 @@ pub struct ParametersBuilder {
     lockbox_disbursements: Vec<(String, Amount<NonNegative>)>,
     /// Checkpointed block hashes and heights for this network.
     checkpoints: Arc<CheckpointList>,
+    /// Height at which the soft-fork to temporarily disable Orchard in transactions activates
+    temporary_orchard_disabling_soft_fork_height: Option<Height>,
 }
 
 impl Default for ParametersBuilder {
@@ -513,6 +521,9 @@ impl Default for ParametersBuilder {
                 .map(|(addr, amount)| (addr.to_string(), *amount))
                 .collect(),
             checkpoints: TESTNET_CHECKPOINT_LIST.clone(),
+            temporary_orchard_disabling_soft_fork_height: Some(
+                super::TESTNET_TEMPORARY_ORCHARD_DISABLING_SOFT_FORK_HEIGHT,
+            ),
         }
     }
 }
@@ -593,6 +604,7 @@ impl ParametersBuilder {
             nu5,
             nu6,
             nu6_1,
+            nu6_2,
             nu7,
             #[cfg(zcash_unstable = "zfuture")]
             zfuture,
@@ -620,6 +632,7 @@ impl ParametersBuilder {
                 .chain(nu5.into_iter().map(|h| (h, Nu5)))
                 .chain(nu6.into_iter().map(|h| (h, Nu6)))
                 .chain(nu6_1.into_iter().map(|h| (h, Nu6_1)))
+                .chain(nu6_2.into_iter().map(|h| (h, Nu6_2)))
                 .chain(nu7.into_iter().map(|h| (h, Nu7)));
 
             #[cfg(zcash_unstable = "zfuture")]
@@ -810,6 +823,19 @@ impl ParametersBuilder {
         self.with_checkpoints(ConfiguredCheckpoints::Default(false))
     }
 
+    /// Sets the height for this network at which the soft fork that temporarily disables
+    /// Orchard transactions will activate.
+    pub fn with_temporary_orchard_disabling_soft_fork_height(mut self, height: Height) -> Self {
+        self.temporary_orchard_disabling_soft_fork_height = Some(height);
+        self
+    }
+
+    /// Disables the soft fork that would temporarily disable Orchard transactions.
+    pub fn disable_temporary_orchard_disabling_soft_fork(mut self) -> Self {
+        self.temporary_orchard_disabling_soft_fork_height = None;
+        self
+    }
+
     /// Converts the builder to a [`Parameters`] struct
     fn finish(self) -> Parameters {
         let Self {
@@ -827,6 +853,7 @@ impl ParametersBuilder {
             post_blossom_halving_interval,
             lockbox_disbursements,
             checkpoints,
+            temporary_orchard_disabling_soft_fork_height,
         } = self;
         Parameters {
             network_name,
@@ -843,6 +870,7 @@ impl ParametersBuilder {
             post_blossom_halving_interval,
             lockbox_disbursements,
             checkpoints,
+            temporary_orchard_disabling_soft_fork_height,
         }
     }
 
@@ -889,6 +917,7 @@ impl ParametersBuilder {
             post_blossom_halving_interval,
             lockbox_disbursements,
             checkpoints: _,
+            temporary_orchard_disabling_soft_fork_height: _,
         } = Self::default();
 
         self.activation_heights == activation_heights
@@ -962,6 +991,8 @@ pub struct Parameters {
     lockbox_disbursements: Vec<(String, Amount<NonNegative>)>,
     /// List of checkpointed block heights and hashes
     checkpoints: Arc<CheckpointList>,
+    /// Height at which the soft-fork to temporarily disable Orchard in transactions activates
+    temporary_orchard_disabling_soft_fork_height: Option<Height>,
 }
 
 impl Default for Parameters {
@@ -999,6 +1030,9 @@ impl Parameters {
             .with_disable_pow(true)
             .with_unshielded_coinbase_spends(true)
             .with_slow_start_interval(Height::MIN)
+            // Like the default Testnet activation heights stripped below, the default Testnet's
+            // temporary Orchard-disabling soft fork does not apply to Regtest.
+            .disable_temporary_orchard_disabling_soft_fork()
             // Removes default Testnet activation heights if not configured,
             // most network upgrades are disabled by default for Regtest in zcashd
             .with_activation_heights(activation_heights.for_regtest())?
@@ -1046,6 +1080,7 @@ impl Parameters {
             post_blossom_halving_interval,
             lockbox_disbursements: _,
             checkpoints: _,
+            temporary_orchard_disabling_soft_fork_height: _,
         } = Self::new_regtest(Default::default()).expect("default regtest parameters are valid");
 
         self.network_name == network_name
@@ -1146,6 +1181,12 @@ impl Parameters {
     /// Returns the checkpoints for this network.
     pub fn checkpoints(&self) -> Arc<CheckpointList> {
         self.checkpoints.clone()
+    }
+
+    /// Returns the height at which the soft-fork to temporarily disable Orchard in
+    /// transactions activates.
+    pub fn temporary_orchard_disabling_soft_fork_height(&self) -> Option<Height> {
+        self.temporary_orchard_disabling_soft_fork_height
     }
 }
 

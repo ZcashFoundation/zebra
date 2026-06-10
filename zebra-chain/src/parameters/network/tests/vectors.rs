@@ -688,3 +688,68 @@ fn funding_streams_default_values() {
         1
     );
 }
+
+/// Checks the temporary Orchard-disabling soft fork height accessors, including the
+/// activation-height boundary used to trigger a mempool reset.
+#[test]
+fn temporary_orchard_disabling_soft_fork_heights() {
+    let _init_guard = zebra_test::init();
+
+    // Mainnet uses a fixed activation height.
+    let mainnet_height = Height(3_363_426);
+    assert_eq!(
+        Network::Mainnet.temporary_orchard_disabling_soft_fork_height(),
+        Some(mainnet_height),
+    );
+    assert!(!Network::Mainnet
+        .temporary_orchard_disabling_soft_fork_active((mainnet_height - 1).unwrap()),);
+    assert!(Network::Mainnet.temporary_orchard_disabling_soft_fork_active(mainnet_height));
+    // Only the exact activation height is the boundary that triggers a reset.
+    assert!(!Network::Mainnet
+        .is_temporary_orchard_disabling_soft_fork_activation_height((mainnet_height - 1).unwrap()));
+    assert!(
+        Network::Mainnet.is_temporary_orchard_disabling_soft_fork_activation_height(mainnet_height)
+    );
+    assert!(!Network::Mainnet
+        .is_temporary_orchard_disabling_soft_fork_activation_height((mainnet_height + 1).unwrap()));
+
+    // The default Testnet uses a fixed activation height, below its NU6.2 activation height.
+    let testnet_default_height = Height(4_048_500);
+    assert_eq!(
+        Network::new_default_testnet().temporary_orchard_disabling_soft_fork_height(),
+        Some(testnet_default_height),
+    );
+
+    // Regtest does not apply the temporary Orchard-disabling soft fork.
+    assert_eq!(
+        Network::new_regtest(Default::default()).temporary_orchard_disabling_soft_fork_height(),
+        None,
+    );
+
+    // A configured Testnet uses its configured height.
+    let testnet_height = Height(2_000_000);
+    let configured = testnet::Parameters::build()
+        .with_temporary_orchard_disabling_soft_fork_height(testnet_height)
+        .to_network()
+        .expect("failed to build configured network");
+
+    assert_eq!(
+        configured.temporary_orchard_disabling_soft_fork_height(),
+        Some(testnet_height),
+    );
+    assert!(configured.is_temporary_orchard_disabling_soft_fork_activation_height(testnet_height));
+    assert!(!configured
+        .is_temporary_orchard_disabling_soft_fork_activation_height((testnet_height + 1).unwrap()));
+
+    // A Testnet with the soft fork disabled has no activation height.
+    let disabled = testnet::Parameters::build()
+        .disable_temporary_orchard_disabling_soft_fork()
+        .to_network()
+        .expect("failed to build configured network");
+
+    assert_eq!(
+        disabled.temporary_orchard_disabling_soft_fork_height(),
+        None,
+    );
+    assert!(!disabled.is_temporary_orchard_disabling_soft_fork_activation_height(testnet_height));
+}

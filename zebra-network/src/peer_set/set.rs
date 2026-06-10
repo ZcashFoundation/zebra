@@ -1413,7 +1413,7 @@ where
             }
 
             // Broadcast advertisements to lots of peers
-            Request::AdvertiseTransactionIds(_) => self.route_broadcast(req),
+            Request::AdvertiseTransactionIds(_, _) => self.route_broadcast(req),
             Request::AdvertiseBlock(_, _) => self.route_broadcast(req),
             Request::AdvertiseBlockToAll(_) => self.broadcast_all(req),
 
