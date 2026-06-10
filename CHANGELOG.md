@@ -5,11 +5,38 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Unreleased]
+## [Zebra 5.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.1.0) - 2026-06-10
+
+This release fixes a genesis-to-tip sync stall that could cause new nodes to hang
+during initial block download, bumps the minimum network protocol version to Nu6_2,
+extends the `getpeerinfo` RPC, and includes several performance and correctness fixes.
+
+### Breaking Changes
+
+- The minimum network protocol version is now Nu6_2 (170150). Peers running protocol
+  versions below Nu6_2 will be disconnected. Update to Zebra 5.0.0 or later to remain
+  compatible.
 
 ### Added
 
-- Extended `getpeerinfo` RPC with `subver`, `version`, `services`, `lastrecv`, `banscore`, and `connection_state` fields
+- Extended `getpeerinfo` RPC with `subver`, `version`, `services`, `lastrecv`,
+  `banscore`, and `connection_state` fields ([#10443](https://github.com/ZcashFoundation/zebra/pull/10443))
+
+### Fixed
+
+- Fixed genesis-to-tip sync stall that could cause new nodes to hang during initial
+  block download ([#10679](https://github.com/ZcashFoundation/zebra/pull/10679))
+- Bumped minimum network protocol version to Nu6_2
+  ([#10692](https://github.com/ZcashFoundation/zebra/pull/10692))
+- Fixed mempool index being unnecessarily rebuilt per transaction in `getrawmempool`
+  ([#10599](https://github.com/ZcashFoundation/zebra/pull/10599))
+- Fixed `dequeue_children` by-height index handling in the state service
+  ([#10604](https://github.com/ZcashFoundation/zebra/pull/10604))
+
+### Contributors
+
+Thank you to everyone who contributed to this release:
+@andres-pcg, @conradoplg, @gustavovalverde, @judah-caruso, @oxarbitrage, @syszery and @upbqdn
 
 ## [Zebra 5.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.0.0) - 2026-06-02
 
