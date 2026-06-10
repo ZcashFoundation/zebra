@@ -3,13 +3,6 @@ name: Coverage
 on:
   push:
     branches: [main]
-    paths:
-      - "**/*.rs"
-      - "**/Cargo.toml"
-      - "**/Cargo.lock"
-      - .config/nextest.toml
-      - codecov.yml
-      - .github/workflows/coverage.yml
 
 # Ensures that only one workflow task will run at a time. Previous builds, if
 # already in process, will get cancelled. Only the latest commit will be allowed
@@ -30,7 +23,25 @@ env:
   COLORBT_SHOW_HIDDEN: 1
 
 jobs:
-  coverage:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      coverage: ${{ steps.filter.outputs.coverage || 'true' }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        if: github.event_name == 'pull_request'
+        with:
+          persist-credentials: false
+      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        id: filter
+        if: github.event_name == 'pull_request'
+        with:
+          filters: .github/path-filters.yml
+
+  run-coverage:
+    needs: changes
+    if: needs.changes.outputs.coverage == 'true'
     # `contents: read` is intentionally omitted: this job uploads source to a
     # public Codecov project, so missing checkout permission keeps it inert
     # on private forks as a fail-closed safeguard.
@@ -71,14 +82,15 @@ jobs:
         with:
           files: lcov.info
 
-  coverage-success:
-    name: coverage success
+  coverage:
     runs-on: ubuntu-latest
     if: always()
     needs:
-      - coverage
+      - changes
+      - run-coverage
     steps:
       - name: Decide whether the needed jobs succeeded or failed
         uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe #v1.2.2
         with:
           jobs: ${{ toJSON(needs) }}
+          allowed-skips: run-coverage

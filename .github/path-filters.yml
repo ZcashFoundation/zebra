@@ -1,0 +1,76 @@
+# Single source of truth for "what changed files trigger what workflow."
+#
+# Consumed by dorny/paths-filter in each required-check workflow's `changes` job.
+# Each key maps 1:1 to a workflow basename; values are picomatch globs.
+#
+# Editing this file re-triggers every workflow on the next PR (the file is
+# listed in every filter), which is the desired safety property when the
+# triggering rules themselves change.
+
+lint:
+  - "**/*.rs"
+  - "**/Cargo.toml"
+  - "**/Cargo.lock"
+  - ".cargo/config.toml"
+  - "**/clippy.toml"
+  - "deny.toml"
+  - "supply-chain/**"
+  - ".github/workflows/lint.yml"
+  - ".github/path-filters.yml"
+
+unit_tests:
+  - "**/*.rs"
+  - "**/Cargo.toml"
+  - "**/Cargo.lock"
+  - ".config/nextest.toml"
+  - ".github/workflows/tests-unit.yml"
+  - ".github/path-filters.yml"
+
+test_crates:
+  - "**/*.rs"
+  - "**/Cargo.toml"
+  - "**/Cargo.lock"
+  - ".cargo/config.toml"
+  - "**/clippy.toml"
+  - ".github/workflows/test-crates.yml"
+  - ".github/path-filters.yml"
+
+test_docker:
+  - "**/*.rs"
+  - "**/Cargo.toml"
+  - "**/Cargo.lock"
+  - "docker/Dockerfile"
+  - "docker/entrypoint.sh"
+  - "docker/**/*.toml"
+  - "zebrad/tests/common/configs/**"
+  - ".github/workflows/test-docker.yml"
+  - ".github/path-filters.yml"
+
+book:
+  - "book/**"
+  - "katex-header.html"
+  - "**/*.rs"
+  - "**/Cargo.toml"
+  - "**/Cargo.lock"
+  - ".cargo/config.toml"
+  - "**/clippy.toml"
+  - ".github/workflows/book.yml"
+  - ".github/path-filters.yml"
+
+coverage:
+  - "**/*.rs"
+  - "**/Cargo.toml"
+  - "**/Cargo.lock"
+  - ".config/nextest.toml"
+  - "codecov.yml"
+  - ".github/workflows/coverage.yml"
+  - ".github/path-filters.yml"
+
+docs_check:
+  - "**/*.md"
+  - "book/**"
+  - ".lychee.toml"
+  - ".codespellrc"
+  - ".trunk/configs/.markdownlint.yaml"
+  - ".github/workflows/docs-check.yml"
+  - ".github/path-filters.yml"
