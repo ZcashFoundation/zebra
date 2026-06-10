@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 - Extended `getpeerinfo` RPC with `subver`, `version`, `services`, `lastrecv`, `banscore`, and `connection_state` fields
 
+### Fixed
+
+- Handle `invalidateblock` and `reconsiderblock` edge cases without panicking. Three previously process-fatal paths in the non-finalized state are now graceful: `invalidateblock` on the root of a tracked chain, `invalidateblock` on two same-height sibling fork tips, and a repeated `reconsiderblock` for the same hash. `Chain::cmp` no longer panics on matching tip hashes; the root invalidation path retains by tip hash; `reconsider_block` removes the invalidation record from the live map; and replay errors propagate as a typed `ReconsiderError::ReplayFailed` rather than `expect()` ([#10586](https://github.com/ZcashFoundation/zebra/issues/10586))
+
 ## [Zebra 5.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.0.0) - 2026-06-02
 
 This release activates the NU6.2 network upgrade. NU6.2 re-enables Orchard
@@ -170,7 +174,6 @@ The release also adds support for mining to a shielded address.
 
 Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
 @ValarDragon, @andres-pcg, @conradoplg, @dingledropper, @evan-forbes, @gustavovalverde, @oxarbitrage, @syszery, @upbqdn, @zmanian.
-- Handle `invalidateblock` and `reconsiderblock` edge cases without panicking. Three previously process-fatal paths in the non-finalized state are now graceful: `invalidateblock` on the root of a tracked chain, `invalidateblock` on two same-height sibling fork tips, and a repeated `reconsiderblock` for the same hash. `Chain::cmp` no longer panics on matching tip hashes; the root invalidation path retains by tip hash; `reconsider_block` removes the invalidation record from the live map; and replay errors propagate as a typed `ReconsiderError::ReplayFailed` rather than `expect()` ([#10586](https://github.com/ZcashFoundation/zebra/issues/10586))
 
 ## [Zebra 4.4.1](https://github.com/ZcashFoundation/zebra/releases/tag/v4.4.1) - 2026-05-04
 
