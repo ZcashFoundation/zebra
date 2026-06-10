@@ -7,26 +7,7 @@ name: zcashd-compat Regtest
 # randomised ports, so no external infrastructure is required.
 on:
   push:
-    branches: [main]
-    paths:
-      # zcashd-compat implementation
-      - zebrad/src/components/zcashd_compat/**
-      - zebrad/zcashd-compat-manifest.json
-      - scripts/resolve-zcashd-compat-manifest.sh
-      - zebrad/src/commands/start.rs
-      - zebrad/src/config.rs
-      - zebrad/src/components.rs
-      # zcashd-compat test harness and entry points
-      - zebrad/tests/common/zcashd_compat.rs
-      - zebrad/tests/common/zcashd_compat/**
-      - zebrad/tests/acceptance.rs
-      # test and build configuration
-      - .config/nextest.toml
-      - make/zcashd-compat.mk
-      - .github/workflows/zcashd-compat-regtest.yml
-
-  pull_request:
-    branches: [main, feat/nu7]
+    branches: [ironwood-main]
     paths:
       # zcashd-compat implementation
       - zebrad/src/components/zcashd_compat/**
