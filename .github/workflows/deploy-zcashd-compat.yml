@@ -1,0 +1,161 @@
+name: Deploy zcashd-compat
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to build and deploy"
+        required: true
+        type: string
+        default: feat/zcashd-compat
+      host:
+        description: "Target host or IP address"
+        required: true
+        type: string
+        default: "159.203.113.196"
+      height_max_drift:
+        description: "Maximum allowed zebrad/zcashd height drift"
+        required: true
+        type: string
+        default: "10"
+      sync_timeout:
+        description: "Seconds to wait for the remote sync check"
+        required: true
+        type: string
+        default: "1800"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.host }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and deploy zebrad
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    environment: zcashd-compat
+
+    env:
+      DEPLOY_HOST: ${{ inputs.host }}
+      DEPLOY_USER: root
+      HEIGHT_MAX_DRIFT: ${{ inputs.height_max_drift }}
+      SYNC_CHECK_TIMEOUT: ${{ inputs.sync_timeout }}
+      SYNC_CHECK_INTERVAL: "15"
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref }}
+
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
+        with:
+          toolchain: stable
+          cache-on-failure: true
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 #v2.9.1
+        with:
+          cache-on-failure: true
+
+      - name: Install protoc
+        run: |
+          sudo apt-get -qq update
+          sudo apt-get -qq install -y --no-install-recommends protobuf-compiler
+
+      - name: Build zebrad
+        run: cargo build --release --locked -p zebrad
+
+      - name: Start SSH agent
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$DEPLOY_SSH_KEY" ]; then
+            echo "DEPLOY_SSH_KEY secret is required in the zcashd-compat Environment" >&2
+            exit 1
+          fi
+
+          ssh_agent_sock="$RUNNER_TEMP/ssh-agent.sock"
+          ssh-agent -a "$ssh_agent_sock" > "$RUNNER_TEMP/ssh-agent.env"
+          SSH_AUTH_SOCK="$ssh_agent_sock" ssh-add - <<< "$DEPLOY_SSH_KEY"
+          echo "SSH_AUTH_SOCK=$ssh_agent_sock" >> "$GITHUB_ENV"
+
+      - name: Pin target host key
+        run: |
+          set -euo pipefail
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          ssh-keyscan -T 30 -H "$DEPLOY_HOST" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Upload binary and sync check
+        run: |
+          set -euo pipefail
+
+          ssh_options=(-o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts")
+
+          scp "${ssh_options[@]}" target/release/zebrad "$DEPLOY_USER@$DEPLOY_HOST:/usr/local/bin/zebrad.new"
+          scp "${ssh_options[@]}" deploy/zcashd-compat/sync-check.sh "$DEPLOY_USER@$DEPLOY_HOST:/tmp/zcashd-compat-sync-check.sh"
+
+      - name: Install and restart zebrad
+        run: |
+          set -euo pipefail
+
+          ssh_options=(-o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts")
+
+          ssh "${ssh_options[@]}" "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' <<'EOF'
+          set -euo pipefail
+
+          if [ -x /usr/local/bin/zebrad ]; then
+            cp -a /usr/local/bin/zebrad /usr/local/bin/zebrad.bak
+          fi
+
+          install -m 755 /usr/local/bin/zebrad.new /usr/local/bin/zebrad
+          rm -f /usr/local/bin/zebrad.new
+          chmod 755 /tmp/zcashd-compat-sync-check.sh
+          if ! systemctl restart zebrad-compat; then
+            if [ -x /usr/local/bin/zebrad.bak ]; then
+              install -m 755 /usr/local/bin/zebrad.bak /usr/local/bin/zebrad
+              systemctl restart zebrad-compat || true
+            fi
+            exit 1
+          fi
+          EOF
+
+      - name: Verify zcashd-compat sync
+        run: |
+          set -euo pipefail
+
+          ssh_options=(-o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts")
+
+          # shellcheck disable=SC2029
+          if ! ssh "${ssh_options[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "HEIGHT_MAX_DRIFT='$HEIGHT_MAX_DRIFT' SYNC_CHECK_TIMEOUT='$SYNC_CHECK_TIMEOUT' SYNC_CHECK_INTERVAL='$SYNC_CHECK_INTERVAL' /tmp/zcashd-compat-sync-check.sh"
+          then
+            echo "Sync check failed, rolling back to /usr/local/bin/zebrad.bak" >&2
+            ssh "${ssh_options[@]}" "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' <<'EOF'
+          set -euo pipefail
+
+          if [ ! -x /usr/local/bin/zebrad.bak ]; then
+            echo "Rollback binary missing: /usr/local/bin/zebrad.bak" >&2
+            exit 1
+          fi
+
+          install -m 755 /usr/local/bin/zebrad.bak /usr/local/bin/zebrad
+          systemctl restart zebrad-compat
+          EOF
+            exit 1
+          fi
+
+      - name: Log deployed version
+        run: |
+          set -euo pipefail
+
+          ssh_options=(-o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts")
+
+          ssh "${ssh_options[@]}" "$DEPLOY_USER@$DEPLOY_HOST" '/usr/local/bin/zebrad --version'
