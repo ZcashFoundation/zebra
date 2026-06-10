@@ -34,6 +34,12 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Retry missing block downloads inside the active sync round, avoiding long
   stalls when a peer reports `notfound` for a required block hash.
 
+### Security
+
+- Write RPC authentication cookies through a freshly created private temporary
+  file before replacing `.cookie`, so pre-existing permissive cookie files cannot
+  expose the generated RPC authentication secret.
+
 ## [Zebra 5.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.0.0) - 2026-06-02
 
 This release activates the NU6.2 network upgrade. NU6.2 re-enables Orchard

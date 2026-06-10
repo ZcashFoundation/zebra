@@ -32,6 +32,36 @@ fn cookie_file_has_restrictive_permissions() {
 
 #[cfg(unix)]
 #[test]
+fn cookie_write_replaces_existing_permissive_file() {
+    let _init_guard = zebra_test::init();
+
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let cookie_path = dir.path().join(".cookie");
+    fs::write(&cookie_path, b"old cookie").unwrap();
+    fs::set_permissions(&cookie_path, fs::Permissions::from_mode(0o644)).unwrap();
+
+    let cookie = Cookie::default();
+    cookie::write_to_disk(&cookie, dir.path(), None).unwrap();
+
+    let metadata = fs::metadata(&cookie_path).unwrap();
+    let mode = metadata.permissions().mode() & 0o777;
+    assert_eq!(
+        mode, 0o600,
+        "cookie file should have mode 0600 after replacement, got {mode:o}"
+    );
+
+    assert!(
+        fs::read_to_string(&cookie_path)
+            .unwrap()
+            .starts_with("__cookie__:"),
+        "cookie file should contain a fresh cookie"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn cookie_write_rejects_symlink() {
     let _init_guard = zebra_test::init();
 
