@@ -88,6 +88,16 @@ impl SupervisorConfig {
             NetworkKind::Regtest => args.push("-regtest".to_string()),
         }
 
+        // In compat mode zebrad owns P2P. zcashd must not listen on the network
+        // port (8233 mainnet / 18233 testnet). Operators often reuse a legacy
+        // full-node zcash.conf with listen=1, and CLI args are parsed before
+        // zcash.conf without being overwritten by it — so pass these explicitly
+        // as defense in depth (zcashd also force-disables them when -zebra-compat
+        // is set). extra_args remain last. P2P-enabling flags there are rejected
+        // by zcashd startup validation rather than silently taking effect.
+        args.push("-p2p=0".to_string());
+        args.push("-listen=0".to_string());
+
         // Always include -printtoconsole and filter it out from extra_args
         args.push("-printtoconsole".to_string());
         args.extend(
@@ -480,8 +490,22 @@ mod tests {
         assert!(args
             .iter()
             .any(|a| a.starts_with("-zebra-compat-cookiefile=/tmp/.cookie")));
+        assert!(args.contains(&"-p2p=0".to_string()));
+        assert!(args.contains(&"-listen=0".to_string()));
         assert!(args.contains(&"-printtoconsole".to_string()));
         assert!(args.contains(&"-debug=1".to_string()));
+
+        let p2p_idx = args.iter().position(|a| a == "-p2p=0").expect("p2p override present");
+        let listen_idx = args
+            .iter()
+            .position(|a| a == "-listen=0")
+            .expect("listen override present");
+        let debug_idx = args
+            .iter()
+            .position(|a| a == "-debug=1")
+            .expect("extra arg present");
+        assert!(p2p_idx < debug_idx);
+        assert!(listen_idx < debug_idx);
     }
 
     #[tokio::test]
