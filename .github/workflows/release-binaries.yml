@@ -78,7 +78,7 @@ jobs:
           set -euo pipefail
           ./scripts/resolve-zcashd-compat-manifest.sh \
             --write-github-output \
-            --require-targets x86_64-pc-linux-gnu,aarch64-linux-gnu
+            --require-targets x86_64-pc-linux-gnu
 
   build-zebrad-assets:
     name: Build zebrad assets (${{ matrix.name }})
@@ -381,10 +381,6 @@ jobs:
             runner: ${{ vars.DOCKER_BUILD_RUNNER_AMD64 || 'ubuntu-latest' }}
             platform: linux/amd64
             docker_tag_suffix: amd64
-          - name: linux-aarch64
-            runner: ${{ vars.DOCKER_BUILD_RUNNER_ARM64 || 'ubuntu-24.04-arm' }}
-            platform: linux/arm64
-            docker_tag_suffix: arm64
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
         with:
@@ -451,7 +447,7 @@ jobs:
             .
 
   publish-zcashd-compat-docker-manifest:
-    name: Publish zcashd compat Docker multi-arch manifest
+    name: Publish zcashd compat Docker amd64 manifest
     if: github.event_name == 'release' || inputs.publish_docker_to_dockerhub
     runs-on: ubuntu-latest
     needs: [resolve-release, resolve-zcashd-compat-manifest, build-zcashd-compat]
@@ -479,14 +475,13 @@ jobs:
 
           docker buildx imagetools create \
             "${tags[@]}" \
-            "valaroman/zebra:zcashd-compat-${image_version}-amd64" \
-            "valaroman/zebra:zcashd-compat-${image_version}-arm64"
+            "valaroman/zebra:zcashd-compat-${image_version}-amd64"
 
           docker buildx imagetools inspect "valaroman/zebra:zcashd-compat-${image_version}" \
             --format '{{json .Manifest}}' \
             | jq -e '
                 [ .manifests[].platform | "\(.os)/\(.architecture)" ] as $platforms
-                | ($platforms | index("linux/amd64")) != null and ($platforms | index("linux/arm64")) != null
+                | $platforms == ["linux/amd64"]
               ' >/dev/null
 
   release-binaries-success:

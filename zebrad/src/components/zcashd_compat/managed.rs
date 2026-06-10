@@ -39,7 +39,6 @@ pub enum ZcashdBinarySource {
 pub fn zcashd_target_triple() -> Option<&'static str> {
     let target = match (std::env::consts::OS, std::env::consts::ARCH) {
         ("linux", "x86_64") => Some("x86_64-pc-linux-gnu"),
-        ("linux", "aarch64") => Some("aarch64-linux-gnu"),
         _ => None,
     }?;
 
@@ -524,6 +523,10 @@ mod tests {
     #[test]
     fn target_triple_is_configured_or_none() {
         if let Some(target) = zcashd_target_triple() {
+            assert_eq!(
+                target, "x86_64-pc-linux-gnu",
+                "managed zcashd downloads are only published for x86_64"
+            );
             assert!(
                 EMBEDDED_ZCASHD_RELEASE_MANIFEST
                     .artifact_for_target(target)

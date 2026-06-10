@@ -22,9 +22,9 @@ outputs or prepares a Docker build context containing bin/zcashd.
 Options:
   --manifest-path PATH       Manifest JSON path (default: zebrad/zcashd-compat-manifest.json)
   --target-triple TRIPLE     Rust-style target triple
-  --platform PLATFORM        Docker platform (linux/amd64 or linux/arm64)
+  --platform PLATFORM        Docker platform (linux/amd64)
   --require-targets LIST     Comma-separated target triples that must be present
-  --write-github-output      Write release_tag/url_amd64/sha256_amd64/url_arm64/sha256_arm64
+  --write-github-output      Write release_tag/url_amd64/sha256_amd64
   --prepare-build-context DIR
                              Download, verify, and install zcashd into DIR/bin/zcashd
   -h, --help                 Show this help
@@ -46,7 +46,6 @@ abs_manifest_path() {
 platform_to_target_triple() {
   case "$1" in
     linux/amd64) echo "x86_64-pc-linux-gnu" ;;
-    linux/arm64) echo "aarch64-linux-gnu" ;;
     *)
       echo "unsupported Docker platform for zcashd compat artifacts: $1" >&2
       exit 1
@@ -57,7 +56,6 @@ platform_to_target_triple() {
 target_to_github_prefix() {
   case "$1" in
     x86_64-pc-linux-gnu) echo "amd64" ;;
-    aarch64-linux-gnu) echo "arm64" ;;
     *)
       echo "unsupported target triple for GitHub Actions outputs: $1" >&2
       exit 1
@@ -152,7 +150,7 @@ write_github_output() {
   } >> "$output_file"
 
   local triple prefix url sha256
-  for triple in x86_64-pc-linux-gnu aarch64-linux-gnu; do
+  for triple in x86_64-pc-linux-gnu; do
     if jq -e --arg target "$triple" '
       [.artifacts[] | select(.target_triple == $target)] | length == 1
     ' "$manifest" >/dev/null; then

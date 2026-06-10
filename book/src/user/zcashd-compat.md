@@ -96,7 +96,7 @@ explicitly accept degraded or unstable operation.
 
 The standard container image does not enable zcashd-compat or include `zcashd`
 by default. Release builds publish a separate `zfnd/zebra-zcashd-compat` image,
-or you can build a local compat image with:
+currently for `linux/amd64` only, or you can build a local compat image with:
 
 ```console
 make compat-docker-build
@@ -137,6 +137,7 @@ If `manage_zcashd = true`, Zebra resolves `zcashd` as follows:
 1. If `zcashd_path` is set, Zebra uses that local executable directly.
 2. Otherwise, `zcashd_source = "managed"` uses Zebra's embedded release manifest
    to fetch a compatible `zcashd` archive, verify its SHA256, cache it, and run it.
+   Managed downloads are currently available only on `x86_64` Linux.
 3. `zcashd_source = "path"` requires `zcashd_path` to be set.
 
 Managed downloads are cached under:
@@ -145,8 +146,8 @@ Managed downloads are cached under:
 <state.cache_dir>/zcashd-compat/bin/<release_tag>/<target>/zcashd
 ```
 
-If managed artifacts are unavailable for the local platform, set `zcashd_path`
-to a local binary instead.
+If managed artifacts are unavailable for the local platform, including Linux
+`aarch64`, set `zcashd_path` to a local binary instead.
 
 ## Quick regtest loop
 
