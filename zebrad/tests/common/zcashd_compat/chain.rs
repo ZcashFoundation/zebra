@@ -2,8 +2,8 @@
 
 use color_eyre::eyre::{eyre, Result};
 
+use super::{setup_zcashd_compat, wait_for_zcashd_height};
 use crate::common::regtest::MiningRpcMethods;
-use super::setup_zcashd_compat;
 
 /// Verifies that zebrad and zcashd agree on block count and best block hash.
 ///
@@ -17,6 +17,7 @@ pub async fn height_and_hash_agree() -> Result<()> {
 
     if setup.can_mutate() {
         setup.zebra_client.generate(5).await?;
+        wait_for_zcashd_height(&setup.zcashd_client, 5).await?;
     }
 
     let zebra_count: u64 = setup
@@ -32,7 +33,10 @@ pub async fn height_and_hash_agree() -> Result<()> {
         .map_err(|e| eyre!("zcashd getblockcount: {e}"))?;
 
     if setup.can_mutate() {
-        assert_eq!(zebra_count, 5, "zebrad should have exactly 5 blocks after mining");
+        assert_eq!(
+            zebra_count, 5,
+            "zebrad should have exactly 5 blocks after mining"
+        );
     }
 
     assert_eq!(
@@ -72,6 +76,7 @@ pub async fn getblock_hash_consistent() -> Result<()> {
 
     let start_height: u64 = if setup.can_mutate() {
         setup.zebra_client.generate(3).await?;
+        wait_for_zcashd_height(&setup.zcashd_client, 3).await?;
         1
     } else {
         let tip: u64 = setup

@@ -9,19 +9,17 @@ use tempfile::TempDir;
 use tokio::time::sleep;
 use zebra_chain::parameters::{Network, NetworkKind};
 use zebra_node_services::rpc_client::RpcRequestClient;
-use zebra_test::{args, command::TestChild};
 use zebra_rpc::server::OPENED_RPC_ENDPOINT_MSG;
+use zebra_test::{args, command::TestChild};
 
+use super::{
+    config::{build_zcashd_compat_config, ZCASHD_TEST_RPC_PASS, ZCASHD_TEST_RPC_USER},
+    ZcashdRpcClient, TEST_ZCASHD_COOKIE_FILE, TEST_ZCASHD_RPC_ADDR, TEST_ZCASHD_RPC_PASSWORD,
+    TEST_ZCASHD_RPC_USER, TEST_ZEBRAD_RPC_ADDR,
+};
 use crate::common::{
     config::{read_listen_addr_from_logs, testdir},
     launch::{ZebradTestDirExt, LAUNCH_DELAY},
-};
-use super::{
-    config::{
-        build_zcashd_compat_config, ZCASHD_TEST_RPC_PASS, ZCASHD_TEST_RPC_USER,
-    },
-    ZcashdRpcClient, ZEBRA_TEST_ZCASHD_COOKIE_FILE, ZEBRA_TEST_ZCASHD_RPC_ADDR,
-    ZEBRA_TEST_ZCASHD_RPC_PASSWORD, ZEBRA_TEST_ZCASHD_RPC_USER, ZEBRA_TEST_ZEBRAD_RPC_ADDR,
 };
 
 /// Zcashd-compat cookie file name written by zebrad.
@@ -59,7 +57,9 @@ impl ZcashdCompatSetup {
     pub fn teardown(mut self) -> Result<()> {
         if let Some(mut z) = self.managed.take() {
             z.kill(false)?;
-            z.wait_with_output()?.assert_failure()?.assert_was_killed()?;
+            z.wait_with_output()?
+                .assert_failure()?
+                .assert_was_killed()?;
         }
         Ok(())
     }
@@ -82,9 +82,13 @@ pub async fn spawn_zebrad_with_zcashd_compat() -> Result<ZcashdCompatSetup> {
     let zebra_compat_rpc_addr = compat_cfg.zebra_compat_rpc_addr;
     let zcashd_own_rpc_addr = compat_cfg.zcashd_own_rpc_addr;
 
-    let mut zebrad = dir
-        .with_config(&mut zebrad_config)?
-        .spawn_child(args!["start", "--zcashd-compat", "--unsafe-low-specs"])?;
+    // `--unsafe-low-specs` skips the hardware preflight minimums (600 GiB disk
+    // etc.), which regtest doesn't need and CI runners don't have.
+    let mut zebrad = dir.with_config(&mut zebrad_config)?.spawn_child(args![
+        "start",
+        "--zcashd-compat",
+        "--unsafe-low-specs"
+    ])?;
 
     // Main RPC logs first; zcashd-compat RPC logs second.
     // We pre-chose both ports via random_known_port(), so we only need to wait
@@ -100,7 +104,11 @@ pub async fn spawn_zebrad_with_zcashd_compat() -> Result<ZcashdCompatSetup> {
     wait_for_cookie_file(&cookie_path).await?;
 
     let zebra_client = RpcRequestClient::new(zebra_rpc_addr);
-    let zcashd_client = ZcashdRpcClient::new(zcashd_own_rpc_addr, ZCASHD_TEST_RPC_USER, ZCASHD_TEST_RPC_PASS);
+    let zcashd_client = ZcashdRpcClient::new(
+        zcashd_own_rpc_addr,
+        ZCASHD_TEST_RPC_USER,
+        ZCASHD_TEST_RPC_PASS,
+    );
 
     wait_for_zcashd_rpc(&zcashd_client).await?;
 
@@ -121,26 +129,26 @@ pub async fn spawn_zebrad_with_zcashd_compat() -> Result<ZcashdCompatSetup> {
 pub async fn connect_to_external_zcashd_compat(kind: NetworkKind) -> Result<ZcashdCompatSetup> {
     let _init_guard = zebra_test::init();
 
-    let zebra_rpc_addr: SocketAddr = std::env::var(ZEBRA_TEST_ZEBRAD_RPC_ADDR)
-        .map_err(|_| eyre!("{ZEBRA_TEST_ZEBRAD_RPC_ADDR} must be set for external mode"))?
+    let zebra_rpc_addr: SocketAddr = std::env::var(TEST_ZEBRAD_RPC_ADDR)
+        .map_err(|_| eyre!("{TEST_ZEBRAD_RPC_ADDR} must be set for external mode"))?
         .parse()
-        .map_err(|e| eyre!("invalid {ZEBRA_TEST_ZEBRAD_RPC_ADDR}: {e}"))?;
+        .map_err(|e| eyre!("invalid {TEST_ZEBRAD_RPC_ADDR}: {e}"))?;
 
-    let zcashd_own_rpc_addr: SocketAddr = std::env::var(ZEBRA_TEST_ZCASHD_RPC_ADDR)
-        .map_err(|_| eyre!("{ZEBRA_TEST_ZCASHD_RPC_ADDR} must be set for external mode"))?
+    let zcashd_own_rpc_addr: SocketAddr = std::env::var(TEST_ZCASHD_RPC_ADDR)
+        .map_err(|_| eyre!("{TEST_ZCASHD_RPC_ADDR} must be set for external mode"))?
         .parse()
-        .map_err(|e| eyre!("invalid {ZEBRA_TEST_ZCASHD_RPC_ADDR}: {e}"))?;
+        .map_err(|e| eyre!("invalid {TEST_ZCASHD_RPC_ADDR}: {e}"))?;
 
-    let zcashd_client = if let Ok(cookie_path) = std::env::var(ZEBRA_TEST_ZCASHD_COOKIE_FILE) {
+    let zcashd_client = if let Ok(cookie_path) = std::env::var(TEST_ZCASHD_COOKIE_FILE) {
         ZcashdRpcClient::from_cookie_file(zcashd_own_rpc_addr, &PathBuf::from(cookie_path))?
     } else {
-        let user = std::env::var(ZEBRA_TEST_ZCASHD_RPC_USER).map_err(|_| {
+        let user = std::env::var(TEST_ZCASHD_RPC_USER).map_err(|_| {
             eyre!(
-                "either {ZEBRA_TEST_ZCASHD_COOKIE_FILE} or \
-                 {ZEBRA_TEST_ZCASHD_RPC_USER}/{ZEBRA_TEST_ZCASHD_RPC_PASSWORD} must be set"
+                "either {TEST_ZCASHD_COOKIE_FILE} or \
+                 {TEST_ZCASHD_RPC_USER}/{TEST_ZCASHD_RPC_PASSWORD} must be set"
             )
         })?;
-        let pass = std::env::var(ZEBRA_TEST_ZCASHD_RPC_PASSWORD).unwrap_or_default();
+        let pass = std::env::var(TEST_ZCASHD_RPC_PASSWORD).unwrap_or_default();
         ZcashdRpcClient::new(zcashd_own_rpc_addr, user, pass)
     };
 
@@ -149,7 +157,9 @@ pub async fn connect_to_external_zcashd_compat(kind: NetworkKind) -> Result<Zcas
     let network = match kind {
         NetworkKind::Mainnet => Network::Mainnet,
         NetworkKind::Testnet => Network::new_default_testnet(),
-        NetworkKind::Regtest => unreachable!("regtest is handled by spawn_zebrad_with_zcashd_compat"),
+        NetworkKind::Regtest => {
+            unreachable!("regtest is handled by spawn_zebrad_with_zcashd_compat")
+        }
     };
 
     // In external mode there is no zcashd-compat RPC addr in our control;

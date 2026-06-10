@@ -2,7 +2,20 @@
 
 use color_eyre::eyre::{eyre, Result};
 
-use super::setup_zcashd_compat;
+use super::{launch::ZcashdCompatSetup, setup_zcashd_compat, wait_for_zcashd_height};
+use crate::common::regtest::MiningRpcMethods;
+
+/// Mines one block and waits for zcashd to sync it (managed mode only).
+///
+/// zcashd disables wallet RPCs while in initial block download, which on a
+/// fresh regtest chain only clears once the first block arrives.
+async fn exit_initial_block_download(setup: &ZcashdCompatSetup) -> Result<()> {
+    if setup.can_mutate() {
+        setup.zebra_client.generate(1).await?;
+        wait_for_zcashd_height(&setup.zcashd_client, 1).await?;
+    }
+    Ok(())
+}
 
 /// Verifies that zcashd can generate a new transparent address.
 ///
@@ -13,13 +26,18 @@ pub async fn address_generation() -> Result<()> {
         return Ok(());
     };
 
+    exit_initial_block_download(&setup).await?;
+
     let address: String = setup
         .zcashd_client
         .json_result_from_call("getnewaddress", "[]")
         .await
         .map_err(|e| eyre!("getnewaddress: {e}"))?;
 
-    assert!(!address.is_empty(), "getnewaddress returned an empty string");
+    assert!(
+        !address.is_empty(),
+        "getnewaddress returned an empty string"
+    );
 
     setup.teardown()
 }
@@ -37,13 +55,19 @@ pub async fn initial_balance_zero() -> Result<()> {
         return setup.teardown();
     }
 
+    // Mines to zebrad's miner address, so the zcashd wallet balance stays zero.
+    exit_initial_block_download(&setup).await?;
+
     let balance: f64 = setup
         .zcashd_client
         .json_result_from_call("getbalance", "[]")
         .await
         .map_err(|e| eyre!("getbalance: {e}"))?;
 
-    assert_eq!(balance, 0.0, "expected zero balance on fresh regtest wallet");
+    assert_eq!(
+        balance, 0.0,
+        "expected zero balance on fresh regtest wallet"
+    );
 
     setup.teardown()
 }
@@ -56,13 +80,20 @@ pub async fn getwalletinfo_fields_present() -> Result<()> {
         return Ok(());
     };
 
+    exit_initial_block_download(&setup).await?;
+
     let info: serde_json::Value = setup
         .zcashd_client
         .json_result_from_call("getwalletinfo", "[]")
         .await
         .map_err(|e| eyre!("getwalletinfo: {e}"))?;
 
-    for field in &["walletversion", "balance", "unconfirmed_balance", "immature_balance"] {
+    for field in &[
+        "walletversion",
+        "balance",
+        "unconfirmed_balance",
+        "immature_balance",
+    ] {
         assert!(
             info.get(field).is_some(),
             "getwalletinfo response missing field `{field}`: {info}"

@@ -34,18 +34,12 @@ pub struct ZcashdReleaseArtifact {
 ///
 pub const EMBEDDED_ZCASHD_RELEASE_MANIFEST: ZcashdReleaseManifest = ZcashdReleaseManifest {
     schema_version: EMBEDDED_MANIFEST_SCHEMA_VERSION,
-    release_tag: "v6.2.1-alpha",
+    release_tag: "v6.2.1-alpha-zebra-regtest-compat.1",
     artifacts: &[
         ZcashdReleaseArtifact {
             target_triple: "x86_64-pc-linux-gnu",
-            runtime_archive_url: "https://github.com/valargroup/zcashd/releases/download/v6.2.1-alpha/zcashd-zebra-compat-v6.2.1-alpha-linux-x86_64.tar.gz",
-            runtime_archive_sha256: "09e640b55c9af91dee5742e5e9bb6712f92d7073f0fe899ca58d43f62eb9d13c",
-            runtime_archive_member_binary_path: "./bin/zcashd",
-        },
-        ZcashdReleaseArtifact {
-            target_triple: "aarch64-linux-gnu",
-            runtime_archive_url: "https://github.com/valargroup/zcashd/releases/download/v6.2.1-alpha/zcashd-zebra-compat-v6.2.1-alpha-linux-aarch64.tar.gz",
-            runtime_archive_sha256: "133e562f86b4f49dd4e69ad55eb94bdd259c5e8af4fc533ec72b1f39bbbb6927",
+            runtime_archive_url: "https://github.com/valargroup/zcashd/releases/download/v6.2.1-alpha-zebra-regtest-compat.1/zcashd-zebra-compat-v6.2.1-alpha-zebra-regtest-compat.1-linux-x86_64.tar.gz",
+            runtime_archive_sha256: "2a5eb54015125573e8fd5dac087d10b9952f99b7cedb69dfe3f5c8c526979e0f",
             runtime_archive_member_binary_path: "./bin/zcashd",
         },
     ],

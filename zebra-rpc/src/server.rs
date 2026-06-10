@@ -191,10 +191,9 @@ impl RpcServer {
         let wait_on_shutdown = move || {
             span.in_scope(|| {
                 if config.enable_cookie_auth {
-                    if let Err(err) = cookie::remove_from_disk(
-                        &config.cookie_dir,
-                        Some(&config.cookie_file_name),
-                    ) {
+                    if let Err(err) =
+                        cookie::remove_from_disk(&config.cookie_dir, Some(&config.cookie_file_name))
+                    {
                         warn!(
                             ?err,
                             "unexpectedly could not remove the rpc auth cookie from the disk"

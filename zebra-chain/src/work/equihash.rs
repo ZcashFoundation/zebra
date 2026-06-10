@@ -33,6 +33,12 @@ pub(crate) const SOLUTION_SIZE: usize = 1344;
 /// The size of an Equihash solution in bytes on Regtest (always 36).
 pub(crate) const REGTEST_SOLUTION_SIZE: usize = 36;
 
+/// The Equihash `N` parameter on Regtest, matching zcashd's regtest chain parameters.
+const REGTEST_N: u32 = 48;
+
+/// The Equihash `K` parameter on Regtest, matching zcashd's regtest chain parameters.
+const REGTEST_K: u32 = 5;
+
 /// Equihash Solution in compressed format.
 ///
 /// A wrapper around `[u8; n]` where `n` is the solution size because
@@ -73,8 +79,10 @@ impl Solution {
         // TODO:
         // - Add Equihash parameters field to `testnet::Parameters`
         // - Update `Solution::Regtest` variant to hold a `Vec` to support arbitrary parameters - rename to `Other`
-        let n = 200;
-        let k = 9;
+        let (n, k) = match self {
+            Solution::Common(_) => (200, 9),
+            Solution::Regtest(_) => (REGTEST_N, REGTEST_K),
+        };
         let nonce = &header.nonce;
 
         let mut input = Vec::new();

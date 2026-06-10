@@ -4524,12 +4524,13 @@ async fn disconnects_from_misbehaving_peers() -> Result<()> {
 // These tests require a zcashd binary and are skipped unless `TEST_ZCASHD_COMPAT=1`
 // is set. Run the full suite with:
 //
-//   TEST_ZCASHD_COMPAT=1 cargo nextest run --profile zcashd-compat-integration
+//   TEST_ZCASHD_COMPAT=1 \
+//     cargo nextest run --profile zcashd-compat-integration --run-ignored=only
 //
 // Or with an explicit binary:
 //
-//   TEST_ZCASHD_COMPAT=1 ZEBRA_TEST_ZCASHD_PATH=/path/to/zcashd \
-//     cargo nextest run --profile zcashd-compat-integration
+//   TEST_ZCASHD_COMPAT=1 TEST_ZCASHD_PATH=/path/to/zcashd \
+//     cargo nextest run --profile zcashd-compat-integration --run-ignored=only
 
 /// Verifies that both zebrad and zcashd start and respond to basic RPC calls.
 ///

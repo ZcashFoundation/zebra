@@ -14,20 +14,24 @@ everything down.  No external infrastructure is required.
 
 ```
 TEST_ZCASHD_COMPAT=1                          (required)
-ZEBRA_TEST_ZCASHD_PATH=/path/to/zcashd        (optional — uses managed download if unset)
+TEST_ZCASHD_PATH=/path/to/zcashd        (optional — uses managed download if unset)
 ```
 
 Run:
 
 ```console
 # Via make
-make compat-test-regtest ZEBRA_TEST_ZCASHD_PATH=/path/to/zcashd
+make compat-test-regtest TEST_ZCASHD_PATH=/path/to/zcashd
 
 # Via cargo directly
 TEST_ZCASHD_COMPAT=1 \
-  ZEBRA_TEST_ZCASHD_PATH=/path/to/zcashd \
-  cargo nextest run --profile zcashd-compat-integration
+  TEST_ZCASHD_PATH=/path/to/zcashd \
+  cargo nextest run --profile zcashd-compat-integration --run-ignored=only
 ```
+
+In CI, the suite runs automatically on every merge to `main` that touches the
+zcashd-compat implementation or test harness — see
+[`.github/workflows/zcashd-compat-regtest.yml`](../../../../.github/workflows/zcashd-compat-regtest.yml).
 
 ### External — Mainnet / Testnet (deployment validation)
 
@@ -37,14 +41,14 @@ No writes are performed on a live network.
 
 ```
 TEST_ZCASHD_COMPAT=1                          (required)
-ZEBRA_TEST_ZCASHD_COMPAT_NETWORK=Mainnet      (or Testnet)
-ZEBRA_TEST_ZEBRAD_RPC_ADDR=127.0.0.1:8232     (zebrad main RPC)
-ZEBRA_TEST_ZCASHD_RPC_ADDR=127.0.0.1:28232    (zcashd own RPC)
+TEST_ZCASHD_COMPAT_NETWORK=Mainnet      (or Testnet)
+TEST_ZEBRAD_RPC_ADDR=127.0.0.1:8232     (zebrad main RPC)
+TEST_ZCASHD_RPC_ADDR=127.0.0.1:28232    (zcashd own RPC)
 
 # Authentication — provide one of:
-ZEBRA_TEST_ZCASHD_COOKIE_FILE=/path/to/.cookie    (preferred)
-ZEBRA_TEST_ZCASHD_RPC_USER=username               (alternative)
-ZEBRA_TEST_ZCASHD_RPC_PASSWORD=password
+TEST_ZCASHD_COOKIE_FILE=/path/to/.cookie    (preferred)
+TEST_ZCASHD_RPC_USER=username               (alternative)
+TEST_ZCASHD_RPC_PASSWORD=password
 ```
 
 Run:
@@ -52,22 +56,22 @@ Run:
 ```console
 # Via make (addresses can be overridden as Make vars)
 make compat-test-mainnet \
-  ZEBRA_TEST_ZEBRAD_RPC_ADDR=127.0.0.1:8232 \
-  ZEBRA_TEST_ZCASHD_RPC_ADDR=127.0.0.1:28232 \
-  ZEBRA_TEST_ZCASHD_COOKIE_FILE=/home/user/.zcash/.cookie
+  TEST_ZEBRAD_RPC_ADDR=127.0.0.1:8232 \
+  TEST_ZCASHD_RPC_ADDR=127.0.0.1:28232 \
+  TEST_ZCASHD_COOKIE_FILE=/home/user/.zcash/.cookie
 
 make compat-test-testnet \
-  ZEBRA_TEST_ZEBRAD_RPC_ADDR=127.0.0.1:18232 \
-  ZEBRA_TEST_ZCASHD_RPC_ADDR=127.0.0.1:18233 \
-  ZEBRA_TEST_ZCASHD_COOKIE_FILE=/home/user/.zcash/testnet3/.cookie
+  TEST_ZEBRAD_RPC_ADDR=127.0.0.1:18232 \
+  TEST_ZCASHD_RPC_ADDR=127.0.0.1:18233 \
+  TEST_ZCASHD_COOKIE_FILE=/home/user/.zcash/testnet3/.cookie
 
 # Via cargo directly (mainnet example)
 TEST_ZCASHD_COMPAT=1 \
-  ZEBRA_TEST_ZCASHD_COMPAT_NETWORK=Mainnet \
-  ZEBRA_TEST_ZEBRAD_RPC_ADDR=127.0.0.1:8232 \
-  ZEBRA_TEST_ZCASHD_RPC_ADDR=127.0.0.1:28232 \
-  ZEBRA_TEST_ZCASHD_COOKIE_FILE=/home/user/.zcash/.cookie \
-  cargo nextest run --profile zcashd-compat-external
+  TEST_ZCASHD_COMPAT_NETWORK=Mainnet \
+  TEST_ZEBRAD_RPC_ADDR=127.0.0.1:8232 \
+  TEST_ZCASHD_RPC_ADDR=127.0.0.1:28232 \
+  TEST_ZCASHD_COOKIE_FILE=/home/user/.zcash/.cookie \
+  cargo nextest run --profile zcashd-compat-external --run-ignored=only
 ```
 
 ### Skip behaviour
@@ -75,7 +79,7 @@ TEST_ZCASHD_COMPAT=1 \
 If `TEST_ZCASHD_COMPAT` is not set, every test prints a message and exits
 `Ok(())` immediately.  The skip is silent in CI output — no failures, no noise.
 
-If `ZEBRA_TEST_ZCASHD_COMPAT_NETWORK` is set to `Mainnet` or `Testnet` but
+If `TEST_ZCASHD_COMPAT_NETWORK` is set to `Mainnet` or `Testnet` but
 the required address or auth variables are missing, the test suite returns an
 error (misconfiguration, not a skip).
 
@@ -84,13 +88,13 @@ error (misconfiguration, not a skip).
 | Variable | Required | Purpose |
 |---|---|---|
 | `TEST_ZCASHD_COMPAT` | Always | Enable the suite (set to any non-empty value) |
-| `ZEBRA_TEST_ZCASHD_PATH` | No | Path to a zcashd binary; uses managed download if absent |
-| `ZEBRA_TEST_ZCASHD_COMPAT_NETWORK` | External only | `Mainnet` or `Testnet`; absent = Regtest/managed |
-| `ZEBRA_TEST_ZEBRAD_RPC_ADDR` | External only | zebrad main RPC (`host:port`) |
-| `ZEBRA_TEST_ZCASHD_RPC_ADDR` | External only | zcashd own RPC (`host:port`) |
-| `ZEBRA_TEST_ZCASHD_COOKIE_FILE` | External (preferred) | Path to zcashd cookie file |
-| `ZEBRA_TEST_ZCASHD_RPC_USER` | External (fallback) | zcashd RPC username |
-| `ZEBRA_TEST_ZCASHD_RPC_PASSWORD` | External (fallback) | zcashd RPC password |
+| `TEST_ZCASHD_PATH` | No | Path to a zcashd binary; uses managed download if absent |
+| `TEST_ZCASHD_COMPAT_NETWORK` | External only | `Mainnet` or `Testnet`; absent = Regtest/managed |
+| `TEST_ZEBRAD_RPC_ADDR` | External only | zebrad main RPC (`host:port`) |
+| `TEST_ZCASHD_RPC_ADDR` | External only | zcashd own RPC (`host:port`) |
+| `TEST_ZCASHD_COOKIE_FILE` | External (preferred) | Path to zcashd cookie file |
+| `TEST_ZCASHD_RPC_USER` | External (fallback) | zcashd RPC username |
+| `TEST_ZCASHD_RPC_PASSWORD` | External (fallback) | zcashd RPC password |
 
 ## Test Inventory
 
@@ -121,7 +125,7 @@ Before running against mainnet or testnet:
 2. zcashd must be running in zebra-compat mode, connected to that zebrad via
    the compat RPC channel.
 3. Both processes must be reachable from the test runner via the addresses in
-   `ZEBRA_TEST_ZEBRAD_RPC_ADDR` and `ZEBRA_TEST_ZCASHD_RPC_ADDR`.
+   `TEST_ZEBRAD_RPC_ADDR` and `TEST_ZCASHD_RPC_ADDR`.
 4. zcashd's cookie file path or explicit credentials must be provided.
 
 A typical production layout uses the cookie file (`~/.zcash/.cookie` on
@@ -136,7 +140,9 @@ zebrad/tests/common/
 │                              env var constants, setup_zcashd_compat()
 └── zcashd_compat/
     ├── config.rs              build_zcashd_compat_config() (regtest only),
-    │                          expected_chain_name(), read_test_network_kind()
+    │                          expected_zebrad_chain_name(),
+    │                          expected_zcashd_chain_name(),
+    │                          read_test_network_kind()
     ├── launch.rs              ZcashdCompatSetup, spawn_zebrad_with_zcashd_compat(),
     │                          connect_to_external_zcashd_compat(), wait_for_zcashd_rpc()
     ├── startup.rs             both_processes_start, readiness_after_mine, rpc_requires_auth

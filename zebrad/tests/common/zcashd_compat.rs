@@ -27,28 +27,33 @@ pub mod wallet;
 /// Set to any non-empty value (e.g. `1`) to run the suite.
 pub const TEST_ZCASHD_COMPAT: &str = "TEST_ZCASHD_COMPAT";
 
+// NOTE: these test env vars deliberately avoid the `ZEBRA_` prefix, because
+// zebrad parses every inherited `ZEBRA_*` env var as a config override, and
+// `ZebradConfig` rejects unknown fields. A `ZEBRA_`-prefixed test var would
+// make every spawned zebrad child abort at startup.
+
 /// Optional explicit path to a zcashd binary with zebra-compat support.
 /// If unset, the managed download is used in regtest mode.
-pub const ZEBRA_TEST_ZCASHD_PATH: &str = "ZEBRA_TEST_ZCASHD_PATH";
+pub const TEST_ZCASHD_PATH: &str = "TEST_ZCASHD_PATH";
 
 /// Network for external mode: `Mainnet` or `Testnet`.
 /// Absent means regtest/managed.
-pub const ZEBRA_TEST_ZCASHD_COMPAT_NETWORK: &str = "ZEBRA_TEST_ZCASHD_COMPAT_NETWORK";
+pub const TEST_ZCASHD_COMPAT_NETWORK: &str = "TEST_ZCASHD_COMPAT_NETWORK";
 
 /// Zebrad main RPC address for external mode (e.g. `127.0.0.1:8232`).
-pub const ZEBRA_TEST_ZEBRAD_RPC_ADDR: &str = "ZEBRA_TEST_ZEBRAD_RPC_ADDR";
+pub const TEST_ZEBRAD_RPC_ADDR: &str = "TEST_ZEBRAD_RPC_ADDR";
 
 /// Zcashd own RPC address for external mode (e.g. `127.0.0.1:8233`).
-pub const ZEBRA_TEST_ZCASHD_RPC_ADDR: &str = "ZEBRA_TEST_ZCASHD_RPC_ADDR";
+pub const TEST_ZCASHD_RPC_ADDR: &str = "TEST_ZCASHD_RPC_ADDR";
 
 /// Zcashd RPC username (user/pass auth, alternative to cookie file).
-pub const ZEBRA_TEST_ZCASHD_RPC_USER: &str = "ZEBRA_TEST_ZCASHD_RPC_USER";
+pub const TEST_ZCASHD_RPC_USER: &str = "TEST_ZCASHD_RPC_USER";
 
 /// Zcashd RPC password (user/pass auth, alternative to cookie file).
-pub const ZEBRA_TEST_ZCASHD_RPC_PASSWORD: &str = "ZEBRA_TEST_ZCASHD_RPC_PASSWORD";
+pub const TEST_ZCASHD_RPC_PASSWORD: &str = "TEST_ZCASHD_RPC_PASSWORD";
 
 /// Path to zcashd cookie file for external mode (preferred over user/pass).
-pub const ZEBRA_TEST_ZCASHD_COOKIE_FILE: &str = "ZEBRA_TEST_ZCASHD_COOKIE_FILE";
+pub const TEST_ZCASHD_COOKIE_FILE: &str = "TEST_ZCASHD_COOKIE_FILE";
 
 // ── Skip guard ────────────────────────────────────────────────────────────────
 
@@ -125,20 +130,49 @@ impl ZcashdRpcClient {
     }
 
     /// Sends a call and attempts to deserialize the `result` field.
+    ///
+    /// zcashd returns JSON-RPC 1.0-style responses where both `result` and
+    /// `error` are always present and the unused one is `null`, so this parses
+    /// the fields manually instead of using `jsonrpsee_types::Response`
+    /// (which rejects `"error": null`).
     pub async fn json_result_from_call<T: DeserializeOwned>(
         &self,
         method: impl AsRef<str>,
         params: impl AsRef<str>,
     ) -> std::result::Result<T, BoxError> {
         let text = self.call(method, params).await?.text().await?;
-        let output: jsonrpsee_types::Response<serde_json::Value> = serde_json::from_str(&text)?;
-        match output.payload {
-            jsonrpsee_types::ResponsePayload::Success(v) => {
-                Ok(serde_json::from_value(v.into_owned())?)
+        let mut response: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&text)?;
+        match response.remove("error") {
+            Some(error) if !error.is_null() => Err(error.to_string().into()),
+            _ => {
+                let result = response.remove("result").unwrap_or(serde_json::Value::Null);
+                Ok(serde_json::from_value(result)?)
             }
-            jsonrpsee_types::ResponsePayload::Error(e) => Err(e.to_string().into()),
         }
     }
+}
+
+/// Polls zcashd's `getblockcount` until it reaches `height`, up to 60 seconds.
+///
+/// zcashd learns about newly mined blocks from zebrad via a polling worker,
+/// so tests that mine must wait for it to catch up before cross-checking.
+pub async fn wait_for_zcashd_height(client: &ZcashdRpcClient, height: u64) -> Result<()> {
+    let mut last_seen = None;
+    for _ in 0..60u32 {
+        if let Ok(count) = client
+            .json_result_from_call::<u64>("getblockcount", "[]")
+            .await
+        {
+            if count >= height {
+                return Ok(());
+            }
+            last_seen = Some(count);
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    Err(eyre!(
+        "zcashd did not reach height {height} within 60 s (last seen: {last_seen:?})"
+    ))
 }
 
 // ── Dispatch ──────────────────────────────────────────────────────────────────
@@ -156,6 +190,8 @@ pub async fn setup_zcashd_compat() -> Result<Option<launch::ZcashdCompatSetup>> 
 
     match config::read_test_network_kind()? {
         NetworkKind::Regtest => launch::spawn_zebrad_with_zcashd_compat().await.map(Some),
-        kind => launch::connect_to_external_zcashd_compat(kind).await.map(Some),
+        kind => launch::connect_to_external_zcashd_compat(kind)
+            .await
+            .map(Some),
     }
 }

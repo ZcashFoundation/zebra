@@ -5,8 +5,24 @@ use std::time::Duration;
 use color_eyre::eyre::{eyre, Result};
 use tokio::time::sleep;
 
+use super::{
+    config::MINER_PRIV_WIF, launch::ZcashdCompatSetup, setup_zcashd_compat, wait_for_zcashd_height,
+};
 use crate::common::regtest::MiningRpcMethods;
-use super::setup_zcashd_compat;
+
+/// Imports the deterministic miner private key into zcashd's wallet (with a
+/// rescan), making the mined coinbase outputs spendable via `sendtoaddress`.
+async fn import_miner_key(setup: &ZcashdCompatSetup) -> Result<()> {
+    let _: serde_json::Value = setup
+        .zcashd_client
+        .json_result_from_call(
+            "importprivkey",
+            &format!(r#"["{MINER_PRIV_WIF}", "", true]"#),
+        )
+        .await
+        .map_err(|e| eyre!("importprivkey: {e}"))?;
+    Ok(())
+}
 
 /// Sends a transparent transaction via zcashd and confirms it appears in
 /// zebrad's mempool.
@@ -40,6 +56,8 @@ pub async fn transparent_tx_in_mempool() -> Result<()> {
 
     // Mine enough blocks to have spendable coinbase (maturity = 100 on regtest).
     setup.zebra_client.generate(110).await?;
+    wait_for_zcashd_height(&setup.zcashd_client, 110).await?;
+    import_miner_key(&setup).await?;
 
     // Get a fresh address and send some ZEC to it.
     let addr: String = setup
@@ -92,6 +110,8 @@ pub async fn transparent_tx_confirms() -> Result<()> {
 
     // Mine enough blocks to have spendable coinbase.
     setup.zebra_client.generate(110).await?;
+    wait_for_zcashd_height(&setup.zcashd_client, 110).await?;
+    import_miner_key(&setup).await?;
 
     let addr: String = setup
         .zcashd_client

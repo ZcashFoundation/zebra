@@ -179,28 +179,28 @@ compat-status-sync:
 
 # Optional: path to a local zcashd binary for regtest tests.
 # If unset, the managed download embedded in the zebrad binary is used.
-# Override with: make compat-test-regtest ZEBRA_TEST_ZCASHD_PATH=/path/to/zcashd
-ZEBRA_TEST_ZCASHD_PATH ?=
+# Override with: make compat-test-regtest TEST_ZCASHD_PATH=/path/to/zcashd
+TEST_ZCASHD_PATH ?=
 
 # External-mode test addresses and credentials.
 # Set these before running compat-test-mainnet or compat-test-testnet.
-ZEBRA_TEST_ZEBRAD_RPC_ADDR ?= 127.0.0.1:8232
-ZEBRA_TEST_ZCASHD_RPC_ADDR ?= 127.0.0.1:28232
+TEST_ZEBRAD_RPC_ADDR ?= 127.0.0.1:8232
+TEST_ZCASHD_RPC_ADDR ?= 127.0.0.1:28232
 # Set one of the following for zcashd authentication (cookie file is preferred):
-ZEBRA_TEST_ZCASHD_COOKIE_FILE ?=
-ZEBRA_TEST_ZCASHD_RPC_USER ?=
-ZEBRA_TEST_ZCASHD_RPC_PASSWORD ?=
+TEST_ZCASHD_COOKIE_FILE ?=
+TEST_ZCASHD_RPC_USER ?=
+TEST_ZCASHD_RPC_PASSWORD ?=
 
 # Run the full zcashd-compat integration test suite against a fresh regtest
 # environment.  zebrad and zcashd are spawned automatically by the test harness.
 #
-# Prerequisites: a zcashd binary (set ZEBRA_TEST_ZCASHD_PATH) or let the
+# Prerequisites: a zcashd binary (set TEST_ZCASHD_PATH) or let the
 #   managed download provide one.
 # When to use: CI smoke-testing and developer local verification after code changes.
 compat-test-regtest:
 	TEST_ZCASHD_COMPAT=1 \
-	ZEBRA_TEST_ZCASHD_PATH="$(ZEBRA_TEST_ZCASHD_PATH)" \
-	cargo nextest run --profile zcashd-compat-integration
+	TEST_ZCASHD_PATH="$(TEST_ZCASHD_PATH)" \
+	cargo nextest run --profile zcashd-compat-integration --run-ignored=only
 
 # Run the read-only zcashd-compat test suite against a live mainnet deployment.
 # Requires a fully-synced zebrad and zcashd already running on this host.
@@ -209,18 +209,18 @@ compat-test-regtest:
 # Prerequisites:
 #   - zebrad running with --zcashd-compat on mainnet
 #   - zcashd -zebra-compat connected to that zebrad
-#   - ZEBRA_TEST_ZEBRAD_RPC_ADDR and ZEBRA_TEST_ZCASHD_RPC_ADDR pointing to them
-#   - ZEBRA_TEST_ZCASHD_COOKIE_FILE or ZEBRA_TEST_ZCASHD_RPC_USER/PASSWORD set
+#   - TEST_ZEBRAD_RPC_ADDR and TEST_ZCASHD_RPC_ADDR pointing to them
+#   - TEST_ZCASHD_COOKIE_FILE or TEST_ZCASHD_RPC_USER/PASSWORD set
 # When to use: validating a live mainnet deployment after an upgrade.
 compat-test-mainnet:
 	TEST_ZCASHD_COMPAT=1 \
-	ZEBRA_TEST_ZCASHD_COMPAT_NETWORK=Mainnet \
-	ZEBRA_TEST_ZEBRAD_RPC_ADDR="$(ZEBRA_TEST_ZEBRAD_RPC_ADDR)" \
-	ZEBRA_TEST_ZCASHD_RPC_ADDR="$(ZEBRA_TEST_ZCASHD_RPC_ADDR)" \
-	ZEBRA_TEST_ZCASHD_COOKIE_FILE="$(ZEBRA_TEST_ZCASHD_COOKIE_FILE)" \
-	ZEBRA_TEST_ZCASHD_RPC_USER="$(ZEBRA_TEST_ZCASHD_RPC_USER)" \
-	ZEBRA_TEST_ZCASHD_RPC_PASSWORD="$(ZEBRA_TEST_ZCASHD_RPC_PASSWORD)" \
-	cargo nextest run --profile zcashd-compat-external
+	TEST_ZCASHD_COMPAT_NETWORK=Mainnet \
+	TEST_ZEBRAD_RPC_ADDR="$(TEST_ZEBRAD_RPC_ADDR)" \
+	TEST_ZCASHD_RPC_ADDR="$(TEST_ZCASHD_RPC_ADDR)" \
+	TEST_ZCASHD_COOKIE_FILE="$(TEST_ZCASHD_COOKIE_FILE)" \
+	TEST_ZCASHD_RPC_USER="$(TEST_ZCASHD_RPC_USER)" \
+	TEST_ZCASHD_RPC_PASSWORD="$(TEST_ZCASHD_RPC_PASSWORD)" \
+	cargo nextest run --profile zcashd-compat-external --run-ignored=only
 
 # Run the read-only zcashd-compat test suite against a live testnet deployment.
 # Identical to compat-test-mainnet but targets testnet instances.
@@ -230,10 +230,10 @@ compat-test-mainnet:
 # When to use: validating a testnet deployment before promoting changes to mainnet.
 compat-test-testnet:
 	TEST_ZCASHD_COMPAT=1 \
-	ZEBRA_TEST_ZCASHD_COMPAT_NETWORK=Testnet \
-	ZEBRA_TEST_ZEBRAD_RPC_ADDR="$(ZEBRA_TEST_ZEBRAD_RPC_ADDR)" \
-	ZEBRA_TEST_ZCASHD_RPC_ADDR="$(ZEBRA_TEST_ZCASHD_RPC_ADDR)" \
-	ZEBRA_TEST_ZCASHD_COOKIE_FILE="$(ZEBRA_TEST_ZCASHD_COOKIE_FILE)" \
-	ZEBRA_TEST_ZCASHD_RPC_USER="$(ZEBRA_TEST_ZCASHD_RPC_USER)" \
-	ZEBRA_TEST_ZCASHD_RPC_PASSWORD="$(ZEBRA_TEST_ZCASHD_RPC_PASSWORD)" \
-	cargo nextest run --profile zcashd-compat-external
+	TEST_ZCASHD_COMPAT_NETWORK=Testnet \
+	TEST_ZEBRAD_RPC_ADDR="$(TEST_ZEBRAD_RPC_ADDR)" \
+	TEST_ZCASHD_RPC_ADDR="$(TEST_ZCASHD_RPC_ADDR)" \
+	TEST_ZCASHD_COOKIE_FILE="$(TEST_ZCASHD_COOKIE_FILE)" \
+	TEST_ZCASHD_RPC_USER="$(TEST_ZCASHD_RPC_USER)" \
+	TEST_ZCASHD_RPC_PASSWORD="$(TEST_ZCASHD_RPC_PASSWORD)" \
+	cargo nextest run --profile zcashd-compat-external --run-ignored=only

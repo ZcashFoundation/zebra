@@ -140,8 +140,8 @@ default-filter = 'package(zebrad) and test(~zcashd_compat)'
 
 [profile.zcashd-compat-external]
 # External mode: connect to pre-running mainnet/testnet zebrad + zcashd.
-# Set ZEBRA_TEST_ZCASHD_COMPAT_NETWORK, ZEBRA_TEST_ZEBRAD_RPC_ADDR,
-# ZEBRA_TEST_ZCASHD_RPC_ADDR, and auth env vars before running.
+# Set TEST_ZCASHD_COMPAT_NETWORK, TEST_ZEBRAD_RPC_ADDR,
+# TEST_ZCASHD_RPC_ADDR, and auth env vars before running.
 # No block mining — 5 minutes per test is sufficient.
 test-threads = 1
 slow-timeout = { period = "5m", terminate-after = 2 }

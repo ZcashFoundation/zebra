@@ -2,8 +2,11 @@
 
 use color_eyre::eyre::Result;
 
+use super::{
+    config::{expected_zcashd_chain_name, expected_zebrad_chain_name},
+    setup_zcashd_compat, wait_for_zcashd_height,
+};
 use crate::common::regtest::MiningRpcMethods;
-use super::{config::expected_chain_name, setup_zcashd_compat};
 
 /// Verifies that both zebrad and zcashd start and respond to basic RPC calls.
 ///
@@ -14,7 +17,8 @@ pub async fn both_processes_start() -> Result<()> {
         return Ok(());
     };
 
-    let expected_chain = expected_chain_name(&setup.network);
+    let expected_zebrad_chain = expected_zebrad_chain_name(&setup.network);
+    let expected_zcashd_chain = expected_zcashd_chain_name(&setup.network);
 
     let zebra_info: serde_json::Value = setup
         .zebra_client
@@ -24,8 +28,8 @@ pub async fn both_processes_start() -> Result<()> {
 
     assert_eq!(
         zebra_info["chain"].as_str(),
-        Some(expected_chain),
-        "zebrad chain mismatch: expected {expected_chain:?}, got {:?}",
+        Some(expected_zebrad_chain.as_str()),
+        "zebrad chain mismatch: expected {expected_zebrad_chain:?}, got {:?}",
         zebra_info["chain"]
     );
 
@@ -37,8 +41,8 @@ pub async fn both_processes_start() -> Result<()> {
 
     assert_eq!(
         zcashd_info["chain"].as_str(),
-        Some(expected_chain),
-        "zcashd chain mismatch: expected {expected_chain:?}, got {:?}",
+        Some(expected_zcashd_chain),
+        "zcashd chain mismatch: expected {expected_zcashd_chain:?}, got {:?}",
         zcashd_info["chain"]
     );
 
@@ -57,22 +61,38 @@ pub async fn readiness_after_mine() -> Result<()> {
 
     if setup.can_mutate() {
         setup.zebra_client.generate(5).await?;
+        wait_for_zcashd_height(&setup.zcashd_client, 5).await?;
     }
 
-    let info: serde_json::Value = setup
-        .zcashd_client
-        .json_result_from_call("getzebracompatinfo", "[]")
-        .await
-        .map_err(|e| color_eyre::eyre::eyre!("getzebracompatinfo: {e}"))?;
+    // Readiness flips to "ready" once several async components converge
+    // (tip match, mempool mirror, wallet notifications), so poll for up to
+    // 60 seconds in managed mode instead of asserting a single snapshot.
+    let mut readiness = String::new();
+    for attempt in 1..=60u32 {
+        let info: serde_json::Value = setup
+            .zcashd_client
+            .json_result_from_call("getzebracompatinfo", "[]")
+            .await
+            .map_err(|e| color_eyre::eyre::eyre!("getzebracompatinfo: {e}"))?;
 
-    let readiness = info["readiness"]
-        .as_str()
-        .ok_or_else(|| color_eyre::eyre::eyre!("missing or non-string `readiness` field: {info}"))?;
+        readiness = info["readiness"]
+            .as_str()
+            .ok_or_else(|| {
+                color_eyre::eyre::eyre!("missing or non-string `readiness` field: {info}")
+            })?
+            .to_string();
+
+        if !setup.can_mutate() || readiness == "ready" || attempt == 60 {
+            break;
+        }
+
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
 
     if setup.can_mutate() {
         assert_eq!(
             readiness, "ready",
-            "expected readiness=='ready' after mining 5 blocks, got {readiness:?}"
+            "expected readiness=='ready' within 60 s of mining 5 blocks, got {readiness:?}"
         );
     }
 

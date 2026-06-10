@@ -98,10 +98,10 @@ impl NetworkKind {
     /// Return the network name as defined in
     /// [BIP70](https://github.com/bitcoin/bips/blob/master/bip-0070.mediawiki#paymentdetailspaymentrequest)
     pub fn bip70_network_name(&self) -> String {
-        if *self == Self::Mainnet {
-            "main".to_string()
-        } else {
-            "test".to_string()
+        match self {
+            Self::Mainnet => "main".to_string(),
+            Self::Testnet => "test".to_string(),
+            Self::Regtest => "test".to_string(),
         }
     }
 

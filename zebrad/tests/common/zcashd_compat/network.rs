@@ -63,7 +63,10 @@ pub async fn mempool_info_valid() -> Result<()> {
             "getmempoolinfo field `{field}` should be a number, got {value}"
         );
         let n = value.as_f64().unwrap_or(-1.0);
-        assert!(n >= 0.0, "getmempoolinfo field `{field}` should be non-negative, got {n}");
+        assert!(
+            n >= 0.0,
+            "getmempoolinfo field `{field}` should be non-negative, got {n}"
+        );
     }
 
     setup.teardown()

@@ -1,0 +1,69 @@
+name: zcashd-compat Regtest
+
+# Runs the managed zcashd-compat Regtest integration suite after merges to main,
+# whenever the zcashd-compat implementation, test harness, or test config changes.
+#
+# The test harness spawns a fresh zebrad and zcashd (managed download) on
+# randomised ports, so no external infrastructure is required.
+on:
+  push:
+    branches: [main]
+    paths:
+      # zcashd-compat implementation
+      - zebrad/src/components/zcashd_compat/**
+      - zebrad/src/commands/start.rs
+      - zebrad/src/config.rs
+      - zebrad/src/components.rs
+      # zcashd-compat test harness and entry points
+      - zebrad/tests/common/zcashd_compat.rs
+      - zebrad/tests/common/zcashd_compat/**
+      - zebrad/tests/acceptance.rs
+      # test and build configuration
+      - .config/nextest.toml
+      - make/zcashd-compat.mk
+      - .github/workflows/zcashd-compat-regtest.yml
+
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  RUST_LIB_BACKTRACE: 1
+  RUST_LOG: info
+  COLORBT_SHOW_HIDDEN: 1
+
+jobs:
+  zcashd-compat-regtest:
+    name: zcashd-compat regtest suite
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
+        with:
+          toolchain: stable
+          cache-key: zcashd-compat-regtest
+          cache-on-failure: true
+
+      - uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 #v2.79.3
+        with:
+          tool: cargo-nextest
+
+      - uses: ./.github/actions/setup-zebra-build
+
+      # Uses the managed zcashd download (TEST_ZCASHD_PATH unset).
+      - name: Run zcashd-compat regtest suite
+        run: make compat-test-regtest
