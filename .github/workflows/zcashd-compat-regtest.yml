@@ -11,6 +11,8 @@ on:
     paths:
       # zcashd-compat implementation
       - zebrad/src/components/zcashd_compat/**
+      - zebrad/zcashd-compat-manifest.json
+      - scripts/resolve-zcashd-compat-manifest.sh
       - zebrad/src/commands/start.rs
       - zebrad/src/config.rs
       - zebrad/src/components.rs
@@ -28,6 +30,8 @@ on:
     paths:
       # zcashd-compat implementation
       - zebrad/src/components/zcashd_compat/**
+      - zebrad/zcashd-compat-manifest.json
+      - scripts/resolve-zcashd-compat-manifest.sh
       - zebrad/src/commands/start.rs
       - zebrad/src/config.rs
       - zebrad/src/components.rs

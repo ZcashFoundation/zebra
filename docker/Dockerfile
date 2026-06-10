@@ -228,7 +228,7 @@ CMD ["zebrad"]
 FROM runtime AS runtime-zcashd-compat
 
 COPY --link --from=zcashd_compat /bin/zcashd /usr/local/bin/zcashd
-RUN test -x /usr/local/bin/zcashd
+RUN test -x /usr/local/bin/zcashd && /usr/local/bin/zcashd --version
 
 # TODO: Add a `monitoring` stage
 #

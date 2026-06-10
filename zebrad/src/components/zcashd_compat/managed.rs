@@ -37,11 +37,15 @@ pub enum ZcashdBinarySource {
 
 /// Returns the current platform target triple used for managed release lookups.
 pub fn zcashd_target_triple() -> Option<&'static str> {
-    match (std::env::consts::OS, std::env::consts::ARCH) {
+    let target = match (std::env::consts::OS, std::env::consts::ARCH) {
         ("linux", "x86_64") => Some("x86_64-pc-linux-gnu"),
         ("linux", "aarch64") => Some("aarch64-linux-gnu"),
         _ => None,
-    }
+    }?;
+
+    EMBEDDED_ZCASHD_RELEASE_MANIFEST
+        .artifact_for_target(target)
+        .map(|_| target)
 }
 
 /// Resolves the effective source for `zcashd`.
@@ -104,14 +108,14 @@ fn resolve_managed_zcashd_binary_from_manifest(
     let cache_dir = state_cache_dir
         .join("zcashd-compat")
         .join("bin")
-        .join(manifest.release_tag)
+        .join(&manifest.release_tag)
         .join(target);
     fs::create_dir_all(&cache_dir)?;
 
     let binary_path = cache_dir.join("zcashd");
     let provenance_path = cache_dir.join("zcashd.sha256");
     if binary_path.is_file()
-        && provenance_matches(&provenance_path, artifact.runtime_archive_sha256)?
+        && provenance_matches(&provenance_path, &artifact.runtime_archive_sha256)?
     {
         return Ok(binary_path);
     }
@@ -124,13 +128,13 @@ fn resolve_managed_zcashd_binary_from_manifest(
 
     // Re-check after acquiring the lock.
     if binary_path.is_file()
-        && provenance_matches(&provenance_path, artifact.runtime_archive_sha256)?
+        && provenance_matches(&provenance_path, &artifact.runtime_archive_sha256)?
     {
         return Ok(binary_path);
     }
 
     let mut archive_temp = NamedTempFile::new_in(&cache_dir)?;
-    download_archive(artifact.runtime_archive_url, archive_temp.as_file_mut())?;
+    download_archive(&artifact.runtime_archive_url, archive_temp.as_file_mut())?;
     archive_temp.as_file_mut().sync_all()?;
 
     let archive_sha256 = sha256_hex_file(archive_temp.path())?;
@@ -144,7 +148,7 @@ fn resolve_managed_zcashd_binary_from_manifest(
     let extracted_temp = NamedTempFile::new_in(&cache_dir)?;
     extract_archive_member_to_path(
         archive_temp.path(),
-        artifact.runtime_archive_member_binary_path,
+        &artifact.runtime_archive_member_binary_path,
         extracted_temp.path(),
     )?;
     make_executable(extracted_temp.path())?;
@@ -488,6 +492,7 @@ mod tests {
     };
     use crate::components::zcashd_compat::{
         ConfigZcashdBinarySource, ZcashdReleaseArtifact, ZcashdReleaseManifest,
+        EMBEDDED_ZCASHD_RELEASE_MANIFEST,
     };
 
     #[test]
@@ -517,11 +522,13 @@ mod tests {
     }
 
     #[test]
-    fn target_triple_is_known_or_none() {
+    fn target_triple_is_configured_or_none() {
         if let Some(target) = zcashd_target_triple() {
             assert!(
-                target == "x86_64-pc-linux-gnu" || target == "aarch64-linux-gnu",
-                "unexpected target triple: {target}"
+                EMBEDDED_ZCASHD_RELEASE_MANIFEST
+                    .artifact_for_target(target)
+                    .is_some(),
+                "managed target triple is not configured in embedded manifest: {target}"
             );
         }
     }
@@ -629,14 +636,14 @@ mod tests {
         let temp = tempdir().expect("tempdir should exist");
         let manifest = ZcashdReleaseManifest {
             schema_version: 1,
-            release_tag: "test-release",
-            artifacts: Box::leak(Box::new([ZcashdReleaseArtifact {
-                target_triple: target,
-                runtime_archive_url: "http://example.com/zcashd.tar.gz",
+            release_tag: "test-release".to_string(),
+            artifacts: vec![ZcashdReleaseArtifact {
+                target_triple: target.to_string(),
+                runtime_archive_url: "http://example.com/zcashd.tar.gz".to_string(),
                 runtime_archive_sha256:
-                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                runtime_archive_member_binary_path: "./bin/zcashd",
-            }])),
+                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
+                runtime_archive_member_binary_path: "./bin/zcashd".to_string(),
+            }],
         };
 
         let error = resolve_managed_zcashd_binary_from_manifest(&manifest, temp.path())
@@ -699,15 +706,15 @@ mod tests {
 
         let local_http_url = format!("http://{address}/zcashd-compat.tar.gz");
         let artifact = ZcashdReleaseArtifact {
-            target_triple: target,
-            runtime_archive_url: Box::leak(local_http_url.into_boxed_str()),
-            runtime_archive_sha256: Box::leak(archive_sha256.into_boxed_str()),
-            runtime_archive_member_binary_path: "./bin/zcashd",
+            target_triple: target.to_string(),
+            runtime_archive_url: local_http_url,
+            runtime_archive_sha256: archive_sha256,
+            runtime_archive_member_binary_path: "./bin/zcashd".to_string(),
         };
         let manifest = ZcashdReleaseManifest {
             schema_version: 1,
-            release_tag: "test-release",
-            artifacts: Box::leak(Box::new([artifact])),
+            release_tag: "test-release".to_string(),
+            artifacts: vec![artifact],
         };
         let resolved = resolve_managed_zcashd_binary_from_manifest(&manifest, temp.path())
             .expect("managed resolver should install zcashd");

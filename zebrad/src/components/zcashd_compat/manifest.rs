@@ -1,49 +1,57 @@
 //! Embedded zcashd compatibility release manifest.
 //!
-//! This file is intended to be generated from zcash release metadata.
-//! It is currently maintained manually until the generation step lands.
+//! [`zebrad/zcashd-compat-manifest.json`](../../../zcashd-compat-manifest.json) is the
+//! single source of truth for the zcashd compat pin: CI and Docker builds read it via
+//! `scripts/resolve-zcashd-compat-manifest.sh`, and zebrad embeds it at compile time
+//! and parses it here.
+
+use std::sync::LazyLock;
+
+use serde::Deserialize;
 
 /// Embedded manifest schema version.
 pub const EMBEDDED_MANIFEST_SCHEMA_VERSION: u32 = 1;
 
 /// Embedded zcashd compatibility release manifest.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ZcashdReleaseManifest {
     /// Manifest schema version.
     pub schema_version: u32,
     /// Release tag from which artifacts were published.
-    pub release_tag: &'static str,
+    pub release_tag: String,
     /// Release artifacts by target triple.
-    pub artifacts: &'static [ZcashdReleaseArtifact],
+    pub artifacts: Vec<ZcashdReleaseArtifact>,
 }
 
 /// One released zcashd compatibility artifact.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ZcashdReleaseArtifact {
     /// Rust-style target triple.
-    pub target_triple: &'static str,
+    pub target_triple: String,
     /// Fully-qualified runtime archive URL.
-    pub runtime_archive_url: &'static str,
+    pub runtime_archive_url: String,
     /// SHA256 hex digest of the runtime archive.
-    pub runtime_archive_sha256: &'static str,
+    pub runtime_archive_sha256: String,
     /// Runtime archive member path that points to the `zcashd` executable.
-    pub runtime_archive_member_binary_path: &'static str,
+    pub runtime_archive_member_binary_path: String,
 }
 
 /// Embedded manifest used by managed zcashd downloads.
-///
-pub const EMBEDDED_ZCASHD_RELEASE_MANIFEST: ZcashdReleaseManifest = ZcashdReleaseManifest {
-    schema_version: EMBEDDED_MANIFEST_SCHEMA_VERSION,
-    release_tag: "v6.2.1-alpha-zebra-regtest-compat.2",
-    artifacts: &[
-        ZcashdReleaseArtifact {
-            target_triple: "x86_64-pc-linux-gnu",
-            runtime_archive_url: "https://github.com/valargroup/zcashd/releases/download/v6.2.1-alpha-zebra-regtest-compat.2/zcashd-zebra-compat-v6.2.1-alpha-zebra-regtest-compat.2-linux-x86_64.tar.gz",
-            runtime_archive_sha256: "e92374902085bdbf12faeff4e5f4f026abe3225895bd0035bcc3f146246c5a2c",
-            runtime_archive_member_binary_path: "./bin/zcashd",
-        },
-    ],
-};
+pub static EMBEDDED_ZCASHD_RELEASE_MANIFEST: LazyLock<ZcashdReleaseManifest> =
+    LazyLock::new(|| {
+        let manifest: ZcashdReleaseManifest =
+            serde_json::from_str(include_str!("../../../zcashd-compat-manifest.json"))
+                .expect("committed zcashd-compat-manifest.json is validated by unit tests and CI");
+
+        assert_eq!(
+            manifest.schema_version, EMBEDDED_MANIFEST_SCHEMA_VERSION,
+            "unsupported zcashd-compat-manifest.json schema version"
+        );
+
+        manifest
+    });
 
 impl ZcashdReleaseManifest {
     /// Returns the configured artifact for `target_triple`, if any.
@@ -63,9 +71,9 @@ mod tests {
     #[test]
     fn embedded_manifest_targets_are_unique() {
         let mut targets = HashSet::new();
-        for artifact in EMBEDDED_ZCASHD_RELEASE_MANIFEST.artifacts {
+        for artifact in &EMBEDDED_ZCASHD_RELEASE_MANIFEST.artifacts {
             assert!(
-                targets.insert(artifact.target_triple),
+                targets.insert(artifact.target_triple.as_str()),
                 "duplicate manifest target found: {}",
                 artifact.target_triple
             );
@@ -74,7 +82,7 @@ mod tests {
 
     #[test]
     fn embedded_manifest_entries_are_well_formed() {
-        for artifact in EMBEDDED_ZCASHD_RELEASE_MANIFEST.artifacts {
+        for artifact in &EMBEDDED_ZCASHD_RELEASE_MANIFEST.artifacts {
             assert!(
                 artifact.runtime_archive_url.starts_with("https://"),
                 "managed zcashd artifact URL must be https: {}",
