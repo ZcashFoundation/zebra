@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   balance change is now calculated on demand and passed as a parameter to
   `FinalizedBlock::from_checkpoint_verified()` and
   `FinalizedBlock::from_contextually_verified()`.
+- `CheckpointVerifiedBlock::new()` no longer takes a `deferred_pool_balance_change`
+  parameter.
 
 ### Fixed
 

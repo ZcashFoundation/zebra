@@ -10,14 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 ## [Zebra 5.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.1.0) - 2026-06-10
 
 This release fixes a genesis-to-tip sync stall that could cause new nodes to hang
-during initial block download, bumps the minimum network protocol version to Nu6_2,
+during initial block download, bumps the minimum network protocol version to NU6.2,
 extends the `getpeerinfo` RPC, and includes several performance and correctness fixes.
 
 ### Breaking Changes
 
-- The minimum network protocol version is now Nu6_2 (170150). Peers running protocol
-  versions below Nu6_2 will be disconnected. Update to Zebra 5.0.0 or later to remain
-  compatible.
+- The minimum network protocol version is now NU6.2 (170150). Peers running protocol
+  versions below NU6.2 will be disconnected. Update to Zebra 5.0.0 or later to remain
+  compatible ([#10692](https://github.com/ZcashFoundation/zebra/pull/10692)).
 
 ### Added
 

@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `INITIAL_MIN_NETWORK_PROTOCOL_VERSION` bumped from `Nu6` (170120) to `Nu6_2` (170150)
   on Mainnet, Testnet, and Regtest. Peers running protocol version 170120 are no longer
-  accepted.
+  accepted ([#10692](https://github.com/ZcashFoundation/zebra/pull/10692)).
 - Removed `Copy` derive from `types::MetaAddr` (now only `Clone`) to support `String` fields.
 - Changed `types::MetaAddr::new_connected()` to take additional `user_agent` and
   `negotiated_version` parameters.
@@ -35,7 +35,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Require network protocol version 170150 for NU6.2 on Mainnet, Testnet, and Regtest.
 - Bump `CURRENT_NETWORK_PROTOCOL_VERSION` to 170150.
 
 ## [7.0.0] - 2026-05-28
