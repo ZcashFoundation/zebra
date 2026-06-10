@@ -17,6 +17,8 @@ use crate::common::config::default_test_config;
 /// Configuration produced by [`build_zcashd_compat_config`].
 pub struct ZcashdCompatConfig {
     pub zebrad_config: ZebradConfig,
+    /// Zcashd datadir prepared for managed regtest mode.
+    pub zcashd_datadir: PathBuf,
     /// Zebrad's main (unauthenticated) RPC listen address.
     pub zebra_rpc_addr: SocketAddr,
     /// Zebrad's zcashd-compat (cookie-authenticated) RPC listen address.
@@ -93,7 +95,7 @@ pub fn build_zcashd_compat_config(cookie_dir: PathBuf) -> Result<ZcashdCompatCon
         zcashd_datadir.join("zcash.conf"),
         "i-am-aware-zcashd-will-be-replaced-by-zebrad-and-zallet-in-2025=1\n",
     )?;
-    config.zcashd_compat.zcashd_datadir = Some(zcashd_datadir);
+    config.zcashd_compat.zcashd_datadir = Some(zcashd_datadir.clone());
 
     // Use an explicit zcashd path if provided, else managed download.
     // An empty value counts as unset (the make targets always export the var).
@@ -120,6 +122,8 @@ pub fn build_zcashd_compat_config(cookie_dir: PathBuf) -> Result<ZcashdCompatCon
         // The wallet tests use `getnewaddress`, which is deny-by-default
         // deprecated in current zcashd.
         "-allowdeprecated=getnewaddress".to_string(),
+        "-zebra-compat-sync-batch-size=33".to_string(),
+        "-zebra-compat-poll-interval=1".to_string(),
         // Regtest blocks mined on top of the 2011 genesis inherit old
         // median-time-past timestamps, which would keep zcashd in initial
         // block download forever and disable its wallet RPCs. 100 years.
@@ -128,6 +132,7 @@ pub fn build_zcashd_compat_config(cookie_dir: PathBuf) -> Result<ZcashdCompatCon
 
     Ok(ZcashdCompatConfig {
         zebrad_config: config,
+        zcashd_datadir,
         zebra_rpc_addr,
         zebra_compat_rpc_addr,
         zcashd_own_rpc_addr,

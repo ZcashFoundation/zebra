@@ -33,6 +33,8 @@ const ZCASHD_RPC_POLL_INTERVAL: Duration = Duration::from_secs(2);
 pub struct ZcashdCompatSetup {
     /// The zebrad process, present only in managed (regtest) mode.
     pub managed: Option<TestChild<TempDir>>,
+    /// Zcashd datadir, present only when the test harness manages zcashd.
+    pub zcashd_datadir: Option<PathBuf>,
     /// Client for zebrad's unauthenticated main RPC.
     pub zebra_client: RpcRequestClient,
     /// Client for zcashd's own authenticated RPC (wallet operations).
@@ -114,6 +116,7 @@ pub async fn spawn_zebrad_with_zcashd_compat() -> Result<ZcashdCompatSetup> {
 
     Ok(ZcashdCompatSetup {
         managed: Some(zebrad),
+        zcashd_datadir: Some(compat_cfg.zcashd_datadir),
         zebra_client,
         zcashd_client,
         network: Network::new_regtest(Default::default()),
@@ -168,6 +171,7 @@ pub async fn connect_to_external_zcashd_compat(kind: NetworkKind) -> Result<Zcas
 
     Ok(ZcashdCompatSetup {
         managed: None,
+        zcashd_datadir: None,
         zebra_client: RpcRequestClient::new(zebra_rpc_addr),
         zcashd_client,
         network,

@@ -4661,3 +4661,43 @@ async fn zcashd_compat_mempool_info_valid() -> Result<()> {
 async fn zcashd_compat_historical_block_consistent() -> Result<()> {
     common::zcashd_compat::network::historical_block_consistent().await
 }
+
+/// See [`common::zcashd_compat::reorg::basic_depth1`] for details.
+#[tokio::test]
+#[ignore]
+#[cfg(unix)]
+async fn zcashd_compat_reorg_basic_depth1() -> Result<()> {
+    common::zcashd_compat::reorg::basic_depth1().await
+}
+
+/// See [`common::zcashd_compat::reorg::equal_work_race`] for details.
+#[tokio::test]
+#[ignore]
+#[cfg(unix)]
+async fn zcashd_compat_reorg_equal_work_race() -> Result<()> {
+    common::zcashd_compat::reorg::equal_work_race().await
+}
+
+/// See [`common::zcashd_compat::reorg::depth_at_batch_limit`] for details.
+#[tokio::test]
+#[ignore]
+#[cfg(unix)]
+async fn zcashd_compat_reorg_depth_at_batch_limit() -> Result<()> {
+    common::zcashd_compat::reorg::depth_at_batch_limit().await
+}
+
+/// See [`common::zcashd_compat::reorg::branch_too_large_sticky`] for details.
+#[tokio::test]
+#[ignore]
+#[cfg(unix)]
+async fn zcashd_compat_reorg_branch_too_large_sticky() -> Result<()> {
+    common::zcashd_compat::reorg::branch_too_large_sticky().await
+}
+
+/// See [`common::zcashd_compat::reorg::churn`] for details.
+#[tokio::test]
+#[ignore]
+#[cfg(unix)]
+async fn zcashd_compat_reorg_churn() -> Result<()> {
+    common::zcashd_compat::reorg::churn().await
+}

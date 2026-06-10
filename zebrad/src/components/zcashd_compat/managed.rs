@@ -492,9 +492,11 @@ mod tests {
 
     #[test]
     fn explicit_zcashd_path_overrides_managed_source() {
-        let mut config = Config::default();
-        config.zcashd_source = ConfigZcashdBinarySource::Managed;
-        config.zcashd_path = Some("/usr/local/bin/zcashd".into());
+        let config = Config {
+            zcashd_source: ConfigZcashdBinarySource::Managed,
+            zcashd_path: Some("/usr/local/bin/zcashd".into()),
+            ..Default::default()
+        };
 
         assert_eq!(
             effective_zcashd_source(&config).expect("source should resolve"),
@@ -504,9 +506,11 @@ mod tests {
 
     #[test]
     fn path_source_requires_explicit_path() {
-        let mut config = Config::default();
-        config.zcashd_source = ConfigZcashdBinarySource::Path;
-        config.zcashd_path = None;
+        let config = Config {
+            zcashd_source: ConfigZcashdBinarySource::Path,
+            zcashd_path: None,
+            ..Default::default()
+        };
 
         let error = effective_zcashd_source(&config).expect_err("path source should fail");
         assert!(error.to_string().contains("zcashd_source=path"));

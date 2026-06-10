@@ -50,7 +50,7 @@ pub fn run_preflight(
 ) -> Result<(), color_eyre::eyre::Report> {
     #[cfg(target_os = "linux")]
     {
-        return run_linux_preflight(config, unsafe_low_specs);
+        run_linux_preflight(config, unsafe_low_specs)
     }
 
     #[cfg(not(target_os = "linux"))]

@@ -169,6 +169,9 @@ zebrad start --zcashd-compat
 
 3. Generate blocks via Zebra RPC (`generate`) and verify `zcashd` follows.
 
+The zcashd-compat regtest suite also includes reorg regression and stress tests;
+use `make compat-test-soak` for extended local churn runs.
+
 ## Notes
 
 - `zcashd -zebra-compat` talks to Zebra over RPC, not over peer-to-peer connections.

@@ -9,6 +9,7 @@
 	compat-zcashd-status \
 	compat-status-sync \
 	compat-test-regtest \
+	compat-test-soak \
 	compat-test-mainnet \
 	compat-test-testnet
 
@@ -29,8 +30,8 @@ ZEBRA_COOKIE_FILE ?= $(ZEBRA_COOKIE_DIR)/.zcashd-compat.cookie
 HEIGHT_MAX_DRIFT ?= 10
 
 ZEBRA_DOCKER_IMAGE ?= zebra:zcashd-compat
-ZCASHD_COMPAT_URL ?= https://github.com/valargroup/zcashd/releases/download/v6.2.1-alpha/zcashd-zebra-compat-v6.2.1-alpha-linux-x86_64.tar.gz
-ZCASHD_COMPAT_SHA256 ?= 09e640b55c9af91dee5742e5e9bb6712f92d7073f0fe899ca58d43f62eb9d13c
+ZCASHD_COMPAT_URL ?= https://github.com/valargroup/zcashd/releases/download/v6.2.1-alpha-zebra-regtest-compat.2/zcashd-zebra-compat-v6.2.1-alpha-zebra-regtest-compat.2-linux-x86_64.tar.gz
+ZCASHD_COMPAT_SHA256 ?= e92374902085bdbf12faeff4e5f4f026abe3225895bd0035bcc3f146246c5a2c
 ZCASHD_COMPAT_ARTIFACT_DIR ?= $(CURDIR)/target/zcashd-compat
 ZCASHD_COMPAT_ARCHIVE_PATH ?= $(ZCASHD_COMPAT_ARTIFACT_DIR)/zcashd-compat.tar.gz
 ZCASHD_COMPAT_EXTRACT_DIR ?= $(ZCASHD_COMPAT_ARTIFACT_DIR)/extracted
@@ -181,6 +182,7 @@ compat-status-sync:
 # If unset, the managed download embedded in the zebrad binary is used.
 # Override with: make compat-test-regtest TEST_ZCASHD_PATH=/path/to/zcashd
 TEST_ZCASHD_PATH ?=
+TEST_ZCASHD_COMPAT_REORG_ITERATIONS ?= 500
 
 # External-mode test addresses and credentials.
 # Set these before running compat-test-mainnet or compat-test-testnet.
@@ -201,6 +203,14 @@ compat-test-regtest:
 	TEST_ZCASHD_COMPAT=1 \
 	TEST_ZCASHD_PATH="$(TEST_ZCASHD_PATH)" \
 	cargo nextest run --profile zcashd-compat-integration --run-ignored=only
+
+# Run a long zcashd-compat reorg churn soak against a fresh regtest environment.
+# Override TEST_ZCASHD_COMPAT_REORG_ITERATIONS for shorter local smoke runs.
+compat-test-soak:
+	TEST_ZCASHD_COMPAT=1 \
+	TEST_ZCASHD_PATH="$(TEST_ZCASHD_PATH)" \
+	TEST_ZCASHD_COMPAT_REORG_ITERATIONS="$(TEST_ZCASHD_COMPAT_REORG_ITERATIONS)" \
+	cargo nextest run --profile zcashd-compat-soak --run-ignored=only
 
 # Run the read-only zcashd-compat test suite against a live mainnet deployment.
 # Requires a fully-synced zebrad and zcashd already running on this host.

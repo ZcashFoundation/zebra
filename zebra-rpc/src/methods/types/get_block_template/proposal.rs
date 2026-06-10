@@ -232,7 +232,7 @@ pub fn proposal_block_from_template(
             time,
             difficulty_threshold,
             nonce: [0; 32].into(),
-            solution: Solution::for_proposal(),
+            solution: Solution::for_proposal_for_network(net),
         }),
         transactions,
     })

@@ -7,6 +7,7 @@ use serde_big_array::BigArray;
 
 use crate::{
     block::Header,
+    parameters::Network,
     serialization::{
         zcash_deserialize_bytes_external_count, zcash_serialize_bytes, CompactSizeMessage,
         SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
@@ -122,8 +123,16 @@ impl Solution {
 
     /// Returns a [`Solution`] of `[0; SOLUTION_SIZE]` to be used in block proposals.
     pub fn for_proposal() -> Self {
-        // TODO: Accept network as an argument, and if it's Regtest, return the shorter null solution.
         Self::Common([0; SOLUTION_SIZE])
+    }
+
+    /// Returns a null [`Solution`] to be used in block proposals on `network`.
+    pub fn for_proposal_for_network(network: &Network) -> Self {
+        if network.is_regtest() {
+            Self::Regtest([0; REGTEST_SOLUTION_SIZE])
+        } else {
+            Self::for_proposal()
+        }
     }
 
     /// Mines and returns one or more [`Solution`]s based on a template `header`.

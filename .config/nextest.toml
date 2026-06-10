@@ -147,3 +147,10 @@ test-threads = 1
 slow-timeout = { period = "5m", terminate-after = 2 }
 failure-output = "immediate"
 default-filter = 'package(zebrad) and test(~zcashd_compat)'
+
+[profile.zcashd-compat-soak]
+# Long-running local soak for the reorg churn stress test.
+test-threads = 1
+slow-timeout = { period = "4h", terminate-after = 1 }
+failure-output = "immediate"
+default-filter = 'package(zebrad) and test(=zcashd_compat_reorg_churn)'
