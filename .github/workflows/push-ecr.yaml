@@ -23,7 +23,7 @@ jobs:
     env:
       AWS_REGION: ${{ vars.AWS_REGION }}
       ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
-      DOCKERFILE_PATH: docker/Dockerfile
+      DOCKERFILE_PATH: testnet-single-node-deploy/dockerfile
     steps:
       - name: Checkout
         uses: actions/checkout@v4
