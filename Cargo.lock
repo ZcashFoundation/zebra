@@ -7798,6 +7798,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "zebra-watchdog"
+version = "0.1.0"
+dependencies = [
+ "clap 4.6.1",
+ "reqwest 0.12.28",
+ "sentry",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "zebrad"
 version = "5.0.0-rc.3"
 dependencies = [

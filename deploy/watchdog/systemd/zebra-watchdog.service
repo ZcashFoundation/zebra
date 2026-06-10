@@ -1,0 +1,34 @@
+# Systemd unit for the Zebra watchdog sidecar.
+#
+# Installation:
+# 1- Install the binary:
+#    install -m 755 zebra-watchdog /usr/local/bin/zebra-watchdog
+# 2- Optionally create /etc/zebra-watchdog/env with configuration overrides,
+#    including SENTRY_DSN (see deploy/watchdog/README.md):
+#    mkdir -p /etc/zebra-watchdog
+#    printf 'SENTRY_DSN=...\nSENTRY_ENVIRONMENT=...\n' > /etc/zebra-watchdog/env
+#    chmod 600 /etc/zebra-watchdog/env
+# 3- Install and start the unit:
+#    cp deploy/watchdog/systemd/zebra-watchdog.service /etc/systemd/system/
+#    systemctl daemon-reload
+#    systemctl enable --now zebra-watchdog
+[Unit]
+Description=Zebra watchdog sidecar
+Documentation=https://github.com/ZcashFoundation/zebra/tree/main/deploy/watchdog
+After=network-online.target
+Wants=network-online.target
+AssertPathExists=/usr/local/bin/zebra-watchdog
+
+[Service]
+ExecStart=/usr/local/bin/zebra-watchdog run
+# Optional configuration overrides, including SENTRY_DSN.
+EnvironmentFile=-/etc/zebra-watchdog/env
+Restart=always
+RestartSec=5
+PrivateTmp=true
+NoNewPrivileges=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

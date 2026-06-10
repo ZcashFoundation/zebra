@@ -12,6 +12,7 @@ members = [
         "zebra-utils",
         "tower-batch-control",
         "tower-fallback",
+        "deploy/watchdog",
 ]
 
 # Use the edition 2021 dependency resolver in the workspace, to match the crates

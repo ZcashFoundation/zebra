@@ -1,0 +1,24 @@
+[package]
+name = "zebra-watchdog"
+version = "0.1.0"
+authors.workspace = true
+description = "Standalone watchdog sidecar that checks Zebra services and reports statuses to Sentry"
+license.workspace = true
+repository.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+# This crate is deploy/operator tooling, not a published library.
+publish = false
+
+[dependencies]
+clap = { workspace = true, features = ["derive", "env"] }
+reqwest = { workspace = true, default-features = false, features = ["blocking", "rustls-tls", "json"] }
+sentry = { workspace = true, features = ["backtrace", "contexts", "logs", "rustls", "tracing", "ureq"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+
+[lints]
+workspace = true
