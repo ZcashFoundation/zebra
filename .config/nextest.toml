@@ -130,3 +130,20 @@ default-filter = 'package(zebrad) and test(=lightwalletd_test_suite)'
 [profile.rpc-z-getsubtreesbyindex-snapshot]
 slow-timeout = { period = "30m", terminate-after = 2 }
 default-filter = 'package(zebrad) and test(=fully_synced_rpc_z_getsubtreesbyindex_snapshot_test)'
+
+[profile.zcashd-compat-integration]
+# Run zcashd-compat tests one at a time to avoid port conflicts and resource exhaustion.
+test-threads = 1
+slow-timeout = { period = "15m", terminate-after = 2 }
+failure-output = "immediate"
+default-filter = 'package(zebrad) and test(~zcashd_compat)'
+
+[profile.zcashd-compat-external]
+# External mode: connect to pre-running mainnet/testnet zebrad + zcashd.
+# Set ZEBRA_TEST_ZCASHD_COMPAT_NETWORK, ZEBRA_TEST_ZEBRAD_RPC_ADDR,
+# ZEBRA_TEST_ZCASHD_RPC_ADDR, and auth env vars before running.
+# No block mining — 5 minutes per test is sufficient.
+test-threads = 1
+slow-timeout = { period = "5m", terminate-after = 2 }
+failure-output = "immediate"
+default-filter = 'package(zebrad) and test(~zcashd_compat)'

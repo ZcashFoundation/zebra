@@ -1,0 +1,194 @@
+# zcashd-compat Integration Tests
+
+Integration tests for zebrad's **zcashd-compat mode**, in which zebrad acts as
+the consensus/P2P/mempool backend and zcashd handles the wallet.  These tests
+validate the full two-process deployment end-to-end.
+
+## Two Modes
+
+### Managed — Regtest (CI)
+
+The test harness spawns a fresh zebrad and zcashd on randomised ports, runs
+the full test suite including block mining and wallet sends, then tears
+everything down.  No external infrastructure is required.
+
+```
+TEST_ZCASHD_COMPAT=1                          (required)
+ZEBRA_TEST_ZCASHD_PATH=/path/to/zcashd        (optional — uses managed download if unset)
+```
+
+Run:
+
+```console
+# Via make
+make compat-test-regtest ZEBRA_TEST_ZCASHD_PATH=/path/to/zcashd
+
+# Via cargo directly
+TEST_ZCASHD_COMPAT=1 \
+  ZEBRA_TEST_ZCASHD_PATH=/path/to/zcashd \
+  cargo nextest run --profile zcashd-compat-integration
+```
+
+### External — Mainnet / Testnet (deployment validation)
+
+The test harness connects to pre-running zebrad and zcashd instances.
+All tests that require block mining or wallet spends skip automatically.
+No writes are performed on a live network.
+
+```
+TEST_ZCASHD_COMPAT=1                          (required)
+ZEBRA_TEST_ZCASHD_COMPAT_NETWORK=Mainnet      (or Testnet)
+ZEBRA_TEST_ZEBRAD_RPC_ADDR=127.0.0.1:8232     (zebrad main RPC)
+ZEBRA_TEST_ZCASHD_RPC_ADDR=127.0.0.1:28232    (zcashd own RPC)
+
+# Authentication — provide one of:
+ZEBRA_TEST_ZCASHD_COOKIE_FILE=/path/to/.cookie    (preferred)
+ZEBRA_TEST_ZCASHD_RPC_USER=username               (alternative)
+ZEBRA_TEST_ZCASHD_RPC_PASSWORD=password
+```
+
+Run:
+
+```console
+# Via make (addresses can be overridden as Make vars)
+make compat-test-mainnet \
+  ZEBRA_TEST_ZEBRAD_RPC_ADDR=127.0.0.1:8232 \
+  ZEBRA_TEST_ZCASHD_RPC_ADDR=127.0.0.1:28232 \
+  ZEBRA_TEST_ZCASHD_COOKIE_FILE=/home/user/.zcash/.cookie
+
+make compat-test-testnet \
+  ZEBRA_TEST_ZEBRAD_RPC_ADDR=127.0.0.1:18232 \
+  ZEBRA_TEST_ZCASHD_RPC_ADDR=127.0.0.1:18233 \
+  ZEBRA_TEST_ZCASHD_COOKIE_FILE=/home/user/.zcash/testnet3/.cookie
+
+# Via cargo directly (mainnet example)
+TEST_ZCASHD_COMPAT=1 \
+  ZEBRA_TEST_ZCASHD_COMPAT_NETWORK=Mainnet \
+  ZEBRA_TEST_ZEBRAD_RPC_ADDR=127.0.0.1:8232 \
+  ZEBRA_TEST_ZCASHD_RPC_ADDR=127.0.0.1:28232 \
+  ZEBRA_TEST_ZCASHD_COOKIE_FILE=/home/user/.zcash/.cookie \
+  cargo nextest run --profile zcashd-compat-external
+```
+
+### Skip behaviour
+
+If `TEST_ZCASHD_COMPAT` is not set, every test prints a message and exits
+`Ok(())` immediately.  The skip is silent in CI output — no failures, no noise.
+
+If `ZEBRA_TEST_ZCASHD_COMPAT_NETWORK` is set to `Mainnet` or `Testnet` but
+the required address or auth variables are missing, the test suite returns an
+error (misconfiguration, not a skip).
+
+## Environment Variables
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `TEST_ZCASHD_COMPAT` | Always | Enable the suite (set to any non-empty value) |
+| `ZEBRA_TEST_ZCASHD_PATH` | No | Path to a zcashd binary; uses managed download if absent |
+| `ZEBRA_TEST_ZCASHD_COMPAT_NETWORK` | External only | `Mainnet` or `Testnet`; absent = Regtest/managed |
+| `ZEBRA_TEST_ZEBRAD_RPC_ADDR` | External only | zebrad main RPC (`host:port`) |
+| `ZEBRA_TEST_ZCASHD_RPC_ADDR` | External only | zcashd own RPC (`host:port`) |
+| `ZEBRA_TEST_ZCASHD_COOKIE_FILE` | External (preferred) | Path to zcashd cookie file |
+| `ZEBRA_TEST_ZCASHD_RPC_USER` | External (fallback) | zcashd RPC username |
+| `ZEBRA_TEST_ZCASHD_RPC_PASSWORD` | External (fallback) | zcashd RPC password |
+
+## Test Inventory
+
+| Test function | Module | Regtest | Mainnet/Testnet |
+|---|---|---|---|
+| `zcashd_compat_both_processes_start` | startup | Full check — asserts `chain == "regtest"` | Full check — asserts `chain == "main"/"test"` |
+| `zcashd_compat_readiness_after_mine` | startup | Mines 5 blocks, asserts `readiness == "ready"` | Checks readiness without mining; asserts not `"failed"` |
+| `zcashd_compat_rpc_requires_auth` | startup | Full check — unauthenticated request must fail | Full check |
+| `zcashd_compat_height_and_hash_agree` | chain | Mines 5, asserts count == 5 on both sides | Cross-checks current tip (no mining) |
+| `zcashd_compat_getblock_hash_consistent` | chain | Mines 3, checks heights 1–3 | Checks last 3 blocks at current tip |
+| `zcashd_compat_wallet_address_generation` | wallet | Full check (t-addr + z-addr) | Full check |
+| `zcashd_compat_wallet_initial_balance_zero` | wallet | Asserts zero balance and empty UTXOs | **Skipped** (live wallet may have funds) |
+| `zcashd_compat_getwalletinfo_fields_present` | wallet | Full check | Full check |
+| `zcashd_compat_transparent_tx_in_mempool` | tx_flow | Mines 200, sends tx, polls zebrad mempool | Validates `getmempoolinfo` structure only |
+| `zcashd_compat_transparent_tx_confirms` | tx_flow | Sends + mines + checks confirmations on both sides | **Skipped** |
+| `zcashd_compat_zebrad_clean_shutdown` | resilience | Mines 3, SIGKILLs zebrad, asserts clean exit | **Skipped** (don't own process) |
+| `zcashd_compat_zcashd_restarts_after_exit` | resilience | SIGTERMs zcashd, waits for supervisor restart | **Skipped** (unix only; don't own process) |
+| `zcashd_compat_peer_connectivity` | network | **Skipped** (regtest has no peers) | Asserts at least one peer connected |
+| `zcashd_compat_mempool_info_valid` | network | Structural check only | Structural check (mempool typically non-empty) |
+| `zcashd_compat_historical_block_consistent` | network | **Skipped** (no canonical block 1 on fresh chain) | Block hash at height 1 agrees on both sides |
+
+## Prerequisites for External Mode
+
+Before running against mainnet or testnet:
+
+1. zebrad must be running with zcashd-compat enabled and fully synced to the
+   network tip.
+2. zcashd must be running in zebra-compat mode, connected to that zebrad via
+   the compat RPC channel.
+3. Both processes must be reachable from the test runner via the addresses in
+   `ZEBRA_TEST_ZEBRAD_RPC_ADDR` and `ZEBRA_TEST_ZCASHD_RPC_ADDR`.
+4. zcashd's cookie file path or explicit credentials must be provided.
+
+A typical production layout uses the cookie file (`~/.zcash/.cookie` on
+mainnet, `~/.zcash/testnet3/.cookie` on testnet) — this is the most
+straightforward way to authenticate.
+
+## Module Structure
+
+```
+zebrad/tests/common/
+├── zcashd_compat.rs          module root — skip guard, ZcashdRpcClient,
+│                              env var constants, setup_zcashd_compat()
+└── zcashd_compat/
+    ├── config.rs              build_zcashd_compat_config() (regtest only),
+    │                          expected_chain_name(), read_test_network_kind()
+    ├── launch.rs              ZcashdCompatSetup, spawn_zebrad_with_zcashd_compat(),
+    │                          connect_to_external_zcashd_compat(), wait_for_zcashd_rpc()
+    ├── startup.rs             both_processes_start, readiness_after_mine, rpc_requires_auth
+    ├── chain.rs               height_and_hash_agree, getblock_hash_consistent
+    ├── wallet.rs              address_generation, initial_balance_zero,
+    │                          getwalletinfo_fields_present
+    ├── tx_flow.rs             transparent_tx_in_mempool, transparent_tx_confirms
+    ├── resilience.rs          zebrad_clean_shutdown, zcashd_restarts_after_exit
+    └── network.rs             peer_connectivity, mempool_info_valid,
+                               historical_block_consistent
+```
+
+Entry points are the `#[tokio::test] #[ignore]` functions in
+`zebrad/tests/acceptance.rs` (all prefixed `zcashd_compat_`).
+
+## Adding a New Test
+
+1. Choose the right submodule (or create a new one).
+2. Write an `async fn my_test() -> Result<()>` function:
+
+   ```rust
+   pub async fn my_test() -> Result<()> {
+       let Some(setup) = setup_zcashd_compat().await? else {
+           return Ok(());   // TEST_ZCASHD_COMPAT unset — silent skip
+       };
+
+       if !setup.can_mutate() {
+           // On mainnet/testnet: read-only check or skip
+           return setup.teardown();
+       }
+
+       // Regtest path — free to mine, send, inspect state
+       use crate::common::regtest::MiningRpcMethods;
+       setup.zebra_client.generate(1).await?;
+       // ...
+
+       setup.teardown()
+   }
+   ```
+
+3. Add a corresponding entry point in `zebrad/tests/acceptance.rs`:
+
+   ```rust
+   #[tokio::test]
+   #[ignore]
+   async fn zcashd_compat_my_test() -> Result<()> {
+       common::zcashd_compat::my_module::my_test().await
+   }
+   ```
+
+Key rules:
+
+- Call `setup.teardown()` on every exit path that owns a managed process.
+- Guard all writes (`generate`, `sendtoaddress`, `z_sendmany`) behind `setup.can_mutate()`.
+- Use `setup.zebra_client` (unauthenticated) for zebrad and `setup.zcashd_client` (Basic Auth) for zcashd.

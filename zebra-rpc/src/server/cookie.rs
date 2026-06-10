@@ -40,10 +40,10 @@ impl Default for Cookie {
 ///
 /// Uses restrictive file permissions (0600 on Unix) to prevent other
 /// local users from reading the cookie secret.
-pub fn write_to_disk(cookie: &Cookie, dir: &Path) -> Result<()> {
+pub fn write_to_disk(cookie: &Cookie, dir: &Path, file_name: Option<&str>) -> Result<()> {
     std::fs::create_dir_all(dir)?;
 
-    let cookie_path = dir.join(FILE);
+    let cookie_path = dir.join(file_name.unwrap_or(FILE));
 
     if cookie_path
         .symlink_metadata()
@@ -79,8 +79,8 @@ fn create_owner_only_file(path: &Path) -> Result<File> {
 }
 
 /// Removes a cookie from the given dir.
-pub fn remove_from_disk(dir: &Path) -> Result<()> {
-    remove_file(dir.join(FILE))?;
+pub fn remove_from_disk(dir: &Path, file_name: Option<&str>) -> Result<()> {
+    remove_file(dir.join(file_name.unwrap_or(FILE)))?;
 
     tracing::info!("RPC auth cookie removed from disk");
 

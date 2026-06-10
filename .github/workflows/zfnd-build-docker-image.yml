@@ -43,30 +43,30 @@ on:
         required: false
         type: string
       zcashd_compat_enabled:
-        description: "Whether to vendor zcashd compatibility artifacts into the runtime image"
+        description: "Whether to include an externally prepared zcashd compatibility binary in runtime images"
         required: false
         type: boolean
         default: false
       zcashd_compat_url_amd64:
-        description: "Artifact URL for the linux/amd64 zcashd compatibility runtime build"
+        description: "Hash-pinned artifact URL for linux/amd64 zcashd compatibility builds"
         required: false
         type: string
-        default: ''
+        default: 'https://github.com/valargroup/zcashd/releases/download/v6.2.1-alpha/zcashd-zebra-compat-v6.2.1-alpha-linux-x86_64.tar.gz'
       zcashd_compat_sha256_amd64:
-        description: "SHA256 for the linux-x86_64 zcashd compatibility runtime artifact"
+        description: "SHA256 for the linux/amd64 zcashd compatibility runtime artifact"
         required: false
         type: string
-        default: ''
+        default: '09e640b55c9af91dee5742e5e9bb6712f92d7073f0fe899ca58d43f62eb9d13c'
       zcashd_compat_url_arm64:
-        description: "Artifact URL for the linux/arm64 zcashd compatibility runtime build"
+        description: "Hash-pinned artifact URL for linux/arm64 zcashd compatibility builds"
         required: false
         type: string
-        default: ''
+        default: 'https://github.com/valargroup/zcashd/releases/download/v6.2.1-alpha/zcashd-zebra-compat-v6.2.1-alpha-linux-aarch64.tar.gz'
       zcashd_compat_sha256_arm64:
-        description: "SHA256 for the linux-aarch64 zcashd compatibility runtime artifact"
+        description: "SHA256 for the linux/arm64 zcashd compatibility runtime artifact"
         required: false
         type: string
-        default: ''
+        default: '133e562f86b4f49dd4e69ad55eb94bdd259c5e8af4fc533ec72b1f39bbbb6927'
       no_cache:
         description: Disable the Docker cache for this build
         required: false
@@ -251,6 +251,75 @@ jobs:
           driver: ${{ vars.DOCKER_BUILDER || 'docker' }}
           endpoint: zfnd/zebra
 
+      - name: Resolve effective Docker target
+        id: resolve_target
+        env:
+          INPUT_TARGET: ${{ inputs.dockerfile_target }}
+          ZCASHD_COMPAT_ENABLED: ${{ inputs.zcashd_compat_enabled }}
+        run: |
+          if [ "$INPUT_TARGET" = "runtime" ] && [ "$ZCASHD_COMPAT_ENABLED" = "true" ]; then
+            echo "target=runtime-zcashd-compat" >> "$GITHUB_OUTPUT"
+          else
+            echo "target=$INPUT_TARGET" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Prepare zcashd compatibility build context
+        env:
+          INPUT_TARGET: ${{ inputs.dockerfile_target }}
+          PLATFORM: ${{ matrix.platform }}
+          ZCASHD_COMPAT_ENABLED: ${{ inputs.zcashd_compat_enabled }}
+          ZCASHD_COMPAT_URL_AMD64: ${{ inputs.zcashd_compat_url_amd64 }}
+          ZCASHD_COMPAT_SHA256_AMD64: ${{ inputs.zcashd_compat_sha256_amd64 }}
+          ZCASHD_COMPAT_URL_ARM64: ${{ inputs.zcashd_compat_url_arm64 }}
+          ZCASHD_COMPAT_SHA256_ARM64: ${{ inputs.zcashd_compat_sha256_arm64 }}
+        run: |
+          set -euo pipefail
+          context_dir="${RUNNER_TEMP}/zcashd-compat-context"
+          rm -rf "$context_dir"
+          mkdir -p "$context_dir"
+
+          if [ "$ZCASHD_COMPAT_ENABLED" != "true" ]; then
+            echo "zcashd compatibility context disabled for this build."
+            exit 0
+          fi
+
+          if [ "$INPUT_TARGET" != "runtime" ]; then
+            echo "zcashd compatibility images can only be built from dockerfile_target=runtime" >&2
+            exit 1
+          fi
+
+          case "$PLATFORM" in
+            linux/amd64)
+              artifact_url="$ZCASHD_COMPAT_URL_AMD64"
+              artifact_sha256="$ZCASHD_COMPAT_SHA256_AMD64"
+              ;;
+            linux/arm64)
+              artifact_url="$ZCASHD_COMPAT_URL_ARM64"
+              artifact_sha256="$ZCASHD_COMPAT_SHA256_ARM64"
+              ;;
+            *)
+              echo "Unsupported platform for zcashd compatibility artifact: $PLATFORM" >&2
+              exit 1
+              ;;
+          esac
+
+          if [ -z "$artifact_url" ] || [ -z "$artifact_sha256" ]; then
+            echo "zcashd compatibility URL and SHA256 must be set for platform $PLATFORM" >&2
+            exit 1
+          fi
+
+          work_dir="$(mktemp -d)"
+          trap 'rm -rf "$work_dir"' EXIT
+
+          archive_path="$work_dir/zcashd-compat.tar.gz"
+          extract_dir="$work_dir/extracted"
+          curl -fsSL "$artifact_url" -o "$archive_path"
+          echo "$artifact_sha256  $archive_path" | sha256sum -c -
+          mkdir -p "$extract_dir"
+          tar -xzf "$archive_path" -C "$extract_dir"
+
+          install -D -m 0755 "$extract_dir/bin/zcashd" "$context_dir/bin/zcashd"
+
       # Build and push image by digest to Google Artifact Registry
       # Images are pushed by digest only and will be merged into multi-arch manifest in the merge job
       # With provenance and SBOM (ZcashFoundation repository only)
@@ -260,7 +329,7 @@ jobs:
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f #v7.1.0
         with:
           platforms: ${{ matrix.platform }}
-          target: ${{ inputs.dockerfile_target }}
+          target: ${{ steps.resolve_target.outputs.target }}
           context: .
           file: ${{ inputs.dockerfile_path }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -269,9 +338,8 @@ jobs:
             RUST_LOG=${{ env.RUST_LOG }}
             CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}
             FEATURES=${{ env.FEATURES }}
-            ZCASHD_COMPAT_ENABLED=${{ inputs.zcashd_compat_enabled }}
-            ZCASHD_COMPAT_URL=${{ matrix.platform == 'linux/amd64' && inputs.zcashd_compat_url_amd64 || inputs.zcashd_compat_url_arm64 }}
-            ZCASHD_COMPAT_SHA256=${{ matrix.platform == 'linux/amd64' && inputs.zcashd_compat_sha256_amd64 || inputs.zcashd_compat_sha256_arm64 }}
+          build-contexts: |
+            zcashd_compat=${{ runner.temp }}/zcashd-compat-context
           outputs: type=image,name=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }},push-by-digest=true,name-canonical=true,push=true
           # It's recommended to build images with max-level provenance attestations
           # https://docs.docker.com/build/ci/github-actions/attestations/
@@ -289,7 +357,7 @@ jobs:
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f #v7.1.0
         with:
           platforms: ${{ matrix.platform }}
-          target: ${{ inputs.dockerfile_target }}
+          target: ${{ steps.resolve_target.outputs.target }}
           context: .
           file: ${{ inputs.dockerfile_path }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -298,9 +366,8 @@ jobs:
             RUST_LOG=${{ env.RUST_LOG }}
             CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}
             FEATURES=${{ env.FEATURES }}
-            ZCASHD_COMPAT_ENABLED=${{ inputs.zcashd_compat_enabled }}
-            ZCASHD_COMPAT_URL=${{ matrix.platform == 'linux/amd64' && inputs.zcashd_compat_url_amd64 || inputs.zcashd_compat_url_arm64 }}
-            ZCASHD_COMPAT_SHA256=${{ matrix.platform == 'linux/amd64' && inputs.zcashd_compat_sha256_amd64 || inputs.zcashd_compat_sha256_arm64 }}
+          build-contexts: |
+            zcashd_compat=${{ runner.temp }}/zcashd-compat-context
           outputs: type=image,name=us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }},push-by-digest=true,name-canonical=true,push=true
           # Don't read from the cache if the caller disabled it.
           # https://docs.docker.com/engine/reference/commandline/buildx_build/#options

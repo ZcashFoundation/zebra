@@ -9,6 +9,7 @@
 use std::{env, fs, io::Write, path::PathBuf, sync::Mutex};
 
 use tempfile::{Builder, TempDir};
+use zebrad::components::zcashd_compat::ConfigZcashdBinarySource;
 use zebrad::config::ZebradConfig;
 
 // Prefix used for environment variables mapped to config values in tests.
@@ -207,6 +208,71 @@ fn config_nested_env_vars() {
     assert_eq!(config.tracing.filter.as_deref(), Some("debug"));
 }
 
+#[test]
+fn config_zcashd_compat_source_and_path_env() {
+    let env = EnvGuard::new();
+    env.set_var("ZEBRA_ZCASHD_COMPAT__ZCASHD_SOURCE", "path");
+    env.set_var("ZEBRA_ZCASHD_COMPAT__ZCASHD_PATH", "/usr/local/bin/zcashd");
+
+    let config = ZebradConfig::load(None).expect("load config with zcashd compat env vars");
+    assert_eq!(
+        config.zcashd_compat.zcashd_source,
+        ConfigZcashdBinarySource::Path
+    );
+    assert_eq!(
+        config.zcashd_compat.zcashd_path,
+        Some(PathBuf::from("/usr/local/bin/zcashd"))
+    );
+}
+
+#[test]
+fn config_zcashd_compat_managed_source_env() {
+    let env = EnvGuard::new();
+    env.set_var("ZEBRA_ZCASHD_COMPAT__ZCASHD_SOURCE", "managed");
+
+    let config = ZebradConfig::load(None).expect("load config with managed source");
+    assert_eq!(
+        config.zcashd_compat.zcashd_source,
+        ConfigZcashdBinarySource::Managed
+    );
+}
+
+#[test]
+fn config_zcashd_compat_rpc_listener_env() {
+    let env = EnvGuard::new();
+    env.set_var("ZEBRA_ZCASHD_COMPAT__LISTEN_ADDR", "127.0.0.1:28232");
+    env.set_var(
+        "ZEBRA_ZCASHD_COMPAT__COOKIE_DIR",
+        "/tmp/zcashd-compat-cookies",
+    );
+
+    let config = ZebradConfig::load(None).expect("load config with zcashd-compat rpc env vars");
+    assert_eq!(
+        config.zcashd_compat.listen_addr.unwrap().to_string(),
+        "127.0.0.1:28232"
+    );
+    assert_eq!(
+        config.zcashd_compat.cookie_dir,
+        PathBuf::from("/tmp/zcashd-compat-cookies")
+    );
+    assert_eq!(
+        config.zcashd_compat.cookie_file_name,
+        ".zcashd-compat.cookie"
+    );
+}
+
+#[test]
+fn config_zcashd_compat_legacy_rpc_url_env() {
+    let env = EnvGuard::new();
+    env.set_var("ZEBRA_ZCASHD_COMPAT__RPC_URL", "http://127.0.0.1:28232");
+
+    let config = ZebradConfig::load(None).expect("load config with legacy zcashd-compat rpc_url");
+    assert_eq!(
+        config.zcashd_compat.listen_addr.unwrap().to_string(),
+        "127.0.0.1:28232"
+    );
+}
+
 // --- Specific env mappings used in Docker examples ---
 
 #[test]
@@ -230,6 +296,7 @@ fn config_zebra_rpc_listen_addr_env() {
         config.rpc.listen_addr.unwrap().to_string(),
         "127.0.0.1:18232"
     );
+    assert_eq!(config.rpc.cookie_file_name, ".cookie");
 }
 
 #[test]

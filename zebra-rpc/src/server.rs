@@ -126,7 +126,7 @@ impl RpcServer {
 
         let http_middleware_layer = if conf.enable_cookie_auth {
             let cookie = Cookie::default();
-            cookie::write_to_disk(&cookie, &conf.cookie_dir)
+            cookie::write_to_disk(&cookie, &conf.cookie_dir, Some(&conf.cookie_file_name))
                 .expect("Zebra must be able to write the auth cookie to the disk");
             HttpRequestMiddlewareLayer::new(Some(cookie), max_request_body_size)
         } else {
@@ -191,7 +191,10 @@ impl RpcServer {
         let wait_on_shutdown = move || {
             span.in_scope(|| {
                 if config.enable_cookie_auth {
-                    if let Err(err) = cookie::remove_from_disk(&config.cookie_dir) {
+                    if let Err(err) = cookie::remove_from_disk(
+                        &config.cookie_dir,
+                        Some(&config.cookie_file_name),
+                    ) {
                         warn!(
                             ?err,
                             "unexpectedly could not remove the rpc auth cookie from the disk"

@@ -16,7 +16,7 @@ use tracing::{debug, error, info, warn};
 
 use zebra_chain::parameters::NetworkKind;
 
-use crate::components::zcashd_compat::Config;
+use super::Config;
 
 /// The full configuration used by the zcashd-compat supervisor task.
 #[derive(Clone, Debug)]
@@ -25,9 +25,9 @@ pub struct SupervisorConfig {
     pub zcashd_path: PathBuf,
     /// Datadir for `zcashd`.
     pub zcashd_datadir: PathBuf,
-    /// RPC URL passed to `-unityzebra`.
+    /// RPC URL passed to `-zebra-compat-url`.
     pub rpc_url: String,
-    /// Cookie file path passed to `-unityzebracookiefile`.
+    /// Cookie file path passed to `-zebra-compat-cookiefile`.
     pub cookie_path: PathBuf,
     /// Any extra user-provided arguments.
     pub extra_args: Vec<String>,
@@ -47,13 +47,14 @@ impl SupervisorConfig {
     /// Builds a runtime supervisor config from `zebrad` and `[zcashd_compat]` settings.
     pub fn new(
         zcashd_compat: &Config,
+        zcashd_path: PathBuf,
         state_cache_dir: &Path,
         network: NetworkKind,
         rpc_url: String,
         cookie_path: PathBuf,
     ) -> Self {
         Self {
-            zcashd_path: zcashd_compat.zcashd_path.clone(),
+            zcashd_path,
             zcashd_datadir: zcashd_compat
                 .zcashd_datadir
                 .clone()
@@ -72,10 +73,10 @@ impl SupervisorConfig {
     /// Builds the zcashd command-line arguments.
     pub fn command_args(&self) -> Vec<String> {
         let mut args = vec![
-            "-unity".to_string(),
-            format!("-unityzebra={}", self.rpc_url),
+            "-zebra-compat".to_string(),
+            format!("-zebra-compat-url={}", self.rpc_url),
             format!(
-                "-unityzebracookiefile={}",
+                "-zebra-compat-cookiefile={}",
                 self.cookie_path.to_string_lossy()
             ),
             format!("-datadir={}", self.zcashd_datadir.to_string_lossy()),
@@ -87,7 +88,14 @@ impl SupervisorConfig {
             NetworkKind::Regtest => args.push("-regtest".to_string()),
         }
 
-        args.extend(self.extra_args.iter().cloned());
+        // Always include -printtoconsole and filter it out from extra_args
+        args.push("-printtoconsole".to_string());
+        args.extend(
+            self.extra_args
+                .iter()
+                .filter(|arg| arg.as_str() != "-printtoconsole")
+                .cloned(),
+        );
         args
     }
 }
@@ -454,7 +462,7 @@ mod tests {
             zcashd_datadir: PathBuf::from("/tmp/zcashd-compat-datadir"),
             rpc_url: "http://127.0.0.1:8232".to_string(),
             cookie_path: PathBuf::from("/tmp/.cookie"),
-            extra_args: vec!["-printtoconsole".to_string()],
+            extra_args: vec!["-debug=1".to_string()],
             network: NetworkKind::Regtest,
             startup_delay: std::time::Duration::from_secs(1),
             restart_backoff: std::time::Duration::from_secs(2),
@@ -464,15 +472,16 @@ mod tests {
 
         let args = config.command_args();
 
-        assert!(args.contains(&"-unity".to_string()));
+        assert!(args.contains(&"-zebra-compat".to_string()));
         assert!(args.contains(&"-regtest".to_string()));
         assert!(args
             .iter()
-            .any(|a| a.starts_with("-unityzebra=http://127.0.0.1:8232")));
+            .any(|a| a.starts_with("-zebra-compat-url=http://127.0.0.1:8232")));
         assert!(args
             .iter()
-            .any(|a| a.starts_with("-unityzebracookiefile=/tmp/.cookie")));
+            .any(|a| a.starts_with("-zebra-compat-cookiefile=/tmp/.cookie")));
         assert!(args.contains(&"-printtoconsole".to_string()));
+        assert!(args.contains(&"-debug=1".to_string()));
     }
 
     #[tokio::test]

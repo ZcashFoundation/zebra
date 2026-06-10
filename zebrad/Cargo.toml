@@ -194,6 +194,11 @@ tracing = { workspace = true }
 metrics = { workspace = true }
 
 dirs = { workspace = true }
+reqwest = { workspace = true, default-features = false, features = ["blocking", "rustls-tls"] }
+sha2 = { workspace = true }
+tempfile = { workspace = true }
+flate2 = "1.1.9"
+tar = "0.4.46"
 
 # Health check server dependencies
 hyper = { workspace = true, features = ["server", "http1"] }
@@ -205,7 +210,7 @@ config = { workspace = true }
 
 num-integer = { workspace = true }
 rand = { workspace = true }
-nix = { workspace = true }
+nix = { workspace = true, features = ["fs"] }
 
 # prod feature internal-miner
 thread-priority = { workspace = true, optional = true }

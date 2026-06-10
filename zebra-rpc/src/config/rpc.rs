@@ -63,6 +63,10 @@ pub struct Config {
     /// The directory where Zebra stores RPC cookies.
     pub cookie_dir: PathBuf,
 
+    /// The cookie file name used in `cookie_dir`.
+    #[serde(default = "default_cookie_file_name")]
+    pub cookie_file_name: String,
+
     /// Enable cookie-based authentication for RPCs.
     pub enable_cookie_auth: bool,
 
@@ -89,6 +93,7 @@ impl Default for Config {
 
             // Use the default cache dir for the auth cookie.
             cookie_dir: default_cache_dir(),
+            cookie_file_name: default_cookie_file_name(),
 
             // Enable cookie-based authentication by default.
             enable_cookie_auth: true,
@@ -96,5 +101,30 @@ impl Default for Config {
             // 50 MiB
             max_response_body_size: 52_428_800,
         }
+    }
+}
+
+fn default_cookie_file_name() -> String {
+    ".cookie".to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Config;
+
+    #[test]
+    fn deserialize_defaults_cookie_file_name_when_missing() {
+        let config: Config = toml::from_str(
+            r#"
+            listen_addr = "127.0.0.1:8232"
+            "#,
+        )
+        .expect("partial rpc config should deserialize");
+
+        assert_eq!(
+            config.cookie_file_name,
+            super::default_cookie_file_name(),
+            "missing cookie file names should use the default value"
+        );
     }
 }

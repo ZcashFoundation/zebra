@@ -36,6 +36,7 @@ async fn rpc_server_spawn() {
         parallel_cpu_threads: 0,
         debug_force_finished_sync: false,
         cookie_dir: Default::default(),
+        cookie_file_name: ".cookie".to_string(),
         enable_cookie_auth: false,
         max_response_body_size: Default::default(),
     };
@@ -105,6 +106,7 @@ async fn rpc_spawn_unallocated_port(do_shutdown: bool) {
         parallel_cpu_threads: 0,
         debug_force_finished_sync: false,
         cookie_dir: Default::default(),
+        cookie_file_name: ".cookie".to_string(),
         enable_cookie_auth: false,
         max_response_body_size: Default::default(),
     };
@@ -164,6 +166,7 @@ async fn rpc_server_spawn_port_conflict() {
         debug_force_finished_sync: false,
         parallel_cpu_threads: 0,
         cookie_dir: Default::default(),
+        cookie_file_name: ".cookie".to_string(),
         enable_cookie_auth: false,
         max_response_body_size: Default::default(),
     };

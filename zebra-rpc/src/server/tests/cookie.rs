@@ -12,7 +12,7 @@ fn cookie_file_has_restrictive_permissions() {
     let dir = tempfile::tempdir().unwrap();
     let cookie = Cookie::default();
 
-    cookie::write_to_disk(&cookie, dir.path()).unwrap();
+    cookie::write_to_disk(&cookie, dir.path(), None).unwrap();
 
     let cookie_path = dir.path().join(".cookie");
     let metadata = fs::metadata(&cookie_path).unwrap();
@@ -42,6 +42,6 @@ fn cookie_write_rejects_symlink() {
     std::os::unix::fs::symlink(&target, dir.path().join(".cookie")).unwrap();
 
     let cookie = Cookie::default();
-    let result = cookie::write_to_disk(&cookie, dir.path());
+    let result = cookie::write_to_disk(&cookie, dir.path(), None);
     assert!(result.is_err(), "should reject symlink at cookie path");
 }

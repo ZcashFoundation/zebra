@@ -4518,3 +4518,145 @@ async fn disconnects_from_misbehaving_peers() -> Result<()> {
 
     Ok(())
 }
+
+// ── zcashd-compat integration tests ──────────────────────────────────────────
+//
+// These tests require a zcashd binary and are skipped unless `TEST_ZCASHD_COMPAT=1`
+// is set. Run the full suite with:
+//
+//   TEST_ZCASHD_COMPAT=1 cargo nextest run --profile zcashd-compat-integration
+//
+// Or with an explicit binary:
+//
+//   TEST_ZCASHD_COMPAT=1 ZEBRA_TEST_ZCASHD_PATH=/path/to/zcashd \
+//     cargo nextest run --profile zcashd-compat-integration
+
+/// Verifies that both zebrad and zcashd start and respond to basic RPC calls.
+///
+/// See [`common::zcashd_compat::startup::both_processes_start`] for details.
+#[tokio::test]
+#[ignore]
+async fn zcashd_compat_both_processes_start() -> Result<()> {
+    common::zcashd_compat::startup::both_processes_start().await
+}
+
+/// After mining 5 blocks, `getzebracompatinfo` should report `readiness == "ready"`.
+///
+/// See [`common::zcashd_compat::startup::readiness_after_mine`] for details.
+#[tokio::test]
+#[ignore]
+async fn zcashd_compat_readiness_after_mine() -> Result<()> {
+    common::zcashd_compat::startup::readiness_after_mine().await
+}
+
+/// Verifies that zcashd's RPC endpoint rejects requests with invalid credentials.
+///
+/// See [`common::zcashd_compat::startup::rpc_requires_auth`] for details.
+#[tokio::test]
+#[ignore]
+async fn zcashd_compat_rpc_requires_auth() -> Result<()> {
+    common::zcashd_compat::startup::rpc_requires_auth().await
+}
+
+/// Verifies that zebrad and zcashd agree on block count and best block hash.
+///
+/// See [`common::zcashd_compat::chain::height_and_hash_agree`] for details.
+#[tokio::test]
+#[ignore]
+async fn zcashd_compat_height_and_hash_agree() -> Result<()> {
+    common::zcashd_compat::chain::height_and_hash_agree().await
+}
+
+/// Verifies that `getblockhash` returns the same hash on both endpoints for heights 1–3.
+///
+/// See [`common::zcashd_compat::chain::getblock_hash_consistent`] for details.
+#[tokio::test]
+#[ignore]
+async fn zcashd_compat_getblock_hash_consistent() -> Result<()> {
+    common::zcashd_compat::chain::getblock_hash_consistent().await
+}
+
+/// Verifies that zcashd can generate new transparent and shielded addresses.
+///
+/// See [`common::zcashd_compat::wallet::address_generation`] for details.
+#[tokio::test]
+#[ignore]
+async fn zcashd_compat_wallet_address_generation() -> Result<()> {
+    common::zcashd_compat::wallet::address_generation().await
+}
+
+/// Verifies that wallet balances and UTXOs are zero before any funding.
+///
+/// See [`common::zcashd_compat::wallet::initial_balance_zero`] for details.
+#[tokio::test]
+#[ignore]
+async fn zcashd_compat_wallet_initial_balance_zero() -> Result<()> {
+    common::zcashd_compat::wallet::initial_balance_zero().await
+}
+
+/// Verifies that `getwalletinfo` contains all expected response fields.
+///
+/// See [`common::zcashd_compat::wallet::getwalletinfo_fields_present`] for details.
+#[tokio::test]
+#[ignore]
+async fn zcashd_compat_getwalletinfo_fields_present() -> Result<()> {
+    common::zcashd_compat::wallet::getwalletinfo_fields_present().await
+}
+
+/// Sends a transparent transaction via zcashd and confirms it appears in zebrad's mempool.
+///
+/// See [`common::zcashd_compat::tx_flow::transparent_tx_in_mempool`] for details.
+#[tokio::test]
+#[ignore]
+async fn zcashd_compat_transparent_tx_in_mempool() -> Result<()> {
+    common::zcashd_compat::tx_flow::transparent_tx_in_mempool().await
+}
+
+/// Sends a transparent transaction via zcashd, mines a block, and confirms it via zebrad.
+///
+/// See [`common::zcashd_compat::tx_flow::transparent_tx_confirms`] for details.
+#[tokio::test]
+#[ignore]
+async fn zcashd_compat_transparent_tx_confirms() -> Result<()> {
+    common::zcashd_compat::tx_flow::transparent_tx_confirms().await
+}
+
+/// Verifies that zebrad shuts down cleanly while supervising a running zcashd.
+///
+/// See [`common::zcashd_compat::resilience::zebrad_clean_shutdown`] for details.
+#[tokio::test]
+#[ignore]
+async fn zcashd_compat_zebrad_clean_shutdown() -> Result<()> {
+    common::zcashd_compat::resilience::zebrad_clean_shutdown().await
+}
+
+/// Verifies that zcashd restarts after an unexpected exit without corrupting zebrad.
+///
+/// See [`common::zcashd_compat::resilience::zcashd_restarts_after_exit`] for details.
+#[tokio::test]
+#[ignore]
+#[cfg(unix)]
+async fn zcashd_compat_zcashd_restarts_after_exit() -> Result<()> {
+    common::zcashd_compat::resilience::zcashd_restarts_after_exit().await
+}
+
+/// See [`common::zcashd_compat::network::peer_connectivity`] for details.
+#[tokio::test]
+#[ignore]
+async fn zcashd_compat_peer_connectivity() -> Result<()> {
+    common::zcashd_compat::network::peer_connectivity().await
+}
+
+/// See [`common::zcashd_compat::network::mempool_info_valid`] for details.
+#[tokio::test]
+#[ignore]
+async fn zcashd_compat_mempool_info_valid() -> Result<()> {
+    common::zcashd_compat::network::mempool_info_valid().await
+}
+
+/// See [`common::zcashd_compat::network::historical_block_consistent`] for details.
+#[tokio::test]
+#[ignore]
+async fn zcashd_compat_historical_block_consistent() -> Result<()> {
+    common::zcashd_compat::network::historical_block_consistent().await
+}

@@ -445,23 +445,40 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Prepare zcashd compat build context
+        env:
+          ZCASHD_COMPAT_URL: ${{ needs.resolve-zcashd-compat-manifest.outputs[matrix.zcashd_compat_url_output] }}
+          ZCASHD_COMPAT_SHA256: ${{ needs.resolve-zcashd-compat-manifest.outputs[matrix.zcashd_compat_sha256_output] }}
+        run: |
+          set -euo pipefail
+          context_dir="${RUNNER_TEMP}/zcashd-compat-context"
+          work_dir="$(mktemp -d)"
+          trap 'rm -rf "$work_dir"' EXIT
+          archive_path="$work_dir/zcashd-compat.tar.gz"
+          extract_dir="$work_dir/extracted"
+
+          curl -fsSL "$ZCASHD_COMPAT_URL" -o "$archive_path"
+          echo "$ZCASHD_COMPAT_SHA256  $archive_path" | sha256sum -c -
+          mkdir -p "$extract_dir"
+          tar -xzf "$archive_path" -C "$extract_dir"
+
+          rm -rf "$context_dir"
+          mkdir -p "$context_dir"
+          install -D -m 0755 "$extract_dir/bin/zcashd" "$context_dir/bin/zcashd"
+
       - name: Build zcashd compat runtime image
         if: github.event_name != 'release' && !inputs.publish_docker_to_dockerhub
         env:
           FEATURES: ${{ vars.RUST_PROD_FEATURES || 'default-release-binaries' }}
           IMAGE_TAG: valaroman/zebra:zcashd-compat-release-ci-${{ matrix.name }}
-          ZCASHD_COMPAT_URL: ${{ needs.resolve-zcashd-compat-manifest.outputs[matrix.zcashd_compat_url_output] }}
-          ZCASHD_COMPAT_SHA256: ${{ needs.resolve-zcashd-compat-manifest.outputs[matrix.zcashd_compat_sha256_output] }}
         run: |
           set -euo pipefail
           docker buildx build \
             --platform "${{ matrix.platform }}" \
-            --target runtime \
+            --target runtime-zcashd-compat \
             --file ./docker/Dockerfile \
+            --build-context "zcashd_compat=${RUNNER_TEMP}/zcashd-compat-context" \
             --build-arg "FEATURES=${FEATURES}" \
-            --build-arg "ZCASHD_COMPAT_ENABLED=true" \
-            --build-arg "ZCASHD_COMPAT_URL=${ZCASHD_COMPAT_URL}" \
-            --build-arg "ZCASHD_COMPAT_SHA256=${ZCASHD_COMPAT_SHA256}" \
             --tag "$IMAGE_TAG" \
             --load \
             .
@@ -473,19 +490,15 @@ jobs:
           FEATURES: ${{ vars.RUST_PROD_FEATURES || 'default-release-binaries' }}
           RELEASE_TAG: ${{ needs.resolve-release.outputs.release_tag }}
           DOCKER_TAG_SUFFIX: ${{ matrix.docker_tag_suffix }}
-          ZCASHD_COMPAT_URL: ${{ needs.resolve-zcashd-compat-manifest.outputs[matrix.zcashd_compat_url_output] }}
-          ZCASHD_COMPAT_SHA256: ${{ needs.resolve-zcashd-compat-manifest.outputs[matrix.zcashd_compat_sha256_output] }}
         run: |
           set -euo pipefail
           image_version="${RELEASE_TAG#v}"
           docker buildx build \
             --platform "${{ matrix.platform }}" \
-            --target runtime \
+            --target runtime-zcashd-compat \
             --file ./docker/Dockerfile \
+            --build-context "zcashd_compat=${RUNNER_TEMP}/zcashd-compat-context" \
             --build-arg "FEATURES=${FEATURES}" \
-            --build-arg "ZCASHD_COMPAT_ENABLED=true" \
-            --build-arg "ZCASHD_COMPAT_URL=${ZCASHD_COMPAT_URL}" \
-            --build-arg "ZCASHD_COMPAT_SHA256=${ZCASHD_COMPAT_SHA256}" \
             --tag "valaroman/zebra:zcashd-compat-${image_version}-${DOCKER_TAG_SUFFIX}" \
             --push \
             .

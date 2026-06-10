@@ -22,3 +22,4 @@ pub mod lightwalletd;
 pub mod regtest;
 pub mod sync;
 pub mod test_type;
+pub mod zcashd_compat;
