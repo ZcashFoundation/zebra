@@ -22,7 +22,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `MetaAddr::negotiated_version()` accessor returning `Option<Version>`.
 - `MetaAddr::last_connection_state()` accessor returning `PeerAddrState`.
 - `MetaAddr::services()` accessor returning `Option<PeerServices>`.
-- `MetaAddr::last_seen()` accessor returning `Option<DateTime32>`.
 - `Display` impl for `PeerAddrState`.
 - Made `types::Version` type public with `Display` impl.
 

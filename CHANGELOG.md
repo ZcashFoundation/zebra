@@ -26,8 +26,6 @@ extends the `getpeerinfo` RPC, and includes several performance and correctness 
 
 - Fixed genesis-to-tip sync stall that could cause new nodes to hang during initial
   block download ([#10679](https://github.com/ZcashFoundation/zebra/pull/10679))
-- Bumped minimum network protocol version to Nu6_2
-  ([#10692](https://github.com/ZcashFoundation/zebra/pull/10692))
 - Fixed mempool index being unnecessarily rebuilt per transaction in `getrawmempool`
   ([#10599](https://github.com/ZcashFoundation/zebra/pull/10599))
 - Fixed `dequeue_children` by-height index handling in the state service
