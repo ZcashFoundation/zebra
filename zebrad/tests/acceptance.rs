@@ -4694,6 +4694,22 @@ async fn zcashd_compat_reorg_branch_too_large_sticky() -> Result<()> {
     common::zcashd_compat::reorg::branch_too_large_sticky().await
 }
 
+/// See [`common::zcashd_compat::reorg::restart_after_reorg`] for details.
+#[tokio::test]
+#[ignore]
+#[cfg(unix)]
+async fn zcashd_compat_reorg_restart_after_reorg() -> Result<()> {
+    common::zcashd_compat::reorg::restart_after_reorg().await
+}
+
+/// See [`common::zcashd_compat::reorg::zebra_tip_behind_local`] for details.
+#[tokio::test]
+#[ignore]
+#[cfg(unix)]
+async fn zcashd_compat_reorg_zebra_tip_behind_local() -> Result<()> {
+    common::zcashd_compat::reorg::zebra_tip_behind_local().await
+}
+
 /// See [`common::zcashd_compat::reorg::churn`] for details.
 #[tokio::test]
 #[ignore]

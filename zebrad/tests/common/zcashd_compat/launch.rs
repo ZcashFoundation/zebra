@@ -55,15 +55,73 @@ impl ZcashdCompatSetup {
         self.network.is_regtest()
     }
 
-    /// Cleans up: kills the managed zebrad child if present, asserts clean exit.
+    /// Returns the pid of the supervised zcashd from its pid file.
+    ///
+    /// Errors in external mode (no managed datadir) or before zcashd has
+    /// written its pid file.
+    pub fn zcashd_pid(&self) -> Result<u32> {
+        let datadir = self
+            .zcashd_datadir
+            .as_ref()
+            .ok_or_else(|| eyre!("zcashd datadir is unavailable outside managed regtest mode"))?;
+        let pid_path = datadir.join("regtest").join("zcashd.pid");
+        let pid = std::fs::read_to_string(&pid_path)
+            .map_err(|e| eyre!("failed to read zcashd pid file {}: {e}", pid_path.display()))?;
+
+        pid.trim()
+            .parse()
+            .map_err(|e| eyre!("invalid zcashd pid in {}: {e}", pid_path.display()))
+    }
+
+    /// Cleans up: kills the managed zebrad child if present (asserting it was
+    /// killed cleanly), then kills the supervised zcashd it leaves behind.
+    ///
+    /// SIGKILLing zebrad skips the supervisor's zcashd shutdown path, so
+    /// without the explicit kill every managed test leaks one zcashd process.
     pub fn teardown(mut self) -> Result<()> {
+        // Read the pid before killing zebrad: the testdir holding the pid file
+        // is dropped with the zebrad `TestChild`.
+        let zcashd_pid = self.zcashd_pid().ok();
+
         if let Some(mut z) = self.managed.take() {
             z.kill(false)?;
             z.wait_with_output()?
                 .assert_failure()?
                 .assert_was_killed()?;
         }
+
+        // Best-effort: zcashd may already have exited (resilience tests stop it).
+        if let Some(pid) = zcashd_pid {
+            let _ = send_signal(pid, "-KILL");
+        }
         Ok(())
+    }
+}
+
+impl Drop for ZcashdCompatSetup {
+    fn drop(&mut self) {
+        // Failure paths return early without calling `teardown()`; zebrad is
+        // killed by the `TestChild` drop, but the supervised zcashd would leak.
+        // After a successful `teardown()` the testdir is already gone, so the
+        // pid read fails and this is a no-op.
+        if let Ok(pid) = self.zcashd_pid() {
+            let _ = send_signal(pid, "-KILL");
+        }
+    }
+}
+
+/// Sends `signal` (a `kill` argument like `-STOP` or `-KILL`) to `pid`.
+pub fn send_signal(pid: u32, signal: &str) -> Result<()> {
+    let status = std::process::Command::new("kill")
+        .arg(signal)
+        .arg(pid.to_string())
+        .status()
+        .map_err(|e| eyre!("failed to run kill {signal} {pid}: {e}"))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(eyre!("kill {signal} {pid} failed with status {status}"))
     }
 }
 
