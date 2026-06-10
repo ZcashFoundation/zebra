@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.0.0] - 2026-06-10
+
+### Breaking Changes
+
+- Removed `deferred_pool_balance_change` field from `ContextuallyVerifiedBlock`,
+  `SemanticallyVerifiedBlock`, and `CheckpointVerifiedBlock`. The deferred pool
+  balance change is now calculated on demand and passed as a parameter to
+  `FinalizedBlock::from_checkpoint_verified()` and
+  `FinalizedBlock::from_contextually_verified()`.
+
+### Fixed
+
+- `QueuedBlocks::dequeue_children()`: fixed `by_height` index handling to remove
+  individual hashes instead of the entire height entry, preventing loss of queued
+  blocks at the same height
+  ([#10604](https://github.com/ZcashFoundation/zebra/pull/10604)).
+
 ## [8.0.0] - 2026-06-02
 
 ### Changed
