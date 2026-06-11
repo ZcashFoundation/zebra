@@ -179,8 +179,19 @@ async fn engine_ring_is_preallocated_and_empty() {
     let _init_guard = zebra_test::init();
 
     let (peer_set, state, _chain_tip, _chain_tip_sender) = mock_services();
+    let (list, _blocks) = super::FakeHashList::continuous_mainnet(1);
+    let (_status_sender, peer_status) =
+        tokio::sync::watch::channel(zebra_network::PeerSetStatus::default());
 
-    let engine = Engine::new(peer_set, state, zebra_chain::block::Height(0));
+    let engine = Engine::new(
+        peer_set,
+        state,
+        zebra_chain::block::Height(0),
+        list,
+        peer_status,
+        sync::Config::default().known_hash_lookahead_bytes,
+        std::time::Duration::from_secs(5),
+    );
 
     assert!(
         engine.window_capacity() >= IBD_SPAN_MAX,

@@ -32,6 +32,8 @@ use zebra_state as zs;
 use crate::{components::sync::Config, BoxError};
 
 pub mod engine;
+pub mod fetch;
+pub mod peer_stats;
 
 #[cfg(test)]
 mod tests;
@@ -249,7 +251,22 @@ where
             "starting the known-hash IBD engine",
         );
 
-        let engine = engine::Engine::new(self.peer_set, self.state, next_commit);
+        // TODO(known-hash-ibd D6): plumb the real peer set status watch
+        // (`PeerSet::status_receiver()`) through `start.rs`; until then the
+        // engine sees a default (empty) status and sizes its batch
+        // concurrency at the minimum.
+        let (_status_sender, peer_status) =
+            tokio::sync::watch::channel(zn::PeerSetStatus::default());
+
+        let engine = engine::Engine::new(
+            self.peer_set,
+            self.state,
+            next_commit,
+            list,
+            peer_status,
+            self.config.known_hash_lookahead_bytes,
+            Duration::from_secs(self.config.known_hash_gap_hedge_secs),
+        );
 
         // TODO(known-hash-ibd D4/D6): supervisor restart loop with
         // `IBD_RESTART_DELAY`, progress tracking, and degradation above the
