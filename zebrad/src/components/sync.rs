@@ -6,6 +6,7 @@ use std::{
     cmp::max,
     collections::{HashMap, HashSet},
     convert,
+    path::PathBuf,
     pin::Pin,
     task::Poll,
     time::Duration,
@@ -289,6 +290,56 @@ pub struct Config {
     /// If the number of logical cores can't be detected, Zebra uses one thread.
     /// For details, see [the `rayon` documentation](https://docs.rs/rayon/latest/rayon/struct.ThreadPoolBuilder.html#method.num_threads).
     pub parallel_cpu_threads: usize,
+
+    /// Enable the known-hash initial sync engine.
+    ///
+    /// When enabled on a network with a bundled known-hash list, initial sync
+    /// downloads blocks directly by their pinned hashes instead of discovering
+    /// hashes from peers, then hands off to the legacy syncer at the end of
+    /// the list.
+    ///
+    /// Defaults to `false` until the engine is validated.
+    /// See `docs/design/known-hash-ibd.md` for the engine design.
+    pub known_hash_sync: bool,
+
+    /// The known-hash initial sync lookahead limit, as a byte budget.
+    ///
+    /// Bounds the bytes of fetched and in-flight blocks the known-hash engine
+    /// holds in memory ahead of the commit frontier. The block-count lookahead
+    /// is not configured: it auto-scales from the list's per-block size hints,
+    /// so small-block eras look ahead further than large-block eras.
+    ///
+    /// Increasing this limit can improve sync throughput at the cost of RAM;
+    /// decreasing it reduces RAM usage.
+    pub known_hash_lookahead_bytes: usize,
+
+    /// The number of seconds a block near the commit frontier may be in flight
+    /// before the known-hash engine hedges it with a single-hash refetch from
+    /// a different peer.
+    ///
+    /// Lower values fill frontier gaps faster but send more duplicate
+    /// requests; higher values are more polite to slow peers.
+    pub known_hash_gap_hedge_secs: u64,
+
+    /// An override directory containing the known-hash list chunk files.
+    ///
+    /// When unset, the chunk files are resolved from the directories next to
+    /// the `zebrad` binary, the platform data directory, or the development
+    /// tree, in that order.
+    pub known_hash_list_dir: Option<PathBuf>,
+
+    /// Allow the known-hash engine to download missing list chunk files.
+    ///
+    /// Downloaded chunks are verified against the hashes compiled into
+    /// `zebrad` before use, so this changes availability, not trust.
+    pub known_hash_list_download: bool,
+
+    /// Write every block fetched by the known-hash engine to its disk cache
+    /// before committing it.
+    ///
+    /// This closes the crash-loss window for blocks fetched but not yet
+    /// committed, at the cost of one extra sequential write of the chain.
+    pub known_hash_cache_write_ahead: bool,
 }
 
 impl Default for Config {
@@ -317,6 +368,26 @@ impl Default for Config {
             // If this causes tokio executor starvation, move CPU-intensive tasks to rayon threads,
             // or reserve a few cores for tokio threads, based on `num_cpus()`.
             parallel_cpu_threads: 0,
+
+            // Off until the known-hash engine is validated.
+            known_hash_sync: false,
+
+            // 256 MiB: enough lookahead to keep the network busy in every era
+            // without a large RSS increase.
+            known_hash_lookahead_bytes: 268_435_456,
+
+            // A small multiple of a typical block round-trip.
+            known_hash_gap_hedge_secs: 5,
+
+            // Use the layered asset search by default.
+            known_hash_list_dir: None,
+
+            // Self-downloads are verified against compiled-in hashes.
+            known_hash_list_download: true,
+
+            // Off: one sequential write of the whole chain is not worth the
+            // small crash-loss window for most users.
+            known_hash_cache_write_ahead: false,
         }
     }
 }

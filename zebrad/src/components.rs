@@ -6,6 +6,7 @@
 //! don't fit the async context well.
 
 pub mod health;
+pub mod ibd;
 pub mod inbound;
 #[allow(missing_docs)]
 pub mod mempool;
