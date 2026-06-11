@@ -41,17 +41,14 @@ use zebra_network::{self as zn, InventoryResponse, PeerSocketAddr};
 use super::engine::{IBD_BATCH_MAX_BLOCKS, IBD_BATCH_MAX_WEIGHT, SIZE_HINT_UNIT};
 use crate::BoxError;
 
-/// The size hint used for every block until the per-block size-hint asset
-/// ships with the known-hash list.
+/// The size hint used for blocks whose known-hash chunk does not embed
+/// per-block size hints.
 ///
 /// `255` is the maximum hint, covering the largest possible block, so the
 /// byte-budget reservations stay a priori upper bounds — but it also makes
 /// every request cross the batch weight threshold on its own, so batches are
-/// effectively single-block.
-///
-/// TODO(known-hash-ibd E2): once `KnownHashListSpec::size_hint_hash` pins a
-/// real size-hint asset, the engine passes per-block hints and small-block
-/// eras batch up to [`IBD_BATCH_MAX_BLOCKS`] blocks per request again.
+/// effectively single-block. With hinted chunks, small-block eras batch up
+/// to [`IBD_BATCH_MAX_BLOCKS`] blocks per request.
 pub const DEFAULT_SIZE_HINT: u8 = 255;
 
 /// The minimum [`RequestWeight`] of a fetch item.

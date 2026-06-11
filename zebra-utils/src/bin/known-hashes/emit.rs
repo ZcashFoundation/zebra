@@ -5,11 +5,10 @@
 //! engine:
 //!
 //! - `<prefix>-known-hashes-NN.bin` chunk files, each holding up to
-//!   [`HASHES_PER_CHUNK`] raw 32-byte internal-order block hashes,
-//! - a `<prefix>-size-hints.bin` array with one quantized size hint byte per
-//!   block, and
-//! - the `KnownHashListSpec` constant block that pins both with SHA-256
-//!   digests, printed ready to paste into `zebra-chain`.
+//!   [`HASHES_PER_CHUNK`] raw 32-byte internal-order block hashes followed by
+//!   one quantized size-hint byte per block, and
+//! - the `KnownHashListSpec` constant block that pins each chunk with a
+//!   SHA-256 digest, printed ready to paste into `zebra-chain`.
 
 use std::{fmt::Write as _, fs, path::Path};
 
@@ -35,9 +34,6 @@ pub const SIZE_HINT_UNIT: u32 = MAX_BLOCK_BYTES.div_ceil(255) as u32;
 pub struct EmittedSpec {
     /// SHA-256 of each emitted chunk file, in chunk order.
     pub chunk_hashes: Vec<[u8; 32]>,
-
-    /// SHA-256 of the emitted size-hint array file.
-    pub size_hint_hash: [u8; 32],
 }
 
 /// Quantizes a serialized block size into its 1-byte size hint:
@@ -59,9 +55,12 @@ pub fn size_hint(serialized_size: u32) -> Result<u8> {
     Ok(hint as u8)
 }
 
-/// Writes the chunked hash files and the size-hint array for `hashes` and
-/// `hints` into `out_dir`, using `file_prefix` (`main` or `test`) in the file
-/// names, and returns their SHA-256 digests.
+/// Writes the chunk files for `hashes` and `hints` into `out_dir`, using
+/// `file_prefix` (`main` or `test`) in the file names, and returns their
+/// SHA-256 digests.
+///
+/// Each chunk holds the raw 32-byte hashes for its heights, followed by one
+/// size-hint byte per height in the same order.
 ///
 /// `hashes` and `hints` must each have one entry per height, starting at
 /// genesis.
@@ -88,8 +87,13 @@ pub fn emit_assets(
     }
 
     let mut chunk_hashes = Vec::new();
-    for (index, chunk) in hashes.chunks(HASHES_PER_CHUNK).enumerate() {
-        let bytes: Vec<u8> = chunk.iter().flatten().copied().collect();
+    for (index, (hash_chunk, hint_chunk)) in hashes
+        .chunks(HASHES_PER_CHUNK)
+        .zip(hints.chunks(HASHES_PER_CHUNK))
+        .enumerate()
+    {
+        let mut bytes: Vec<u8> = hash_chunk.iter().flatten().copied().collect();
+        bytes.extend_from_slice(hint_chunk);
 
         let path = out_dir.join(format!("{file_prefix}-known-hashes-{index:02}.bin"));
         fs::write(&path, &bytes).wrap_err_with(|| format!("writing {}", path.display()))?;
@@ -97,13 +101,7 @@ pub fn emit_assets(
         chunk_hashes.push(Sha256::digest(&bytes).into());
     }
 
-    let path = out_dir.join(format!("{file_prefix}-size-hints.bin"));
-    fs::write(&path, hints).wrap_err_with(|| format!("writing {}", path.display()))?;
-
-    Ok(EmittedSpec {
-        chunk_hashes,
-        size_hint_hash: Sha256::digest(hints).into(),
-    })
+    Ok(EmittedSpec { chunk_hashes })
 }
 
 /// Formats the `KnownHashListSpec` constant block for `spec`, ready to paste
@@ -131,14 +129,7 @@ pub fn spec_constant_block(const_prefix: &str, max_height: u32, spec: &EmittedSp
             .expect("writing to a String never fails");
     }
 
-    writeln!(
-        block,
-        "    ],\n\
-         \x20   size_hint_hash: hex!(\"{}\"),\n\
-         }};",
-        hex::encode(spec.size_hint_hash),
-    )
-    .expect("writing to a String never fails");
+    writeln!(block, "    ],\n}};").expect("writing to a String never fails");
 
     block
 }

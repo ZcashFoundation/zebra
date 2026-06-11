@@ -48,6 +48,14 @@ const DEV_KNOWN_HASHES_DIR: &str =
 /// consumers that only need the list's coverage (the commit gate floor, state
 /// initialization, progress reporting) require no chunk I/O at all, and a
 /// truncated or extended asset set is detected as a hard mismatch at load.
+///
+/// # Chunk file format
+///
+/// A chunk holding `n` blocks is either `n × 32` bytes (one internal-order
+/// block hash per block), or `n × 33` bytes: the `n` hashes followed by one
+/// size-hint byte per block, in the same height order (design doc §6.2). The
+/// pinned SHA-256 constants distinguish the formats, so hints can ship
+/// per-chunk as size data becomes available.
 #[derive(Copy, Clone, Debug)]
 pub struct KnownHashListSpec {
     /// The highest height covered by the list.
@@ -59,44 +67,41 @@ pub struct KnownHashListSpec {
     /// engine's maximum window span to stay below this (design doc §6.4).
     pub chunk_blocks: u32,
 
-    /// SHA-256 of each hash chunk file, as lowercase hex, in chunk order.
+    /// SHA-256 of each chunk file, as lowercase hex, in chunk order.
     pub chunk_hashes: &'static [&'static str],
 
     /// The chunk file name prefix, e.g. `main-known-hashes` for
     /// `main-known-hashes-00.bin`.
     pub file_prefix: &'static str,
-
-    /// SHA-256 of the per-block size-hint array, as lowercase hex.
-    ///
-    /// `None` until the size-hint asset for this network has been generated
-    /// and shipped (see the design doc §6.2).
-    pub size_hint_hash: Option<&'static str>,
 }
 
 /// The Mainnet every-block known-hash list: 3,358,432 hashes
 /// (heights 0..=3,358,431) in 23 chunks.
+///
+/// Chunks 00–14 (heights 0..=2,249,999) embed per-block size hints; the
+/// remaining chunks are hash-only until their size data is swept from a
+/// synced node (TODO(ibd-engine E2): sweep the remaining sizes at the chain
+/// tip and re-emit chunks 15–22 with hints).
 pub const MAINNET_KNOWN_HASHES: KnownHashListSpec = KnownHashListSpec {
     max_height: block::Height(3_358_431),
     chunk_blocks: 150_000,
     file_prefix: "main-known-hashes",
-    // TODO(ibd-engine E2): size hints generated from a synced node.
-    size_hint_hash: None,
     chunk_hashes: &[
-        "3c8dd4f9cb86334aed0796fb795a3822bb89fda2a93c98b3a1f7d092a04ac4bb",
-        "6840720c2e34b8cb32625ee169707d1d98981df6e14e48104b9ba6206519a8c8",
-        "ed7ce0da0458c79e64384a8c3bb0ef1ca5796a2faa4dc0cdbf8a38158072cae2",
-        "ae65a186dc54f6d4945b2de8fe25431b2238a3d199d1a61d6fd70e7e74441dc0",
-        "2fa2815f13502c15d7c3ad4f3e2c76c0ddf96628a9a377d4613fa6fda3eb1ab0",
-        "db2beab3abe5f781a7d06363e80571a89fa67add59b6a706e0d214689038f721",
-        "5610c6a4ebef8c813055601314905216d7488c91bd0d0d83437242fbb3464346",
-        "68b6ce9cf856d27b361ccedcafb047b55c8dbbfcaf30684953a7daf2d70df52f",
-        "f9c62df1efb218f236d5195e3e5943dfbabe94b853f30b6b50a4890154ab4e6a",
-        "6704e94e301bb2de6d9732c511b777ac4e083713d8e6ce1074257a12ef523e60",
-        "15734d93c3e82e0fecd02833a288d32c515fa30811095e8f98f7d98c5ad08d4f",
-        "36f3accf4f69f244fe59c8110688972d3f2202d185b3ac3f0c75accbfdf7475e",
-        "7ba72656904c85984914d4e119db689b549ac6acfee86825bcd3d421af7e84ef",
-        "e3b4001c714c52502a63893c38cc88a22d9e01c5084b6523e601b375cd85956e",
-        "43ff830a861b44544e88fbce64c5a3fbbe3e67f5af4c6982afc1097c191da637",
+        "5c9719ada92cd27e622be82b58f6d8ead1270f0af1b5a8644021b80512db3e90",
+        "d4bab1830873891534e9e96855ea39aeb8b6d78b7658c6a688381f17a492837b",
+        "ebb26bbb3b97329525661ebe5426ab34ffc9c298cf7385deed99b1a73b2ae843",
+        "6031454d8e7f35e421382646bbd5786e30cc8f56b72580f8a2c6cbbe43638880",
+        "e3b2fc594b317337110003846fa4af3f343e54cb4d3c701165feb504365a685a",
+        "220d9361c3c301cc5cd6fa1199c0e906002b1d5081cce73aa95b1675ce0ffcf6",
+        "3f5d1bf1a2a63b9feb4186c3e30726048d933b00069aee07e7f832f57a03c165",
+        "c62cf58ee51946e8d9c56925eb5bb12ac726db11bf95512e7fbf21a8a1e50d02",
+        "6ae103db21d767b84f5434b931c0bd15bbe42f2c07763768066efe6043b45ef7",
+        "ea1234be1244f3d92b78e00feb7da4a2453e2830de53d9758a38d5c8b591ffee",
+        "3c8fdab2136ddba3c44a5328c0bb80e89c96f8cb2e8d03f4d3697e563079a443",
+        "03446d4bababe433b48b4f2f40add345e8c7e3130d947cabd8d3d77fd7c41d38",
+        "58cf63ddb267f6ce7cba94f96afe64a24f6cceb318060afd29d4e9dbbf6574b5",
+        "300a8ba12a7d0fd10fbddaafa643decac7fabe76849a38e55663fdd8bdd8ca5d",
+        "ba134982f8c8f339ee1f408d59254c76329fb07a158697f725b7502e84fd4926",
         "79d005f596bd2c711933560d9b4a33cd904c451e4b6df23facc98596830d1e18",
         "65a554e1df7de35e9e4b2ae1a1de316afb9110afef37ba2c40565f1b77a4b06f",
         "ea870fbd205f346e9f90a575786b8fca9387c1cdebdba7f28418f66a2adc12cd",
@@ -186,13 +191,16 @@ pub enum KnownHashError {
     /// A chunk file's length does not match the spec.
     #[error(
         "known-hash chunk {path} is {actual} bytes, expected {expected} \
-         (the spec pins {spec_len} total hashes; assets and spec disagree)"
+         (hash-only) or {expected_with_hints} (with embedded size hints; \
+         the spec pins {spec_len} total hashes; assets and spec disagree)"
     )]
     ChunkLength {
         /// The chunk file path.
         path: PathBuf,
-        /// The expected length in bytes.
+        /// The expected hash-only length in bytes.
         expected: u64,
+        /// The expected length in bytes with embedded size hints.
+        expected_with_hints: u64,
         /// The actual length in bytes.
         actual: u64,
         /// The total number of hashes pinned by the spec.
@@ -339,6 +347,9 @@ impl KnownHashList {
     }
 
     /// Reads chunk `index`, verifying its length and SHA-256 against the spec.
+    ///
+    /// Accepts both chunk formats: hash-only (32 bytes per block) and with
+    /// embedded size hints (33 bytes per block).
     fn read_chunk_raw(
         spec: &KnownHashListSpec,
         dir: &Path,
@@ -352,10 +363,12 @@ impl KnownHashList {
         })?;
 
         let expected_len = spec.chunk_len(index) * HASH_BYTES as u64;
-        if chunk.len() as u64 != expected_len {
+        let expected_len_with_hints = spec.chunk_len(index) * (HASH_BYTES + 1) as u64;
+        if chunk.len() as u64 != expected_len && chunk.len() as u64 != expected_len_with_hints {
             return Err(KnownHashError::ChunkLength {
                 path,
                 expected: expected_len,
+                expected_with_hints: expected_len_with_hints,
                 actual: chunk.len() as u64,
                 spec_len: spec.len(),
             });
@@ -426,6 +439,32 @@ impl KnownHashList {
             .last()
             .map(|(_, raw)| raw.as_slice())
             .expect("just inserted or moved the chunk to the back"))
+    }
+
+    /// Returns the embedded size hint for `height`, or `None` past the end
+    /// of the list or when `height`'s chunk is hash-only (design doc §6.2).
+    ///
+    /// A hint byte `w` in `1..=255` means the block's serialized size is at
+    /// most `w` size-hint units. Loads the chunk containing `height` like
+    /// [`hash`](Self::hash).
+    pub fn size_hint(&mut self, height: block::Height) -> Result<Option<u8>, KnownHashError> {
+        if height > self.spec.max_height {
+            return Ok(None);
+        }
+
+        let chunk_index = (height.0 / self.spec.chunk_blocks) as usize;
+        let chunk_blocks = self.spec.chunk_len(chunk_index) as usize;
+        let offset = (height.0 % self.spec.chunk_blocks) as usize;
+
+        let chunk = self.resident_chunk(chunk_index)?;
+
+        // Hash-only chunks are `32 × n` bytes; hinted chunks append one hint
+        // byte per block after the `32 × n` hash section.
+        if chunk.len() == chunk_blocks * HASH_BYTES {
+            return Ok(None);
+        }
+
+        Ok(Some(chunk[chunk_blocks * HASH_BYTES + offset]))
     }
 
     /// Drops resident chunks that only cover heights below `height`.

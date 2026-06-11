@@ -3,8 +3,8 @@
 //! Sweeps every block hash and serialized block size from a local, fully
 //! synced node over JSON-RPC, verifies the result against the network's
 //! spaced checkpoint list (every checkpointed height must match exactly), and
-//! emits the chunked hash assets, the per-block size-hint array, and the
-//! `KnownHashListSpec` constant block used by the known-hash IBD engine.
+//! emits the chunked assets (per-block hashes with embedded size hints) and
+//! the `KnownHashListSpec` constant block used by the known-hash IBD engine.
 //!
 //! Typical usage, against a synced local node:
 //!
@@ -163,7 +163,7 @@ fn run_emit(
     let spec = emit::emit_assets(&args.out_dir, file_prefix, &hashes, &hints)?;
 
     eprintln!(
-        "emitted {} hash chunks and {} size hints to {} ({verified} anchors verified)",
+        "emitted {} chunks with {} embedded size hints to {} ({verified} anchors verified)",
         spec.chunk_hashes.len(),
         hints.len(),
         args.out_dir.display(),

@@ -284,8 +284,8 @@ pub trait HashList: Send + 'static {
 
     /// Returns the size hint for `height` (design doc §6.2), in `1..=255`.
     ///
-    /// Defaults to [`DEFAULT_SIZE_HINT`] until the size-hint asset ships
-    /// (TODO(known-hash-ibd E2)).
+    /// Defaults to [`DEFAULT_SIZE_HINT`] for heights whose chunk does not
+    /// embed size hints.
     fn size_hint(&mut self, _height: block::Height) -> u8 {
         DEFAULT_SIZE_HINT
     }
@@ -301,6 +301,16 @@ impl HashList for KnownHashList {
 
     fn hash(&mut self, height: block::Height) -> Result<Option<block::Hash>, BoxError> {
         Ok(KnownHashList::hash(self, height)?)
+    }
+
+    fn size_hint(&mut self, height: block::Height) -> u8 {
+        // The hint only sizes fetch batches, so a chunk read error here is
+        // not fatal: fall back to the conservative default, and let the
+        // `hash` lookup for the same height surface the error.
+        match KnownHashList::size_hint(self, height) {
+            Ok(Some(hint)) => hint.max(1),
+            Ok(None) | Err(_) => DEFAULT_SIZE_HINT,
+        }
     }
 
     fn release_below(&mut self, height: block::Height) {

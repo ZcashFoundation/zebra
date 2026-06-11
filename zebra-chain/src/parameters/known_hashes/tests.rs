@@ -18,11 +18,20 @@ const MAINNET_SAPLING_DISPLAY_HEX: &str =
     "00000000025a57200d898ac7f21e26bf29028bbe96ec46e05b2c17cc9db9e4f3";
 
 /// Builds a single-chunk synthetic spec over `hashes`, writing the chunk file
-/// into `dir`.
+/// into `dir`. When `hints` is `Some`, one size-hint byte per block is
+/// appended to the chunk.
 ///
 /// Leaks the spec and its strings: test-only, bounded by the number of tests.
-fn synthetic_spec(dir: &Path, hashes: &[block::Hash]) -> &'static KnownHashListSpec {
-    let bytes: Vec<u8> = hashes.iter().flat_map(|h| h.0).collect();
+fn synthetic_spec(
+    dir: &Path,
+    hashes: &[block::Hash],
+    hints: Option<&[u8]>,
+) -> &'static KnownHashListSpec {
+    let mut bytes: Vec<u8> = hashes.iter().flat_map(|h| h.0).collect();
+    if let Some(hints) = hints {
+        assert_eq!(hashes.len(), hints.len(), "one hint per block");
+        bytes.extend_from_slice(hints);
+    }
 
     let chunk_hash: &'static str = Box::leak(hex::encode(Sha256::digest(&bytes)).into_boxed_str());
 
@@ -30,7 +39,6 @@ fn synthetic_spec(dir: &Path, hashes: &[block::Hash]) -> &'static KnownHashListS
         max_height: block::Height((hashes.len() - 1) as u32),
         chunk_blocks: 150_000,
         file_prefix: "test-known-hashes",
-        size_hint_hash: None,
         chunk_hashes: Box::leak(Box::new([chunk_hash])),
     }));
 
@@ -132,6 +140,25 @@ fn mainnet_assets_load_and_verify() {
         .hash(block::Height::MAX)
         .expect("no load needed")
         .is_none());
+
+    // Chunks 00-14 embed size hints; the rest are hash-only until their
+    // size data is swept.
+    assert!(list
+        .size_hint(block::Height(0))
+        .expect("chunk 0 is resident")
+        .is_some());
+    assert!(list
+        .size_hint(block::Height(2_249_999))
+        .expect("chunk 14 loads")
+        .is_some());
+    assert!(list
+        .size_hint(block::Height(2_250_000))
+        .expect("chunk 15 loads")
+        .is_none());
+    assert!(list
+        .size_hint(block::Height(3_358_431))
+        .expect("last chunk is resident")
+        .is_none());
 }
 
 /// Sequential lookups across chunk boundaries keep at most two chunks
@@ -168,7 +195,7 @@ fn synthetic_list_round_trip() {
 
     let dir = TempDir::new().expect("temp dir");
     let hashes = fake_hashes(100);
-    let spec = synthetic_spec(dir.path(), &hashes);
+    let spec = synthetic_spec(dir.path(), &hashes, None);
 
     let mut list = KnownHashList::open_spec(spec, &Network::Mainnet, Some(dir.path()))
         .expect("synthetic assets load");
@@ -182,6 +209,41 @@ fn synthetic_list_round_trip() {
         assert_eq!(actual, *expected, "hash mismatch at height {i}");
     }
     assert!(list.hash(block::Height(100)).expect("no load").is_none());
+
+    // Hash-only chunks have no size hints.
+    assert_eq!(list.size_hint(block::Height(0)).expect("chunk loads"), None);
+    assert_eq!(list.size_hint(block::Height(100)).expect("no load"), None);
+}
+
+#[test]
+fn synthetic_list_with_hints_round_trip() {
+    let _init_guard = zebra_test::init();
+
+    let dir = TempDir::new().expect("temp dir");
+    let hashes = fake_hashes(100);
+    // Distinct hints per height, never 0.
+    let hints: Vec<u8> = (0..100).map(|i| (i % 255) + 1).collect();
+    let spec = synthetic_spec(dir.path(), &hashes, Some(&hints));
+
+    let mut list = KnownHashList::open_spec(spec, &Network::Mainnet, Some(dir.path()))
+        .expect("synthetic hinted assets load");
+
+    for (i, (expected_hash, expected_hint)) in hashes.iter().zip(&hints).enumerate() {
+        let height = block::Height(i as u32);
+        let actual = list
+            .hash(height)
+            .expect("single chunk loads")
+            .expect("height is covered");
+        assert_eq!(actual, *expected_hash, "hash mismatch at height {i}");
+
+        let hint = list.size_hint(height).expect("chunk is resident");
+        assert_eq!(hint, Some(*expected_hint), "hint mismatch at height {i}");
+    }
+
+    assert!(list
+        .size_hint(block::Height(100))
+        .expect("no load")
+        .is_none());
 }
 
 #[test]
@@ -189,7 +251,7 @@ fn corrupt_chunk_rejected() {
     let _init_guard = zebra_test::init();
 
     let dir = TempDir::new().expect("temp dir");
-    let spec = synthetic_spec(dir.path(), &fake_hashes(100));
+    let spec = synthetic_spec(dir.path(), &fake_hashes(100), None);
 
     // Flip one byte in the middle of the chunk file (not the genesis hash, so
     // the failure is the SHA-256 check, not the genesis check).
@@ -210,7 +272,7 @@ fn truncated_chunk_rejected() {
     let _init_guard = zebra_test::init();
 
     let dir = TempDir::new().expect("temp dir");
-    let spec = synthetic_spec(dir.path(), &fake_hashes(100));
+    let spec = synthetic_spec(dir.path(), &fake_hashes(100), None);
 
     let path = dir.path().join(spec.chunk_file_name(0));
     let bytes = std::fs::read(&path).expect("chunk readable");
@@ -233,7 +295,7 @@ fn genesis_mismatch_rejected() {
     // A list whose height 0 is not the Mainnet genesis hash.
     let mut hashes = fake_hashes(100);
     hashes[0] = block::Hash([0xBB; 32]);
-    let spec = synthetic_spec(dir.path(), &hashes);
+    let spec = synthetic_spec(dir.path(), &hashes, None);
 
     let result = KnownHashList::open_spec(spec, &Network::Mainnet, Some(dir.path()));
     assert!(
@@ -249,7 +311,7 @@ fn missing_assets_report_searched_dirs() {
     let dir = TempDir::new().expect("temp dir");
     // A spec whose chunk files exist nowhere (empty override dir, and the
     // prefix doesn't exist in any fallback directory either).
-    let spec = synthetic_spec(dir.path(), &fake_hashes(10));
+    let spec = synthetic_spec(dir.path(), &fake_hashes(10), None);
     std::fs::remove_file(dir.path().join(spec.chunk_file_name(0))).expect("file removable");
 
     let result = KnownHashList::open_spec(spec, &Network::Mainnet, Some(dir.path()));
@@ -269,7 +331,7 @@ fn config_override_takes_priority() {
     let _init_guard = zebra_test::init();
 
     let dir = TempDir::new().expect("temp dir");
-    let spec = synthetic_spec(dir.path(), &fake_hashes(10));
+    let spec = synthetic_spec(dir.path(), &fake_hashes(10), None);
 
     // Resolution must pick the override directory (the only place the
     // synthetic chunk exists).

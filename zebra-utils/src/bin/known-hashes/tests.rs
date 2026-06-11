@@ -135,7 +135,7 @@ fn chunking_splits_at_exact_chunk_boundary() -> Result<()> {
 
     assert_eq!(spec.chunk_hashes.len(), 1);
     let chunk = std::fs::read(dir.path().join("main-known-hashes-00.bin"))?;
-    assert_eq!(chunk.len(), HASHES_PER_CHUNK * 32);
+    assert_eq!(chunk.len(), HASHES_PER_CHUNK * 33);
     assert!(!dir.path().join("main-known-hashes-01.bin").exists());
     assert_eq!(
         spec.chunk_hashes[0],
@@ -151,17 +151,11 @@ fn chunking_splits_at_exact_chunk_boundary() -> Result<()> {
 
     assert_eq!(spec.chunk_hashes.len(), 2);
     let chunk = std::fs::read(dir.path().join("main-known-hashes-01.bin"))?;
-    assert_eq!(chunk.len(), 32);
+    assert_eq!(chunk.len(), 33, "one hash and its trailing hint byte");
+    assert_eq!(chunk[32], 1, "the hint byte follows the hash section");
     assert_eq!(
         spec.chunk_hashes[1],
         <[u8; 32]>::from(Sha256::digest(&chunk))
-    );
-
-    let hint_file = std::fs::read(dir.path().join("main-size-hints.bin"))?;
-    assert_eq!(hint_file, hints);
-    assert_eq!(
-        spec.size_hint_hash,
-        <[u8; 32]>::from(Sha256::digest(&hint_file)),
     );
 
     Ok(())
@@ -192,13 +186,13 @@ fn spec_constant_block_matches_synthetic_sweep() -> Result<()> {
 
     let spec = emit_assets(dir.path(), "test", &hashes, &hints)?;
 
-    // The chunk digest covers the concatenated raw internal-order hashes.
-    let concatenated: Vec<u8> = hashes.iter().flatten().copied().collect();
+    // The chunk digest covers the concatenated raw internal-order hashes
+    // followed by the per-block hint bytes.
+    let mut concatenated: Vec<u8> = hashes.iter().flatten().copied().collect();
+    concatenated.extend_from_slice(&hints);
     let expected_chunk = <[u8; 32]>::from(Sha256::digest(&concatenated));
-    let expected_hints = <[u8; 32]>::from(Sha256::digest(hints));
 
     assert_eq!(spec.chunk_hashes, vec![expected_chunk]);
-    assert_eq!(spec.size_hint_hash, expected_hints);
 
     let constant_block = spec_constant_block("TESTNET", 2, &spec);
 
@@ -212,13 +206,6 @@ fn spec_constant_block_matches_synthetic_sweep() -> Result<()> {
     );
     assert!(
         constant_block.contains(&format!("hex!(\"{}\"),", hex::encode(expected_chunk))),
-        "{constant_block}"
-    );
-    assert!(
-        constant_block.contains(&format!(
-            "size_hint_hash: hex!(\"{}\"),",
-            hex::encode(expected_hints),
-        )),
         "{constant_block}"
     );
 
