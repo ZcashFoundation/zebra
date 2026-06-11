@@ -321,7 +321,7 @@ where
                 self.peer_set_status.clone(),
                 // The cache index is rebuilt from disk by the engine's
                 // restore scan on every (re)start.
-                Some(cache::BlockCache::new(&self.cache_dir)),
+                cache::BlockCache::new(&self.cache_dir),
                 self.config.known_hash_lookahead_bytes,
                 Duration::from_secs(self.config.known_hash_gap_hedge_secs),
             );

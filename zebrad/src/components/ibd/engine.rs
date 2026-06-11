@@ -541,12 +541,9 @@ where
     /// The weighted batched fetch service (design doc §4.2).
     batched_fetch: BatchedFetch<ZN>,
 
-    /// The disk overflow tier (design doc §4.5), when configured.
-    ///
-    /// `None` disables overflow fetch-ahead: the engine simply stops issuing
-    /// fetches at the memory budget. TODO(known-hash-ibd D6): wire the
-    /// production cache under `<state cache_dir>/ibd-block-cache/`.
-    cache: Option<BlockCache>,
+    /// The disk overflow tier (design doc §4.5), under
+    /// `<state cache_dir>/ibd-block-cache/`.
+    cache: BlockCache,
 
     /// Live peer set status, used for batch-concurrency sizing and stall
     /// diagnostics.
@@ -664,7 +661,7 @@ where
         base: block::Height,
         list: L,
         peer_status: watch::Receiver<PeerSetStatus>,
-        cache: Option<BlockCache>,
+        cache: BlockCache,
         lookahead_bytes: usize,
         gap_hedge_after: Duration,
     ) -> Self {
@@ -725,13 +722,11 @@ where
         loop {
             if self.base > end {
                 // Every height through the end of the list is committed.
-                if let Some(cache) = &mut self.cache {
-                    if let Err(error) = cache.remove_all() {
-                        warn!(
-                            %error,
-                            "failed to remove the IBD block cache directory at handoff",
-                        );
-                    }
+                if let Err(error) = self.cache.remove_all() {
+                    warn!(
+                        %error,
+                        "failed to remove the IBD block cache directory at handoff",
+                    );
                 }
 
                 info!(
@@ -785,12 +780,9 @@ where
         // The state tip is the height below the first uncommitted height.
         let state_tip = self.base.0.checked_sub(1).map(block::Height);
 
-        let survivors = match &mut self.cache {
-            None => return Ok(()),
-            Some(cache) => cache.scan(state_tip, end).map_err(|error| {
-                EngineError::Internal(format!("IBD block cache scan failed: {error}"))
-            })?,
-        };
+        let survivors = self.cache.scan(state_tip, end).map_err(|error| {
+            EngineError::Internal(format!("IBD block cache scan failed: {error}"))
+        })?;
 
         for (height, bytes) in survivors {
             // `scan` pruned everything at or below the state tip, so
@@ -952,13 +944,10 @@ where
     /// outstanding fetch count × the 2 MB block cap, which
     /// [`Self::fetch_slots_available`] bounds.
     fn storage_allows(&self) -> bool {
-        let disk_bytes = self.cache.as_ref().map_or(0, BlockCache::bytes);
-        let allowance = if self.cache.is_some() {
-            self.lookahead_bytes
-                .saturating_mul(1 + DISK_FETCH_AHEAD_FACTOR)
-        } else {
-            self.lookahead_bytes
-        };
+        let disk_bytes = self.cache.bytes();
+        let allowance = self
+            .lookahead_bytes
+            .saturating_mul(1 + DISK_FETCH_AHEAD_FACTOR);
 
         self.budget_used.saturating_add(disk_bytes) < allowance
     }
@@ -1159,12 +1148,7 @@ where
         // (single-owner, no-mutex design; see the cache module docs). An
         // unreadable entry was already dropped by the cache: reset the slot
         // for an immediate network refetch (§4.5 exception (a)).
-        let cached = match self
-            .cache
-            .as_mut()
-            .expect("promotion only happens for Cached slots, which need a configured cache")
-            .get(height)
-        {
+        let cached = match self.cache.get(height) {
             Some(cached) => cached,
             None => {
                 metrics::counter!("ibd.duplicate.download.count", "reason" => "corrupt-cache")
@@ -1396,28 +1380,25 @@ where
         // tier once the RAM block buffer is over budget.
         let over_budget = self.budget_used + bytes_u64 > self.lookahead_bytes;
         let placed_on_disk = if over_budget && offset > 0 {
-            match &mut self.cache {
-                Some(cache) => match cache.put(height, &block, source) {
-                    Ok(cached_bytes) => {
-                        self.window[offset] = Slot::Cached {
-                            bytes: cached_bytes,
-                            promoted: false,
-                        };
-                        true
-                    }
-                    Err(error) => {
-                        // A failed cache write must not waste the download:
-                        // hold the block in memory instead — a bounded budget
-                        // overshoot.
-                        warn!(
-                            %error,
-                            height = height.0,
-                            "failed to write a block to the IBD disk cache; keeping it in memory",
-                        );
-                        false
-                    }
-                },
-                None => false,
+            match self.cache.put(height, &block, source) {
+                Ok(cached_bytes) => {
+                    self.window[offset] = Slot::Cached {
+                        bytes: cached_bytes,
+                        promoted: false,
+                    };
+                    true
+                }
+                Err(error) => {
+                    // A failed cache write must not waste the download:
+                    // hold the block in memory instead — a bounded budget
+                    // overshoot.
+                    warn!(
+                        %error,
+                        height = height.0,
+                        "failed to write a block to the IBD disk cache; keeping it in memory",
+                    );
+                    false
+                }
             }
         } else {
             false
@@ -1773,9 +1754,7 @@ where
                 // The implicated cached copy is discarded from disk too
                 // (synchronous single-file unlink; see the cache module
                 // docs for the single-owner, no-mutex design).
-                if let Some(cache) = &mut self.cache {
-                    cache.remove(height);
-                }
+                self.cache.remove(height);
                 bytes
             }
             other => unreachable!("discarded copies are held or cached: {other:?}"),
@@ -1829,14 +1808,11 @@ where
         // so each round scans the cache index once. Synchronous unlinks of a
         // bounded batch, called directly from the loop like every cache
         // operation (single-owner, no-mutex design).
-        if let Some(cache) = &mut self.cache {
-            if !cache.is_empty()
-                && self.base.0.saturating_sub(self.cache_evicted_through.0)
-                    >= IBD_CACHE_EVICT_INTERVAL
-            {
-                self.cache_evicted_through = self.base;
-                cache.evict_through(block::Height(self.base.0 - 1));
-            }
+        if !self.cache.is_empty()
+            && self.base.0.saturating_sub(self.cache_evicted_through.0) >= IBD_CACHE_EVICT_INTERVAL
+        {
+            self.cache_evicted_through = self.base;
+            self.cache.evict_through(block::Height(self.base.0 - 1));
         }
     }
 
