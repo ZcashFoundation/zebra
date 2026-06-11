@@ -17,17 +17,14 @@ use sha2::{Digest, Sha256};
 
 use zebra_chain::block::MAX_BLOCK_BYTES;
 
+// The size-hint quantum is defined once in `zebra-chain` so the emitter and the
+// IBD engine quantize and dequantize with the same constant; re-exported here
+// for the sweep and its tests.
+pub use zebra_chain::parameters::known_hashes::SIZE_HINT_UNIT;
+
 /// The number of block hashes in each chunk file: 150,000 32-byte hashes,
 /// 4.8 MB per full chunk.
 pub const HASHES_PER_CHUNK: usize = 150_000;
-
-/// The size-hint quantum: `MAX_BLOCK_BYTES.div_ceil(255)` = 7,844 bytes.
-///
-/// A hint byte `w` in `1..=255` means the block's serialized size is at most
-/// `w * SIZE_HINT_UNIT`, so hints are always upper bounds.
-//
-// The maximum block size is 2,000,000 bytes, so the quotient fits in a u32.
-pub const SIZE_HINT_UNIT: u32 = MAX_BLOCK_BYTES.div_ceil(255) as u32;
 
 /// The asset digests pinned by a `KnownHashListSpec`.
 #[derive(Debug)]

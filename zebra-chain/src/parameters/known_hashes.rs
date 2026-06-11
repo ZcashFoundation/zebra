@@ -33,6 +33,21 @@ mod tests;
 /// field of [`block::Hash`]), with no header, delimiter, or byte reversal.
 const HASH_BYTES: usize = 32;
 
+/// The quantum for the per-block size hints embedded in chunk files
+/// (design doc §6.2): `MAX_BLOCK_BYTES.div_ceil(255)` = 7,844 bytes.
+///
+/// A hint byte `w` in `1..=255` means the block's serialized size is at most
+/// `w × SIZE_HINT_UNIT` bytes, so hints are always upper bounds. This is the
+/// single source of truth shared by the asset emitter (`zebra-utils`, which
+/// quantizes sizes into hints) and the IBD engine (`zebrad`, which
+/// dequantizes hints into byte-budget bounds), so the two can't disagree.
+//
+// 7,844 fits in a u32; the const assert below pins the value.
+pub const SIZE_HINT_UNIT: u32 = crate::block::MAX_BLOCK_BYTES.div_ceil(255) as u32;
+
+const _: () = assert!(SIZE_HINT_UNIT == 7_844);
+const _: () = assert!(255 * SIZE_HINT_UNIT as u64 >= crate::block::MAX_BLOCK_BYTES);
+
 /// The development-tree fallback directory holding the bundled chunk files,
 /// baked in at build time.
 ///

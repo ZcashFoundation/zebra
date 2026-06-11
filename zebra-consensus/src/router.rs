@@ -269,7 +269,6 @@ where
     // Make sure the state contains the known best chain checkpoints, in a separate thread.
 
     let checkpoint_state_service = state_service.clone();
-    let checkpoint_sync = config.checkpoint_sync;
     let checkpoint_network = network.clone();
 
     let state_checkpoint_verify_handle = tokio::task::spawn(
@@ -291,8 +290,9 @@ where
             // detection the old full-list walk provided, without issuing one
             // serial state request per checkpoint (design doc §7.2): the
             // highest checkpoint at or below the state tip pins the whole
-            // chain below it by construction.
-            let _ = checkpoint_sync;
+            // chain below it by construction. The spot-check always runs (it
+            // is a cheap consistency assertion), independent of the
+            // `checkpoint_sync` config.
             let checkpoints = checkpoint_network.checkpoint_list();
 
             let tip = match checkpoint_state_service

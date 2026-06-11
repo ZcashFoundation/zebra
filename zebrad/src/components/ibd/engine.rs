@@ -38,7 +38,7 @@ use tokio::{sync::watch, time::Instant};
 use tower::{Service, ServiceExt};
 
 use zebra_chain::{
-    block::{self, Block, MAX_BLOCK_BYTES},
+    block::{self, Block},
     parameters::{known_hashes::KnownHashList, Network, GENESIS_PREVIOUS_BLOCK_HASH},
     serialization::ZcashSerialize,
 };
@@ -60,9 +60,10 @@ use crate::BoxError;
 /// The maximum number of blocks requested in one batched `BlocksByHash`
 /// request.
 ///
-/// This is the wire serving limit (`GETDATA_MAX_BLOCK_COUNT`): overflow is
-/// **silently dropped** by serving nodes, so batches must never exceed it.
-pub const IBD_BATCH_MAX_BLOCKS: usize = 16;
+/// This is the wire serving limit: overflow is **silently dropped** by serving
+/// nodes, so batches must never exceed it. Aliased to the inbound serving
+/// constant so the request and serving sides can't drift apart.
+pub const IBD_BATCH_MAX_BLOCKS: usize = crate::components::inbound::GETDATA_MAX_BLOCK_COUNT;
 
 /// The batch layer's `max_items_weight_in_batch`: the size-hint weight at
 /// which a batch is flushed.
@@ -81,19 +82,6 @@ pub const IBD_BATCH_MAX_WEIGHT: usize = 800_000;
 ///
 /// Fills batches without adding meaningful per-block latency.
 pub const IBD_BATCH_FLUSH_LATENCY: Duration = Duration::from_millis(10);
-
-/// The size-hint quantum, in bytes.
-///
-/// A size hint `w` (1..=255) means the block's serialized size is at most
-/// `w × SIZE_HINT_UNIT`, so hints are a priori upper bounds: byte budgets
-/// reserved from hints can only over-reserve, never under-count.
-pub const SIZE_HINT_UNIT: u64 = MAX_BLOCK_BYTES.div_ceil(255);
-
-// The spec pins `SIZE_HINT_UNIT` at 7,844 bytes (design doc §3.2), and the
-// maximum hint must cover the largest possible block; a change to
-// `MAX_BLOCK_BYTES` would silently change every size-hint bound.
-const _: () = assert!(SIZE_HINT_UNIT == 7_844);
-const _: () = assert!(255 * SIZE_HINT_UNIT >= MAX_BLOCK_BYTES);
 
 /// The defensive ceiling on the window's height span (slot bookkeeping only —
 /// **not** a memory bound, and not policy; maintainer-directed).
@@ -614,11 +602,9 @@ where
     /// Per-height peer exclusions and `notfound` accounting.
     peer_stats: PeerStats,
 
-    /// The total number of blocks fetched into the window (memory or disk).
+    /// The total number of blocks fetched into the window (memory or disk),
+    /// reported in the completion log.
     fetched_blocks: u64,
-
-    /// The total number of gap hedges issued.
-    hedge_count: u64,
 
     /// The lowest non-fetched height when the fetch frontier last advanced,
     /// for stall detection.
@@ -716,65 +702,10 @@ where
             gap_hedge_after,
             peer_stats: PeerStats::new(now),
             fetched_blocks: 0,
-            hedge_count: 0,
             fetch_watermark: base,
             frontier_progress_at: now,
             last_stall_warn: None,
         }
-    }
-
-    /// The lowest uncommitted height.
-    pub fn base(&self) -> block::Height {
-        self.base
-    }
-
-    /// The number of heights currently tracked by the window.
-    pub fn window_len(&self) -> usize {
-        self.window.len()
-    }
-
-    /// The window's allocated slot capacity (for tests and metrics).
-    pub fn window_capacity(&self) -> usize {
-        self.window.capacity()
-    }
-
-    /// Bytes currently counted against the lookahead budget (for tests and
-    /// metrics).
-    pub fn budget_used(&self) -> u64 {
-        self.budget_used
-    }
-
-    /// The number of unresolved stage-2 verify-and-commit futures (for tests
-    /// and metrics).
-    pub fn commit_inflight_blocks(&self) -> usize {
-        self.commit_blocks
-    }
-
-    /// The exact bytes behind unresolved stage-2 futures (for tests and
-    /// metrics).
-    pub fn commit_inflight_bytes(&self) -> u64 {
-        self.commit_bytes
-    }
-
-    /// The total number of blocks fetched into the window.
-    pub fn fetched_blocks(&self) -> u64 {
-        self.fetched_blocks
-    }
-
-    /// The total number of gap hedges issued.
-    pub fn hedge_count(&self) -> u64 {
-        self.hedge_count
-    }
-
-    /// The engine's per-height peer exclusions (for tests and diagnostics).
-    pub fn peer_stats(&self) -> &PeerStats {
-        &self.peer_stats
-    }
-
-    /// The slot tracking `height`, if it is in the window.
-    pub fn slot(&self, height: block::Height) -> Option<&Slot> {
-        let offset = height.0.checked_sub(self.base.0)?;
-        self.window.get(offset as usize)
     }
 
     /// Runs the engine until every height through the list's max height is
@@ -1376,7 +1307,6 @@ where
                 other => unreachable!("hedge candidates stay InFlight within this step: {other:?}"),
             }
 
-            self.hedge_count += 1;
             metrics::counter!("ibd.gap.hedge.count").increment(1);
         }
 

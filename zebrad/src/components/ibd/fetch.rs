@@ -35,10 +35,13 @@ use tokio::sync::oneshot;
 use tower::{Service, ServiceExt};
 use tower_batch_control::{Batch, BatchControl, RequestWeight};
 
-use zebra_chain::block::{self, Block};
+use zebra_chain::{
+    block::{self, Block},
+    parameters::known_hashes::SIZE_HINT_UNIT,
+};
 use zebra_network::{self as zn, InventoryResponse, PeerSocketAddr};
 
-use super::engine::{IBD_BATCH_MAX_BLOCKS, IBD_BATCH_MAX_WEIGHT, SIZE_HINT_UNIT};
+use super::engine::{IBD_BATCH_MAX_BLOCKS, IBD_BATCH_MAX_WEIGHT};
 use crate::BoxError;
 
 /// The size hint used for blocks whose known-hash chunk does not embed
@@ -95,7 +98,7 @@ impl FetchRequest {
     /// over-reserve, never under-count.
     pub fn hint_upper_bytes(&self) -> u64 {
         // a u8 hint times the ~8 KB unit always fits in u64
-        u64::from(self.size_hint.max(1)) * SIZE_HINT_UNIT
+        u64::from(self.size_hint.max(1)) * u64::from(SIZE_HINT_UNIT)
     }
 }
 
