@@ -215,32 +215,9 @@ where
         let mut state_service = self.state_service.clone();
         let mut transaction_verifier = self.transaction_verifier.clone();
         let network = self.network.clone();
+        let known_hash_floor = self.known_hash_floor;
 
         let block = request.block();
-
-        // Gate commits at or below the known-hash floor: those heights are
-        // only committed by the known-hash IBD engine, never by semantic
-        // verification (design doc §7.2). Without the gate, a gossiped or
-        // RPC-submitted block just above the engine's tip could semantically
-        // verify mid-sync and flip the state to its non-finalized mode,
-        // silently demoting the rest of the initial sync.
-        let floor = self.known_hash_floor;
-        if let Some(height) = block.coinbase_height() {
-            if height <= floor {
-                // There's no use case for block proposals below the floor.
-                if request.is_proposal() {
-                    return async move {
-                        Err(VerifyBlockError::ValidateProposal(
-                            "block proposals must be above the known-hash floor".into(),
-                        ))
-                    }
-                    .boxed();
-                }
-
-                return async move { Err(VerifyBlockError::BelowKnownHashRange { height, floor }) }
-                    .boxed();
-            }
-        }
 
         // We don't include the block hash, because it's likely already in a parent span
         let span = tracing::debug_span!("block", height = ?block.coinbase_height());
@@ -268,6 +245,32 @@ where
             let height = block
                 .coinbase_height()
                 .ok_or(BlockError::MissingHeight(hash))?;
+
+            // Gate commits at or below the known-hash floor: those heights are
+            // only committed by the known-hash IBD engine, never by semantic
+            // verification (design doc §7.2). Without the gate, a gossiped or
+            // RPC-submitted block just above the engine's tip could
+            // semantically verify mid-sync and flip the state to its
+            // non-finalized mode, silently demoting the rest of the initial
+            // sync.
+            //
+            // This runs after the already-in-chain check so that a duplicate
+            // of a block the engine already committed still reports as a
+            // duplicate (no new commit happens); only a genuinely new
+            // below-floor block is rejected.
+            if height <= known_hash_floor {
+                // There's no use case for block proposals below the floor.
+                if request.is_proposal() {
+                    return Err(VerifyBlockError::ValidateProposal(
+                        "block proposals must be above the known-hash floor".into(),
+                    ));
+                }
+
+                return Err(VerifyBlockError::BelowKnownHashRange {
+                    height,
+                    floor: known_hash_floor,
+                });
+            }
 
             // Zebra does not support heights greater than
             // [`block::Height::MAX`].
