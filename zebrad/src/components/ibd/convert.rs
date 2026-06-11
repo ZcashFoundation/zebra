@@ -148,7 +148,11 @@ impl BlockPayload {
     /// Raw cached bytes that do not deserialize, or whose recomputed header
     /// hash does not match the pinned `expected` hash, are corrupt cache
     /// entries (§4.5 exception (a)): the caller refetches the height.
-    fn into_block(self, height: block::Height, expected: block::Hash) -> Result<Arc<Block>, ConvertError> {
+    fn into_block(
+        self,
+        height: block::Height,
+        expected: block::Hash,
+    ) -> Result<Arc<Block>, ConvertError> {
         match self {
             Self::Block(block) => Ok(block),
             Self::Raw(bytes) => {

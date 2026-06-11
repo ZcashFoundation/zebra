@@ -1840,7 +1840,8 @@ where
         // with `list[base - 1]`.
         self.list
             .release_below(block::Height(self.base.0.saturating_sub(1)));
-        self.commit_failures.retain(|height, _| *height >= self.base);
+        self.commit_failures
+            .retain(|height, _| *height >= self.base);
 
         // Lazily evict committed entries from the disk tier (§4.5), batched
         // so each round scans the cache index once. Synchronous unlinks of a

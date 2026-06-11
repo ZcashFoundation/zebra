@@ -661,7 +661,7 @@ async fn setup(
 
         ..NetworkConfig::default()
     };
-    let (mut peer_set, address_book, _) = zebra_network::init(
+    let (mut peer_set, address_book, _, _) = zebra_network::init(
         network_config,
         inbound_service.clone(),
         latest_chain_tip.clone(),
@@ -865,7 +865,7 @@ mod submitblock_test {
             .buffer(10)
             .service(BoxService::new(inbound_service));
 
-        let (peer_set, _address_book, _misbehavior_tx) = zebra_network::init(
+        let (peer_set, _address_book, _misbehavior_tx, _status) = zebra_network::init(
             network_config,
             inbound_service.clone(),
             latest_chain_tip.clone(),

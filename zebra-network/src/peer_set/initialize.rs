@@ -43,7 +43,10 @@ use crate::{
         OutboundConnectorRequest, PeerPreference,
     },
     peer_cache_updater::peer_cache_updater,
-    peer_set::{set::MorePeers, ActiveConnectionCounter, CandidateSet, ConnectionTracker, PeerSet},
+    peer_set::{
+        set::MorePeers, ActiveConnectionCounter, CandidateSet, ConnectionTracker, PeerSet,
+        PeerSetStatus,
+    },
     AddressBook, BoxError, Config, PeerSocketAddr, Request, Response,
 };
 
@@ -103,6 +106,7 @@ pub async fn init<S, C>(
     Buffer<BoxService<Request, Response, BoxError>, Request>,
     Arc<std::sync::Mutex<AddressBook>>,
     mpsc::Sender<(PeerSocketAddr, u32)>,
+    watch::Receiver<PeerSetStatus>,
 )
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + Sync + 'static,
@@ -227,9 +231,9 @@ where
         MinimumPeerVersion::new(latest_chain_tip, &config.network),
         None,
     );
-    // TODO: return `peer_set.status_receiver()` from `init()`, so sync
-    //       consumers like the known-hash IBD engine can size their download
-    //       pipelines from the peer set status (D phase).
+    // Sync consumers like the known-hash IBD engine size their download
+    // pipelines from the peer set status.
+    let peer_set_status = peer_set.status_receiver();
     let peer_set = Buffer::new(BoxService::new(peer_set), constants::PEERSET_BUFFER_SIZE);
 
     // Connect peerset_tx to the 3 peer sources:
@@ -312,7 +316,7 @@ where
         ])
         .unwrap();
 
-    (peer_set, address_book, misbehavior_tx)
+    (peer_set, address_book, misbehavior_tx, peer_set_status)
 }
 
 /// Use the provided `outbound_connector` to connect to the configured DNS seeder and

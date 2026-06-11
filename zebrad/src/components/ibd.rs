@@ -14,8 +14,12 @@
 //! (default off). See `docs/design/known-hash-ibd.md` for the full design;
 //! the supervisor is specified in §4.7.
 
-use std::time::Duration;
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
+use tokio::sync::watch;
 use tower::Service;
 
 use zebra_chain::{
@@ -149,6 +153,13 @@ where
 
     /// Allows efficient access to the best tip of the blockchain.
     latest_chain_tip: ZSTip,
+
+    /// Live peer set status, for sizing the engine's download pipeline.
+    peer_set_status: watch::Receiver<zn::PeerSetStatus>,
+
+    /// The disk overflow tier's directory
+    /// (`<state cache_dir>/`[`cache::CACHE_DIR_NAME`]).
+    cache_dir: PathBuf,
 }
 
 impl<ZN, ZS, ZSTip> IbdEngine<ZN, ZS, ZSTip>
@@ -172,13 +183,19 @@ where
     /// - `network`: the configured network,
     /// - `peer_set`: the buffered zebra-network peer set,
     /// - `state`: the buffered zebra-state service,
-    /// - `latest_chain_tip`: the latest chain tip from `state`.
+    /// - `latest_chain_tip`: the latest chain tip from `state`,
+    /// - `peer_set_status`: the live peer set status watch from
+    ///   [`zebra_network::init`],
+    /// - `cache_dir`: the state cache directory; the disk overflow tier
+    ///   lives under `<cache_dir>/`[`cache::CACHE_DIR_NAME`].
     pub fn new(
         config: Config,
         network: Network,
         peer_set: ZN,
         state: ZS,
         latest_chain_tip: ZSTip,
+        peer_set_status: watch::Receiver<zn::PeerSetStatus>,
+        cache_dir: &Path,
     ) -> Self {
         Self {
             config,
@@ -186,6 +203,8 @@ where
             peer_set,
             state,
             latest_chain_tip,
+            peer_set_status,
+            cache_dir: cache_dir.join(cache::CACHE_DIR_NAME),
         }
     }
 
@@ -293,24 +312,16 @@ where
                 "starting the known-hash IBD engine",
             );
 
-            // TODO(known-hash-ibd D6): plumb the real peer set status watch
-            // (`PeerSet::status_receiver()`) through `start.rs`; until then
-            // the engine sees a default (empty) status and sizes its batch
-            // concurrency at the minimum.
-            let (_status_sender, peer_status) =
-                tokio::sync::watch::channel(zn::PeerSetStatus::default());
-
             let mut engine = engine::Engine::new(
                 self.network.clone(),
                 self.peer_set.clone(),
                 self.state.clone(),
                 next_commit,
                 list,
-                peer_status,
-                // TODO(known-hash-ibd D6): wire the disk overflow tier under
-                // `<state cache_dir>/ibd-block-cache/`; without it the
-                // engine stops fetch-ahead at the memory budget.
-                None,
+                self.peer_set_status.clone(),
+                // The cache index is rebuilt from disk by the engine's
+                // restore scan on every (re)start.
+                Some(cache::BlockCache::new(&self.cache_dir)),
                 self.config.known_hash_lookahead_bytes,
                 Duration::from_secs(self.config.known_hash_gap_hedge_secs),
             );

@@ -89,7 +89,7 @@ use zebra_rpc::{methods::RpcImpl, server::RpcServer, SubmitBlockChannel};
 use crate::{
     application::{build_version, user_agent, LAST_WARN_ERROR_LOG_SENDER},
     components::{
-        health,
+        health, ibd,
         inbound::{self, InboundSetupData, MAX_INBOUND_RESPONSE_TIME},
         mempool::{self, Mempool},
         sync::{self, show_block_chain_progress, VERIFICATION_PIPELINE_SCALING_MULTIPLIER},
@@ -173,13 +173,27 @@ impl StartCmd {
             &config.network.network,
         );
 
+        // When the known-hash IBD engine is enabled, the finalized write
+        // path must cover the whole pinned list, not just the spaced
+        // checkpoint range (design doc §7.3 / D6).
+        let max_finalizable_height = if config.sync.known_hash_sync {
+            zebra_chain::parameters::known_hashes::KnownHashListSpec::for_network(
+                &config.network.network,
+            )
+            .map_or(max_checkpoint_height, |spec| {
+                max_checkpoint_height.max(spec.max_height)
+            })
+        } else {
+            max_checkpoint_height
+        };
+
         info!("opening database, this may take a few minutes");
 
         let (state_service, read_only_state_service, latest_chain_tip, chain_tip_change) =
             zebra_state::init(
                 config.state.clone(),
                 &config.network.network,
-                max_checkpoint_height,
+                max_finalizable_height,
                 config.sync.checkpoint_verify_concurrency_limit
                     * (VERIFICATION_PIPELINE_SCALING_MULTIPLIER + 1),
             )
@@ -213,13 +227,15 @@ impl StartCmd {
                 setup_rx,
             ));
 
-        let (peer_set, address_book, misbehavior_sender) = zebra_network::init(
+        let (peer_set, address_book, misbehavior_sender, peer_set_status) = zebra_network::init(
             config.network.clone(),
             inbound,
             latest_chain_tip.clone(),
             user_agent(),
         )
         .await;
+        // The engine's own handle, captured before later moves of `peer_set`.
+        let ibd_peer_set = peer_set.clone();
 
         // Start health server if configured (after sync_status is available)
 
@@ -431,7 +447,60 @@ impl StartCmd {
                 "validated block hash should match network genesis hash"
             )
         }
-        let syncer_task_handle = tokio::spawn(syncer.sync().in_current_span());
+        // Run the known-hash IBD engine (design doc §4.7) to completion
+        // before driving the legacy syncer: `ChainSync` is constructed at
+        // startup (its status handles feed the mempool, gossip, and progress
+        // tasks), but `sync()` only runs after the engine returns. The
+        // combined task sits in the supervision `select!` below, so ctrl-c
+        // and sibling-task failures abort the engine cleanly.
+        let ibd_engine = ibd::IbdEngine::new(
+            config.sync.clone(),
+            config.network.network.clone(),
+            ibd_peer_set,
+            state.clone(),
+            latest_chain_tip.clone(),
+            peer_set_status,
+            &config.state.cache_dir,
+        );
+        // Boxing the engine future erases the higher-ranked lifetimes its
+        // generic services would otherwise leak into the spawned task type.
+        let ibd_engine_fut: std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<ibd::IbdOutcome, crate::BoxError>> + Send>,
+        > = Box::pin(ibd_engine.run());
+        // Futures are lazy: the syncer future is created here but does not
+        // run until awaited, after the engine returns. Boxing erases the
+        // generic future types, which otherwise trip rustc's
+        // implementation-of-`From`-is-not-general-enough false positive when
+        // captured by the combined task's async block.
+        let sync_fut: std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<(), color_eyre::Report>> + Send>,
+        > = Box::pin(syncer.sync());
+        // The engine runs as its own supervised task; the syncer task awaits
+        // its outcome, so `sync()` only drives after the engine returns.
+        let ibd_task_handle = tokio::spawn(ibd_engine_fut.in_current_span());
+        let syncer_task_handle = tokio::spawn(
+            async move {
+                match ibd_task_handle.await {
+                    Ok(Ok(outcome)) => {
+                        info!(
+                            ?outcome,
+                            "known-hash IBD engine finished; starting the legacy syncer",
+                        );
+                    }
+                    // Errors need operator attention (broken assets, state
+                    // shutdown): exit instead of silently falling back.
+                    Ok(Err(error)) => {
+                        return Err(eyre!("known-hash IBD engine failed: {error}"));
+                    }
+                    Err(join_error) => {
+                        return Err(eyre!("known-hash IBD engine panicked: {join_error}"));
+                    }
+                }
+
+                sync_fut.await
+            }
+            .in_current_span(),
+        );
 
         // And finally, spawn the internal Zcash miner, if it is enabled.
         //

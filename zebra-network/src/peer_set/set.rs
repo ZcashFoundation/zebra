@@ -501,7 +501,6 @@ where
     // TODO: plumb this receiver through `peer_set::init()`'s return value, so
     //       the known-hash IBD engine can size its download pipeline from the
     //       peer set status (D phase).
-    #[allow(dead_code)]
     pub fn status_receiver(&self) -> watch::Receiver<PeerSetStatus> {
         self.status_sender.subscribe()
     }
