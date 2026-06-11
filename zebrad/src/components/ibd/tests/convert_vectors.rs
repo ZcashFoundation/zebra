@@ -54,7 +54,7 @@ fn convert_happy_path_returns_pinned_block_and_size() {
 
     let (genesis, block1) = (genesis(), block1());
 
-    let (converted, size) = convert(
+    let converted = convert(
         &Network::Mainnet,
         block::Height(1),
         block1.hash(),
@@ -69,7 +69,6 @@ fn convert_happy_path_returns_pinned_block_and_size() {
         converted.transaction_hashes.len(),
         block1.transactions.len()
     );
-    assert_eq!(size, zebra_test::vectors::BLOCK_MAINNET_1_BYTES.len());
 }
 
 /// Genesis converts with [`GENESIS_PREVIOUS_BLOCK_HASH`] as its parent pin:
@@ -80,7 +79,7 @@ fn convert_genesis_with_genesis_previous_block_hash() {
 
     let genesis = genesis();
 
-    let (converted, _size) = convert(
+    let converted = convert(
         &Network::Mainnet,
         block::Height(0),
         genesis.hash(),

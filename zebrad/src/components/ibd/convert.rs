@@ -30,7 +30,7 @@ use tower::{Service, ServiceExt};
 use zebra_chain::{
     block::{self, Block},
     parameters::Network,
-    serialization::{ZcashDeserialize, ZcashSerialize},
+    serialization::ZcashDeserialize,
 };
 use zebra_consensus::{merkle_root_validity, spawn_fifo, BlockError};
 use zebra_network::PeerSocketAddr;
@@ -67,7 +67,7 @@ pub fn convert(
     expected: block::Hash,
     prev_expected: block::Hash,
     block: Arc<Block>,
-) -> Result<(CheckpointVerifiedBlock, usize), ConvertError> {
+) -> Result<CheckpointVerifiedBlock, ConvertError> {
     let coinbase_height = block.coinbase_height();
     if coinbase_height != Some(height) {
         return Err(ConvertError::WrongHeight {
@@ -86,8 +86,6 @@ pub fn convert(
         });
     }
 
-    let block_size = block.zcash_serialized_size();
-
     // Transaction hashing and `new_outputs` precomputation: the expensive
     // part, parallel across blocks on the rayon pool. The coinbase height
     // was checked above, so the constructor's coinbase-height invariant
@@ -99,7 +97,7 @@ pub fn convert(
         &block_to_commit.block,
         &block_to_commit.transaction_hashes,
     ) {
-        Ok(()) => Ok((block_to_commit, block_size)),
+        Ok(()) => Ok(block_to_commit),
         Err(BlockError::DuplicateTransaction) => Err(ConvertError::DuplicateTransaction {
             height,
             hash: expected,
@@ -486,7 +484,7 @@ where
             // Payload resolution (deserializing raw cached bytes) runs inside
             // the rayon closure with `convert`: the calling task never does
             // CPU-heavy work inline (design doc §4.5).
-            let (block_to_commit, _block_size) = spawn_fifo(move || {
+            let block_to_commit = spawn_fifo(move || {
                 let block = block.into_block(height, expected)?;
                 convert(&network, height, expected, prev_expected, block)
             })
