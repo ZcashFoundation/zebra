@@ -81,6 +81,24 @@ pub struct Config {
     #[arg(long, global = true, env = "WATCHDOG_INTERVAL", default_value_t = 60)]
     pub watchdog_interval: u64,
 
+    /// File containing a Unix timestamp until which deployment alerts are suppressed.
+    #[arg(
+        long,
+        global = true,
+        env = "WATCHDOG_DEPLOYMENT_SUPPRESSION_FILE",
+        default_value = "/run/zebra-watchdog/deployment-suppressed-until"
+    )]
+    pub deployment_suppression_file: PathBuf,
+
+    /// Maximum accepted deployment alert suppression window in seconds.
+    #[arg(
+        long,
+        global = true,
+        env = "WATCHDOG_MAX_DEPLOYMENT_SUPPRESSION",
+        default_value_t = 1200
+    )]
+    pub max_deployment_suppression: u64,
+
     /// Per-request RPC timeout in seconds.
     #[arg(
         long,
@@ -118,6 +136,11 @@ mod tests {
         assert_eq!(config.sync_check_timeout, 600);
         assert_eq!(config.sync_check_interval, 15);
         assert_eq!(config.watchdog_interval, 60);
+        assert_eq!(
+            config.deployment_suppression_file,
+            PathBuf::from("/run/zebra-watchdog/deployment-suppressed-until")
+        );
+        assert_eq!(config.max_deployment_suppression, 1200);
     }
 
     #[test]
@@ -130,6 +153,10 @@ mod tests {
             "3",
             "--watchdog-interval",
             "5",
+            "--deployment-suppression-file",
+            "/tmp/zebra-watchdog-test-suppression",
+            "--max-deployment-suppression",
+            "30",
         ])
         .expect("flags parse");
         let config = cli.config;
@@ -137,5 +164,10 @@ mod tests {
         assert_eq!(config.zebra_rpc_url, "http://127.0.0.1:18232");
         assert_eq!(config.height_max_drift, 3);
         assert_eq!(config.watchdog_interval, 5);
+        assert_eq!(
+            config.deployment_suppression_file,
+            PathBuf::from("/tmp/zebra-watchdog-test-suppression")
+        );
+        assert_eq!(config.max_deployment_suppression, 30);
     }
 }

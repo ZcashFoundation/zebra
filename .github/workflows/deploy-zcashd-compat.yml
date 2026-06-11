@@ -7,7 +7,7 @@ on:
         description: "Git ref to build and deploy"
         required: true
         type: string
-        default: feat/zcashd-compat
+        default: ironwood-main
       host:
         description: "Target host or IP address"
         required: true
@@ -101,7 +101,7 @@ jobs:
 
           scp "${ssh_options[@]}" target/release/zebrad "$DEPLOY_USER@$DEPLOY_HOST:/usr/local/bin/zebrad.new"
           scp "${ssh_options[@]}" target/release/zebra-watchdog "$DEPLOY_USER@$DEPLOY_HOST:/usr/local/bin/zebra-watchdog.new"
-          scp "${ssh_options[@]}" deploy/watchdog/sync-check.sh "$DEPLOY_USER@$DEPLOY_HOST:/tmp/zebra-watchdog-sync-check.sh"
+          scp "${ssh_options[@]}" deploy/zcashd-compat/sync-check.sh "$DEPLOY_USER@$DEPLOY_HOST:/tmp/zcashd-compat-sync-check.sh"
           scp "${ssh_options[@]}" deploy/watchdog/systemd/zebra-watchdog.service "$DEPLOY_USER@$DEPLOY_HOST:/tmp/zebra-watchdog.service"
 
       - name: Install and restart zebrad
@@ -121,7 +121,11 @@ jobs:
           rm -f /usr/local/bin/zebrad.new
           install -m 755 /usr/local/bin/zebra-watchdog.new /usr/local/bin/zebra-watchdog
           rm -f /usr/local/bin/zebra-watchdog.new
-          chmod 755 /tmp/zebra-watchdog-sync-check.sh
+          mkdir -p /run/zebra-watchdog
+          printf '%s\n' "$(( $(date +%s) + 1200 ))" > /run/zebra-watchdog/deployment-suppressed-until
+          chmod 644 /run/zebra-watchdog/deployment-suppressed-until
+          systemctl try-restart zebra-watchdog || true
+          chmod 755 /tmp/zcashd-compat-sync-check.sh
           if ! systemctl restart zebrad-compat; then
             if [ -x /usr/local/bin/zebrad.bak ]; then
               install -m 755 /usr/local/bin/zebrad.bak /usr/local/bin/zebrad
@@ -139,7 +143,7 @@ jobs:
 
           # shellcheck disable=SC2029
           if ! ssh "${ssh_options[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
-            "HEIGHT_MAX_DRIFT='$HEIGHT_MAX_DRIFT' SYNC_CHECK_TIMEOUT='$SYNC_CHECK_TIMEOUT' SYNC_CHECK_INTERVAL='$SYNC_CHECK_INTERVAL' /tmp/zebra-watchdog-sync-check.sh"
+            "HEIGHT_MAX_DRIFT='$HEIGHT_MAX_DRIFT' SYNC_CHECK_TIMEOUT='$SYNC_CHECK_TIMEOUT' SYNC_CHECK_INTERVAL='$SYNC_CHECK_INTERVAL' /tmp/zcashd-compat-sync-check.sh"
           then
             echo "Sync check failed, rolling back to /usr/local/bin/zebrad.bak" >&2
             ssh "${ssh_options[@]}" "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' <<'EOF'

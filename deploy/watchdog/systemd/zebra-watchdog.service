@@ -4,7 +4,8 @@
 # 1- Install the binary:
 #    install -m 755 zebra-watchdog /usr/local/bin/zebra-watchdog
 # 2- Optionally create /etc/zebra-watchdog/env with configuration overrides,
-#    including SENTRY_DSN (see deploy/watchdog/README.md):
+#    including SENTRY_DSN and deployment suppression file path
+#    (see deploy/watchdog/README.md):
 #    mkdir -p /etc/zebra-watchdog
 #    printf 'SENTRY_DSN=...\nSENTRY_ENVIRONMENT=...\n' > /etc/zebra-watchdog/env
 #    chmod 600 /etc/zebra-watchdog/env

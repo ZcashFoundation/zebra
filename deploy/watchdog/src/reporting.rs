@@ -12,6 +12,16 @@ use sentry::protocol::{Event, Map, Value};
 
 use crate::checks::{CheckOutcome, CheckStatus};
 
+/// Active alert suppression window.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AlertSuppression {
+    /// Why alerts are currently suppressed.
+    pub reason: &'static str,
+
+    /// Unix timestamp when suppression expires.
+    pub until_epoch_seconds: u64,
+}
+
 /// A status transition worth reporting as a discrete event.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Transition {
@@ -52,7 +62,21 @@ impl Reporter {
 
     /// Logs the outcome of one check cycle and captures a Sentry event when
     /// the check transitioned between passing and failing.
-    pub fn report(&mut self, check_name: &'static str, outcome: &CheckOutcome) {
+    ///
+    /// Suppressed failures are still logged locally at info level, but they do
+    /// not update alert state. If the failure persists after suppression
+    /// expires, the next unsuppressed cycle reports a normal failure transition.
+    pub fn report(
+        &mut self,
+        check_name: &'static str,
+        outcome: &CheckOutcome,
+        suppression: Option<&AlertSuppression>,
+    ) {
+        if let Some(suppression) = suppression {
+            self.report_suppressed(check_name, outcome, suppression);
+            return;
+        }
+
         match outcome.status {
             CheckStatus::Pass => {
                 tracing::info!(check = check_name, summary = %outcome.summary, "check passed");
@@ -91,6 +115,36 @@ impl Reporter {
 
         if self.sentry_enabled {
             sentry::capture_event(transition_event(check_name, transition, outcome));
+        }
+    }
+
+    /// Logs a check outcome while deployment alert suppression is active.
+    fn report_suppressed(
+        &self,
+        check_name: &'static str,
+        outcome: &CheckOutcome,
+        suppression: &AlertSuppression,
+    ) {
+        match outcome.status {
+            CheckStatus::Pass => {
+                tracing::info!(
+                    check = check_name,
+                    summary = %outcome.summary,
+                    suppression_reason = suppression.reason,
+                    suppression_until = suppression.until_epoch_seconds,
+                    "check passed during alert suppression",
+                );
+            }
+            CheckStatus::Fail => {
+                tracing::info!(
+                    check = check_name,
+                    summary = %outcome.summary,
+                    details = ?outcome.details,
+                    suppression_reason = suppression.reason,
+                    suppression_until = suppression.until_epoch_seconds,
+                    "check failed during alert suppression",
+                );
+            }
         }
     }
 }
@@ -236,5 +290,26 @@ mod tests {
             .message
             .as_deref()
             .is_some_and(|message| message.contains("drift too large")));
+    }
+
+    #[test]
+    fn suppressed_failures_do_not_update_alert_state() {
+        let mut reporter = Reporter::new(false);
+        let outcome = CheckOutcome::fail("deployment restart", BTreeMap::new());
+        let suppression = AlertSuppression {
+            reason: "deployment",
+            until_epoch_seconds: u64::MAX,
+        };
+
+        reporter.report("zcashd_compat_sync", &outcome, Some(&suppression));
+
+        assert_eq!(reporter.last_status.get("zcashd_compat_sync"), None);
+
+        reporter.report("zcashd_compat_sync", &outcome, None);
+
+        assert_eq!(
+            reporter.last_status.get("zcashd_compat_sync"),
+            Some(&CheckStatus::Fail)
+        );
     }
 }

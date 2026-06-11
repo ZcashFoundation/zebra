@@ -11,6 +11,8 @@ It has two run modes:
   all checks pass within the timeout, non-zero otherwise.
 - `zebra-watchdog run` — continuous operation under systemd. Runs all checks
   on an interval forever and reports failure/recovery transitions to Sentry.
+  If a deployment suppression marker is active, checks keep running but failure
+  alerts are suppressed until the marker expires.
 
 ## Architecture
 
@@ -82,6 +84,8 @@ environment variable names match the legacy sync-check script and the
 | `SYNC_CHECK_TIMEOUT`      | `--sync-check-timeout`      | `600`                                 | One-shot `check` total timeout (seconds) |
 | `SYNC_CHECK_INTERVAL`     | `--sync-check-interval`     | `15`                                  | One-shot `check` retry interval (seconds) |
 | `WATCHDOG_INTERVAL`       | `--watchdog-interval`       | `60`                                  | Continuous `run` cycle interval (seconds) |
+| `WATCHDOG_DEPLOYMENT_SUPPRESSION_FILE` | `--deployment-suppression-file` | `/run/zebra-watchdog/deployment-suppressed-until` | Unix timestamp file for deployment alert suppression |
+| `WATCHDOG_MAX_DEPLOYMENT_SUPPRESSION` | `--max-deployment-suppression` | `1200`                                | Maximum accepted deployment suppression window (seconds) |
 | `WATCHDOG_RPC_TIMEOUT`    | `--rpc-timeout`             | `30`                                  | Per-RPC-request timeout (seconds) |
 
 Logging verbosity is controlled with the standard `RUST_LOG` environment
@@ -108,6 +112,12 @@ Reporting behavior is designed to avoid event spam:
   structured Sentry logs, info-level events become breadcrumbs.
 - Events are tagged with `watchdog.check` and `watchdog.transition`, and carry
   the check's structured details (heights, drift, failing predicate) as extras.
+- **Deployment suppression** keeps checks running but logs failures at info
+  level and skips Sentry transition events while the timestamp in
+  `WATCHDOG_DEPLOYMENT_SUPPRESSION_FILE` is in the future. If a failure
+  persists after the window expires, the next unsuppressed cycle reports it.
+  Markers more than `WATCHDOG_MAX_DEPLOYMENT_SUPPRESSION` seconds in the future
+  are ignored, so a stale or bad marker cannot suppress alerts forever.
 
 ## Systemd deployment
 
@@ -146,21 +156,23 @@ deployments.
 deploys the watchdog alongside `zebrad`:
 
 1. builds `zebrad` and `zebra-watchdog` (`cargo build --release --locked -p zebrad -p zebra-watchdog`),
-2. uploads both binaries, [`sync-check.sh`](sync-check.sh), and the systemd unit,
+2. uploads both binaries, the legacy zcashd-compat sync checker, and the systemd unit,
 3. installs both binaries and restarts `zebrad-compat`
    (only `zebrad` keeps a `.bak` rollback copy),
-4. verifies the deployment with `/tmp/zebra-watchdog-sync-check.sh`
-   (which runs `zebra-watchdog check`); on failure the workflow restores
+4. writes a 20-minute deployment suppression marker and restarts any existing
+   watchdog service so the running sidecar observes the marker,
+5. verifies the deployment with `/tmp/zcashd-compat-sync-check.sh`;
+   on failure the workflow restores
    `/usr/local/bin/zebrad.bak` and fails,
-5. on success, installs/refreshes the `zebra-watchdog` systemd unit and
+6. on success, installs/refreshes the `zebra-watchdog` systemd unit and
    restarts the continuous watchdog service.
 
-Rollback ownership stays with the workflow: the one-shot check only reports
+Rollback ownership stays with the workflow: the deploy sync checker only reports
 pass/fail through its exit code.
 
 ### Manual one-shot check
 
-Run the same verification manually on the host:
+Run an equivalent watchdog verification manually on the host:
 
 ```bash
 HEIGHT_MAX_DRIFT=10 SYNC_CHECK_TIMEOUT=1800 SYNC_CHECK_INTERVAL=15 \
