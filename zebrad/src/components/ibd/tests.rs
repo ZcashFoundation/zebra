@@ -7,6 +7,7 @@ use zebra_chain::{block, serialization::ZcashDeserializeInto};
 use super::engine::HashList;
 use crate::BoxError;
 
+mod cache;
 mod convert_vectors;
 mod engine_prop;
 mod vectors;
