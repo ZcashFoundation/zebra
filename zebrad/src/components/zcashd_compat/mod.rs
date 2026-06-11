@@ -1,12 +1,14 @@
 //! zcashd-compat mode configuration and `zcashd` child-process supervision.
 
 mod config;
+mod datadir;
 mod managed;
 mod manifest;
 mod preflight;
 mod supervisor;
 
 pub use config::{Config, ZcashdBinarySource as ConfigZcashdBinarySource};
+pub use datadir::{effective_zcashd_datadir, ensure_zcashd_datadir, resolve_zcashd_datadir_path};
 pub use managed::{
     effective_zcashd_source, resolve_managed_zcashd_binary, resolve_zcashd_binary_path,
     zcashd_target_triple, ZcashdBinarySource,

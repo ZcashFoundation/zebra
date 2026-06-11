@@ -50,6 +50,11 @@ pub struct Config {
     /// - a JSON array string (useful for environment variable overrides):
     ///   `ZEBRA_ZCASHD_COMPAT__ZCASHD_EXTRA_ARGS='["-conf=/path/to/zcash.conf","-debug=1"]'`
     ///
+    /// Zebra passes these arguments through unchanged. For first-start bootstrap,
+    /// Zebra only infers path overrides from the first valid `-conf=/path` or
+    /// `-datadir=/path` form, and logs warnings for paired, empty, or duplicate
+    /// path options.
+    ///
     /// Zebra always includes `-printtoconsole` automatically.
     #[serde(default, deserialize_with = "deserialize_zcashd_extra_args")]
     pub zcashd_extra_args: Vec<String>,

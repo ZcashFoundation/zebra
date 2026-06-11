@@ -28,7 +28,19 @@ If zcashd-compat supervision is enabled, Zebra starts `zcashd` with:
 -zebra-compat-cookiefile=<zcashd_compat.cookie_dir>/<zcashd_compat.cookie_file_name>
 -datadir=<zcashd_compat.zcashd_datadir or state.cache_dir/zcashd-compat-zcashd>
 [-testnet | -regtest]
+-p2p=0
+-listen=0
+-printtoconsole
+[<zcashd_compat.zcashd_extra_args...>]
 ```
+
+Zebra always passes `-p2p=0` and `-listen=0` before `zcashd_extra_args`. CLI
+arguments are parsed before `zcash.conf` and are not overwritten by config-file
+values, so legacy full-node configs with `listen=1` do not cause `zcashd` to
+bind the network P2P port (8233 mainnet / 18233 testnet) that Zebra already
+uses. `zcashd` also force-disables P2P listen flags when `-zebra-compat` is
+active. P2P-enabling flags in `zcashd_extra_args` are rejected by `zcashd`
+startup validation rather than silently taking effect.
 
 ## Configuration
 
@@ -58,6 +70,73 @@ ZEBRA_ZCASHD_COMPAT__ZCASHD_EXTRA_ARGS='["-conf=/path/to/zcash.conf","-debug=1"]
 ```
 
 `zebrad` always adds `-printtoconsole` automatically for supervised `zcashd`.
+
+## `zcashd` configuration
+
+Supervised `zcashd` still requires a normal datadir and `zcash.conf`. When
+`manage_zcashd = true`, Zebra creates the configured datadir if it is missing
+and bootstraps a minimal config file only when the effective `zcash.conf` is
+absent. Existing operator configs are never overwritten.
+
+Minimum first-start `zcash.conf`:
+
+```conf
+i-am-aware-zcashd-will-be-replaced-by-zebrad-and-zallet-in-2025=1
+# zcashd-compat: P2P is disabled; chain data comes from zebrad RPC.
+# Do not add bind=, connect=, addnode=, or listen=1 here.
+```
+
+`zcashd` refuses to start without this deprecation acknowledgement. If an
+existing config has missing or legacy P2P settings, Zebra logs clear warnings;
+some P2P flags are forced off, while peer configuration options can still make
+`zcashd` reject startup validation.
+
+### Three different "listen" concepts
+
+Do not disable the wrong listener:
+
+| Listener | Default / typical | Role in zcashd-compat |
+|---|---|---|
+| **Zebra network P2P** (`network.listen_addr`) | enabled | Zebra syncs blocks from the Zcash network. Keep enabled. |
+| **Zebra compat RPC** (`zcashd_compat.listen_addr`) | `127.0.0.1:28232` | Cookie-auth channel for supervised `zcashd -zebra-compat`. Separate from `[rpc]`. |
+| **Zebra user RPC** (`[rpc].listen_addr`) | optional | Operator-facing Zebra JSON-RPC (for example `127.0.0.1:8232`). |
+| **zcashd network P2P** (`-listen`, port 8233/18233) | forced off | Must stay off; Zebra owns P2P. |
+| **zcashd wallet RPC** (`-rpcbind`, `-rpcport`) | operator choice | Unrelated to `-listen`; configure separately if needed. |
+
+### Legacy `zcash.conf` from full-node use
+
+Operators often reuse an existing `zcash.conf`. In compat mode:
+
+- `listen=1`, `p2p=1`, `dnsseed=1`, and `listenonion=1` in the file may remain
+  on disk but are overridden at startup (supervisor CLI plus `zcashd`
+  `-zebra-compat` preset). They do not need manual removal for those flags.
+- Remove or avoid P2P peer options that fail startup validation: `bind=`,
+  `whitebind=`, `connect=`, `addnode=`, `seednode=`, and similar.
+
+You do not need to add `listen=0` to `zcashd_extra_args`; the supervisor
+already passes it.
+
+### Validate P2P is disabled
+
+After both processes are running:
+
+```console
+zcash-cli getzebracompatinfo
+```
+
+Expect `"p2p": false` and `"blocksource": "zebra"`.
+
+```console
+zcash-cli getconnectioncount   # expect 0
+zcash-cli getpeerinfo          # expect []
+```
+
+Confirm `zcashd` is not listening on the network P2P port (Zebra should be):
+
+```console
+ss -ltnp 'sport = :18233'   # testnet example
+ss -ltnp 'sport = :8233'    # mainnet example
+```
 
 ## Hardware preflight (Linux)
 

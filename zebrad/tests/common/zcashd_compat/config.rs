@@ -85,16 +85,9 @@ pub fn build_zcashd_compat_config(cookie_dir: PathBuf) -> Result<ZcashdCompatCon
     // Skip startup delay in tests — supervisor spawns zcashd immediately
     config.zcashd_compat.startup_delay = Duration::ZERO;
 
-    // zcashd refuses to start if its datadir doesn't exist or has no
-    // `zcash.conf`, and the supervisor creates neither, so prepare a fresh
-    // datadir inside the testdir. zcashd also requires the deprecation
-    // acknowledgement option before it will start.
+    // Use a fresh datadir inside the testdir. The supervisor bootstraps the
+    // datadir and minimal `zcash.conf` before spawning zcashd.
     let zcashd_datadir = cookie_dir.join("zcashd-datadir");
-    std::fs::create_dir_all(&zcashd_datadir)?;
-    std::fs::write(
-        zcashd_datadir.join("zcash.conf"),
-        "i-am-aware-zcashd-will-be-replaced-by-zebrad-and-zallet-in-2025=1\n",
-    )?;
     config.zcashd_compat.zcashd_datadir = Some(zcashd_datadir.clone());
 
     // Use an explicit zcashd path if provided, else managed download.
