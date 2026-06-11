@@ -63,14 +63,23 @@ impl PeerStats {
     pub fn record_not_found(&mut self, height: block::Height, peer: Option<PeerSocketAddr>) {
         let Some(peer) = peer else { return };
 
-        let excluded = self.excluded.entry(height).or_default();
-        if !excluded.contains(&peer) {
-            excluded.push(peer);
-        }
+        self.exclude(height, peer);
 
         *self.not_found_counts.entry(peer).or_default() += 1;
 
         metrics::counter!("ibd.peer.notfound.count", "addr" => peer.to_string()).increment(1);
+    }
+
+    /// Excludes `peer` for `height`, steering the next fetch of that height
+    /// to a different peer.
+    ///
+    /// Used for `notfound` responses and for peers whose delivered copy
+    /// failed verification or its state commit (design doc §4.3, §4.6).
+    pub fn exclude(&mut self, height: block::Height, peer: PeerSocketAddr) {
+        let excluded = self.excluded.entry(height).or_default();
+        if !excluded.contains(&peer) {
+            excluded.push(peer);
+        }
     }
 
     /// Returns the peers excluded for `height`.

@@ -30,7 +30,7 @@ use tower::{Service, ServiceExt};
 use zebra_chain::{
     block::{self, Block},
     parameters::Network,
-    serialization::ZcashSerialize,
+    serialization::{ZcashDeserialize, ZcashSerialize},
 };
 use zebra_consensus::{merkle_root_validity, spawn_fifo, BlockError};
 use zebra_network::PeerSocketAddr;
@@ -113,6 +113,65 @@ pub fn convert(
             source_peer: None,
             error,
         }),
+    }
+}
+
+/// The block payload of an [`IbdBlock`]: either a block already deserialized
+/// by zebra-network, or raw bytes promoted from the disk overflow tier
+/// (design doc §4.5).
+///
+/// Raw bytes are **untrusted**: they are deserialized inside the service's
+/// rayon closure (the engine loop never deserializes inline), and their
+/// recomputed header hash is checked against the pinned `expected` hash
+/// before [`convert`] runs — the receipt-time hash check that network blocks
+/// already passed in the connection handler.
+#[derive(Clone, Debug)]
+pub enum BlockPayload {
+    /// A block deserialized at receipt; its header hash already matched the
+    /// pinned list entry in the connection handler.
+    Block(Arc<Block>),
+
+    /// Raw block bytes read back from the disk overflow tier, possibly
+    /// corrupted or truncated while on disk.
+    Raw(Vec<u8>),
+}
+
+impl From<Arc<Block>> for BlockPayload {
+    fn from(block: Arc<Block>) -> Self {
+        Self::Block(block)
+    }
+}
+
+impl BlockPayload {
+    /// Resolves the payload into a block whose header hash is `expected`.
+    ///
+    /// Raw cached bytes that do not deserialize, or whose recomputed header
+    /// hash does not match the pinned `expected` hash, are corrupt cache
+    /// entries (§4.5 exception (a)): the caller refetches the height.
+    fn into_block(self, height: block::Height, expected: block::Hash) -> Result<Arc<Block>, ConvertError> {
+        match self {
+            Self::Block(block) => Ok(block),
+            Self::Raw(bytes) => {
+                let block = Block::zcash_deserialize(&bytes[..]).map_err(|error| {
+                    ConvertError::CorruptCachedBytes {
+                        height,
+                        expected,
+                        detail: format!("cached bytes do not deserialize: {error}"),
+                    }
+                })?;
+
+                let found = block.hash();
+                if found != expected {
+                    return Err(ConvertError::CorruptCachedBytes {
+                        height,
+                        expected,
+                        detail: format!("cached block hashes to {found:?}"),
+                    });
+                }
+
+                Ok(Arc::new(block))
+            }
+        }
     }
 }
 
@@ -209,6 +268,27 @@ pub enum ConvertError {
         source_peer: Option<PeerSocketAddr>,
     },
 
+    /// Raw bytes from the disk overflow tier did not deserialize, or
+    /// deserialized to a block whose header hash does not match the pinned
+    /// list entry the bytes were stored under.
+    ///
+    /// A corrupt or torn cache entry (design doc §4.5 exception (a)): the
+    /// engine discards the entry and refetches the height from the network.
+    /// Not peer-attributable — the delivering peer's copy passed the
+    /// receipt-time hash check before it was written to disk.
+    #[error(
+        "cached block bytes for {expected:?} at {height:?} are corrupt: \
+         {detail}; discarding the cache entry and refetching"
+    )]
+    CorruptCachedBytes {
+        /// The height assigned from the known-hash list.
+        height: block::Height,
+        /// The pinned hash the bytes were cached under (`list[height]`).
+        expected: block::Hash,
+        /// What was wrong with the bytes.
+        detail: String,
+    },
+
     /// The rayon pool dropped the conversion's response channel; Zebra is
     /// shutting down.
     #[error("the rayon threadpool dropped the conversion result; Zebra is likely shutting down")]
@@ -225,7 +305,10 @@ impl ConvertError {
         match &mut self {
             Self::BadMerkleRoot { source_peer, .. }
             | Self::DuplicateTransaction { source_peer, .. } => *source_peer = peer,
-            Self::WrongHeight { .. } | Self::BrokenLink { .. } | Self::RayonShutdown => {}
+            Self::WrongHeight { .. }
+            | Self::BrokenLink { .. }
+            | Self::CorruptCachedBytes { .. }
+            | Self::RayonShutdown => {}
         }
 
         self
@@ -248,7 +331,10 @@ impl ConvertError {
         match self {
             Self::BadMerkleRoot { source_peer, .. }
             | Self::DuplicateTransaction { source_peer, .. } => *source_peer,
-            Self::WrongHeight { .. } | Self::BrokenLink { .. } | Self::RayonShutdown => None,
+            Self::WrongHeight { .. }
+            | Self::BrokenLink { .. }
+            | Self::CorruptCachedBytes { .. }
+            | Self::RayonShutdown => None,
         }
     }
 
@@ -308,8 +394,9 @@ pub struct IbdBlock {
     /// [`GENESIS_PREVIOUS_BLOCK_HASH`]: zebra_chain::parameters::GENESIS_PREVIOUS_BLOCK_HASH
     pub prev_expected: block::Hash,
 
-    /// The fetched block.
-    pub block: Arc<Block>,
+    /// The fetched block, or its raw cached bytes when promoted from the
+    /// disk overflow tier.
+    pub block: BlockPayload,
 
     /// The peer that delivered the block, when known; attached to
     /// peer-attributable verify failures for misbehavior reporting.
@@ -392,11 +479,16 @@ where
         let state = self.state.clone();
 
         async move {
-            let (block_to_commit, _block_size) =
-                spawn_fifo(move || convert(&network, height, expected, prev_expected, block))
-                    .await
-                    .map_err(|_recv_error| ConvertError::RayonShutdown)?
-                    .map_err(|error| error.with_source_peer(source))?;
+            // Payload resolution (deserializing raw cached bytes) runs inside
+            // the rayon closure with `convert`: the calling task never does
+            // CPU-heavy work inline (design doc §4.5).
+            let (block_to_commit, _block_size) = spawn_fifo(move || {
+                let block = block.into_block(height, expected)?;
+                convert(&network, height, expected, prev_expected, block)
+            })
+            .await
+            .map_err(|_recv_error| ConvertError::RayonShutdown)?
+            .map_err(|error| error.with_source_peer(source))?;
 
             match state
                 .oneshot(zs::Request::CommitCheckpointVerifiedBlock(block_to_commit))

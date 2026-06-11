@@ -16,7 +16,7 @@ use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::{
     components::ibd::convert::{
-        convert, ConvertError, IbdBlock, VerifyAndCommit, VerifyAndCommitError,
+        convert, BlockPayload, ConvertError, IbdBlock, VerifyAndCommit, VerifyAndCommitError,
     },
     BoxError,
 };
@@ -229,7 +229,7 @@ async fn body_swapped_block_fails_bad_merkle_root_with_attribution() {
             height: block::Height(1),
             expected: block1.hash(),
             prev_expected: genesis.hash(),
-            block: tampered,
+            block: tampered.into(),
             source: Some(peer),
         })
         .await;
@@ -327,7 +327,7 @@ async fn verify_and_commit_resolves_with_committed_hash() {
             height: block::Height(1),
             expected: block1.hash(),
             prev_expected: genesis.hash(),
-            block: block1.clone(),
+            block: block1.clone().into(),
             source: None,
         });
     let call = tokio::spawn(call);
@@ -375,7 +375,7 @@ async fn state_failure_surfaces_as_commit_error() {
             height: block::Height(1),
             expected: block1.hash(),
             prev_expected: genesis.hash(),
-            block: block1.clone(),
+            block: block1.clone().into(),
             source: None,
         });
     let call = tokio::spawn(call);
@@ -433,7 +433,7 @@ async fn eight_conversions_and_commits_overlap() {
             height: block::Height(height as u32),
             expected: blocks[height].hash(),
             prev_expected: blocks[height - 1].hash(),
-            block: blocks[height].clone(),
+            block: blocks[height].clone().into(),
             source: None,
         };
 
@@ -492,4 +492,128 @@ async fn eight_conversions_and_commits_overlap() {
         let hash = result.expect("every pinned block commits");
         assert_eq!(hash, blocks[idx + 1].hash());
     }
+}
+
+/// Raw cached bytes (a disk-tier promotion, design doc §4.5) deserialize
+/// inside the verify stage and commit exactly like a network block.
+#[tokio::test]
+async fn raw_cached_bytes_verify_and_commit() {
+    let _init_guard = zebra_test::init();
+
+    let (genesis, block1) = (genesis(), block1());
+
+    let mut state: MockState = MockService::build().for_unit_tests();
+    let mut service = VerifyAndCommit::new(Network::Mainnet, state.clone());
+
+    let call = service
+        .ready()
+        .await
+        .expect("the mocked state service is always ready")
+        .call(IbdBlock {
+            height: block::Height(1),
+            expected: block1.hash(),
+            prev_expected: genesis.hash(),
+            block: BlockPayload::Raw(zebra_test::vectors::BLOCK_MAINNET_1_BYTES.to_vec()),
+            source: None,
+        });
+    let call = tokio::spawn(call);
+
+    let responder = state
+        .expect_request_that(|req| matches!(req, zs::Request::CommitCheckpointVerifiedBlock(_)))
+        .await;
+    let zs::Request::CommitCheckpointVerifiedBlock(committed) = responder.request() else {
+        unreachable!("expect_request_that only matches the commit variant");
+    };
+    let hash = committed.hash;
+    responder.respond(zs::Response::Committed(hash));
+
+    let committed_hash = call
+        .await
+        .expect("the call task does not panic")
+        .expect("pinned raw bytes with a healthy state commit");
+    assert_eq!(committed_hash, block1.hash());
+}
+
+/// Truncated cached bytes fail as a corrupt cache entry — not attributable
+/// to any peer — and never reach the state.
+#[tokio::test]
+async fn truncated_cached_bytes_fail_as_corrupt() {
+    let _init_guard = zebra_test::init();
+
+    let (genesis, block1) = (genesis(), block1());
+
+    // Half a block: a torn write, the §4.5 exception (a) shape.
+    let bytes = zebra_test::vectors::BLOCK_MAINNET_1_BYTES.to_vec();
+    let truncated = bytes[..bytes.len() / 2].to_vec();
+
+    let mut state: MockState = MockService::build().for_unit_tests();
+    let mut service = VerifyAndCommit::new(Network::Mainnet, state.clone());
+
+    let error = service
+        .ready()
+        .await
+        .expect("the mocked state service is always ready")
+        .call(IbdBlock {
+            height: block::Height(1),
+            expected: block1.hash(),
+            prev_expected: genesis.hash(),
+            block: BlockPayload::Raw(truncated),
+            source: Some(PeerSocketAddr::from(([192, 168, 1, 1], 8233))),
+        })
+        .await
+        .expect_err("truncated bytes must fail verification");
+
+    let VerifyAndCommitError::Verify(error) = error else {
+        panic!("expected a verify-stage failure, got: {error:?}");
+    };
+    assert!(
+        matches!(error, ConvertError::CorruptCachedBytes { .. }),
+        "unexpected error: {error:?}",
+    );
+    assert!(
+        !error.is_peer_attributable(),
+        "disk corruption must not be blamed on the delivering peer",
+    );
+    assert_eq!(error.source_peer(), None);
+    assert!(!error.is_fatal_list_diagnostic());
+
+    state.expect_no_requests().await;
+}
+
+/// Valid block bytes promoted under the wrong pinned hash fail the
+/// receipt-equivalent hash re-check that network blocks already passed in
+/// the connection handler.
+#[tokio::test]
+async fn hash_mismatched_cached_bytes_fail_as_corrupt() {
+    let _init_guard = zebra_test::init();
+
+    let (genesis, block1) = (genesis(), block1());
+
+    let mut state: MockState = MockService::build().for_unit_tests();
+    let mut service = VerifyAndCommit::new(Network::Mainnet, state.clone());
+
+    let error = service
+        .ready()
+        .await
+        .expect("the mocked state service is always ready")
+        .call(IbdBlock {
+            height: block::Height(1),
+            expected: block1.hash(),
+            prev_expected: genesis.hash(),
+            // Genesis bytes cached under block 1's pinned hash.
+            block: BlockPayload::Raw(zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES.to_vec()),
+            source: None,
+        })
+        .await
+        .expect_err("bytes hashing to a different block must fail the hash re-check");
+
+    let VerifyAndCommitError::Verify(error) = error else {
+        panic!("expected a verify-stage failure, got: {error:?}");
+    };
+    assert!(
+        matches!(error, ConvertError::CorruptCachedBytes { .. }),
+        "unexpected error: {error:?}",
+    );
+
+    state.expect_no_requests().await;
 }

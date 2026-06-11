@@ -47,6 +47,14 @@ mod tests;
 /// enough that a restart barely dents sync throughput.
 pub const IBD_RESTART_DELAY: Duration = Duration::from_secs(15);
 
+/// The number of consecutive engine restarts with zero frontier progress
+/// after which the supervisor may degrade to the legacy syncer — only above
+/// the mandatory checkpoint height (design doc §4.1, §4.7).
+///
+/// Below the mandatory checkpoint the engine restarts forever with alarms:
+/// semantic sync below Canopy is not a sound fallback.
+pub const IBD_MAX_RESTARTS_WITHOUT_PROGRESS: u32 = 5;
+
 /// How often the engine repeats its warning while the commit frontier is
 /// stalled.
 ///
@@ -90,14 +98,6 @@ pub enum DeclineReason {
 
     /// The `sync.known_hash_sync` config flag is off.
     DisabledByConfig,
-
-    /// The engine core is not implemented yet, so a startable engine still
-    /// hands straight off to the legacy syncer.
-    ///
-    /// Removed when D2–D6 land (see `docs/design/known-hash-ibd.md` §9
-    /// Phase D); until then this variant keeps the skeleton honest: it never
-    /// claims `Completed` for work it did not do.
-    NotYetImplemented,
 }
 
 /// Reasons the engine may hand an unfinished range back to the legacy syncer.
@@ -105,11 +105,13 @@ pub enum DeclineReason {
 /// Degradation is only permitted above the mandatory checkpoint height
 /// (`docs/design/known-hash-ibd.md` §4.1); below it the engine loops forever
 /// with alarms instead.
-///
-/// Currently uninhabited: the supervisor restart policy that produces
-/// degradations lands with the rest of Phase D.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum DegradeReason {}
+pub enum DegradeReason {
+    /// [`IBD_MAX_RESTARTS_WITHOUT_PROGRESS`] consecutive engine restarts
+    /// made zero frontier progress; the legacy syncer is correct, just
+    /// slower (design doc §4.1).
+    RepeatedRestartsWithoutProgress,
+}
 
 /// The known-hash IBD engine supervisor.
 ///
@@ -187,12 +189,22 @@ where
         }
     }
 
-    /// Checks the engine preconditions, then runs the engine and returns its
-    /// outcome.
+    /// Checks the engine preconditions, then runs the engine — restarting it
+    /// after [`IBD_RESTART_DELAY`] on fatal-but-retryable errors — and
+    /// returns its outcome (design doc §4.7).
+    ///
+    /// Every (re)start re-derives the first uncommitted height from the
+    /// state tip and rebuilds the engine window; the consecutive-failure
+    /// counter resets whenever a restart makes frontier progress. Above the
+    /// mandatory checkpoint height,
+    /// [`IBD_MAX_RESTARTS_WITHOUT_PROGRESS`] zero-progress restarts degrade
+    /// to the legacy syncer; below it the engine restarts forever with
+    /// alarms.
     ///
     /// Returns `Ok(IbdOutcome::Declined(_))` when the engine cannot or should
     /// not run; the caller starts the legacy syncer either way. Returns an
-    /// error only on broken or tampered list assets, which need operator
+    /// error on broken or tampered list assets and on non-retryable engine
+    /// failures (list diagnostics, state shutdown), which need operator
     /// attention rather than a silent fallback.
     pub async fn run(self) -> Result<IbdOutcome, BoxError> {
         if !self.config.known_hash_sync {
@@ -208,22 +220,43 @@ where
             return Ok(IbdOutcome::Declined(DeclineReason::NoList));
         };
 
-        // Check the tip against the spec constant before opening the list:
-        // a synced node must not re-read and re-hash the full asset set
-        // (~103 MB on Mainnet) on every restart.
-        let tip_height = self.latest_chain_tip.best_tip_height();
+        let mandatory_floor = self.network.mandatory_checkpoint_height();
 
-        if tip_height >= Some(spec.max_height) {
-            info!(
-                ?tip_height,
-                list_max_height = ?spec.max_height,
-                "chain tip is already past the known-hash list; using the legacy syncer",
-            );
-            return Ok(IbdOutcome::Declined(DeclineReason::AlreadyPast));
-        }
+        let mut restarts: u32 = 0;
+        let mut failures_without_progress: u32 = 0;
+        let mut last_start_height: Option<block::Height> = None;
 
-        let list =
-            match KnownHashList::open(&self.network, self.config.known_hash_list_dir.as_deref()) {
+        loop {
+            // Check the tip against the spec constant before opening the
+            // list: a synced node must not re-read and re-hash the full
+            // asset set (~103 MB on Mainnet) on every restart.
+            let tip_height = self.latest_chain_tip.best_tip_height();
+
+            if tip_height >= Some(spec.max_height) {
+                return Ok(if restarts == 0 {
+                    info!(
+                        ?tip_height,
+                        list_max_height = ?spec.max_height,
+                        "chain tip is already past the known-hash list; \
+                         using the legacy syncer",
+                    );
+                    IbdOutcome::Declined(DeclineReason::AlreadyPast)
+                } else {
+                    // A previous run committed through the end of the list
+                    // before failing.
+                    IbdOutcome::Completed {
+                        final_height: spec.max_height,
+                    }
+                });
+            }
+
+            // Re-opened on every restart: the engine consumes the list, and
+            // restarts are rare enough that re-verifying the assets is
+            // cheaper than holding a second copy across the whole run.
+            let list = match KnownHashList::open(
+                &self.network,
+                self.config.known_hash_list_dir.as_deref(),
+            ) {
                 Ok(Some(list)) => list,
                 // Unreachable: `for_network()` returned a spec just above, and
                 // `open()` only returns `None` when there is no spec.
@@ -240,39 +273,83 @@ where
                 Err(error) => return Err(error.into()),
             };
 
-        // Every (re)start re-derives the first uncommitted height from the
-        // state tip (design doc §4.7).
-        let next_commit = tip_height.map_or(block::Height(0), |tip| {
-            tip.next()
-                .expect("a tip below the list max height is far below Height::MAX")
-        });
+            // Every (re)start re-derives the first uncommitted height from
+            // the state tip (design doc §4.7).
+            let next_commit = tip_height.map_or(block::Height(0), |tip| {
+                tip.next()
+                    .expect("a tip below the list max height is far below Height::MAX")
+            });
 
-        info!(
-            ?next_commit,
-            list_max_height = ?list.max_height(),
-            "starting the known-hash IBD engine",
-        );
+            // A restart that advanced the frontier resets the failure count.
+            if last_start_height.is_some_and(|previous| next_commit > previous) {
+                failures_without_progress = 0;
+            }
+            last_start_height = Some(next_commit);
 
-        // TODO(known-hash-ibd D6): plumb the real peer set status watch
-        // (`PeerSet::status_receiver()`) through `start.rs`; until then the
-        // engine sees a default (empty) status and sizes its batch
-        // concurrency at the minimum.
-        let (_status_sender, peer_status) =
-            tokio::sync::watch::channel(zn::PeerSetStatus::default());
+            info!(
+                ?next_commit,
+                list_max_height = ?list.max_height(),
+                restarts,
+                "starting the known-hash IBD engine",
+            );
 
-        let engine = engine::Engine::new(
-            self.peer_set,
-            self.state,
-            next_commit,
-            list,
-            peer_status,
-            self.config.known_hash_lookahead_bytes,
-            Duration::from_secs(self.config.known_hash_gap_hedge_secs),
-        );
+            // TODO(known-hash-ibd D6): plumb the real peer set status watch
+            // (`PeerSet::status_receiver()`) through `start.rs`; until then
+            // the engine sees a default (empty) status and sizes its batch
+            // concurrency at the minimum.
+            let (_status_sender, peer_status) =
+                tokio::sync::watch::channel(zn::PeerSetStatus::default());
 
-        // TODO(known-hash-ibd D4/D6): supervisor restart loop with
-        // `IBD_RESTART_DELAY`, progress tracking, and degradation above the
-        // mandatory checkpoint floor (design doc §4.7).
-        engine.run().await
+            let mut engine = engine::Engine::new(
+                self.network.clone(),
+                self.peer_set.clone(),
+                self.state.clone(),
+                next_commit,
+                list,
+                peer_status,
+                // TODO(known-hash-ibd D6): wire the disk overflow tier under
+                // `<state cache_dir>/ibd-block-cache/`; without it the
+                // engine stops fetch-ahead at the memory budget.
+                None,
+                self.config.known_hash_lookahead_bytes,
+                Duration::from_secs(self.config.known_hash_gap_hedge_secs),
+            );
+
+            match engine.run().await {
+                Ok(outcome) => return Ok(outcome),
+
+                // Fatal diagnostics and shutdowns propagate: restarting
+                // cannot fix a broken list or a closed state (§4.6).
+                Err(error) if !error.is_retryable() => return Err(error.into()),
+
+                Err(error) => {
+                    restarts += 1;
+                    failures_without_progress += 1;
+
+                    warn!(
+                        %error,
+                        restarts,
+                        failures_without_progress,
+                        "known-hash IBD engine failed; restarting",
+                    );
+
+                    if next_commit > mandatory_floor
+                        && failures_without_progress >= IBD_MAX_RESTARTS_WITHOUT_PROGRESS
+                    {
+                        warn!(
+                            ?next_commit,
+                            failures_without_progress,
+                            "known-hash IBD engine made no progress over repeated restarts \
+                             above the mandatory checkpoint; degrading to the legacy syncer",
+                        );
+                        return Ok(IbdOutcome::Degraded(
+                            DegradeReason::RepeatedRestartsWithoutProgress,
+                        ));
+                    }
+
+                    tokio::time::sleep(IBD_RESTART_DELAY).await;
+                }
+            }
+        }
     }
 }

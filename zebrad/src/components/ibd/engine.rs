@@ -8,39 +8,52 @@
 //! [`watch`] publishing the memory-eligible boundary, read by in-flight
 //! fetches for the tier re-check.)
 //!
-//! D2 state: the engine loop downloads its whole range through the weighted
-//! batched fetch service (design doc §4.1–4.2) — refill with auto-scaled
-//! lookahead, per-height retry policy with NotFound/transport classification,
-//! gap hedging, and the stall warning ladder. The verify-and-commit stage-2
-//! futures, base advancement, and the disk overflow tier land in D3–D5, so
-//! [`Engine::run`] still declines; [`Engine::run_fetch_only`] drives the
-//! fetch pipeline for tests.
+//! The engine loop downloads its whole range through the weighted batched
+//! fetch service (design doc §4.1–4.2) — refill with auto-scaled lookahead,
+//! per-height retry policy with NotFound/transport classification, gap
+//! hedging, and the stall warning ladder — and commits it in height order
+//! through stage-2 verify-and-commit continuations capped by the commit
+//! pipeline bounds (§4.4). Heights beyond the memory byte budget overflow to
+//! the disk tier (§4.5) and are promoted back through the same
+//! verify-and-commit path as commits free budget. Commit failures follow the
+//! §4.6 recovery: descendants dropped by a write-thread reset are resubmitted
+//! from their retained [`Arc`]s (a re-verification, never a re-download),
+//! only the failed height itself is refetched — from a different peer — and
+//! repeated byte-identical failures are a fatal diagnostic.
 
-use std::{collections::VecDeque, pin::Pin, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, VecDeque},
+    pin::Pin,
+    sync::Arc,
+    time::Duration,
+};
 
 use futures::{
     future::{AbortHandle, Abortable, Aborted},
     stream::FuturesUnordered,
     Future, FutureExt, StreamExt,
 };
+use thiserror::Error;
 use tokio::{sync::watch, time::Instant};
 use tower::{Service, ServiceExt};
 
 use zebra_chain::{
     block::{self, Block, MAX_BLOCK_BYTES},
-    parameters::known_hashes::KnownHashList,
+    parameters::{known_hashes::KnownHashList, Network, GENESIS_PREVIOUS_BLOCK_HASH},
     serialization::ZcashSerialize,
 };
 use zebra_network::{self as zn, PeerSetStatus, PeerSocketAddr};
 use zebra_state as zs;
 
 use super::{
+    cache::BlockCache,
+    convert::{BlockPayload, ConvertError, IbdBlock, VerifyAndCommit, VerifyAndCommitError},
     fetch::{
         self, BatchFetchResponse, BatchedFetch, FetchError, FetchFailureKind, FetchRequest,
         FetchedBlock, DEFAULT_SIZE_HINT,
     },
     peer_stats::PeerStats,
-    DeclineReason, IbdOutcome, IBD_STALL_WARN_INTERVAL,
+    IbdOutcome, IBD_STALL_WARN_INTERVAL,
 };
 use crate::BoxError;
 
@@ -82,12 +95,26 @@ pub const SIZE_HINT_UNIT: u64 = MAX_BLOCK_BYTES.div_ceil(255);
 const _: () = assert!(SIZE_HINT_UNIT == 7_844);
 const _: () = assert!(255 * SIZE_HINT_UNIT >= MAX_BLOCK_BYTES);
 
-/// The hard cap on the window's height span, and the ring's capacity.
+/// The defensive ceiling on the window's height span (slot bookkeeping only —
+/// **not** a memory bound, and not policy; maintainer-directed).
 ///
-/// Allocated once at startup, the ring never grows. This bounds the slot
-/// metadata (~40 B per slot, ~2.6 MB total) and the auto-scaled lookahead
-/// regardless of how small blocks are.
-pub const IBD_SPAN_MAX: usize = 65_536;
+/// The window's real bounds are the byte budgets: the RAM block-buffer budget
+/// (`sync.known_hash_lookahead_bytes`) plus the disk fetch-ahead allowance
+/// ([`DISK_FETCH_AHEAD_FACTOR`]). The span that fits those budgets is
+/// emergent from actual block sizes. This ceiling only stops runaway slot
+/// bookkeeping if accounting breaks (~40 B per slot, so ~80 MB at the
+/// ceiling); it should never bind in practice.
+pub const IBD_SPAN_MAX: usize = 2_000_000;
+
+/// The disk overflow tier's fetch-ahead allowance, as a multiple of the RAM
+/// block-buffer budget.
+///
+/// The engine keeps fetching past the RAM budget — storing arrivals on disk —
+/// until RAM-held plus disk-held block bytes reach
+/// `budget × (1 + DISK_FETCH_AHEAD_FACTOR)`. Proportional to the configured
+/// budget, so transient disk usage scales with what the node was sized for
+/// (the chain state needs that space soon anyway).
+pub const DISK_FETCH_AHEAD_FACTOR: u64 = 4;
 
 /// The maximum number of unresolved verify-and-commit futures.
 ///
@@ -125,6 +152,14 @@ pub const IBD_HEIGHT_RETRY_BACKOFF_CAP: Duration = Duration::from_secs(30);
 /// is treated as deterministic and fatal (design doc §4.6).
 pub const COMMIT_FAILURE_ATTEMPT_LIMIT: u8 = 3;
 
+/// How many heights the commit frontier advances between batched disk-tier
+/// eviction rounds (design doc §4.5).
+///
+/// Eviction is lazy: each round deletes every cached entry the frontier has
+/// passed, so the batch interval only bounds how long committed entries
+/// linger on disk, not how many are deleted.
+pub const IBD_CACHE_EVICT_INTERVAL: u32 = 1_024;
+
 /// Returns the batch layer's `max_concurrent_batches` limit for the current
 /// number of ready peers.
 ///
@@ -147,6 +182,89 @@ fn retry_backoff(attempts: u8) -> Duration {
     IBD_HEIGHT_RETRY_BACKOFF_BASE
         .saturating_mul(1u32 << exponent)
         .min(IBD_HEIGHT_RETRY_BACKOFF_CAP)
+}
+
+/// A fatal engine exit (design doc §4.6–4.7).
+///
+/// The supervisor restarts the engine only for
+/// [retryable](EngineError::is_retryable) errors; diagnostics and shutdowns
+/// propagate so they are never cured by silent fallback.
+#[derive(Debug, Error)]
+pub enum EngineError {
+    /// The known-hash list (or its loader) disagrees with a block whose
+    /// header hash it pins; refetching can never cure this (design doc
+    /// §4.3).
+    #[error("fatal known-hash list diagnostic: {0}")]
+    ListDiagnostic(#[source] ConvertError),
+
+    /// A byte-identical block failed its state commit
+    /// [`COMMIT_FAILURE_ATTEMPT_LIMIT`] times: a known-hash list-vs-chain
+    /// inconsistency or local database corruption (design doc §4.6).
+    #[error(
+        "block {hash:?} at {height:?} failed its state commit {attempts} times \
+         with byte-identical copies: known-hash list inconsistency or local \
+         database corruption; not retrying"
+    )]
+    DeterministicCommitFailure {
+        /// The height of the failing block.
+        height: block::Height,
+        /// The pinned hash of the failing block.
+        hash: block::Hash,
+        /// How many times byte-identical copies failed.
+        attempts: u8,
+        /// The state's last commit error.
+        #[source]
+        error: BoxError,
+    },
+
+    /// The state write task, the state service, or the rayon pool is gone:
+    /// Zebra is shutting down, or the state is broken (design doc §4.6).
+    #[error("cannot verify and commit blocks; Zebra may be shutting down: {0}")]
+    Shutdown(#[source] BoxError),
+
+    /// Reading the known-hash list failed.
+    #[error("known-hash list read failed: {0}")]
+    List(#[source] BoxError),
+
+    /// An engine invariant was broken, or a transient subsystem failed.
+    #[error("known-hash IBD engine error: {0}")]
+    Internal(String),
+}
+
+impl EngineError {
+    /// Returns true when a supervisor restart might cure this error (design
+    /// doc §4.7).
+    ///
+    /// Fatal diagnostics and shutdowns return false: restarting cannot fix a
+    /// broken list or a closed state, and retrying them would be the silent
+    /// fallback §4.6 forbids.
+    pub fn is_retryable(&self) -> bool {
+        matches!(self, EngineError::List(_) | EngineError::Internal(_))
+    }
+}
+
+/// Returns true when `error`'s source chain contains the state's
+/// [`zs::CommitBlockError::WriteTaskExited`].
+///
+/// At the commit frontier this means the write task is really gone (the
+/// frontier block is always at the write thread's next valid height, so it
+/// is never reset-dropped): the engine shuts down instead of refetching
+/// (design doc §4.6).
+fn is_write_task_exited(error: &BoxError) -> bool {
+    let mut current: Option<&(dyn std::error::Error + 'static)> = Some(&**error);
+
+    while let Some(error) = current {
+        if matches!(
+            error.downcast_ref::<zs::CommitBlockError>(),
+            Some(zs::CommitBlockError::WriteTaskExited { .. })
+        ) {
+            return true;
+        }
+
+        current = error.source();
+    }
+
+    false
 }
 
 /// The source of the engine's pinned hashes and size hints.
@@ -190,38 +308,6 @@ impl HashList for KnownHashList {
     }
 }
 
-/// The window tier a block is fetched into (design doc §4.5).
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum Tier {
-    /// Within the memory byte budget: the block is held in its window slot
-    /// and flows straight to verify-and-commit.
-    Memory,
-
-    /// Beyond the memory budget: the block is saved raw to the disk overflow
-    /// tier and promoted later.
-    ///
-    /// TODO(known-hash-ibd D5): issued by overflow fetch-ahead once
-    /// `cache.rs` lands; D2 never issues past the memory budget.
-    Disk,
-}
-
-/// Returns the tier a completed fetch resolves into.
-///
-/// This is the §4.1 tier re-check **at completion**: the frontier may have
-/// advanced mid-fetch, so a height issued for the disk tier that has become
-/// frontier-critical commits directly instead of round-tripping through
-/// disk.
-fn completion_tier(
-    height: block::Height,
-    memory_eligible: &watch::Receiver<block::Height>,
-) -> Tier {
-    if height <= *memory_eligible.borrow() {
-        Tier::Memory
-    } else {
-        Tier::Disk
-    }
-}
-
 /// Which of a slot's in-flight futures produced an outcome.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum FetchOrigin {
@@ -235,7 +321,10 @@ pub enum FetchOrigin {
 /// The result of a stage-1 fetch future.
 #[derive(Debug)]
 pub enum FetchOutcome {
-    /// The block arrived and is memory-eligible.
+    /// The block arrived. The engine loop decides its placement at arrival:
+    /// memory while the RAM block buffer has room, the disk overflow tier
+    /// otherwise (design doc §4.5; maintainer-directed arrival-time
+    /// placement).
     Fetched {
         /// The fetched block.
         block: Arc<Block>,
@@ -243,11 +332,21 @@ pub enum FetchOutcome {
         source: Option<PeerSocketAddr>,
     },
 
-    // TODO(known-hash-ibd D5): `Saved { bytes }` for disk-tier fetches that
-    // wrote the raw block to the overflow cache.
     /// The fetch failed with a classified error; the engine's retry policy
     /// decides what happens next.
     Failed(FetchFailureKind),
+}
+
+/// The result of a stage-2 verify-and-commit future.
+#[derive(Debug)]
+pub enum CommitOutcome {
+    /// The block was verified and committed; the future resolved after the
+    /// database write.
+    Committed(block::Hash),
+
+    /// The verify or commit stage failed; the engine maps the error per the
+    /// design doc §4.3/§4.6 semantics.
+    Failed(VerifyAndCommitError),
 }
 
 /// The completion payload of one per-block staged future.
@@ -261,8 +360,9 @@ pub enum StageOutcome {
         outcome: FetchOutcome,
     },
 
-    // TODO(known-hash-ibd D3/D4): `Commit(CommitOutcome)` for the stage-2
-    // verify-and-commit continuations.
+    /// A stage-2 verify-and-commit continuation completed.
+    Commit(CommitOutcome),
+
     /// The future was cancelled: it lost a hedge race or the engine is
     /// shutting down. The slot was already updated by the winner.
     Aborted,
@@ -297,9 +397,6 @@ pub enum Slot {
         not_founds: u8,
         /// When the current fetch was issued; drives gap hedging.
         since: Instant,
-        /// The byte-budget reservation for this height: the size-hint upper
-        /// bound, reconciled to the exact size on arrival.
-        reserved_bytes: u32,
         /// Aborts the hedged single-hash refetch, if one was issued.
         hedged: Option<AbortHandle>,
         /// Aborts the primary in-flight fetch.
@@ -307,7 +404,7 @@ pub enum Slot {
     },
 
     /// The fetch stage is done; the verify-and-commit continuation is pending
-    /// or in flight.
+    /// (`committing: false`) or in flight (`committing: true`).
     ///
     /// The block is retained until its commit resolves, for commit-reset
     /// recovery (design doc §4.6) — it is the same [`Arc`] the state queue
@@ -317,14 +414,26 @@ pub enum Slot {
         block: Arc<Block>,
         /// The block's exact serialized size.
         bytes: u32,
+        /// Whether a stage-2 verify-and-commit future is in flight.
+        committing: bool,
+        /// The peer that delivered the block, when known; carried for
+        /// commit-time attribution (design doc §4.6).
+        source: Option<PeerSocketAddr>,
     },
 
     /// The block is in the disk overflow tier (design doc §4.5); it is never
-    /// re-requested from the network.
+    /// re-requested from the network. A stage-2 promotion future is in
+    /// flight when `promoted` is set.
     Cached {
         /// The block's exact serialized size.
         bytes: u32,
+        /// Whether a stage-2 promotion future is in flight.
+        promoted: bool,
     },
+
+    /// The block's commit resolved after the database write; the slot is
+    /// popped once the contiguous committed prefix reaches it.
+    Committed,
 }
 
 impl Slot {
@@ -337,15 +446,39 @@ impl Slot {
         }
     }
 
-    /// Is this height's block in memory or on disk?
+    /// Is this height's block in memory, on disk, or already committed?
     fn is_fetched(&self) -> bool {
-        matches!(self, Slot::Fetched { .. } | Slot::Cached { .. })
+        matches!(
+            self,
+            Slot::Fetched { .. } | Slot::Cached { .. } | Slot::Committed
+        )
     }
 }
 
 /// Merges `deadline` into the engine loop's next wake-up time.
 fn merge_wake(next_wake: &mut Option<Instant>, deadline: Instant) {
     *next_wake = Some(next_wake.map_or(deadline, |wake| wake.min(deadline)));
+}
+
+/// The refill action derived from a slot, so the borrow of the window ends
+/// before the action mutates the engine.
+enum RefillAction {
+    /// Extend the ring with a new trailing height and fetch it.
+    Extend,
+    /// Issue a fetch for an `Unrequested` slot with an expired backoff.
+    Issue,
+    /// Promote a `Cached` slot through the verify-and-commit path.
+    Promote {
+        /// The cached block's exact serialized size.
+        bytes: u32,
+    },
+    /// Push the stage-2 continuation for a `Fetched` slot.
+    Commit {
+        /// The fetched block's exact serialized size.
+        bytes: u32,
+    },
+    /// Nothing to do for this height.
+    Skip,
 }
 
 /// The known-hash IBD engine: a ring window over the uncommitted height
@@ -368,13 +501,11 @@ where
 {
     /// The ring window: slot `i` tracks height `base + i`.
     ///
-    /// `std`'s ring buffer, allocated once with at least [`IBD_SPAN_MAX`]
-    /// capacity; the span-cap invariant means it never grows (every push is
-    /// `debug_assert!`ed against the preallocated capacity).
+    /// `std`'s ring buffer, grown organically with the active span — the
+    /// span is emergent from the byte budgets and actual block sizes
+    /// (maintainer-directed), with [`IBD_SPAN_MAX`] as a defensive
+    /// bookkeeping ceiling only.
     window: VecDeque<Slot>,
-
-    /// The capacity allocated at startup, for the never-grows invariant.
-    ring_capacity: usize,
 
     /// The lowest uncommitted height; slots are popped from the front as the
     /// commit frontier advances.
@@ -390,11 +521,9 @@ where
     /// is the gap-hedge path (single-hash `BlocksByHash`, design doc §4.1).
     peer_set: ZN,
 
-    /// A buffered state service which is used to commit verified blocks.
-    // TODO(known-hash-ibd D3): drive the verify-and-commit service (design
-    // doc §4.3) from this handle.
-    #[allow(dead_code)]
-    state: ZS,
+    /// The verify-and-commit service over the buffered state (design doc
+    /// §4.3); one stage-2 future per block goes through it.
+    verify_and_commit: VerifyAndCommit<ZS>,
 
     /// The pinned hash list; owned by the engine, queried synchronously from
     /// the refill step.
@@ -403,21 +532,59 @@ where
     /// The weighted batched fetch service (design doc §4.2).
     batched_fetch: BatchedFetch<ZN>,
 
+    /// The disk overflow tier (design doc §4.5), when configured.
+    ///
+    /// `None` disables overflow fetch-ahead: the engine simply stops issuing
+    /// fetches at the memory budget. TODO(known-hash-ibd D6): wire the
+    /// production cache under `<state cache_dir>/ibd-block-cache/`.
+    cache: Option<BlockCache>,
+
     /// Live peer set status, used for batch-concurrency sizing and stall
     /// diagnostics.
     peer_status: watch::Receiver<PeerSetStatus>,
 
-    /// The memory-eligible boundary: the highest height whose block may be
-    /// held in the memory tier. In-flight fetches read this for the
-    /// completion tier re-check (design doc §4.1).
-    memory_eligible: watch::Sender<block::Height>,
-
-    /// The lookahead byte budget (`sync.known_hash_lookahead_bytes`).
+    /// The RAM block-buffer budget (`sync.known_hash_lookahead_bytes`):
+    /// the configured memory for checkpoint-verified blocks awaiting commit.
     lookahead_bytes: u64,
 
-    /// Bytes counted against the lookahead budget: size-hint upper bounds
-    /// for in-flight heights, exact serialized sizes for fetched ones.
+    /// The exact serialized bytes of blocks currently held in RAM:
+    /// `Fetched` slots plus blocks behind unresolved stage-2 futures
+    /// (including promotions read back from disk). Updated at arrival
+    /// placement and commit resolution — the live counter the
+    /// maintainer-directed placement rule compares against the budget.
     budget_used: u64,
+
+    /// The number of in-flight stage-1 fetches (`InFlight` slots).
+    ///
+    /// Fetch issuance is bounded by the network's useful concurrency, not by
+    /// the byte budgets: placement happens at arrival.
+    inflight_fetches: usize,
+
+    /// The number of unresolved stage-2 verify-and-commit futures.
+    commit_blocks: usize,
+
+    /// The exact bytes of the blocks behind unresolved stage-2 futures.
+    commit_bytes: u64,
+
+    /// The block-count cap on unresolved stage-2 futures
+    /// ([`IBD_COMMIT_PIPELINE_BLOCKS`]; overridable in tests).
+    commit_pipeline_max_blocks: usize,
+
+    /// The byte cap on unresolved stage-2 futures
+    /// ([`IBD_COMMIT_PIPELINE_BYTES`]; overridable in tests).
+    commit_pipeline_max_bytes: u64,
+
+    /// Commit-failure tracking for the §4.6 deterministic-failure detector:
+    /// per failing height, the byte-identical failure count and the failed
+    /// copy it is compared against.
+    ///
+    /// Entries are dropped when their height commits or the frontier passes
+    /// it, so the map is bounded by the actively-failing pipeline span.
+    commit_failures: HashMap<block::Height, (u8, Option<Arc<Block>>)>,
+
+    /// The frontier below which committed disk-tier entries were last
+    /// evicted (lazily batched, design doc §4.5).
+    cache_evicted_through: block::Height,
 
     /// How long a frontier-critical fetch may be in flight before it is
     /// hedged (`sync.known_hash_gap_hedge_secs`).
@@ -426,15 +593,15 @@ where
     /// Per-height peer exclusions and `notfound` accounting.
     peer_stats: PeerStats,
 
-    /// The total number of blocks fetched into the window.
+    /// The total number of blocks fetched into the window (memory or disk).
     fetched_blocks: u64,
 
     /// The total number of gap hedges issued.
     hedge_count: u64,
 
-    /// The window offset of the lowest non-fetched height when the fetch
-    /// frontier last advanced, for stall detection.
-    stall_watermark: usize,
+    /// The lowest non-fetched height when the fetch frontier last advanced,
+    /// for stall detection.
+    fetch_watermark: block::Height,
 
     /// When the fetch frontier last advanced.
     frontier_progress_at: Instant,
@@ -461,59 +628,72 @@ where
 {
     /// Returns a new engine whose window starts at `base`, the lowest
     /// uncommitted height, using:
+    /// - `network`: the configured network, for the verify stage's merkle
+    ///   and branch-ID checks,
     /// - `peer_set`: the Buffer'd zebra-network peer set,
     /// - `state`: the Buffer'd zebra-state service,
     /// - `list`: the verified known-hash list,
     /// - `peer_status`: the peer set's status watch (sizes the batch
     ///   concurrency; until D6 plumbs the real watch through `start.rs`, the
     ///   supervisor passes a default),
+    /// - `cache`: the disk overflow tier (design doc §4.5), or `None` to
+    ///   stop fetch-ahead at the memory budget,
     /// - `lookahead_bytes` and `gap_hedge_after`: the
     ///   `sync.known_hash_lookahead_bytes` / `known_hash_gap_hedge_secs`
-    ///   config fields.
+    ///   config fields. A `gap_hedge_after` too large for the clock
+    ///   (`Duration::MAX`) disables hedging.
     ///
-    /// Allocates the full ring capacity up front: the window never grows
-    /// after construction, so the engine's slot metadata is bounded for its
-    /// whole lifetime. Must be called within a Tokio runtime (the batched
-    /// fetch worker is spawned onto it).
+    /// Must be called within a Tokio runtime (the batched fetch worker is
+    /// spawned onto it).
+    //
+    // Everything here is a distinct service handle or config value used by a
+    // different engine stage; bundling them into a struct would only move
+    // the argument list into a literal at the single call site.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
+        network: Network,
         peer_set: ZN,
         state: ZS,
         base: block::Height,
         list: L,
         peer_status: watch::Receiver<PeerSetStatus>,
+        cache: Option<BlockCache>,
         lookahead_bytes: usize,
         gap_hedge_after: Duration,
     ) -> Self {
         let ready_peers = peer_status.borrow().ready_peers;
         let batched_fetch =
             fetch::batched_fetch(peer_set.clone(), ibd_max_concurrent_batches(ready_peers));
-
-        let window = VecDeque::with_capacity(IBD_SPAN_MAX);
-        let ring_capacity = window.capacity();
-
-        let (memory_eligible, _) = watch::channel(base);
+        let verify_and_commit = VerifyAndCommit::new(network, state);
 
         let now = Instant::now();
 
         Self {
-            window,
-            ring_capacity,
+            window: VecDeque::new(),
             base,
             blocks: FuturesUnordered::new(),
             peer_set,
-            state,
+            verify_and_commit,
             list,
             batched_fetch,
+            cache,
             peer_status,
-            memory_eligible,
             // usize values always fit in u64 on supported platforms
             lookahead_bytes: lookahead_bytes as u64,
             budget_used: 0,
+            inflight_fetches: 0,
+            commit_blocks: 0,
+            commit_bytes: 0,
+            commit_pipeline_max_blocks: IBD_COMMIT_PIPELINE_BLOCKS,
+            // the constant fits u64 on all supported platforms
+            commit_pipeline_max_bytes: IBD_COMMIT_PIPELINE_BYTES as u64,
+            commit_failures: HashMap::new(),
+            cache_evicted_through: base,
             gap_hedge_after,
             peer_stats: PeerStats::new(now),
             fetched_blocks: 0,
             hedge_count: 0,
-            stall_watermark: 0,
+            fetch_watermark: base,
             frontier_progress_at: now,
             last_stall_warn: None,
         }
@@ -540,6 +720,18 @@ where
         self.budget_used
     }
 
+    /// The number of unresolved stage-2 verify-and-commit futures (for tests
+    /// and metrics).
+    pub fn commit_inflight_blocks(&self) -> usize {
+        self.commit_blocks
+    }
+
+    /// The exact bytes behind unresolved stage-2 futures (for tests and
+    /// metrics).
+    pub fn commit_inflight_bytes(&self) -> u64 {
+        self.commit_bytes
+    }
+
     /// The total number of blocks fetched into the window.
     pub fn fetched_blocks(&self) -> u64 {
         self.fetched_blocks
@@ -561,47 +753,49 @@ where
         self.window.get(offset as usize)
     }
 
-    /// Runs the engine until it completes the known-hash range, or returns
-    /// an outcome that hands off to the legacy syncer.
-    ///
-    /// Still declines: the fetch pipeline (D2) is driven by
-    /// [`Self::run_fetch_only`] until the verify-and-commit stage (D3) and
-    /// commit pipeline (D4) replace this stub with the production loop.
-    pub async fn run(self) -> Result<IbdOutcome, BoxError> {
-        info!(
-            base = ?self.base,
-            window_len = self.window_len(),
-            in_flight_blocks = self.blocks.len(),
-            "known-hash IBD engine commit pipeline is not yet implemented; \
-             handing off to the legacy syncer",
-        );
-
-        Ok(IbdOutcome::Declined(DeclineReason::NotYetImplemented))
+    /// Overrides the commit pipeline caps, so tests can exercise the cap
+    /// boundary without thousand-block fixtures.
+    #[cfg(test)]
+    pub(crate) fn set_commit_pipeline_caps(&mut self, max_blocks: usize, max_bytes: u64) {
+        self.commit_pipeline_max_blocks = max_blocks;
+        self.commit_pipeline_max_bytes = max_bytes;
     }
 
-    /// Runs the fetch pipeline until every height in `[base, end]` is
-    /// fetched into the window, without committing anything.
+    /// Runs the engine until every height through the list's max height is
+    /// committed, returning [`IbdOutcome::Completed`].
     ///
-    /// This is the D2 slice of the engine loop: refill, retry policy, gap
-    /// hedging, and stall warnings, with the fetch→commit stage boundary in
-    /// place but no stage-2 futures. D3/D4 replace the all-fetched exit
-    /// condition with stage-2 commit pushes in [`Self::on_fetched`] and base
-    /// advancement on commit completions, without restructuring this loop.
-    ///
-    /// Test-only by design: production semantics never advance past a height
-    /// without committing it. (Public so the fetch pipeline is reachable from
-    /// the crate's test targets, but hidden: it is not part of zebrad's API.)
-    #[doc(hidden)]
-    pub async fn run_fetch_only(&mut self, end: block::Height) -> Result<(), BoxError> {
-        assert!(
-            end >= self.base && end <= HashList::max_height(&self.list),
-            "fetch range must be within the window base and the list",
-        );
+    /// Restores the disk overflow tier left by a previous run, then loops:
+    /// refill (promotion, stage-2 pushes, tiered fetch issuance), gap
+    /// hedging, stall tracking, and one staged-future completion per
+    /// iteration. Returns an [`EngineError`] for fatal diagnostics,
+    /// shutdowns, and broken invariants; the supervisor decides which of
+    /// those to retry (design doc §4.7).
+    pub async fn run(&mut self) -> Result<IbdOutcome, EngineError> {
+        let end = HashList::max_height(&self.list);
 
-        // `end >= base` is asserted above; the widening +1 cannot overflow.
-        let target = u64::from(end.0 - self.base.0) + 1;
+        self.restore_cache(end)?;
 
         loop {
+            if self.base > end {
+                // Every height through the end of the list is committed.
+                if let Some(cache) = &mut self.cache {
+                    if let Err(error) = cache.remove_all() {
+                        warn!(
+                            %error,
+                            "failed to remove the IBD block cache directory at handoff",
+                        );
+                    }
+                }
+
+                info!(
+                    final_height = ?end,
+                    fetched_blocks = self.fetched_blocks,
+                    "known-hash IBD engine committed every block in the list",
+                );
+
+                return Ok(IbdOutcome::Completed { final_height: end });
+            }
+
             let now = Instant::now();
             let mut next_wake: Option<Instant> = None;
 
@@ -609,18 +803,12 @@ where
             self.refill(end, now, &mut next_wake)?;
             self.hedge_frontier(now, &mut next_wake)?;
             self.update_gauges();
-
-            if self.fetched_blocks >= target {
-                debug_assert!(self.window.iter().all(Slot::is_fetched));
-                return Ok(());
-            }
-
             self.track_stall(now, &mut next_wake);
 
             tokio::select! {
                 completion = self.blocks.next(), if !self.blocks.is_empty() => {
                     if let Some((height, outcome)) = completion {
-                        self.on_stage_complete(height, outcome, Instant::now());
+                        self.on_stage_complete(height, outcome, Instant::now())?;
                     }
                 }
 
@@ -633,116 +821,275 @@ where
 
                 else => {
                     // No futures in flight and no timer to wait for, but the
-                    // range is not fetched: an engine invariant is broken.
-                    return Err("known-hash engine stalled with no pending work".into());
+                    // range is not committed: an engine invariant is broken.
+                    return Err(EngineError::Internal(
+                        "engine stalled with no in-flight work and no timer".into(),
+                    ));
                 }
             }
         }
     }
 
-    /// Refills the window, lowest-missing-first, with auto-scaled lookahead
-    /// (design doc §4.1 step 1).
-    ///
-    /// Issues a stage-1 fetch future for every `Unrequested` height with an
-    /// expired backoff while `budget_used + hint_upper(next)` stays within
-    /// the lookahead byte budget and the ring span allows. The block-count
-    /// lookahead is not configured anywhere: it emerges from the byte budget
-    /// and the per-block size hints.
-    ///
-    /// Collects the earliest pending backoff expiry into `next_wake`.
-    // TODO(known-hash-ibd D4): track the lowest non-fetched offset
-    // incrementally instead of rescanning, once commits move the base.
-    fn refill(
-        &mut self,
-        end: block::Height,
-        now: Instant,
-        next_wake: &mut Option<Instant>,
-    ) -> Result<(), BoxError> {
-        // `end >= base` is checked by the caller, the +1 cannot overflow in
-        // u64, and the span is clamped to the ring capacity, so it fits usize.
-        let span = usize::try_from(u64::from(end.0 - self.base.0) + 1)
-            .unwrap_or(usize::MAX)
-            .min(self.ring_capacity);
+    /// Restores the disk overflow tier on (re)start: scans the cache
+    /// directory, prunes entries the engine no longer needs, and marks
+    /// surviving heights `Cached` so they are promoted instead of refetched
+    /// (design doc §4.5).
+    fn restore_cache(&mut self, end: block::Height) -> Result<(), EngineError> {
+        // The state tip is the height below the first uncommitted height.
+        let state_tip = self.base.0.checked_sub(1).map(block::Height);
 
-        // Once the budget rejects the lowest missing height, stop issuing
-        // (lowest-missing-first), but keep scanning for backoff deadlines.
-        let mut budget_open = true;
+        let survivors = match &mut self.cache {
+            None => return Ok(()),
+            Some(cache) => cache.scan(state_tip, end).map_err(|error| {
+                EngineError::Internal(format!("IBD block cache scan failed: {error}"))
+            })?,
+        };
 
-        for offset in 0..span {
-            // `offset` is bounded by the u32 height span.
-            let height = block::Height(self.base.0 + offset as u32);
+        for (height, bytes) in survivors {
+            // `scan` pruned everything at or below the state tip, so
+            // survivors are at or above `base`.
+            let offset = height
+                .0
+                .checked_sub(self.base.0)
+                .expect("scan only returns heights above the state tip")
+                as usize;
 
-            if offset == self.window.len() {
-                // Extending the ring: only when the new height can be issued
-                // immediately, so the window never holds trailing idle slots.
-                if !budget_open || !self.budget_allows(height) {
-                    break;
-                }
-
-                debug_assert!(
-                    self.window.len() < self.ring_capacity,
-                    "span cap holds, so the preallocated ring never grows",
+            if offset >= IBD_SPAN_MAX {
+                // A previous run's span cannot reach past the current span,
+                // but be defensive: leave the entry for a later scan rather
+                // than break the ring bound.
+                warn!(
+                    height = height.0,
+                    "cached block is beyond the ring span; leaving it on disk",
                 );
+                break;
+            }
+
+            while self.window.len() <= offset {
                 self.window.push_back(Slot::unrequested());
-                debug_assert_eq!(
-                    self.window.capacity(),
-                    self.ring_capacity,
-                    "the ring must never reallocate",
-                );
-
-                self.issue_fetch(offset, height, now)?;
-                continue;
             }
 
-            let Slot::Unrequested { backoff_until, .. } = &self.window[offset] else {
-                continue;
+            self.window[offset] = Slot::Cached {
+                bytes,
+                promoted: false,
             };
-
-            if let Some(until) = backoff_until {
-                if *until > now {
-                    merge_wake(next_wake, *until);
-                    continue;
-                }
-            }
-
-            if !budget_open || !self.budget_allows(height) {
-                budget_open = false;
-                continue;
-            }
-
-            self.issue_fetch(offset, height, now)?;
         }
 
         Ok(())
     }
 
-    /// Does the lookahead byte budget have room for `height`'s size-hint
-    /// upper bound?
-    fn budget_allows(&mut self, height: block::Height) -> bool {
-        let hint_upper = u64::from(self.list.size_hint(height).max(1)) * SIZE_HINT_UNIT;
-        self.budget_used + hint_upper <= self.lookahead_bytes
+    /// Refills the window, lowest-missing-first, with auto-scaled lookahead
+    /// (design doc §4.1):
+    ///
+    /// 1. promotes `Cached` slots and pushes stage-2 continuations for
+    ///    `Fetched` slots while the commit pipeline caps (§4.4) hold,
+    /// 2. issues memory-tier fetches while
+    ///    `budget_used + hint_upper(next) ≤ IBD_LOOKAHEAD_BYTES` — the
+    ///    block-count lookahead is not configured anywhere: it emerges from
+    ///    the byte budget and the per-block size hints — and raises the
+    ///    memory-eligible boundary over heights the budget reaches,
+    /// 3. once the budget is fully reserved, keeps issuing disk-tier fetches
+    ///    while the ring span allows (overflow fetch-ahead, §4.5).
+    ///
+    /// The frontier height bypasses the byte budget: its commit unblocks
+    /// everything else, and after a §4.6 recovery the budget may be full of
+    /// retained descendants parked behind it.
+    ///
+    /// Collects the earliest pending backoff expiry into `next_wake`.
+    fn refill(
+        &mut self,
+        end: block::Height,
+        now: Instant,
+        next_wake: &mut Option<Instant>,
+    ) -> Result<(), EngineError> {
+        // `base <= end` is checked by the caller, the +1 cannot overflow in
+        // u64, and the span is clamped to the defensive ceiling, so it fits
+        // usize.
+        let span = usize::try_from(u64::from(end.0 - self.base.0) + 1)
+            .unwrap_or(usize::MAX)
+            .min(IBD_SPAN_MAX);
+
+        // Fetch issuance is bounded by the network's useful concurrency and
+        // the total storage allowance, not the RAM budget: placement happens
+        // at arrival (maintainer-directed). One flag tracks each bound so the
+        // walk keeps scanning for promotions, commit pushes, and backoff
+        // deadlines after issuance stops.
+        let mut can_issue = self.storage_allows() && self.fetch_slots_available();
+
+        for offset in 0..span {
+            // `offset` is bounded by the u32 height span.
+            let height = block::Height(self.base.0 + offset as u32);
+
+            let action = if offset == self.window.len() {
+                RefillAction::Extend
+            } else {
+                match &self.window[offset] {
+                    Slot::Unrequested { backoff_until, .. } => {
+                        if let Some(until) = backoff_until {
+                            if *until > now {
+                                merge_wake(next_wake, *until);
+                                continue;
+                            }
+                        }
+                        RefillAction::Issue
+                    }
+                    Slot::Cached {
+                        promoted: false,
+                        bytes,
+                    } => RefillAction::Promote { bytes: *bytes },
+                    Slot::Fetched {
+                        committing: false,
+                        bytes,
+                        ..
+                    } => RefillAction::Commit { bytes: *bytes },
+                    _ => RefillAction::Skip,
+                }
+            };
+
+            match action {
+                RefillAction::Extend => {
+                    if !can_issue {
+                        // Extending only creates fetch work, so the walk is
+                        // done once issuance is blocked and the window end
+                        // is reached.
+                        break;
+                    }
+
+                    self.window.push_back(Slot::unrequested());
+                    self.issue_fetch(offset, height, now)?;
+                    can_issue = self.storage_allows() && self.fetch_slots_available();
+                }
+
+                RefillAction::Issue => {
+                    // The frontier height bypasses the storage gate: its
+                    // commit unblocks everything else.
+                    if can_issue || height == self.base {
+                        self.issue_fetch(offset, height, now)?;
+                        can_issue = self.storage_allows() && self.fetch_slots_available();
+                    }
+                }
+
+                RefillAction::Promote { bytes } => {
+                    // Promotion brings bytes back into RAM, so it takes the
+                    // RAM budget (exact, already known) and the commit
+                    // pipeline caps. The frontier height bypasses the budget:
+                    // after a §4.6 recovery the budget may be full of
+                    // retained descendants parked behind it.
+                    let budget_fits = self.budget_used + u64::from(bytes) <= self.lookahead_bytes
+                        || height == self.base;
+
+                    if budget_fits && self.commit_caps_allow(bytes) {
+                        self.promote(offset, height, bytes)?;
+                    }
+                }
+
+                RefillAction::Commit { bytes } => {
+                    if self.commit_caps_allow(bytes) {
+                        self.push_commit(offset, height)?;
+                    }
+                }
+
+                RefillAction::Skip => {}
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Does the total storage allowance — the RAM block buffer plus the disk
+    /// fetch-ahead allowance — have room for more fetch-ahead?
+    ///
+    /// Arrivals are placed at completion time, so this gate is approximate
+    /// by design: in-flight fetches can overshoot it by at most the
+    /// outstanding fetch count × the 2 MB block cap, which
+    /// [`Self::fetch_slots_available`] bounds.
+    fn storage_allows(&self) -> bool {
+        let disk_bytes = self.cache.as_ref().map_or(0, BlockCache::bytes);
+        let allowance = if self.cache.is_some() {
+            self.lookahead_bytes
+                .saturating_mul(1 + DISK_FETCH_AHEAD_FACTOR)
+        } else {
+            self.lookahead_bytes
+        };
+
+        self.budget_used.saturating_add(disk_bytes) < allowance
+    }
+
+    /// Is the in-flight fetch count under the network's useful concurrency?
+    ///
+    /// More outstanding single-block fetches than the batch pipeline can
+    /// carry just queue inside the batcher, so issuance pauses there.
+    fn fetch_slots_available(&self) -> bool {
+        let ready_peers = self.peer_status.borrow().ready_peers;
+        self.inflight_fetches
+            < ibd_max_concurrent_batches(ready_peers).saturating_mul(IBD_BATCH_MAX_BLOCKS)
+    }
+
+    /// Does the commit pipeline (design doc §4.4) have room for one more
+    /// unresolved stage-2 future of `bytes`?
+    ///
+    /// An empty pipeline always admits one block, so a block larger than the
+    /// byte cap could never deadlock the frontier (unreachable today: the
+    /// 2 MB protocol cap is far below the 64 MiB pipeline cap).
+    fn commit_caps_allow(&self, bytes: u32) -> bool {
+        self.commit_blocks < self.commit_pipeline_max_blocks
+            && (self.commit_blocks == 0
+                || self.commit_bytes + u64::from(bytes) <= self.commit_pipeline_max_bytes)
+    }
+
+    /// Returns the pinned hash for `height` and its parent pin:
+    /// `(list[height], list[height - 1])`, with the genesis parent pinned to
+    /// [`GENESIS_PREVIOUS_BLOCK_HASH`].
+    //
+    // The `expect`s check internal invariants (in-window heights are
+    // pre-bounded by the list); the `Result` is only for real list I/O
+    // errors.
+    #[allow(clippy::unwrap_in_result)]
+    fn pinned_hashes(
+        &mut self,
+        height: block::Height,
+    ) -> Result<(block::Hash, block::Hash), EngineError> {
+        let expected = self
+            .list
+            .hash(height)
+            .map_err(EngineError::List)?
+            .expect("in-window heights are within the list");
+
+        let prev_expected = match height.0.checked_sub(1) {
+            None => GENESIS_PREVIOUS_BLOCK_HASH,
+            Some(prev) => self
+                .list
+                .hash(block::Height(prev))
+                .map_err(EngineError::List)?
+                .expect("heights below an in-window height are within the list"),
+        };
+
+        Ok((expected, prev_expected))
     }
 
     /// Issues the stage-1 fetch future for `height` and moves its slot to
-    /// `InFlight`, reserving the size-hint upper bound against the budget.
+    /// `InFlight`.
+    ///
+    /// Placement (memory vs disk tier) happens when the block arrives, not
+    /// here (maintainer-directed arrival-time placement).
     //
-    // The `expect`s check internal invariants (heights pre-bounded by the
-    // list, hint bounds far below `u32::MAX`); the `Result` is only for real
-    // list I/O errors.
+    // The `expect` checks an internal invariant (heights pre-bounded by the
+    // list); the `Result` is only for real list I/O errors.
     #[allow(clippy::unwrap_in_result)]
     fn issue_fetch(
         &mut self,
         offset: usize,
         height: block::Height,
         now: Instant,
-    ) -> Result<(), BoxError> {
+    ) -> Result<(), EngineError> {
         // Synchronous list lookups stay in the refill step by design: a
         // chunk fault reads ~5 MB from disk (~20 ms, once per 150,000
         // heights), which is cheaper than threading file I/O through the
         // per-block futures.
         let hash = self
             .list
-            .hash(height)?
+            .hash(height)
+            .map_err(EngineError::List)?
             .expect("height was bounded by the list's max height in refill");
         let size_hint = self.list.size_hint(height).max(1);
 
@@ -751,7 +1098,6 @@ where
             hash,
             size_hint,
         };
-        let reserved = request.hint_upper_bytes();
 
         let (attempts, not_founds) = match &self.window[offset] {
             Slot::Unrequested {
@@ -763,10 +1109,9 @@ where
         };
 
         let service = self.batched_fetch.clone();
-        let memory_eligible = self.memory_eligible.subscribe();
         let (abort, registration) = AbortHandle::new_pair();
 
-        let fetch = Abortable::new(fetch_stage(service, request, memory_eligible), registration);
+        let fetch = Abortable::new(fetch_stage(service, request), registration);
         self.blocks.push(
             async move {
                 match fetch.await {
@@ -783,33 +1128,140 @@ where
             .boxed(),
         );
 
-        self.budget_used += reserved;
-
-        // Raise the memory-eligible boundary: D2 only issues memory-tier
-        // fetches, so every issued height is eligible. D5's overflow
-        // fetch-ahead issues `Tier::Disk` heights *above* this boundary.
-        self.memory_eligible.send_if_modified(|boundary| {
-            if height > *boundary {
-                *boundary = height;
-                true
-            } else {
-                false
-            }
-        });
+        self.inflight_fetches += 1;
 
         self.window[offset] = Slot::InFlight {
             attempts: attempts.saturating_add(1),
             not_founds,
             since: now,
-            // the hint upper bound is at most 255 × SIZE_HINT_UNIT ≈ 2 MB,
-            // which fits in u32
-            reserved_bytes: u32::try_from(reserved)
-                .expect("size-hint upper bounds are far below u32::MAX"),
             hedged: None,
             abort,
         };
 
         Ok(())
+    }
+
+    /// Pushes the stage-2 verify-and-commit continuation for the `Fetched`
+    /// block at `offset` (design doc §4.4).
+    ///
+    /// The pinned `list[height]` / `list[height - 1]` hashes are threaded at
+    /// issuance, so the verify stage needs no list access of its own.
+    fn push_commit(&mut self, offset: usize, height: block::Height) -> Result<(), EngineError> {
+        let (expected, prev_expected) = self.pinned_hashes(height)?;
+
+        let (payload, bytes, source) = match &mut self.window[offset] {
+            Slot::Fetched {
+                block,
+                bytes,
+                committing,
+                source,
+            } => {
+                debug_assert!(!*committing, "one stage-2 future per height at a time");
+                *committing = true;
+                (BlockPayload::from(block.clone()), *bytes, *source)
+            }
+            other => unreachable!("push_commit is only called on Fetched slots: {other:?}"),
+        };
+
+        self.spawn_commit(height, bytes, {
+            let service = self.verify_and_commit.clone();
+            async move {
+                commit_outcome(
+                    service,
+                    IbdBlock {
+                        height,
+                        expected,
+                        prev_expected,
+                        block: payload,
+                        source,
+                    },
+                )
+                .await
+            }
+        });
+
+        Ok(())
+    }
+
+    /// Pushes the stage-2 promotion future for the `Cached` block at
+    /// `offset`: the disk read happens inside the future, the raw bytes are
+    /// deserialized inside the verify stage's rayon closure, and the block
+    /// flows through the same verify-and-commit path as a network block
+    /// (design doc §4.5).
+    fn promote(
+        &mut self,
+        offset: usize,
+        height: block::Height,
+        bytes: u32,
+    ) -> Result<(), EngineError> {
+        let (expected, prev_expected) = self.pinned_hashes(height)?;
+
+        // The disk read is a synchronous page-cache-bound ≤ 2 MB read,
+        // called directly from the loop like every cache operation
+        // (single-owner, no-mutex design; see the cache module docs). An
+        // unreadable entry was already dropped by the cache: reset the slot
+        // for an immediate network refetch (§4.5 exception (a)).
+        let cached = match self
+            .cache
+            .as_mut()
+            .expect("promotion only happens for Cached slots, which need a configured cache")
+            .get(height)
+        {
+            Some(cached) => cached,
+            None => {
+                metrics::counter!("ibd.duplicate.download.count", "reason" => "corrupt-cache")
+                    .increment(1);
+
+                self.window[offset] = Slot::unrequested();
+                return Ok(());
+            }
+        };
+
+        match &mut self.window[offset] {
+            Slot::Cached { promoted, .. } => {
+                debug_assert!(!*promoted, "one promotion future per height at a time");
+                *promoted = true;
+            }
+            other => unreachable!("promote is only called on Cached slots: {other:?}"),
+        }
+
+        // Promoted blocks enter memory (inside the commit pipeline), so they
+        // count against the RAM block buffer until their commit resolves.
+        self.budget_used += u64::from(bytes);
+
+        self.spawn_commit(height, bytes, {
+            let service = self.verify_and_commit.clone();
+            async move {
+                commit_outcome(
+                    service,
+                    IbdBlock {
+                        height,
+                        expected,
+                        prev_expected,
+                        block: BlockPayload::Raw(cached.bytes),
+                        source: cached.source,
+                    },
+                )
+                .await
+            }
+        });
+
+        Ok(())
+    }
+
+    /// Pushes `commit` into the staged-future collection and accounts it
+    /// against the commit pipeline caps (design doc §4.4).
+    fn spawn_commit(
+        &mut self,
+        height: block::Height,
+        bytes: u32,
+        commit: impl Future<Output = CommitOutcome> + Send + 'static,
+    ) {
+        self.blocks
+            .push(async move { (height, StageOutcome::Commit(commit.await)) }.boxed());
+
+        self.commit_blocks += 1;
+        self.commit_bytes += u64::from(bytes);
     }
 
     /// Issues single-hash hedge fetches for frontier-critical heights that
@@ -825,7 +1277,7 @@ where
         &mut self,
         now: Instant,
         next_wake: &mut Option<Instant>,
-    ) -> Result<(), BoxError> {
+    ) -> Result<(), EngineError> {
         let critical_span = (IBD_FRONTIER_CRITICAL_SPAN as usize).min(self.window.len());
 
         let mut due = Vec::new();
@@ -837,7 +1289,13 @@ where
                 ..
             } = &self.window[offset]
             {
-                let deadline = *since + self.gap_hedge_after;
+                // A deadline past the clock's range means hedging is
+                // disabled (tests use this to keep paused-clock
+                // auto-advance away from the hedge timer).
+                let Some(deadline) = since.checked_add(self.gap_hedge_after) else {
+                    continue;
+                };
+
                 if deadline <= now {
                     due.push(offset);
                 } else {
@@ -851,7 +1309,8 @@ where
             let height = block::Height(self.base.0 + offset as u32);
             let hash = self
                 .list
-                .hash(height)?
+                .hash(height)
+                .map_err(EngineError::List)?
                 .expect("in-window heights are within the list");
 
             // A single-hash `BlocksByHash` through the plain peer set gets
@@ -898,34 +1357,46 @@ where
     }
 
     /// Applies one completed staged future to its slot.
-    fn on_stage_complete(&mut self, height: block::Height, outcome: StageOutcome, now: Instant) {
-        // Completions for heights the frontier already passed are stale.
+    fn on_stage_complete(
+        &mut self,
+        height: block::Height,
+        outcome: StageOutcome,
+        now: Instant,
+    ) -> Result<(), EngineError> {
+        // Completions for heights the frontier already passed are stale
+        // (only fetch futures can outlive their heights, via hedge races).
         let Some(offset) = height.0.checked_sub(self.base.0) else {
-            return;
+            return Ok(());
         };
         // u32 always fits in usize on supported platforms
         let offset = offset as usize;
         if offset >= self.window.len() {
-            return;
+            return Ok(());
         }
 
-        let StageOutcome::Fetch { origin, outcome } = outcome else {
-            // Aborted: the slot was already updated by the winning future.
-            return;
-        };
-
         match outcome {
-            FetchOutcome::Fetched { block, source } => {
-                self.on_fetch_success(offset, height, block, source);
+            StageOutcome::Fetch { origin, outcome } => {
+                match outcome {
+                    FetchOutcome::Fetched { block, source } => {
+                        self.on_fetch_success(offset, height, block, source);
+                    }
+                    FetchOutcome::Failed(kind) => {
+                        self.on_fetch_failure(offset, height, origin, kind, now);
+                    }
+                }
+                Ok(())
             }
-            FetchOutcome::Failed(kind) => {
-                self.on_fetch_failure(offset, height, origin, kind, now);
-            }
+
+            StageOutcome::Commit(outcome) => self.on_commit_complete(offset, height, outcome),
+
+            // Aborted: the slot was already updated by the winning future.
+            StageOutcome::Aborted => Ok(()),
         }
     }
 
-    /// Stores an arrived block in its slot, reconciling the byte budget from
-    /// the hint upper bound to the exact serialized size.
+    /// Places an arrived block at completion time (maintainer-directed):
+    /// into its window slot while the RAM block buffer has room, or raw into
+    /// the disk overflow tier when over budget (design doc §4.5).
     fn on_fetch_success(
         &mut self,
         offset: usize,
@@ -933,8 +1404,8 @@ where
         block: Arc<Block>,
         source: Option<PeerSocketAddr>,
     ) {
-        // One serialized-size pass per arrived block; the exact size replaces
-        // the hint upper bound in the budget, which can only free budget.
+        // One serialized-size pass per arrived block: the placement decision
+        // needs the exact size.
         let bytes = block.zcash_serialized_size();
         // serialized blocks are bounded by the 2 MB protocol limit, enforced
         // at deserialization in zebra-network, so they fit u32 and u64
@@ -942,12 +1413,7 @@ where
         let bytes_u64 = u64::from(bytes_u32);
 
         match &mut self.window[offset] {
-            Slot::InFlight {
-                abort,
-                hedged,
-                reserved_bytes,
-                ..
-            } => {
+            Slot::InFlight { abort, hedged, .. } => {
                 // First completion wins; cancel the loser (aborting an
                 // already-completed future is a no-op).
                 abort.abort();
@@ -955,48 +1421,66 @@ where
                     hedged.abort();
                 }
 
-                self.budget_used = self
-                    .budget_used
-                    .checked_sub(u64::from(*reserved_bytes))
-                    .expect("the reservation was added when this fetch was issued")
-                    + bytes_u64;
+                self.inflight_fetches = self.inflight_fetches.saturating_sub(1);
             }
-            Slot::Fetched { .. } | Slot::Cached { .. } => {
+            Slot::Fetched { .. } | Slot::Cached { .. } | Slot::Committed => {
                 // A lost hedge race delivered a duplicate: the single slot
                 // per height is the dedup point; drop it.
                 return;
             }
             Slot::Unrequested { .. } => {
-                // The other future failed and reset the slot (releasing the
-                // reservation) before this one delivered: accept the block.
-                self.budget_used += bytes_u64;
+                // The other future failed and reset the slot before this one
+                // delivered: accept the block.
             }
         }
 
-        self.window[offset] = Slot::Fetched {
-            block,
-            bytes: bytes_u32,
+        // Arrival-time placement: the frontier height always stays in memory
+        // (its commit unblocks everything else); other blocks go to the disk
+        // tier once the RAM block buffer is over budget.
+        let over_budget = self.budget_used + bytes_u64 > self.lookahead_bytes;
+        let placed_on_disk = if over_budget && offset > 0 {
+            match &mut self.cache {
+                Some(cache) => match cache.put(height, &block, source) {
+                    Ok(cached_bytes) => {
+                        self.window[offset] = Slot::Cached {
+                            bytes: cached_bytes,
+                            promoted: false,
+                        };
+                        true
+                    }
+                    Err(error) => {
+                        // A failed cache write must not waste the download:
+                        // hold the block in memory instead — a bounded budget
+                        // overshoot.
+                        warn!(
+                            %error,
+                            height = height.0,
+                            "failed to write a block to the IBD disk cache; keeping it in memory",
+                        );
+                        false
+                    }
+                },
+                None => false,
+            }
+        } else {
+            false
         };
+
+        if !placed_on_disk {
+            self.budget_used += bytes_u64;
+            self.window[offset] = Slot::Fetched {
+                block,
+                bytes: bytes_u32,
+                committing: false,
+                source,
+            };
+        }
+
         self.fetched_blocks += 1;
 
         metrics::counter!("ibd.fetched.block.count").increment(1);
-        // Compatibility increment so existing sync dashboards keep working
-        // (design doc §8).
         metrics::counter!("sync.downloaded.block.count").increment(1);
-
-        self.on_fetched(height, source);
     }
-
-    /// Hook called when a height's fetch stage completes into its slot.
-    ///
-    /// TODO(known-hash-ibd D3/D4): push the stage-2 verify-and-commit
-    /// continuation here while the commit pipeline caps
-    /// ([`IBD_COMMIT_PIPELINE_BLOCKS`] / [`IBD_COMMIT_PIPELINE_BYTES`]) have
-    /// room (carrying `source` for misbehavior attribution), retain the slot
-    /// until the commit resolves, and advance `base` (with
-    /// `list.release_below` and `peer_stats.release_below`) as commits
-    /// complete. D2 stops at the stage boundary.
-    fn on_fetched(&mut self, _height: block::Height, _source: Option<PeerSocketAddr>) {}
 
     /// Applies the retry policy to a failed fetch (design doc §4.1):
     /// `NotFound` excludes the reporting peer for this height; transport
@@ -1019,7 +1503,6 @@ where
                 not_founds,
                 hedged,
                 abort,
-                reserved_bytes,
                 ..
             } => {
                 if let FetchFailureKind::NotFound { .. } = kind {
@@ -1028,7 +1511,7 @@ where
 
                 match (origin, hedged.take()) {
                     // The primary failed but its hedge is still in flight:
-                    // promote the hedge and keep the slot (and reservation).
+                    // promote the hedge and keep the slot.
                     (FetchOrigin::Primary, Some(hedge)) => {
                         *abort = hedge;
                     }
@@ -1041,15 +1524,12 @@ where
                     // slot.)
                     (FetchOrigin::Hedge, Some(_)) => {}
 
-                    // The last in-flight future for this height failed:
-                    // release the reservation and back off before
-                    // reassigning. (A hedge failure with `hedged: None`
-                    // means the hedge had been promoted to primary.)
+                    // The last in-flight future for this height failed: back
+                    // off before reassigning. (A hedge failure with
+                    // `hedged: None` means the hedge had been promoted to
+                    // primary.)
                     (FetchOrigin::Primary | FetchOrigin::Hedge, None) => {
-                        self.budget_used = self
-                            .budget_used
-                            .checked_sub(u64::from(*reserved_bytes))
-                            .expect("the reservation was added when this fetch was issued");
+                        self.inflight_fetches = self.inflight_fetches.saturating_sub(1);
 
                         let attempts = *attempts;
                         let not_founds = *not_founds;
@@ -1069,7 +1549,311 @@ where
 
             // The other future already delivered the block (or a failure
             // already reset the slot): nothing to do.
-            Slot::Fetched { .. } | Slot::Cached { .. } | Slot::Unrequested { .. } => {}
+            Slot::Fetched { .. }
+            | Slot::Cached { .. }
+            | Slot::Committed
+            | Slot::Unrequested { .. } => {}
+        }
+    }
+
+    /// Applies a resolved stage-2 future to its slot: releases the commit
+    /// pipeline accounting, then commits, refetches, or recovers per the
+    /// outcome (design doc §4.4, §4.6).
+    fn on_commit_complete(
+        &mut self,
+        offset: usize,
+        height: block::Height,
+        outcome: CommitOutcome,
+    ) -> Result<(), EngineError> {
+        let bytes = match &self.window[offset] {
+            Slot::Fetched {
+                bytes,
+                committing: true,
+                ..
+            }
+            | Slot::Cached {
+                bytes,
+                promoted: true,
+            } => *bytes,
+            other => {
+                debug_assert!(
+                    false,
+                    "commit completions always find the slot that pushed them: {other:?}",
+                );
+                return Ok(());
+            }
+        };
+
+        // The unresolved-future accounting for this stage-2 ends here,
+        // whatever the outcome.
+        self.commit_blocks = self
+            .commit_blocks
+            .checked_sub(1)
+            .expect("every resolved stage-2 future was counted when it was pushed");
+        self.commit_bytes = self
+            .commit_bytes
+            .checked_sub(u64::from(bytes))
+            .expect("every resolved stage-2 future reserved its bytes when it was pushed");
+
+        match outcome {
+            CommitOutcome::Committed(committed_hash) => {
+                // Both held (`Fetched`) and promoted (`Cached`) blocks
+                // counted against the budget until this resolution.
+                self.budget_used = self
+                    .budget_used
+                    .checked_sub(u64::from(bytes))
+                    .expect("committed blocks were counted against the budget");
+
+                debug!(?height, ?committed_hash, "committed a known-hash block");
+
+                self.window[offset] = Slot::Committed;
+                self.commit_failures.remove(&height);
+
+                metrics::counter!("ibd.converted.block.count").increment(1);
+
+                self.advance_base();
+                Ok(())
+            }
+
+            CommitOutcome::Failed(error) => self.on_commit_failure(offset, height, error),
+        }
+    }
+
+    /// Maps a failed stage-2 future per the design doc failure semantics
+    /// (§4.3 verify failures, §4.6 commit failures).
+    fn on_commit_failure(
+        &mut self,
+        offset: usize,
+        height: block::Height,
+        error: VerifyAndCommitError,
+    ) -> Result<(), EngineError> {
+        match error {
+            // The state Buffer failed its readiness check: the service is
+            // gone, and so is every future commit.
+            VerifyAndCommitError::StateUnready(error) => Err(EngineError::Shutdown(error)),
+
+            VerifyAndCommitError::Verify(error) => self.on_verify_failure(offset, height, error),
+
+            VerifyAndCommitError::Commit { error, hash, .. } => {
+                self.on_commit_stage_failure(offset, height, hash, error)
+            }
+        }
+    }
+
+    /// Maps a verify-stage failure (design doc §4.3): list diagnostics are
+    /// fatal, corrupt copies are discarded and refetched — from a different
+    /// peer when the failure is attributable.
+    fn on_verify_failure(
+        &mut self,
+        offset: usize,
+        height: block::Height,
+        error: ConvertError,
+    ) -> Result<(), EngineError> {
+        if error.is_fatal_list_diagnostic() {
+            return Err(EngineError::ListDiagnostic(error));
+        }
+
+        if matches!(error, ConvertError::RayonShutdown) {
+            return Err(EngineError::Shutdown(error.into()));
+        }
+
+        // A corrupt body (peer-attributable) or corrupt cached bytes: either
+        // way the copy never met the §4.5 invariant condition, so the
+        // refetch is inside the invariant — but counted, for observability
+        // (gate 8).
+        let reason = if error.is_peer_attributable() {
+            "unconfirmed-copy"
+        } else {
+            "corrupt-cache"
+        };
+        metrics::counter!("ibd.duplicate.download.count", "reason" => reason).increment(1);
+
+        if let Some(peer) = error.source_peer() {
+            // TODO(known-hash-ibd D6): also report misbehavior through the
+            // address book updater once start.rs wires the channel through.
+            self.peer_stats.exclude(height, peer);
+        }
+
+        warn!(
+            %error,
+            height = height.0,
+            "discarding a block copy that failed verification; refetching",
+        );
+
+        self.discard_slot_copy(offset, height);
+        Ok(())
+    }
+
+    /// Maps a commit-stage failure (design doc §4.6).
+    ///
+    /// Above the frontier this is a descendant dropped by the write thread's
+    /// reset: the retained copy is resubmitted through re-verification —
+    /// never refetched. At the frontier it is the genuinely-failing block
+    /// (the state commits in strict height order): the implicated copy is
+    /// discarded and refetched from a different peer, and byte-identical
+    /// failures count toward the deterministic-failure limit.
+    fn on_commit_stage_failure(
+        &mut self,
+        offset: usize,
+        height: block::Height,
+        hash: block::Hash,
+        error: BoxError,
+    ) -> Result<(), EngineError> {
+        if height > self.base {
+            // A descendant dropped by a reset (or a frontier error racing
+            // ahead of lower commit completions — it fails again at the
+            // frontier and is classified there). Resubmission re-runs
+            // `convert` on the retained copy: a re-verification, never a
+            // re-download.
+            debug!(
+                %error,
+                height = height.0,
+                base = self.base.0,
+                "commit dropped above the frontier; resubmitting the retained copy",
+            );
+
+            match &mut self.window[offset] {
+                Slot::Fetched { committing, .. } => *committing = false,
+                Slot::Cached { bytes, promoted } => {
+                    *promoted = false;
+                    // Release the promotion's budget reservation;
+                    // re-promotion re-reserves it.
+                    let bytes = u64::from(*bytes);
+                    self.budget_used = self
+                        .budget_used
+                        .checked_sub(bytes)
+                        .expect("promoted blocks were counted against the budget");
+                }
+                other => unreachable!("commit failures always find their pushed slot: {other:?}"),
+            }
+
+            return Ok(());
+        }
+
+        // The frontier block is always at the write thread's next valid
+        // height, so it is never reset-dropped: `WriteTaskExited` here means
+        // the write task is really gone.
+        if is_write_task_exited(&error) {
+            return Err(EngineError::Shutdown(error));
+        }
+
+        // The genuinely-failing block (e.g. a v5 auth-data substitution only
+        // detectable at commit): count byte-identical failures.
+        let copy = match &self.window[offset] {
+            Slot::Fetched { block, .. } => Some(block.clone()),
+            // A promoted copy's bytes went through the rayon closure; the
+            // next failure of its refetched (memory-held) copy starts the
+            // identity tracking.
+            _ => None,
+        };
+
+        let entry = self.commit_failures.entry(height).or_insert((0, None));
+        let byte_identical = matches!((&entry.1, &copy), (Some(prev), Some(new)) if prev == new);
+        if byte_identical {
+            entry.0 = entry.0.saturating_add(1);
+        } else {
+            *entry = (1, copy);
+        }
+        let attempts = entry.0;
+
+        if attempts >= COMMIT_FAILURE_ATTEMPT_LIMIT {
+            return Err(EngineError::DeterministicCommitFailure {
+                height,
+                hash,
+                attempts,
+                error,
+            });
+        }
+
+        warn!(
+            %error,
+            height = height.0,
+            attempts,
+            "state commit failed at the frontier; discarding the implicated copy \
+             and refetching from a different peer",
+        );
+        metrics::counter!("ibd.duplicate.download.count", "reason" => "unconfirmed-copy")
+            .increment(1);
+
+        // Exclude the previous source so the refetch lands on a different
+        // peer. TODO(known-hash-ibd D6): also report misbehavior through the
+        // address book updater.
+        if let Slot::Fetched {
+            source: Some(peer), ..
+        } = &self.window[offset]
+        {
+            let peer = *peer;
+            self.peer_stats.exclude(height, peer);
+        }
+
+        self.discard_slot_copy(offset, height);
+        Ok(())
+    }
+
+    /// Discards the block copy held (or cached) for `height`, releasing its
+    /// budget and resetting the slot for an immediate refetch.
+    fn discard_slot_copy(&mut self, offset: usize, height: block::Height) {
+        let bytes = match &self.window[offset] {
+            Slot::Fetched { bytes, .. } => *bytes,
+            Slot::Cached { bytes, .. } => {
+                let bytes = *bytes;
+                // The implicated cached copy is discarded from disk too
+                // (synchronous single-file unlink; see the cache module
+                // docs for the single-owner, no-mutex design).
+                if let Some(cache) = &mut self.cache {
+                    cache.remove(height);
+                }
+                bytes
+            }
+            other => unreachable!("discarded copies are held or cached: {other:?}"),
+        };
+
+        self.budget_used = self
+            .budget_used
+            .checked_sub(u64::from(bytes))
+            .expect("held and promoted blocks were counted against the budget");
+
+        // No backoff: the copy was corrupt, not missing; the §4.1 exclusion
+        // steers the refetch to a different peer immediately.
+        self.window[offset] = Slot::unrequested();
+    }
+
+    /// Pops the contiguous committed prefix off the window front, advancing
+    /// the commit frontier and releasing everything keyed below it.
+    fn advance_base(&mut self) {
+        let old_base = self.base;
+
+        while matches!(self.window.front(), Some(Slot::Committed)) {
+            self.window.pop_front();
+            self.base = block::Height(self.base.0 + 1);
+        }
+
+        if self.base == old_base {
+            return;
+        }
+
+        // `base > 0` here because it just advanced.
+        metrics::gauge!("ibd.committed.height").set(f64::from(self.base.0 - 1));
+
+        self.peer_stats.release_below(self.base);
+        // Keep `base - 1` resident: the next stage-2 push pins its parent
+        // with `list[base - 1]`.
+        self.list
+            .release_below(block::Height(self.base.0.saturating_sub(1)));
+        self.commit_failures.retain(|height, _| *height >= self.base);
+
+        // Lazily evict committed entries from the disk tier (§4.5), batched
+        // so each round scans the cache index once. Synchronous unlinks of a
+        // bounded batch, called directly from the loop like every cache
+        // operation (single-owner, no-mutex design).
+        if let Some(cache) = &mut self.cache {
+            if !cache.is_empty()
+                && self.base.0.saturating_sub(self.cache_evicted_through.0)
+                    >= IBD_CACHE_EVICT_INTERVAL
+            {
+                self.cache_evicted_through = self.base;
+                cache.evict_through(block::Height(self.base.0 - 1));
+            }
         }
     }
 
@@ -1085,8 +1869,11 @@ where
             return;
         };
 
-        if lowest_missing > self.stall_watermark {
-            self.stall_watermark = lowest_missing;
+        // `lowest_missing` is within the u32 height span.
+        let height = block::Height(self.base.0 + lowest_missing as u32);
+
+        if height > self.fetch_watermark {
+            self.fetch_watermark = height;
             self.frontier_progress_at = now;
             self.last_stall_warn = None;
             return;
@@ -1106,8 +1893,6 @@ where
             .is_none_or(|last| now.duration_since(last) >= IBD_STALL_WARN_INTERVAL);
 
         if warn_due {
-            // `lowest_missing` is within the u32 height span.
-            let height = block::Height(self.base.0 + lowest_missing as u32);
             let (attempts, not_founds) = match &self.window[lowest_missing] {
                 Slot::Unrequested {
                     attempts,
@@ -1119,7 +1904,7 @@ where
                     not_founds,
                     ..
                 } => (*attempts, *not_founds),
-                Slot::Fetched { .. } | Slot::Cached { .. } => (0, 0),
+                Slot::Fetched { .. } | Slot::Cached { .. } | Slot::Committed => (0, 0),
             };
             let ready_peers = self.peer_status.borrow().ready_peers;
 
@@ -1147,30 +1932,35 @@ where
     }
 }
 
-/// The stage-1 fetch future body: one weighted batched fetch, then the tier
-/// re-check at completion (design doc §4.1).
-async fn fetch_stage<S>(
-    service: S,
-    request: FetchRequest,
-    memory_eligible: watch::Receiver<block::Height>,
-) -> FetchOutcome
+/// Resolves one verify-and-commit call into a [`CommitOutcome`].
+async fn commit_outcome<ZS>(service: VerifyAndCommit<ZS>, request: IbdBlock) -> CommitOutcome
+where
+    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
+    ZS::Future: Send,
+{
+    match service.oneshot(request).await {
+        Ok(committed_hash) => CommitOutcome::Committed(committed_hash),
+        Err(error) => CommitOutcome::Failed(error),
+    }
+}
+
+/// The stage-1 fetch future body: one weighted batched fetch.
+///
+/// Placement (memory vs the disk overflow tier) is the engine loop's job at
+/// arrival, against its live RAM counter (maintainer-directed) — the future
+/// just delivers the block.
+async fn fetch_stage<S>(service: S, request: FetchRequest) -> FetchOutcome
 where
     S: Service<FetchRequest, Response = BatchFetchResponse, Error = BoxError> + Send + 'static,
     S::Future: Send,
 {
-    let height = request.height;
-
     match service.oneshot(request).await {
         Ok(BatchFetchResponse::Fetched(FetchedBlock { block, source })) => {
-            match completion_tier(height, &memory_eligible) {
-                Tier::Memory => FetchOutcome::Fetched { block, source },
-                // TODO(known-hash-ibd D5): save the raw block to the disk
-                // overflow cache and resolve `Saved { bytes }`. D2 never
-                // issues past the memory-eligible boundary, so this arm is
-                // unreachable until overflow fetch-ahead lands; holding the
-                // block in its slot keeps it correct even if it were hit.
-                Tier::Disk => FetchOutcome::Fetched { block, source },
-            }
+            FetchOutcome::Fetched { block, source }
         }
         Ok(BatchFetchResponse::Flushed) => {
             debug_assert!(false, "per-item calls never resolve `Flushed`");

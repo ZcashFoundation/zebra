@@ -41,21 +41,23 @@
 //! - a truncated or corrupted *body* is returned as-is by
 //!   [`BlockCache::get`] and caught downstream by re-verification.
 //!
-//! # Blocking I/O
+//! # Blocking I/O and ownership
 //!
-//! Internals are synchronous `std::fs` operations behind a mutex; the public
-//! async methods wrap them in [`tokio::task::spawn_blocking`], so they are
-//! safe to call from async tasks (the engine never does file I/O inline on
-//! its loop). Each operation touches one file, except the batched
-//! [`BlockCache::evict_through`], [`BlockCache::scan`], and
-//! [`BlockCache::remove_all`].
+//! The cache is a plain single-owner struct: the engine task owns it and
+//! calls its synchronous `std::fs` operations directly from the loop — no
+//! mutex, no shared state (a maintainer-directed design rule). Each
+//! operation touches one ≤ 2 MB file through the page cache (microseconds
+//! to low milliseconds), and the per-block operations only run when the
+//! state write task is already the bottleneck, so loop latency is not on
+//! the critical path. The batched [`BlockCache::evict_through`],
+//! [`BlockCache::scan`], and [`BlockCache::remove_all`] run at the commit
+//! frontier, startup, and handoff respectively.
 
 use std::{
     collections::{btree_map, BTreeMap},
     fs,
     io::{self, Read},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, MutexGuard, PoisonError},
 };
 
 use zebra_chain::{
@@ -117,17 +119,10 @@ struct Entry {
 
 /// The disk overflow tier: a block store with one file per block.
 ///
-/// Cheaply cloneable; clones share the same directory and index. See the
-/// [module docs](self) for the on-disk format and trust model.
-#[derive(Clone, Debug)]
-pub struct BlockCache {
-    /// The shared directory, index, and byte accounting.
-    inner: Arc<Mutex<Inner>>,
-}
-
-/// The state shared by all clones of a [`BlockCache`].
+/// Single-owner: the engine task owns the cache and its index outright. See
+/// the [module docs](self) for the on-disk format and trust model.
 #[derive(Debug)]
-struct Inner {
+pub struct BlockCache {
     /// The cache directory, created lazily on first write or scan.
     dir: PathBuf,
 
@@ -151,13 +146,26 @@ impl BlockCache {
     /// left by a previous run are only discovered by [`scan`](Self::scan).
     pub fn new(dir: impl Into<PathBuf>) -> Self {
         Self {
-            inner: Arc::new(Mutex::new(Inner {
-                dir: dir.into(),
-                dir_created: false,
-                entries: BTreeMap::new(),
-                bytes: 0,
-            })),
+            dir: dir.into(),
+            dir_created: false,
+            entries: BTreeMap::new(),
+            bytes: 0,
         }
+    }
+
+    /// Returns the total raw block bytes of all indexed entries.
+    pub fn bytes(&self) -> u64 {
+        self.bytes
+    }
+
+    /// Returns the number of indexed entries.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Returns whether the cache has no indexed entries.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
     }
 
     /// Serializes `block` and writes it as the cache entry for `height`,
@@ -165,127 +173,16 @@ impl BlockCache {
     ///
     /// Replaces any previous entry for `height` (a refetched copy after a
     /// failed promotion). There is no per-block fsync: torn writes are
-    /// caught by re-verification at promotion.
+    /// caught by re-verification at promotion. Page-cache-bound synchronous
+    /// I/O, called directly from the engine loop (see the module docs).
     ///
     /// Returns the raw block byte size, for the engine's `Slot::Cached`
     /// accounting.
-    pub async fn put(
-        &self,
-        height: block::Height,
-        block: &Arc<Block>,
-        source: Option<PeerSocketAddr>,
-    ) -> io::Result<u32> {
-        let cache = self.clone();
-        let block = Arc::clone(block);
-
-        tokio::task::spawn_blocking(move || cache.lock().put(height, &block, source))
-            .await
-            .expect("cache I/O closures only do std I/O and index bookkeeping, and do not panic")
-    }
-
-    /// Reads the cache entry for `height` back for promotion.
-    ///
-    /// The returned bytes are **untrusted**: the caller must run them
-    /// through the full verify path against
-    /// [`expected_hash`](CachedBlock::expected_hash).
-    ///
-    /// Returns `None` when `height` is not cached, or when the entry's file
-    /// or sidecar is unreadable — in that case the entry is dropped (and its
-    /// file deleted), and the caller must refetch the height from the
-    /// network (§4.5 exception (a)). A readable entry with a corrupt *body*
-    /// is still returned: only re-verification can detect it.
-    pub async fn get(&self, height: block::Height) -> Option<CachedBlock> {
-        let cache = self.clone();
-
-        tokio::task::spawn_blocking(move || cache.lock().get(height))
-            .await
-            .expect("cache I/O closures only do std I/O and index bookkeeping, and do not panic")
-    }
-
-    /// Deletes every entry at or below `height`, which has been committed to
-    /// the state.
-    ///
-    /// Eviction is batched: the engine calls this lazily as its commit
-    /// frontier advances, not once per committed block. Files that fail to
-    /// delete are logged and forgotten; they are re-pruned by the next
-    /// [`scan`](Self::scan).
-    pub async fn evict_through(&self, height: block::Height) {
-        let cache = self.clone();
-
-        tokio::task::spawn_blocking(move || cache.lock().evict_through(height))
-            .await
-            .expect("cache I/O closures only do std I/O and index bookkeeping, and do not panic")
-    }
-
-    /// Scans the cache directory after a (re)start, rebuilding the index
-    /// from entries left by a previous run.
-    ///
-    /// Keeps only heights the engine still needs — within
-    /// `(state_tip, list_max]` — and deletes everything else: stale entries
-    /// at or below the committed tip, entries beyond the pinned list, and
-    /// files whose name or sidecar cannot be parsed. Survivors' bodies are
-    /// *not* verified here; they are re-verified at promotion like any other
-    /// cached bytes.
-    ///
-    /// Returns the surviving `(height, raw block bytes)` pairs in ascending
-    /// height order, for the engine's `Slot::Cached` accounting.
-    pub async fn scan(
-        &self,
-        state_tip: Option<block::Height>,
-        list_max: block::Height,
-    ) -> io::Result<Vec<(block::Height, u32)>> {
-        let cache = self.clone();
-
-        tokio::task::spawn_blocking(move || cache.lock().scan(state_tip, list_max))
-            .await
-            .expect("cache I/O closures only do std I/O and index bookkeeping, and do not panic")
-    }
-
-    /// Deletes the entire cache directory, for the `Completed` handoff to
-    /// the legacy syncer.
-    ///
-    /// The cache remains usable afterwards: the directory is recreated on
-    /// the next write.
-    pub async fn remove_all(&self) -> io::Result<()> {
-        let cache = self.clone();
-
-        tokio::task::spawn_blocking(move || cache.lock().remove_all())
-            .await
-            .expect("cache I/O closures only do std I/O and index bookkeeping, and do not panic")
-    }
-
-    /// Returns the total raw block bytes of all indexed entries.
-    pub fn bytes(&self) -> u64 {
-        self.lock().bytes
-    }
-
-    /// Returns the number of indexed entries.
-    pub fn len(&self) -> usize {
-        self.lock().entries.len()
-    }
-
-    /// Returns whether the cache has no indexed entries.
-    pub fn is_empty(&self) -> bool {
-        self.lock().entries.is_empty()
-    }
-
-    /// Locks the shared state.
-    fn lock(&self) -> MutexGuard<'_, Inner> {
-        // A poisoned lock means a previous operation panicked mid-update.
-        // Recovering it is safe: the index is advisory (rebuildable from
-        // disk by `scan`), and every cached byte is re-verified at
-        // promotion regardless of index state.
-        self.inner.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-}
-
-impl Inner {
-    /// Synchronous [`BlockCache::put`]: see its docs.
     //
     // The `expect` checks an internal invariant (network blocks are bounded
     // far below `u32::MAX`); the `Result` is only for real file I/O errors.
     #[allow(clippy::unwrap_in_result)]
-    fn put(
+    pub fn put(
         &mut self,
         height: block::Height,
         block: &Block,
@@ -329,8 +226,18 @@ impl Inner {
         Ok(block_bytes)
     }
 
-    /// Synchronous [`BlockCache::get`]: see its docs.
-    fn get(&mut self, height: block::Height) -> Option<CachedBlock> {
+    /// Reads the cache entry for `height` back for promotion.
+    ///
+    /// The returned bytes are **untrusted**: the caller must run them
+    /// through the full verify path against
+    /// [`expected_hash`](CachedBlock::expected_hash).
+    ///
+    /// Returns `None` when `height` is not cached, or when the entry's file
+    /// or sidecar is unreadable — the entry is dropped (and its file
+    /// deleted), and the caller must refetch the height from the network
+    /// (§4.5 exception (a)). A readable entry with a corrupt *body* is
+    /// still returned: only re-verification can detect it.
+    pub fn get(&mut self, height: block::Height) -> Option<CachedBlock> {
         let entry = self.entries.get(&height).copied()?;
         let path = self.entry_path(height, &entry.hash);
 
@@ -369,8 +276,24 @@ impl Inner {
         })
     }
 
-    /// Synchronous [`BlockCache::evict_through`]: see its docs.
-    fn evict_through(&mut self, height: block::Height) {
+    /// Deletes the entry for `height` alone, dropping an implicated copy
+    /// whose body failed verification at promotion or its commit-time
+    /// auth-data check (design doc §4.6). A no-op when `height` is not
+    /// cached.
+    pub fn remove(&mut self, height: block::Height) {
+        if let Some(entry) = self.entries.get(&height).copied() {
+            self.forget(height, &entry, true);
+        }
+    }
+
+    /// Deletes every entry at or below `height`, which has been committed
+    /// to the state.
+    ///
+    /// Eviction is batched: the engine calls this lazily as its commit
+    /// frontier advances, not once per committed block. Files that fail to
+    /// delete are logged and forgotten; they are re-pruned by the next
+    /// [`scan`](Self::scan).
+    pub fn evict_through(&mut self, height: block::Height) {
         let survivors = self
             .entries
             .split_off(&block::Height(height.0.saturating_add(1)));
@@ -384,8 +307,19 @@ impl Inner {
         self.update_bytes_metric();
     }
 
-    /// Synchronous [`BlockCache::scan`]: see its docs.
-    fn scan(
+    /// Scans the cache directory after a (re)start, rebuilding the index
+    /// from entries left by a previous run.
+    ///
+    /// Keeps only heights the engine still needs — within
+    /// `(state_tip, list_max]` — and deletes everything else: stale entries
+    /// at or below the committed tip, entries beyond the pinned list, and
+    /// files whose name or sidecar cannot be parsed. Survivors' bodies are
+    /// *not* verified here; they are re-verified at promotion like any
+    /// other cached bytes.
+    ///
+    /// Returns the surviving `(height, raw block bytes)` pairs in ascending
+    /// height order, for the engine's `Slot::Cached` accounting.
+    pub fn scan(
         &mut self,
         state_tip: Option<block::Height>,
         list_max: block::Height,
@@ -496,8 +430,12 @@ impl Inner {
             .collect())
     }
 
-    /// Synchronous [`BlockCache::remove_all`]: see its docs.
-    fn remove_all(&mut self) -> io::Result<()> {
+    /// Deletes the entire cache directory, for the `Completed` handoff to
+    /// the legacy syncer.
+    ///
+    /// The cache remains usable afterwards: the directory is recreated on
+    /// the next write.
+    pub fn remove_all(&mut self) -> io::Result<()> {
         self.entries.clear();
         self.bytes = 0;
         self.dir_created = false;
