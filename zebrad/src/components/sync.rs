@@ -298,7 +298,8 @@ pub struct Config {
     /// hashes from peers, then hands off to the legacy syncer at the end of
     /// the list.
     ///
-    /// Defaults to `false` until the engine is validated.
+    /// Enabled by default on networks with a bundled list (currently
+    /// Mainnet); other networks decline to the legacy syncer automatically.
     /// See `docs/design/known-hash-ibd.md` for the engine design.
     pub known_hash_sync: bool,
 
@@ -370,7 +371,7 @@ impl Default for Config {
             parallel_cpu_threads: 0,
 
             // Off until the known-hash engine is validated.
-            known_hash_sync: false,
+            known_hash_sync: true,
 
             // 256 MiB: enough lookahead to keep the network busy in every era
             // without a large RSS increase.
