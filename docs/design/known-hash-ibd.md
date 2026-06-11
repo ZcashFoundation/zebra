@@ -780,6 +780,23 @@ The background list-walk is replaced by an O(1) spot-check (genesis +
 `BestChainBlockHash(finalized_tip)` vs `list[tip]`), preserving
 wrong-chain-on-restart detection without the walk.
 
+**As-built update (2026-06-11), and planned follow-up.** The floor watch was
+dropped in favor of constants: the gate floor is the larger of
+`mandatory_checkpoint_height` and the network's known-hash list max height,
+fixed for the life of the process (no engine plumbing; on networks with a
+bundled list the floor is always at list max, even with the engine disabled).
+**Planned (maintainer-directed, after review):** with the checkpoint verifier
+gone, `BlockVerifierRouter` no longer routes anything — it is a constant
+height check in front of `SemanticBlockVerifier`. Fold the floor check into
+`SemanticBlockVerifier::call` (computing the floor from the same constants in
+its constructor), add `VerifyBlockError::BelowKnownHashRange` (misbehavior
+score 0, not a duplicate), and delete the router service and `RouterError`;
+`router::init` then buffers the semantic verifier directly, keeping the same
+`Request`/Buffer surface for inbound/RPC/sync callers. Known type-surface
+updates: `BlockDownloadVerifyError` in `zebrad/src/components/sync/downloads.rs`
+(field type + downcast), the `submit_block` downcast in
+`zebra-rpc/src/methods.rs`, and the `service_trait` re-export path.
+
 ### 7.3 State-side renames (same commit)
 
 `zebra_state::init`'s `max_checkpoint_height` → `max_finalizable_height` (it gates
