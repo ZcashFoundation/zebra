@@ -98,7 +98,8 @@ const MAX_BLOCK_REOBTAIN_RETRIES: u8 = 3;
 /// Once these malicious blocks start failing validation, the syncer will cancel all
 /// the pending download and verify tasks, drop all the blocks, and start a new
 /// ObtainTips with a new set of peers.
-pub const MIN_CHECKPOINT_CONCURRENCY_LIMIT: usize = zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP;
+pub const MIN_CHECKPOINT_CONCURRENCY_LIMIT: usize =
+    zebra_chain::parameters::checkpoint::constants::MAX_CHECKPOINT_HEIGHT_GAP;
 
 /// The default for the user-specified lookahead limit.
 ///

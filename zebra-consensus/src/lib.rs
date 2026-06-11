@@ -35,7 +35,6 @@
 #![doc(html_root_url = "https://docs.rs/zebra_consensus")]
 
 mod block;
-mod checkpoint;
 mod primitives;
 mod script;
 
@@ -49,7 +48,6 @@ pub use block::check::difficulty_is_valid;
 
 pub use block::check::merkle_root_validity;
 pub use block::{subsidy::funding_stream_address, Request, VerifyBlockError, MAX_BLOCK_SIGOPS};
-pub use checkpoint::{VerifyCheckpointError, MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP};
 pub use config::Config;
 pub use error::BlockError;
 pub use primitives::{ed25519, groth16, halo2, redjubjub, redpallas, spawn_fifo};

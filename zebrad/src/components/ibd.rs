@@ -93,9 +93,6 @@ pub enum DeclineReason {
     /// No known-hash list is bundled for the configured network.
     NoList,
 
-    /// The list chunk files were not found in any searched directory.
-    AssetMissing,
-
     /// The chain tip is already at or past the end of the list, so there is
     /// nothing for the engine to download.
     AlreadyPast,
@@ -188,6 +185,7 @@ where
     ///   [`zebra_network::init`],
     /// - `cache_dir`: the state cache directory; the disk overflow tier
     ///   lives under `<cache_dir>/`[`cache::CACHE_DIR_NAME`].
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: Config,
         network: Network,
@@ -281,11 +279,12 @@ where
                 // `open()` only returns `None` when there is no spec.
                 Ok(None) => return Ok(IbdOutcome::Declined(DeclineReason::NoList)),
                 Err(error @ KnownHashError::AssetsNotFound { .. }) => {
-                    warn!(
-                        %error,
-                        "known-hash list assets not found; using the legacy syncer",
-                    );
-                    return Ok(IbdOutcome::Declined(DeclineReason::AssetMissing));
+                    // With the checkpoint verifier removed, the engine is the
+                    // only path that can commit blocks at or below the
+                    // mandatory floor: a missing asset set is a hard,
+                    // actionable error, never a silent fallback (design doc
+                    // §6.3).
+                    return Err(error.into());
                 }
                 // Corrupt, tampered, or unreadable assets: surface the error
                 // instead of silently syncing without the engine.

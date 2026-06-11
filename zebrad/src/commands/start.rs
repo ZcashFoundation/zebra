@@ -241,6 +241,7 @@ impl StartCmd {
 
         info!("initializing verifiers");
         let (tx_verifier_setup_tx, tx_verifier_setup_rx) = oneshot::channel();
+
         let (block_verifier_router, tx_verifier, consensus_task_handles, max_checkpoint_height) =
             zebra_consensus::router::init(
                 config.consensus.clone(),
@@ -435,17 +436,25 @@ impl StartCmd {
                 .state_contains(config.network.network.genesis_hash())
                 .await?
         {
-            let genesis_hash = block_verifier_router
-                .clone()
-                .oneshot(zebra_consensus::Request::Commit(regtest_genesis_block()))
-                .await
-                .expect("should validate Regtest genesis block");
+            // The genesis block is below the router's known-hash floor, so it
+            // is committed directly to the state as a checkpoint-verified
+            // block (design doc §7.2): its hash is checked against the
+            // network genesis hash, which is the same pin the deleted
+            // checkpoint verifier applied.
+            let genesis_block = regtest_genesis_block();
+            let genesis = zebra_state::CheckpointVerifiedBlock::from(genesis_block);
 
             assert_eq!(
-                genesis_hash,
+                genesis.hash,
                 config.network.network.genesis_hash(),
-                "validated block hash should match network genesis hash"
-            )
+                "the Regtest genesis block hash should match the network genesis hash"
+            );
+
+            state
+                .clone()
+                .oneshot(zebra_state::Request::CommitCheckpointVerifiedBlock(genesis))
+                .await
+                .expect("should commit the Regtest genesis block");
         }
         // Run the known-hash IBD engine (design doc §4.7) to completion
         // before driving the legacy syncer: `ChainSync` is constructed at

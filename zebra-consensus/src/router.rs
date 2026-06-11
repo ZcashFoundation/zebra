@@ -1,16 +1,20 @@
 //! Top-level semantic block verification for Zebra.
 //!
-//! Verifies blocks using the [`CheckpointVerifier`] or full [`SemanticBlockVerifier`],
-//! depending on the config and block height.
+//! Verifies blocks using the full [`SemanticBlockVerifier`], gating commits
+//! at or below the known-hash floor: on networks with a bundled known-hash
+//! list, those heights are only ever committed by the known-hash IBD engine,
+//! which checks them against the pinned hash list (see
+//! `docs/design/known-hash-ibd.md` §7.2). Without the gate, a gossiped or
+//! RPC-submitted block just above the engine's tip could semantically verify
+//! mid-IBD and flip the state to its non-finalized mode, silently demoting
+//! the rest of the initial sync.
 //!
 //! # Correctness
 //!
-//! Block and transaction verification requests should be wrapped in a timeout, because:
-//! - checkpoint verification waits for previous blocks, and
-//! - full block and transaction verification wait for UTXOs from previous blocks.
-//!
-//! Otherwise, verification of out-of-order and invalid blocks and transactions can hang
-//! indefinitely.
+//! Block and transaction verification requests should be wrapped in a
+//! timeout, because full block and transaction verification wait for UTXOs
+//! from previous blocks. Otherwise, verification of out-of-order and invalid
+//! blocks and transactions can hang indefinitely.
 
 use core::fmt;
 use std::{
@@ -28,7 +32,7 @@ use tracing::{instrument, Instrument, Span};
 
 use zebra_chain::{
     block::{self, Height},
-    parameters::{checkpoint::list::CheckpointList, Network},
+    parameters::{checkpoint::list::CheckpointList, known_hashes::KnownHashListSpec, Network},
 };
 
 use zebra_node_services::mempool;
@@ -36,7 +40,6 @@ use zebra_state as zs;
 
 use crate::{
     block::{Request, SemanticBlockVerifier, VerifyBlockError},
-    checkpoint::{CheckpointVerifier, VerifyCheckpointError},
     error::TransactionError,
     transaction, BoxError, Config,
 };
@@ -60,8 +63,8 @@ mod tests;
 /// memory, but missing slots can significantly slow down Zebra.
 const VERIFIER_BUFFER_BOUND: usize = 5;
 
-/// The block verifier router routes requests to either the checkpoint verifier or the
-/// semantic block verifier, depending on the maximum checkpoint height.
+/// The block verifier router gates commits at or below the known-hash floor
+/// and routes everything else to the semantic block verifier.
 ///
 /// # Correctness
 ///
@@ -78,17 +81,17 @@ where
         + 'static,
     V::Future: Send + 'static,
 {
-    /// The checkpointing block verifier.
+    /// The commit-gate floor: the larger of the mandatory checkpoint height
+    /// (Canopy − 1) and the network's known-hash list max height, when the
+    /// network has a bundled list (design doc §7.2).
     ///
-    /// Always used for blocks before `Canopy`, optionally used for the entire checkpoint list.
-    checkpoint: CheckpointVerifier<S>,
+    /// Both inputs are constants, so the floor is fixed for the life of the
+    /// process. Semantic commits at or below it are rejected: those blocks
+    /// are only ever committed by the known-hash engine, and "Zebra cannot
+    /// fully validate pre-Canopy blocks".
+    floor: block::Height,
 
-    /// The highest permitted checkpoint block.
-    ///
-    /// This height must be in the `checkpoint` verifier's checkpoint list.
-    max_checkpoint_height: block::Height,
-
-    /// The full semantic block verifier, used for blocks after `max_checkpoint_height`.
+    /// The full semantic block verifier, used for blocks above the floor.
     block: SemanticBlockVerifier<S, V>,
 }
 
@@ -98,30 +101,31 @@ where
 #[derive(Debug, Error)]
 #[allow(missing_docs)]
 pub enum RouterError {
-    /// Block could not be checkpointed
-    Checkpoint { source: Box<VerifyCheckpointError> },
     /// Block could not be full-verified
     Block { source: Box<VerifyBlockError> },
+    /// The block is at or below the known-hash floor: those heights are only
+    /// committed by the known-hash IBD engine, never by semantic
+    /// verification (design doc §7.2). A benign rejection for gossiped
+    /// blocks; an explicit one for RPC block submission.
+    BelowKnownHashRange {
+        /// The rejected block's height.
+        height: block::Height,
+        /// The floor in effect when the block was rejected.
+        floor: block::Height,
+    },
 }
 
 impl fmt::Display for RouterError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&match self {
-            RouterError::Checkpoint { source } => {
-                format!("block could not be checkpointed due to: {source}")
-            }
             RouterError::Block { source } => {
                 format!("block could not be full-verified due to: {source}")
             }
+            RouterError::BelowKnownHashRange { height, floor } => format!(
+                "block at height {height:?} is at or below the known-hash floor {floor:?}: \
+                 blocks in that range are only committed by the known-hash sync engine"
+            ),
         })
-    }
-}
-
-impl From<VerifyCheckpointError> for RouterError {
-    fn from(err: VerifyCheckpointError) -> Self {
-        RouterError::Checkpoint {
-            source: Box::new(err),
-        }
     }
 }
 
@@ -138,8 +142,8 @@ impl RouterError {
     /// Some duplicate requests might not be detected, and therefore return `false`.
     pub fn is_duplicate_request(&self) -> bool {
         match self {
-            RouterError::Checkpoint { source, .. } => source.is_duplicate_request(),
             RouterError::Block { source, .. } => source.is_duplicate_request(),
+            RouterError::BelowKnownHashRange { .. } => false,
         }
     }
 
@@ -147,8 +151,10 @@ impl RouterError {
     pub fn misbehavior_score(&self) -> u32 {
         // TODO: Adjust these values based on zcashd (#9258).
         match self {
-            RouterError::Checkpoint { source } => source.misbehavior_score(),
             RouterError::Block { source } => source.misbehavior_score(),
+            // Peers cannot know our engine's exact floor timing, so a
+            // below-floor block is not necessarily misbehavior.
+            RouterError::BelowKnownHashRange { .. } => 0,
         }
     }
 }
@@ -177,16 +183,7 @@ where
         // If either verifier is unready, this task is scheduled for wakeup when it becomes
         // ready.
         //
-        // We acquire checkpoint readiness before block readiness, to avoid an unlikely
-        // hang during the checkpoint to block verifier transition. If the checkpoint and
-        // block verifiers are contending for the same buffer/batch, we want the checkpoint
-        // verifier to win, so that checkpoint verification completes, and block verification
-        // can start. (Buffers and batches have multiple slots, so this contention is unlikely.)
         use futures::ready;
-        // The chain verifier holds one slot in each verifier, for each concurrent task.
-        // Therefore, any shared buffers or batches polled by these verifiers should double
-        // their bounds. (For example, the state service buffer.)
-        ready!(self.checkpoint.poll_ready(cx))?;
         ready!(self.block.poll_ready(cx))?;
         Poll::Ready(Ok(()))
     }
@@ -194,22 +191,22 @@ where
     fn call(&mut self, request: Request) -> Self::Future {
         let block = request.block();
 
+        let floor = self.floor;
+
         match block.coinbase_height() {
-            // There's currently no known use case for block proposals below the checkpoint height,
-            // so it's okay to immediately return an error here.
-            Some(height) if height <= self.max_checkpoint_height && request.is_proposal() => {
-                async {
-                    // TODO: Add a `ValidateProposalError` enum with a `BelowCheckpoint` variant?
-                    Err(VerifyBlockError::ValidateProposal(
-                        "block proposals must be above checkpoint height".into(),
-                    ))?
-                }
-                .boxed()
+            // There's currently no known use case for block proposals below
+            // the floor, so it's okay to immediately return an error here.
+            Some(height) if height <= floor && request.is_proposal() => async {
+                Err(VerifyBlockError::ValidateProposal(
+                    "block proposals must be above the known-hash floor".into(),
+                ))?
+            }
+            .boxed(),
+
+            Some(height) if height <= floor => {
+                async move { Err(RouterError::BelowKnownHashRange { height, floor }) }.boxed()
             }
 
-            Some(height) if height <= self.max_checkpoint_height => {
-                self.checkpoint.call(block).map_err(Into::into).boxed()
-            }
             // This also covers blocks with no height, which the block verifier
             // will reject immediately.
             _ => self.block.call(request).map_err(Into::into).boxed(),
@@ -246,7 +243,7 @@ where
 pub async fn init<S, Mempool>(
     config: Config,
     network: &Network,
-    mut state_service: S,
+    state_service: S,
     mempool: oneshot::Receiver<Mempool>,
 ) -> (
     Buffer<BoxService<Request, block::Hash, RouterError>, Request>,
@@ -276,71 +273,80 @@ where
     let checkpoint_network = network.clone();
 
     let state_checkpoint_verify_handle = tokio::task::spawn(
-        // TODO: move this into an async function?
         async move {
             tracing::info!("starting state checkpoint validation");
 
             // # Consensus
-            //
-            // We want to verify all available checkpoints, even if the node is not configured
-            // to use them for syncing. Zebra's checkpoints are updated with every release,
-            // which makes sure they include the latest settled network upgrade.
             //
             // > A network upgrade is settled on a given network when there is a social
             // > consensus that it has activated with a given activation block hash.
             // > A full validator that potentially risks Mainnet funds or displays Mainnet
             // > transaction information to a user MUST do so only for a block chain that
             // > includes the activation block of the most recent settled network upgrade,
-            // > with the corresponding activation block hash. Currently, there is social
-            // > consensus that NU5 has activated on the Zcash Mainnet and Testnet with the
-            // > activation block hashes given in § 3.12 ‘Mainnet and Testnet’ on p. 20.
+            // > with the corresponding activation block hash.
             //
             // <https://zips.z.cash/protocol/protocol.pdf#blockchain>
-            let full_checkpoints = checkpoint_network.checkpoint_list();
-            let mut already_warned = false;
+            //
+            // An O(1) spot-check preserves the wrong-chain-on-restart
+            // detection the old full-list walk provided, without issuing one
+            // serial state request per checkpoint (design doc §7.2): the
+            // highest checkpoint at or below the state tip pins the whole
+            // chain below it by construction.
+            let _ = checkpoint_sync;
+            let checkpoints = checkpoint_network.checkpoint_list();
 
-            for (height, checkpoint_hash) in full_checkpoints.iter() {
-                let checkpoint_state_service = checkpoint_state_service.clone();
-                let request = zebra_state::Request::BestChainBlockHash(*height);
+            let tip = match checkpoint_state_service
+                .clone()
+                .oneshot(zebra_state::Request::Tip)
+                .await
+            {
+                Ok(zebra_state::Response::Tip(tip)) => tip,
+                Ok(response) => {
+                    unreachable!("unexpected response type: {response:?} from state request")
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "unexpected error: {e:?} in state tip request while verifying previous \
+                         state checkpoints. Is Zebra shutting down?"
+                    );
+                    return;
+                }
+            };
 
-                match checkpoint_state_service.oneshot(request).await {
-                    Ok(zebra_state::Response::BlockHash(Some(state_hash))) => assert_eq!(
-                        *checkpoint_hash, state_hash,
-                        "invalid block in state: a previous Zebra instance followed an \
-                         incorrect chain. Delete and re-sync your state to use the best chain"
-                    ),
+            let Some((tip_height, _)) = tip else {
+                tracing::info!("state is empty, no previous chain to spot-check");
+                return;
+            };
 
-                    Ok(zebra_state::Response::BlockHash(None)) => {
-                        if checkpoint_sync {
-                            tracing::info!(
-                                "state is not fully synced yet, remaining checkpoints will be \
-                                 verified during syncing"
-                            );
-                        } else {
-                            tracing::warn!(
-                                "state is not fully synced yet, remaining checkpoints will be \
-                                 verified next time Zebra starts up. Zebra will be less secure \
-                                 until it is restarted. Use consensus.checkpoint_sync = true \
-                                 in zebrad.toml to make sure you are following a valid chain"
-                            );
-                        }
+            let Some(check_height) = checkpoints.max_height_in_range(..=tip_height) else {
+                tracing::info!("no checkpoint at or below the state tip to spot-check");
+                return;
+            };
 
-                        break;
-                    }
+            let checkpoint_hash = checkpoints
+                .hash(check_height)
+                .expect("max_height_in_range returns a height in the list");
 
-                    Ok(response) => {
-                        unreachable!("unexpected response type: {response:?} from state request")
-                    }
-                    Err(e) => {
-                        // This error happens a lot in some tests, and it could happen to users.
-                        if !already_warned {
-                            tracing::warn!(
-                                "unexpected error: {e:?} in state request while verifying previous \
-                                 state checkpoints. Is Zebra shutting down?"
-                            );
-                            already_warned = true;
-                        }
-                    }
+            match checkpoint_state_service
+                .oneshot(zebra_state::Request::BestChainBlockHash(check_height))
+                .await
+            {
+                Ok(zebra_state::Response::BlockHash(Some(state_hash))) => assert_eq!(
+                    checkpoint_hash, state_hash,
+                    "invalid block in state: a previous Zebra instance followed an \
+                     incorrect chain. Delete and re-sync your state to use the best chain"
+                ),
+                Ok(zebra_state::Response::BlockHash(None)) => {
+                    unreachable!("the state tip is at or above the spot-checked height")
+                }
+                Ok(response) => {
+                    unreachable!("unexpected response type: {response:?} from state request")
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "unexpected error: {e:?} in state request while verifying previous \
+                         state checkpoints. Is Zebra shutting down?"
+                    );
                 }
             }
 
@@ -355,32 +361,20 @@ where
     let transaction = Buffer::new(BoxService::new(transaction), VERIFIER_BUFFER_BOUND);
 
     // block verification
-    let (list, max_checkpoint_height) = init_checkpoint_list(config, network);
+    let (_list, max_checkpoint_height) = init_checkpoint_list(config, network);
 
-    let tip = match state_service
-        .ready()
-        .await
-        .unwrap()
-        .call(zs::Request::Tip)
-        .await
-        .unwrap()
-    {
-        zs::Response::Tip(tip) => tip,
-        _ => unreachable!("wrong response to Request::Tip"),
-    };
-    tracing::info!(
-        ?tip,
-        ?max_checkpoint_height,
-        "initializing block verifier router"
-    );
+    tracing::info!(?max_checkpoint_height, "initializing block verifier router");
 
     let block = SemanticBlockVerifier::new(network, state_service.clone(), transaction.clone());
-    let checkpoint = CheckpointVerifier::from_checkpoint_list(list, network, tip, state_service);
-    let router = BlockVerifierRouter {
-        checkpoint,
-        max_checkpoint_height,
-        block,
-    };
+
+    // The gate floor is built from constants: the mandatory checkpoint
+    // height, raised to the known-hash list's max height on networks that
+    // bundle a list (design doc §7.2).
+    let floor = KnownHashListSpec::for_network(network)
+        .map_or(Height(0), |spec| spec.max_height)
+        .max(network.mandatory_checkpoint_height());
+
+    let router = BlockVerifierRouter { floor, block };
 
     let router = Buffer::new(BoxService::new(router), VERIFIER_BUFFER_BOUND);
 
