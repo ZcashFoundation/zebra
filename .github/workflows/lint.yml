@@ -48,7 +48,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        rust-version: [stable, beta]
+        # TODO: QED-it temporary Rust 1.94 pin: stable when testing Zebra v4.2.0 on upstream CI; remove before upstream merge.
+        rust-version: [1.94]
         type: [release, tests]
         include:
           - type: release
@@ -69,8 +70,7 @@ jobs:
           cache-on-failure: true
       - uses: ./.github/actions/setup-zebra-build
       - name: Run clippy
-        # TODO: Temporary QED-it fork exception for clippy::manual_option_zip; remove before merging this branch upstream.
-        run: cargo clippy ${{ matrix.args }} --features "${{ matrix.features }}" -- -A unknown-lints -A clippy::manual_option_zip
+        run: cargo clippy ${{ matrix.args }} --features "${{ matrix.features }}"
 
   crate-checks:
     permissions:
