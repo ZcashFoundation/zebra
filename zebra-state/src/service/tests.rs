@@ -434,6 +434,18 @@ proptest! {
 
             prop_assert!(result.is_ok(), "unexpected failed finalized block commit: {:?}", result);
 
+            // The checkpoint write pipeline responds to commits before their
+            // disk writes complete, so wait for the block to reach the
+            // finalized tip before checking the on-disk value pool.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            while state_service.read_service.db.finalized_tip_height() < Some(block.height) {
+                prop_assert!(
+                    std::time::Instant::now() < deadline,
+                    "timeout waiting for the committed block to be written to disk"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+
             prop_assert_eq!(
                 state_service.read_service.db.finalized_value_pool(),
                 expected_finalized_value_pool.clone()?.constrain()?

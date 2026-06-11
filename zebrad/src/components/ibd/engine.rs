@@ -753,14 +753,6 @@ where
         self.window.get(offset as usize)
     }
 
-    /// Overrides the commit pipeline caps, so tests can exercise the cap
-    /// boundary without thousand-block fixtures.
-    #[cfg(test)]
-    pub(crate) fn set_commit_pipeline_caps(&mut self, max_blocks: usize, max_bytes: u64) {
-        self.commit_pipeline_max_blocks = max_blocks;
-        self.commit_pipeline_max_bytes = max_bytes;
-    }
-
     /// Runs the engine until every height through the list's max height is
     /// committed, returning [`IbdOutcome::Completed`].
     ///

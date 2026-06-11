@@ -57,7 +57,7 @@ fn ensure_timeouts_consistent() {
 
     // This constraint avoids spurious failures when restarting large checkpoints
     assert!(
-       BLOCK_VERIFY_TIMEOUT.as_secs() > SYNC_RESTART_DELAY.as_secs() + 2 * zebra_consensus::MAX_CHECKPOINT_BYTE_COUNT / MIN_NETWORK_SPEED_BYTES_PER_SEC,
+       BLOCK_VERIFY_TIMEOUT.as_secs() > SYNC_RESTART_DELAY.as_secs() + 2 * zebra_node_services::constants::MAX_CHECKPOINT_BYTE_COUNT / MIN_NETWORK_SPEED_BYTES_PER_SEC,
        "Block verify should allow for a full checkpoint download, a sync restart, then a full checkpoint re-download"
     );
 

@@ -1147,7 +1147,7 @@ impl DiskDb {
     }
 
     /// Returns true if [`DiskDb::write`] currently skips the write-ahead log.
-    #[cfg(any(test, feature = "proptest-impl"))]
+    #[cfg(test)]
     pub(crate) fn skip_wal(&self) -> bool {
         self.skip_wal.load(atomic::Ordering::SeqCst)
     }
@@ -1156,7 +1156,7 @@ impl DiskDb {
     ///
     /// Returns the first error if updating any column family fails. After an
     /// error, some column families can be left with the old setting, and the
-    /// flag returned by [`DiskDb::auto_compaction_disabled`] is not updated.
+    /// in-process mirror flag is not updated.
     ///
     /// # Persistence
     ///
@@ -1194,7 +1194,7 @@ impl DiskDb {
     ///
     /// This is an in-process mirror of the option: RocksDB has no property
     /// that reads `disable_auto_compactions` back from the database.
-    #[cfg(any(test, feature = "proptest-impl"))]
+    #[cfg(test)]
     pub(crate) fn auto_compaction_disabled(&self) -> bool {
         self.auto_compaction_disabled.load(atomic::Ordering::SeqCst)
     }

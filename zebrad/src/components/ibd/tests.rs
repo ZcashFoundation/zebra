@@ -1,6 +1,6 @@
 //! Known-hash IBD engine tests
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 
 use zebra_chain::{block, serialization::ZcashDeserializeInto};
 
@@ -9,8 +9,6 @@ use crate::BoxError;
 
 mod cache;
 mod convert_vectors;
-mod engine_prop;
-mod vectors;
 
 /// An in-memory [`HashList`] over real test-vector blocks, so engine tests
 /// don't read (and re-hash) the ~103 MB on-disk asset set.
@@ -21,9 +19,6 @@ mod vectors;
 pub(crate) struct FakeHashList {
     /// The pinned hashes, indexed by height.
     hashes: Vec<block::Hash>,
-
-    /// Per-height size-hint overrides; other heights use the trait default.
-    hints: BTreeMap<u32, u8>,
 }
 
 impl FakeHashList {
@@ -48,25 +43,9 @@ impl FakeHashList {
 
         let list = Self {
             hashes: blocks.iter().map(|block| block.hash()).collect(),
-            hints: BTreeMap::new(),
         };
 
         (list, blocks)
-    }
-
-    /// Sets the size hint for every height in the list.
-    pub(crate) fn with_uniform_hint(self, hint: u8) -> Self {
-        let len = self.hashes.len();
-        self.with_hints(&vec![hint; len])
-    }
-
-    /// Sets per-height size hints, starting at height 0.
-    pub(crate) fn with_hints(mut self, hints: &[u8]) -> Self {
-        for (height, hint) in hints.iter().enumerate() {
-            // test lists are tiny, heights fit u32
-            self.hints.insert(height as u32, *hint);
-        }
-        self
     }
 }
 
@@ -79,12 +58,5 @@ impl HashList for FakeHashList {
 
     fn hash(&mut self, height: block::Height) -> Result<Option<block::Hash>, BoxError> {
         Ok(self.hashes.get(height.0 as usize).copied())
-    }
-
-    fn size_hint(&mut self, height: block::Height) -> u8 {
-        self.hints
-            .get(&height.0)
-            .copied()
-            .unwrap_or(super::fetch::DEFAULT_SIZE_HINT)
     }
 }

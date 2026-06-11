@@ -79,19 +79,7 @@ async fn verifiers_from_network(
     (block_verifier_router, state_service)
 }
 
-static BLOCK_VERIFY_TRANSCRIPT_GENESIS: Lazy<
-    Vec<(Request, Result<block::Hash, ExpectedTranscriptError>)>,
-> = Lazy::new(|| {
-    let block: Arc<_> =
-        Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
-            .unwrap()
-            .into();
-    let hash = Ok(block.hash());
-
-    vec![(Request::Commit(block), hash)]
-});
-
-static BLOCK_VERIFY_TRANSCRIPT_GENESIS_FAIL: Lazy<
+static BLOCK_VERIFY_TRANSCRIPT_GENESIS_BELOW_FLOOR: Lazy<
     Vec<(Request, Result<block::Hash, ExpectedTranscriptError>)>,
 > = Lazy::new(|| {
     let block: Arc<_> =
@@ -99,6 +87,8 @@ static BLOCK_VERIFY_TRANSCRIPT_GENESIS_FAIL: Lazy<
             .unwrap()
             .into();
 
+    // Genesis is below the known-hash floor, so the router's gate rejects it:
+    // blocks in that range are only committed by the known-hash IBD engine.
     vec![(Request::Commit(block), Err(ExpectedTranscriptError::Any))]
 });
 
@@ -124,10 +114,10 @@ static NO_COINBASE_STATE_TRANSCRIPT: Lazy<
     )]
 });
 
-static STATE_VERIFY_TRANSCRIPT_GENESIS: Lazy<
+static STATE_VERIFY_TRANSCRIPT_GENESIS_MISSING: Lazy<
     Vec<(zs::Request, Result<zs::Response, ExpectedTranscriptError>)>,
 > = Lazy::new(|| {
-    let block: Arc<_> =
+    let block: Arc<Block> =
         Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES[..])
             .unwrap()
             .into();
@@ -135,17 +125,17 @@ static STATE_VERIFY_TRANSCRIPT_GENESIS: Lazy<
 
     vec![(
         zs::Request::Block(hash.into()),
-        Ok(zs::Response::Block(Some(block))),
+        Ok(zs::Response::Block(None)),
     )]
 });
 
 #[tokio::test(flavor = "multi_thread")]
-async fn verify_checkpoint_test() -> Result<(), Report> {
-    verify_checkpoint(Config {
+async fn verify_below_known_hash_floor_test() -> Result<(), Report> {
+    verify_below_known_hash_floor(Config {
         checkpoint_sync: true,
     })
     .await?;
-    verify_checkpoint(Config {
+    verify_below_known_hash_floor(Config {
         checkpoint_sync: false,
     })
     .await?;
@@ -153,32 +143,34 @@ async fn verify_checkpoint_test() -> Result<(), Report> {
     Ok(())
 }
 
-/// Test that checkpoint verifies work.
+/// Test that the router's gate rejects commits at or below the known-hash
+/// floor, regardless of the `checkpoint_sync` config, and that the rejected
+/// block never reaches the state.
 ///
-/// Also tests the `chain::init` function.
+/// Also tests the `router::init` function.
 #[spandoc::spandoc]
-async fn verify_checkpoint(config: Config) -> Result<(), Report> {
+async fn verify_below_known_hash_floor(config: Config) -> Result<(), Report> {
     let _init_guard = zebra_test::init();
 
     let network = Network::Mainnet;
+    let state_service = zs::init_test(&network).await;
 
-    // Test that the chain::init function works. Most of the other tests use
-    // init_from_verifiers.
-    //
-    // Download task panics and timeouts are propagated to the tests that use Groth16 verifiers.
     let (
         block_verifier_router,
         _transaction_verifier,
         _groth16_download_handle,
         _max_checkpoint_height,
-    ) = super::init_test(config.clone(), &network, zs::init_test(&network).await).await;
+    ) = super::init_test(config.clone(), &network, state_service.clone()).await;
 
     // Add a timeout layer
     let block_verifier_router =
         TimeoutLayer::new(Duration::from_secs(VERIFY_TIMEOUT_SECONDS)).layer(block_verifier_router);
 
-    let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
+    let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT_GENESIS_BELOW_FLOOR.iter().cloned());
     transcript.check(block_verifier_router).await.unwrap();
+
+    let transcript = Transcript::from(STATE_VERIFY_TRANSCRIPT_GENESIS_MISSING.iter().cloned());
+    transcript.check(state_service).await.unwrap();
 
     Ok(())
 }
@@ -207,68 +199,6 @@ async fn verify_fail_no_coinbase() -> Result<(), Report> {
 
     let transcript = Transcript::from(NO_COINBASE_STATE_TRANSCRIPT.iter().cloned());
     transcript.check(state_service).await.unwrap();
-
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn round_trip_checkpoint_test() -> Result<(), Report> {
-    round_trip_checkpoint().await
-}
-
-/// Test that state updates work
-#[spandoc::spandoc]
-async fn round_trip_checkpoint() -> Result<(), Report> {
-    let _init_guard = zebra_test::init();
-
-    let (block_verifier_router, state_service) = verifiers_from_network(Network::Mainnet).await;
-
-    // Add a timeout layer
-    let block_verifier_router =
-        TimeoutLayer::new(Duration::from_secs(VERIFY_TIMEOUT_SECONDS)).layer(block_verifier_router);
-
-    let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
-    transcript.check(block_verifier_router).await.unwrap();
-
-    let transcript = Transcript::from(STATE_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
-    transcript.check(state_service).await.unwrap();
-
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn verify_fail_add_block_checkpoint_test() -> Result<(), Report> {
-    verify_fail_add_block_checkpoint().await
-}
-
-/// Test that the state rejects duplicate block adds
-#[spandoc::spandoc]
-async fn verify_fail_add_block_checkpoint() -> Result<(), Report> {
-    let _init_guard = zebra_test::init();
-
-    let (block_verifier_router, state_service) = verifiers_from_network(Network::Mainnet).await;
-
-    // Add a timeout layer
-    let block_verifier_router =
-        TimeoutLayer::new(Duration::from_secs(VERIFY_TIMEOUT_SECONDS)).layer(block_verifier_router);
-
-    let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
-    transcript
-        .check(block_verifier_router.clone())
-        .await
-        .unwrap();
-
-    let transcript = Transcript::from(STATE_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
-    transcript.check(state_service.clone()).await.unwrap();
-
-    let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT_GENESIS_FAIL.iter().cloned());
-    transcript
-        .check(block_verifier_router.clone())
-        .await
-        .unwrap();
-
-    let transcript = Transcript::from(STATE_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
-    transcript.check(state_service.clone()).await.unwrap();
 
     Ok(())
 }

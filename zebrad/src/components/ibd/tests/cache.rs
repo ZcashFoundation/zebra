@@ -46,10 +46,10 @@ fn entry_files(dir: &TempDir) -> Vec<PathBuf> {
 /// `put` then `get` preserves the exact serialized bytes, the pinned hash,
 /// and the source address (present, absent, and IPv6), and the bytes pass
 /// the header-hash check.
-#[tokio::test]
-async fn put_get_round_trip_preserves_bytes_and_source() {
+#[test]
+fn put_get_round_trip_preserves_bytes_and_source() {
     let _init_guard = zebra_test::init();
-    let (cache, _dir, blocks) = cache_with_blocks(3);
+    let (mut cache, _dir, blocks) = cache_with_blocks(3);
 
     let v4_source: PeerSocketAddr = "203.0.113.7:8233".parse().expect("hardcoded addr parses");
     let v6_source: PeerSocketAddr = "[2001:db8::7]:8233".parse().expect("hardcoded addr parses");
@@ -66,14 +66,12 @@ async fn put_get_round_trip_preserves_bytes_and_source() {
 
         let size = cache
             .put(height, block, source)
-            .await
             .expect("writing to a fresh temp dir succeeds");
         assert_eq!(size as usize, raw.len(), "put returns the raw block size");
         expected_bytes += raw.len() as u64;
 
         let entry = cache
             .get(height)
-            .await
             .expect("an entry that was just written is readable");
         assert_eq!(entry.bytes, raw, "raw block bytes round-trip exactly");
         assert_eq!(
@@ -100,10 +98,10 @@ async fn put_get_round_trip_preserves_bytes_and_source() {
 /// A restart `scan` prunes entries at or below the state tip and above the
 /// list max (gate F10), deletes their files, and returns the survivors
 /// sorted by height with their sizes; survivors keep their sources.
-#[tokio::test]
-async fn scan_prunes_outside_range_and_returns_sorted_survivors() {
+#[test]
+fn scan_prunes_outside_range_and_returns_sorted_survivors() {
     let _init_guard = zebra_test::init();
-    let (cache, dir, blocks) = cache_with_blocks(6);
+    let (mut cache, dir, blocks) = cache_with_blocks(6);
 
     let source: PeerSocketAddr = "203.0.113.7:8233".parse().expect("hardcoded addr parses");
     for (height, block) in blocks.iter().enumerate() {
@@ -111,15 +109,13 @@ async fn scan_prunes_outside_range_and_returns_sorted_survivors() {
         let height = block::Height(height as u32);
         cache
             .put(height, block, Some(source))
-            .await
             .expect("writing to a fresh temp dir succeeds");
     }
 
     // A fresh cache over the same directory simulates a restart.
-    let restarted = BlockCache::new(cache_dir(&dir));
+    let mut restarted = BlockCache::new(cache_dir(&dir));
     let survivors = restarted
         .scan(Some(block::Height(1)), block::Height(4))
-        .await
         .expect("scanning a populated cache dir succeeds");
 
     let expected: Vec<(block::Height, u32)> = (2..=4)
@@ -148,14 +144,13 @@ async fn scan_prunes_outside_range_and_returns_sorted_survivors() {
 
     for height in [0, 1, 5] {
         assert!(
-            restarted.get(block::Height(height)).await.is_none(),
+            restarted.get(block::Height(height)).is_none(),
             "pruned height {height} is gone",
         );
     }
 
     let entry = restarted
         .get(block::Height(2))
-        .await
         .expect("a surviving entry is readable after restart");
     assert_eq!(
         entry.source,
@@ -166,23 +161,21 @@ async fn scan_prunes_outside_range_and_returns_sorted_survivors() {
 }
 
 /// With an empty state (no tip), `scan` keeps cached blocks from genesis up.
-#[tokio::test]
-async fn scan_with_empty_state_keeps_genesis() {
+#[test]
+fn scan_with_empty_state_keeps_genesis() {
     let _init_guard = zebra_test::init();
-    let (cache, dir, blocks) = cache_with_blocks(2);
+    let (mut cache, dir, blocks) = cache_with_blocks(2);
 
     for (height, block) in blocks.iter().enumerate() {
         // test heights are tiny, they fit u32
         cache
             .put(block::Height(height as u32), block, None)
-            .await
             .expect("writing to a fresh temp dir succeeds");
     }
 
-    let restarted = BlockCache::new(cache_dir(&dir));
+    let mut restarted = BlockCache::new(cache_dir(&dir));
     let survivors = restarted
         .scan(None, block::Height(1))
-        .await
         .expect("scanning a populated cache dir succeeds");
 
     let heights: Vec<u32> = survivors.iter().map(|(height, _)| height.0).collect();
@@ -191,14 +184,13 @@ async fn scan_with_empty_state_keeps_genesis() {
 
 /// A corrupted entry body is still returned by `get` (the sidecar is
 /// intact), but fails the header-hash check that promotion re-runs.
-#[tokio::test]
-async fn corrupt_entry_fails_the_hash_check() {
+#[test]
+fn corrupt_entry_fails_the_hash_check() {
     let _init_guard = zebra_test::init();
-    let (cache, dir, blocks) = cache_with_blocks(1);
+    let (mut cache, dir, blocks) = cache_with_blocks(1);
 
     cache
         .put(block::Height(0), &blocks[0], None)
-        .await
         .expect("writing to a fresh temp dir succeeds");
 
     let files = entry_files(&dir);
@@ -217,7 +209,6 @@ async fn corrupt_entry_fails_the_hash_check() {
 
     let entry = cache
         .get(block::Height(0))
-        .await
         .expect("a body-corrupt entry is returned: only re-verification can detect it");
     assert!(
         !verify_entry(&entry.bytes, entry.expected_hash),
@@ -228,16 +219,15 @@ async fn corrupt_entry_fails_the_hash_check() {
 /// Truncated entry files never panic: a file torn inside the sidecar is
 /// dropped by `get` and pruned by `scan`; a file torn inside the body is
 /// returned and fails verification.
-#[tokio::test]
-async fn truncated_entries_are_dropped_or_fail_verification() {
+#[test]
+fn truncated_entries_are_dropped_or_fail_verification() {
     let _init_guard = zebra_test::init();
-    let (cache, dir, blocks) = cache_with_blocks(2);
+    let (mut cache, dir, blocks) = cache_with_blocks(2);
 
     for (height, block) in blocks.iter().enumerate() {
         // test heights are tiny, they fit u32
         cache
             .put(block::Height(height as u32), block, None)
-            .await
             .expect("writing to a fresh temp dir succeeds");
     }
 
@@ -266,12 +256,12 @@ async fn truncated_entries_are_dropped_or_fail_verification() {
     // and deletes the file.
     let torn_sidecar = truncate(0, 4);
     assert!(
-        cache.get(block::Height(0)).await.is_none(),
+        cache.get(block::Height(0)).is_none(),
         "an entry torn inside its sidecar is dropped",
     );
     assert!(!torn_sidecar.exists(), "the torn file is deleted");
     assert!(
-        cache.get(block::Height(0)).await.is_none(),
+        cache.get(block::Height(0)).is_none(),
         "the dropped entry stays gone",
     );
 
@@ -288,7 +278,6 @@ async fn truncated_entries_are_dropped_or_fail_verification() {
 
     let entry = cache
         .get(block::Height(1))
-        .await
         .expect("a body-torn entry is returned: only re-verification can detect it");
     assert_eq!(entry.bytes.len(), 100);
     assert!(
@@ -298,10 +287,9 @@ async fn truncated_entries_are_dropped_or_fail_verification() {
 
     // A restart scan prunes a sidecar-torn file instead of restoring it.
     truncate(1, 4);
-    let restarted = BlockCache::new(cache_dir(&dir));
+    let mut restarted = BlockCache::new(cache_dir(&dir));
     let survivors = restarted
         .scan(None, block::Height(10))
-        .await
         .expect("scanning a cache dir with torn entries succeeds");
     assert!(survivors.is_empty(), "scan prunes sidecar-torn entries");
     assert!(entry_files(&dir).is_empty(), "scan deletes pruned files");
@@ -309,24 +297,23 @@ async fn truncated_entries_are_dropped_or_fail_verification() {
 
 /// `evict_through` deletes all entries at or below the committed height,
 /// their files included, and leaves the rest readable.
-#[tokio::test]
-async fn evict_through_deletes_committed_entries() {
+#[test]
+fn evict_through_deletes_committed_entries() {
     let _init_guard = zebra_test::init();
-    let (cache, dir, blocks) = cache_with_blocks(5);
+    let (mut cache, dir, blocks) = cache_with_blocks(5);
 
     for (height, block) in blocks.iter().enumerate() {
         // test heights are tiny, they fit u32
         cache
             .put(block::Height(height as u32), block, None)
-            .await
             .expect("writing to a fresh temp dir succeeds");
     }
 
-    cache.evict_through(block::Height(2)).await;
+    cache.evict_through(block::Height(2));
 
     for height in 0..=2 {
         assert!(
-            cache.get(block::Height(height)).await.is_none(),
+            cache.get(block::Height(height)).is_none(),
             "evicted height {height} is gone",
         );
     }
@@ -349,12 +336,12 @@ async fn evict_through_deletes_committed_entries() {
     assert_eq!(cache.bytes(), expected_bytes);
 
     assert!(
-        cache.get(block::Height(3)).await.is_some(),
+        cache.get(block::Height(3)).is_some(),
         "surviving entries stay readable",
     );
 
     // Evicting far past the top clears everything else.
-    cache.evict_through(block::Height(500)).await;
+    cache.evict_through(block::Height(500));
     assert!(cache.is_empty());
     assert_eq!(cache.bytes(), 0);
     assert!(entry_files(&dir).is_empty());
@@ -362,33 +349,29 @@ async fn evict_through_deletes_committed_entries() {
 
 /// `remove_all` deletes the entire cache directory for the `Completed`
 /// handoff, and the cache stays usable afterwards.
-#[tokio::test]
-async fn remove_all_deletes_the_cache_directory() {
+#[test]
+fn remove_all_deletes_the_cache_directory() {
     let _init_guard = zebra_test::init();
-    let (cache, dir, blocks) = cache_with_blocks(1);
+    let (mut cache, dir, blocks) = cache_with_blocks(1);
 
     cache
         .put(block::Height(0), &blocks[0], None)
-        .await
         .expect("writing to a fresh temp dir succeeds");
     assert!(cache_dir(&dir).exists());
 
     cache
         .remove_all()
-        .await
         .expect("removing an existing cache dir succeeds");
     assert!(!cache_dir(&dir).exists(), "the whole directory is removed");
     assert_eq!(cache.bytes(), 0);
-    assert!(cache.get(block::Height(0)).await.is_none());
+    assert!(cache.get(block::Height(0)).is_none());
 
     // Removing an already-removed cache is fine, and writes recreate it.
     cache
         .remove_all()
-        .await
         .expect("removing a missing cache dir is not an error");
     cache
         .put(block::Height(0), &blocks[0], None)
-        .await
         .expect("the cache dir is recreated on the next write");
-    assert!(cache.get(block::Height(0)).await.is_some());
+    assert!(cache.get(block::Height(0)).is_some());
 }

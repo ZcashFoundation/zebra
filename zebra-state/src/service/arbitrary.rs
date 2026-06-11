@@ -211,6 +211,11 @@ pub async fn populated_state(
     LatestChainTip,
     ChainTipChange,
 ) {
+    let blocks: Vec<Arc<Block>> = blocks.into_iter().collect();
+    let max_height = blocks
+        .iter()
+        .map(|block| block.coinbase_height().expect("test blocks have heights"))
+        .max();
     let requests = blocks
         .into_iter()
         .map(|block| Request::CommitCheckpointVerifiedBlock(block.into()));
@@ -247,6 +252,19 @@ pub async fn populated_state(
                 "timeout waiting for chain tip change after committing block"
             );
         }
+    }
+
+    // The checkpoint write pipeline responds to commits before their disk
+    // writes complete, so wait for the last block to reach the finalized tip,
+    // keeping the returned state fully queryable.
+    if let Some(max_height) = max_height {
+        timeout(CHAIN_TIP_UPDATE_WAIT_LIMIT, async {
+            while read_state.db.finalized_tip_height() < Some(max_height) {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("timeout waiting for committed blocks to be written to disk");
     }
 
     (state, read_state, latest_chain_tip, chain_tip_change)

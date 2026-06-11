@@ -18,7 +18,7 @@ use zebra_chain::{
     parameters::Network,
     transparent::MIN_TRANSPARENT_COINBASE_MATURITY,
 };
-use zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP;
+use zebra_node_services::constants::MAX_CHECKPOINT_HEIGHT_GAP;
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_state::state_database_format_version_in_code;
 use zebra_test::{

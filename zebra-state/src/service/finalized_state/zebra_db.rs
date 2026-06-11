@@ -268,9 +268,7 @@ impl ZebraDb {
 
     /// Returns true if the last successful [`ZebraDb::set_auto_compaction`]
     /// call disabled auto-compaction.
-    ///
-    /// See [`DiskDb::auto_compaction_disabled`] for details.
-    #[cfg(any(test, feature = "proptest-impl"))]
+    #[cfg(test)]
     pub(crate) fn auto_compaction_disabled(&self) -> bool {
         self.db.auto_compaction_disabled()
     }
@@ -283,7 +281,7 @@ impl ZebraDb {
     }
 
     /// Returns true if database writes currently skip the write-ahead log.
-    #[cfg(any(test, feature = "proptest-impl"))]
+    #[cfg(test)]
     pub(crate) fn skip_wal(&self) -> bool {
         self.db.skip_wal()
     }

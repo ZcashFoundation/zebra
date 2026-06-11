@@ -1421,7 +1421,7 @@ async fn local_listener_port_with(listen_addr: SocketAddr, network: Network) {
     let inbound_service =
         service_fn(|_| async { unreachable!("inbound service should never be called") });
 
-    let (_peer_service, address_book, _) = init(
+    let (_peer_service, address_book, _, _) = init(
         config,
         inbound_service,
         NoChainTip,
@@ -1487,7 +1487,7 @@ where
         ..default_config
     };
 
-    let (_peer_service, address_book, _) = init(
+    let (_peer_service, address_book, _, _) = init(
         config,
         inbound_service,
         NoChainTip,
