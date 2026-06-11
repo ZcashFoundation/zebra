@@ -790,15 +790,18 @@ mandatory height. A `RouterError::BelowKnownHashRange` reaching the legacy
 syncer is now surfaced as an actionable error (the range is engine-only;
 re-downloading cannot help) instead of a silent retry loop.
 
+**Router removal — done.** `BlockVerifierRouter` and `RouterError` are gone;
+the floor check lives in `SemanticBlockVerifier::call` (with
+`VerifyBlockError::BelowKnownHashRange`), and `router::init` buffers the
+semantic verifier directly. The buffered error type is now `VerifyBlockError`
+across the inbound, sync-download, and RPC `submit_block` paths.
+
 **Open / planned follow-ups (need maintainer decision):**
-- *Router removal (maintainer-directed cleanup).* With the checkpoint verifier
-  gone, `BlockVerifierRouter` only adds a constant height check in front of
-  `SemanticBlockVerifier`. Folding the check into `SemanticBlockVerifier::call`
-  (with `VerifyBlockError::BelowKnownHashRange`) and deleting the router/
-  `RouterError` ripples the buffered error type through `sync/downloads.rs`,
-  `zebra-rpc/src/methods.rs` (`submit_block` downcast), and the
-  `service_trait` re-export — a pure-cleanup refactor across three crates,
-  best done as its own reviewed change now that the floor bug is fixed.
+- *RPC `submit_block` duplicate reporting.* An RPC submission of an
+  already-committed below-floor block now reports `Rejected` (the gate fires
+  before duplicate detection) rather than zcashd's `duplicate`. Restoring
+  duplicate reporting for below-floor blocks (e.g. a state check before the
+  gate) is a small, separable compatibility fix.
 - *Degraded handoff below list max.* When the engine degrades between the
   mandatory height and the list max, the legacy syncer it hands off to still
   cannot commit that range. The handoff is a false promise there; the choice
