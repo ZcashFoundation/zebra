@@ -31,6 +31,7 @@ use zebra_state as zs;
 
 use crate::{components::sync::Config, BoxError};
 
+pub mod convert;
 pub mod engine;
 pub mod fetch;
 pub mod peer_stats;
