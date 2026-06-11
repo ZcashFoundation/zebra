@@ -986,7 +986,7 @@ pub async fn test_mining_rpcs<State, ReadState>(
     >,
     state: State,
     read_state: ReadState,
-    block_verifier_router: Buffer<BoxService<Request, Hash, RouterError>, Request>,
+    block_verifier_router: Buffer<BoxService<Request, Hash, VerifyBlockError>, Request>,
     settings: Settings,
 ) where
     State: Service<

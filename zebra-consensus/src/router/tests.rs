@@ -15,6 +15,8 @@ use zebra_chain::{
 use zebra_state as zs;
 use zebra_test::transcript::{ExpectedTranscriptError, Transcript};
 
+use std::future::Future;
+
 use super::*;
 
 /// The timeout we apply to each verify future during testing.

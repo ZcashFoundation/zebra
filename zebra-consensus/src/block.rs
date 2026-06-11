@@ -49,6 +49,10 @@ pub struct SemanticBlockVerifier<S, V> {
     network: Network,
     state_service: S,
     transaction_verifier: V,
+    /// Commits at or below this height are rejected: those heights are only
+    /// committed by the known-hash IBD engine (design doc §7.2). See
+    /// [`router::init`](crate::router::init) for how the floor is chosen.
+    known_hash_floor: block::Height,
 }
 
 /// Block verification errors.
@@ -93,6 +97,21 @@ pub enum VerifyBlockError {
     /// This is for errors that are not specifically related to block depth or commit failures.
     #[error("state service error for block {hash}: {source}")]
     StateService { source: BoxError, hash: block::Hash },
+
+    /// The block is at or below the known-hash floor: those heights are only
+    /// committed by the known-hash IBD engine, never by semantic verification
+    /// (design doc §7.2). A benign rejection for gossiped blocks; an explicit
+    /// one for RPC block submission.
+    #[error(
+        "block at height {height:?} is at or below the known-hash floor {floor:?}: \
+         blocks in that range are only committed by the known-hash sync engine"
+    )]
+    BelowKnownHashRange {
+        /// The rejected block's height.
+        height: block::Height,
+        /// The floor in effect when the block was rejected.
+        floor: block::Height,
+    },
 }
 
 impl VerifyBlockError {
@@ -114,8 +133,17 @@ impl VerifyBlockError {
             Equihash { .. } | Subsidy(_) => 100,
             Transaction(err) => err.mempool_misbehavior_score(),
             Commit(err) => err.misbehavior_score(),
+            // Peers cannot know the engine's exact floor timing, so a
+            // below-floor block is not necessarily misbehavior.
             _other => 0,
         }
+    }
+
+    /// Returns `true` if this is a [`VerifyBlockError::BelowKnownHashRange`]
+    /// rejection: the block is in the range only the known-hash engine can
+    /// commit, so re-downloading it through the legacy path cannot help.
+    pub fn is_below_known_hash_range(&self) -> bool {
+        matches!(self, VerifyBlockError::BelowKnownHashRange { .. })
     }
 }
 
@@ -147,12 +175,19 @@ where
     V: Service<tx::Request, Response = tx::Response, Error = BoxError> + Send + Clone + 'static,
     V::Future: Send + 'static,
 {
-    /// Creates a new SemanticBlockVerifier
-    pub fn new(network: &Network, state_service: S, transaction_verifier: V) -> Self {
+    /// Creates a new [`SemanticBlockVerifier`] that rejects commits at or
+    /// below `known_hash_floor` (design doc §7.2).
+    pub fn new(
+        network: &Network,
+        state_service: S,
+        transaction_verifier: V,
+        known_hash_floor: block::Height,
+    ) -> Self {
         Self {
             network: network.clone(),
             state_service,
             transaction_verifier,
+            known_hash_floor,
         }
     }
 }
@@ -182,6 +217,30 @@ where
         let network = self.network.clone();
 
         let block = request.block();
+
+        // Gate commits at or below the known-hash floor: those heights are
+        // only committed by the known-hash IBD engine, never by semantic
+        // verification (design doc §7.2). Without the gate, a gossiped or
+        // RPC-submitted block just above the engine's tip could semantically
+        // verify mid-sync and flip the state to its non-finalized mode,
+        // silently demoting the rest of the initial sync.
+        let floor = self.known_hash_floor;
+        if let Some(height) = block.coinbase_height() {
+            if height <= floor {
+                // There's no use case for block proposals below the floor.
+                if request.is_proposal() {
+                    return async move {
+                        Err(VerifyBlockError::ValidateProposal(
+                            "block proposals must be above the known-hash floor".into(),
+                        ))
+                    }
+                    .boxed();
+                }
+
+                return async move { Err(VerifyBlockError::BelowKnownHashRange { height, floor }) }
+                    .boxed();
+            }
+        }
 
         // We don't include the block hash, because it's likely already in a parent span
         let span = tracing::debug_span!("block", height = ?block.coinbase_height());

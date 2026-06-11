@@ -29,7 +29,7 @@ use zebra_chain::{
     serialization::ZcashSerialize,
     transaction::UnminedTxId,
 };
-use zebra_consensus::{router::RouterError, VerifyBlockError};
+use zebra_consensus::VerifyBlockError;
 use zebra_network::{AddressBook, InventoryResponse};
 use zebra_node_services::mempool;
 
@@ -80,7 +80,7 @@ type BlockDownloadPeerSet =
 type State = Buffer<BoxService<zs::Request, zs::Response, zs::BoxError>, zs::Request>;
 type Mempool = Buffer<BoxService<mempool::Request, mempool::Response, BoxError>, mempool::Request>;
 type SemanticBlockVerifier = Buffer<
-    BoxService<zebra_consensus::Request, block::Hash, RouterError>,
+    BoxService<zebra_consensus::Request, block::Hash, VerifyBlockError>,
     zebra_consensus::Request,
 >;
 type GossipedBlockDownloads =

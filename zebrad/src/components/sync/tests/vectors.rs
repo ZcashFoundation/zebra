@@ -12,7 +12,7 @@ use zebra_chain::{
     chain_tip::mock::{MockChainTip, MockChainTipSender},
     serialization::ZcashDeserializeInto,
 };
-use zebra_consensus::{Config as ConsensusConfig, RouterError, VerifyBlockError};
+use zebra_consensus::{Config as ConsensusConfig, VerifyBlockError};
 use zebra_network::{InventoryResponse, PeerSocketAddr};
 use zebra_state::Config as StateConfig;
 use zebra_test::mock_service::{MockService, PanicAssertion};
@@ -997,12 +997,9 @@ async fn should_restart_sync_returns_false() {
     };
 
     let verify_block_error = VerifyBlockError::Commit(commit_error);
-    let router_error = RouterError::Block {
-        source: Box::new(verify_block_error),
-    };
 
     let err = BlockDownloadVerifyError::Invalid {
-        error: router_error,
+        error: verify_block_error,
         height: block::Height(42),
         hash: block::Hash::from([0xAA; 32]),
         advertiser_addr: None,

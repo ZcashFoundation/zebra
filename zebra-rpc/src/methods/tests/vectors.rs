@@ -2408,13 +2408,21 @@ async fn rpc_submitblock_errors() {
         None,
     );
 
-    // Try to submit pre-populated blocks and assert that it responds with duplicate.
+    // Every test-vector block is below the known-hash floor, so the block
+    // verifier's commit gate rejects them before any duplicate or
+    // bad-block check (design doc §7.2): blocks in that range are only
+    // committed by the known-hash IBD engine, never via RPC submission.
+    //
+    // Note: this means an RPC submission of an already-committed below-floor
+    // block reports `Rejected` rather than `Duplicate`. Restoring
+    // zcashd-compatible duplicate reporting for below-floor blocks (e.g. by
+    // checking the state before the gate) is a tracked follow-up.
     for &block_bytes in zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS.values() {
         let submit_block_response = rpc.submit_block(HexData(block_bytes.into()), None).await;
 
         assert_eq!(
             submit_block_response,
-            Ok(SubmitBlockErrorResponse::Duplicate.into())
+            Ok(SubmitBlockErrorResponse::Rejected.into())
         );
     }
 

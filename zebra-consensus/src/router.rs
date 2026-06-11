@@ -1,13 +1,13 @@
-//! Top-level semantic block verification for Zebra.
+//! Initialization of Zebra's block and transaction verification services.
 //!
-//! Verifies blocks using the full [`SemanticBlockVerifier`], gating commits
-//! at or below the known-hash floor: on networks with a bundled known-hash
-//! list, those heights are only ever committed by the known-hash IBD engine,
-//! which checks them against the pinned hash list (see
-//! `docs/design/known-hash-ibd.md` §7.2). Without the gate, a gossiped or
-//! RPC-submitted block just above the engine's tip could semantically verify
-//! mid-IBD and flip the state to its non-finalized mode, silently demoting
-//! the rest of the initial sync.
+//! [`init`] builds the [`SemanticBlockVerifier`], which both performs full
+//! semantic verification and gates commits at or below the known-hash floor:
+//! on networks with a bundled known-hash list those heights are only ever
+//! committed by the known-hash IBD engine, which checks them against the
+//! pinned hash list (see `docs/design/known-hash-ibd.md` §7.2). Without the
+//! gate, a gossiped or RPC-submitted block just above the engine's tip could
+//! semantically verify mid-IBD and flip the state to its non-finalized mode,
+//! silently demoting the rest of the initial sync.
 //!
 //! # Correctness
 //!
@@ -16,16 +16,8 @@
 //! from previous blocks. Otherwise, verification of out-of-order and invalid
 //! blocks and transactions can hang indefinitely.
 
-use core::fmt;
-use std::{
-    future::Future,
-    pin::Pin,
-    sync::Arc,
-    task::{Context, Poll},
-};
+use std::sync::Arc;
 
-use futures::{FutureExt, TryFutureExt};
-use thiserror::Error;
 use tokio::{sync::oneshot, task::JoinHandle};
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
 use tracing::{instrument, Instrument, Span};
@@ -63,164 +55,6 @@ mod tests;
 /// memory, but missing slots can significantly slow down Zebra.
 const VERIFIER_BUFFER_BOUND: usize = 5;
 
-/// The block verifier router gates commits at or below the known-hash floor
-/// and routes everything else to the semantic block verifier.
-///
-/// # Correctness
-///
-/// Block verification requests should be wrapped in a timeout, so that
-/// out-of-order and invalid requests do not hang indefinitely. See the [`router`](`crate::router`)
-/// module documentation for details.
-struct BlockVerifierRouter<S, V>
-where
-    S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
-    S::Future: Send + 'static,
-    V: Service<transaction::Request, Response = transaction::Response, Error = BoxError>
-        + Send
-        + Clone
-        + 'static,
-    V::Future: Send + 'static,
-{
-    /// The commit-gate floor: the larger of the mandatory checkpoint height
-    /// (Canopy − 1) and the network's known-hash list max height, when the
-    /// network has a bundled list (design doc §7.2).
-    ///
-    /// Both inputs are constants, so the floor is fixed for the life of the
-    /// process. Semantic commits at or below it are rejected: those blocks
-    /// are only ever committed by the known-hash engine, and "Zebra cannot
-    /// fully validate pre-Canopy blocks".
-    floor: block::Height,
-
-    /// The full semantic block verifier, used for blocks above the floor.
-    block: SemanticBlockVerifier<S, V>,
-}
-
-/// An error while semantically verifying a block.
-//
-// One or both of these error variants are at least 140 bytes
-#[derive(Debug, Error)]
-#[allow(missing_docs)]
-pub enum RouterError {
-    /// Block could not be full-verified
-    Block { source: Box<VerifyBlockError> },
-    /// The block is at or below the known-hash floor: those heights are only
-    /// committed by the known-hash IBD engine, never by semantic
-    /// verification (design doc §7.2). A benign rejection for gossiped
-    /// blocks; an explicit one for RPC block submission.
-    BelowKnownHashRange {
-        /// The rejected block's height.
-        height: block::Height,
-        /// The floor in effect when the block was rejected.
-        floor: block::Height,
-    },
-}
-
-impl fmt::Display for RouterError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&match self {
-            RouterError::Block { source } => {
-                format!("block could not be full-verified due to: {source}")
-            }
-            RouterError::BelowKnownHashRange { height, floor } => format!(
-                "block at height {height:?} is at or below the known-hash floor {floor:?}: \
-                 blocks in that range are only committed by the known-hash sync engine"
-            ),
-        })
-    }
-}
-
-impl From<VerifyBlockError> for RouterError {
-    fn from(err: VerifyBlockError) -> Self {
-        RouterError::Block {
-            source: Box::new(err),
-        }
-    }
-}
-
-impl RouterError {
-    /// Returns `true` if this is definitely a duplicate request.
-    /// Some duplicate requests might not be detected, and therefore return `false`.
-    pub fn is_duplicate_request(&self) -> bool {
-        match self {
-            RouterError::Block { source, .. } => source.is_duplicate_request(),
-            RouterError::BelowKnownHashRange { .. } => false,
-        }
-    }
-
-    /// Returns a suggested misbehaviour score increment for a certain error.
-    pub fn misbehavior_score(&self) -> u32 {
-        // TODO: Adjust these values based on zcashd (#9258).
-        match self {
-            RouterError::Block { source } => source.misbehavior_score(),
-            // Peers cannot know our engine's exact floor timing, so a
-            // below-floor block is not necessarily misbehavior.
-            RouterError::BelowKnownHashRange { .. } => 0,
-        }
-    }
-
-    /// Returns `true` if this is a [`RouterError::BelowKnownHashRange`]
-    /// rejection: the block is in the range only the known-hash engine can
-    /// commit, so re-downloading it through the legacy path cannot help.
-    pub fn is_below_known_hash_range(&self) -> bool {
-        matches!(self, RouterError::BelowKnownHashRange { .. })
-    }
-}
-
-impl<S, V> Service<Request> for BlockVerifierRouter<S, V>
-where
-    S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
-    S::Future: Send + 'static,
-    V: Service<transaction::Request, Response = transaction::Response, Error = BoxError>
-        + Send
-        + Clone
-        + 'static,
-    V::Future: Send + 'static,
-{
-    type Response = block::Hash;
-    type Error = RouterError;
-    type Future =
-        Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        // CORRECTNESS
-        //
-        // The current task must be scheduled for wakeup every time we return
-        // `Poll::Pending`.
-        //
-        // If either verifier is unready, this task is scheduled for wakeup when it becomes
-        // ready.
-        //
-        use futures::ready;
-        ready!(self.block.poll_ready(cx))?;
-        Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, request: Request) -> Self::Future {
-        let block = request.block();
-
-        let floor = self.floor;
-
-        match block.coinbase_height() {
-            // There's currently no known use case for block proposals below
-            // the floor, so it's okay to immediately return an error here.
-            Some(height) if height <= floor && request.is_proposal() => async {
-                Err(VerifyBlockError::ValidateProposal(
-                    "block proposals must be above the known-hash floor".into(),
-                ))?
-            }
-            .boxed(),
-
-            Some(height) if height <= floor => {
-                async move { Err(RouterError::BelowKnownHashRange { height, floor }) }.boxed()
-            }
-
-            // This also covers blocks with no height, which the block verifier
-            // will reject immediately.
-            _ => self.block.call(request).map_err(Into::into).boxed(),
-        }
-    }
-}
-
 /// Initialize block and transaction verification services.
 ///
 /// Returns a block verifier, transaction verifier,
@@ -254,7 +88,7 @@ pub async fn init<S, Mempool>(
     mempool: oneshot::Receiver<Mempool>,
     known_hash_sync: bool,
 ) -> (
-    Buffer<BoxService<Request, block::Hash, RouterError>, Request>,
+    Buffer<BoxService<Request, block::Hash, VerifyBlockError>, Request>,
     Buffer<
         BoxService<transaction::Request, transaction::Response, TransactionError>,
         transaction::Request,
@@ -382,13 +216,10 @@ where
     // block verification
     let (_list, max_checkpoint_height) = init_checkpoint_list(config, network);
 
-    tracing::info!(?max_checkpoint_height, "initializing block verifier router");
-
-    let block = SemanticBlockVerifier::new(network, state_service.clone(), transaction.clone());
-
-    // The gate floor is built from constants (design doc §7.2). The permanent
-    // floor is the mandatory checkpoint height — Zebra cannot fully validate
-    // pre-Canopy blocks semantically, so it never commits them this way.
+    // The commit-gate floor is built from constants (design doc §7.2). The
+    // permanent floor is the mandatory checkpoint height — Zebra cannot fully
+    // validate pre-Canopy blocks semantically, so it never commits them this
+    // way.
     //
     // While the known-hash engine is enabled it owns the whole pinned range,
     // so the floor is raised to the list's max height: a gossiped or
@@ -397,7 +228,7 @@ where
     // engine is disabled the floor stays at the mandatory height, so a node
     // syncing the post-Canopy range with the legacy path is not blocked by a
     // gate that exists only to protect the engine.
-    let floor = if known_hash_sync {
+    let known_hash_floor = if known_hash_sync {
         KnownHashListSpec::for_network(network)
             .map_or(Height(0), |spec| spec.max_height)
             .max(network.mandatory_checkpoint_height())
@@ -405,15 +236,26 @@ where
         network.mandatory_checkpoint_height()
     };
 
-    let router = BlockVerifierRouter { floor, block };
+    tracing::info!(
+        ?max_checkpoint_height,
+        ?known_hash_floor,
+        "initializing block verifier"
+    );
 
-    let router = Buffer::new(BoxService::new(router), VERIFIER_BUFFER_BOUND);
+    let block = SemanticBlockVerifier::new(
+        network,
+        state_service.clone(),
+        transaction.clone(),
+        known_hash_floor,
+    );
+
+    let block = Buffer::new(BoxService::new(block), VERIFIER_BUFFER_BOUND);
 
     let task_handles = BackgroundTaskHandles {
         state_checkpoint_verify_handle,
     };
 
-    (router, transaction, task_handles, max_checkpoint_height)
+    (block, transaction, task_handles, max_checkpoint_height)
 }
 
 /// Parses the checkpoint list for `network` and `config`.
@@ -450,7 +292,7 @@ pub async fn init_test<S>(
     network: &Network,
     state_service: S,
 ) -> (
-    Buffer<BoxService<Request, block::Hash, RouterError>, Request>,
+    Buffer<BoxService<Request, block::Hash, VerifyBlockError>, Request>,
     Buffer<
         BoxService<transaction::Request, transaction::Response, TransactionError>,
         transaction::Request,

@@ -51,7 +51,6 @@ pub use block::{subsidy::funding_stream_address, Request, VerifyBlockError, MAX_
 pub use config::Config;
 pub use error::BlockError;
 pub use primitives::{ed25519, groth16, halo2, redjubjub, redpallas, spawn_fifo};
-pub use router::RouterError;
 
 /// A boxed [`std::error::Error`].
 pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;

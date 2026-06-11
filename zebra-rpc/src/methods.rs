@@ -82,7 +82,7 @@ use zebra_chain::{
     },
 };
 use zebra_consensus::{
-    funding_stream_address, router::service_trait::BlockVerifierService, RouterError,
+    funding_stream_address, router::service_trait::BlockVerifierService, VerifyBlockError,
 };
 use zebra_network::{address_book_peers::AddressBookPeers, types::PeerServices, PeerSocketAddr};
 use zebra_node_services::mempool::{self, CreatedOrSpent, MempoolService};
@@ -2589,11 +2589,11 @@ where
                 return Ok(SubmitBlockResponse::Accepted);
             }
 
-            // Turns BoxError into Result<VerifyChainError, BoxError>,
-            // by downcasting from Any to VerifyChainError.
+            // Turns BoxError into Result<VerifyBlockError, BoxError>,
+            // by downcasting from Any to VerifyBlockError.
             Err(box_error) => {
                 let error = box_error
-                    .downcast::<RouterError>()
+                    .downcast::<VerifyBlockError>()
                     .map(|boxed_chain_error| *boxed_chain_error);
 
                 tracing::info!(
