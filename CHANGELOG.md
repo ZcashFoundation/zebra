@@ -22,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   RocksDB WAL skipping during the initial-sync write phase, trading crash-resync
   time for write throughput on slow disks.
 
+### Changed
+
+- Increased Zebra's local rollback window (`MAX_BLOCK_REORG_HEIGHT`) from 99 to
+  1000 blocks as a defence-in-depth measure against sustained consensus splits.
+
 ## [Zebra 5.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.1.0) - 2026-06-10
 
 This release fixes a genesis-to-tip sync stall that could cause new nodes to hang
