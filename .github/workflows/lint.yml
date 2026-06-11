@@ -2,11 +2,9 @@ name: Lint
 
 on:
   pull_request:
-    # Temporarily allow CI on the QEDIT integration branch.
-    # TODO: Remove v4.2.0-dev before merging upstream.
     branches:
-      - main
-      - v4.2.0-dev
+      main
+      zsa1
     paths:
       - "**/*.rs"
       - "**/Cargo.toml"
@@ -16,11 +14,7 @@ on:
       - .github/workflows/lint.yml
 
   push:
-    # Temporarily allow CI on the QEDIT integration branch.
-    # TODO: Remove v4.2.0-dev before merging upstream.
-    branches:
-      - main
-      - v4.2.0-dev
+    branches: [main]
     paths:
       - "**/*.rs"
       - "**/Cargo.toml"
