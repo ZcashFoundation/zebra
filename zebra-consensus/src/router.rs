@@ -157,6 +157,13 @@ impl RouterError {
             RouterError::BelowKnownHashRange { .. } => 0,
         }
     }
+
+    /// Returns `true` if this is a [`RouterError::BelowKnownHashRange`]
+    /// rejection: the block is in the range only the known-hash engine can
+    /// commit, so re-downloading it through the legacy path cannot help.
+    pub fn is_below_known_hash_range(&self) -> bool {
+        matches!(self, RouterError::BelowKnownHashRange { .. })
+    }
 }
 
 impl<S, V> Service<Request> for BlockVerifierRouter<S, V>
@@ -245,6 +252,7 @@ pub async fn init<S, Mempool>(
     network: &Network,
     state_service: S,
     mempool: oneshot::Receiver<Mempool>,
+    known_hash_sync: bool,
 ) -> (
     Buffer<BoxService<Request, block::Hash, RouterError>, Request>,
     Buffer<
@@ -378,12 +386,24 @@ where
 
     let block = SemanticBlockVerifier::new(network, state_service.clone(), transaction.clone());
 
-    // The gate floor is built from constants: the mandatory checkpoint
-    // height, raised to the known-hash list's max height on networks that
-    // bundle a list (design doc §7.2).
-    let floor = KnownHashListSpec::for_network(network)
-        .map_or(Height(0), |spec| spec.max_height)
-        .max(network.mandatory_checkpoint_height());
+    // The gate floor is built from constants (design doc §7.2). The permanent
+    // floor is the mandatory checkpoint height — Zebra cannot fully validate
+    // pre-Canopy blocks semantically, so it never commits them this way.
+    //
+    // While the known-hash engine is enabled it owns the whole pinned range,
+    // so the floor is raised to the list's max height: a gossiped or
+    // RPC-submitted block just above the engine's tip must not semantically
+    // verify mid-sync and flip the state to its non-finalized mode. When the
+    // engine is disabled the floor stays at the mandatory height, so a node
+    // syncing the post-Canopy range with the legacy path is not blocked by a
+    // gate that exists only to protect the engine.
+    let floor = if known_hash_sync {
+        KnownHashListSpec::for_network(network)
+            .map_or(Height(0), |spec| spec.max_height)
+            .max(network.mandatory_checkpoint_height())
+    } else {
+        network.mandatory_checkpoint_height()
+    };
 
     let router = BlockVerifierRouter { floor, block };
 
@@ -450,6 +470,9 @@ where
             Buffer<BoxService<mempool::Request, mempool::Response, BoxError>, mempool::Request>,
         >()
         .1,
+        // Keep the gate at the known-hash list max for tests, matching the
+        // default-on engine config.
+        true,
     )
     .await
 }

@@ -248,6 +248,7 @@ impl StartCmd {
                 &config.network.network,
                 state.clone(),
                 tx_verifier_setup_rx,
+                config.sync.known_hash_sync,
             )
             .await;
 
