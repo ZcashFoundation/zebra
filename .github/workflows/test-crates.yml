@@ -3,8 +3,8 @@ name: Test Crate Build
 on:
   pull_request:
     branches:
-      main
-      zsa1
+      - main
+      - zsa1
     paths:
       - "**/*.rs"
       - "**/Cargo.toml"
@@ -185,7 +185,6 @@ jobs:
         run: |
           cargo clippy --package ${{ matrix.crate }} --all-features --all-targets -- -D warnings
           cargo build --package ${{ matrix.crate }} --all-features --all-targets
-
 
   test-crate-build-success:
     name: test crate build success
