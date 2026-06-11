@@ -5,11 +5,14 @@ use std::{
     collections::HashSet,
     iter,
     net::SocketAddr,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicU32, AtomicU64, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 
-use futures::{stream, StreamExt};
+use futures::{future, stream, StreamExt};
 use tokio::time::timeout;
 use tower::{discover::Change, Service, ServiceExt};
 
@@ -30,7 +33,7 @@ use indexmap::IndexMap;
 use tokio::sync::watch;
 
 use super::{
-    super::{MorePeers, TIP_STALL_EVICTION_TIMEOUT},
+    super::{track_block_delivery, MorePeers, PeerSetStatus, TIP_STALL_EVICTION_TIMEOUT},
     PeerSetBuilder, PeerVersions,
 };
 
@@ -481,19 +484,105 @@ fn peer_set_tracks_delivered_block_height() {
             .expect("delivered block response succeeds");
 
         // Once the peer becomes ready again, the delivered block has raised
-        // its height above the stale handshake height.
+        // its height above the stale handshake height, and is counted in the
+        // peer's block-download diagnostics.
         let peer_ready = peer_set
             .ready()
             .await
             .expect("peer set service is always ready");
 
-        let remote_height = peer_ready
+        let peer = peer_ready
             .ready_services
             .values()
             .next()
-            .expect("the peer becomes ready again after responding")
-            .remote_height();
-        assert_eq!(remote_height, block_height);
+            .expect("the peer becomes ready again after responding");
+        assert_eq!(peer.remote_height(), block_height);
+        assert_eq!(peer.blocks_received(), 1);
+    });
+}
+
+/// Check that the block-delivery response wrapper counts delivered blocks and
+/// raises the live height, ignoring missing inventory entries.
+#[test]
+fn track_block_delivery_counts_blocks_and_raises_height() {
+    let (runtime, _init_guard) = zebra_test::init_async();
+
+    runtime.block_on(async move {
+        let live_height = Arc::new(AtomicU32::new(0));
+        let blocks_received = Arc::new(AtomicU64::new(0));
+
+        let block = Arc::new(
+            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..])
+                .expect("hard-coded test vector deserializes"),
+        );
+        let block_height = block
+            .coinbase_height()
+            .expect("hard-coded test vector has a coinbase height");
+
+        // A partial response: one delivered block and one missing entry.
+        let response = Response::Blocks(vec![
+            InventoryResponse::Available((block, None)),
+            InventoryResponse::Missing(block::Hash([0; 32])),
+        ]);
+
+        track_block_delivery(
+            live_height.clone(),
+            blocks_received.clone(),
+            future::ready(Ok::<_, SharedPeerError>(response)),
+        )
+        .await
+        .expect("wrapped response future returns the response");
+
+        // Only the available block counts; the missing entry is ignored.
+        assert_eq!(blocks_received.load(Ordering::Relaxed), 1);
+        assert_eq!(live_height.load(Ordering::Relaxed), block_height.0);
+    });
+}
+
+/// Check that the peer set publishes [`PeerSetStatus`] snapshots once peers
+/// become ready.
+#[test]
+fn peer_set_publishes_status_watch() {
+    // Use two peers with the same version.
+    let peer_version = Version::min_specified_for_upgrade(&Network::Mainnet, NetworkUpgrade::Nu6_2);
+    let peer_versions = PeerVersions {
+        peer_versions: vec![peer_version, peer_version],
+    };
+
+    // Start the runtime
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    // Get peers and client handles of them
+    let (discovered_peers, _handles) = peer_versions.mock_peer_discovery();
+    let (minimum_peer_version, _best_tip_height) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+
+    runtime.block_on(async move {
+        // Build a peerset
+        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version.clone())
+            .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
+            .build();
+
+        let status_receiver = peer_set.status_receiver();
+
+        // Before the first poll, the status is empty.
+        assert_eq!(*status_receiver.borrow(), PeerSetStatus::default());
+
+        // After a poll, the status reflects the ready peers.
+        let peer_ready = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+        assert_eq!(peer_ready.ready_services.len(), 2);
+
+        let status = status_receiver.borrow().clone();
+        assert_eq!(status.ready_peers, 2);
+        assert_eq!(status.unready_peers, 0);
+        // The mock handshakes report a start height of zero.
+        assert_eq!(status.median_remote_height, Some(block::Height(0)));
     });
 }
 

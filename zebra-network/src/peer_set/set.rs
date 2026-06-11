@@ -101,7 +101,7 @@ use std::{
     net::IpAddr,
     pin::Pin,
     sync::{
-        atomic::{AtomicU32, Ordering},
+        atomic::{AtomicU32, AtomicU64, Ordering},
         Arc,
     },
     task::{Context, Poll},
@@ -132,7 +132,7 @@ use zebra_chain::{block::Height, chain_tip::ChainTip, parameters::Network};
 
 use crate::{
     address_book::AddressMetrics,
-    constants::MIN_PEER_SET_LOG_INTERVAL,
+    constants::{MIN_PEER_SET_LOG_INTERVAL, PEER_STATS_LOG_INTERVAL},
     peer::{LoadTrackedClient, MinimumPeerVersion},
     peer_set::{
         stall_tracker::FindResponseStallTracker,
@@ -171,6 +171,25 @@ pub struct MorePeers;
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct CancelClientWork;
 
+/// A snapshot of the peer set's size and the heights of its ready peers,
+/// published on a watch channel.
+///
+/// Used by sync consumers to size their download pipelines from the number of
+/// usable peers and how far ahead of us they are.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PeerSetStatus {
+    /// The number of peers that are ready for requests.
+    pub ready_peers: usize,
+
+    /// The number of peers that are busy handling requests.
+    pub unready_peers: usize,
+
+    /// The median chain height of the ready peers — each peer's handshake
+    /// height, raised by blocks that peer actually delivered — or `None` if
+    /// there are no ready peers.
+    pub median_remote_height: Option<Height>,
+}
+
 type ResponseFuture = Pin<Box<dyn Future<Output = Result<Response, BoxError>> + Send + 'static>>;
 
 /// Classification of a `FindBlocks`/`FindHeaders` response, sent from a
@@ -193,14 +212,19 @@ fn classify_find_response<E>(result: &Result<Response, E>) -> Option<StallOutcom
     }
 }
 
-/// Wraps a block-download response future so that the routed peer's live
-/// height is raised to the highest delivered block height once the request
-/// completes.
+/// Wraps a block-download response future so that, once the request completes,
+/// the routed peer's live height is raised to the highest delivered block
+/// height, and the delivered blocks are added to the peer's block-download
+/// counter.
 ///
 /// Only blocks the peer actually delivered raise its height, which keeps
 /// [`LoadTrackedClient::remote_height`] a trusted direct signal rather than
-/// gossip. Missing inventory entries and errors leave the height unchanged.
-fn track_block_delivery<Fut, E>(live_height: Arc<AtomicU32>, fut: Fut) -> ResponseFuture
+/// gossip. Missing inventory entries and errors leave both stats unchanged.
+fn track_block_delivery<Fut, E>(
+    live_height: Arc<AtomicU32>,
+    blocks_received: Arc<AtomicU64>,
+    fut: Fut,
+) -> ResponseFuture
 where
     Fut: Future<Output = Result<Response, E>> + Send + 'static,
     E: Into<BoxError>,
@@ -209,13 +233,19 @@ where
         let response = fut.await.map_err(Into::into);
 
         if let Ok(Response::Blocks(blocks)) = &response {
-            let delivered_height = blocks
-                .iter()
-                .filter_map(|block| match block {
-                    InventoryResponse::Available((block, _addr)) => block.coinbase_height(),
-                    InventoryResponse::Missing(_) => None,
-                })
-                .max();
+            let mut delivered_count: u64 = 0;
+            let mut delivered_height = None;
+
+            for block in blocks {
+                if let InventoryResponse::Available((block, _addr)) = block {
+                    delivered_count += 1;
+                    delivered_height = delivered_height.max(block.coinbase_height());
+                }
+            }
+
+            if delivered_count > 0 {
+                blocks_received.fetch_add(delivered_count, Ordering::Relaxed);
+            }
 
             if let Some(height) = delivered_height {
                 // `fetch_max` keeps the live height monotonic.
@@ -335,6 +365,15 @@ where
     /// The last time we logged a message about the peer set size
     last_peer_log: Option<Instant>,
 
+    /// The last time we logged detailed per-peer sync diagnostics at info level.
+    last_peer_stats_log: Option<Instant>,
+
+    /// Publishes [`PeerSetStatus`] snapshots whenever the peer set's size or
+    /// peer heights change.
+    ///
+    /// Subscribe via [`PeerSet::status_receiver`].
+    status_sender: watch::Sender<PeerSetStatus>,
+
     // Stalled Sync Detection
     //
     /// The highest best-chain-tip height the peer set has observed so far.
@@ -407,6 +446,7 @@ where
         max_conns_per_ip: Option<usize>,
     ) -> Self {
         let (stall_event_tx, stall_event_rx) = tokio_mpsc::unbounded_channel();
+        let (status_sender, _status_receiver) = watch::channel(PeerSetStatus::default());
         Self {
             // New peers
             discover,
@@ -439,6 +479,8 @@ where
 
             // Metrics
             last_peer_log: None,
+            last_peer_stats_log: None,
+            status_sender,
             address_metrics,
 
             // Stalled sync detection
@@ -449,6 +491,19 @@ where
 
             network: config.network.clone(),
         }
+    }
+
+    /// Returns a watch channel receiver for [`PeerSetStatus`] snapshots.
+    ///
+    /// The status is updated whenever the peer set polls its peers, so it can
+    /// briefly lag behind the live peer set.
+    //
+    // TODO: plumb this receiver through `peer_set::init()`'s return value, so
+    //       the known-hash IBD engine can size its download pipeline from the
+    //       peer set status (D phase).
+    #[allow(dead_code)]
+    pub fn status_receiver(&self) -> watch::Receiver<PeerSetStatus> {
+        self.status_sender.subscribe()
     }
 
     /// Check background task handles to make sure they're still running.
@@ -827,9 +882,10 @@ where
     /// Calls a ready peer, moving it to the unready set.
     ///
     /// `BlocksByHash` response futures are wrapped so that delivered blocks
-    /// raise the peer's live height, keeping
+    /// raise the peer's live height — keeping
     /// [`LoadTrackedClient::remote_height`] up to date for height-aware
-    /// routing.
+    /// routing — and increment the peer's block-download counter for sync
+    /// diagnostics.
     ///
     /// # Panics
     ///
@@ -839,15 +895,18 @@ where
             .take_ready_service(&key)
             .expect("selected peer must be ready");
 
-        // Track the highest block height this peer delivers, for height-aware routing.
-        let live_height =
-            matches!(&req, Request::BlocksByHash(_)).then(|| svc.live_height_handle());
+        // Track the blocks this peer delivers, for height-aware routing and
+        // sync diagnostics.
+        let delivery_stats = matches!(&req, Request::BlocksByHash(_))
+            .then(|| (svc.live_height_handle(), svc.blocks_received_handle()));
 
         let fut = svc.call(req);
         self.push_unready(key, svc);
 
-        match live_height {
-            Some(live_height) => track_block_delivery(live_height, fut),
+        match delivery_stats {
+            Some((live_height, blocks_received)) => {
+                track_block_delivery(live_height, blocks_received, fut)
+            }
             None => fut.map_err(Into::into).boxed(),
         }
     }
@@ -1430,6 +1489,9 @@ where
 
         self.last_peer_log = Some(now);
 
+        // Log sync diagnostics about the connected peers.
+        self.log_peer_stats(ready_services_len, unready_services_len);
+
         // Log potential duplicate connections.
         let peers = self.peer_set_addresses();
 
@@ -1486,6 +1548,98 @@ where
         }
     }
 
+    /// Logs sync diagnostics about the connected peers.
+    ///
+    /// Emits a compact summary line on each call — every
+    /// [`MIN_PEER_SET_LOG_INTERVAL`], via [`PeerSet::log_peer_set_size`] —
+    /// with the ready/unready counts, how many ready peers are at or above our
+    /// chain tip, and the spread of reported peer heights. Every
+    /// [`PEER_STATS_LOG_INTERVAL`] it also emits one line per ready peer with
+    /// its reported height, blocks downloaded so far, and load (a peak-EWMA
+    /// latency estimate). The per-peer detail uses a longer interval because
+    /// it logs one line per connected peer, which is too verbose to emit every
+    /// minute.
+    ///
+    /// Stats for peers that are currently handling a request (unready) are not
+    /// readable here, so the per-peer lines only cover ready peers. Counts are
+    /// cumulative over each peer connection's lifetime.
+    fn log_peer_stats(&mut self, ready: usize, unready: usize) {
+        let tip_height = self.minimum_peer_version.chain_tip_height();
+
+        let mut heights: Vec<Height> = self
+            .ready_services
+            .values()
+            .map(|svc| svc.remote_height())
+            .collect();
+        heights.sort_unstable();
+
+        let peers_at_or_above_tip = heights
+            .iter()
+            .filter(|&&height| height >= tip_height)
+            .count();
+        let min_height = heights.first().copied();
+        let max_height = heights.last().copied();
+        let median_height = heights.get(heights.len() / 2).copied();
+
+        info!(
+            ready_peers = ready,
+            unready_peers = unready,
+            ?tip_height,
+            peers_at_or_above_tip,
+            ?min_height,
+            ?median_height,
+            ?max_height,
+            "peer set status",
+        );
+
+        // The per-peer lines are verbose (one per connected peer), so only emit
+        // them at info level every few minutes.
+        let now = Instant::now();
+        if let Some(last) = self.last_peer_stats_log {
+            if now.duration_since(last) < PEER_STATS_LOG_INTERVAL {
+                return;
+            }
+        }
+        self.last_peer_stats_log = Some(now);
+
+        for (addr, svc) in &self.ready_services {
+            info!(
+                ?addr,
+                height = ?svc.remote_height(),
+                blocks_downloaded = svc.blocks_received(),
+                load = ?svc.load(),
+                "ready peer sync status",
+            );
+        }
+    }
+
+    /// Publishes a [`PeerSetStatus`] snapshot on the status watch channel,
+    /// waking subscribers only when the status has changed.
+    fn publish_status(&self, ready_peers: usize, unready_peers: usize) {
+        let mut heights: Vec<Height> = self
+            .ready_services
+            .values()
+            .map(|svc| svc.remote_height())
+            .collect();
+        heights.sort_unstable();
+        let median_remote_height = heights.get(heights.len() / 2).copied();
+
+        let status = PeerSetStatus {
+            ready_peers,
+            unready_peers,
+            median_remote_height,
+        };
+
+        self.status_sender.send_if_modified(|current| {
+            if *current == status {
+                false
+            } else {
+                *current = status;
+                true
+            }
+        });
+    }
+
     /// Updates the peer set metrics.
     ///
     /// # Panics
@@ -1498,6 +1652,8 @@ where
         metrics::gauge!("pool.num_ready").set(num_ready as f64);
         metrics::gauge!("pool.num_unready").set(num_unready as f64);
         metrics::gauge!("zcash.net.peers").set(num_peers as f64);
+
+        self.publish_status(num_ready, num_unready);
 
         // Security: make sure we haven't exceeded the connection limit
         if num_peers > self.peerset_total_connection_limit {

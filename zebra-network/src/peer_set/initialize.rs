@@ -227,6 +227,9 @@ where
         MinimumPeerVersion::new(latest_chain_tip, &config.network),
         None,
     );
+    // TODO: return `peer_set.status_receiver()` from `init()`, so sync
+    //       consumers like the known-hash IBD engine can size their download
+    //       pipelines from the peer set status (D phase).
     let peer_set = Buffer::new(BoxService::new(peer_set), constants::PEERSET_BUFFER_SIZE);
 
     // Connect peerset_tx to the 3 peer sources:

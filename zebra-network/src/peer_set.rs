@@ -14,3 +14,4 @@ use inventory_registry::InventoryRegistry;
 pub(crate) use set::PeerSet;
 
 pub use initialize::init;
+pub use set::PeerSetStatus;

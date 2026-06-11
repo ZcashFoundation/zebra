@@ -3,7 +3,7 @@
 
 use std::{
     sync::{
-        atomic::{AtomicU32, Ordering},
+        atomic::{AtomicU32, AtomicU64, Ordering},
         Arc,
     },
     task::{Context, Poll},
@@ -43,6 +43,13 @@ pub struct LoadTrackedClient {
     /// which raise it when a `Blocks` response arrives. Only ever raised, never
     /// lowered, so it is a trusted direct signal rather than gossip.
     live_height: Arc<AtomicU32>,
+
+    /// The number of blocks downloaded from this peer over the connection's lifetime.
+    ///
+    /// Shared with the block-download response futures routed to this peer,
+    /// which increment it when a `Blocks` response arrives. Used for sync
+    /// diagnostics.
+    blocks_received: Arc<AtomicU64>,
 }
 
 /// Create a new [`LoadTrackedClient`] wrapping the provided `client` service.
@@ -61,6 +68,7 @@ impl From<Client> for LoadTrackedClient {
             service,
             connection_info,
             live_height: Arc::new(AtomicU32::new(0)),
+            blocks_received: Arc::new(AtomicU64::new(0)),
         }
     }
 }
@@ -107,6 +115,18 @@ impl LoadTrackedClient {
     /// [`fetch_max`](AtomicU32::fetch_max).
     pub(crate) fn live_height_handle(&self) -> Arc<AtomicU32> {
         self.live_height.clone()
+    }
+
+    /// Returns the number of blocks downloaded from this peer over the
+    /// connection's lifetime.
+    pub fn blocks_received(&self) -> u64 {
+        self.blocks_received.load(Ordering::Relaxed)
+    }
+
+    /// Returns a handle to this peer's block-download counter, so a response
+    /// future can record blocks received after the request completes.
+    pub(crate) fn blocks_received_handle(&self) -> Arc<AtomicU64> {
+        self.blocks_received.clone()
     }
 }
 
