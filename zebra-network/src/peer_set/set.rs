@@ -100,7 +100,10 @@ use std::{
     marker::PhantomData,
     net::IpAddr,
     pin::Pin,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc,
+    },
     task::{Context, Poll},
     time::Instant,
 };
@@ -138,7 +141,7 @@ use crate::{
     },
     protocol::{
         external::InventoryHash,
-        internal::{Request, Response},
+        internal::{InventoryResponse, Request, Response},
     },
     BoxError, Config, PeerError, PeerSocketAddr, SharedPeerError,
 };
@@ -181,6 +184,41 @@ fn classify_find_response<E>(result: &Result<Response, E>) -> Option<StallOutcom
         Ok(_) => None,
         Err(_) => Some(StallOutcome::Stall),
     }
+}
+
+/// Wraps a block-download response future so that the routed peer's live
+/// height is raised to the highest delivered block height once the request
+/// completes.
+///
+/// Only blocks the peer actually delivered raise its height, which keeps
+/// [`LoadTrackedClient::remote_height`] a trusted direct signal rather than
+/// gossip. Missing inventory entries and errors leave the height unchanged.
+fn track_block_delivery<Fut, E>(live_height: Arc<AtomicU32>, fut: Fut) -> ResponseFuture
+where
+    Fut: Future<Output = Result<Response, E>> + Send + 'static,
+    E: Into<BoxError>,
+{
+    async move {
+        let response = fut.await.map_err(Into::into);
+
+        if let Ok(Response::Blocks(blocks)) = &response {
+            let delivered_height = blocks
+                .iter()
+                .filter_map(|block| match block {
+                    InventoryResponse::Available((block, _addr)) => block.coinbase_height(),
+                    InventoryResponse::Missing(_) => None,
+                })
+                .max();
+
+            if let Some(height) = delivered_height {
+                // `fetch_max` keeps the live height monotonic.
+                live_height.fetch_max(height.0, Ordering::Relaxed);
+            }
+        }
+
+        response
+    }
+    .boxed()
 }
 
 /// A [`tower::Service`] that abstractly represents "the rest of the network".
@@ -762,6 +800,34 @@ where
         }
     }
 
+    /// Calls a ready peer, moving it to the unready set.
+    ///
+    /// `BlocksByHash` response futures are wrapped so that delivered blocks
+    /// raise the peer's live height, keeping
+    /// [`LoadTrackedClient::remote_height`] up to date for height-aware
+    /// routing.
+    ///
+    /// # Panics
+    ///
+    /// If the peer at `key` is not in `ready_services`.
+    fn call_ready_peer(&mut self, key: D::Key, req: Request) -> <Self as Service<Request>>::Future {
+        let mut svc = self
+            .take_ready_service(&key)
+            .expect("selected peer must be ready");
+
+        // Track the highest block height this peer delivers, for height-aware routing.
+        let live_height =
+            matches!(&req, Request::BlocksByHash(_)).then(|| svc.live_height_handle());
+
+        let fut = svc.call(req);
+        self.push_unready(key, svc);
+
+        match live_height {
+            Some(live_height) => track_block_delivery(live_height, fut),
+            None => fut.map_err(Into::into).boxed(),
+        }
+    }
+
     /// Takes a ready service by key.
     fn take_ready_service(&mut self, key: &D::Key) -> Option<D::Service> {
         if let Some(svc) = self.ready_services.remove(key) {
@@ -939,31 +1005,36 @@ where
         if let Some(p2c_key) = self.select_ready_p2c_peer() {
             tracing::trace!(?p2c_key, "routing based on p2c");
 
-            let mut svc = self
-                .take_ready_service(&p2c_key)
-                .expect("selected peer must be ready");
-
             let track_stalls = matches!(
                 &req,
                 Request::FindBlocks { .. } | Request::FindHeaders { .. }
             );
 
+            if !track_stalls {
+                // `call_ready_peer` tracks delivered block heights for
+                // `BlocksByHash` requests, which reach `route_p2c` via the
+                // `route_block_download` fallback. Block requests are never
+                // `FindBlocks`/`FindHeaders`, so at most one response wrapper
+                // applies to each request.
+                return self.call_ready_peer(p2c_key, req);
+            }
+
+            let mut svc = self
+                .take_ready_service(&p2c_key)
+                .expect("selected peer must be ready");
+
             let fut = svc.call(req);
             self.push_unready(p2c_key, svc);
 
-            if track_stalls {
-                let stall_tx = self.stall_event_tx.clone();
-                return async move {
-                    let result = fut.await;
-                    if let Some(outcome) = classify_find_response(&result) {
-                        let _ = stall_tx.send((p2c_key, outcome));
-                    }
-                    result.map_err(Into::into)
+            let stall_tx = self.stall_event_tx.clone();
+            return async move {
+                let result = fut.await;
+                if let Some(outcome) = classify_find_response(&result) {
+                    let _ = stall_tx.send((p2c_key, outcome));
                 }
-                .boxed();
+                result.map_err(Into::into)
             }
-
-            return fut.map_err(Into::into).boxed();
+            .boxed();
         }
 
         async move {
@@ -979,6 +1050,41 @@ where
         }
         .map_err(Into::into)
         .boxed()
+    }
+
+    /// Routes a block download request to a ready peer whose chain height is
+    /// at or above our current chain tip.
+    ///
+    /// During initial sync, this avoids wasting download slots on peers that
+    /// are behind us — they're unlikely to have the blocks we need. The peer
+    /// height is the handshake height raised by blocks the peer actually
+    /// delivered (see [`LoadTrackedClient::remote_height`]).
+    ///
+    /// Falls back to normal P2C routing if no ready peers are at our height.
+    fn route_block_download(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
+        let tip_height = self.minimum_peer_version.chain_tip_height();
+
+        let tall_peers: HashSet<D::Key> = self
+            .ready_services
+            .iter()
+            .filter(|(_addr, svc)| svc.remote_height() >= tip_height)
+            .map(|(addr, _svc)| *addr)
+            .collect();
+
+        // Security: choose a random, less-loaded peer at or above our chain tip.
+        if let Some(key) = self.select_p2c_peer_from_list(&tall_peers) {
+            tracing::trace!(
+                ?key,
+                ?tip_height,
+                tall_peers = tall_peers.len(),
+                "routing block download to a peer at or above our chain tip"
+            );
+
+            return self.call_ready_peer(key, req);
+        }
+
+        // No ready peers at our height — fall back to normal P2C.
+        self.route_p2c(req)
     }
 
     /// Tries to route a request to a ready peer that advertised that inventory,
@@ -1010,12 +1116,9 @@ where
         // so that a peer can't provide all our inventory responses.
         let peer = self.select_p2c_peer_from_list(&advertising_peer_list);
 
-        if let Some(mut svc) = peer.and_then(|key| self.take_ready_service(&key)) {
-            let peer = peer.expect("just checked peer is Some");
-            tracing::trace!(?hash, ?peer, "routing to a peer which advertised inventory");
-            let fut = svc.call(req);
-            self.push_unready(peer, svc);
-            return fut.map_err(Into::into).boxed();
+        if let Some(key) = peer.filter(|key| self.ready_services.contains_key(key)) {
+            tracing::trace!(?hash, ?key, "routing to a peer which advertised inventory");
+            return self.call_ready_peer(key, req);
         }
 
         let missing_peer_list: HashSet<PeerSocketAddr> = self
@@ -1033,12 +1136,9 @@ where
         // Security: choose a random, less-loaded peer that might have the inventory.
         let peer = self.select_p2c_peer_from_list(&maybe_peer_list);
 
-        if let Some(mut svc) = peer.and_then(|key| self.take_ready_service(&key)) {
-            let peer = peer.expect("just checked peer is Some");
-            tracing::trace!(?hash, ?peer, "routing to a peer that might have inventory");
-            let fut = svc.call(req);
-            self.push_unready(peer, svc);
-            return fut.map_err(Into::into).boxed();
+        if let Some(key) = peer.filter(|key| self.ready_services.contains_key(key)) {
+            tracing::trace!(?hash, ?key, "routing to a peer that might have inventory");
+            return self.call_ready_peer(key, req);
         }
 
         tracing::debug!(
@@ -1411,6 +1511,12 @@ where
                 let hash = InventoryHash::from(*hashes.iter().next().unwrap());
                 self.route_inv(req, hash)
             }
+
+            // Route multi-block download requests to peers whose chain height
+            // is at or above our current chain tip. This avoids wasting
+            // download slots on peers that are behind us during initial sync.
+            // Falls back to normal P2C if no peers are tall enough.
+            Request::BlocksByHash(ref hashes) if hashes.len() > 1 => self.route_block_download(req),
 
             // Broadcast advertisements to lots of peers
             Request::AdvertiseTransactionIds(_, _) => self.route_broadcast(req),

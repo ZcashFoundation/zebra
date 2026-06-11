@@ -2,20 +2,22 @@
 
 use std::{cmp::max, collections::HashSet, iter, net::SocketAddr, sync::Arc, time::Duration};
 
+use futures::{stream, StreamExt};
 use tokio::time::timeout;
-use tower::{Service, ServiceExt};
+use tower::{discover::Change, Service, ServiceExt};
 
 use zebra_chain::{
-    block,
+    block::{self, Block},
     parameters::{Network, NetworkUpgrade},
+    serialization::ZcashDeserialize,
 };
 
 use crate::{
     constants::DEFAULT_MAX_CONNS_PER_IP,
-    peer::{ClientRequest, MinimumPeerVersion},
+    peer::{ClientRequest, ClientTestHarness, LoadTrackedClient, MinimumPeerVersion},
     peer_set::inventory_registry::InventoryStatus,
     protocol::external::{types::Version, InventoryHash},
-    PeerSocketAddr, Request, SharedPeerError,
+    BoxError, InventoryResponse, PeerSocketAddr, Request, Response, SharedPeerError,
 };
 use indexmap::IndexMap;
 use tokio::sync::watch;
@@ -176,6 +178,177 @@ fn peer_set_ready_multiple_connections() {
         // Peer set hangs when no more connections are present
         let peer_ready = peer_set.ready();
         assert!(timeout(Duration::from_secs(10), peer_ready).await.is_err());
+    });
+}
+
+/// Check that the peer set routes multi-block download requests to a ready
+/// peer whose chain height is at or above our current chain tip, in preference
+/// to ready peers that are behind us.
+#[test]
+fn peer_set_routes_multi_block_downloads_to_tall_peers() {
+    let peer_version = Version::min_specified_for_upgrade(&Network::Mainnet, NetworkUpgrade::Nu6_2);
+
+    // Start the runtime
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    // Peer heights are compared against this chain tip height.
+    let (minimum_peer_version, best_tip_height) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+    best_tip_height.send_best_tip_height(block::Height(100));
+
+    runtime.block_on(async move {
+        // A peer that is at or above our chain tip, and a peer that is behind us.
+        let (tall_client, mut tall_handle) = ClientTestHarness::build()
+            .with_version(peer_version)
+            .with_start_height(block::Height(200))
+            .finish();
+        let (short_client, mut short_handle) = ClientTestHarness::build()
+            .with_version(peer_version)
+            .with_start_height(block::Height(0))
+            .finish();
+
+        let tall_addr: PeerSocketAddr = SocketAddr::new([127, 0, 0, 1].into(), 1).into();
+        let short_addr: PeerSocketAddr = SocketAddr::new([127, 0, 0, 1].into(), 2).into();
+
+        let discovered_peers: Vec<Result<Change<PeerSocketAddr, LoadTrackedClient>, BoxError>> = vec![
+            Ok(Change::Insert(tall_addr, tall_client.into())),
+            Ok(Change::Insert(short_addr, short_client.into())),
+        ];
+        let discovered_peers = stream::iter(discovered_peers).chain(stream::pending());
+
+        // Build a peerset
+        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version.clone())
+            .max_conns_per_ip(max(2, DEFAULT_MAX_CONNS_PER_IP))
+            .build();
+
+        // Get peerset ready
+        let peer_ready = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+
+        // Check we have the right amount of ready services
+        assert_eq!(peer_ready.ready_services.len(), 2);
+
+        // A multi-block download request skips inventory routing and uses
+        // height-aware routing.
+        let sent_request = Request::BlocksByHash(
+            [block::Hash([0; 32]), block::Hash([1; 32])]
+                .into_iter()
+                .collect(),
+        );
+        let _fut = peer_ready.call(sent_request.clone());
+
+        // Only the peer at or above the chain tip should receive the request.
+        if let Some(ClientRequest { request, .. }) = tall_handle
+            .try_to_receive_outbound_client_request()
+            .request()
+        {
+            assert_eq!(sent_request, request);
+        } else {
+            panic!("block download not routed to the peer at or above our chain tip");
+        }
+
+        assert!(
+            short_handle
+                .try_to_receive_outbound_client_request()
+                .request()
+                .is_none(),
+            "block download routed to a peer that is behind our chain tip",
+        );
+    });
+}
+
+/// Check that the peer set raises a peer's height when the peer delivers a
+/// block, so height-aware routing uses delivered blocks as well as the
+/// handshake height.
+#[test]
+fn peer_set_tracks_delivered_block_height() {
+    // Use one peer, so the request routing is deterministic.
+    let peer_versions = PeerVersions {
+        peer_versions: vec![Version::min_specified_for_upgrade(
+            &Network::Mainnet,
+            NetworkUpgrade::Nu6_2,
+        )],
+    };
+
+    // Start the runtime
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    // Get the peer and its client handle
+    let (discovered_peers, mut handles) = peer_versions.mock_peer_discovery();
+    let (minimum_peer_version, _best_tip_height) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+
+    runtime.block_on(async move {
+        // Build a peerset
+        let (mut peer_set, _peer_set_guard) = PeerSetBuilder::new()
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version.clone())
+            .build();
+
+        // Get peerset ready
+        let peer_ready = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+        assert_eq!(peer_ready.ready_services.len(), 1);
+
+        // The mock handshake reports a start height of zero.
+        let handshake_height = peer_ready
+            .ready_services
+            .values()
+            .next()
+            .expect("just checked there is a ready peer")
+            .remote_height();
+        assert_eq!(handshake_height, block::Height(0));
+
+        let block = Arc::new(
+            Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_1_BYTES[..])
+                .expect("hard-coded test vector deserializes"),
+        );
+        let block_height = block
+            .coinbase_height()
+            .expect("hard-coded test vector has a coinbase height");
+
+        // Request the block, and deliver it through the mocked connection.
+        let response_fut =
+            peer_ready.call(Request::BlocksByHash(iter::once(block.hash()).collect()));
+
+        let client_request = handles[0]
+            .try_to_receive_outbound_client_request()
+            .request()
+            .expect("peer set routes the request to the only ready peer");
+
+        client_request
+            .tx
+            .send(Ok(Response::Blocks(vec![InventoryResponse::Available((
+                block, None,
+            ))])))
+            .expect("response receiver is held by the routed response future");
+
+        response_fut
+            .await
+            .expect("delivered block response succeeds");
+
+        // Once the peer becomes ready again, the delivered block has raised
+        // its height above the stale handshake height.
+        let peer_ready = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+
+        let remote_height = peer_ready
+            .ready_services
+            .values()
+            .next()
+            .expect("the peer becomes ready again after responding")
+            .remote_height();
+        assert_eq!(remote_height, block_height);
     });
 }
 
