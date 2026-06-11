@@ -334,6 +334,10 @@ pub struct Config {
     ///
     /// Downloaded chunks are verified against the hashes compiled into
     /// `zebrad` before use, so this changes availability, not trust.
+    ///
+    /// Not yet implemented: missing chunk files are currently a hard error
+    /// regardless of this setting (the self-download path is a planned
+    /// follow-up). The field is kept so configs that set it keep parsing.
     pub known_hash_list_download: bool,
 
     /// Write every block fetched by the known-hash engine to its disk cache
@@ -341,6 +345,11 @@ pub struct Config {
     ///
     /// This closes the crash-loss window for blocks fetched but not yet
     /// committed, at the cost of one extra sequential write of the chain.
+    ///
+    /// Not yet implemented: blocks are currently spooled to the disk cache
+    /// only when they overflow the memory budget (the write-ahead path is a
+    /// planned follow-up). The field is kept so configs that set it keep
+    /// parsing.
     pub known_hash_cache_write_ahead: bool,
 }
 

@@ -420,7 +420,13 @@ where
         }
 
         if saw_missing {
-            not_found_peer = round_source.or(not_found_peer);
+            // A batch is served by one peer, so this round's `Available`
+            // source is also whoever reported the `Missing` items. Attribute
+            // to the most recent round that saw a miss, not the earliest:
+            // keeping a stale earlier peer (via `.or`) would blame a peer that
+            // delivered in a later round, and overwriting with `None` for an
+            // all-missing round honestly records "couldn't identify the peer".
+            not_found_peer = round_source;
         }
 
         if remaining.is_empty() {

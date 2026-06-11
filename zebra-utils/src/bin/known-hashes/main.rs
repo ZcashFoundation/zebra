@@ -174,5 +174,10 @@ fn run_emit(
         Network::Testnet(_) => "TESTNET",
     };
 
-    Ok(emit::spec_constant_block(const_prefix, max_height, &spec))
+    Ok(emit::spec_constant_block(
+        const_prefix,
+        &format!("{file_prefix}-known-hashes"),
+        max_height,
+        &spec,
+    ))
 }

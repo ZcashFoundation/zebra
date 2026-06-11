@@ -1414,7 +1414,7 @@ where
                 Ok(())
             }
 
-            StageOutcome::Commit(outcome) => self.on_commit_complete(offset, height, outcome),
+            StageOutcome::Commit(outcome) => self.on_commit_complete(offset, height, outcome, now),
 
             // Aborted: the slot was already updated by the winning future.
             StageOutcome::Aborted => Ok(()),
@@ -1530,6 +1530,7 @@ where
                 not_founds,
                 hedged,
                 abort,
+                since,
                 ..
             } => {
                 if let FetchFailureKind::NotFound { .. } = kind {
@@ -1538,18 +1539,27 @@ where
 
                 match (origin, hedged.take()) {
                     // The primary failed but its hedge is still in flight:
-                    // promote the hedge and keep the slot.
+                    // promote the hedge and keep the slot. Restart the hedge
+                    // clock from now so the promoted hedge gets a full
+                    // interval before it is itself hedged — otherwise the
+                    // stale `since` is already past the deadline and
+                    // `hedge_frontier` re-hedges on the next loop pass.
                     (FetchOrigin::Primary, Some(hedge)) => {
                         *abort = hedge;
+                        *since = now;
                     }
 
                     // A hedge failed while another future is still in
-                    // flight: just forget the hedge handle. (When a promoted
-                    // hedge and a newer hedge are both in flight, we cannot
-                    // tell which one failed; either way exactly one live
-                    // future remains, and its own completion settles the
+                    // flight: forget the hedge handle and restart the hedge
+                    // clock (same reason as above — without this, the slot
+                    // re-hedges every loop pass in a tight CPU spin). (When a
+                    // promoted hedge and a newer hedge are both in flight, we
+                    // cannot tell which one failed; either way exactly one
+                    // live future remains, and its own completion settles the
                     // slot.)
-                    (FetchOrigin::Hedge, Some(_)) => {}
+                    (FetchOrigin::Hedge, Some(_)) => {
+                        *since = now;
+                    }
 
                     // The last in-flight future for this height failed: back
                     // off before reassigning. (A hedge failure with
@@ -1591,6 +1601,7 @@ where
         offset: usize,
         height: block::Height,
         outcome: CommitOutcome,
+        now: Instant,
     ) -> Result<(), EngineError> {
         let bytes = match &self.window[offset] {
             Slot::Fetched {
@@ -1642,7 +1653,7 @@ where
                 Ok(())
             }
 
-            CommitOutcome::Failed(error) => self.on_commit_failure(offset, height, error),
+            CommitOutcome::Failed(error) => self.on_commit_failure(offset, height, error, now),
         }
     }
 
@@ -1653,16 +1664,19 @@ where
         offset: usize,
         height: block::Height,
         error: VerifyAndCommitError,
+        now: Instant,
     ) -> Result<(), EngineError> {
         match error {
             // The state Buffer failed its readiness check: the service is
             // gone, and so is every future commit.
             VerifyAndCommitError::StateUnready(error) => Err(EngineError::Shutdown(error)),
 
-            VerifyAndCommitError::Verify(error) => self.on_verify_failure(offset, height, error),
+            VerifyAndCommitError::Verify(error) => {
+                self.on_verify_failure(offset, height, error, now)
+            }
 
             VerifyAndCommitError::Commit { error, hash, .. } => {
-                self.on_commit_stage_failure(offset, height, hash, error)
+                self.on_commit_stage_failure(offset, height, hash, error, now)
             }
         }
     }
@@ -1675,6 +1689,7 @@ where
         offset: usize,
         height: block::Height,
         error: ConvertError,
+        now: Instant,
     ) -> Result<(), EngineError> {
         if error.is_fatal_list_diagnostic() {
             return Err(EngineError::ListDiagnostic(error));
@@ -1707,7 +1722,7 @@ where
             "discarding a block copy that failed verification; refetching",
         );
 
-        self.discard_slot_copy(offset, height);
+        self.discard_slot_copy(offset, height, now);
         Ok(())
     }
 
@@ -1725,6 +1740,7 @@ where
         height: block::Height,
         hash: block::Hash,
         error: BoxError,
+        now: Instant,
     ) -> Result<(), EngineError> {
         if height > self.base {
             // A descendant dropped by a reset (or a frontier error racing
@@ -1813,13 +1829,13 @@ where
             self.peer_stats.exclude(height, peer);
         }
 
-        self.discard_slot_copy(offset, height);
+        self.discard_slot_copy(offset, height, now);
         Ok(())
     }
 
     /// Discards the block copy held (or cached) for `height`, releasing its
     /// budget and resetting the slot for an immediate refetch.
-    fn discard_slot_copy(&mut self, offset: usize, height: block::Height) {
+    fn discard_slot_copy(&mut self, offset: usize, height: block::Height, now: Instant) {
         let bytes = match &self.window[offset] {
             Slot::Fetched { bytes, .. } => *bytes,
             Slot::Cached { bytes, .. } => {
@@ -1840,9 +1856,18 @@ where
             .checked_sub(u64::from(bytes))
             .expect("held and promoted blocks were counted against the budget");
 
-        // No backoff: the copy was corrupt, not missing; the §4.1 exclusion
-        // steers the refetch to a different peer immediately.
-        self.window[offset] = Slot::unrequested();
+        // Back off before refetching. A corrupt copy is not a missing block,
+        // but without a delay a peer that keeps serving a bad body for the
+        // same height drives a tight fetch -> verify-fail -> refetch CPU spin
+        // (the per-height exclusion is recorded but not yet consulted by
+        // routing, so the refetch can return to the same peer). The base
+        // backoff paces these retries without materially slowing recovery
+        // from a one-off corrupt delivery.
+        self.window[offset] = Slot::Unrequested {
+            attempts: 0,
+            not_founds: 0,
+            backoff_until: Some(now + IBD_HEIGHT_RETRY_BACKOFF_BASE),
+        };
     }
 
     /// Pops the contiguous committed prefix off the window front, advancing

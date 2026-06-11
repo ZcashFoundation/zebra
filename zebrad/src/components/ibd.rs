@@ -10,9 +10,10 @@
 //! owns the engine task, and reports the [`IbdOutcome`] used by startup
 //! wiring to hand off to the legacy syncer.
 //!
-//! The engine is gated behind the `sync.known_hash_sync` config flag
-//! (default off). See `docs/design/known-hash-ibd.md` for the full design;
-//! the supervisor is specified in §4.7.
+//! The engine is gated behind the `sync.known_hash_sync` config flag, which
+//! defaults to on for Mainnet (enabled in Phase E1). See
+//! `docs/design/known-hash-ibd.md` for the full design; the supervisor is
+//! specified in §4.7.
 
 use std::{
     path::{Path, PathBuf},

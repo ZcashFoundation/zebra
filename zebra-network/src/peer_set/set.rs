@@ -1109,6 +1109,24 @@ where
             return;
         }
 
+        // Only treat a static tip as a stall worth churning peers over when at
+        // least one peer reports a height above ours — i.e. there is newer
+        // chain we are failing to obtain. A fully-synced node during a natural
+        // >timeout block gap, a quiet/partitioned network where no peer has
+        // anything newer, and regtest or an unmined testnet (where the tip
+        // never grows) are not recoverable by eviction; dropping a healthy
+        // peer and cancelling its in-flight work there is pure harm. Resetting
+        // the timer means a later genuine fall-behind measures from when it
+        // started, giving sync the full timeout to recover before any eviction.
+        let some_peer_is_ahead = self
+            .ready_services
+            .values()
+            .any(|svc| svc.remote_height() > tip_height);
+        if !some_peer_is_ahead {
+            self.last_tip_growth = Instant::now();
+            return;
+        }
+
         // The tip hasn't grown yet: wait until the stall timeout elapses.
         if self.last_tip_growth.elapsed() < TIP_STALL_EVICTION_TIMEOUT {
             return;

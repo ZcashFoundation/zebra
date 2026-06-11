@@ -337,7 +337,18 @@ where
                      incorrect chain. Delete and re-sync your state to use the best chain"
                 ),
                 Ok(zebra_state::Response::BlockHash(None)) => {
-                    unreachable!("the state tip is at or above the spot-checked height")
+                    // The `Tip` and `BestChainBlockHash` reads are not atomic.
+                    // The best chain can shrink below the spot-checked height
+                    // between them — e.g. an `invalidateblock` RPC or a reorg
+                    // to a shorter chain — leaving no block at that height. That
+                    // is a benign race, not a wrong-chain indictment, so skip
+                    // the spot-check this startup rather than panicking the
+                    // consensus task (which would exit the node).
+                    tracing::info!(
+                        ?check_height,
+                        "best chain changed during the startup spot-check; \
+                         skipping it this run"
+                    );
                 }
                 Ok(response) => {
                     unreachable!("unexpected response type: {response:?} from state request")

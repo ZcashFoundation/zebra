@@ -111,6 +111,15 @@ pub struct DiskDb {
     /// diagnostics to check whether auto-compaction is currently paused.
     auto_compaction_disabled: Arc<AtomicBool>,
 
+    /// The names of the column families this database was opened with.
+    ///
+    /// Captured at construction so per-column-family operations (flush,
+    /// auto-compaction toggling, level-0 counting) don't re-read the list off
+    /// disk on every call — and, more importantly, can't silently degrade to a
+    /// no-op if that disk read transiently fails, which for the WAL-skip flush
+    /// would mean reporting bulk writes durable when nothing was flushed.
+    column_families: Arc<[String]>,
+
     // Owned State
     //
     // Everything contained in this state must be shared by all clones, or read-only.
@@ -1011,8 +1020,16 @@ impl DiskDb {
             db_options.set_atomic_flush(true);
         }
 
-        let column_families =
-            DiskDb::construct_column_families(db_options.clone(), &path, column_families_in_code);
+        // Collect the in-code column family names once: they're stored on the
+        // DiskDb so per-CF operations never re-list from disk, and reused to
+        // build the open descriptors below.
+        let column_family_names: Arc<[String]> = column_families_in_code.into_iter().collect();
+
+        let column_families = DiskDb::construct_column_families(
+            db_options.clone(),
+            &path,
+            column_family_names.iter().cloned(),
+        );
 
         let db_result = if read_only {
             // Use a tempfile for the secondary instance cache directory
@@ -1049,6 +1066,7 @@ impl DiskDb {
                     finished_format_upgrades: Arc::new(AtomicBool::new(false)),
                     skip_wal: Arc::new(AtomicBool::new(false)),
                     auto_compaction_disabled: Arc::new(AtomicBool::new(false)),
+                    column_families: column_family_names,
                 };
 
                 db.assert_default_cf_is_empty();
@@ -1173,7 +1191,7 @@ impl DiskDb {
 
         for cf_name in self.column_family_names() {
             // Skip column families that were dropped or renamed since the names were listed.
-            let Some(cf) = self.db.cf_handle(&cf_name) else {
+            let Some(cf) = self.db.cf_handle(cf_name) else {
                 continue;
             };
 
@@ -1242,9 +1260,9 @@ impl DiskDb {
         self.db.flush_cfs_opt(&cf_handles, &flush_options)
     }
 
-    /// Returns the names of all column families in this database.
-    fn column_family_names(&self) -> Vec<String> {
-        DB::list_cf(&DiskDb::options(), self.path()).unwrap_or_default()
+    /// Returns the names of the column families this database was opened with.
+    fn column_family_names(&self) -> &[String] {
+        &self.column_families
     }
 
     // Private methods

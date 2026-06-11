@@ -194,18 +194,28 @@ fn spec_constant_block_matches_synthetic_sweep() -> Result<()> {
 
     assert_eq!(spec.chunk_hashes, vec![expected_chunk]);
 
-    let constant_block = spec_constant_block("TESTNET", 2, &spec);
+    let constant_block = spec_constant_block("TESTNET", "test-known-hashes", 2, &spec);
 
+    // The emitted block must match the KnownHashListSpec struct field for
+    // field, so it compiles when pasted into zebra-chain.
     assert!(
-        constant_block.contains("pub const TESTNET_KNOWN_HASH_LIST_SPEC: KnownHashListSpec ="),
+        constant_block.contains("pub const TESTNET_KNOWN_HASHES: KnownHashListSpec ="),
         "{constant_block}"
     );
     assert!(
-        constant_block.contains("max_height: Height(2),"),
+        constant_block.contains("max_height: block::Height(2),"),
         "{constant_block}"
     );
     assert!(
-        constant_block.contains(&format!("hex!(\"{}\"),", hex::encode(expected_chunk))),
+        constant_block.contains(&format!("chunk_blocks: {HASHES_PER_CHUNK},")),
+        "{constant_block}"
+    );
+    assert!(
+        constant_block.contains("file_prefix: \"test-known-hashes\","),
+        "{constant_block}"
+    );
+    assert!(
+        constant_block.contains(&format!("\"{}\",", hex::encode(expected_chunk))),
         "{constant_block}"
     );
 
