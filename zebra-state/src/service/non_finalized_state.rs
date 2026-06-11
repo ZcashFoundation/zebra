@@ -480,10 +480,24 @@ impl NonFinalizedState {
             ),
         };
 
-        // Push onto the chain, updating trees, nullifiers, and UTXOs; the
-        // block commitment and sprout anchor validation in
-        // `validate_and_update_parallel` are skipped because checkpoint
-        // verification already pinned the block.
+        // Validate the block's commitment to the chain history before
+        // pushing. The checkpoint hash list pins the header and, via the
+        // merkle root, the transaction IDs — but for NU5-onward blocks the
+        // txid excludes authorizing data (ZIP-244), so a peer could
+        // substitute signatures, proofs, or ciphertexts without changing any
+        // pinned hash. The `hashBlockCommitments` check binds the
+        // authorizing-data root and closes that gap; it is the one check from
+        // `validate_and_update_parallel` that the pinned hashes don't already
+        // cover. (The sprout anchor check stays skipped: pre-NU5 txids commit
+        // to the full transaction bytes, so the merkle root already pins
+        // joinsplit anchors, and there are no sprout joinsplits after NU5.)
+        check::block_commitment_is_valid_for_chain_history(
+            contextual.block.clone(),
+            &self.network,
+            &chain.history_block_commitment_tree(),
+        )?;
+
+        // Push onto the chain, updating trees, nullifiers, and UTXOs.
         //
         // If the push fails, the chain is lost, because `push` consumes it;
         // callers treat errors from this method as fatal.

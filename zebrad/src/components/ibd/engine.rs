@@ -160,16 +160,27 @@ pub const COMMIT_FAILURE_ATTEMPT_LIMIT: u8 = 3;
 /// linger on disk, not how many are deleted.
 pub const IBD_CACHE_EVICT_INTERVAL: u32 = 1_024;
 
-/// Returns the batch layer's `max_concurrent_batches` limit for the current
-/// number of ready peers.
+/// The hard ceiling on concurrent fetch batches, regardless of peer count.
+///
+/// The batch layer is built once at this ceiling (the per-batch
+/// `max_concurrent_batches` is fixed for the worker's lifetime), and the live
+/// per-peer limit is enforced dynamically at issuance by
+/// [`Engine::fetch_slots_available`]. Building the layer at a startup snapshot
+/// of the peer count would freeze concurrency at whatever was ready before the
+/// first handshake — typically zero, i.e. one batch for the whole run.
+pub const IBD_MAX_CONCURRENT_BATCHES: usize = 96;
+
+/// Returns the live `max_concurrent_batches` limit for the current number of
+/// ready peers, used to gate issuance (not to size the batch layer).
 ///
 /// About 3× oversubscription keeps every freed connection instantly busy;
 /// the cap bounds worst-case in-flight response bytes (design doc §3.3). At
-/// least one batch is always allowed, so the engine can start (and issue its
-/// first requests into the peer set's own readiness queue) before any peer
-/// is ready.
+/// least one batch is always allowed, so the engine can issue its first
+/// requests into the peer set's own readiness queue before any peer is ready.
 pub fn ibd_max_concurrent_batches(ready_peers: usize) -> usize {
-    ready_peers.saturating_mul(3).clamp(1, 96)
+    ready_peers
+        .saturating_mul(3)
+        .clamp(1, IBD_MAX_CONCURRENT_BATCHES)
 }
 
 /// The per-height retry backoff: 500 ms × 2^attempts, capped at 30 s.
@@ -671,9 +682,12 @@ where
         lookahead_bytes: usize,
         gap_hedge_after: Duration,
     ) -> Self {
-        let ready_peers = peer_status.borrow().ready_peers;
-        let batched_fetch =
-            fetch::batched_fetch(peer_set.clone(), ibd_max_concurrent_batches(ready_peers));
+        // Size the batch layer at the hard ceiling: its `max_concurrent_batches`
+        // is fixed for the worker's lifetime, and the live per-peer limit is
+        // applied at issuance by `fetch_slots_available`. Sizing it from the
+        // current peer count would freeze concurrency at the startup snapshot
+        // (typically zero ready peers, i.e. one batch for the whole run).
+        let batched_fetch = fetch::batched_fetch(peer_set.clone(), IBD_MAX_CONCURRENT_BATCHES);
         let verify_and_commit = VerifyAndCommit::new(network, state);
 
         let now = Instant::now();
@@ -977,16 +991,17 @@ where
                     // pipeline caps. The frontier height bypasses the budget:
                     // after a §4.6 recovery the budget may be full of
                     // retained descendants parked behind it.
-                    let budget_fits = self.budget_used + u64::from(bytes) <= self.lookahead_bytes
-                        || height == self.base;
+                    let is_frontier = height == self.base;
+                    let budget_fits =
+                        self.budget_used + u64::from(bytes) <= self.lookahead_bytes || is_frontier;
 
-                    if budget_fits && self.commit_caps_allow(bytes) {
+                    if budget_fits && self.commit_caps_allow(bytes, is_frontier) {
                         self.promote(offset, height, bytes)?;
                     }
                 }
 
                 RefillAction::Commit { bytes } => {
-                    if self.commit_caps_allow(bytes) {
+                    if self.commit_caps_allow(bytes, height == self.base) {
                         self.push_commit(offset, height)?;
                     }
                 }
@@ -1030,13 +1045,23 @@ where
     /// Does the commit pipeline (design doc §4.4) have room for one more
     /// unresolved stage-2 future of `bytes`?
     ///
-    /// An empty pipeline always admits one block, so a block larger than the
-    /// byte cap could never deadlock the frontier (unreachable today: the
-    /// 2 MB protocol cap is far below the 64 MiB pipeline cap).
-    fn commit_caps_allow(&self, bytes: u32) -> bool {
-        self.commit_blocks < self.commit_pipeline_max_blocks
-            && (self.commit_blocks == 0
-                || self.commit_bytes + u64::from(bytes) <= self.commit_pipeline_max_bytes)
+    /// The frontier block always passes: its commit is what unblocks the
+    /// state's in-order drain, which is what lets every parked above-frontier
+    /// commit resolve and free the caps. Without this bypass the pipeline can
+    /// deadlock — above-frontier commits fill the caps while their drain
+    /// waits on the frontier, and the frontier's own commit is then refused.
+    /// At most one frontier commit is over-cap at a time (the slot is marked
+    /// `committing` once pushed, and the frontier only advances when its
+    /// commit resolves), so the overshoot is bounded to one block.
+    ///
+    /// Otherwise, an empty pipeline always admits one block, so a non-frontier
+    /// block larger than the byte cap could never wedge the caps (unreachable
+    /// today: the 2 MB protocol cap is far below the 64 MiB pipeline cap).
+    fn commit_caps_allow(&self, bytes: u32, is_frontier: bool) -> bool {
+        is_frontier
+            || (self.commit_blocks < self.commit_pipeline_max_blocks
+                && (self.commit_blocks == 0
+                    || self.commit_bytes + u64::from(bytes) <= self.commit_pipeline_max_bytes))
     }
 
     /// Returns the pinned hash for `height` and its parent pin:
