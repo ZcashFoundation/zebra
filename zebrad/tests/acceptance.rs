@@ -4694,6 +4694,14 @@ async fn zcashd_compat_reorg_branch_too_large_sticky() -> Result<()> {
     common::zcashd_compat::reorg::branch_too_large_sticky().await
 }
 
+/// See [`common::zcashd_compat::reorg::sticky_fault_restart_recovers`] for details.
+#[tokio::test]
+#[ignore]
+#[cfg(unix)]
+async fn zcashd_compat_reorg_sticky_fault_restart_recovers() -> Result<()> {
+    common::zcashd_compat::reorg::sticky_fault_restart_recovers().await
+}
+
 /// See [`common::zcashd_compat::reorg::restart_after_reorg`] for details.
 #[tokio::test]
 #[ignore]
@@ -4702,12 +4710,36 @@ async fn zcashd_compat_reorg_restart_after_reorg() -> Result<()> {
     common::zcashd_compat::reorg::restart_after_reorg().await
 }
 
+/// See [`common::zcashd_compat::reorg::restart_cycles`] for details.
+#[tokio::test]
+#[ignore]
+#[cfg(unix)]
+async fn zcashd_compat_reorg_restart_cycles() -> Result<()> {
+    common::zcashd_compat::reorg::restart_cycles().await
+}
+
+/// See [`common::zcashd_compat::reorg::restart_deep_chain`] for details.
+#[tokio::test]
+#[ignore]
+#[cfg(unix)]
+async fn zcashd_compat_reorg_restart_deep_chain() -> Result<()> {
+    common::zcashd_compat::reorg::restart_deep_chain().await
+}
+
 /// See [`common::zcashd_compat::reorg::zebra_tip_behind_local`] for details.
 #[tokio::test]
 #[ignore]
 #[cfg(unix)]
 async fn zcashd_compat_reorg_zebra_tip_behind_local() -> Result<()> {
     common::zcashd_compat::reorg::zebra_tip_behind_local().await
+}
+
+/// See [`common::zcashd_compat::reorg::reorg_context_zebra_tip_behind_recovers`] for details.
+#[tokio::test]
+#[ignore]
+#[cfg(unix)]
+async fn zcashd_compat_reorg_context_zebra_tip_behind_recovers() -> Result<()> {
+    common::zcashd_compat::reorg::reorg_context_zebra_tip_behind_recovers().await
 }
 
 /// See [`common::zcashd_compat::reorg::churn`] for details.

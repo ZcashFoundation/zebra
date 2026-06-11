@@ -59,7 +59,7 @@ pub const TEST_ZCASHD_COOKIE_FILE: &str = "TEST_ZCASHD_COOKIE_FILE";
 /// Number of reorg churn cycles to run in the zcashd-compat stress test.
 pub const TEST_ZCASHD_COMPAT_REORG_ITERATIONS: &str = "TEST_ZCASHD_COMPAT_REORG_ITERATIONS";
 
-/// Enable the known-blocker zcashd restart-after-reorg reload probe.
+/// Enable slow zcashd restart-after-reorg integration probes.
 pub const TEST_ZCASHD_COMPAT_RESTART_AFTER_REORG: &str = "TEST_ZCASHD_COMPAT_RESTART_AFTER_REORG";
 
 // ── Skip guard ────────────────────────────────────────────────────────────────

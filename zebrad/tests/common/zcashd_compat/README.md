@@ -45,11 +45,20 @@ worker:
   branch, matching zcashd's memory-clamped sync batch limit in CI.
 - `zcashd_compat_reorg_branch_too_large_sticky` verifies that a 34-block branch
   fails sticky with `reorg_branch_too_large`.
-- `zcashd_compat_reorg_restart_after_reorg` is an opt-in blocker probe for
-  zcashd supervisor restart and block-index reload after several Zebra-side
-  reorgs. Current zcashd builds can leave trusted Zebra regtest side-branch
-  indexes on disk that fail `LoadBlockIndex()` proof-of-work checks on restart,
-  so this probe is skipped unless `TEST_ZCASHD_COMPAT_RESTART_AFTER_REORG=1`.
+- `zcashd_compat_reorg_sticky_fault_restart_recovers` enters that sticky fault,
+  restarts zcashd, reverts Zebra to the local branch, and verifies
+  `zebra_tip_matched`.
+- `zcashd_compat_reorg_restart_after_reorg` is an opt-in slow probe for zcashd
+  supervisor restart and block-index reload after several Zebra-side reorgs.
+  Skipped unless `TEST_ZCASHD_COMPAT_RESTART_AFTER_REORG=1`.
+- `zcashd_compat_reorg_restart_cycles` interleaves reorg and restart across three
+  cycles to verify trusted-boundary advancement on disk.
+- `zcashd_compat_reorg_restart_deep_chain` verifies VerifyDB window coverage on a
+  long trusted chain after reorg and restart. Opt-in via
+  `TEST_ZCASHD_COMPAT_RESTART_AFTER_REORG=1`.
+- `zcashd_compat_reorg_context_zebra_tip_behind_recovers` verifies no sticky failure
+  when Zebra shrinks after a paused reorg has converged (end-to-end recovery to
+  `zebra_tip_matched`).
 - `zcashd_compat_reorg_zebra_tip_behind_local` verifies the recoverable
   `zebra_tip_behind_local` degraded state and requires recovery after Zebra
   mines a replacement branch.
@@ -133,7 +142,7 @@ error (misconfiguration, not a skip).
 | `TEST_ZCASHD_RPC_USER` | External (fallback) | zcashd RPC username |
 | `TEST_ZCASHD_RPC_PASSWORD` | External (fallback) | zcashd RPC password |
 | `TEST_ZCASHD_COMPAT_REORG_ITERATIONS` | No | Reorg churn cycles; defaults to 30 in tests and 500 in `make compat-test-soak` |
-| `TEST_ZCASHD_COMPAT_RESTART_AFTER_REORG` | No | Set to `1` to run the known-blocker restart-after-reorg reload probe |
+| `TEST_ZCASHD_COMPAT_RESTART_AFTER_REORG` | No | Set to `1` to run slow restart-after-reorg probes |
 
 ## Test Inventory
 
@@ -158,8 +167,12 @@ error (misconfiguration, not a skip).
 | `zcashd_compat_reorg_equal_work_race` | reorg | Equal-work degraded state and recovery | **Skipped** |
 | `zcashd_compat_reorg_depth_at_batch_limit` | reorg | 33-block replacement branch convergence | **Skipped** |
 | `zcashd_compat_reorg_branch_too_large_sticky` | reorg | 34-block branch sticky failure | **Skipped** |
-| `zcashd_compat_reorg_restart_after_reorg` | reorg | **Opt-in:** known-blocker reload probe for supervised zcashd restart after reorgs | **Skipped** |
+| `zcashd_compat_reorg_sticky_fault_restart_recovers` | reorg | Sticky fault recovery after restart + Zebra reconciliation | **Skipped** |
+| `zcashd_compat_reorg_restart_after_reorg` | reorg | **Opt-in:** slow supervised zcashd restart after several reorgs | **Skipped** |
+| `zcashd_compat_reorg_restart_cycles` | reorg | **Opt-in:** interleaved reorg-then-restart across three cycles | **Skipped** |
+| `zcashd_compat_reorg_restart_deep_chain` | reorg | **Opt-in:** VerifyDB window on long trusted chain after reorg + restart | **Skipped** |
 | `zcashd_compat_reorg_zebra_tip_behind_local` | reorg | Recoverable Zebra-tip-behind-local state and required recovery | **Skipped** |
+| `zcashd_compat_reorg_context_zebra_tip_behind_recovers` | reorg | No sticky failure on tip-behind after paused reorg convergence | **Skipped** |
 | `zcashd_compat_reorg_churn` | reorg | Repeated small reorg stress loop | **Skipped** |
 
 ## Prerequisites for External Mode
@@ -201,8 +214,10 @@ zebrad/tests/common/
     │                          historical_block_consistent
     └── reorg.rs               basic_depth1, equal_work_race,
                                depth_at_batch_limit, branch_too_large_sticky,
-                               restart_after_reorg, zebra_tip_behind_local,
-                               churn
+                               sticky_fault_restart_recovers, restart_after_reorg,
+                               restart_cycles,
+                               restart_deep_chain, zebra_tip_behind_local,
+                               reorg_context_zebra_tip_behind_recovers, churn
 ```
 
 Entry points are the `#[tokio::test] #[ignore]` functions in
