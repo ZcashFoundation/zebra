@@ -3,6 +3,7 @@
 Tools for maintaining and testing Zebra:
 
 - [zebra-checkpoints](#zebra-checkpoints)
+- [known-hashes](#known-hashes)
 - [zebrad-hash-lookup](#zebrad-hash-lookup)
 - [zebrad-log-filter](#zebrad-log-filter)
 - [zcash-rpc-diff](#zcash-rpc-diff)
@@ -95,6 +96,39 @@ Then use the commands above to regenerate the checkpoints.
   of the existing checkpoint file. If you started from genesis, replace the entire file.
 - Open a pull request with the updated Mainnet and Testnet lists at:
   <https://github.com/ZcashFoundation/zebra/pulls>
+
+## known-hashes
+
+This command assembles the known-hash list assets used by known-hash initial block download:
+the chunked block hash files, the per-block size-hint array, and the `KnownHashListSpec`
+constant block that pins them with SHA-256 digests.
+
+It sweeps every block hash and serialized block size from a synced local `zebrad` or `zcashd`
+node over JSON-RPC, and verifies the swept hashes against the network's spaced checkpoint
+list: every checkpointed height must match exactly, and a single mismatch fails the run.
+
+`known-hashes` is a standalone rust binary, you can compile it using:
+
+```sh
+cargo install --locked --features known-hashes --git https://github.com/ZcashFoundation/zebra zebra-utils
+```
+
+To sweep a synced local node, then emit the assets and spec constants:
+
+```sh
+known-hashes --network mainnet --out-dir assets/
+known-hashes --network mainnet --out-dir assets/ --emit-chunks --end-height <max-height>
+```
+
+Sweeps are resumable: heights already present in the output files are skipped, so an
+interrupted sweep continues where it left off. By default the sweep stops 100 blocks below
+the node tip, so it never records blocks that could still be reorged away.
+
+You can see all the `known-hashes` options using:
+
+```sh
+target/release/known-hashes --help
+```
 
 ## zebrad-hash-lookup
 
