@@ -1,5 +1,7 @@
 //! Writing blocks to the finalized and non-finalized states.
 
+mod finalized_write_phase;
+
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
@@ -21,6 +23,7 @@ use crate::{
         finalized_state::{FinalizedState, ZebraDb},
         non_finalized_state::NonFinalizedState,
         queued_blocks::{QueuedCheckpointVerified, QueuedSemanticallyVerified},
+        write::finalized_write_phase::FinalizedWritePhase,
         ChainTipBlock, ChainTipSender, InvalidateError, ReconsiderError,
     },
     SemanticallyVerifiedBlock, ValidateContextError,
@@ -273,6 +276,22 @@ impl WriteBlockWorkerTask {
 
         let mut prev_finalized_note_commitment_trees = None;
 
+        // Pause auto-compaction while the finalized (checkpoint) write phase
+        // is active, so background compactions don't compete with the bulk
+        // block writes for disk bandwidth. If the user opted in via
+        // `disable_wal_during_ibd`, also skip the write-ahead log during this
+        // phase.
+        //
+        // This guard restores both settings on every exit path: when the
+        // finalized channel closes, on the early shutdown returns below, and
+        // on panic unwinds. If the process is killed without unwinding
+        // (e.g. `kill -9`), the next database open re-enables auto-compaction
+        // (see `DiskDb::set_auto_compaction`).
+        let mut finalized_write_phase = FinalizedWritePhase::new(
+            finalized_state.db.clone(),
+            finalized_state.db.config().disable_wal_during_ibd,
+        );
+
         // Write all the finalized blocks sent by the state,
         // until the state closes the finalized block channel's sender.
         while let Some(ordered_block) = finalized_block_write_receiver.blocking_recv() {
@@ -317,6 +336,9 @@ impl WriteBlockWorkerTask {
                     let tip_block = ChainTipBlock::from(finalized);
                     prev_finalized_note_commitment_trees = Some(note_commitment_trees);
                     chain_tip_sender.set_finalized_tip(tip_block);
+
+                    // Bound level 0 file growth while auto-compaction is paused.
+                    finalized_write_phase.block_committed();
                 }
                 Err(error) => {
                     let finalized_tip = finalized_state.db.tip();
@@ -343,6 +365,11 @@ impl WriteBlockWorkerTask {
                 }
             }
         }
+
+        // The finalized (checkpoint) write phase is over: re-enable
+        // auto-compaction and the write-ahead log for the rest of the sync,
+        // and flush any writes that skipped the write-ahead log.
+        std::mem::drop(finalized_write_phase);
 
         // Do this check even if the channel got closed before any finalized blocks were sent.
         // This can happen if we're past the finalized tip.

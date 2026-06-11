@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `Config.disable_wal_during_ibd`: opt-in flag (default `false`) that skips the
+  RocksDB write-ahead log while checkpoint-verified blocks are bulk-written
+  during the initial block download. A crash while it is enabled loses
+  recently-written blocks, which are re-downloaded on restart.
+
+### Changed
+
+- RocksDB auto-compaction is now paused while checkpoint-verified blocks are
+  bulk-written during the initial block download, and re-enabled when that
+  phase ends (on every exit path, including panics). While paused, a periodic
+  level 0 file count check temporarily re-enables auto-compaction if too many
+  level 0 files accumulate.
+
 ## [9.0.0] - 2026-06-10
 
 ### Breaking Changes

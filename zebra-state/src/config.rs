@@ -100,6 +100,36 @@ pub struct Config {
     /// deleted.
     pub delete_old_database: bool,
 
+    /// Whether to skip writing to the database's write-ahead log (WAL) while
+    /// Zebra is bulk-writing checkpoint-verified blocks during the initial
+    /// block download.
+    ///
+    /// Set to `false` by default.
+    ///
+    /// # Tradeoff
+    ///
+    /// Skipping the WAL avoids writing every block to disk twice (once to the
+    /// log and once to the database files), which can speed up the initial
+    /// sync on machines with slow disks. On fast disks it makes little
+    /// difference, so it is only worth enabling on slow disks.
+    ///
+    /// The cost is durability during the initial sync: if Zebra crashes or
+    /// the machine loses power while this is enabled, all blocks written
+    /// since the last database flush are lost, and Zebra re-downloads them
+    /// from the network when it restarts. This is safe for consensus, because
+    /// those blocks are public chain data that is re-verified when it is
+    /// re-downloaded, but it costs extra sync time after a crash.
+    ///
+    /// When this option is enabled, Zebra also enables RocksDB atomic flushes,
+    /// so that a crash without a WAL rolls the database back to a consistent
+    /// point that Zebra can resume syncing from.
+    ///
+    /// The WAL is only skipped while the initial bulk-write phase is active.
+    /// It is re-enabled, and the database is flushed, when that phase
+    /// finishes. This option has no effect on blocks that are committed after
+    /// the initial sync.
+    pub disable_wal_during_ibd: bool,
+
     // Debug configs
     //
     /// Commit blocks to the finalized state up to this height, then exit Zebra.
@@ -216,6 +246,7 @@ impl Default for Config {
             ephemeral: false,
             should_backup_non_finalized_state: true,
             delete_old_database: true,
+            disable_wal_during_ibd: false,
             debug_stop_at_height: None,
             debug_validity_check_interval: None,
             debug_skip_non_finalized_state_backup_task: false,

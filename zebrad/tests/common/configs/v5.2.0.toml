@@ -88,6 +88,7 @@ parallel_cpu_threads = 0
 cache_dir = "cache_dir"
 debug_skip_non_finalized_state_backup_task = false
 delete_old_database = true
+disable_wal_during_ibd = false
 ephemeral = false
 should_backup_non_finalized_state = true
 

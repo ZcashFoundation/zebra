@@ -259,6 +259,50 @@ impl ZebraDb {
         }
     }
 
+    /// Enables or disables RocksDB auto-compaction on every column family.
+    ///
+    /// See [`DiskDb::set_auto_compaction`] for details.
+    pub(crate) fn set_auto_compaction(&self, enabled: bool) -> Result<(), rocksdb::Error> {
+        self.db.set_auto_compaction(enabled)
+    }
+
+    /// Returns true if the last successful [`ZebraDb::set_auto_compaction`]
+    /// call disabled auto-compaction.
+    ///
+    /// See [`DiskDb::auto_compaction_disabled`] for details.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub(crate) fn auto_compaction_disabled(&self) -> bool {
+        self.db.auto_compaction_disabled()
+    }
+
+    /// Enables or disables WAL skipping for future database writes.
+    ///
+    /// See [`DiskDb::set_skip_wal`] for the correctness requirements.
+    pub(crate) fn set_skip_wal(&self, skip_wal: bool) {
+        self.db.set_skip_wal(skip_wal);
+    }
+
+    /// Returns true if database writes currently skip the write-ahead log.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub(crate) fn skip_wal(&self) -> bool {
+        self.db.skip_wal()
+    }
+
+    /// Returns the largest number of level 0 SST files in any column family.
+    ///
+    /// See [`DiskDb::level0_file_count`] for details.
+    pub(crate) fn level0_file_count(&self) -> u64 {
+        self.db.level0_file_count()
+    }
+
+    /// Flushes every column family's memtables to SST files on disk, waiting
+    /// for the flushes to finish.
+    ///
+    /// See [`DiskDb::flush_all_column_families`] for details.
+    pub(crate) fn flush_all_column_families(&self) -> Result<(), rocksdb::Error> {
+        self.db.flush_all_column_families()
+    }
+
     /// When called with a secondary DB instance, tries to catch up with the primary DB instance
     pub fn try_catch_up_with_primary(&self) -> Result<(), rocksdb::Error> {
         self.db.try_catch_up_with_primary()
