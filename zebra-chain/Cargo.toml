@@ -10,6 +10,10 @@ rust-version.workspace = true
 
 readme = "../README.md"
 homepage.workspace = true
+# The bundled known-hash chunk assets are ~103 MB: far over the crates.io
+# package limit. Published builds resolve them at runtime instead (see
+# src/parameters/known_hashes.rs).
+exclude = ["src/parameters/known_hashes/*.bin"]
 # crates.io is limited to 5 keywords and categories
 keywords.workspace = true
 # Must be one of <https://crates.io/category_slugs>
