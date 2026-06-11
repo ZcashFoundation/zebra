@@ -773,6 +773,11 @@ impl StateService {
         // We detect the last checkpoint by looking for non-finalized blocks
         // that are a child of the last block we sent.
         //
+        // The checkpoint pipeline acknowledges blocks before their disk
+        // writes finish, but it keeps writing the remaining blocks while this
+        // condition waits for the finalized tip to catch up to the last sent
+        // block, so checking the disk tip here stays live.
+        //
         // TODO: configure the state with the last checkpoint hash instead?
         if self.block_write_sender.finalized.is_some()
             && self

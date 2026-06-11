@@ -373,6 +373,151 @@ impl NonFinalizedState {
         Ok(())
     }
 
+    /// Commits a checkpoint-verified block to the non-finalized state, on top
+    /// of the single best chain (the pipelined checkpoint write path; design
+    /// doc `docs/design/known-hash-ibd.md` §12 / F3).
+    ///
+    /// This is the fast in-memory commit: the full contextual validation that
+    /// semantically-verified blocks go through (transparent spend checks
+    /// excepted, which still run for UTXO tracking; anchor checks and the
+    /// block commitment check are skipped) is unnecessary because every block
+    /// in the range is pinned by hash.
+    ///
+    /// Returns a `ChainTipBlock` for chain tip updates. The block is later
+    /// written to disk by the pipeline and pruned from memory by
+    /// [`finalize`](Self::finalize).
+    /// # Panics
+    ///
+    /// If the chain set holds more than one chain: the pipeline is the only
+    /// writer while it runs, and it maintains a single best chain.
+    #[tracing::instrument(level = "debug", skip(self, finalized_state, checkpoint_verified))]
+    #[allow(clippy::unwrap_in_result)]
+    pub fn commit_checkpoint_block(
+        &mut self,
+        checkpoint_verified: crate::CheckpointVerifiedBlock,
+        finalized_state: &ZebraDb,
+    ) -> Result<crate::service::ChainTipBlock, ValidateContextError> {
+        let prepared: SemanticallyVerifiedBlock = checkpoint_verified.into();
+        let height = prepared.height;
+        let hash = prepared.hash;
+
+        // The spent-UTXO lookup still runs so the chain tracks UTXOs
+        // correctly; anchor and block commitment checks are skipped (the
+        // pinned hash chain guarantees the block's contents).
+        //
+        // Passing `created_utxos` without filtering out spent outputs is
+        // correct, because spends of already-spent outputs are rejected
+        // against `spent_utxos` before the created map is consulted;
+        // filtering would clone the whole map on every block.
+        let empty_created = HashMap::new();
+        let empty_spent = HashMap::new();
+        let (chain_created_utxos, chain_spent_utxos) = match self.best_chain() {
+            Some(chain) => (&chain.created_utxos, &chain.spent_utxos),
+            None => (&empty_created, &empty_spent),
+        };
+        let spent_utxos = check::utxo::transparent_spend(
+            &prepared,
+            chain_created_utxos,
+            chain_spent_utxos,
+            finalized_state,
+        )?;
+
+        // All the fields are cheap copies or `Arc` clones.
+        let tip_block = crate::service::ChainTipBlock {
+            hash,
+            height,
+            time: prepared.block.header.time,
+            transactions: prepared.block.transactions.clone(),
+            transaction_hashes: prepared.transaction_hashes.clone(),
+            previous_block_hash: prepared.block.header.previous_block_hash,
+        };
+
+        let transaction_count = prepared.block.transactions.len();
+        let spent_utxo_count = spent_utxos.len();
+        let contextual = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
+            prepared,
+            spent_utxos,
+            crate::service::finalized_state::calculate_deferred_pool_balance_change(
+                height,
+                &self.network,
+            ),
+        )
+        .map_err(|value_balance_error| {
+            ValidateContextError::CalculateBlockChainValueChange {
+                value_balance_error,
+                height,
+                block_hash: hash,
+                transaction_count,
+                spent_utxo_count,
+            }
+        })?;
+
+        // Take the chain out of the chain set: with the set entry removed,
+        // the `Arc` is uniquely owned (the pipeline doesn't publish chain
+        // snapshots), so the push below mutates the chain in place instead
+        // of deep-cloning it, and the pre-push chain can't accumulate in the
+        // set as a stale prefix of the new chain.
+        let chain = match self.chain_set.pop_last() {
+            Some(chain) => {
+                assert!(
+                    self.chain_set.is_empty(),
+                    "the checkpoint pipeline maintains a single best chain"
+                );
+
+                Arc::try_unwrap(chain).unwrap_or_else(|shared_chain| (*shared_chain).clone())
+            }
+            // The first block after the finalized tip starts a new chain.
+            None => Chain::new(
+                &self.network,
+                finalized_state
+                    .finalized_tip_height()
+                    .unwrap_or(block::Height(0)),
+                finalized_state.sprout_tree_for_tip(),
+                finalized_state.sapling_tree_for_tip(),
+                finalized_state.orchard_tree_for_tip(),
+                finalized_state.history_tree(),
+                finalized_state.finalized_value_pool(),
+            ),
+        };
+
+        // Push onto the chain, updating trees, nullifiers, and UTXOs; the
+        // block commitment and sprout anchor validation in
+        // `validate_and_update_parallel` are skipped because checkpoint
+        // verification already pinned the block.
+        //
+        // If the push fails, the chain is lost, because `push` consumes it;
+        // callers treat errors from this method as fatal.
+        let chain = Arc::new(chain.push(contextual)?);
+
+        self.insert(chain);
+        self.update_metrics_for_committed_block(height, hash);
+
+        Ok(tip_block)
+    }
+
+    /// Returns a [`FinalizableBlock::Contextual`] for the tip of the best
+    /// chain by cloning data already computed during the chain update,
+    /// **without** mutating the non-finalized state.
+    ///
+    /// Used by the pipelined checkpoint write path to send the tip block to
+    /// the disk writer immediately after committing it to the non-finalized
+    /// state; the prune loop removes the block once its disk write completes.
+    ///
+    /// Returns `None` if the non-finalized state is empty.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn peek_finalize_tip(&self) -> Option<FinalizableBlock> {
+        let best_chain = self.best_chain()?;
+        let tip = best_chain
+            .tip_block()
+            .expect("the best chain is not empty because best_chain returned it");
+        let tip_height = tip.height;
+        let treestate = best_chain
+            .treestate(tip_height.into())
+            .expect("the treestate exists for the tip height because the block is in the chain");
+
+        Some(FinalizableBlock::new(tip.clone(), treestate))
+    }
+
     /// Invalidate block with hash `block_hash` and all descendants from the non-finalized state. Insert
     /// the new chain into the chain_set and discard the previous.
     #[allow(clippy::unwrap_in_result)]

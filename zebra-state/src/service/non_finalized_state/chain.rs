@@ -20,7 +20,7 @@ use zebra_chain::{
     orchard,
     parallel::tree::NoteCommitmentTrees,
     parameters::Network,
-    primitives::Groth16Proof,
+    primitives::{Bctv14Proof, Groth16Proof},
     sapling,
     serialization::ZcashSerialize as _,
     sprout,
@@ -1178,7 +1178,7 @@ impl Chain {
         }
     }
 
-    fn treestate(&self, hash_or_height: HashOrHeight) -> Option<Treestate> {
+    pub(crate) fn treestate(&self, hash_or_height: HashOrHeight) -> Option<Treestate> {
         let sprout_tree = self.sprout_tree(hash_or_height)?;
         let sapling_tree = self.sapling_tree(hash_or_height)?;
         let orchard_tree = self.orchard_tree(hash_or_height)?;
@@ -1588,7 +1588,14 @@ impl Chain {
                     joinsplit_data,
                     sapling_shielded_data,
                     ..
-                } => (inputs, outputs, joinsplit_data, sapling_shielded_data, &None, &None),
+                } => (
+                    inputs,
+                    outputs,
+                    joinsplit_data,
+                    sapling_shielded_data,
+                    &None,
+                    &None,
+                ),
                 V5 {
                     inputs,
                     outputs,
@@ -1619,9 +1626,66 @@ impl Chain {
                     orchard_shielded_data,
                 ),
 
-                V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
-                    "older transaction versions only exist in finalized blocks, because of the mandatory canopy checkpoint",
-                ),
+                V1 {
+                    inputs, outputs, ..
+                } => {
+                    // V1 transactions have no shielded data: only the
+                    // transaction location and transparent updates apply.
+                    // These versions are reachable in the non-finalized state
+                    // via the pipelined checkpoint write path (design doc
+                    // `docs/design/known-hash-ibd.md` §12 / F3).
+                    let transaction_location =
+                        TransactionLocation::from_usize(height, transaction_index);
+                    let prior_pair = self
+                        .tx_loc_by_hash
+                        .insert(transaction_hash, transaction_location);
+                    assert_eq!(
+                        prior_pair, None,
+                        "transactions must be unique within a single chain"
+                    );
+
+                    self.update_chain_tip_with(&(outputs, &transaction_hash, new_outputs))?;
+                    self.update_chain_tip_with(&(inputs, &transaction_hash, spent_outputs))?;
+                    continue;
+                }
+                V2 {
+                    inputs,
+                    outputs,
+                    joinsplit_data,
+                    ..
+                }
+                | V3 {
+                    inputs,
+                    outputs,
+                    joinsplit_data,
+                    ..
+                } => {
+                    // V2/V3 transactions have transparent data and Bctv14
+                    // joinsplits. As below, the joinsplit (nullifier) update
+                    // runs before the `tx_loc_by_hash` insert, so duplicate
+                    // transactions fail with a clean duplicate-nullifier
+                    // error first.
+                    {
+                        #[cfg(not(feature = "indexer"))]
+                        let transaction_hash = ();
+
+                        self.update_chain_tip_with(&(joinsplit_data, &transaction_hash))?;
+                    }
+
+                    let transaction_location =
+                        TransactionLocation::from_usize(height, transaction_index);
+                    let prior_pair = self
+                        .tx_loc_by_hash
+                        .insert(transaction_hash, transaction_location);
+                    assert_eq!(
+                        prior_pair, None,
+                        "transactions must be unique within a single chain"
+                    );
+
+                    self.update_chain_tip_with(&(outputs, &transaction_hash, new_outputs))?;
+                    self.update_chain_tip_with(&(inputs, &transaction_hash, spent_outputs))?;
+                    continue;
+                }
             };
 
             // Shielded-data updates run before the transparent updates and
@@ -1783,7 +1847,14 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                     joinsplit_data,
                     sapling_shielded_data,
                     ..
-                } => (inputs, outputs, joinsplit_data, sapling_shielded_data, &None, &None),
+                } => (
+                    inputs,
+                    outputs,
+                    joinsplit_data,
+                    sapling_shielded_data,
+                    &None,
+                    &None,
+                ),
                 V5 {
                     inputs,
                     outputs,
@@ -1814,9 +1885,46 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                     orchard_shielded_data,
                 ),
 
-                V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
-                    "older transaction versions only exist in finalized blocks, because of the mandatory canopy checkpoint",
-                ),
+                V1 {
+                    inputs, outputs, ..
+                } => {
+                    // V1: transparent-only revert (see the push arms above).
+                    self.revert_chain_with(&(outputs, transaction_hash, new_outputs), position);
+                    self.revert_chain_with(&(inputs, transaction_hash, spent_outputs), position);
+                    assert!(
+                        self.tx_loc_by_hash.remove(transaction_hash).is_some(),
+                        "transactions must be present if block was added to chain"
+                    );
+                    continue;
+                }
+                V2 {
+                    inputs,
+                    outputs,
+                    joinsplit_data,
+                    ..
+                }
+                | V3 {
+                    inputs,
+                    outputs,
+                    joinsplit_data,
+                    ..
+                } => {
+                    // V2/V3: transparent + Bctv14 joinsplit revert.
+                    self.revert_chain_with(&(outputs, transaction_hash, new_outputs), position);
+                    self.revert_chain_with(&(inputs, transaction_hash, spent_outputs), position);
+                    assert!(
+                        self.tx_loc_by_hash.remove(transaction_hash).is_some(),
+                        "transactions must be present if block was added to chain"
+                    );
+
+                    {
+                        #[cfg(not(feature = "indexer"))]
+                        let transaction_hash = &();
+
+                        self.revert_chain_with(&(joinsplit_data, transaction_hash), position);
+                    }
+                    continue;
+                }
             };
 
             // remove the utxos this produced
@@ -2128,6 +2236,53 @@ impl
             // by removing trees above the fork height from the note commitment index.
             // This happens when reverting the block itself.
 
+            check::nullifier::remove_from_non_finalized_chain(
+                &mut self.sprout_nullifiers,
+                joinsplit_data.nullifiers(),
+            );
+        }
+    }
+}
+
+impl
+    UpdateWith<(
+        &Option<transaction::JoinSplitData<Bctv14Proof>>,
+        &SpendingTransactionId,
+    )> for Chain
+{
+    #[instrument(skip(self, joinsplit_data))]
+    fn update_chain_tip_with(
+        &mut self,
+        &(joinsplit_data, revealing_tx_id): &(
+            &Option<transaction::JoinSplitData<Bctv14Proof>>,
+            &SpendingTransactionId,
+        ),
+    ) -> Result<(), ValidateContextError> {
+        if let Some(joinsplit_data) = joinsplit_data {
+            check::nullifier::add_to_non_finalized_chain_unique(
+                &mut self.sprout_nullifiers,
+                joinsplit_data.nullifiers(),
+                *revealing_tx_id,
+            )?;
+        }
+        Ok(())
+    }
+
+    /// # Panics
+    ///
+    /// Panics if any nullifier is missing from the chain when we try to remove it.
+    ///
+    /// See [`check::nullifier::remove_from_non_finalized_chain`] for details.
+    #[instrument(skip(self, joinsplit_data))]
+    fn revert_chain_with(
+        &mut self,
+        &(joinsplit_data, _revealing_tx_id): &(
+            &Option<transaction::JoinSplitData<Bctv14Proof>>,
+            &SpendingTransactionId,
+        ),
+        _position: RevertPosition,
+    ) {
+        if let Some(joinsplit_data) = joinsplit_data {
             check::nullifier::remove_from_non_finalized_chain(
                 &mut self.sprout_nullifiers,
                 joinsplit_data.nullifiers(),

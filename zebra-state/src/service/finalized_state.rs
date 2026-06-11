@@ -24,6 +24,7 @@ use zebra_chain::{
     block,
     parallel::tree::NoteCommitmentTrees,
     parameters::{subsidy::block_subsidy, Network},
+    transparent,
 };
 use zebra_db::{
     chain::BLOCK_INFO,
@@ -330,97 +331,143 @@ impl FinalizedState {
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
         source: &str,
     ) -> Result<(block::Hash, NoteCommitmentTrees), CommitCheckpointVerifiedError> {
-        let (height, hash, finalized, prev_note_commitment_trees) = match finalizable_block {
-            FinalizableBlock::Checkpoint {
-                checkpoint_verified,
-            } => {
-                // Checkpoint-verified blocks don't have an associated treestate, so we retrieve the
-                // treestate of the finalized tip from the database and update it for the block
-                // being committed, assuming the retrieved treestate is the parent block's
-                // treestate. Later on, this function proves this assumption by asserting that the
-                // finalized tip is the parent block of the block being committed.
+        let (height, hash, finalized, spent_utxos, prev_note_commitment_trees) =
+            match finalizable_block {
+                FinalizableBlock::Checkpoint {
+                    checkpoint_verified,
+                } => {
+                    // Checkpoint-verified blocks don't have an associated treestate, so we retrieve the
+                    // treestate of the finalized tip from the database and update it for the block
+                    // being committed, assuming the retrieved treestate is the parent block's
+                    // treestate. Later on, this function proves this assumption by asserting that the
+                    // finalized tip is the parent block of the block being committed.
 
-                let block = checkpoint_verified.block.clone();
-                let mut history_tree = self.db.history_tree();
-                let prev_note_commitment_trees = prev_note_commitment_trees
-                    .unwrap_or_else(|| self.db.note_commitment_trees_for_tip());
+                    let block = checkpoint_verified.block.clone();
+                    let mut history_tree = self.db.history_tree();
+                    let prev_note_commitment_trees = prev_note_commitment_trees
+                        .unwrap_or_else(|| self.db.note_commitment_trees_for_tip());
 
-                // Update the note commitment trees.
-                let mut note_commitment_trees = prev_note_commitment_trees.clone();
-                note_commitment_trees
-                    .update_trees_parallel(&block)
-                    .map_err(ValidateContextError::from)?;
+                    // Update the note commitment trees.
+                    let mut note_commitment_trees = prev_note_commitment_trees.clone();
+                    note_commitment_trees
+                        .update_trees_parallel(&block)
+                        .map_err(ValidateContextError::from)?;
 
-                // Check the block commitment if the history tree was not
-                // supplied by the non-finalized state. Note that we don't do
-                // this check for history trees supplied by the non-finalized
-                // state because the non-finalized state checks the block
-                // commitment.
-                //
-                // For Nu5-onward, the block hash commits only to
-                // non-authorizing data (see ZIP-244). This checks the
-                // authorizing data commitment, making sure the entire block
-                // contents were committed to. The test is done here (and not
-                // during semantic validation) because it needs the history tree
-                // root. While it _is_ checked during contextual validation,
-                // that is not called by the checkpoint verifier, and keeping a
-                // history tree there would be harder to implement.
-                //
-                // TODO: run this CPU-intensive cryptography in a parallel rayon
-                // thread, if it shows up in profiles
-                check::block_commitment_is_valid_for_chain_history(
-                    block.clone(),
-                    &self.network(),
-                    &history_tree,
-                )?;
+                    // Check the block commitment if the history tree was not
+                    // supplied by the non-finalized state. Note that we don't do
+                    // this check for history trees supplied by the non-finalized
+                    // state because the non-finalized state checks the block
+                    // commitment.
+                    //
+                    // For Nu5-onward, the block hash commits only to
+                    // non-authorizing data (see ZIP-244). This checks the
+                    // authorizing data commitment, making sure the entire block
+                    // contents were committed to. The test is done here (and not
+                    // during semantic validation) because it needs the history tree
+                    // root. While it _is_ checked during contextual validation,
+                    // that is not called by the checkpoint verifier, and keeping a
+                    // history tree there would be harder to implement.
+                    //
+                    // TODO: run this CPU-intensive cryptography in a parallel rayon
+                    // thread, if it shows up in profiles
+                    check::block_commitment_is_valid_for_chain_history(
+                        block.clone(),
+                        &self.network(),
+                        &history_tree,
+                    )?;
 
-                // Update the history tree.
-                //
-                // TODO: run this CPU-intensive cryptography in a parallel rayon
-                // thread, if it shows up in profiles
-                let history_tree_mut = Arc::make_mut(&mut history_tree);
-                let sapling_root = note_commitment_trees.sapling.root();
-                let orchard_root = note_commitment_trees.orchard.root();
-                history_tree_mut
-                    .push(&self.network(), block.clone(), &sapling_root, &orchard_root)
-                    .map_err(Arc::new)
-                    .map_err(ValidateContextError::from)?;
+                    // Update the history tree.
+                    //
+                    // TODO: run this CPU-intensive cryptography in a parallel rayon
+                    // thread, if it shows up in profiles
+                    let history_tree_mut = Arc::make_mut(&mut history_tree);
+                    let sapling_root = note_commitment_trees.sapling.root();
+                    let orchard_root = note_commitment_trees.orchard.root();
+                    history_tree_mut
+                        .push(&self.network(), block.clone(), &sapling_root, &orchard_root)
+                        .map_err(Arc::new)
+                        .map_err(ValidateContextError::from)?;
 
-                let treestate = Treestate {
-                    note_commitment_trees,
-                    history_tree,
-                };
+                    let treestate = Treestate {
+                        note_commitment_trees,
+                        history_tree,
+                    };
 
-                let height = checkpoint_verified.height;
+                    let height = checkpoint_verified.height;
 
-                (
-                    height,
-                    checkpoint_verified.hash,
-                    FinalizedBlock::from_checkpoint_verified(
+                    let finalized = FinalizedBlock::from_checkpoint_verified(
                         checkpoint_verified,
                         treestate,
                         calculate_deferred_pool_balance_change(height, &self.network()),
-                    ),
-                    Some(prev_note_commitment_trees),
-                )
-            }
-            FinalizableBlock::Contextual {
-                contextually_verified,
-                treestate,
-            } => {
-                let height = contextually_verified.height;
-                (
-                    height,
-                    contextually_verified.hash,
-                    FinalizedBlock::from_contextually_verified(
-                        contextually_verified,
-                        treestate,
-                        calculate_deferred_pool_balance_change(height, &self.network()),
-                    ),
-                    prev_note_commitment_trees,
-                )
-            }
-        };
+                    );
+
+                    // Checkpoint-verified blocks don't carry resolved spent
+                    // UTXOs, so look them up from the database and the block
+                    // itself.
+                    let spent_utxos = self.db.lookup_spent_utxos(&finalized);
+
+                    (
+                        height,
+                        finalized.hash,
+                        finalized,
+                        spent_utxos,
+                        Some(prev_note_commitment_trees),
+                    )
+                }
+                FinalizableBlock::Contextual {
+                    contextually_verified,
+                    treestate,
+                } => {
+                    let height = contextually_verified.height;
+
+                    // The non-finalized chain already resolved every spent UTXO
+                    // when the block was committed to it, so derive the output
+                    // locations from that data instead of re-reading the
+                    // database per input. `spent_outputs` is a superset that
+                    // also contains the block's own outputs, so it is indexed by
+                    // the block's actual transparent inputs.
+                    let spent_utxos: Vec<(
+                        transparent::OutPoint,
+                        OutputLocation,
+                        transparent::Utxo,
+                    )> = contextually_verified
+                        .block
+                        .transactions
+                        .iter()
+                        .flat_map(|tx| tx.inputs().iter())
+                        .flat_map(|input| input.outpoint())
+                        .map(|outpoint| {
+                            let ordered_utxo = contextually_verified
+                                .spent_outputs
+                                .get(&outpoint)
+                                .expect("contextually verified blocks carry all their spent UTXOs");
+
+                            let transaction_location = TransactionLocation::from_usize(
+                                ordered_utxo.utxo.height,
+                                ordered_utxo.tx_index_in_block,
+                            );
+
+                            (
+                                outpoint,
+                                OutputLocation::from_outpoint(transaction_location, &outpoint),
+                                ordered_utxo.utxo.clone(),
+                            )
+                        })
+                        .collect();
+
+                    (
+                        height,
+                        contextually_verified.hash,
+                        FinalizedBlock::from_contextually_verified(
+                            contextually_verified,
+                            treestate,
+                            calculate_deferred_pool_balance_change(height, &self.network()),
+                        ),
+                        spent_utxos,
+                        prev_note_commitment_trees,
+                    )
+                }
+            };
 
         let committed_tip_hash = self.db.finalized_tip_hash();
         let committed_tip_height = self.db.finalized_tip_height();
@@ -455,6 +502,7 @@ impl FinalizedState {
 
         let result = self.db.write_block(
             finalized,
+            spent_utxos,
             prev_note_commitment_trees,
             &self.network(),
             source,

@@ -14,10 +14,14 @@ use tokio::sync::{
 };
 
 use tracing::Span;
-use zebra_chain::block::{self, Height};
+use zebra_chain::{
+    block::{self, Height},
+    parallel::tree::NoteCommitmentTrees,
+};
 
 use crate::{
     constants::MAX_BLOCK_REORG_HEIGHT,
+    request::FinalizableBlock,
     service::{
         check,
         finalized_state::{FinalizedState, ZebraDb},
@@ -40,6 +44,13 @@ use crate::service::{
 ///
 /// We allow enough space for multiple concurrent chain forks with errors.
 const PARENT_ERROR_MAP_LIMIT: usize = MAX_BLOCK_REORG_HEIGHT as usize * 2;
+
+/// The capacity of the checkpoint pipeline channel from the block committer
+/// (Thread 1) to the disk writer (Thread 2).
+///
+/// Bounded so the in-memory non-finalized state holds at most a few hundred
+/// checkpoint blocks while their disk writes are in flight.
+const PIPELINE_WRITE_CHANNEL_CAPACITY: usize = 100;
 
 /// Run contextual validation on the prepared block and add it to the
 /// non-finalized state if it is contextually valid.
@@ -276,100 +287,241 @@ impl WriteBlockWorkerTask {
 
         let mut prev_finalized_note_commitment_trees = None;
 
-        // Pause auto-compaction while the finalized (checkpoint) write phase
-        // is active, so background compactions don't compete with the bulk
-        // block writes for disk bandwidth. If the user opted in via
-        // `disable_wal_during_ibd`, also skip the write-ahead log during this
-        // phase.
+        // Checkpoint pipeline: commit checkpoint-verified blocks to the
+        // non-finalized state (Thread 1, this thread), then prepare the
+        // database batch and write it to disk (Thread 2). Thread 1 responds
+        // to the state service as soon as the block is in the non-finalized
+        // state, so block commits are not serialized behind disk I/O; the
+        // bounded channel limits how many blocks have disk writes in flight.
         //
-        // This guard restores both settings on every exit path: when the
-        // finalized channel closes, on the early shutdown returns below, and
-        // on panic unwinds. If the process is killed without unwinding
-        // (e.g. `kill -9`), the next database open re-enables auto-compaction
-        // (see `DiskDb::set_auto_compaction`).
-        let mut finalized_write_phase = FinalizedWritePhase::new(
-            finalized_state.db.clone(),
-            finalized_state.db.config().disable_wal_during_ibd,
-        );
+        // Thread 1 does NOT publish the non-finalized state to the watch
+        // channel while the pipeline runs: keeping the chain `Arc` uniquely
+        // owned lets each commit mutate it in place instead of deep-cloning
+        // it, and keeps the backup task idle (as it is on the non-pipelined
+        // path). In-flight blocks are not queryable through the read service
+        // until their disk writes complete, at most a pipeline depth later.
+        //
+        // Returns true if the state service is shutting down.
+        let shutting_down = std::thread::scope(|s| {
+            let (write_tx, write_rx) =
+                crossbeam_channel::bounded::<FinalizableBlock>(PIPELINE_WRITE_CHANNEL_CAPACITY);
 
-        // Write all the finalized blocks sent by the state,
-        // until the state closes the finalized block channel's sender.
-        while let Some(ordered_block) = finalized_block_write_receiver.blocking_recv() {
-            // TODO: split these checks into separate functions
-
-            if invalid_block_reset_sender.is_closed() {
-                info!("StateService closed the block reset channel. Is Zebra shutting down?");
-                return;
-            }
-
-            // Discard any children of invalid blocks in the channel
+            // Thread 2: commit each block to the finalized state.
             //
-            // `commit_finalized()` requires blocks in height order.
-            // So if there has been a block commit error,
-            // we need to drop all the descendants of that block,
-            // until we receive a block at the required next height.
-            let next_valid_height = finalized_state
+            // Going through `commit_finalized_direct` keeps the tip linkage
+            // assertions, the `debug_stop_at_height` exit, and elasticsearch
+            // indexing that the sequential loop had.
+            let mut write_state = finalized_state.clone();
+            s.spawn(move || {
+                // Pause auto-compaction while the finalized (checkpoint)
+                // write phase is active, so background compactions don't
+                // compete with the bulk block writes for disk bandwidth. If
+                // the user opted in via `disable_wal_during_ibd`, also skip
+                // the write-ahead log during this phase.
+                //
+                // This guard restores both settings on every exit path: it
+                // drops when the pipeline drains, which the thread scope
+                // waits for on every return from Thread 1, including panic
+                // unwinds. If the process is killed without unwinding
+                // (e.g. `kill -9`), the next database open re-enables
+                // auto-compaction (see `DiskDb::set_auto_compaction`).
+                let mut finalized_write_phase = FinalizedWritePhase::new(
+                    write_state.db.clone(),
+                    write_state.db.config().disable_wal_during_ibd,
+                );
+
+                let mut prev_note_commitment_trees: Option<NoteCommitmentTrees> = None;
+                while let Ok(finalizable) = write_rx.recv() {
+                    let height = match &finalizable {
+                        FinalizableBlock::Contextual {
+                            contextually_verified,
+                            ..
+                        } => contextually_verified.height,
+                        FinalizableBlock::Checkpoint {
+                            checkpoint_verified,
+                        } => checkpoint_verified.height,
+                    };
+
+                    let (_hash, note_commitment_trees) = write_state
+                        .commit_finalized_direct(
+                            finalizable,
+                            prev_note_commitment_trees.take(),
+                            "checkpoint pipeline disk writer",
+                        )
+                        .expect(
+                            "unexpected disk write error: the block was already \
+                             committed to the non-finalized state",
+                        );
+
+                    prev_note_commitment_trees = Some(note_commitment_trees);
+
+                    // Bound level 0 file growth while auto-compaction is paused.
+                    finalized_write_phase.block_committed();
+
+                    metrics::counter!("state.checkpoint.finalized.block.count").increment(1);
+                    metrics::gauge!("state.checkpoint.finalized.block.height").set(height.0 as f64);
+                    metrics::gauge!("zcash.chain.verified.block.height").set(height.0 as f64);
+                    metrics::counter!("zcash.chain.verified.block.total").increment(1);
+                }
+            });
+
+            // Thread 1: commit all the checkpoint-verified blocks sent by the
+            // state to the non-finalized state, in height order, and feed
+            // them into the pipeline; until the state closes the finalized
+            // block channel's sender.
+            //
+            // Blocks already written to disk by the disk writer can't be on
+            // disk at the wrong height, so Thread 1 tracks the next expected
+            // height itself instead of re-reading the finalized tip.
+            let mut next_expected_height = finalized_state
                 .db
                 .finalized_tip_height()
                 .map(|height| (height + 1).expect("committed heights are valid"))
                 .unwrap_or(Height(0));
 
-            if ordered_block.0.height != next_valid_height {
-                debug!(
-                    ?next_valid_height,
-                    invalid_height = ?ordered_block.0.height,
-                    invalid_hash = ?ordered_block.0.hash,
-                    "got a block that was the wrong height. \
-                     Assuming a parent block failed, and dropping this block",
-                );
-
-                // We don't want to send a reset here, because it could overwrite a valid sent hash
-                std::mem::drop(ordered_block);
-                continue;
-            }
-
-            // Try committing the block
-            match finalized_state
-                .commit_finalized(ordered_block, prev_finalized_note_commitment_trees.take())
+            while let Some((checkpoint_verified, rsp_tx)) =
+                finalized_block_write_receiver.blocking_recv()
             {
-                Ok((finalized, note_commitment_trees)) => {
-                    let tip_block = ChainTipBlock::from(finalized);
-                    prev_finalized_note_commitment_trees = Some(note_commitment_trees);
-                    chain_tip_sender.set_finalized_tip(tip_block);
-
-                    // Bound level 0 file growth while auto-compaction is paused.
-                    finalized_write_phase.block_committed();
+                if invalid_block_reset_sender.is_closed() {
+                    info!("StateService closed the block reset channel. Is Zebra shutting down?");
+                    return true;
                 }
-                Err(error) => {
-                    let finalized_tip = finalized_state.db.tip();
 
-                    // The last block in the queue failed, so we can't commit the next block.
-                    // Instead, we need to reset the state queue,
-                    // and discard any children of the invalid block in the channel.
-                    info!(
-                        ?error,
-                        last_valid_height = ?finalized_tip.map(|tip| tip.0),
-                        last_valid_hash = ?finalized_tip.map(|tip| tip.1),
-                        "committing a block to the finalized state failed, resetting state queue",
+                // Discard any children of invalid blocks in the channel.
+                //
+                // The pipeline requires blocks in height order. So if there
+                // has been a block commit error, we need to drop all the
+                // descendants of that block, until we receive a block at the
+                // required next height.
+                if checkpoint_verified.height != next_expected_height {
+                    debug!(
+                        ?next_expected_height,
+                        invalid_height = ?checkpoint_verified.height,
+                        invalid_hash = ?checkpoint_verified.hash,
+                        "got a block that was the wrong height. \
+                         Assuming a parent block failed, and dropping this block",
                     );
 
-                    let send_result =
-                        invalid_block_reset_sender.send(finalized_state.db.finalized_tip_hash());
+                    // We don't want to send a reset here, because it could overwrite a valid sent hash
+                    std::mem::drop((checkpoint_verified, rsp_tx));
+                    continue;
+                }
 
-                    if send_result.is_err() {
-                        info!(
-                            "StateService closed the block reset channel. Is Zebra shutting down?"
-                        );
-                        return;
+                // The genesis block must be committed directly to disk: the
+                // non-finalized state's chains initialize their tree states
+                // from a finalized tip, which doesn't exist yet.
+                if checkpoint_verified.height == Height(0) {
+                    // Genesis is always the first commit, so there are no
+                    // previous note commitment trees to pass through.
+                    match finalized_state.commit_finalized((checkpoint_verified, rsp_tx), None) {
+                        Ok((finalized, _note_commitment_trees)) => {
+                            let tip_block = ChainTipBlock::from(finalized);
+                            chain_tip_sender.set_finalized_tip(tip_block);
+
+                            next_expected_height =
+                                (next_expected_height + 1).expect("committed heights are valid");
+                        }
+                        Err(error) => {
+                            let finalized_tip = finalized_state.db.tip();
+
+                            info!(
+                                ?error,
+                                last_valid_height = ?finalized_tip.map(|tip| tip.0),
+                                last_valid_hash = ?finalized_tip.map(|tip| tip.1),
+                                "committing the genesis block to the finalized state failed, \
+                                 resetting state queue",
+                            );
+
+                            let send_result = invalid_block_reset_sender
+                                .send(finalized_state.db.finalized_tip_hash());
+
+                            if send_result.is_err() {
+                                info!(
+                                    "StateService closed the block reset channel. \
+                                     Is Zebra shutting down?"
+                                );
+                                return true;
+                            }
+                        }
+                    }
+
+                    continue;
+                }
+
+                let hash = checkpoint_verified.hash;
+
+                // Commit the block to the non-finalized state: a fast,
+                // in-memory commit that updates the trees, nullifiers, and
+                // UTXOs without the disk write.
+                let tip_block = non_finalized_state
+                    .commit_checkpoint_block(checkpoint_verified, &finalized_state.db)
+                    .expect(
+                        "checkpoint block commits to the non-finalized state can't fail: \
+                         the checkpoint hash chain pins the block's contents, and the \
+                         database the chain context is read from is consistent",
+                    );
+
+                chain_tip_sender.set_best_non_finalized_tip(tip_block);
+
+                // Hand the just-committed tip to the disk writer, with its
+                // treestate already computed during the chain update and its
+                // spent UTXOs already resolved by the commit.
+                let finalizable = non_finalized_state
+                    .peek_finalize_tip()
+                    .expect("the non-finalized state is not empty: a block was just committed");
+
+                if write_tx.send(finalizable).is_err() {
+                    // The disk writer panicked; exiting unwinds the scope.
+                    return true;
+                }
+
+                // Respond to the state service now: the block is committed
+                // in memory, and the disk write can only fail by panicking.
+                let _ = rsp_tx.send(Ok(hash));
+
+                // Prune blocks that the disk writer has already written from
+                // the non-finalized state, keeping its memory use bounded by
+                // the pipeline channel capacity.
+                if let Some(finalized_tip_height) = finalized_state.db.finalized_tip_height() {
+                    while non_finalized_state
+                        .root_height()
+                        .is_some_and(|root_height| root_height <= finalized_tip_height)
+                    {
+                        non_finalized_state.finalize();
                     }
                 }
+
+                next_expected_height =
+                    (next_expected_height + 1).expect("committed heights are valid");
             }
+
+            // Dropping the write sender drains and joins the disk writer
+            // when the scope exits; its disk writes complete before the
+            // loops below run.
+            drop(write_tx);
+            false
+        });
+
+        if shutting_down {
+            return;
         }
 
-        // The finalized (checkpoint) write phase is over: re-enable
-        // auto-compaction and the write-ahead log for the rest of the sync,
-        // and flush any writes that skipped the write-ahead log.
-        std::mem::drop(finalized_write_phase);
+        // All the pipelined blocks are on disk: remove them from the
+        // non-finalized state, so the full-verification phase below starts
+        // from an empty non-finalized state at the finalized tip.
+        //
+        // Only blocks at or below the finalized tip are removed: if the
+        // non-finalized state was restored from a backup at startup (so the
+        // pipeline never ran), its blocks are above the finalized tip, and
+        // they must be preserved for the full-verification phase.
+        if let Some(finalized_tip_height) = finalized_state.db.finalized_tip_height() {
+            while non_finalized_state
+                .root_height()
+                .is_some_and(|root_height| root_height <= finalized_tip_height)
+            {
+                non_finalized_state.finalize();
+            }
+        }
 
         // Do this check even if the channel got closed before any finalized blocks were sent.
         // This can happen if we're past the finalized tip.
