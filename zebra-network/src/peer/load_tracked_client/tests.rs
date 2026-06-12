@@ -45,8 +45,6 @@ fn remote_height_keeps_handshake_height_floor() {
     let client: LoadTrackedClient = client.into();
 
     // Delivering a historic block doesn't lower the height below the handshake height.
-    client
-        .live_height_handle()
-        .fetch_max(10, Ordering::Relaxed);
+    client.live_height_handle().fetch_max(10, Ordering::Relaxed);
     assert_eq!(client.remote_height(), Height(200));
 }
