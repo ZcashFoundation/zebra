@@ -1187,13 +1187,13 @@ runs.
   carries the full brief: two design angles (incrementalmerkletree-native vs
   a recorded shardtree evaluation), judge synthesis, isolated-worktree
   implementation, and equivalence-breaking review.
-- **Engine extraction into its own crate** (maintainer-directed): once the
+- **Engine extraction into `zebra-sync`** (maintainer-directed): once the
   in-flight redesign workflows land (state write pipeline, generic engine
   unification), move the sync engine out of `zebrad/src/components/ibd/`
-  into a dedicated workspace crate, so the unified checkpoint/full-validation
-  engine has its own API surface, tests, and dependency boundary
-  (`zebra-chain`/`zebra-network`/`zebra-state` consumers only, no `zebrad`
-  internals).
+  into a new `zebra-sync` workspace crate, so the unified
+  checkpoint/full-validation engine has its own API surface, tests, and
+  dependency boundary (`zebra-chain`/`zebra-network`/`zebra-state`
+  consumers only, no `zebrad` internals).
 - Checkpoint-sync disk I/O reduction, e.g. created-then-spent UTXO elision
   (§15.2) — very late phase, **separate PR**.
 - Engine property tests rebuilt against the as-built API (the pre-rework
