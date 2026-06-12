@@ -1574,19 +1574,19 @@ where
 
     /// Logs sync diagnostics about the connected peers.
     ///
-    /// Emits a compact summary line on each call — every
+    /// Emits one compact summary line at info level on each call — every
     /// [`MIN_PEER_SET_LOG_INTERVAL`], via [`PeerSet::log_peer_set_size`] —
-    /// with the ready/unready counts, how many ready peers are at or above our
-    /// chain tip, and the spread of reported peer heights. Every
-    /// [`PEER_STATS_LOG_INTERVAL`] it also emits one line per ready peer with
-    /// its reported height, blocks downloaded so far, and load (a peak-EWMA
-    /// latency estimate). The per-peer detail uses a longer interval because
-    /// it logs one line per connected peer, which is too verbose to emit every
-    /// minute.
+    /// with the peer counts against the connection limit, how many ready
+    /// peers are at or above our chain tip, the spread of reported peer
+    /// heights, and the total blocks downloaded over the current connections.
+    /// Every [`PEER_STATS_LOG_INTERVAL`] it also emits one **debug**-level
+    /// line per ready peer with its reported height, blocks downloaded, and
+    /// load (a peak-EWMA latency estimate) — per-peer detail is for debug
+    /// runs, not production logs.
     ///
     /// Stats for peers that are currently handling a request (unready) are not
-    /// readable here, so the per-peer lines only cover ready peers. Counts are
-    /// cumulative over each peer connection's lifetime.
+    /// readable here, so the height/download stats cover ready peers. Counts
+    /// are cumulative over each peer connection's lifetime.
     fn log_peer_stats(&mut self, ready: usize, unready: usize) {
         let tip_height = self.minimum_peer_version.chain_tip_height();
 
@@ -1601,23 +1601,29 @@ where
             .iter()
             .filter(|&&height| height >= tip_height)
             .count();
-        let min_height = heights.first().copied();
-        let max_height = heights.last().copied();
-        let median_height = heights.get(heights.len() / 2).copied();
+        let min_height = heights.first().map(|height| height.0);
+        let max_height = heights.last().map(|height| height.0);
+        let median_height = heights.get(heights.len() / 2).map(|height| height.0);
+        let blocks_downloaded: u64 = self
+            .ready_services
+            .values()
+            .map(|svc| svc.blocks_received())
+            .sum();
 
         info!(
-            ready_peers = ready,
-            unready_peers = unready,
-            ?tip_height,
+            ready,
+            unready,
+            peer_limit = self.peerset_total_connection_limit,
+            tip = tip_height.0,
             peers_at_or_above_tip,
-            ?min_height,
-            ?median_height,
-            ?max_height,
-            "peer set status",
+            min_height,
+            median_height,
+            max_height,
+            blocks_downloaded,
+            "peer sync status",
         );
 
-        // The per-peer lines are verbose (one per connected peer), so only emit
-        // them at info level every few minutes.
+        // The per-peer lines are verbose (one per connected peer): debug only.
         let now = Instant::now();
         if let Some(last) = self.last_peer_stats_log {
             if now.duration_since(last) < PEER_STATS_LOG_INTERVAL {
@@ -1627,9 +1633,9 @@ where
         self.last_peer_stats_log = Some(now);
 
         for (addr, svc) in &self.ready_services {
-            info!(
+            debug!(
                 ?addr,
-                height = ?svc.remote_height(),
+                height = svc.remote_height().0,
                 blocks_downloaded = svc.blocks_received(),
                 load = ?svc.load(),
                 "ready peer sync status",
