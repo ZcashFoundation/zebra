@@ -7799,7 +7799,7 @@ dependencies = [
 
 [[package]]
 name = "zebrad"
-version = "5.1.0"
+version = "5.1.1"
 dependencies = [
  "abscissa_core",
  "anyhow",
