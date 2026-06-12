@@ -83,21 +83,13 @@ pub enum IbdOutcome {
     Declined(DeclineReason),
 
     /// The engine gave up above the mandatory checkpoint floor and handed
-    /// its unfinished range to the legacy syncer.
-    Degraded(DegradeReason),
-}
-
-/// Reasons the engine may hand an unfinished range back to the legacy syncer.
-///
-/// Degradation is only permitted above the mandatory checkpoint height
-/// (`docs/design/known-hash-ibd.md` §4.1); below it the engine loops forever
-/// with alarms instead.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum DegradeReason {
-    /// [`IBD_MAX_RESTARTS_WITHOUT_PROGRESS`] consecutive engine restarts
-    /// made zero frontier progress; the legacy syncer is correct, just
-    /// slower (design doc §4.1).
-    RepeatedRestartsWithoutProgress,
+    /// its unfinished range to the legacy syncer:
+    /// [`IBD_MAX_RESTARTS_WITHOUT_PROGRESS`] consecutive engine restarts made
+    /// zero frontier progress, and the legacy syncer is correct, just slower
+    /// (design doc §4.1, §4.7; degradation is only permitted above the
+    /// mandatory checkpoint height — below it the engine restarts forever
+    /// with alarms).
+    Degraded,
 }
 
 /// Reasons the known-hash engine declines to run.
@@ -352,9 +344,7 @@ where
                             "known-hash IBD engine made no progress over repeated restarts \
                              above the mandatory checkpoint; degrading to the legacy syncer",
                         );
-                        return Ok(IbdOutcome::Degraded(
-                            DegradeReason::RepeatedRestartsWithoutProgress,
-                        ));
+                        return Ok(IbdOutcome::Degraded);
                     }
 
                     tokio::time::sleep(IBD_RESTART_DELAY).await;
