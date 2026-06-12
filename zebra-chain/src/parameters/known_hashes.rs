@@ -48,6 +48,23 @@ pub const SIZE_HINT_UNIT: u32 = crate::block::MAX_BLOCK_BYTES.div_ceil(255) as u
 const _: () = assert!(SIZE_HINT_UNIT == 7_844);
 const _: () = assert!(255 * SIZE_HINT_UNIT as u64 >= crate::block::MAX_BLOCK_BYTES);
 
+/// The number of block hashes in each chunk file (except the last): 150,000
+/// 32-byte hashes, 4.8 MB of hashes per full chunk.
+///
+/// Like [`SIZE_HINT_UNIT`], this is the single source of truth shared by the
+/// asset emitter (`zebra-utils`) and the bundled specs the loader verifies
+/// against, so the two can't disagree.
+pub const HASHES_PER_CHUNK: u32 = 150_000;
+
+/// Returns the chunk file name for `file_prefix` and chunk `index`:
+/// `<file_prefix>-NN.bin` (e.g. `main-known-hashes-00.bin`).
+///
+/// The single source of the file-name format, shared by the asset emitter
+/// (`zebra-utils`) and the loader's asset search.
+pub fn chunk_file_name(file_prefix: &str, index: usize) -> String {
+    format!("{file_prefix}-{index:02}.bin")
+}
+
 /// The development-tree fallback directory holding the bundled chunk files,
 /// baked in at build time.
 ///
@@ -99,7 +116,7 @@ pub struct KnownHashListSpec {
 /// tip and re-emit chunks 15–22 with hints).
 pub const MAINNET_KNOWN_HASHES: KnownHashListSpec = KnownHashListSpec {
     max_height: block::Height(3_358_431),
-    chunk_blocks: 150_000,
+    chunk_blocks: HASHES_PER_CHUNK,
     file_prefix: "main-known-hashes",
     chunk_hashes: &[
         "5c9719ada92cd27e622be82b58f6d8ead1270f0af1b5a8644021b80512db3e90",
@@ -162,7 +179,7 @@ impl KnownHashListSpec {
 
     /// The chunk file name for chunk `index`.
     fn chunk_file_name(&self, index: usize) -> String {
-        format!("{}-{index:02}.bin", self.file_prefix)
+        chunk_file_name(self.file_prefix, index)
     }
 }
 

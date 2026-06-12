@@ -4,9 +4,9 @@
 //! Converts a completed sweep into the assets consumed by the known-hash IBD
 //! engine:
 //!
-//! - `<prefix>-known-hashes-NN.bin` chunk files, each holding up to
-//!   [`HASHES_PER_CHUNK`] raw 32-byte internal-order block hashes followed by
-//!   one quantized size-hint byte per block, and
+//! - `<prefix>-NN.bin` chunk files, each holding up to [`HASHES_PER_CHUNK`]
+//!   raw 32-byte internal-order block hashes followed by one quantized
+//!   size-hint byte per block, and
 //! - the `KnownHashListSpec` constant block that pins each chunk with a
 //!   SHA-256 digest, printed ready to paste into `zebra-chain`.
 
@@ -15,16 +15,23 @@ use std::{fmt::Write as _, fs, path::Path};
 use color_eyre::eyre::{ensure, eyre, Result, WrapErr};
 use sha2::{Digest, Sha256};
 
-use zebra_chain::block::MAX_BLOCK_BYTES;
+use zebra_chain::{block::MAX_BLOCK_BYTES, parameters::known_hashes::chunk_file_name};
 
-// The size-hint quantum is defined once in `zebra-chain` so the emitter and the
-// IBD engine quantize and dequantize with the same constant; re-exported here
-// for the sweep and its tests.
+// The size-hint quantum and chunk size are defined once in `zebra-chain` so
+// the emitter and the IBD engine encode and decode the same format;
+// re-exported here for the sweep and its tests.
 pub use zebra_chain::parameters::known_hashes::SIZE_HINT_UNIT;
 
-/// The number of block hashes in each chunk file: 150,000 32-byte hashes,
-/// 4.8 MB per full chunk.
-pub const HASHES_PER_CHUNK: usize = 150_000;
+/// The number of block hashes in each chunk file (except the last), as a
+/// `usize` for slicing.
+///
+/// Defined once in `zebra-chain`
+/// ([`HASHES_PER_CHUNK`](zebra_chain::parameters::known_hashes::HASHES_PER_CHUNK))
+/// so the emitter and the loader's specs can't disagree.
+//
+// 150,000 fits usize on all supported platforms.
+pub const HASHES_PER_CHUNK: usize =
+    zebra_chain::parameters::known_hashes::HASHES_PER_CHUNK as usize;
 
 /// The asset digests pinned by a `KnownHashListSpec`.
 #[derive(Debug)]
@@ -53,8 +60,9 @@ pub fn size_hint(serialized_size: u32) -> Result<u8> {
 }
 
 /// Writes the chunk files for `hashes` and `hints` into `out_dir`, using
-/// `file_prefix` (`main` or `test`) in the file names, and returns their
-/// SHA-256 digests.
+/// `file_prefix` (`main-known-hashes` or `test-known-hashes`, matching the
+/// spec's `file_prefix` field) in the file names, and returns their SHA-256
+/// digests.
 ///
 /// Each chunk holds the raw 32-byte hashes for its heights, followed by one
 /// size-hint byte per height in the same order.
@@ -92,7 +100,7 @@ pub fn emit_assets(
         let mut bytes: Vec<u8> = hash_chunk.iter().flatten().copied().collect();
         bytes.extend_from_slice(hint_chunk);
 
-        let path = out_dir.join(format!("{file_prefix}-known-hashes-{index:02}.bin"));
+        let path = out_dir.join(chunk_file_name(file_prefix, index));
         fs::write(&path, &bytes).wrap_err_with(|| format!("writing {}", path.display()))?;
 
         chunk_hashes.push(Sha256::digest(&bytes).into());

@@ -52,11 +52,12 @@ async fn main() -> Result<()> {
     let args = Args::from_args();
     let network = &args.network;
 
-    // The network part of emitted asset file names, matching the
-    // `main-checkpoints.txt`/`test-checkpoints.txt` convention.
+    // The emitted asset file name prefix (the spec's `file_prefix` field);
+    // the network part matches the `main-checkpoints.txt`/
+    // `test-checkpoints.txt` convention.
     let file_prefix = match network {
-        Network::Mainnet => "main",
-        Network::Testnet(_) => "test",
+        Network::Mainnet => "main-known-hashes",
+        Network::Testnet(_) => "test-known-hashes",
     };
     let network_name = network.to_string().to_lowercase();
 
@@ -176,7 +177,7 @@ fn run_emit(
 
     Ok(emit::spec_constant_block(
         const_prefix,
-        &format!("{file_prefix}-known-hashes"),
+        file_prefix,
         max_height,
         &spec,
     ))

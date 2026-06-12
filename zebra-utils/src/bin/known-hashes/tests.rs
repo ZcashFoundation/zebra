@@ -131,7 +131,7 @@ fn chunking_splits_at_exact_chunk_boundary() -> Result<()> {
     let hashes = vec![[1u8; 32]; HASHES_PER_CHUNK];
     let hints = vec![1u8; HASHES_PER_CHUNK];
 
-    let spec = emit_assets(dir.path(), "main", &hashes, &hints)?;
+    let spec = emit_assets(dir.path(), "main-known-hashes", &hashes, &hints)?;
 
     assert_eq!(spec.chunk_hashes.len(), 1);
     let chunk = std::fs::read(dir.path().join("main-known-hashes-00.bin"))?;
@@ -147,7 +147,7 @@ fn chunking_splits_at_exact_chunk_boundary() -> Result<()> {
     let hashes = vec![[2u8; 32]; HASHES_PER_CHUNK + 1];
     let hints = vec![1u8; HASHES_PER_CHUNK + 1];
 
-    let spec = emit_assets(dir.path(), "main", &hashes, &hints)?;
+    let spec = emit_assets(dir.path(), "main-known-hashes", &hashes, &hints)?;
 
     assert_eq!(spec.chunk_hashes.len(), 2);
     let chunk = std::fs::read(dir.path().join("main-known-hashes-01.bin"))?;
@@ -166,13 +166,13 @@ fn emit_assets_rejects_invalid_input() -> Result<()> {
     let dir = tempdir()?;
 
     // No genesis hash.
-    assert!(emit_assets(dir.path(), "main", &[], &[]).is_err());
+    assert!(emit_assets(dir.path(), "main-known-hashes", &[], &[]).is_err());
 
     // Hash and hint coverage must match.
-    assert!(emit_assets(dir.path(), "main", &[[1; 32]; 2], &[1]).is_err());
+    assert!(emit_assets(dir.path(), "main-known-hashes", &[[1; 32]; 2], &[1]).is_err());
 
     // Hint 0 marks an unswept height: the error must name it.
-    let err = emit_assets(dir.path(), "main", &[[1; 32]; 2], &[1, 0]).unwrap_err();
+    let err = emit_assets(dir.path(), "main-known-hashes", &[[1; 32]; 2], &[1, 0]).unwrap_err();
     assert!(err.to_string().contains("height 1"), "{err}");
 
     Ok(())
@@ -184,7 +184,7 @@ fn spec_constant_block_matches_synthetic_sweep() -> Result<()> {
     let hashes = [[0xaa; 32], [0xbb; 32], [0xcc; 32]];
     let hints = [1u8, 254, 255];
 
-    let spec = emit_assets(dir.path(), "test", &hashes, &hints)?;
+    let spec = emit_assets(dir.path(), "test-known-hashes", &hashes, &hints)?;
 
     // The chunk digest covers the concatenated raw internal-order hashes
     // followed by the per-block hint bytes.
