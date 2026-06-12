@@ -68,10 +68,10 @@ The life of one block, height `h`:
    Thread 2 writes the RocksDB batch with auto-compaction paused (§9 F2).
    The engine's future resolves after the disk write; the slot is popped and
    the disk-tier copy (if any) is evicted.
-6. **Protected** (§7.2): while the engine owns the range, the semantic block
-   verifier rejects any gossiped or RPC-submitted block at or below the
-   list's max height, so nothing can flip the state to its non-finalized mode
-   mid-sync.
+6. **Protected** (§7.2): a stateless checkpoint gate in front of the
+   semantic block verifier rejects any gossiped or RPC-submitted block at or
+   below the mandatory checkpoint height (Canopy) — Zebra cannot fully
+   validate that range, so only the engine commits it.
 
 If a fetch fails it backs off and re-issues; a frontier-critical block stuck
 in flight for 5 s gets a hedged single-hash refetch from another peer; a
@@ -135,7 +135,7 @@ What replaces the deleted checks:
 | Tx branch-ID consistency | inside `merkle_root_validity` | retained automatically | |
 | NU5+ auth-data commitment | state `commit_finalized_direct` (never in CheckpointVerifier) | state write pipeline Thread 1: `commit_checkpoint_block` runs `block_commitment_is_valid_for_chain_history` (`hashBlockCommitments` vs history tree + auth data root) before the in-memory commit | v5 txids do not commit to witnesses; substituted auth data is caught at commit time → the implicated copy is discarded and the height refetched (§4.6) |
 | ≤4 queued blocks per height | `MAX_QUEUED_BLOCKS_PER_HEIGHT` | engine window holds exactly one slot per height, byte-capped | Strictly stronger |
-| Mandatory checkpoint floor (Canopy) | router `init_checkpoint_list` | semantic-verifier commit gate (§7.2): commits at or below `known_hash_floor` rejected; the floor is computed once in `zebrad`'s startup wiring | Stronger while the engine runs (floor = list max); the permanent floor stays the mandatory checkpoint height |
+| Mandatory checkpoint floor (Canopy) | router `init_checkpoint_list` | `CheckpointGateLayer` (§7.2): a stateless layer in front of the semantic verifier rejects commits at or below `mandatory_checkpoint_height()` | A constant of the network, not a function of config |
 | State-vs-list consistency on restart | router background full-list walk | O(1) spot-check: `BestChainBlockHash(tip)` vs the checkpoint at or below the tip | Fixes the 3.36M-request startup walk |
 
 Consensus-acceptance change: **none**. Every block the engine commits is
@@ -260,7 +260,7 @@ single response item can exceed it).
 | In-flight batch responses (network + batch-control queue) | live concurrent-batch limit (`min(3 × ready_peers, 96)`) × (800 KB + one crossing block ≤ ~2 MB) ≈ 269 MB worst case, realistically ≪ (spam-era batches are single-block) | issuance gate (`fetch_slots_available`) + tower-batch-control queue limits |
 | RAM block buffer (`Slot::Fetched` blocks + promoted blocks in the commit pipeline) | `known_hash_lookahead_bytes` (256 MiB default), counted exactly from arrival sizes; the frontier block may overshoot by ≤ one block (it always stays in memory, §4.5); a failed cache write keeps its block in memory (bounded by the in-flight cap) | arrival-time placement: over-budget arrivals go to the disk tier |
 | Verify-and-commit pipeline (rayon queue + state queue + write channel, jointly) | `IBD_COMMIT_PIPELINE_BLOCKS` (1,024) / `IBD_COMMIT_PIPELINE_BYTES` (64 MiB) unresolved futures — futures resolve only after the disk write | engine stage-boundary caps (§4.4) |
-| State `finalized_state_queued_blocks` + write channel | transitively ≤ the commit-pipeline caps: **only the engine submits during IBD** (the §7.2 gate excludes gossip/RPC below the floor); the write channel itself is bounded (capacity 100) | engine caps + gate + bounded channel |
+| State `finalized_state_queued_blocks` + write channel | transitively ≤ the commit-pipeline caps: **only the engine submits during IBD** (the §7.2 gate excludes gossip/RPC below Canopy, and callers don't submit in the engine's range above it); the write channel itself is bounded (capacity 100) | engine caps + gate + bounded channel |
 | Window slot bookkeeping | ≤ `IBD_WINDOW_MAX_BLOCKS` (16,384) slots in practice (~40 B each); `IBD_SPAN_MAX` (2,000,000 ≈ 80 MB) is the defensive ceiling if accounting breaks | window cap in `refill`; span ceiling |
 | Disk overflow tier | disk, not RAM: RAM-held + disk-held bytes ≤ budget × (1 + `DISK_FETCH_AHEAD_FACTOR`) = 5 × budget (~1.25 GB at the default; transient double-storage of blocks the chain state is about to store anyway); in-memory index is one `(height, hash, u32)` entry per cached block | `storage_allows` issuance gate; continuous eviction on commit |
 | Known-hash list | ≤ 2 resident chunks (~5–10 MB, hints embedded); all chunks verified at open then dropped; the whole list is dropped once the tip passes `max_height` | windowed loader (§6.4) |
@@ -382,7 +382,7 @@ loops forever with alarms — semantic sync below Canopy is not a sound
 fallback. Above it, after `IBD_MAX_RESTARTS_WITHOUT_PROGRESS` (5) consecutive
 supervisor restarts with zero frontier progress, the engine returns
 `Degraded` and the legacy syncer takes over (correct, just slower), behind an
-explicit `warn!` (see §7.2's open follow-up on the below-list-max handoff).
+explicit `warn!` (see §7.2's open follow-up on the below-checkpoint handoff).
 
 ### 4.2 Batched fetch service (`fetch.rs`)
 
@@ -820,7 +820,7 @@ restart spot-check, and tooling.
 | Area | What died |
 |---|---|
 | `zebra-consensus/src/checkpoint.rs` + `checkpoint/types.rs` + tests | the entire CheckpointVerifier (~2,100 LOC) |
-| `router.rs` | the `BlockVerifierRouter` service and `RouterError` (the router was first reduced to a gate, then folded into the semantic verifier — §7.2); the background full-list state walk |
+| `router.rs` | the `BlockVerifierRouter` service and `RouterError` (the router was first reduced to a gate, then folded into the semantic verifier, then extracted as the stateless `checkpoints.rs` layer — §7.2); `router.rs` itself was dissolved into `lib.rs` (init + background task) and `checkpoints.rs` (heights + gate); the background full-list state walk |
 | `zebrad` sync.rs / downloads.rs | checkpoint lookahead branches and checkpoint concurrency constants (`MAX_CHECKPOINT_*` now live in `zebra-chain`/`zebra-node-services` for the remaining consumers) |
 
 `CheckpointList` itself stays in zebra-chain (testnet construction
@@ -830,46 +830,50 @@ they are the engine's commit path.
 
 ### 7.2 The commit gate
 
-The deleted router arm (`height <= max_checkpoint_height → CheckpointVerifier`)
-structurally prevented a semantically-verified block from reaching the
-non-finalized queue mid-IBD. Without a replacement, an adversarial gossiped
-or RPC-submitted block at engine-tip+1 would pass the inbound height window,
-semantic-verify (its parent's UTXOs are finalized), and **flip the state to
-non-finalized**, permanently demoting the rest of IBD.
+Zebra cannot fully validate blocks at or below the mandatory checkpoint
+height (Canopy activation): some consensus rules are not implemented for
+those network upgrades, so the only sound way to commit them is
+checkpoint-equivalent verification — the known-hash engine's pinned list.
 
-As built, the gate lives at the top of `SemanticBlockVerifier::call`: commit
-requests at or below `known_hash_floor` are rejected with
-`VerifyBlockError::BelowKnownHashRange { height, floor }` (after the
-already-in-chain check, so an RPC re-submission of a committed block still
-reports `duplicate` for zcashd compatibility). The floor is a `Height`
-computed **once, in `zebrad`'s startup wiring**, and passed to
-`router::init` — the same wiring point also raises the state's finalized
-write range from the same list constant, so the two boundaries cannot drift:
-
-- Engine enabled (`sync.known_hash_sync = true`, the mainnet default):
-  floor = `max(mandatory_checkpoint_height, list max_height)` — the engine
-  owns the whole pinned range.
-- Engine disabled: floor = `mandatory_checkpoint_height` (the code-level
-  expression of "Zebra cannot fully validate pre-Canopy blocks"), so a
-  legacy-path node with an existing post-Canopy state is not blocked by a
-  gate that exists only to protect the engine. Regtest has no list and a
-  zero mandatory floor.
+As built, the gate is a **stateless tower layer**
+(`zebra_consensus::checkpoints::CheckpointGateLayer`), wrapped around the
+semantic block verifier by `zebra_consensus::init`: any commit or proposal
+request at or below `network.mandatory_checkpoint_height()` is rejected with
+`VerifyBlockError::BelowMandatoryCheckpoint { height, floor }` before it
+reaches the verifier or the state service. The verifier itself processes any
+block above the mandatory height, with no engine knowledge; callers are
+responsible for routing checkpoint-verifiable blocks through the engine, and
+for not sending blocks in the engine's range to the verifier unless
+checkpoint sync is disabled in the config. (Regtest has no list and a zero
+mandatory floor, so the gate is inert there.)
 
 Gossip's downloader already treats verifier errors as non-fatal drops; the
-legacy syncer surfaces `BelowKnownHashRange` as an actionable error (the
-range is engine-only; re-downloading cannot help) instead of a silent retry
-loop; RPC `submit_block` maps the error to a rejection.
+legacy syncer surfaces `BelowMandatoryCheckpoint` as an actionable error
+(re-downloading cannot help; enable known-hash sync) instead of a silent
+retry loop; RPC `submit_block` maps the error to a rejection — including for
+blocks the state already holds, since the stateless gate fires before the
+verifier's already-in-chain check.
 
-The router's background list-walk is replaced by an O(1) spot-check
+The old router's background list-walk is replaced by an O(1) spot-check
 (`BestChainBlockHash` at the spaced checkpoint at or below the tip),
 preserving wrong-chain-on-restart detection without the walk.
 
+**Residual caller responsibility (engine range above Canopy).** Earlier
+designs raised the gate floor to the list max while the engine ran, so
+nothing could semantically commit inside the engine's range mid-IBD. With
+the floor fixed at the mandatory height, a semantically-valid block whose
+parent is the engine's current finalized tip (above Canopy) would flip the
+state's finalized→non-finalized handoff early if a caller submitted it.
+Inbound gossip and the legacy syncer don't do this in practice (gossip
+fetches near the network tip; the syncer is idle during the engine phase),
+but the protection is now a property of the callers, not the gate.
+
 **Open / planned follow-ups (maintainer decisions):**
 
-- *Degraded handoff below list max.* When the engine degrades between the
-  mandatory height and the list max, the legacy syncer it hands off to still
-  cannot commit that range (the gate holds). The choice — keep restarting
-  the engine forever with alarms, vs. exit fatally — is an
+- *Degraded handoff below the mandatory checkpoint.* When the engine
+  degrades below the mandatory height, the legacy syncer it hands off to
+  still cannot commit that range (the gate holds). The choice — keep
+  restarting the engine forever with alarms, vs. exit fatally — is an
   operational-behavior decision.
 - *Flag-off fresh mainnet sync* below Canopy is unsupported without the
   engine (no checkpoint verifier); whether to hard-error at startup is open.
@@ -1141,7 +1145,7 @@ runs.
 
 | Risk | Sev | Mitigation |
 |---|---|---|
-| Gossip/RPC block at engine-tip+1 flips state to non-finalized mid-IBD | Critical | §7.2 gate; injection test (gate 9) |
+| Gossip/RPC block at engine-tip+1 flips state to non-finalized mid-IBD | Critical | §7.2 gate below Canopy; above it, caller behavior (gossip fetches near the network tip, syncer idle during the engine phase) — see §7.2's residual-responsibility note; injection test (gate 9) |
 | Merkle/dup-txid check dropped in convert | Critical | reuse `merkle_root_validity` verbatim; body-swap vectors (D3) |
 | v5 auth-data substitution → commit-reset amplification | High | commit-time `hashBlockCommitments` check (§2) + 3-failure byte-identical deterministic detector (§4.6); implicated copy discarded; refetch backoff |
 | Scheduler recreates #10679 poisoning | High | engine never writes the registry; only explicit NotFound is classified as inventory knowledge |
@@ -1237,9 +1241,16 @@ with cause". The main spec body above always describes the as-built system.
   published the gate floor on a `watch<Option<Height>>` with a drop-guard
   (`None` on engine exit). Replaced by a startup-computed constant `Height`
   (§7.2) — first computed inside `router::init` from the config flag, then
-  (cleanup wave) computed once in `zebrad`'s startup wiring and passed in,
-  removing consensus's knowledge of the list entirely. Accepted
-  consequence: the Degraded-handoff question in §7.2.
+  computed once in `zebrad`'s startup wiring and passed in, removing
+  consensus's knowledge of the list entirely. Finally (PR review,
+  maintainer-directed) the list-max raise was dropped altogether: the gate
+  became the stateless `checkpoints::CheckpointGateLayer` fixed at the
+  mandatory checkpoint height, the verifier processes anything above
+  Canopy, and protecting the engine's range above Canopy became the
+  callers' responsibility (§7.2's residual-responsibility note). Accepted
+  consequences: the Degraded-handoff question in §7.2, and below-Canopy
+  `submit_block` duplicates reporting `Rejected` (the stateless gate fires
+  before the duplicate check).
 - **Per-height peer exclusions: deleted.** The design specified per-height
   exclusion sets steering refetches away from `notfound`/bad-copy peers.
   As built, routing is owned by zebra-network's peer set, which the engine

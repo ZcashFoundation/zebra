@@ -45,7 +45,7 @@ use zebra_chain::{
 #[allow(unused_imports)]
 use zebra_chain::serialization::BytesInDisplayOrder;
 
-use zebra_consensus::{router::service_trait::BlockVerifierService, MAX_BLOCK_SIGOPS};
+use zebra_consensus::{service_trait::BlockVerifierService, MAX_BLOCK_SIGOPS};
 use zebra_node_services::mempool::{self, TransactionDependencies};
 use zebra_state::GetBlockTemplateChainInfo;
 

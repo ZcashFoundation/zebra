@@ -142,12 +142,7 @@ async fn check_transcripts() -> Result<(), Report> {
     let transaction = transaction::Verifier::new_for_tests(&network, state_service.clone());
     let transaction = Buffer::new(BoxService::new(transaction), 1);
     let block_verifier = Buffer::new(
-        SemanticBlockVerifier::new(
-            &network,
-            state_service.clone(),
-            transaction,
-            zebra_chain::block::Height(0),
-        ),
+        SemanticBlockVerifier::new(&network, state_service.clone(), transaction),
         1,
     );
 

@@ -5,7 +5,7 @@
 //!
 //! - [`BlockVerifierService`]: for services that handle block verification requests.
 
-use crate::router::Request;
+use crate::block::Request;
 use zebra_chain::block::Hash;
 use zebra_node_services::service_traits::ZebraService;
 

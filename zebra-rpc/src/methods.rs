@@ -82,7 +82,7 @@ use zebra_chain::{
     },
 };
 use zebra_consensus::{
-    funding_stream_address, router::service_trait::BlockVerifierService, VerifyBlockError,
+    funding_stream_address, service_trait::BlockVerifierService, VerifyBlockError,
 };
 use zebra_network::{address_book_peers::AddressBookPeers, types::PeerServices, PeerSocketAddr};
 use zebra_node_services::mempool::{self, CreatedOrSpent, MempoolService};

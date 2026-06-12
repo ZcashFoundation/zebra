@@ -43,16 +43,17 @@ pub use request::Request;
 mod tests;
 
 /// Asynchronous semantic block verification.
+///
+/// Processes any block above the network's mandatory checkpoint height; the
+/// [`CheckpointGateLayer`](crate::checkpoints::CheckpointGateLayer) in front
+/// of it rejects everything else (Zebra cannot fully validate blocks below
+/// the mandatory checkpoint).
 #[derive(Debug)]
 pub struct SemanticBlockVerifier<S, V> {
     /// The network to be verified.
     network: Network,
     state_service: S,
     transaction_verifier: V,
-    /// Commits at or below this height are rejected: those heights are only
-    /// committed by the known-hash IBD engine (design doc §7.2). See
-    /// [`router::init`](crate::router::init) for how the floor is chosen.
-    known_hash_floor: block::Height,
 }
 
 /// Block verification errors.
@@ -98,18 +99,20 @@ pub enum VerifyBlockError {
     #[error("state service error for block {hash}: {source}")]
     StateService { source: BoxError, hash: block::Hash },
 
-    /// The block is at or below the known-hash floor: those heights are only
-    /// committed by the known-hash IBD engine, never by semantic verification
-    /// (design doc §7.2). A benign rejection for gossiped blocks; an explicit
-    /// one for RPC block submission.
+    /// The block is at or below the mandatory checkpoint height: Zebra
+    /// cannot fully validate blocks in that range, so they are only committed
+    /// by checkpoint-equivalent verification (the known-hash IBD engine). A
+    /// benign rejection for gossiped blocks; an explicit one for RPC block
+    /// submission.
     #[error(
-        "block at height {height:?} is at or below the known-hash floor {floor:?}: \
-         blocks in that range are only committed by the known-hash sync engine"
+        "block at height {height:?} is at or below the mandatory checkpoint height {floor:?}: \
+         Zebra cannot fully validate blocks in that range, so they are only committed by \
+         checkpoint-verified sync (the known-hash engine)"
     )]
-    BelowKnownHashRange {
+    BelowMandatoryCheckpoint {
         /// The rejected block's height.
         height: block::Height,
-        /// The floor in effect when the block was rejected.
+        /// The mandatory checkpoint height.
         floor: block::Height,
     },
 }
@@ -133,17 +136,18 @@ impl VerifyBlockError {
             Equihash { .. } | Subsidy(_) => 100,
             Transaction(err) => err.mempool_misbehavior_score(),
             Commit(err) => err.misbehavior_score(),
-            // Peers cannot know the engine's exact floor timing, so a
-            // below-floor block is not necessarily misbehavior.
+            // A historic below-checkpoint block is valid data on the wrong
+            // path, not necessarily misbehavior.
             _other => 0,
         }
     }
 
-    /// Returns `true` if this is a [`VerifyBlockError::BelowKnownHashRange`]
-    /// rejection: the block is in the range only the known-hash engine can
+    /// Returns `true` if this is a
+    /// [`VerifyBlockError::BelowMandatoryCheckpoint`] rejection: the block is
+    /// in the range only checkpoint-verified sync (the known-hash engine) can
     /// commit, so re-downloading it through the legacy path cannot help.
-    pub fn is_below_known_hash_range(&self) -> bool {
-        matches!(self, VerifyBlockError::BelowKnownHashRange { .. })
+    pub fn is_below_mandatory_checkpoint(&self) -> bool {
+        matches!(self, VerifyBlockError::BelowMandatoryCheckpoint { .. })
     }
 }
 
@@ -175,19 +179,12 @@ where
     V: Service<tx::Request, Response = tx::Response, Error = BoxError> + Send + Clone + 'static,
     V::Future: Send + 'static,
 {
-    /// Creates a new [`SemanticBlockVerifier`] that rejects commits at or
-    /// below `known_hash_floor` (design doc §7.2).
-    pub fn new(
-        network: &Network,
-        state_service: S,
-        transaction_verifier: V,
-        known_hash_floor: block::Height,
-    ) -> Self {
+    /// Creates a new [`SemanticBlockVerifier`].
+    pub fn new(network: &Network, state_service: S, transaction_verifier: V) -> Self {
         Self {
             network: network.clone(),
             state_service,
             transaction_verifier,
-            known_hash_floor,
         }
     }
 }
@@ -215,7 +212,6 @@ where
         let mut state_service = self.state_service.clone();
         let mut transaction_verifier = self.transaction_verifier.clone();
         let network = self.network.clone();
-        let known_hash_floor = self.known_hash_floor;
 
         let block = request.block();
 
@@ -245,32 +241,6 @@ where
             let height = block
                 .coinbase_height()
                 .ok_or(BlockError::MissingHeight(hash))?;
-
-            // Gate commits at or below the known-hash floor: those heights are
-            // only committed by the known-hash IBD engine, never by semantic
-            // verification (design doc §7.2). Without the gate, a gossiped or
-            // RPC-submitted block just above the engine's tip could
-            // semantically verify mid-sync and flip the state to its
-            // non-finalized mode, silently demoting the rest of the initial
-            // sync.
-            //
-            // This runs after the already-in-chain check so that a duplicate
-            // of a block the engine already committed still reports as a
-            // duplicate (no new commit happens); only a genuinely new
-            // below-floor block is rejected.
-            if height <= known_hash_floor {
-                // There's no use case for block proposals below the floor.
-                if request.is_proposal() {
-                    return Err(VerifyBlockError::ValidateProposal(
-                        "block proposals must be above the known-hash floor".into(),
-                    ));
-                }
-
-                return Err(VerifyBlockError::BelowKnownHashRange {
-                    height,
-                    floor: known_hash_floor,
-                });
-            }
 
             // Zebra does not support heights greater than
             // [`block::Height::MAX`].

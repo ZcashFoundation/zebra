@@ -83,7 +83,7 @@ use tower::{builder::ServiceBuilder, util::BoxService, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::block::genesis::regtest_genesis_block;
-use zebra_consensus::router::BackgroundTaskHandles;
+use zebra_consensus::BackgroundTaskHandles;
 use zebra_rpc::{methods::RpcImpl, server::RpcServer, SubmitBlockChannel};
 
 use crate::{
@@ -168,16 +168,18 @@ impl StartCmd {
         };
 
         info!("initializing node state");
-        let max_checkpoint_height = zebra_consensus::router::max_checkpoint_height(
+        let max_checkpoint_height = zebra_consensus::checkpoints::max_checkpoint_height(
             config.consensus.clone(),
             &config.network.network,
         );
 
-        // The end of the bundled known-hash list, when the known-hash IBD
-        // engine is enabled. This single policy point raises two floors
-        // below: the state's finalized write range and the consensus commit
-        // gate (design doc §7.2–§7.3).
-        let known_hash_max_height = config
+        // When the known-hash IBD engine is enabled, the finalized write
+        // path must cover the whole pinned list, not just the spaced
+        // checkpoint range (design doc §7.3 / D6). The consensus commit gate
+        // is independent of this: it always rejects semantic commits at or
+        // below the mandatory checkpoint height (see
+        // `zebra_consensus::checkpoints`).
+        let max_finalizable_height = config
             .sync
             .known_hash_sync
             .then(|| {
@@ -186,28 +188,10 @@ impl StartCmd {
                 )
                 .map(|spec| spec.max_height)
             })
-            .flatten();
-
-        // When the known-hash IBD engine is enabled, the finalized write
-        // path must cover the whole pinned list, not just the spaced
-        // checkpoint range (design doc §7.3 / D6).
-        let max_finalizable_height = known_hash_max_height
+            .flatten()
             .map_or(max_checkpoint_height, |list_max| {
                 max_checkpoint_height.max(list_max)
             });
-
-        // The consensus commit gate: semantic commits are gated at the
-        // mandatory checkpoint height — Zebra cannot fully validate
-        // pre-Canopy blocks semantically — raised to the end of the list
-        // while the engine owns the whole pinned range, so a gossiped or
-        // RPC-submitted block just above the engine's tip can't semantically
-        // verify mid-sync and flip the state to its non-finalized mode. With
-        // the engine disabled the floor stays at the mandatory height, so
-        // legacy post-Canopy sync isn't blocked by a gate that exists only
-        // to protect the engine.
-        let known_hash_floor = known_hash_max_height
-            .unwrap_or(zebra_chain::block::Height(0))
-            .max(config.network.network.mandatory_checkpoint_height());
 
         info!("opening database, this may take a few minutes");
 
@@ -265,12 +249,11 @@ impl StartCmd {
         let (tx_verifier_setup_tx, tx_verifier_setup_rx) = oneshot::channel();
 
         let (block_verifier_router, tx_verifier, consensus_task_handles, max_checkpoint_height) =
-            zebra_consensus::router::init(
+            zebra_consensus::init(
                 config.consensus.clone(),
                 &config.network.network,
                 state.clone(),
                 tx_verifier_setup_rx,
-                known_hash_floor,
             )
             .await;
 

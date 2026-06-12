@@ -18,7 +18,7 @@ use zebra_chain::{
     block::MAX_BLOCK_BYTES, chain_sync_status::ChainSyncStatus, chain_tip::ChainTip,
     parameters::Network,
 };
-use zebra_consensus::router::service_trait::BlockVerifierService;
+use zebra_consensus::service_trait::BlockVerifierService;
 use zebra_network::AddressBookPeers;
 use zebra_node_services::mempool::MempoolService;
 use zebra_state::{ReadState as ReadStateService, State as StateService};

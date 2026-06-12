@@ -1391,20 +1391,20 @@ where
             }
 
             BlockDownloadVerifyError::Invalid { error, .. }
-                if error.is_below_known_hash_range() =>
+                if error.is_below_mandatory_checkpoint() =>
             {
-                // The legacy sync path reached a block in the known-hash
-                // range, which only the known-hash IBD engine can commit.
-                // Re-downloading it cannot help, so surface an actionable
-                // error instead of the generic "continuing" / retry path.
-                // This is reachable when the engine is disabled, or degraded,
-                // on a node whose tip is still below the known-hash list max.
+                // The legacy sync path reached a block at or below the
+                // mandatory checkpoint height, which only checkpoint-verified
+                // sync (the known-hash IBD engine) can commit. Re-downloading
+                // it cannot help, so surface an actionable error instead of
+                // the generic "continuing" / retry path. This is reachable
+                // when the engine is disabled, or declined to run, on a node
+                // whose tip is still below the mandatory checkpoint.
                 error!(
                     error = ?e,
-                    "a block in the known-hash range was rejected by the commit gate during \
-                     legacy sync; this range is only committed by the known-hash IBD engine. \
-                     Enable sync.known_hash_sync, or delete the state and re-sync, to make \
-                     progress below the known-hash list"
+                    "a block at or below the mandatory checkpoint was rejected during legacy \
+                     sync; that range is only committed by known-hash sync. Enable \
+                     sync.known_hash_sync to make progress below the mandatory checkpoint"
                 );
                 // Pace retries via SYNC_RESTART_DELAY rather than spinning, in
                 // case the engine becomes available again; the log explains

@@ -1,29 +1,24 @@
-//! Tests for chain verification
+//! Tests for the block verification stack built by [`init`](crate::init).
 
 #![allow(clippy::unwrap_in_result)]
 
-use std::{sync::Arc, time::Duration};
+use std::{future::Future, sync::Arc, time::Duration};
 
 use color_eyre::eyre::Report;
 use once_cell::sync::Lazy;
-use tower::{layer::Layer, timeout::TimeoutLayer};
+use tower::{layer::Layer, timeout::TimeoutLayer, Service};
 
 use zebra_chain::{
-    block::Block,
+    block::{self, Block},
+    parameters::Network,
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
 };
 use zebra_state as zs;
 use zebra_test::transcript::{ExpectedTranscriptError, Transcript};
 
-use std::future::Future;
-
-use super::*;
+use crate::{BoxError, Config, Request};
 
 /// The timeout we apply to each verify future during testing.
-///
-/// The checkpoint verifier uses `tokio::sync::oneshot` channels as futures.
-/// If the verifier doesn't send a message on the channel, any tests that
-/// await the channel future will hang.
 ///
 /// The block verifier waits for the previous block to reach the state service.
 /// If that never happens, the test can hang.
@@ -44,8 +39,7 @@ pub fn block_no_transactions() -> Block {
     }
 }
 
-/// Return a new chain verifier and state service,
-/// using the hard-coded checkpoint list for `network`.
+/// Return a new block verifier stack and state service for `network`.
 async fn verifiers_from_network(
     network: Network,
 ) -> (
@@ -67,21 +61,17 @@ async fn verifiers_from_network(
         + 'static,
 ) {
     let state_service = zs::init_test(&network).await;
-    let (
-        block_verifier_router,
-        _transaction_verifier,
-        _groth16_download_handle,
-        _max_checkpoint_height,
-    ) = crate::router::init_test(Config::default(), &network, state_service.clone()).await;
+    let (block_verifier, _transaction_verifier, _background_handles, _max_checkpoint_height) =
+        crate::init_test(Config::default(), &network, state_service.clone()).await;
 
-    // We can drop the download task handle here, because:
-    // - if the download task fails, the tests will panic, and
-    // - if the download task hangs, the tests will hang.
+    // We can drop the background task handles here, because:
+    // - if a background task fails, the tests will panic, and
+    // - if a background task hangs, the tests will hang.
 
-    (block_verifier_router, state_service)
+    (block_verifier, state_service)
 }
 
-static BLOCK_VERIFY_TRANSCRIPT_GENESIS_BELOW_FLOOR: Lazy<
+static BLOCK_VERIFY_TRANSCRIPT_GENESIS_BELOW_CHECKPOINT: Lazy<
     Vec<(Request, Result<block::Hash, ExpectedTranscriptError>)>,
 > = Lazy::new(|| {
     let block: Arc<_> =
@@ -89,8 +79,9 @@ static BLOCK_VERIFY_TRANSCRIPT_GENESIS_BELOW_FLOOR: Lazy<
             .unwrap()
             .into();
 
-    // Genesis is below the known-hash floor, so the router's gate rejects it:
-    // blocks in that range are only committed by the known-hash IBD engine.
+    // Genesis is below the mandatory checkpoint height, so the checkpoint
+    // gate rejects it: blocks in that range are only committed by
+    // checkpoint-verified sync (the known-hash IBD engine).
     vec![(Request::Commit(block), Err(ExpectedTranscriptError::Any))]
 });
 
@@ -132,12 +123,12 @@ static STATE_VERIFY_TRANSCRIPT_GENESIS_MISSING: Lazy<
 });
 
 #[tokio::test(flavor = "multi_thread")]
-async fn verify_below_known_hash_floor_test() -> Result<(), Report> {
-    verify_below_known_hash_floor(Config {
+async fn verify_below_mandatory_checkpoint_test() -> Result<(), Report> {
+    verify_below_mandatory_checkpoint(Config {
         checkpoint_sync: true,
     })
     .await?;
-    verify_below_known_hash_floor(Config {
+    verify_below_mandatory_checkpoint(Config {
         checkpoint_sync: false,
     })
     .await?;
@@ -145,31 +136,31 @@ async fn verify_below_known_hash_floor_test() -> Result<(), Report> {
     Ok(())
 }
 
-/// Test that the router's gate rejects commits at or below the known-hash
-/// floor, regardless of the `checkpoint_sync` config, and that the rejected
-/// block never reaches the state.
+/// Test that the checkpoint gate rejects commits at or below the mandatory
+/// checkpoint height, regardless of the `checkpoint_sync` config, and that
+/// the rejected block never reaches the state.
 ///
-/// Also tests the `router::init` function.
+/// Also tests the `init` function.
 #[spandoc::spandoc]
-async fn verify_below_known_hash_floor(config: Config) -> Result<(), Report> {
+async fn verify_below_mandatory_checkpoint(config: Config) -> Result<(), Report> {
     let _init_guard = zebra_test::init();
 
     let network = Network::Mainnet;
     let state_service = zs::init_test(&network).await;
 
-    let (
-        block_verifier_router,
-        _transaction_verifier,
-        _groth16_download_handle,
-        _max_checkpoint_height,
-    ) = super::init_test(config.clone(), &network, state_service.clone()).await;
+    let (block_verifier, _transaction_verifier, _background_handles, _max_checkpoint_height) =
+        crate::init_test(config.clone(), &network, state_service.clone()).await;
 
     // Add a timeout layer
-    let block_verifier_router =
-        TimeoutLayer::new(Duration::from_secs(VERIFY_TIMEOUT_SECONDS)).layer(block_verifier_router);
+    let block_verifier =
+        TimeoutLayer::new(Duration::from_secs(VERIFY_TIMEOUT_SECONDS)).layer(block_verifier);
 
-    let transcript = Transcript::from(BLOCK_VERIFY_TRANSCRIPT_GENESIS_BELOW_FLOOR.iter().cloned());
-    transcript.check(block_verifier_router).await.unwrap();
+    let transcript = Transcript::from(
+        BLOCK_VERIFY_TRANSCRIPT_GENESIS_BELOW_CHECKPOINT
+            .iter()
+            .cloned(),
+    );
+    transcript.check(block_verifier).await.unwrap();
 
     let transcript = Transcript::from(STATE_VERIFY_TRANSCRIPT_GENESIS_MISSING.iter().cloned());
     transcript.check(state_service).await.unwrap();
@@ -182,22 +173,24 @@ async fn verify_fail_no_coinbase_test() -> Result<(), Report> {
     verify_fail_no_coinbase().await
 }
 
-/// Test that blocks with no coinbase height are rejected by the BlockVerifierRouter
+/// Test that blocks with no coinbase height are rejected by the verifier
+/// stack.
 ///
-/// BlockVerifierRouter uses the block height to decide between the CheckpointVerifier
-/// and SemanticBlockVerifier. This is the error case, where there is no height.
+/// The checkpoint gate passes blocks without a parseable coinbase height
+/// through, so the semantic verifier reports them with full context. This is
+/// that error case.
 #[spandoc::spandoc]
 async fn verify_fail_no_coinbase() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
 
-    let (router, state_service) = verifiers_from_network(Network::Mainnet).await;
+    let (verifier, state_service) = verifiers_from_network(Network::Mainnet).await;
 
     // Add a timeout layer
-    let block_verifier_router =
-        TimeoutLayer::new(Duration::from_secs(VERIFY_TIMEOUT_SECONDS)).layer(router);
+    let block_verifier =
+        TimeoutLayer::new(Duration::from_secs(VERIFY_TIMEOUT_SECONDS)).layer(verifier);
 
     let transcript = Transcript::from(NO_COINBASE_TRANSCRIPT.iter().cloned());
-    transcript.check(block_verifier_router).await.unwrap();
+    transcript.check(block_verifier).await.unwrap();
 
     let transcript = Transcript::from(NO_COINBASE_STATE_TRANSCRIPT.iter().cloned());
     transcript.check(state_service).await.unwrap();
