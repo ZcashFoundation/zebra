@@ -2,5 +2,4 @@
 
 [Valarbook](README.md)
 
-- [POC Scope](pages/poc-scope.md)
-- [Running Tests](pages/running-tests.md)
+- [zebra-zcashd-compat](pages/zcashd-compat.md)

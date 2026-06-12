@@ -40,8 +40,7 @@ jobs:
           test -f book/valarbook/.gitbook.yaml
           test -f book/valarbook/README.md
           test -f book/valarbook/SUMMARY.md
-          test -f book/valarbook/pages/poc-scope.md
-          test -f book/valarbook/pages/running-tests.md
+          test -f book/valarbook/pages/zcashd-compat.md
           ! grep -R "{{#" book/valarbook
 
       - name: Setup Node.js
