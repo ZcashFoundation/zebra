@@ -95,19 +95,6 @@ impl LoadTrackedClient {
         std::cmp::max(self.connection_info.remote.start_height, live_height)
     }
 
-    /// Records that this peer delivered a block at `height`, raising the
-    /// peer's live height if `height` is above it.
-    ///
-    /// The live height is monotonic: deliveries of lower blocks never lower it.
-    //
-    // The peer set's response futures raise the shared live-height handle
-    // directly, because the client has been moved into the unready set by the
-    // time a response arrives. This method is for callers that hold the client.
-    #[allow(dead_code)]
-    pub fn record_delivered_height(&self, height: Height) {
-        self.live_height.fetch_max(height.0, Ordering::Relaxed);
-    }
-
     /// Returns a handle to this peer's live height, so a response future can
     /// record delivered block heights after the request completes.
     ///

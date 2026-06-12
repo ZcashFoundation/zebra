@@ -663,11 +663,8 @@ fn peer_set_publishes_status_watch() {
             .expect("peer set service is always ready");
         assert_eq!(peer_ready.ready_services.len(), 2);
 
-        let status = status_receiver.borrow().clone();
+        let status = *status_receiver.borrow();
         assert_eq!(status.ready_peers, 2);
-        assert_eq!(status.unready_peers, 0);
-        // The mock handshakes report a start height of zero.
-        assert_eq!(status.median_remote_height, Some(block::Height(0)));
     });
 }
 

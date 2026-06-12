@@ -171,23 +171,14 @@ pub struct MorePeers;
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct CancelClientWork;
 
-/// A snapshot of the peer set's size and the heights of its ready peers,
-/// published on a watch channel.
+/// A snapshot of the peer set's size, published on a watch channel.
 ///
 /// Used by sync consumers to size their download pipelines from the number of
-/// usable peers and how far ahead of us they are.
-#[derive(Clone, Debug, Default, PartialEq)]
+/// usable peers.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 pub struct PeerSetStatus {
     /// The number of peers that are ready for requests.
     pub ready_peers: usize,
-
-    /// The number of peers that are busy handling requests.
-    pub unready_peers: usize,
-
-    /// The median chain height of the ready peers — each peer's handshake
-    /// height, raised by blocks that peer actually delivered — or `None` if
-    /// there are no ready peers.
-    pub median_remote_height: Option<Height>,
 }
 
 type ResponseFuture = Pin<Box<dyn Future<Output = Result<Response, BoxError>> + Send + 'static>>;
@@ -1632,20 +1623,8 @@ where
 
     /// Publishes a [`PeerSetStatus`] snapshot on the status watch channel,
     /// waking subscribers only when the status has changed.
-    fn publish_status(&self, ready_peers: usize, unready_peers: usize) {
-        let mut heights: Vec<Height> = self
-            .ready_services
-            .values()
-            .map(|svc| svc.remote_height())
-            .collect();
-        heights.sort_unstable();
-        let median_remote_height = heights.get(heights.len() / 2).copied();
-
-        let status = PeerSetStatus {
-            ready_peers,
-            unready_peers,
-            median_remote_height,
-        };
+    fn publish_status(&self, ready_peers: usize) {
+        let status = PeerSetStatus { ready_peers };
 
         self.status_sender.send_if_modified(|current| {
             if *current == status {
@@ -1670,7 +1649,7 @@ where
         metrics::gauge!("pool.num_unready").set(num_unready as f64);
         metrics::gauge!("zcash.net.peers").set(num_peers as f64);
 
-        self.publish_status(num_ready, num_unready);
+        self.publish_status(num_ready);
 
         // Security: make sure we haven't exceeded the connection limit
         if num_peers > self.peerset_total_connection_limit {
