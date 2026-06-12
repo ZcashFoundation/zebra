@@ -1073,14 +1073,16 @@ where
             .choose(&mut rand::thread_rng())
     }
 
-    /// Evicts a random peer if the best chain tip height hasn't grown for at least
-    /// [`TIP_STALL_EVICTION_TIMEOUT`].
+    /// Evicts a random peer if the best chain tip height hasn't grown for at
+    /// least [`TIP_STALL_EVICTION_TIMEOUT`] **and** the peer set is full.
     ///
     /// A stalled chain tip can indicate that we're connected to peers that aren't
     /// serving us new blocks (for example, peers on a stuck or minority chain, or
-    /// unresponsive peers holding download slots). Dropping a random peer frees a
-    /// connection slot, prompting the crawler to connect to a different peer that
-    /// might let our sync make progress.
+    /// unresponsive peers holding download slots). Eviction is a last resort:
+    /// while the peer set has free connection slots, the crawler can add new
+    /// peers without dropping a working connection, so this only signals
+    /// [`MorePeers`] demand. Once the set is full, dropping a random peer is the
+    /// only way to make room for a different one.
     ///
     /// At most one peer is evicted per stall window.
     fn evict_peer_if_tip_stalled(&mut self) {
@@ -1119,16 +1121,34 @@ where
             return;
         }
 
-        // Reset the timer so we evict at most one peer per stall window, even if
+        // Reset the timer so we act at most once per stall window, even if
         // the tip stays stuck.
         self.last_tip_growth = Instant::now();
+
+        // While there are free connection slots, ask the crawler for more
+        // peers instead of dropping a working connection: eviction only helps
+        // when the set is full and a new peer can't be added any other way.
+        let num_peers = self.ready_services.len() + self.cancel_handles.len();
+        if num_peers < self.peerset_total_connection_limit {
+            info!(
+                ?tip_height,
+                num_peers,
+                peer_limit = self.peerset_total_connection_limit,
+                stall = ?TIP_STALL_EVICTION_TIMEOUT,
+                "chain tip is stalled behind our peers, requesting more peers"
+            );
+
+            let _ = self.demand_signal.try_send(MorePeers);
+            return;
+        }
 
         if let Some(key) = self.select_random_peer() {
             info!(
                 ?key,
                 ?tip_height,
                 stall = ?TIP_STALL_EVICTION_TIMEOUT,
-                "chain tip has not grown recently, evicting a random peer to recover sync"
+                "chain tip is stalled behind a full peer set, \
+                 evicting a random peer to make room for a new one"
             );
 
             // `remove()` drops ready peers and cancels in-flight work for unready peers.

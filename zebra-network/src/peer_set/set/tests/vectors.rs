@@ -27,7 +27,7 @@ use crate::{
     peer::{ClientRequest, ClientTestHarness, LoadTrackedClient, MinimumPeerVersion},
     peer_set::inventory_registry::InventoryStatus,
     protocol::external::{types::Version, InventoryHash},
-    BoxError, InventoryResponse, PeerSocketAddr, Request, Response, SharedPeerError,
+    BoxError, Config, InventoryResponse, PeerSocketAddr, Request, Response, SharedPeerError,
 };
 use indexmap::IndexMap;
 use tokio::sync::watch;
@@ -195,12 +195,21 @@ fn peer_set_ready_multiple_connections() {
 }
 
 /// Check that the peer set evicts a random peer when the best chain tip height
-/// has not grown for longer than [`TIP_STALL_EVICTION_TIMEOUT`], and at least
-/// one peer reports a height above ours (so there is newer chain we are failing
-/// to obtain).
+/// has not grown for longer than [`TIP_STALL_EVICTION_TIMEOUT`], at least one
+/// peer reports a height above ours (so there is newer chain we are failing to
+/// obtain), and the peer set is full (so a new peer can't be added without
+/// evicting one first).
 #[test]
 fn peer_set_evicts_random_peer_on_stalled_tip() {
     let peer_version = Version::min_specified_for_upgrade(&Network::Mainnet, NetworkUpgrade::Nu6_2);
+
+    // The smallest configurable connection limit:
+    // `peerset_initial_target_size` × (outbound + inbound multipliers) = 8.
+    let config = Config {
+        peerset_initial_target_size: 1,
+        ..Config::default()
+    };
+    let peer_limit = config.peerset_total_connection_limit();
 
     // Start the runtime
     let (runtime, _init_guard) = zebra_test::init_async();
@@ -213,13 +222,14 @@ fn peer_set_evicts_random_peer_on_stalled_tip() {
     best_tip_height.send_best_tip_height(block::Height(100));
 
     runtime.block_on(async move {
-        // Three peers, all reporting a height above our tip: the sync is behind,
-        // so a static tip is a genuine stall worth churning a peer over. The
-        // harnesses must outlive the peer set — dropping one closes its mock
-        // connection and the peer never becomes ready.
+        // Fill the peer set to its connection limit with peers reporting a
+        // height above our tip: the sync is behind and no new peer can be
+        // added, so a static tip is a genuine stall worth churning a peer
+        // over. The harnesses must outlive the peer set — dropping one closes
+        // its mock connection and the peer never becomes ready.
         let mut harnesses = Vec::new();
         let discovered_peers: Vec<Result<Change<PeerSocketAddr, LoadTrackedClient>, BoxError>> = (1
-            ..=3u16)
+            ..=peer_limit as u16)
             .map(|port| {
                 let (client, harness) = ClientTestHarness::build()
                     .with_version(peer_version)
@@ -235,8 +245,9 @@ fn peer_set_evicts_random_peer_on_stalled_tip() {
         // Build a peerset
         let (mut peer_set, mut peer_set_guard) = PeerSetBuilder::new()
             .with_discover(discovered_peers)
+            .with_config(config)
             .with_minimum_peer_version(minimum_peer_version.clone())
-            .max_conns_per_ip(max(3, DEFAULT_MAX_CONNS_PER_IP))
+            .max_conns_per_ip(max(peer_limit, DEFAULT_MAX_CONNS_PER_IP))
             .build();
 
         // Drive a first poll to make all peers ready and seed the stall detector
@@ -245,7 +256,7 @@ fn peer_set_evicts_random_peer_on_stalled_tip() {
             .ready()
             .await
             .expect("peer set service is always ready");
-        assert_eq!(peer_ready.ready_services.len(), 3);
+        assert_eq!(peer_ready.ready_services.len(), peer_limit);
 
         // Pretend the tip last grew more than the eviction timeout ago, while
         // leaving the tip height unchanged so it counts as stalled.
@@ -258,8 +269,8 @@ fn peer_set_evicts_random_peer_on_stalled_tip() {
             .expect("peer set service is always ready");
         assert_eq!(
             peer_ready.ready_services.len(),
-            2,
-            "a stalled tip should evict exactly one peer"
+            peer_limit - 1,
+            "a stalled tip with a full peer set should evict exactly one peer"
         );
 
         // The eviction should have asked the crawler for a replacement peer.
@@ -273,6 +284,78 @@ fn peer_set_evicts_random_peer_on_stalled_tip() {
                 Ok(MorePeers)
             ),
             "evicting a peer should send a MorePeers demand signal"
+        );
+    });
+}
+
+/// Check that a stalled tip does *not* evict a peer while the peer set has
+/// free connection slots — the crawler can add new peers without dropping a
+/// working connection — but still signals [`MorePeers`] demand.
+#[test]
+fn peer_set_requests_more_peers_on_stalled_tip_below_limit() {
+    let peer_version = Version::min_specified_for_upgrade(&Network::Mainnet, NetworkUpgrade::Nu6_2);
+
+    let (runtime, _init_guard) = zebra_test::init_async();
+    let _guard = runtime.enter();
+
+    let (minimum_peer_version, best_tip_height) =
+        MinimumPeerVersion::with_mock_chain_tip(&Network::Mainnet);
+    best_tip_height.send_best_tip_height(block::Height(100));
+
+    runtime.block_on(async move {
+        // Three peers ahead of our tip, with the default connection limit far
+        // above three: the set has free slots.
+        let mut harnesses = Vec::new();
+        let discovered_peers: Vec<Result<Change<PeerSocketAddr, LoadTrackedClient>, BoxError>> = (1
+            ..=3u16)
+            .map(|port| {
+                let (client, harness) = ClientTestHarness::build()
+                    .with_version(peer_version)
+                    .with_start_height(block::Height(200))
+                    .finish();
+                harnesses.push(harness);
+                let addr: PeerSocketAddr = SocketAddr::new([127, 0, 0, 1].into(), port).into();
+                Ok(Change::Insert(addr, client.into()))
+            })
+            .collect();
+        let discovered_peers = stream::iter(discovered_peers).chain(stream::pending());
+
+        let (mut peer_set, mut peer_set_guard) = PeerSetBuilder::new()
+            .with_discover(discovered_peers)
+            .with_minimum_peer_version(minimum_peer_version.clone())
+            .max_conns_per_ip(max(3, DEFAULT_MAX_CONNS_PER_IP))
+            .build();
+
+        let peer_ready = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+        assert_eq!(peer_ready.ready_services.len(), 3);
+
+        // Force the stall timer well into the past, with a static tip.
+        peer_set.last_tip_growth = Instant::now() - (TIP_STALL_EVICTION_TIMEOUT * 2);
+
+        let peer_ready = peer_set
+            .ready()
+            .await
+            .expect("peer set service is always ready");
+        assert_eq!(
+            peer_ready.ready_services.len(),
+            3,
+            "a stalled tip below the connection limit should not evict peers"
+        );
+
+        // The stall should still ask the crawler for more peers.
+        assert!(
+            matches!(
+                peer_set_guard
+                    .demand_receiver()
+                    .as_mut()
+                    .expect("demand receiver is created by the builder")
+                    .try_recv(),
+                Ok(MorePeers)
+            ),
+            "a stalled tip below the connection limit should send MorePeers demand"
         );
     });
 }

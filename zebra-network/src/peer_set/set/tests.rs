@@ -162,6 +162,14 @@ impl<D, C> PeerSetBuilder<D, C> {
         }
     }
 
+    /// Use the provided [`Config`] when constructing the [`PeerSet`] instance.
+    pub fn with_config(self, config: Config) -> PeerSetBuilder<D, C> {
+        PeerSetBuilder {
+            config: Some(config),
+            ..self
+        }
+    }
+
     /// Use the provided [`MinimumPeerVersion`] instance when constructing the [`PeerSet`] instance.
     pub fn max_conns_per_ip(self, max_conns_per_ip: usize) -> PeerSetBuilder<D, C> {
         assert!(
