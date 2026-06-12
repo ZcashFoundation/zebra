@@ -262,10 +262,18 @@ where
             // Re-opened on every restart: the engine consumes the list, and
             // restarts are rare enough that re-verifying the assets is
             // cheaper than holding a second copy across the whole run.
-            let list = match KnownHashList::open(
-                &self.network,
-                self.config.known_hash_list_dir.as_deref(),
-            ) {
+            //
+            // Opening reads and hashes the full asset set (~103 MB on
+            // Mainnet), so it runs on a blocking thread instead of stalling
+            // the async runtime.
+            let open_result = tokio::task::spawn_blocking({
+                let network = self.network.clone();
+                let list_dir = self.config.known_hash_list_dir.clone();
+                move || KnownHashList::open(&network, list_dir.as_deref())
+            })
+            .await?;
+
+            let list = match open_result {
                 Ok(Some(list)) => list,
                 // Unreachable: `for_network()` returned a spec just above, and
                 // `open()` only returns `None` when there is no spec.
