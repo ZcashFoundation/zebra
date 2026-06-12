@@ -1171,10 +1171,29 @@ runs.
   in-memory address-balance cache during IBD; selective per-column-family
   compaction; computing the auth-data root in `convert` on the rayon pool
   instead of write Thread 1.
-- **Parallel note-commitment subtrees** (maintainer vision, §15.1): use the
-  lookahead to compute absolute leaf positions ahead and build aligned
-  subtrees on rayon; consensus-critical, must be bit-identical to sequential
-  appends; own PR.
+- **Parallel note-commitment subtrees** (maintainer vision, §15.1):
+  precompute per-block, per-pool subtree nodes at verify time (the engine's
+  verify-and-commit stage, on rayon) keyed to absolute leaf positions
+  prefix-summed over the lookahead window, so the state can append whole
+  subtrees instead of per-note sequential hashing. Consensus-critical: must
+  be bit-identical to sequential appends (roots **and** serialized
+  frontiers), proven by real-vector tests and proptests over arbitrary start
+  positions. Staged: (1) zebra-chain precompute + `append_precomputed` +
+  equivalence proofs; (2) engine position threading + the thin verify-stage
+  wiring; (3) state-side subtree appends on top of the redesigned write
+  pipeline. **Status: a stage-1 design/implementation workflow was launched
+  and then paused to preserve tokens** — resume from the saved
+  `note-commitment-subtrees` workflow script (run `wf_cca64ee5-851`), which
+  carries the full brief: two design angles (incrementalmerkletree-native vs
+  a recorded shardtree evaluation), judge synthesis, isolated-worktree
+  implementation, and equivalence-breaking review.
+- **Engine extraction into its own crate** (maintainer-directed): once the
+  in-flight redesign workflows land (state write pipeline, generic engine
+  unification), move the sync engine out of `zebrad/src/components/ibd/`
+  into a dedicated workspace crate, so the unified checkpoint/full-validation
+  engine has its own API surface, tests, and dependency boundary
+  (`zebra-chain`/`zebra-network`/`zebra-state` consumers only, no `zebrad`
+  internals).
 - Checkpoint-sync disk I/O reduction, e.g. created-then-spent UTXO elision
   (§15.2) — very late phase, **separate PR**.
 - Engine property tests rebuilt against the as-built API (the pre-rework
