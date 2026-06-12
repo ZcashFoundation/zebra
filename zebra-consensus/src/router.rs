@@ -16,16 +16,17 @@
 //! from previous blocks. Otherwise, verification of out-of-order and invalid
 //! blocks and transactions can hang indefinitely.
 
-use std::sync::Arc;
-
 use tokio::{sync::oneshot, task::JoinHandle};
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
 use tracing::{instrument, Instrument, Span};
 
 use zebra_chain::{
     block::{self, Height},
-    parameters::{checkpoint::list::CheckpointList, known_hashes::KnownHashListSpec, Network},
+    parameters::Network,
 };
+
+#[cfg(any(test, feature = "proptest-impl"))]
+use zebra_chain::parameters::known_hashes::KnownHashListSpec;
 
 use zebra_node_services::mempool;
 use zebra_state as zs;
@@ -64,6 +65,13 @@ const VERIFIER_BUFFER_BOUND: usize = 5;
 /// The consensus configuration is specified by `config`, and the Zcash network
 /// to verify blocks for is specified by `network`.
 ///
+/// `known_hash_floor` is the height at or below which semantic block commits
+/// are gated (see the module docs and `docs/design/known-hash-ibd.md` §7.2):
+/// the mandatory checkpoint height, raised to the end of the bundled
+/// known-hash list when the known-hash IBD engine is enabled. The caller
+/// owns this policy because it also sizes the state's finalized write range
+/// from the same heights (see `zebrad`'s startup wiring).
+///
 /// The block verification service asynchronously performs semantic verification
 /// checks. Blocks that pass semantic verification are submitted to the supplied
 /// `state_service` for contextual verification before being committed to the chain.
@@ -86,7 +94,7 @@ pub async fn init<S, Mempool>(
     network: &Network,
     state_service: S,
     mempool: oneshot::Receiver<Mempool>,
-    known_hash_sync: bool,
+    known_hash_floor: Height,
 ) -> (
     Buffer<BoxService<Request, block::Hash, VerifyBlockError>, Request>,
     Buffer<
@@ -214,27 +222,7 @@ where
     let transaction = Buffer::new(BoxService::new(transaction), VERIFIER_BUFFER_BOUND);
 
     // block verification
-    let (_list, max_checkpoint_height) = init_checkpoint_list(config, network);
-
-    // The commit-gate floor is built from constants (design doc §7.2). The
-    // permanent floor is the mandatory checkpoint height — Zebra cannot fully
-    // validate pre-Canopy blocks semantically, so it never commits them this
-    // way.
-    //
-    // While the known-hash engine is enabled it owns the whole pinned range,
-    // so the floor is raised to the list's max height: a gossiped or
-    // RPC-submitted block just above the engine's tip must not semantically
-    // verify mid-sync and flip the state to its non-finalized mode. When the
-    // engine is disabled the floor stays at the mandatory height, so a node
-    // syncing the post-Canopy range with the legacy path is not blocked by a
-    // gate that exists only to protect the engine.
-    let known_hash_floor = if known_hash_sync {
-        KnownHashListSpec::for_network(network)
-            .map_or(Height(0), |spec| spec.max_height)
-            .max(network.mandatory_checkpoint_height())
-    } else {
-        network.mandatory_checkpoint_height()
-    };
+    let max_checkpoint_height = max_checkpoint_height(config, network);
 
     tracing::info!(
         ?max_checkpoint_height,
@@ -258,21 +246,19 @@ where
     (block, transaction, task_handles, max_checkpoint_height)
 }
 
-/// Parses the checkpoint list for `network` and `config`.
-/// Returns the checkpoint list and maximum checkpoint height.
-pub fn init_checkpoint_list(config: Config, network: &Network) -> (Arc<CheckpointList>, Height) {
-    // TODO: Zebra parses the checkpoint list three times at startup.
+/// Returns the maximum checkpoint verification height for `network` and
+/// `config`.
+pub fn max_checkpoint_height(config: Config, network: &Network) -> Height {
+    // TODO: Zebra parses the checkpoint list multiple times at startup.
     //       Instead, cache the checkpoint list for each `network`.
     let list = network.checkpoint_list();
 
-    let max_checkpoint_height = if config.checkpoint_sync {
+    if config.checkpoint_sync {
         list.max_height()
     } else {
         list.min_height_in_range(network.mandatory_checkpoint_height()..)
             .expect("hardcoded checkpoint list extends past canopy activation")
-    };
-
-    (list, max_checkpoint_height)
+    }
 }
 
 /// The background task handles for `zebra-consensus` verifier initialization.
@@ -304,6 +290,12 @@ where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
 {
+    // Keep the gate at the known-hash list max for tests, matching the
+    // default-on engine config in `zebrad`'s startup wiring.
+    let known_hash_floor = KnownHashListSpec::for_network(network)
+        .map_or(Height(0), |spec| spec.max_height)
+        .max(network.mandatory_checkpoint_height());
+
     init(
         config.clone(),
         network,
@@ -312,9 +304,7 @@ where
             Buffer<BoxService<mempool::Request, mempool::Response, BoxError>, mempool::Request>,
         >()
         .1,
-        // Keep the gate at the known-hash list max for tests, matching the
-        // default-on engine config.
-        true,
+        known_hash_floor,
     )
     .await
 }

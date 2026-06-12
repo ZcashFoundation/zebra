@@ -168,24 +168,46 @@ impl StartCmd {
         };
 
         info!("initializing node state");
-        let (_, max_checkpoint_height) = zebra_consensus::router::init_checkpoint_list(
+        let max_checkpoint_height = zebra_consensus::router::max_checkpoint_height(
             config.consensus.clone(),
             &config.network.network,
         );
 
+        // The end of the bundled known-hash list, when the known-hash IBD
+        // engine is enabled. This single policy point raises two floors
+        // below: the state's finalized write range and the consensus commit
+        // gate (design doc §7.2–§7.3).
+        let known_hash_max_height = config
+            .sync
+            .known_hash_sync
+            .then(|| {
+                zebra_chain::parameters::known_hashes::KnownHashListSpec::for_network(
+                    &config.network.network,
+                )
+                .map(|spec| spec.max_height)
+            })
+            .flatten();
+
         // When the known-hash IBD engine is enabled, the finalized write
         // path must cover the whole pinned list, not just the spaced
         // checkpoint range (design doc §7.3 / D6).
-        let max_finalizable_height = if config.sync.known_hash_sync {
-            zebra_chain::parameters::known_hashes::KnownHashListSpec::for_network(
-                &config.network.network,
-            )
-            .map_or(max_checkpoint_height, |spec| {
-                max_checkpoint_height.max(spec.max_height)
-            })
-        } else {
-            max_checkpoint_height
-        };
+        let max_finalizable_height = known_hash_max_height
+            .map_or(max_checkpoint_height, |list_max| {
+                max_checkpoint_height.max(list_max)
+            });
+
+        // The consensus commit gate: semantic commits are gated at the
+        // mandatory checkpoint height — Zebra cannot fully validate
+        // pre-Canopy blocks semantically — raised to the end of the list
+        // while the engine owns the whole pinned range, so a gossiped or
+        // RPC-submitted block just above the engine's tip can't semantically
+        // verify mid-sync and flip the state to its non-finalized mode. With
+        // the engine disabled the floor stays at the mandatory height, so
+        // legacy post-Canopy sync isn't blocked by a gate that exists only
+        // to protect the engine.
+        let known_hash_floor = known_hash_max_height
+            .unwrap_or(zebra_chain::block::Height(0))
+            .max(config.network.network.mandatory_checkpoint_height());
 
         info!("opening database, this may take a few minutes");
 
@@ -248,7 +270,7 @@ impl StartCmd {
                 &config.network.network,
                 state.clone(),
                 tx_verifier_setup_rx,
-                config.sync.known_hash_sync,
+                known_hash_floor,
             )
             .await;
 
