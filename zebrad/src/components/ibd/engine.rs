@@ -69,12 +69,15 @@ pub const IBD_BATCH_MAX_BLOCKS: usize = crate::components::inbound::GETDATA_MAX_
 ///
 /// This is a flush-after-crossing threshold: all but the last item in a batch
 /// sum to under this weight, so a flushed batch's weight is under the
-/// threshold plus at most one block. The 800 KB value leaves a 200 KB margin
-/// under zebrad's 1 MB serving limit for size-hint quantization, so every
-/// prefix of an honest batch except the final block stays servable in full.
+/// threshold plus at most one block. Derived from the serving-side byte limit
+/// ([`GETDATA_SENT_BYTES_LIMIT`](crate::components::inbound::GETDATA_SENT_BYTES_LIMIT))
+/// so the two can't drift apart, minus a 200 KB margin for size-hint
+/// quantization, so every prefix of an honest batch except the final block
+/// stays servable in full.
 ///
 /// `usize` to match `tower_batch_control::RequestWeight`.
-pub const IBD_BATCH_MAX_WEIGHT: usize = 800_000;
+pub const IBD_BATCH_MAX_WEIGHT: usize =
+    crate::components::inbound::GETDATA_SENT_BYTES_LIMIT - 200_000;
 
 /// The batch layer's `max_latency`: how long a partially-full batch waits
 /// before being flushed.
