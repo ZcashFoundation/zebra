@@ -20,7 +20,7 @@ use zebra_chain::{
     orchard,
     parallel::tree::NoteCommitmentTrees,
     parameters::Network,
-    primitives::{Bctv14Proof, Groth16Proof},
+    primitives::ZkSnarkProof,
     sapling,
     serialization::ZcashSerialize as _,
     sprout,
@@ -2191,9 +2191,9 @@ impl
     }
 }
 
-impl
+impl<P: ZkSnarkProof>
     UpdateWith<(
-        &Option<transaction::JoinSplitData<Groth16Proof>>,
+        &Option<transaction::JoinSplitData<P>>,
         &SpendingTransactionId,
     )> for Chain
 {
@@ -2201,7 +2201,7 @@ impl
     fn update_chain_tip_with(
         &mut self,
         &(joinsplit_data, revealing_tx_id): &(
-            &Option<transaction::JoinSplitData<Groth16Proof>>,
+            &Option<transaction::JoinSplitData<P>>,
             &SpendingTransactionId,
         ),
     ) -> Result<(), ValidateContextError> {
@@ -2226,7 +2226,7 @@ impl
     fn revert_chain_with(
         &mut self,
         &(joinsplit_data, _revealing_tx_id): &(
-            &Option<transaction::JoinSplitData<Groth16Proof>>,
+            &Option<transaction::JoinSplitData<P>>,
             &SpendingTransactionId,
         ),
         _position: RevertPosition,
@@ -2236,53 +2236,6 @@ impl
             // by removing trees above the fork height from the note commitment index.
             // This happens when reverting the block itself.
 
-            check::nullifier::remove_from_non_finalized_chain(
-                &mut self.sprout_nullifiers,
-                joinsplit_data.nullifiers(),
-            );
-        }
-    }
-}
-
-impl
-    UpdateWith<(
-        &Option<transaction::JoinSplitData<Bctv14Proof>>,
-        &SpendingTransactionId,
-    )> for Chain
-{
-    #[instrument(skip(self, joinsplit_data))]
-    fn update_chain_tip_with(
-        &mut self,
-        &(joinsplit_data, revealing_tx_id): &(
-            &Option<transaction::JoinSplitData<Bctv14Proof>>,
-            &SpendingTransactionId,
-        ),
-    ) -> Result<(), ValidateContextError> {
-        if let Some(joinsplit_data) = joinsplit_data {
-            check::nullifier::add_to_non_finalized_chain_unique(
-                &mut self.sprout_nullifiers,
-                joinsplit_data.nullifiers(),
-                *revealing_tx_id,
-            )?;
-        }
-        Ok(())
-    }
-
-    /// # Panics
-    ///
-    /// Panics if any nullifier is missing from the chain when we try to remove it.
-    ///
-    /// See [`check::nullifier::remove_from_non_finalized_chain`] for details.
-    #[instrument(skip(self, joinsplit_data))]
-    fn revert_chain_with(
-        &mut self,
-        &(joinsplit_data, _revealing_tx_id): &(
-            &Option<transaction::JoinSplitData<Bctv14Proof>>,
-            &SpendingTransactionId,
-        ),
-        _position: RevertPosition,
-    ) {
-        if let Some(joinsplit_data) = joinsplit_data {
             check::nullifier::remove_from_non_finalized_chain(
                 &mut self.sprout_nullifiers,
                 joinsplit_data.nullifiers(),
