@@ -329,28 +329,6 @@ pub struct Config {
     /// the `zebrad` binary, the platform data directory, or the development
     /// tree, in that order.
     pub known_hash_list_dir: Option<PathBuf>,
-
-    /// Allow the known-hash engine to download missing list chunk files.
-    ///
-    /// Downloaded chunks are verified against the hashes compiled into
-    /// `zebrad` before use, so this changes availability, not trust.
-    ///
-    /// Not yet implemented: missing chunk files are currently a hard error
-    /// regardless of this setting (the self-download path is a planned
-    /// follow-up). The field is kept so configs that set it keep parsing.
-    pub known_hash_list_download: bool,
-
-    /// Write every block fetched by the known-hash engine to its disk cache
-    /// before committing it.
-    ///
-    /// This closes the crash-loss window for blocks fetched but not yet
-    /// committed, at the cost of one extra sequential write of the chain.
-    ///
-    /// Not yet implemented: blocks are currently spooled to the disk cache
-    /// only when they overflow the memory budget (the write-ahead path is a
-    /// planned follow-up). The field is kept so configs that set it keep
-    /// parsing.
-    pub known_hash_cache_write_ahead: bool,
 }
 
 impl Default for Config {
@@ -380,7 +358,6 @@ impl Default for Config {
             // or reserve a few cores for tokio threads, based on `num_cpus()`.
             parallel_cpu_threads: 0,
 
-            // Off until the known-hash engine is validated.
             known_hash_sync: true,
 
             // 256 MiB: enough lookahead to keep the network busy in every era
@@ -392,13 +369,6 @@ impl Default for Config {
 
             // Use the layered asset search by default.
             known_hash_list_dir: None,
-
-            // Self-downloads are verified against compiled-in hashes.
-            known_hash_list_download: true,
-
-            // Off: one sequential write of the whole chain is not worth the
-            // small crash-loss window for most users.
-            known_hash_cache_write_ahead: false,
         }
     }
 }

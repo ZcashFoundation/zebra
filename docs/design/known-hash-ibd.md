@@ -554,7 +554,8 @@ load-time verification):
   fetch-ahead pauses only at the `IBD_SPAN_MAX` ring bound. The directory is
   removed entirely at `Completed` handoff.
 
-Optional hardening (config `known_hash_cache_write_ahead`, default off): also
+Optional hardening (a planned `known_hash_cache_write_ahead` config, off by
+default, added together with its implementation): also
 spool **memory-tier** blocks to the cache raw on arrival (sequential append,
 deleted on commit), closing exception (b) at the cost of writing the full
 chain (~100 GB) to disk once more across IBD. Off by default
@@ -951,12 +952,11 @@ pub known_hash_lookahead_bytes: usize,     // 268_435_456 (256 MiB)
 pub known_hash_gap_hedge_secs: u64,        // 5
 /// Override directory for the known-hash chunk files.
 pub known_hash_list_dir: Option<PathBuf>,  // None → layered search (§6)
-/// Allow verified self-download of missing list chunks.
-pub known_hash_list_download: bool,        // true
-/// Spool every fetched block to the cache (closes the crash-loss window at the
-/// cost of one extra sequential write of the chain).
-pub known_hash_cache_write_ahead: bool,    // false
 ```
+
+Planned fields, added together with their implementations:
+`known_hash_list_download` (verified self-download of missing list chunks) and
+`known_hash_cache_write_ahead` (spool every fetched block to the cache).
 
 Deprecations (E3): `sync.checkpoint_verify_concurrency_limit` (+ `lookahead_limit`
 alias) and `consensus.checkpoint_sync` become accepted-but-ignored via back-compat

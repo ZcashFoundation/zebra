@@ -16,8 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   `sync.known_hash_sync = false` to use the legacy syncer. See
   `docs/design/known-hash-ibd.md` for the design.
 - New `[sync]` config fields for the engine: `known_hash_lookahead_bytes` (the
-  block-buffer RAM budget), `known_hash_gap_hedge_secs`, `known_hash_list_dir`,
-  `known_hash_list_download`, and `known_hash_cache_write_ahead`.
+  block-buffer RAM budget), `known_hash_gap_hedge_secs`, and
+  `known_hash_list_dir`.
 - New `[state]` config field `disable_wal_during_ibd` (default off): opt-in
   RocksDB WAL skipping during the initial-sync write phase, trading crash-resync
   time for write throughput on slow disks.
