@@ -109,6 +109,11 @@ impl LoadTrackedClient {
         self.connection_info.remote.version
     }
 
+    /// Returns the metadata for the connected peer.
+    pub(crate) fn connection_info(&self) -> &Arc<ConnectionInfo> {
+        &self.connection_info
+    }
+
     /// Returns the peer's current chain height, as far as we can tell.
     ///
     /// This is the maximum of:

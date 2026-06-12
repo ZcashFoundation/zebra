@@ -132,7 +132,9 @@ use zebra_chain::{block::Height, chain_tip::ChainTip, parameters::Network};
 
 use crate::{
     address_book::AddressMetrics,
-    constants::{MIN_PEER_SET_LOG_INTERVAL, PEER_STATS_LOG_INTERVAL},
+    constants::{
+        MIN_PEER_SET_LOG_INTERVAL, PEER_STATS_DETAILED_LOG_INTERVAL, PEER_STATS_LOG_INTERVAL,
+    },
     peer::{LoadTrackedClient, MinimumPeerVersion},
     peer_set::{
         stall_tracker::FindResponseStallTracker,
@@ -360,8 +362,11 @@ where
     /// The last time we logged a message about the peer set size
     last_peer_log: Option<Instant>,
 
-    /// The last time we logged detailed per-peer sync diagnostics at info level.
+    /// The last time we logged per-peer sync diagnostics at debug level.
     last_peer_stats_log: Option<Instant>,
+
+    /// The last time we logged full per-peer connection details at info level.
+    last_peer_detailed_log: Option<Instant>,
 
     /// Publishes [`PeerSetStatus`] snapshots whenever the peer set's size or
     /// peer heights change.
@@ -475,6 +480,7 @@ where
             // Metrics
             last_peer_log: None,
             last_peer_stats_log: None,
+            last_peer_detailed_log: None,
             status_sender,
             address_metrics,
 
@@ -1588,6 +1594,12 @@ where
     /// load (a peak-EWMA latency estimate) — per-peer detail is for debug
     /// runs, not production logs.
     ///
+    /// Every [`PEER_STATS_DETAILED_LOG_INTERVAL`] it emits one **info**-level
+    /// line per ready peer with the full connection details (user agent,
+    /// protocol versions, advertised services, handshake and live heights,
+    /// blocks downloaded, and load), so operators get an occasional complete
+    /// picture of the peer set without enabling debug logging.
+    ///
     /// Stats for peers that are currently handling a request (unready) are not
     /// readable here, so the height/download stats cover ready peers. Counts
     /// are cumulative over each peer connection's lifetime.
@@ -1627,8 +1639,40 @@ where
             "peer sync status",
         );
 
-        // The per-peer lines are verbose (one per connected peer): debug only.
         let now = Instant::now();
+
+        // The full connection details are verbose but valuable: one
+        // info-level line per ready peer, every few minutes.
+        let detailed_log_due = self
+            .last_peer_detailed_log
+            .is_none_or(|last| now.duration_since(last) >= PEER_STATS_DETAILED_LOG_INTERVAL);
+        if detailed_log_due {
+            self.last_peer_detailed_log = Some(now);
+
+            for (addr, svc) in &self.ready_services {
+                let connection_info = svc.connection_info();
+                info!(
+                    ?addr,
+                    user_agent = %connection_info.remote.user_agent,
+                    remote_version = %connection_info.remote.version,
+                    negotiated_version = %connection_info.negotiated_version,
+                    services = ?connection_info.remote.services,
+                    handshake_height = connection_info.remote.start_height.0,
+                    height = svc.remote_height().0,
+                    blocks_downloaded = svc.blocks_received(),
+                    load = ?svc.load(),
+                    "ready peer connection details",
+                );
+            }
+
+            // The debug lines below are a subset of the detailed lines, so
+            // skip them on detailed-log passes.
+            self.last_peer_stats_log = Some(now);
+            return;
+        }
+
+        // The per-peer sync lines are verbose (one per connected peer):
+        // debug only.
         if let Some(last) = self.last_peer_stats_log {
             if now.duration_since(last) < PEER_STATS_LOG_INTERVAL {
                 return;
