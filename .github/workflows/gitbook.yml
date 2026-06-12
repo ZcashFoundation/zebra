@@ -1,0 +1,81 @@
+name: GitBook
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ironwood-main]
+    paths:
+      - book/valarbook/**
+      - .github/workflows/gitbook.yml
+  pull_request:
+    paths:
+      - book/valarbook/**
+      - .github/workflows/gitbook.yml
+
+# Ensures that only one workflow task will run at a time. Previous builds, if
+# already in process, will get cancelled. Only the latest commit will be allowed
+# to run, cancelling any workflows in between
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  build:
+    name: Build Valarbook
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd #v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Validate Valarbook layout
+        run: |
+          test -f book/valarbook/.gitbook.yaml
+          test -f book/valarbook/README.md
+          test -f book/valarbook/SUMMARY.md
+          test -f book/valarbook/pages/poc-scope.md
+          test -f book/valarbook/pages/running-tests.md
+          ! grep -R "{{#" book/valarbook
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e #v6.4.0
+        with:
+          node-version: "22"
+
+      - name: Build Valarbook site
+        run: |
+          npx --yes honkit@latest build book/valarbook
+          test -f book/valarbook/_book/index.html
+
+      - name: Setup Pages
+        if: github.event_name != 'pull_request'
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d #v6.0.0
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 #v5.0.0
+        with:
+          path: book/valarbook/_book
+
+  deploy:
+    name: Deploy Valarbook
+    if: github.event_name != 'pull_request'
+    permissions:
+      pages: write
+      id-token: write
+    runs-on: ubuntu-latest
+    needs: [build]
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 #v5.0.0
