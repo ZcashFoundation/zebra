@@ -133,29 +133,44 @@ pub struct Config {
     /// on blocks that are committed after the initial sync.
     pub disable_wal_during_ibd: bool,
 
-    /// The number of recently committed blocks kept in the in-memory
-    /// non-finalized state during the initial checkpoint sync, even after
-    /// their database writes complete.
+    /// The number of recently finalized blocks whose created transparent
+    /// outputs are kept in an in-memory cache (the non-finalized state's
+    /// `PrunedChain`) during the initial checkpoint sync, even though those
+    /// blocks are already in the finalized state.
     ///
     /// Set to [`MAX_BLOCK_REORG_HEIGHT`](crate::constants::MAX_BLOCK_REORG_HEIGHT)
-    /// (1000) by default. Configured values below half the default are
-    /// raised to that minimum.
+    /// (1000) by default — matching the minimum length of a non-finalized
+    /// chain during full validation. Configured values below half the reorg
+    /// height are raised to that minimum.
     ///
     /// # Tradeoff
     ///
-    /// While a block is retained in memory, spends of its transparent
-    /// outputs are resolved from the in-memory chain instead of database
-    /// point reads. Most outputs created during the 2022–2023 transaction
-    /// spam are spent within a few hundred blocks, so a window this size
-    /// turns the bulk of that era's spent-output lookups into memory hits,
-    /// at the cost of holding up to this many extra blocks (and their
-    /// indexes) in memory — roughly `blocks × 2 MB` in the worst case.
+    /// While a recently finalized block's outputs are cached, spends of
+    /// those outputs resolve from memory instead of database point reads.
+    /// Most outputs created during the 2022–2023 transaction spam are spent
+    /// within a few hundred blocks, so a window this size turns the bulk of
+    /// that era's spent-output lookups into memory hits. Only the spendable
+    /// outputs are cached (entries are dropped as soon as they are spent),
+    /// so memory use is proportional to the window's unspent outputs, not
+    /// to whole blocks.
     ///
-    /// Retention only applies while the initial bulk-write phase is active:
-    /// the retained blocks are already durable on disk, are not visible to
-    /// readers until their writes land, and are all released when the phase
-    /// finishes.
+    /// The cache only exists while the initial bulk-write phase is active,
+    /// and is dropped when that phase finishes.
     pub checkpoint_sync_retained_blocks: u32,
+
+    /// The capacity of the checkpoint-sync write pipeline: how far the
+    /// finalized state's database writes may fall behind the in-memory
+    /// block commits during the initial checkpoint sync.
+    ///
+    /// Set to [`MAX_BLOCK_REORG_HEIGHT`](crate::constants::MAX_BLOCK_REORG_HEIGHT)
+    /// (1000) by default. Configured values below half the reorg height are
+    /// raised to that minimum.
+    ///
+    /// A deeper pipeline keeps the disk writer fed across commit-rate
+    /// bursts. In-flight blocks are held in the in-memory non-finalized
+    /// state until their writes land, so memory use grows with this value —
+    /// roughly `blocks × 2 MB` in the worst case.
+    pub checkpoint_sync_pipeline_capacity: usize,
 
     // Debug configs
     //
@@ -275,6 +290,7 @@ impl Default for Config {
             delete_old_database: true,
             disable_wal_during_ibd: false,
             checkpoint_sync_retained_blocks: crate::constants::MAX_BLOCK_REORG_HEIGHT,
+            checkpoint_sync_pipeline_capacity: crate::constants::MAX_BLOCK_REORG_HEIGHT as usize,
             debug_stop_at_height: None,
             debug_validity_check_interval: None,
             debug_skip_non_finalized_state_backup_task: false,

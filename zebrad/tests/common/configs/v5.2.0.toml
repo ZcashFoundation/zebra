@@ -86,6 +86,7 @@ parallel_cpu_threads = 0
 
 [state]
 cache_dir = "cache_dir"
+checkpoint_sync_pipeline_capacity = 1000
 checkpoint_sync_retained_blocks = 1000
 debug_skip_non_finalized_state_backup_task = false
 delete_old_database = true

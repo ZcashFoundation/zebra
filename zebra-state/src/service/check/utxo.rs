@@ -9,7 +9,10 @@ use zebra_chain::{
 
 use crate::{
     constants::MIN_TRANSPARENT_COINBASE_MATURITY,
-    service::{finalized_state::ZebraDb, non_finalized_state::SpendingTransactionId},
+    service::{
+        finalized_state::ZebraDb,
+        non_finalized_state::{PrunedChain, SpendingTransactionId},
+    },
     SemanticallyVerifiedBlock,
     ValidateContextError::{
         self, DuplicateTransparentSpend, EarlyTransparentSpend, ImmatureTransparentCoinbaseSpend,
@@ -39,6 +42,7 @@ pub fn transparent_spend(
     semantically_verified: &SemanticallyVerifiedBlock,
     non_finalized_chain_unspent_utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     non_finalized_chain_spent_utxos: &HashMap<transparent::OutPoint, SpendingTransactionId>,
+    pruned_chain: Option<&PrunedChain>,
     finalized_state: &ZebraDb,
 ) -> Result<HashMap<transparent::OutPoint, transparent::OrderedUtxo>, ValidateContextError> {
     let mut block_spends = HashMap::new();
@@ -60,6 +64,7 @@ pub fn transparent_spend(
                 &semantically_verified.new_outputs,
                 non_finalized_chain_unspent_utxos,
                 non_finalized_chain_spent_utxos,
+                pruned_chain,
                 finalized_state,
             )?;
 
@@ -129,6 +134,7 @@ fn transparent_spend_chain_order(
     block_new_outputs: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     non_finalized_chain_unspent_utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     non_finalized_chain_spent_utxos: &HashMap<transparent::OutPoint, SpendingTransactionId>,
+    pruned_chain: Option<&PrunedChain>,
     finalized_state: &ZebraDb,
 ) -> Result<transparent::OrderedUtxo, ValidateContextError> {
     if let Some(output) = block_new_outputs.get(&spend) {
@@ -160,6 +166,16 @@ fn transparent_spend_chain_order(
     non_finalized_chain_unspent_utxos
         .get(&spend)
         .cloned()
+        // During the checkpoint sync, recently finalized outputs are served
+        // from the in-memory cache instead of a database point read; the
+        // metric makes the cache's hit rate observable on live syncs.
+        .or_else(|| {
+            let utxo = pruned_chain.and_then(|pruned_chain| pruned_chain.utxo(&spend));
+            if utxo.is_some() {
+                metrics::counter!("state.checkpoint.spend_cache.hit.count").increment(1);
+            }
+            utxo
+        })
         .or_else(|| finalized_state.utxo(&spend))
         // we don't keep spent UTXOs in the finalized state,
         // so all we can say is that it's missing from both

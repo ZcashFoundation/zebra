@@ -32,6 +32,7 @@ use crate::{
 
 mod backup;
 mod chain;
+mod pruned_chain;
 
 #[cfg(test)]
 pub(crate) use backup::MIN_DURATION_BETWEEN_BACKUP_UPDATES;
@@ -40,6 +41,7 @@ pub(crate) use backup::MIN_DURATION_BETWEEN_BACKUP_UPDATES;
 mod tests;
 
 pub(crate) use chain::{Chain, SpendingTransactionId};
+pub(crate) use pruned_chain::PrunedChain;
 
 /// The state of the chains in memory, including queued blocks.
 ///
@@ -61,6 +63,13 @@ pub struct NonFinalizedState {
     /// Blocks that have been invalidated in, and removed from, the non finalized
     /// state.
     invalidated_blocks: IndexMap<Height, Arc<Vec<ContextuallyVerifiedBlock>>>,
+
+    /// A cache of recently finalized spendable outputs, kept while the
+    /// checkpoint pipeline runs so spend lookups stay in memory (see
+    /// [`PrunedChain`]).
+    ///
+    /// `None` outside the checkpoint bulk-write phase.
+    pruned_chain: Option<PrunedChain>,
 
     // Configuration
     //
@@ -108,6 +117,9 @@ impl Clone for NonFinalizedState {
             chain_set: self.chain_set.clone(),
             network: self.network.clone(),
             invalidated_blocks: self.invalidated_blocks.clone(),
+            // The spend cache is local to the checkpoint pipeline's writer;
+            // clones are published snapshots that never serve its lookups.
+            pruned_chain: None,
             should_count_metrics: self.should_count_metrics,
             // Don't track progress in clones.
             #[cfg(feature = "progress-bar")]
@@ -125,6 +137,7 @@ impl NonFinalizedState {
             chain_set: Default::default(),
             network: network.clone(),
             invalidated_blocks: Default::default(),
+            pruned_chain: None,
             should_count_metrics: true,
             #[cfg(feature = "progress-bar")]
             chain_count_bar: None,
@@ -281,6 +294,19 @@ impl NonFinalizedState {
         self.insert_with(chain, |_ignored_chain| { /* no filter */ })
     }
 
+    /// Starts caching recently finalized spendable outputs in a
+    /// [`PrunedChain`] with the given retention window, for the checkpoint
+    /// bulk-write phase (see the [`pruned_chain`](pruned_chain) module docs).
+    pub fn enable_pruned_chain(&mut self, retained_blocks: u32) {
+        self.pruned_chain = Some(PrunedChain::new(retained_blocks));
+    }
+
+    /// Stops caching recently finalized outputs and drops the cache, at the
+    /// end of the checkpoint bulk-write phase.
+    pub fn disable_pruned_chain(&mut self) {
+        self.pruned_chain = None;
+    }
+
     /// Finalize the lowest height block in the non-finalized portion of the best
     /// chain and update all side-chains to match.
     pub fn finalize(&mut self) -> FinalizableBlock {
@@ -293,6 +319,23 @@ impl NonFinalizedState {
 
         // extract best chain
         let mut best_chain = chains.next_back().expect("there's at least one chain");
+
+        // Cache the root's still-spendable outputs before popping it, so
+        // checkpoint-sync spend lookups stay in memory (see [`PrunedChain`]).
+        // The chain's precise spent-set is consulted *before* the pop, while
+        // it still includes the root's own within-block spends; the block's
+        // `spent_outputs` field can't be used here because it also contains
+        // every new output (see `with_block_and_spent_utxos`).
+        if let Some(pruned_chain) = self.pruned_chain.as_mut() {
+            if let Some((root_height, root)) = best_chain.blocks.first_key_value() {
+                pruned_chain.add_finalized_root(
+                    *root_height,
+                    root.new_outputs
+                        .iter()
+                        .filter(|(outpoint, _)| !best_chain.spent_utxos.contains_key(outpoint)),
+                );
+            }
+        }
 
         // clone if required
         let mut_best_chain = Arc::make_mut(&mut best_chain);
@@ -419,8 +462,17 @@ impl NonFinalizedState {
             &prepared,
             chain_created_utxos,
             chain_spent_utxos,
+            self.pruned_chain.as_ref(),
             finalized_state,
         )?;
+
+        // The resolved spends can never be read again (the pinned chain has
+        // no double-spends), so drop them from the recently-finalized cache.
+        // This must use the precise spend map: the `spent_outputs` field on
+        // the contextual block below also contains every new output.
+        if let Some(pruned_chain) = self.pruned_chain.as_mut() {
+            pruned_chain.remove_spent(spent_utxos.keys());
+        }
 
         // All the fields are cheap copies or `Arc` clones.
         let tip_block = crate::service::ChainTipBlock {
@@ -734,6 +786,9 @@ impl NonFinalizedState {
             &prepared,
             &new_chain.unspent_utxos(),
             &new_chain.spent_utxos,
+            // The recently-finalized cache only exists during the checkpoint
+            // bulk-write phase; full validation reads the database.
+            None,
             finalized_state,
         )?;
 
