@@ -131,7 +131,14 @@ pub enum BlockPayload {
 
     /// Raw block bytes read back from the disk overflow tier, possibly
     /// corrupted or truncated while on disk.
-    Raw(Vec<u8>),
+    Raw {
+        /// The cache entry file's bytes (the body is not copied out of them).
+        bytes: Vec<u8>,
+        /// The offset of the block body within `bytes`, just past the cache
+        /// sidecar line (always in bounds; see
+        /// [`CachedBlock`](super::cache::CachedBlock)).
+        body_offset: usize,
+    },
 }
 
 impl From<Arc<Block>> for BlockPayload {
@@ -153,8 +160,8 @@ impl BlockPayload {
     ) -> Result<Arc<Block>, ConvertError> {
         match self {
             Self::Block(block) => Ok(block),
-            Self::Raw(bytes) => {
-                let block = Block::zcash_deserialize(&bytes[..]).map_err(|error| {
+            Self::Raw { bytes, body_offset } => {
+                let block = Block::zcash_deserialize(&bytes[body_offset..]).map_err(|error| {
                     ConvertError::CorruptCachedBytes {
                         height,
                         expected,

@@ -62,8 +62,11 @@ use std::{
 
 use zebra_chain::{
     block::{self, Block, MAX_BLOCK_BYTES},
-    serialization::{ZcashDeserialize, ZcashSerialize},
+    serialization::ZcashSerialize,
 };
+
+#[cfg(test)]
+use zebra_chain::serialization::ZcashDeserialize;
 use zebra_network::PeerSocketAddr;
 
 /// The name of the cache directory under the state cache directory.
@@ -94,9 +97,16 @@ const FILE_EXTENSION: &str = "bin";
 /// full verify-and-commit path against `expected_hash` before use.
 #[derive(Clone, Debug)]
 pub struct CachedBlock {
-    /// The raw block bytes as fetched from the network — possibly corrupted
-    /// or truncated while on disk.
+    /// The entry file's bytes: the sidecar line followed by the raw block
+    /// body, which is possibly corrupted or truncated while on disk.
+    ///
+    /// The whole file is kept so the body doesn't pay a copy to strip the
+    /// sidecar; the body starts at `body_offset`.
     pub bytes: Vec<u8>,
+
+    /// The offset of the block body within `bytes`, just past the parsed
+    /// sidecar line (so it is always in bounds).
+    pub body_offset: usize,
 
     /// The pinned hash this entry was stored under, recovered from the file
     /// name. Re-verification must check the block against this hash.
@@ -105,6 +115,14 @@ pub struct CachedBlock {
     /// The peer that delivered the block, when known, for misbehavior
     /// attribution if re-verification fails.
     pub source: Option<PeerSocketAddr>,
+}
+
+impl CachedBlock {
+    /// Returns the raw block body: the entry file bytes with the sidecar
+    /// stripped.
+    pub fn body(&self) -> &[u8] {
+        &self.bytes[self.body_offset..]
+    }
 }
 
 /// The in-memory index record for one cached block.
@@ -159,6 +177,7 @@ impl BlockCache {
     }
 
     /// Returns the number of indexed entries.
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
@@ -168,8 +187,13 @@ impl BlockCache {
         self.entries.is_empty()
     }
 
-    /// Serializes `block` and writes it as the cache entry for `height`,
-    /// recording `source` for later misbehavior attribution.
+    /// Serializes `block` and writes it as the cache entry for `height`
+    /// under its already-verified `hash`, recording `source` for later
+    /// misbehavior attribution.
+    ///
+    /// `hash` must be the block's header hash (the engine's pinned hash,
+    /// matched against the recomputed header hash at receipt), so the entry
+    /// file name doesn't pay a re-hash here.
     ///
     /// Replaces any previous entry for `height` (a refetched copy after a
     /// failed promotion). There is no per-block fsync: torn writes are
@@ -186,14 +210,9 @@ impl BlockCache {
         &mut self,
         height: block::Height,
         block: &Block,
+        hash: block::Hash,
         source: Option<PeerSocketAddr>,
     ) -> io::Result<u32> {
-        let raw = block.zcash_serialize_to_vec()?;
-        let block_bytes = u32::try_from(raw.len()).expect(
-            "blocks fetched from the network are bounded by MAX_BLOCK_BYTES, far below u32::MAX",
-        );
-        let hash = block.hash();
-
         // The real (unredacted) address is stored for misbehavior
         // attribution: this is a local file under the state cache dir, not a
         // log or metric (see the module docs).
@@ -202,9 +221,14 @@ impl BlockCache {
             |addr| addr.remove_socket_addr_privacy().to_string(),
         );
 
+        // Serialize the block once, directly after the sidecar line, so the
+        // entry costs one serialization pass and no body copy.
         let mut file = format!("{SIDECAR_MAGIC} {source}\n").into_bytes();
-        file.extend_from_slice(&raw);
-        drop(raw);
+        let sidecar_len = file.len();
+        block.zcash_serialize(&mut file)?;
+        let block_bytes = u32::try_from(file.len() - sidecar_len).expect(
+            "blocks fetched from the network are bounded by MAX_BLOCK_BYTES, far below u32::MAX",
+        );
 
         self.ensure_dir()?;
         fs::write(self.entry_path(height, &hash), &file)?;
@@ -241,7 +265,7 @@ impl BlockCache {
         let entry = self.entries.get(&height).copied()?;
         let path = self.entry_path(height, &entry.hash);
 
-        let mut file = match fs::read(&path) {
+        let file = match fs::read(&path) {
             Ok(file) => file,
             Err(error) => {
                 warn!(
@@ -263,14 +287,13 @@ impl BlockCache {
             return None;
         };
 
-        // Keep only the body. The body itself may still be torn or
-        // corrupted: that is for the caller's re-verification to catch.
-        file.drain(..body_offset);
-
         metrics::counter!("ibd.cache.promoted.count").increment(1);
 
+        // The body (`bytes[body_offset..]`) may still be torn or corrupted:
+        // that is for the caller's re-verification to catch.
         Some(CachedBlock {
             bytes: file,
+            body_offset,
             expected_hash: entry.hash,
             source,
         })
@@ -482,13 +505,14 @@ impl BlockCache {
     }
 }
 
-/// A cheap header-level integrity check on a cached entry's bytes.
+/// A cheap header-level integrity check on a cached entry's body bytes.
 ///
 /// Returns whether `bytes` starts with a parseable block header whose hash
 /// is `expected_hash`. This catches header corruption and any truncation
 /// shorter than the header, but **not** body corruption — only the full
 /// verify path (merkle root and linkage checks at promotion) confirms the
 /// body, so passing this check never makes the bytes trusted.
+#[cfg(test)]
 pub fn verify_entry(bytes: &[u8], expected_hash: block::Hash) -> bool {
     let mut reader = bytes;
 

@@ -65,7 +65,7 @@ fn put_get_round_trip_preserves_bytes_and_source() {
             .expect("serialization into a Vec never fails");
 
         let size = cache
-            .put(height, block, source)
+            .put(height, block, block.hash(), source)
             .expect("writing to a fresh temp dir succeeds");
         assert_eq!(size as usize, raw.len(), "put returns the raw block size");
         expected_bytes += raw.len() as u64;
@@ -73,7 +73,7 @@ fn put_get_round_trip_preserves_bytes_and_source() {
         let entry = cache
             .get(height)
             .expect("an entry that was just written is readable");
-        assert_eq!(entry.bytes, raw, "raw block bytes round-trip exactly");
+        assert_eq!(entry.body(), raw, "raw block bytes round-trip exactly");
         assert_eq!(
             entry.expected_hash,
             block.hash(),
@@ -82,7 +82,7 @@ fn put_get_round_trip_preserves_bytes_and_source() {
         assert_eq!(entry.source, source, "the source address round-trips");
 
         assert!(
-            verify_entry(&entry.bytes, entry.expected_hash),
+            verify_entry(entry.body(), entry.expected_hash),
             "an intact entry passes the header-hash check",
         );
     }
@@ -108,7 +108,7 @@ fn scan_prunes_outside_range_and_returns_sorted_survivors() {
         // test heights are tiny, they fit u32
         let height = block::Height(height as u32);
         cache
-            .put(height, block, Some(source))
+            .put(height, block, block.hash(), Some(source))
             .expect("writing to a fresh temp dir succeeds");
     }
 
@@ -157,7 +157,7 @@ fn scan_prunes_outside_range_and_returns_sorted_survivors() {
         Some(source),
         "sources survive the restart scan"
     );
-    assert!(verify_entry(&entry.bytes, entry.expected_hash));
+    assert!(verify_entry(entry.body(), entry.expected_hash));
 }
 
 /// With an empty state (no tip), `scan` keeps cached blocks from genesis up.
@@ -169,7 +169,7 @@ fn scan_with_empty_state_keeps_genesis() {
     for (height, block) in blocks.iter().enumerate() {
         // test heights are tiny, they fit u32
         cache
-            .put(block::Height(height as u32), block, None)
+            .put(block::Height(height as u32), block, block.hash(), None)
             .expect("writing to a fresh temp dir succeeds");
     }
 
@@ -190,7 +190,7 @@ fn corrupt_entry_fails_the_hash_check() {
     let (mut cache, dir, blocks) = cache_with_blocks(1);
 
     cache
-        .put(block::Height(0), &blocks[0], None)
+        .put(block::Height(0), &blocks[0], blocks[0].hash(), None)
         .expect("writing to a fresh temp dir succeeds");
 
     let files = entry_files(&dir);
@@ -211,7 +211,7 @@ fn corrupt_entry_fails_the_hash_check() {
         .get(block::Height(0))
         .expect("a body-corrupt entry is returned: only re-verification can detect it");
     assert!(
-        !verify_entry(&entry.bytes, entry.expected_hash),
+        !verify_entry(entry.body(), entry.expected_hash),
         "the flipped byte must fail the header-hash check",
     );
 }
@@ -227,7 +227,7 @@ fn truncated_entries_are_dropped_or_fail_verification() {
     for (height, block) in blocks.iter().enumerate() {
         // test heights are tiny, they fit u32
         cache
-            .put(block::Height(height as u32), block, None)
+            .put(block::Height(height as u32), block, block.hash(), None)
             .expect("writing to a fresh temp dir succeeds");
     }
 
@@ -279,9 +279,9 @@ fn truncated_entries_are_dropped_or_fail_verification() {
     let entry = cache
         .get(block::Height(1))
         .expect("a body-torn entry is returned: only re-verification can detect it");
-    assert_eq!(entry.bytes.len(), 100);
+    assert_eq!(entry.body().len(), 100);
     assert!(
-        !verify_entry(&entry.bytes, entry.expected_hash),
+        !verify_entry(entry.body(), entry.expected_hash),
         "a truncated header must fail the header-hash check",
     );
 
@@ -305,7 +305,7 @@ fn evict_through_deletes_committed_entries() {
     for (height, block) in blocks.iter().enumerate() {
         // test heights are tiny, they fit u32
         cache
-            .put(block::Height(height as u32), block, None)
+            .put(block::Height(height as u32), block, block.hash(), None)
             .expect("writing to a fresh temp dir succeeds");
     }
 
@@ -355,7 +355,7 @@ fn remove_all_deletes_the_cache_directory() {
     let (mut cache, dir, blocks) = cache_with_blocks(1);
 
     cache
-        .put(block::Height(0), &blocks[0], None)
+        .put(block::Height(0), &blocks[0], blocks[0].hash(), None)
         .expect("writing to a fresh temp dir succeeds");
     assert!(cache_dir(&dir).exists());
 
@@ -371,7 +371,7 @@ fn remove_all_deletes_the_cache_directory() {
         .remove_all()
         .expect("removing a missing cache dir is not an error");
     cache
-        .put(block::Height(0), &blocks[0], None)
+        .put(block::Height(0), &blocks[0], blocks[0].hash(), None)
         .expect("the cache dir is recreated on the next write");
     assert!(cache.get(block::Height(0)).is_some());
 }

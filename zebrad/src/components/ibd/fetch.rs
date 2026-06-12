@@ -121,6 +121,10 @@ pub struct FetchedBlock {
     /// The block, already checked against the requested hash.
     pub block: Arc<Block>,
 
+    /// The requested (pinned) hash, already matched against the block's
+    /// recomputed header hash, so consumers don't re-hash the header.
+    pub hash: block::Hash,
+
     /// The address of the peer that delivered the block, when known; used for
     /// misbehavior attribution.
     pub source: Option<PeerSocketAddr>,
@@ -413,7 +417,11 @@ where
                     // dropped here; the connection handler already filters
                     // blocks that match no requested hash.
                     if let Some((_request, responder)) = remaining.remove(&hash) {
-                        let _ = responder.send(Ok(FetchedBlock { block, source }));
+                        let _ = responder.send(Ok(FetchedBlock {
+                            block,
+                            hash,
+                            source,
+                        }));
                     }
                 }
                 InventoryResponse::Missing(_hash) => {
@@ -503,7 +511,11 @@ where
     for response_item in response_items {
         match response_item {
             InventoryResponse::Available((block, source)) if block.hash() == hash => {
-                return Ok(FetchedBlock { block, source });
+                return Ok(FetchedBlock {
+                    block,
+                    hash,
+                    source,
+                });
             }
             // Unsolicited blocks for other hashes are dropped.
             InventoryResponse::Available(_) => {}

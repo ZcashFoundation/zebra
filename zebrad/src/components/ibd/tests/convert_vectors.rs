@@ -512,7 +512,10 @@ async fn raw_cached_bytes_verify_and_commit() {
             height: block::Height(1),
             expected: block1.hash(),
             prev_expected: genesis.hash(),
-            block: BlockPayload::Raw(zebra_test::vectors::BLOCK_MAINNET_1_BYTES.to_vec()),
+            block: BlockPayload::Raw {
+                bytes: zebra_test::vectors::BLOCK_MAINNET_1_BYTES.to_vec(),
+                body_offset: 0,
+            },
             source: None,
         });
     let call = tokio::spawn(call);
@@ -556,7 +559,10 @@ async fn truncated_cached_bytes_fail_as_corrupt() {
             height: block::Height(1),
             expected: block1.hash(),
             prev_expected: genesis.hash(),
-            block: BlockPayload::Raw(truncated),
+            block: BlockPayload::Raw {
+                bytes: truncated,
+                body_offset: 0,
+            },
             source: Some(PeerSocketAddr::from(([192, 168, 1, 1], 8233))),
         })
         .await
@@ -600,7 +606,10 @@ async fn hash_mismatched_cached_bytes_fail_as_corrupt() {
             expected: block1.hash(),
             prev_expected: genesis.hash(),
             // Genesis bytes cached under block 1's pinned hash.
-            block: BlockPayload::Raw(zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES.to_vec()),
+            block: BlockPayload::Raw {
+                bytes: zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES.to_vec(),
+                body_offset: 0,
+            },
             source: None,
         })
         .await

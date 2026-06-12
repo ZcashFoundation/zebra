@@ -1180,7 +1180,10 @@ where
                 height,
                 expected,
                 prev_expected,
-                block: BlockPayload::Raw(cached.bytes),
+                block: BlockPayload::Raw {
+                    body_offset: cached.body_offset,
+                    bytes: cached.bytes,
+                },
                 source: cached.source,
             }),
         );
@@ -1283,8 +1286,12 @@ where
         match outcome {
             StageOutcome::Fetch { origin, outcome } => {
                 match outcome {
-                    Ok(FetchedBlock { block, source }) => {
-                        self.on_fetch_success(offset, height, block, source);
+                    Ok(FetchedBlock {
+                        block,
+                        hash,
+                        source,
+                    }) => {
+                        self.on_fetch_success(offset, height, block, hash, source);
                     }
                     Err(kind) => {
                         self.on_fetch_failure(offset, origin, kind, now);
@@ -1308,6 +1315,7 @@ where
         offset: usize,
         height: block::Height,
         block: Arc<Block>,
+        hash: block::Hash,
         source: Option<PeerSocketAddr>,
     ) {
         // One serialized-size pass per arrived block: the placement decision
@@ -1345,7 +1353,7 @@ where
         // tier once the RAM block buffer is over budget.
         let over_budget = self.budget_used + bytes_u64 > self.lookahead_bytes;
         let placed_on_disk = if over_budget && offset > 0 {
-            match self.cache.put(height, &block, source) {
+            match self.cache.put(height, &block, hash, source) {
                 Ok(cached_bytes) => {
                     self.window[offset] = Slot::Cached {
                         bytes: cached_bytes,
