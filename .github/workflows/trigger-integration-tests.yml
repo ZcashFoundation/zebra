@@ -28,6 +28,10 @@ permissions: {}
 jobs:
   trigger-integration:
     name: Trigger integration tests
+    # Fork PRs do not receive repository secrets, so `Z3_APP_ID` and
+    # `Z3_APP_PRIVATE_KEY` resolve to empty strings and the token step fails.
+    # Skip the job on fork PRs; keep it on same-repo PRs and main pushes.
+    if: ${{ (github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork) || (github.event_name == 'push' && github.ref_name == 'main') }}
     runs-on: ubuntu-latest
     steps:
       - name: Generate app token
