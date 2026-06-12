@@ -419,3 +419,141 @@ fn finalized_write_phase_skips_wal_with_config_opt_in() {
     // The bulk writes were flushed by the guard, so they stay readable.
     assert_eq!(state.db.finalized_tip_height(), Some(Height(2)));
 }
+
+/// The environment variable that switches [`wal_skip_crash_writer`] into its
+/// writer role; holds the state cache directory shared with the parent test.
+const WAL_SKIP_CRASH_TEST_DIR_ENV: &str = "ZEBRA_WAL_SKIP_CRASH_TEST_DIR";
+
+/// The height the writer flushes at; recovery must land exactly here.
+const WAL_SKIP_CRASH_FLUSH_HEIGHT: u32 = 5;
+
+/// The last height the writer commits without flushing before it aborts;
+/// recovery must not see any of these blocks.
+const WAL_SKIP_CRASH_LAST_HEIGHT: u32 = 10;
+
+/// With the WAL skipped, a process crash rolls the database back to the last
+/// atomic flush — a cross-column-family-consistent recent point — never to
+/// scratch and never to a torn state.
+///
+/// This is the `kill -9` test for `disable_wal_during_ibd`: it spawns this
+/// test binary as a child process in the writer role
+/// ([`wal_skip_crash_writer`]), which commits real blocks with the WAL
+/// skipped, flushes at height [`WAL_SKIP_CRASH_FLUSH_HEIGHT`], commits more
+/// blocks, and then `abort()`s — process death with no destructors, so
+/// neither the write-phase guard nor RocksDB's shutdown flush can run. The
+/// parent then reopens the database and checks the recovered state.
+#[test]
+fn wal_skip_crash_recovers_to_last_atomic_flush() {
+    let _init_guard = zebra_test::init();
+
+    let dir = tempfile::tempdir().expect("creating a temp dir succeeds");
+
+    // Run the writer role in a child process, and let it crash.
+    let exe = std::env::current_exe().expect("the test binary path is available");
+    let status = std::process::Command::new(exe)
+        .arg("service::write::finalized_write_phase::tests::wal_skip_crash_writer")
+        .arg("--exact")
+        .arg("--include-ignored")
+        .arg("--nocapture")
+        .env(WAL_SKIP_CRASH_TEST_DIR_ENV, dir.path())
+        .status()
+        .expect("spawning the writer child process succeeds");
+    assert!(
+        !status.success(),
+        "the writer must die by abort, simulating a crash: {status:?}",
+    );
+
+    // Reopen the crashed database, exactly like a node restart.
+    let config = Config {
+        cache_dir: dir.path().to_owned(),
+        ephemeral: false,
+        disable_wal_during_ibd: true,
+        ..Config::default()
+    };
+    let state = FinalizedState::new(
+        &config,
+        &Network::Mainnet,
+        #[cfg(feature = "elasticsearch")]
+        false,
+    );
+
+    // Recovery lands exactly on the flushed height: the flushed blocks are
+    // durable, and the unflushed post-flush blocks are gone.
+    assert_eq!(
+        state.db.finalized_tip_height(),
+        Some(Height(WAL_SKIP_CRASH_FLUSH_HEIGHT)),
+        "recovery must land exactly on the last atomic flush",
+    );
+
+    // The recovered point is consistent across column families: every
+    // flushed block is fully readable (block reads join the height, hash,
+    // and block-data column families), and no unflushed block left partial
+    // rows behind.
+    for height in 0..=WAL_SKIP_CRASH_LAST_HEIGHT {
+        let block = state.db.block(Height(height).into());
+        assert_eq!(
+            block.is_some(),
+            height <= WAL_SKIP_CRASH_FLUSH_HEIGHT,
+            "recovered block at height {height} must exist iff it was flushed",
+        );
+    }
+}
+
+/// The writer role of [`wal_skip_crash_recovers_to_last_atomic_flush`]:
+/// commits real blocks with the WAL skipped, flushes once, commits more, and
+/// aborts the whole process.
+///
+/// A no-op when [`WAL_SKIP_CRASH_TEST_DIR_ENV`] is unset (for example, when
+/// CI runs ignored tests directly), so it only ever aborts the parent test's
+/// child process.
+#[test]
+#[ignore = "spawned by wal_skip_crash_recovers_to_last_atomic_flush; aborts the process"]
+fn wal_skip_crash_writer() {
+    let Some(dir) = std::env::var_os(WAL_SKIP_CRASH_TEST_DIR_ENV) else {
+        eprintln!("{WAL_SKIP_CRASH_TEST_DIR_ENV} is unset: nothing to do");
+        return;
+    };
+    let _init_guard = zebra_test::init();
+
+    let config = Config {
+        cache_dir: dir.into(),
+        ephemeral: false,
+        disable_wal_during_ibd: true,
+        ..Config::default()
+    };
+    let mut state = FinalizedState::new(
+        &config,
+        &Network::Mainnet,
+        #[cfg(feature = "elasticsearch")]
+        false,
+    );
+    let db = state.db.clone();
+
+    // Activate the bulk-write phase: WAL skipping on (the config opted in).
+    let mut phase = FinalizedWritePhase::new(db.clone(), db.config().disable_wal_during_ibd);
+    assert!(db.skip_wal(), "the writer must run with the WAL skipped");
+
+    let blocks = Network::Mainnet.blockchain_map();
+    for height in 0..=WAL_SKIP_CRASH_LAST_HEIGHT {
+        let block: Arc<Block> = blocks
+            .get(&height)
+            .expect("test vectors include the first blocks of every network")
+            .zcash_deserialize_into()
+            .expect("test vectors deserialize");
+
+        state
+            .commit_finalized_direct(block.into(), None, "WAL-skip crash test writer")
+            .expect("test vectors are valid blocks");
+        phase.block_committed();
+
+        // One atomic flush partway through: recovery must land here.
+        if height == WAL_SKIP_CRASH_FLUSH_HEIGHT {
+            db.flush_all_column_families()
+                .expect("flushing a healthy database succeeds");
+        }
+    }
+
+    // Crash: immediate process death, like `kill -9`. No destructors run, so
+    // the guard can't flush on the way out (`abort` never unwinds).
+    std::process::abort();
+}
