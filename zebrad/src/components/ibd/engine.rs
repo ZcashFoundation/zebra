@@ -341,36 +341,18 @@ pub enum FetchOrigin {
     Hedge,
 }
 
-/// The result of a stage-1 fetch future.
-#[derive(Debug)]
-pub enum FetchOutcome {
-    /// The block arrived. The engine loop decides its placement at arrival:
-    /// memory while the RAM block buffer has room, the disk overflow tier
-    /// otherwise (design doc §4.5; maintainer-directed arrival-time
-    /// placement).
-    Fetched {
-        /// The fetched block.
-        block: Arc<Block>,
-        /// The delivering peer, when known.
-        source: Option<PeerSocketAddr>,
-    },
+/// The result of a stage-1 fetch future: the arrived block, or a classified
+/// failure for the engine's retry policy.
+///
+/// The engine loop decides an arrived block's placement: memory while the
+/// RAM block buffer has room, the disk overflow tier otherwise (design doc
+/// §4.5; maintainer-directed arrival-time placement).
+pub type FetchOutcome = Result<FetchedBlock, FetchFailureKind>;
 
-    /// The fetch failed with a classified error; the engine's retry policy
-    /// decides what happens next.
-    Failed(FetchFailureKind),
-}
-
-/// The result of a stage-2 verify-and-commit future.
-#[derive(Debug)]
-pub enum CommitOutcome {
-    /// The block was verified and committed; the future resolved after the
-    /// database write.
-    Committed(block::Hash),
-
-    /// The verify or commit stage failed; the engine maps the error per the
-    /// design doc §4.3/§4.6 semantics.
-    Failed(VerifyAndCommitError),
-}
+/// The result of a stage-2 verify-and-commit future, resolved after the
+/// database write: the committed hash, or an error the engine maps per the
+/// design doc §4.3/§4.6 semantics.
+pub type CommitOutcome = Result<block::Hash, VerifyAndCommitError>;
 
 /// The completion payload of one per-block staged future.
 #[derive(Debug)]
@@ -1120,22 +1102,17 @@ where
             other => unreachable!("push_commit is only called on Fetched slots: {other:?}"),
         };
 
-        self.spawn_commit(height, bytes, {
-            let service = self.verify_and_commit.clone();
-            async move {
-                commit_outcome(
-                    service,
-                    IbdBlock {
-                        height,
-                        expected,
-                        prev_expected,
-                        block: payload,
-                        source,
-                    },
-                )
-                .await
-            }
-        });
+        self.spawn_commit(
+            height,
+            bytes,
+            self.verify_and_commit.clone().oneshot(IbdBlock {
+                height,
+                expected,
+                prev_expected,
+                block: payload,
+                source,
+            }),
+        );
 
         Ok(())
     }
@@ -1181,22 +1158,17 @@ where
         // count against the RAM block buffer until their commit resolves.
         self.budget_used += u64::from(bytes);
 
-        self.spawn_commit(height, bytes, {
-            let service = self.verify_and_commit.clone();
-            async move {
-                commit_outcome(
-                    service,
-                    IbdBlock {
-                        height,
-                        expected,
-                        prev_expected,
-                        block: BlockPayload::Raw(cached.bytes),
-                        source: cached.source,
-                    },
-                )
-                .await
-            }
-        });
+        self.spawn_commit(
+            height,
+            bytes,
+            self.verify_and_commit.clone().oneshot(IbdBlock {
+                height,
+                expected,
+                prev_expected,
+                block: BlockPayload::Raw(cached.bytes),
+                source: cached.source,
+            }),
+        );
 
         Ok(())
     }
@@ -1282,12 +1254,7 @@ where
                             height,
                             StageOutcome::Fetch {
                                 origin: FetchOrigin::Hedge,
-                                outcome: match result {
-                                    Ok(FetchedBlock { block, source }) => {
-                                        FetchOutcome::Fetched { block, source }
-                                    }
-                                    Err(error) => FetchOutcome::Failed(error.kind()),
-                                },
+                                outcome: result.map_err(|error| error.kind()),
                             },
                         ),
                         Err(Aborted) => (height, StageOutcome::Aborted),
@@ -1328,10 +1295,10 @@ where
         match outcome {
             StageOutcome::Fetch { origin, outcome } => {
                 match outcome {
-                    FetchOutcome::Fetched { block, source } => {
+                    Ok(FetchedBlock { block, source }) => {
                         self.on_fetch_success(offset, height, block, source);
                     }
-                    FetchOutcome::Failed(kind) => {
+                    Err(kind) => {
                         self.on_fetch_failure(offset, origin, kind, now);
                     }
                 }
@@ -1554,7 +1521,7 @@ where
             .expect("every resolved stage-2 future reserved its bytes when it was pushed");
 
         match outcome {
-            CommitOutcome::Committed(committed_hash) => {
+            Ok(committed_hash) => {
                 // Both held (`Fetched`) and promoted (`Cached`) blocks
                 // counted against the budget until this resolution.
                 self.budget_used = self
@@ -1573,7 +1540,7 @@ where
                 Ok(())
             }
 
-            CommitOutcome::Failed(error) => self.on_commit_failure(offset, height, error, now),
+            Err(error) => self.on_commit_failure(offset, height, error, now),
         }
     }
 
@@ -1889,22 +1856,6 @@ where
     }
 }
 
-/// Resolves one verify-and-commit call into a [`CommitOutcome`].
-async fn commit_outcome<ZS>(service: VerifyAndCommit<ZS>, request: IbdBlock) -> CommitOutcome
-where
-    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError>
-        + Send
-        + Sync
-        + Clone
-        + 'static,
-    ZS::Future: Send,
-{
-    match service.oneshot(request).await {
-        Ok(committed_hash) => CommitOutcome::Committed(committed_hash),
-        Err(error) => CommitOutcome::Failed(error),
-    }
-}
-
 /// The stage-1 fetch future body: one weighted batched fetch.
 ///
 /// Placement (memory vs the disk overflow tier) is the engine loop's job at
@@ -1916,13 +1867,11 @@ where
     S::Future: Send,
 {
     match service.oneshot(request).await {
-        Ok(BatchFetchResponse::Fetched(FetchedBlock { block, source })) => {
-            FetchOutcome::Fetched { block, source }
-        }
+        Ok(BatchFetchResponse::Fetched(fetched)) => Ok(fetched),
         Ok(BatchFetchResponse::Flushed) => {
             debug_assert!(false, "per-item calls never resolve `Flushed`");
-            FetchOutcome::Failed(FetchFailureKind::Transport)
+            Err(FetchFailureKind::Transport)
         }
-        Err(error) => FetchOutcome::Failed(FetchError::classify(&error)),
+        Err(error) => Err(FetchError::classify(&error)),
     }
 }
