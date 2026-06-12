@@ -10,11 +10,11 @@
 //! items by header hash, and classifies failures per
 //! `docs/design/known-hash-ibd.md` §4.2:
 //!
-//! - explicit peer `notfound` ⇒ [`FetchError::NotFound`] (per-height peer
-//!   exclusion in the engine, after one immediate in-batcher retry round for
-//!   the missing remainder), and
+//! - explicit peer `notfound` ⇒ [`FetchError::NotFound`] (counted by the
+//!   engine, after one immediate in-batcher retry round for the missing
+//!   remainder), and
 //! - whole-request errors and timeouts ⇒ [`FetchError::Transport`] for every
-//!   item in the batch, with **no** peer exclusion.
+//!   item in the batch.
 //!
 //! The engine never writes to the peer set's inventory registry: marking stays
 //! in the client layer (`MissingInventoryCollector`), which only forwards
@@ -156,8 +156,7 @@ pub enum FetchError {
     /// A peer explicitly reported the block as `notfound`, and the immediate
     /// in-batcher retry round did not recover it.
     ///
-    /// The engine excludes `peer` for this height (when the responding peer
-    /// is known) and re-issues the fetch.
+    /// The engine counts the `notfound` and re-issues the fetch with backoff.
     #[error("block {hash:?} at {height:?} not found by peer {peer:?}")]
     NotFound {
         /// The requested block hash.
@@ -202,13 +201,14 @@ impl FetchError {
 /// The engine-facing classification of a fetch failure.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum FetchFailureKind {
-    /// Explicit peer `notfound`: exclude `peer` for this height and re-issue.
+    /// Explicit peer `notfound`: counted separately from transport losses,
+    /// then re-issued.
     NotFound {
         /// The peer that reported `notfound`, when known.
         peer: Option<PeerSocketAddr>,
     },
 
-    /// Transport loss: re-issue with no peer exclusion.
+    /// Transport loss: re-issued.
     Transport,
 }
 
