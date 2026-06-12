@@ -173,6 +173,3 @@ zebra-rpc/qa/cache/
 zebra-chain/fuzz/artifacts
 zebra-chain/fuzz/corpus
 
-
-# Zebra state archives must never be committed (15.5 GB blob hazard, see docs/design/known-hash-ibd.md)
-zebra_state.tgz*
