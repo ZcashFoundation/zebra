@@ -976,34 +976,61 @@ where
                     || self.commit_bytes + u64::from(bytes) <= self.commit_pipeline_max_bytes))
     }
 
+    /// Returns the pinned hash `list[height]`.
+    //
+    // The `expect` checks an internal invariant (in-window heights, and the
+    // frontier's resident parent, are pre-bounded by the list); the `Result`
+    // is only for real list I/O errors.
+    #[allow(clippy::unwrap_in_result)]
+    fn pinned_hash(&mut self, height: block::Height) -> Result<block::Hash, EngineError> {
+        Ok(self
+            .list
+            .hash(height)
+            .map_err(EngineError::List)?
+            .expect("in-window heights and the frontier's parent are within the list"))
+    }
+
     /// Returns the pinned hash for `height` and its parent pin:
     /// `(list[height], list[height - 1])`, with the genesis parent pinned to
     /// [`GENESIS_PREVIOUS_BLOCK_HASH`].
-    //
-    // The `expect`s check internal invariants (in-window heights are
-    // pre-bounded by the list); the `Result` is only for real list I/O
-    // errors.
-    #[allow(clippy::unwrap_in_result)]
     fn pinned_hashes(
         &mut self,
         height: block::Height,
     ) -> Result<(block::Hash, block::Hash), EngineError> {
-        let expected = self
-            .list
-            .hash(height)
-            .map_err(EngineError::List)?
-            .expect("in-window heights are within the list");
+        let expected = self.pinned_hash(height)?;
 
         let prev_expected = match height.0.checked_sub(1) {
             None => GENESIS_PREVIOUS_BLOCK_HASH,
-            Some(prev) => self
-                .list
-                .hash(block::Height(prev))
-                .map_err(EngineError::List)?
-                .expect("heights below an in-window height are within the list"),
+            Some(prev) => self.pinned_hash(block::Height(prev))?,
         };
 
         Ok((expected, prev_expected))
+    }
+
+    /// Wraps a stage-1 fetch future in an abort handle, tags it with
+    /// `origin`, and pushes it into the staged-future collection.
+    ///
+    /// Returns the abort handle for the slot.
+    fn push_fetch(
+        &mut self,
+        height: block::Height,
+        origin: FetchOrigin,
+        fetch: impl Future<Output = FetchOutcome> + Send + 'static,
+    ) -> AbortHandle {
+        let (abort, registration) = AbortHandle::new_pair();
+        let fetch = Abortable::new(fetch, registration);
+
+        self.blocks.push(
+            async move {
+                match fetch.await {
+                    Ok(outcome) => (height, StageOutcome::Fetch { origin, outcome }),
+                    Err(Aborted) => (height, StageOutcome::Aborted),
+                }
+            }
+            .boxed(),
+        );
+
+        abort
     }
 
     /// Issues the stage-1 fetch future for `height` and moves its slot to
@@ -1011,10 +1038,6 @@ where
     ///
     /// Placement (memory vs disk tier) happens when the block arrives, not
     /// here (maintainer-directed arrival-time placement).
-    //
-    // The `expect` checks an internal invariant (heights pre-bounded by the
-    // list); the `Result` is only for real list I/O errors.
-    #[allow(clippy::unwrap_in_result)]
     fn issue_fetch(
         &mut self,
         offset: usize,
@@ -1025,11 +1048,7 @@ where
         // chunk fault reads ~5 MB from disk (~20 ms, once per 150,000
         // heights), which is cheaper than threading file I/O through the
         // per-block futures.
-        let hash = self
-            .list
-            .hash(height)
-            .map_err(EngineError::List)?
-            .expect("height was bounded by the list's max height in refill");
+        let hash = self.pinned_hash(height)?;
         let size_hint = self.list.size_hint(height).max(1);
 
         let request = FetchRequest {
@@ -1047,24 +1066,10 @@ where
             other => unreachable!("issue_fetch is only called on Unrequested slots: {other:?}"),
         };
 
-        let service = self.batched_fetch.clone();
-        let (abort, registration) = AbortHandle::new_pair();
-
-        let fetch = Abortable::new(fetch_stage(service, request), registration);
-        self.blocks.push(
-            async move {
-                match fetch.await {
-                    Ok(outcome) => (
-                        height,
-                        StageOutcome::Fetch {
-                            origin: FetchOrigin::Primary,
-                            outcome,
-                        },
-                    ),
-                    Err(Aborted) => (height, StageOutcome::Aborted),
-                }
-            }
-            .boxed(),
+        let abort = self.push_fetch(
+            height,
+            FetchOrigin::Primary,
+            fetch_stage(self.batched_fetch.clone(), request),
         );
 
         self.inflight_fetches += 1;
@@ -1192,11 +1197,6 @@ where
     /// have been in flight too long (design doc §4.1 step 3).
     ///
     /// Collects the earliest pending hedge deadline into `next_wake`.
-    //
-    // The `expect` checks an internal invariant (in-window heights are
-    // pre-bounded by the list); the `Result` is only for real list I/O
-    // errors.
-    #[allow(clippy::unwrap_in_result)]
     fn hedge_frontier(
         &mut self,
         now: Instant,
@@ -1231,37 +1231,15 @@ where
         for offset in due {
             // `offset` is within the frontier-critical span, so it fits u32.
             let height = block::Height(self.base.0 + offset as u32);
-            let hash = self
-                .list
-                .hash(height)
-                .map_err(EngineError::List)?
-                .expect("in-window heights are within the list");
+            let hash = self.pinned_hash(height)?;
 
             // A single-hash `BlocksByHash` through the plain peer set gets
             // inventory-aware routing (`route_inv`) for free, and the
             // one-request-per-connection rule lands it on a different peer
             // than the still-pending primary by construction.
-            let (abort, registration) = AbortHandle::new_pair();
-            let hedge = Abortable::new(
-                fetch::fetch_single(self.peer_set.clone(), height, hash),
-                registration,
-            );
-
-            self.blocks.push(
-                async move {
-                    match hedge.await {
-                        Ok(result) => (
-                            height,
-                            StageOutcome::Fetch {
-                                origin: FetchOrigin::Hedge,
-                                outcome: result.map_err(|error| error.kind()),
-                            },
-                        ),
-                        Err(Aborted) => (height, StageOutcome::Aborted),
-                    }
-                }
-                .boxed(),
-            );
+            let hedge = fetch::fetch_single(self.peer_set.clone(), height, hash)
+                .map(|result| result.map_err(|error| error.kind()));
+            let abort = self.push_fetch(height, FetchOrigin::Hedge, hedge);
 
             match &mut self.window[offset] {
                 Slot::InFlight { hedged, .. } => *hedged = Some(abort),
