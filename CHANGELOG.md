@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - New `[state]` config field `disable_wal_during_ibd` (default off): opt-in
   RocksDB WAL skipping during the initial-sync write phase, trading crash-resync
   time for write throughput on slow disks.
+- New `[state]` config field `checkpoint_sync_retained_blocks` (default 1000):
+  the number of recently committed blocks kept in memory during the initial
+  checkpoint sync, so spends of recent outputs resolve without database reads
+  (most outputs created during the 2022–2023 transaction spam are spent within
+  a few hundred blocks). Configured values below 500 are raised to 500.
 
 ### Changed
 

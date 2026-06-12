@@ -133,6 +133,30 @@ pub struct Config {
     /// on blocks that are committed after the initial sync.
     pub disable_wal_during_ibd: bool,
 
+    /// The number of recently committed blocks kept in the in-memory
+    /// non-finalized state during the initial checkpoint sync, even after
+    /// their database writes complete.
+    ///
+    /// Set to [`MAX_BLOCK_REORG_HEIGHT`](crate::constants::MAX_BLOCK_REORG_HEIGHT)
+    /// (1000) by default. Configured values below half the default are
+    /// raised to that minimum.
+    ///
+    /// # Tradeoff
+    ///
+    /// While a block is retained in memory, spends of its transparent
+    /// outputs are resolved from the in-memory chain instead of database
+    /// point reads. Most outputs created during the 2022–2023 transaction
+    /// spam are spent within a few hundred blocks, so a window this size
+    /// turns the bulk of that era's spent-output lookups into memory hits,
+    /// at the cost of holding up to this many extra blocks (and their
+    /// indexes) in memory — roughly `blocks × 2 MB` in the worst case.
+    ///
+    /// Retention only applies while the initial bulk-write phase is active:
+    /// the retained blocks are already durable on disk, are not visible to
+    /// readers until their writes land, and are all released when the phase
+    /// finishes.
+    pub checkpoint_sync_retained_blocks: u32,
+
     // Debug configs
     //
     /// Commit blocks to the finalized state up to this height, then exit Zebra.
@@ -250,6 +274,7 @@ impl Default for Config {
             should_backup_non_finalized_state: true,
             delete_old_database: true,
             disable_wal_during_ibd: false,
+            checkpoint_sync_retained_blocks: crate::constants::MAX_BLOCK_REORG_HEIGHT,
             debug_stop_at_height: None,
             debug_validity_check_interval: None,
             debug_skip_non_finalized_state_backup_task: false,

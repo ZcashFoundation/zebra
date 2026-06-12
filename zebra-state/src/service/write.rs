@@ -51,8 +51,10 @@ const PARENT_ERROR_MAP_LIMIT: usize = MAX_BLOCK_REORG_HEIGHT as usize * 2;
 /// The capacity of the checkpoint pipeline channel from the block committer
 /// (Thread 1) to the disk writer (Thread 2).
 ///
-/// Bounded so the in-memory non-finalized state holds at most a few hundred
-/// checkpoint blocks while their disk writes are in flight.
+/// Bounded so at most this many checkpoint blocks have disk writes in
+/// flight. The in-memory non-finalized state holds these blocks plus the
+/// already-written retention window
+/// ([`Config::checkpoint_sync_retained_blocks`](crate::Config::checkpoint_sync_retained_blocks)).
 const PIPELINE_WRITE_CHANNEL_CAPACITY: usize = 100;
 
 /// The disk-writer tip height value meaning nothing has been written to disk
@@ -60,11 +62,20 @@ const PIPELINE_WRITE_CHANNEL_CAPACITY: usize = 100;
 const NO_DISK_TIP_HEIGHT: u32 = u32::MAX;
 
 /// Prunes blocks that the disk writer has already written from the
-/// non-finalized state, keeping its memory use bounded by the pipeline
-/// channel capacity.
+/// non-finalized state, keeping the most recent `retained_blocks` of them in
+/// memory.
 ///
 /// `disk_writer_tip_height` is the height most recently published by the disk
 /// writer, or [`NO_DISK_TIP_HEIGHT`] if nothing has been written yet.
+///
+/// Retaining recently-written blocks during the checkpoint sync keeps their
+/// transparent outputs in the in-memory chain, so spends of recent outputs —
+/// the dominant pattern during the 2022–2023 transaction spam — resolve from
+/// memory instead of database point reads (see
+/// [`Config::checkpoint_sync_retained_blocks`](crate::Config::checkpoint_sync_retained_blocks)).
+/// The retained blocks are already durable on disk and are not visible to
+/// readers (the non-finalized state is not published while the pipeline
+/// runs); pass `retained_blocks = 0` to prune fully at phase end.
 ///
 /// # Correctness
 ///
@@ -80,16 +91,20 @@ const NO_DISK_TIP_HEIGHT: u32 = u32::MAX;
 fn prune_finalized_blocks(
     non_finalized_state: &mut NonFinalizedState,
     disk_writer_tip_height: &AtomicU32,
+    retained_blocks: u32,
 ) {
     let disk_tip = disk_writer_tip_height.load(Ordering::Acquire);
     if disk_tip == NO_DISK_TIP_HEIGHT {
         return;
     }
 
-    let finalized_tip_height = Height(disk_tip);
+    // Until the disk tip passes the retention window, nothing is pruned:
+    // heights start at genesis, so the subtraction can't wrap into real
+    // heights.
+    let prune_through_height = Height(disk_tip.saturating_sub(retained_blocks));
     while non_finalized_state
         .root_height()
-        .is_some_and(|root_height| root_height <= finalized_tip_height)
+        .is_some_and(|root_height| root_height <= prune_through_height)
     {
         non_finalized_state.finalize();
     }
@@ -364,6 +379,24 @@ impl WriteBlockWorkerTask {
                 .map_or(NO_DISK_TIP_HEIGHT, |height| height.0),
         ));
 
+        // The number of disk-written blocks kept in the non-finalized state
+        // during the checkpoint sync, so spends of recent outputs resolve
+        // from memory (see `prune_finalized_blocks`). Configured values
+        // below the minimum are raised to it.
+        let retained_blocks = {
+            let configured = finalized_state.db.config().checkpoint_sync_retained_blocks;
+            let min_retained = MAX_BLOCK_REORG_HEIGHT / 2;
+            if configured < min_retained {
+                warn!(
+                    configured,
+                    min_retained,
+                    "checkpoint_sync_retained_blocks is below the minimum, \
+                     using the minimum instead",
+                );
+            }
+            configured.max(min_retained)
+        };
+
         // Returns true if the state service is shutting down.
         let shutting_down = std::thread::scope(|s| {
             let (write_tx, write_rx) =
@@ -555,7 +588,11 @@ impl WriteBlockWorkerTask {
 
                 // The disk writer publishes its tip height, so this doesn't
                 // re-read the finalized tip from the database on every block.
-                prune_finalized_blocks(non_finalized_state, &disk_writer_tip_height);
+                prune_finalized_blocks(
+                    non_finalized_state,
+                    &disk_writer_tip_height,
+                    retained_blocks,
+                );
 
                 next_expected_height =
                     (next_expected_height + 1).expect("committed heights are valid");
@@ -573,7 +610,8 @@ impl WriteBlockWorkerTask {
         }
 
         // All the pipelined blocks are on disk: remove them from the
-        // non-finalized state, so the full-verification phase below starts
+        // non-finalized state — including the blocks retained for in-memory
+        // spend resolution — so the full-verification phase below starts
         // from an empty non-finalized state at the finalized tip.
         //
         // Only blocks at or below the finalized tip are removed: if the
@@ -581,7 +619,7 @@ impl WriteBlockWorkerTask {
         // pipeline never ran), its blocks are above the finalized tip, and
         // they must be preserved for the full-verification phase. The thread
         // scope joined the disk writer, so its published tip height is final.
-        prune_finalized_blocks(non_finalized_state, &disk_writer_tip_height);
+        prune_finalized_blocks(non_finalized_state, &disk_writer_tip_height, 0);
 
         // Do this check even if the channel got closed before any finalized blocks were sent.
         // This can happen if we're past the finalized tip.
