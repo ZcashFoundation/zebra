@@ -79,10 +79,9 @@ use abscissa_core::{config, Command, FrameworkError};
 use color_eyre::eyre::{eyre, Report};
 use futures::FutureExt;
 use tokio::{pin, select, sync::oneshot};
-use tower::{builder::ServiceBuilder, util::BoxService, ServiceExt};
+use tower::{builder::ServiceBuilder, util::BoxService};
 use tracing_futures::Instrument;
 
-use zebra_chain::block::genesis::regtest_genesis_block;
 use zebra_consensus::BackgroundTaskHandles;
 use zebra_rpc::{methods::RpcImpl, server::RpcServer, SubmitBlockChannel};
 
@@ -258,7 +257,7 @@ impl StartCmd {
             .await;
 
         info!("initializing syncer");
-        let (mut syncer, sync_status) = ChainSync::new(
+        let (syncer, sync_status) = ChainSync::new(
             &config,
             max_checkpoint_height,
             peer_set.clone(),
@@ -437,37 +436,12 @@ impl StartCmd {
         // that multi-hop block propagation works: gossiped blocks that arrive out of
         // order (e.g. only the latest tip hash was gossiped) will be recovered by the
         // syncer using block locators within REGTEST_SYNC_RESTART_DELAY (2 seconds).
-        if is_regtest
-            && !syncer
-                .state_contains(config.network.network.genesis_hash())
-                .await?
-        {
-            // The genesis block is below the router's known-hash floor, so it
-            // is committed directly to the state as a checkpoint-verified
-            // block (design doc §7.2): its hash is checked against the
-            // network genesis hash, which is the same pin the deleted
-            // checkpoint verifier applied.
-            let genesis_block = regtest_genesis_block();
-            let genesis = zebra_state::CheckpointVerifiedBlock::from(genesis_block);
-
-            assert_eq!(
-                genesis.hash,
-                config.network.network.genesis_hash(),
-                "the Regtest genesis block hash should match the network genesis hash"
-            );
-
-            state
-                .clone()
-                .oneshot(zebra_state::Request::CommitCheckpointVerifiedBlock(genesis))
-                .await
-                .expect("should commit the Regtest genesis block");
+        if is_regtest {
+            ibd::commit_regtest_genesis_if_missing(&config.network.network, state.clone()).await?;
         }
+
         // Run the known-hash IBD engine (design doc §4.7) to completion
-        // before driving the legacy syncer: `ChainSync` is constructed at
-        // startup (its status handles feed the mempool, gossip, and progress
-        // tasks), but `sync()` only runs after the engine returns. The
-        // combined task sits in the supervision `select!` below, so ctrl-c
-        // and sibling-task failures abort the engine cleanly.
+        // before driving the legacy syncer.
         let ibd_engine = ibd::IbdEngine::new(
             config.sync.clone(),
             config.network.network.clone(),
@@ -477,45 +451,7 @@ impl StartCmd {
             peer_set_status,
             &config.state.cache_dir,
         );
-        // Boxing the engine future erases the higher-ranked lifetimes its
-        // generic services would otherwise leak into the spawned task type.
-        let ibd_engine_fut: std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<ibd::IbdOutcome, crate::BoxError>> + Send>,
-        > = Box::pin(ibd_engine.run());
-        // Futures are lazy: the syncer future is created here but does not
-        // run until awaited, after the engine returns. Boxing erases the
-        // generic future types, which otherwise trip rustc's
-        // implementation-of-`From`-is-not-general-enough false positive when
-        // captured by the combined task's async block.
-        let sync_fut: std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<(), color_eyre::Report>> + Send>,
-        > = Box::pin(syncer.sync());
-        // The engine runs as its own supervised task; the syncer task awaits
-        // its outcome, so `sync()` only drives after the engine returns.
-        let ibd_task_handle = tokio::spawn(ibd_engine_fut.in_current_span());
-        let syncer_task_handle = tokio::spawn(
-            async move {
-                match ibd_task_handle.await {
-                    Ok(Ok(outcome)) => {
-                        info!(
-                            ?outcome,
-                            "known-hash IBD engine finished; starting the legacy syncer",
-                        );
-                    }
-                    // Errors need operator attention (broken assets, state
-                    // shutdown): exit instead of silently falling back.
-                    Ok(Err(error)) => {
-                        return Err(eyre!("known-hash IBD engine failed: {error}"));
-                    }
-                    Err(join_error) => {
-                        return Err(eyre!("known-hash IBD engine panicked: {join_error}"));
-                    }
-                }
-
-                sync_fut.await
-            }
-            .in_current_span(),
-        );
+        let syncer_task_handle = ibd::spawn_engine_then_legacy_sync(ibd_engine, syncer.sync());
 
         // And finally, spawn the internal Zcash miner, if it is enabled.
         //

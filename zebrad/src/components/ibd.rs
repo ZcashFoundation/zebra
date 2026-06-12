@@ -16,12 +16,16 @@
 //! specified in §4.7.
 
 use std::{
+    future::Future,
     path::{Path, PathBuf},
+    pin::Pin,
     time::Duration,
 };
 
-use tokio::sync::watch;
-use tower::Service;
+use color_eyre::eyre::{eyre, Report};
+use tokio::{sync::watch, task::JoinHandle};
+use tower::{Service, ServiceExt};
+use tracing_futures::Instrument;
 
 use zebra_chain::{
     block,
@@ -360,4 +364,117 @@ where
             }
         }
     }
+}
+
+/// Commits the Regtest genesis block directly to the state, if the state
+/// doesn't already contain it.
+///
+/// In Regtest, the legacy syncer's genesis download requires a connected
+/// peer, which a standalone Regtest node doesn't have. Genesis is below the
+/// checkpoint gate (`zebra_consensus::checkpoints`), so it is committed as a
+/// checkpoint-verified block: its hash is checked against the network
+/// genesis hash, which is the same pin the deleted checkpoint verifier
+/// applied.
+pub async fn commit_regtest_genesis_if_missing<ZS>(
+    network: &Network,
+    state: ZS,
+) -> Result<(), Report>
+where
+    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    ZS::Future: Send,
+{
+    let genesis_block = zebra_chain::block::genesis::regtest_genesis_block();
+    let genesis = zs::CheckpointVerifiedBlock::from(genesis_block);
+
+    assert_eq!(
+        genesis.hash,
+        network.genesis_hash(),
+        "the Regtest genesis block hash should match the network genesis hash"
+    );
+
+    let known = state
+        .clone()
+        .oneshot(zs::Request::KnownBlock(genesis.hash))
+        .await
+        .map_err(|error| eyre!(error))?;
+    if matches!(known, zs::Response::KnownBlock(Some(_))) {
+        return Ok(());
+    }
+
+    state
+        .oneshot(zs::Request::CommitCheckpointVerifiedBlock(genesis))
+        .await
+        .map_err(|error| eyre!("committing the Regtest genesis block failed: {error}"))?;
+
+    Ok(())
+}
+
+/// Spawns the known-hash IBD engine and the legacy syncer as one combined,
+/// supervised task: the engine runs to completion first, then `sync_fut`
+/// (the legacy syncer) takes over from the real tip (design doc §4.7).
+///
+/// `ChainSync` is constructed at startup — its status handles feed the
+/// mempool, gossip, and progress tasks — but futures are lazy: `sync_fut`
+/// does not run until awaited, after the engine returns. The returned handle
+/// goes into the startup supervision `select!`, so ctrl-c and sibling-task
+/// failures abort the engine cleanly.
+///
+/// Engine errors need operator attention (broken assets, state shutdown), so
+/// the combined task exits with the error instead of silently falling back
+/// to the legacy syncer.
+pub fn spawn_engine_then_legacy_sync<ZN, ZS, ZSTip, F>(
+    engine: IbdEngine<ZN, ZS, ZSTip>,
+    sync_fut: F,
+) -> JoinHandle<Result<(), Report>>
+where
+    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
+    ZN::Future: Send,
+    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
+    ZS::Future: Send,
+    ZSTip: ChainTip + Clone + Send + 'static,
+    F: Future<Output = Result<(), Report>> + Send + 'static,
+{
+    // Boxing the engine future erases the higher-ranked lifetimes its
+    // generic services would otherwise leak into the spawned task type.
+    let engine_fut: Pin<Box<dyn Future<Output = Result<IbdOutcome, BoxError>> + Send>> =
+        Box::pin(engine.run());
+
+    // Boxing erases the generic syncer future type, which otherwise trips
+    // rustc's implementation-of-`From`-is-not-general-enough false positive
+    // when captured by the combined task's async block.
+    let sync_fut: Pin<Box<dyn Future<Output = Result<(), Report>> + Send>> = Box::pin(sync_fut);
+
+    // The engine runs as its own supervised task; the combined task awaits
+    // its outcome, so the syncer only drives after the engine returns.
+    let engine_task = tokio::spawn(engine_fut.in_current_span());
+
+    tokio::spawn(
+        async move {
+            match engine_task.await {
+                Ok(Ok(outcome)) => {
+                    info!(
+                        ?outcome,
+                        "known-hash IBD engine finished; starting the legacy syncer",
+                    );
+                }
+                Ok(Err(error)) => {
+                    return Err(eyre!("known-hash IBD engine failed: {error}"));
+                }
+                Err(join_error) => {
+                    return Err(eyre!("known-hash IBD engine panicked: {join_error}"));
+                }
+            }
+
+            sync_fut.await
+        }
+        .in_current_span(),
+    )
 }
