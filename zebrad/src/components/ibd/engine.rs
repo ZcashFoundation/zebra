@@ -18,8 +18,8 @@
 //! verify-and-commit path as commits free budget. Commit failures follow the
 //! §4.6 recovery: descendants dropped by a write-thread reset are resubmitted
 //! from their retained [`Arc`]s (a re-verification, never a re-download),
-//! only the failed height itself is refetched — from a different peer — and
-//! repeated byte-identical failures are a fatal diagnostic.
+//! only the failed height itself is refetched, and repeated byte-identical
+//! failures are a fatal diagnostic.
 
 use std::{
     collections::{HashMap, VecDeque},
@@ -52,7 +52,6 @@ use super::{
         self, BatchFetchResponse, BatchedFetch, FetchError, FetchFailureKind, FetchRequest,
         FetchedBlock, DEFAULT_SIZE_HINT,
     },
-    peer_stats::PeerStats,
     IbdOutcome, IBD_STALL_WARN_INTERVAL,
 };
 use crate::BoxError;
@@ -611,9 +610,6 @@ where
     /// hedged (`sync.known_hash_gap_hedge_secs`).
     gap_hedge_after: Duration,
 
-    /// Per-height peer exclusions and `notfound` accounting.
-    peer_stats: PeerStats,
-
     /// The total number of blocks fetched into the window (memory or disk),
     /// reported in the completion log.
     fetched_blocks: u64,
@@ -712,7 +708,6 @@ where
             commit_failures: HashMap::new(),
             cache_evicted_through: base,
             gap_hedge_after,
-            peer_stats: PeerStats::new(now),
             fetched_blocks: 0,
             fetch_watermark: base,
             frontier_progress_at: now,
@@ -756,7 +751,6 @@ where
             let now = Instant::now();
             let mut next_wake: Option<Instant> = None;
 
-            self.peer_stats.maybe_rotate(now);
             self.refill(end, now, &mut next_wake)?;
             self.hedge_frontier(now, &mut next_wake)?;
             self.update_gauges();
@@ -1338,7 +1332,7 @@ where
                         self.on_fetch_success(offset, height, block, source);
                     }
                     FetchOutcome::Failed(kind) => {
-                        self.on_fetch_failure(offset, height, origin, kind, now);
+                        self.on_fetch_failure(offset, origin, kind, now);
                     }
                 }
                 Ok(())
@@ -1437,18 +1431,17 @@ where
     }
 
     /// Applies the retry policy to a failed fetch (design doc §4.1):
-    /// `NotFound` excludes the reporting peer for this height; transport
-    /// losses exclude no one; either way the height backs off and reassigns.
+    /// explicit `NotFound` responses are counted separately from transport
+    /// losses; either way the height backs off and reassigns.
     fn on_fetch_failure(
         &mut self,
         offset: usize,
-        height: block::Height,
         origin: FetchOrigin,
         kind: FetchFailureKind,
         now: Instant,
     ) {
-        if let FetchFailureKind::NotFound { peer } = kind {
-            self.peer_stats.record_not_found(height, peer);
+        if matches!(kind, FetchFailureKind::NotFound { .. }) {
+            metrics::counter!("ibd.peer.notfound.count").increment(1);
         }
 
         match &mut self.window[offset] {
@@ -1637,11 +1630,9 @@ where
         };
         metrics::counter!("ibd.duplicate.download.count", "reason" => reason).increment(1);
 
-        if let Some(peer) = error.source_peer() {
-            // TODO(known-hash-ibd D6): also report misbehavior through the
-            // address book updater once start.rs wires the channel through.
-            self.peer_stats.exclude(height, peer);
-        }
+        // TODO(known-hash-ibd D6): report `error.source_peer()`'s misbehavior
+        // through the address book updater once start.rs wires the channel
+        // through.
 
         warn!(
             %error,
@@ -1659,8 +1650,8 @@ where
     /// reset: the retained copy is resubmitted through re-verification —
     /// never refetched. At the frontier it is the genuinely-failing block
     /// (the state commits in strict height order): the implicated copy is
-    /// discarded and refetched from a different peer, and byte-identical
-    /// failures count toward the deterministic-failure limit.
+    /// discarded and refetched, and byte-identical failures count toward the
+    /// deterministic-failure limit.
     fn on_commit_stage_failure(
         &mut self,
         offset: usize,
@@ -1740,21 +1731,14 @@ where
             height = height.0,
             attempts,
             "state commit failed at the frontier; discarding the implicated copy \
-             and refetching from a different peer",
+             and refetching",
         );
         metrics::counter!("ibd.duplicate.download.count", "reason" => "unconfirmed-copy")
             .increment(1);
 
-        // Exclude the previous source so the refetch lands on a different
-        // peer. TODO(known-hash-ibd D6): also report misbehavior through the
-        // address book updater.
-        if let Slot::Fetched {
-            source: Some(peer), ..
-        } = &self.window[offset]
-        {
-            let peer = *peer;
-            self.peer_stats.exclude(height, peer);
-        }
+        // TODO(known-hash-ibd D6): report the implicated copy's source peer
+        // (the `Slot::Fetched` `source` field) through the address book
+        // updater.
 
         self.discard_slot_copy(offset, height, now);
         Ok(())
@@ -1784,8 +1768,7 @@ where
         // Back off before refetching. A corrupt copy is not a missing block,
         // but without a delay a peer that keeps serving a bad body for the
         // same height drives a tight fetch -> verify-fail -> refetch CPU spin
-        // (the per-height exclusion is recorded but not yet consulted by
-        // routing, so the refetch can return to the same peer). The base
+        // (routing may return the refetch to the same peer). The base
         // backoff paces these retries without materially slowing recovery
         // from a one-off corrupt delivery.
         self.window[offset] = Slot::Unrequested {
@@ -1812,7 +1795,6 @@ where
         // `base > 0` here because it just advanced.
         metrics::gauge!("ibd.committed.height").set(f64::from(self.base.0 - 1));
 
-        self.peer_stats.release_below(self.base);
         // Keep `base - 1` resident: the next stage-2 push pins its parent
         // with `list[base - 1]`.
         self.list

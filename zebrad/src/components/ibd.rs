@@ -40,7 +40,6 @@ pub mod cache;
 pub mod convert;
 pub mod engine;
 pub mod fetch;
-pub mod peer_stats;
 
 #[cfg(test)]
 mod tests;
@@ -88,6 +87,19 @@ pub enum IbdOutcome {
     Degraded(DegradeReason),
 }
 
+/// Reasons the engine may hand an unfinished range back to the legacy syncer.
+///
+/// Degradation is only permitted above the mandatory checkpoint height
+/// (`docs/design/known-hash-ibd.md` §4.1); below it the engine loops forever
+/// with alarms instead.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum DegradeReason {
+    /// [`IBD_MAX_RESTARTS_WITHOUT_PROGRESS`] consecutive engine restarts
+    /// made zero frontier progress; the legacy syncer is correct, just
+    /// slower (design doc §4.1).
+    RepeatedRestartsWithoutProgress,
+}
+
 /// Reasons the known-hash engine declines to run.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum DeclineReason {
@@ -100,19 +112,6 @@ pub enum DeclineReason {
 
     /// The `sync.known_hash_sync` config flag is off.
     DisabledByConfig,
-}
-
-/// Reasons the engine may hand an unfinished range back to the legacy syncer.
-///
-/// Degradation is only permitted above the mandatory checkpoint height
-/// (`docs/design/known-hash-ibd.md` §4.1); below it the engine loops forever
-/// with alarms instead.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum DegradeReason {
-    /// [`IBD_MAX_RESTARTS_WITHOUT_PROGRESS`] consecutive engine restarts
-    /// made zero frontier progress; the legacy syncer is correct, just
-    /// slower (design doc §4.1).
-    RepeatedRestartsWithoutProgress,
 }
 
 /// The known-hash IBD engine supervisor.
