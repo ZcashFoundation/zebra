@@ -4,7 +4,10 @@ mod finalized_write_phase;
 
 use std::{
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc,
+    },
 };
 
 use indexmap::IndexMap;
@@ -301,10 +304,26 @@ impl WriteBlockWorkerTask {
         // path). In-flight blocks are not queryable through the read service
         // until their disk writes complete, at most a pipeline depth later.
         //
+        // The height of the block most recently written to disk by Thread 2,
+        // published so Thread 1 can prune the non-finalized state without
+        // re-reading the finalized tip from the database on every block. A
+        // reverse iterator over the height column family gets slower as level 0
+        // grows during the compaction-paused write phase, so re-reading it per
+        // block would scale with sync depth. `NO_DISK_TIP_HEIGHT` (`u32::MAX`,
+        // far above any real block height) means nothing has been written yet.
+        const NO_DISK_TIP_HEIGHT: u32 = u32::MAX;
+        let disk_writer_tip_height = Arc::new(AtomicU32::new(
+            finalized_state
+                .db
+                .finalized_tip_height()
+                .map_or(NO_DISK_TIP_HEIGHT, |height| height.0),
+        ));
+
         // Returns true if the state service is shutting down.
         let shutting_down = std::thread::scope(|s| {
             let (write_tx, write_rx) =
                 crossbeam_channel::bounded::<FinalizableBlock>(PIPELINE_WRITE_CHANNEL_CAPACITY);
+            let disk_writer_tip_height_writer = disk_writer_tip_height.clone();
 
             // Thread 2: commit each block to the finalized state.
             //
@@ -354,6 +373,11 @@ impl WriteBlockWorkerTask {
                         );
 
                     prev_note_commitment_trees = Some(note_commitment_trees);
+
+                    // Publish the on-disk tip height for Thread 1's prune loop.
+                    // Release pairs with Thread 1's Acquire load so it never
+                    // prunes a block before its disk write is visible.
+                    disk_writer_tip_height_writer.store(height.0, Ordering::Release);
 
                     // Bound level 0 file growth while auto-compaction is paused.
                     finalized_write_phase.block_committed();
@@ -418,6 +442,11 @@ impl WriteBlockWorkerTask {
                             let tip_block = ChainTipBlock::from(finalized);
                             chain_tip_sender.set_finalized_tip(tip_block);
 
+                            // Genesis is committed to disk on this thread, so
+                            // publish its height directly rather than via the
+                            // disk writer.
+                            disk_writer_tip_height.store(Height(0).0, Ordering::Release);
+
                             next_expected_height =
                                 (next_expected_height + 1).expect("committed heights are valid");
                         }
@@ -481,8 +510,12 @@ impl WriteBlockWorkerTask {
 
                 // Prune blocks that the disk writer has already written from
                 // the non-finalized state, keeping its memory use bounded by
-                // the pipeline channel capacity.
-                if let Some(finalized_tip_height) = finalized_state.db.finalized_tip_height() {
+                // the pipeline channel capacity. The disk writer publishes its
+                // tip height, so this doesn't re-read the finalized tip from
+                // the database on every block.
+                let disk_tip = disk_writer_tip_height.load(Ordering::Acquire);
+                if disk_tip != NO_DISK_TIP_HEIGHT {
+                    let finalized_tip_height = Height(disk_tip);
                     while non_finalized_state
                         .root_height()
                         .is_some_and(|root_height| root_height <= finalized_tip_height)
@@ -513,8 +546,11 @@ impl WriteBlockWorkerTask {
         // Only blocks at or below the finalized tip are removed: if the
         // non-finalized state was restored from a backup at startup (so the
         // pipeline never ran), its blocks are above the finalized tip, and
-        // they must be preserved for the full-verification phase.
-        if let Some(finalized_tip_height) = finalized_state.db.finalized_tip_height() {
+        // they must be preserved for the full-verification phase. The thread
+        // scope joined the disk writer, so its published tip height is final.
+        let disk_tip = disk_writer_tip_height.load(Ordering::Acquire);
+        if disk_tip != NO_DISK_TIP_HEIGHT {
+            let finalized_tip_height = Height(disk_tip);
             while non_finalized_state
                 .root_height()
                 .is_some_and(|root_height| root_height <= finalized_tip_height)
