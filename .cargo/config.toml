@@ -1,5 +1,8 @@
 # Zebra cargo configuration
 
+[alias]
+xtask = "run --package xtask --"
+
 [build]
 rustdocflags = [
     # The -A and -W settings must be the same as the `RUSTDOCFLAGS` in:

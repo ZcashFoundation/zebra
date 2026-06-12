@@ -18,11 +18,11 @@ use crate::{
     parameters::Network,
     serialization::ZcashSerialize,
     transaction,
-    transparent::serialize::GENESIS_COINBASE_SCRIPT_SIG,
 };
 
 pub use address::Address;
 pub use script::Script;
+pub use serialize::GENESIS_COINBASE_SCRIPT_SIG;
 pub use utxo::{
     new_ordered_outputs, new_outputs, outputs_from_utxos, utxos_from_ordered_utxos,
     CoinbaseSpendRestriction, OrderedUtxo, Utxo,

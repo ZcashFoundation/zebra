@@ -13,6 +13,8 @@ members = [
         "tower-batch-control",
         "tower-fallback",
         "deploy/watchdog",
+        "xtask",
+        "zebra-jsonl-trace",
 ]
 
 # Use the edition 2021 dependency resolver in the workspace, to match the crates

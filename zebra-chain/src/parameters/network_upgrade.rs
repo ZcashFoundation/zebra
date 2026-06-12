@@ -233,7 +233,6 @@ pub(crate) const CONSENSUS_BRANCH_IDS: &[(NetworkUpgrade, ConsensusBranchId)] = 
     (Nu6_1, ConsensusBranchId(0x4dec4df0)),
     (Nu6_2, ConsensusBranchId(0x5437f330)),
     // TODO: set below to (Nu7, ConsensusBranchId(0x77190ad8)), once the same value is set in librustzcash
-    #[cfg(any(test, feature = "zebra-test"))]
     (Nu7, ConsensusBranchId(0xffffffff)),
     #[cfg(zcash_unstable = "zfuture")]
     (ZFuture, ConsensusBranchId(0xffffffff)),

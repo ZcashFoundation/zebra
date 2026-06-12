@@ -19,7 +19,9 @@
 !*.toml
 !*.lock
 !tower-*
+!xtask
 !zebra-*
 !zebrad
 !docker/entrypoint.sh
 !docker/default-zebra-config.toml
+!docker/ubuntu-package.Dockerfile

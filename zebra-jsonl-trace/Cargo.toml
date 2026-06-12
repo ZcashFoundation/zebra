@@ -1,0 +1,22 @@
+[package]
+name = "zebra-jsonl-trace"
+version = "0.1.0"
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Shared non-blocking JSONL tracing support for Zebra"
+
+[dependencies]
+tokio = { workspace = true, features = ["fs", "io-util", "sync", "time", "rt", "macros"] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+[lints]
+workspace = true
