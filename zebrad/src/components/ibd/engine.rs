@@ -113,6 +113,21 @@ pub const IBD_COMMIT_PIPELINE_BLOCKS: usize = 1_024;
 /// The byte bound on unresolved verify-and-commit futures.
 pub const IBD_COMMIT_PIPELINE_BYTES: usize = 64 * 1024 * 1024;
 
+/// The operational ceiling on the window's block count (fetch-ahead distance).
+///
+/// The refill walk is `O(window length)` per loop event, so an unbounded
+/// window starves the loop: in small-block eras the byte budget alone allows
+/// hundreds of thousands of blocks of fetch-ahead, and the per-event rescan
+/// then dominates the engine thread and *lowers* throughput as peers (and the
+/// window) grow. This caps the fetch-ahead to a depth that still keeps every
+/// peer and the commit pipeline fed — far more than the in-flight fetch
+/// capacity plus [`IBD_COMMIT_PIPELINE_BLOCKS`] — while keeping the rescan
+/// cheap. In large-block eras the byte budgets bind well below this, so it
+/// only takes effect when blocks are small.
+pub const IBD_WINDOW_MAX_BLOCKS: usize = 16_384;
+
+const _: () = assert!(IBD_WINDOW_MAX_BLOCKS <= IBD_SPAN_MAX);
+
 /// The number of heights above the commit frontier treated as gap-critical.
 ///
 /// In-flight blocks in this span block the frontier directly, so they are
@@ -887,10 +902,11 @@ where
 
             match action {
                 RefillAction::Extend => {
-                    if !can_issue {
+                    if !can_issue || self.window.len() >= IBD_WINDOW_MAX_BLOCKS {
                         // Extending only creates fetch work, so the walk is
-                        // done once issuance is blocked and the window end
-                        // is reached.
+                        // done once issuance is blocked, the window end is
+                        // reached, or the fetch-ahead cap is hit (keeping the
+                        // per-event rescan bounded; see IBD_WINDOW_MAX_BLOCKS).
                         break;
                     }
 
