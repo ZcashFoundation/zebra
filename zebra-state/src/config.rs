@@ -114,20 +114,23 @@ pub struct Config {
     /// difference, so it is only worth enabling on slow disks.
     ///
     /// The cost is durability during the initial sync: if Zebra crashes or
-    /// the machine loses power while this is enabled, all blocks written
-    /// since the last database flush are lost, and Zebra re-downloads them
-    /// from the network when it restarts. This is safe for consensus, because
+    /// the machine loses power while this is enabled, blocks written since
+    /// the last database flush are lost, and Zebra re-downloads them from
+    /// the network when it restarts. This is safe for consensus, because
     /// those blocks are public chain data that is re-verified when it is
     /// re-downloaded, but it costs extra sync time after a crash.
     ///
-    /// When this option is enabled, Zebra also enables RocksDB atomic flushes,
-    /// so that a crash without a WAL rolls the database back to a consistent
-    /// point that Zebra can resume syncing from.
+    /// The crash-loss window is bounded: when this option is enabled, Zebra
+    /// also enables RocksDB atomic flushes — so a crash rolls the database
+    /// back to a consistent point Zebra can resume syncing from, never to
+    /// scratch — and flushes the database every few minutes during the
+    /// bulk-write phase, so a restart resumes from at most a few minutes
+    /// behind where it crashed.
     ///
     /// The WAL is only skipped while the initial bulk-write phase is active.
     /// It is re-enabled, and the database is flushed, when that phase
-    /// finishes. This option has no effect on blocks that are committed after
-    /// the initial sync.
+    /// finishes (including on graceful shutdown). This option has no effect
+    /// on blocks that are committed after the initial sync.
     pub disable_wal_during_ibd: bool,
 
     // Debug configs

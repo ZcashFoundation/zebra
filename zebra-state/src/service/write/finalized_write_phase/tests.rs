@@ -150,6 +150,63 @@ fn skips_wal_when_opted_in_and_flushes_on_drop() {
     );
 }
 
+/// While the WAL is skipped, the guard flushes the database once the
+/// periodic crash-loss interval elapses, and not before.
+#[test]
+fn wal_skip_flushes_periodically() {
+    let _init_guard = zebra_test::init();
+
+    let db = MockDb::default();
+    let mut phase = FinalizedWritePhase::new(db.clone(), true);
+
+    // Within the interval: no flush.
+    phase.block_committed();
+    assert_eq!(
+        db.calls(),
+        vec![DbCall::SetAutoCompaction(false), DbCall::SetSkipWal(true)],
+        "no flush before the crash-loss interval elapses",
+    );
+
+    // Pretend the interval elapsed: the next committed block flushes.
+    phase.last_wal_skip_flush = std::time::Instant::now() - super::WAL_SKIP_FLUSH_INTERVAL * 2;
+    phase.block_committed();
+    assert_eq!(
+        db.calls(),
+        vec![
+            DbCall::SetAutoCompaction(false),
+            DbCall::SetSkipWal(true),
+            DbCall::FlushAllColumnFamilies,
+        ],
+        "a committed block after the interval triggers a crash-loss flush",
+    );
+
+    // The flush timestamp was reset: the next block doesn't flush again.
+    phase.block_committed();
+    assert_eq!(
+        db.calls().len(),
+        3,
+        "the interval restarts after each periodic flush",
+    );
+}
+
+/// Without the WAL-skip opt-in, the guard never issues periodic flushes.
+#[test]
+fn no_periodic_flush_without_wal_skip() {
+    let _init_guard = zebra_test::init();
+
+    let db = MockDb::default();
+    let mut phase = FinalizedWritePhase::new(db.clone(), false);
+
+    phase.last_wal_skip_flush = std::time::Instant::now() - super::WAL_SKIP_FLUSH_INTERVAL * 2;
+    phase.block_committed();
+
+    assert_eq!(
+        db.calls(),
+        vec![DbCall::SetAutoCompaction(false)],
+        "with the WAL on, every write is already durable, so no periodic flush",
+    );
+}
+
 /// The guard re-enables auto-compaction when the write task panics.
 #[test]
 fn resumes_compaction_on_panic_unwind() {

@@ -16,6 +16,12 @@
 //! overlap every key, so point lookups check all of them). The guard
 //! periodically checks the level 0 file count, and temporarily re-enables
 //! auto-compaction until the backlog drains.
+//!
+//! While the write-ahead log is skipped, the guard also flushes the database
+//! periodically, so a crash restarts the sync from at most
+//! [`WAL_SKIP_FLUSH_INTERVAL`] back instead of the last buffer-full flush.
+
+use std::time::{Duration, Instant};
 
 use crate::service::finalized_state::ZebraDb;
 
@@ -25,6 +31,18 @@ use crate::service::finalized_state::ZebraDb;
 /// Checking is cheap (a few RocksDB property reads), but it doesn't need to
 /// be frequent: level 0 pressure builds over thousands of blocks.
 const L0_CHECK_INTERVAL_BLOCKS: u64 = 10_000;
+
+/// While the write-ahead log is skipped, flush the database at least this
+/// often, so a crash loses at most this much sync progress.
+///
+/// With the WAL off, writes are durable only once their memtables are
+/// flushed — atomically across column families: `disable_wal_during_ibd`
+/// also enables RocksDB's `atomic_flush`, so crash recovery always lands on
+/// a cross-column-family-consistent point, and the node resumes from that
+/// tip instead of starting from scratch. Automatic flushes only happen when
+/// a write buffer fills, which can take tens of minutes in small-block eras;
+/// this periodic flush bounds the crash-loss window by time instead.
+const WAL_SKIP_FLUSH_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
 /// Temporarily re-enable auto-compaction when any column family has more
 /// than this many level 0 files.
@@ -116,6 +134,12 @@ pub(crate) struct FinalizedWritePhase<D: FinalizedWriteDb> {
 
     /// The number of blocks committed since the last level 0 check.
     blocks_since_level0_check: u64,
+
+    /// When the database was last flushed for WAL-skip crash-loss bounding.
+    ///
+    /// Only consulted while `skip_wal` is set; see
+    /// [`WAL_SKIP_FLUSH_INTERVAL`].
+    last_wal_skip_flush: Instant,
 }
 
 impl<D: FinalizedWriteDb> FinalizedWritePhase<D> {
@@ -143,16 +167,27 @@ impl<D: FinalizedWriteDb> FinalizedWritePhase<D> {
             skip_wal,
             draining_level0: false,
             blocks_since_level0_check: 0,
+            last_wal_skip_flush: Instant::now(),
         }
     }
 
-    /// Records a committed block, and bounds level 0 file growth.
+    /// Records a committed block, bounds level 0 file growth, and — while the
+    /// write-ahead log is skipped — bounds the crash-loss window.
     ///
     /// Every [`L0_CHECK_INTERVAL_BLOCKS`] blocks, checks the level 0 file
     /// count, and temporarily re-enables auto-compaction above
     /// [`L0_DRAIN_FILE_LIMIT`] files, until the backlog drains back down to
     /// [`L0_DRAINED_FILE_LIMIT`] files.
+    ///
+    /// Every [`WAL_SKIP_FLUSH_INTERVAL`], flushes the database if the
+    /// write-ahead log is being skipped, so a crash restarts from at most
+    /// that long ago.
     pub(crate) fn block_committed(&mut self) {
+        if self.skip_wal && self.last_wal_skip_flush.elapsed() >= WAL_SKIP_FLUSH_INTERVAL {
+            self.db.flush_all_column_families();
+            self.last_wal_skip_flush = Instant::now();
+        }
+
         self.blocks_since_level0_check += 1;
         if self.blocks_since_level0_check < L0_CHECK_INTERVAL_BLOCKS {
             return;
