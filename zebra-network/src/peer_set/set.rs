@@ -488,10 +488,6 @@ where
     ///
     /// The status is updated whenever the peer set polls its peers, so it can
     /// briefly lag behind the live peer set.
-    //
-    // TODO: plumb this receiver through `peer_set::init()`'s return value, so
-    //       the known-hash IBD engine can size its download pipeline from the
-    //       peer set status (D phase).
     pub fn status_receiver(&self) -> watch::Receiver<PeerSetStatus> {
         self.status_sender.subscribe()
     }

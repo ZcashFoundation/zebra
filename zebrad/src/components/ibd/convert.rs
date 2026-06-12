@@ -50,7 +50,7 @@ use crate::BoxError;
 ///   the header, so this check extends the pin to the bodies, and carries
 ///   the CVE-2012-2459 duplicate-txid and branch-ID consistency checks.
 ///
-/// Returns the converted block and its serialized size in bytes.
+/// Returns the converted block.
 ///
 /// This function is pure and CPU-heavy (transaction hashing and
 /// `new_outputs` precomputation): callers run it on the rayon pool through

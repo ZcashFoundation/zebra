@@ -4,9 +4,8 @@
 //! uncommitted height range and one [`FuturesUnordered`] of per-block staged
 //! futures. There are no internal data channels and no second stateful task,
 //! so there is a single byte-accounting point for the memory bounds in
-//! `docs/design/known-hash-ibd.md` §3.3. (One control signal exists: a
-//! [`watch`] publishing the memory-eligible boundary, read by in-flight
-//! fetches for the tier re-check.)
+//! `docs/design/known-hash-ibd.md` §3.3. (The only external control input is
+//! the peer set's status [`watch`], which sizes the fetch concurrency.)
 //!
 //! The engine loop downloads its whole range through the weighted batched
 //! fetch service (design doc §4.1–4.2) — refill with auto-scaled lookahead,
@@ -633,11 +632,9 @@ where
     /// - `peer_set`: the Buffer'd zebra-network peer set,
     /// - `state`: the Buffer'd zebra-state service,
     /// - `list`: the verified known-hash list,
-    /// - `peer_status`: the peer set's status watch (sizes the batch
-    ///   concurrency; until D6 plumbs the real watch through `start.rs`, the
-    ///   supervisor passes a default),
-    /// - `cache`: the disk overflow tier (design doc §4.5), or `None` to
-    ///   stop fetch-ahead at the memory budget,
+    /// - `peer_status`: the peer set's status watch from
+    ///   [`zebra_network::init`] (sizes the fetch concurrency),
+    /// - `cache`: the disk overflow tier (design doc §4.5),
     /// - `lookahead_bytes` and `gap_hedge_after`: the
     ///   `sync.known_hash_lookahead_bytes` / `known_hash_gap_hedge_secs`
     ///   config fields. A `gap_hedge_after` too large for the clock
@@ -825,13 +822,14 @@ where
     ///
     /// 1. promotes `Cached` slots and pushes stage-2 continuations for
     ///    `Fetched` slots while the commit pipeline caps (§4.4) hold,
-    /// 2. issues memory-tier fetches while
-    ///    `budget_used + hint_upper(next) ≤ IBD_LOOKAHEAD_BYTES` — the
-    ///    block-count lookahead is not configured anywhere: it emerges from
-    ///    the byte budget and the per-block size hints — and raises the
-    ///    memory-eligible boundary over heights the budget reaches,
-    /// 3. once the budget is fully reserved, keeps issuing disk-tier fetches
-    ///    while the ring span allows (overflow fetch-ahead, §4.5).
+    /// 2. issues fetches while the total storage allowance
+    ///    ([`Self::storage_allows`]: the RAM block buffer plus the disk
+    ///    fetch-ahead allowance) and the live fetch concurrency
+    ///    ([`Self::fetch_slots_available`]) both have room — the block-count
+    ///    lookahead is not configured anywhere: it emerges from the byte
+    ///    budgets and actual block sizes, capped at
+    ///    [`IBD_WINDOW_MAX_BLOCKS`]. Memory-vs-disk placement happens at
+    ///    arrival, not at issuance (§4.5).
     ///
     /// The frontier height bypasses the byte budget: its commit unblocks
     /// everything else, and after a §4.6 recovery the budget may be full of
