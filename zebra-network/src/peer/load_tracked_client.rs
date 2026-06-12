@@ -42,6 +42,28 @@ pub struct LoadTrackedClient {
     /// Shared with the block-download response futures routed to this peer,
     /// which raise it when a `Blocks` response arrives. Only ever raised, never
     /// lowered, so it is a trusted direct signal rather than gossip.
+    ///
+    /// # Correctness
+    ///
+    /// All accesses use [`Ordering::Relaxed`], which is sufficient because
+    /// this atomic is a **standalone value**: no other memory is read or
+    /// written in coordination with it, so no happens-before edge is needed.
+    /// `Relaxed` never weakens the atomicity or coherence of the value
+    /// itself, only its ordering relative to *other* memory.
+    ///
+    /// - Writers only use [`fetch_max`](AtomicU32::fetch_max), a
+    ///   read-modify-write: RMW operations always act on the latest value in
+    ///   the modification order, so concurrent raisers can't overwrite each
+    ///   other and the value is monotonic under any interleaving (tested in
+    ///   this module's unit tests).
+    /// - Readers ([`remote_height`](Self::remote_height)) tolerate stale
+    ///   values: the height is a routing heuristic, so a stale read can only
+    ///   make one routing decision slightly less optimal, never unsound.
+    ///   Nothing consensus- or safety-relevant consumes it.
+    ///
+    /// Do **not** copy this pattern for an atomic that guards or publishes
+    /// other data — that requires `Release`/`Acquire` pairing and its own
+    /// correctness argument.
     live_height: Arc<AtomicU32>,
 
     /// The number of blocks downloaded from this peer over the connection's lifetime.
@@ -49,6 +71,14 @@ pub struct LoadTrackedClient {
     /// Shared with the block-download response futures routed to this peer,
     /// which increment it when a `Blocks` response arrives. Used for sync
     /// diagnostics.
+    ///
+    /// # Correctness
+    ///
+    /// All accesses use [`Ordering::Relaxed`] for the same reasons as
+    /// [`Self::live_height`]: a standalone counter with no associated memory,
+    /// written only via [`fetch_add`](AtomicU64::fetch_add) (an RMW, so
+    /// concurrent increments are never lost), and read only by diagnostics
+    /// (logs) where staleness is harmless.
     blocks_received: Arc<AtomicU64>,
 }
 
@@ -90,6 +120,8 @@ impl LoadTrackedClient {
     ///   served us. This is a trusted direct signal, raised only by blocks the
     ///   peer actually delivered, never by gossip.
     pub fn remote_height(&self) -> Height {
+        // Correctness: `Relaxed` is enough for a standalone routing heuristic
+        // that tolerates staleness; see the `live_height` field docs.
         let live_height = Height(self.live_height.load(Ordering::Relaxed));
 
         std::cmp::max(self.connection_info.remote.start_height, live_height)
@@ -98,8 +130,11 @@ impl LoadTrackedClient {
     /// Returns a handle to this peer's live height, so a response future can
     /// record delivered block heights after the request completes.
     ///
+    /// # Correctness
+    ///
     /// To keep the live height monotonic, holders must only raise it using
-    /// [`fetch_max`](AtomicU32::fetch_max).
+    /// [`fetch_max`](AtomicU32::fetch_max) with [`Ordering::Relaxed`]; see
+    /// the `live_height` field docs for why `Relaxed` is sufficient.
     pub(crate) fn live_height_handle(&self) -> Arc<AtomicU32> {
         self.live_height.clone()
     }

@@ -234,12 +234,16 @@ where
                 }
             }
 
+            // Correctness: both atomics are standalone stats with no
+            // associated memory to publish, so `Relaxed` is sufficient; the
+            // read-modify-write operations (`fetch_add`/`fetch_max`) never
+            // lose concurrent updates, and `fetch_max` keeps the live height
+            // monotonic. See the `LoadTrackedClient` field docs.
             if delivered_count > 0 {
                 blocks_received.fetch_add(delivered_count, Ordering::Relaxed);
             }
 
             if let Some(height) = delivered_height {
-                // `fetch_max` keeps the live height monotonic.
                 live_height.fetch_max(height.0, Ordering::Relaxed);
             }
         }

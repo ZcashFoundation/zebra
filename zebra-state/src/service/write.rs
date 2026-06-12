@@ -64,9 +64,19 @@ const NO_DISK_TIP_HEIGHT: u32 = u32::MAX;
 /// channel capacity.
 ///
 /// `disk_writer_tip_height` is the height most recently published by the disk
-/// writer, or [`NO_DISK_TIP_HEIGHT`] if nothing has been written yet. The
-/// Acquire load pairs with the disk writer's Release store, so a block is
-/// never pruned before its disk write is visible.
+/// writer, or [`NO_DISK_TIP_HEIGHT`] if nothing has been written yet.
+///
+/// # Correctness
+///
+/// The `Acquire` load pairs with the disk writer's `Release` store, which
+/// happens **after** `commit_finalized_direct` returns: reading height `H`
+/// here therefore happens-after the completion of `H`'s database write, so a
+/// block is never pruned from the in-memory non-finalized state before its
+/// on-disk copy is in place — readers always find the block in one of the
+/// two. `Relaxed` would not document or guarantee that prune-after-write
+/// ordering (it would lean on RocksDB's internal synchronization instead);
+/// the explicit `Release`/`Acquire` pair makes the invariant independent of
+/// database internals.
 fn prune_finalized_blocks(
     non_finalized_state: &mut NonFinalizedState,
     disk_writer_tip_height: &AtomicU32,
@@ -340,6 +350,13 @@ impl WriteBlockWorkerTask {
         // reverse iterator over the height column family gets slower as level 0
         // grows during the compaction-paused write phase, so re-reading it per
         // block would scale with sync depth.
+        //
+        // Correctness: Thread 2 `Release`-stores a height only after its
+        // database write completes, and Thread 1 `Acquire`-loads it before
+        // pruning, so a block is never pruned from the in-memory state before
+        // its on-disk copy is in place (see `prune_finalized_blocks`). The
+        // value is monotonic because only Thread 2 stores to it after the
+        // genesis commit, in commit order.
         let disk_writer_tip_height = Arc::new(AtomicU32::new(
             finalized_state
                 .db

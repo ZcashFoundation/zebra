@@ -193,6 +193,18 @@ S::Future: Send + 'static,
 - All external waits need timeouts (network, state, channels)
 - Prefer `tokio::sync::watch` over `Mutex` for shared async state
 - Prefer freshness tracking ("time since last change") to detect stalls
+- Atomic primitives (`AtomicU32`, `AtomicU64`, …) require a `# Correctness`
+  comment at the declaration and at non-trivial use sites, justifying the
+  chosen `Ordering`, plus tests covering the concurrent behavior
+  (monotonicity, no lost updates, ordering invariants):
+  - `Relaxed` is only acceptable for standalone values (counters, monotonic
+    stats) with no associated memory to publish, written via
+    read-modify-write operations (`fetch_add`/`fetch_max`) so concurrent
+    updates are never lost, and whose readers tolerate staleness — state all
+    of this explicitly in the comment
+  - Publishing data to another thread requires `Release`/`Acquire` pairing,
+    with the comment naming both sides and the invariant the edge protects
+  - When in doubt, use a channel or `watch` instead of an atomic
 
 ### Security
 
