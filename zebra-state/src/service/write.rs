@@ -55,6 +55,36 @@ const PARENT_ERROR_MAP_LIMIT: usize = MAX_BLOCK_REORG_HEIGHT as usize * 2;
 /// checkpoint blocks while their disk writes are in flight.
 const PIPELINE_WRITE_CHANNEL_CAPACITY: usize = 100;
 
+/// The disk-writer tip height value meaning nothing has been written to disk
+/// yet: `u32::MAX`, far above any real block height.
+const NO_DISK_TIP_HEIGHT: u32 = u32::MAX;
+
+/// Prunes blocks that the disk writer has already written from the
+/// non-finalized state, keeping its memory use bounded by the pipeline
+/// channel capacity.
+///
+/// `disk_writer_tip_height` is the height most recently published by the disk
+/// writer, or [`NO_DISK_TIP_HEIGHT`] if nothing has been written yet. The
+/// Acquire load pairs with the disk writer's Release store, so a block is
+/// never pruned before its disk write is visible.
+fn prune_finalized_blocks(
+    non_finalized_state: &mut NonFinalizedState,
+    disk_writer_tip_height: &AtomicU32,
+) {
+    let disk_tip = disk_writer_tip_height.load(Ordering::Acquire);
+    if disk_tip == NO_DISK_TIP_HEIGHT {
+        return;
+    }
+
+    let finalized_tip_height = Height(disk_tip);
+    while non_finalized_state
+        .root_height()
+        .is_some_and(|root_height| root_height <= finalized_tip_height)
+    {
+        non_finalized_state.finalize();
+    }
+}
+
 /// Run contextual validation on the prepared block and add it to the
 /// non-finalized state if it is contextually valid.
 #[tracing::instrument(
@@ -309,9 +339,7 @@ impl WriteBlockWorkerTask {
         // re-reading the finalized tip from the database on every block. A
         // reverse iterator over the height column family gets slower as level 0
         // grows during the compaction-paused write phase, so re-reading it per
-        // block would scale with sync depth. `NO_DISK_TIP_HEIGHT` (`u32::MAX`,
-        // far above any real block height) means nothing has been written yet.
-        const NO_DISK_TIP_HEIGHT: u32 = u32::MAX;
+        // block would scale with sync depth.
         let disk_writer_tip_height = Arc::new(AtomicU32::new(
             finalized_state
                 .db
@@ -508,21 +536,9 @@ impl WriteBlockWorkerTask {
                 // in memory, and the disk write can only fail by panicking.
                 let _ = rsp_tx.send(Ok(hash));
 
-                // Prune blocks that the disk writer has already written from
-                // the non-finalized state, keeping its memory use bounded by
-                // the pipeline channel capacity. The disk writer publishes its
-                // tip height, so this doesn't re-read the finalized tip from
-                // the database on every block.
-                let disk_tip = disk_writer_tip_height.load(Ordering::Acquire);
-                if disk_tip != NO_DISK_TIP_HEIGHT {
-                    let finalized_tip_height = Height(disk_tip);
-                    while non_finalized_state
-                        .root_height()
-                        .is_some_and(|root_height| root_height <= finalized_tip_height)
-                    {
-                        non_finalized_state.finalize();
-                    }
-                }
+                // The disk writer publishes its tip height, so this doesn't
+                // re-read the finalized tip from the database on every block.
+                prune_finalized_blocks(non_finalized_state, &disk_writer_tip_height);
 
                 next_expected_height =
                     (next_expected_height + 1).expect("committed heights are valid");
@@ -548,16 +564,7 @@ impl WriteBlockWorkerTask {
         // pipeline never ran), its blocks are above the finalized tip, and
         // they must be preserved for the full-verification phase. The thread
         // scope joined the disk writer, so its published tip height is final.
-        let disk_tip = disk_writer_tip_height.load(Ordering::Acquire);
-        if disk_tip != NO_DISK_TIP_HEIGHT {
-            let finalized_tip_height = Height(disk_tip);
-            while non_finalized_state
-                .root_height()
-                .is_some_and(|root_height| root_height <= finalized_tip_height)
-            {
-                non_finalized_state.finalize();
-            }
-        }
+        prune_finalized_blocks(non_finalized_state, &disk_writer_tip_height);
 
         // Do this check even if the channel got closed before any finalized blocks were sent.
         // This can happen if we're past the finalized tip.
