@@ -1006,38 +1006,25 @@ where
 
     /// Performs P2C on `self.ready_services` to randomly select a less-loaded ready service.
     fn select_ready_p2c_peer(&self) -> Option<D::Key> {
-        self.select_p2c_peer_from_list(&self.ready_services.keys().copied().collect())
+        let ready_peers: Vec<D::Key> = self.ready_services.keys().copied().collect();
+        self.select_p2c_peer_from_list(&ready_peers)
     }
 
     /// Performs P2C on `ready_service_list` to randomly select a less-loaded ready service.
+    ///
+    /// The list must not contain duplicate peers, so each peer gets an equal
+    /// chance of being sampled.
     #[allow(clippy::unwrap_in_result)]
-    fn select_p2c_peer_from_list(&self, ready_service_list: &HashSet<D::Key>) -> Option<D::Key> {
-        match ready_service_list.len() {
-            0 => None,
-            1 => Some(
-                *ready_service_list
-                    .iter()
-                    .next()
-                    .expect("just checked there is one service"),
-            ),
-            len => {
+    fn select_p2c_peer_from_list(&self, ready_service_list: &[D::Key]) -> Option<D::Key> {
+        match *ready_service_list {
+            [] => None,
+            [only_peer] => Some(only_peer),
+            ref list => {
                 // Choose 2 random peers, then return the least loaded of those 2 peers.
-                let (a, b) = {
-                    let idxs = rand::seq::index::sample(&mut rand::thread_rng(), len, 2);
-                    let a = idxs.index(0);
-                    let b = idxs.index(1);
-
-                    let a = *ready_service_list
-                        .iter()
-                        .nth(a)
-                        .expect("sample returns valid indexes");
-                    let b = *ready_service_list
-                        .iter()
-                        .nth(b)
-                        .expect("sample returns valid indexes");
-
-                    (a, b)
-                };
+                let len = list.len();
+                let idxs = rand::seq::index::sample(&mut rand::thread_rng(), len, 2);
+                let a = list[idxs.index(0)];
+                let b = list[idxs.index(1)];
 
                 let a_load = self.query_load(&a).expect("supplied services are ready");
                 let b_load = self.query_load(&b).expect("supplied services are ready");
@@ -1108,25 +1095,9 @@ where
             return;
         }
 
-        // Only treat a static tip as a stall worth churning peers over when at
-        // least one peer reports a height above ours — i.e. there is newer
-        // chain we are failing to obtain. A fully-synced node during a natural
-        // >timeout block gap, a quiet/partitioned network where no peer has
-        // anything newer, and regtest or an unmined testnet (where the tip
-        // never grows) are not recoverable by eviction; dropping a healthy
-        // peer and cancelling its in-flight work there is pure harm. Resetting
-        // the timer means a later genuine fall-behind measures from when it
-        // started, giving sync the full timeout to recover before any eviction.
-        let some_peer_is_ahead = self
-            .ready_services
-            .values()
-            .any(|svc| svc.remote_height() > tip_height);
-        if !some_peer_is_ahead {
-            self.last_tip_growth = Instant::now();
-            return;
-        }
-
         // The tip hasn't grown yet: wait until the stall timeout elapses.
+        // The checks below run at most once per stall window, so they stay
+        // off the per-poll hot path.
         if self.last_tip_growth.elapsed() < TIP_STALL_EVICTION_TIMEOUT {
             return;
         }
@@ -1134,6 +1105,23 @@ where
         // Reset the timer so we act at most once per stall window, even if
         // the tip stays stuck.
         self.last_tip_growth = Instant::now();
+
+        // Only treat a static tip as a stall worth acting on when at least
+        // one peer reports a height above ours — i.e. there is newer chain
+        // we are failing to obtain. A fully-synced node during a natural
+        // >timeout block gap, a quiet/partitioned network where no peer has
+        // anything newer, and regtest or an unmined testnet (where the tip
+        // never grows) are not recoverable by churning peers; dropping a
+        // healthy peer and cancelling its in-flight work there is pure harm.
+        // The timer was just reset, so a peer that pulls ahead later still
+        // gets a full window before any action.
+        let some_peer_is_ahead = self
+            .ready_services
+            .values()
+            .any(|svc| svc.remote_height() > tip_height);
+        if !some_peer_is_ahead {
+            return;
+        }
 
         // While there are free connection slots, ask the crawler for more
         // peers instead of dropping a working connection: eviction only helps
@@ -1241,7 +1229,7 @@ where
     fn route_block_download(&mut self, req: Request) -> <Self as tower::Service<Request>>::Future {
         let tip_height = self.minimum_peer_version.chain_tip_height();
 
-        let tall_peers: HashSet<D::Key> = self
+        let tall_peers: Vec<D::Key> = self
             .ready_services
             .iter()
             .filter(|(_addr, svc)| svc.remote_height() >= tip_height)
@@ -1276,7 +1264,9 @@ where
         req: Request,
         hash: InventoryHash,
     ) -> <Self as tower::Service<Request>>::Future {
-        let advertising_peer_list = self
+        // `status_peers` yields each peer at most once, so this list is
+        // duplicate-free, as `select_p2c_peer_from_list` requires.
+        let advertising_peer_list: Vec<D::Key> = self
             .inventory_registry
             .advertising_peers(hash)
             .filter(|&addr| self.ready_services.contains_key(addr))
@@ -1303,7 +1293,7 @@ where
             .missing_peers(hash)
             .copied()
             .collect();
-        let maybe_peer_list = self
+        let maybe_peer_list: Vec<D::Key> = self
             .ready_services
             .keys()
             .filter(|addr| !missing_peer_list.contains(addr))
