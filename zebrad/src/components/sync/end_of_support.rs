@@ -12,8 +12,22 @@ use zebra_chain::{
 
 use crate::application::release_version;
 
+/// The estimated number of Mainnet blocks between the checkpoint-list
+/// regeneration for a release and the release being published.
+///
+/// The checkpoint lists are regenerated shortly before each release, so the
+/// release height is the checkpoint max plus a couple of days of blocks.
+const ESTIMATED_BLOCKS_FROM_CHECKPOINT_TO_RELEASE: u32 = 2_200;
+
 /// The estimated height that this release will be published.
-pub const ESTIMATED_RELEASE_HEIGHT: u32 = 3_375_400;
+///
+/// Derived from the release's bundled Mainnet checkpoint coverage
+/// ([`MAINNET_MAX_CHECKPOINT_HEIGHT`](zebra_chain::parameters::checkpoint::constants::MAINNET_MAX_CHECKPOINT_HEIGHT),
+/// updated every release), so it tracks releases without separate manual
+/// updates.
+pub const ESTIMATED_RELEASE_HEIGHT: u32 =
+    zebra_chain::parameters::checkpoint::constants::MAINNET_MAX_CHECKPOINT_HEIGHT.0
+        + ESTIMATED_BLOCKS_FROM_CHECKPOINT_TO_RELEASE;
 
 /// The maximum number of days after `ESTIMATED_RELEASE_HEIGHT` where a Zebra server will run
 /// without halting.

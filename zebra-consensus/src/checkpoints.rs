@@ -33,18 +33,17 @@ use crate::{
 /// `config`.
 ///
 /// This is the end of the network's checkpoint list when checkpoint sync is
-/// enabled, and the first checkpoint at or above the mandatory checkpoint
-/// height when it is disabled (users who want full validation from Canopy
-/// onwards can disable `checkpoint_sync`).
+/// enabled — a hard-coded release-time constant, so no list is loaded — and
+/// the first checkpoint at or above the mandatory checkpoint height when it
+/// is disabled (users who want full validation from Canopy onwards can
+/// disable `checkpoint_sync`).
 pub fn max_checkpoint_height(config: Config, network: &Network) -> block::Height {
-    // TODO: Zebra parses the checkpoint list multiple times at startup.
-    //       Instead, cache the checkpoint list for each `network`.
-    let list = network.checkpoint_list();
-
     if config.checkpoint_sync {
-        list.max_height()
+        network.max_checkpoint_height()
     } else {
-        list.min_height_in_range(network.mandatory_checkpoint_height()..)
+        network
+            .checkpoint_list()
+            .min_height_in_range(network.mandatory_checkpoint_height()..)
             .expect("hardcoded checkpoint list extends past canopy activation")
     }
 }

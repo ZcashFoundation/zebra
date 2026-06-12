@@ -70,6 +70,24 @@ impl Network {
             Network::Testnet(params) => params.checkpoints(),
         }
     }
+
+    /// Returns the maximum height in `network`'s bundled checkpoint list,
+    /// without loading or parsing the list.
+    ///
+    /// These are the hard-coded
+    /// [`MAINNET_MAX_CHECKPOINT_HEIGHT`](super::constants::MAINNET_MAX_CHECKPOINT_HEIGHT) /
+    /// [`TESTNET_MAX_CHECKPOINT_HEIGHT`](super::constants::TESTNET_MAX_CHECKPOINT_HEIGHT)
+    /// constants, updated at every release. Configured testnets can carry
+    /// custom checkpoints, so they fall back to reading their list.
+    pub fn max_checkpoint_height(&self) -> block::Height {
+        match self {
+            Network::Mainnet => super::constants::MAINNET_MAX_CHECKPOINT_HEIGHT,
+            Network::Testnet(params) if params.is_default_testnet() => {
+                super::constants::TESTNET_MAX_CHECKPOINT_HEIGHT
+            }
+            Network::Testnet(params) => params.checkpoints().max_height(),
+        }
+    }
 }
 
 /// Parses a checkpoint to a [`block::Height`] and [`block::Hash`].

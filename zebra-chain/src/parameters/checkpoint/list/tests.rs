@@ -9,7 +9,7 @@ use num_integer::div_ceil;
 use crate::{
     block::{Block, HeightDiff, MAX_BLOCK_BYTES},
     parameters::{
-        checkpoint::constants::{MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP},
+        checkpoint::constants::{self, MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP},
         Network::*,
     },
     serialization::ZcashDeserialize,
@@ -330,4 +330,39 @@ fn checkpoint_list_hard_coded_max_gap(network: Network) -> Result<(), BoxError> 
     }
 
     Ok(())
+}
+
+/// Checks that the hard-coded max-checkpoint-height constants match the
+/// bundled checkpoint lists.
+///
+/// This test fails after the checkpoint lists are regenerated for a release,
+/// until the constants in `checkpoint::constants` are updated to match.
+#[test]
+fn max_checkpoint_height_constants_match_lists() {
+    let _init_guard = zebra_test::init();
+
+    assert_eq!(
+        Network::Mainnet.checkpoint_list().max_height(),
+        constants::MAINNET_MAX_CHECKPOINT_HEIGHT,
+        "MAINNET_MAX_CHECKPOINT_HEIGHT must match the last entry in main-checkpoints.txt",
+    );
+    assert_eq!(
+        Network::new_default_testnet()
+            .checkpoint_list()
+            .max_height(),
+        constants::TESTNET_MAX_CHECKPOINT_HEIGHT,
+        "TESTNET_MAX_CHECKPOINT_HEIGHT must match the last entry in test-checkpoints.txt",
+    );
+
+    // The constant shortcut and the list agree for the built-in networks.
+    assert_eq!(
+        Network::Mainnet.max_checkpoint_height(),
+        Network::Mainnet.checkpoint_list().max_height(),
+    );
+    assert_eq!(
+        Network::new_default_testnet().max_checkpoint_height(),
+        Network::new_default_testnet()
+            .checkpoint_list()
+            .max_height(),
+    );
 }
