@@ -743,6 +743,15 @@ where
                     if let Some((height, outcome)) = completion {
                         self.on_stage_complete(height, outcome, Instant::now())?;
                     }
+
+                    // Batch arrivals and pipelined commits resolve many
+                    // futures at nearly the same time. Drain every
+                    // already-ready completion before the next loop pass, so
+                    // the `O(window)` refill and stall scans above run once
+                    // per ready batch instead of once per future.
+                    while let Some(Some((height, outcome))) = self.blocks.next().now_or_never() {
+                        self.on_stage_complete(height, outcome, Instant::now())?;
+                    }
                 }
 
                 _ = async {
