@@ -8,6 +8,7 @@ use std::{
 use futures::prelude::*;
 use tokio::net::TcpStream;
 use tower::{Service, ServiceExt};
+use tower_fair_buffer::Tagged;
 use tracing_futures::Instrument;
 
 use zebra_chain::chain_tip::{ChainTip, NoChainTip};
@@ -23,7 +24,10 @@ use crate::{
 /// [`tower::Service`] lets us apply unified timeout policies, etc.
 pub struct Connector<S, C = NoChainTip>
 where
-    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    S: Service<Tagged<PeerSocketAddr, Request>, Response = Response, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
     S::Future: Send,
     C: ChainTip + Clone + Send + 'static,
 {
@@ -32,7 +36,10 @@ where
 
 impl<S, C> Clone for Connector<S, C>
 where
-    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    S: Service<Tagged<PeerSocketAddr, Request>, Response = Response, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
     S::Future: Send,
     C: ChainTip + Clone + Send + 'static,
 {
@@ -45,7 +52,10 @@ where
 
 impl<S, C> Connector<S, C>
 where
-    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    S: Service<Tagged<PeerSocketAddr, Request>, Response = Response, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
     S::Future: Send,
     C: ChainTip + Clone + Send + 'static,
 {
@@ -68,7 +78,10 @@ pub struct OutboundConnectorRequest {
 
 impl<S, C> Service<OutboundConnectorRequest> for Connector<S, C>
 where
-    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    S: Service<Tagged<PeerSocketAddr, Request>, Response = Response, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
     S::Future: Send,
     C: ChainTip + Clone + Send + 'static,
 {

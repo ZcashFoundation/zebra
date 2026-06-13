@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use arti_client::{DataStream, TorAddr, TorClient, TorClientConfig};
 use tor_rtcompat::tokio::TokioRuntimeHandle;
 use tower::Service;
+use tower_fair_buffer::Tagged;
 
 use zebra_chain::parameters::Network;
 
@@ -73,8 +74,10 @@ pub async fn connect_isolated_tor_with_inbound<InboundService>(
     inbound_service: InboundService,
 ) -> Result<ZebraClient, BoxError>
 where
-    InboundService:
-        Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    InboundService: Service<Tagged<PeerSocketAddr, Request>, Response = Response, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
     InboundService::Future: Send,
 {
     let tor_stream = new_tor_stream(hostname).await?;

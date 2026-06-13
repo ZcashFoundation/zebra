@@ -1405,8 +1405,8 @@ where
         //
         // The inbound service must be called immediately after a buffer slot is reserved.
         //
-        // The inbound service never times out in readiness, because the load shed layer is always
-        // ready, and returns an error in response to the request instead.
+        // The inbound service never times out in readiness, because the fair buffer is always
+        // ready, and sheds queued requests instead of exerting backpressure.
         if self.svc.ready().await.is_err() {
             self.fail_with(PeerError::ServiceShutdown).await;
             return;
@@ -1415,11 +1415,14 @@ where
         // Inbound service request timeouts are handled by the timeout layer in `start::start()`.
         let rsp = match self.svc.call(req.clone()).await {
             Err(e) => {
-                if e.is::<tower::load_shed::error::Overloaded>() {
+                if e.is::<tower::load_shed::error::Overloaded>()
+                    || e.is::<tower_fair_buffer::error::Shed>()
+                {
                     // # Security
                     //
                     // The peer request queue must have a limited length.
-                    // The buffer and load shed layers are added in `start::start()`.
+                    // The fair buffer added in `start::start()` sheds the queued request from
+                    // the peer with the highest recent request count when it is full.
                     tracing::debug!("inbound service is overloaded, may close connection");
 
                     let now = Instant::now();

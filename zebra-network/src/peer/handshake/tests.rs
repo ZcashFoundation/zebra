@@ -6,7 +6,10 @@ use super::*;
 
 impl<S, C> Handshake<S, C>
 where
-    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    S: Service<Tagged<PeerSocketAddr, Request>, Response = Response, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
     S::Future: Send,
     C: ChainTip + Clone + Send + 'static,
 {

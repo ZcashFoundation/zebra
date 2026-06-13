@@ -5,6 +5,7 @@ use std::future::Future;
 use futures::future::TryFutureExt;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tower::{util::Oneshot, Service};
+use tower_fair_buffer::Tagged;
 
 use zebra_chain::{chain_tip::NoChainTip, parameters::Network};
 
@@ -80,8 +81,10 @@ pub fn connect_isolated_with_inbound<PeerTransport, InboundService>(
 ) -> impl Future<Output = Result<Client, BoxError>>
 where
     PeerTransport: AsyncRead + AsyncWrite + Unpin + Send + 'static,
-    InboundService:
-        Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    InboundService: Service<Tagged<PeerSocketAddr, Request>, Response = Response, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
     InboundService::Future: Send,
 {
     let config = Config {
@@ -150,8 +153,10 @@ pub fn connect_isolated_tcp_direct_with_inbound<InboundService>(
     inbound_service: InboundService,
 ) -> impl Future<Output = Result<Client, BoxError>>
 where
-    InboundService:
-        Service<Request, Response = Response, Error = BoxError> + Clone + Send + 'static,
+    InboundService: Service<Tagged<PeerSocketAddr, Request>, Response = Response, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
     InboundService::Future: Send,
 {
     let addr = addr.into();

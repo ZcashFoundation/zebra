@@ -24,6 +24,7 @@ use futures::{channel::mpsc, FutureExt, StreamExt};
 use indexmap::IndexSet;
 use tokio::{io::AsyncWriteExt, net::TcpStream, task::JoinHandle};
 use tower::{service_fn, Layer, Service, ServiceExt};
+use tower_fair_buffer::Tagged;
 
 use zebra_chain::{chain_tip::NoChainTip, parameters::Network, serialization::DateTime32};
 
@@ -1469,7 +1470,11 @@ async fn init_with_peer_limit<S>(
     default_config: impl Into<Option<Config>>,
 ) -> Arc<std::sync::Mutex<AddressBook>>
 where
-    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + Sync + 'static,
+    S: Service<Tagged<PeerSocketAddr, Request>, Response = Response, Error = BoxError>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
     S::Future: Send + 'static,
 {
     // This test might fail on machines with no configured IPv4 addresses

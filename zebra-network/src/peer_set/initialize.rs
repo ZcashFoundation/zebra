@@ -30,6 +30,7 @@ use tokio_stream::wrappers::IntervalStream;
 use tower::{
     buffer::Buffer, discover::Change, layer::Layer, util::BoxService, Service, ServiceExt,
 };
+use tower_fair_buffer::Tagged;
 use tracing_futures::Instrument;
 
 use zebra_chain::{chain_tip::ChainTip, diagnostic::task::WaitForPanics};
@@ -109,7 +110,11 @@ pub async fn init<S, C>(
     watch::Receiver<PeerSetStatus>,
 )
 where
-    S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + Sync + 'static,
+    S: Service<Tagged<PeerSocketAddr, Request>, Response = Response, Error = BoxError>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
     S::Future: Send + 'static,
     C: ChainTip + Clone + Send + Sync + 'static,
 {
