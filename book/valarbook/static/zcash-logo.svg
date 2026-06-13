@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Zcash logo">
+  <circle cx="32" cy="32" r="30" fill="#f4b728"/>
+  <circle cx="32" cy="32" r="23" fill="none" stroke="#182022" stroke-width="4"/>
+  <path fill="#182022" d="M36 12v7h10v6H28l18 14v6H36v7h-8v-7H18v-6h18L18 25v-6h10v-7h8Z"/>
+</svg>
