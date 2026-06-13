@@ -574,7 +574,7 @@ zebra/target/release/zebrad start</code></pre>
                 <li><strong>Transport:</strong> zcashd talks to Zebra over RPC only (no zcashd P2P in compat mode).</li>
                 <li><strong>Auth:</strong> keep Zebra cookie auth enabled and avoid exposing RPC publicly.</li>
                 <li><strong>Deployment:</strong> deploy zcashd and Zebra on the same machine.</li>
-                <li><strong>Lifecycle:</strong> supervised mode manages zcashd process lifecycle at runtime. For container builds, zcashd artifact fetch and SHA verification happen outside the Dockerfile before image build.</li>
+                <li><strong>Lifecycle:</strong> managed mode manages zcashd process lifecycle at runtime. For container builds, zcashd artifact fetch and SHA verification happen outside the Dockerfile before image build.</li>
               </ul>
             </article>
 
@@ -620,27 +620,91 @@ zebra/target/release/zebrad start</code></pre>
                      data-panel-scope=".panel">
                   <button class="active"
                           type="button"
-                          data-panel-target="supervised-panel"
-                          aria-pressed="true">Supervised</button>
+                          data-panel-target="path-panel"
+                          aria-pressed="true">Path</button>
+                  <button type="button" data-panel-target="managed-panel" aria-pressed="false">Managed</button>
                   <button type="button" data-panel-target="source-panel" aria-pressed="false">Build from source</button>
                   <button type="button" data-panel-target="docker-panel" aria-pressed="false">Docker</button>
                 </div>
               </div>
 
-              <div id="supervised-panel" class="setup-mode-panel" data-panel>
+              <div id="path-panel" class="setup-mode-panel" data-panel>
+                <ol class="join-steps">
+                  <li class="join-step">
+                    <div class="join-step-body">
+                      <h3>Install Both Binaries</h3>
+                      <p class="body-copy">
+                        Follow the "Pre-requisites" for binaries and snapshots. Run <code>zebrad</code> and <code>zcashd</code> as two independent processes. Zebra enables the zcashd-compat RPC surface; you are responsible for starting and stopping <code>zcashd</code>.
+                      </p>
+                    </div>
+                  </li>
+                  <li class="join-step">
+                    <div class="join-step-body">
+                      <h3>Configure</h3>
+                      <p class="note">Zebra enables the zcashd-compat RPC surface but does not spawn or supervise zcashd — you start it yourself.</p>
+                      <div class="code-block">
+                        <pre><code id="path-config" class="language-toml">[zcashd_compat]
+enabled = true
+manage_zcashd = false</code></pre>
+                      </div>
+                    </div>
+                  </li>
+                  <li class="join-step">
+                    <div class="join-step-body">
+                      <h3>Start Zebra and zcashd</h3>
+                      <p class="body-copy">Wait for Zebra to write its auth cookie, then start zcashd pointed at Zebra's compat listener.</p>
+                      <div class="code-block">
+                        <pre><code id="path-start-zcashd" class="language-bash">zebrad start --zcashd-compat
+# Default location, to which Zebra writes an auth cookie
+ZEBRA_COMPAT_COOKIE="$HOME/.cache/zebra/.zcashd-compat.cookie"
+
+# Ensure Zebra has written it
+test -f "$ZEBRA_COMPAT_COOKIE" && echo "cookie ready: $ZEBRA_COMPAT_COOKIE"
+
+# One-time zcashd datadir setup (zcashd refuses to start without this line)
+mkdir -p ~/.zcash
+echo 'i-am-aware-zcashd-will-be-replaced-by-zebrad-and-zallet-in-2025=1' >> ~/.zcash/zcash.conf
+
+# Start zcashd in compat mode, pointed at Zebra's compat listener
+./src/zcashd -zebra-compat \
+  -zebra-compat-url=http://127.0.0.1:28232 \
+  -zebra-compat-cookiefile="$HOME/.cache/zebra/.zcashd-compat.cookie" \
+  -printtoconsole
+
+# verify
+./src/zcash-cli getzebracompatinfo</code></pre>
+                        <button class="copy"
+                                type="button"
+                                data-copy="path-start-zcashd"
+                                aria-label="Copy zcashd start command"
+                                title="Copy">
+                          <span class="copy-icon" aria-hidden="true"></span>
+                          <span class="copy-status" aria-hidden="true"></span>
+                        </button>
+                      </div>
+                      <p class="note">
+                        For full configuration reference, see
+                        <a href="https://github.com/valargroup/zebra/blob/ironwood-main/book/src/user/zcashd-compat.md">full documentation</a>.
+                      </p>
+                    </div>
+                  </li>
+                </ol>
+              </div>
+
+              <div id="managed-panel" class="setup-mode-panel" data-panel hidden>
                 <ol class="join-steps">
                   <li class="join-step">
                     <div class="join-step-body">
                       <h3>Start Zebra In zcashd-compat Mode</h3>
                       <p class="body-copy">
-                        Default path: one Zebra binary. Zebra resolves a hash-pinned compatible zcashd build, starts it as a child process, and supervises restarts.
+                        One Zebra binary. Zebra resolves a hash-pinned compatible zcashd build, fetches it, starts it as a child process, and manages restarts automatically.
                       </p>
                       <div class="code-block">
-                        <pre><code id="supervised-start" class="language-bash">zebrad start --zcashd-compat</code></pre>
+                        <pre><code id="managed-start" class="language-bash">zebrad start --zcashd-compat</code></pre>
                         <button class="copy"
                                 type="button"
-                                data-copy="supervised-start"
-                                aria-label="Copy supervised start command"
+                                data-copy="managed-start"
+                                aria-label="Copy managed start command"
                                 title="Copy">
                           <span class="copy-icon" aria-hidden="true"></span>
                           <span class="copy-status" aria-hidden="true"></span>
@@ -651,9 +715,9 @@ zebra/target/release/zebrad start</code></pre>
                   <li class="join-step">
                     <div class="join-step-body">
                       <h3>Minimal Config</h3>
-                      <p class="note">Keep supervision enabled so Zebra manages install + lifecycle.</p>
+                      <p class="note">Keep <code>manage_zcashd = true</code> so Zebra handles install and lifecycle.</p>
                       <div class="code-block">
-                        <pre><code id="supervised-config" class="language-toml">[zcashd_compat]
+                        <pre><code id="managed-config" class="language-toml">[zcashd_compat]
 enabled = true
 manage_zcashd = true
 zcashd_source = "managed"
@@ -665,8 +729,8 @@ zcashd_datadir = "/path/to/zcashd/datadir"
 ZEBRA_ZCASHD_COMPAT__ZCASHD_EXTRA_ARGS='["-printtoconsole"]'</code></pre>
                         <button class="copy"
                                 type="button"
-                                data-copy="supervised-config"
-                                aria-label="Copy supervised config snippet"
+                                data-copy="managed-config"
+                                aria-label="Copy managed config snippet"
                                 title="Copy">
                           <span class="copy-icon" aria-hidden="true"></span>
                           <span class="copy-status" aria-hidden="true"></span>
