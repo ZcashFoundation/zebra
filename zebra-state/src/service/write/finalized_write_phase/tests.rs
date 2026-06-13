@@ -508,6 +508,8 @@ fn wal_skip_crash_recovers_to_last_atomic_flush() {
 /// child process.
 #[test]
 #[ignore = "spawned by wal_skip_crash_recovers_to_last_atomic_flush; aborts the process"]
+// This test communicates with its parent over stderr when misconfigured.
+#[allow(clippy::print_stderr)]
 fn wal_skip_crash_writer() {
     let Some(dir) = std::env::var_os(WAL_SKIP_CRASH_TEST_DIR_ENV) else {
         eprintln!("{WAL_SKIP_CRASH_TEST_DIR_ENV} is unset: nothing to do");
