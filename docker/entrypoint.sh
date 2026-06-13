@@ -72,6 +72,7 @@ create_owned_directory() {
 # Create and own cache and config directories based on ZEBRA_* environment variables
 [[ -n ${ZEBRA_STATE__CACHE_DIR} ]] && create_owned_directory "${ZEBRA_STATE__CACHE_DIR}"
 [[ -n ${ZEBRA_RPC__COOKIE_DIR} ]] && create_owned_directory "${ZEBRA_RPC__COOKIE_DIR}"
+[[ -n ${ZEBRA_ZCASHD_COMPAT__ZCASHD_DATADIR:-} ]] && create_owned_directory "${ZEBRA_ZCASHD_COMPAT__ZCASHD_DATADIR}"
 [[ -n ${ZEBRA_TRACING__LOG_FILE} ]] && create_owned_directory "$(dirname "${ZEBRA_TRACING__LOG_FILE}")"
 
 # --- Optional config file support ---

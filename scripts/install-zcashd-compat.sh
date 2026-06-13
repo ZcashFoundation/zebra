@@ -908,11 +908,13 @@ docker run --rm -it \\
   -e ZEBRA_STATE__CACHE_DIR=/home/zebra/.cache/zebra \\
   -e ZEBRA_ZCASHD_COMPAT__MANAGE_ZCASHD=true \\
   -e ZEBRA_ZCASHD_COMPAT__ZCASHD_DATADIR=/home/zebra/.cache/zcashd \\
-  -e ZEBRA_ZCASHD_COMPAT__LISTEN_ADDR=127.0.0.1:28232 \\
+  -e ZEBRA_ZCASHD_COMPAT__LISTEN_ADDR=0.0.0.0:28232 \\
+  -e ZEBRA_ZCASHD_COMPAT__UNSAFE_ALLOW_REMOTE_HTTP=true \\
   -e ZEBRA_ZCASHD_COMPAT__ZCASHD_EXTRA_ARGS='["-rpcbind=0.0.0.0","-rpcallowip=0.0.0.0/0"]' \\
   --mount type=bind,src=$(shell_quote "$ZEBRA_STATE_DIR"),dst=/home/zebra/.cache/zebra \\
   --mount type=bind,src=$(shell_quote "$ZCASHD_DATADIR"),dst=/home/zebra/.cache/zcashd \\
   -p 8233:8233 \\
+  -p 127.0.0.1:28232:28232 \\
   -p 127.0.0.1:8232:8232 \\
   $(shell_quote "$image") \\
   zebrad start --zcashd-compat
@@ -926,7 +928,9 @@ $(style "$GREEN$BOLD" "Start Zebra container in terminal 1:")
 docker run --rm -it --name zebra-compat-zebrad \\
   -e ZEBRA_NETWORK__LISTEN_ADDR='[::]:8233' \\
   -e ZEBRA_STATE__CACHE_DIR=/home/zebra/.cache/zebra \\
-    --mount type=bind,src=$(shell_quote "$ZEBRA_STATE_DIR"),dst=/home/zebra/.cache/zebra \\
+  -e ZEBRA_ZCASHD_COMPAT__LISTEN_ADDR=0.0.0.0:28232 \\
+  -e ZEBRA_ZCASHD_COMPAT__UNSAFE_ALLOW_REMOTE_HTTP=true \\
+  --mount type=bind,src=$(shell_quote "$ZEBRA_STATE_DIR"),dst=/home/zebra/.cache/zebra \\
   -p 8233:8233 \\
   -p 127.0.0.1:28232:28232 \\
   $(shell_quote "$ZEBRA_DOCKER_IMAGE") \\
