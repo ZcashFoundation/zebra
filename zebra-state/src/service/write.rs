@@ -17,6 +17,9 @@ mod disk_writer;
 mod finalized_write_phase;
 mod worker;
 
+#[cfg(test)]
+mod tests;
+
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
@@ -242,6 +245,7 @@ impl BlockWriteSender {
                     chain_tip_sender,
                     non_finalized_state_sender,
                     backup_dir_path,
+                    last_commit_error_warn: std::time::Instant::now(),
                 }
                 .run()
             })

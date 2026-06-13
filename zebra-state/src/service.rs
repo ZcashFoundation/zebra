@@ -87,6 +87,14 @@ use self::queued_blocks::{QueuedCheckpointVerified, QueuedSemanticallyVerified, 
 
 pub use self::traits::{ReadState, State};
 
+/// Prune the sent-hash and finalized-queue structures by height every time
+/// this many checkpoint blocks have been sent to the write worker.
+///
+/// Bounds their growth now that there is no "flip" to clear them. The value is
+/// large enough that pruning is rare, and small enough that the structures
+/// stay well under the rollback window of retained blocks.
+const CHECKPOINT_SENDS_PER_PRUNE: u32 = 1024;
+
 /// A read-write service for Zebra's cached blockchain state.
 ///
 /// This service modifies and provides access to:
@@ -134,18 +142,13 @@ pub(crate) struct StateService {
     /// Channel to send blocks to the block write task.
     block_write_sender: write::BlockWriteSender,
 
-    /// Whether the state is still committing checkpoint-verified blocks to the
-    /// finalized state.
+    /// The number of checkpoint blocks sent to the write worker since the last
+    /// time the sent-hash and finalized-queue structures were pruned by height.
     ///
-    /// Reproduces the old "flip": set to `true` at startup when the
-    /// non-finalized state is empty, and cleared once the checkpoint stream is
-    /// done and the lowest semantically verified block arrives. While `true`,
-    /// checkpoint blocks are queued and sent; once `false`, repeated checkpoint
-    /// blocks get a duplicate error and semantic blocks flow.
-    //
-    // TODO: delete this when the write worker commits checkpoint and semantic
-    //       blocks in any order.
-    accepting_checkpoint_blocks: bool,
+    /// Without the old "flip" to clear those structures, this bounds their
+    /// growth: every [`CHECKPOINT_SENDS_PER_PRUNE`] sends, entries at or below
+    /// the last sent height are dropped.
+    checkpoint_sends_since_prune: u32,
 
     /// The [`block::Hash`] of the most recent block sent to the block write
     /// task.
@@ -388,11 +391,6 @@ impl StateService {
             ChainTipSender::new(initial_tip, network);
 
         let finalized_state_for_writing = finalized_state.clone();
-        // The state accepts checkpoint blocks only when the restored
-        // non-finalized state is empty. Otherwise (a backup restored above the
-        // max checkpoint height) it must commit semantic blocks immediately,
-        // or chain sync stalls.
-        let accepting_checkpoint_blocks = non_finalized_state.is_chain_set_empty();
         let sync_backup_dir_path = backup_dir_path.filter(|_| skip_backup_task);
         let (
             block_write_sender,
@@ -432,7 +430,7 @@ impl StateService {
             non_finalized_state_queued_blocks,
             finalized_state_queued_blocks: HashMap::new(),
             block_write_sender,
-            accepting_checkpoint_blocks,
+            checkpoint_sends_since_prune: 0,
             finalized_block_write_last_sent_hash,
             non_finalized_block_write_sent_hashes,
             invalid_block_write_reset_receiver,
@@ -524,38 +522,22 @@ impl StateService {
         let (rsp_tx, rsp_rx) = oneshot::channel();
         let queued = (checkpoint_verified, rsp_tx);
 
-        if self.accepting_checkpoint_blocks {
-            // We're still committing checkpoint verified blocks
-            if let Some(duplicate_queued) = self
-                .finalized_state_queued_blocks
-                .insert(queued_prev_hash, queued)
-            {
-                Self::send_checkpoint_verified_block_error(
-                    duplicate_queued,
-                    CommitBlockError::new_duplicate(
-                        Some(queued_prev_hash.into()),
-                        KnownBlock::Queue,
-                    ),
-                );
-            }
-
-            self.drain_finalized_queue_and_commit();
-        } else {
-            // We've finished committing checkpoint verified blocks to the finalized state,
-            // so drop any repeated queued blocks, and return an error.
-            //
-            // TODO: track the latest sent height, and drop any blocks under that height
-            //       every time we send some blocks (like QueuedSemanticallyVerifiedBlocks)
+        // Checkpoint-verified blocks are always queued and drained: the write
+        // worker commits checkpoint and semantic blocks in any order, so there
+        // is no "flip" after which checkpoints stop. A checkpoint block that no
+        // longer extends the chain (a duplicate, or one already committed via a
+        // semantic block) is rejected by the worker, or pruned below by height.
+        if let Some(duplicate_queued) = self
+            .finalized_state_queued_blocks
+            .insert(queued_prev_hash, queued)
+        {
             Self::send_checkpoint_verified_block_error(
-                queued,
-                CommitBlockError::new_duplicate(None, KnownBlock::Finalized),
+                duplicate_queued,
+                CommitBlockError::new_duplicate(Some(queued_prev_hash.into()), KnownBlock::Queue),
             );
-
-            self.clear_finalized_block_queue(CommitBlockError::new_duplicate(
-                None,
-                KnownBlock::Finalized,
-            ));
         }
+
+        self.drain_finalized_queue_and_commit();
 
         if self.finalized_state_queued_blocks.is_empty() {
             self.max_finalized_queue_height = f64::NAN;
@@ -607,28 +589,71 @@ impl StateService {
             .finalized_state_queued_blocks
             .remove(&self.finalized_block_write_last_sent_hash)
         {
-            let last_sent_finalized_block_height = queued_block.0.height;
+            let sent_hash = queued_block.0.hash;
+            let sent_height = queued_block.0.height;
 
-            self.finalized_block_write_last_sent_hash = queued_block.0.hash;
+            self.finalized_block_write_last_sent_hash = sent_hash;
 
-            // If we've finished sending finalized blocks, ignore any repeated blocks.
-            // (Blocks can be repeated after a syncer reset.)
-            if let Some(sender) = &self.block_write_sender.sender {
-                let send_result = sender.send(WriteMessage::Checkpoint(queued_block));
+            let Some(sender) = &self.block_write_sender.sender else {
+                // The write worker exited (shutting down): stop sending.
+                break;
+            };
 
-                // If the receiver is closed, we can't send any more blocks.
-                if let Err(SendError(WriteMessage::Checkpoint(queued))) = send_result {
-                    // If Zebra is shutting down, drop blocks and return an error.
-                    Self::send_checkpoint_verified_block_error(
-                        queued,
-                        CommitBlockError::WriteTaskExited,
-                    );
+            let send_result = sender.send(WriteMessage::Checkpoint(queued_block));
 
-                    self.clear_finalized_block_queue(CommitBlockError::WriteTaskExited);
-                } else {
-                    metrics::gauge!("state.checkpoint.sent.block.height")
-                        .set(last_sent_finalized_block_height.0 as f64);
-                };
+            // If the receiver is closed, we can't send any more blocks.
+            if let Err(SendError(WriteMessage::Checkpoint(queued))) = send_result {
+                // If Zebra is shutting down, drop blocks and return an error.
+                Self::send_checkpoint_verified_block_error(
+                    queued,
+                    CommitBlockError::WriteTaskExited,
+                );
+                self.clear_finalized_block_queue(CommitBlockError::WriteTaskExited);
+                break;
+            }
+
+            metrics::gauge!("state.checkpoint.sent.block.height").set(sent_height.0 as f64);
+
+            // Record the sent hash so `can_fork_chain_at` and the duplicate
+            // check recognise it, and release any semantic child that was
+            // queued waiting for this checkpoint block's arrival.
+            self.non_finalized_block_write_sent_hashes
+                .add_sent_hash(sent_hash, sent_height);
+            self.send_ready_non_finalized_queued(sent_hash);
+
+            // Periodically bound the sent-hash and finalized-queue structures
+            // by dropping entries at or below the last sent height (replacing
+            // the old "flip" clears).
+            self.checkpoint_sends_since_prune += 1;
+            if self.checkpoint_sends_since_prune >= CHECKPOINT_SENDS_PER_PRUNE {
+                self.checkpoint_sends_since_prune = 0;
+                self.non_finalized_block_write_sent_hashes
+                    .prune_by_height(sent_height);
+                self.prune_finalized_queue_by_height(sent_height);
+            }
+        }
+    }
+
+    /// Drops queued checkpoint blocks at or below `height` from
+    /// `finalized_state_queued_blocks`, failing each with a duplicate error.
+    ///
+    /// These blocks are below the write frontier, so they can never be drained
+    /// to the worker; dropping them bounds the queue now that there is no
+    /// "flip" to clear it.
+    fn prune_finalized_queue_by_height(&mut self, height: block::Height) {
+        let stale_parents: Vec<block::Hash> = self
+            .finalized_state_queued_blocks
+            .iter()
+            .filter(|(_parent_hash, queued)| queued.0.height <= height)
+            .map(|(parent_hash, _queued)| *parent_hash)
+            .collect();
+
+        for parent_hash in stale_parents {
+            if let Some(queued) = self.finalized_state_queued_blocks.remove(&parent_hash) {
+                Self::send_checkpoint_verified_block_error(
+                    queued,
+                    CommitBlockError::new_duplicate(None, KnownBlock::Finalized),
+                );
             }
         }
     }
@@ -782,62 +807,35 @@ impl StateService {
             rsp_rx
         };
 
-        // We've finished sending checkpoint verified blocks when:
-        // - we've sent the verified block for the last checkpoint, and
-        // - it has been successfully written to disk.
-        //
-        // We detect the last checkpoint by looking for non-finalized blocks
-        // that are a child of the last block we sent.
-        //
-        // The checkpoint pipeline acknowledges blocks before their disk
-        // writes finish, but it keeps writing the remaining blocks while this
-        // condition waits for the finalized tip to catch up to the last sent
-        // block, so checking the disk tip here stays live.
-        //
-        // TODO: configure the state with the last checkpoint hash instead?
-        if self.accepting_checkpoint_blocks
-            && self
-                .non_finalized_state_queued_blocks
-                .has_queued_children(self.finalized_block_write_last_sent_hash)
-            && self.read_service.db.finalized_tip_hash()
-                == self.finalized_block_write_last_sent_hash
-        {
-            // Tell the state to stop committing checkpoint verified blocks to the finalized state,
-            // and move on to committing semantically verified blocks to the non-finalized state.
-            self.accepting_checkpoint_blocks = false;
-            // Remove any checkpoint-verified block hashes from `non_finalized_block_write_sent_hashes`.
-            self.non_finalized_block_write_sent_hashes = SentHashes::default();
-            // Mark `SentHashes` as usable by the `can_fork_chain_at()` method.
-            self.non_finalized_block_write_sent_hashes
-                .can_fork_chain_at_hashes = true;
-            // Send blocks from non-finalized queue
-            self.send_ready_non_finalized_queued(self.finalized_block_write_last_sent_hash);
-            // We've finished committing checkpoint verified blocks to finalized state, so drop any repeated queued blocks.
-            self.clear_finalized_block_queue(CommitBlockError::new_duplicate(
-                None,
-                KnownBlock::Finalized,
-            ));
-        } else if !self.can_fork_chain_at(&parent_hash) {
+        // The write worker commits checkpoint and semantic blocks in any
+        // order, so there is no "flip": a semantic block whose parent is any
+        // sent checkpoint hash (or the finalized tip) can be sent immediately,
+        // and the worker forks the in-flight chain if needed.
+        if !self.can_fork_chain_at(&parent_hash) {
             tracing::trace!("unready to verify, returning early");
-        } else if !self.accepting_checkpoint_blocks {
-            // Wait until block commit task is ready to write non-finalized blocks before dequeuing them
+        } else {
+            // Send any queued blocks whose parent has now arrived.
             self.send_ready_non_finalized_queued(parent_hash);
 
-            let finalized_tip_height = self.read_service.db.finalized_tip_height().expect(
-                "Finalized state must have at least one block before committing non-finalized state",
-            );
+            // Bound the queues by the finalized tip height. Pre-genesis the
+            // database is empty, so there is nothing to prune below.
+            if let Some(finalized_tip_height) = self.read_service.db.finalized_tip_height() {
+                self.non_finalized_state_queued_blocks
+                    .prune_by_height(finalized_tip_height);
 
-            self.non_finalized_state_queued_blocks
-                .prune_by_height(finalized_tip_height);
-
-            self.non_finalized_block_write_sent_hashes
-                .prune_by_height(finalized_tip_height);
+                self.non_finalized_block_write_sent_hashes
+                    .prune_by_height(finalized_tip_height);
+            }
         }
 
         rsp_rx
     }
 
-    /// Returns `true` if `hash` is a valid previous block hash for new non-finalized blocks.
+    /// Returns `true` if `hash` is a valid previous block hash for new
+    /// non-finalized blocks: a recorded sent block, or the finalized tip.
+    ///
+    /// Every sent checkpoint hash is recorded now (see
+    /// [`SentHashes::add_sent_hash`]), so this is valid in every phase.
     fn can_fork_chain_at(&self, hash: &block::Hash) -> bool {
         self.non_finalized_block_write_sent_hashes
             .can_fork_chain_at(hash)
@@ -906,13 +904,6 @@ impl StateService {
     ) -> oneshot::Receiver<Result<block::Hash, InvalidateError>> {
         let (rsp_tx, rsp_rx) = oneshot::channel();
 
-        // While committing checkpoint blocks, the worker can't process
-        // invalidation requests.
-        if self.accepting_checkpoint_blocks {
-            let _ = rsp_tx.send(Err(InvalidateError::ProcessingCheckpointedBlocks));
-            return rsp_rx;
-        }
-
         let Some(sender) = &self.block_write_sender.sender else {
             let _ = rsp_tx.send(Err(InvalidateError::SendInvalidateRequestFailed));
             return rsp_rx;
@@ -936,13 +927,6 @@ impl StateService {
         hash: block::Hash,
     ) -> oneshot::Receiver<Result<Vec<block::Hash>, ReconsiderError>> {
         let (rsp_tx, rsp_rx) = oneshot::channel();
-
-        // While committing checkpoint blocks, the worker can't process
-        // reconsideration requests.
-        if self.accepting_checkpoint_blocks {
-            let _ = rsp_tx.send(Err(ReconsiderError::CheckpointCommitInProgress));
-            return rsp_rx;
-        }
 
         let Some(sender) = &self.block_write_sender.sender else {
             let _ = rsp_tx.send(Err(ReconsiderError::ReconsiderSendFailed));

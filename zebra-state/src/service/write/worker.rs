@@ -39,6 +39,7 @@ use zebra_chain::block::{self, Height};
 
 use crate::{
     constants::MAX_BLOCK_REORG_HEIGHT,
+    error::{CommitBlockError, CommitCheckpointVerifiedError},
     request::FinalizableBlock,
     service::{
         finalized_state::FinalizedState,
@@ -85,7 +86,14 @@ pub(super) struct WriteBlockWorker {
     /// synchronously before each channel update, instead of via the async
     /// backup task.
     pub(super) backup_dir_path: Option<PathBuf>,
+
+    /// When the last checkpoint-commit-failure warning was logged, used to
+    /// rate-limit the warning (a peer can drive that failure path).
+    pub(super) last_commit_error_warn: std::time::Instant,
 }
+
+/// Log at most one checkpoint-commit-failure warning per this interval.
+const COMMIT_ERROR_WARN_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
 
 impl WriteBlockWorker {
     /// Reads blocks from the channel, commits them to the non-finalized state,
@@ -238,33 +246,71 @@ impl WriteBlockWorker {
             Result<block::Hash, crate::error::CommitCheckpointVerifiedError>,
         >,
     ) -> bool {
-        // Discard children of invalid blocks: the pipeline requires blocks in
-        // height order, so after a commit error the descendants are dropped
-        // until a block at the required next height arrives.
-        //
-        // (This is the flip-era height gate; the any-order gate replaces it in
-        // a later commit.)
-        if checkpoint_verified.height != loop_state.next_disk_height {
-            debug!(
-                next_expected_height = ?loop_state.next_disk_height,
-                invalid_height = ?checkpoint_verified.height,
-                invalid_hash = ?checkpoint_verified.hash,
-                "got a block that was the wrong height. \
-                 Assuming a parent block failed, and dropping this block",
-            );
+        let height = checkpoint_verified.height;
+        let hash = checkpoint_verified.hash;
+        let parent_hash = checkpoint_verified.block.header.previous_block_hash;
 
-            // No reset here: it could overwrite a valid sent hash.
-            std::mem::drop((checkpoint_verified, rsp_tx));
+        // Genesis must be committed directly to disk: the non-finalized state's
+        // chains initialize their tree states from a finalized tip, which
+        // doesn't exist yet. Route it through the disk writer with a blocking
+        // ack (the channel is empty at that moment, so this is serial).
+        if height == Height(0) && self.finalized_state.db.is_empty() {
+            return self.commit_genesis(loop_state, checkpoint_verified, rsp_tx);
+        }
+
+        // Locate the parent chain by tip hash. In pure checkpoint sync this is
+        // the single chain and always matches; the fallback arms cost nothing
+        // on the hot path.
+        let parent_is_a_chain_tip = self
+            .non_finalized_state
+            .find_chain(|chain| chain.non_finalized_tip_hash() == parent_hash)
+            .is_some();
+        let parent_is_finalized_tip = parent_hash == self.finalized_state.db.finalized_tip_hash();
+
+        if !parent_is_a_chain_tip && !parent_is_finalized_tip {
+            // No chain extends this block's parent.
+
+            // Adopt-twin: the block may already have entered memory via a
+            // semantic commit (a handoff-window race). If any chain holds this
+            // exact block, the ack contract — committed in memory, disk write
+            // in flight or future — is already satisfied: respond Ok and let
+            // its disk handoff happen when its checkpoint child arrives (or it
+            // finalizes at depth 1000 as an ordinary non-finalized block).
+            if self
+                .non_finalized_state
+                .find_chain(|chain| chain.height_by_hash(hash) == Some(height))
+                .is_some()
+            {
+                let _ = rsp_tx.send(Ok(hash));
+                return false;
+            }
+
+            // Stale, ahead, or sibling: reject explicitly. The engine resubmits
+            // its retained copy above the frontier on any error. No reset: it
+            // could overwrite a valid sent hash.
+            let next_height = self.canonical_next_height(loop_state);
+            let _ = rsp_tx.send(Err(CommitBlockError::OutOfOrder {
+                height,
+                next_height,
+            }
+            .into()));
             return false;
         }
 
-        // The genesis block must be committed directly to disk: the
-        // non-finalized state's chains initialize their tree states from a
-        // finalized tip, which doesn't exist yet. Route it through the disk
-        // writer with a blocking ack (the channel is empty at that moment, so
-        // this is serial), then advance the frontier.
-        if checkpoint_verified.height == Height(0) {
-            return self.commit_genesis(loop_state, checkpoint_verified, rsp_tx);
+        // Flush any semantically-committed ancestors of this block that haven't
+        // been handed to the disk writer yet (needed for any-order: a semantic
+        // block extended the chain past the disk frontier before this
+        // checkpoint child arrived). Fails safe on a fork below the frontier.
+        if height > loop_state.next_disk_height
+            && !self.flush_unhanded_ancestors(loop_state, parent_hash, height)
+        {
+            let next_height = self.canonical_next_height(loop_state);
+            let _ = rsp_tx.send(Err(CommitBlockError::OutOfOrder {
+                height,
+                next_height,
+            }
+            .into()));
+            return false;
         }
 
         // Lazily enter bulk-write mode on the first checkpoint commit: enable
@@ -276,48 +322,69 @@ impl WriteBlockWorker {
             loop_state.bulk_active = true;
         }
 
-        let hash = checkpoint_verified.hash;
-
         // Commit the block to the non-finalized state: a fast, in-memory commit
         // that updates the trees, nullifiers, and UTXOs without the disk write.
         // It also returns the finalizable block, with its treestate already
         // computed during the chain update and its spent UTXOs already resolved.
-        let (tip_block, finalizable) = self
+        let (tip_block, finalizable) = match self
             .non_finalized_state
             .commit_checkpoint_block(checkpoint_verified, &self.finalized_state.db)
-            .expect(
-                "checkpoint block commits to the non-finalized state can't fail: \
-                 the checkpoint hash chain pins the block's contents, and the \
-                 database the chain context is read from is consistent",
-            );
+        {
+            Ok(committed) => committed,
+            Err(error) => {
+                // A peer-influenceable failure: the NU5+ auth-data
+                // hashBlockCommitments check (a substituted-signatures block
+                // passes every engine check and fails only here), or the
+                // spend/value-balance construction. The non-finalized state is
+                // untouched (validate-before-mutate), so the resent copy and
+                // all retained descendants recommit cleanly.
+                //
+                // Reset the service to the parent (the last acked block): it
+                // rewinds and re-drains; descendants arrive above the canonical
+                // tip and get OutOfOrder, which the engine answers by
+                // resubmitting from retained copies — no re-download.
+                //
+                // Rate-limit the warning: a peer can drive this path, so an
+                // unthrottled log is a noise amplifier.
+                if self.last_commit_error_warn.elapsed() >= COMMIT_ERROR_WARN_INTERVAL {
+                    self.last_commit_error_warn = std::time::Instant::now();
+                    warn!(
+                        ?error,
+                        ?height,
+                        ?hash,
+                        "checkpoint block failed its in-memory commit; \
+                         resetting the queue to the parent and recovering",
+                    );
+                }
+                let _ = rsp_tx.send(Err(error.into()));
+                let _ = self.invalid_block_reset_sender.send(parent_hash);
+                return false;
+            }
+        };
 
-        self.chain_tip_sender.set_best_non_finalized_tip(tip_block);
+        // Only update the best-chain tip if the committed chain is the best
+        // chain (always true in pure bulk; correct under forks).
+        if self
+            .non_finalized_state
+            .best_chain()
+            .is_some_and(|chain| chain.non_finalized_tip_hash() == hash)
+        {
+            self.chain_tip_sender.set_best_non_finalized_tip(tip_block);
+        }
 
         // Hand the just-committed block to the disk writer. Blocking on the full
         // bounded channel IS the pipeline backpressure. A SendError means the
         // disk writer panicked; exiting unwinds the scope.
-        if loop_state
-            .disk_tx
-            .send(DiskRequest::Write {
-                block: Box::new(finalizable),
-                bulk: true,
-                ack: None,
-            })
+        if self
+            .enqueue_for_disk(loop_state, finalizable, true, None)
             .is_err()
         {
             return true;
         }
-        loop_state
-            .inflight_disk
-            .push_back((loop_state.next_disk_height, hash));
-        loop_state.disk_frontier_hash = hash;
 
         // Respond now: the block is committed in memory, and the disk write is
         // in flight (it can only fail by panicking).
         let _ = rsp_tx.send(Ok(hash));
-
-        loop_state.next_disk_height =
-            (loop_state.next_disk_height + 1).expect("committed heights are valid");
 
         // The disk writer publishes its tip height, so this doesn't re-read the
         // finalized tip from the database on every block.
@@ -328,6 +395,141 @@ impl WriteBlockWorker {
         );
 
         false
+    }
+
+    /// The next height the worker can accept on the canonical chain: the
+    /// canonical tip + 1, or `next_disk_height` when the non-finalized state is
+    /// empty.
+    fn canonical_next_height(&self, loop_state: &WorkerLoopState<'_>) -> Height {
+        self.non_finalized_state
+            .best_chain()
+            .and_then(|chain| chain.non_finalized_tip().0 + 1)
+            .unwrap_or(loop_state.next_disk_height)
+    }
+
+    /// Sends a block to the disk writer and advances the disk frontier, without
+    /// recording it in `inflight_disk`.
+    ///
+    /// Used for blocks that are popped from the non-finalized state at handoff
+    /// (genesis and overflow roots), so prune never needs to retire them.
+    ///
+    /// `ack` is `Some` for senders that block on durability and own the error
+    /// policy. Returns `Err` if the disk writer's channel is closed (it
+    /// panicked).
+    #[allow(clippy::result_unit_err)]
+    fn send_to_disk(
+        &self,
+        loop_state: &mut WorkerLoopState<'_>,
+        finalizable: FinalizableBlock,
+        bulk: bool,
+        ack: Option<
+            tokio::sync::oneshot::Sender<Result<block::Hash, CommitCheckpointVerifiedError>>,
+        >,
+    ) -> Result<(), ()> {
+        let height = finalizable.height();
+        let hash = finalizable.hash();
+
+        loop_state
+            .disk_tx
+            .send(DiskRequest::Write {
+                block: Box::new(finalizable),
+                bulk,
+                ack,
+            })
+            .map_err(|_| ())?;
+
+        loop_state.next_disk_height = (height + 1).expect("committed heights are valid");
+        loop_state.disk_frontier_hash = hash;
+
+        Ok(())
+    }
+
+    /// Hands a block that stays in the non-finalized state to the disk writer,
+    /// recording it in `inflight_disk` so prune retires it once durable, and
+    /// advancing the disk frontier.
+    ///
+    /// `ack` is `None` for the fire-and-forget checkpoint stream (whose
+    /// post-ack disk errors are fatal). Returns `Err` if the disk writer's
+    /// channel is closed (it panicked).
+    #[allow(clippy::result_unit_err)]
+    fn enqueue_for_disk(
+        &self,
+        loop_state: &mut WorkerLoopState<'_>,
+        finalizable: FinalizableBlock,
+        bulk: bool,
+        ack: Option<
+            tokio::sync::oneshot::Sender<Result<block::Hash, CommitCheckpointVerifiedError>>,
+        >,
+    ) -> Result<(), ()> {
+        let height = finalizable.height();
+        let hash = finalizable.hash();
+
+        self.send_to_disk(loop_state, finalizable, bulk, ack)?;
+        loop_state.inflight_disk.push_back((height, hash));
+
+        Ok(())
+    }
+
+    /// Hands the parent chain's semantically-committed ancestors at heights
+    /// `next_disk_height ..= height - 1` to the disk writer, in order, before
+    /// their checkpoint child is committed.
+    ///
+    /// These ancestors were fully contextually validated when committed
+    /// (strictly more than checkpoint blocks get), and the engine's
+    /// convert-time linkage pins every ancestor hash to the known-hash list.
+    ///
+    /// Returns `false` (fail safe, no mutation) if the chain forked below the
+    /// disk frontier — never force-finalize across competing forks.
+    fn flush_unhanded_ancestors(
+        &mut self,
+        loop_state: &mut WorkerLoopState<'_>,
+        parent_hash: block::Hash,
+        height: Height,
+    ) -> bool {
+        // Find the parent chain (the one whose tip is the block's parent).
+        let Some(parent_chain) = self
+            .non_finalized_state
+            .find_chain(|chain| chain.non_finalized_tip_hash() == parent_hash)
+        else {
+            return false;
+        };
+
+        // Verify the chain's block at the frontier links to the frontier hash;
+        // if not, it forked below the frontier and we must not flush across it.
+        let frontier_block = parent_chain.blocks.get(&loop_state.next_disk_height);
+        let Some(frontier_block) = frontier_block else {
+            return false;
+        };
+        if frontier_block.block.header.previous_block_hash != loop_state.disk_frontier_hash {
+            return false;
+        }
+
+        // Hand each ancestor at next_disk_height ..= height - 1 to the disk
+        // writer, non-popping (the blocks stay in the NFS until prune observes
+        // durability, so there is no visibility gap and no acks are needed).
+        let mut flush_height = loop_state.next_disk_height;
+        while flush_height < height {
+            let block = parent_chain
+                .blocks
+                .get(&flush_height)
+                .expect("ancestor heights are contiguous up to the committed block");
+            let treestate = parent_chain
+                .treestate(flush_height.into())
+                .expect("the treestate exists for an ancestor in the chain");
+            let finalizable = FinalizableBlock::new(block.clone(), treestate);
+
+            if self
+                .enqueue_for_disk(loop_state, finalizable, true, None)
+                .is_err()
+            {
+                // The disk writer panicked; the caller exits and unwinds.
+                return false;
+            }
+
+            flush_height = (flush_height + 1).expect("committed heights are valid");
+        }
+
+        true
     }
 
     /// Commits the genesis block directly through the disk writer with a
@@ -412,23 +614,18 @@ impl WriteBlockWorker {
             Result<block::Hash, crate::CommitSemanticallyVerifiedError>,
         >,
     ) -> bool {
-        // The first semantic block ends the checkpoint bulk-write phase. Drain
-        // every still-in-flight checkpoint block out of the non-finalized state
-        // first (so the semantic block commits against an empty non-finalized
-        // state at the finalized tip, as on the non-pipelined path), tell the
-        // disk writer to drop its bulk guard, and drop the recently-finalized
-        // cache. This is the surviving responsibility of the old "flip", now a
-        // reversible message.
-        //
-        // (Draining before the first semantic commit reproduces the
-        // sequential-phase boundary; the any-order design lifts it in a later
-        // commit.)
-        if loop_state.bulk_active {
-            self.drain_inflight_checkpoint_blocks(loop_state);
-            let _ = loop_state.disk_tx.send(DiskRequest::EndBulk);
-            self.non_finalized_state.disable_pruned_chain();
-            loop_state.bulk_active = false;
-        }
+        // Retire any already-durable checkpoint blocks before deciding how to
+        // commit this block: a semantic block whose parent is the finalized
+        // tip must commit as a fresh chain, but if a durable checkpoint block
+        // is still in the non-finalized state (its prune lagged the disk
+        // write), the commit would fork a sibling chain that the post-commit
+        // prune then drops. Pruning first keeps the non-finalized state
+        // consistent with durability.
+        prune_durable_blocks(
+            &mut self.non_finalized_state,
+            loop_state.disk_tip_height,
+            &mut loop_state.inflight_disk,
+        );
 
         let child_hash = queued_child.hash;
         let parent_hash = queued_child.block.header.previous_block_hash;
@@ -473,6 +670,28 @@ impl WriteBlockWorker {
             return false;
         }
 
+        // Retire any already-durable checkpoint blocks before publishing, so
+        // the published snapshot never carries roots the disk writer has
+        // finalized.
+        prune_durable_blocks(
+            &mut self.non_finalized_state,
+            loop_state.disk_tip_height,
+            &mut loop_state.inflight_disk,
+        );
+
+        // A semantic block has been committed, so the checkpoint bulk-write
+        // phase is over for now: tell the disk writer to drop its bulk guard
+        // (resume compaction, flush WAL-skipped writes) and drop the
+        // recently-finalized cache. This is the flip's only surviving
+        // responsibility, now a reversible message: a later checkpoint block
+        // simply re-enables both (re-enabling the cache empty is always
+        // correct; lookups fall back to database reads).
+        if loop_state.bulk_active {
+            let _ = loop_state.disk_tx.send(DiskRequest::EndBulk);
+            self.non_finalized_state.disable_pruned_chain();
+            loop_state.bulk_active = false;
+        }
+
         // Committing keeps the same best chain, so publish it now.
         //
         // TODO: if this causes state request errors due to chain conflicts,
@@ -490,27 +709,30 @@ impl WriteBlockWorker {
         // The blocking ack preserves visibility: the pre-pop published snapshot
         // still holds the root, and the next publish happens only after
         // durability.
+        //
+        // The `root >= next_disk_height` guard stops the loop at any in-flight
+        // checkpoint-era root (those are retired by `prune_durable_blocks` once
+        // durable, so finalizing them here would double-write).
         while self
             .non_finalized_state
             .best_chain_len()
             .expect("just successfully inserted a non-finalized block above")
             > MAX_BLOCK_REORG_HEIGHT
+            && self
+                .non_finalized_state
+                .root_height()
+                .is_some_and(|root| root >= loop_state.next_disk_height)
         {
             tracing::trace!("finalizing block past the reorg limit");
             let finalizable = self.non_finalized_state.finalize();
-            let height = finalizable.height();
-            let hash = finalizable.hash();
 
+            // The root was popped out of the non-finalized state, so it is not
+            // tracked in inflight_disk; the blocking ack reports any disk error
+            // as fatal. `bulk: false` drops the guard if it somehow survived
+            // (belt-and-braces with EndBulk).
             let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
-            if loop_state
-                .disk_tx
-                .send(DiskRequest::Write {
-                    block: Box::new(finalizable),
-                    // Drop the bulk guard if it somehow survived
-                    // (belt-and-braces with EndBulk).
-                    bulk: false,
-                    ack: Some(ack_tx),
-                })
+            if self
+                .send_to_disk(loop_state, finalizable, false, Some(ack_tx))
                 .is_err()
             {
                 return true;
@@ -523,9 +745,6 @@ impl WriteBlockWorker {
                     "unexpected finalized block commit error: note commitment and history \
                      trees were already checked by the non-finalized state",
                 );
-
-            loop_state.next_disk_height = (height + 1).expect("committed heights are valid");
-            loop_state.disk_frontier_hash = hash;
         }
 
         // Update the metrics now that semantic and contextual validation passed.
@@ -576,33 +795,6 @@ impl WriteBlockWorker {
             &self.non_finalized_state_sender,
             self.backup_dir_path.as_deref(),
         );
-    }
-
-    /// Drains every still-in-flight checkpoint block out of the non-finalized
-    /// state, waiting for the disk writer to make each one durable.
-    ///
-    /// Reproduces the sequential-phase boundary: when the checkpoint stream
-    /// ends and the first semantic block arrives, the non-finalized state is
-    /// emptied back to the finalized tip before the semantic block is
-    /// committed, so it commits as a fresh chain (the non-pipelined path).
-    ///
-    /// The disk writer is actively draining the bounded channel, so the loop
-    /// terminates; the short sleep avoids busy-spinning while the last few
-    /// disk writes complete.
-    fn drain_inflight_checkpoint_blocks(&mut self, loop_state: &mut WorkerLoopState<'_>) {
-        while !loop_state.inflight_disk.is_empty() {
-            prune_durable_blocks(
-                &mut self.non_finalized_state,
-                loop_state.disk_tip_height,
-                &mut loop_state.inflight_disk,
-            );
-
-            if loop_state.inflight_disk.is_empty() {
-                break;
-            }
-
-            std::thread::sleep(std::time::Duration::from_millis(1));
-        }
     }
 }
 
