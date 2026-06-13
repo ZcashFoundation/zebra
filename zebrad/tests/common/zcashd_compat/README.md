@@ -45,11 +45,10 @@ worker:
   branch, matching zcashd's memory-clamped sync batch limit in CI.
 - `zcashd_compat_reorg_large_batch_depth80` verifies an 80-block replacement
   branch with raised zcashd and Zebra response-size limits.
-- `zcashd_compat_reorg_branch_too_large_sticky` verifies that a 34-block branch
-  fails sticky with `reorg_branch_too_large`.
-- `zcashd_compat_reorg_sticky_fault_restart_recovers` enters that sticky fault,
-  restarts zcashd, reverts Zebra to the local branch, and verifies
-  `zebra_tip_matched`.
+- `zcashd_compat_reorg_over_batch_branch_syncs` verifies that a branch longer
+  than one sync batch is fetched in chunks and forward-synced to the Zebra tip.
+- `zcashd_compat_reorg_over_batch_branch_restart_recovers` verifies that the
+  over-batch branch remains healthy after a supervised zcashd restart.
 - `zcashd_compat_reorg_restart_after_reorg` is an opt-in slow probe for zcashd
   supervisor restart and block-index reload after several Zebra-side reorgs.
   Skipped unless `TEST_ZCASHD_COMPAT_RESTART_AFTER_REORG=1`.
@@ -169,8 +168,8 @@ error (misconfiguration, not a skip).
 | `zcashd_compat_reorg_equal_work_race` | reorg | Equal-work degraded state and recovery | **Skipped** |
 | `zcashd_compat_reorg_depth_at_batch_limit` | reorg | 33-block replacement branch convergence | **Skipped** |
 | `zcashd_compat_reorg_large_batch_depth80` | reorg | 80-block replacement branch convergence with raised response limits | **Skipped** |
-| `zcashd_compat_reorg_branch_too_large_sticky` | reorg | 34-block branch sticky failure | **Skipped** |
-| `zcashd_compat_reorg_sticky_fault_restart_recovers` | reorg | Sticky fault recovery after restart + Zebra reconciliation | **Skipped** |
+| `zcashd_compat_reorg_over_batch_branch_syncs` | reorg | 34-block replacement branch convergence via chunked fetch + forward sync | **Skipped** |
+| `zcashd_compat_reorg_over_batch_branch_restart_recovers` | reorg | Over-batch replacement branch remains healthy after restart | **Skipped** |
 | `zcashd_compat_reorg_restart_after_reorg` | reorg | **Opt-in:** slow supervised zcashd restart after several reorgs | **Skipped** |
 | `zcashd_compat_reorg_restart_cycles` | reorg | **Opt-in:** interleaved reorg-then-restart across three cycles | **Skipped** |
 | `zcashd_compat_reorg_restart_deep_chain` | reorg | **Opt-in:** VerifyDB window on long trusted chain after reorg + restart | **Skipped** |
@@ -217,7 +216,8 @@ zebrad/tests/common/
     │                          historical_block_consistent
     └── reorg.rs               basic_depth1, equal_work_race,
                                depth_at_batch_limit, large_batch_depth80,
-                               branch_too_large_sticky, sticky_fault_restart_recovers,
+                               over_batch_branch_syncs,
+                               over_batch_branch_restart_recovers,
                                restart_after_reorg, restart_cycles,
                                restart_deep_chain, zebra_tip_behind_local,
                                reorg_context_zebra_tip_behind_recovers, churn

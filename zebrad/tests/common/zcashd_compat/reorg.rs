@@ -149,8 +149,11 @@ pub async fn large_batch_depth80() -> Result<()> {
     setup.teardown()
 }
 
-/// Verifies that replacement branches larger than zcashd's batch limit fail sticky.
-pub async fn branch_too_large_sticky() -> Result<()> {
+/// Verifies that a replacement branch longer than one sync batch still converges.
+///
+/// zcashd fetches the reorg activation prefix in `ZebraCompatSyncBatchSize()`
+/// chunks, then forward-syncs any remaining Zebra tip tail.
+pub async fn over_batch_branch_syncs() -> Result<()> {
     let Some(setup) = setup_zcashd_compat().await? else {
         return Ok(());
     };
@@ -162,45 +165,25 @@ pub async fn branch_too_large_sticky() -> Result<()> {
     setup.zebra_client.generate(40).await?;
     wait_for_tips_match(&setup, STANDARD_SYNC_TIMEOUT).await?;
 
-    let old_zcashd_tip = zcashd_tip(&setup.zcashd_client).await?;
+    let info = compat_info(&setup.zcashd_client).await?;
+    assert_eq!(
+        info["limits"]["sync_batch_size"].as_u64(),
+        Some(SYNC_BATCH_SIZE_LIMIT),
+        "test assumes zcashd's memory-clamped sync batch limit is 33"
+    );
 
     force_zebra_reorg(&setup, 8, (SYNC_BATCH_SIZE_LIMIT + 1) as u32).await?;
+    wait_for_tips_match(&setup, DEEP_REORG_SYNC_TIMEOUT).await?;
 
-    let first_failure = wait_for_sync_detail(
-        &setup.zcashd_client,
-        "reorg_branch_too_large",
-        STANDARD_SYNC_TIMEOUT,
-    )
-    .await?;
-    assert_eq!(first_failure["sync"]["state"].as_str(), Some("failed"));
-    assert_eq!(first_failure["readiness"].as_str(), Some("failed"));
-
-    sleep(Duration::from_secs(4)).await;
-
-    let second_failure = compat_info(&setup.zcashd_client).await?;
-    assert_eq!(
-        second_failure["sync"]["detail"].as_str(),
-        Some("reorg_branch_too_large"),
-        "oversized replacement branch should stay in the same sticky failure"
-    );
-    assert_eq!(second_failure["sync"]["state"].as_str(), Some("failed"));
-    assert_eq!(second_failure["readiness"].as_str(), Some("failed"));
-
-    let current_zcashd_tip = zcashd_tip(&setup.zcashd_client).await?;
-    assert_eq!(
-        current_zcashd_tip, old_zcashd_tip,
-        "zcashd should not advance after rejecting an oversized replacement branch"
-    );
+    let info = compat_info(&setup.zcashd_client).await?;
+    assert_eq!(info["sync"]["state"].as_str(), Some("synced"));
+    assert_eq!(info["sync"]["detail"].as_str(), Some("zebra_tip_matched"));
 
     setup.teardown()
 }
 
-/// Sticky sync fault clears after restart once Zebra's best chain is reconciled.
-///
-/// `UnityBlockSourceThread` idles once `stickyFault` is set. Reconcile Zebra first, then
-/// restart zcashd so the sync loop retries against an ingestible branch instead of
-/// immediately re-entering sticky failure on the oversized replacement chain.
-pub async fn sticky_fault_restart_recovers() -> Result<()> {
+/// Verifies that an over-batch replacement branch remains healthy after restart.
+pub async fn over_batch_branch_restart_recovers() -> Result<()> {
     let Some(setup) = setup_zcashd_compat().await? else {
         return Ok(());
     };
@@ -209,78 +192,20 @@ pub async fn sticky_fault_restart_recovers() -> Result<()> {
         return setup.teardown();
     }
 
-    const FORK_HEIGHT: u64 = 8;
-
     setup.zebra_client.generate(40).await?;
     wait_for_tips_match(&setup, STANDARD_SYNC_TIMEOUT).await?;
 
-    let old_zcashd_tip = zcashd_tip(&setup.zcashd_client).await?;
-
-    force_zebra_reorg(&setup, FORK_HEIGHT, (SYNC_BATCH_SIZE_LIMIT + 1) as u32).await?;
-
-    let first_failure = wait_for_sync_detail(
-        &setup.zcashd_client,
-        "reorg_branch_too_large",
-        STANDARD_SYNC_TIMEOUT,
-    )
-    .await?;
-    assert_eq!(first_failure["sync"]["state"].as_str(), Some("failed"));
-    assert_eq!(first_failure["readiness"].as_str(), Some("failed"));
-
-    sleep(Duration::from_secs(4)).await;
-
-    let still_failed = compat_info(&setup.zcashd_client).await?;
-    assert_eq!(
-        still_failed["sync"]["detail"].as_str(),
-        Some("reorg_branch_too_large"),
-        "oversized branch should remain sticky before restart"
-    );
-    assert_eq!(still_failed["sync"]["state"].as_str(), Some("failed"));
-
-    let current_zcashd_tip = zcashd_tip(&setup.zcashd_client).await?;
-    assert_eq!(
-        current_zcashd_tip, old_zcashd_tip,
-        "zcashd should keep the pre-reorg tip while sticky"
-    );
-
-    let replacement_root = zebra_block_hash(&setup, FORK_HEIGHT + 1).await?;
-    let params = serde_json::to_string(&vec![replacement_root])?;
-    let _: () = setup
-        .zebra_client
-        .json_result_from_call("invalidateblock", &params)
-        .await
-        .map_err(|e| eyre!("revert oversized Zebra branch: {e}"))?;
-
-    // Zebra falls back to the common ancestor at `FORK_HEIGHT`. Mine one block past zcashd's
-    // height so the replacement branch strictly beats on work and fits the batch limit.
-    let zcashd_height = old_zcashd_tip.0;
-    let extension_len = (zcashd_height - FORK_HEIGHT + 1) as u32;
-    assert!(
-        extension_len <= SYNC_BATCH_SIZE_LIMIT as u32,
-        "replacement branch length {extension_len} exceeds batch limit"
-    );
-    setup
-        .zebra_client
-        .generate(extension_len)
-        .await
-        .map_err(|e| eyre!("extend Zebra past zcashd after revert: {e}"))?;
-
-    let old_pid = setup.zcashd_pid()?;
-    let _: serde_json::Value = setup
-        .zcashd_client
-        .json_result_from_call("stop", "[]")
-        .await
-        .map_err(|e| eyre!("zcashd stop after sticky fault: {e}"))?;
-    wait_for_restarted_zcashd_rpc(&setup, old_pid, STANDARD_SYNC_TIMEOUT).await?;
-
+    force_zebra_reorg(&setup, 8, (SYNC_BATCH_SIZE_LIMIT + 1) as u32).await?;
     wait_for_tips_match(&setup, DEEP_REORG_SYNC_TIMEOUT).await?;
-    wait_for_readiness(&setup.zcashd_client, "ready", STANDARD_SYNC_TIMEOUT).await?;
+
+    restart_zcashd_and_wait_for_tips(&setup).await?;
 
     let info = compat_info(&setup.zcashd_client).await?;
     assert_eq!(
         info["sync"]["detail"].as_str(),
         Some("zebra_tip_matched"),
-        "zcashd should recover after sticky fault + restart + Zebra reconciliation"
+        "sync loop not healthy after over-batch reorg restart; detail: {:?}",
+        info["sync"]["detail"]
     );
 
     setup.teardown()

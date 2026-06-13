@@ -33,6 +33,9 @@ pub const ZCASHD_TEST_RPC_PASS: &str = "zebra_test_pass";
 
 /// Default zcashd sync batch size for managed regtest tests.
 pub const DEFAULT_TEST_SYNC_BATCH_SIZE: u64 = 33;
+/// Zebra RPC response body limit needed for the default zcashd sync batch size.
+pub const DEFAULT_TEST_RPC_MAX_RESPONSE_BODY_SIZE: usize =
+    DEFAULT_TEST_SYNC_BATCH_SIZE as usize * 4 * 1024 * 1024;
 
 /// Deterministic regtest miner keypair (secp256k1 secret key = 1, compressed).
 ///
@@ -57,7 +60,7 @@ impl Default for ZcashdCompatTestOptions {
         Self {
             sync_batch_size: DEFAULT_TEST_SYNC_BATCH_SIZE,
             sync_response_budget_mb: None,
-            rpc_max_response_body_size: None,
+            rpc_max_response_body_size: Some(DEFAULT_TEST_RPC_MAX_RESPONSE_BODY_SIZE),
         }
     }
 }

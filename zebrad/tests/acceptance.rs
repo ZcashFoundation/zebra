@@ -4694,20 +4694,20 @@ async fn zcashd_compat_reorg_large_batch_depth80() -> Result<()> {
     common::zcashd_compat::reorg::large_batch_depth80().await
 }
 
-/// See [`common::zcashd_compat::reorg::branch_too_large_sticky`] for details.
+/// See [`common::zcashd_compat::reorg::over_batch_branch_syncs`] for details.
 #[tokio::test]
 #[ignore]
 #[cfg(unix)]
-async fn zcashd_compat_reorg_branch_too_large_sticky() -> Result<()> {
-    common::zcashd_compat::reorg::branch_too_large_sticky().await
+async fn zcashd_compat_reorg_over_batch_branch_syncs() -> Result<()> {
+    common::zcashd_compat::reorg::over_batch_branch_syncs().await
 }
 
-/// See [`common::zcashd_compat::reorg::sticky_fault_restart_recovers`] for details.
+/// See [`common::zcashd_compat::reorg::over_batch_branch_restart_recovers`] for details.
 #[tokio::test]
 #[ignore]
 #[cfg(unix)]
-async fn zcashd_compat_reorg_sticky_fault_restart_recovers() -> Result<()> {
-    common::zcashd_compat::reorg::sticky_fault_restart_recovers().await
+async fn zcashd_compat_reorg_over_batch_branch_restart_recovers() -> Result<()> {
+    common::zcashd_compat::reorg::over_batch_branch_restart_recovers().await
 }
 
 /// See [`common::zcashd_compat::reorg::restart_after_reorg`] for details.
