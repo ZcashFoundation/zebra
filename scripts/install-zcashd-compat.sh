@@ -859,7 +859,7 @@ prepare_docker_images() {
         add_error "Docker image is missing or could not be pulled: $ZEBRA_DOCKER_IMAGE"
 
       if [[ -z "$ZCASHD_DOCKER_IMAGE" ]]; then
-        ZCASHD_DOCKER_IMAGE="valaroman/zcashd:v6.2.1-alpha.9@sha256:ca1878cc78f2794105c7b903a8a3e4839fc4f63e2ff2964f4d3721a32b53e766"
+        ZCASHD_DOCKER_IMAGE="valaroman/zcashd:v6.2.1-alpha.9.1@sha256:77f7a000c47248aef00a7f7b14b45ae49aa98f8c9d86c86767714ff76034698c"
       fi
 
       docker_image_available_or_pull "$ZCASHD_DOCKER_IMAGE" ||
@@ -937,13 +937,12 @@ docker run --rm -it --name zebra-compat-zcashd --network host \\
   --mount type=bind,src=$(shell_quote "$ZCASHD_DATADIR"),dst=/home/zcashd/.zcash \\
   --mount type=bind,src=$(shell_quote "$ZEBRA_STATE_DIR"),dst=/zebra-state,readonly \\
   $(shell_quote "$ZCASHD_DOCKER_IMAGE") \\
-  zcashd \\
-    -zebra-compat \\
-    -zebra-compat-url=http://127.0.0.1:28232 \\
-    -zebra-compat-cookiefile=$(shell_quote "$cookie_file") \\
-    -datadir=/home/zcashd/.zcash \\
-    -conf=/home/zcashd/.zcash/zcash.conf \\
-    -printtoconsole
+  -zebra-compat \\
+  -zebra-compat-url=http://127.0.0.1:28232 \\
+  -zebra-compat-cookiefile=$(shell_quote "$cookie_file") \\
+  -datadir=/home/zcashd/.zcash \\
+  -conf=/home/zcashd/.zcash/zcash.conf \\
+  -printtoconsole
 EOF
 }
 
