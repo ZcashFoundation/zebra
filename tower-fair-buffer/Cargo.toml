@@ -1,0 +1,28 @@
+[package]
+name = "tower-fair-buffer"
+version = "0.1.0"
+authors = ["Zcash Foundation <zebra@zfnd.org>", "Tower Maintainers <team@tower-rs.com>"]
+description = "A vendored fork of tower 0.4.13's tower::buffer middleware"
+# # Legal
+#
+# This licence is deliberately different to the rest of Zebra.
+#
+# This code is vendored from tower 0.4.13's `tower::buffer`:
+# https://github.com/tower-rs/tower/tree/master/tower/src/buffer
+license = "MIT"
+repository.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+# crates.io is limited to 5 keywords and categories
+keywords = ["tower", "buffer"]
+# Must be one of <https://crates.io/category_slugs>
+categories = ["asynchronous"]
+
+[dependencies]
+futures-core = { workspace = true }
+pin-project-lite = "0.2.16"
+tokio = { workspace = true, features = ["macros", "rt", "sync"] }
+tokio-util = { workspace = true }
+tower = { workspace = true }
+tracing = { workspace = true }

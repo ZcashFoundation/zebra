@@ -6070,6 +6070,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "tower-fair-buffer"
+version = "0.1.0"
+dependencies = [
+ "futures-core",
+ "pin-project-lite",
+ "tokio",
+ "tokio-util",
+ "tower 0.4.13",
+ "tracing",
+]
+
+[[package]]
 name = "tower-fallback"
 version = "0.2.41"
 dependencies = [
