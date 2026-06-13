@@ -901,18 +901,21 @@ EOF
 
 print_docker_supervised_command() {
   local image="${ZEBRA_COMPAT_DOCKER_SELECTED:-$ZEBRA_COMPAT_DOCKER_IMAGE}"
+  local container_zebra_state_dir="/home/zebra/.cache/zebra"
+  local container_zcashd_datadir="/home/zebra/.cache/zcashd"
   cat <<EOF
 docker run --rm -it \\
   -e ZCASHD_COMPAT_ENABLED=true \\
   -e ZEBRA_NETWORK__LISTEN_ADDR='[::]:8233' \\
-  -e ZEBRA_STATE__CACHE_DIR=/home/zebra/.cache/zebra \\
+  -e ZEBRA_STATE__CACHE_DIR=$container_zebra_state_dir \\
   -e ZEBRA_ZCASHD_COMPAT__MANAGE_ZCASHD=true \\
-  -e ZEBRA_ZCASHD_COMPAT__ZCASHD_DATADIR=/home/zebra/.cache/zcashd \\
+  -e ZEBRA_ZCASHD_COMPAT__COOKIE_DIR=$container_zebra_state_dir \\
+  -e ZEBRA_ZCASHD_COMPAT__ZCASHD_DATADIR=$container_zcashd_datadir \\
   -e ZEBRA_ZCASHD_COMPAT__LISTEN_ADDR=0.0.0.0:28232 \\
   -e ZEBRA_ZCASHD_COMPAT__UNSAFE_ALLOW_REMOTE_HTTP=true \\
   -e ZEBRA_ZCASHD_COMPAT__ZCASHD_EXTRA_ARGS='["-rpcbind=0.0.0.0","-rpcallowip=0.0.0.0/0"]' \\
-  --mount type=bind,src=$(shell_quote "$ZEBRA_STATE_DIR"),dst=/home/zebra/.cache/zebra \\
-  --mount type=bind,src=$(shell_quote "$ZCASHD_DATADIR"),dst=/home/zebra/.cache/zcashd \\
+  --mount type=bind,src=$(shell_quote "$ZEBRA_STATE_DIR"),dst=$container_zebra_state_dir \\
+  --mount type=bind,src=$(shell_quote "$ZCASHD_DATADIR"),dst=$container_zcashd_datadir \\
   -p 8233:8233 \\
   -p 127.0.0.1:28232:28232 \\
   -p 127.0.0.1:8232:8232 \\
