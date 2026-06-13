@@ -2,7 +2,12 @@
 # Install or prepare commands for Zebra's zcashd-compat operating modes.
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_SOURCE="${BASH_SOURCE[0]:-}"
+if [[ -n "$SCRIPT_SOURCE" && -f "$SCRIPT_SOURCE" ]]; then
+  SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
+else
+  SCRIPT_DIR="$PWD"
+fi
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 UNITY_ROOT="$(cd "$REPO_ROOT/.." && pwd)"
 
@@ -16,6 +21,9 @@ ZEBRA_COMPAT_DOCKER_FALLBACK_IMAGE="valaroman/zebra:zcashd-compat-latest"
 
 MANIFEST_PATH="$REPO_ROOT/zebrad/zcashd-compat-manifest.json"
 TARGET_TRIPLE="x86_64-pc-linux-gnu"
+ZCASHD_RUNTIME_ARCHIVE_URL="https://github.com/valargroup/zcashd/releases/download/v6.2.1-alpha.7/zcashd-zebra-compat-v6.2.1-alpha.7-linux-x86_64.tar.gz"
+ZCASHD_RUNTIME_ARCHIVE_SHA256="6a1c4dc673646bc514f289b306944b4081a5f44dfd3206e5b22336f95c3ad6c6"
+ZCASHD_RUNTIME_ARCHIVE_MEMBER_BINARY_PATH="./bin/zcashd"
 
 MODE=""
 NETWORK="Mainnet"
@@ -37,6 +45,14 @@ UNSAFE_LOW_SPECS=0
 ERRORS=()
 LOW_SPEC_ERRORS=()
 WARNINGS=()
+PROMPT_FD=0
+PROMPT_INPUT_ERROR_REPORTED=0
+
+if [[ ! -t 0 ]]; then
+  if ! { exec {PROMPT_FD}</dev/tty; } 2>/dev/null; then
+    PROMPT_FD=-1
+  fi
+fi
 
 USE_ANSI=0
 if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
@@ -227,6 +243,21 @@ sanitize_terminal_input() {
   LC_ALL=C sed $'s/\x1B\\[[0-9;?]*[ -\\/]*[@-~]//g' | tr -d '[:cntrl:]'
 }
 
+read_prompt() {
+  local prompt="$1"
+  local var_name="$2"
+
+  if ((PROMPT_FD < 0)); then
+    if ((PROMPT_INPUT_ERROR_REPORTED == 0)); then
+      add_error "interactive prompts require a terminal when the installer is read from stdin; pass --non-interactive with explicit options"
+      PROMPT_INPUT_ERROR_REPORTED=1
+    fi
+    return 1
+  fi
+
+  read -r -u "$PROMPT_FD" -p "$prompt" "$var_name"
+}
+
 prompt_value() {
   local label="$1"
   local current="$2"
@@ -237,7 +268,10 @@ prompt_value() {
     return
   fi
 
-  read -r -p "$label [$current]: " reply
+  if ! read_prompt "$label [$current]: " reply; then
+    printf '%s\n' "$current"
+    return
+  fi
   sanitized_reply="$(printf '%s' "$reply" | sanitize_terminal_input)"
   if [[ -n "$sanitized_reply" ]]; then
     printf '%s\n' "$sanitized_reply"
@@ -256,7 +290,10 @@ prompt_yes_no() {
     return
   fi
 
-  read -r -p "$label [$default]: " reply
+  if ! read_prompt "$label [$default]: " reply; then
+    printf '%s\n' "$default"
+    return
+  fi
   sanitized_reply="$(printf '%s' "$reply" | sanitize_terminal_input)"
   printf '%s\n' "${sanitized_reply:-$default}"
 }
@@ -301,7 +338,7 @@ Choose a zcashd-compat mode:
 EOF
   fi
   printf '\n'
-  read -r -p "Mode [split-binary]: " reply
+  read_prompt "Mode [split-binary]: " reply || reply=""
   case "${reply:-split-binary}" in
     1 | split-binary) MODE="split-binary" ;;
     2 | supervised) MODE="supervised" ;;
@@ -636,6 +673,17 @@ collect_checks() {
 
 manifest_field() {
   local field="$1"
+
+  if [[ ! -f "$MANIFEST_PATH" ]]; then
+    case "$field" in
+      runtime_archive_url) printf '%s\n' "$ZCASHD_RUNTIME_ARCHIVE_URL" ;;
+      runtime_archive_sha256) printf '%s\n' "$ZCASHD_RUNTIME_ARCHIVE_SHA256" ;;
+      runtime_archive_member_binary_path) printf '%s\n' "$ZCASHD_RUNTIME_ARCHIVE_MEMBER_BINARY_PATH" ;;
+      *) return 1 ;;
+    esac
+    return
+  fi
+
   FIELD="$field" TARGET_TRIPLE="$TARGET_TRIPLE" MANIFEST_PATH="$MANIFEST_PATH" python3 - <<'PY'
 import json
 import os
