@@ -273,7 +273,7 @@ impl BlockCache {
                     %error,
                     "cached block file unreadable; dropping the entry for refetch",
                 );
-                self.forget(height, &entry, false);
+                self.forget(height, &entry, "unreadable");
                 return None;
             }
         };
@@ -283,7 +283,7 @@ impl BlockCache {
                 height = height.0,
                 "cached block sidecar corrupt; deleting the entry for refetch",
             );
-            self.forget(height, &entry, true);
+            self.forget(height, &entry, "corrupt sidecar");
             return None;
         };
 
@@ -305,7 +305,7 @@ impl BlockCache {
     /// cached.
     pub fn remove(&mut self, height: block::Height) {
         if let Some(entry) = self.entries.get(&height).copied() {
-            self.forget(height, &entry, true);
+            self.forget(height, &entry, "discarded copy");
         }
     }
 
@@ -470,14 +470,20 @@ impl BlockCache {
         }
     }
 
-    /// Drops the index entry for `height`, optionally deleting its file.
-    fn forget(&mut self, height: block::Height, entry: &Entry, delete_file: bool) {
+    /// Drops the index entry for `height` and deletes its file, logging
+    /// `reason` if the deletion fails.
+    ///
+    /// The file is always deleted: a dropped entry is always refetched, and
+    /// the refetched copy overwrites the same path, so keeping the old file
+    /// could only leave junk for the next restart scan to trip over.
+    /// Deleting an *unreadable* file usually still works (unlinking needs
+    /// directory permissions, not file permissions); if it fails too, the
+    /// file is logged and re-pruned by the next scan.
+    fn forget(&mut self, height: block::Height, entry: &Entry, reason: &str) {
         self.entries.remove(&height);
         self.bytes = self.bytes.saturating_sub(u64::from(entry.block_bytes));
 
-        if delete_file {
-            remove_entry_file(&self.dir, height, &entry.hash, "corrupt");
-        }
+        remove_entry_file(&self.dir, height, &entry.hash, reason);
 
         self.update_bytes_metric();
     }
