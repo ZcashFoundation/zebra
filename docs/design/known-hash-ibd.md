@@ -1187,6 +1187,22 @@ runs.
   carries the full brief: two design angles (incrementalmerkletree-native vs
   a recorded shardtree evaluation), judge synthesis, isolated-worktree
   implementation, and equivalence-breaking review.
+- **WAL auto-mode and flush-interval tuning** (maintainer question, WAL
+  review thread): `disable_wal_during_ibd` only pays off when disk write
+  bandwidth is the constraint (it halves write volume by not writing every
+  batch twice); on fast disks the sync is CPU-bound and the WAL is nearly
+  free, so it stays opt-in. The periodic crash-bound flush is already
+  self-tuning in the right direction — in heavy-write eras (spam) the 256 MB
+  memtables auto-flush faster than the 5-minute timer, so the timer adds
+  ~zero extra I/O exactly when I/O is scarce; it only fires in light-write
+  eras, where the L0 files it creates are small and redoing lost work is
+  cheapest. Possible follow-ups, deferred until measurements justify them:
+  a configurable/adaptive flush interval (effectively `min(bytes, time)` —
+  the bytes half already exists as the memtable size), and an auto mode that
+  toggles WAL skipping from live flush-stall/disk-utilization tracking —
+  rejected for now because it makes crash-durability semantics time-varying
+  for a benefit that exists only on slow disks the operator can identify
+  statically.
 - **Engine extraction into `zebra-sync`** (maintainer-directed): once the
   in-flight redesign workflows land (state write pipeline, generic engine
   unification), move the sync engine out of `zebrad/src/components/ibd/`
