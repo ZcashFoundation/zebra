@@ -1,5 +1,6 @@
 //! Initial [`Handshake`]s with Zebra peers over a `PeerTransport`.
 
+use std::net::IpAddr;
 use std::{
     cmp::min,
     fmt,
@@ -63,7 +64,7 @@ mod tests;
 /// - wrapped in a timeout.
 pub struct Handshake<S, C = NoChainTip>
 where
-    S: Service<Tagged<PeerSocketAddr, Request>, Response = Response, Error = BoxError>
+    S: Service<Tagged<IpAddr, Request>, Response = Response, Error = BoxError>
         + Clone
         + Send
         + 'static,
@@ -86,7 +87,7 @@ where
 
 impl<S, C> fmt::Debug for Handshake<S, C>
 where
-    S: Service<Tagged<PeerSocketAddr, Request>, Response = Response, Error = BoxError>
+    S: Service<Tagged<IpAddr, Request>, Response = Response, Error = BoxError>
         + Clone
         + Send
         + 'static,
@@ -108,7 +109,7 @@ where
 
 impl<S, C> Clone for Handshake<S, C>
 where
-    S: Service<Tagged<PeerSocketAddr, Request>, Response = Response, Error = BoxError>
+    S: Service<Tagged<IpAddr, Request>, Response = Response, Error = BoxError>
         + Clone
         + Send
         + 'static,
@@ -404,7 +405,7 @@ impl fmt::Debug for ConnectedAddr {
 /// A builder for `Handshake`.
 pub struct Builder<S, C = NoChainTip>
 where
-    S: Service<Tagged<PeerSocketAddr, Request>, Response = Response, Error = BoxError>
+    S: Service<Tagged<IpAddr, Request>, Response = Response, Error = BoxError>
         + Clone
         + Send
         + 'static,
@@ -424,7 +425,7 @@ where
 
 impl<S, C> Builder<S, C>
 where
-    S: Service<Tagged<PeerSocketAddr, Request>, Response = Response, Error = BoxError>
+    S: Service<Tagged<IpAddr, Request>, Response = Response, Error = BoxError>
         + Clone
         + Send
         + 'static,
@@ -557,7 +558,7 @@ where
 
 impl<S> Handshake<S, NoChainTip>
 where
-    S: Service<Tagged<PeerSocketAddr, Request>, Response = Response, Error = BoxError>
+    S: Service<Tagged<IpAddr, Request>, Response = Response, Error = BoxError>
         + Clone
         + Send
         + 'static,
@@ -881,7 +882,7 @@ where
 
 impl<S, PeerTransport, C> Service<HandshakeRequest<PeerTransport>> for Handshake<S, C>
 where
-    S: Service<Tagged<PeerSocketAddr, Request>, Response = Response, Error = BoxError>
+    S: Service<Tagged<IpAddr, Request>, Response = Response, Error = BoxError>
         + Clone
         + Send
         + 'static,
@@ -915,20 +916,26 @@ where
         // Clone these upfront, so they can be moved into the future.
         let nonces = self.nonces.clone();
 
-        // Tag every request from this connection's peer with the peer's
-        // transient address, so a fair buffer in the inbound service can
-        // prioritize requests from quiet peers, and shed requests from loud
-        // peers.
+        // Tag every request from this connection's peer with the peer's IP
+        // address, so a fair buffer in the inbound service can prioritize
+        // requests from quiet peers, and shed requests from loud peers.
+        //
+        // The key is the IP alone, not the full transient socket address:
+        // inbound ports are ephemeral, so keying by socket address would let
+        // a peer reset its recent-request count on every reconnect.
+        // Reconnect churn is already rate-limited, but the IP key removes
+        // the reset entirely. Peers behind one NAT share a fairness budget,
+        // which is the standard trade-off for per-IP accounting.
         //
         // Isolated connections have no transient address, so their requests
         // are tagged as internal. In practice, they use their own nil inbound
         // service, and never reach a shared inbound service.
-        let transient_addr = connected_addr.get_transient_addr();
+        let peer_ip = connected_addr.get_transient_addr().map(|addr| addr.ip());
         let inbound_service = self
             .inbound_service
             .clone()
             .map_request(move |request| Tagged {
-                key: transient_addr,
+                key: peer_ip,
                 request,
             });
         let address_book_updater = self.address_book_updater.clone();

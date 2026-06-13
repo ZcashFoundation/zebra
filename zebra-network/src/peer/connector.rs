@@ -1,5 +1,6 @@
 //! Wrapper around handshake logic that also opens a TCP connection.
 
+use std::net::IpAddr;
 use std::{
     pin::Pin,
     task::{Context, Poll},
@@ -24,7 +25,7 @@ use crate::{
 /// [`tower::Service`] lets us apply unified timeout policies, etc.
 pub struct Connector<S, C = NoChainTip>
 where
-    S: Service<Tagged<PeerSocketAddr, Request>, Response = Response, Error = BoxError>
+    S: Service<Tagged<IpAddr, Request>, Response = Response, Error = BoxError>
         + Clone
         + Send
         + 'static,
@@ -36,7 +37,7 @@ where
 
 impl<S, C> Clone for Connector<S, C>
 where
-    S: Service<Tagged<PeerSocketAddr, Request>, Response = Response, Error = BoxError>
+    S: Service<Tagged<IpAddr, Request>, Response = Response, Error = BoxError>
         + Clone
         + Send
         + 'static,
@@ -52,7 +53,7 @@ where
 
 impl<S, C> Connector<S, C>
 where
-    S: Service<Tagged<PeerSocketAddr, Request>, Response = Response, Error = BoxError>
+    S: Service<Tagged<IpAddr, Request>, Response = Response, Error = BoxError>
         + Clone
         + Send
         + 'static,
@@ -78,7 +79,7 @@ pub struct OutboundConnectorRequest {
 
 impl<S, C> Service<OutboundConnectorRequest> for Connector<S, C>
 where
-    S: Service<Tagged<PeerSocketAddr, Request>, Response = Response, Error = BoxError>
+    S: Service<Tagged<IpAddr, Request>, Response = Response, Error = BoxError>
         + Clone
         + Send
         + 'static,

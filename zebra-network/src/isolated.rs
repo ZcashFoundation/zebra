@@ -1,6 +1,7 @@
 //! Creating isolated connections to specific peers.
 
 use std::future::Future;
+use std::net::IpAddr;
 
 use futures::future::TryFutureExt;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -81,7 +82,7 @@ pub fn connect_isolated_with_inbound<PeerTransport, InboundService>(
 ) -> impl Future<Output = Result<Client, BoxError>>
 where
     PeerTransport: AsyncRead + AsyncWrite + Unpin + Send + 'static,
-    InboundService: Service<Tagged<PeerSocketAddr, Request>, Response = Response, Error = BoxError>
+    InboundService: Service<Tagged<IpAddr, Request>, Response = Response, Error = BoxError>
         + Clone
         + Send
         + 'static,
@@ -153,7 +154,7 @@ pub fn connect_isolated_tcp_direct_with_inbound<InboundService>(
     inbound_service: InboundService,
 ) -> impl Future<Output = Result<Client, BoxError>>
 where
-    InboundService: Service<Tagged<PeerSocketAddr, Request>, Response = Response, Error = BoxError>
+    InboundService: Service<Tagged<IpAddr, Request>, Response = Response, Error = BoxError>
         + Clone
         + Send
         + 'static,

@@ -13,6 +13,7 @@
 //! If it does not have any IPv4 interfaces, or IPv4 localhost is not on `127.0.0.1`,
 //! skip all the network tests by setting the `SKIP_NETWORK_TESTS` environmental variable.
 
+use std::net::IpAddr;
 use std::{
     net::{Ipv4Addr, SocketAddr},
     sync::Arc,
@@ -1470,7 +1471,7 @@ async fn init_with_peer_limit<S>(
     default_config: impl Into<Option<Config>>,
 ) -> Arc<std::sync::Mutex<AddressBook>>
 where
-    S: Service<Tagged<PeerSocketAddr, Request>, Response = Response, Error = BoxError>
+    S: Service<Tagged<IpAddr, Request>, Response = Response, Error = BoxError>
         + Clone
         + Send
         + Sync

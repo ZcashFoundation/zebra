@@ -1,6 +1,7 @@
 //! Uses tor to create isolated and anonymised connections to specific peers.
 
 use std::sync::{Arc, Mutex};
+use std::net::IpAddr;
 
 use arti_client::{DataStream, TorAddr, TorClient, TorClientConfig};
 use tor_rtcompat::tokio::TokioRuntimeHandle;
@@ -74,7 +75,7 @@ pub async fn connect_isolated_tor_with_inbound<InboundService>(
     inbound_service: InboundService,
 ) -> Result<ZebraClient, BoxError>
 where
-    InboundService: Service<Tagged<PeerSocketAddr, Request>, Response = Response, Error = BoxError>
+    InboundService: Service<Tagged<IpAddr, Request>, Response = Response, Error = BoxError>
         + Clone
         + Send
         + 'static,

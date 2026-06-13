@@ -127,9 +127,23 @@ where
     T: Service<R>,
 {
     fn clone(&self) -> Self {
+        self.shared.handle_cloned();
+
         Self {
             shared: self.shared.clone(),
         }
+    }
+}
+
+impl<T, K, R> Drop for FairBuffer<T, K, R>
+where
+    T: Service<R>,
+{
+    fn drop(&mut self) {
+        // The worker shuts down once every handle has dropped and the queue
+        // has drained, matching `tower::buffer`'s teardown when all senders
+        // drop.
+        self.shared.handle_dropped();
     }
 }
 

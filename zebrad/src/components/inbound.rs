@@ -58,9 +58,10 @@ pub const MAX_INBOUND_RESPONSE_TIME: Duration = Duration::from_secs(5);
 
 /// The interval after which the inbound fair buffer's recent peer request counts decay.
 ///
-/// Each peer's count covers at least one and at most two of these intervals. Like
-/// `zebra_network`'s inventory rotation interval, it is around half a target block interval,
-/// so inbound request fairness roughly tracks each peer's activity over the last block.
+/// Each peer's count covers at least one and at most two of these intervals
+/// (53-106 seconds). Matching `zebra_network`'s inventory rotation interval, it is
+/// less than the 75 second target block spacing, so inbound request fairness roughly
+/// tracks each peer's activity over the last block or so.
 pub const INBOUND_FAIRNESS_ROTATION_INTERVAL: Duration = Duration::from_secs(53);
 
 /// The number of bytes the [`Inbound`] service will queue in response to a single block or

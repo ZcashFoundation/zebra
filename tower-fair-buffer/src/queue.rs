@@ -73,6 +73,12 @@ pub(crate) struct Shared<K, R, Fut> {
 /// The lock-protected part of [`Shared`].
 #[derive(Debug)]
 struct State<K> {
+    /// The number of live `FairBuffer` handles sharing this queue.
+    ///
+    /// When it reaches zero the worker shuts down after draining the queue,
+    /// matching `tower::buffer`'s teardown when all senders drop.
+    handles: usize,
+
     /// Each caller's recent request count.
     counts: RecentRequestCounts<K>,
 
@@ -109,6 +115,8 @@ impl<K, R, Fut> Shared<K, R, Fut> {
         Self {
             queue: SkipMap::new(),
             state: Mutex::new(State {
+                // `FairBuffer::pair` creates the first handle.
+                handles: 1,
                 counts: RecentRequestCounts::new(),
                 next_seq: 0,
                 len: 0,
@@ -148,6 +156,33 @@ impl<K, R, Fut> Shared<K, R, Fut> {
             None => Ok(()),
             Some(failed) => Err(failed.clone().into()),
         }
+    }
+
+    /// Records a cloned `FairBuffer` handle.
+    pub(crate) fn handle_cloned(&self) {
+        self.lock_state().handles += 1;
+    }
+
+    /// Records a dropped `FairBuffer` handle, waking the worker when the
+    /// last handle drops so it can shut down.
+    pub(crate) fn handle_dropped(&self) {
+        let handles = {
+            let mut state = self.lock_state();
+            state.handles = state.handles.saturating_sub(1);
+            state.handles
+        };
+
+        if handles == 0 {
+            // Wake the worker outside the critical section; it re-checks
+            // `handles_dropped` once the queue is drained.
+            self.notify.notify_one();
+        }
+    }
+
+    /// Returns true once every `FairBuffer` handle has been dropped, so no
+    /// new messages can ever be pushed.
+    pub(crate) fn handles_dropped(&self) -> bool {
+        self.lock_state().handles == 0
     }
 }
 

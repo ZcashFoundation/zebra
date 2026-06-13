@@ -21,7 +21,6 @@ categories = ["asynchronous"]
 
 [dependencies]
 crossbeam-skiplist = { workspace = true }
-futures = { workspace = true }
 pin-project = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time", "tracing"] }
 tower = { workspace = true, features = ["util"] }

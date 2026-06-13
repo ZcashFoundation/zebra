@@ -273,3 +273,104 @@ async fn canceled_request_skipped() {
     assert_pending!(worker.poll());
     assert_dispatch_order(&mut handle, &["kept"]);
 }
+
+/// A push wakes a parked worker: the no-lost-wakeup contract at unit level.
+#[tokio::test]
+async fn push_wakes_parked_worker() {
+    let _init_guard = zebra_test::init();
+
+    let (mut service, worker, mut handle) = test_buffer(10);
+    let mut worker = task::spawn(worker);
+
+    // Park the worker on an empty queue.
+    handle.allow(1);
+    assert_pending!(worker.poll());
+
+    // A push must wake it; otherwise dispatch relies on luck.
+    let mut response = send(&mut service, Some("peer"), "request").await;
+    assert!(worker.is_woken(), "a push must wake the parked worker");
+
+    assert_pending!(worker.poll());
+    assert_dispatch_order(&mut handle, &["request"]);
+    assert_eq!(assert_ready_ok!(response.poll()), "request");
+}
+
+/// Counts keep rotating while the queue is backed up behind an un-ready
+/// inner service: decay holds its time bound under sustained overload.
+#[tokio::test(start_paused = true)]
+async fn rotation_continues_under_backlog() {
+    let _init_guard = zebra_test::init();
+
+    let (mut service, worker, mut handle) = test_buffer(10);
+    let mut worker = task::spawn(worker);
+
+    // The inner service accepts nothing: the queue backs up.
+    handle.allow(0);
+    let _loud = [
+        send(&mut service, Some("loud"), "loud1").await,
+        send(&mut service, Some("loud"), "loud2").await,
+        send(&mut service, Some("loud"), "loud3").await,
+    ];
+    assert_pending!(worker.poll());
+
+    // Two rotation intervals pass while the backlog never drains. The
+    // worker is waiting for inner-service readiness, but its rotation timer
+    // must still fire.
+    tokio::time::advance(TEST_ROTATION_INTERVAL + Duration::from_secs(1)).await;
+    assert!(
+        worker.is_woken(),
+        "the rotation timer must wake a worker blocked on inner readiness",
+    );
+    assert_pending!(worker.poll());
+    tokio::time::advance(TEST_ROTATION_INTERVAL + Duration::from_secs(1)).await;
+    assert!(worker.is_woken());
+    assert_pending!(worker.poll());
+
+    // The loud peer's pre-backlog count has fully expired: its new request
+    // sorts like a fresh peer's, ahead of the mid peer's second request.
+    let _late = [
+        send(&mut service, Some("mid"), "mid1").await,
+        send(&mut service, Some("mid"), "mid2").await,
+        send(&mut service, Some("loud"), "loud4").await,
+    ];
+
+    // Drain everything. The worker already holds loud1 (popped before the
+    // backlog formed), so it dispatches first; the rest drain in global
+    // (priority, arrival) order, where the decayed loud4 (count 1) beats
+    // the backlog's loud2/loud3 (counts 2 and 3, fixed at push time).
+    handle.allow(6);
+    assert_pending!(worker.poll());
+    assert_dispatch_order(
+        &mut handle,
+        &["loud1", "mid1", "loud4", "loud2", "mid2", "loud3"],
+    );
+}
+
+/// The worker shuts down once every handle is dropped and the queue is
+/// drained, instead of parking forever.
+#[tokio::test]
+async fn worker_exits_when_handles_dropped() {
+    let _init_guard = zebra_test::init();
+
+    let (mut service, worker, mut handle) = test_buffer(10);
+    let mut worker = task::spawn(worker);
+
+    // Dispatch one request, leaving the worker parked on an empty queue.
+    handle.allow(1);
+    let mut response = send(&mut service, Some("peer"), "request").await;
+    assert_pending!(worker.poll());
+    assert_dispatch_order(&mut handle, &["request"]);
+    assert_eq!(assert_ready_ok!(response.poll()), "request");
+
+    // Dropping every handle (including clones) wakes the parked worker, and
+    // its next poll exits instead of parking forever.
+    let clone = service.clone();
+    drop(service);
+    drop(clone);
+
+    assert!(
+        worker.is_woken(),
+        "dropping the last handle must wake the worker",
+    );
+    assert_ready!(worker.poll());
+}

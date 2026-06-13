@@ -6084,7 +6084,6 @@ name = "tower-fair-buffer"
 version = "0.1.0"
 dependencies = [
  "crossbeam-skiplist",
- "futures",
  "pin-project",
  "tokio",
  "tokio-test",

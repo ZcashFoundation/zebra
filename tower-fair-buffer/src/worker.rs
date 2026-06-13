@@ -69,46 +69,67 @@ where
         rotation.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
         loop {
-            // Dispatch all queued messages, lowest priority key first.
-            while let Some(message) = self.shared.pop_lowest() {
-                let Message { request, tx, span } = message;
-
-                // Wait for the inner service inside the request's span.
-                match self.service.ready().instrument(span.clone()).await {
-                    Ok(service) => {
-                        // Call the inner service inside the request's span,
-                        // and send the response future back to the caller.
-                        //
-                        // A send error means the request was canceled
-                        // in-between, so the response future is just dropped.
-                        let response = span.in_scope(|| {
-                            tracing::trace!("dispatching request to the inner service");
-                            service.call(request)
-                        });
-                        let _ = tx.send(Ok(response));
-                    }
-                    Err(error) => {
-                        let error = error.into();
-                        tracing::debug!(%error, "fair buffered service failed");
-
-                        // Fail the queued messages and reject future pushes...
-                        let service_error = self.shared.fail(error);
-                        // ...and fail the message we were about to dispatch.
-                        let _ = tx.send(Err(service_error.into()));
-
-                        return;
-                    }
+            // Take the lowest-key queued message, waiting for a push while
+            // the queue is empty — and exit once every handle has dropped
+            // and the queue is drained, matching `tower::buffer`'s worker
+            // teardown instead of parking forever.
+            let Message { request, tx, span } = loop {
+                if let Some(message) = self.shared.pop_lowest() {
+                    break message;
                 }
-            }
+                if self.shared.handles_dropped() {
+                    tracing::trace!("all fair buffer handles dropped, shutting down");
+                    return;
+                }
 
-            tokio::select! {
-                // Wait for a new message. A push between `pop_lowest`
-                // returning `None` and this wait stores a wakeup permit, so
-                // wakeups can't be lost.
-                _ = self.shared.pushed() => {}
+                tokio::select! {
+                    // Wait for a new message (or the last handle dropping).
+                    // A push between `pop_lowest` returning `None` and this
+                    // wait stores a wakeup permit, so wakeups can't be lost.
+                    _ = self.shared.pushed() => {}
 
-                // Or rotate the recent request counts.
-                _ = rotation.tick() => self.shared.rotate_counts(),
+                    // Keep rotating the recent request counts while idle.
+                    _ = rotation.tick() => self.shared.rotate_counts(),
+                }
+            };
+
+            // Wait for the inner service inside the request's span — still
+            // rotating the counts on schedule. Without this, a sustained
+            // backlog or a slow inner service would starve the rotation
+            // exactly when shedding is active: a once-loud peer would keep
+            // its full count with no time bound, and "recent request count"
+            // would silently become "total request count".
+            let ready = loop {
+                tokio::select! {
+                    ready = self.service.ready().instrument(span.clone()) => break ready,
+                    _ = rotation.tick() => self.shared.rotate_counts(),
+                }
+            };
+
+            match ready {
+                Ok(service) => {
+                    // Call the inner service inside the request's span,
+                    // and send the response future back to the caller.
+                    //
+                    // A send error means the request was canceled
+                    // in-between, so the response future is just dropped.
+                    let response = span.in_scope(|| {
+                        tracing::trace!("dispatching request to the inner service");
+                        service.call(request)
+                    });
+                    let _ = tx.send(Ok(response));
+                }
+                Err(error) => {
+                    let error = error.into();
+                    tracing::debug!(%error, "fair buffered service failed");
+
+                    // Fail the queued messages and reject future pushes...
+                    let service_error = self.shared.fail(error);
+                    // ...and fail the message we were about to dispatch.
+                    let _ = tx.send(Err(service_error.into()));
+
+                    return;
+                }
             }
         }
     }

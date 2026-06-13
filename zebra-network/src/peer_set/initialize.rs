@@ -80,9 +80,12 @@ type DiscoveredPeer = (PeerSocketAddr, peer::Client);
 /// request.  Otherwise, inbound messages are interpreted as requests and sent
 /// to the supplied `inbound_service`.
 ///
-/// Wrapping the `inbound_service` in [`tower::load_shed`] middleware will
-/// cause the peer set to shrink when the inbound service is unable to keep up
-/// with the volume of inbound requests.
+/// Each connection tags its peer requests with the peer's IP address, so
+/// wrapping the `inbound_service` in a `tower_fair_buffer::FairBuffer` serves
+/// the quietest peers first and sheds the loudest peer's requests when the
+/// buffer is full. Shed (and timed-out) requests cause the peer set to shrink
+/// when the inbound service is unable to keep up, via the connection's
+/// overload handling.
 ///
 /// Use [`NoChainTip`][1] to explicitly provide no chain tip receiver.
 ///
@@ -110,7 +113,7 @@ pub async fn init<S, C>(
     watch::Receiver<PeerSetStatus>,
 )
 where
-    S: Service<Tagged<PeerSocketAddr, Request>, Response = Response, Error = BoxError>
+    S: Service<Tagged<IpAddr, Request>, Response = Response, Error = BoxError>
         + Clone
         + Send
         + Sync
