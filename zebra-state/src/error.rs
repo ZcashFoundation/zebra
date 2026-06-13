@@ -58,6 +58,24 @@ pub enum CommitBlockError {
     #[error("could not contextually validate semantically verified block")]
     ValidateContextError(#[from] Box<ValidateContextError>),
 
+    /// A checkpoint-verified block did not extend the in-memory canonical tip.
+    ///
+    /// The block is stale, ahead of the commit frontier, or a sibling of an
+    /// already-committed block. The known-hash IBD engine answers any error
+    /// above its frontier by resubmitting its retained copy, so this is an
+    /// explicit, inspectable alternative to silently dropping the block.
+    #[error(
+        "checkpoint-verified block at height {height:?} does not extend the \
+         write frontier; next expected height is {next_height:?}"
+    )]
+    #[non_exhaustive]
+    OutOfOrder {
+        /// The height of the rejected block.
+        height: block::Height,
+        /// The next height the write worker can accept on the canonical chain.
+        next_height: block::Height,
+    },
+
     /// The write task exited (likely during shutdown).
     #[error("block commit task exited. Is Zebra shutting down?")]
     #[non_exhaustive]
@@ -120,8 +138,9 @@ impl From<ValidateContextError> for CommitCheckpointVerifiedError {
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum InvalidateError {
-    /// The state is currently checkpointing blocks and cannot accept invalidation requests.
-    #[error("cannot invalidate blocks while still committing checkpointed blocks")]
+    /// The target block's disk write is in flight or complete (its height is at
+    /// or below the write frontier), so it can no longer be invalidated.
+    #[error("cannot invalidate a block whose disk write is in flight or complete")]
     ProcessingCheckpointedBlocks,
 
     /// Sending the invalidate request to the block write task failed.
@@ -153,8 +172,9 @@ pub enum ReconsiderError {
     #[error("Invalidated blocks list is empty when it should contain at least one block")]
     InvalidatedBlocksEmpty,
 
-    /// The state is currently checkpointing blocks and cannot accept reconsider requests.
-    #[error("cannot reconsider blocks while still committing checkpointed blocks")]
+    /// The target block's disk write is in flight or complete (its height is at
+    /// or below the write frontier), so it can no longer be reconsidered.
+    #[error("cannot reconsider a block whose disk write is in flight or complete")]
     CheckpointCommitInProgress,
 
     /// Sending the reconsider request to the block write task failed.

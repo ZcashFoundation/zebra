@@ -40,6 +40,19 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   request count is shed, instead of failing the newest request from a random
   peer. This stops spammy peers crowding out quiet ones under load
   ([#7306](https://github.com/ZcashFoundation/zebra/issues/7306)).
+- The state's block write path is now a single worker loop that commits
+  checkpoint-verified and semantically-verified blocks in any order, replacing
+  the previous two-phase pipeline that switched from finalized to non-finalized
+  commits on the first semantic block. A semantic block arriving during the
+  initial checkpoint sync no longer ends the checkpoint pipeline. Block
+  invalidation and reconsideration (`invalidateblock` / `reconsiderblock` RPCs)
+  now work during the initial sync for blocks above the disk-write frontier.
+
+### Fixed
+
+- Fixed a panic when invalidating the only non-finalized chain (the chain was
+  removed from the chain set by value, hitting an internal "chain tip hashes
+  are unique" assertion); the chain is now removed by tip hash.
 
 ## [Zebra 5.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.1.0) - 2026-06-10
 

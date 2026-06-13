@@ -24,7 +24,7 @@ use crate::{
         non_finalized_state::{Chain, NonFinalizedState, MIN_DURATION_BETWEEN_BACKUP_UPDATES},
     },
     tests::FakeChainHelper,
-    Config, SemanticallyVerifiedBlock,
+    CheckpointVerifiedBlock, Config, SemanticallyVerifiedBlock, ValidateContextError,
 };
 
 #[test]
@@ -962,6 +962,200 @@ fn commit_new_chain_sets_chain_value_pools_deferred_amount() -> Result<()> {
         .constrain::<NonNegative>()?;
 
     assert_eq!(chain.chain_value_pools.deferred_amount(), expected);
+
+    Ok(())
+}
+
+/// Builds an empty pre-Heartwood [`NonFinalizedState`], a matching
+/// [`FinalizedState`], and a root block whose parent is the empty database's
+/// finalized tip, so it can be committed via `commit_checkpoint_block`'s
+/// `Chain::new` arm.
+///
+/// Pre-Heartwood blocks skip the history-tree commitment check (see
+/// `block_commitment_is_valid_for_chain_history`).
+fn empty_checkpoint_test_states(
+    network: &Network,
+) -> (NonFinalizedState, FinalizedState, Arc<Block>) {
+    let state = NonFinalizedState::new(network);
+    let finalized_state = FinalizedState::new(
+        &Config::ephemeral(),
+        network,
+        #[cfg(feature = "elasticsearch")]
+        false,
+    );
+    finalized_state.set_finalized_value_pool(ValueBalance::<NonNegative>::fake_populated_pool());
+
+    // Re-root a real pre-Heartwood block onto the empty database's tip so the
+    // checkpoint commit's parent-linkage holds.
+    let block: Arc<Block> = Arc::new(network.test_block(653_599, 583_999).unwrap());
+    let mut root = Block::clone(&block);
+    Arc::make_mut(&mut root.header).previous_block_hash = finalized_state.db.finalized_tip_hash();
+    let root = Arc::new(root);
+
+    (state, finalized_state, root)
+}
+
+/// `commit_checkpoint_block` commits a block whose parent is a non-best
+/// chain's tip onto that chain, forking it, instead of assuming a single best
+/// chain.
+#[test]
+fn commit_checkpoint_block_forks_at_parent_tip() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    for network in Network::iter() {
+        let (mut state, finalized_state, block1) = empty_checkpoint_test_states(&network);
+        // Two children of block1 with different work, forming two chains once
+        // both are committed on top of block1.
+        let block2a = block1.make_fake_child().set_work(10);
+        let block2b = block1.make_fake_child().set_work(5);
+        // A checkpoint block whose parent is the *lower-work* chain's tip.
+        let block3b = block2b.make_fake_child().set_work(5);
+
+        // block1, then a fork: block2a (best) and block2b (side chain).
+        state.commit_checkpoint_block(
+            CheckpointVerifiedBlock::from(block1.clone()),
+            &finalized_state.db,
+        )?;
+        state.commit_block(block2a.clone().prepare(), &finalized_state.db)?;
+        state.commit_block(block2b.clone().prepare(), &finalized_state.db)?;
+        assert_eq!(state.chain_count(), 2, "block1 forked into two chains");
+
+        // A checkpoint block extending the lower-work side chain must commit
+        // against block2b's context, not the best chain's tip block2a.
+        let (tip_block, finalizable) = state.commit_checkpoint_block(
+            CheckpointVerifiedBlock::from(block3b.clone()),
+            &finalized_state.db,
+        )?;
+
+        assert_eq!(tip_block.hash, block3b.hash());
+        assert_eq!(finalizable.inner_block(), block3b);
+
+        // The block3b chain now exists and contains block3b on top of block2b.
+        let chain = state
+            .find_chain(|chain| chain.non_finalized_tip_hash() == block3b.hash())
+            .expect("the block3b chain exists");
+        assert!(chain.contains_block_hash(block2b.hash()));
+        assert!(chain.contains_block_hash(block1.hash()));
+    }
+
+    Ok(())
+}
+
+/// A failed `commit_checkpoint_block` leaves the non-finalized state exactly
+/// as it was, so the write worker can treat the error as non-fatal.
+#[test]
+fn commit_checkpoint_block_error_leaves_state_untouched() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    for network in Network::iter() {
+        let (mut state, finalized_state, block1) = empty_checkpoint_test_states(&network);
+        let block2 = block1.make_fake_child().set_work(10);
+
+        state.commit_checkpoint_block(
+            CheckpointVerifiedBlock::from(block1.clone()),
+            &finalized_state.db,
+        )?;
+        state.commit_checkpoint_block(
+            CheckpointVerifiedBlock::from(block2.clone()),
+            &finalized_state.db,
+        )?;
+
+        let before = state.clone();
+
+        // A block whose parent matches no chain tip and isn't the finalized
+        // tip is rejected without mutating the state.
+        let orphan = block1.make_fake_child().make_fake_child().set_work(10);
+        let error = state
+            .commit_checkpoint_block(CheckpointVerifiedBlock::from(orphan), &finalized_state.db)
+            .err();
+
+        assert!(
+            matches!(error, Some(ValidateContextError::NotReadyToBeCommitted)),
+            "expected NotReadyToBeCommitted, got {error:?}",
+        );
+        assert!(
+            before.eq_internal_state(&state),
+            "the non-finalized state must be unchanged after a failed commit",
+        );
+    }
+
+    Ok(())
+}
+
+/// `finalize_root(Some(best_root_hash))` is equivalent to `finalize()` when a
+/// single chain exists.
+#[test]
+fn finalize_root_some_matches_finalize_single_chain() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    for network in Network::iter() {
+        let (mut by_hash_state, finalized_state, block1) = empty_checkpoint_test_states(&network);
+        let block2 = block1.make_fake_child().set_work(10);
+
+        by_hash_state.commit_new_chain(block1.clone().prepare(), &finalized_state.db)?;
+        by_hash_state.commit_block(block2.clone().prepare(), &finalized_state.db)?;
+
+        let mut best_state = by_hash_state.clone();
+
+        let root_hash = by_hash_state
+            .best_chain()
+            .expect("chain committed")
+            .non_finalized_root_hash();
+
+        let by_hash = by_hash_state.finalize_root(Some(root_hash)).inner_block();
+        let best = best_state.finalize().inner_block();
+
+        assert_eq!(
+            by_hash, best,
+            "finalize_root(Some(best)) must equal finalize()"
+        );
+        assert_eq!(by_hash, block1);
+        assert!(
+            best_state.eq_internal_state(&by_hash_state),
+            "both states must be left identical",
+        );
+    }
+
+    Ok(())
+}
+
+/// `finalize_root(Some(hash))` finalizes the named chain's root and drops a
+/// sibling chain whose root differs, even when the sibling has more work.
+#[test]
+fn finalize_root_drops_mismatched_sibling() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    for network in Network::iter() {
+        let (mut state, finalized_state, block1) = empty_checkpoint_test_states(&network);
+        // A fork on top of block1: two children at the same height.
+        let block2a = block1.make_fake_child().set_work(10);
+        let block2b = block1.make_fake_child().set_work(20);
+
+        state.commit_new_chain(block1.clone().prepare(), &finalized_state.db)?;
+        state.commit_block(block2a.clone().prepare(), &finalized_state.db)?;
+        state.commit_block(block2b.clone().prepare(), &finalized_state.db)?;
+        assert_eq!(state.chain_count(), 2, "block1 forked into two chains");
+
+        // Finalize the shared root block1: both chains keep going, now rooted
+        // at block2a and block2b respectively.
+        let finalized = state.finalize_root(Some(block1.hash())).inner_block();
+        assert_eq!(finalized, block1);
+        assert_eq!(
+            state.chain_count(),
+            2,
+            "both forks survive the shared-root pop"
+        );
+
+        // Now finalize block2a by hash: the block2b chain is rooted at block2b
+        // (a different hash), so it forked below block2a and is dropped, even
+        // though block2b has more work.
+        let finalized = state.finalize_root(Some(block2a.hash())).inner_block();
+        assert_eq!(finalized, block2a);
+        assert!(
+            state.best_chain().is_none(),
+            "block2a finalized, block2b chain dropped as a mismatched sibling",
+        );
+    }
 
     Ok(())
 }

@@ -62,10 +62,11 @@ The life of one block, height `h`:
    coinbase height, the parent linkage against `list[h-1]`, and the merkle
    root against the transaction bodies (extending the header pin to the
    bodies, including the CVE-2012-2459 duplicate-txid check).
-5. **Committed** (§4.4, §7.3): the state's two-thread checkpoint pipeline
-   commits the block — Thread 1 updates the in-memory non-finalized chain
-   (including the NU5+ `hashBlockCommitments` auth-data check) and responds;
-   Thread 2 writes the RocksDB batch with auto-compaction paused (§9 F2).
+5. **Committed** (§4.4, §7.3): the state's any-order write pipeline commits
+   the block — the worker updates the in-memory non-finalized chain (including
+   the NU5+ `hashBlockCommitments` auth-data check) and responds; the disk
+   writer writes the RocksDB batch with auto-compaction paused (§9 F2).
+   Checkpoint-verified and semantically-verified blocks commit in any order.
    The engine's future resolves after the disk write; the slot is popped and
    the disk-tier copy (if any) is evicted.
 6. **Protected** (§7.2): a stateless checkpoint gate in front of the
@@ -209,7 +210,9 @@ zebrad/src/components/ibd/
 zebra-chain/src/parameters/known_hashes.rs   KnownHashListSpec + windowed chunk loader (§6)
 zebra-chain/src/parameters/known_hashes/     *.bin chunk assets (in git; excluded from crates.io)
 
-zebra-state/src/service/write.rs                       two-thread checkpoint commit pipeline (§7.3)
+zebra-state/src/service/write.rs                       any-order write pipeline: WriteMessage + spawn (§7.3)
+zebra-state/src/service/write/worker.rs                the single write-worker loop + 4 message handlers (§7.3)
+zebra-state/src/service/write/disk_writer.rs           the persistent disk-writer thread (sole commit_finalized_direct caller)
 zebra-state/src/service/write/finalized_write_phase.rs RAII compaction-pause / WAL-skip guard (§9 F2)
 
 zebra-utils/src/bin/known-hashes/            list assembly tool: RPC sweep, anchors, chunk emission (§6.2, §7.4)
@@ -260,7 +263,7 @@ single response item can exceed it).
 | In-flight batch responses (network + batch-control queue) | live concurrent-batch limit (`min(3 × ready_peers, 96)`) × (800 KB + one crossing block ≤ ~2 MB) ≈ 269 MB worst case, realistically ≪ (spam-era batches are single-block) | issuance gate (`fetch_slots_available`) + tower-batch-control queue limits |
 | RAM block buffer (`Slot::Fetched` blocks + promoted blocks in the commit pipeline) | `known_hash_lookahead_bytes` (256 MiB default), counted exactly from arrival sizes; the frontier block may overshoot by ≤ one block (it always stays in memory, §4.5); a failed cache write keeps its block in memory (bounded by the in-flight cap) | arrival-time placement: over-budget arrivals go to the disk tier |
 | Verify-and-commit pipeline (rayon queue + state queue + write channel, jointly) | `IBD_COMMIT_PIPELINE_BLOCKS` (1,024) / `IBD_COMMIT_PIPELINE_BYTES` (64 MiB) unresolved futures — futures resolve only after the disk write | engine stage-boundary caps (§4.4) |
-| State `finalized_state_queued_blocks` + write channel | transitively ≤ the commit-pipeline caps: **only the engine submits during IBD** (the §7.2 gate excludes gossip/RPC below Canopy, and callers don't submit in the engine's range above it); the write channel itself is bounded (capacity 100) | engine caps + gate + bounded channel |
+| State `finalized_state_queued_blocks` + write channel | transitively ≤ the commit-pipeline caps: **only the engine submits during IBD** (the §7.2 gate excludes gossip/RPC below Canopy, and callers don't submit in the engine's range above it); the worker→disk-writer channel itself is bounded (capacity `checkpoint_sync_pipeline_capacity`, min 500) | engine caps + gate + bounded channel |
 | Window slot bookkeeping | ≤ `IBD_WINDOW_MAX_BLOCKS` (16,384) slots in practice (~40 B each); `IBD_SPAN_MAX` (2,000,000 ≈ 80 MB) is the defensive ceiling if accounting breaks | window cap in `refill`; span ceiling |
 | Disk overflow tier | disk, not RAM: RAM-held + disk-held bytes ≤ budget × (1 + `DISK_FETCH_AHEAD_FACTOR`) = 5 × budget (~1.25 GB at the default; transient double-storage of blocks the chain state is about to store anyway); in-memory index is one `(height, hash, u32)` entry per cached block | `storage_allows` issuance gate; continuous eviction on commit |
 | Known-hash list | ≤ 2 resident chunks (~5–10 MB, hints embedded); all chunks verified at open then dropped; the whole list is dropped once the tip passes `max_height` | windowed loader (§6.4) |
@@ -673,11 +676,11 @@ semantic, with no shim. The engine task is awaited inside the same supervised
 task as the syncer, so ctrl-c and sibling-task failures abort it cleanly.
 
 After `Completed`/`Declined`/`Degraded`, the legacy syncer starts from a
-block locator at the real tip — no special seam. The state's
-finalized→non-finalized flip triggers on the first semantically-verified
-child of the last committed block, exactly as today (verified: the trigger
-keys on the last-sent checkpoint-verified hash, not on a height constant,
-and self-heals on transient races).
+block locator at the real tip — no special seam. There is no
+finalized→non-finalized "flip" to coordinate: the state write worker commits
+checkpoint-verified and semantically-verified blocks in any order (§7.3), so
+the first semantically-verified child of the last committed block is simply
+committed, with no phase transition to time against the disk tip.
 
 ## 5. zebra-network changes
 
@@ -858,15 +861,14 @@ The old router's background list-walk is replaced by an O(1) spot-check
 (`BestChainBlockHash` at the spaced checkpoint at or below the tip),
 preserving wrong-chain-on-restart detection without the walk.
 
-**Residual caller responsibility (engine range above Canopy).** Earlier
-designs raised the gate floor to the list max while the engine ran, so
-nothing could semantically commit inside the engine's range mid-IBD. With
-the floor fixed at the mandatory height, a semantically-valid block whose
-parent is the engine's current finalized tip (above Canopy) would flip the
-state's finalized→non-finalized handoff early if a caller submitted it.
-Inbound gossip and the legacy syncer don't do this in practice (gossip
-fetches near the network tip; the syncer is idle during the engine phase),
-but the protection is now a property of the callers, not the gate.
+A semantically-valid block submitted inside the engine's range mid-IBD (its
+parent the engine's current finalized tip, above Canopy) is now **safe by
+construction**: the state write worker commits checkpoint-verified and
+semantically-verified blocks in any order (§7.3), so such a block simply forks
+the in-flight chain and is reorged away by the hash-pinned prune if it loses —
+no early "flip", no special caller responsibility. Inbound gossip and the
+legacy syncer don't submit in this range in practice anyway (gossip fetches
+near the network tip; the syncer is idle during the engine phase).
 
 **Open / planned follow-ups (maintainer decisions):**
 
@@ -878,7 +880,7 @@ but the protection is now a property of the callers, not the gate.
 - *Flag-off fresh mainnet sync* below Canopy is unsupported without the
   engine (no checkpoint verifier); whether to hard-error at startup is open.
 
-### 7.3 State side: the checkpoint write pipeline
+### 7.3 State side: the any-order write pipeline
 
 `zebra_state::init` keeps its `max_checkpoint_height` parameter, but startup
 wiring now passes the **max finalizable height** — the checkpoint max raised
@@ -887,42 +889,123 @@ and backup-restore cover the whole pinned range. (Renaming the parameter to
 match its raised meaning is a recorded follow-up.) The near-final-checkpoint
 UTXO window keeps its `checkpoint_verify_concurrency_limit`-based semantics.
 
-Checkpoint commits run on a **two-thread pipeline** in the state's write
-task (`write.rs`), replacing the fully serial commit loop:
+The state's write path is **one persistent worker loop** over **one input
+channel**, feeding **one persistent disk-writer thread** — the sole caller of
+`commit_finalized_direct` in the whole system. Checkpoint-verified and
+semantically-verified blocks commit **in any order**, interleaved: there is no
+finalized→non-finalized "flip". The two threads are:
 
-- **Thread 1** (the write task itself) commits each checkpoint-verified
-  block to the in-memory non-finalized chain (`commit_checkpoint_block`:
-  tree updates, nullifiers, UTXOs, spent-output resolution — and the NU5+
-  `hashBlockCommitments` auth-data check, §2), hands the finalizable tip to
-  Thread 2 over a bounded channel (capacity 100), and **responds to the
-  state service immediately** — the disk write can only fail by panicking.
-  It prunes committed blocks from the non-finalized state using the disk
-  tip height Thread 2 publishes on an atomic (no per-block RocksDB read).
-- **Thread 2** drains the channel through `commit_finalized_direct`
-  (keeping the tip-linkage assertions, `debug_stop_at_height`, and
-  elasticsearch indexing the serial loop had) and writes the RocksDB batch.
-  It owns the `FinalizedWritePhase` RAII guard: auto-compaction is paused
-  for the whole bulk-write phase (and the WAL skipped iff the user opted in
-  via `state.disable_wal_during_ibd`), with a level-0 file-count hysteresis
-  (re-enable compaction above 64 L0 files, pause again at 32) so the write
-  thread's own reads don't degrade unboundedly. The guard restores
-  everything on every exit path, and the next database open re-enables
-  compaction after a `kill -9`.
+- **The worker** (`write/worker.rs`, Thread 1) reads `WriteMessage`s
+  (`Checkpoint`, `Semantic`, `Invalidate`, `Reconsider`) from one
+  `tokio::mpsc` channel and commits each block to the in-memory non-finalized
+  state. The single-threaded `StateService` serializes both block streams into
+  commit order before they reach the channel, so a FIFO read preserves
+  parent-before-child ordering with no cross-channel races and no locks.
+  Checkpoint blocks go through `commit_checkpoint_block` (tree updates,
+  nullifiers, UTXOs, spent-output resolution, and the NU5+
+  `hashBlockCommitments` auth-data check, §2), which is **fork-tolerant**
+  (it locates the parent chain by tip hash and sources chain context from it)
+  and **validate-before-mutate** (every fallible check runs before any chain
+  mutation, so an error leaves the non-finalized state untouched). The worker
+  hands each durable-bound block to the disk writer over a bounded crossbeam
+  channel (capacity = `checkpoint_sync_pipeline_capacity`, min 500), and
+  **responds to the state service as soon as the block is in memory**.
+- **The disk writer** (`write/disk_writer.rs`, Thread 2) drains its channel
+  through `commit_finalized_direct` (keeping the tip-linkage assertions,
+  `debug_stop_at_height`, and elasticsearch indexing the serial loop had) and
+  writes the RocksDB batch. It owns the `FinalizedWritePhase` RAII guard as a
+  reversible `Option`: created on the first **bulk** write (a checkpoint-stream
+  block), dropped on an `EndBulk` message, a non-bulk write, or channel close.
+  The guard pauses auto-compaction for the bulk-write phase (and skips the WAL
+  iff `state.disable_wal_during_ibd`), with a level-0 file-count hysteresis
+  (re-enable compaction above 64 L0 files, pause again at 32). It restores
+  everything on every exit path; the next database open re-enables compaction
+  after a `kill -9`.
 
-Genesis commits directly to disk on Thread 1 (the non-finalized chain
-initializes its trees from a finalized tip). The pipeline preserves the
-commit-response contract change reviewers should know: **a commit response
-means the block is committed in memory; its disk write is in flight**, at
-most a pipeline depth (100 blocks) behind. Blocks in flight are not readable
-through the state until their disk writes land (Thread 1 does not publish
-the non-finalized state to the watch channel during the pipeline — that
-keeps the chain `Arc` uniquely owned for in-place mutation and the backup
-task idle).
+**Disk frontier and prune.** The worker tracks `next_disk_height` and
+`disk_frontier_hash` (the last block handed to the disk writer), and an
+`inflight_disk` queue of handed-off checkpoint blocks still in the
+non-finalized state. The disk writer publishes its on-disk tip height on a
+`Release`/`Acquire` atomic; the worker prunes **hash-pinned** — a block is
+finalized out of memory only when its own height is observed durable, by its
+exact hash via `finalize_root(Some(hash))`. This closes the hole where a
+transient adversarial fork briefly out-working the pipeline chain could make a
+work-based prune pop the fork's root and orphan the pipeline chain. It also
+makes the restored-backup property structural: only `inflight_disk` entries are
+ever pruned, and those hold only worker-enqueued blocks, so restored blocks
+can never be pruned.
+
+**Any-order gate (checkpoint commits).** For a checkpoint block whose parent
+is a chain tip (or the finalized tip), the worker commits it directly — the
+pure-bulk hot path. Otherwise:
+
+- if an identical block already entered memory via a semantic commit (a
+  handoff-window race), the worker **adopts the twin** and responds `Ok` (the
+  ack contract is already satisfied);
+- if the block is above the disk frontier, the worker **flushes its
+  semantically-committed ancestors** to the disk writer first (those ancestors
+  got strictly more validation than checkpoint blocks), failing safe with no
+  mutation on a fork below the frontier;
+- otherwise (stale, ahead, or a sibling), the worker responds
+  `CommitBlockError::OutOfOrder { height, next_height }`. The known-hash IBD
+  engine answers any error above its frontier by resubmitting its retained
+  copy (a re-verification, never a re-download), so an explicit `OutOfOrder`
+  beats silently dropping the block.
+
+**Bulk lifecycle.** The recently-finalized `PrunedChain` cache is enabled
+lazily on the first checkpoint commit; the first semantic commit drops the disk
+writer's bulk guard (via `EndBulk`) and the cache. A later checkpoint block
+re-enables both — re-enabling the cache empty is always correct (lookups fall
+back to database reads).
+
+**Genesis** commits directly to the disk writer with a blocking ack (the
+non-finalized chain initializes its trees from a finalized tip), folding away
+the old `FinalizedState::commit_finalized` special case. **Reorg-overflow**
+roots (best chain past the 1000-block rollback window) likewise go to the disk
+writer with a blocking ack.
+
+**Commit-response contract** (unchanged): a checkpoint commit response means
+**the block is committed in memory; its disk write is in flight**, at most a
+pipeline depth behind. A genesis commit response means the block is durable.
+Blocks in flight are not readable through the state until their disk writes
+land — the worker does **not** publish the non-finalized state to the watch
+channel during checkpoint commits (keeping the chain `Arc` uniquely owned for
+in-place mutation and the backup task idle). Semantic commits and successful
+admin ops always publish.
+
+**Admin ops during IBD.** Invalidate and reconsider now work during checkpoint
+sync for blocks **above** the disk frontier; a block at or below the frontier
+(its disk write enqueued, in flight, or complete) is rejected with a typed
+error. Invalidating the only non-finalized chain empties the state and
+publishes the empty snapshot, falling the chain tip back to the finalized tip.
+
+**Error policy** (cited in the worker module docs):
+
+| Path | Handling |
+|---|---|
+| Checkpoint not extending the canonical tip (stale, ahead, sibling) | respond `OutOfOrder`; no reset |
+| Same-hash twin already in the canonical chain | respond `Ok` (idempotent adopt) |
+| Ancestor-flush linkage mismatch (competing fork below the frontier) | respond `OutOfOrder`; no mutation |
+| Genesis disk write error (ack path) | error metrics + respond Err + reset(db tip); continue |
+| Checkpoint in-memory commit error (auth-data substitution, spend/value build) | respond Err + reset(parent); continue; non-finalized state untouched |
+| `Chain::push` failure after all checks passed | expect-panic (internal invariant) |
+| Post-ack checkpoint disk error (`ack: None`) | disk writer panics (documented fatal), propagates via scope join |
+| Overflow-root disk error (`ack: Some`) | worker expect-panic (trees already validated) |
+| Semantic contextual error | respond Err + parent-error map + rejected-hash channel |
+| Invalidate/Reconsider below the disk frontier | typed Err, no state change |
+
+The checkpoint in-memory commit error replaces a previously remote-triggerable
+panic: a substituted-signatures NU5 block passes every engine check and fails
+only the auth-data check on the commit path, so that path must be recoverable.
+Because the commit is validate-before-mutate, the reset rewinds the service to
+the parent and the honest copy recommits cleanly; the engine's refetch /
+three-strike machinery (§4.6) becomes reachable.
 
 Consensus-review note: like the old `commit_finalized_direct`-only path, the
-pipeline skips the Sapling/Orchard anchor checks on the checkpoint path (the
-pinned hashes guarantee the contents); the auth-data commitment check was
-*added* relative to the old path (§2).
+checkpoint path skips the Sapling/Orchard anchor checks (the pinned hashes
+guarantee the contents); the auth-data commitment check was *added* relative
+to the old path (§2). The exact same checks run on the exact same blocks — only
+threading, ordering tolerance, and failure handling changed.
 
 ### 7.4 Testnet (pending — E2)
 
@@ -1105,9 +1188,10 @@ and `parallel_cpu_threads` still drive the legacy tail and the rayon pool.
    invariant condition — invariant-consistent, but counted for
    observability).
 9. *(E2 additionally)*: testnet list landed + gates 1–2 re-run on testnet;
-   mid-IBD gossip/RPC injection cannot flip the state to non-finalized; a
-   backup-restore cycle behaves correctly with the new final height (~3.36M
-   vs ~1M today).
+   mid-IBD gossip/RPC injection is handled safely by the any-order write
+   worker (§7.3) — it forks the in-flight chain and is reorged away if it
+   loses; a backup-restore cycle behaves correctly with the new final height
+   (~3.36M vs ~1M today).
 
 ## 12. Throughput model and measurements
 
@@ -1145,7 +1229,7 @@ runs.
 
 | Risk | Sev | Mitigation |
 |---|---|---|
-| Gossip/RPC block at engine-tip+1 flips state to non-finalized mid-IBD | Critical | §7.2 gate below Canopy; above it, caller behavior (gossip fetches near the network tip, syncer idle during the engine phase) — see §7.2's residual-responsibility note; injection test (gate 9) |
+| Gossip/RPC block at engine-tip+1 disrupts the mid-IBD commit pipeline | Critical | §7.2 gate below Canopy; above it, safe by construction — the any-order write worker (§7.3) forks the in-flight chain and reorgs it away if it loses; injection test (gate 9) |
 | Merkle/dup-txid check dropped in convert | Critical | reuse `merkle_root_validity` verbatim; body-swap vectors (D3) |
 | v5 auth-data substitution → commit-reset amplification | High | commit-time `hashBlockCommitments` check (§2) + 3-failure byte-identical deterministic detector (§4.6); implicated copy discarded; refetch backoff |
 | Scheduler recreates #10679 poisoning | High | engine never writes the registry; only explicit NotFound is classified as inventory knowledge |

@@ -14,11 +14,9 @@ use zebra_test::prelude::*;
 
 use crate::{
     config::Config,
-    service::{
-        arbitrary::PreparedChain,
-        finalized_state::{CheckpointVerifiedBlock, FinalizedState},
-    },
+    service::{arbitrary::PreparedChain, finalized_state::FinalizedState},
     tests::FakeChainHelper,
+    CheckpointVerifiedBlock,
 };
 
 const DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES: u32 = 1;

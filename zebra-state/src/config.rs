@@ -154,11 +154,12 @@ pub struct Config {
     /// so memory use is proportional to the window's unspent outputs, not
     /// to whole blocks.
     ///
-    /// The cache only exists while the initial bulk-write phase is active,
-    /// and is dropped when that phase finishes.
+    /// The cache is enabled while checkpoint-verified blocks are being
+    /// committed, and dropped once a semantically-verified block is committed
+    /// (it is re-enabled, empty, if checkpoint commits resume).
     pub checkpoint_sync_retained_blocks: u32,
 
-    /// The capacity of the checkpoint-sync write pipeline: how far the
+    /// The capacity of the worker-to-disk-writer channel: how far the
     /// finalized state's database writes may fall behind the in-memory
     /// block commits during the initial checkpoint sync.
     ///
