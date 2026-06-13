@@ -1,5 +1,7 @@
 //! Fixed test vectors for zebra-network configuration.
 
+use std::{collections::HashSet, time::Duration};
+
 use static_assertions::const_assert;
 use zebra_chain::{
     block::Height,
@@ -10,8 +12,9 @@ use zebra_chain::{
 };
 
 use crate::{
+    config::CacheDir,
     constants::{INBOUND_PEER_LIMIT_MULTIPLIER, OUTBOUND_PEER_LIMIT_MULTIPLIER},
-    Config,
+    Config, PeerSocketAddr,
 };
 
 #[test]
@@ -145,5 +148,46 @@ fn temporary_orchard_disabling_soft_fork_height_serialization_roundtrip() {
     assert_eq!(
         params.temporary_orchard_disabling_soft_fork_height(),
         Some(soft_fork_height),
+    );
+}
+
+/// Check that `initial_peers()` returns cached peers without blocking on DNS when the disk cache
+/// is populated but no DNS seeders are configured.
+///
+/// This guards the reliability fix that lets Zebra bootstrap from its disk cache even when the DNS
+/// seeders can't be reached: `resolve_peers` must not block startup waiting for DNS when usable
+/// cached peers are already available.
+#[tokio::test]
+async fn initial_peers_uses_cache_without_blocking_on_dns() {
+    let _init_guard = zebra_test::init();
+
+    let cache_dir = tempfile::tempdir().expect("temporary directory is created successfully");
+
+    let config = Config {
+        network: Network::Mainnet,
+        // No DNS seeders, so the only initial peers come from the disk cache.
+        initial_mainnet_peers: HashSet::new().into_iter().collect(),
+        cache_dir: CacheDir::custom_path(cache_dir.path()),
+        ..Config::default()
+    };
+
+    // Write a known peer to the disk cache.
+    let cached_peer: PeerSocketAddr = "192.0.2.1:8233"
+        .parse()
+        .expect("hard-coded peer address is valid");
+    config
+        .update_peer_cache(HashSet::from([cached_peer]))
+        .await
+        .expect("writing the peer cache succeeds");
+
+    // `initial_peers()` must return promptly (the DNS retry loop must not run when the cache
+    // already provides usable peers). Use a short timeout to catch a regression that blocks here.
+    let initial_peers = tokio::time::timeout(Duration::from_secs(5), config.initial_peers())
+        .await
+        .expect("initial_peers() must not block on DNS when cached peers are available");
+
+    assert!(
+        initial_peers.contains(&cached_peer),
+        "initial_peers() should include the cached peer, got: {initial_peers:?}"
     );
 }
