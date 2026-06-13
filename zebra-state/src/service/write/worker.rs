@@ -49,7 +49,7 @@ use crate::{
             update_latest_chain_channels, validate_and_commit_non_finalized, WriteMessage,
             MIN_CHECKPOINT_SYNC_RETAINED_BLOCKS, NO_DISK_TIP_HEIGHT, PARENT_ERROR_MAP_LIMIT,
         },
-        ChainTipBlock, ChainTipSender,
+        ChainTipBlock, ChainTipSender, InvalidateError, ReconsiderError,
     },
     ValidateContextError,
 };
@@ -208,11 +208,11 @@ impl WriteBlockWorker {
                         WriteMessage::Semantic((semantically_verified, rsp_tx)) => self
                             .handle_semantic_block(&mut loop_state, semantically_verified, rsp_tx),
                         WriteMessage::Invalidate { hash, rsp_tx } => {
-                            self.handle_invalidate(hash, rsp_tx);
+                            self.handle_invalidate(&loop_state, hash, rsp_tx);
                             false
                         }
                         WriteMessage::Reconsider { hash, rsp_tx } => {
-                            self.handle_reconsider(hash, rsp_tx);
+                            self.handle_reconsider(&loop_state, hash, rsp_tx);
                             false
                         }
                     };
@@ -761,40 +761,108 @@ impl WriteBlockWorker {
     }
 
     /// Invalidates a block and its descendants in the non-finalized state.
+    ///
+    /// A block whose disk write is enqueued, in flight, or complete (its height
+    /// is below the disk frontier) can't be invalidated; above the frontier,
+    /// invalidation works even during checkpoint sync.
     fn handle_invalidate(
         &mut self,
+        loop_state: &WorkerLoopState<'_>,
         hash: block::Hash,
-        rsp_tx: tokio::sync::oneshot::Sender<Result<block::Hash, crate::service::InvalidateError>>,
+        rsp_tx: tokio::sync::oneshot::Sender<Result<block::Hash, InvalidateError>>,
     ) {
+        if self.is_below_disk_frontier(loop_state, hash) {
+            let _ = rsp_tx.send(Err(InvalidateError::ProcessingCheckpointedBlocks));
+            return;
+        }
+
         tracing::info!(?hash, "invalidating a block in the non-finalized state");
-        let _ = rsp_tx.send(self.non_finalized_state.invalidate_block(hash));
-        self.publish_after_admin_op();
+        let result = self.non_finalized_state.invalidate_block(hash);
+        let succeeded = result.is_ok();
+        let _ = rsp_tx.send(result);
+
+        // Publish only on success: a failed invalidate didn't change the state.
+        if succeeded {
+            self.publish_after_admin_op();
+        }
     }
 
     /// Reconsiders a previously invalidated block into the non-finalized state.
+    ///
+    /// A block whose disk write is enqueued, in flight, or complete (its height
+    /// is below the disk frontier) can't be reconsidered; above the frontier,
+    /// reconsideration works even during checkpoint sync.
     fn handle_reconsider(
         &mut self,
+        loop_state: &WorkerLoopState<'_>,
         hash: block::Hash,
-        rsp_tx: tokio::sync::oneshot::Sender<
-            Result<Vec<block::Hash>, crate::service::ReconsiderError>,
-        >,
+        rsp_tx: tokio::sync::oneshot::Sender<Result<Vec<block::Hash>, ReconsiderError>>,
     ) {
+        if self.is_below_disk_frontier(loop_state, hash) {
+            let _ = rsp_tx.send(Err(ReconsiderError::CheckpointCommitInProgress));
+            return;
+        }
+
         tracing::info!(?hash, "reconsidering a block in the non-finalized state");
-        let _ = rsp_tx.send(
-            self.non_finalized_state
-                .reconsider_block(hash, &self.finalized_state.db),
-        );
-        self.publish_after_admin_op();
+        let result = self
+            .non_finalized_state
+            .reconsider_block(hash, &self.finalized_state.db);
+        let succeeded = result.is_ok();
+        let _ = rsp_tx.send(result);
+
+        if succeeded {
+            self.publish_after_admin_op();
+        }
     }
 
-    /// Publishes the latest chain channels after an invalidate or reconsider.
+    /// Returns `true` if `hash`'s height is below the disk frontier (its disk
+    /// write is enqueued, in flight, or complete), so it can't be the target of
+    /// an invalidate or reconsider.
+    ///
+    /// A hash that isn't in any non-finalized chain (already finalized, or
+    /// unknown) is treated as below the frontier: invalidating it is either
+    /// impossible or already covered by the gate.
+    fn is_below_disk_frontier(&self, loop_state: &WorkerLoopState<'_>, hash: block::Hash) -> bool {
+        match self.non_finalized_state.height_by_hash(hash) {
+            Some(height) => height < loop_state.next_disk_height,
+            None => true,
+        }
+    }
+
+    /// Publishes the latest chain channels after a successful invalidate or
+    /// reconsider, tolerating an emptied non-finalized state.
+    ///
+    /// Invalidating the only chain leaves the non-finalized state empty; in
+    /// that case publish the empty snapshot and fall the chain tip back to the
+    /// finalized tip. Readers already tolerate snapshots that drop blocks
+    /// (reorg semantics).
     fn publish_after_admin_op(&mut self) {
-        update_latest_chain_channels(
-            &self.non_finalized_state,
-            &mut self.chain_tip_sender,
-            &self.non_finalized_state_sender,
-            self.backup_dir_path.as_deref(),
-        );
+        if self.non_finalized_state.best_chain().is_some() {
+            update_latest_chain_channels(
+                &self.non_finalized_state,
+                &mut self.chain_tip_sender,
+                &self.non_finalized_state_sender,
+                self.backup_dir_path.as_deref(),
+            );
+            return;
+        }
+
+        // The non-finalized state is empty: publish the empty snapshot and fall
+        // the chain tip back to the finalized tip.
+        if let Some(backup_dir_path) = self.backup_dir_path.as_deref() {
+            self.non_finalized_state.write_to_backup(backup_dir_path);
+        }
+        let _ = self
+            .non_finalized_state_sender
+            .send(self.non_finalized_state.clone());
+
+        let finalized_tip = self
+            .finalized_state
+            .db
+            .tip_block()
+            .map(crate::CheckpointVerifiedBlock::from)
+            .map(ChainTipBlock::from);
+        self.chain_tip_sender.set_finalized_tip(finalized_tip);
     }
 }
 

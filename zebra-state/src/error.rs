@@ -138,8 +138,9 @@ impl From<ValidateContextError> for CommitCheckpointVerifiedError {
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum InvalidateError {
-    /// The state is currently checkpointing blocks and cannot accept invalidation requests.
-    #[error("cannot invalidate blocks while still committing checkpointed blocks")]
+    /// The target block's disk write is in flight or complete (its height is at
+    /// or below the write frontier), so it can no longer be invalidated.
+    #[error("cannot invalidate a block whose disk write is in flight or complete")]
     ProcessingCheckpointedBlocks,
 
     /// Sending the invalidate request to the block write task failed.
@@ -171,8 +172,9 @@ pub enum ReconsiderError {
     #[error("Invalidated blocks list is empty when it should contain at least one block")]
     InvalidatedBlocksEmpty,
 
-    /// The state is currently checkpointing blocks and cannot accept reconsider requests.
-    #[error("cannot reconsider blocks while still committing checkpointed blocks")]
+    /// The target block's disk write is in flight or complete (its height is at
+    /// or below the write frontier), so it can no longer be reconsidered.
+    #[error("cannot reconsider a block whose disk write is in flight or complete")]
     CheckpointCommitInProgress,
 
     /// Sending the reconsider request to the block write task failed.

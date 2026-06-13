@@ -670,7 +670,12 @@ impl NonFinalizedState {
         };
 
         let invalidated_blocks = if chain.non_finalized_root_hash() == block_hash {
-            self.chain_set.remove(&chain);
+            // Remove the chain by tip hash, not by `BTreeSet::remove`:
+            // `Chain::cmp` panics when two chains tie on work and tip hash,
+            // which a remove-by-equal-value search would hit.
+            let chain_tip_hash = chain.non_finalized_tip_hash();
+            self.chain_set
+                .retain(|c| c.non_finalized_tip_hash() != chain_tip_hash);
             chain.blocks.values().cloned().collect()
         } else {
             let (new_chain, invalidated_blocks) = chain
@@ -985,6 +990,14 @@ impl NonFinalizedState {
             .iter()
             .rev()
             .any(|chain| chain.height_by_hash.contains_key(hash))
+    }
+
+    /// Returns the height of `hash` in any known chain, if present.
+    pub fn height_by_hash(&self, hash: block::Hash) -> Option<block::Height> {
+        self.chain_set
+            .iter()
+            .rev()
+            .find_map(|chain| chain.height_by_hash(hash))
     }
 
     /// Returns the first chain satisfying the given predicate.
