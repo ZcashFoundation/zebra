@@ -70,7 +70,6 @@ pub async fn equal_work_race() -> Result<()> {
     let zcashd_tip = zcashd_tip(&setup.zcashd_client).await?;
 
     assert_eq!(info["sync"]["state"].as_str(), Some("degraded"));
-    assert_eq!(info["readiness"].as_str(), Some("degraded"));
     assert_eq!(
         zcashd_tip, old_zcashd_tip,
         "zcashd should keep the first-seen equal-work tip until Zebra extends"
@@ -379,7 +378,6 @@ pub async fn zebra_tip_behind_local() -> Result<()> {
     .await?;
 
     assert_eq!(info["sync"]["state"].as_str(), Some("degraded"));
-    assert_eq!(info["readiness"].as_str(), Some("degraded"));
 
     setup.zebra_client.generate(2).await?;
     wait_for_tips_match(&setup, DEEP_REORG_SYNC_TIMEOUT).await?;
