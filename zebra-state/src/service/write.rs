@@ -571,8 +571,10 @@ impl WriteBlockWorkerTask {
 
                 // Commit the block to the non-finalized state: a fast,
                 // in-memory commit that updates the trees, nullifiers, and
-                // UTXOs without the disk write.
-                let tip_block = non_finalized_state
+                // UTXOs without the disk write. It also returns the finalizable
+                // block, with its treestate already computed during the chain
+                // update and its spent UTXOs already resolved by the commit.
+                let (tip_block, finalizable) = non_finalized_state
                     .commit_checkpoint_block(checkpoint_verified, &finalized_state.db)
                     .expect(
                         "checkpoint block commits to the non-finalized state can't fail: \
@@ -581,13 +583,6 @@ impl WriteBlockWorkerTask {
                     );
 
                 chain_tip_sender.set_best_non_finalized_tip(tip_block);
-
-                // Hand the just-committed tip to the disk writer, with its
-                // treestate already computed during the chain update and its
-                // spent UTXOs already resolved by the commit.
-                let finalizable = non_finalized_state
-                    .peek_finalize_tip()
-                    .expect("the non-finalized state is not empty: a block was just committed");
 
                 if write_tx.send(finalizable).is_err() {
                     // The disk writer panicked; exiting unwinds the scope.

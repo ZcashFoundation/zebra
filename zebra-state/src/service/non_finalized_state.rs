@@ -309,16 +309,71 @@ impl NonFinalizedState {
 
     /// Finalize the lowest height block in the non-finalized portion of the best
     /// chain and update all side-chains to match.
+    ///
+    /// This is the best-chain case of [`finalize_root`](Self::finalize_root);
+    /// see it for the side-chain handling and cache feeding.
     pub fn finalize(&mut self) -> FinalizableBlock {
+        self.finalize_root(None)
+    }
+
+    /// Finalize the root block of the chain selected by `expected_root_hash`,
+    /// and update all other chains to match.
+    ///
+    /// - `None` selects the **best chain** (highest work); its root is
+    ///   finalized. This is the reorg-limit overflow case.
+    /// - `Some(hash)` selects the chain whose **root hash** is `hash`; that
+    ///   exact block is finalized. This is the checkpoint-pipeline prune case,
+    ///   where the disk writer has already made a specific block durable and
+    ///   the in-memory copy must be retired by hash, not by work — a transient
+    ///   adversarial fork must never cause the wrong root to be popped.
+    ///
+    /// Any chain whose root differs from the finalized block forked below it
+    /// and can never finalize, so it is dropped whole (the existing
+    /// side-chain-drop semantics, made hash-precise).
+    ///
+    /// While the recently-finalized cache is enabled, the finalized root's
+    /// still-spendable outputs are cached so checkpoint-sync spend lookups
+    /// stay in memory (see [`PrunedChain`]).
+    ///
+    /// # Panics
+    ///
+    /// If `Some(hash)` is given but no chain has that root hash: the caller
+    /// only prunes blocks it observed the disk writer finalize, which are
+    /// always still rooted in the non-finalized state.
+    pub fn finalize_root(&mut self, expected_root_hash: Option<block::Hash>) -> FinalizableBlock {
         // Chain::cmp uses the partial cumulative work, and the hash of the tip block.
         // Neither of these fields has interior mutability.
         // (And when the tip block is dropped for a chain, the chain is also dropped.)
         #[allow(clippy::mutable_key_type)]
         let chains = mem::take(&mut self.chain_set);
-        let mut chains = chains.into_iter();
 
-        // extract best chain
-        let mut best_chain = chains.next_back().expect("there's at least one chain");
+        // Select the chain to finalize the root of: the one with the expected
+        // root hash, or the best chain (highest work, the iterator's last).
+        let mut chosen_chain;
+        let other_chains: Vec<Arc<Chain>>;
+        match expected_root_hash {
+            Some(expected) => {
+                let mut chosen = None;
+                let mut rest = Vec::new();
+                for chain in chains {
+                    if chosen.is_none() && chain.non_finalized_root_hash() == expected {
+                        chosen = Some(chain);
+                    } else {
+                        rest.push(chain);
+                    }
+                }
+                chosen_chain = chosen.expect(
+                    "the chain with the durable root is still in the non-finalized state: \
+                     the worker only prunes blocks it observed the disk writer finalize",
+                );
+                other_chains = rest;
+            }
+            None => {
+                let mut chains = chains.into_iter();
+                chosen_chain = chains.next_back().expect("there's at least one chain");
+                other_chains = chains.collect();
+            }
+        }
 
         // Cache the root's still-spendable outputs before popping it, so
         // checkpoint-sync spend lookups stay in memory (see [`PrunedChain`]).
@@ -327,37 +382,34 @@ impl NonFinalizedState {
         // `spent_outputs` field can't be used here because it also contains
         // every new output (see `with_block_and_spent_utxos`).
         if let Some(pruned_chain) = self.pruned_chain.as_mut() {
-            if let Some((root_height, root)) = best_chain.blocks.first_key_value() {
+            if let Some((root_height, root)) = chosen_chain.blocks.first_key_value() {
                 pruned_chain.add_finalized_root(
                     *root_height,
                     root.new_outputs
                         .iter()
-                        .filter(|(outpoint, _)| !best_chain.spent_utxos.contains_key(outpoint)),
+                        .filter(|(outpoint, _)| !chosen_chain.spent_utxos.contains_key(outpoint)),
                 );
             }
         }
 
         // clone if required
-        let mut_best_chain = Arc::make_mut(&mut best_chain);
+        let mut_chosen_chain = Arc::make_mut(&mut chosen_chain);
 
-        // extract the rest into side_chains so they can be mutated
-        let side_chains = chains;
+        // Pop the lowest height block from the chosen chain to be finalized,
+        // and also obtain its associated treestate.
+        let (finalized_root, root_treestate) = mut_chosen_chain.pop_root();
 
-        // Pop the lowest height block from the best chain to be finalized, and
-        // also obtain its associated treestate.
-        let (best_chain_root, root_treestate) = mut_best_chain.pop_root();
-
-        // add best_chain back to `self.chain_set`
-        if !best_chain.is_empty() {
-            self.insert(best_chain);
+        // add the chosen chain back to `self.chain_set`
+        if !chosen_chain.is_empty() {
+            self.insert(chosen_chain);
         }
 
-        // for each remaining chain in side_chains
-        for mut side_chain in side_chains.rev() {
-            if side_chain.non_finalized_root_hash() != best_chain_root.hash {
-                // If we popped the root, the chain would be empty or orphaned,
-                // so just drop it now.
-                drop(side_chain);
+        // for each remaining chain
+        for mut other_chain in other_chains.into_iter().rev() {
+            if other_chain.non_finalized_root_hash() != finalized_root.hash {
+                // This chain forked below the finalized block, so popping the
+                // root would leave it empty or orphaned: drop it now.
+                drop(other_chain);
 
                 continue;
             }
@@ -365,24 +417,24 @@ impl NonFinalizedState {
             // otherwise, the popped root block is the same as the finalizing block
 
             // clone if required
-            let mut_side_chain = Arc::make_mut(&mut side_chain);
+            let mut_other_chain = Arc::make_mut(&mut other_chain);
 
             // remove the first block from `chain`
-            let (side_chain_root, _treestate) = mut_side_chain.pop_root();
-            assert_eq!(side_chain_root.hash, best_chain_root.hash);
+            let (other_chain_root, _treestate) = mut_other_chain.pop_root();
+            assert_eq!(other_chain_root.hash, finalized_root.hash);
 
             // add the chain back to `self.chain_set`
-            self.insert(side_chain);
+            self.insert(other_chain);
         }
 
         // Remove all invalidated_blocks at or below the finalized height
         self.invalidated_blocks
-            .retain(|height, _blocks| *height >= best_chain_root.height);
+            .retain(|height, _blocks| *height >= finalized_root.height);
 
         self.update_metrics_for_chains();
 
         // Add the treestate to the finalized block.
-        FinalizableBlock::new(best_chain_root, root_treestate)
+        FinalizableBlock::new(finalized_root, root_treestate)
     }
 
     /// Commit block to the non-finalized state, on top of:
@@ -417,47 +469,76 @@ impl NonFinalizedState {
     }
 
     /// Commits a checkpoint-verified block to the non-finalized state, on top
-    /// of the single best chain (the pipelined checkpoint write path; design
-    /// doc `docs/design/known-hash-ibd.md` §12 / F3).
+    /// of the chain whose tip is the block's parent (the pipelined checkpoint
+    /// write path; design doc `docs/design/known-hash-ibd.md` §7.3).
     ///
     /// This is the fast in-memory commit: the full contextual validation that
     /// semantically-verified blocks go through (transparent spend checks
-    /// excepted, which still run for UTXO tracking; anchor checks and the
-    /// block commitment check are skipped) is unnecessary because every block
-    /// in the range is pinned by hash.
+    /// excepted, which still run for UTXO tracking; anchor checks are skipped)
+    /// is unnecessary because every block in the range is pinned by hash. The
+    /// one exception is the NU5-onward `hashBlockCommitments` check, which the
+    /// pinned hashes don't cover (see below); it runs before any mutation.
     ///
-    /// Returns a `ChainTipBlock` for chain tip updates. The block is later
-    /// written to disk by the pipeline and pruned from memory by
-    /// [`finalize`](Self::finalize).
-    /// # Panics
+    /// Unlike full validation, this is a single-pass fast path, but it is
+    /// **fork-tolerant**: it locates the parent chain by tip hash and sources
+    /// its chain context (spends, value balance, history tree) from that
+    /// chain. During pure checkpoint sync there is exactly one chain and the
+    /// parent is always its tip; a semantic block committed mid-sync can leave
+    /// a second chain, and a later checkpoint block forking off the canonical
+    /// one is committed correctly against its own parent.
     ///
-    /// If the chain set holds more than one chain: the pipeline is the only
-    /// writer while it runs, and it maintains a single best chain.
+    /// All fallible, peer-influenceable checks run **before** any mutation, so
+    /// every `Err` return leaves the non-finalized state untouched. This lets
+    /// the write worker treat a commit error as non-fatal: it resets the
+    /// service to the parent and the honest copy recommits cleanly.
+    ///
+    /// Returns the new tip's [`ChainTipBlock`] for chain tip updates, and a
+    /// [`FinalizableBlock`] carrying the just-pushed block and its freshly
+    /// computed treestate, ready to hand to the disk writer. The block is
+    /// later written to disk by the pipeline and pruned from memory by
+    /// [`finalize_root`](Self::finalize_root).
     #[tracing::instrument(level = "debug", skip(self, finalized_state, checkpoint_verified))]
     #[allow(clippy::unwrap_in_result)]
     pub fn commit_checkpoint_block(
         &mut self,
         checkpoint_verified: crate::CheckpointVerifiedBlock,
         finalized_state: &ZebraDb,
-    ) -> Result<crate::service::ChainTipBlock, ValidateContextError> {
+    ) -> Result<(crate::service::ChainTipBlock, FinalizableBlock), ValidateContextError> {
         let prepared: SemanticallyVerifiedBlock = checkpoint_verified.into();
         let height = prepared.height;
         let hash = prepared.hash;
+        let parent_hash = prepared.block.header.previous_block_hash;
+
+        // Locate the parent chain by tip hash, or plan a new chain forked from
+        // the finalized tip. Both arms validate against the located context;
+        // neither mutates the chain set yet, so an error below is recoverable.
+        let parent_chain = self.find_chain(|chain| chain.non_finalized_tip_hash() == parent_hash);
+
+        if parent_chain.is_none() && parent_hash != finalized_state.finalized_tip_hash() {
+            // The worker gates checkpoint commits so this can't be reached in
+            // practice, but return a real error rather than panicking.
+            return Err(ValidateContextError::NotReadyToBeCommitted);
+        }
+
+        // The chain context the checks below read from: the located parent
+        // chain, or empty maps and finalized-tip trees for a new chain. This
+        // fixes the previous single-best-chain assumption — a fork off a
+        // non-best chain reads its own parent's context.
+        let empty_created = HashMap::new();
+        let empty_spent = HashMap::new();
+        let (chain_created_utxos, chain_spent_utxos) = match &parent_chain {
+            Some(chain) => (&chain.created_utxos, &chain.spent_utxos),
+            None => (&empty_created, &empty_spent),
+        };
 
         // The spent-UTXO lookup still runs so the chain tracks UTXOs
-        // correctly; anchor and block commitment checks are skipped (the
-        // pinned hash chain guarantees the block's contents).
+        // correctly; anchor checks are skipped (the pinned hash chain
+        // guarantees the block's contents).
         //
         // Passing `created_utxos` without filtering out spent outputs is
         // correct, because spends of already-spent outputs are rejected
         // against `spent_utxos` before the created map is consulted;
         // filtering would clone the whole map on every block.
-        let empty_created = HashMap::new();
-        let empty_spent = HashMap::new();
-        let (chain_created_utxos, chain_spent_utxos) = match self.best_chain() {
-            Some(chain) => (&chain.created_utxos, &chain.spent_utxos),
-            None => (&empty_created, &empty_spent),
-        };
         let spent_utxos = check::utxo::transparent_spend(
             &prepared,
             chain_created_utxos,
@@ -466,29 +547,11 @@ impl NonFinalizedState {
             finalized_state,
         )?;
 
-        // The resolved spends can never be read again (the pinned chain has
-        // no double-spends), so drop them from the recently-finalized cache.
-        // This must use the precise spend map: the `spent_outputs` field on
-        // the contextual block below also contains every new output.
-        if let Some(pruned_chain) = self.pruned_chain.as_mut() {
-            pruned_chain.remove_spent(spent_utxos.keys());
-        }
-
-        // All the fields are cheap copies or `Arc` clones.
-        let tip_block = crate::service::ChainTipBlock {
-            hash,
-            height,
-            time: prepared.block.header.time,
-            transactions: prepared.block.transactions.clone(),
-            transaction_hashes: prepared.transaction_hashes.clone(),
-            previous_block_hash: prepared.block.header.previous_block_hash,
-        };
-
         let transaction_count = prepared.block.transactions.len();
         let spent_utxo_count = spent_utxos.len();
         let contextual = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
             prepared,
-            spent_utxos,
+            spent_utxos.clone(),
             crate::service::finalized_state::calculate_deferred_pool_balance_change(
                 height,
                 &self.network,
@@ -504,19 +567,56 @@ impl NonFinalizedState {
             }
         })?;
 
-        // Take the chain out of the chain set: with the set entry removed,
-        // the `Arc` is uniquely owned (the pipeline doesn't publish chain
-        // snapshots), so the push below mutates the chain in place instead
-        // of deep-cloning it, and the pre-push chain can't accumulate in the
-        // set as a stale prefix of the new chain.
-        let chain = match self.chain_set.pop_last() {
-            Some(chain) => {
-                assert!(
-                    self.chain_set.is_empty(),
-                    "the checkpoint pipeline maintains a single best chain"
-                );
+        // The history tree the block commitment is checked against: the parent
+        // chain's, or the finalized tip's for a new chain.
+        let history_tree = match &parent_chain {
+            Some(chain) => chain.history_block_commitment_tree(),
+            None => finalized_state.history_tree(),
+        };
 
-                Arc::try_unwrap(chain).unwrap_or_else(|shared_chain| (*shared_chain).clone())
+        // Validate the block's commitment to the chain history before any
+        // mutation. The checkpoint hash list pins the header and, via the
+        // merkle root, the transaction IDs — but for NU5-onward blocks the
+        // txid excludes authorizing data (ZIP-244), so a peer could
+        // substitute signatures, proofs, or ciphertexts without changing any
+        // pinned hash. The `hashBlockCommitments` check binds the
+        // authorizing-data root and closes that gap; it is the one check from
+        // `validate_and_update_parallel` that the pinned hashes don't already
+        // cover. (The sprout anchor check stays skipped: pre-NU5 txids commit
+        // to the full transaction bytes, so the merkle root already pins
+        // joinsplit anchors, and there are no sprout joinsplits after NU5.)
+        check::block_commitment_is_valid_for_chain_history(
+            contextual.block.clone(),
+            &self.network,
+            &history_tree,
+        )?;
+
+        // Every fallible check has passed; from here on the state is mutated.
+
+        // The resolved spends can never be read again (the pinned chain has
+        // no double-spends), so drop them from the recently-finalized cache.
+        // This uses the precise spend map: the `spent_outputs` field on the
+        // contextual block also contains every new output.
+        if let Some(pruned_chain) = self.pruned_chain.as_mut() {
+            pruned_chain.remove_spent(spent_utxos.keys());
+        }
+
+        // Take the parent chain out of the chain set (if it was in it): with
+        // the set entry removed, the `Arc` is uniquely owned during pure
+        // checkpoint sync (the pipeline doesn't publish chain snapshots), so
+        // the push below mutates the chain in place instead of deep-cloning
+        // it, and the pre-push chain can't accumulate in the set as a stale
+        // prefix of the new chain. A freshly forked chain isn't in the set,
+        // so the take is a no-op for it.
+        //
+        // The parent chain is removed by tip hash, not by `BTreeSet::remove`:
+        // `Chain::cmp` panics when two chains tie on work and tip hash, which
+        // a remove-by-equal-value search would hit.
+        let chain = match parent_chain {
+            Some(parent_chain) => {
+                self.chain_set
+                    .retain(|chain| chain.non_finalized_tip_hash() != parent_hash);
+                Arc::try_unwrap(parent_chain).unwrap_or_else(|shared_chain| (*shared_chain).clone())
             }
             // The first block after the finalized tip starts a new chain.
             None => Chain::new(
@@ -532,56 +632,33 @@ impl NonFinalizedState {
             ),
         };
 
-        // Validate the block's commitment to the chain history before
-        // pushing. The checkpoint hash list pins the header and, via the
-        // merkle root, the transaction IDs — but for NU5-onward blocks the
-        // txid excludes authorizing data (ZIP-244), so a peer could
-        // substitute signatures, proofs, or ciphertexts without changing any
-        // pinned hash. The `hashBlockCommitments` check binds the
-        // authorizing-data root and closes that gap; it is the one check from
-        // `validate_and_update_parallel` that the pinned hashes don't already
-        // cover. (The sprout anchor check stays skipped: pre-NU5 txids commit
-        // to the full transaction bytes, so the merkle root already pins
-        // joinsplit anchors, and there are no sprout joinsplits after NU5.)
-        check::block_commitment_is_valid_for_chain_history(
-            contextual.block.clone(),
-            &self.network,
-            &chain.history_block_commitment_tree(),
-        )?;
-
         // Push onto the chain, updating trees, nullifiers, and UTXOs.
         //
-        // If the push fails, the chain is lost, because `push` consumes it;
-        // callers treat errors from this method as fatal.
-        let chain = Arc::new(chain.push(contextual)?);
+        // The push can only fail by repeating one of the checks already run
+        // above against the same pinned, consistent context, so a failure
+        // here is an internal invariant violation, not a peer-influenceable
+        // error: the chain is consumed and lost, which is acceptable for a
+        // bug that can't happen.
+        let chain = Arc::new(chain.push(contextual).expect(
+            "checkpoint block push can't fail after its spend, value-balance, \
+             and commitment checks passed against the same chain context",
+        ));
+
+        // Build the finalizable block from the freshly pushed tip, cloning the
+        // data the chain just computed, before inserting the chain back.
+        let tip = chain
+            .tip_block()
+            .expect("the chain is not empty: a block was just pushed");
+        let tip_block = crate::service::ChainTipBlock::from(tip.clone());
+        let treestate = chain
+            .treestate(height.into())
+            .expect("the treestate exists for the tip height because the block is in the chain");
+        let finalizable = FinalizableBlock::new(tip.clone(), treestate);
 
         self.insert(chain);
         self.update_metrics_for_committed_block(height, hash);
 
-        Ok(tip_block)
-    }
-
-    /// Returns a [`FinalizableBlock::Contextual`] for the tip of the best
-    /// chain by cloning data already computed during the chain update,
-    /// **without** mutating the non-finalized state.
-    ///
-    /// Used by the pipelined checkpoint write path to send the tip block to
-    /// the disk writer immediately after committing it to the non-finalized
-    /// state; the prune loop removes the block once its disk write completes.
-    ///
-    /// Returns `None` if the non-finalized state is empty.
-    #[allow(clippy::unwrap_in_result)]
-    pub fn peek_finalize_tip(&self) -> Option<FinalizableBlock> {
-        let best_chain = self.best_chain()?;
-        let tip = best_chain
-            .tip_block()
-            .expect("the best chain is not empty because best_chain returned it");
-        let tip_height = tip.height;
-        let treestate = best_chain
-            .treestate(tip_height.into())
-            .expect("the treestate exists for the tip height because the block is in the chain");
-
-        Some(FinalizableBlock::new(tip.clone(), treestate))
+        Ok((tip_block, finalizable))
     }
 
     /// Invalidate block with hash `block_hash` and all descendants from the non-finalized state. Insert
