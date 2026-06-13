@@ -37,7 +37,7 @@ where
     T: Service<R>,
     T::Future: Send + 'static,
     T::Error: Into<BoxError>,
-    K: Eq + Hash,
+    K: Clone + Eq + Hash,
     R: Send + 'static,
 {
     /// Creates a new [`FairBuffer`] wrapping `service`, and spawns its
@@ -90,12 +90,12 @@ where
     T: Service<R>,
     T::Future: Send + 'static,
     T::Error: Into<BoxError>,
-    K: Eq + Hash,
+    K: Clone + Eq + Hash,
     R: Send + 'static,
 {
     type Response = T::Response;
     type Error = BoxError;
-    type Future = ResponseFuture<T::Future>;
+    type Future = ResponseFuture<K, T::Future>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         // The fair buffer is always ready unless its worker has shut down:
@@ -115,8 +115,11 @@ where
         let span = tracing::Span::current();
         let (tx, rx) = oneshot::channel();
 
-        match self.shared.push(key, Message { request, tx, span }) {
-            Push::Queued => ResponseFuture::new(rx),
+        // The response future records the inner service's response time
+        // against the caller's recent cost, so it keeps its own copy of the
+        // key.
+        match self.shared.push(key.clone(), Message { request, tx, span }) {
+            Push::Queued => ResponseFuture::new(rx, key, self.shared.costs()),
             Push::Failed(error) => ResponseFuture::failed(error),
         }
     }

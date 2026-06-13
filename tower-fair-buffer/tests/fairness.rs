@@ -374,3 +374,49 @@ async fn worker_exits_when_handles_dropped() {
     );
     assert_ready!(worker.poll());
 }
+
+/// Slow responses raise a caller's cost: with equal request counts, the peer
+/// whose requests are expensive to serve sorts after the cheap one.
+#[tokio::test(start_paused = true)]
+async fn response_time_raises_cost() {
+    let _init_guard = zebra_test::init();
+
+    let (mut service, worker, mut handle) = test_buffer(10);
+    let mut worker = task::spawn(worker);
+
+    // Both peers send one request; the slow peer's takes 200ms to serve.
+    handle.allow(2);
+    let mut slow1 = send(&mut service, Some("slow"), "slow1").await;
+    let mut fast1 = send(&mut service, Some("fast"), "fast1").await;
+    assert_pending!(worker.poll());
+
+    // Dispatch slow1, then let 200ms of (paused) service time pass before
+    // responding. The response future must be polled before time advances,
+    // so it observes the dispatch.
+    let (request, respond_slow) =
+        assert_ready!(handle.poll_request()).expect("mock service is open");
+    assert_eq!(request, "slow1");
+    assert_pending!(slow1.poll());
+    tokio::time::advance(Duration::from_millis(200)).await;
+    respond_slow.send_response("slow1");
+    assert_eq!(assert_ready_ok!(slow1.poll()), "slow1");
+
+    // Dispatch fast1 and respond immediately: no extra cost.
+    let (request, respond_fast) =
+        assert_ready!(handle.poll_request()).expect("mock service is open");
+    assert_eq!(request, "fast1");
+    assert_pending!(fast1.poll());
+    respond_fast.send_response("fast1");
+    assert_eq!(assert_ready_ok!(fast1.poll()), "fast1");
+
+    // Each peer sends one more request, slow first. Counted by requests
+    // alone they would tie (and FIFO would serve slow first); with the
+    // 200ms = 20 cost points recorded, the fast peer wins.
+    handle.allow(0);
+    let _slow2 = send(&mut service, Some("slow"), "slow2").await;
+    let _fast2 = send(&mut service, Some("fast"), "fast2").await;
+
+    handle.allow(2);
+    assert_pending!(worker.poll());
+    assert_dispatch_order(&mut handle, &["fast2", "slow2"]);
+}

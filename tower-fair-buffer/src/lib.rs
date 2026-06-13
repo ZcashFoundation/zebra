@@ -6,19 +6,24 @@
 //! [`Worker`] task dispatches queued requests to the inner service, one at a
 //! time, in priority order:
 //!
-//! - Requests from the caller with the lowest recent request count are
-//!   processed first, with FIFO order between requests of equal priority.
+//! - Requests from the caller with the lowest recent request *cost* are
+//!   processed first, with FIFO order between requests of equal priority. A
+//!   caller's cost counts one point per request, plus one point per 10ms the
+//!   inner service spends responding to its requests — so priority reflects
+//!   both how often a caller asks and how expensive its requests are to
+//!   serve.
 //! - When the buffer is full, the queued request with the *highest* recent
-//!   request count is shed: its response future fails with [`error::Shed`].
+//!   request cost is shed: its response future fails with [`error::Shed`].
 //! - Requests without a caller key (internal requests) always have priority 0,
 //!   so they are processed before caller requests and are never shed.
 //!
-//! Recent request counts decay using two map generations that rotate on a
-//! fixed interval, like Zebra's inventory registry: a caller's count is the
-//! sum of its entries in the current and previous generations, so counts
+//! Recent request costs decay using two map generations that rotate on a
+//! fixed interval, like Zebra's inventory registry: a caller's cost is the
+//! sum of its entries in the current and previous generations, so costs
 //! expire after at most two rotation intervals. Queued requests keep the
 //! priority they were assigned when they were enqueued, even if a rotation
-//! happens while they are queued.
+//! happens while they are queued. Response times are recorded when each
+//! response completes, so they affect the caller's *next* requests.
 //!
 //! ## Differences from `tower::buffer`
 //!
@@ -27,9 +32,9 @@
 //!
 //! - The FIFO mpsc channel is replaced with a [`crossbeam_skiplist::SkipMap`]
 //!   ordered by `(priority, FIFO sequence number)`. The skip map provides the
-//!   priority ordering; a single small mutex serializes queue mutations,
-//!   request counting, and teardown, which keeps capacity enforcement and
-//!   shedding exact, and avoids lock-free teardown races. Contention on the
+//!   priority ordering; a single small mutex serializes queue mutations and
+//!   teardown (with caller costs under their own lock), which keeps capacity
+//!   enforcement and shedding exact, and avoids lock-free teardown races. Contention on the
 //!   mutex is low when each caller has at most one in-flight request, like
 //!   Zebra's peer connections.
 //! - Backpressure is replaced with load shedding: `poll_ready` is always ready

@@ -2,14 +2,14 @@
 
 use std::{
     hash::Hash,
-    sync::{Mutex, MutexGuard},
+    sync::{Arc, Mutex, MutexGuard},
 };
 
 use crossbeam_skiplist::SkipMap;
 use tokio::sync::Notify;
 
 use crate::{
-    counts::RecentRequestCounts,
+    counts::RecentRequestCosts,
     error::{Closed, ServiceError, Shed},
     message::Message,
     BoxError,
@@ -58,9 +58,16 @@ pub(crate) struct Shared<K, R, Fut> {
     /// The queued messages, ordered by `(priority, FIFO sequence number)`.
     queue: SkipMap<QueueKey, SlotCell<R, Fut>>,
 
-    /// The mutable queue state: request counts, sequence numbers, queue
-    /// length, and the worker failure slot.
-    state: Mutex<State<K>>,
+    /// The mutable queue state: sequence numbers, queue length, handle
+    /// count, and the worker failure slot.
+    state: Mutex<State>,
+
+    /// Each caller's recent request cost, under its own lock so response
+    /// futures can record response times without touching the queue state.
+    ///
+    /// The two locks are never held at the same time, so they can't
+    /// deadlock.
+    costs: Arc<Mutex<RecentRequestCosts<K>>>,
 
     /// Notifies the worker when a message is pushed.
     notify: Notify,
@@ -72,15 +79,12 @@ pub(crate) struct Shared<K, R, Fut> {
 
 /// The lock-protected part of [`Shared`].
 #[derive(Debug)]
-struct State<K> {
+struct State {
     /// The number of live `FairBuffer` handles sharing this queue.
     ///
     /// When it reaches zero the worker shuts down after draining the queue,
     /// matching `tower::buffer`'s teardown when all senders drop.
     handles: usize,
-
-    /// Each caller's recent request count.
-    counts: RecentRequestCounts<K>,
 
     /// The sequence number for the next queued message.
     next_seq: u64,
@@ -114,10 +118,10 @@ impl<K, R, Fut> Shared<K, R, Fut> {
 
         Self {
             queue: SkipMap::new(),
+            costs: Arc::new(Mutex::new(RecentRequestCosts::new())),
             state: Mutex::new(State {
                 // `FairBuffer::pair` creates the first handle.
                 handles: 1,
-                counts: RecentRequestCounts::new(),
                 next_seq: 0,
                 len: 0,
                 failed: None,
@@ -128,7 +132,7 @@ impl<K, R, Fut> Shared<K, R, Fut> {
     }
 
     /// Locks the shared state.
-    fn lock_state(&self) -> MutexGuard<'_, State<K>> {
+    fn lock_state(&self) -> MutexGuard<'_, State> {
         self.state
             .lock()
             .expect("a caller or the worker panicked while holding the fair buffer state lock")
@@ -143,10 +147,23 @@ impl<K, R, Fut> Shared<K, R, Fut> {
         self.notify.notified().await;
     }
 
-    /// Rotates the recent request counts, expiring counts recorded before
+    /// Rotates the recent request costs, expiring costs recorded before
     /// the last rotation.
     pub(crate) fn rotate_counts(&self) {
-        self.lock_state().counts.rotate();
+        self.lock_costs().rotate();
+    }
+
+    /// Returns a handle to the recent request costs, for response futures to
+    /// record response times.
+    pub(crate) fn costs(&self) -> Arc<Mutex<RecentRequestCosts<K>>> {
+        self.costs.clone()
+    }
+
+    /// Locks the recent request costs.
+    fn lock_costs(&self) -> MutexGuard<'_, RecentRequestCosts<K>> {
+        self.costs
+            .lock()
+            .expect("a caller or the worker panicked while holding the fair buffer costs lock")
     }
 
     /// Returns `Ok` if the fair buffer can accept requests, or the error
@@ -203,18 +220,23 @@ where
     where
         K: Eq + Hash,
     {
+        // The priority is the caller's recent request cost, read before the
+        // queue state lock: the two locks are taken sequentially, never
+        // nested. A request racing a rotation here gets a priority from one
+        // side of the rotation, which is harmless — priorities are a
+        // heuristic ordering, fixed at push time.
+        let priority = match key {
+            // Internal requests always have priority 0 and are never shed.
+            None => 0,
+            Some(key) => self.lock_costs().record_request(key),
+        };
+
         {
             let mut state = self.lock_state();
 
             if let Some(failed) = &state.failed {
                 return Push::Failed(failed.clone().into());
             }
-
-            let priority = match key {
-                // Internal requests always have priority 0 and are never shed.
-                None => 0,
-                Some(key) => state.counts.record(key),
-            };
 
             let seq = state.next_seq;
             state.next_seq = state.next_seq.wrapping_add(1);
@@ -241,7 +263,7 @@ where
     /// If the queue only contains internal requests, nothing is shed and the
     /// queue is left over capacity: internal requests are never shed, and
     /// internal callers are trusted to be finite and disciplined.
-    fn shed_highest(&self, state: &mut MutexGuard<'_, State<K>>) {
+    fn shed_highest(&self, state: &mut MutexGuard<'_, State>) {
         let Some(entry) = self.queue.back() else {
             return;
         };

@@ -56,13 +56,14 @@ use downloads::Downloads as BlockDownloads;
 /// and the peer might be disconnected.
 pub const MAX_INBOUND_RESPONSE_TIME: Duration = Duration::from_secs(5);
 
-/// The interval after which the inbound fair buffer's recent peer request counts decay.
+/// The interval after which the inbound fair buffer's recent peer request costs decay.
 ///
-/// Each peer's count covers at least one and at most two of these intervals
-/// (53-106 seconds). Matching `zebra_network`'s inventory rotation interval, it is
-/// less than the 75 second target block spacing, so inbound request fairness roughly
-/// tracks each peer's activity over the last block or so.
-pub const INBOUND_FAIRNESS_ROTATION_INTERVAL: Duration = Duration::from_secs(53);
+/// Each peer's cost covers at least one and at most two of these intervals
+/// (7-14 minutes, around 6-11 blocks). Long enough that a peer which floods the
+/// inbound service, or sends expensive requests, stays deprioritized across many
+/// blocks rather than recovering within one; short enough that it is forgiven
+/// within two windows once it quiets down.
+pub const INBOUND_FAIRNESS_ROTATION_INTERVAL: Duration = Duration::from_secs(7 * 60);
 
 /// The number of bytes the [`Inbound`] service will queue in response to a single block or
 /// transaction request, before ignoring any additional block or transaction IDs in that request.
