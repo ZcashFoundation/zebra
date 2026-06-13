@@ -1,17 +1,23 @@
-use super::error::ServiceError;
-use tokio::sync::{oneshot, OwnedSemaphorePermit};
+//! Fair buffer message types.
 
-/// Message sent over buffer
+use tokio::sync::oneshot;
+
+use crate::BoxError;
+
+/// Message sent to the fair buffer worker.
 #[derive(Debug)]
 pub(crate) struct Message<Request, Fut> {
     pub(crate) request: Request,
     pub(crate) tx: Tx<Fut>,
     pub(crate) span: tracing::Span,
-    pub(super) _permit: OwnedSemaphorePermit,
 }
 
-/// Response sender
-pub(crate) type Tx<Fut> = oneshot::Sender<Result<Fut, ServiceError>>;
+/// Response sender.
+///
+/// Unlike tower's buffer, the error payload is a [`BoxError`] rather than a
+/// shared `ServiceError`, so individual messages can fail with per-request
+/// errors like [`Shed`](crate::error::Shed).
+pub(crate) type Tx<Fut> = oneshot::Sender<Result<Fut, BoxError>>;
 
-/// Response receiver
-pub(crate) type Rx<Fut> = oneshot::Receiver<Result<Fut, ServiceError>>;
+/// Response receiver.
+pub(crate) type Rx<Fut> = oneshot::Receiver<Result<Fut, BoxError>>;

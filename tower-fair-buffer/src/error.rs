@@ -1,19 +1,30 @@
-//! Error types for the `Buffer` middleware.
+//! Error types for the `FairBuffer` middleware.
 
-use crate::BoxError;
 use std::{fmt, sync::Arc};
 
-/// An error produced by a [`Service`] wrapped by a [`Buffer`]
-///
-/// [`Service`]: crate::Service
-/// [`Buffer`]: crate::buffer::Buffer
+use crate::BoxError;
+
+/// An error produced by a `Service` wrapped by a `FairBuffer`.
 #[derive(Debug)]
 pub struct ServiceError {
     inner: Arc<BoxError>,
 }
 
-/// An error produced when the a buffer's worker closes unexpectedly.
+/// An error produced when the fair buffer's worker closes unexpectedly.
 pub struct Closed {
+    _p: (),
+}
+
+/// An error produced when the fair buffer is full and a queued request is
+/// shed to make room.
+///
+/// The request that is shed is the queued request whose caller had the
+/// highest recent request count when it was enqueued. Internal requests are
+/// never shed.
+///
+/// This error deliberately doesn't contain the caller key, so logging it
+/// can't leak caller identities like peer IP addresses.
+pub struct Shed {
     _p: (),
 }
 
@@ -35,7 +46,7 @@ impl ServiceError {
 
 impl fmt::Display for ServiceError {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        write!(fmt, "buffered service failed: {}", self.inner)
+        write!(fmt, "fair buffered service failed: {}", self.inner)
     }
 }
 
@@ -61,8 +72,30 @@ impl fmt::Debug for Closed {
 
 impl fmt::Display for Closed {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        fmt.write_str("buffer's worker closed unexpectedly")
+        fmt.write_str("fair buffer's worker closed unexpectedly")
     }
 }
 
 impl std::error::Error for Closed {}
+
+// ===== impl Shed =====
+
+impl Shed {
+    pub(crate) fn new() -> Self {
+        Shed { _p: () }
+    }
+}
+
+impl fmt::Debug for Shed {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        fmt.debug_tuple("Shed").finish()
+    }
+}
+
+impl fmt::Display for Shed {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        fmt.write_str("fair buffer overloaded: request shed")
+    }
+}
+
+impl std::error::Error for Shed {}

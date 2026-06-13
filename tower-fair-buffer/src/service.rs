@@ -1,183 +1,143 @@
+//! The `FairBuffer` service wrapper.
+
+use std::{
+    fmt,
+    hash::Hash,
+    sync::Arc,
+    task::{Context, Poll},
+    time::Duration,
+};
+
+use tokio::sync::oneshot;
+use tower::Service;
+
 use super::{
     future::ResponseFuture,
     message::Message,
-    worker::{Handle, Worker},
+    queue::{Push, Shared},
+    tagged::Tagged,
+    worker::Worker,
+    BoxError,
 };
 
-use futures_core::ready;
-use std::sync::Arc;
-use std::task::{Context, Poll};
-use tokio::sync::{mpsc, oneshot, OwnedSemaphorePermit, Semaphore};
-use tokio_util::sync::PollSemaphore;
-use tower::Service;
-
-/// Adds an mpsc buffer in front of an inner service.
+/// Adds a priority queue in front of an inner service, ordered by each
+/// caller's recent request count.
 ///
-/// See the module documentation for more details.
-#[derive(Debug)]
-pub struct Buffer<T, Request>
+/// See the crate documentation for more details.
+pub struct FairBuffer<T, K, R>
 where
-    T: Service<Request>,
+    T: Service<R>,
 {
-    // Note: this actually _is_ bounded, but rather than using Tokio's bounded
-    // channel, we use Tokio's semaphore separately to implement the bound.
-    tx: mpsc::UnboundedSender<Message<Request, T::Future>>,
-    // When the buffer's channel is full, we want to exert backpressure in
-    // `poll_ready`, so that callers such as load balancers could choose to call
-    // another service rather than waiting for buffer capacity.
-    //
-    // Unfortunately, this can't be done easily using Tokio's bounded MPSC
-    // channel, because it doesn't expose a polling-based interface, only an
-    // `async fn ready`, which borrows the sender. Therefore, we implement our
-    // own bounded MPSC on top of the unbounded channel, using a semaphore to
-    // limit how many items are in the channel.
-    semaphore: PollSemaphore,
-    // The current semaphore permit, if one has been acquired.
-    //
-    // This is acquired in `poll_ready` and taken in `call`.
-    permit: Option<OwnedSemaphorePermit>,
-    handle: Handle,
+    /// The queue and state shared with the worker task.
+    shared: Arc<Shared<K, R, T::Future>>,
 }
 
-impl<T, Request> Buffer<T, Request>
+impl<T, K, R> FairBuffer<T, K, R>
 where
-    T: Service<Request>,
-    T::Error: Into<crate::BoxError>,
+    T: Service<R>,
+    T::Future: Send + 'static,
+    T::Error: Into<BoxError>,
+    K: Eq + Hash,
+    R: Send + 'static,
 {
-    /// Creates a new [`Buffer`] wrapping `service`.
+    /// Creates a new [`FairBuffer`] wrapping `service`, and spawns its
+    /// [`Worker`] onto the default Tokio executor.
     ///
-    /// `bound` gives the maximal number of requests that can be queued for the service before
-    /// backpressure is applied to callers.
+    /// `capacity` is the maximum number of queued requests: pushing a request
+    /// beyond it sheds the queued request whose caller had the highest recent
+    /// request count. Internal requests are never shed, so the queue can
+    /// exceed `capacity` when it is full of internal requests.
     ///
-    /// The default Tokio executor is used to run the given service, which means that this method
-    /// must be called while on the Tokio runtime.
+    /// `rotation_interval` is the period after which recent request counts
+    /// decay: a caller's count covers at least one and at most two intervals.
     ///
-    /// # A note on choosing a `bound`
+    /// # Panics
     ///
-    /// When [`Buffer`]'s implementation of [`poll_ready`] returns [`Poll::Ready`], it reserves a
-    /// slot in the channel for the forthcoming [`call`]. However, if this call doesn't arrive,
-    /// this reserved slot may be held up for a long time. As a result, it's advisable to set
-    /// `bound` to be at least the maximum number of concurrent requests the [`Buffer`] will see.
-    /// If you do not, all the slots in the buffer may be held up by futures that have just called
-    /// [`poll_ready`] but will not issue a [`call`], which prevents other senders from issuing new
-    /// requests.
-    ///
-    /// [`Poll::Ready`]: std::task::Poll::Ready
-    /// [`call`]: crate::Service::call
-    /// [`poll_ready`]: crate::Service::poll_ready
-    pub fn new(service: T, bound: usize) -> Self
-    where
-        T: Send + 'static,
-        T::Future: Send,
-        T::Error: Send + Sync,
-        Request: Send + 'static,
-    {
-        let (service, worker) = Self::pair(service, bound);
-        tokio::spawn(worker);
-        service
-    }
-
-    /// Creates a new [`Buffer`] wrapping `service`, but returns the background worker.
-    ///
-    /// This is useful if you do not want to spawn directly onto the tokio runtime
-    /// but instead want to use your own executor. This will return the [`Buffer`] and
-    /// the background `Worker` that you can then spawn.
-    pub fn pair(service: T, bound: usize) -> (Buffer<T, Request>, Worker<T, Request>)
+    /// If `capacity` is zero, or if called outside a Tokio runtime.
+    pub fn new(service: T, capacity: usize, rotation_interval: Duration) -> Self
     where
         T: Send + 'static,
         T::Error: Send + Sync,
-        Request: Send + 'static,
+        K: Send + 'static,
     {
-        let (tx, rx) = mpsc::unbounded_channel();
-        let semaphore = Arc::new(Semaphore::new(bound));
-        let (handle, worker) = Worker::new(service, rx, &semaphore);
-        let buffer = Buffer {
-            tx,
-            handle,
-            semaphore: PollSemaphore::new(semaphore),
-            permit: None,
-        };
-        (buffer, worker)
+        let (buffer, worker) = Self::pair(service, capacity, rotation_interval);
+        tokio::spawn(worker.run());
+        buffer
     }
 
-    fn get_worker_error(&self) -> crate::BoxError {
-        self.handle.get_error_on_closed()
+    /// Creates a new [`FairBuffer`] wrapping `service`, returning the
+    /// background [`Worker`] to be spawned by the caller.
+    ///
+    /// See [`FairBuffer::new`] for details.
+    ///
+    /// # Panics
+    ///
+    /// If `capacity` is zero.
+    pub fn pair(
+        service: T,
+        capacity: usize,
+        rotation_interval: Duration,
+    ) -> (Self, Worker<T, K, R>) {
+        let shared = Arc::new(Shared::new(capacity));
+        let worker = Worker::new(service, shared.clone(), rotation_interval);
+
+        (FairBuffer { shared }, worker)
     }
 }
 
-impl<T, Request> Service<Request> for Buffer<T, Request>
+impl<T, K, R> Service<Tagged<K, R>> for FairBuffer<T, K, R>
 where
-    T: Service<Request>,
-    T::Error: Into<crate::BoxError>,
+    T: Service<R>,
+    T::Future: Send + 'static,
+    T::Error: Into<BoxError>,
+    K: Eq + Hash,
+    R: Send + 'static,
 {
     type Response = T::Response;
-    type Error = crate::BoxError;
+    type Error = BoxError;
     type Future = ResponseFuture<T::Future>;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        // First, check if the worker is still alive.
-        if self.tx.is_closed() {
-            // If the inner service has errored, then we error here.
-            return Poll::Ready(Err(self.get_worker_error()));
-        }
-
-        // Then, check if we've already acquired a permit.
-        if self.permit.is_some() {
-            // We've already reserved capacity to send a request. We're ready!
-            return Poll::Ready(Ok(()));
-        }
-
-        // Finally, if we haven't already acquired a permit, poll the semaphore
-        // to acquire one. If we acquire a permit, then there's enough buffer
-        // capacity to send a new request. Otherwise, we need to wait for
-        // capacity.
-        let permit =
-            ready!(self.semaphore.poll_acquire(cx)).ok_or_else(|| self.get_worker_error())?;
-        self.permit = Some(permit);
-
-        Poll::Ready(Ok(()))
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // The fair buffer is always ready unless its worker has shut down:
+        // over-capacity requests are shed instead of exerting backpressure,
+        // so there are no slots to reserve, and `tower::buffer`'s
+        // reserved-slot hangs can't happen.
+        Poll::Ready(self.shared.check_open())
     }
 
-    fn call(&mut self, request: Request) -> Self::Future {
-        tracing::trace!("sending request to buffer worker");
-        let _permit = self
-            .permit
-            .take()
-            .expect("buffer full; poll_ready must be called first");
+    fn call(&mut self, Tagged { key, request }: Tagged<K, R>) -> Self::Future {
+        tracing::trace!("sending request to fair buffer worker");
 
-        // get the current Span so that we can explicitly propagate it to the worker
-        // if we didn't do this, events on the worker related to this span wouldn't be counted
-        // towards that span since the worker would have no way of entering it.
+        // Get the current Span so that we can explicitly propagate it to the
+        // worker. If we didn't do this, events on the worker related to this
+        // span wouldn't be counted towards that span since the worker would
+        // have no way of entering it.
         let span = tracing::Span::current();
-
-        // If we've made it here, then a semaphore permit has already been
-        // acquired, so we can freely allocate a oneshot.
         let (tx, rx) = oneshot::channel();
 
-        match self.tx.send(Message {
-            request,
-            span,
-            tx,
-            _permit,
-        }) {
-            Err(_) => ResponseFuture::failed(self.get_worker_error()),
-            Ok(_) => ResponseFuture::new(rx),
+        match self.shared.push(key, Message { request, tx, span }) {
+            Push::Queued => ResponseFuture::new(rx),
+            Push::Failed(error) => ResponseFuture::failed(error),
         }
     }
 }
 
-impl<T, Request> Clone for Buffer<T, Request>
+impl<T, K, R> Clone for FairBuffer<T, K, R>
 where
-    T: Service<Request>,
+    T: Service<R>,
 {
     fn clone(&self) -> Self {
         Self {
-            tx: self.tx.clone(),
-            handle: self.handle.clone(),
-            semaphore: self.semaphore.clone(),
-            // The new clone hasn't acquired a permit yet. It will when it's
-            // next polled ready.
-            permit: None,
+            shared: self.shared.clone(),
         }
+    }
+}
+
+impl<T, K, R> fmt::Debug for FairBuffer<T, K, R>
+where
+    T: Service<R>,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FairBuffer").finish_non_exhaustive()
     }
 }
