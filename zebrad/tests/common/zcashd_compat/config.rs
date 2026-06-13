@@ -115,6 +115,8 @@ pub fn build_zcashd_compat_config_with_options(
     // Zcashd-compat mode
     config.zcashd_compat.enabled = true;
     config.zcashd_compat.manage_zcashd = true;
+    config.zcashd_compat.zcashd_source =
+        zebrad::components::zcashd_compat::ConfigZcashdBinarySource::Managed;
     config.zcashd_compat.listen_addr = Some(zebra_compat_rpc_addr);
     config.zcashd_compat.cookie_dir = cookie_dir.clone();
     // Skip startup delay in tests — supervisor spawns zcashd immediately

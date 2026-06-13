@@ -3,15 +3,15 @@ use std::{net::SocketAddr, path::PathBuf, time::Duration};
 use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
 use zebra_chain::common::default_cache_dir;
 
-/// Source selector for Zebra-managed `zcashd` execution.
+/// Source selector for supervised `zcashd` execution.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Deserialize, Serialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ZcashdBinarySource {
-    /// Resolve `zcashd` from Zebra's embedded managed release manifest.
-    #[default]
-    Managed,
     /// Resolve `zcashd` from a local executable path.
+    #[default]
     Path,
+    /// Resolve `zcashd` from Zebra's embedded managed release manifest.
+    Managed,
 }
 
 /// Configuration for Zebra zcashd-compat mode.
@@ -55,7 +55,7 @@ pub struct Config {
     /// `-datadir=/path` form, and logs warnings for paired, empty, or duplicate
     /// path options.
     ///
-    /// Zebra always includes `-printtoconsole` automatically.
+    /// Supervised zcashd runs always include `-printtoconsole` automatically.
     #[serde(default, deserialize_with = "deserialize_zcashd_extra_args")]
     pub zcashd_extra_args: Vec<String>,
 
@@ -134,16 +134,16 @@ pub struct Config {
 }
 
 impl Default for Config {
-    /// Returns conservative zcashd-compat defaults suitable for local supervision.
+    /// Returns conservative zcashd-compat defaults for an externally managed zcashd.
     ///
-    /// Defaults keep zcashd-compat disabled unless explicitly requested, and use a
-    /// short restart/backoff policy for child-process recovery. Shutdowns allow
-    /// enough time for `zcashd` to flush wallet and chainstate data after SIGTERM.
+    /// Defaults keep zcashd-compat disabled unless explicitly requested, and do
+    /// not spawn `zcashd` unless supervision is explicitly enabled. The
+    /// restart/shutdown settings apply only to supervised `zcashd` children.
     fn default() -> Self {
         Self {
             enabled: false,
-            manage_zcashd: true,
-            zcashd_source: ZcashdBinarySource::Managed,
+            manage_zcashd: false,
+            zcashd_source: ZcashdBinarySource::Path,
             zcashd_path: None,
             zcashd_datadir: None,
             zcashd_extra_args: Vec::new(),
@@ -247,9 +247,10 @@ mod tests {
     use super::{Config, ZcashdBinarySource};
 
     #[test]
-    fn defaults_to_managed_source_without_explicit_path() {
+    fn defaults_to_unsupervised_path_source_without_explicit_path() {
         let config = Config::default();
-        assert_eq!(config.zcashd_source, ZcashdBinarySource::Managed);
+        assert!(!config.manage_zcashd);
+        assert_eq!(config.zcashd_source, ZcashdBinarySource::Path);
         assert_eq!(config.zcashd_path, None);
         assert_eq!(config.listen_addr, None);
         assert_eq!(config.cookie_dir, super::default_cache_dir());

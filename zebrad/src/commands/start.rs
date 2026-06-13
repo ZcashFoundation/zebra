@@ -1491,6 +1491,7 @@ mod tests {
         let mut config = ZebradConfig::default();
         config.zcashd_compat.enabled = true;
         config.zcashd_compat.manage_zcashd = true;
+        config.zcashd_compat.zcashd_source = zcashd_compat::ConfigZcashdBinarySource::Managed;
         config.zcashd_compat.tls_cert_file = Some(cert_file);
         config.zcashd_compat.tls_key_file = Some(key_file);
 
@@ -1520,6 +1521,7 @@ mod tests {
         let mut config = ZebradConfig::default();
         config.zcashd_compat.enabled = true;
         config.zcashd_compat.manage_zcashd = true;
+        config.zcashd_compat.zcashd_source = zcashd_compat::ConfigZcashdBinarySource::Managed;
         config.zcashd_compat.tls_cert_file = Some(cert_file);
         config.zcashd_compat.tls_key_file = Some(key_file);
         config.zcashd_compat.tls_ca_file = Some(ca_file);

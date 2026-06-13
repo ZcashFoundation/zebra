@@ -40,6 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - zcashd-compat supervision now also retries `zcashd` spawn failures with the
   same capped backoff instead of permanently ending supervision when the binary
   is briefly missing or unspawnable.
+- zcashd-compat now defaults to externally managed `zcashd` path mode, so Zebra
+  starts the compat RPC endpoint without spawning `zcashd` unless supervision is
+  explicitly enabled.
 - Update `zebra-rollback-state` and `zebrad rollback-state` to run rollback by
   default and use `--dry-run` for rollback-plan previews (replacing the old
   `--force` gate).

@@ -22,18 +22,19 @@ Zcash network ═P2P═▶ zebrad ◀─JSON-RPC (cookie auth, optional TLS)─ 
 
 There are two ways to run the pair:
 
-- **Supervised (recommended):** `zebrad start --zcashd-compat` spawns and
-  manages `zcashd` itself. This page covers the Zebra side and supervised
-  operation.
-- **Externally managed:** you run `zcashd -zebra-compat` yourself against a
-  Zebra RPC endpoint. The zcashd-side flags, trust model, sizing arithmetic,
-  diagnostics, and recovery procedures are documented in
+- **Externally managed (default):** you run `zcashd -zebra-compat` yourself
+  against Zebra's zcashd-compat RPC endpoint.
+- **Supervised:** Zebra spawns and manages `zcashd` itself when
+  `[zcashd_compat].manage_zcashd = true`.
+
+The zcashd-side flags, trust model, sizing arithmetic, diagnostics, and
+recovery procedures are documented in
   [zebra-compat Node Operation](https://github.com/valargroup/zcashd/blob/feat/unity/doc/zebra-compat.md);
-  the Zebra-side sections of this page still apply.
+the Zebra-side sections of this page still apply.
 
-## Quick start (supervised)
+## Quick start (externally managed)
 
-On `x86_64` Linux, the defaults work without a configuration file:
+Start Zebra's zcashd-compat RPC endpoint:
 
 ```console
 zebrad start --zcashd-compat
@@ -43,17 +44,16 @@ On first start, Zebra:
 
 1. runs Linux hardware and filesystem preflight checks (see
    [Hardware preflight](#hardware-preflight-linux));
-2. downloads a SHA256-pinned `zcashd` release archive and caches it (see
-   [zcashd binary resolution](#zcashd-binary-resolution));
-3. bootstraps the `zcashd` datadir and a minimal `zcash.conf` if they are
-   missing (see [zcashd datadir and `zcash.conf`](#zcashd-datadir-and-zcashconf));
-4. starts the dedicated zcashd-compat RPC listener on `127.0.0.1:28232` with
+2. starts the dedicated zcashd-compat RPC listener on `127.0.0.1:28232` with
    cookie authentication;
-5. spawns and supervises `zcashd -zebra-compat`, restarting it with backoff if
-   it exits (see
-   [Monitoring and process lifecycle](#monitoring-and-process-lifecycle)).
+3. waits for an externally managed `zcashd -zebra-compat` process to connect.
 
 The startup log banner shows the zcashd-compat RPC URL and cookie file.
+
+To opt into supervision, set `manage_zcashd = true`. With the default
+`zcashd_source = "path"`, Zebra requires `zcashd_path` to point at a local
+binary. Set `zcashd_source = "managed"` to use Zebra's SHA256-pinned managed
+download.
 
 ### Verify the integration
 
@@ -131,9 +131,9 @@ zcashd-compat mode adds a `[zcashd_compat]` section:
 ```toml
 [zcashd_compat]
 enabled = false
-manage_zcashd = true
-zcashd_source = "managed"                            # "managed" or "path"
-zcashd_path = "/path/to/local/zcashd"               # optional explicit override
+manage_zcashd = false
+zcashd_source = "path"                               # "path" or "managed"; used only when manage_zcashd = true
+zcashd_path = "/path/to/local/zcashd"               # required when supervised zcashd_source = "path"
 zcashd_datadir = "/path/to/zcashd/datadir"          # optional
 zcashd_extra_args = ["-debug=1"]                    # optional extra args
 listen_addr = "127.0.0.1:28232"                     # optional, default set when zcashd-compat is enabled
@@ -169,10 +169,10 @@ for the externally managed workflow.
 If `manage_zcashd = true`, Zebra resolves `zcashd` as follows:
 
 1. If `zcashd_path` is set, Zebra uses that local executable directly.
-2. Otherwise, `zcashd_source = "managed"` uses Zebra's embedded release manifest
+2. `zcashd_source = "path"` requires `zcashd_path` to be set.
+3. `zcashd_source = "managed"` uses Zebra's embedded release manifest
    to fetch a compatible `zcashd` archive, verify its SHA256, cache it, and run it.
    Managed downloads are currently available only on `x86_64` Linux.
-3. `zcashd_source = "path"` requires `zcashd_path` to be set.
 
 Managed downloads are cached under:
 
@@ -499,8 +499,9 @@ When zcashd-compat supervision is enabled (`zcashd_compat.enabled = true` and
   `zcashd_compat.supervisor.active` becomes `0`, or if logs show repeated
   supervised `zcashd` restarts.
 - Startup-time zcashd-compat config validation is unchanged. For example, if
-  `zcashd_compat.manage_zcashd = true` and explicit `zcashd_path` cannot be resolved,
-  Zebra startup fails with an error.
+  `zcashd_compat.manage_zcashd = true`, `zcashd_source = "path"`, and
+  `zcashd_path` is unset or cannot be resolved, Zebra startup fails with an
+  error.
 - If `zebrad` is shut down normally, it asks the zcashd-compat supervisor to stop
   `zcashd` gracefully: SIGTERM first, then SIGKILL after
   `shutdown_grace_period` if needed. A forced kill can interrupt `zcashd` wallet
