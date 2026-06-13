@@ -146,6 +146,7 @@ ARG CARGO_TARGET_DIR
 
 RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     --mount=type=bind,source=tower-fallback,target=tower-fallback \
+    --mount=type=bind,source=deploy/watchdog,target=deploy/watchdog \
     --mount=type=bind,source=zebra-chain,target=zebra-chain \
     --mount=type=bind,source=zebra-consensus,target=zebra-consensus \
     --mount=type=bind,source=zebra-network,target=zebra-network \

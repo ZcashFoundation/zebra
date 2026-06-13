@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   Docker images and Docker CI builds.
 - Use the `5.0.0-rc.3` release identity for this fork's v5 rollback build.
 - zcashd-compat mode for managing zcashd as a wallet while leveraging zebra for p2p.
+- zcashd-compat RPC can serve HTTPS with configured TLS certificate and private
+  key files, including an explicit TLS-only mode that disables cookie auth for
+  externally protected deployments.
+- zcashd-compat preflight now validates filesystem permissions for the zcashd
+  datadir, `zcash.conf`, zcashd binary, Zebra state directory, and RPC cookie
+  directory before creating directories or config files, reporting all problems
+  in one aggregated error. Failures can be bypassed with `--unsafe-low-specs`.
+- `zcashd_compat.unsafe_allow_remote_http` allows a non-loopback zcashd-compat
+  RPC listener without TLS for deployments where another boundary secures the
+  listener, such as a private container network. Non-loopback listeners
+  otherwise require TLS.
 
 ### Changed
 
@@ -20,6 +31,15 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   10 seconds, allow 30 seconds for tip acquisition, increase default block
   download concurrency to 100, increase the default peer target size to 100, and
   cap inbound peers at the peer target size.
+- Increase the default zcashd-compat supervised shutdown grace period to 5
+  minutes, giving `zcashd` more time to flush wallet and chainstate data before
+  force-kill.
+- Make zcashd-compat supervision retry indefinitely with capped exponential
+  restart backoff, reset the backoff ramp after healthy child uptime, and expose
+  active/disabled/exhausted supervisor state through metrics.
+- zcashd-compat supervision now also retries `zcashd` spawn failures with the
+  same capped backoff instead of permanently ending supervision when the binary
+  is briefly missing or unspawnable.
 - Update `zebra-rollback-state` and `zebrad rollback-state` to run rollback by
   default and use `--dry-run` for rollback-plan previews (replacing the old
   `--force` gate).
@@ -28,6 +48,14 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Fixed
 
+- The zcashd-compat supervisor no longer force-kills `zcashd` outside its own
+  SIGTERM → grace period → SIGKILL sequence. The child is spawned without
+  `kill_on_drop` and in its own process group, so zebrad panics, supervisor
+  task aborts, and group-wide terminal signals can no longer SIGKILL `zcashd`
+  mid-flush, and Zebra now waits the shutdown grace period plus a fixed margin
+  for the supervisor task before abandoning it. An interrupted shutdown was
+  able to silently discard hours of ingested chainstate and force a long
+  replay on the next start.
 - Make `zebra-rollback-state` rollback existing v5 databases without replaying
   note commitment trees from genesis for modern rollback targets whose removed
   blocks did not change the Sprout tree. If rolled-back blocks contain Sprout

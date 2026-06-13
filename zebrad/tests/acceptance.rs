@@ -4686,6 +4686,14 @@ async fn zcashd_compat_reorg_depth_at_batch_limit() -> Result<()> {
     common::zcashd_compat::reorg::depth_at_batch_limit().await
 }
 
+/// See [`common::zcashd_compat::reorg::large_batch_depth80`] for details.
+#[tokio::test]
+#[ignore]
+#[cfg(unix)]
+async fn zcashd_compat_reorg_large_batch_depth80() -> Result<()> {
+    common::zcashd_compat::reorg::large_batch_depth80().await
+}
+
 /// See [`common::zcashd_compat::reorg::branch_too_large_sticky`] for details.
 #[tokio::test]
 #[ignore]

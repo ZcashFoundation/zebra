@@ -2,8 +2,8 @@
 
 #[cfg(target_os = "linux")]
 use std::{
-    collections::HashMap,
-    fs,
+    collections::{BTreeMap, HashMap},
+    fs, io,
     num::NonZeroUsize,
     path::{Path, PathBuf},
     thread::available_parallelism,
@@ -12,12 +12,20 @@ use std::{
 #[cfg(target_os = "linux")]
 use color_eyre::eyre::{eyre, Report};
 #[cfg(target_os = "linux")]
+use nix::unistd::{access, AccessFlags};
+#[cfg(target_os = "linux")]
 use std::os::unix::fs::MetadataExt;
 #[cfg(target_os = "linux")]
 use tracing::warn;
 
 #[cfg(target_os = "linux")]
-use super::{effective_zcashd_datadir, ensure_zcashd_datadir, resolve_zcashd_datadir_path};
+use super::{
+    datadir::resolve_zcashd_conf_path,
+    effective_zcashd_datadir, effective_zcashd_source, ensure_zcashd_datadir,
+    is_command_resolvable,
+    managed::{cached_managed_zcashd_binary_is_current, managed_zcashd_binary_path},
+    resolve_zcashd_datadir_path, ZcashdBinarySource,
+};
 use crate::config::ZebradConfig;
 
 #[cfg(target_os = "linux")]
@@ -97,6 +105,43 @@ struct PathRequirement {
 }
 
 #[cfg(target_os = "linux")]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+enum PermissionRole {
+    ZebraState,
+    ZcashdDatadir,
+    ZcashdConf,
+    ManagedZcashdCache,
+    RpcCookieDir,
+}
+
+#[cfg(target_os = "linux")]
+impl PermissionRole {
+    fn label(self) -> &'static str {
+        match self {
+            PermissionRole::ZebraState => "zebra state directory",
+            PermissionRole::ZcashdDatadir => "zcashd datadir",
+            PermissionRole::ZcashdConf => "zcashd config directory",
+            PermissionRole::ManagedZcashdCache => "managed zcashd cache directory",
+            PermissionRole::RpcCookieDir => "rpc cookie directory",
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Debug)]
+struct WriteRequirement {
+    role: PermissionRole,
+    target_path: PathBuf,
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Debug, Default)]
+struct PermissionRequirements {
+    roles: Vec<PermissionRole>,
+    target_paths: Vec<PathBuf>,
+}
+
+#[cfg(target_os = "linux")]
 #[derive(Clone, Debug, Default)]
 struct FilesystemRequirements {
     roles: Vec<DiskRole>,
@@ -120,16 +165,22 @@ fn run_linux_preflight(config: &ZebradConfig, unsafe_low_specs: bool) -> Result<
     if config.zcashd_compat.manage_zcashd {
         zcashd_datadir =
             resolve_zcashd_datadir_path(&zcashd_datadir, &config.zcashd_compat.zcashd_extra_args);
-        ensure_zcashd_datadir(&zcashd_datadir, &config.zcashd_compat.zcashd_extra_args)?;
     }
 
     let mut summary = PreflightSummary::default();
+    check_permissions(&mut summary, config, &zcashd_datadir)?;
     check_cpu(&mut summary)?;
     check_memory(&mut summary)?;
     check_disk(&mut summary, &config.state.cache_dir, &zcashd_datadir)?;
 
     for warning in finalize_preflight(summary, unsafe_low_specs)? {
         warn!("{warning}");
+    }
+
+    // Filesystem bootstrap happens only after preflight has reported every
+    // blocking issue, unless the operator explicitly bypassed the checks.
+    if config.zcashd_compat.manage_zcashd {
+        ensure_zcashd_datadir(&zcashd_datadir, &config.zcashd_compat.zcashd_extra_args)?;
     }
 
     Ok(())
@@ -158,6 +209,236 @@ fn finalize_preflight(
     }
 
     Ok(summary.warnings)
+}
+
+#[cfg(target_os = "linux")]
+fn check_permissions(
+    summary: &mut PreflightSummary,
+    config: &ZebradConfig,
+    zcashd_datadir: &Path,
+) -> Result<(), Report> {
+    let mut requirements = vec![WriteRequirement {
+        role: PermissionRole::ZebraState,
+        target_path: config.state.cache_dir.clone(),
+    }];
+
+    if config.zcashd_compat.enable_cookie_auth {
+        requirements.push(WriteRequirement {
+            role: PermissionRole::RpcCookieDir,
+            target_path: config.zcashd_compat.cookie_dir.clone(),
+        });
+    }
+
+    if config.zcashd_compat.manage_zcashd {
+        requirements.push(WriteRequirement {
+            role: PermissionRole::ZcashdDatadir,
+            target_path: zcashd_datadir.to_path_buf(),
+        });
+
+        let conf_path =
+            resolve_zcashd_conf_path(zcashd_datadir, &config.zcashd_compat.zcashd_extra_args);
+        check_conf_access(summary, &mut requirements, &conf_path)?;
+        check_zcashd_binary(
+            summary,
+            &mut requirements,
+            &config.zcashd_compat,
+            &config.state.cache_dir,
+        );
+    }
+
+    check_write_requirements(summary, &requirements)
+}
+
+#[cfg(target_os = "linux")]
+fn check_conf_access(
+    summary: &mut PreflightSummary,
+    requirements: &mut Vec<WriteRequirement>,
+    conf_path: &Path,
+) -> Result<(), Report> {
+    let metadata = match fs::symlink_metadata(conf_path) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() {
+                match fs::metadata(conf_path) {
+                    Ok(target_metadata) => target_metadata,
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                        summary.errors.push(format!(
+                            "zcashd config {} is a symlink to a missing target",
+                            conf_path.display()
+                        ));
+                        return Ok(());
+                    }
+                    Err(error) => {
+                        summary.errors.push(format!(
+                            "failed to inspect zcashd config symlink target {}: {error}",
+                            conf_path.display()
+                        ));
+                        return Ok(());
+                    }
+                }
+            } else {
+                metadata
+            }
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            let parent = conf_path.parent().ok_or_else(|| {
+                eyre!(
+                    "zcashd config path has no parent directory: {}",
+                    conf_path.display()
+                )
+            })?;
+
+            requirements.push(WriteRequirement {
+                role: PermissionRole::ZcashdConf,
+                target_path: parent.to_path_buf(),
+            });
+
+            return Ok(());
+        }
+        Err(error) => {
+            summary.errors.push(format!(
+                "failed to inspect zcashd config {}: {error}",
+                conf_path.display()
+            ));
+            return Ok(());
+        }
+    };
+
+    if metadata.is_dir() {
+        summary.errors.push(format!(
+            "zcashd config path {} is a directory, expected a file",
+            conf_path.display()
+        ));
+        return Ok(());
+    }
+
+    if access(conf_path, AccessFlags::R_OK).is_err() {
+        summary.errors.push(format!(
+            "zcashd config {} exists but is not readable by the current user",
+            conf_path.display()
+        ));
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn check_zcashd_binary(
+    summary: &mut PreflightSummary,
+    requirements: &mut Vec<WriteRequirement>,
+    zcashd_compat_config: &super::Config,
+    state_cache_dir: &Path,
+) {
+    match effective_zcashd_source(zcashd_compat_config) {
+        Ok(ZcashdBinarySource::Path(path)) => {
+            if !is_command_resolvable(&path) {
+                summary.errors.push(format!(
+                    "zcashd binary {} does not exist or is not executable by the current user",
+                    path.display()
+                ));
+            }
+        }
+        Ok(ZcashdBinarySource::Managed) => {
+            let Some(binary_path) = managed_zcashd_binary_path(state_cache_dir) else {
+                return;
+            };
+            let cache_is_current = match cached_managed_zcashd_binary_is_current(state_cache_dir) {
+                Ok(cache_is_current) => cache_is_current.unwrap_or(false),
+                Err(error) => {
+                    summary.errors.push(error.to_string());
+                    false
+                }
+            };
+
+            if binary_path.exists() && !is_command_resolvable(&binary_path) {
+                summary.errors.push(format!(
+                    "zcashd binary {} does not exist or is not executable by the current user",
+                    binary_path.display()
+                ));
+            }
+
+            if !cache_is_current {
+                let Some(parent) = binary_path.parent() else {
+                    return;
+                };
+
+                requirements.push(WriteRequirement {
+                    role: PermissionRole::ManagedZcashdCache,
+                    target_path: parent.to_path_buf(),
+                });
+            }
+        }
+        Err(error) => summary.errors.push(error.to_string()),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn check_write_requirements(
+    summary: &mut PreflightSummary,
+    requirements: &[WriteRequirement],
+) -> Result<(), Report> {
+    let mut grouped = BTreeMap::<PathBuf, PermissionRequirements>::new();
+
+    for requirement in requirements {
+        let probed_path = nearest_existing_ancestor(&requirement.target_path)?;
+        let entry = grouped.entry(probed_path).or_default();
+
+        if !entry.roles.contains(&requirement.role) {
+            entry.roles.push(requirement.role);
+        }
+
+        if !entry.target_paths.contains(&requirement.target_path) {
+            entry.target_paths.push(requirement.target_path.clone());
+        }
+    }
+
+    for (probed_path, requirements) in grouped {
+        let metadata = fs::metadata(&probed_path).map_err(|error| {
+            eyre!(
+                "failed to read metadata for {}: {error}",
+                probed_path.display()
+            )
+        })?;
+
+        if !metadata.is_dir() {
+            summary.errors.push(format!(
+                "{} (paths: {}) requires a directory at {}, which exists but is not a directory",
+                permission_role_labels(&requirements.roles),
+                display_paths(&requirements.target_paths),
+                probed_path.display()
+            ));
+            continue;
+        }
+
+        if path_is_writable_dir(&probed_path) {
+            continue;
+        }
+
+        if requirements
+            .target_paths
+            .iter()
+            .all(|target_path| target_path == &probed_path)
+        {
+            summary.errors.push(format!(
+                "{} (paths: {}) is not writable by the current user",
+                permission_role_labels(&requirements.roles),
+                display_paths(&requirements.target_paths)
+            ));
+        } else {
+            summary.errors.push(format!(
+                "{} (paths: {}) cannot be created: nearest existing ancestor {} is not writable by the current user",
+                permission_role_labels(&requirements.roles),
+                display_paths(&requirements.target_paths),
+                probed_path.display()
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn path_is_writable_dir(path: &Path) -> bool {
+    access(path, AccessFlags::W_OK | AccessFlags::X_OK).is_ok()
 }
 
 #[cfg(target_os = "linux")]
@@ -493,6 +774,15 @@ fn role_labels(roles: &[DiskRole]) -> String {
 }
 
 #[cfg(target_os = "linux")]
+fn permission_role_labels(roles: &[PermissionRole]) -> String {
+    roles
+        .iter()
+        .map(|role| role.label())
+        .collect::<Vec<_>>()
+        .join(" + ")
+}
+
+#[cfg(target_os = "linux")]
 fn display_paths(paths: &[PathBuf]) -> String {
     paths
         .iter()
@@ -510,6 +800,18 @@ fn human_gib(bytes: u64) -> String {
 mod tests {
     #[cfg(target_os = "linux")]
     use super::*;
+    #[cfg(target_os = "linux")]
+    use std::{
+        fs as std_fs,
+        os::unix::fs::{symlink, PermissionsExt},
+        path::Path,
+        process::Command,
+    };
+    #[cfg(target_os = "linux")]
+    use tempfile::TempDir;
+
+    #[cfg(target_os = "linux")]
+    use crate::components::zcashd_compat::{zcashd_target_triple, ConfigZcashdBinarySource};
 
     #[cfg(target_os = "linux")]
     #[test]
@@ -656,6 +958,365 @@ mod tests {
             error.to_string().contains("preflight failed"),
             "unexpected error: {error}"
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn permission_checks_pass_in_writable_tempdir() {
+        let temp_dir = TempDir::new().expect("tempdir should be created");
+        let config = permission_test_config(&temp_dir);
+        let mut summary = PreflightSummary::default();
+
+        check_permissions(
+            &mut summary,
+            &config,
+            &permission_test_zcashd_datadir(&config),
+        )
+        .expect("permission checks should succeed");
+
+        assert_eq!(summary.errors, Vec::<String>::new());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn no_cookie_auth_skips_cookie_dir_permission_check() {
+        let temp_dir = TempDir::new().expect("tempdir should be created");
+        let mut config = permission_test_config(&temp_dir);
+        config.zcashd_compat.enable_cookie_auth = false;
+        config.zcashd_compat.cookie_dir = PathBuf::from("/proc/zebra-cookie-dir");
+        let mut summary = PreflightSummary::default();
+
+        check_permissions(
+            &mut summary,
+            &config,
+            &permission_test_zcashd_datadir(&config),
+        )
+        .expect("permission checks should succeed even if no-auth cookie dir is unusable");
+
+        assert!(
+            summary
+                .errors
+                .iter()
+                .all(|error| !error.contains("rpc cookie directory")),
+            "no-auth preflight should not check cookie directory: {:?}",
+            summary.errors
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn reports_unwritable_datadir_ancestor() {
+        if running_as_root() {
+            return;
+        }
+
+        let temp_dir = TempDir::new().expect("tempdir should be created");
+        let protected = temp_dir.path().join("protected");
+        std_fs::create_dir(&protected).expect("protected dir should be created");
+
+        let mut config = permission_test_config(&temp_dir);
+        config.zcashd_compat.zcashd_datadir =
+            Some(protected.join("missing").join("zcashd-datadir"));
+
+        set_mode(&protected, 0o555);
+        let mut summary = PreflightSummary::default();
+        let result = check_permissions(
+            &mut summary,
+            &config,
+            &permission_test_zcashd_datadir(&config),
+        );
+        set_mode(&protected, 0o755);
+
+        result.expect("permission checks should complete");
+        assert!(
+            summary.errors.iter().any(|error| {
+                error.contains("nearest existing ancestor") && error.contains("zcashd datadir")
+            }),
+            "expected datadir ancestor error: {:?}",
+            summary.errors
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn dedups_roles_sharing_one_unwritable_directory() {
+        if running_as_root() {
+            return;
+        }
+
+        let temp_dir = TempDir::new().expect("tempdir should be created");
+        let shared = temp_dir.path().join("shared");
+        std_fs::create_dir(&shared).expect("shared dir should be created");
+
+        let mut config = ZebradConfig::default();
+        config.state.cache_dir = shared.clone();
+        config.zcashd_compat.manage_zcashd = false;
+        config.zcashd_compat.cookie_dir = shared.clone();
+
+        set_mode(&shared, 0o555);
+        let mut summary = PreflightSummary::default();
+        let result = check_permissions(&mut summary, &config, temp_dir.path());
+        set_mode(&shared, 0o755);
+
+        result.expect("permission checks should complete");
+        assert_eq!(summary.errors.len(), 1, "errors: {:?}", summary.errors);
+        assert!(
+            summary.errors[0].contains("zebra state directory")
+                && summary.errors[0].contains("rpc cookie directory"),
+            "expected shared-role error: {:?}",
+            summary.errors
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn reports_unreadable_existing_conf() {
+        if running_as_root() {
+            return;
+        }
+
+        let temp_dir = TempDir::new().expect("tempdir should be created");
+        let config = permission_test_config(&temp_dir);
+        let zcashd_datadir = permission_test_zcashd_datadir(&config);
+        std_fs::create_dir_all(&zcashd_datadir).expect("datadir should be created");
+        let conf_path = zcashd_datadir.join("zcash.conf");
+        std_fs::write(&conf_path, "").expect("conf should be written");
+
+        set_mode(&conf_path, 0o000);
+        let mut summary = PreflightSummary::default();
+        let result = check_permissions(&mut summary, &config, &zcashd_datadir);
+        set_mode(&conf_path, 0o644);
+
+        result.expect("permission checks should complete");
+        assert!(
+            summary
+                .errors
+                .iter()
+                .any(|error| error.contains("not readable")),
+            "expected unreadable conf error: {:?}",
+            summary.errors
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn reports_conf_path_that_is_a_directory() {
+        let temp_dir = TempDir::new().expect("tempdir should be created");
+        let config = permission_test_config(&temp_dir);
+        let zcashd_datadir = permission_test_zcashd_datadir(&config);
+        std_fs::create_dir_all(zcashd_datadir.join("zcash.conf"))
+            .expect("conf directory should be created");
+        let mut summary = PreflightSummary::default();
+
+        check_permissions(&mut summary, &config, &zcashd_datadir)
+            .expect("permission checks should complete");
+
+        assert!(
+            summary
+                .errors
+                .iter()
+                .any(|error| error.contains("is a directory")),
+            "expected directory conf error: {:?}",
+            summary.errors
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn reports_dangling_conf_symlink() {
+        let temp_dir = TempDir::new().expect("tempdir should be created");
+        let config = permission_test_config(&temp_dir);
+        let zcashd_datadir = permission_test_zcashd_datadir(&config);
+        std_fs::create_dir_all(&zcashd_datadir).expect("datadir should be created");
+        symlink("missing.conf", zcashd_datadir.join("zcash.conf"))
+            .expect("dangling symlink should be created");
+        let mut summary = PreflightSummary::default();
+
+        check_permissions(&mut summary, &config, &zcashd_datadir)
+            .expect("permission checks should complete");
+
+        assert!(
+            summary
+                .errors
+                .iter()
+                .any(|error| error.contains("symlink to a missing target")),
+            "expected dangling symlink error: {:?}",
+            summary.errors
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn reports_nonexecutable_zcashd_path() {
+        let temp_dir = TempDir::new().expect("tempdir should be created");
+        let mut config = permission_test_config(&temp_dir);
+        let zcashd_path = temp_dir.path().join("non-executable-zcashd");
+        std_fs::write(&zcashd_path, "#!/bin/sh\n").expect("zcashd file should be written");
+        set_mode(&zcashd_path, 0o644);
+        config.zcashd_compat.zcashd_path = Some(zcashd_path);
+        let mut summary = PreflightSummary::default();
+
+        check_permissions(
+            &mut summary,
+            &config,
+            &permission_test_zcashd_datadir(&config),
+        )
+        .expect("permission checks should complete");
+
+        assert!(
+            summary
+                .errors
+                .iter()
+                .any(|error| error.contains("not executable")),
+            "expected non-executable zcashd error: {:?}",
+            summary.errors
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn missing_conf_requires_writable_parent() {
+        let temp_dir = TempDir::new().expect("tempdir should be created");
+        let config = permission_test_config(&temp_dir);
+        let zcashd_datadir = permission_test_zcashd_datadir(&config);
+        std_fs::create_dir_all(&zcashd_datadir).expect("datadir should be created");
+        let mut summary = PreflightSummary::default();
+
+        check_permissions(&mut summary, &config, &zcashd_datadir)
+            .expect("permission checks should complete");
+
+        assert_eq!(summary.errors, Vec::<String>::new());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn managed_source_checks_cache_dir_writability() {
+        if running_as_root() {
+            return;
+        }
+
+        if zcashd_target_triple().is_none() {
+            return;
+        }
+
+        let temp_dir = TempDir::new().expect("tempdir should be created");
+        let protected = temp_dir.path().join("protected");
+        std_fs::create_dir(&protected).expect("protected dir should be created");
+
+        let mut config = permission_test_config(&temp_dir);
+        config.state.cache_dir = protected.join("zebra-cache");
+        config.zcashd_compat.zcashd_datadir = Some(temp_dir.path().join("zcashd-datadir"));
+        config.zcashd_compat.zcashd_source = ConfigZcashdBinarySource::Managed;
+        config.zcashd_compat.zcashd_path = None;
+
+        set_mode(&protected, 0o555);
+        let mut summary = PreflightSummary::default();
+        let result = check_permissions(
+            &mut summary,
+            &config,
+            &permission_test_zcashd_datadir(&config),
+        );
+        set_mode(&protected, 0o755);
+
+        result.expect("permission checks should complete");
+        assert!(
+            summary.errors.iter().any(|error| {
+                error.contains("managed zcashd cache directory")
+                    && error.contains("nearest existing ancestor")
+            }),
+            "expected managed cache writability error: {:?}",
+            summary.errors
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn stale_managed_cache_checks_cache_dir_writability() {
+        if running_as_root() {
+            return;
+        }
+
+        if zcashd_target_triple().is_none() {
+            return;
+        }
+
+        let temp_dir = TempDir::new().expect("tempdir should be created");
+        let mut config = permission_test_config(&temp_dir);
+        config.zcashd_compat.zcashd_source = ConfigZcashdBinarySource::Managed;
+        config.zcashd_compat.zcashd_path = None;
+
+        let binary_path =
+            managed_zcashd_binary_path(&config.state.cache_dir).expect("managed path should exist");
+        let cache_dir = binary_path.parent().expect("binary should have parent");
+        std_fs::create_dir_all(cache_dir).expect("managed cache dir should be created");
+        std_fs::write(&binary_path, "#!/bin/sh\n").expect("cached zcashd should be written");
+        std_fs::write(cache_dir.join("zcashd.sha256"), "stale\n")
+            .expect("stale provenance should be written");
+        set_mode(&binary_path, 0o755);
+
+        set_mode(cache_dir, 0o555);
+        let mut summary = PreflightSummary::default();
+        let result = check_permissions(
+            &mut summary,
+            &config,
+            &permission_test_zcashd_datadir(&config),
+        );
+        set_mode(cache_dir, 0o755);
+
+        result.expect("permission checks should complete");
+        assert!(
+            summary.errors.iter().any(|error| {
+                error.contains("managed zcashd cache directory") && error.contains("not writable")
+            }),
+            "expected stale managed cache writability error: {:?}",
+            summary.errors
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    fn permission_test_config(temp_dir: &TempDir) -> ZebradConfig {
+        let mut config = ZebradConfig::default();
+        config.state.cache_dir = temp_dir.path().join("zebra-cache");
+        config.zcashd_compat.manage_zcashd = true;
+        config.zcashd_compat.zcashd_source = ConfigZcashdBinarySource::Path;
+        config.zcashd_compat.cookie_dir = temp_dir.path().join("cookie-dir");
+        config.zcashd_compat.zcashd_datadir = Some(temp_dir.path().join("zcashd-datadir"));
+
+        let zcashd_path = temp_dir.path().join("zcashd");
+        std_fs::write(&zcashd_path, "#!/bin/sh\n").expect("zcashd file should be written");
+        set_mode(&zcashd_path, 0o755);
+        config.zcashd_compat.zcashd_path = Some(zcashd_path);
+
+        config
+    }
+
+    #[cfg(target_os = "linux")]
+    fn permission_test_zcashd_datadir(config: &ZebradConfig) -> PathBuf {
+        resolve_zcashd_datadir_path(
+            &effective_zcashd_datadir(&config.zcashd_compat, &config.state.cache_dir),
+            &config.zcashd_compat.zcashd_extra_args,
+        )
+    }
+
+    #[cfg(target_os = "linux")]
+    fn set_mode(path: &Path, mode: u32) {
+        std_fs::set_permissions(path, std_fs::Permissions::from_mode(mode))
+            .expect("permissions should be set");
+    }
+
+    #[cfg(target_os = "linux")]
+    fn running_as_root() -> bool {
+        uid_command_reports_root(&["-u"]) || uid_command_reports_root(&["-r", "-u"])
+    }
+
+    #[cfg(target_os = "linux")]
+    fn uid_command_reports_root(args: &[&str]) -> bool {
+        Command::new("id")
+            .args(args)
+            .output()
+            .ok()
+            .and_then(|output| String::from_utf8(output.stdout).ok())
+            .is_some_and(|uid| uid.trim() == "0")
     }
 
     #[cfg(target_os = "linux")]

@@ -13,7 +13,10 @@ use zebra_rpc::server::OPENED_RPC_ENDPOINT_MSG;
 use zebra_test::{args, command::TestChild};
 
 use super::{
-    config::{build_zcashd_compat_config, ZCASHD_TEST_RPC_PASS, ZCASHD_TEST_RPC_USER},
+    config::{
+        build_zcashd_compat_config, build_zcashd_compat_config_with_options, ZcashdCompatConfig,
+        ZcashdCompatTestOptions, ZCASHD_TEST_RPC_PASS, ZCASHD_TEST_RPC_USER,
+    },
     ZcashdRpcClient, TEST_ZCASHD_COOKIE_FILE, TEST_ZCASHD_RPC_ADDR, TEST_ZCASHD_RPC_PASSWORD,
     TEST_ZCASHD_RPC_USER, TEST_ZEBRAD_RPC_ADDR,
 };
@@ -130,12 +133,31 @@ pub fn send_signal(pid: u32, signal: &str) -> Result<()> {
 /// Spawns a fresh regtest zebrad that supervises a zcashd-compat zcashd process,
 /// waits for both to be ready, and returns the test setup.
 pub async fn spawn_zebrad_with_zcashd_compat() -> Result<ZcashdCompatSetup> {
+    spawn_zebrad_with_zcashd_compat_with_config_builder(build_zcashd_compat_config).await
+}
+
+/// Spawns a fresh regtest zebrad with configurable zcashd-compat limits.
+pub async fn spawn_zebrad_with_zcashd_compat_with_options(
+    options: ZcashdCompatTestOptions,
+) -> Result<ZcashdCompatSetup> {
+    spawn_zebrad_with_zcashd_compat_with_config_builder(|cookie_dir| {
+        build_zcashd_compat_config_with_options(cookie_dir, options)
+    })
+    .await
+}
+
+async fn spawn_zebrad_with_zcashd_compat_with_config_builder<F>(
+    build_config: F,
+) -> Result<ZcashdCompatSetup>
+where
+    F: FnOnce(PathBuf) -> Result<ZcashdCompatConfig>,
+{
     let _init_guard = zebra_test::init();
 
     let dir = testdir()?;
     let cookie_dir = dir.path().to_path_buf();
 
-    let compat_cfg = build_zcashd_compat_config(cookie_dir.clone())?;
+    let compat_cfg = build_config(cookie_dir.clone())?;
     let mut zebrad_config = compat_cfg.zebrad_config;
 
     let zebra_rpc_addr = compat_cfg.zebra_rpc_addr;

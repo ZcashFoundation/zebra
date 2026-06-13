@@ -119,6 +119,9 @@ zebra-node-services = { path = "../zebra-node-services", version = "7.0.0", feat
 ] }
 zebra-script = { path = "../zebra-script", version = "8.0.0" }
 zebra-state = { path = "../zebra-state", version = "8.0.0" }
+rustls = "0.23.40"
+tokio-rustls = "0.26.4"
+rustls-pemfile = "2.2.0"
 
 [build-dependencies]
 openrpsee = { workspace = true }

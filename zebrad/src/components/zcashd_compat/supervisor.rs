@@ -2,6 +2,7 @@ use std::{
     borrow::Cow,
     path::{Path, PathBuf},
     process::Stdio,
+    time::{Duration, Instant},
 };
 
 use color_eyre::eyre::{eyre, Report};
@@ -18,6 +19,10 @@ use zebra_chain::parameters::NetworkKind;
 
 use super::{effective_zcashd_datadir, ensure_zcashd_datadir, resolve_zcashd_datadir_path, Config};
 
+const SUPERVISOR_ACTIVE_METRIC: &str = "zcashd_compat.supervisor.active";
+const SUPERVISOR_DISABLED_METRIC: &str = "zcashd_compat.supervisor.disabled";
+const SUPERVISOR_EXHAUSTED_METRIC: &str = "zcashd_compat.supervisor.exhausted";
+
 /// The full configuration used by the zcashd-compat supervisor task.
 #[derive(Clone, Debug)]
 pub struct SupervisorConfig {
@@ -29,6 +34,12 @@ pub struct SupervisorConfig {
     pub rpc_url: String,
     /// Cookie file path passed to `-zebra-compat-cookiefile`.
     pub cookie_path: PathBuf,
+    /// Whether supervised zcashd should authenticate to Zebra using the cookie file.
+    pub enable_cookie_auth: bool,
+    /// Optional CA file passed to zcashd for Zebra TLS verification.
+    pub tls_ca_file: Option<PathBuf>,
+    /// Zebra RPC response body limit passed to zcashd for startup validation.
+    pub zebra_rpc_max_response_body_size: usize,
     /// Any extra user-provided arguments.
     pub extra_args: Vec<String>,
     /// Active Zebra network kind.
@@ -36,11 +47,13 @@ pub struct SupervisorConfig {
     /// Delay before first spawn.
     pub startup_delay: std::time::Duration,
     /// Restart backoff.
-    pub restart_backoff: std::time::Duration,
-    /// Restart limit.
-    pub max_restarts: u32,
+    pub restart_backoff: Duration,
+    /// Maximum restart backoff.
+    pub restart_backoff_max: Duration,
+    /// Child uptime that resets the consecutive restart count.
+    pub restart_reset_after: Duration,
     /// Grace period after SIGTERM.
-    pub shutdown_grace_period: std::time::Duration,
+    pub shutdown_grace_period: Duration,
 }
 
 impl SupervisorConfig {
@@ -52,6 +65,7 @@ impl SupervisorConfig {
         network: NetworkKind,
         rpc_url: String,
         cookie_path: PathBuf,
+        zebra_rpc_max_response_body_size: usize,
     ) -> Self {
         let extra_args = zcashd_compat.zcashd_extra_args.clone();
         let zcashd_datadir = resolve_zcashd_datadir_path(
@@ -64,11 +78,15 @@ impl SupervisorConfig {
             zcashd_datadir,
             rpc_url,
             cookie_path,
+            enable_cookie_auth: zcashd_compat.enable_cookie_auth,
+            tls_ca_file: zcashd_compat.tls_ca_file.clone(),
+            zebra_rpc_max_response_body_size,
             extra_args,
             network,
             startup_delay: zcashd_compat.startup_delay,
             restart_backoff: zcashd_compat.restart_backoff,
-            max_restarts: zcashd_compat.max_restarts,
+            restart_backoff_max: zcashd_compat.restart_backoff_max,
+            restart_reset_after: zcashd_compat.restart_reset_after,
             shutdown_grace_period: zcashd_compat.shutdown_grace_period,
         }
     }
@@ -79,11 +97,25 @@ impl SupervisorConfig {
             "-zebra-compat".to_string(),
             format!("-zebra-compat-url={}", self.rpc_url),
             format!(
-                "-zebra-compat-cookiefile={}",
-                self.cookie_path.to_string_lossy()
+                "-zebra-compat-zebra-rpc-max-response-body-bytes={}",
+                self.zebra_rpc_max_response_body_size
             ),
             format!("-datadir={}", self.zcashd_datadir.to_string_lossy()),
         ];
+        if self.enable_cookie_auth {
+            args.push(format!(
+                "-zebra-compat-cookiefile={}",
+                self.cookie_path.to_string_lossy()
+            ));
+        } else {
+            args.push("-zebra-compat-no-auth=1".to_string());
+        }
+        if let Some(tls_ca_file) = &self.tls_ca_file {
+            args.push(format!(
+                "-zebra-compat-tls-ca-file={}",
+                tls_ca_file.to_string_lossy()
+            ));
+        }
 
         match self.network {
             NetworkKind::Mainnet => {}
@@ -95,9 +127,10 @@ impl SupervisorConfig {
         // port (8233 mainnet / 18233 testnet). Operators often reuse a legacy
         // full-node zcash.conf with listen=1, and CLI args are parsed before
         // zcash.conf without being overwritten by it — so pass these explicitly
-        // as defense in depth (zcashd also force-disables them when -zebra-compat
-        // is set). extra_args remain last. P2P-enabling flags there are rejected
-        // by zcashd startup validation rather than silently taking effect.
+        // as defense in depth. zcashd also force-disables P2P boolean flags
+        // when -zebra-compat is set, including later extra_args such as -p2p=1.
+        // Peer-selection extra_args are still rejected by zcashd startup
+        // validation rather than silently taking effect.
         args.push("-p2p=0".to_string());
         args.push("-listen=0".to_string());
 
@@ -116,32 +149,60 @@ impl SupervisorConfig {
 /// Runs the zcashd-compat zcashd supervisor until shutdown.
 ///
 /// The supervisor keeps restarting `zcashd` exits that happen before Zebra
-/// shutdown, up to `max_restarts`.
+/// shutdown, using capped exponential backoff. Spawn failures use the same
+/// backoff, so a binary that is briefly missing or unspawnable (for example
+/// during an upgrade, or under transient resource pressure) does not
+/// permanently end supervision.
 ///
 /// # Errors
 ///
-/// Returns an error if spawning `zcashd` fails, if shutdown handling fails, or
-/// if the restart limit is exceeded.
+/// Returns an error if shutdown handling fails.
 pub async fn run(
     config: SupervisorConfig,
     mut shutdown_rx: watch::Receiver<bool>,
 ) -> Result<(), Report> {
     ensure_zcashd_datadir(&config.zcashd_datadir, &config.extra_args)?;
+    set_supervision_active_metrics();
 
     if wait_for_delay_or_shutdown(config.startup_delay, &mut shutdown_rx).await {
         info!("zcashd-compat supervisor received shutdown during startup delay");
+        set_supervision_inactive_metrics();
         return Ok(());
     }
 
-    let mut restart_count = 0u32;
+    let mut consecutive_restart_count = 0u32;
 
     loop {
         if *shutdown_rx.borrow() {
             info!("zcashd-compat supervisor received shutdown before spawn");
+            set_supervision_inactive_metrics();
             return Ok(());
         }
 
-        let mut child = spawn_zcashd(&config)?;
+        let mut child = match spawn_zcashd(&config) {
+            Ok(child) => child,
+            Err(error) => {
+                consecutive_restart_count = consecutive_restart_count.saturating_add(1);
+                warn!(
+                    %error,
+                    restart_count = consecutive_restart_count,
+                    "failed to spawn zcashd-compat zcashd child, retrying after backoff"
+                );
+
+                let restart_delay = restart_backoff_delay(
+                    config.restart_backoff,
+                    config.restart_backoff_max,
+                    consecutive_restart_count,
+                );
+                if wait_for_delay_or_shutdown(restart_delay, &mut shutdown_rx).await {
+                    info!("zcashd-compat supervisor received shutdown during spawn retry backoff");
+                    set_supervision_inactive_metrics();
+                    return Ok(());
+                }
+                continue;
+            }
+        };
+        let child_started_at = Instant::now();
         info!(
             path = %config.zcashd_path.display(),
             datadir = %config.zcashd_datadir.display(),
@@ -153,28 +214,45 @@ pub async fn run(
         let child_result = wait_for_child_or_shutdown(&mut child, &mut shutdown_rx).await;
         match child_result {
             ChildOutcome::ShutdownRequested => {
+                info!(
+                    pid = ?child.id(),
+                    grace_period = ?config.shutdown_grace_period,
+                    "zcashd-compat supervisor received shutdown request; terminating zcashd child"
+                );
                 terminate_child(&mut child, config.shutdown_grace_period).await?;
                 info!("zcashd-compat zcashd child stopped on shutdown");
+                set_supervision_inactive_metrics();
                 return Ok(());
             }
             ChildOutcome::Exited(status) => {
-                restart_count = restart_count.saturating_add(1);
+                let child_uptime = child_started_at.elapsed();
+                if should_reset_restart_count(child_uptime, config.restart_reset_after) {
+                    info!(
+                        ?status,
+                        child_uptime_secs = child_uptime.as_secs(),
+                        restart_reset_after_secs = config.restart_reset_after.as_secs(),
+                        previous_restart_count = consecutive_restart_count,
+                        "zcashd-compat zcashd child had healthy uptime, resetting restart count"
+                    );
+                    consecutive_restart_count = 0;
+                }
+
+                consecutive_restart_count = consecutive_restart_count.saturating_add(1);
                 warn!(
                     ?status,
-                    restart_count,
-                    max_restarts = config.max_restarts,
+                    restart_count = consecutive_restart_count,
+                    child_uptime_secs = child_uptime.as_secs(),
                     "zcashd-compat zcashd child exited before shutdown, restarting"
                 );
 
-                if restart_count > config.max_restarts {
-                    return Err(eyre!(
-                        "zcashd-compat zcashd child exceeded restart limit: {}",
-                        config.max_restarts
-                    ));
-                }
-
-                if wait_for_delay_or_shutdown(config.restart_backoff, &mut shutdown_rx).await {
+                let restart_delay = restart_backoff_delay(
+                    config.restart_backoff,
+                    config.restart_backoff_max,
+                    consecutive_restart_count,
+                );
+                if wait_for_delay_or_shutdown(restart_delay, &mut shutdown_rx).await {
                     info!("zcashd-compat supervisor received shutdown during restart backoff");
+                    set_supervision_inactive_metrics();
                     return Ok(());
                 }
             }
@@ -182,7 +260,59 @@ pub async fn run(
     }
 }
 
+/// Sets metrics for zcashd-compat mode when zcashd supervision is intentionally disabled.
+pub fn set_supervision_config_disabled_metrics() {
+    metrics::gauge!(SUPERVISOR_ACTIVE_METRIC).set(0.0);
+    metrics::gauge!(SUPERVISOR_DISABLED_METRIC).set(1.0);
+    metrics::gauge!(SUPERVISOR_EXHAUSTED_METRIC).set(0.0);
+}
+
+/// Sets metrics for zcashd-compat mode when supervision has unexpectedly stopped.
+pub fn set_supervision_unexpectedly_disabled_metrics() {
+    metrics::gauge!(SUPERVISOR_ACTIVE_METRIC).set(0.0);
+    metrics::gauge!(SUPERVISOR_DISABLED_METRIC).set(1.0);
+}
+
+fn set_supervision_active_metrics() {
+    metrics::gauge!(SUPERVISOR_ACTIVE_METRIC).set(1.0);
+    metrics::gauge!(SUPERVISOR_DISABLED_METRIC).set(0.0);
+    metrics::gauge!(SUPERVISOR_EXHAUSTED_METRIC).set(0.0);
+}
+
+fn set_supervision_inactive_metrics() {
+    metrics::gauge!(SUPERVISOR_ACTIVE_METRIC).set(0.0);
+}
+
+/// Returns `true` when a child ran long enough to make previous failures stale.
+fn should_reset_restart_count(child_uptime: Duration, restart_reset_after: Duration) -> bool {
+    restart_reset_after != Duration::ZERO && child_uptime >= restart_reset_after
+}
+
+/// Calculates capped exponential restart backoff from the base delay and consecutive exit count.
+fn restart_backoff_delay(
+    base_delay: Duration,
+    max_delay: Duration,
+    restart_count: u32,
+) -> Duration {
+    if base_delay == Duration::ZERO || restart_count <= 1 {
+        return base_delay.min(max_delay);
+    }
+
+    let multiplier = 1u32
+        .checked_shl(restart_count.saturating_sub(1))
+        .unwrap_or(u32::MAX);
+    base_delay.saturating_mul(multiplier).min(max_delay)
+}
+
 /// Spawns `zcashd` with zcashd-compat arguments and connects child output streams.
+///
+/// `kill_on_drop` is intentionally disabled: a dropped child handle (zebrad
+/// panic, supervisor task abort) must not SIGKILL a zcashd that may be flushing
+/// its chainstate and wallet. An abandoned zcashd finishes any SIGTERM-initiated
+/// shutdown on its own, or keeps running until stopped externally; `init` reaps
+/// it once zebrad exits. The child also runs in its own process group so
+/// group-wide terminal signals aimed at zebrad cannot kill zcashd uncleanly;
+/// [`terminate_child`] remains the only path that force-kills it.
 ///
 /// # Errors
 ///
@@ -196,7 +326,9 @@ fn spawn_zcashd(config: &SupervisorConfig) -> Result<Child, Report> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .stdin(Stdio::null())
-        .kill_on_drop(true);
+        .kill_on_drop(false);
+    #[cfg(unix)]
+    command.process_group(0);
 
     let mut child = command
         .spawn()
@@ -366,6 +498,8 @@ async fn terminate_child(
     child: &mut Child,
     shutdown_grace_period: std::time::Duration,
 ) -> Result<(), Report> {
+    let pid = child.id();
+
     #[cfg(unix)]
     {
         use nix::{
@@ -373,20 +507,45 @@ async fn terminate_child(
             unistd::Pid,
         };
 
-        if let Some(id) = child.id() {
-            let pid = id as i32;
-            let _ = kill(Pid::from_raw(pid), SIGTERM);
+        if let Some(id) = pid {
+            info!(
+                pid = id,
+                grace_period = ?shutdown_grace_period,
+                "sending SIGTERM to zcashd-compat zcashd child"
+            );
+            if let Err(error) = kill(Pid::from_raw(id as i32), SIGTERM) {
+                warn!(
+                    pid = id,
+                    ?error,
+                    "failed to send SIGTERM to zcashd-compat zcashd child"
+                );
+            }
+        } else {
+            warn!("zcashd-compat zcashd child has no process id; cannot send SIGTERM");
         }
     }
 
+    let start = std::time::Instant::now();
     let wait_result = timeout(shutdown_grace_period, child.wait()).await;
     match wait_result {
-        Ok(Ok(_status)) => Ok(()),
+        Ok(Ok(_status)) => {
+            info!(
+                ?pid,
+                elapsed = ?start.elapsed(),
+                "zcashd-compat zcashd exited cleanly after SIGTERM"
+            );
+            Ok(())
+        }
         Ok(Err(error)) => Err(eyre!(
             "failed waiting for zcashd-compat zcashd shutdown: {error}"
         )),
         Err(_timeout) => {
-            warn!("zcashd-compat zcashd did not exit after SIGTERM, sending kill");
+            warn!(
+                ?pid,
+                grace_period = ?shutdown_grace_period,
+                "zcashd-compat zcashd did not exit after SIGTERM, sending kill; \
+                 an interrupted shutdown can lose un-flushed chainstate"
+            );
             child
                 .start_kill()
                 .map_err(|err| eyre!("failed to kill zcashd-compat zcashd child: {err}"))?;
@@ -468,7 +627,10 @@ mod tests {
     use tokio::sync::watch;
     use zebra_chain::parameters::NetworkKind;
 
-    use super::{wait_for_delay_or_shutdown, SupervisorConfig};
+    use super::{
+        restart_backoff_delay, should_reset_restart_count, wait_for_delay_or_shutdown,
+        SupervisorConfig,
+    };
 
     #[test]
     fn command_args_include_zcashd_compat_flags() {
@@ -477,12 +639,16 @@ mod tests {
             zcashd_datadir: PathBuf::from("/tmp/zcashd-compat-datadir"),
             rpc_url: "http://127.0.0.1:8232".to_string(),
             cookie_path: PathBuf::from("/tmp/.cookie"),
+            enable_cookie_auth: true,
+            tls_ca_file: None,
+            zebra_rpc_max_response_body_size: 128 * 1024 * 1024,
             extra_args: vec!["-debug=1".to_string()],
             network: NetworkKind::Regtest,
-            startup_delay: std::time::Duration::from_secs(1),
-            restart_backoff: std::time::Duration::from_secs(2),
-            max_restarts: 3,
-            shutdown_grace_period: std::time::Duration::from_secs(10),
+            startup_delay: Duration::from_secs(1),
+            restart_backoff: Duration::from_secs(2),
+            restart_backoff_max: Duration::from_secs(5 * 60),
+            restart_reset_after: Duration::from_secs(60 * 60),
+            shutdown_grace_period: Duration::from_secs(300),
         };
 
         let args = config.command_args();
@@ -495,6 +661,9 @@ mod tests {
         assert!(args
             .iter()
             .any(|a| a.starts_with("-zebra-compat-cookiefile=/tmp/.cookie")));
+        assert!(args
+            .iter()
+            .any(|a| a == "-zebra-compat-zebra-rpc-max-response-body-bytes=134217728"));
         assert!(args.contains(&"-p2p=0".to_string()));
         assert!(args.contains(&"-listen=0".to_string()));
         assert!(args.contains(&"-printtoconsole".to_string()));
@@ -514,6 +683,89 @@ mod tests {
             .expect("extra arg present");
         assert!(p2p_idx < debug_idx);
         assert!(listen_idx < debug_idx);
+    }
+
+    #[test]
+    fn command_args_use_explicit_no_auth_flag_when_cookie_auth_disabled() {
+        let config = SupervisorConfig {
+            zcashd_path: PathBuf::from("zcashd"),
+            zcashd_datadir: PathBuf::from("/tmp/zcashd-compat-datadir"),
+            rpc_url: "https://127.0.0.1:8232".to_string(),
+            cookie_path: PathBuf::from("/tmp/.cookie"),
+            enable_cookie_auth: false,
+            tls_ca_file: Some(PathBuf::from("/tmp/ca.pem")),
+            zebra_rpc_max_response_body_size: 128 * 1024 * 1024,
+            extra_args: Vec::new(),
+            network: NetworkKind::Regtest,
+            startup_delay: Duration::from_secs(1),
+            restart_backoff: Duration::from_secs(2),
+            restart_backoff_max: Duration::from_secs(5 * 60),
+            restart_reset_after: Duration::from_secs(60 * 60),
+            shutdown_grace_period: Duration::from_secs(300),
+        };
+
+        let args = config.command_args();
+
+        assert!(args.contains(&"-zebra-compat-no-auth=1".to_string()));
+        assert!(args.contains(&"-zebra-compat-tls-ca-file=/tmp/ca.pem".to_string()));
+        assert!(!args
+            .iter()
+            .any(|arg| arg.starts_with("-zebra-compat-cookiefile=")));
+    }
+
+    #[test]
+    fn restart_count_resets_after_healthy_uptime() {
+        assert!(should_reset_restart_count(
+            Duration::from_secs(60 * 60),
+            Duration::from_secs(60 * 60)
+        ));
+        assert!(should_reset_restart_count(
+            Duration::from_secs(60 * 60 + 1),
+            Duration::from_secs(60 * 60)
+        ));
+    }
+
+    #[test]
+    fn restart_count_does_not_reset_before_threshold() {
+        assert!(!should_reset_restart_count(
+            Duration::from_secs(60 * 60 - 1),
+            Duration::from_secs(60 * 60)
+        ));
+        assert!(!should_reset_restart_count(
+            Duration::from_secs(60 * 60),
+            Duration::ZERO
+        ));
+    }
+
+    #[test]
+    fn restart_backoff_is_exponential_from_base_delay() {
+        let base_delay = Duration::from_secs(2);
+        let max_delay = Duration::from_secs(60);
+
+        assert_eq!(restart_backoff_delay(base_delay, max_delay, 0), base_delay);
+        assert_eq!(restart_backoff_delay(base_delay, max_delay, 1), base_delay);
+        assert_eq!(
+            restart_backoff_delay(base_delay, max_delay, 2),
+            Duration::from_secs(4)
+        );
+        assert_eq!(
+            restart_backoff_delay(base_delay, max_delay, 3),
+            Duration::from_secs(8)
+        );
+    }
+
+    #[test]
+    fn restart_backoff_is_capped() {
+        let delay = restart_backoff_delay(Duration::from_secs(2), Duration::from_secs(10), 10);
+
+        assert_eq!(delay, Duration::from_secs(10));
+    }
+
+    #[test]
+    fn restart_backoff_caps_saturated_delay() {
+        let delay = restart_backoff_delay(Duration::MAX, Duration::from_secs(10), u32::MAX);
+
+        assert_eq!(delay, Duration::from_secs(10));
     }
 
     #[tokio::test]
@@ -576,5 +828,56 @@ mod tests {
         let sanitized = super::sanitize_child_log_line(line);
 
         assert_eq!(sanitized, line);
+    }
+
+    /// A child that exits on SIGTERM within the grace period is never SIGKILLed,
+    /// so its shutdown flush cannot be interrupted.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn terminate_child_waits_for_graceful_exit() {
+        let mut child = tokio::process::Command::new("/bin/sleep")
+            .arg("60")
+            .kill_on_drop(false)
+            .spawn()
+            .expect("sleep is available on unix test hosts");
+
+        let start = std::time::Instant::now();
+        super::terminate_child(&mut child, Duration::from_secs(30))
+            .await
+            .expect("terminate_child should succeed for a SIGTERM-compliant child");
+
+        assert!(
+            start.elapsed() < Duration::from_secs(30),
+            "child should exit on SIGTERM well before the grace period"
+        );
+    }
+
+    /// A child that ignores SIGTERM is force-killed only after the full grace
+    /// period elapses.
+    #[cfg(unix)]
+    #[tokio::test(start_paused = true)]
+    async fn terminate_child_kills_after_grace_period() {
+        let mut child = tokio::process::Command::new("/bin/sh")
+            .args(["-c", "trap '' TERM; sleep 60"])
+            .kill_on_drop(true)
+            .spawn()
+            .expect("sh is available on unix test hosts");
+
+        // Give the shell a moment of real time to install the TERM trap before
+        // SIGTERM is sent; the paused clock only skips tokio timers.
+        tokio::task::yield_now().await;
+        std::thread::sleep(std::time::Duration::from_millis(200));
+
+        super::terminate_child(&mut child, Duration::from_secs(5))
+            .await
+            .expect("terminate_child should fall back to SIGKILL");
+
+        let status = child
+            .try_wait()
+            .expect("child status should be queryable after terminate_child");
+        assert!(
+            status.is_some(),
+            "child must have been reaped after the SIGKILL fallback"
+        );
     }
 }

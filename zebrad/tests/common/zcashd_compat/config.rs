@@ -31,6 +31,9 @@ pub struct ZcashdCompatConfig {
 pub const ZCASHD_TEST_RPC_USER: &str = "zcashd_test";
 pub const ZCASHD_TEST_RPC_PASS: &str = "zebra_test_pass";
 
+/// Default zcashd sync batch size for managed regtest tests.
+pub const DEFAULT_TEST_SYNC_BATCH_SIZE: u64 = 33;
+
 /// Deterministic regtest miner keypair (secp256k1 secret key = 1, compressed).
 ///
 /// zebrad mines coinbase to this address; tx-flow tests import the private key
@@ -38,12 +41,41 @@ pub const ZCASHD_TEST_RPC_PASS: &str = "zebra_test_pass";
 pub const MINER_T_ADDR: &str = "tmLPctKo9j49rtCSKpwEBpLBeykiTGomGQs";
 pub const MINER_PRIV_WIF: &str = "cMahea7zqjxrtgAbB7LSGbcQUr1uX1ojuat9jZodMN87JcbXMTcA";
 
+/// Tunable zcashd-compat options for managed regtest tests.
+#[derive(Clone, Copy, Debug)]
+pub struct ZcashdCompatTestOptions {
+    /// zcashd's requested Zebra sync batch size.
+    pub sync_batch_size: u64,
+    /// Optional zcashd raw-block response budget in MiB.
+    pub sync_response_budget_mb: Option<u64>,
+    /// Optional Zebra RPC response body limit.
+    pub rpc_max_response_body_size: Option<usize>,
+}
+
+impl Default for ZcashdCompatTestOptions {
+    fn default() -> Self {
+        Self {
+            sync_batch_size: DEFAULT_TEST_SYNC_BATCH_SIZE,
+            sync_response_budget_mb: None,
+            rpc_max_response_body_size: None,
+        }
+    }
+}
+
 /// Builds a regtest zebrad config wired for zcashd-compat testing.
 ///
 /// `cookie_dir` must be the directory where zebrad will write the zcashd-compat
 /// cookie file.  In managed-spawn mode this is the testdir (kept alive by the
 /// `TestChild`).
 pub fn build_zcashd_compat_config(cookie_dir: PathBuf) -> Result<ZcashdCompatConfig> {
+    build_zcashd_compat_config_with_options(cookie_dir, ZcashdCompatTestOptions::default())
+}
+
+/// Builds a regtest zebrad config wired for zcashd-compat testing.
+pub fn build_zcashd_compat_config_with_options(
+    cookie_dir: PathBuf,
+    options: ZcashdCompatTestOptions,
+) -> Result<ZcashdCompatConfig> {
     let net = Network::new_regtest(
         ConfiguredActivationHeights {
             nu5: Some(1),
@@ -70,6 +102,9 @@ pub fn build_zcashd_compat_config(cookie_dir: PathBuf) -> Result<ZcashdCompatCon
     config.rpc.listen_addr = Some(zebra_rpc_addr);
     config.rpc.parallel_cpu_threads = 1;
     config.rpc.enable_cookie_auth = false;
+    if let Some(max_response_body_size) = options.rpc_max_response_body_size {
+        config.rpc.max_response_body_size = max_response_body_size;
+    }
 
     // Enable mempool from genesis so tx-flow tests work immediately
     config.mempool = mempool::Config {
@@ -115,13 +150,18 @@ pub fn build_zcashd_compat_config(cookie_dir: PathBuf) -> Result<ZcashdCompatCon
         // The wallet tests use `getnewaddress`, which is deny-by-default
         // deprecated in current zcashd.
         "-allowdeprecated=getnewaddress".to_string(),
-        "-zebra-compat-sync-batch-size=33".to_string(),
+        format!("-zebra-compat-sync-batch-size={}", options.sync_batch_size),
         "-zebra-compat-poll-interval=1".to_string(),
         // Regtest blocks mined on top of the 2011 genesis inherit old
         // median-time-past timestamps, which would keep zcashd in initial
         // block download forever and disable its wallet RPCs. 100 years.
         "-maxtipage=3153600000".to_string(),
     ];
+    if let Some(sync_response_budget_mb) = options.sync_response_budget_mb {
+        config.zcashd_compat.zcashd_extra_args.push(format!(
+            "-zebra-compat-sync-response-budget-mb={sync_response_budget_mb}"
+        ));
+    }
 
     Ok(ZcashdCompatConfig {
         zebrad_config: config,

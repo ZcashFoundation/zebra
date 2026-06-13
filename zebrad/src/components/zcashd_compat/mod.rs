@@ -18,4 +18,7 @@ pub use manifest::{
     EMBEDDED_ZCASHD_RELEASE_MANIFEST,
 };
 pub use preflight::run_preflight;
-pub use supervisor::{is_command_resolvable, run as run_supervisor, SupervisorConfig};
+pub use supervisor::{
+    is_command_resolvable, run as run_supervisor, set_supervision_config_disabled_metrics,
+    set_supervision_unexpectedly_disabled_metrics, SupervisorConfig,
+};

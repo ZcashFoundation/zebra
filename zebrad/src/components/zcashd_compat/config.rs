@@ -83,16 +83,50 @@ pub struct Config {
     #[serde(default = "default_cookie_file_name")]
     pub cookie_file_name: String,
 
+    /// Enable cookie-based authentication on the dedicated zcashd-compat RPC listener.
+    ///
+    /// This defaults to true. Disabling it is only allowed when the zcashd-compat
+    /// listener is configured for TLS, so external access control can protect the
+    /// unauthenticated HTTPS endpoint.
+    pub enable_cookie_auth: bool,
+
+    /// TLS certificate chain for the dedicated zcashd-compat RPC listener.
+    pub tls_cert_file: Option<PathBuf>,
+
+    /// TLS private key for the dedicated zcashd-compat RPC listener.
+    pub tls_key_file: Option<PathBuf>,
+
+    /// CA certificate file passed to supervised zcashd so it can verify Zebra's TLS certificate.
+    pub tls_ca_file: Option<PathBuf>,
+
+    /// Allow a non-loopback zcashd-compat RPC listener without TLS.
+    ///
+    /// By default, non-loopback `listen_addr` values require TLS because cookie
+    /// credentials would otherwise cross the network in cleartext. Set this only
+    /// when another layer secures the listener, such as a container or private
+    /// network boundary. This mirrors zcashd's `-zebra-compat-allow-remote-http`
+    /// client-side escape hatch.
+    pub unsafe_allow_remote_http: bool,
+
     /// Delay before the first `zcashd` spawn attempt.
     #[serde(with = "humantime_serde")]
     pub startup_delay: Duration,
 
     /// Delay between supervisor restart attempts.
+    ///
+    /// This is the base delay for exponential restart backoff.
     #[serde(with = "humantime_serde")]
     pub restart_backoff: Duration,
 
-    /// Maximum number of automatic restarts after unexpected exits.
-    pub max_restarts: u32,
+    /// Maximum delay between supervisor restart attempts.
+    ///
+    /// This caps exponential restart backoff while retries continue indefinitely.
+    #[serde(with = "humantime_serde")]
+    pub restart_backoff_max: Duration,
+
+    /// Child uptime that resets the supervisor's consecutive restart count.
+    #[serde(with = "humantime_serde")]
+    pub restart_reset_after: Duration,
 
     /// Grace period for a clean shutdown after sending SIGTERM.
     #[serde(with = "humantime_serde")]
@@ -103,7 +137,8 @@ impl Default for Config {
     /// Returns conservative zcashd-compat defaults suitable for local supervision.
     ///
     /// Defaults keep zcashd-compat disabled unless explicitly requested, and use a
-    /// short restart/backoff policy for child-process recovery.
+    /// short restart/backoff policy for child-process recovery. Shutdowns allow
+    /// enough time for `zcashd` to flush wallet and chainstate data after SIGTERM.
     fn default() -> Self {
         Self {
             enabled: false,
@@ -115,11 +150,24 @@ impl Default for Config {
             listen_addr: None,
             cookie_dir: default_cache_dir(),
             cookie_file_name: default_cookie_file_name(),
+            enable_cookie_auth: true,
+            tls_cert_file: None,
+            tls_key_file: None,
+            tls_ca_file: None,
+            unsafe_allow_remote_http: false,
             startup_delay: Duration::from_secs(1),
             restart_backoff: Duration::from_secs(2),
-            max_restarts: 10,
-            shutdown_grace_period: Duration::from_secs(10),
+            restart_backoff_max: Duration::from_secs(5 * 60),
+            restart_reset_after: Duration::from_secs(60 * 60),
+            shutdown_grace_period: Duration::from_secs(300),
         }
+    }
+}
+
+impl Config {
+    /// Returns true when the dedicated zcashd-compat RPC listener should use TLS.
+    pub fn tls_enabled(&self) -> bool {
+        self.tls_cert_file.is_some() || self.tls_key_file.is_some()
     }
 }
 
@@ -206,6 +254,56 @@ mod tests {
         assert_eq!(config.listen_addr, None);
         assert_eq!(config.cookie_dir, super::default_cache_dir());
         assert_eq!(config.cookie_file_name, super::default_cookie_file_name());
+        assert!(config.enable_cookie_auth);
+        assert!(!config.tls_enabled());
+        assert_eq!(
+            config.restart_reset_after,
+            std::time::Duration::from_secs(60 * 60)
+        );
+        assert_eq!(
+            config.restart_backoff_max,
+            std::time::Duration::from_secs(5 * 60)
+        );
+    }
+
+    #[test]
+    fn default_shutdown_grace_period_allows_zcashd_to_flush_state() {
+        let config = Config::default();
+
+        assert_eq!(
+            config.shutdown_grace_period,
+            std::time::Duration::from_secs(300)
+        );
+    }
+
+    #[test]
+    fn deserialize_restart_reset_after_duration() {
+        let config: Config = toml::from_str(
+            r#"
+            restart_reset_after = "30m"
+            "#,
+        )
+        .expect("restart reset duration should deserialize");
+
+        assert_eq!(
+            config.restart_reset_after,
+            std::time::Duration::from_secs(30 * 60)
+        );
+    }
+
+    #[test]
+    fn deserialize_restart_backoff_max_duration() {
+        let config: Config = toml::from_str(
+            r#"
+            restart_backoff_max = "10m"
+            "#,
+        )
+        .expect("restart backoff cap duration should deserialize");
+
+        assert_eq!(
+            config.restart_backoff_max,
+            std::time::Duration::from_secs(10 * 60)
+        );
     }
 
     #[test]
@@ -237,6 +335,25 @@ mod tests {
             config.listen_addr,
             Some(SocketAddr::from(([127, 0, 0, 1], 28232)))
         );
+    }
+
+    #[test]
+    fn deserialize_tls_and_cookie_auth_settings() {
+        let config: Config = toml::from_str(
+            r#"
+            enable_cookie_auth = false
+            tls_cert_file = "/tmp/zebra.crt"
+            tls_key_file = "/tmp/zebra.key"
+            tls_ca_file = "/tmp/ca.pem"
+            "#,
+        )
+        .expect("TLS zcashd-compat config should deserialize");
+
+        assert!(!config.enable_cookie_auth);
+        assert!(config.tls_enabled());
+        assert_eq!(config.tls_cert_file, Some("/tmp/zebra.crt".into()));
+        assert_eq!(config.tls_key_file, Some("/tmp/zebra.key".into()));
+        assert_eq!(config.tls_ca_file, Some("/tmp/ca.pem".into()));
     }
 
     #[test]

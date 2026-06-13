@@ -125,10 +125,14 @@ impl<S> HttpRequestMiddleware<S> {
     }
 
     /// Maps whatever JSON-RPC version the client is using to JSON-RPC 2.0.
-    async fn request_to_json_rpc_2(
-        request: HttpRequest<HttpBody>,
+    async fn request_to_json_rpc_2<B>(
+        request: HttpRequest<B>,
         max_request_body_size: usize,
-    ) -> Result<(JsonRpcVersion, HttpRequest<HttpBody>), BoxError> {
+    ) -> Result<(JsonRpcVersion, HttpRequest<HttpBody>), BoxError>
+    where
+        B: hyper::body::Body<Data = hyper::body::Bytes> + Send + 'static,
+        B::Error: Into<BoxError>,
+    {
         let (parts, body) = request.into_parts();
         let bytes = Limited::new(body, max_request_body_size)
             .collect()
@@ -200,11 +204,13 @@ impl<S> tower::Layer<S> for HttpRequestMiddlewareLayer {
     }
 }
 
-impl<S> Service<HttpRequest<HttpBody>> for HttpRequestMiddleware<S>
+impl<S, B> Service<HttpRequest<B>> for HttpRequestMiddleware<S>
 where
     S: Service<HttpRequest, Response = HttpResponse> + std::clone::Clone + Send + 'static,
     S::Error: Into<BoxError> + 'static,
     S::Future: Send + 'static,
+    B: hyper::body::Body<Data = hyper::body::Bytes> + Send + 'static,
+    B::Error: Into<BoxError>,
 {
     type Response = S::Response;
     type Error = BoxError;
@@ -218,7 +224,7 @@ where
         self.service.poll_ready(cx).map_err(Into::into)
     }
 
-    fn call(&mut self, mut request: HttpRequest<HttpBody>) -> Self::Future {
+    fn call(&mut self, mut request: HttpRequest<B>) -> Self::Future {
         // Check if the request is authenticated
         if !self.check_credentials(request.headers_mut()) {
             let error = ErrorObject::borrowed(401, "unauthenticated method", None);

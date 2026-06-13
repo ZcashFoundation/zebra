@@ -7,11 +7,16 @@
 //! See the full list of
 //! [Differences between JSON-RPC 1.0 and 2.0.](https://www.simple-is-better.org/rpc/#differences-between-1-0-and-2-0)
 
-use std::{fmt, panic};
+use std::{fmt, fs::File, io::BufReader, panic, sync::Arc};
 
 use cookie::Cookie;
-use jsonrpsee::server::{middleware::rpc::RpcServiceBuilder, Server, ServerHandle};
-use tokio::task::JoinHandle;
+use jsonrpsee::server::{
+    middleware::rpc::RpcServiceBuilder, serve_with_graceful_shutdown, stop_channel, Server,
+    ServerHandle,
+};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use tokio::{net::TcpListener, task::JoinHandle};
+use tokio_rustls::{rustls::ServerConfig as RustlsServerConfig, TlsAcceptor};
 use tracing::*;
 
 use zebra_chain::{
@@ -141,6 +146,71 @@ impl RpcServer {
             .layer_fn(RpcMetricsMiddleware::new)
             .layer_fn(RpcTracingMiddleware::new);
 
+        if let Some(tls) = conf.tls.clone() {
+            let tls_config = load_tls_config(&tls)?;
+            let listener = TcpListener::bind(listen_addr).await?;
+            let local_addr = listener.local_addr()?;
+            let acceptor = TlsAcceptor::from(tls_config);
+            let service_builder = Server::builder()
+                .http_only()
+                .set_http_middleware(http_middleware)
+                .set_rpc_middleware(rpc_middleware)
+                .max_response_body_size(
+                    conf.max_response_body_size
+                        .try_into()
+                        .expect("should be valid"),
+                )
+                .to_service_builder();
+            let methods = rpc.into_rpc();
+            let (stop_handle, server_handle) = stop_channel();
+
+            info!("{OPENED_RPC_ENDPOINT_MSG}{local_addr}");
+
+            return Ok(tokio::spawn(async move {
+                loop {
+                    let (socket, remote_addr) = tokio::select! {
+                        result = listener.accept() => match result {
+                            Ok(connection) => connection,
+                            Err(error) => return Err(error.into()),
+                        },
+                        _ = stop_handle.clone().shutdown() => break,
+                    };
+
+                    let acceptor = acceptor.clone();
+                    let service = service_builder
+                        .clone()
+                        .build(methods.clone(), stop_handle.clone());
+                    let stopped = stop_handle.clone().shutdown();
+
+                    tokio::spawn(async move {
+                        match acceptor.accept(socket).await {
+                            Ok(stream) => {
+                                if let Err(error) =
+                                    serve_with_graceful_shutdown(stream, service, stopped).await
+                                {
+                                    warn!(
+                                        ?error,
+                                        %remote_addr,
+                                        "TLS RPC connection terminated with an error"
+                                    );
+                                }
+                            }
+                            Err(error) => {
+                                warn!(
+                                    ?error,
+                                    %remote_addr,
+                                    "TLS RPC handshake failed"
+                                );
+                            }
+                        }
+                    });
+                }
+
+                drop(server_handle);
+                Ok(())
+            }));
+        }
+
         let server = Server::builder()
             .http_only()
             .set_http_middleware(http_middleware)
@@ -216,6 +286,57 @@ impl RpcServer {
             Err(panic_object) => panic::resume_unwind(panic_object),
         })
     }
+}
+
+fn load_tls_config(
+    tls: &config::rpc::TlsConfig,
+) -> Result<Arc<RustlsServerConfig>, tower::BoxError> {
+    let cert_file = File::open(&tls.cert_file).map_err(|error| {
+        std::io::Error::new(
+            error.kind(),
+            format!(
+                "could not open RPC TLS certificate file {}: {error}",
+                tls.cert_file.display()
+            ),
+        )
+    })?;
+    let key_file = File::open(&tls.key_file).map_err(|error| {
+        std::io::Error::new(
+            error.kind(),
+            format!(
+                "could not open RPC TLS private key file {}: {error}",
+                tls.key_file.display()
+            ),
+        )
+    })?;
+
+    let cert_chain: Vec<CertificateDer<'static>> =
+        rustls_pemfile::certs(&mut BufReader::new(cert_file)).collect::<Result<_, _>>()?;
+    if cert_chain.is_empty() {
+        return Err(format!(
+            "RPC TLS certificate file {} did not contain any certificates",
+            tls.cert_file.display()
+        )
+        .into());
+    }
+
+    let private_key: PrivateKeyDer<'static> =
+        rustls_pemfile::private_key(&mut BufReader::new(key_file))?.ok_or_else(|| {
+            format!(
+                "RPC TLS private key file {} did not contain a usable private key",
+                tls.key_file.display()
+            )
+        })?;
+
+    let crypto_provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+    let config = RustlsServerConfig::builder_with_provider(crypto_provider)
+        .with_safe_default_protocol_versions()
+        .map_err(|error| format!("could not configure RPC TLS protocol versions: {error}"))?
+        .with_no_client_auth()
+        .with_single_cert(cert_chain, private_key)
+        .map_err(|error| format!("could not build RPC TLS server config: {error}"))?;
+
+    Ok(Arc::new(config))
 }
 
 impl Drop for RpcServer {

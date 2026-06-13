@@ -72,6 +72,20 @@ pub struct Config {
 
     /// The maximum size of the response body in bytes.
     pub max_response_body_size: usize,
+
+    /// Optional TLS configuration for this RPC listener.
+    pub tls: Option<TlsConfig>,
+}
+
+/// TLS configuration for an RPC listener.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TlsConfig {
+    /// PEM certificate chain served to RPC clients.
+    pub cert_file: PathBuf,
+
+    /// PEM private key for the served certificate.
+    pub key_file: PathBuf,
 }
 
 // This impl isn't derivable because it depends on features.
@@ -100,6 +114,9 @@ impl Default for Config {
 
             // 50 MiB
             max_response_body_size: 52_428_800,
+
+            // Serve plain HTTP unless a caller wires TLS explicitly.
+            tls: None,
         }
     }
 }

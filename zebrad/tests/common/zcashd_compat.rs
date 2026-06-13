@@ -202,3 +202,26 @@ pub async fn setup_zcashd_compat() -> Result<Option<launch::ZcashdCompatSetup>> 
             .map(Some),
     }
 }
+
+/// Sets up the zcashd-compat test environment with managed-regtest options.
+///
+/// Options are only applied in managed regtest mode. External mainnet/testnet
+/// validation connects to existing processes and ignores them.
+pub async fn setup_zcashd_compat_with_options(
+    options: config::ZcashdCompatTestOptions,
+) -> Result<Option<launch::ZcashdCompatSetup>> {
+    if zebra_skip_zcashd_compat_tests() {
+        return Ok(None);
+    }
+
+    use zebra_chain::parameters::NetworkKind;
+
+    match config::read_test_network_kind()? {
+        NetworkKind::Regtest => launch::spawn_zebrad_with_zcashd_compat_with_options(options)
+            .await
+            .map(Some),
+        kind => launch::connect_to_external_zcashd_compat(kind)
+            .await
+            .map(Some),
+    }
+}

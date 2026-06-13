@@ -6,17 +6,19 @@ use color_eyre::eyre::{eyre, Result};
 use tokio::time::sleep;
 
 use super::{
+    config::{self, ZcashdCompatTestOptions},
     launch::{send_signal, ZcashdCompatSetup},
-    setup_zcashd_compat, ZcashdRpcClient, TEST_ZCASHD_COMPAT_REORG_ITERATIONS,
-    TEST_ZCASHD_COMPAT_RESTART_AFTER_REORG,
+    setup_zcashd_compat, setup_zcashd_compat_with_options, ZcashdRpcClient,
+    TEST_ZCASHD_COMPAT_REORG_ITERATIONS, TEST_ZCASHD_COMPAT_RESTART_AFTER_REORG,
 };
 use crate::common::regtest::MiningRpcMethods;
 
-const SYNC_BATCH_SIZE_LIMIT: u64 = 33;
+const SYNC_BATCH_SIZE_LIMIT: u64 = config::DEFAULT_TEST_SYNC_BATCH_SIZE;
 const DEFAULT_REORG_CHURN_ITERATIONS: u32 = 30;
 const CHAIN_HEIGHT_DEEP: u32 = 295;
 const STANDARD_SYNC_TIMEOUT: Duration = Duration::from_secs(90);
 const DEEP_REORG_SYNC_TIMEOUT: Duration = Duration::from_secs(120);
+const LARGE_BATCH_REORG_SYNC_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// Verifies that zcashd follows a basic Zebra depth-1 reorg.
 pub async fn basic_depth1() -> Result<()> {
@@ -111,6 +113,42 @@ pub async fn depth_at_batch_limit() -> Result<()> {
     setup.teardown()
 }
 
+/// Verifies that a raised response budget supports an 80-block replacement branch.
+pub async fn large_batch_depth80() -> Result<()> {
+    let Some(setup) = setup_zcashd_compat_with_options(ZcashdCompatTestOptions {
+        sync_batch_size: 80,
+        sync_response_budget_mb: Some(320),
+        rpc_max_response_body_size: Some(320 * 1024 * 1024),
+    })
+    .await?
+    else {
+        return Ok(());
+    };
+
+    if !setup.can_mutate() {
+        return setup.teardown();
+    }
+
+    setup.zebra_client.generate(90).await?;
+    wait_for_tips_match(&setup, LARGE_BATCH_REORG_SYNC_TIMEOUT).await?;
+
+    let info = compat_info(&setup.zcashd_client).await?;
+    assert_eq!(info["limits"]["sync_batch_size"].as_u64(), Some(80));
+    assert_eq!(
+        info["limits"]["zebra_rpc_max_response_body_bytes"].as_u64(),
+        Some(321_130_496)
+    );
+
+    force_zebra_reorg(&setup, 11, 80).await?;
+    wait_for_tips_match(&setup, LARGE_BATCH_REORG_SYNC_TIMEOUT).await?;
+
+    let info = compat_info(&setup.zcashd_client).await?;
+    assert_eq!(info["sync"]["state"].as_str(), Some("synced"));
+    assert_eq!(info["sync"]["detail"].as_str(), Some("zebra_tip_matched"));
+
+    setup.teardown()
+}
+
 /// Verifies that replacement branches larger than zcashd's batch limit fail sticky.
 pub async fn branch_too_large_sticky() -> Result<()> {
     let Some(setup) = setup_zcashd_compat().await? else {
@@ -201,8 +239,7 @@ pub async fn sticky_fault_restart_recovers() -> Result<()> {
 
     let current_zcashd_tip = zcashd_tip(&setup.zcashd_client).await?;
     assert_eq!(
-        current_zcashd_tip,
-        old_zcashd_tip,
+        current_zcashd_tip, old_zcashd_tip,
         "zcashd should keep the pre-reorg tip while sticky"
     );
 

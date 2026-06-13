@@ -43,6 +43,8 @@ worker:
   state and verifies recovery after Zebra extends its branch.
 - `zcashd_compat_reorg_depth_at_batch_limit` verifies a 33-block replacement
   branch, matching zcashd's memory-clamped sync batch limit in CI.
+- `zcashd_compat_reorg_large_batch_depth80` verifies an 80-block replacement
+  branch with raised zcashd and Zebra response-size limits.
 - `zcashd_compat_reorg_branch_too_large_sticky` verifies that a 34-block branch
   fails sticky with `reorg_branch_too_large`.
 - `zcashd_compat_reorg_sticky_fault_restart_recovers` enters that sticky fault,
@@ -166,6 +168,7 @@ error (misconfiguration, not a skip).
 | `zcashd_compat_reorg_basic_depth1` | reorg | Depth-1 reorg convergence | **Skipped** |
 | `zcashd_compat_reorg_equal_work_race` | reorg | Equal-work degraded state and recovery | **Skipped** |
 | `zcashd_compat_reorg_depth_at_batch_limit` | reorg | 33-block replacement branch convergence | **Skipped** |
+| `zcashd_compat_reorg_large_batch_depth80` | reorg | 80-block replacement branch convergence with raised response limits | **Skipped** |
 | `zcashd_compat_reorg_branch_too_large_sticky` | reorg | 34-block branch sticky failure | **Skipped** |
 | `zcashd_compat_reorg_sticky_fault_restart_recovers` | reorg | Sticky fault recovery after restart + Zebra reconciliation | **Skipped** |
 | `zcashd_compat_reorg_restart_after_reorg` | reorg | **Opt-in:** slow supervised zcashd restart after several reorgs | **Skipped** |
@@ -213,9 +216,9 @@ zebrad/tests/common/
     ├── network.rs             peer_connectivity, mempool_info_valid,
     │                          historical_block_consistent
     └── reorg.rs               basic_depth1, equal_work_race,
-                               depth_at_batch_limit, branch_too_large_sticky,
-                               sticky_fault_restart_recovers, restart_after_reorg,
-                               restart_cycles,
+                               depth_at_batch_limit, large_batch_depth80,
+                               branch_too_large_sticky, sticky_fault_restart_recovers,
+                               restart_after_reorg, restart_cycles,
                                restart_deep_chain, zebra_tip_behind_local,
                                reorg_context_zebra_tip_behind_recovers, churn
 ```

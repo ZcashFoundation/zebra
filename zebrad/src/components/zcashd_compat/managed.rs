@@ -85,6 +85,46 @@ pub fn resolve_managed_zcashd_binary(state_cache_dir: &Path) -> Result<PathBuf, 
     resolve_managed_zcashd_binary_from_manifest(&EMBEDDED_ZCASHD_RELEASE_MANIFEST, state_cache_dir)
 }
 
+/// Returns the managed zcashd binary cache path without creating directories,
+/// or `None` when managed downloads are unsupported for this target.
+pub(super) fn managed_zcashd_binary_path(state_cache_dir: &Path) -> Option<PathBuf> {
+    let target = zcashd_target_triple()?;
+
+    Some(
+        managed_zcashd_cache_dir(
+            state_cache_dir,
+            &EMBEDDED_ZCASHD_RELEASE_MANIFEST.release_tag,
+            target,
+        )
+        .join("zcashd"),
+    )
+}
+
+/// Returns whether the cached managed zcashd binary is current for this target,
+/// or `None` when managed downloads are unsupported for this target.
+pub(super) fn cached_managed_zcashd_binary_is_current(
+    state_cache_dir: &Path,
+) -> Result<Option<bool>, Report> {
+    let Some(target) = zcashd_target_triple() else {
+        return Ok(None);
+    };
+    let artifact = EMBEDDED_ZCASHD_RELEASE_MANIFEST.artifact_for_target(target);
+    let Some(artifact) = artifact else {
+        return Ok(None);
+    };
+
+    let Some(binary_path) = managed_zcashd_binary_path(state_cache_dir) else {
+        return Ok(None);
+    };
+
+    let provenance_path = binary_path.with_file_name("zcashd.sha256");
+
+    Ok(Some(
+        binary_path.is_file()
+            && provenance_matches(&provenance_path, &artifact.runtime_archive_sha256)?,
+    ))
+}
+
 fn resolve_managed_zcashd_binary_from_manifest(
     manifest: &ZcashdReleaseManifest,
     state_cache_dir: &Path,
@@ -104,11 +144,7 @@ fn resolve_managed_zcashd_binary_from_manifest(
         )
     })?;
 
-    let cache_dir = state_cache_dir
-        .join("zcashd-compat")
-        .join("bin")
-        .join(&manifest.release_tag)
-        .join(target);
+    let cache_dir = managed_zcashd_cache_dir(state_cache_dir, &manifest.release_tag, target);
     fs::create_dir_all(&cache_dir)?;
 
     let binary_path = cache_dir.join("zcashd");
@@ -164,6 +200,14 @@ fn resolve_managed_zcashd_binary_from_manifest(
     )?;
 
     Ok(binary_path)
+}
+
+fn managed_zcashd_cache_dir(state_cache_dir: &Path, release_tag: &str, target: &str) -> PathBuf {
+    state_cache_dir
+        .join("zcashd-compat")
+        .join("bin")
+        .join(release_tag)
+        .join(target)
 }
 
 /// Downloads one managed release archive to `out`.

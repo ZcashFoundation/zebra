@@ -77,7 +77,7 @@ pub fn ensure_zcashd_datadir(datadir: &Path, extra_args: &[String]) -> Result<()
     fs::create_dir_all(&datadir)
         .wrap_err_with(|| format!("failed to create zcashd datadir {}", datadir.display()))?;
 
-    let conf_path = resolve_zcashd_conf_path(&datadir, &extra_args);
+    let conf_path = resolve_zcashd_conf_path(&datadir, extra_args);
     let parent = conf_path.parent().ok_or_else(|| {
         eyre!(
             "zcashd config path has no parent directory: {}",
@@ -210,7 +210,7 @@ fn find_datadir_arg(extra_args: &[String]) -> Option<&str> {
 /// Resolves the first valid `-conf=<path>` we can infer from extra args.
 ///
 /// Relative config paths are anchored under the selected datadir.
-fn resolve_zcashd_conf_path(datadir: &Path, extra_args: &[String]) -> PathBuf {
+pub(super) fn resolve_zcashd_conf_path(datadir: &Path, extra_args: &[String]) -> PathBuf {
     let conf_path = find_conf_arg(extra_args)
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(ZCASH_CONF_FILENAME));

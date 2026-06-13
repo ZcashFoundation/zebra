@@ -18,6 +18,9 @@
 !.config
 !*.toml
 !*.lock
+!deploy
+!deploy/watchdog
+!deploy/watchdog/**
 !tower-*
 !xtask
 !zebra-*

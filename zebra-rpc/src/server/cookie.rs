@@ -118,7 +118,7 @@ fn create_owner_only_file(path: &Path) -> std::io::Result<File> {
     #[cfg(unix)]
     opts.mode(0o600);
 
-    Ok(opts.open(path)?)
+    opts.open(path)
 }
 
 /// Removes a cookie from the given dir.
