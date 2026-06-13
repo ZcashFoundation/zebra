@@ -574,7 +574,7 @@ export ZEBRA_RPC__LISTEN_ADDR=127.0.0.1:8232 ZEBRA_RPC__ENABLE_COOKIE_AUTH=false
                 <li><strong>Transport:</strong> zcashd talks to Zebra over RPC only (no zcashd P2P in compat mode).</li>
                 <li><strong>Auth:</strong> keep Zebra cookie auth enabled and avoid exposing RPC publicly.</li>
                 <li><strong>Deployment:</strong> deploy zcashd and Zebra on the same machine.</li>
-                <li><strong>Lifecycle:</strong> path mode runs zcashd externally by default. Managed mode is an opt-in supervisor that manages the zcashd process lifecycle at runtime. For container builds, zcashd artifact fetch and SHA verification happen outside the Dockerfile before image build.</li>
+                <li><strong>Lifecycle:</strong> externally managed mode is the default: start Zebra with <code>--zcashd-compat</code>, then run zcashd yourself. Managed mode is an opt-in supervisor that manages the zcashd process lifecycle at runtime. For container builds, zcashd artifact fetch and SHA verification happen outside the Dockerfile before image build.</li>
               </ul>
             </article>
 
@@ -612,359 +612,34 @@ export ZEBRA_RPC__LISTEN_ADDR=127.0.0.1:8232 ZEBRA_RPC__ENABLE_COOKIE_AUTH=false
 
             <article class="panel">
               <div class="panel-header">
-                <h2>Configuration</h2>
-                <div class="platform-toggle setup-toggle"
-                     role="group"
-                     aria-label="zcashd-compat setup mode"
-                     data-panel-toggle
-                     data-panel-scope=".panel">
-                  <button class="active"
-                          type="button"
-                          data-panel-target="path-panel"
-                          aria-pressed="true">Path</button>
-                  <button type="button" data-panel-target="managed-panel" aria-pressed="false">Managed</button>
-                  <button type="button" data-panel-target="source-panel" aria-pressed="false">Build from source</button>
-                  <button type="button" data-panel-target="docker-panel" aria-pressed="false">Docker</button>
-                </div>
+                <h2>Install zcashd-compat</h2>
               </div>
 
-              <div id="path-panel" class="setup-mode-panel" data-panel>
-                <ol class="join-steps">
-                  <li class="join-step">
-                    <div class="join-step-body">
-                      <h3>Install Both Binaries</h3>
-                      <p class="body-copy">
-                        Follow the "Pre-requisites" for binaries and snapshots. Run <code>zebrad</code> and <code>zcashd</code> as two independent processes. Zebra enables the zcashd-compat RPC surface; you are responsible for starting and stopping <code>zcashd</code>.
-                      </p>
+              <ol class="join-steps">
+                <li class="join-step">
+                  <div class="join-step-body">
+                    <h3>Run Installer</h3>
+                    <p class="body-copy">
+                      Download and run the installer from the latest Zebra GitHub release. It guides the setup flow and uses the release-published zcashd-compat assets.
+                    </p>
+                    <div class="code-block">
+                      <pre><code id="install-zcashd-compat" class="language-bash">curl -fsSL https://github.com/valargroup/zebra/releases/latest/download/install-zcashd-compat.sh | bash</code></pre>
+                      <button class="copy"
+                              type="button"
+                              data-copy="install-zcashd-compat"
+                              aria-label="Copy zcashd-compat installer command"
+                              title="Copy">
+                        <span class="copy-icon" aria-hidden="true"></span>
+                        <span class="copy-status" aria-hidden="true"></span>
+                      </button>
                     </div>
-                  </li>
-                  <li class="join-step">
-                    <div class="join-step-body">
-                      <h3>Configure</h3>
-                      <p class="note">Zebra enables the zcashd-compat RPC surface but does not spawn or supervise zcashd — you start it yourself.</p>
-                      <div class="code-block">
-                        <pre><code id="path-config" class="language-toml">[zcashd_compat]
-enabled = true
-manage_zcashd = false
-zcashd_source = "path"</code></pre>
-                      </div>
-                    </div>
-                  </li>
-                  <li class="join-step">
-                    <div class="join-step-body">
-                      <h3>Start Zebra and zcashd</h3>
-                      <p class="body-copy">Wait for Zebra to write its auth cookie, then start zcashd pointed at Zebra's compat listener.</p>
-                      <div class="code-block">
-                        <pre><code id="path-start-zcashd" class="language-bash">zebrad start --zcashd-compat
-# Default location, to which Zebra writes an auth cookie
-ZEBRA_COMPAT_COOKIE="$HOME/.cache/zebra/.zcashd-compat.cookie"
+                    <p class="note">
+                      The installer is uploaded as a release asset and included in the release <code>SHA256SUMS.txt</code> alongside the zcashd-compat artifacts.
+                    </p>
+                  </div>
+                </li>
+              </ol>
 
-# Ensure Zebra has written it
-test -f "$ZEBRA_COMPAT_COOKIE" && echo "cookie ready: $ZEBRA_COMPAT_COOKIE"
-
-# One-time zcashd datadir setup (zcashd refuses to start without this line)
-mkdir -p ~/.zcash
-echo 'i-am-aware-zcashd-will-be-replaced-by-zebrad-and-zallet-in-2025=1' >> ~/.zcash/zcash.conf
-
-# Start zcashd in compat mode, pointed at Zebra's compat listener
-./src/zcashd -zebra-compat \
-  -zebra-compat-url=http://127.0.0.1:28232 \
-  -zebra-compat-cookiefile="$HOME/.cache/zebra/.zcashd-compat.cookie" \
-  -printtoconsole
-
-# verify
-./src/zcash-cli getzebracompatinfo</code></pre>
-                        <button class="copy"
-                                type="button"
-                                data-copy="path-start-zcashd"
-                                aria-label="Copy zcashd start command"
-                                title="Copy">
-                          <span class="copy-icon" aria-hidden="true"></span>
-                          <span class="copy-status" aria-hidden="true"></span>
-                        </button>
-                      </div>
-                      <p class="note">
-                        For full configuration reference, see
-                        <a href="https://github.com/valargroup/zebra/blob/ironwood-main/book/src/user/zcashd-compat.md">full documentation</a>.
-                      </p>
-                    </div>
-                  </li>
-                </ol>
-              </div>
-
-              <div id="managed-panel" class="setup-mode-panel" data-panel hidden>
-                <ol class="join-steps">
-                  <li class="join-step">
-                    <div class="join-step-body">
-                      <h3>Start Zebra In zcashd-compat Mode</h3>
-                      <p class="body-copy">
-                        With <code>manage_zcashd = true</code> and <code>zcashd_source = "managed"</code>, Zebra resolves a hash-pinned compatible zcashd build, fetches it, starts it as a child process, and manages restarts automatically.
-                      </p>
-                      <div class="code-block">
-                        <pre><code id="managed-start" class="language-bash">zebrad start --zcashd-compat</code></pre>
-                        <button class="copy"
-                                type="button"
-                                data-copy="managed-start"
-                                aria-label="Copy managed start command"
-                                title="Copy">
-                          <span class="copy-icon" aria-hidden="true"></span>
-                          <span class="copy-status" aria-hidden="true"></span>
-                        </button>
-                      </div>
-                    </div>
-                  </li>
-                  <li class="join-step">
-                    <div class="join-step-body">
-                      <h3>Minimal Config</h3>
-                      <p class="note">Keep <code>manage_zcashd = true</code> so Zebra handles install and lifecycle.</p>
-                      <div class="code-block">
-                        <pre><code id="managed-config" class="language-toml">[zcashd_compat]
-enabled = true
-manage_zcashd = true
-zcashd_source = "managed"
-
-# Optionally, customize zcashd data directory.
-zcashd_datadir = "/path/to/zcashd/datadir"
-
-# Optionally, propagate zcashd CLI arguments via env var.
-ZEBRA_ZCASHD_COMPAT__ZCASHD_EXTRA_ARGS='["-printtoconsole"]'</code></pre>
-                        <button class="copy"
-                                type="button"
-                                data-copy="managed-config"
-                                aria-label="Copy managed config snippet"
-                                title="Copy">
-                          <span class="copy-icon" aria-hidden="true"></span>
-                          <span class="copy-status" aria-hidden="true"></span>
-                        </button>
-                      </div>
-                      <p class="note">
-                        For full configuration reference, see
-                        <a href="https://github.com/valargroup/zebra/blob/ironwood-main/book/src/user/zcashd-compat.md">full documentation</a>.
-                      </p>
-                    </div>
-                  </li>
-                </ol>
-              </div>
-
-              <div id="source-panel" class="setup-mode-panel" data-panel hidden>
-                <ol class="join-steps">
-                  <li class="join-step">
-                    <div class="join-step-body">
-                      <h3>Build Binaries</h3>
-                      <p class="body-copy">Build Zebra and zcashd from source.</p>
-                      <div class="code-block">
-                        <pre><code id="source-build" class="language-bash"># in zebrad tree
-cargo build --release
-
-# in zcashd tree
-./zcutil/build.sh -j"$(nproc)"</code></pre>
-                        <button class="copy"
-                                type="button"
-                                data-copy="source-build"
-                                aria-label="Copy source build commands"
-                                title="Copy">
-                          <span class="copy-icon" aria-hidden="true"></span>
-                          <span class="copy-status" aria-hidden="true"></span>
-                        </button>
-                      </div>
-                    </div>
-                  </li>
-                  <li class="join-step">
-                    <div class="join-step-body">
-                      <h3>Run Manually (No Supervision)</h3>
-                      <p class="note">Configure manually and run zcashd against Zebra RPC.</p>
-                      <div class="code-block">
-                        <pre><code id="source-manual-config" class="language-toml">[zcashd_compat]
-enabled = true
-manage_zcashd = false</code></pre>
-                        <button class="copy"
-                                type="button"
-                                data-copy="source-manual-config"
-                                aria-label="Copy manual compat config"
-                                title="Copy">
-                          <span class="copy-icon" aria-hidden="true"></span>
-                          <span class="copy-status" aria-hidden="true"></span>
-                        </button>
-                      </div>
-                      <div class="code-block">
-                        <pre><code id="source-manual-shell" class="language-bash">zebrad start --zcashd-compat
-# Default location, to which Zebra writes an auth cookie
-ZEBRA_COMPAT_COOKIE="$HOME/.cache/zebra/.zcashd-compat.cookie"
-
-# Ensure Zebra has written it
-test -f "$ZEBRA_COMPAT_COOKIE" && echo "cookie ready: $ZEBRA_COMPAT_COOKIE"
-
-# One-time zcashd datadir setup (zcashd refuses to start without this line)
-mkdir -p ~/.zcash
-echo 'i-am-aware-zcashd-will-be-replaced-by-zebrad-and-zallet-in-2025=1' >> ~/.zcash/zcash.conf
-
-# Start zcashd in compat mode, pointed at Zebra's compat listener
-./src/zcashd -zebra-compat \
-  -zebra-compat-url=http://127.0.0.1:28232 \
-  -zebra-compat-cookiefile="$HOME/.cache/zebra/.zcashd-compat.cookie" \
-  -printtoconsole
-
-# verify
-./src/zcash-cli getzebracompatinfo</code></pre>
-                        <button class="copy"
-                                type="button"
-                                data-copy="source-manual-shell"
-                                aria-label="Copy manual compat commands"
-                                title="Copy">
-                          <span class="copy-icon" aria-hidden="true"></span>
-                          <span class="copy-status" aria-hidden="true"></span>
-                        </button>
-                      </div>
-                    </div>
-                  </li>
-                </ol>
-              </div>
-
-              <div id="docker-panel" class="setup-mode-panel" data-panel hidden>
-                <p class="body-copy">
-                  Artifacts are fetched and hash-verified externally, then passed in as build context. Feel free to follow build from source instructions, if desired too.
-                </p>
-                <ol class="join-steps">
-                  <li class="join-step">
-                    <div class="join-step-body">
-                      <h3>Install Docker Prerequisites</h3>
-                      <p class="body-copy">Install Docker Buildx and verify it before using the Docker setup mode.</p>
-                      <div class="code-block">
-                        <pre><code id="docker-prerequisites" class="language-bash">apt-get update && apt-get install -y docker-buildx && docker buildx version</code></pre>
-                        <button class="copy"
-                                type="button"
-                                data-copy="docker-prerequisites"
-                                aria-label="Copy Docker prerequisites commands"
-                                title="Copy">
-                          <span class="copy-icon" aria-hidden="true"></span>
-                          <span class="copy-status" aria-hidden="true"></span>
-                        </button>
-                      </div>
-                    </div>
-                  </li>
-                  <li class="join-step">
-                    <div class="join-step-body">
-                      <h3>Set Docker Variables</h3>
-                      <p class="body-copy">Set the image tag, choose a hash-pinned zcashd artifact for your platform, and define the local build context path.</p>
-                      <div class="code-block">
-                        <pre><code id="docker-env-vars" class="language-bash">export ZEBRA_DOCKER_IMAGE="zebra:zcashd-compat"
-# Pick the matching artifact for your host architecture.
-# x86_64 example:
-export ZCASHD_COMPAT_URL="https://github.com/valargroup/zcashd/releases/download/v6.2.1-alpha/zcashd-zebra-compat-v6.2.1-alpha-linux-x86_64.tar.gz"
-export ZCASHD_COMPAT_SHA256="09e640b55c9af91dee5742e5e9bb6712f92d7073f0fe899ca58d43f62eb9d13c"
-
-# Local Docker build context that will contain ./bin/zcashd.
-export ZCASHD_COMPAT_CONTEXT="${PWD}/target/zcashd-compat/context"
-
-# State directories for Zebra and zcashd.
-export ZEBRA_STATE_CACHE_DIR="/mnt/data/zebra-state"
-export ZCASHD_DATADIR="/mnt/data/.zcashd"</code></pre>
-                        <button class="copy"
-                                type="button"
-                                data-copy="docker-env-vars"
-                                aria-label="Copy Docker environment variables"
-                                title="Copy">
-                          <span class="copy-icon" aria-hidden="true"></span>
-                          <span class="copy-status" aria-hidden="true"></span>
-                        </button>
-                      </div>
-                    </div>
-                  </li>
-                  <li class="join-step">
-                    <div class="join-step-body">
-                      <h3>Prepare zcashd Build Context</h3>
-                      <p class="body-copy">Download the artifact, verify its SHA256, extract it into a local Docker build context, and confirm the expected binary exists.</p>
-                      <div class="code-block">
-                        <pre><code id="docker-prepare-context" class="language-bash">mkdir -p "${ZCASHD_COMPAT_CONTEXT}"
-curl -fsSL "${ZCASHD_COMPAT_URL}" -o /tmp/zcashd-compat.tar.gz
-echo "${ZCASHD_COMPAT_SHA256}  /tmp/zcashd-compat.tar.gz" | sha256sum -c -
-tar -xzf /tmp/zcashd-compat.tar.gz -C "${ZCASHD_COMPAT_CONTEXT}"
-
-# Guardrail: this fails early if ./bin/zcashd is missing or not executable.
-test -x "${ZCASHD_COMPAT_CONTEXT}/bin/zcashd"</code></pre>
-                        <button class="copy"
-                                type="button"
-                                data-copy="docker-prepare-context"
-                                aria-label="Copy Docker build context preparation commands"
-                                title="Copy">
-                          <span class="copy-icon" aria-hidden="true"></span>
-                          <span class="copy-status" aria-hidden="true"></span>
-                        </button>
-                      </div>
-                    </div>
-                  </li>
-                  <li class="join-step">
-                    <div class="join-step-body">
-                      <h3>Build Compat Runtime Image</h3>
-                      <p class="body-copy">Build the runtime-zcashd-compat target and inject the prepared zcashd binary via --build-context.</p>
-                      <div class="code-block">
-                        <pre><code id="docker-build-image" class="language-bash">docker build \
-  -f ./docker/Dockerfile \
-  --target runtime-zcashd-compat \
-  --build-context "zcashd_compat=${ZCASHD_COMPAT_CONTEXT}" \
-  --tag "${ZEBRA_DOCKER_IMAGE}" \
-  .</code></pre>
-                        <button class="copy"
-                                type="button"
-                                data-copy="docker-build-image"
-                                aria-label="Copy Docker image build command"
-                                title="Copy">
-                          <span class="copy-icon" aria-hidden="true"></span>
-                          <span class="copy-status" aria-hidden="true"></span>
-                        </button>
-                      </div>
-                    </div>
-                  </li>
-                  <li class="join-step">
-                    <div class="join-step-body">
-                      <h3>Prepare Data Directory Permissions</h3>
-                      <p class="body-copy">Ensure Zebra and zcashd data folders are accessible inside the container.</p>
-                      <div class="code-block">
-                        <pre><code id="docker-data-permissions" class="language-bash"># 10001 is the default Dockerfile container user
-# Ensure that zebra and zcashd data folders are accessible inside the container
-mkdir -p "${ZEBRA_STATE_CACHE_DIR}" "${ZCASHD_DATADIR}"
-chown -R 10001:10001 "${ZEBRA_STATE_CACHE_DIR}" "${ZCASHD_DATADIR}"</code></pre>
-                        <button class="copy"
-                                type="button"
-                                data-copy="docker-data-permissions"
-                                aria-label="Copy Docker data permissions commands"
-                                title="Copy">
-                          <span class="copy-icon" aria-hidden="true"></span>
-                          <span class="copy-status" aria-hidden="true"></span>
-                        </button>
-                      </div>
-                    </div>
-                  </li>
-                  <li class="join-step">
-                    <div class="join-step-body">
-                      <h3>Run Docker Image</h3>
-                      <p class="body-copy">Start Zebra in zcashd compatibility mode with persistent Zebra and zcashd state mounted from the host.</p>
-                      <div class="code-block">
-                        <pre><code id="docker-run-image" class="language-bash">docker run --rm -it \
-  -e ZCASHD_COMPAT_ENABLED=true \
-  -e ZEBRA_NETWORK__LISTEN_ADDR="[::]:18233" \
-  -e ZEBRA_STATE__CACHE_DIR="/home/zebra/.cache/zebra" \
-  -e ZEBRA_ZCASHD_COMPAT__ZCASHD_DATADIR="/home/zebra/.cache/zcashd" \
-  -e ZEBRA_ZCASHD_COMPAT__ZCASHD_EXTRA_ARGS='["-rpcbind=0.0.0.0","-rpcallowip=0.0.0.0/0"]' \
-  --mount type=bind,src="${ZEBRA_STATE_CACHE_DIR}",dst="/home/zebra/.cache/zebra" \
-  --mount type=bind,src="${ZCASHD_DATADIR}",dst="/home/zebra/.cache/zcashd" \
-  -p 18233:18233 \
-  -p 127.0.0.1:8232:8232 \
-  "${ZEBRA_DOCKER_IMAGE}" \
-  zebrad start --zcashd-compat</code></pre>
-                        <button class="copy"
-                                type="button"
-                                data-copy="docker-run-image"
-                                aria-label="Copy Docker image run command"
-                                title="Copy">
-                          <span class="copy-icon" aria-hidden="true"></span>
-                          <span class="copy-status" aria-hidden="true"></span>
-                        </button>
-                      </div>
-                    </div>
-                  </li>
-                </ol>
-              </div>
             </article>
 
             <article class="panel panel-full">
@@ -1001,7 +676,7 @@ chown -R 10001:10001 "${ZEBRA_STATE_CACHE_DIR}" "${ZCASHD_DATADIR}"</code></pre>
                 <li>
                   <strong>What happens if I do not have a prior config?</strong>
                   <p class="body-copy">
-                    A default one with sane defaults is created for you. See the
+                    For externally managed zcashd, create the one-line acknowledgement shown above before starting zcashd. In supervised mode, Zebra creates a minimal zcash.conf for the managed child if one is missing. See the
                     <a href="https://github.com/valargroup/zebra/blob/ironwood-main/book/src/user/zcashd-compat.md">full instructions</a>
                     for details about location.
                   </p>
