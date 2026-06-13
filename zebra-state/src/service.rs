@@ -81,7 +81,7 @@ pub mod arbitrary;
 mod tests;
 
 pub use finalized_state::{OutputLocation, TransactionIndex, TransactionLocation};
-use write::NonFinalizedWriteMessage;
+use write::WriteMessage;
 
 use self::queued_blocks::{QueuedCheckpointVerified, QueuedSemanticallyVerified, SentHashes};
 
@@ -131,11 +131,24 @@ pub(crate) struct StateService {
     /// Indexed by their parent block hash.
     finalized_state_queued_blocks: HashMap<block::Hash, QueuedCheckpointVerified>,
 
-    /// Channels to send blocks to the block write task.
+    /// Channel to send blocks to the block write task.
     block_write_sender: write::BlockWriteSender,
 
-    /// The [`block::Hash`] of the most recent block sent on
-    /// `finalized_block_write_sender` or `non_finalized_block_write_sender`.
+    /// Whether the state is still committing checkpoint-verified blocks to the
+    /// finalized state.
+    ///
+    /// Reproduces the old "flip": set to `true` at startup when the
+    /// non-finalized state is empty, and cleared once the checkpoint stream is
+    /// done and the lowest semantically verified block arrives. While `true`,
+    /// checkpoint blocks are queued and sent; once `false`, repeated checkpoint
+    /// blocks get a duplicate error and semantic blocks flow.
+    //
+    // TODO: delete this when the write worker commits checkpoint and semantic
+    //       blocks in any order.
+    accepting_checkpoint_blocks: bool,
+
+    /// The [`block::Hash`] of the most recent block sent to the block write
+    /// task.
     ///
     /// On startup, this is:
     /// - the finalized tip, if there are stored blocks, or
@@ -242,8 +255,7 @@ impl Drop for StateService {
         self.invalid_block_write_reset_receiver.close();
         self.non_finalized_rejected_receiver.close();
 
-        std::mem::drop(self.block_write_sender.finalized.take());
-        std::mem::drop(self.block_write_sender.non_finalized.take());
+        std::mem::drop(self.block_write_sender.sender.take());
 
         self.clear_finalized_block_queue(CommitBlockError::WriteTaskExited);
         self.clear_non_finalized_block_queue(CommitBlockError::WriteTaskExited);
@@ -376,7 +388,11 @@ impl StateService {
             ChainTipSender::new(initial_tip, network);
 
         let finalized_state_for_writing = finalized_state.clone();
-        let should_use_finalized_block_write_sender = non_finalized_state.is_chain_set_empty();
+        // The state accepts checkpoint blocks only when the restored
+        // non-finalized state is empty. Otherwise (a backup restored above the
+        // max checkpoint height) it must commit semantic blocks immediately,
+        // or chain sync stalls.
+        let accepting_checkpoint_blocks = non_finalized_state.is_chain_set_empty();
         let sync_backup_dir_path = backup_dir_path.filter(|_| skip_backup_task);
         let (
             block_write_sender,
@@ -388,7 +404,6 @@ impl StateService {
             non_finalized_state,
             chain_tip_sender,
             non_finalized_state_sender,
-            should_use_finalized_block_write_sender,
             sync_backup_dir_path,
         );
 
@@ -417,6 +432,7 @@ impl StateService {
             non_finalized_state_queued_blocks,
             finalized_state_queued_blocks: HashMap::new(),
             block_write_sender,
+            accepting_checkpoint_blocks,
             finalized_block_write_last_sent_hash,
             non_finalized_block_write_sent_hashes,
             invalid_block_write_reset_receiver,
@@ -508,7 +524,7 @@ impl StateService {
         let (rsp_tx, rsp_rx) = oneshot::channel();
         let queued = (checkpoint_verified, rsp_tx);
 
-        if self.block_write_sender.finalized.is_some() {
+        if self.accepting_checkpoint_blocks {
             // We're still committing checkpoint verified blocks
             if let Some(duplicate_queued) = self
                 .finalized_state_queued_blocks
@@ -597,11 +613,11 @@ impl StateService {
 
             // If we've finished sending finalized blocks, ignore any repeated blocks.
             // (Blocks can be repeated after a syncer reset.)
-            if let Some(finalized_block_write_sender) = &self.block_write_sender.finalized {
-                let send_result = finalized_block_write_sender.send(queued_block);
+            if let Some(sender) = &self.block_write_sender.sender {
+                let send_result = sender.send(WriteMessage::Checkpoint(queued_block));
 
                 // If the receiver is closed, we can't send any more blocks.
-                if let Err(SendError(queued)) = send_result {
+                if let Err(SendError(WriteMessage::Checkpoint(queued))) = send_result {
                     // If Zebra is shutting down, drop blocks and return an error.
                     Self::send_checkpoint_verified_block_error(
                         queued,
@@ -779,16 +795,16 @@ impl StateService {
         // block, so checking the disk tip here stays live.
         //
         // TODO: configure the state with the last checkpoint hash instead?
-        if self.block_write_sender.finalized.is_some()
+        if self.accepting_checkpoint_blocks
             && self
                 .non_finalized_state_queued_blocks
                 .has_queued_children(self.finalized_block_write_last_sent_hash)
             && self.read_service.db.finalized_tip_hash()
                 == self.finalized_block_write_last_sent_hash
         {
-            // Tell the block write task to stop committing checkpoint verified blocks to the finalized state,
+            // Tell the state to stop committing checkpoint verified blocks to the finalized state,
             // and move on to committing semantically verified blocks to the non-finalized state.
-            std::mem::drop(self.block_write_sender.finalized.take());
+            self.accepting_checkpoint_blocks = false;
             // Remove any checkpoint-verified block hashes from `non_finalized_block_write_sent_hashes`.
             self.non_finalized_block_write_sent_hashes = SentHashes::default();
             // Mark `SentHashes` as usable by the `can_fork_chain_at()` method.
@@ -803,7 +819,7 @@ impl StateService {
             ));
         } else if !self.can_fork_chain_at(&parent_hash) {
             tracing::trace!("unready to verify, returning early");
-        } else if self.block_write_sender.finalized.is_none() {
+        } else if !self.accepting_checkpoint_blocks {
             // Wait until block commit task is ready to write non-finalized blocks before dequeuing them
             self.send_ready_non_finalized_queued(parent_hash);
 
@@ -844,7 +860,7 @@ impl StateService {
     #[tracing::instrument(level = "debug", skip(self, new_parent))]
     fn send_ready_non_finalized_queued(&mut self, new_parent: block::Hash) {
         use tokio::sync::mpsc::error::SendError;
-        if let Some(non_finalized_block_write_sender) = &self.block_write_sender.non_finalized {
+        if let Some(sender) = &self.block_write_sender.sender {
             let mut new_parents: Vec<block::Hash> = vec![new_parent];
 
             while let Some(parent_hash) = new_parents.pop() {
@@ -857,9 +873,9 @@ impl StateService {
 
                     self.non_finalized_block_write_sent_hashes
                         .add(&queued_child.0);
-                    let send_result = non_finalized_block_write_sender.send(queued_child.into());
+                    let send_result = sender.send(queued_child.into());
 
-                    if let Err(SendError(NonFinalizedWriteMessage::Commit(queued))) = send_result {
+                    if let Err(SendError(WriteMessage::Semantic(queued))) = send_result {
                         // If Zebra is shutting down, drop blocks and return an error.
                         Self::send_semantically_verified_block_error(
                             queued,
@@ -890,15 +906,22 @@ impl StateService {
     ) -> oneshot::Receiver<Result<block::Hash, InvalidateError>> {
         let (rsp_tx, rsp_rx) = oneshot::channel();
 
-        let Some(sender) = &self.block_write_sender.non_finalized else {
+        // While committing checkpoint blocks, the worker can't process
+        // invalidation requests.
+        if self.accepting_checkpoint_blocks {
             let _ = rsp_tx.send(Err(InvalidateError::ProcessingCheckpointedBlocks));
+            return rsp_rx;
+        }
+
+        let Some(sender) = &self.block_write_sender.sender else {
+            let _ = rsp_tx.send(Err(InvalidateError::SendInvalidateRequestFailed));
             return rsp_rx;
         };
 
         if let Err(tokio::sync::mpsc::error::SendError(error)) =
-            sender.send(NonFinalizedWriteMessage::Invalidate { hash, rsp_tx })
+            sender.send(WriteMessage::Invalidate { hash, rsp_tx })
         {
-            let NonFinalizedWriteMessage::Invalidate { rsp_tx, .. } = error else {
+            let WriteMessage::Invalidate { rsp_tx, .. } = error else {
                 unreachable!("should return the same Invalidate message could not be sent");
             };
 
@@ -914,15 +937,22 @@ impl StateService {
     ) -> oneshot::Receiver<Result<Vec<block::Hash>, ReconsiderError>> {
         let (rsp_tx, rsp_rx) = oneshot::channel();
 
-        let Some(sender) = &self.block_write_sender.non_finalized else {
+        // While committing checkpoint blocks, the worker can't process
+        // reconsideration requests.
+        if self.accepting_checkpoint_blocks {
             let _ = rsp_tx.send(Err(ReconsiderError::CheckpointCommitInProgress));
+            return rsp_rx;
+        }
+
+        let Some(sender) = &self.block_write_sender.sender else {
+            let _ = rsp_tx.send(Err(ReconsiderError::ReconsiderSendFailed));
             return rsp_rx;
         };
 
         if let Err(tokio::sync::mpsc::error::SendError(error)) =
-            sender.send(NonFinalizedWriteMessage::Reconsider { hash, rsp_tx })
+            sender.send(WriteMessage::Reconsider { hash, rsp_tx })
         {
-            let NonFinalizedWriteMessage::Reconsider { rsp_tx, .. } = error else {
+            let WriteMessage::Reconsider { rsp_tx, .. } = error else {
                 unreachable!("should return the same Reconsider message could not be sent");
             };
 
