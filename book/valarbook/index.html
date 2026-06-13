@@ -317,6 +317,13 @@
             flex-shrink: 0;
         }
 
+        .join-step-plain {
+            grid-template-columns: 1fr;
+            counter-increment: none;
+        }
+
+        .join-step-plain::before { display: none; }
+
         .join-step-body h3 { margin-bottom: 6px; color: var(--muted); }
 
         /* ── code blocks ─────────────────────────────────────── */
@@ -578,7 +585,7 @@ export ZEBRA_RPC__LISTEN_ADDR=127.0.0.1:8232 ZEBRA_RPC__ENABLE_COOKIE_AUTH=false
               </ul>
             </article>
 
-            <article class="panel">
+            <article class="panel panel-full">
               <div class="panel-header">
                 <h2>Pre-requisites</h2>
               </div>
@@ -610,13 +617,13 @@ export ZEBRA_RPC__LISTEN_ADDR=127.0.0.1:8232 ZEBRA_RPC__ENABLE_COOKIE_AUTH=false
               </div>
             </article>
 
-            <article class="panel">
+            <article class="panel panel-full">
               <div class="panel-header">
                 <h2>Install zcashd-compat</h2>
               </div>
 
               <ol class="join-steps">
-                <li class="join-step">
+                <li class="join-step join-step-plain">
                   <div class="join-step-body">
                     <h3>Run Installer</h3>
                     <p class="body-copy">
