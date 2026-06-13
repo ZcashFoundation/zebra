@@ -34,6 +34,12 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 - Increased Zebra's local rollback window (`MAX_BLOCK_REORG_HEIGHT`) from 99 to
   1000 blocks as a defence-in-depth measure against sustained consensus splits.
+- The inbound service now handles peer requests fairly: queued requests are
+  processed from the peer with the lowest recent request count first, and when
+  the queue is full, the queued request from the peer with the highest recent
+  request count is shed, instead of failing the newest request from a random
+  peer. This stops spammy peers crowding out quiet ones under load
+  ([#7306](https://github.com/ZcashFoundation/zebra/issues/7306)).
 
 ## [Zebra 5.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.1.0) - 2026-06-10
 

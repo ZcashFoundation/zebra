@@ -7885,6 +7885,7 @@ dependencies = [
  "tonic-prost-build",
  "tower 0.4.13",
  "tower-batch-control",
+ "tower-fair-buffer",
  "tracing",
  "tracing-appender",
  "tracing-error",

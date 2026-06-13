@@ -160,6 +160,7 @@ zebra-state = { path = "../zebra-state", version = "9.0.0" }
 zebra-script = { path = "../zebra-script", version = "9.0.0" }
 
 tower-batch-control = { path = "../tower-batch-control", version = "1.0.1" }
+tower-fair-buffer = { path = "../tower-fair-buffer", version = "0.1.0" }
 zcash_script = { workspace = true }
 
 # Required for crates.io publishing, but it's only used in tests

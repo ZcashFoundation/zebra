@@ -80,6 +80,7 @@ use color_eyre::eyre::{eyre, Report};
 use futures::FutureExt;
 use tokio::{pin, select, sync::oneshot};
 use tower::{builder::ServiceBuilder, util::BoxService};
+use tower_fair_buffer::FairBuffer;
 use tracing_futures::Instrument;
 
 use zebra_consensus::BackgroundTaskHandles;
@@ -89,7 +90,9 @@ use crate::{
     application::{build_version, user_agent, LAST_WARN_ERROR_LOG_SENDER},
     components::{
         health, ibd,
-        inbound::{self, InboundSetupData, MAX_INBOUND_RESPONSE_TIME},
+        inbound::{
+            self, InboundSetupData, INBOUND_FAIRNESS_ROTATION_INTERVAL, MAX_INBOUND_RESPONSE_TIME,
+        },
         mempool::{self, Mempool},
         sync::{self, show_block_chain_progress, VERIFICATION_PIPELINE_SCALING_MULTIPLIER},
         tokio::{RuntimeRun, TokioComponent},
@@ -212,24 +215,31 @@ impl StartCmd {
             .service(state_service);
 
         info!("initializing network");
-        // The service that our node uses to respond to requests by peers. The
-        // load_shed middleware ensures that we reduce the size of the peer set
-        // in response to excess load.
+        // The service that our node uses to respond to requests by peers.
         //
         // # Security
         //
         // This layer stack is security-sensitive, modifying it can cause hangs,
         // or enable denial of service attacks.
         //
+        // The fair buffer reduces the size of the peer set in response to excess load:
+        // it dispatches the request from the peer with the lowest recent request count
+        // first, and when it is full, it sheds the queued request from the peer with the
+        // highest recent request count, so loud peers can't crowd out quiet ones.
+        //
+        // The timeout is outside the fair buffer, so it bounds each request's combined
+        // queue and processing time: requests from loud peers that are starved by the
+        // priority queue time out and feed the same per-connection overload handling
+        // as shed requests.
+        //
         // See `zebra_network::Connection::drive_peer_request()` for details.
         let (setup_tx, setup_rx) = oneshot::channel();
         let inbound = ServiceBuilder::new()
-            .load_shed()
-            .buffer(inbound::downloads::MAX_INBOUND_CONCURRENCY)
             .timeout(MAX_INBOUND_RESPONSE_TIME)
-            .service(Inbound::new(
-                config.sync.full_verify_concurrency_limit,
-                setup_rx,
+            .service(FairBuffer::new(
+                Inbound::new(config.sync.full_verify_concurrency_limit, setup_rx),
+                inbound::downloads::MAX_INBOUND_CONCURRENCY,
+                INBOUND_FAIRNESS_ROTATION_INTERVAL,
             ));
 
         let (peer_set, address_book, misbehavior_sender, peer_set_status) = zebra_network::init(

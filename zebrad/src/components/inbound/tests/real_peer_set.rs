@@ -7,9 +7,8 @@ use std::{iter, net::SocketAddr};
 use futures::FutureExt;
 use indexmap::IndexSet;
 use tokio::{sync::oneshot, task::JoinHandle};
-use tower::{
-    buffer::Buffer, builder::ServiceBuilder, load_shed::LoadShed, util::BoxService, ServiceExt,
-};
+use tower::{buffer::Buffer, builder::ServiceBuilder, util::BoxService, ServiceExt};
+use tower_fair_buffer::{FairBuffer, Tagged};
 
 use zebra_chain::{
     block::{self, Height},
@@ -20,7 +19,8 @@ use zebra_chain::{
 use zebra_consensus::{error::TransactionError, transaction, VerifyBlockError};
 use zebra_network::{
     canonical_peer_addr, connect_isolated_tcp_direct_with_inbound, types::InventoryHash, CacheDir,
-    Config as NetworkConfig, InventoryResponse, PeerError, Request, Response, SharedPeerError,
+    Config as NetworkConfig, InventoryResponse, PeerError, PeerSocketAddr, Request, Response,
+    SharedPeerError,
 };
 use zebra_node_services::mempool;
 use zebra_rpc::SubmitBlockChannel;
@@ -29,7 +29,10 @@ use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::{
     components::{
-        inbound::{downloads::MAX_INBOUND_CONCURRENCY, Inbound, InboundSetupData},
+        inbound::{
+            downloads::MAX_INBOUND_CONCURRENCY, Inbound, InboundSetupData,
+            INBOUND_FAIRNESS_ROTATION_INTERVAL,
+        },
         mempool::{gossip_mempool_transaction_id, Config as MempoolConfig, Mempool},
         sync::{self, BlockGossipError, SyncStatus},
     },
@@ -66,7 +69,9 @@ async fn inbound_peers_empty_address_book() -> Result<(), crate::BoxError> {
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     // Send a request to inbound directly
-    let request = inbound_service.clone().oneshot(Request::Peers);
+    let request = inbound_service
+        .clone()
+        .oneshot(Tagged::internal(Request::Peers));
     let response = request.await;
     match response.as_ref() {
         Ok(Response::Peers(single_peer)) if single_peer.len() == 1 => {
@@ -151,7 +156,9 @@ async fn inbound_block_empty_state_notfound() -> Result<(), crate::BoxError> {
     // Send a request to inbound directly
     let request = inbound_service
         .clone()
-        .oneshot(Request::BlocksByHash(iter::once(test_block).collect()));
+        .oneshot(Tagged::internal(Request::BlocksByHash(
+            iter::once(test_block).collect(),
+        )));
     let response = request.await;
     match response.as_ref() {
         Ok(Response::Blocks(single_block)) if single_block.len() == 1 => {
@@ -241,7 +248,9 @@ async fn inbound_tx_empty_state_notfound() -> Result<(), crate::BoxError> {
         // Send a request to inbound directly
         let request = inbound_service
             .clone()
-            .oneshot(Request::TransactionsById(txs.iter().copied().collect()));
+            .oneshot(Tagged::internal(Request::TransactionsById(
+                txs.iter().copied().collect(),
+            )));
         let response = request.await;
         match response.as_ref() {
             Ok(Response::Transactions(response_txs)) => {
@@ -605,11 +614,10 @@ async fn setup(
     // connected peer which responds with isolated_peer_response
     Buffer<zebra_network::Client, zebra_network::Request>,
     // inbound service
-    LoadShed<
-        Buffer<
-            BoxService<zebra_network::Request, zebra_network::Response, BoxError>,
-            zebra_network::Request,
-        >,
+    FairBuffer<
+        BoxService<zebra_network::Request, zebra_network::Response, BoxError>,
+        PeerSocketAddr,
+        zebra_network::Request,
     >,
     // outbound peer set (only has the connected peer)
     Buffer<
@@ -637,10 +645,11 @@ async fn setup(
     let (setup_tx, setup_rx) = oneshot::channel();
     let inbound_service = Inbound::new(MAX_INBOUND_CONCURRENCY, setup_rx);
     // TODO: add a timeout just above the service, if needed
-    let inbound_service = ServiceBuilder::new()
-        .load_shed()
-        .buffer(10)
-        .service(BoxService::new(inbound_service));
+    let inbound_service = FairBuffer::new(
+        BoxService::new(inbound_service),
+        10,
+        INBOUND_FAIRNESS_ROTATION_INTERVAL,
+    );
 
     // State
     // UTXO verification doesn't matter for these tests.
@@ -860,10 +869,11 @@ mod submitblock_test {
         // Inbound
         let (_setup_tx, setup_rx) = oneshot::channel();
         let inbound_service = Inbound::new(MAX_INBOUND_CONCURRENCY, setup_rx);
-        let inbound_service = ServiceBuilder::new()
-            .load_shed()
-            .buffer(10)
-            .service(BoxService::new(inbound_service));
+        let inbound_service = FairBuffer::new(
+            BoxService::new(inbound_service),
+            10,
+            INBOUND_FAIRNESS_ROTATION_INTERVAL,
+        );
 
         let (peer_set, _address_book, _misbehavior_tx, _status) = zebra_network::init(
             network_config,
