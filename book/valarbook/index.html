@@ -524,9 +524,9 @@
           <div class="prereq-group">
             <h3>Run the node</h3>
             <div class="code-block">
-              <pre><code id="zebra-run-node" class="language-bash"># 1. download and build zebrad from source (needs Rust and clang; one-time)
-git clone --branch v5.0.0-rc.3 https://github.com/valargroup/zebra zebra
-cargo build --release --locked --manifest-path zebra/Cargo.toml --bin zebrad
+              <pre><code id="zebra-run-node" class="language-bash"># 1. download the prebuilt zebrad release binary (Linux x86_64)
+wget https://github.com/valargroup/zebra/releases/download/v5.0.0-test.1/zebrad-v5.0.0-test.1-linux-x86_64.tar.gz
+tar -xzf zebrad-v5.0.0-test.1-linux-x86_64.tar.gz
 
 # 2. download the latest snapshot (resumable, parallel, checksum-verified)
 aria2c -x16 -s16 --checksum=sha-256=1154d81bafca6cccbd6a53888284a5c941523be693d33eaddec2b05f029d7ba2 \
@@ -538,9 +538,9 @@ aria2c -x16 -s16 --checksum=sha-256=1154d81bafca6cccbd6a53888284a5c941523be693d3
 # 3. extract into the cache dir
 mkdir -p ~/.cache/zebra && zstd -dc zebra-mainnet-20260612T013145Z-3374802.tar.zst | tar -x -C ~/.cache/zebra
 
-# 4. start - comes up at #3,374,802, not genesis
+# 4. start at snapshot height, not genesis
 export ZEBRA_RPC__LISTEN_ADDR=127.0.0.1:8232 ZEBRA_RPC__ENABLE_COOKIE_AUTH=false
-zebra/target/release/zebrad start</code></pre>
+./bin/zebrad start</code></pre>
               <button class="copy"
                       type="button"
                       data-copy="zebra-run-node"
