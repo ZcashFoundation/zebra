@@ -529,11 +529,31 @@
             </article>
           </div>
           <div class="prereq-group">
+            <h3>Install Zakura</h3>
+            <p class="body-copy">
+              Download and run the standalone Zakura installer from the latest Zebra GitHub release. It guides native, Docker, and build-from-source setup modes and downloads only Zebra binaries.
+            </p>
+            <div class="code-block">
+              <pre><code id="install-zakura" class="language-bash">curl -fsSL https://github.com/valargroup/zebra/releases/latest/download/install-zakura.sh | bash</code></pre>
+              <button class="copy"
+                      type="button"
+                      data-copy="install-zakura"
+                      aria-label="Copy Zakura installer command"
+                      title="Copy">
+                <span class="copy-icon" aria-hidden="true"></span>
+                <span class="copy-status" aria-hidden="true"></span>
+              </button>
+            </div>
+            <p class="note">
+              The installer defaults to normal <code>zebrad start</code> operation and does not enable zcashd compatibility mode.
+            </p>
+          </div>
+          <div class="prereq-group">
             <h3>Run the node</h3>
             <div class="code-block">
               <pre><code id="zebra-run-node" class="language-bash"># 1. download the prebuilt zebrad release binary (Linux x86_64)
-wget https://github.com/valargroup/zebra/releases/download/v5.0.0-test.1/zebrad-v5.0.0-test.1-linux-x86_64.tar.gz
-tar -xzf zebrad-v5.0.0-test.1-linux-x86_64.tar.gz
+wget https://github.com/valargroup/zebra/releases/download/v5.0.0-test.4/zebrad-v5.0.0-test.4-linux-x86_64.tar.gz
+tar -xzf zebrad-v5.0.0-test.4-linux-x86_64.tar.gz
 
 # 2. download the latest snapshot (resumable, parallel, checksum-verified)
 aria2c -x16 -s16 --checksum=sha-256=1154d81bafca6cccbd6a53888284a5c941523be693d33eaddec2b05f029d7ba2 \

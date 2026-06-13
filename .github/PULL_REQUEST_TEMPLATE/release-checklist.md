@@ -210,7 +210,7 @@ for c in zebra-test tower-fallback zebra-chain tower-batch-control zebra-node-se
   - [ ] Confirm the manifest contains only the `x86_64-pc-linux-gnu` artifact before publishing zcashd-compat Docker images.
   - [ ] Confirm the workflow logs show the expected `/usr/local/bin/zcashd --version` for the zcashd-compat linux/amd64 image variant.
 - [ ] Wait for the [the Docker images to be published successfully](https://github.com/ZcashFoundation/zebra/actions/workflows/release-binaries.yml?query=event%3Arelease).
-- [ ] Confirm `release-binaries.yml` published `zebrad-<tag>-linux-x86_64.tar.gz`, `zebrad-<tag>-linux-aarch64.tar.gz`, `zebrad-manifest-<tag>.json`, and `SHA256SUMS.txt` to the GitHub release.
+- [ ] Confirm `release-binaries.yml` published `zebrad-<tag>-linux-x86_64.tar.gz`, `zebrad-<tag>-linux-aarch64.tar.gz`, `zebrad-manifest-<tag>.json`, `install-zakura.sh`, `install-zcashd-compat.sh`, and `SHA256SUMS.txt` to the GitHub release.
 - [ ] Wait for the new tag in the [dockerhub zebra space](https://hub.docker.com/r/zfnd/zebra/tags)
 - [ ] Confirm `zfnd/zebra:<version>` includes `linux/amd64` and `linux/arm64`, and `zfnd/zebra-zcashd-compat:<version>` includes only `linux/amd64`.
 - [ ] Un-freeze the [`batched` queue](https://dashboard.mergify.com/github/ZcashFoundation/repo/zebra/queues) using Mergify.

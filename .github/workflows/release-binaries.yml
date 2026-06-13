@@ -229,6 +229,7 @@ jobs:
 
           find ./publish -type f -name 'zebrad-*.tar.gz' -exec cp {} ./publish/final/ \;
           cp ./scripts/install-zcashd-compat.sh ./publish/final/
+          cp ./scripts/install-zakura.sh ./publish/final/
           RELEASE_TAG="$RELEASE_TAG" python3 - <<'PY'
           import os
           import re
@@ -236,24 +237,31 @@ jobs:
 
           release_tag = os.environ["RELEASE_TAG"]
           image_version = release_tag.removeprefix("v")
-          installer_path = Path("./publish/final/install-zcashd-compat.sh")
-          installer = installer_path.read_text(encoding="utf-8")
-          replacements = {
-              "ZEBRA_RELEASE_TAG": release_tag,
-              "ZEBRA_DOCKER_IMAGE": f"valaroman/zebra:{image_version}",
-              "ZEBRA_COMPAT_DOCKER_IMAGE": f"valaroman/zebra:zcashd-compat-{image_version}",
+          installers = {
+              "install-zcashd-compat.sh": {
+                  "ZEBRA_RELEASE_TAG": release_tag,
+                  "ZEBRA_DOCKER_IMAGE": f"valaroman/zebra:{image_version}",
+                  "ZEBRA_COMPAT_DOCKER_IMAGE": f"valaroman/zebra:zcashd-compat-{image_version}",
+              },
+              "install-zakura.sh": {
+                  "ZEBRA_RELEASE_TAG": release_tag,
+                  "ZEBRA_DOCKER_IMAGE": f"valaroman/zebra:{image_version}",
+              },
           }
-          for name, value in replacements.items():
-              installer, count = re.subn(
-                  rf'^{name}="[^"]*"$',
-                  f'{name}="{value}"',
-                  installer,
-                  count=1,
-                  flags=re.MULTILINE,
-              )
-              if count != 1:
-                  raise SystemExit(f"Expected exactly one {name} assignment in installer.")
-          installer_path.write_text(installer, encoding="utf-8")
+          for filename, replacements in installers.items():
+              installer_path = Path("./publish/final") / filename
+              installer = installer_path.read_text(encoding="utf-8")
+              for name, value in replacements.items():
+                  installer, count = re.subn(
+                      rf'^{name}="[^"]*"$',
+                      f'{name}="{value}"',
+                      installer,
+                      count=1,
+                      flags=re.MULTILINE,
+                  )
+                  if count != 1:
+                      raise SystemExit(f"Expected exactly one {name} assignment in {filename}.")
+              installer_path.write_text(installer, encoding="utf-8")
           PY
           (
             cd ./publish/final
@@ -309,6 +317,7 @@ jobs:
             ./publish/final/zebrad-*.tar.gz \
             ./publish/final/zebrad-manifest-*.json \
             ./publish/final/install-zcashd-compat.sh \
+            ./publish/final/install-zakura.sh \
             ./publish/final/SHA256SUMS.txt \
             --repo "$REPOSITORY" \
             --clobber

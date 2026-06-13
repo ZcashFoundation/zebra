@@ -11,18 +11,19 @@ fi
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 UNITY_ROOT="$(cd "$REPO_ROOT/.." && pwd)"
 
-ZEBRA_RELEASE_TAG="v5.0.0-test.1"
+ZEBRA_RELEASE_TAG="v5.0.0-test.4"
 ZEBRA_ARCHIVE="zebrad-${ZEBRA_RELEASE_TAG}-linux-x86_64.tar.gz"
 ZEBRA_URL="https://github.com/valargroup/zebra/releases/download/${ZEBRA_RELEASE_TAG}/${ZEBRA_ARCHIVE}"
 ZEBRA_MEMBER="./bin/zebrad"
-ZEBRA_DOCKER_IMAGE="valaroman/zebra:5.0.0-test.1"
-ZEBRA_COMPAT_DOCKER_IMAGE="valaroman/zebra:zcashd-compat-5.0.0-test.1"
+ZEBRA_DOCKER_IMAGE="valaroman/zebra:5.0.0-test.4"
+ZEBRA_COMPAT_DOCKER_IMAGE="valaroman/zebra:zcashd-compat-5.0.0-test.4"
 ZEBRA_COMPAT_DOCKER_FALLBACK_IMAGE="valaroman/zebra:zcashd-compat-latest"
+ZEBRA_DEFAULT_CACHE_DIR="${XDG_CACHE_HOME:-${HOME}/.cache}/zebra"
 
 MANIFEST_PATH="$REPO_ROOT/zebrad/zcashd-compat-manifest.json"
 TARGET_TRIPLE="x86_64-pc-linux-gnu"
-ZCASHD_RUNTIME_ARCHIVE_URL="https://github.com/valargroup/zcashd/releases/download/v6.2.1-alpha.7/zcashd-zebra-compat-v6.2.1-alpha.7-linux-x86_64.tar.gz"
-ZCASHD_RUNTIME_ARCHIVE_SHA256="6a1c4dc673646bc514f289b306944b4081a5f44dfd3206e5b22336f95c3ad6c6"
+ZCASHD_RUNTIME_ARCHIVE_URL="https://github.com/valargroup/zcashd/releases/download/v6.2.1-alpha.9/zcashd-zebra-compat-v6.2.1-alpha.9-linux-x86_64.tar.gz"
+ZCASHD_RUNTIME_ARCHIVE_SHA256="5f899869a0e5fdb8d5179e291d764f37b9e4e6db04163a07fc2439806c8f0097"
 ZCASHD_RUNTIME_ARCHIVE_MEMBER_BINARY_PATH="./bin/zcashd"
 
 MODE=""
@@ -365,11 +366,6 @@ normalize_inputs() {
   ZEBRA_STATE_DIR="$(prompt_value "Zebra state directory" "$ZEBRA_STATE_DIR")"
   ZCASHD_DATADIR="$(prompt_value "zcashd datadir" "$ZCASHD_DATADIR")"
   INSTALL_DIR="$(prompt_value "Install directory" "$INSTALL_DIR")"
-  CACHE_DIR="$(prompt_value "Download/cache directory" "$CACHE_DIR")"
-
-  if [[ -z "$COOKIE_DIR" ]]; then
-    COOKIE_DIR="$ZEBRA_STATE_DIR"
-  fi
 
   if [[ -z "$ZCASHD_CONF" ]]; then
     ZCASHD_CONF="$ZCASHD_DATADIR/zcash.conf"
@@ -379,6 +375,9 @@ normalize_inputs() {
   ZCASHD_DATADIR="$(printf '%s' "$ZCASHD_DATADIR" | sanitize_terminal_input)"
   INSTALL_DIR="$(printf '%s' "$INSTALL_DIR" | sanitize_terminal_input)"
   CACHE_DIR="$(printf '%s' "$CACHE_DIR" | sanitize_terminal_input)"
+  if [[ -z "$COOKIE_DIR" ]]; then
+    COOKIE_DIR="$ZEBRA_STATE_DIR"
+  fi
   COOKIE_DIR="$(printf '%s' "$COOKIE_DIR" | sanitize_terminal_input)"
   ZCASHD_CONF="$(printf '%s' "$ZCASHD_CONF" | sanitize_terminal_input)"
   ZEBRAD_PATH="$(printf '%s' "$ZEBRAD_PATH" | sanitize_terminal_input)"
@@ -860,7 +859,7 @@ prepare_docker_images() {
         add_error "Docker image is missing or could not be pulled: $ZEBRA_DOCKER_IMAGE"
 
       if [[ -z "$ZCASHD_DOCKER_IMAGE" ]]; then
-        ZCASHD_DOCKER_IMAGE="valargroup/zcashd:zcashd-compat-v6.2.1-alpha.7"
+        ZCASHD_DOCKER_IMAGE="valaroman/zcashd:v6.2.1-alpha.9@sha256:ca1878cc78f2794105c7b903a8a3e4839fc4f63e2ff2964f4d3721a32b53e766"
       fi
 
       docker_image_available_or_pull "$ZCASHD_DOCKER_IMAGE" ||
@@ -893,6 +892,7 @@ print_supervised_command() {
   cat <<EOF
 $(style "$GREEN$BOLD" "Start Zebra. In the background, downloads hash-pinned zcashd and kicks it off as a supervised child process.")
 ZEBRA_STATE__CACHE_DIR=$(shell_quote "$ZEBRA_STATE_DIR") \\
+ZEBRA_ZCASHD_COMPAT__MANAGE_ZCASHD=true \\
 ZEBRA_ZCASHD_COMPAT__ZCASHD_SOURCE=managed \\
 ZEBRA_ZCASHD_COMPAT__ZCASHD_DATADIR=$(shell_quote "$ZCASHD_DATADIR") \\
 $(shell_quote "$ZEBRAD_PATH") start --zcashd-compat
@@ -906,6 +906,7 @@ docker run --rm -it \\
   -e ZCASHD_COMPAT_ENABLED=true \\
   -e ZEBRA_NETWORK__LISTEN_ADDR='[::]:8233' \\
   -e ZEBRA_STATE__CACHE_DIR=/home/zebra/.cache/zebra \\
+  -e ZEBRA_ZCASHD_COMPAT__MANAGE_ZCASHD=true \\
   -e ZEBRA_ZCASHD_COMPAT__ZCASHD_DATADIR=/home/zebra/.cache/zcashd \\
   -e ZEBRA_ZCASHD_COMPAT__LISTEN_ADDR=127.0.0.1:28232 \\
   -e ZEBRA_ZCASHD_COMPAT__ZCASHD_EXTRA_ARGS='["-rpcbind=0.0.0.0","-rpcallowip=0.0.0.0/0"]' \\
@@ -925,7 +926,7 @@ $(style "$GREEN$BOLD" "Start Zebra container in terminal 1:")
 docker run --rm -it --name zebra-compat-zebrad \\
   -e ZEBRA_NETWORK__LISTEN_ADDR='[::]:8233' \\
   -e ZEBRA_STATE__CACHE_DIR=/home/zebra/.cache/zebra \\
-  --mount type=bind,src=$(shell_quote "$ZEBRA_STATE_DIR"),dst=/home/zebra/.cache/zebra \\
+    --mount type=bind,src=$(shell_quote "$ZEBRA_STATE_DIR"),dst=/home/zebra/.cache/zebra \\
   -p 8233:8233 \\
   -p 127.0.0.1:28232:28232 \\
   $(shell_quote "$ZEBRA_DOCKER_IMAGE") \\
