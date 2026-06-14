@@ -19,6 +19,8 @@ ZEBRA_DOCKER_IMAGE="valaroman/zebra:5.0.0-test.4"
 ZEBRA_COMPAT_DOCKER_IMAGE="valaroman/zebra:zcashd-compat-5.0.0-test.4"
 ZEBRA_COMPAT_DOCKER_FALLBACK_IMAGE="valaroman/zebra:zcashd-compat-latest"
 ZEBRA_DEFAULT_CACHE_DIR="${XDG_CACHE_HOME:-${HOME}/.cache}/zebra"
+ZEBRA_DOCKER_RUNTIME_UID=10001
+ZEBRA_DOCKER_RUNTIME_GID=10001
 
 MANIFEST_PATH="$REPO_ROOT/zebrad/zcashd-compat-manifest.json"
 TARGET_TRIPLE="x86_64-pc-linux-gnu"
@@ -843,6 +845,54 @@ docker_image_available_or_pull() {
   docker pull "$image" >/dev/null 2>&1
 }
 
+run_privileged_or_current_user() {
+  if ((EUID == 0)); then
+    "$@"
+    return
+  fi
+
+  if command_exists sudo && sudo -n true 2>/dev/null; then
+    sudo "$@"
+    return
+  fi
+
+  "$@"
+}
+
+prepare_docker_owned_directory() {
+  local label="$1"
+  local dir="$2"
+  local owner="${ZEBRA_DOCKER_RUNTIME_UID}:${ZEBRA_DOCKER_RUNTIME_GID}"
+
+  if ((DRY_RUN)); then
+    if ((USE_ANSI)); then
+      printf '%s %s\n' "$(style "$CYAN" "[file]")" "$(style "$DIM" "Dry run: would create $label at $dir and chown it to $owner")"
+    else
+      printf 'Dry run: would create %s at %s and chown it to %s\n' "$label" "$dir" "$owner"
+    fi
+    return
+  fi
+
+  if ! mkdir -p "$dir"; then
+    add_error "failed to create $label for Docker mount: $dir"
+    return
+  fi
+
+  if ! run_privileged_or_current_user chown -R "$owner" "$dir"; then
+    add_error "failed to chown $label $dir to Docker runtime user $owner; run: sudo chown -R $owner $(shell_quote "$dir")"
+  fi
+}
+
+prepare_docker_supervised_mounts() {
+  if [[ "$MODE" != "docker-supervised" ]]; then
+    return
+  fi
+
+  prepare_docker_owned_directory "Zebra state directory" "$ZEBRA_STATE_DIR"
+  prepare_docker_owned_directory "zcashd datadir" "$ZCASHD_DATADIR"
+  finalize_checks
+}
+
 prepare_docker_images() {
   case "$MODE" in
     docker-supervised)
@@ -993,6 +1043,14 @@ print_ready_commands() {
   esac
 
   print_command_block_end
+
+  case "$MODE" in
+    docker-supervised | docker-split-containers)
+      printf '\n%s ZEBRA_ZCASHD_COMPAT__UNSAFE_ALLOW_REMOTE_HTTP=true is set because the compat RPC is published on 0.0.0.0 over plain HTTP,\n' "$(style "$YELLOW" "[!]")"
+      printf '    so the cookie crosses the network in cleartext and is safe behind the local container/private-network boundary.\n'
+      printf '    To remove it, enable TLS via ZEBRA_ZCASHD_COMPAT__TLS_CERT_FILE/_TLS_KEY_FILE/_TLS_CA_FILE.\n'
+      ;;
+  esac
 }
 
 while (($#)); do
@@ -1106,6 +1164,7 @@ case "$MODE" in
     prepare_binary_paths
     ;;
   docker-split-containers | docker-supervised)
+    prepare_docker_supervised_mounts
     prepare_docker_images
     ;;
   build-from-source)
