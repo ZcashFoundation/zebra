@@ -30,8 +30,9 @@ ZCASHD_RUNTIME_ARCHIVE_MEMBER_BINARY_PATH="./bin/zcashd"
 
 MODE=""
 NETWORK="Mainnet"
-ZEBRA_STATE_DIR="/mnt/data/zebra-state"
-ZCASHD_DATADIR="/mnt/data/zcashd-mainnet"
+ZCASHD_DEFAULT_DATADIR="${HOME}/.zcash"
+ZEBRA_STATE_DIR="$ZEBRA_DEFAULT_CACHE_DIR"
+ZCASHD_DATADIR="$ZCASHD_DEFAULT_DATADIR"
 INSTALL_DIR="${HOME}/.local/zcashd-compat"
 CACHE_DIR="${HOME}/.cache/zcashd-compat"
 COOKIE_DIR=""
@@ -41,6 +42,8 @@ ZCASHD_PATH=""
 ZCASHD_DOCKER_IMAGE=""
 DOWNLOAD_BINARIES=1
 DOWNLOAD_BINARIES_SET=0
+ZEBRA_STATE_DIR_SET=0
+ZCASHD_DATADIR_SET=0
 DRY_RUN=0
 NON_INTERACTIVE=0
 UNSAFE_LOW_SPECS=0
@@ -301,6 +304,312 @@ prompt_yes_no() {
   printf '%s\n' "${sanitized_reply:-$default}"
 }
 
+network_name_lowercase() {
+  local network="$NETWORK"
+  network="${network,,}"
+
+  case "$network" in
+    main | mainnet) printf 'mainnet\n' ;;
+    test | testnet) printf 'testnet\n' ;;
+    regtest) printf 'regtest\n' ;;
+    *) printf '%s\n' "$network" ;;
+  esac
+}
+
+zcashd_network_datadir() {
+  local datadir="$1"
+
+  case "$(network_name_lowercase)" in
+    testnet) printf '%s/testnet3\n' "$datadir" ;;
+    regtest) printf '%s/regtest\n' "$datadir" ;;
+    *) printf '%s\n' "$datadir" ;;
+  esac
+}
+
+path_capacity_bytes() {
+  local path="$1"
+  local ancestor size
+
+  command_exists df || return 1
+  command_exists awk || return 1
+
+  ancestor="$(nearest_existing_ancestor "$path")" || return 1
+  size="$(df -PB1 "$ancestor" 2>/dev/null | awk 'NR == 2 { gsub(/B$/, "", $2); print $2 }')"
+
+  [[ "$size" =~ ^[0-9]+$ ]] || return 1
+  printf '%s\n' "$size"
+}
+
+path_has_min_capacity() {
+  local path="$1"
+  local min_bytes="$2"
+  local size
+
+  size="$(path_capacity_bytes "$path")" || return 1
+  ((size >= min_bytes))
+}
+
+zebra_state_has_expected_files() {
+  local dir="$1"
+  local net_dir matches
+
+  [[ -d "$dir" ]] || return 1
+  net_dir="$(network_name_lowercase)"
+
+  matches=("$dir"/state/v*/"$net_dir"/version "$dir"/state/v*/"$net_dir"/CURRENT "$dir"/state/v*/"$net_dir"/MANIFEST-*)
+  for match in "${matches[@]}"; do
+    if [[ -e "$match" ]]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+zcashd_datadir_has_expected_files() {
+  local datadir="$1"
+  local effective_datadir
+
+  [[ -d "$datadir" ]] || return 1
+
+  for effective_datadir in "$datadir" "$(zcashd_network_datadir "$datadir")"; do
+    [[ -f "$effective_datadir/zcash.conf" ]] && return 0
+    [[ -d "$effective_datadir/blocks" ]] && return 0
+    [[ -d "$effective_datadir/blocks/index" ]] && return 0
+    [[ -d "$effective_datadir/chainstate" ]] && return 0
+  done
+
+  return 1
+}
+
+candidate_search_roots() {
+  local root seen
+  local roots=("$HOME" "${XDG_CACHE_HOME:-$HOME/.cache}" /mnt /media /srv /var/lib /data)
+  seen=""
+
+  if command_exists df && command_exists awk; then
+    while IFS= read -r root; do
+      roots+=("$root")
+    done < <(df -P 2>/dev/null | awk 'NR > 1 { print $6 }')
+  fi
+
+  for root in "${roots[@]}"; do
+    [[ -n "$root" ]] || continue
+    case $'\n'"$seen" in
+      *$'\n'"$root"$'\n'*) continue ;;
+    esac
+    seen+="$root"$'\n'
+    printf '%s\n' "$root"
+  done
+}
+
+check_candidate_datadir() {
+  local candidate="$1"
+  local min_bytes="$2"
+  local expected_files_check="$3"
+
+  [[ -d "$candidate" ]] || return 1
+  path_has_min_capacity "$candidate" "$min_bytes" || return 1
+  "$expected_files_check" "$candidate"
+}
+
+candidate_size_kib() {
+  local candidate="$1"
+
+  if command_exists du && command_exists awk; then
+    du -sk "$candidate" 2>/dev/null | awk 'NR == 1 { print $1 }'
+  else
+    printf '0\n'
+  fi
+}
+
+candidate_score() {
+  local candidate="$1"
+  local size_kib
+
+  size_kib="$(candidate_size_kib "$candidate")"
+  if [[ "$size_kib" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$size_kib"
+  else
+    printf '0\n'
+  fi
+}
+
+maybe_select_better_candidate() {
+  local candidate="$1"
+  local min_bytes="$2"
+  local expected_files_check="$3"
+  local score
+
+  check_candidate_datadir "$candidate" "$min_bytes" "$expected_files_check" || return 0
+  score="$(candidate_score "$candidate")"
+
+  if [[ -z "${BEST_CANDIDATE:-}" || "$score" -gt "${BEST_CANDIDATE_SCORE:-0}" ]]; then
+    BEST_CANDIDATE="$candidate"
+    BEST_CANDIDATE_SCORE="$score"
+  fi
+}
+
+maybe_select_better_install_root() {
+  local root="$1"
+  local min_bytes="$2"
+  local score
+
+  [[ -n "$root" && "$root" != "/" && -d "$root" ]] || return 0
+  score="$(path_capacity_bytes "$root" 2>/dev/null || printf '0')"
+  [[ "$score" =~ ^[0-9]+$ ]] || return 0
+  ((score >= min_bytes)) || return 0
+
+  if [[ -z "${BEST_INSTALL_ROOT:-}" || "$score" -gt "${BEST_INSTALL_ROOT_SCORE:-0}" ]]; then
+    BEST_INSTALL_ROOT="$root"
+    BEST_INSTALL_ROOT_SCORE="$score"
+  fi
+}
+
+recommend_install_root() {
+  local min_bytes="$1"
+  local root
+  BEST_INSTALL_ROOT=""
+  BEST_INSTALL_ROOT_SCORE=0
+
+  while IFS= read -r root; do
+    maybe_select_better_install_root "$root" "$min_bytes"
+  done < <(candidate_search_roots)
+
+  if [[ -n "$BEST_INSTALL_ROOT" ]]; then
+    printf '%s\n' "$BEST_INSTALL_ROOT"
+    return 0
+  fi
+
+  return 1
+}
+
+search_named_candidates() {
+  local min_bytes="$1"
+  local expected_files_check="$2"
+  shift 2
+
+  local root name candidate
+  while IFS= read -r root; do
+    [[ -n "$root" && "$root" != "/" && -d "$root" ]] || continue
+
+    for name in "$@"; do
+      candidate="$root/$name"
+      maybe_select_better_candidate "$candidate" "$min_bytes" "$expected_files_check"
+    done
+  done < <(candidate_search_roots)
+}
+
+search_zebra_state_candidates() {
+  local min_bytes="$1"
+  local root candidate
+
+  search_named_candidates "$min_bytes" zebra_state_has_expected_files \
+    ".cache/zebra" "zebra" "zebra-state" "data/zebra" "data/zebra-state" \
+    "mnt/data/zebra" "mnt/data/zebra-state"
+
+  command_exists find || return 0
+  while IFS= read -r root; do
+    [[ -n "$root" && "$root" != "/" && -d "$root" ]] || continue
+    path_has_min_capacity "$root" "$min_bytes" || continue
+
+    while IFS= read -r candidate; do
+      maybe_select_better_candidate "$candidate" "$min_bytes" zebra_state_has_expected_files
+    done < <(find "$root" -xdev -maxdepth 5 -type d \( -name zebra -o -name zebra-state \) -print 2>/dev/null)
+  done < <(candidate_search_roots)
+}
+
+search_zcashd_datadir_candidates() {
+  local min_bytes="$1"
+  local root candidate
+
+  search_named_candidates "$min_bytes" zcashd_datadir_has_expected_files \
+    ".zcash" "zcash" "zcashd" "zcashd-mainnet" "data/.zcash" "data/zcashd" "data/zcashd-mainnet" \
+    "mnt/data/.zcash" "mnt/data/zcashd" "mnt/data/zcashd-mainnet"
+
+  command_exists find || return 0
+  while IFS= read -r root; do
+    [[ -n "$root" && "$root" != "/" && -d "$root" ]] || continue
+    path_has_min_capacity "$root" "$min_bytes" || continue
+
+    while IFS= read -r candidate; do
+      maybe_select_better_candidate "$candidate" "$min_bytes" zcashd_datadir_has_expected_files
+    done < <(find "$root" -xdev -maxdepth 5 -type d \( -name .zcash -o -name zcash -o -name zcashd -o -name zcashd-mainnet \) -print 2>/dev/null)
+  done < <(candidate_search_roots)
+}
+
+recommend_zebra_state_dir() {
+  local binary_default="$1"
+  local min_bytes=$((300 * 1024 * 1024 * 1024))
+  local synthetic_min_bytes="${SYNTHETIC_INSTALL_MIN_BYTES:-$min_bytes}"
+  local install_root
+  BEST_CANDIDATE=""
+  BEST_CANDIDATE_SCORE=0
+
+  maybe_select_better_candidate "$binary_default" "$min_bytes" zebra_state_has_expected_files
+  search_zebra_state_candidates "$min_bytes"
+
+  if [[ -n "$BEST_CANDIDATE" ]]; then
+    printf '%s\n' "$BEST_CANDIDATE"
+    return
+  fi
+
+  if ! path_has_min_capacity "$binary_default" "$min_bytes"; then
+    if install_root="$(recommend_install_root "$synthetic_min_bytes")"; then
+      printf '%s/.cache/zebra\n' "$install_root"
+      return
+    fi
+  fi
+
+  printf '%s\n' "$binary_default"
+}
+
+recommend_zcashd_datadir() {
+  local binary_default="$1"
+  local min_bytes=$((300 * 1024 * 1024 * 1024))
+  local synthetic_min_bytes="${SYNTHETIC_INSTALL_MIN_BYTES:-$min_bytes}"
+  local install_root
+  BEST_CANDIDATE=""
+  BEST_CANDIDATE_SCORE=0
+
+  maybe_select_better_candidate "$binary_default" "$min_bytes" zcashd_datadir_has_expected_files
+  search_zcashd_datadir_candidates "$min_bytes"
+
+  if [[ -n "$BEST_CANDIDATE" ]]; then
+    printf '%s\n' "$BEST_CANDIDATE"
+    return
+  fi
+
+  if ! path_has_min_capacity "$binary_default" "$min_bytes"; then
+    if install_root="$(recommend_install_root "$synthetic_min_bytes")"; then
+      printf '%s/.zcash\n' "$install_root"
+      return
+    fi
+  fi
+
+  printf '%s\n' "$binary_default"
+}
+
+recommend_datadir_defaults() {
+  # Empty fallback locations share a filesystem, so size them for both datadirs
+  # when both prompt defaults are being selected together.
+  if ((ZEBRA_STATE_DIR_SET == 0 && ZCASHD_DATADIR_SET == 0)); then
+    SYNTHETIC_INSTALL_MIN_BYTES=$((600 * 1024 * 1024 * 1024))
+  else
+    SYNTHETIC_INSTALL_MIN_BYTES=$((300 * 1024 * 1024 * 1024))
+  fi
+
+  if ((ZEBRA_STATE_DIR_SET == 0)); then
+    ZEBRA_STATE_DIR="$(recommend_zebra_state_dir "$ZEBRA_DEFAULT_CACHE_DIR")"
+  fi
+
+  if ((ZCASHD_DATADIR_SET == 0)); then
+    ZCASHD_DATADIR="$(recommend_zcashd_datadir "$ZCASHD_DEFAULT_DATADIR")"
+  fi
+
+  unset SYNTHETIC_INSTALL_MIN_BYTES
+}
+
 prompt_mode() {
   local reply
 
@@ -364,6 +673,8 @@ normalize_inputs() {
       esac
     fi
   fi
+
+  recommend_datadir_defaults
 
   ZEBRA_STATE_DIR="$(prompt_value "Zebra state directory" "$ZEBRA_STATE_DIR")"
   ZCASHD_DATADIR="$(prompt_value "zcashd datadir" "$ZCASHD_DATADIR")"
@@ -1068,11 +1379,13 @@ while (($#)); do
     --zebra-state-dir)
       require_value "$1" "${2:-}"
       ZEBRA_STATE_DIR="$2"
+      ZEBRA_STATE_DIR_SET=1
       shift 2
       ;;
     --zcashd-datadir)
       require_value "$1" "${2:-}"
       ZCASHD_DATADIR="$2"
+      ZCASHD_DATADIR_SET=1
       shift 2
       ;;
     --install-dir)
