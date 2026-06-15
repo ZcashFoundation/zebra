@@ -79,12 +79,9 @@ compiler. Below are quick summaries for installing these dependencies.
 sudo pacman -S rust clang protobuf
 ```
 
-Note that the package `clang` includes `libclang` as well. The GCC version on
-Arch Linux has a broken build script in a `rocksdb` dependency. A workaround is:
-
-```sh
-export CXXFLAGS="$CXXFLAGS -include cstdint"
-```
+Note that the package `clang` includes `libclang` as well. If you hit a
+compiling failure in `rocksdb`, see the [GCC 15 workaround](#gcc-15-workaround)
+below.
 
 </details>
 
