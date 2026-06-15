@@ -4,7 +4,7 @@ on:
   pull_request:
     branches:
       - main
-      - zsa1
+      - zsa-support
     paths:
       - "**/*.rs"
       - "**/Cargo.toml"
