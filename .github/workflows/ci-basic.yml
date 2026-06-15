@@ -59,23 +59,10 @@ jobs:
         with:
           tool: cargo-nextest
 
-      - name: Run regular tests
+      - name: Run tests
         run: |
           timeout --preserve-status 1h \
-            cargo nextest run --workspace --locked \
-              -E 'not package(zebra-network) and not binary(acceptance)'
-
-      - name: Run zebra-network tests
-        run: |
-          timeout --preserve-status 30m \
-            cargo nextest run -p zebra-network --locked \
-              --retries 3
-
-      - name: Run zebrad acceptance tests
-        run: |
-          timeout --preserve-status 1h \
-            cargo nextest run -p zebrad --test acceptance --locked \
-              --retries 3
+            cargo nextest run --workspace --locked
 
       - name: Run doc tests
         run: |

@@ -130,3 +130,13 @@ default-filter = 'package(zebrad) and test(=lightwalletd_test_suite)'
 [profile.rpc-z-getsubtreesbyindex-snapshot]
 slow-timeout = { period = "30m", terminate-after = 2 }
 default-filter = 'package(zebrad) and test(=fully_synced_rpc_z_getsubtreesbyindex_snapshot_test)'
+
+# --- QEDIT temporary retries ---
+
+# TODO: Remove retries after investigating periodic random failures.
+# Add more tests here only after confirming similar intermittent failures.
+[[profile.default.overrides]]
+filter = '''
+test(=sync_large_checkpoints_mempool_mainnet)
+'''
+retries = 3
