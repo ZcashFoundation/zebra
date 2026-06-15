@@ -75,6 +75,11 @@ jobs:
             cargo nextest run -p zebrad --test acceptance --locked \
               --retries 3
 
+      - name: Run doc tests
+        run: |
+          timeout --preserve-status 30m \
+            cargo test --doc --workspace --locked
+
       - name: Run doc check
         run: cargo doc --workspace --no-deps --all-features --document-private-items --locked
 
