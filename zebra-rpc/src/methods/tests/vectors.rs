@@ -3190,3 +3190,39 @@ async fn rpc_gettxout() {
     let rpc_tx_queue_task_result = rpc_tx_queue.now_or_never();
     assert!(rpc_tx_queue_task_result.is_none());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_get_standard_fee() {
+    let _init_guard = zebra_test::init();
+
+    let mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _rpc_tx_queue) = RpcImpl::new(
+        Mainnet,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    let response = rpc
+        .get_standard_fee()
+        .await
+        .expect("get_standard_fee should succeed");
+
+    // Static v0 placeholder: the ZIP-317 marginal fee and version 0.
+    assert_eq!(response.standard_fee(), 5000);
+    assert_eq!(response.version(), 0);
+}

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Added
+
+- Added the `getstandardfee` RPC, a parameterless method returning the
+  recommended standard fee per logical action (the ZIP-317 marginal fee, 5000
+  zatoshis) with a `version` field for future dynamic fee estimation
+  ([#10717](https://github.com/ZcashFoundation/zebra/pull/10717))
+
 ## [Zebra 5.1.1](https://github.com/ZcashFoundation/zebra/releases/tag/v5.1.1) - 2026-06-11
 
 This release reduces Zebra's end-of-support window ahead of the NU7 network upgrade
