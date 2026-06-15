@@ -161,6 +161,8 @@ _The diagram above illustrates the parallel execution patterns in our CI/CD syst
 - **Delete GCP resources** (`zfnd-delete-gcp-resources.yml`): Cleanup utilities
 - Helper scripts in `.github/workflows/scripts/` used by the above
 
+Required-check workflows follow a `changes` (paths-filter) + gated workers + aggregator pattern. File-to-workflow mapping lives in [`.github/path-filters.yml`](../path-filters.yml). The aggregator job ID matches the workflow basename and the GitHub ruleset context (`lint`, `unit-tests`, `test-crates`, ...). See [`book/src/dev/continuous-integration.md`](../../book/src/dev/continuous-integration.md).
+
 ## Test Execution Strategy
 
 ### Test Orchestration with Nextest

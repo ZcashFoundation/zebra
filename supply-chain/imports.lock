@@ -129,6 +129,69 @@ version = "0.244.0"
 when = "2026-01-06"
 trusted-publisher = "github:bytecodealliance/wasm-tools"
 
+[[publisher.zebra-chain]]
+version = "10.0.0"
+when = "2026-06-11"
+user-id = 228785
+user-login = "oxarbitrage"
+user-name = "Alfredo Garcia"
+
+[[publisher.zebra-consensus]]
+version = "9.0.0"
+when = "2026-06-11"
+user-id = 228785
+user-login = "oxarbitrage"
+user-name = "Alfredo Garcia"
+
+[[publisher.zebra-network]]
+version = "9.0.0"
+when = "2026-06-11"
+user-id = 228785
+user-login = "oxarbitrage"
+user-name = "Alfredo Garcia"
+
+[[publisher.zebra-node-services]]
+version = "8.0.0"
+when = "2026-06-11"
+user-id = 228785
+user-login = "oxarbitrage"
+user-name = "Alfredo Garcia"
+
+[[publisher.zebra-rpc]]
+version = "10.0.0"
+when = "2026-06-11"
+user-id = 228785
+user-login = "oxarbitrage"
+user-name = "Alfredo Garcia"
+
+[[publisher.zebra-script]]
+version = "9.0.0"
+when = "2026-06-11"
+user-id = 228785
+user-login = "oxarbitrage"
+user-name = "Alfredo Garcia"
+
+[[publisher.zebra-state]]
+version = "9.0.0"
+when = "2026-06-11"
+user-id = 228785
+user-login = "oxarbitrage"
+user-name = "Alfredo Garcia"
+
+[[publisher.zebra-utils]]
+version = "8.0.0"
+when = "2026-06-11"
+user-id = 228785
+user-login = "oxarbitrage"
+user-name = "Alfredo Garcia"
+
+[[publisher.zebrad]]
+version = "5.1.0"
+when = "2026-06-11"
+user-id = 228785
+user-login = "oxarbitrage"
+user-name = "Alfredo Garcia"
+
 [[audits.bytecode-alliance.wildcard-audits.bumpalo]]
 who = "Nick Fitzgerald <fitzgen@gmail.com>"
 criteria = "safe-to-deploy"

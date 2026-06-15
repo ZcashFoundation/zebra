@@ -7,9 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+## [Zebra 5.1.1](https://github.com/ZcashFoundation/zebra/releases/tag/v5.1.1) - 2026-06-11
+
+This release reduces Zebra's end-of-support window ahead of the NU7 network upgrade
+expected at the end of July 2026, so that nodes running outdated versions stop before
+the upgrade activates.
+
+### Changed
+
+- Reduced the end-of-support period from 105 to 44 days, and updated the estimated
+  release height, ahead of the NU7 network upgrade
+  ([#10710](https://github.com/ZcashFoundation/zebra/pull/10710))
+
+## [Zebra 5.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.1.0) - 2026-06-10
+
+This release fixes a genesis-to-tip sync stall that could cause new nodes to hang
+during initial block download, bumps the minimum network protocol version to NU6.2,
+extends the `getpeerinfo` RPC, and includes several performance and correctness fixes.
+
+### Breaking Changes
+
+- The minimum network protocol version is now NU6.2 (170150). Peers running protocol
+  versions below NU6.2 will be disconnected. Update to Zebra 5.0.0 or later to remain
+  compatible ([#10692](https://github.com/ZcashFoundation/zebra/pull/10692)).
+
 ### Added
 
-- Extended `getpeerinfo` RPC with `subver`, `version`, `services`, `lastrecv`, `banscore`, and `connection_state` fields
+- Extended `getpeerinfo` RPC with `subver`, `version`, `services`, `lastrecv`,
+  `banscore`, and `connection_state` fields ([#10443](https://github.com/ZcashFoundation/zebra/pull/10443))
+
+### Fixed
+
+- Fixed genesis-to-tip sync stall that could cause new nodes to hang during initial
+  block download ([#10679](https://github.com/ZcashFoundation/zebra/pull/10679))
+- Fixed mempool index being unnecessarily rebuilt per transaction in `getrawmempool`
+  ([#10599](https://github.com/ZcashFoundation/zebra/pull/10599))
+- Fixed `dequeue_children` by-height index handling in the state service
+  ([#10604](https://github.com/ZcashFoundation/zebra/pull/10604))
+
+### Contributors
+
+Thank you to everyone who contributed to this release:
+@andres-pcg, @conradoplg, @gustavovalverde, @judah-caruso, @oxarbitrage, @syszery and @upbqdn
 
 ## [Zebra 5.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v5.0.0) - 2026-06-02
 

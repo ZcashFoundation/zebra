@@ -137,6 +137,8 @@ cargo release replace --verbose --execute --allow-branch '*' -p zebrad
 
 - [ ] Commit and push the above version changes to the release branch.
 
+- [ ] **Major (network upgrade) releases only:** Check that `INITIAL_MIN_NETWORK_PROTOCOL_VERSION` in [`zebra-network/src/constants.rs`](https://github.com/ZcashFoundation/zebra/blob/main/zebra-network/src/constants.rs) uses the latest activated network upgrade.
+
 ## Update End of Support
 
 The end of support height is calculated from the current blockchain height:
