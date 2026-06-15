@@ -4,17 +4,20 @@ use zebra_chain::block::Height;
 
 use crate::{constants, service::read::find::block_locator_heights};
 
-/// Block heights, and the expected minimum block locator height
+/// Block heights, and the expected minimum block locator height.
+///
+/// Cases are computed against [`constants::MAX_BLOCK_REORG_HEIGHT`].
 static BLOCK_LOCATOR_CASES: &[(u32, u32)] = &[
     (0, 0),
     (1, 0),
     (10, 0),
-    (98, 0),
     (99, 0),
-    (100, 1),
-    (101, 2),
-    (1000, 901),
-    (10000, 9901),
+    (100, 0),
+    (999, 0),
+    (1000, 0),
+    (1001, 1),
+    (2000, 1000),
+    (10000, 9000),
 ];
 
 /// Check that the block locator heights are sensible.
@@ -54,7 +57,7 @@ fn test_block_locator_heights() {
         );
         assert!(
             height - final_height.0 <= constants::MAX_BLOCK_REORG_HEIGHT,
-            "locator for {} must not be more than the maximum reorg height {} below the tip, \
+            "locator for {} must not be more than MAX_BLOCK_REORG_HEIGHT ({}) below the tip, \
              but {} is {} blocks below the tip",
             height,
             constants::MAX_BLOCK_REORG_HEIGHT,

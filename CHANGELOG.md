@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Unreleased]
 
+### Changed
+
+- Increased Zebra's local rollback window (`MAX_BLOCK_REORG_HEIGHT`) from 99 to
+  1000 blocks as a defence-in-depth measure against sustained consensus splits.
+
 ## [Zebra 5.1.1](https://github.com/ZcashFoundation/zebra/releases/tag/v5.1.1) - 2026-06-11
 
 This release reduces Zebra's end-of-support window ahead of the NU7 network upgrade
