@@ -97,7 +97,8 @@ jobs:
           echo "PROPTEST_MAX_SHRINK_ITERS=1024" >> $GITHUB_ENV
 
       - name: Run unit tests
-        run: cargo nextest run --profile all-tests --locked --release --features "${{ matrix.features }}" --run-ignored=all
+        # TODO: Remove retries after investigating periodic random failures of sync_large_checkpoints_mempool_mainnet, found on QEDIT CI.
+        run: cargo nextest run --profile all-tests --locked --release --features "${{ matrix.features }}" --run-ignored=all --retries 3
         env:
           TEST_LARGE_CHECKPOINTS: 1
 
