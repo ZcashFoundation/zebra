@@ -22,7 +22,7 @@ pub struct RpcRequestClient {
 }
 
 impl RpcRequestClient {
-    /// Creates new RPCRequestSender
+    /// Creates a new RPC request client with the default timeout.
     pub fn new(rpc_address: SocketAddr) -> Self {
         Self::new_with_timeout(rpc_address, RPC_REQUEST_TIMEOUT)
     }
