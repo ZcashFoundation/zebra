@@ -3038,7 +3038,7 @@ async fn getrawtransaction_confirmations_include_non_finalized_blocks() -> Resul
     let client = RpcRequestClient::new(rpc_address);
 
     // Mine enough blocks to push the first few blocks into the finalized state.
-    // Block at height 2 is finalized once tip > 2 + MAX_BLOCK_REORG_HEIGHT = 101.
+    // Block at height 2 is finalized once tip > 2 + MAX_BLOCK_REORG_HEIGHT (= 1002).
     let blocks_to_mine = MAX_BLOCK_REORG_HEIGHT + 10;
     client.generate(blocks_to_mine).await?;
 
@@ -3958,8 +3958,8 @@ async fn has_spending_transaction_ids() -> Result<()> {
 
     tracing::info!("checking indexes of spending transaction ids");
 
-    // Read the last 500 blocks - should be greater than the MAX_BLOCK_REORG_HEIGHT so that
-    // both the finalized and non-finalized state are checked.
+    // Read the last 500 blocks. This exceeds the 100 blocks committed to the non-finalized
+    // state above, so the loop reads into the finalized state too, checking both.
     let num_blocks_to_check = 500;
     let mut is_failure = false;
     for i in 0..num_blocks_to_check {
