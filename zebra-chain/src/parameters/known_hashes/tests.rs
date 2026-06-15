@@ -73,7 +73,7 @@ fn mainnet_spec_constants_well_formed() {
 
     assert_eq!(spec.chunk_hashes.len(), 23);
     assert!(!spec.is_empty());
-    assert_eq!(spec.len(), 3_358_432);
+    assert_eq!(spec.len(), 3_373_207);
 
     for hash in spec.chunk_hashes {
         assert_eq!(hash.len(), 64, "SHA-256 hex must be 64 chars: {hash}");
@@ -86,7 +86,7 @@ fn mainnet_spec_constants_well_formed() {
     // 22 full chunks of 150,000 plus the remainder.
     assert_eq!(spec.chunk_len(0), 150_000);
     assert_eq!(spec.chunk_len(21), 150_000);
-    assert_eq!(spec.chunk_len(22), 3_358_432 - 22 * 150_000);
+    assert_eq!(spec.chunk_len(22), 3_373_207 - 22 * 150_000);
 
     assert_eq!(spec.chunk_file_name(0), "main-known-hashes-00.bin");
     assert_eq!(spec.chunk_file_name(22), "main-known-hashes-22.bin");
@@ -110,7 +110,7 @@ fn mainnet_assets_load_and_verify() {
         .expect("bundled mainnet assets load and verify")
         .expect("mainnet has a bundled list");
 
-    assert_eq!(list.max_height(), block::Height(3_358_431));
+    assert_eq!(list.max_height(), block::Height(3_373_206));
 
     // After open(), no chunks are resident (verify-then-drop).
     assert_eq!(list.resident_chunks(), 0);
@@ -129,11 +129,11 @@ fn mainnet_assets_load_and_verify() {
     assert_eq!(sapling.to_string(), MAINNET_SAPLING_DISPLAY_HEX);
 
     assert!(list
-        .hash(block::Height(3_358_431))
+        .hash(block::Height(3_373_206))
         .expect("last chunk loads")
         .is_some());
     assert!(list
-        .hash(block::Height(3_358_432))
+        .hash(block::Height(3_373_207))
         .expect("no load needed")
         .is_none());
     assert!(list
@@ -141,24 +141,19 @@ fn mainnet_assets_load_and_verify() {
         .expect("no load needed")
         .is_none());
 
-    // Chunks 00-14 embed size hints; the rest are hash-only until their
-    // size data is swept.
+    // All 23 chunks embed per-block size hints.
     assert!(list
         .size_hint(block::Height(0))
         .expect("chunk 0 is resident")
         .is_some());
     assert!(list
-        .size_hint(block::Height(2_249_999))
-        .expect("chunk 14 loads")
-        .is_some());
-    assert!(list
         .size_hint(block::Height(2_250_000))
         .expect("chunk 15 loads")
-        .is_none());
+        .is_some());
     assert!(list
-        .size_hint(block::Height(3_358_431))
+        .size_hint(block::Height(3_373_206))
         .expect("last chunk is resident")
-        .is_none());
+        .is_some());
 }
 
 /// Sequential lookups across chunk boundaries keep at most two chunks

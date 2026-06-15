@@ -107,15 +107,10 @@ pub struct KnownHashListSpec {
     pub file_prefix: &'static str,
 }
 
-/// The Mainnet every-block known-hash list: 3,358,432 hashes
-/// (heights 0..=3,358,431) in 23 chunks.
-///
-/// Chunks 00–14 (heights 0..=2,249,999) embed per-block size hints; the
-/// remaining chunks are hash-only until their size data is swept from a
-/// synced node (TODO(ibd-engine E2): sweep the remaining sizes at the chain
-/// tip and re-emit chunks 15–22 with hints).
+/// The Mainnet every-block known-hash list: 3,373,207 hashes
+/// (heights 0..=3,373,206) in 23 chunks, each embedding per-block size hints.
 pub const MAINNET_KNOWN_HASHES: KnownHashListSpec = KnownHashListSpec {
-    max_height: block::Height(3_358_431),
+    max_height: block::Height(3_373_206),
     chunk_blocks: HASHES_PER_CHUNK,
     file_prefix: "main-known-hashes",
     chunk_hashes: &[
@@ -134,14 +129,14 @@ pub const MAINNET_KNOWN_HASHES: KnownHashListSpec = KnownHashListSpec {
         "58cf63ddb267f6ce7cba94f96afe64a24f6cceb318060afd29d4e9dbbf6574b5",
         "300a8ba12a7d0fd10fbddaafa643decac7fabe76849a38e55663fdd8bdd8ca5d",
         "ba134982f8c8f339ee1f408d59254c76329fb07a158697f725b7502e84fd4926",
-        "79d005f596bd2c711933560d9b4a33cd904c451e4b6df23facc98596830d1e18",
-        "65a554e1df7de35e9e4b2ae1a1de316afb9110afef37ba2c40565f1b77a4b06f",
-        "ea870fbd205f346e9f90a575786b8fca9387c1cdebdba7f28418f66a2adc12cd",
-        "538c8ed6cc2f539a7afbf9ed1832dd8c42ce5dc1c9802608c55c41b8f5c062bd",
-        "5704d2c80866de97ba63856bd116c38c249466fdd7e5d0f219fb10197df57573",
-        "2a1a12a53d02735f060cbf535163264afcdabb3ce080978eca8c6fb8e4dc7524",
-        "0e8a98342e896a77ffb434d427e4ce2484812aa0407df4aedb274b40a0df7eba",
-        "15e8ec07d2cd300d7de1c2479faf94785a150ef1cbd208f6eb5a97990990140a",
+        "9ab753b04ee8bd18c795c0bb94c4523fb80a077d0787b62462cf8536f10eeb73",
+        "7d53879f0d911c4dd2d0dfb95269ccbdc55a28599a9a63002a3012333c454e50",
+        "ed87b7012bace58ea1145abb50633a43cebcc2d2cbb552cb5be3fca9fcf4a3e4",
+        "fc6a82d97e3c6caf3d220d0eaa5022b711cd26e848d6544cc2371d883d9519a1",
+        "f5cbb51028b8acd3d618e7588e8920a51d5af28b23f0e9d27378dc10624c0b9f",
+        "c6df924a3c21ee4eac81ef73a1b2b229d7c75a3b549b49dc6c054c76e9439b03",
+        "d444c2e1afdcd6635c8707e0d302a3064fc5dacb6a96e09c18a56969429b11e3",
+        "651f6924710b43b9e161186ba81bdfddc12f2217d18f4c53eae9cdeb05c1a07a",
     ],
 };
 
