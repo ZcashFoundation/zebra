@@ -164,8 +164,8 @@ mod tests {
         )
         .await;
 
-        let inner_result = result
-            .expect("outer safety timeout should not fire; client timeout should fire first");
+        let inner_result =
+            result.expect("outer safety timeout should not fire; client timeout should fire first");
 
         let err =
             inner_result.expect_err("request to unresponsive server should fail with timeout");
