@@ -138,7 +138,10 @@ impl RpcRequestClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
+    use std::{
+        sync::{Arc, Mutex},
+        time::Duration,
+    };
 
     /// Proves that `RpcRequestClient` times out instead of hanging indefinitely
     /// when a server accepts a TCP connection but never sends a response.
@@ -148,10 +151,14 @@ mod tests {
             std::net::TcpListener::bind("127.0.0.1:0").expect("should bind to localhost");
         let addr = listener.local_addr().expect("should have a local address");
 
+        // Hold the accepted stream so the connection stays open until the test ends.
+        let held_stream = Arc::new(Mutex::new(None));
+        let held_stream_clone = held_stream.clone();
+
         // Accept the connection but never respond.
-        let _accept_thread = std::thread::spawn(move || {
-            let (_stream, _peer_addr) = listener.accept().expect("should accept a connection");
-            std::thread::park();
+        let accept_thread = std::thread::spawn(move || {
+            let (stream, _peer_addr) = listener.accept().expect("should accept a connection");
+            *held_stream_clone.lock().expect("lock poisoned") = Some(stream);
         });
 
         let short_timeout = Duration::from_secs(2);
@@ -170,5 +177,10 @@ mod tests {
         let err =
             inner_result.expect_err("request to unresponsive server should fail with timeout");
         assert!(err.is_timeout(), "error should be a timeout, got: {err}");
+
+        drop(held_stream);
+        accept_thread
+            .join()
+            .expect("accept thread should exit cleanly");
     }
 }
