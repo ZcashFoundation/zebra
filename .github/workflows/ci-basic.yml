@@ -54,13 +54,6 @@ jobs:
           sed -i 's|.*"--cfg", .feature="tx_v6".*|# &|' .cargo/config.toml
           sed -i 's|.*"--cfg", "zcash_unstable=\\"nu7\\"".*|# &|' .cargo/config.toml
 
-      - name: Run non-network tests
-        env:
-          SKIP_NETWORK_TESTS: "1"
-        run: |
-          timeout --preserve-status 1h cargo test --verbose --locked -- \
-            --skip trusted_chain_sync_handles_forks_correctly
-
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
 
