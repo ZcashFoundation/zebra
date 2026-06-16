@@ -28,6 +28,7 @@ use zebra_chain::{
 };
 use zebra_db::{
     chain::BLOCK_INFO,
+    known_hash::KNOWN_HASH_CHUNK,
     transparent::{BALANCE_BY_TRANSPARENT_ADDR, TX_LOC_BY_SPENT_OUT_LOC},
 };
 
@@ -103,6 +104,8 @@ pub const STATE_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
     "history_tree",
     "tip_chain_value_pool",
     BLOCK_INFO,
+    // P2P known-hash snapshot distribution
+    KNOWN_HASH_CHUNK,
 ];
 
 /// The finalized part of the chain state, stored in the db.

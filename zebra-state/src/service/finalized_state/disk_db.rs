@@ -758,6 +758,30 @@ impl DiskDb {
         self.zs_range_iter_with_direction(cf, range, false)
     }
 
+    /// Returns a forward iterator over the raw on-disk key/value byte pairs of
+    /// every entry in `cf`, in ascending key-byte order.
+    ///
+    /// Unlike [`zs_forward_range_iter`](Self::zs_forward_range_iter), this does
+    /// not deserialize keys or values, so it works for column families whose key
+    /// type only implements [`FromDisk`] under test (for example
+    /// [`transparent::Address`](zebra_chain::transparent::Address)) and lets
+    /// callers stream the canonical on-disk bytes directly.
+    ///
+    /// Holding this iterator open might delay block commit transactions.
+    pub fn zs_forward_full_bytes_iter<'a, C>(
+        &'a self,
+        cf: &'a C,
+    ) -> impl Iterator<Item = (Box<[u8]>, Box<[u8]>)> + 'a
+    where
+        C: rocksdb::AsColumnFamilyRef,
+    {
+        // Reading multiple items from iterators has caused database hangs,
+        // in previous RocksDB versions.
+        self.db
+            .iterator_cf(cf, rocksdb::IteratorMode::Start)
+            .map(|result| result.expect("unexpected database failure"))
+    }
+
     /// Returns a reverse iterator over the items in `cf` in `range`.
     ///
     /// Holding this iterator open might delay block commit transactions.

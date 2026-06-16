@@ -30,7 +30,7 @@ use zebra_chain::{
     transaction::UnminedTxId,
 };
 use zebra_consensus::VerifyBlockError;
-use zebra_network::{AddressBook, InventoryResponse};
+use zebra_network::{AddressBook, InventoryResponse, ShieldedPool};
 use zebra_node_services::mempool;
 
 use crate::BoxError;
@@ -574,6 +574,55 @@ impl Service<zn::Request> for Inbound {
                 })
                     .boxed()
             }
+            // IBD P2P snapshot distribution: each of these is DoS-bounded to a
+            // single artifact (one chunk / one tree / one <=1 MiB range) read
+            // from `zebra_state`. An unavailable or over-limit artifact returns
+            // `zn::Response::NotFound`, never an error that would drop the peer.
+            // See `docs/design/p2p-snapshot-distribution.md`.
+            zn::Request::KnownHashChunk(index) => {
+                let request = zs::Request::KnownHashChunk(index);
+                state.clone().oneshot(request).map_ok(|resp| match resp {
+                    zs::Response::KnownHashChunk(Some(bytes)) => zn::Response::KnownHashChunk(bytes.into()),
+                    zs::Response::KnownHashChunk(None) => zn::Response::NotFound,
+                    _ => unreachable!("zebra-state should always respond to a `KnownHashChunk` request with a `KnownHashChunk` response"),
+                })
+                    .boxed()
+            }
+            zn::Request::NoteCommitmentTree { pool, height } => {
+                // Map the network pool selector onto the state pool selector;
+                // the two enums are kept separate so `zebra-state` does not
+                // depend on the higher `zebra-network` crate.
+                let pool = match pool {
+                    ShieldedPool::Sapling => zs::ShieldedPool::Sapling,
+                    ShieldedPool::Orchard => zs::ShieldedPool::Orchard,
+                };
+                let request = zs::Request::NoteCommitmentTreeBytes { pool, height };
+                state.clone().oneshot(request).map_ok(|resp| match resp {
+                    zs::Response::NoteCommitmentTreeBytes(Some(bytes)) => zn::Response::NoteCommitmentTree(bytes.into()),
+                    zs::Response::NoteCommitmentTreeBytes(None) => zn::Response::NotFound,
+                    _ => unreachable!("zebra-state should always respond to a `NoteCommitmentTreeBytes` request with a `NoteCommitmentTreeBytes` response"),
+                })
+                    .boxed()
+            }
+            zn::Request::UnspentOutputs { offset, len } => {
+                let request = zs::Request::UnspentOutputsRange { offset, len };
+                state.clone().oneshot(request).map_ok(|resp| match resp {
+                    zs::Response::SnapshotRange(Some(bytes)) => zn::Response::SnapshotRange(bytes.into()),
+                    zs::Response::SnapshotRange(None) => zn::Response::NotFound,
+                    _ => unreachable!("zebra-state should always respond to a `UnspentOutputsRange` request with a `SnapshotRange` response"),
+                })
+                    .boxed()
+            }
+            zn::Request::AddressBalances { offset, len } => {
+                let request = zs::Request::AddressBalancesRange { offset, len };
+                state.clone().oneshot(request).map_ok(|resp| match resp {
+                    zs::Response::SnapshotRange(Some(bytes)) => zn::Response::SnapshotRange(bytes.into()),
+                    zs::Response::SnapshotRange(None) => zn::Response::NotFound,
+                    _ => unreachable!("zebra-state should always respond to a `AddressBalancesRange` request with a `SnapshotRange` response"),
+                })
+                    .boxed()
+            }
+
             zn::Request::Ping(_) => {
                 unreachable!("ping requests are handled internally");
             }

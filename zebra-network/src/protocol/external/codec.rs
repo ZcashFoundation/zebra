@@ -23,13 +23,13 @@ use zebra_chain::{
     transaction::Transaction,
 };
 
-use crate::constants;
+use crate::{constants, protocol::internal::ShieldedPool};
 
 use super::{
     addr::{AddrInVersion, AddrV1, AddrV2},
     message::{
-        Message, RejectReason, VersionMessage, MAX_REJECT_MESSAGE_LENGTH, MAX_REJECT_REASON_LENGTH,
-        MAX_USER_AGENT_LENGTH,
+        Message, RejectReason, SnapshotSet, VersionMessage, MAX_REJECT_MESSAGE_LENGTH,
+        MAX_REJECT_REASON_LENGTH, MAX_USER_AGENT_LENGTH,
     },
     types::*,
 };
@@ -171,6 +171,13 @@ impl Encoder<Message> for Codec {
             FilterLoad { .. } => b"filterload\0\0",
             FilterAdd { .. } => b"filteradd\0\0\0",
             FilterClear => b"filterclear\0",
+            GetKnownHashChunk { .. } => b"getkhchunk\0\0",
+            KnownHashChunk { .. } => b"khchunk\0\0\0\0\0",
+            GetNoteCommitmentTree { .. } => b"getnctree\0\0\0",
+            NoteCommitmentTree { .. } => b"nctree\0\0\0\0\0\0",
+            GetSnapshot { .. } => b"getsnap\0\0\0\0\0",
+            Snapshot { .. } => b"snap\0\0\0\0\0\0\0\0",
+            SnapshotNotFound => b"snapnf\0\0\0\0\0\0",
         };
         trace!(?item, len = body_length);
 
@@ -334,8 +341,62 @@ impl Codec {
                 writer.write_all(data)?;
             }
             Message::FilterClear => { /* Empty payload -- no-op */ }
+            Message::GetKnownHashChunk { index } => {
+                writer.write_u32::<LittleEndian>(*index)?;
+            }
+            Message::KnownHashChunk { bytes } => {
+                Self::write_length_delimited_bytes(&mut writer, bytes)?;
+            }
+            Message::GetNoteCommitmentTree { pool, height } => {
+                writer.write_u8(shielded_pool_to_byte(*pool))?;
+                writer.write_u32::<LittleEndian>(height.0)?;
+            }
+            Message::NoteCommitmentTree { bytes } => {
+                Self::write_length_delimited_bytes(&mut writer, bytes)?;
+            }
+            Message::GetSnapshot { set, offset, len } => {
+                // `SnapshotSet` is `#[repr(u8)]`, so the cast is the wire byte.
+                writer.write_u8(*set as u8)?;
+                writer.write_u64::<LittleEndian>(*offset)?;
+                writer.write_u32::<LittleEndian>(*len)?;
+            }
+            Message::Snapshot { bytes } => {
+                Self::write_length_delimited_bytes(&mut writer, bytes)?;
+            }
+            Message::SnapshotNotFound => { /* Empty payload -- no-op */ }
         }
         Ok(())
+    }
+
+    /// Write a `u32` little-endian length prefix followed by `bytes`.
+    ///
+    /// Used by the Zebra-specific snapshot-distribution messages, whose bodies
+    /// are opaque byte buffers. The length prefix makes decoding robust to the
+    /// bitcoin "extra trailing data" convention.
+    fn write_length_delimited_bytes<W: Write>(mut writer: W, bytes: &[u8]) -> Result<(), Error> {
+        // The body length is checked against `max_len` (<= MAX_PROTOCOL_MESSAGE_LEN,
+        // which fits in u32) before any bytes are written, so this cast cannot
+        // truncate for messages that the encoder will actually emit.
+        writer.write_u32::<LittleEndian>(bytes.len() as u32)?;
+        writer.write_all(bytes)?;
+        Ok(())
+    }
+}
+
+/// Convert a [`ShieldedPool`] into its single-byte wire encoding.
+fn shielded_pool_to_byte(pool: ShieldedPool) -> u8 {
+    match pool {
+        ShieldedPool::Sapling => 0,
+        ShieldedPool::Orchard => 1,
+    }
+}
+
+/// Convert a single wire byte back into a [`ShieldedPool`].
+fn shielded_pool_from_byte(byte: u8) -> Result<ShieldedPool, Error> {
+    match byte {
+        0 => Ok(ShieldedPool::Sapling),
+        1 => Ok(ShieldedPool::Orchard),
+        _ => Err(Error::Parse("invalid ShieldedPool selector byte")),
     }
 }
 
@@ -476,6 +537,13 @@ impl Decoder for Codec {
                     b"filterload\0\0" => self.read_filterload(&mut body_reader, body_len),
                     b"filteradd\0\0\0" => self.read_filteradd(&mut body_reader, body_len),
                     b"filterclear\0" => self.read_filterclear(&mut body_reader),
+                    b"getkhchunk\0\0" => self.read_getkhchunk(&mut body_reader),
+                    b"khchunk\0\0\0\0\0" => self.read_khchunk(&mut body_reader),
+                    b"getnctree\0\0\0" => self.read_getnctree(&mut body_reader),
+                    b"nctree\0\0\0\0\0\0" => self.read_nctree(&mut body_reader),
+                    b"getsnap\0\0\0\0\0" => self.read_getsnap(&mut body_reader),
+                    b"snap\0\0\0\0\0\0\0\0" => self.read_snap(&mut body_reader),
+                    b"snapnf\0\0\0\0\0\0" => self.read_snapnf(&mut body_reader),
                     _ => {
                         let command_string = String::from_utf8_lossy(&command);
 
@@ -787,6 +855,74 @@ impl Codec {
 
     fn read_filterclear<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
         Ok(Message::FilterClear)
+    }
+
+    /// Read a `u32` little-endian length prefix and then that many bytes.
+    ///
+    /// The length is bounded by the codec's configured maximum body length
+    /// (at most `MAX_PROTOCOL_MESSAGE_LEN`), so a malicious peer cannot use the
+    /// prefix to force an unbounded allocation.
+    fn read_length_delimited_bytes<R: Read>(&self, mut reader: R) -> Result<Vec<u8>, Error> {
+        let len = reader.read_u32::<LittleEndian>()? as usize;
+
+        // # Memory Denial of Service
+        //
+        // The length prefix is attacker-controlled, so bound it by the codec's
+        // maximum body length before allocating. The body has already passed the
+        // header `body_len <= max_len` check, so a well-formed message's prefix
+        // cannot exceed this, and a lying prefix is rejected here.
+        if len > self.builder.max_len {
+            return Err(Error::Parse(
+                "snapshot message byte length exceeds maximum body length",
+            ));
+        }
+
+        zcash_deserialize_bytes_external_count(len, &mut reader)
+    }
+
+    fn read_getkhchunk<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
+        Ok(Message::GetKnownHashChunk {
+            index: reader.read_u32::<LittleEndian>()?,
+        })
+    }
+
+    fn read_khchunk<R: Read>(&self, reader: R) -> Result<Message, Error> {
+        Ok(Message::KnownHashChunk {
+            bytes: self.read_length_delimited_bytes(reader)?,
+        })
+    }
+
+    fn read_getnctree<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
+        let pool = shielded_pool_from_byte(reader.read_u8()?)?;
+        let height = block::Height(reader.read_u32::<LittleEndian>()?);
+        Ok(Message::GetNoteCommitmentTree { pool, height })
+    }
+
+    fn read_nctree<R: Read>(&self, reader: R) -> Result<Message, Error> {
+        Ok(Message::NoteCommitmentTree {
+            bytes: self.read_length_delimited_bytes(reader)?,
+        })
+    }
+
+    fn read_getsnap<R: Read>(&self, mut reader: R) -> Result<Message, Error> {
+        let set = match reader.read_u8()? {
+            0 => SnapshotSet::UnspentOutputs,
+            1 => SnapshotSet::AddressBalances,
+            _ => return Err(Error::Parse("invalid SnapshotSet selector byte")),
+        };
+        let offset = reader.read_u64::<LittleEndian>()?;
+        let len = reader.read_u32::<LittleEndian>()?;
+        Ok(Message::GetSnapshot { set, offset, len })
+    }
+
+    fn read_snap<R: Read>(&self, reader: R) -> Result<Message, Error> {
+        Ok(Message::Snapshot {
+            bytes: self.read_length_delimited_bytes(reader)?,
+        })
+    }
+
+    fn read_snapnf<R: Read>(&self, mut _reader: R) -> Result<Message, Error> {
+        Ok(Message::SnapshotNotFound)
     }
 
     /// Given the reader, deserialize the transaction in the rayon thread pool.

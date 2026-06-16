@@ -674,6 +674,157 @@ fn headers_message_at_protocol_cap_is_accepted() {
     }
 }
 
+/// Round-trip `msg` through the codec at the full protocol body limit and
+/// assert the decoded message equals the original.
+///
+/// Used by the snapshot-distribution message round-trip tests, whose byte
+/// payloads can exceed the handshake body limit.
+fn snapshot_message_round_trip(msg: Message) {
+    let _init_guard = zebra_test::init();
+
+    let mut codec = Codec::builder()
+        .with_max_body_len(MAX_PROTOCOL_MESSAGE_LEN)
+        .finish();
+
+    let mut bytes = BytesMut::new();
+    codec
+        .encode(msg.clone(), &mut bytes)
+        .expect("snapshot message should encode");
+
+    let decoded = codec
+        .decode(&mut bytes)
+        .expect("decoding should not error")
+        .expect("a message should be present");
+
+    assert_eq!(msg, decoded, "snapshot message should round-trip");
+}
+
+#[test]
+fn getkhchunk_message_round_trip() {
+    snapshot_message_round_trip(Message::GetKnownHashChunk { index: 0x1234_5678 });
+}
+
+#[test]
+fn khchunk_message_round_trip() {
+    // A non-trivial payload, exercising the length-delimited byte encoding.
+    snapshot_message_round_trip(Message::KnownHashChunk {
+        bytes: (0..4096).map(|i| i as u8).collect(),
+    });
+
+    // An empty payload must also round-trip.
+    snapshot_message_round_trip(Message::KnownHashChunk { bytes: Vec::new() });
+}
+
+#[test]
+fn getnctree_message_round_trip() {
+    snapshot_message_round_trip(Message::GetNoteCommitmentTree {
+        pool: ShieldedPool::Sapling,
+        height: block::Height(1_234_567),
+    });
+    snapshot_message_round_trip(Message::GetNoteCommitmentTree {
+        pool: ShieldedPool::Orchard,
+        height: block::Height(0),
+    });
+}
+
+#[test]
+fn nctree_message_round_trip() {
+    snapshot_message_round_trip(Message::NoteCommitmentTree {
+        bytes: vec![0xab; 1500],
+    });
+}
+
+#[test]
+fn getsnap_message_round_trip() {
+    snapshot_message_round_trip(Message::GetSnapshot {
+        set: SnapshotSet::UnspentOutputs,
+        offset: 0xdead_beef_0000_0001,
+        len: 1_048_576,
+    });
+    snapshot_message_round_trip(Message::GetSnapshot {
+        set: SnapshotSet::AddressBalances,
+        offset: 0,
+        len: 0,
+    });
+}
+
+#[test]
+fn snap_message_round_trip() {
+    snapshot_message_round_trip(Message::Snapshot {
+        bytes: (0..8192).map(|i| (i * 7) as u8).collect(),
+    });
+}
+
+#[test]
+fn snapnf_message_round_trip() {
+    snapshot_message_round_trip(Message::SnapshotNotFound);
+}
+
+/// An invalid `ShieldedPool` selector byte in a `getnctree` message must be
+/// rejected with a parse error rather than silently decoding.
+#[test]
+fn getnctree_invalid_pool_byte_is_rejected() {
+    let _init_guard = zebra_test::init();
+
+    let mut codec = Codec::builder()
+        .with_max_body_len(MAX_PROTOCOL_MESSAGE_LEN)
+        .finish();
+
+    let mut bytes = BytesMut::new();
+    codec
+        .encode(
+            Message::GetNoteCommitmentTree {
+                pool: ShieldedPool::Sapling,
+                height: block::Height(42),
+            },
+            &mut bytes,
+        )
+        .expect("encoding should succeed");
+
+    // The pool selector byte is the first byte of the body, immediately after
+    // the 24-byte message header.
+    bytes[HEADER_LEN] = 0xff;
+    // Recompute the checksum over the tampered body so the codec reaches the
+    // body parser instead of failing the checksum check first.
+    let checksum = sha256d::Checksum::from(&bytes[HEADER_LEN..]);
+    bytes[20..24].copy_from_slice(&checksum.0);
+
+    codec
+        .decode(&mut bytes)
+        .expect_err("an invalid ShieldedPool selector byte should be rejected");
+}
+
+/// A `khchunk` message whose length prefix exceeds the codec's maximum body
+/// length must be rejected, not allocated.
+#[test]
+fn khchunk_oversized_length_prefix_is_rejected() {
+    let _init_guard = zebra_test::init();
+
+    let mut codec = Codec::builder()
+        .with_max_body_len(MAX_PROTOCOL_MESSAGE_LEN)
+        .finish();
+
+    let mut bytes = BytesMut::new();
+    codec
+        .encode(
+            Message::KnownHashChunk {
+                bytes: vec![0u8; 16],
+            },
+            &mut bytes,
+        )
+        .expect("encoding should succeed");
+
+    // Overwrite the u32 little-endian length prefix (first 4 body bytes) with a
+    // value larger than the maximum body length, leaving the body short.
+    bytes[HEADER_LEN..HEADER_LEN + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+    let checksum = sha256d::Checksum::from(&bytes[HEADER_LEN..]);
+    bytes[20..24].copy_from_slice(&checksum.0);
+
+    codec
+        .decode(&mut bytes)
+        .expect_err("an oversized length prefix should be rejected");
+}
+
 /// Check that the version test vector deserialization fails when there's a network magic mismatch.
 #[test]
 fn message_with_wrong_network_magic_returns_error() {

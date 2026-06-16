@@ -1,10 +1,15 @@
 //! `emit-snapshot` subcommand - emits IBD state-snapshot artifacts from a synced state.
 //!
 //! Reads a synced, read-only finalized state and writes assumeUTXO-style
-//! snapshot artifacts (design doc §16/§17), so a node can load a prepared state
-//! at the snapshot height instead of re-deriving it. Currently emits the set of
-//! unspent transparent output locations at the finalized tip; note-commitment
-//! tree artifacts follow.
+//! snapshot artifacts (design doc §16/§17), so a node can skip re-deriving state
+//! during checkpoint sync. It emits:
+//!
+//! - `unspent-output-locations.bin`: the set of unspent transparent output
+//!   locations at the finalized tip, so the engine can skip persisting outputs
+//!   that are spent before the snapshot height;
+//! - `sapling-tree-roots.bin` / `orchard-tree-roots.bin`: the note-commitment
+//!   tree root at every height that updates each tree, so trees can be fetched
+//!   by height and verified instead of recomputed by appending notes.
 //!
 //! The snapshot height is the cached state's finalized tip: point this at a
 //! state synced to (or rolled back to) the height you want to snapshot.

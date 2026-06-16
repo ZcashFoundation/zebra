@@ -9,6 +9,7 @@
 
 use std::{borrow::Cow, collections::HashSet, fmt, pin::Pin, sync::Arc, time::Instant};
 
+use bytes::Bytes;
 use futures::{future::Either, prelude::*};
 use rand::{seq::SliceRandom, thread_rng, Rng};
 use tokio::time::{sleep, Sleep};
@@ -34,7 +35,10 @@ use crate::{
     },
     peer_set::ConnectionTracker,
     protocol::{
-        external::{types::Nonce, InventoryHash, Message},
+        external::{
+            types::{Nonce, PeerServices},
+            InventoryHash, Message, SnapshotSet,
+        },
         internal::{InventoryResponse, Request, Response},
     },
     BoxError, PeerSocketAddr, MAX_TX_INV_IN_SENT_MESSAGE,
@@ -68,6 +72,16 @@ pub(super) enum Handler {
         transactions: Vec<UnminedTx>,
     },
     MempoolTransactionIds,
+
+    /// Awaiting the bytes (or a not-found reply) for a known-hash chunk request.
+    KnownHashChunk,
+
+    /// Awaiting the bytes (or a not-found reply) for a note-commitment-tree request.
+    NoteCommitmentTree,
+
+    /// Awaiting the bytes (or a not-found reply) for a snapshot range request
+    /// (the unspent-output set or the address-balance set).
+    SnapshotRange,
 }
 
 impl fmt::Display for Handler {
@@ -99,6 +113,10 @@ impl fmt::Display for Handler {
                 transactions.len()
             ),
             Handler::MempoolTransactionIds => "MempoolTransactionIds".to_string(),
+
+            Handler::KnownHashChunk => "KnownHashChunk".to_string(),
+            Handler::NoteCommitmentTree => "NoteCommitmentTree".to_string(),
+            Handler::SnapshotRange => "SnapshotRange".to_string(),
         })
     }
 }
@@ -120,6 +138,10 @@ impl Handler {
             Handler::TransactionsById { .. } => "TransactionsById".into(),
 
             Handler::MempoolTransactionIds => "MempoolTransactionIds".into(),
+
+            Handler::KnownHashChunk => "KnownHashChunk".into(),
+            Handler::NoteCommitmentTree => "NoteCommitmentTree".into(),
+            Handler::SnapshotRange => "SnapshotRange".into(),
         }
     }
 
@@ -419,6 +441,24 @@ impl Handler {
                     transaction_ids(&items).collect(),
                 )))
             }
+
+            // Snapshot-distribution responses. Each request maps to exactly one
+            // reply message (the bytes) or a `snapnf` not-found. The bytes are
+            // content-addressed, so the requester verifies them against the pinned
+            // constants; the connection just delivers them.
+            (Handler::KnownHashChunk, Message::KnownHashChunk { bytes }) => {
+                Handler::Finished(Ok(Response::KnownHashChunk(Bytes::from(bytes))))
+            }
+            (Handler::NoteCommitmentTree, Message::NoteCommitmentTree { bytes }) => {
+                Handler::Finished(Ok(Response::NoteCommitmentTree(Bytes::from(bytes))))
+            }
+            (Handler::SnapshotRange, Message::Snapshot { bytes }) => {
+                Handler::Finished(Ok(Response::SnapshotRange(Bytes::from(bytes))))
+            }
+            (
+                Handler::KnownHashChunk | Handler::NoteCommitmentTree | Handler::SnapshotRange,
+                Message::SnapshotNotFound,
+            ) => Handler::Finished(Ok(Response::NotFound)),
 
             // By default, messages are not responses.
             (state, msg) => {
@@ -976,6 +1016,21 @@ where
         self.shutdown_async(error).await;
     }
 
+    /// Returns true if the remote peer advertised the
+    /// [`NODE_KNOWN_HASH_SNAPSHOT`](PeerServices::NODE_KNOWN_HASH_SNAPSHOT)
+    /// service bit in its version handshake.
+    ///
+    /// Zebra only sends the Zebra-specific snapshot-distribution requests to
+    /// peers that advertise this capability. `zcashd` peers and older Zebra peers
+    /// never set the bit, so they are never asked, and their codec would drop the
+    /// unknown commands anyway.
+    fn remote_supports_known_hash_snapshot(&self) -> bool {
+        self.connection_info
+            .remote
+            .services
+            .contains(PeerServices::NODE_KNOWN_HASH_SNAPSHOT)
+    }
+
     /// Handle an internal client request, possibly generating outgoing messages to the
     /// remote peer.
     ///
@@ -1163,6 +1218,65 @@ where
                          Handler::Finished(Ok(Response::Nil))
                     )
             }
+
+            // Snapshot-distribution requests are only sent to peers that advertise
+            // the `NODE_KNOWN_HASH_SNAPSHOT` capability. `zcashd` and older Zebra
+            // peers never set this bit, so sending these custom commands to them
+            // would be dropped by their codec and time out. Fail the individual
+            // request cleanly instead, so the caller can route it to a peer that
+            // supports it without taking down this connection.
+            (
+                AwaitingRequest,
+                request @ (KnownHashChunk(_)
+                | NoteCommitmentTree { .. }
+                | UnspentOutputs { .. }
+                | AddressBalances { .. }),
+            ) if !self.remote_supports_known_hash_snapshot() => {
+                debug!(
+                    %request,
+                    remote_services = ?self.connection_info.remote.services,
+                    "ignoring snapshot-distribution request to peer without NODE_KNOWN_HASH_SNAPSHOT",
+                );
+
+                // Fail only this request, not the whole connection: the peer is
+                // healthy, it just doesn't support these custom messages. The
+                // caller can route the request to a peer that advertises the bit.
+                Ok(Handler::Finished(Err(PeerError::UnsupportedByPeer(
+                    request.command(),
+                ))))
+            }
+
+            (AwaitingRequest, KnownHashChunk(index)) => self
+                .peer_tx
+                .send(Message::GetKnownHashChunk { index })
+                .await
+                .map(|()| Handler::KnownHashChunk),
+
+            (AwaitingRequest, NoteCommitmentTree { pool, height }) => self
+                .peer_tx
+                .send(Message::GetNoteCommitmentTree { pool, height })
+                .await
+                .map(|()| Handler::NoteCommitmentTree),
+
+            (AwaitingRequest, UnspentOutputs { offset, len }) => self
+                .peer_tx
+                .send(Message::GetSnapshot {
+                    set: SnapshotSet::UnspentOutputs,
+                    offset,
+                    len,
+                })
+                .await
+                .map(|()| Handler::SnapshotRange),
+
+            (AwaitingRequest, AddressBalances { offset, len }) => self
+                .peer_tx
+                .send(Message::GetSnapshot {
+                    set: SnapshotSet::AddressBalances,
+                    offset,
+                    len,
+                })
+                .await
+                .map(|()| Handler::SnapshotRange),
         };
 
         // Update the connection state with a new handler, or fail with an error.
@@ -1364,6 +1478,31 @@ where
             }
             .into(),
             Message::Mempool => Request::MempoolTransactionIds.into(),
+
+            // Snapshot-distribution get-requests from a peer: map them to internal
+            // requests so the inbound service can serve them from finalized state.
+            // The reply (or `snapnf`) is produced by `drive_peer_request`.
+            Message::GetKnownHashChunk { index } => Request::KnownHashChunk(index).into(),
+            Message::GetNoteCommitmentTree { pool, height } => {
+                Request::NoteCommitmentTree { pool, height }.into()
+            }
+            Message::GetSnapshot { set, offset, len } => match set {
+                SnapshotSet::UnspentOutputs => Request::UnspentOutputs { offset, len }.into(),
+                SnapshotSet::AddressBalances => Request::AddressBalances { offset, len }.into(),
+            },
+
+            // Snapshot-distribution reply messages: these are only valid as
+            // responses to a request we sent, and are interpreted by
+            // `Handler::process_message` while awaiting that response. If we see
+            // one here, it was unsolicited or arrived for a canceled request, so
+            // ignore it without dropping the connection.
+            Message::KnownHashChunk { .. }
+            | Message::NoteCommitmentTree { .. }
+            | Message::Snapshot { .. }
+            | Message::SnapshotNotFound => {
+                debug!(%msg, "got snapshot-distribution reply unsolicited or from canceled request");
+                Unused
+            }
         };
 
         // Handle the request, and return unused messages.
@@ -1563,6 +1702,49 @@ where
                     .collect();
 
                 if let Err(e) = self.peer_tx.send(Message::Inv(hashes)).await {
+                    self.fail_with(e).await
+                }
+            }
+
+            // Snapshot-distribution responses from the inbound service: send the
+            // single matching reply message back to the requesting peer. The bytes
+            // are content-addressed, so the requester verifies them; the connection
+            // only forwards them. `Response::NotFound` becomes a `snapnf` message.
+            Response::KnownHashChunk(bytes) => {
+                if let Err(e) = self
+                    .peer_tx
+                    .send(Message::KnownHashChunk {
+                        bytes: bytes.to_vec(),
+                    })
+                    .await
+                {
+                    self.fail_with(e).await
+                }
+            }
+            Response::NoteCommitmentTree(bytes) => {
+                if let Err(e) = self
+                    .peer_tx
+                    .send(Message::NoteCommitmentTree {
+                        bytes: bytes.to_vec(),
+                    })
+                    .await
+                {
+                    self.fail_with(e).await
+                }
+            }
+            Response::SnapshotRange(bytes) => {
+                if let Err(e) = self
+                    .peer_tx
+                    .send(Message::Snapshot {
+                        bytes: bytes.to_vec(),
+                    })
+                    .await
+                {
+                    self.fail_with(e).await
+                }
+            }
+            Response::NotFound => {
+                if let Err(e) = self.peer_tx.send(Message::SnapshotNotFound).await {
                     self.fail_with(e).await
                 }
             }

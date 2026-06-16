@@ -1063,6 +1063,133 @@ async fn setup(
     )
 }
 
+/// The inbound service serves a known-hash chunk by index from the state, and
+/// answers `NotFound` for a chunk index above the tip — never an error that
+/// would drop the peer.
+#[tokio::test(flavor = "multi_thread")]
+async fn inbound_serves_known_hash_chunk() {
+    use zebra_chain::{chain_tip::ChainTip, parameters::known_hashes::chunk_v2::ParsedChunk};
+
+    let _init_guard = zebra_test::init();
+
+    let network = Mainnet;
+    let state_config = StateConfig::ephemeral();
+    let consensus_config = ConsensusConfig::default();
+
+    let address_book = AddressBook::new(
+        SocketAddr::from_str("0.0.0.0:0").unwrap(),
+        &network,
+        DEFAULT_MAX_CONNS_PER_IP,
+        Span::none(),
+    );
+    let address_book = Arc::new(std::sync::Mutex::new(address_book));
+
+    let (state, _read_only_state_service, latest_chain_tip, mut chain_tip_change) =
+        zebra_state::init(state_config, &network, Height::MAX, 0).await;
+    let mut state_service = ServiceBuilder::new().buffer(1).service(state);
+
+    // Commit genesis and block 1 as checkpoint-verified blocks, so the finalized
+    // state has a non-empty known-hash span.
+    let genesis: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    let block_one: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_1_BYTES
+        .zcash_deserialize_into()
+        .unwrap();
+    for block in [genesis, block_one] {
+        state_service
+            .ready()
+            .await
+            .unwrap()
+            .call(zebra_state::Request::CommitCheckpointVerifiedBlock(
+                block.into(),
+            ))
+            .await
+            .unwrap();
+    }
+
+    // Block commits are finalized asynchronously on a background task. Wait for
+    // the finalized tip to reach height 1 before serving the chunk, so the
+    // generated chunk deterministically covers both committed blocks.
+    while latest_chain_tip.best_tip_height() != Some(Height(1)) {
+        timeout(
+            CHAIN_TIP_UPDATE_WAIT_LIMIT,
+            chain_tip_change.wait_for_tip_change(),
+        )
+        .await
+        .expect("timeout waiting for chain tip to reach height 1")
+        .expect("unexpected chain tip update failure");
+    }
+
+    let (block_verifier, _tx_verifier, _groth16_download_handle, _max_checkpoint_height) =
+        zebra_consensus::init_test(consensus_config, &network, state_service.clone()).await;
+
+    let peer_set = MockService::build()
+        .with_max_request_delay(MAX_PEER_SET_REQUEST_DELAY)
+        .for_unit_tests();
+    let buffered_peer_set = Buffer::new(BoxService::new(peer_set), 10);
+    let buffered_mempool_service =
+        Buffer::new(BoxService::new(MockService::build().for_unit_tests()), 10);
+    let (setup_tx, setup_rx) = oneshot::channel();
+
+    let inbound_service = ServiceBuilder::new()
+        .load_shed()
+        .buffer(1)
+        .service(BoxService::new(Inbound::new(
+            MAX_INBOUND_CONCURRENCY,
+            setup_rx,
+        )));
+    let (misbehavior_sender, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
+
+    let setup_data = InboundSetupData {
+        address_book,
+        block_download_peer_set: buffered_peer_set,
+        block_verifier,
+        mempool: buffered_mempool_service,
+        state: state_service,
+        latest_chain_tip,
+        misbehavior_sender,
+    };
+    let r = setup_tx.send(setup_data);
+    assert!(r.is_ok(), "unexpected setup channel send failure");
+
+    // Chunk 0 is generated from the committed blocks and parses as v2. The
+    // finalized write that durably stores block 1 can lag the chain-tip update,
+    // so retry until the served chunk covers both blocks (bounded by a timeout).
+    let mut block_count = 0;
+    for _ in 0..50 {
+        let response = inbound_service
+            .clone()
+            .oneshot(Request::KnownHashChunk(0))
+            .await
+            .expect("inbound service responds to a KnownHashChunk request");
+
+        let Response::KnownHashChunk(bytes) = response else {
+            panic!("expected a KnownHashChunk response, got {response:?}");
+        };
+        let parsed = ParsedChunk::parse(&bytes).expect("served chunk parses as v2");
+        block_count = parsed.block_count();
+        if block_count == 2 {
+            break;
+        }
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(block_count, 2, "chunk covers the two committed blocks");
+
+    // A chunk index above the tip is answered with NotFound, not an error.
+    let response = inbound_service
+        .clone()
+        .oneshot(Request::KnownHashChunk(u32::MAX))
+        .await
+        .expect("inbound service responds to an above-tip KnownHashChunk request");
+    assert_eq!(
+        response,
+        Response::NotFound,
+        "an above-tip chunk index is answered with NotFound",
+    );
+}
+
 /// Manually add a transaction to the mempool storage.
 ///
 /// Skips some mempool functionality, like transaction verification and peer broadcasts.

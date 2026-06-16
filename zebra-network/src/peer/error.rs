@@ -133,6 +133,19 @@ pub enum PeerError {
     /// [1]: crate::protocol::internal::InventoryResponse::Missing
     #[error("All ready peers are registered as recently missing these items: {0:?}")]
     NotFoundRegistry(Vec<InventoryHash>),
+
+    /// We tried to send a request that the remote peer does not support.
+    ///
+    /// This happens for the Zebra-specific snapshot-distribution requests when
+    /// the remote peer did not advertise the `NODE_KNOWN_HASH_SNAPSHOT` service
+    /// bit in its version handshake (for example, `zcashd` peers, or older Zebra
+    /// peers).
+    ///
+    /// This is a temporary error: only the individual request fails, the
+    /// connection stays open, and the caller can retry against a peer that
+    /// advertises the capability.
+    #[error("Remote peer does not support the {0} request")]
+    UnsupportedByPeer(&'static str),
 }
 
 impl PeerError {
@@ -156,6 +169,7 @@ impl PeerError {
             PeerError::ServiceShutdown => "ServiceShutdown".into(),
             PeerError::NotFoundResponse(_) => "NotFoundResponse".into(),
             PeerError::NotFoundRegistry(_) => "NotFoundRegistry".into(),
+            PeerError::UnsupportedByPeer(_) => "UnsupportedByPeer".into(),
         }
     }
 }

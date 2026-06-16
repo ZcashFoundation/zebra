@@ -1324,7 +1324,11 @@ impl Service<Request> for StateService {
             | Request::FindBlockHashes { .. }
             | Request::FindBlockHeaders { .. }
             | Request::CheckBestChainTipNullifiersAndAnchors(_)
-            | Request::CheckBlockProposalValidity(_) => {
+            | Request::CheckBlockProposalValidity(_)
+            | Request::KnownHashChunk(_)
+            | Request::NoteCommitmentTreeBytes { .. }
+            | Request::UnspentOutputsRange { .. }
+            | Request::AddressBalancesRange { .. } => {
                 // Redirect the request to the concurrent ReadStateService
                 let read_service = self.read_service.clone();
 
@@ -1792,6 +1796,25 @@ impl Service<ReadRequest> for ReadStateService {
                 let is_spent = read::unspent_utxo(state.latest_best_chain(), &state.db, outpoint);
                 Ok(ReadResponse::IsTransparentOutputSpent(is_spent.is_none()))
             }
+
+            // Used by the IBD P2P snapshot server (the inbound service).
+            ReadRequest::KnownHashChunk(index) => Ok(ReadResponse::KnownHashChunk(
+                read::known_hash_chunk_bytes(&state.db, index),
+            )),
+
+            ReadRequest::NoteCommitmentTreeBytes { pool, height } => {
+                Ok(ReadResponse::NoteCommitmentTreeBytes(
+                    read::note_commitment_tree_bytes(&state.db, pool, height),
+                ))
+            }
+
+            ReadRequest::UnspentOutputsRange { offset, len } => Ok(ReadResponse::SnapshotRange(
+                read::unspent_outputs_range(&state.db, offset, len),
+            )),
+
+            ReadRequest::AddressBalancesRange { offset, len } => Ok(ReadResponse::SnapshotRange(
+                read::address_balances_range(&state.db, offset, len),
+            )),
         };
 
         timed_span.spawn_blocking(request_handler)

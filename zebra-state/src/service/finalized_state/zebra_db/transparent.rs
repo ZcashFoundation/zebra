@@ -210,6 +210,31 @@ impl ZebraDb {
         }
     }
 
+    /// Streams the canonical on-disk bytes of every address-balance record to
+    /// `f`, in ascending address (key) order: the 21-byte
+    /// [`transparent::Address`] key, then its 32-byte [`AddressBalanceLocation`]
+    /// value (balance + first-output-location + received).
+    ///
+    /// The `balance_by_transparent_addr` column family holds exactly one record
+    /// per address that has ever received funds, keyed by address, so its live
+    /// entries are the address-balance set at the finalized tip. Used by the IBD
+    /// P2P snapshot server to serve byte ranges of that set, and by the snapshot
+    /// emitter to hash the whole set.
+    ///
+    /// Streams rather than collecting: the set is millions of entries. The bytes
+    /// are deterministic ([`IntoDisk`] serialization), so every honest node
+    /// produces a byte-identical set.
+    pub fn for_each_address_balance_bytes(&self, mut f: impl FnMut(&[u8], &[u8])) {
+        let balance_by_transparent_addr = self.address_balance_cf();
+
+        for (address_bytes, value_bytes) in self
+            .db
+            .zs_forward_full_bytes_iter(balance_by_transparent_addr)
+        {
+            f(&address_bytes, &value_bytes);
+        }
+    }
+
     /// Returns the unspent transparent outputs for a [`transparent::Address`],
     /// if they are in the finalized state.
     pub fn address_utxos(

@@ -24,6 +24,8 @@ use thiserror::Error;
 
 use crate::{block, parameters::Network};
 
+pub mod chunk_v2;
+
 #[cfg(test)]
 mod tests;
 

@@ -11,6 +11,20 @@ use crate::PeerSocketAddr;
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
+/// A shielded pool selector for note-commitment-tree requests.
+///
+/// Used by [`Request::NoteCommitmentTree`] to pick which of the two shielded
+/// note commitment trees (Sapling or Orchard) is being requested for a height.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+pub enum ShieldedPool {
+    /// The Sapling note commitment tree.
+    Sapling,
+
+    /// The Orchard note commitment tree.
+    Orchard,
+}
+
 /// A network request, represented in internal format.
 ///
 /// The network layer aims to abstract away the details of the Bitcoin wire
@@ -211,6 +225,77 @@ pub enum Request {
     ///
     /// Returns [`Response::TransactionIds`](super::Response::TransactionIds).
     MempoolTransactionIds,
+
+    /// Request a known-hash chunk by its chunk index.
+    ///
+    /// A chunk is a deterministic, content-addressed encoding of a span of
+    /// blocks (block hashes, size hints, and shielded tree roots). The peer
+    /// regenerates chunk `index` from its finalized state, so every honest node
+    /// produces byte-identical output that hashes to the pinned
+    /// `chunk_hashes[index]` constant. See `docs/design/p2p-snapshot-distribution.md`.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Response::KnownHashChunk`](super::Response::KnownHashChunk) if
+    /// the chunk is available, or [`Response::NotFound`](super::Response::NotFound)
+    /// if the chunk index is unknown or above the peer's tip.
+    KnownHashChunk(u32),
+
+    /// Request the serialized note commitment tree of a shielded pool, as of a
+    /// given block height.
+    ///
+    /// The serialization is deterministic so the requester's recomputed
+    /// `.root()` matches the root recorded in the relevant known-hash chunk.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Response::NoteCommitmentTree`](super::Response::NoteCommitmentTree)
+    /// if the tree is available, or [`Response::NotFound`](super::Response::NotFound)
+    /// if the height is unknown or above the peer's tip.
+    NoteCommitmentTree {
+        /// The shielded pool whose tree is requested.
+        pool: ShieldedPool,
+        /// The block height at which to snapshot the tree.
+        height: block::Height,
+    },
+
+    /// Request a byte range of the unspent transparent output set at the max
+    /// checkpoint height.
+    ///
+    /// The set is the sorted concatenation of fixed-size `OutputLocation`s. It
+    /// is served ranged into sub-chunks bounded under the 2 MiB protocol frame;
+    /// the assembled set is verified against a pinned SHA-256 constant.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Response::SnapshotRange`](super::Response::SnapshotRange) with
+    /// the requested bytes, or [`Response::NotFound`](super::Response::NotFound)
+    /// if the range is out of bounds or the length exceeds the per-request limit.
+    UnspentOutputs {
+        /// The byte offset into the unspent-output set.
+        offset: u64,
+        /// The number of bytes to return, bounded by the per-request limit.
+        len: u32,
+    },
+
+    /// Request a byte range of the address-balance set at the max checkpoint
+    /// height.
+    ///
+    /// The set is the sorted concatenation of fixed-size
+    /// `(transparent::Address, AddressBalanceLocation)` records. It is served
+    /// and verified like the unspent-output set.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Response::SnapshotRange`](super::Response::SnapshotRange) with
+    /// the requested bytes, or [`Response::NotFound`](super::Response::NotFound)
+    /// if the range is out of bounds or the length exceeds the per-request limit.
+    AddressBalances {
+        /// The byte offset into the address-balance set.
+        offset: u64,
+        /// The number of bytes to return, bounded by the per-request limit.
+        len: u32,
+    },
 }
 
 impl fmt::Display for Request {
@@ -243,6 +328,20 @@ impl fmt::Display for Request {
             Request::AdvertiseBlock(_, _) => "AdvertiseBlock".to_string(),
             Request::AdvertiseBlockToAll(_) => "AdvertiseBlockToAll".to_string(),
             Request::MempoolTransactionIds => "MempoolTransactionIds".to_string(),
+
+            Request::KnownHashChunk(index) => format!("KnownHashChunk({index})"),
+            Request::NoteCommitmentTree { pool, height } => {
+                format!(
+                    "NoteCommitmentTree {{ pool: {pool:?}, height: {} }}",
+                    height.0
+                )
+            }
+            Request::UnspentOutputs { offset, len } => {
+                format!("UnspentOutputs {{ offset: {offset}, len: {len} }}")
+            }
+            Request::AddressBalances { offset, len } => {
+                format!("AddressBalances {{ offset: {offset}, len: {len} }}")
+            }
         })
     }
 }
@@ -265,6 +364,11 @@ impl Request {
 
             Request::AdvertiseBlock(_, _) | Request::AdvertiseBlockToAll(_) => "AdvertiseBlock",
             Request::MempoolTransactionIds => "MempoolTransactionIds",
+
+            Request::KnownHashChunk(_) => "KnownHashChunk",
+            Request::NoteCommitmentTree { .. } => "NoteCommitmentTree",
+            Request::UnspentOutputs { .. } => "UnspentOutputs",
+            Request::AddressBalances { .. } => "AddressBalances",
         }
     }
 

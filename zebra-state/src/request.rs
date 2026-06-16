@@ -36,6 +36,21 @@ use crate::{
     CommitSemanticallyVerifiedError,
 };
 
+/// A shielded pool selector for note-commitment-tree snapshot requests.
+///
+/// Used by [`ReadRequest::NoteCommitmentTreeBytes`] to pick which of the two
+/// shielded note commitment trees (Sapling or Orchard) is being serialized for a
+/// height. This mirrors `zebra_network`'s `ShieldedPool`, but is defined here so
+/// that `zebra-state` does not depend on the higher `zebra-network` crate.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub enum ShieldedPool {
+    /// The Sapling note commitment tree.
+    Sapling,
+
+    /// The Orchard note commitment tree.
+    Orchard,
+}
+
 /// Identify a spend by a transparent outpoint or revealed nullifier.
 ///
 /// This enum implements `From` for [`transparent::OutPoint`], [`sprout::Nullifier`],
@@ -1059,6 +1074,58 @@ pub enum Request {
     /// Returns [`Response::ValidBlockProposal`] when successful.
     /// See `[ReadRequest::CheckBlockProposalValidity]` for details.
     CheckBlockProposalValidity(SemanticallyVerifiedBlock),
+
+    /// Generates the deterministic `chunk_v2` bytes for the known-hash chunk at
+    /// the given index, from the finalized state, for P2P snapshot distribution.
+    ///
+    /// Returns [`Response::KnownHashChunk(Some(bytes))`](Response::KnownHashChunk)
+    /// if the chunk span has blocks, or
+    /// [`Response::KnownHashChunk(None)`](Response::KnownHashChunk) if the chunk
+    /// index is entirely above the finalized tip.
+    KnownHashChunk(u32),
+
+    /// Serializes the note commitment tree of a shielded pool as of a height,
+    /// from the finalized state, for P2P snapshot distribution.
+    ///
+    /// Returns
+    /// [`Response::NoteCommitmentTreeBytes(Some(bytes))`](Response::NoteCommitmentTreeBytes)
+    /// if the tree exists, or
+    /// [`Response::NoteCommitmentTreeBytes(None)`](Response::NoteCommitmentTreeBytes)
+    /// if the height is above the finalized tip.
+    NoteCommitmentTreeBytes {
+        /// The shielded pool whose tree is requested.
+        pool: ShieldedPool,
+        /// The block height at which to snapshot the tree.
+        height: block::Height,
+    },
+
+    /// Reads a byte range of the unspent-output-location set at the finalized
+    /// tip, for P2P snapshot distribution.
+    ///
+    /// Returns [`Response::SnapshotRange(Some(bytes))`](Response::SnapshotRange)
+    /// with the requested bytes, or
+    /// [`Response::SnapshotRange(None)`](Response::SnapshotRange) if the request
+    /// is malformed, over-limit, or out of bounds.
+    UnspentOutputsRange {
+        /// The byte offset into the unspent-output set.
+        offset: u64,
+        /// The number of bytes to return, bounded by the per-request limit.
+        len: u32,
+    },
+
+    /// Reads a byte range of the address-balance set at the finalized tip, for
+    /// P2P snapshot distribution.
+    ///
+    /// Returns [`Response::SnapshotRange(Some(bytes))`](Response::SnapshotRange)
+    /// with the requested bytes, or
+    /// [`Response::SnapshotRange(None)`](Response::SnapshotRange) if the request
+    /// is malformed, over-limit, or out of bounds.
+    AddressBalancesRange {
+        /// The byte offset into the address-balance set.
+        offset: u64,
+        /// The number of bytes to return, bounded by the per-request limit.
+        len: u32,
+    },
 }
 
 impl Request {
@@ -1089,6 +1156,10 @@ impl Request {
             Request::InvalidateBlock(_) => "invalidate_block",
             Request::ReconsiderBlock(_) => "reconsider_block",
             Request::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
+            Request::KnownHashChunk(_) => "known_hash_chunk",
+            Request::NoteCommitmentTreeBytes { .. } => "note_commitment_tree_bytes",
+            Request::UnspentOutputsRange { .. } => "unspent_outputs_range",
+            Request::AddressBalancesRange { .. } => "address_balances_range",
         }
     }
 
@@ -1430,6 +1501,43 @@ pub enum ReadRequest {
     /// Returns `true` if the transparent output is spent in the best chain,
     /// or `false` if it is unspent.
     IsTransparentOutputSpent(transparent::OutPoint),
+
+    /// Generates the deterministic `chunk_v2` bytes for the known-hash chunk at
+    /// the given index, from the finalized state, for P2P snapshot distribution.
+    ///
+    /// Returns
+    /// [`ReadResponse::KnownHashChunk(Some(bytes))`](ReadResponse::KnownHashChunk)
+    /// if the chunk span has blocks, or
+    /// [`ReadResponse::KnownHashChunk(None)`](ReadResponse::KnownHashChunk) if the
+    /// chunk index is entirely above the finalized tip.
+    KnownHashChunk(u32),
+
+    /// Serializes the note commitment tree of a shielded pool as of a height,
+    /// from the finalized state, for P2P snapshot distribution.
+    NoteCommitmentTreeBytes {
+        /// The shielded pool whose tree is requested.
+        pool: ShieldedPool,
+        /// The block height at which to snapshot the tree.
+        height: block::Height,
+    },
+
+    /// Reads a byte range of the unspent-output-location set at the finalized
+    /// tip, for P2P snapshot distribution.
+    UnspentOutputsRange {
+        /// The byte offset into the unspent-output set.
+        offset: u64,
+        /// The number of bytes to return, bounded by the per-request limit.
+        len: u32,
+    },
+
+    /// Reads a byte range of the address-balance set at the finalized tip, for
+    /// P2P snapshot distribution.
+    AddressBalancesRange {
+        /// The byte offset into the address-balance set.
+        offset: u64,
+        /// The number of bytes to return, bounded by the per-request limit.
+        len: u32,
+    },
 }
 
 impl ReadRequest {
@@ -1474,6 +1582,10 @@ impl ReadRequest {
             ReadRequest::TipBlockSize => "tip_block_size",
             ReadRequest::NonFinalizedBlocksListener => "non_finalized_blocks_listener",
             ReadRequest::IsTransparentOutputSpent(_) => "is_transparent_output_spent",
+            ReadRequest::KnownHashChunk(_) => "known_hash_chunk",
+            ReadRequest::NoteCommitmentTreeBytes { .. } => "note_commitment_tree_bytes",
+            ReadRequest::UnspentOutputsRange { .. } => "unspent_outputs_range",
+            ReadRequest::AddressBalancesRange { .. } => "address_balances_range",
         }
     }
 
@@ -1539,6 +1651,17 @@ impl TryFrom<Request> for ReadRequest {
             Request::CheckBlockProposalValidity(semantically_verified) => Ok(
                 ReadRequest::CheckBlockProposalValidity(semantically_verified),
             ),
+
+            Request::KnownHashChunk(index) => Ok(ReadRequest::KnownHashChunk(index)),
+            Request::NoteCommitmentTreeBytes { pool, height } => {
+                Ok(ReadRequest::NoteCommitmentTreeBytes { pool, height })
+            }
+            Request::UnspentOutputsRange { offset, len } => {
+                Ok(ReadRequest::UnspentOutputsRange { offset, len })
+            }
+            Request::AddressBalancesRange { offset, len } => {
+                Ok(ReadRequest::AddressBalancesRange { offset, len })
+            }
         }
     }
 }

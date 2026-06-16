@@ -46,7 +46,7 @@ pub use error::{
 };
 pub use request::{
     CheckpointVerifiedBlock, CommitSemanticallyVerifiedBlockRequest, HashOrHeight, MappedRequest,
-    ReadRequest, Request, SemanticallyVerifiedBlock,
+    ReadRequest, Request, SemanticallyVerifiedBlock, ShieldedPool,
 };
 
 #[cfg(feature = "indexer")]
