@@ -11,7 +11,7 @@
 //!
 //! Both types implement [`CommitStage`], so the engine drives either one with
 //! its window, weighted-fetch, gap-hedge, and commit-pipeline machinery
-//! unchanged — the payoff of the [`CommitStage`] seam (design doc §15 / the
+//! unchanged — the payoff of the [`CommitStage`] seam (design doc §17 / the
 //! generic engine unification). This module is the second implementation that
 //! proves the seam; wiring it into `ChainSync` (replacing the bespoke
 //! `downloads.rs` Hedge/Retry/Timeout stack) is a later phase.
@@ -97,7 +97,7 @@ where
         // that fails readiness is gone, so the engine treats it as a shutdown.
         self.verifier
             .poll_ready(cx)
-            .map_err(VerifyAndCommitError::StateUnready)
+            .map_err(VerifyAndCommitError::StageUnready)
     }
 
     fn call(&mut self, request: IbdBlock) -> Self::Future {
@@ -141,6 +141,17 @@ where
                     hash: expected,
                     error,
                 })?;
+
+            // The verifier commits the exact block it was handed and returns
+            // that block's hash, which the fetch layer already matched against
+            // the assigned `expected` at receipt. Assert the parity, matching
+            // the known-hash path (`VerifyAndCommit`): the engine keys the
+            // committed slot by the assigned height, so a divergence here would
+            // mark the wrong block committed.
+            assert_eq!(
+                committed_hash, expected,
+                "the verifier must commit the hash the engine assigned to this height",
+            );
 
             Ok(committed_hash)
         }

@@ -380,10 +380,14 @@ pub enum VerifyAndCommitError {
         error: BoxError,
     },
 
-    /// The state service failed its readiness check, before any block was
-    /// sent to it.
-    #[error("the state service failed its readiness check: {0}")]
-    StateUnready(#[source] BoxError),
+    /// The stage-2 service — the Buffer'd state ([`VerifyAndCommit`]) or the
+    /// consensus block verifier ([`SemanticCommit`]) — failed its readiness
+    /// check, before any block was sent to it. Either way the service is gone,
+    /// so the engine treats it as a shutdown.
+    ///
+    /// [`SemanticCommit`]: super::semantic::SemanticCommit
+    #[error("the stage-2 commit service failed its readiness check: {0}")]
+    StageUnready(#[source] BoxError),
 }
 
 /// A request to verify and commit one fetched block (design doc §4.3).
@@ -500,7 +504,7 @@ where
         // its unresolved-future caps, not readiness (design doc §4.3).
         self.state
             .poll_ready(cx)
-            .map_err(VerifyAndCommitError::StateUnready)
+            .map_err(VerifyAndCommitError::StageUnready)
     }
 
     fn call(&mut self, request: IbdBlock) -> Self::Future {

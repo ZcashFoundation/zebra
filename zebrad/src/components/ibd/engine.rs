@@ -288,11 +288,20 @@ fn is_write_task_exited(error: &BoxError) -> bool {
 ///
 /// The pinned [`KnownHashList`] is the production implementation, and the trait
 /// lets engine tests run against in-memory lists built from real test-vector
-/// blocks instead of the on-disk asset set. It also generalizes the engine
-/// beyond a fixed, pre-known list: a *discovery* source (full-validation sync,
-/// a later phase) grows over time through [`extend`](Self::extend) and reorgs
-/// through [`invalidate_above`](Self::invalidate_above), reusing the engine's
-/// window, fetch, hedge, and commit-pipeline machinery unchanged.
+/// blocks instead of the on-disk asset set. It is also the seam that
+/// generalizes the engine beyond a fixed, pre-known list: a *discovery* source
+/// (full-validation sync) would grow over time through
+/// [`extend`](Self::extend) and reorg through
+/// [`invalidate_above`](Self::invalidate_above).
+///
+/// Those two methods define the seam's shape; the engine-side handling that
+/// fully consumes them — the window reorg op, restore-cache rescan, and
+/// growing-range completion semantics — lands together with that discovery
+/// source in a later phase (design doc §17). Today only [`max_height`] growth
+/// is consumed (the run loop re-reads it), and the only implementations are the
+/// fixed pinned list and the test list, for which both methods are no-ops.
+///
+/// [`max_height`]: Self::max_height
 pub trait HashSource: Send + 'static {
     /// The highest height the source currently has a hash for.
     ///
@@ -330,9 +339,11 @@ pub trait HashSource: Send + 'static {
     /// frontier.
     ///
     /// The pinned list is checkpoint-anchored and never reorgs, so the default
-    /// is a no-op. A discovery source truncates its tentative hashes here;
-    /// callers pair it with the engine's `invalidate_above` window op so the
-    /// engine abandons the in-flight blocks for the orphaned branch.
+    /// is a no-op. A discovery source truncates its tentative hashes here. The
+    /// matching engine-side window op — which abandons the in-flight blocks for
+    /// the orphaned branch and rolls back their accounting — is part of the
+    /// later discovery phase (design doc §17); it does not exist yet, so for now
+    /// this is a source-only hook with no engine consumer.
     fn invalidate_above(&mut self, _height: block::Height) {}
 }
 
@@ -1596,9 +1607,10 @@ where
         now: Instant,
     ) -> Result<(), EngineError> {
         match error {
-            // The state Buffer failed its readiness check: the service is
-            // gone, and so is every future commit.
-            VerifyAndCommitError::StateUnready(error) => Err(EngineError::Shutdown(error)),
+            // The stage-2 commit service (state Buffer or block verifier)
+            // failed its readiness check: the service is gone, and so is every
+            // future commit.
+            VerifyAndCommitError::StageUnready(error) => Err(EngineError::Shutdown(error)),
 
             VerifyAndCommitError::Verify(error) => {
                 self.on_verify_failure(offset, height, error, now)
