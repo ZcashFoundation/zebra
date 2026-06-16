@@ -284,17 +284,25 @@ fn is_write_task_exited(error: &BoxError) -> bool {
     false
 }
 
-/// The source of the engine's pinned hashes and size hints.
+/// The source of the engine's per-height block hashes and size hints.
 ///
-/// [`KnownHashList`] is the production implementation; the trait exists so
-/// engine tests can run against in-memory lists built from real test-vector
-/// blocks instead of the ~103 MB on-disk asset set.
-pub trait HashList: Send + 'static {
-    /// The highest height covered by the list.
+/// The pinned [`KnownHashList`] is the production implementation, and the trait
+/// lets engine tests run against in-memory lists built from real test-vector
+/// blocks instead of the on-disk asset set. It also generalizes the engine
+/// beyond a fixed, pre-known list: a *discovery* source (full-validation sync,
+/// a later phase) grows over time through [`extend`](Self::extend) and reorgs
+/// through [`invalidate_above`](Self::invalidate_above), reusing the engine's
+/// window, fetch, hedge, and commit-pipeline machinery unchanged.
+pub trait HashSource: Send + 'static {
+    /// The highest height the source currently has a hash for.
+    ///
+    /// Fixed for the pinned list; grows as a discovery source learns of new
+    /// blocks. The engine re-reads it every loop pass, so a grown range
+    /// extends the fetch window automatically.
     fn max_height(&self) -> block::Height;
 
-    /// Returns the pinned hash for `height`, or `None` past the end of the
-    /// list.
+    /// Returns the hash for `height`, or `None` past the current end of the
+    /// source.
     ///
     /// Takes `&mut self` because the on-disk list loads chunks on demand.
     fn hash(&mut self, height: block::Height) -> Result<Option<block::Hash>, BoxError>;
@@ -307,11 +315,28 @@ pub trait HashList: Send + 'static {
         DEFAULT_SIZE_HINT
     }
 
-    /// Drops list resources that only cover heights below `height`.
+    /// Drops source resources that only cover heights below `height`.
     fn release_below(&mut self, _height: block::Height) {}
+
+    /// Appends discovered hashes immediately above the current
+    /// [`max_height`](Self::max_height), growing the covered range.
+    ///
+    /// The pinned [`KnownHashList`] is fixed and never calls this, so the
+    /// default is a no-op. A discovery source appends each `FindBlocks` round
+    /// here.
+    fn extend(&mut self, _hashes: &[block::Hash]) {}
+
+    /// Drops every hash strictly above `height`: a reorg of the source's
+    /// frontier.
+    ///
+    /// The pinned list is checkpoint-anchored and never reorgs, so the default
+    /// is a no-op. A discovery source truncates its tentative hashes here;
+    /// callers pair it with the engine's `invalidate_above` window op so the
+    /// engine abandons the in-flight blocks for the orphaned branch.
+    fn invalidate_above(&mut self, _height: block::Height) {}
 }
 
-impl HashList for KnownHashList {
+impl HashSource for KnownHashList {
     fn max_height(&self) -> block::Height {
         KnownHashList::max_height(self)
     }
@@ -502,7 +527,7 @@ where
     ZN::Future: Send,
     C: CommitStage,
     C::Future: Send,
-    L: HashList,
+    L: HashSource,
 {
     /// The ring window: slot `i` tracks height `base + i`.
     ///
@@ -626,7 +651,7 @@ where
         + Clone
         + 'static,
     ZS::Future: Send,
-    L: HashList,
+    L: HashSource,
 {
     /// Returns a new engine whose window starts at `base`, the lowest
     /// uncommitted height, using:
@@ -711,7 +736,7 @@ where
     ZN::Future: Send,
     C: CommitStage,
     C::Future: Send,
-    L: HashList,
+    L: HashSource,
 {
     /// Runs the engine until every height through the list's max height is
     /// committed, returning [`IbdOutcome::Completed`].
@@ -723,11 +748,16 @@ where
     /// shutdowns, and broken invariants; the supervisor decides which of
     /// those to retry (design doc §4.7).
     pub async fn run(&mut self) -> Result<IbdOutcome, EngineError> {
-        let end = HashList::max_height(&self.list);
+        let mut end = HashSource::max_height(&self.list);
 
         self.restore_cache(end)?;
 
         loop {
+            // Re-read each pass: a discovery source grows its range as it
+            // learns of new blocks (the pinned list is fixed, so this is
+            // constant for known-hash sync).
+            end = HashSource::max_height(&self.list);
+
             if self.base > end {
                 // Every height through the end of the list is committed.
                 if let Err(error) = self.cache.remove_all() {

@@ -4,13 +4,13 @@ use std::sync::Arc;
 
 use zebra_chain::{block, serialization::ZcashDeserializeInto};
 
-use super::engine::HashList;
+use super::engine::HashSource;
 use crate::BoxError;
 
 mod cache;
 mod convert_vectors;
 
-/// An in-memory [`HashList`] over real test-vector blocks, so engine tests
+/// An in-memory [`HashSource`] over real test-vector blocks, so engine tests
 /// don't read (and re-hash) the ~103 MB on-disk asset set.
 ///
 /// Heights map onto [`zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS`]: the
@@ -49,7 +49,7 @@ impl FakeHashList {
     }
 }
 
-impl HashList for FakeHashList {
+impl HashSource for FakeHashList {
     fn max_height(&self) -> block::Height {
         assert!(!self.hashes.is_empty(), "test lists are never empty");
         // test lists are tiny, heights fit u32
