@@ -9,6 +9,7 @@ use crate::BoxError;
 
 mod cache;
 mod convert_vectors;
+mod semantic_vectors;
 
 /// An in-memory [`HashSource`] over real test-vector blocks, so engine tests
 /// don't read (and re-hash) the ~103 MB on-disk asset set.

@@ -44,6 +44,7 @@ pub mod cache;
 pub mod convert;
 pub mod engine;
 pub mod fetch;
+pub mod semantic;
 
 #[cfg(test)]
 mod tests;
