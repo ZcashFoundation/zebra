@@ -186,9 +186,7 @@ impl KnownHashListSpec {
     pub fn for_network(network: &Network) -> Option<&'static KnownHashListSpec> {
         match network {
             Network::Mainnet => Some(&MAINNET_KNOWN_HASHES),
-            Network::Testnet(params) if params.is_default_testnet() => {
-                Some(&TESTNET_KNOWN_HASHES)
-            }
+            Network::Testnet(params) if params.is_default_testnet() => Some(&TESTNET_KNOWN_HASHES),
             _ => None,
         }
     }
