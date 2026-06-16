@@ -14,6 +14,7 @@ expression: empty_column_families
   "orchard_note_commitment_subtree: no entries",
   "orchard_note_commitment_tree: no entries",
   "orchard_nullifiers: no entries",
+  "pruning_metadata: no entries",
   "sapling_anchors: no entries",
   "sapling_note_commitment_subtree: no entries",
   "sapling_note_commitment_tree: no entries",

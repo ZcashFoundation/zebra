@@ -259,6 +259,13 @@ pub enum MetaAddrChange {
             proptest(strategy = "canonical_peer_addr_strategy()")
         )]
         addr: PeerSocketAddr,
+
+        /// The services this node advertises for its own listener address.
+        ///
+        /// This must match the services advertised during the handshake, so a
+        /// node that does not advertise [`PeerServices::NODE_NETWORK`] (for
+        /// example, a pruned node) does not gossip itself as a full node.
+        services: PeerServices,
     },
 
     /// Updates an existing `MetaAddr` when an outbound connection attempt
@@ -427,10 +434,15 @@ impl MetaAddr {
         }
     }
 
-    /// Returns a [`MetaAddrChange::NewLocal`] for our own listener address.
-    pub fn new_local_listener_change(addr: impl Into<PeerSocketAddr>) -> MetaAddrChange {
+    /// Returns a [`MetaAddrChange::NewLocal`] for our own listener address,
+    /// advertising `services`.
+    pub fn new_local_listener_change(
+        addr: impl Into<PeerSocketAddr>,
+        services: PeerServices,
+    ) -> MetaAddrChange {
         NewLocal {
             addr: canonical_peer_addr(addr),
+            services,
         }
     }
 
@@ -810,8 +822,7 @@ impl MetaAddrChange {
             NewGossiped {
                 untrusted_services, ..
             } => Some(*untrusted_services),
-            // TODO: create a "services implemented by Zebra" constant (#2324)
-            NewLocal { .. } => Some(PeerServices::NODE_NETWORK),
+            NewLocal { services, .. } => Some(*services),
             UpdateAttempt { .. } => None,
             UpdateConnected { services, .. } => Some(*services),
             UpdatePingSent { .. } => None,

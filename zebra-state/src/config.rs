@@ -1,6 +1,7 @@
 //! Cached state configuration for Zebra.
 
 use std::{
+    fmt,
     fs::{self, canonicalize, remove_dir_all, DirEntry, ReadDir},
     io::ErrorKind,
     path::{Path, PathBuf},
@@ -8,14 +9,20 @@ use std::{
 };
 
 use semver::Version;
-use serde::{Deserialize, Serialize};
+use serde::{
+    de::{self, IgnoredAny, MapAccess, Visitor},
+    Deserialize, Deserializer, Serialize,
+};
 use tokio::task::{spawn_blocking, JoinHandle};
 use tracing::Span;
 
 use zebra_chain::{common::default_cache_dir, parameters::Network};
 
 use crate::{
-    constants::{DATABASE_FORMAT_VERSION_FILE_NAME, STATE_DATABASE_KIND},
+    constants::{
+        min_pruning_retention, DATABASE_FORMAT_VERSION_FILE_NAME, MIN_PRUNING_RETENTION,
+        STATE_DATABASE_KIND,
+    },
     service::finalized_state::restorable_db_versions,
     state_database_format_version_in_code, BoxError,
 };
@@ -37,6 +44,8 @@ pub struct Config {
     /// You can delete the entire cached state directory, but it will impact your node's
     /// readiness and network usage. If you do, Zebra will re-sync from genesis the next
     /// time it is launched.
+    ///
+    /// Storage mode is controlled separately by [`storage_mode`](Config::storage_mode).
     ///
     /// The default directory is platform dependent, based on
     /// [`dirs::cache_dir()`](https://docs.rs/dirs/3.0.1/dirs/fn.cache_dir.html):
@@ -99,6 +108,21 @@ pub struct Config {
     /// no check for old database versions will be made and nothing will be
     /// deleted.
     pub delete_old_database: bool,
+
+    /// Selects whether Zebra keeps all historical block data, or stores only the
+    /// data required to validate future blocks.
+    ///
+    /// Set to [`StorageMode::Archive`] by default, which preserves all data and
+    /// is required to answer historical RPC queries.
+    ///
+    /// [`StorageMode::Pruned`] deletes historical raw transaction bytes outside a
+    /// retention window to reduce disk usage, while keeping all consensus-critical
+    /// state (the UTXO set, nullifiers, anchors, note commitment trees, history
+    /// tree, and value pools) as well as the transaction location indexes needed
+    /// to validate future spends. This is a one-way mode: once data has been
+    /// pruned, the database cannot be reopened in [`StorageMode::Archive`] without
+    /// re-syncing from genesis.
+    pub storage_mode: StorageMode,
 
     // Debug configs
     //
@@ -207,6 +231,160 @@ impl Config {
             ..Config::default()
         }
     }
+
+    /// Returns the [`PruningConfig`] if this config selects pruned storage mode.
+    pub fn pruning_config(&self) -> Option<&PruningConfig> {
+        match &self.storage_mode {
+            StorageMode::Archive => None,
+            StorageMode::Pruned(pruning) => Some(pruning),
+        }
+    }
+
+    /// Validates the configured [`StorageMode`].
+    ///
+    /// This must be called before opening the database, so that a misconfigured
+    /// retention window fails fast at startup rather than mid-run.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if pruned mode is selected with a `tx_retention` below
+    /// the network-specific floor ([`min_pruning_retention`]). A retention window
+    /// at or below the reorg depth could let pruning delete data that a rollback
+    /// needs to read.
+    pub fn validate_storage_mode(&self, network: &Network) -> Result<(), BoxError> {
+        if let Some(pruning) = self.pruning_config() {
+            let floor = min_pruning_retention(network);
+            if pruning.tx_retention < floor {
+                return Err(format!(
+                    "invalid pruning configuration: tx_retention ({}) must be at least {floor} \
+                     on {network} so pruning cannot delete data within the reorg/rollback window",
+                    pruning.tx_retention,
+                )
+                .into());
+            }
+        }
+
+        Ok(())
+    }
+}
+
+/// Selects whether Zebra keeps all historical block data, or stores only the data
+/// required to validate future blocks.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StorageMode {
+    /// Keep all historical data, including raw transactions and lookup indexes.
+    ///
+    /// This is the default and is required to answer historical RPC queries such
+    /// as `getrawtransaction` for old transactions.
+    #[default]
+    Archive,
+
+    /// Prune historical raw transaction bytes outside the retention window.
+    ///
+    /// Consensus-critical state and transaction location indexes are always
+    /// retained. This is a one-way mode: a pruned database cannot be reopened in
+    /// [`StorageMode::Archive`].
+    Pruned(PruningConfig),
+}
+
+impl<'de> Deserialize<'de> for StorageMode {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        if deserializer.is_human_readable() {
+            deserializer.deserialize_any(StorageModeVisitor)
+        } else {
+            StorageModeSerde::deserialize(deserializer).map(Into::into)
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum StorageModeSerde {
+    Archive,
+    Pruned(PruningConfig),
+}
+
+impl From<StorageModeSerde> for StorageMode {
+    fn from(storage_mode: StorageModeSerde) -> Self {
+        match storage_mode {
+            StorageModeSerde::Archive => StorageMode::Archive,
+            StorageModeSerde::Pruned(pruning) => StorageMode::Pruned(pruning),
+        }
+    }
+}
+
+struct StorageModeVisitor;
+
+impl<'de> Visitor<'de> for StorageModeVisitor {
+    type Value = StorageMode;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(r#"`"archive"`, `"pruned"`, or a storage mode table"#)
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        match value {
+            "archive" => Ok(StorageMode::Archive),
+            "pruned" => Ok(StorageMode::Pruned(PruningConfig::default())),
+            _ => Err(de::Error::unknown_variant(value, &["archive", "pruned"])),
+        }
+    }
+
+    fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
+    where
+        M: MapAccess<'de>,
+    {
+        let Some(key) = map.next_key::<String>()? else {
+            return Err(de::Error::invalid_length(0, &self));
+        };
+
+        let storage_mode = match key.as_str() {
+            "archive" => {
+                map.next_value::<IgnoredAny>()?;
+                StorageMode::Archive
+            }
+            "pruned" => StorageMode::Pruned(map.next_value()?),
+            _ => return Err(de::Error::unknown_variant(&key, &["archive", "pruned"])),
+        };
+
+        if let Some(key) = map.next_key::<String>()? {
+            return Err(de::Error::custom(format!(
+                "multiple storage mode variants configured, including `{key}`"
+            )));
+        }
+
+        Ok(storage_mode)
+    }
+}
+
+/// Configuration for [`StorageMode::Pruned`].
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct PruningConfig {
+    /// Number of recent finalized blocks below the tip whose raw transaction data
+    /// is retained.
+    ///
+    /// Blocks older than this window have their raw transaction bytes (`tx_by_loc`)
+    /// deleted. Transaction lookup indexes (`tx_loc_by_hash`, `hash_by_tx_loc`) are
+    /// retained, because they are needed to resolve spends of UTXOs created in old
+    /// blocks. Must be at least [`MIN_PRUNING_RETENTION`]; this is enforced by
+    /// [`Config::validate_storage_mode`].
+    pub tx_retention: u32,
+}
+
+impl Default for PruningConfig {
+    fn default() -> Self {
+        Self {
+            tx_retention: MIN_PRUNING_RETENTION,
+        }
+    }
 }
 
 impl Default for Config {
@@ -216,6 +394,7 @@ impl Default for Config {
             ephemeral: false,
             should_backup_non_finalized_state: true,
             delete_old_database: true,
+            storage_mode: StorageMode::default(),
             debug_stop_at_height: None,
             debug_validity_check_interval: None,
             debug_skip_non_finalized_state_backup_task: false,
@@ -226,6 +405,37 @@ impl Default for Config {
             #[cfg(feature = "elasticsearch")]
             elasticsearch_password: "".to_string(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn storage_mode_deserializes_from_documented_toml() {
+        let archive: Config = toml::from_str(r#"storage_mode = "archive""#)
+            .expect("archive storage mode deserializes from a string");
+        assert_eq!(archive.storage_mode, StorageMode::Archive);
+
+        let pruned: Config = toml::from_str(r#"storage_mode = "pruned""#)
+            .expect("pruned storage mode deserializes from a string");
+        assert_eq!(
+            pruned.storage_mode,
+            StorageMode::Pruned(PruningConfig::default())
+        );
+
+        let pruned_with_retention: Config = toml::from_str(
+            r#"
+            [storage_mode.pruned]
+            tx_retention = 6000
+            "#,
+        )
+        .expect("pruned storage mode deserializes from a table");
+        assert_eq!(
+            pruned_with_retention.storage_mode,
+            StorageMode::Pruned(PruningConfig { tx_retention: 6000 })
+        );
     }
 }
 

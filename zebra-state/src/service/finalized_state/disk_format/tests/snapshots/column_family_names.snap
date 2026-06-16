@@ -15,6 +15,7 @@ expression: cf_names
   "orchard_note_commitment_subtree",
   "orchard_note_commitment_tree",
   "orchard_nullifiers",
+  "pruning_metadata",
   "sapling_anchors",
   "sapling_note_commitment_subtree",
   "sapling_note_commitment_tree",

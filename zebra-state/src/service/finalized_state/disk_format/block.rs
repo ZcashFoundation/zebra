@@ -216,8 +216,9 @@ impl IntoDisk for block::Header {
 
 impl FromDisk for block::Header {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        let bytes = bytes.as_ref();
+
         bytes
-            .as_ref()
             .zcash_deserialize_into()
             .expect("deserialization format should match the serialization format used by IntoDisk")
     }
@@ -295,7 +296,6 @@ impl FromDisk for Transaction {
         // TODO: skip cryptography verification during transaction deserialization from storage,
         //       or do it in a rayon thread (ideally in parallel with other transactions)
         bytes
-            .as_ref()
             .zcash_deserialize_into()
             .expect("deserialization format should match the serialization format used by IntoDisk")
     }

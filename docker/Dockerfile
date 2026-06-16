@@ -106,11 +106,12 @@ COPY --link --chown=${UID}:${GID} ./ ${HOME}
 # Build Zebra test binaries using nextest, but don't run them.
 # This also copies the necessary binaries to /usr/local/bin.
 RUN [ -n "${SHORT_SHA}" ] && export SHORT_SHA="${SHORT_SHA}" || true; \
-    cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad --bin zebra-rollback-state && \
+    cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad --bin zebra-rollback-state --bin zebra-prune-state && \
     cargo nextest run --locked --release --no-run --features "${FEATURES}" && \
     # Copy binaries to standard location
     cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin && \
     cp ${CARGO_TARGET_DIR}/release/zebra-rollback-state /usr/local/bin && \
+    cp ${CARGO_TARGET_DIR}/release/zebra-prune-state /usr/local/bin && \
     # Only copy zebra-checkpoints if the feature is enabled
     if echo "${FEATURES}" | grep -q "zebra-checkpoints"; then \
         cp ${CARGO_TARGET_DIR}/release/zebra-checkpoints /usr/local/bin; \
@@ -164,9 +165,10 @@ RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     --mount=type=cache,target=${CARGO_TARGET_DIR} \
     --mount=type=cache,target=${CARGO_HOME} \
     [ -n "${SHORT_SHA}" ] && export SHORT_SHA="${SHORT_SHA}" || true; \
-    cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad --bin zebra-rollback-state && \
+    cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad --bin zebra-rollback-state --bin zebra-prune-state && \
     cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin && \
-    cp ${CARGO_TARGET_DIR}/release/zebra-rollback-state /usr/local/bin
+    cp ${CARGO_TARGET_DIR}/release/zebra-rollback-state /usr/local/bin && \
+    cp ${CARGO_TARGET_DIR}/release/zebra-prune-state /usr/local/bin
 
 # This stage starts from scratch using Debian and copies the built Zebra binaries
 # from the `release` stage along with other binaries and files.
@@ -221,6 +223,7 @@ RUN chown -R ${UID}:${GID} ${HOME}
 
 COPY --link --from=release /usr/local/bin/zebrad /usr/local/bin/
 COPY --link --from=release /usr/local/bin/zebra-rollback-state /usr/local/bin/
+COPY --link --from=release /usr/local/bin/zebra-prune-state /usr/local/bin/
 COPY --link --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 ENTRYPOINT [ "entrypoint.sh" ]

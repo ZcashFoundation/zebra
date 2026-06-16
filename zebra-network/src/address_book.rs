@@ -21,7 +21,7 @@ use crate::{
     constants::{self, ADDR_RESPONSE_LIMIT_DENOMINATOR, MAX_ADDRS_IN_MESSAGE},
     meta_addr::MetaAddrChange,
     protocol::external::{canonical_peer_addr, canonical_socket_addr},
-    types::MetaAddr,
+    types::{MetaAddr, PeerServices},
     AddressBookPeers, PeerAddrState, PeerSocketAddr,
 };
 
@@ -86,6 +86,14 @@ pub struct AddressBook {
 
     /// The local listener address.
     local_listener: SocketAddr,
+
+    /// The services advertised for our own [`local_listener`](Self::local_listener)
+    /// address when it is gossiped to peers.
+    ///
+    /// This must match the services advertised during the handshake, so a node
+    /// that does not advertise [`PeerServices::NODE_NETWORK`] (for example, a
+    /// pruned node) does not gossip itself as a full node.
+    local_listener_services: PeerServices,
 
     /// The configured Zcash network.
     network: Network,
@@ -160,6 +168,9 @@ impl AddressBook {
         let mut new_book = AddressBook {
             by_addr: OrderedMap::new(|meta_addr| Reverse(*meta_addr)),
             local_listener: canonical_socket_addr(local_listener),
+            // Default to full-node services; callers that advertise different
+            // services set them with `with_local_listener_services`.
+            local_listener_services: PeerServices::NODE_NETWORK,
             network: network.clone(),
             addr_limit: constants::MAX_ADDRS_IN_ADDRESS_BOOK,
             span,
@@ -171,6 +182,15 @@ impl AddressBook {
 
         new_book.update_metrics(instant_now, chrono_now);
         new_book
+    }
+
+    /// Sets the services advertised for our own gossiped listener address.
+    ///
+    /// These must match the services advertised during the handshake.
+    #[must_use]
+    pub fn with_local_listener_services(mut self, services: PeerServices) -> Self {
+        self.local_listener_services = services;
+        self
     }
 
     /// Construct an [`AddressBook`] with the given `local_listener`, `network`,
@@ -258,7 +278,7 @@ impl AddressBook {
     pub fn local_listener_meta_addr(&self, now: chrono::DateTime<Utc>) -> MetaAddr {
         let now: DateTime32 = now.try_into().expect("will succeed until 2038");
 
-        MetaAddr::new_local_listener_change(self.local_listener)
+        MetaAddr::new_local_listener_change(self.local_listener, self.local_listener_services)
             .local_listener_into_new_meta_addr(now)
     }
 
@@ -872,6 +892,7 @@ impl Clone for AddressBook {
         AddressBook {
             by_addr: self.by_addr.clone(),
             local_listener: self.local_listener,
+            local_listener_services: self.local_listener_services,
             network: self.network.clone(),
             addr_limit: self.addr_limit,
             span: self.span.clone(),

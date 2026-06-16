@@ -96,6 +96,7 @@ color-eyre = { workspace = true }
 
 once_cell = { workspace = true }
 spandoc = { workspace = true }
+toml = { workspace = true }
 
 hex = { workspace = true, features = ["serde"] }
 insta = { workspace = true, features = ["ron", "redactions"] }

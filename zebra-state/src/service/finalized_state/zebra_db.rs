@@ -34,6 +34,7 @@ use super::disk_format::upgrade::restorable_db_versions;
 pub mod block;
 pub mod chain;
 pub mod metrics;
+pub mod prune;
 pub mod rollback;
 pub mod shielded;
 pub mod transparent;
@@ -89,7 +90,9 @@ impl ZebraDb {
     /// and returns a shared high-level typed database wrapper.
     ///
     /// If `debug_skip_format_upgrades` is true, don't do any format upgrades or format checks.
-    /// This argument is only used when running tests, it is ignored in production code.
+    ///
+    /// This is used by tests and offline tools that have already checked the exact database
+    /// format version before opening the database.
     //
     // TODO: rename to StateDb and remove the db_kind and column_families_in_code arguments
     pub fn new(
@@ -119,8 +122,8 @@ impl ZebraDb {
         // Format upgrades try to write to the database, so we always skip them
         // if `read_only` is `true`.
         //
-        // We also allow skipping them when we are running tests.
-        let debug_skip_format_upgrades = read_only || (cfg!(test) && debug_skip_format_upgrades);
+        // Offline tools can also skip them after checking the exact database format version.
+        let debug_skip_format_upgrades = read_only || debug_skip_format_upgrades;
 
         // Open the database and do initial checks.
         let mut db = ZebraDb {

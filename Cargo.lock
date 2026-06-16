@@ -7798,6 +7798,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "toml 1.1.2+spec-1.1.0",
  "tower 0.4.13",
  "tracing",
  "zebra-chain",

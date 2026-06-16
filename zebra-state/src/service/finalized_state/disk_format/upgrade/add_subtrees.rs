@@ -204,6 +204,12 @@ pub fn reset(
 /// This check runs the first subtree calculation, but it doesn't read the subtree data in the
 /// database. So it can be run before the upgrade is started.
 pub fn subtree_format_calculation_pre_checks(db: &ZebraDb) -> Result<(), String> {
+    // Pruned databases can intentionally be missing historical raw transaction
+    // bytes needed to reconstruct the old blocks used by these vector checks.
+    if db.is_pruned() {
+        return Ok(());
+    }
+
     // Check the entire format before returning any errors.
     let sapling_result = quick_check_sapling_subtrees(db);
     let orchard_result = quick_check_orchard_subtrees(db);

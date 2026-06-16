@@ -60,6 +60,10 @@ pub use zebra_db::ZebraDb;
 pub use disk_format::KV;
 
 pub use disk_format::upgrade::restorable_db_versions;
+pub use zebra_db::prune::{
+    preview_prune_finalized_state, prune_finalized_state, PruneFinalizedStateError,
+    PruneFinalizedStateOptions, PruneFinalizedStateSummary,
+};
 pub use zebra_db::rollback::{
     preview_rollback_finalized_state, rollback_finalized_state, RollbackBackupSummary,
     RollbackFinalizedStateError, RollbackFinalizedStateOptions, RollbackFinalizedStateSummary,
@@ -101,7 +105,17 @@ pub const STATE_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
     "history_tree",
     "tip_chain_value_pool",
     BLOCK_INFO,
+    // Storage policy
+    PRUNING_METADATA,
 ];
+
+/// The name of the column family that records pruning progress.
+///
+/// In pruned storage mode this holds a single entry, keyed by the unit value
+/// `()`, mapping to the next block height managed by online pruning. The
+/// presence of this entry marks the database as pruned, which is a one-way state:
+/// a pruned database cannot be reopened in archive mode.
+pub const PRUNING_METADATA: &str = "pruning_metadata";
 
 /// The finalized part of the chain state, stored in the db.
 ///
@@ -172,6 +186,11 @@ impl FinalizedState {
         #[cfg(feature = "elasticsearch")] enable_elastic_db: bool,
         read_only: bool,
     ) -> Self {
+        // Fail fast on an invalid storage configuration, before opening the database.
+        if let Err(error) = config.validate_storage_mode(network) {
+            panic!("{error}");
+        }
+
         #[cfg(feature = "elasticsearch")]
         let elastic_db = if enable_elastic_db {
             use elasticsearch::{
@@ -225,6 +244,17 @@ impl FinalizedState {
             debug_stop_at_height: config.debug_stop_at_height.map(block::Height),
             db,
         };
+
+        // Pruning is a one-way storage mode. Refuse to open a database that has
+        // already pruned historical data in archive mode, because the data it
+        // would be expected to serve has been irreversibly deleted.
+        if config.pruning_config().is_none() && new_state.db.is_pruned() {
+            panic!(
+                "this database has been pruned and cannot be opened in archive storage mode; \
+                 configure pruned storage mode (`storage_mode.pruned`), or delete the cache \
+                 directory and re-sync from genesis"
+            );
+        }
 
         // TODO: move debug_stop_at_height into a task in the start command (#3442)
         if let Some(tip_height) = new_state.db.finalized_tip_height() {

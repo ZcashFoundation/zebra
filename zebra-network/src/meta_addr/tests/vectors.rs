@@ -80,8 +80,8 @@ fn new_local_listener_is_gossipable() {
     let local_now: DateTime32 = chrono_now.try_into().expect("will succeed until 2038");
 
     let address = PeerSocketAddr::from(([192, 168, 180, 9], 10_000));
-    let peer =
-        MetaAddr::new_local_listener_change(address).into_new_meta_addr(instant_now, local_now);
+    let peer = MetaAddr::new_local_listener_change(address, PeerServices::NODE_NETWORK)
+        .into_new_meta_addr(instant_now, local_now);
 
     assert!(peer.is_active_for_gossip(chrono_now));
 }

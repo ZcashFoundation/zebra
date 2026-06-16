@@ -4,6 +4,8 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use semver::Version;
 
+use zebra_chain::parameters::{Network, NetworkKind};
+
 // For doc comment links
 #[allow(unused_imports)]
 use crate::{
@@ -28,6 +30,45 @@ pub const MAX_BLOCK_REORG_HEIGHT: u32 = 1000;
 /// The directory name used to distinguish the state database from Zebra's other databases or flat files.
 pub const STATE_DATABASE_KIND: &str = "state";
 
+/// The minimum retention window allowed in pruned storage mode.
+///
+/// Pruned mode deletes historical raw transaction data at `tip - retention`. The
+/// retention window must be strictly greater than [`MAX_BLOCK_REORG_HEIGHT`], so
+/// that pruning can never delete data that a reorg or rollback could still read.
+///
+/// This floor is sized well above the reorg window (10x) to also cover coinbase
+/// maturity ([`MIN_TRANSPARENT_COINBASE_MATURITY`]) and leave operational
+/// headroom. At the current 75-second block target, it retains more than a week
+/// of raw transaction data. Configs below this value are rejected at startup.
+///
+/// This is the floor for Mainnet and Testnet; use [`min_pruning_retention`] to
+/// get the network-specific floor.
+pub const MIN_PRUNING_RETENTION: u32 = 10_000;
+
+/// The minimum retention window allowed in pruned storage mode on `network`.
+///
+/// Every network's floor stays strictly greater than [`MAX_BLOCK_REORG_HEIGHT`],
+/// so pruning can never delete data that a reorg or rollback could still read.
+///
+/// Mainnet and Testnet use [`MIN_PRUNING_RETENTION`], which adds operational
+/// headroom above the reorg window. Regtest drops that headroom (but still covers
+/// the reorg window) so tests can cross the retention boundary without committing
+/// a 10_000+ block chain.
+pub fn min_pruning_retention(network: &Network) -> u32 {
+    match network.kind() {
+        NetworkKind::Regtest => MAX_BLOCK_REORG_HEIGHT + 1,
+        NetworkKind::Mainnet | NetworkKind::Testnet => MIN_PRUNING_RETENTION,
+    }
+}
+
+/// The maximum number of block heights pruned in a single block commit.
+///
+/// In steady state, each committed block makes exactly one new height eligible
+/// for pruning, so this limit is not reached. It bounds per-commit work if a
+/// pruning progress marker falls behind the retention boundary, keeping
+/// individual write batches small.
+pub const MAX_PRUNE_HEIGHTS_PER_COMMIT: u32 = 100;
+
 /// The database format major version, incremented each time the on-disk database format has a
 /// breaking data format change.
 ///
@@ -50,7 +91,7 @@ const DATABASE_FORMAT_VERSION: u64 = 27;
 /// - adding new column families,
 /// - changing the format of a column family in a compatible way, or
 /// - breaking changes with compatibility code in all supported Zebra versions.
-const DATABASE_FORMAT_MINOR_VERSION: u64 = 0;
+const DATABASE_FORMAT_MINOR_VERSION: u64 = 1;
 
 /// The database format patch version, incremented each time the on-disk database format has a
 /// significant format compatibility fix.

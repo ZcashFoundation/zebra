@@ -16,7 +16,8 @@ use tokio::{
 use tracing::{Level, Span};
 
 use crate::{
-    address_book::AddressMetrics, meta_addr::MetaAddrChange, AddressBook, BoxError, Config,
+    address_book::AddressMetrics, meta_addr::MetaAddrChange, types::PeerServices, AddressBook,
+    BoxError, Config,
 };
 
 /// The minimum size of the address book updater channel.
@@ -47,6 +48,7 @@ impl AddressBookUpdater {
     pub fn spawn(
         config: &Config,
         local_listener: SocketAddr,
+        advertised_services: PeerServices,
     ) -> (
         Arc<std::sync::Mutex<AddressBook>>,
         watch::Receiver<Arc<IndexMap<IpAddr, Instant>>>,
@@ -66,7 +68,8 @@ impl AddressBookUpdater {
             &config.network,
             config.max_connections_per_ip,
             span!(Level::TRACE, "address book"),
-        );
+        )
+        .with_local_listener_services(advertised_services);
         let address_metrics = address_book.address_metrics_watcher();
         let address_book = Arc::new(std::sync::Mutex::new(address_book));
 

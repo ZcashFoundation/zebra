@@ -29,7 +29,9 @@ use zebra_test::vectors::{MAINNET_BLOCKS, TESTNET_BLOCKS};
 use crate::{
     constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
     request::{FinalizedBlock, Treestate},
-    service::finalized_state::{disk_db::DiskWriteBatch, ZebraDb, STATE_COLUMN_FAMILIES_IN_CODE},
+    service::finalized_state::{
+        disk_db::DiskWriteBatch, ZebraDb, PRUNING_METADATA, STATE_COLUMN_FAMILIES_IN_CODE,
+    },
     CheckpointVerifiedBlock, Config, SemanticallyVerifiedBlock,
 };
 
@@ -172,4 +174,28 @@ fn test_block_db_round_trip_with(
 
         assert_eq!(stored_block, original_block);
     }
+}
+
+/// Missing pruning metadata means this is an archive database from before pruning was added.
+#[test]
+fn missing_pruning_metadata_cf_is_archive_database() {
+    let _init_guard = zebra_test::init();
+
+    let column_families_without_pruning_metadata = STATE_COLUMN_FAMILIES_IN_CODE
+        .iter()
+        .filter(|cf_name| **cf_name != PRUNING_METADATA)
+        .map(ToString::to_string);
+
+    let state = ZebraDb::new(
+        &Config::ephemeral(),
+        STATE_DATABASE_KIND,
+        &state_database_format_version_in_code(),
+        &Mainnet,
+        true,
+        column_families_without_pruning_metadata,
+        false,
+    );
+
+    assert!(state.lowest_retained_height().is_none());
+    assert!(!state.is_pruned());
 }

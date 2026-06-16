@@ -11,8 +11,8 @@ use crate::config::ZebradConfig;
 pub use self::{entry_point::EntryPoint, start::StartCmd};
 
 use self::{
-    copy_state::CopyStateCmd, generate::GenerateCmd, rollback_state::RollbackStateCmd,
-    tip_height::TipHeightCmd,
+    copy_state::CopyStateCmd, generate::GenerateCmd, prune_state::PruneStateCmd,
+    rollback_state::RollbackStateCmd, tip_height::TipHeightCmd,
 };
 
 pub mod start;
@@ -20,6 +20,7 @@ pub mod start;
 mod copy_state;
 mod entry_point;
 mod generate;
+pub mod prune_state;
 pub mod rollback_state;
 mod tip_height;
 
@@ -40,6 +41,9 @@ pub enum ZebradCmd {
 
     /// Generate a default `zebrad.toml` configuration
     Generate(GenerateCmd),
+
+    /// Prune Zebra's finalized raw transaction data on disk
+    PruneState(PruneStateCmd),
 
     /// Roll back Zebra's finalized chain state on disk
     RollbackState(RollbackStateCmd),
@@ -64,7 +68,7 @@ impl ZebradCmd {
             CopyState(_) | Start(_) => true,
 
             // Utility commands that don't use server components
-            Generate(_) | RollbackState(_) | TipHeight(_) => false,
+            Generate(_) | PruneState(_) | RollbackState(_) | TipHeight(_) => false,
         }
     }
 
@@ -78,7 +82,7 @@ impl ZebradCmd {
             Start(_) => true,
 
             // Utility commands
-            CopyState(_) | Generate(_) | RollbackState(_) | TipHeight(_) => false,
+            CopyState(_) | Generate(_) | PruneState(_) | RollbackState(_) | TipHeight(_) => false,
         }
     }
 
@@ -97,7 +101,7 @@ impl ZebradCmd {
             // This output:
             // - is used by automated tools, or
             // - needs to be read easily.
-            Generate(_) | RollbackState(_) | TipHeight(_) => true,
+            Generate(_) | PruneState(_) | RollbackState(_) | TipHeight(_) => true,
 
             // Commands that generate informative logging output by default.
             CopyState(_) | Start(_) => false,
@@ -118,6 +122,7 @@ impl Runnable for ZebradCmd {
         match self {
             CopyState(cmd) => cmd.run(),
             Generate(cmd) => cmd.run(),
+            PruneState(cmd) => cmd.run(),
             RollbackState(cmd) => cmd.run(),
             Start(cmd) => cmd.run(),
             TipHeight(cmd) => cmd.run(),

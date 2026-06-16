@@ -1000,21 +1000,26 @@ where
         let debug_force_finished_sync = self.debug_force_finished_sync;
         let network = &self.network;
 
-        let (usage_info_rsp, tip_pool_values_rsp, chain_tip_difficulty) = {
+        let (usage_info_rsp, is_pruned_rsp, tip_pool_values_rsp, chain_tip_difficulty) = {
             use zebra_state::ReadRequest::*;
             let state_call = |request| self.read_state.clone().oneshot(request);
             tokio::join!(
                 state_call(UsageInfo),
+                state_call(IsPruned),
                 state_call(TipPoolValues),
                 chain_tip_difficulty(network.clone(), self.read_state.clone(), true)
             )
         };
 
-        let (size_on_disk, (tip_height, tip_hash), value_balance, difficulty) = {
+        let (size_on_disk, is_pruned, (tip_height, tip_hash), value_balance, difficulty) = {
             use zebra_state::ReadResponse::*;
 
             let UsageInfo(size_on_disk) = usage_info_rsp.map_misc_error()? else {
-                unreachable!("unmatched response to a TipPoolValues request")
+                unreachable!("unmatched response to a UsageInfo request")
+            };
+
+            let IsPruned(is_pruned) = is_pruned_rsp.map_misc_error()? else {
+                unreachable!("unmatched response to an IsPruned request")
             };
 
             let (tip, value_balance) = match tip_pool_values_rsp {
@@ -1030,7 +1035,7 @@ where
             let difficulty = chain_tip_difficulty
                 .expect("should always be Ok when `should_use_default` is true");
 
-            (size_on_disk, tip, value_balance, difficulty)
+            (size_on_disk, is_pruned, tip, value_balance, difficulty)
         };
 
         let now = Utc::now();
@@ -1119,7 +1124,7 @@ where
             verification_progress,
             // TODO: store work in the finalized state for each height (#7109)
             chain_work: 0,
-            pruned: false,
+            pruned: is_pruned,
             size_on_disk,
             // TODO: Investigate whether this needs to be implemented (it's sprout-only in zcashd)
             commitments: 0,

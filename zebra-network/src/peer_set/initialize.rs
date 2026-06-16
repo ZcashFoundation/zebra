@@ -44,6 +44,7 @@ use crate::{
     },
     peer_cache_updater::peer_cache_updater,
     peer_set::{set::MorePeers, ActiveConnectionCounter, CandidateSet, ConnectionTracker, PeerSet},
+    protocol::external::types::PeerServices,
     AddressBook, BoxError, Config, PeerSocketAddr, Request, Response,
 };
 
@@ -99,6 +100,7 @@ pub async fn init<S, C>(
     inbound_service: S,
     latest_chain_tip: C,
     user_agent: String,
+    advertised_services: PeerServices,
 ) -> (
     Buffer<BoxService<Request, Response, BoxError>, Request>,
     Arc<std::sync::Mutex<AddressBook>>,
@@ -117,7 +119,7 @@ where
         address_book_updater,
         address_metrics,
         address_book_updater_guard,
-    ) = AddressBookUpdater::spawn(&config, listen_addr);
+    ) = AddressBookUpdater::spawn(&config, listen_addr, advertised_services);
 
     let (misbehavior_tx, mut misbehavior_rx) = mpsc::channel(
         // Leave enough room for a misbehaviour update on every peer connection
@@ -177,13 +179,12 @@ where
     let (listen_handshaker, outbound_connector) = {
         use tower::timeout::TimeoutLayer;
         let hs_timeout = TimeoutLayer::new(constants::HANDSHAKE_TIMEOUT);
-        use crate::protocol::external::types::PeerServices;
         let hs = peer::Handshake::builder()
             .with_config(config.clone())
             .with_inbound_service(inbound_service)
             .with_inventory_collector(inv_sender)
             .with_address_book_updater(address_book_updater.clone())
-            .with_advertised_services(PeerServices::NODE_NETWORK)
+            .with_advertised_services(advertised_services)
             .with_user_agent(user_agent)
             .with_latest_chain_tip(latest_chain_tip.clone())
             .want_transactions(true)

@@ -1531,7 +1531,7 @@ where
         address_book_updater,
         _address_metrics,
         _address_book_updater_guard,
-    ) = AddressBookUpdater::spawn(&config, config.listen_addr);
+    ) = AddressBookUpdater::spawn(&config, config.listen_addr, PeerServices::NODE_NETWORK);
 
     // Add enough fake peers to go over the limit, even if the limit is zero.
     let over_limit_peers = config.peerset_outbound_connection_limit() * 2 + 1;
@@ -1781,7 +1781,7 @@ where
         address_book_updater,
         _address_metrics,
         address_book_updater_guard,
-    ) = AddressBookUpdater::spawn(&config, unused_v4);
+    ) = AddressBookUpdater::spawn(&config, unused_v4, PeerServices::NODE_NETWORK);
 
     let add_fut = add_initial_peers(config, outbound_connector, peerset_tx, address_book_updater);
     let add_task_handle = tokio::spawn(add_fut);

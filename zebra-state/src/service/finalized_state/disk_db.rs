@@ -718,6 +718,23 @@ impl DiskDb {
         self.db.try_catch_up_with_primary()
     }
 
+    /// Compact the given key range in `cf`, including `from` and excluding
+    /// `until_strictly_before`.
+    pub fn zs_compact_range<C, K>(&self, cf: &C, from: K, until_strictly_before: K)
+    where
+        C: rocksdb::AsColumnFamilyRef,
+        K: IntoDisk + Debug,
+    {
+        let from_bytes = from.as_bytes();
+        let until_strictly_before_bytes = until_strictly_before.as_bytes();
+
+        self.db.compact_range_cf(
+            cf,
+            Some(from_bytes.as_ref()),
+            Some(until_strictly_before_bytes.as_ref()),
+        );
+    }
+
     /// Returns a forward iterator over the items in `cf` in `range`.
     ///
     /// Holding this iterator open might delay block commit transactions.
@@ -1093,6 +1110,11 @@ impl DiskDb {
     /// Writes `batch` to the database.
     pub(crate) fn write(&self, batch: DiskWriteBatch) -> Result<(), rocksdb::Error> {
         self.db.write(batch.batch)
+    }
+
+    /// Flushes pending writes to SST files.
+    pub(crate) fn flush(&self) -> Result<(), rocksdb::Error> {
+        self.db.flush()
     }
 
     // Private methods

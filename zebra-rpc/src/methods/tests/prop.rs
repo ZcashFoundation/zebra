@@ -391,6 +391,12 @@ proptest! {
                         .respond(zebra_state::ReadResponse::UsageInfo(0));
 
                     state
+                        .expect_request(zebra_state::ReadRequest::IsPruned)
+                        .await
+                        .expect("getblockchaininfo should call mock state service with correct request")
+                        .respond(zebra_state::ReadResponse::IsPruned(false));
+
+                    state
                         .expect_request(zebra_state::ReadRequest::TipPoolValues)
                         .await
                         .expect("getblockchaininfo should call mock state service with correct request")
@@ -447,6 +453,7 @@ proptest! {
         let block_height = block.coinbase_height().unwrap();
         let block_hash = block.hash();
         let expected_size_on_disk = 1_000;
+        let expected_is_pruned = true;
 
         // check no requests were made during this test
         runtime.block_on(async move {
@@ -459,6 +466,12 @@ proptest! {
                         .await
                         .expect("getblockchaininfo should call mock state service with correct request")
                         .respond(zebra_state::ReadResponse::UsageInfo(expected_size_on_disk));
+
+                    state
+                        .expect_request(zebra_state::ReadRequest::IsPruned)
+                        .await
+                        .expect("getblockchaininfo should call mock state service with correct request")
+                        .respond(zebra_state::ReadResponse::IsPruned(expected_is_pruned));
 
                     state
                         .expect_request(zebra_state::ReadRequest::TipPoolValues)
@@ -495,6 +508,7 @@ proptest! {
                     prop_assert_eq!(info.blocks, block_height);
                     prop_assert_eq!(info.best_block_hash, block_hash);
                     prop_assert_eq!(info.size_on_disk, expected_size_on_disk);
+                    prop_assert_eq!(info.pruned, expected_is_pruned);
                     prop_assert!(info.estimated_height < Height::MAX);
 
                     prop_assert_eq!(
@@ -569,6 +583,12 @@ proptest! {
                     .await
                     .expect("getblockchaininfo should call mock state service with correct request")
                     .respond(zebra_state::ReadResponse::UsageInfo(expected_size_on_disk));
+
+                state
+                    .expect_request(zebra_state::ReadRequest::IsPruned)
+                    .await
+                    .expect("getblockchaininfo should call mock state service with correct request")
+                    .respond(zebra_state::ReadResponse::IsPruned(false));
 
                 state.expect_request(zebra_state::ReadRequest::TipPoolValues)
                     .await

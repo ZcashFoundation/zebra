@@ -3080,6 +3080,111 @@ async fn getrawtransaction_confirmations_include_non_finalized_blocks() -> Resul
     Ok(())
 }
 
+/// Pruned storage mode deletes historical raw transaction data during regtest
+/// sync, while the node keeps committing new blocks.
+///
+/// This is a full-node end-to-end test of online pruning:
+/// - the node runs in [`StorageMode::Pruned`](zebra_state::StorageMode::Pruned),
+/// - it mines past the retention window so commit-time pruning runs,
+/// - it keeps validating and committing new blocks over the pruned history,
+/// - and the on-disk database records that pruning happened.
+///
+/// Regtest uses a lower retention floor ([`min_pruning_retention`]) than
+/// Mainnet/Testnet so the test can cross the window without a 10_000+ block chain.
+/// Even so, blocks only finalize once they are [`MAX_BLOCK_REORG_HEIGHT`] deep, so
+/// this test mines `tx_retention + MAX_BLOCK_REORG_HEIGHT + margin` blocks and is
+/// correspondingly slow.
+#[tokio::test(flavor = "multi_thread")]
+async fn pruned_storage_mode_prunes_during_regtest_sync() -> Result<()> {
+    use zebra_state::{
+        constants::{min_pruning_retention, MAX_BLOCK_REORG_HEIGHT},
+        PruneFinalizedStateOptions, PruningConfig, StorageMode,
+    };
+
+    let _init_guard = zebra_test::init();
+
+    let network = Network::new_regtest(Default::default());
+    // The Regtest floor (MAX_BLOCK_REORG_HEIGHT + 1); the smallest retention the
+    // node will accept on Regtest.
+    let tx_retention = min_pruning_retention(&network);
+
+    let mut config = os_assigned_rpc_port_config(false, &network)?;
+    config.mempool.debug_enable_at_height = Some(0);
+    // Pruning operates on the finalized database, so we need a persistent state.
+    config.state.ephemeral = false;
+    config.state.storage_mode = StorageMode::Pruned(PruningConfig { tx_retention });
+
+    let mut zebrad = testdir()?
+        .with_config(&mut config)?
+        .spawn_child(args!["start"])?;
+    let rpc_address = read_listen_addr_from_logs(&mut zebrad, OPENED_RPC_ENDPOINT_MSG)?;
+    // `with_config` set the state cache dir to the test directory; keep the
+    // `TempDir` alive so we can reopen the database after shutdown.
+    let cache_dir = config.state.cache_dir.clone();
+    let test_dir = zebrad
+        .dir
+        .take()
+        .expect("zebrad should have a test directory");
+
+    tokio::time::sleep(LAUNCH_DELAY).await;
+
+    let client = RpcRequestClient::new(rpc_address);
+
+    // Online pruning runs as finalized blocks fall `tx_retention` below the
+    // finalized tip. A block only finalizes once it is `MAX_BLOCK_REORG_HEIGHT`
+    // deep, so no height is prunable until the chain passes
+    // `tx_retention + MAX_BLOCK_REORG_HEIGHT`. Mine a margin past that so several
+    // heights are pruned.
+    let blocks_to_mine = tx_retention + MAX_BLOCK_REORG_HEIGHT + 50;
+    let mut mined = 0;
+    while mined < blocks_to_mine {
+        // Mine in batches to keep each `generate` RPC call bounded.
+        let batch = (blocks_to_mine - mined).min(250);
+        client.generate(batch).await?;
+        mined += batch;
+    }
+
+    // Commit-time pruning logs a line each time it deletes a height range.
+    zebrad.expect_stdout_line_matches(
+        "pruning raw transaction history outside the retention window",
+    )?;
+
+    // The node keeps validating and committing new blocks over the partially
+    // pruned history (this is what proves pruning didn't break future validation).
+    let height_before = client.blockchain_info().await?.blocks().0;
+    client.generate(5).await?;
+    let height_after = client.blockchain_info().await?.blocks().0;
+    assert_eq!(
+        height_after,
+        height_before + 5,
+        "node should keep committing blocks after pruning",
+    );
+
+    zebrad.kill(false)?;
+    let output = zebrad.wait_with_output()?;
+    output.assert_failure()?.assert_was_killed()?;
+    // Give the OS a moment to release the database lock before reopening it.
+    tokio::time::sleep(Duration::from_secs(3)).await;
+
+    // Reopen the finalized state through the public offline-prune preview API and
+    // confirm the database recorded pruning progress.
+    let mut state_config = zebra_state::Config::default();
+    state_config.cache_dir = cache_dir;
+    let summary = zebra_state::preview_prune_finalized_state(
+        state_config,
+        &network,
+        PruneFinalizedStateOptions { tx_retention },
+    )?;
+    assert!(
+        summary.previous_lowest_retained_height.is_some(),
+        "database should record online pruning progress, got {summary:?}",
+    );
+
+    drop(test_dir);
+
+    Ok(())
+}
+
 #[tokio::test]
 async fn regtest_coinbase() -> Result<()> {
     common::coinbase::regtest_coinbase().await

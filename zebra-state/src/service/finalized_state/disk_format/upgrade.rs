@@ -102,7 +102,11 @@ fn format_upgrades(
             Version::new(26, 0, 0),
         )),
         Box::new(block_info_and_address_received::Upgrade),
-    ] as [Box<dyn DiskFormatUpgrade>; 5])
+        Box::new(no_migration::NoMigration::new(
+            "add pruning metadata column family",
+            Version::new(27, 1, 0),
+        )),
+    ] as [Box<dyn DiskFormatUpgrade>; 6])
         .into_iter()
         .filter(move |upgrade| upgrade.version() > min_version())
 }

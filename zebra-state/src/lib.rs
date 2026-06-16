@@ -37,7 +37,8 @@ mod tests;
 
 pub use config::{
     check_and_delete_old_databases, check_and_delete_old_state_databases,
-    database_format_version_on_disk, state_database_format_version_on_disk, Config,
+    database_format_version_on_disk, state_database_format_version_on_disk, Config, PruningConfig,
+    StorageMode,
 };
 pub use constants::{state_database_format_version_in_code, MAX_BLOCK_REORG_HEIGHT};
 pub use error::{
@@ -71,6 +72,10 @@ pub use service::{
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use service::finalized_state::{ReadDisk, TypedColumnFamily, WriteTypedBatch};
 
+pub use service::finalized_state::{
+    preview_prune_finalized_state, prune_finalized_state, PruneFinalizedStateError,
+    PruneFinalizedStateOptions, PruneFinalizedStateSummary,
+};
 pub use service::finalized_state::{
     preview_rollback_finalized_state, rollback_finalized_state, RollbackBackupSummary,
     RollbackFinalizedStateError, RollbackFinalizedStateOptions, RollbackFinalizedStateSummary,
