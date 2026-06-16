@@ -1100,8 +1100,18 @@ where
             IndexSet::new()
         };
 
+        // Dispatch blocks with duplicate-tolerant error handling.
+        // DuplicateBlockQueuedForDownload is caught and skipped instead of
+        // propagating — this prevents dropping unprocessed hashes from the
+        // batch, which would create frontier gaps and stalls (#5709).
         for hash in hashes.into_iter() {
-            self.downloads.download_and_verify(hash).await?;
+            match self.downloads.download_and_verify(hash).await {
+                Ok(()) => {}
+                Err(BlockDownloadVerifyError::DuplicateBlockQueuedForDownload { .. }) => {
+                    debug!("block request was already queued, continuing");
+                }
+                Err(error) => return Err(error),
+            }
         }
 
         Ok(extra_hashes)
@@ -1149,7 +1159,6 @@ where
         match response {
             Ok((height, hash)) => {
                 trace!(?height, ?hash, "verified and committed block to state");
-
                 return Ok(());
             }
 
