@@ -46,6 +46,46 @@ use crate::{
 
 use super::super::TypedColumnFamily;
 
+/// Which parts of the transparent transaction batch to write, for the
+/// consensus / RPC-only write split (see `docs/design/state-write-split.md`).
+///
+/// The transparent batch interleaves a consensus-critical write (the
+/// `utxo_by_out_loc` unspent-output set) with the four RPC-only indexes
+/// (`utxo_loc_by_transparent_addr_loc`, `tx_loc_by_transparent_addr_loc`,
+/// `balance_by_transparent_addr`, and the `indexer`-feature
+/// `tx_loc_by_spent_out_loc`). This selector lets the same code build either
+/// half independently when the split is enabled, while remaining bit-identical
+/// to the original path when it is not.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum TransparentBatchKind {
+    /// Write both the consensus `utxo_by_out_loc` set and the RPC-only indexes,
+    /// in one batch. The single-database default — unchanged behaviour.
+    Combined,
+
+    /// Write only the consensus `utxo_by_out_loc` set; skip the RPC-only
+    /// indexes and the balance read/merge. Used on the consensus write path
+    /// when the split is enabled.
+    ConsensusOnly,
+
+    /// Write only the RPC-only indexes and balances; skip the consensus
+    /// `utxo_by_out_loc` set. Used by the trailing RPC indexer thread when the
+    /// split is enabled.
+    RpcOnly,
+}
+
+impl TransparentBatchKind {
+    /// Whether the consensus `utxo_by_out_loc` set should be written.
+    pub fn writes_utxo_set(self) -> bool {
+        matches!(self, Self::Combined | Self::ConsensusOnly)
+    }
+
+    /// Whether the RPC-only address / balance / spent-tx indexes should be
+    /// written.
+    pub fn writes_rpc_indexes(self) -> bool {
+        matches!(self, Self::Combined | Self::RpcOnly)
+    }
+}
+
 /// The name of the transaction hash by spent outpoints column family.
 pub const TX_LOC_BY_SPENT_OUT_LOC: &str = "tx_loc_by_spent_out_loc";
 
@@ -95,28 +135,45 @@ impl ZebraDb {
 
     /// Returns the [`TransactionLocation`] for a transaction that spent the output
     /// at the provided [`OutputLocation`], if it is in the finalized state.
+    ///
+    /// Reads the RPC-only `tx_loc_by_spent_out_loc` column family, which lives in
+    /// the separate RPC index database when the consensus / RPC write split is
+    /// enabled ([`rpc_index_or_self`](ZebraDb::rpc_index_or_self)).
     pub fn tx_location_by_spent_output_location(
         &self,
         output_location: &OutputLocation,
     ) -> Option<TransactionLocation> {
-        self.tx_loc_by_spent_output_loc_cf().zs_get(output_location)
+        self.rpc_index_or_self()
+            .tx_loc_by_spent_output_loc_cf()
+            .zs_get(output_location)
     }
 
     /// Returns a handle to the `balance_by_transparent_addr` RocksDB column family.
+    ///
+    /// When the consensus / RPC write split is enabled, this is the handle in
+    /// the separate RPC index database.
     pub fn address_balance_cf(&self) -> &ColumnFamily {
-        self.db.cf_handle(BALANCE_BY_TRANSPARENT_ADDR).unwrap()
+        self.rpc_index_or_self()
+            .db
+            .cf_handle(BALANCE_BY_TRANSPARENT_ADDR)
+            .unwrap()
     }
 
     /// Returns the [`AddressBalanceLocation`] for a [`transparent::Address`],
     /// if it is in the finalized state.
+    ///
+    /// Reads the RPC-only `balance_by_transparent_addr` column family, which
+    /// lives in the separate RPC index database when the consensus / RPC write
+    /// split is enabled.
     #[allow(clippy::unwrap_in_result)]
     pub fn address_balance_location(
         &self,
         address: &transparent::Address,
     ) -> Option<AddressBalanceLocation> {
-        let balance_by_transparent_addr = self.address_balance_cf();
+        let rpc_db = self.rpc_index_or_self();
+        let balance_by_transparent_addr = rpc_db.db.cf_handle(BALANCE_BY_TRANSPARENT_ADDR).unwrap();
 
-        self.db.zs_get(&balance_by_transparent_addr, address)
+        rpc_db.db.zs_get(&balance_by_transparent_addr, address)
     }
 
     /// Returns every `(address, balance)` record in the address-balance column
@@ -322,7 +379,8 @@ impl ZebraDb {
         &self,
         address_location: AddressLocation,
     ) -> BTreeSet<AddressUnspentOutput> {
-        let utxo_loc_by_transparent_addr_loc = self
+        let rpc_db = self.rpc_index_or_self();
+        let utxo_loc_by_transparent_addr_loc = rpc_db
             .db
             .cf_handle("utxo_loc_by_transparent_addr_loc")
             .unwrap();
@@ -335,7 +393,7 @@ impl ZebraDb {
 
         loop {
             // Seek to a valid entry for this address, or the first entry for the next address
-            unspent_output = match self
+            unspent_output = match rpc_db
                 .db
                 .zs_next_key_value_from(&utxo_loc_by_transparent_addr_loc, &unspent_output)
             {
@@ -412,15 +470,19 @@ impl ZebraDb {
         address_location: AddressLocation,
         query_height_range: RangeInclusive<Height>,
     ) -> BTreeSet<AddressTransaction> {
-        let tx_loc_by_transparent_addr_loc =
-            self.db.cf_handle("tx_loc_by_transparent_addr_loc").unwrap();
+        let rpc_db = self.rpc_index_or_self();
+        let tx_loc_by_transparent_addr_loc = rpc_db
+            .db
+            .cf_handle("tx_loc_by_transparent_addr_loc")
+            .unwrap();
 
         // A potentially invalid key representing the first UTXO send to the address,
         // or the query start height.
         let transaction_location_range =
             AddressTransaction::address_iterator_range(address_location, query_height_range);
 
-        self.db
+        rpc_db
+            .db
             .zs_forward_range_iter(&tx_loc_by_transparent_addr_loc, transaction_location_range)
             .map(|(tx_loc, ())| tx_loc)
             .collect()
@@ -530,7 +592,41 @@ impl DiskWriteBatch {
         spent_utxos_by_outpoint: &HashMap<transparent::OutPoint, transparent::Utxo>,
         spent_utxos_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
         out_loc_by_outpoint: &HashMap<transparent::OutPoint, OutputLocation>,
+        address_balances: AddressBalanceLocationUpdates,
+    ) {
+        self.prepare_transparent_transaction_batch_split(
+            zebra_db,
+            network,
+            finalized,
+            new_outputs_by_out_loc,
+            spent_utxos_by_outpoint,
+            spent_utxos_by_out_loc,
+            out_loc_by_outpoint,
+            address_balances,
+            TransparentBatchKind::Combined,
+        );
+    }
+
+    /// Like [`prepare_transparent_transaction_batch`], but writes only the
+    /// portion of the batch selected by `kind` (see [`TransparentBatchKind`]),
+    /// for the consensus / RPC-only write split.
+    ///
+    /// With [`TransparentBatchKind::Combined`] this is bit-identical to
+    /// [`prepare_transparent_transaction_batch`].
+    ///
+    /// [`prepare_transparent_transaction_batch`]: Self::prepare_transparent_transaction_batch
+    #[allow(clippy::too_many_arguments)]
+    pub fn prepare_transparent_transaction_batch_split(
+        &mut self,
+        zebra_db: &ZebraDb,
+        network: &Network,
+        finalized: &FinalizedBlock,
+        new_outputs_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
+        spent_utxos_by_outpoint: &HashMap<transparent::OutPoint, transparent::Utxo>,
+        spent_utxos_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
+        out_loc_by_outpoint: &HashMap<transparent::OutPoint, OutputLocation>,
         mut address_balances: AddressBalanceLocationUpdates,
+        kind: TransparentBatchKind,
     ) {
         let db = &zebra_db.db;
         let FinalizedBlock { block, height, .. } = finalized;
@@ -545,29 +641,36 @@ impl DiskWriteBatch {
         // The genesis block has no address index, so it never reaches here.
         let snapshot_consume = zebra_db.snapshot_consume();
 
-        // Update the in-memory `address_balances` transaction-by-transaction, debiting inputs
-        // before crediting outputs within each transaction. This ordering keeps every
-        // intermediate per-address balance within the consensus range, even when the block
-        // contains a same-address transparent self-spend chain whose batch credit-first
-        // intermediate balance would otherwise exceed MAX_MONEY.
-        Self::prepare_transparent_address_balance_updates(
-            network,
-            *height,
-            &block.transactions,
-            spent_utxos_by_outpoint,
-            out_loc_by_outpoint,
-            &mut address_balances,
-            snapshot_consume,
-        );
+        // The address-balance in-memory update is only needed when RPC indexes
+        // (which read `address_location()`) or balances are written.
+        if kind.writes_rpc_indexes() {
+            // Update the in-memory `address_balances` transaction-by-transaction, debiting inputs
+            // before crediting outputs within each transaction. This ordering keeps every
+            // intermediate per-address balance within the consensus range, even when the block
+            // contains a same-address transparent self-spend chain whose batch credit-first
+            // intermediate balance would otherwise exceed MAX_MONEY.
+            Self::prepare_transparent_address_balance_updates(
+                network,
+                *height,
+                &block.transactions,
+                spent_utxos_by_outpoint,
+                out_loc_by_outpoint,
+                &mut address_balances,
+                snapshot_consume,
+            );
+        }
 
         // Write the new and spent transparent output index entries. These passes no longer
         // touch `address_balances`; they only read each entry's `address_location()`.
+        // The `utxo_by_out_loc` writes inside them are consensus-critical; the
+        // address-index writes are RPC-only — `kind` selects which run.
         self.prepare_new_transparent_outputs_batch(
             db,
             network,
             new_outputs_by_out_loc,
             &address_balances,
             snapshot_consume,
+            kind,
         );
         self.prepare_spent_transparent_outputs_batch(
             db,
@@ -575,25 +678,28 @@ impl DiskWriteBatch {
             spent_utxos_by_out_loc,
             &address_balances,
             snapshot_consume,
+            kind,
         );
 
-        // Index the transparent addresses that spent in each transaction
-        for (tx_index, transaction) in block.transactions.iter().enumerate() {
-            let spending_tx_location = TransactionLocation::from_usize(*height, tx_index);
+        if kind.writes_rpc_indexes() {
+            // Index the transparent addresses that spent in each transaction
+            for (tx_index, transaction) in block.transactions.iter().enumerate() {
+                let spending_tx_location = TransactionLocation::from_usize(*height, tx_index);
 
-            self.prepare_spending_transparent_tx_ids_batch(
-                zebra_db,
-                network,
-                spending_tx_location,
-                transaction,
-                spent_utxos_by_outpoint,
-                out_loc_by_outpoint,
-                &address_balances,
-                snapshot_consume,
-            );
+                self.prepare_spending_transparent_tx_ids_batch(
+                    zebra_db,
+                    network,
+                    spending_tx_location,
+                    transaction,
+                    spent_utxos_by_outpoint,
+                    out_loc_by_outpoint,
+                    &address_balances,
+                    snapshot_consume,
+                );
+            }
+
+            self.prepare_transparent_balances_batch(db, address_balances);
         }
-
-        self.prepare_transparent_balances_batch(db, address_balances);
     }
 
     /// Update `address_balances` in memory for the transparent transfers in `transactions`,
@@ -751,7 +857,7 @@ impl DiskWriteBatch {
     /// **only** when the unsafe [`crate::snapshot_consume::SnapshotConsumeConfig::elide_utxo_bytes`]
     /// flag is set (default off): checkpoint spend resolution falls through to
     /// this CF, so eliding it is not restart-safe. See [`crate::snapshot_consume`].
-    #[allow(clippy::unwrap_in_result)]
+    #[allow(clippy::unwrap_in_result, clippy::too_many_arguments)]
     pub fn prepare_new_transparent_outputs_batch(
         &mut self,
         db: &DiskDb,
@@ -759,12 +865,20 @@ impl DiskWriteBatch {
         new_outputs_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
         address_balances: &AddressBalanceLocationUpdates,
         snapshot_consume: Option<&Arc<crate::snapshot_consume::SnapshotConsumeState>>,
+        kind: TransparentBatchKind,
     ) {
-        let utxo_by_out_loc = db.cf_handle("utxo_by_out_loc").unwrap();
+        let write_rpc_indexes = kind.writes_rpc_indexes();
+        let write_utxo_set = kind.writes_utxo_set();
+
+        // The consensus UTXO-set handle is only present (and only needed) when
+        // writing the consensus half; the RPC address-index handles only when
+        // writing the RPC half. Under the split, the database missing the other
+        // half's column families must not be touched.
+        let utxo_by_out_loc = write_utxo_set.then(|| db.cf_handle("utxo_by_out_loc").unwrap());
         let utxo_loc_by_transparent_addr_loc =
-            db.cf_handle("utxo_loc_by_transparent_addr_loc").unwrap();
+            write_rpc_indexes.then(|| db.cf_handle("utxo_loc_by_transparent_addr_loc").unwrap());
         let tx_loc_by_transparent_addr_loc =
-            db.cf_handle("tx_loc_by_transparent_addr_loc").unwrap();
+            write_rpc_indexes.then(|| db.cf_handle("tx_loc_by_transparent_addr_loc").unwrap());
 
         // Index all new transparent outputs
         for (new_output_location, utxo) in new_outputs_by_out_loc {
@@ -786,7 +900,7 @@ impl DiskWriteBatch {
                 // The balance pass skips the credit for an elided output, so its
                 // address may be absent from `address_balances`; skipping the
                 // address-index writes here keeps the two passes consistent.
-                if !elide_addr_index {
+                if write_rpc_indexes && !elide_addr_index {
                     let receiving_address_location = match address_balances {
                         AddressBalanceLocationUpdates::Merge(balance_changes) => balance_changes
                             .get(&receiving_address)
@@ -806,7 +920,9 @@ impl DiskWriteBatch {
                     let address_unspent_output =
                         AddressUnspentOutput::new(receiving_address_location, *new_output_location);
                     self.zs_insert(
-                        &utxo_loc_by_transparent_addr_loc,
+                        utxo_loc_by_transparent_addr_loc
+                            .as_ref()
+                            .expect("present when writing RPC indexes"),
                         address_unspent_output,
                         (),
                     );
@@ -817,7 +933,13 @@ impl DiskWriteBatch {
                         receiving_address_location,
                         new_output_location.transaction_location(),
                     );
-                    self.zs_insert(&tx_loc_by_transparent_addr_loc, address_transaction, ());
+                    self.zs_insert(
+                        tx_loc_by_transparent_addr_loc
+                            .as_ref()
+                            .expect("present when writing RPC indexes"),
+                        address_transaction,
+                        (),
+                    );
                 }
             }
 
@@ -825,10 +947,19 @@ impl DiskWriteBatch {
             // (For performance reasons, we don't want to deserialize the whole transaction
             // to get an output.)
             //
-            // Eliding the UTXO bytes is unsafe (default off): the checkpoint
-            // commit path's spend resolution reads this CF as its last resort.
-            if !elide_utxo_byte {
-                self.zs_insert(&utxo_by_out_loc, new_output_location, unspent_output);
+            // This is the consensus `utxo_by_out_loc` set: written on the
+            // consensus path (`write_utxo_set`), skipped by the RPC-only
+            // indexer. Eliding the UTXO bytes is unsafe (default off): the
+            // checkpoint commit path's spend resolution reads this CF as its
+            // last resort.
+            if write_utxo_set && !elide_utxo_byte {
+                self.zs_insert(
+                    utxo_by_out_loc
+                        .as_ref()
+                        .expect("present when writing the consensus UTXO set"),
+                    new_output_location,
+                    unspent_output,
+                );
             }
         }
     }
@@ -861,7 +992,7 @@ impl DiskWriteBatch {
     /// # Errors
     ///
     /// - This method doesn't currently return any errors, but it might in future
-    #[allow(clippy::unwrap_in_result)]
+    #[allow(clippy::unwrap_in_result, clippy::too_many_arguments)]
     pub fn prepare_spent_transparent_outputs_batch(
         &mut self,
         db: &DiskDb,
@@ -869,10 +1000,16 @@ impl DiskWriteBatch {
         spent_utxos_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
         address_balances: &AddressBalanceLocationUpdates,
         snapshot_consume: Option<&Arc<crate::snapshot_consume::SnapshotConsumeState>>,
+        kind: TransparentBatchKind,
     ) {
-        let utxo_by_out_loc = db.cf_handle("utxo_by_out_loc").unwrap();
+        let write_rpc_indexes = kind.writes_rpc_indexes();
+        let write_utxo_set = kind.writes_utxo_set();
+
+        // Only fetch each half's column-family handle when that half is written;
+        // under the split, the other half's column families are absent.
+        let utxo_by_out_loc = write_utxo_set.then(|| db.cf_handle("utxo_by_out_loc").unwrap());
         let utxo_loc_by_transparent_addr_loc =
-            db.cf_handle("utxo_loc_by_transparent_addr_loc").unwrap();
+            write_rpc_indexes.then(|| db.cf_handle("utxo_loc_by_transparent_addr_loc").unwrap());
 
         // Mark all transparent inputs as spent.
         //
@@ -893,7 +1030,7 @@ impl DiskWriteBatch {
             // `address_balances` (its create-credit was skipped), so skip the
             // address-index delete too.
             if let Some(sending_address) = sending_address {
-                if !elide_addr_index {
+                if write_rpc_indexes && !elide_addr_index {
                     let address_location = match address_balances {
                         AddressBalanceLocationUpdates::Merge(balance_changes) => balance_changes
                             .get(&sending_address)
@@ -909,15 +1046,27 @@ impl DiskWriteBatch {
                     let address_spent_output =
                         AddressUnspentOutput::new(address_location, *spent_output_location);
 
-                    self.zs_delete(&utxo_loc_by_transparent_addr_loc, address_spent_output);
+                    self.zs_delete(
+                        utxo_loc_by_transparent_addr_loc
+                            .as_ref()
+                            .expect("present when writing RPC indexes"),
+                        address_spent_output,
+                    );
                 }
             }
 
             // Delete the OutputLocation, and the copy of the spent Output in the database.
-            // Skipped only when the create was elided (unsafe flag): the delete
-            // is then a no-op.
-            if !elide_utxo_byte {
-                self.zs_delete(&utxo_by_out_loc, spent_output_location);
+            // This is the consensus `utxo_by_out_loc` set: deleted on the
+            // consensus path (`write_utxo_set`), skipped by the RPC-only
+            // indexer. Skipped only when the create was elided (unsafe flag):
+            // the delete is then a no-op.
+            if write_utxo_set && !elide_utxo_byte {
+                self.zs_delete(
+                    utxo_by_out_loc
+                        .as_ref()
+                        .expect("present when writing the consensus UTXO set"),
+                    spent_output_location,
+                );
             }
         }
     }

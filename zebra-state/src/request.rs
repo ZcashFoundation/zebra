@@ -408,6 +408,35 @@ pub struct FinalizedBlock {
 }
 
 impl FinalizedBlock {
+    /// Reconstructs a [`FinalizedBlock`] from a block already stored durably in
+    /// the consensus database, for the trailing RPC indexer (the consensus /
+    /// RPC write split).
+    ///
+    /// Recomputes `new_outputs` and `transaction_hashes` from the block (the
+    /// only fields the RPC-only transparent index uses, besides `block`, `hash`,
+    /// and `height`). The treestate and deferred-pool change are not read by the
+    /// RPC index path, so this uses placeholders for them — callers must only use
+    /// the result to build RPC-only index batches, never to commit consensus
+    /// state.
+    ///
+    /// See `docs/design/state-write-split.md`.
+    pub fn for_rpc_index(block: Arc<Block>, hash: block::Hash) -> Self {
+        let semantically_verified = SemanticallyVerifiedBlock::with_hash(block, hash);
+
+        Self {
+            block: semantically_verified.block,
+            hash: semantically_verified.hash,
+            height: semantically_verified.height,
+            new_outputs: semantically_verified.new_outputs,
+            transaction_hashes: semantically_verified.transaction_hashes,
+            treestate: Treestate {
+                note_commitment_trees: Default::default(),
+                history_tree: Default::default(),
+            },
+            deferred_pool_balance_change: DeferredPoolBalanceChange::zero(),
+        }
+    }
+
     /// Constructs [`FinalizedBlock`] from [`CheckpointVerifiedBlock`] and its [`Treestate`].
     pub fn from_checkpoint_verified(
         block: CheckpointVerifiedBlock,

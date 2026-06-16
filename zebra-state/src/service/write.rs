@@ -15,6 +15,7 @@
 
 mod disk_writer;
 mod finalized_write_phase;
+mod rpc_indexer;
 mod worker;
 
 #[cfg(test)]

@@ -71,6 +71,12 @@ pub use disk_format::upgrade::restorable_db_versions;
 /// The column families supported by the running `zebra-state` database code.
 ///
 /// Existing column families that aren't listed here are preserved when the database is opened.
+///
+/// This is the full set; it is the union of [`CONSENSUS_COLUMN_FAMILIES_IN_CODE`]
+/// and [`RPC_INDEX_COLUMN_FAMILIES_IN_CODE`]. When the single-database default
+/// (`!Config::separate_rpc_index_db`) is in effect, the main database is opened
+/// with this full list and every column family lives together, exactly as
+/// before.
 pub const STATE_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
     // Blocks
     "hash_by_height",
@@ -107,6 +113,85 @@ pub const STATE_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
     // P2P known-hash snapshot distribution
     KNOWN_HASH_CHUNK,
 ];
+
+/// The RPC-only column families: address / balance / spent-transaction indexes
+/// that are read **only** by RPC methods, never on a consensus, spend-resolution,
+/// chain-reconstruction, or IBD-engine path.
+///
+/// See `docs/design/state-write-split.md` §2 for the per-column-family
+/// classification and the read-site audit that confirms each is RPC-only.
+///
+/// When [`Config::separate_rpc_index_db`](crate::Config::separate_rpc_index_db)
+/// is set, these column families live in a separate "RPC index" database written
+/// by a thread that trails the consensus database, and the consensus database is
+/// opened with [`CONSENSUS_COLUMN_FAMILIES_IN_CODE`] only.
+pub const RPC_INDEX_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
+    BALANCE_BY_TRANSPARENT_ADDR,
+    "tx_loc_by_transparent_addr_loc",
+    "utxo_loc_by_transparent_addr_loc",
+    TX_LOC_BY_SPENT_OUT_LOC,
+    // The RPC index database's own durable tip marker (height -> block hash),
+    // so it knows crash-safely how far it has indexed. Never present in the
+    // single-database default path.
+    RPC_INDEX_TIP,
+];
+
+/// The consensus-critical column families: everything block / transaction
+/// validation, spend resolution, the value pool, the note-commitment / history
+/// trees, chain reconstruction, and the IBD engine need.
+///
+/// This is [`STATE_COLUMN_FAMILIES_IN_CODE`] minus the four RPC-only column
+/// families in [`RPC_INDEX_COLUMN_FAMILIES_IN_CODE`] (the RPC-index tip marker
+/// is never in the consensus database). The consensus database is opened with
+/// this list only when
+/// [`Config::separate_rpc_index_db`](crate::Config::separate_rpc_index_db) is
+/// set.
+pub const CONSENSUS_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
+    // Blocks
+    "hash_by_height",
+    "height_by_hash",
+    "block_header_by_height",
+    // Transactions
+    "tx_by_loc",
+    "hash_by_tx_loc",
+    "tx_loc_by_hash",
+    // Transparent (consensus subset: the unspent-output set only)
+    "utxo_by_out_loc",
+    // Sprout
+    "sprout_nullifiers",
+    "sprout_anchors",
+    "sprout_note_commitment_tree",
+    // Sapling
+    "sapling_nullifiers",
+    "sapling_anchors",
+    "sapling_note_commitment_tree",
+    "sapling_note_commitment_subtree",
+    // Orchard
+    "orchard_nullifiers",
+    "orchard_anchors",
+    "orchard_note_commitment_tree",
+    "orchard_note_commitment_subtree",
+    // Chain
+    "history_tree",
+    "tip_chain_value_pool",
+    BLOCK_INFO,
+    // P2P known-hash snapshot distribution
+    KNOWN_HASH_CHUNK,
+];
+
+/// The name of the RPC index database's durable tip column family
+/// (height -> block hash of the highest indexed block).
+///
+/// Only present in the separate RPC index database (see
+/// [`RPC_INDEX_COLUMN_FAMILIES_IN_CODE`]).
+pub const RPC_INDEX_TIP: &str = "rpc_index_tip";
+
+/// The database-kind sub-directory name for the separate RPC index database.
+///
+/// The RPC index database lives at `<consensus-db-path>/rpc-index`, so it shares
+/// the consensus database's version / network directory and is deleted together
+/// with it.
+pub const RPC_INDEX_DB_DIR: &str = "rpc-index";
 
 /// The finalized part of the chain state, stored in the db.
 ///
@@ -205,15 +290,23 @@ impl FinalizedState {
             None
         };
 
+        // With the consensus / RPC write split enabled, the main database holds
+        // only the consensus-critical column families; the RPC-only indexes live
+        // in the separate RPC index database that `ZebraDb::new` opens. The
+        // single-database default opens the full list, unchanged.
+        let main_column_families: &[&str] = if config.separate_rpc_index_db && !read_only {
+            CONSENSUS_COLUMN_FAMILIES_IN_CODE
+        } else {
+            STATE_COLUMN_FAMILIES_IN_CODE
+        };
+
         let db = ZebraDb::new(
             config,
             STATE_DATABASE_KIND,
             &state_database_format_version_in_code(),
             network,
             debug_skip_format_upgrades,
-            STATE_COLUMN_FAMILIES_IN_CODE
-                .iter()
-                .map(ToString::to_string),
+            main_column_families.iter().map(ToString::to_string),
             read_only,
         );
 

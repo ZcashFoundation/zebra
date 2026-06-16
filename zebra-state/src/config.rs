@@ -162,6 +162,31 @@ pub struct Config {
     /// roughly `blocks × 2 MB` in the worst case.
     pub checkpoint_sync_pipeline_capacity: usize,
 
+    /// Write RPC-only address / balance / spent-transaction indexes to a
+    /// separate "RPC index" database, updated by a thread that trails the
+    /// consensus database.
+    ///
+    /// `false` by default: every column family lives in one database and the
+    /// RPC-only indexes are written together with the consensus data on the
+    /// block-commit path, exactly as before.
+    ///
+    /// When `true`, the finalized state is split in two:
+    ///
+    /// - a **consensus database** holding everything block / transaction
+    ///   validation, spend resolution, the value pool, the note-commitment /
+    ///   history trees and the IBD engine need, committed block-by-block; and
+    /// - an **RPC index database** (under `<consensus-db>/rpc-index`) holding
+    ///   only the transparent address / balance / spent-tx indexes, written by
+    ///   a thread that trails the consensus database.
+    ///
+    /// The consensus thread never blocks on the RPC indexer. On restart the
+    /// RPC index database catches up from its own durable tip to the consensus
+    /// tip; it is never ahead of the consensus database. RPC reads tolerate the
+    /// RPC index trailing recent heights (best-effort, same as during IBD).
+    ///
+    /// See `docs/design/state-write-split.md`.
+    pub separate_rpc_index_db: bool,
+
     /// Optional "snapshot consume" mode for the known-hash / checkpoint initial
     /// block download (assumeUTXO sync).
     ///
@@ -297,6 +322,7 @@ impl Default for Config {
             disable_wal_during_ibd: false,
             checkpoint_sync_retained_blocks: crate::constants::MAX_BLOCK_REORG_HEIGHT,
             checkpoint_sync_pipeline_capacity: crate::constants::MAX_BLOCK_REORG_HEIGHT as usize,
+            separate_rpc_index_db: false,
             snapshot_consume: None,
             debug_stop_at_height: None,
             debug_validity_check_interval: None,

@@ -135,6 +135,14 @@ impl WriteBlockWorker {
                 .map_or(NO_DISK_TIP_HEIGHT, |height| height.0),
         ));
 
+        // When the consensus / RPC write split is enabled, a trailing RPC
+        // indexer thread (Thread 3) reads each newly durable block from the
+        // consensus database and writes its RPC-only transparent indexes into
+        // the separate RPC index database. It trails `disk_tip_height` and never
+        // blocks the consensus path. Its shutdown flag is set when this loop
+        // exits so it stops parking and joins with the scope.
+        let rpc_indexer_shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
         // The disk writer lives for the worker's whole lifetime inside one
         // thread scope. The scope join propagates the disk writer's panics.
         std::thread::scope(|s| {
@@ -146,6 +154,18 @@ impl WriteBlockWorker {
                 disk_tip_height: disk_tip_height.clone(),
             };
             s.spawn(move || disk_writer.run());
+
+            // Spawn the trailing RPC indexer only when the split is enabled.
+            if let Some(rpc_index_db) = self.finalized_state.db.rpc_index_db() {
+                let indexer = super::rpc_indexer::RpcIndexer {
+                    consensus_db: self.finalized_state.db.clone(),
+                    rpc_index_db: rpc_index_db.clone(),
+                    network: self.non_finalized_state.network.clone(),
+                    disk_tip_height: disk_tip_height.clone(),
+                    shutdown: rpc_indexer_shutdown.clone(),
+                };
+                s.spawn(move || indexer.run());
+            }
 
             // Worker-local commit/disk-frontier state, no synchronization.
             let mut loop_state = WorkerLoopState {
@@ -201,6 +221,10 @@ impl WriteBlockWorker {
                     break;
                 }
             }
+
+            // Signal the trailing RPC indexer (if any) to stop parking and exit,
+            // so the scope join doesn't block on it.
+            rpc_indexer_shutdown.store(true, std::sync::atomic::Ordering::Release);
 
             // Dropping the sender drains and joins the disk writer: blocks
             // already acked reach disk, the guard drops, and the scope join

@@ -40,7 +40,7 @@ use crate::{
             block::TransactionLocation,
             transparent::{AddressBalanceLocationUpdates, OutputLocation},
         },
-        zebra_db::{metrics::block_precommit_metrics, ZebraDb},
+        zebra_db::{metrics::block_precommit_metrics, transparent::TransparentBatchKind, ZebraDb},
         FromDisk, RawBytes,
     },
     HashOrHeight,
@@ -622,6 +622,18 @@ impl ZebraDb {
                 .collect()
         }
 
+        // When the consensus / RPC write split is enabled, the RPC-only
+        // transparent indexes and balances are written by the trailing RPC
+        // indexer thread to the separate RPC index database, not here. The
+        // consensus write path then skips the address-balance read entirely (it
+        // is only used to derive those RPC-only writes), and writes only the
+        // consensus `utxo_by_out_loc` set. See `docs/design/state-write-split.md`.
+        let transparent_batch_kind = if self.rpc_index_db().is_some() {
+            TransparentBatchKind::ConsensusOnly
+        } else {
+            TransparentBatchKind::Combined
+        };
+
         // # Performance
         //
         // It's better to update entries in RocksDB with insertions over merge operations when there is no risk that
@@ -632,15 +644,19 @@ impl ZebraDb {
         // reading all of the pending merge operands (potentially hundreds), and applying pending merge operands to the
         // fully-merged value such that it's much faster to read entries that have been updated with insertions than it
         // is to read entries that have been updated with merge operations.
-        let address_balances: AddressBalanceLocationUpdates = if self.finished_format_upgrades() {
-            AddressBalanceLocationUpdates::Insert(read_addr_locs(changed_addresses, |addr| {
-                self.address_balance_location(addr)
-            }))
-        } else {
-            AddressBalanceLocationUpdates::Merge(read_addr_locs(changed_addresses, |addr| {
-                Some(self.address_balance_location(addr)?.into_new_change())
-            }))
-        };
+        let address_balances: AddressBalanceLocationUpdates =
+            if !transparent_batch_kind.writes_rpc_indexes() {
+                // The RPC indexer owns the balance derivation; skip the read here.
+                AddressBalanceLocationUpdates::Insert(HashMap::new())
+            } else if self.finished_format_upgrades() {
+                AddressBalanceLocationUpdates::Insert(read_addr_locs(changed_addresses, |addr| {
+                    self.address_balance_location(addr)
+                }))
+            } else {
+                AddressBalanceLocationUpdates::Merge(read_addr_locs(changed_addresses, |addr| {
+                    Some(self.address_balance_location(addr)?.into_new_change())
+                }))
+            };
 
         let mut batch = DiskWriteBatch::new();
 
@@ -657,6 +673,7 @@ impl ZebraDb {
             self.finalized_value_pool(),
             prev_note_commitment_trees,
             skip_value_pool_derivation,
+            transparent_batch_kind,
         )?;
 
         // Track batch commit latency for observability
@@ -722,6 +739,7 @@ impl DiskWriteBatch {
         value_pool: ValueBalance<NonNegative>,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
         skip_value_pool_derivation: bool,
+        transparent_batch_kind: TransparentBatchKind,
     ) -> Result<(), CommitCheckpointVerifiedError> {
         let db = &zebra_db.db;
 
@@ -748,8 +766,10 @@ impl DiskWriteBatch {
         // for the genesis block. This also ignores genesis shielded value pool updates, but there
         // aren't any of those on mainnet or testnet.
         if !finalized.height.is_min() {
-            // Commit transaction indexes
-            self.prepare_transparent_transaction_batch(
+            // Commit transaction indexes. `transparent_batch_kind` selects the
+            // consensus `utxo_by_out_loc` set, the RPC-only indexes, or both
+            // (the single-database default).
+            self.prepare_transparent_transaction_batch_split(
                 zebra_db,
                 network,
                 finalized,
@@ -758,6 +778,7 @@ impl DiskWriteBatch {
                 &spent_utxos_by_out_loc,
                 &out_loc_by_outpoint,
                 address_balances,
+                transparent_batch_kind,
             );
         }
 

@@ -36,6 +36,7 @@ pub mod block;
 pub mod chain;
 pub mod known_hash;
 pub mod metrics;
+pub mod rpc_index;
 pub mod shielded;
 pub mod transparent;
 
@@ -92,6 +93,27 @@ pub struct ZebraDb {
     /// writes, skipped per-block balances, and survivor-set elision). Shared by
     /// all clones (read-only after construction).
     snapshot_consume: Option<Arc<SnapshotConsumeState>>,
+
+    /// The optional separate "RPC index" database, holding only the RPC-only
+    /// column families (transparent address / balance / spent-tx indexes),
+    /// written by a thread that trails this consensus database.
+    ///
+    /// `None` (the default) when
+    /// [`Config::separate_rpc_index_db`](crate::Config::separate_rpc_index_db)
+    /// is off — every column family lives in this `ZebraDb` and the RPC-only
+    /// read accessors read from it directly.
+    ///
+    /// When `Some`, this `ZebraDb` is the consensus database (opened with the
+    /// consensus-only column families) and the RPC-only read accessors consult
+    /// this handle instead. Boxed to break the recursive type (a `ZebraDb`
+    /// containing a `ZebraDb`); the inner handle's own `rpc_index_db` is always
+    /// `None`. Shared by all clones via the inner `DiskDb`'s `Arc`.
+    //
+    // # Correctness
+    //
+    // The inner database is a normal `ZebraDb` with its own `Drop`, so the last
+    // clone closes it exactly like the consensus database.
+    rpc_index_db: Option<Box<ZebraDb>>,
 }
 
 impl ZebraDb {
@@ -144,14 +166,29 @@ impl ZebraDb {
             // file can only be changed while we hold the RocksDB database lock.
             db: DiskDb::new(
                 config,
-                db_kind,
+                &db_kind,
                 format_version_in_code,
                 network,
                 column_families_in_code,
                 read_only,
             ),
             snapshot_consume: None,
+            rpc_index_db: None,
         };
+
+        // Open the separate RPC index database, if configured. It lives under
+        // the consensus database directory, so it shares the version / network
+        // path and is cleaned up with it. Only the top-level (consensus)
+        // database opens one; the recursive call passes `false`.
+        if config.separate_rpc_index_db && !read_only {
+            db.rpc_index_db = Some(Box::new(Self::open_rpc_index_db(
+                config,
+                &db_kind,
+                format_version_in_code,
+                network,
+                debug_skip_format_upgrades,
+            )));
+        }
 
         // Load the optional snapshot-consume state, if configured. This is done
         // after the database is open so the fresh-DB guard can read the tip.
@@ -221,6 +258,91 @@ impl ZebraDb {
     /// survivor-set elision) instead of deriving state.
     pub fn snapshot_consume(&self) -> Option<&Arc<SnapshotConsumeState>> {
         self.snapshot_consume.as_ref()
+    }
+
+    /// Opens the separate RPC index database under the consensus database path.
+    ///
+    /// The RPC index database holds only the RPC-only column families
+    /// ([`RPC_INDEX_COLUMN_FAMILIES_IN_CODE`]) plus its own durable tip marker.
+    /// It is placed at `<consensus-db-path>/rpc-index` by deriving a config
+    /// whose `cache_dir` is the consensus database's full version / network
+    /// directory and whose `db_kind` directory is [`RPC_INDEX_DB_DIR`], so it is
+    /// co-located with, and cleaned up alongside, the consensus database.
+    ///
+    /// The inner database never opens its own RPC index database (the derived
+    /// config has `separate_rpc_index_db` cleared), avoiding infinite recursion.
+    ///
+    /// [`RPC_INDEX_COLUMN_FAMILIES_IN_CODE`]: crate::service::finalized_state::RPC_INDEX_COLUMN_FAMILIES_IN_CODE
+    /// [`RPC_INDEX_DB_DIR`]: crate::service::finalized_state::RPC_INDEX_DB_DIR
+    fn open_rpc_index_db(
+        config: &Config,
+        db_kind: impl AsRef<str>,
+        format_version_in_code: &Version,
+        network: &Network,
+        debug_skip_format_upgrades: bool,
+    ) -> ZebraDb {
+        use crate::service::finalized_state::{
+            RPC_INDEX_COLUMN_FAMILIES_IN_CODE, RPC_INDEX_DB_DIR,
+        };
+
+        // The consensus database's full version / network directory becomes the
+        // RPC index database's cache_dir, so the inner db_path resolves to
+        // <consensus-db-path>/rpc-index/v<major>/<network>.
+        let consensus_db_path = config.db_path(&db_kind, format_version_in_code.major, network);
+
+        let rpc_index_config = Config {
+            cache_dir: consensus_db_path,
+            // The inner database must never open its own RPC index database.
+            separate_rpc_index_db: false,
+            // The RPC index is non-consensus data; never skip its WAL or load a
+            // snapshot into it.
+            disable_wal_during_ibd: false,
+            snapshot_consume: None,
+            // It is a real on-disk database co-located with the consensus one,
+            // even when the consensus database is ephemeral the parent dir is a
+            // real temp dir, so keep ephemeral matched to the parent.
+            ephemeral: config.ephemeral,
+            ..config.clone()
+        };
+
+        ZebraDb::new(
+            &rpc_index_config,
+            RPC_INDEX_DB_DIR,
+            format_version_in_code,
+            network,
+            debug_skip_format_upgrades,
+            RPC_INDEX_COLUMN_FAMILIES_IN_CODE
+                .iter()
+                .map(ToString::to_string),
+            false,
+        )
+    }
+
+    /// Returns the separate RPC index database handle, if the consensus / RPC
+    /// write split is enabled
+    /// ([`Config::separate_rpc_index_db`](crate::Config::separate_rpc_index_db)).
+    ///
+    /// `None` for the single-database default path, in which the RPC-only column
+    /// families live in this database.
+    pub fn rpc_index_db(&self) -> Option<&ZebraDb> {
+        self.rpc_index_db.as_deref()
+    }
+
+    /// Returns the database holding the RPC-only column families: the separate
+    /// RPC index database when the split is enabled, otherwise this database.
+    ///
+    /// RPC-only read accessors use this so they transparently read from the
+    /// correct database in both configurations.
+    pub fn rpc_index_or_self(&self) -> &ZebraDb {
+        self.rpc_index_db.as_deref().unwrap_or(self)
+    }
+
+    /// Returns `true` if this database's own handle does not have the column
+    /// family `cf_name` (used to assert RPC-only column families are absent from
+    /// the consensus database in the write-split tests).
+    #[cfg(test)]
+    pub(crate) fn raw_cf_handle_is_none_for_test(&self, cf_name: &str) -> bool {
+        self.db.cf_handle(cf_name).is_none()
     }
 
     /// Sets the snapshot-consume state directly, for tests.
