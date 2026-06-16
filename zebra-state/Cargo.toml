@@ -1,6 +1,6 @@
 [package]
 name = "zebra-state"
-version = "9.0.0"
+version = "9.0.1"
 authors.workspace = true
 description = "State contextual verification and storage code for Zebra"
 license.workspace = true
