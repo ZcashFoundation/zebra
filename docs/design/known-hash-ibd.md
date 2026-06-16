@@ -1533,3 +1533,88 @@ The reason to build Stages 1 + 4 first is to **measure**: full-sync wall time
 current known-hash engine baseline, on the same hardware, for both Mainnet and
 Testnet. Measurement artifacts are generated locally from a synced state rolled
 back / stopped at `H_max`; no P2P distribution is needed to measure.
+
+## 17. Generic engine unification (carrying the wins to full-validation sync)
+
+The engine's wins — the auto-scaled window, the weighted batched fetch, the
+gap-hedge ladder, the arrival-time RAM/disk placement, and the any-order commit
+pipeline with reset recovery — are not specific to *known-hash* sync. The same
+machinery should drive the **full-validation** sync path (post-`H_max`, and any
+node with checkpoint sync disabled) so there is one engine, not the engine plus
+the bespoke `downloads.rs` Hedge/Retry/Timeout download stack. The cut is two
+trait seams; everything else is shared verbatim.
+
+### 17.1 The two seams
+
+- **`CommitStage`** — *what stage-2 does with a fetched block*. It is the tower
+  `Service<IbdBlock>` contract pinned to the engine's stage-2 response
+  (`block::Hash`) and error (`VerifyAndCommitError`) types, named by a marker
+  trait with a blanket impl, so the engine is generic over it and drives either
+  implementation with `oneshot`.
+  - `VerifyAndCommit` (known-hash): the merkle-root pin (`convert`) plus
+    `CommitCheckpointVerifiedBlock` (a finalized commit).
+  - `SemanticCommit` (full-validation): the zebra-consensus block verifier via
+    `Request::Commit` — semantic + contextual validation and a non-finalized
+    commit. This is the exact call the legacy `download_and_verify` makes per
+    block.
+- **`HashSource`** — *where the per-height hashes come from*. `hash(height) ->
+  Option<Hash>`, a `max_height()` the engine re-reads every loop pass (so it may
+  grow), `release_below`, and two ops the pinned list never needs: `extend`
+  (append a discovery round) and `invalidate_above` (a reorg).
+  - `KnownHashList` (pinned): fixed, checkpoint-anchored; `extend` /
+    `invalidate_above` are no-ops.
+  - A discovery source (later): wraps the `ObtainTips`/`ExtendTips` crawl, which
+    stays where it is and merely *feeds* the source instead of driving its own
+    download loop.
+
+### 17.2 What has landed
+
+Phases that each compile, lint, and test green on this branch:
+
+1. **`CommitStage` extracted.** `Engine<ZN, ZS, L>` became `Engine<ZN, C, L>`
+   where `C: CommitStage`; the state generic moved into the
+   `Engine<ZN, VerifyAndCommit<ZS>, L>` constructor impl, so `Engine::new` keeps
+   its `network` + `state` signature and the production caller is unchanged.
+2. **`HashList` generalized to `HashSource`,** with defaulted `extend` /
+   `invalidate_above`, and `run()` re-reading `max_height` each iteration so a
+   growing source extends the fetch window automatically.
+3. **`SemanticCommit` added** (additive, not yet wired): the second
+   `CommitStage` implementation, proving the seam drives full validation with
+   the window / fetch / hedge / commit machinery unchanged. Corrupt cached bytes
+   still fail as a verify-stage error before the verifier is reached, reusing the
+   engine's discard-and-refetch path. Covered by isolated `MockService` tests
+   mirroring the known-hash `convert_vectors`.
+
+### 17.3 What remains (and the honest hard parts)
+
+The remaining work rewires the production syncer and so is gated on a full
+genesis→tip sync test (Mainnet and Testnet); it is **not** landed:
+
+- **Discovery `HashSource`** wrapping `ObtainTips`/`ExtendTips`, feeding tentative
+  hashes via `extend`, and truncating via `invalidate_above` on reorg.
+- **Engine window-reorg op** (deferred from phase 2 deliberately): drop the
+  window slots above a reorg height, abort their in-flight fetches/hedges, evict
+  their cache entries, and roll back the RAM / commit-pipeline byte and block
+  accounting — then defer to the non-finalized state for commits already in
+  flight (which it reorgs itself). This mutates five counters and needs an
+  engine test harness (none exists yet — current tests cover `convert`,
+  `SemanticCommit`, and the cache, not a constructed `Engine`), so it lands with
+  its consumer rather than speculatively. The same phase reconciles
+  `restore_cache`, which currently scans the disk tier once against the initial
+  `max_height`: a growing source must rescan against the current range on
+  restart so it neither prunes valid look-ahead nor keeps orphaned heights.
+- **Error classification.** `VerifyAndCommitError` is shaped for the known-hash
+  path (`ConvertError`: fatal list diagnostics vs. peer-attributable corrupt
+  bodies). For discovery, a verifier failure is a peer-attributable *invalid
+  block* that should refetch from a different peer (or abandon the branch), not
+  route through the frontier commit-reset path. `SemanticCommit` currently maps
+  every verifier error to `Commit{..}` as a safe starting point; the real
+  classification is defined alongside the wiring.
+- **Discovery completion.** The pinned engine completes when `base > max_height`;
+  a tip-following source must not "complete" merely by catching up. Completion
+  becomes the syncer's call (it owns `SyncStatus` / `RecentSyncLengths`).
+- **Swap `ChainSync`'s internals** to construct the engine with the discovery
+  source + `SemanticCommit` behind the existing config, then **delete
+  `downloads.rs`**. What stays in `sync.rs`: discovery cadence, genesis
+  bootstrap, `SyncStatus` / `RecentSyncLengths` (mempool activation), and gossip
+  — the syncer becomes discovery + status plumbing around the shared engine.
