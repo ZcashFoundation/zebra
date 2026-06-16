@@ -1,0 +1,1681 @@
+#!/usr/bin/env bash
+# check-api — Detect public API and dependency changes across all
+# workspace crates.
+#
+# Compares every workspace crate between two git refs (baseline and head,
+# where head defaults to the working tree if dirty, else HEAD). Up to four
+# sections are emitted (sections 2 and 4 are opt-in):
+#
+#   1. Workspace dependency diff. Each dep is classified by the strongest
+#      kind it is used with across the workspace (runtime > build > dev).
+#      Optional runtime deps are labelled `runtime-opt`. Crates whose name
+#      ends in `-test` (or is exactly `zebra-test`) are excluded from
+#      classification so their transitive runtime deps don't masquerade as
+#      production deps. Workspace-internal crates are excluded entirely (the
+#      per-crate section already covers them).
+#
+#   2. Optional Cargo.lock diff (--with-lock). Transitive changes only;
+#      direct workspace deps are suppressed because they already appear in
+#      section 1.
+#
+#   3. Per-crate public API diff via `cargo public-api`.
+#
+#   4. Optional const/static value + doc-comment diff (--with-values).
+#      cargo-public-api compares signatures only, so a `pub const` whose value
+#      changes (e.g. 99 -> 1000) or an item whose doc text changes shows as
+#      "no change". This section catches those via rustdoc JSON.
+#
+# PREREQUISITES
+#   cargo install cargo-public-api
+#   jq
+#   a nightly toolchain (only for --with-values; builds rustdoc JSON)
+#
+# USAGE
+#   check-api [options] [<baseline> [<head>]]
+#
+# ARGUMENTS
+#   <baseline>    Git ref to compare against: branch name, tag, or commit SHA.
+#   <head>        Git ref to compare to.
+#
+# DEFAULT BEHAVIOR (when <head> is not given)
+#   The script picks `head` based on whether the working tree is dirty:
+#     - 0 args, dirty:  head = working tree, baseline = HEAD
+#     - 0 args, clean:  head = HEAD,         baseline = parent branch (upstream
+#                                                         tracking ref, or 'main')
+#     - 1 arg,  dirty:  head = working tree, baseline = <arg>
+#     - 1 arg,  clean:  head = HEAD,         baseline = <arg>
+#     - 2 args:         head = <arg2>,       baseline = <arg1>
+#
+#   "Working tree" includes both staged and unstaged changes plus any
+#   untracked files (so a brand-new .rs file shows as added API).
+#
+# OPTIONS
+#   -h, --help       Print this help message and exit.
+#   --with-lock      Also diff Cargo.lock for transitive dep changes.
+#   --with-values    Also diff public const/static values and doc text via
+#                    rustdoc JSON. Catches changes cargo-public-api can't see
+#                    (it is signature-only). Needs a nightly toolchain and
+#                    roughly doubles the rustdoc work, hence opt-in.
+#   --json           Emit a machine-readable JSON summary on stdout (all
+#                    human-readable output is suppressed). Schema:
+#                      {
+#                        baseline:     "<ref as given>",
+#                        baseline_sha: "<short sha>",
+#                        head:         "<ref as given, or 'working tree'>",
+#                        head_sha:     "<short sha>",
+#                        verdict:      "ok" | "breaking" | "error",
+#                        totals: {
+#                          removed, changed, added,  # API items
+#                          api_breaking,             # removed + changed
+#                          dep_breaking,             # breaking runtime deps
+#                          error_crates,             # cargo-public-api fails
+#                          value_changed,            # const/static value changes
+#                          doc_changed               # doc-comment changes
+#                        },
+#                        deps: {
+#                          removed: [ {name, version, kind} ],
+#                          changed: [ {name, old, new, bump, kind, features} ],
+#                          added:   [ {name, version, kind} ]
+#                        },
+#                        values: [ {crate, path, type, old, new} ],
+#                        docs:   [ {crate, path} ],
+#                        crates: [ {name, removed, changed, added, status} ]
+#                      }
+#                    Per-crate `status` is "ok" or "error"; an "error"
+#                    crate has removed/changed/added all zero because
+#                    cargo-public-api could not produce a diff.
+#
+# EXAMPLES
+#   check-api                     # if dirty: HEAD -> working tree
+#                                    # if clean: parent-branch -> HEAD
+#   check-api main                # if dirty: main -> working tree
+#                                    # if clean: main -> HEAD
+#   check-api v4.2.0              # if dirty: v4.2.0 -> working tree
+#                                    # if clean: v4.2.0 -> HEAD
+#   check-api v4.1.0 v4.2.0       # compare two arbitrary refs
+#   check-api --with-lock         # include transitive Cargo.lock diff
+#   check-api --with-values main  # also flag const/static value + doc changes
+#   check-api --json main         # machine-readable output for CI
+#
+# OUTPUT
+#   Sections are printed in order:
+#     1. Workspace dep diff — removed / changed / added.
+#        Colors: red = consumer-visible breaking (runtime major bump,
+#        runtime removal), yellow = changed but not breaking, dim =
+#        internal (build / dev / runtime-opt), green = added.
+#     2. Transitive Cargo.lock diff (only with --with-lock). Direct
+#        workspace deps are suppressed (already in section 1); each
+#        transitive crate is annotated with the direct deps that pull
+#        it in (`via foo, bar` — truncated to 3 with `...(+N)`).
+#     3. Per-crate public-API counts, one row per workspace crate:
+#          crate-name   -R  ~C  +A  [(additive)]
+#        Crates with only additions are tagged `(additive)` so reviewers
+#        can focus on breaking ones. Crates with no changes show as
+#        `no changes`; crates where cargo-public-api failed show as
+#        `error: <message>`.
+#     4. Summary table — aligned counts per crate plus a Total row,
+#        printed only if at least one crate changed. Zero counts are
+#        rendered as `-` for readability.
+#     5. Detailed diffs — for each changed crate, the removed / changed
+#        / added API items.
+#     6. Value/doc changes (only with --with-values) — const/static values
+#        shown as `old -> new` (counted as breaking), and public items whose
+#        doc-comment text changed (informational).
+#     7. Final verdict line: BREAKING / ERROR / OK with a one-line
+#        summary of the contributing factors.
+#   With --json a single JSON document is printed instead (schema above).
+#
+# ENVIRONMENT
+#   CARGO_TARGET_DIR   Used as the root for the dep-dump cache. When unset,
+#                      `target/check-api-cache/` is used. Cache entries are
+#                      keyed on the resolved baseline SHA plus a hash of
+#                      this script, so edits to the dep-diff logic
+#                      automatically invalidate prior caches. With --with-values
+#                      an additional persistent `<cache>/values-target/` holds
+#                      the shared rustdoc target tree; it is not cleaned on exit
+#                      and may grow large — delete it to reclaim space.
+#   CHECK_API_TOOLCHAIN  Nightly toolchain name used to build rustdoc JSON for
+#                        --with-values. Defaults to the first installed
+#                        `nightly*` toolchain.
+#   NO_COLOR           When set to any non-empty value, disables ANSI
+#                      color output (https://no-color.org).
+#
+# EXIT CODES
+#   0   No breaking changes. No API removals or signature changes, and no
+#       breaking runtime-dep removals, major bumps, or feature removals.
+#       Additive changes (new APIs, new deps) are fine. With --with-values,
+#       public doc-comment changes are reported but informational and do not
+#       affect the exit code.
+#   1   Either:
+#         - Breaking changes were detected (API removals/changes, or a
+#           runtime dep was removed / major-bumped / lost features), or
+#         - with --with-values, a public const/static value changed
+#           (signature-clean but consumer-visible), or
+#         - `cargo public-api` failed for at least one crate (treated as
+#           unknown state), or
+#         - An unrecoverable runtime error occurred (missing ref, lockfile
+#           out of sync, missing tools, etc).
+#       In `--json` mode the `verdict` field distinguishes these:
+#       "breaking" vs "error" (and "ok" for exit 0).
+
+set -euo pipefail
+
+# ── tunables ──────────────────────────────────────────────────────────
+# Regex (jq-syntax) matching crate names whose deps should be excluded
+# from the workspace dep classification. These are test-only crates
+# whose "runtime" deps are actually downstream test deps.
+TEST_CRATE_PATTERN='^(zebra-test|.*-test)$'
+
+# ── colors ────────────────────────────────────────────────────────────
+# Disabled when output is not a terminal, or when NO_COLOR is set to any
+# non-empty value (https://no-color.org).
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+    RED=$'\033[31m'
+    GREEN=$'\033[32m'
+    YELLOW=$'\033[33m'
+    BOLD=$'\033[1m'
+    DIM=$'\033[2m'
+    RESET=$'\033[0m'
+else
+    RED="" GREEN="" YELLOW="" BOLD="" DIM="" RESET=""
+fi
+
+# ── help ──────────────────────────────────────────────────────────────
+show_help() {
+    sed -n '/^#/!q; s/^# \{0,1\}//; 1d; p' "$0"
+}
+
+with_lock=false
+with_values=false
+json_mode=false
+while [ $# -gt 0 ]; do
+    case "$1" in
+    -h | --help)
+        show_help
+        exit 0
+        ;;
+    --with-lock)
+        with_lock=true
+        shift
+        ;;
+    --with-values)
+        with_values=true
+        shift
+        ;;
+    --json)
+        json_mode=true
+        shift
+        ;;
+    --)
+        shift
+        break
+        ;;
+    -*)
+        echo "${RED}error:${RESET} unknown option '$1' (run with --help for usage)" >&2
+        exit 1
+        ;;
+    *)
+        break
+        ;;
+    esac
+done
+
+# In JSON mode, silence colours and redirect human-readable output to
+# /dev/null so the final JSON document is the only thing on stdout.
+if $json_mode; then
+    RED="" GREEN="" YELLOW="" BOLD="" DIM="" RESET=""
+    exec 3>&1 >/dev/null
+fi
+
+# ── baseline detection ────────────────────────────────────────────────
+
+# Detect the parent branch to use when the user doesn't pass a baseline
+# AND the working tree is clean. Strategy, in order:
+#   1. If we're on 'main' (or HEAD is detached and there is no branch),
+#      use 'main' — comparing main to HEAD is the only useful default.
+#   2. Otherwise, if the current branch has an upstream tracking ref
+#      configured, use that (stripping a leading `origin/`).
+#   3. Fall back to 'main'.
+# Returning the upstream ref (not just "main") means feature branches
+# tracking release branches compare against the right target.
+detect_parent_branch() {
+    local current upstream
+    current=$(git branch --show-current 2>/dev/null)
+    if [ -z "$current" ] || [ "$current" = "main" ]; then
+        echo "main"
+        return
+    fi
+    upstream=$(git rev-parse --abbrev-ref "${current}@{upstream}" 2>/dev/null || true)
+    # Prefer the upstream ref verbatim (e.g. `origin/release-X`); fall back to
+    # the `origin/`-stripped name only if it resolves locally, else `main`.
+    # Returning a bare name that doesn't exist locally would abort the run when
+    # the baseline ref is verified.
+    if [ -n "$upstream" ] && git rev-parse --verify --quiet "$upstream" >/dev/null; then
+        echo "$upstream"
+    elif [ -n "$upstream" ] && git rev-parse --verify --quiet "${upstream#origin/}" >/dev/null; then
+        echo "${upstream#origin/}"
+    else
+        echo "main"
+    fi
+}
+
+# Is the working tree dirty? "Dirty" means any tracked file is modified
+# or staged, OR any untracked-and-non-ignored file exists. We use
+# `--porcelain` because it's the documented stable format and trivial
+# to test with `-n`.
+is_worktree_dirty() {
+    local out
+    out=$(git status --porcelain 2>/dev/null) || return 1
+    [ -n "$out" ]
+}
+
+# Synthesize a commit that captures the current working tree (tracked +
+# untracked + staged), parented at HEAD. Returns the commit SHA.
+#
+# The point: cargo-public-api's diff syntax requires two refs (it has
+# no "ref vs working tree" mode for git refs — only published versions).
+# We work around this by snapshotting the working tree into a real commit
+# object, *without* touching the working tree, the index, or the stash
+# list. Done with a temp index so `git add -A` doesn't disturb anything.
+#
+# The resulting commit isn't reachable from any branch, so it'll be
+# garbage-collected eventually. To keep it alive for the lifetime of
+# this script, the caller passes the SHA into cargo-public-api via the
+# normal ref-resolution path (it gets used immediately, before gc).
+worktree_snapshot_commit() {
+    local tmp_index head_sha tree commit
+    tmp_index=$(mktemp -p "$RUN_TMP" .index.XXXXXX)
+    # Seed the temp index with HEAD's tree, then add the entire working
+    # tree (including untracked files) on top.
+    if ! head_sha=$(git rev-parse --verify HEAD 2>/dev/null); then
+        echo "${RED}error:${RESET} cannot resolve HEAD (no commits yet?)" >&2
+        return 1
+    fi
+    GIT_INDEX_FILE="$tmp_index" git read-tree "$head_sha" 2>/dev/null || {
+        echo "${RED}error:${RESET} git read-tree HEAD failed" >&2
+        return 1
+    }
+    GIT_INDEX_FILE="$tmp_index" git add -A 2>/dev/null || {
+        echo "${RED}error:${RESET} git add -A failed (working tree snapshot)" >&2
+        return 1
+    }
+    tree=$(GIT_INDEX_FILE="$tmp_index" git write-tree) || {
+        echo "${RED}error:${RESET} git write-tree failed" >&2
+        return 1
+    }
+    commit=$(git commit-tree "$tree" -p "$head_sha" \
+        -m "[check-api worktree snapshot]" 2>/dev/null) || {
+        echo "${RED}error:${RESET} git commit-tree failed" >&2
+        return 1
+    }
+    rm -f "$tmp_index"
+    echo "$commit"
+}
+
+# Argument parsing — see "DEFAULT BEHAVIOR" in the doc header.
+#
+#   - 2 args: explicit baseline + head, no working-tree magic.
+#   - 0 or 1 args: head depends on whether the working tree is dirty:
+#       dirty → head = synthesized worktree-snapshot commit
+#       clean → head = HEAD (committed only)
+if [ $# -gt 2 ]; then
+    echo "${RED}error:${RESET} too many positional arguments, expected at most 2 (run with --help for usage)" >&2
+    exit 1
+fi
+
+# `head_label` is what we display in headings and error messages. For
+# the synthesized worktree commit, we don't want to expose the SHA
+# (it's an implementation detail) — show "working tree" instead.
+head_label=""
+
+# RUN_TMP is created later (it's needed for worktree_snapshot_commit),
+# so we defer dirty-detection until after that. Stash the desired mode
+# here as a flag and resolve below.
+mode_dirty=false
+if [ $# -lt 2 ] && is_worktree_dirty; then
+    mode_dirty=true
+fi
+
+if [ $# -ge 2 ]; then
+    baseline="$1"
+    head_ref="$2"
+    head_label="$2"
+elif [ $# -eq 1 ]; then
+    baseline="$1"
+    if $mode_dirty; then
+        head_ref="" # filled in below, after RUN_TMP exists
+        head_label="working tree"
+    else
+        head_ref="HEAD"
+        head_label="HEAD"
+    fi
+else
+    if $mode_dirty; then
+        baseline="HEAD"
+        head_ref="" # filled in below
+        head_label="working tree"
+    else
+        baseline=$(detect_parent_branch)
+        head_ref="HEAD"
+        head_label="HEAD"
+    fi
+fi
+
+# Verify the baseline ref exists. Head verification is deferred until
+# after RUN_TMP is set up (worktree-snapshot mode resolves head_ref then).
+if ! git rev-parse --verify "$baseline" >/dev/null 2>&1; then
+    echo "${RED}error:${RESET} unknown git ref '$baseline' (run with --help for usage)" >&2
+    exit 1
+fi
+if [ -n "$head_ref" ] && ! git rev-parse --verify "$head_ref" >/dev/null 2>&1; then
+    echo "${RED}error:${RESET} unknown git ref '$head_ref' (run with --help for usage)" >&2
+    exit 1
+fi
+
+# Verify cargo-public-api is installed.
+if ! cargo public-api --version >/dev/null 2>&1; then
+    echo "${RED}error:${RESET} cargo-public-api is not installed" >&2
+    echo "  install it with: cargo install cargo-public-api" >&2
+    exit 1
+fi
+
+# Verify jq is installed.
+if ! command -v jq >/dev/null 2>&1; then
+    echo "${RED}error:${RESET} jq is not installed" >&2
+    exit 1
+fi
+
+baseline_short=$(git rev-parse --short "$baseline" 2>/dev/null || echo "$baseline")
+
+# ── workspace dependency diff ─────────────────────────────────────────
+#
+# For each ref we snapshot the workspace dependency list via `cargo metadata`
+# in a detached worktree, then classify each workspace dep by the strongest
+# kind it is used with across the workspace:
+#
+#   runtime > build > dev > unused
+#
+# This lets us separate consumer-visible dep changes from internal/test-only
+# ones. `cargo metadata` also resolves feature flags and renames accurately,
+# which a `sed` parse of `Cargo.toml` cannot.
+
+# Classify a version bump: returns "major", "minor", or "patch".
+# For 0.x crates, a minor bump (0.1 -> 0.2) is treated as major per semver.
+# Pre-release (-rc1) and build-metadata (+abc) suffixes are stripped before
+# comparing — they don't affect semver precedence at the major/minor/patch
+# level.
+classify_bump() {
+    local old=${1%%[-+]*} new=${2%%[-+]*}
+    local old_major=${old%%.*} new_major=${new%%.*}
+    if [ "$old_major" != "$new_major" ]; then
+        echo "major"
+        return
+    fi
+    local old_rest=${old#*.} new_rest=${new#*.}
+    local old_minor=${old_rest%%.*} new_minor=${new_rest%%.*}
+    if [ "$old_minor" != "$new_minor" ]; then
+        if [ "$old_major" = "0" ]; then echo "major"; else echo "minor"; fi
+        return
+    fi
+    echo "patch"
+}
+
+# Portable SHA-1 of a file, printing the first 12 hex chars. Tries
+# sha1sum (GNU), shasum (macOS/BSD/Perl), then openssl. Fails loudly if
+# none are available — silently falling back to non-hash mtime data
+# would break the "edits to this script invalidate the cache" contract.
+sha1_short() {
+    if command -v sha1sum >/dev/null 2>&1; then
+        sha1sum "$1" | cut -c1-12
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 1 "$1" | cut -c1-12
+    elif command -v openssl >/dev/null 2>&1; then
+        openssl dgst -sha1 "$1" | awk '{print $NF}' | cut -c1-12
+    else
+        echo "${RED}error:${RESET} no SHA-1 tool found (install sha1sum, shasum, or openssl)" >&2
+        exit 1
+    fi
+}
+
+# List workspace crate names (one per line), sorted. Used by both the
+# per-crate API-diff loop and the lock-diff direct-dep filter.
+workspace_crate_names() {
+    cargo metadata --no-deps --format-version 1 2>/dev/null |
+        jq -r '
+            (.workspace_members) as $ws |
+            [.packages[] | select(.id as $id | $ws | index($id)) | .name]
+            | sort[]
+        '
+}
+
+# Cache directory for resolved dep dumps. Keyed on the ref's resolved SHA
+# plus a hash of this script, so edits to the jq query invalidate the cache.
+CACHE_DIR="${CARGO_TARGET_DIR:-target}/check-api-cache"
+SCRIPT_HASH=$(sha1_short "$0")
+mkdir -p "$CACHE_DIR" 2>/dev/null || true
+
+# Per-run temp directory for worktrees; cleaned on exit. Each worktree gets
+# a unique subdir under here, so a single EXIT trap handles all of them
+# (including the case where the script aborts mid-run).
+RUN_TMP=$(mktemp -d)
+cleanup_run_tmp() {
+    # Best-effort: remove any worktrees still registered, then nuke the dir.
+    if [ -d "$RUN_TMP" ]; then
+        for wt in "$RUN_TMP"/*; do
+            [ -d "$wt" ] || continue
+            git worktree remove --force "$wt" >/dev/null 2>&1 || true
+        done
+        rm -rf "$RUN_TMP"
+    fi
+}
+trap cleanup_run_tmp EXIT
+
+# If we deferred head_ref resolution (worktree-snapshot mode), do it now
+# that RUN_TMP exists. The synthesized commit object is parented at HEAD
+# and contains the working tree's tracked + untracked + staged contents.
+#
+# `api_cwd` is where the per-crate `cargo public-api ... diff A..B` loop
+# runs from. cargo-public-api's git-ref diff mode performs `git checkout`
+# in CWD, which would conflict with the user's dirty working tree, so
+# in worktree-snapshot mode we point it at a dedicated detached worktree
+# parked at the snapshot commit. In normal (clean) mode we just stay in
+# the user's repo root.
+api_cwd="$PWD"
+if [ -z "$head_ref" ]; then
+    head_ref=$(worktree_snapshot_commit) || exit 1
+    api_cwd=$(mktemp -d -p "$RUN_TMP" snapshot.XXXXXX)
+    if ! git worktree add --detach --quiet "$api_cwd" "$head_ref" 2>/dev/null; then
+        echo "${RED}error:${RESET} failed to create worktree for working-tree snapshot" >&2
+        exit 1
+    fi
+fi
+
+head_short=$(git rev-parse --short "$head_ref" 2>/dev/null || echo "$head_ref")
+
+# Pre-resolve full-length SHAs for baseline + head so downstream
+# `cargo public-api ... diff $base..$head` doesn't have to re-resolve
+# the refs in a worktree where `HEAD` may point somewhere else.
+baseline_sha=$(git rev-parse --verify "$baseline" 2>/dev/null) || {
+    echo "${RED}error:${RESET} cannot resolve baseline ref '$baseline'" >&2
+    exit 1
+}
+head_sha=$(git rev-parse --verify "$head_ref" 2>/dev/null) || {
+    echo "${RED}error:${RESET} cannot resolve head ref" >&2
+    exit 1
+}
+
+echo "${BOLD}Comparing public API: ${baseline}${RESET}${DIM} (${baseline_short})${RESET} ${BOLD}-> ${head_label}${RESET}${DIM} (${head_short})${RESET}"
+echo ""
+
+# Dump one TSV row per workspace dependency at a ref. Columns are:
+#
+#   name    Display key — the dep's rename if any, otherwise its real
+#           crate name. If renamed, formatted as "foo (pkg: bar)".
+#   ver     Version requirement from Cargo.toml (leading "^" stripped).
+#   kind    Strongest kind across all usages: runtime | build | dev |
+#           unused.
+#   opt     "opt" if every max-kind usage is optional, else "req".
+#   def     "def" if any usage enables default features, else "nodef".
+#   feat    Comma-joined sorted union of explicitly-enabled features
+#           across usages (empty if none).
+#
+# Uses `git worktree add --detach` so the current tree is untouched, and
+# `cargo metadata --no-deps` so only workspace crates are inspected (fast,
+# no network, no registry pull unless lockfile is missing).
+#
+# Results are cached under $CACHE_DIR keyed on ref-SHA + script hash, so
+# edits to this script's jq query automatically invalidate prior caches.
+dump_workspace_deps() {
+    local ref=$1
+    local sha
+    sha=$(git rev-parse --verify "$ref" 2>/dev/null) || {
+        echo "${RED}error:${RESET} cannot resolve ref '$ref'" >&2
+        return 1
+    }
+    local cache_file="$CACHE_DIR/${sha}.${SCRIPT_HASH}.tsv"
+    if [ -s "$cache_file" ]; then
+        cat "$cache_file"
+        return 0
+    fi
+
+    # Worktree lives under RUN_TMP so the script-level EXIT trap cleans it
+    # up even if we abort partway through.
+    local tmp
+    tmp=$(mktemp -d -p "$RUN_TMP")
+
+    if ! git worktree add --detach --quiet "$tmp" "$ref" 2>/dev/null; then
+        echo "${RED}error:${RESET} failed to create worktree for '$ref'" >&2
+        return 1
+    fi
+
+    # A stale Cargo.lock at `$ref` would cause cargo to resolve against
+    # the current registry instead of the locked versions, producing
+    # results that don't match what CI would see. Rather than silently
+    # "retry without --locked" and report a drifted answer, surface the
+    # failure loudly so the user knows the dep diff may be misleading.
+    local meta
+    if ! meta=$(cargo metadata --manifest-path "$tmp/Cargo.toml" \
+        --no-deps --format-version 1 --locked 2>/dev/null); then
+        echo "${RED}error:${RESET} lockfile out of sync at '$ref' (cargo metadata --locked failed)" >&2
+        echo "${DIM}  either update Cargo.lock at that ref, or re-run without --locked by editing this script${RESET}" >&2
+        return 1
+    fi
+
+    # Collect (name, kind, features) triples from every non-test workspace
+    # crate's dependencies. Then for each name, pick the strongest kind
+    # (runtime > build > dev > unused) and the union of all explicitly-enabled
+    # features across usages.
+    #
+    # Crates whose sole purpose is test infrastructure (matching `*-test` or
+    # named `zebra-test`) are excluded from classification, because their
+    # "runtime" deps are downstream crates' test deps and would otherwise
+    # upgrade every dev-dep to runtime in the merged view.
+    #
+    # Workspace-internal crates (those listed in `workspace_members`) are
+    # excluded from the output entirely, because their versions are covered
+    # by the per-crate public-API diff section.
+    jq -r --arg test_pat "$TEST_CRATE_PATTERN" '
+        def kind_rank:
+            {"runtime": 3, "build": 2, "dev": 1, "unused": 0}[.];
+
+        def is_test_crate($n):
+            $n | test($test_pat);
+
+        # Kind of a single dep entry. null kind == runtime in cargo metadata.
+        def entry_kind:
+            if .kind == null or .kind == "normal" then "runtime"
+            elif .kind == "build" then "build"
+            elif .kind == "dev" then "dev"
+            else "runtime"
+            end;
+
+        # Display key for a dep: the rename if one is set (matching what
+        # appears in Cargo.toml), otherwise the real crate name.
+        def disp_key: (.rename // .name);
+
+        # Names of workspace-internal crates, to filter them out below.
+        # Resolved by joining .workspace_members (list of package IDs) against
+        # .packages[].id + .name.
+        (.workspace_members) as $ws_ids |
+        ([ .packages[]
+           | select(.id as $id | $ws_ids | index($id))
+           | .name
+         ]) as $ws_names |
+
+        # Per-dep usage across non-test workspace crates: kind + features
+        # + optionality. A dep is considered "optional" only if every usage
+        # that resolves to its strongest kind is marked optional.
+        #
+        # Keying on `disp_key` means `foo = { package = "bar" }` is tracked
+        # as `foo (pkg: bar)`, matching what appears in Cargo.toml.
+        (
+          [ .packages[]
+            | select(is_test_crate(.name) | not)
+            | .dependencies[]
+            | {
+                key: disp_key,
+                real_name: .name,
+                kind: entry_kind,
+                optional: (.optional // false),
+                uses_default: (.uses_default_features // true),
+                features: (.features // [])
+              }
+          ]
+          | group_by(.key)
+          | map(
+              . as $entries |
+              ($entries | map(.kind) | max_by(kind_rank)) as $max_kind |
+              {
+                key: .[0].key,
+                real_name: .[0].real_name,
+                kind: $max_kind,
+                optional: (
+                  [ $entries[] | select(.kind == $max_kind) | .optional ]
+                  | all
+                ),
+                # Defaults are "on" if any usage enables them.
+                uses_default: (map(.uses_default) | any),
+                features: (map(.features) | add | unique)
+              }
+            )
+        ) as $used |
+
+        # Workspace-level dep table (source of versions). Strip the leading
+        # "^" cargo inserts for caret requirements so the output matches
+        # what a human typed in Cargo.toml.
+        (
+          [ .packages[]
+            | select(is_test_crate(.name) | not)
+            | .dependencies[]
+            | {
+                key: disp_key,
+                real_name: .name,
+                req: ((.req // "-") | sub("^\\^"; ""))
+              }
+          ]
+          | unique_by(.key)
+        ) as $declared |
+
+        # Merge usage kinds/features/optionality into the declared list,
+        # filter out workspace-internal crates, and emit TSV. The display
+        # key (column 1) uses the renamed-as name; if the crate is renamed,
+        # the real crate name is appended as "name (pkg: real)".
+        (
+          ($used | map({(.key): .}) | add // {}) as $by_key |
+          $declared
+          | map(. + ($by_key[.key] // {kind: "unused", optional: false, uses_default: true, features: []}))
+          | map(select(.key as $k | ($ws_names | index($k)) | not))
+          | unique_by(.key)
+          | sort_by(.key)
+          | .[]
+          | [
+              (if .key == .real_name then .key
+               else "\(.key) (pkg: \(.real_name))" end),
+              .req,
+              .kind,
+              (if .optional then "opt" else "req" end),
+              (if .uses_default then "def" else "nodef" end),
+              (.features | sort | join(","))
+            ] | @tsv
+        )
+    ' <<<"$meta" >"$cache_file.tmp" || {
+        rm -f "$cache_file.tmp"
+        echo "${RED}error:${RESET} jq failed processing metadata for '$ref'" >&2
+        return 1
+    }
+    mv "$cache_file.tmp" "$cache_file"
+    cat "$cache_file"
+}
+
+base_dump=$(dump_workspace_deps "$baseline") || exit 1
+head_dump=$(dump_workspace_deps "$head_ref") || exit 1
+
+# Build two maps keyed on dep name. Each value is the dep's record
+# columns 2-6 (ver, kind, opt, def, feat) tab-joined into a single
+# string, so we only need two associative arrays instead of one per
+# column. `split_dep` below unpacks a record back into positional
+# globals DEP_VER / DEP_KIND / DEP_OPT / DEP_DEF / DEP_FEAT.
+declare -A base_dep head_dep
+while IFS=$'\t' read -r name ver kind opt def feat; do
+    [ -z "$name" ] && continue
+    base_dep[$name]=$(printf '%s\t%s\t%s\t%s\t%s' "$ver" "$kind" "$opt" "$def" "$feat")
+done <<<"$base_dump"
+while IFS=$'\t' read -r name ver kind opt def feat; do
+    [ -z "$name" ] && continue
+    head_dep[$name]=$(printf '%s\t%s\t%s\t%s\t%s' "$ver" "$kind" "$opt" "$def" "$feat")
+done <<<"$head_dump"
+
+# Split a "ver\tkind\topt\tdef\tfeat" record into the named global vars.
+split_dep() {
+    IFS=$'\t' read -r DEP_VER DEP_KIND DEP_OPT DEP_DEF DEP_FEAT <<<"$1"
+}
+
+# Rank a kind for "strongest kind wins" comparisons.
+kind_rank() {
+    case "$1" in
+    runtime | runtime-opt) echo 3 ;;
+    build) echo 2 ;;
+    dev) echo 1 ;;
+    *) echo 0 ;;
+    esac
+}
+
+# Format a kind label including optionality: "runtime-opt", "runtime", etc.
+kind_label() {
+    local kind=$1 opt=$2
+    if [ "$opt" = "opt" ] && [ "$kind" = "runtime" ]; then
+        echo "runtime-opt"
+    else
+        echo "$kind"
+    fi
+}
+
+# Diff two comma-separated feature lists plus a default-features toggle.
+# Output "+a,-b,+c" style. Default-feature toggles are surfaced first
+# and suffixed with `!` so they stand out, and are tracked separately
+# from the feature list so a hypothetical feature literally named
+# "default" can never be conflated with the default-features flag:
+#
+#   -default!,+std,-foo       # lost defaults, gained std, lost foo
+feature_diff() {
+    local old_def=$1 new_def=$2 old_feat=$3 new_feat=$4
+    local default_entry=""
+    if [ "$old_def" != "$new_def" ]; then
+        if [ "$old_def" = "def" ]; then
+            default_entry="-default!"
+        else
+            default_entry="+default!"
+        fi
+    fi
+    local rest=() f
+    if [ "$old_feat" != "$new_feat" ]; then
+        local -A in_old in_new
+        IFS=',' read -ra old_arr <<<"$old_feat"
+        IFS=',' read -ra new_arr <<<"$new_feat"
+        for f in "${old_arr[@]}"; do [ -n "$f" ] && in_old[$f]=1; done
+        for f in "${new_arr[@]}"; do [ -n "$f" ] && in_new[$f]=1; done
+        for f in "${!in_old[@]}"; do
+            [ -z "${in_new[$f]+x}" ] && rest+=("-$f")
+        done
+        for f in "${!in_new[@]}"; do
+            [ -z "${in_old[$f]+x}" ] && rest+=("+$f")
+        done
+    fi
+    local sorted=()
+    if [ ${#rest[@]} -gt 0 ]; then
+        readarray -t sorted < <(printf '%s\n' "${rest[@]}" | sort)
+    fi
+    local out=()
+    [ -n "$default_entry" ] && out+=("$default_entry")
+    out+=("${sorted[@]}")
+    (
+        IFS=','
+        echo "${out[*]}"
+    )
+}
+
+dep_removed=()
+dep_changed=()
+dep_added=()
+dep_breaking_count=0
+
+# Walk base_dep for removed + changed deps, then walk head_dep for added
+# deps (names not in base_dep). Each iteration splits the record, compares
+# fields, and pushes into the matching bucket. Breaking classification is
+# intentionally narrow — `dep_breaking_count` only ticks up for runtime
+# (non-optional) deps that are removed, major-bumped, or lose features /
+# default-features. Changes to build-only, dev-only, or runtime-opt deps
+# don't affect the verdict.
+for name in "${!base_dep[@]}"; do
+    split_dep "${base_dep[$name]}"
+    old_ver=$DEP_VER old_kind=$DEP_KIND old_opt=$DEP_OPT old_def=$DEP_DEF old_feat=$DEP_FEAT
+    if [ -z "${head_dep[$name]+x}" ]; then
+        label=$(kind_label "$old_kind" "$old_opt")
+        dep_removed+=("$name|$old_ver|$label")
+        [ "$label" = "runtime" ] && dep_breaking_count=$((dep_breaking_count + 1))
+        continue
+    fi
+    split_dep "${head_dep[$name]}"
+    new_ver=$DEP_VER new_kind=$DEP_KIND new_opt=$DEP_OPT new_def=$DEP_DEF new_feat=$DEP_FEAT
+    if [ "$old_ver" = "$new_ver" ] && [ "$old_kind" = "$new_kind" ] &&
+        [ "$old_opt" = "$new_opt" ] && [ "$old_def" = "$new_def" ] &&
+        [ "$old_feat" = "$new_feat" ]; then
+        continue
+    fi
+    bump=$(classify_bump "$old_ver" "$new_ver")
+    # Strongest kind across old/new determines display color.
+    if [ "$(kind_rank "$new_kind")" -ge "$(kind_rank "$old_kind")" ]; then
+        kind=$new_kind opt=$new_opt
+    else
+        kind=$old_kind opt=$old_opt
+    fi
+    label=$(kind_label "$kind" "$opt")
+    feat_delta=$(feature_diff "$old_def" "$new_def" "$old_feat" "$new_feat")
+    dep_changed+=("$name|$old_ver|$new_ver|$bump|$label|$feat_delta")
+    if [ "$label" = "runtime" ]; then
+        # A removed feature or lost default (`-name` / `-default!`) is breaking;
+        # a hyphen *inside* an added feature name (`+async-std`) is not.
+        feat_breaking=false
+        if [ -n "$feat_delta" ]; then
+            IFS=',' read -ra feat_toks <<<"$feat_delta"
+            for ft in "${feat_toks[@]}"; do
+                [[ "$ft" == -* ]] && { feat_breaking=true; break; }
+            done
+        fi
+        if [ "$bump" = "major" ] || $feat_breaking; then
+            dep_breaking_count=$((dep_breaking_count + 1))
+        fi
+    fi
+done
+for name in "${!head_dep[@]}"; do
+    if [ -z "${base_dep[$name]+x}" ]; then
+        split_dep "${head_dep[$name]}"
+        label=$(kind_label "$DEP_KIND" "$DEP_OPT")
+        dep_added+=("$name|$DEP_VER|$label")
+    fi
+done
+
+# Sort each bucket by name for stable output. Guard empty inputs so
+# `readarray` doesn't insert a single empty element.
+[ ${#dep_removed[@]} -gt 0 ] && readarray -t dep_removed < <(printf '%s\n' "${dep_removed[@]}" | sort)
+[ ${#dep_changed[@]} -gt 0 ] && readarray -t dep_changed < <(printf '%s\n' "${dep_changed[@]}" | sort)
+[ ${#dep_added[@]} -gt 0 ] && readarray -t dep_added < <(printf '%s\n' "${dep_added[@]}" | sort)
+
+if [ $((${#dep_removed[@]} + ${#dep_changed[@]} + ${#dep_added[@]})) -gt 0 ]; then
+    echo "${BOLD}Dependency changes${RESET}${DIM} (kind: runtime = consumer-visible, build/dev = internal)${RESET}"
+    echo ""
+
+    if [ ${#dep_removed[@]} -gt 0 ]; then
+        echo "  ${RED}Removed (${#dep_removed[@]}):${RESET}"
+        for entry in "${dep_removed[@]}"; do
+            IFS='|' read -r name ver kind <<<"$entry"
+            # runtime = red (breaking); runtime-opt/build = yellow; dev = dim.
+            case "$kind" in
+            runtime) color=$RED ;;
+            runtime-opt | build) color=$YELLOW ;;
+            *) color=$DIM ;;
+            esac
+            printf "    ${color}- %s %s${RESET} ${DIM}[%s]${RESET}\n" "$name" "$ver" "$kind"
+        done
+        echo ""
+    fi
+
+    if [ ${#dep_changed[@]} -gt 0 ]; then
+        echo "  ${YELLOW}Changed (${#dep_changed[@]}):${RESET}"
+        max_len=0
+        for entry in "${dep_changed[@]}"; do
+            IFS='|' read -r name _ _ _ _ _ <<<"$entry"
+            [ ${#name} -gt "$max_len" ] && max_len=${#name}
+        done
+        for entry in "${dep_changed[@]}"; do
+            IFS='|' read -r name old new bump kind feat_delta <<<"$entry"
+            # Major bumps on runtime (non-optional) deps are consumer-visible
+            # breaking. Optional runtime deps, build deps, and dev deps are
+            # downgraded.
+            color="$YELLOW"
+            if [ "$bump" = "major" ] && [ "$kind" = "runtime" ]; then
+                color="$RED"
+            elif [ "$kind" = "dev" ] || [ "$kind" = "build" ] || [ "$kind" = "runtime-opt" ]; then
+                color="$DIM"
+            fi
+            if [ "$old" = "$new" ]; then
+                # Version unchanged; only kind or features differ.
+                printf "    ${color}%-${max_len}s  %s${RESET} ${DIM}[%s]${RESET}" \
+                    "$name" "$old" "$kind"
+            else
+                printf "    ${color}%-${max_len}s  %s -> %s  (%s)${RESET} ${DIM}[%s]${RESET}" \
+                    "$name" "$old" "$new" "$bump" "$kind"
+            fi
+            if [ -n "$feat_delta" ]; then
+                printf " ${DIM}features:${RESET} %s" "$feat_delta"
+            fi
+            printf "\n"
+        done
+        echo ""
+    fi
+
+    if [ ${#dep_added[@]} -gt 0 ]; then
+        echo "  ${GREEN}Added (${#dep_added[@]}):${RESET}"
+        for entry in "${dep_added[@]}"; do
+            IFS='|' read -r name ver kind <<<"$entry"
+            printf "    ${GREEN}+ %s %s${RESET} ${DIM}[%s]${RESET}\n" "$name" "$ver" "$kind"
+        done
+        echo ""
+    fi
+fi
+
+# ── Cargo.lock diff (opt-in) ──────────────────────────────────────────
+#
+# Parses the resolved `[[package]]` table from Cargo.lock at each ref and
+# reports transitive version changes. Direct-dep changes already appear in
+# the workspace dep diff above and are suppressed here.
+
+if $with_lock; then
+    # Extract "name@version" lines from Cargo.lock at a ref.
+    #
+    # Walks the TOML `[[package]]` blocks line-by-line (fast and dep-free
+    # vs pulling in a TOML parser). A blank line terminates the block and
+    # triggers the emit. The END action catches the edge case of a lock
+    # file that ends without a trailing blank line — rare, but cargo
+    # doesn't guarantee one, so the last package would otherwise be lost.
+    extract_lock() {
+        git show "$1:Cargo.lock" 2>/dev/null | awk '
+            /^\[\[package\]\]/ { name=""; version=""; in_pkg=1; next }
+            in_pkg && /^name *= *"/  { sub(/^name *= *"/, ""); sub(/"$/, ""); name=$0 }
+            in_pkg && /^version *= *"/ { sub(/^version *= *"/, ""); sub(/"$/, ""); version=$0 }
+            in_pkg && /^$/ {
+                if (name != "" && version != "") print name "@" version
+                name=""; version=""; in_pkg=0
+            }
+            END {
+                if (in_pkg && name != "" && version != "") print name "@" version
+            }
+        ' | sort -u
+    }
+
+    base_lock=$(extract_lock "$baseline") || base_lock=""
+    head_lock=$(extract_lock "$head_ref") || head_lock=""
+
+    if [ -z "$base_lock" ] || [ -z "$head_lock" ]; then
+        echo "${YELLOW}warning:${RESET} Cargo.lock missing at one or both refs; skipping lock diff" >&2
+    else
+        # Declared workspace-dep names (to suppress direct deps) plus the
+        # workspace-internal crate names themselves — the latter always
+        # appear in Cargo.lock for the workspace, but their versions are
+        # covered by the per-crate public-API section and shouldn't show
+        # up again here.
+        declare -A direct_names=()
+        for n in "${!base_dep[@]}" "${!head_dep[@]}"; do
+            direct_names[$n]=1
+            # Renamed deps display as `foo (pkg: real)`; Cargo.lock and
+            # cargo-tree use the real name, so register that too.
+            if [[ "$n" == *" (pkg: "* ]]; then
+                real=${n##* (pkg: }
+                direct_names[${real%)}]=1
+            fi
+        done
+        while IFS= read -r n; do
+            [ -n "$n" ] && direct_names[$n]=1
+        done < <(workspace_crate_names)
+
+        # Lock files can list the same crate at multiple major versions
+        # (e.g. `foo 1.2.0` and `foo 2.0.0` coexisting). Comma-join them
+        # into a single slot per crate so the removed/changed/added logic
+        # below compares the *set* of versions — a multi-version crate
+        # only appears in `changed` if the set actually differs.
+        declare -A base_lock_ver head_lock_ver
+        while IFS='@' read -r name ver; do
+            [ -z "$name" ] && continue
+            if [ -n "${base_lock_ver[$name]+x}" ]; then
+                base_lock_ver[$name]="${base_lock_ver[$name]},$ver"
+            else
+                base_lock_ver[$name]=$ver
+            fi
+        done <<<"$base_lock"
+        while IFS='@' read -r name ver; do
+            [ -z "$name" ] && continue
+            if [ -n "${head_lock_ver[$name]+x}" ]; then
+                head_lock_ver[$name]="${head_lock_ver[$name]},$ver"
+            else
+                head_lock_ver[$name]=$ver
+            fi
+        done <<<"$head_lock"
+
+        lock_changed=()
+        lock_added=()
+        lock_removed=()
+        for name in "${!base_lock_ver[@]}"; do
+            # Skip if this is a direct workspace dep (already reported above).
+            [ -n "${direct_names[$name]+x}" ] && continue
+            old=${base_lock_ver[$name]}
+            new=${head_lock_ver[$name]:-}
+            if [ -z "$new" ]; then
+                lock_removed+=("$name|$old")
+            elif [ "$old" != "$new" ]; then
+                lock_changed+=("$name|$old|$new")
+            fi
+        done
+        for name in "${!head_lock_ver[@]}"; do
+            [ -n "${direct_names[$name]+x}" ] && continue
+            [ -z "${base_lock_ver[$name]+x}" ] &&
+                lock_added+=("$name|${head_lock_ver[$name]}")
+        done
+
+        # Sort by name for stable output. Guard empty inputs so
+        # `readarray` doesn't insert a single empty element.
+        [ ${#lock_removed[@]} -gt 0 ] && readarray -t lock_removed < <(printf '%s\n' "${lock_removed[@]}" | sort)
+        [ ${#lock_changed[@]} -gt 0 ] && readarray -t lock_changed < <(printf '%s\n' "${lock_changed[@]}" | sort)
+        [ ${#lock_added[@]} -gt 0 ] && readarray -t lock_added < <(printf '%s\n' "${lock_added[@]}" | sort)
+
+        # Build a reverse attribution map: for each transitive crate,
+        # record the *direct* workspace-level deps that pull it in.
+        #
+        # Done in a single forward pass: run `cargo tree --prefix=depth`
+        # from the workspace root and, while walking each dependency
+        # chain, remember the last workspace-declared dep seen. Every
+        # subsequent crate under that chain is attributed to it.
+        #
+        # This replaces the prior per-crate `cargo tree -i` invocation
+        # (one subprocess per transitive change) with a single subprocess.
+        declare -A attrib
+        current_direct=""
+        while IFS= read -r line; do
+            [[ "$line" =~ ^([0-9]+)([^[:space:]]+) ]] || continue
+            depth=${BASH_REMATCH[1]}
+            name=${BASH_REMATCH[2]}
+            if [ "$depth" = "0" ]; then
+                # Reset anchor for this workspace root's subtree.
+                current_direct=""
+                continue
+            fi
+            # If this crate is itself a direct workspace-declared dep,
+            # it becomes the anchor for everything below it.
+            if [ -n "${direct_names[$name]+x}" ]; then
+                current_direct=$name
+                continue
+            fi
+            # Otherwise, if we're under an anchor, attribute this crate.
+            [ -z "$current_direct" ] && continue
+            # Dedup: append only if not already recorded for this crate.
+            existing=${attrib[$name]:-}
+            case ",$existing," in
+            *",$current_direct,"*) ;;
+            *)
+                if [ -z "$existing" ]; then
+                    attrib[$name]=$current_direct
+                else
+                    attrib[$name]="$existing,$current_direct"
+                fi
+                ;;
+            esac
+        done < <(cargo tree --prefix=depth --edges=normal --workspace 2>/dev/null || true)
+
+        # Return the attribution string for one crate (empty if none),
+        # truncated to 3 sources with "...(+N)".
+        attribute_transitive() {
+            local raw=${attrib[$1]:-}
+            [ -z "$raw" ] && {
+                echo ""
+                return
+            }
+            IFS=',' read -ra parts <<<"$raw"
+            if [ ${#parts[@]} -le 3 ]; then
+                echo "$raw"
+            else
+                printf '%s,%s,%s,...(+%d)\n' \
+                    "${parts[0]}" "${parts[1]}" "${parts[2]}" "$((${#parts[@]} - 3))"
+            fi
+        }
+
+        if [ $((${#lock_removed[@]} + ${#lock_changed[@]} + ${#lock_added[@]})) -gt 0 ]; then
+            echo "${BOLD}Transitive (Cargo.lock) changes${RESET}${DIM} (direct deps already reported above)${RESET}"
+            echo ""
+            if [ ${#lock_changed[@]} -gt 0 ]; then
+                echo "  ${YELLOW}Changed (${#lock_changed[@]}):${RESET}"
+                max_len=0
+                for entry in "${lock_changed[@]}"; do
+                    IFS='|' read -r name _ _ <<<"$entry"
+                    [ ${#name} -gt "$max_len" ] && max_len=${#name}
+                done
+                for entry in "${lock_changed[@]}"; do
+                    IFS='|' read -r name old new <<<"$entry"
+                    via=$(attribute_transitive "$name")
+                    if [ -n "$via" ]; then
+                        printf "    ${YELLOW}%-${max_len}s  %s -> %s${RESET} ${DIM}via %s${RESET}\n" \
+                            "$name" "$old" "$new" "$via"
+                    else
+                        printf "    ${YELLOW}%-${max_len}s  %s -> %s${RESET}\n" "$name" "$old" "$new"
+                    fi
+                done
+                echo ""
+            fi
+            if [ ${#lock_added[@]} -gt 0 ]; then
+                echo "  ${GREEN}Added (${#lock_added[@]}):${RESET}"
+                for entry in "${lock_added[@]}"; do
+                    IFS='|' read -r name ver <<<"$entry"
+                    via=$(attribute_transitive "$name")
+                    if [ -n "$via" ]; then
+                        printf "    ${GREEN}+ %s %s${RESET} ${DIM}via %s${RESET}\n" "$name" "$ver" "$via"
+                    else
+                        printf "    ${GREEN}+ %s %s${RESET}\n" "$name" "$ver"
+                    fi
+                done
+                echo ""
+            fi
+            if [ ${#lock_removed[@]} -gt 0 ]; then
+                echo "  ${RED}Removed (${#lock_removed[@]}):${RESET}"
+                for entry in "${lock_removed[@]}"; do
+                    IFS='|' read -r name ver <<<"$entry"
+                    printf "    ${RED}- %s %s${RESET}\n" "$name" "$ver"
+                done
+                echo ""
+            fi
+        fi
+    fi
+fi
+
+# ── per-crate API diff ─────────────────────────────────────────────────
+#
+# Crate discovery uses `cargo metadata --no-deps` so nested workspace
+# crates are found regardless of directory layout. For each crate we
+# run `cargo public-api -p <crate> diff $baseline..$head` and parse its
+# text output into three buckets (removed / changed / added). Failures
+# (e.g. rustdoc crashed, baseline missing) are captured per-crate as
+# `status=error` and surfaced in the summary and verdict.
+
+echo "${BOLD}Public API changes${RESET}"
+echo ""
+
+readarray -t all_crates < <(workspace_crate_names)
+crate_count=${#all_crates[@]}
+if [ "$crate_count" -eq 0 ]; then
+    echo "${YELLOW}warning:${RESET} no workspace crates discovered via cargo metadata" >&2
+fi
+
+removed_total=0
+changed_total=0
+added_total=0
+
+declare -a crate_names=()
+declare -a crate_removed=()
+declare -a crate_changed=()
+declare -a crate_added=()
+declare -a crate_removed_lines=()
+declare -a crate_changed_lines=()
+declare -a crate_added_lines=()
+declare -a crate_status=()
+
+changed_crate_count=0
+error_crate_count=0
+
+# Auto-size the crate-name column so longer names (e.g. if a new
+# `-test-helpers` crate lands) don't misalign the table. Floor at 16 so
+# a workspace with only short names still has visible padding.
+crate_col_width=16
+for crate_name in "${all_crates[@]}"; do
+    [ ${#crate_name} -gt "$crate_col_width" ] && crate_col_width=${#crate_name}
+done
+
+for crate_name in "${all_crates[@]}"; do
+    err_file="$RUN_TMP/${crate_name}.err"
+    # Run from `api_cwd` so cargo-public-api's internal `git checkout`
+    # doesn't trip on a dirty working tree in worktree-snapshot mode.
+    # In normal mode, `api_cwd == $PWD`, so this is a no-op.
+    #
+    # `baseline_sha` / `head_sha` are pre-resolved absolute SHAs because
+    # `HEAD` resolves differently across worktrees (the snapshot worktree
+    # has its own detached HEAD pointing at the synth commit, so passing
+    # the literal string "HEAD" would diff snapshot-vs-snapshot).
+    if ! output=$(cd "$api_cwd" && cargo public-api -p "$crate_name" -sss diff "$baseline_sha..$head_sha" 2>"$err_file"); then
+        # cargo-public-api failed outright (missing baseline, rustdoc
+        # failure, etc.). Record and surface the error.
+        error_crate_count=$((error_crate_count + 1))
+        err_msg=$(head -n1 "$err_file" 2>/dev/null || echo "")
+        crate_names+=("$crate_name")
+        crate_removed+=(0)
+        crate_changed+=(0)
+        crate_added+=(0)
+        crate_removed_lines+=("")
+        crate_changed_lines+=("")
+        crate_added_lines+=("")
+        crate_status+=("error")
+        printf "  %-${crate_col_width}s ${RED}error${RESET}${DIM}: %s${RESET}\n" \
+            "$crate_name" "${err_msg:-cargo public-api failed}"
+        continue
+    fi
+
+    removed_buf="" changed_old_buf="" changed_new_buf="" added_buf=""
+    section=""
+    while IFS= read -r line; do
+        case "$line" in
+        "Removed items from the public API") section=removed ;;
+        "Changed items in the public API") section=changed ;;
+        "Added items to the public API") section=added ;;
+        =*) ;;
+        "(none)") ;;
+        "") ;;
+        -*)
+            case "$section" in
+            removed) removed_buf+="${line#-}"$'\n' ;;
+            changed) changed_old_buf+="${line#-}"$'\n' ;;
+            esac
+            ;;
+        +*)
+            case "$section" in
+            changed) changed_new_buf+="${line#+}"$'\n' ;;
+            added) added_buf+="${line#+}"$'\n' ;;
+            esac
+            ;;
+        esac
+    done <<<"$output"
+
+    # Interleave old/new lines for the changed section.
+    changed_buf=""
+    if [ -n "$changed_old_buf" ]; then
+        mapfile -t old_arr <<<"$changed_old_buf"
+        mapfile -t new_arr <<<"$changed_new_buf"
+        for j in "${!old_arr[@]}"; do
+            [ -z "${old_arr[$j]}" ] && continue
+            changed_buf+="  - ${old_arr[$j]}"$'\n'
+            changed_buf+="  + ${new_arr[$j]:-}"$'\n'
+        done
+    fi
+
+    r=$(printf '%s' "$removed_buf" | grep -c . || true)
+    c=$(printf '%s' "$changed_old_buf" | grep -c . || true)
+    a=$(printf '%s' "$added_buf" | grep -c . || true)
+
+    crate_names+=("$crate_name")
+    crate_removed+=("$r")
+    crate_changed+=("$c")
+    crate_added+=("$a")
+    crate_removed_lines+=("$removed_buf")
+    crate_changed_lines+=("$changed_buf")
+    crate_added_lines+=("$added_buf")
+    crate_status+=("ok")
+
+    removed_total=$((removed_total + r))
+    changed_total=$((changed_total + c))
+    added_total=$((added_total + a))
+
+    if [ $((r + c + a)) -gt 0 ]; then
+        changed_crate_count=$((changed_crate_count + 1))
+        # Additive-only crates get a dim "(additive)" tag so reviewers can
+        # focus on the breaking ones.
+        tag=""
+        if [ "$r" -eq 0 ] && [ "$c" -eq 0 ]; then
+            tag=" ${DIM}(additive)${RESET}"
+        fi
+        printf "  %-${crate_col_width}s ${RED}-%d${RESET}  ${YELLOW}~%d${RESET}  ${GREEN}+%d${RESET}%s\n" \
+            "$crate_name" "$r" "$c" "$a" "$tag"
+    else
+        printf "  %-${crate_col_width}s ${DIM}no changes${RESET}\n" "$crate_name"
+    fi
+done
+
+# ── const/static value + doc-comment diff (opt-in: --with-values) ──────
+# cargo-public-api compares *signatures*, so a `pub const` whose value changes
+# (e.g. 99 -> 1000) or a public item whose doc-comment text changes shows as
+# "no change". With --with-values we additionally build rustdoc JSON for every
+# crate at both refs and diff the evaluated const/static values and the doc
+# text. This roughly doubles the rustdoc work, hence opt-in.
+value_changed_total=0
+doc_changed_total=0
+declare -a value_changes=()
+declare -a doc_changes=()
+
+if $with_values; then
+    # Split the lookup off the `:-` default so a no-match `grep` (exit 1 under
+    # pipefail) can't abort the script via `set -e` before the skip-guard below.
+    nightly_toolchain="${CHECK_API_TOOLCHAIN:-}"
+    if [ -z "$nightly_toolchain" ]; then
+        nightly_toolchain=$(rustup toolchain list 2>/dev/null | grep -oE 'nightly[^ ]*' | head -n1 || true)
+    fi
+    if [ -z "$nightly_toolchain" ]; then
+        echo "${YELLOW}warning:${RESET} --with-values needs a nightly toolchain for rustdoc JSON; skipping value/doc diff" >&2
+    else
+        # Shared target dir so deps compile once and cache across refs/runs.
+        values_target="$CACHE_DIR/values-target"
+        mkdir -p "$values_target" 2>/dev/null || true
+
+        # Emit one TSV row per public const/static value and doc-bearing item in
+        # a crate's rustdoc JSON, keyed by the item's stable semantic path
+        # (rustdoc item ids are not stable across refs, but `.paths` is):
+        #   V <crate> <path> <type> <value>
+        #   D <crate> <path> <docs-base64>
+        #
+        # Reads the (unstable) rustdoc JSON shape directly. If a future nightly
+        # changes these field paths, the jq below silently yields zero rows
+        # (reported as "no change"), not an error — revisit on toolchain bumps.
+        extract_value_doc() { # $1=json  $2=crate
+            jq -r --arg crate "$2" '
+                .index as $idx | .paths as $paths |
+                $paths | to_entries[] | .key as $id | .value as $p |
+                ($idx[$id]) as $it |
+                select($it != null and $it.visibility == "public") |
+                ($p.path | join("::")) as $path |
+                (
+                  ( if $it.inner.constant != null then
+                      ["V", $crate, $path,
+                       ($it.inner.constant.type | (.primitive // .resolved_path.name // tostring)),
+                       ($it.inner.constant.const.value // $it.inner.constant.const.expr // "?")]
+                    elif $it.inner.static != null then
+                      ["V", $crate, $path,
+                       ($it.inner.static.type | (.primitive // .resolved_path.name // tostring)),
+                       ($it.inner.static.expr // "?")]
+                    else empty end ),
+                  ( if ($it.docs != null and ($it.docs | length) > 0) then
+                      ["D", $crate, $path, ($it.docs | @base64)]
+                    else empty end )
+                ) | @tsv
+            ' "$1" 2>/dev/null
+        }
+
+        # Build rustdoc JSON for every workspace crate at $ref and emit the
+        # combined V/D rows. Cached on ref-SHA + script hash, like the dep dump.
+        dump_value_doc_index() { # $1=ref  -> stdout TSV
+            local ref=$1 sha cache_file wt tmp_out crate json failed=0
+            sha=$(git rev-parse --verify "$ref" 2>/dev/null) || return 1
+            cache_file="$CACHE_DIR/${sha}.${SCRIPT_HASH}.values.tsv"
+            if [ -s "$cache_file" ]; then cat "$cache_file"; return 0; fi
+            wt=$(mktemp -d -p "$RUN_TMP" values.XXXXXX)
+            if ! git worktree add --detach --quiet "$wt" "$ref" 2>/dev/null; then
+                echo "${YELLOW}warning:${RESET} could not create worktree for '$ref' (value diff)" >&2
+                return 1
+            fi
+            tmp_out=$(mktemp -p "$RUN_TMP")
+            while IFS= read -r crate; do
+                [ -z "$crate" ] && continue
+                if CARGO_TARGET_DIR="$values_target" cargo +"$nightly_toolchain" rustdoc -q \
+                    --manifest-path "$wt/Cargo.toml" -p "$crate" --lib \
+                    -- -Z unstable-options --output-format json >/dev/null 2>&1; then
+                    json="$values_target/doc/${crate//-/_}.json"
+                    { [ -f "$json" ] && extract_value_doc "$json" "$crate" >>"$tmp_out"; } || true
+                else
+                    # A crate that fails to build rustdoc JSON must not poison
+                    # the cache, or its value/doc changes are hidden until the
+                    # script hash changes. Skip caching this (partial) run.
+                    failed=1
+                fi
+            done < <(workspace_crate_names)
+            git worktree remove --force "$wt" >/dev/null 2>&1 || true
+            if [ "$failed" -eq 0 ]; then
+                mv "$tmp_out" "$cache_file" 2>/dev/null || true
+                cat "$cache_file" 2>/dev/null || true
+            else
+                cat "$tmp_out"
+            fi
+        }
+
+        echo "${DIM}--with-values: building rustdoc JSON for both refs (this can take a while)...${RESET}" >&2
+        values_base_tsv="$RUN_TMP/values.base.tsv"
+        values_head_tsv="$RUN_TMP/values.head.tsv"
+        dump_value_doc_index "$baseline_sha" >"$values_base_tsv" || : >"$values_base_tsv"
+        dump_value_doc_index "$head_sha" >"$values_head_tsv" || : >"$values_head_tsv"
+
+        # Value changes: items present in both refs whose evaluated value differs.
+        # (Added/removed items are already covered by the signature diff above.)
+        while IFS= read -r row; do
+            [ -z "$row" ] && continue
+            value_changes+=("$row")
+        done < <(awk -F'\t' '
+            FNR==NR { if ($1=="V") { k=$2 SUBSEP $3; t[k]=$4; v[k]=$5 } next }
+            $1=="V" { k=$2 SUBSEP $3; if (k in v && v[k] != $5) printf "%s\t%s\t%s\t%s\t%s\n", $2, $3, t[k], v[k], $5 }
+        ' "$values_base_tsv" "$values_head_tsv")
+
+        # Doc changes: items present in both refs whose doc text differs.
+        while IFS= read -r row; do
+            [ -z "$row" ] && continue
+            doc_changes+=("$row")
+        done < <(awk -F'\t' '
+            FNR==NR { if ($1=="D") { k=$2 SUBSEP $3; d[k]=$4 } next }
+            $1=="D" { k=$2 SUBSEP $3; if (k in d && d[k] != $4) printf "%s\t%s\n", $2, $3 }
+        ' "$values_base_tsv" "$values_head_tsv")
+
+        value_changed_total=${#value_changes[@]}
+        doc_changed_total=${#doc_changes[@]}
+    fi
+fi
+
+# ── summary ───────────────────────────────────────────────────────────
+
+echo ""
+echo "${BOLD}Summary${RESET}  ${DIM}(${changed_crate_count}/${crate_count} crates with changes)${RESET}"
+
+# Only show the table if there are changes; otherwise a one-liner suffices.
+# In JSON mode we always fall through so the JSON block below emits.
+if [ $((removed_total + changed_total + added_total + value_changed_total + doc_changed_total)) -eq 0 ]; then
+    echo ""
+    echo "  ${GREEN}No public API changes.${RESET}"
+    if ! $json_mode; then
+        # Still emit the final verdict so dep-only changes surface.
+        if [ "$dep_breaking_count" -gt 0 ]; then
+            echo ""
+            echo "${RED}${BOLD}BREAKING${RESET}${RED}: runtime-deps: $dep_breaking_count breaking.${RESET}"
+            exit 1
+        fi
+        exit 0
+    fi
+fi
+
+# Print a table row. Arguments: name r c a [tag]
+# Colors are applied around the pre-padded field so escape codes don't affect alignment.
+print_row() {
+    local name=$1 r=$2 c=$3 a=$4 tag=${5:-}
+    local rc="" cc="" ac="" nb="" ne=""
+    if [ "$r" = "-" ]; then rc="$DIM"; else rc="$RED"; fi
+    if [ "$c" = "-" ]; then cc="$DIM"; else cc="$YELLOW"; fi
+    if [ "$a" = "-" ]; then ac="$DIM"; else ac="$GREEN"; fi
+    if [ "$name" = "Total" ]; then
+        nb="$BOLD"
+        ne="$RESET"
+    fi
+    printf "  ${nb}%-${crate_col_width}s${ne} ${rc}%8s${RESET} ${cc}%8s${RESET} ${ac}%8s${RESET}%s\n" \
+        "$name" "$r" "$c" "$a" "$tag"
+}
+
+# Horizontal separator: width matches the crate column so dashes
+# line up with the longest crate name.
+printf -v crate_col_dashes '%*s' "$crate_col_width" ''
+crate_col_dashes=${crate_col_dashes// /-}
+
+if [ $((removed_total + changed_total + added_total)) -gt 0 ]; then
+    echo ""
+    print_row "" "Removed" "Changed" "Added"
+    printf "  ${DIM}%s %8s %8s %8s${RESET}\n" "$crate_col_dashes" "--------" "--------" "--------"
+
+    for i in "${!crate_names[@]}"; do
+        r="${crate_removed[$i]}"
+        c="${crate_changed[$i]}"
+        a="${crate_added[$i]}"
+        [ $((r + c + a)) -eq 0 ] && continue
+
+        tag=""
+        [ "$r" -eq 0 ] && [ "$c" -eq 0 ] && tag=" ${DIM}(additive)${RESET}"
+        [ "$r" -eq 0 ] && r="-"
+        [ "$c" -eq 0 ] && c="-"
+        [ "$a" -eq 0 ] && a="-"
+        print_row "${crate_names[$i]}" "$r" "$c" "$a" "$tag"
+    done
+
+    printf "  ${DIM}%s %8s %8s %8s${RESET}\n" "$crate_col_dashes" "--------" "--------" "--------"
+    local_r="$removed_total"
+    [ "$local_r" -eq 0 ] && local_r="-"
+    local_c="$changed_total"
+    [ "$local_c" -eq 0 ] && local_c="-"
+    local_a="$added_total"
+    [ "$local_a" -eq 0 ] && local_a="-"
+    print_row "Total" "$local_r" "$local_c" "$local_a"
+fi
+
+# ── detailed diffs ────────────────────────────────────────────────────
+
+has_breaking=false
+
+for i in "${!crate_names[@]}"; do
+    r="${crate_removed[$i]}"
+    c="${crate_changed[$i]}"
+    a="${crate_added[$i]}"
+    [ $((r + c + a)) -eq 0 ] && continue
+
+    [ $((r + c)) -gt 0 ] && has_breaking=true
+
+    echo ""
+    echo "${BOLD}${crate_names[$i]}${RESET}"
+
+    if [ "$r" -gt 0 ]; then
+        echo ""
+        echo "  ${RED}Removed ($r):${RESET}"
+        while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            echo "    ${RED}- ${line}${RESET}"
+        done <<<"${crate_removed_lines[$i]}"
+    fi
+
+    if [ "$c" -gt 0 ]; then
+        echo ""
+        echo "  ${YELLOW}Changed ($c):${RESET}"
+        while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            case "$line" in
+            "  - "*) echo "    ${RED}${line#  }${RESET}" ;;
+            "  + "*) echo "    ${GREEN}${line#  }${RESET}" ;;
+            *) echo "    $line" ;;
+            esac
+        done <<<"${crate_changed_lines[$i]}"
+    fi
+
+    if [ "$a" -gt 0 ]; then
+        echo ""
+        echo "  ${GREEN}Added ($a):${RESET}"
+        while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            echo "    ${GREEN}+ ${line}${RESET}"
+        done <<<"${crate_added_lines[$i]}"
+    fi
+done
+
+# ── value / doc changes (--with-values) ───────────────────────────────
+if [ "$value_changed_total" -gt 0 ]; then
+    echo ""
+    echo "${BOLD}Value changes (${value_changed_total})${RESET}${DIM} — const/static values; cargo-public-api can't see these${RESET}"
+    last_crate=""
+    for row in "${value_changes[@]}"; do
+        IFS=$'\t' read -r crate path type_ old new <<<"$row"
+        if [ "$crate" != "$last_crate" ]; then
+            echo ""
+            echo "  ${BOLD}${crate}${RESET}"
+            last_crate="$crate"
+        fi
+        echo "    ${YELLOW}~ ${path}: ${type_}${RESET}"
+        echo "        ${RED}${old}${RESET} ${DIM}->${RESET} ${GREEN}${new}${RESET}"
+    done
+fi
+if [ "$doc_changed_total" -gt 0 ]; then
+    echo ""
+    echo "${BOLD}Doc changes (${doc_changed_total})${RESET}${DIM} — public doc-comment text changed${RESET}"
+    last_crate=""
+    for row in "${doc_changes[@]}"; do
+        IFS=$'\t' read -r crate path <<<"$row"
+        if [ "$crate" != "$last_crate" ]; then
+            echo ""
+            echo "  ${BOLD}${crate}${RESET}"
+            last_crate="$crate"
+        fi
+        echo "    ${YELLOW}~ ${path}${RESET}${DIM} (doc text changed)${RESET}"
+    done
+fi
+
+# ── verdict ───────────────────────────────────────────────────────────
+
+echo ""
+api_breaking=$((removed_total + changed_total))
+any_breaking=false
+$has_breaking && any_breaking=true
+[ "$dep_breaking_count" -gt 0 ] && any_breaking=true
+[ "$value_changed_total" -gt 0 ] && any_breaking=true
+
+# ── JSON output (opt-in) ──────────────────────────────────────────────
+# When --json is set we assemble a structured document from the same
+# tables used by the text verdict and write it to fd 3 (saved stdout),
+# then exit with the appropriate status code.
+if $json_mode; then
+    verdict="ok"
+    if [ "$error_crate_count" -gt 0 ]; then
+        verdict="error"
+    elif $any_breaking; then
+        verdict="breaking"
+    fi
+
+    # Build per-crate array as jq args.
+    crate_jsons=()
+    for i in "${!crate_names[@]}"; do
+        crate_jsons+=(--arg "name$i" "${crate_names[$i]}")
+        crate_jsons+=(--argjson "r$i" "${crate_removed[$i]}")
+        crate_jsons+=(--argjson "c$i" "${crate_changed[$i]}")
+        crate_jsons+=(--argjson "a$i" "${crate_added[$i]}")
+        crate_jsons+=(--arg "status$i" "${crate_status[$i]}")
+    done
+    crate_expr='['
+    for i in "${!crate_names[@]}"; do
+        [ "$i" -gt 0 ] && crate_expr+=','
+        crate_expr+="{name:\$name$i,removed:\$r$i,changed:\$c$i,added:\$a$i,status:\$status$i}"
+    done
+    crate_expr+=']'
+
+    # Dep arrays: just stream the parsed rows back through jq.
+    dep_rem_expr="[$(printf '%s\n' "${dep_removed[@]}" |
+        awk -F'|' 'NF>=3 {printf "{name:\"%s\",version:\"%s\",kind:\"%s\"},", $1, $2, $3}' |
+        sed 's/,$//')]"
+    dep_chg_expr="[$(printf '%s\n' "${dep_changed[@]}" |
+        awk -F'|' 'NF>=5 {printf "{name:\"%s\",old:\"%s\",new:\"%s\",bump:\"%s\",kind:\"%s\",features:\"%s\"},", $1, $2, $3, $4, $5, $6}' |
+        sed 's/,$//')]"
+    dep_add_expr="[$(printf '%s\n' "${dep_added[@]}" |
+        awk -F'|' 'NF>=3 {printf "{name:\"%s\",version:\"%s\",kind:\"%s\"},", $1, $2, $3}' |
+        sed 's/,$//')]"
+
+    # Build value/doc arrays through jq (not string interpolation) so values
+    # containing quotes or backslashes — e.g. string consts — are escaped.
+    val_json=$(printf '%s\n' "${value_changes[@]}" | jq -R -s '
+        split("\n") | map(select(length > 0) | split("\t")
+            | {crate: .[0], path: .[1], type: .[2], old: .[3], new: .[4]})')
+    doc_json=$(printf '%s\n' "${doc_changes[@]}" | jq -R -s '
+        split("\n") | map(select(length > 0) | split("\t")
+            | {crate: .[0], path: .[1]})')
+
+    jq -n \
+        --arg baseline "$baseline" \
+        --arg baseline_sha "$baseline_short" \
+        --arg head "$head_label" \
+        --arg head_sha "$head_short" \
+        --arg verdict "$verdict" \
+        --argjson api_breaking "$api_breaking" \
+        --argjson dep_breaking "$dep_breaking_count" \
+        --argjson error_crates "$error_crate_count" \
+        --argjson value_changed "$value_changed_total" \
+        --argjson doc_changed "$doc_changed_total" \
+        --argjson removed_total "$removed_total" \
+        --argjson changed_total "$changed_total" \
+        --argjson added_total "$added_total" \
+        --argjson values "$val_json" \
+        --argjson docs "$doc_json" \
+        "${crate_jsons[@]}" \
+        "{
+            baseline: \$baseline,
+            baseline_sha: \$baseline_sha,
+            head: \$head,
+            head_sha: \$head_sha,
+            verdict: \$verdict,
+            totals: {
+                removed: \$removed_total,
+                changed: \$changed_total,
+                added: \$added_total,
+                api_breaking: \$api_breaking,
+                dep_breaking: \$dep_breaking,
+                error_crates: \$error_crates,
+                value_changed: \$value_changed,
+                doc_changed: \$doc_changed
+            },
+            deps: {
+                removed: $dep_rem_expr,
+                changed: $dep_chg_expr,
+                added: $dep_add_expr
+            },
+            values: \$values,
+            docs: \$docs,
+            crates: $crate_expr
+        }" >&3
+
+    case "$verdict" in
+    ok) exit 0 ;;
+    *) exit 1 ;;
+    esac
+fi
+
+# Crates where cargo-public-api failed outright are treated as an unknown
+# state — we can't tell whether their API changed, so surface it loudly and
+# fail the verdict.
+if [ "$error_crate_count" -gt 0 ]; then
+    echo "${RED}${BOLD}ERROR${RESET}${RED}: cargo-public-api failed for ${error_crate_count} crate(s).${RESET}"
+    if [ "$head_label" = "working tree" ]; then
+        # The synthesized worktree-snapshot commit is unreachable and
+        # likely GC'd by the time the user reads this — re-running the
+        # script reproduces the failure (a fresh snapshot is created).
+        echo "${DIM}(re-run this script to reproduce, or commit your changes first to debug with \`cargo public-api -p <crate> diff $baseline_sha..HEAD\`)${RESET}"
+    else
+        echo "${DIM}(run \`cargo public-api -p <crate> diff $baseline_sha..$head_sha\` to reproduce)${RESET}"
+    fi
+    exit 1
+fi
+
+if $any_breaking; then
+    parts=()
+    if [ "$api_breaking" -gt 0 ]; then
+        parts+=("api: $removed_total removed / $changed_total changed")
+    fi
+    if [ "$dep_breaking_count" -gt 0 ]; then
+        parts+=("runtime-deps: $dep_breaking_count breaking")
+    fi
+    if [ "$value_changed_total" -gt 0 ]; then
+        parts+=("values: $value_changed_total changed")
+    fi
+    joined=""
+    sep=""
+    for p in "${parts[@]}"; do
+        joined+="$sep$p"
+        sep="; "
+    done
+    echo "${RED}${BOLD}BREAKING${RESET}${RED}: ${joined}.${RESET}"
+    if [ "$added_total" -gt 0 ]; then
+        echo "${DIM}(also $added_total new API items, additive only)${RESET}"
+    fi
+    [ "$doc_changed_total" -gt 0 ] && echo "${DIM}(also $doc_changed_total public doc-comment change(s))${RESET}"
+    exit 1
+else
+    if [ "$added_total" -gt 0 ]; then
+        echo "${GREEN}OK: $added_total new API items, no breaking changes.${RESET}"
+    else
+        echo "${GREEN}OK: no breaking changes.${RESET}"
+    fi
+    [ "$doc_changed_total" -gt 0 ] && echo "${DIM}(also $doc_changed_total public doc-comment change(s))${RESET}"
+fi

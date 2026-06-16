@@ -7,6 +7,7 @@ Tools for maintaining and testing Zebra:
 - [zebrad-log-filter](#zebrad-log-filter)
 - [zcash-rpc-diff](#zcash-rpc-diff)
 - [scanning-results-reader](#scanning-results-reader)
+- [check-api](#check-api)
 
 Binaries are easier to use if they are located in your system execution path.
 
@@ -195,3 +196,31 @@ You can override the binaries the script calls using these environmental variabl
 - `$ZCASH_CLI`
 - `$DIFF`
 - `$JQ`
+
+## check-api
+
+`check-api` reports public API, dependency, const/static value, and doc-comment
+changes between two git refs across every workspace crate. It is a maintainer aid
+for writing changelogs and choosing semver bumps: `cargo public-api` covers
+signatures, and this wraps it to also surface dependency changes and (with
+`--with-values`) const/static value and doc-comment changes that signature
+diffing alone can't see.
+
+Run it from the repository root:
+
+```sh
+zebra-utils/check-api                 # parent branch (or HEAD) -> working tree / HEAD
+zebra-utils/check-api main            # main -> working tree / HEAD
+zebra-utils/check-api v4.1.0 v4.2.0   # compare two refs
+zebra-utils/check-api --with-values   # also flag const/static value + doc changes
+zebra-utils/check-api --json main     # machine-readable output
+```
+
+It exits non-zero when it detects a breaking change. See
+`zebra-utils/check-api --help` for the full options, output format, and JSON schema.
+
+#### Prerequisites
+
+- [`cargo-public-api`](https://crates.io/crates/cargo-public-api) (`cargo install cargo-public-api`)
+- `jq`
+- a nightly toolchain (only for `--with-values`, which builds rustdoc JSON)
