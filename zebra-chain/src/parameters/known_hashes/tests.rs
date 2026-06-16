@@ -38,7 +38,9 @@ fn synthetic_spec(
     let spec = Box::leak(Box::new(KnownHashListSpec {
         max_height: block::Height((hashes.len() - 1) as u32),
         chunk_blocks: 150_000,
-        file_prefix: "test-known-hashes",
+        // A prefix that cannot collide with the real bundled `main-known-hashes`
+        // / `test-known-hashes` assets in the fallback search dir.
+        file_prefix: "synthetic-known-hashes",
         chunk_hashes: Box::leak(Box::new([chunk_hash])),
     }));
 
@@ -96,8 +98,18 @@ fn mainnet_spec_constants_well_formed() {
 fn for_network_coverage() {
     let _init_guard = zebra_test::init();
 
-    assert!(KnownHashListSpec::for_network(&Network::Mainnet).is_some());
-    assert!(KnownHashListSpec::for_network(&Network::new_default_testnet()).is_none());
+    for network in [Network::Mainnet, Network::new_default_testnet()] {
+        let spec = KnownHashListSpec::for_network(&network)
+            .expect("Mainnet and the default Testnet have a bundled known-hash list");
+
+        // The bundled list must cover exactly up to the max checkpoint height,
+        // since the engine finalizes the known-hash range up to that height.
+        assert_eq!(
+            spec.max_height,
+            network.max_checkpoint_height(),
+            "{network} known-hash list max_height must match its max checkpoint height",
+        );
+    }
 }
 
 /// Loads the real bundled Mainnet assets: verifies all 23 SHA-256 constants,
@@ -152,6 +164,46 @@ fn mainnet_assets_load_and_verify() {
         .is_some());
     assert!(list
         .size_hint(block::Height(3_373_206))
+        .expect("last chunk is resident")
+        .is_some());
+}
+
+/// Loads the real bundled Testnet assets: verifies all 28 SHA-256 constants,
+/// the genesis cross-check, the list boundary, and embedded size hints.
+#[test]
+fn testnet_assets_load_and_verify() {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::new_default_testnet();
+    let mut list = KnownHashList::open(&network, None)
+        .expect("bundled testnet assets load and verify")
+        .expect("the default testnet has a bundled list");
+
+    assert_eq!(list.max_height(), block::Height(4_057_200));
+    assert_eq!(list.resident_chunks(), 0);
+
+    let genesis = list
+        .hash(block::Height(0))
+        .expect("chunk 0 loads")
+        .expect("height 0 is covered");
+    assert_eq!(genesis, network.genesis_hash());
+
+    assert!(list
+        .hash(block::Height(4_057_200))
+        .expect("last chunk loads")
+        .is_some());
+    assert!(list
+        .hash(block::Height(4_057_201))
+        .expect("no load needed")
+        .is_none());
+
+    // All 28 chunks embed per-block size hints.
+    assert!(list
+        .size_hint(block::Height(0))
+        .expect("chunk 0 is resident")
+        .is_some());
+    assert!(list
+        .size_hint(block::Height(4_057_200))
         .expect("last chunk is resident")
         .is_some());
 }

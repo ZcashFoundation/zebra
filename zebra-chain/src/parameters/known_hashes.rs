@@ -140,14 +140,55 @@ pub const MAINNET_KNOWN_HASHES: KnownHashListSpec = KnownHashListSpec {
     ],
 };
 
+/// The Testnet every-block known-hash list: 4,057,201 hashes
+/// (heights 0..=4,057,200) in 28 chunks, each embedding per-block size hints.
+pub const TESTNET_KNOWN_HASHES: KnownHashListSpec = KnownHashListSpec {
+    max_height: block::Height(4_057_200),
+    chunk_blocks: HASHES_PER_CHUNK,
+    file_prefix: "test-known-hashes",
+    chunk_hashes: &[
+        "db46db6f5badf86de84e0fca397aa56cec951d064e5cc2774767fe5945932fec",
+        "b5107840198f5cdf459f07aab9abd935233ef97a9f3e25483134f270e7b095a0",
+        "345a929865ab41e51d780ef04ec63252531d5ae23737edcb34055b5b5d804095",
+        "32d9a4a3da44e66cae83ff6bfb9d8076d07205f55b5dfd72de7739771f13d7d2",
+        "4eccc9d2565a1a890d9e9b03dba9f38d18be8b6632dadaacf245f68ad10d409f",
+        "ed862cf5062736745e693f431abf365af94b070da376e35ade88115a403091ed",
+        "6d44807f17d82750a0449875ad6d9094447537d99a1e15cb8adfebbc0090c98f",
+        "bfe991320ef5f84569753cd890766d3513c2c1dded004a51e20c210a1f561c89",
+        "a564afe668a4c7d7c17a1e2cc2b17613fe1a909c33563bf2316a17cea42f3935",
+        "140817694ab7b575c1dedc1d7cd1ffab4c5fc1eea83a995e62c0369c104bd14e",
+        "ef1279b6b6d376f69f40f8bfa1b5b1adf7e5625f7b45e9bbfde22c73e8cba45b",
+        "2bbf2ff53cd3903b70c64c3034c1fd6bf60101db7bc2bc471324f10990bed79a",
+        "7b2ef839922b3087ea6f2983ccc169f8e1cb27c9f14188c35db595c7173932ab",
+        "3de6366a13f4bcb9d371fc74f756b6eb2edfb48f7aa0d297ce1107a2d9a1708e",
+        "17c25a41b6352b0ae4437252a5b6a1cb1e77f32cbbe88a0dc2fa288dc356dc7b",
+        "e7fd222f427c3872ee45ca4608d04b416d458c5617af04a889537e9bb9363f80",
+        "4b9da715b418dd1676fb979b64b3a71702b0a0a07c1f8c4dd95b2f096a2b532a",
+        "b957fb56d8146102a6a4fdd8cb9ba989a807bca3e3721d57734182b57af88c50",
+        "53f5ff60e6d99ab2e4be8a5e9e04143c3a00c11ac198f6d03d871785f2a8b583",
+        "6f8faf2977f82a067e618ba53ccb15c69a68f48952312ec89af02e6005214c6c",
+        "1f6c851ef2f7b73b10c8cacfc375057317738629d490a4ceee5e7069667886fc",
+        "217a3ca2198d08f5cfceeb883688efbeff8e6ad36d471a38e122510f537d76a2",
+        "070e684d2f3cb06877876c3dab4fdf59b03f0f5c0bfd50e4e31b6189eba8ca86",
+        "67cdfec9a513b990b0b19e63780d1ae89b260087598da4a55f4198913551b242",
+        "2d42b6f9632ffefb44a89eb02888a76a8c1f3ad109eb88c85861571ce815bca2",
+        "26fb79f0e7ca5e74de466533f8e9e7aee94a03ca40cbc690ac3b722f5ed28c4c",
+        "197b7242daa1abd7df1534ee009ec9bbd706fc791f135b3bfcdd0dd74de5529d",
+        "9206a3a1653b3d1725c221139908b8fc34998b22b99d56316a7b3e81079969ba",
+    ],
+};
+
 impl KnownHashListSpec {
     /// Returns the known-hash list spec for `network`, if one is bundled.
     ///
-    /// Currently Mainnet only; the Testnet list is assembled in a later phase
-    /// (design doc §7.4).
+    /// Bundled for Mainnet and the default public Testnet. Custom testnets have
+    /// their own chain, so they get no bundled list.
     pub fn for_network(network: &Network) -> Option<&'static KnownHashListSpec> {
         match network {
             Network::Mainnet => Some(&MAINNET_KNOWN_HASHES),
+            Network::Testnet(params) if params.is_default_testnet() => {
+                Some(&TESTNET_KNOWN_HASHES)
+            }
             _ => None,
         }
     }
