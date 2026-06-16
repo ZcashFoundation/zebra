@@ -12,7 +12,7 @@
 use std::{
     fs::File,
     io::{BufWriter, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 use abscissa_core::{Application, Command, Runnable};
@@ -25,6 +25,12 @@ use crate::prelude::APPLICATION;
 
 /// The name of the emitted unspent-transparent-output-location artifact.
 const UNSPENT_OUTPUTS_FILE: &str = "unspent-output-locations.bin";
+
+/// The name of the emitted Sapling note-commitment-tree-root artifact.
+const SAPLING_ROOTS_FILE: &str = "sapling-tree-roots.bin";
+
+/// The name of the emitted Orchard note-commitment-tree-root artifact.
+const ORCHARD_ROOTS_FILE: &str = "orchard-tree-roots.bin";
 
 /// Emit IBD state-snapshot artifacts from a synced read-only state (expert users only)
 #[derive(Command, Debug, Default, Parser)]
@@ -71,22 +77,54 @@ impl EmitSnapshotCmd {
         std::fs::create_dir_all(&self.out_dir)?;
 
         let unspent_outputs = self.emit_unspent_output_locations(&db)?;
+        let (sapling_roots, orchard_roots) = self.emit_tree_roots(&db)?;
 
         tracing::info!(
             ?tip_height,
             ?tip_hash,
             unspent_outputs,
+            sapling_roots,
+            orchard_roots,
             "emitted IBD state snapshot",
         );
         println!(
-            "snapshot at tip height {} ({}):\n  {unspent_outputs} unspent transparent output \
-             locations -> {}",
+            "snapshot at tip height {} ({}):\n  \
+             {unspent_outputs} unspent transparent output locations -> {}\n  \
+             {sapling_roots} Sapling tree roots -> {}\n  \
+             {orchard_roots} Orchard tree roots -> {}",
             tip_height.0,
             tip_hash,
             self.out_dir.join(UNSPENT_OUTPUTS_FILE).display(),
+            self.out_dir.join(SAPLING_ROOTS_FILE).display(),
+            self.out_dir.join(ORCHARD_ROOTS_FILE).display(),
         );
 
         Ok(())
+    }
+
+    /// Emits the Sapling and Orchard note-commitment-tree roots at every height
+    /// that updates each tree (the heights the state stores a tree for), in
+    /// ascending height order. Returns `(sapling_count, orchard_count)`.
+    ///
+    /// Each record is `height` (`u32` little-endian) followed by the 32-byte
+    /// tree root. A node can fetch the tree for any height by binary-searching
+    /// for the largest recorded height `<=` it, then verifying the fetched tree
+    /// against the recorded root — so trees are downloaded by height instead of
+    /// recomputed by appending notes (design doc §16/§17).
+    fn emit_tree_roots(&self, db: &zebra_state::ZebraDb) -> Result<(u64, u64)> {
+        let sapling = write_root_records(
+            &self.out_dir.join(SAPLING_ROOTS_FILE),
+            db.sapling_tree_by_height_range(..)
+                .map(|(height, tree)| (height.0, <[u8; 32]>::from(tree.root()))),
+        )?;
+
+        let orchard = write_root_records(
+            &self.out_dir.join(ORCHARD_ROOTS_FILE),
+            db.orchard_tree_by_height_range(..)
+                .map(|(height, tree)| (height.0, <[u8; 32]>::from(tree.root()))),
+        )?;
+
+        Ok((sapling, orchard))
     }
 
     /// Streams every unspent transparent output location (8 bytes each, in
@@ -115,4 +153,20 @@ impl EmitSnapshotCmd {
         writer.flush()?;
         Ok(count)
     }
+}
+
+/// Writes `(height, root)` records (4-byte little-endian height + 32-byte root)
+/// to `path` in iteration order. Returns the number of records written.
+fn write_root_records(path: &Path, records: impl Iterator<Item = (u32, [u8; 32])>) -> Result<u64> {
+    let mut writer = BufWriter::new(File::create(path)?);
+
+    let mut count: u64 = 0;
+    for (height, root) in records {
+        writer.write_all(&height.to_le_bytes())?;
+        writer.write_all(&root)?;
+        count += 1;
+    }
+
+    writer.flush()?;
+    Ok(count)
 }
