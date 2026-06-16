@@ -323,6 +323,23 @@ pub struct Config {
     /// requests; higher values are more polite to slow peers.
     pub known_hash_gap_hedge_secs: u64,
 
+    /// How many block heights ahead of the commit frontier the known-hash
+    /// engine downloads note commitment trees, in snapshot-consume mode.
+    ///
+    /// Trees are fetched *ahead of* the block-commit frontier — a deeper
+    /// lookahead than block fetch — so that by the time a block reaches the
+    /// commit stage its sapling/orchard tree is already downloaded and verified,
+    /// and the state takes the "tree supplied by download" path instead of
+    /// folding note commitments. Only the ~7% of heights that update a tree are
+    /// requested, so this many *heights* of margin schedules far fewer tree
+    /// fetches in practice.
+    ///
+    /// Clamped to an internal ceiling so it cannot make the engine fetch
+    /// unboundedly far ahead. Set to `0` to disable tree lookahead (the commit
+    /// then always folds). Ignored outside snapshot-consume mode (the bundled
+    /// `.bin` list folds notes the normal way).
+    pub known_hash_tree_lookahead: u32,
+
     /// An override directory containing the known-hash list chunk files.
     ///
     /// When unset, the chunk files are resolved from the directories next to
@@ -385,6 +402,12 @@ impl Default for Config {
 
             // A small multiple of a typical block round-trip.
             known_hash_gap_hedge_secs: 5,
+
+            // Fetch trees deeper ahead of the frontier than blocks, so a
+            // height's tree is already verified by the time its block commits.
+            // At ~7% updating heights this schedules a few hundred tree fetches
+            // at most. See `components::ibd::tree::TREE_LOOKAHEAD_DEFAULT`.
+            known_hash_tree_lookahead: crate::components::ibd::tree::TREE_LOOKAHEAD_DEFAULT,
 
             // Use the layered asset search by default.
             known_hash_list_dir: None,

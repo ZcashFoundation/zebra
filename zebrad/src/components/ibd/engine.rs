@@ -41,19 +41,21 @@ use zebra_chain::{
     parameters::{known_hashes::KnownHashList, Network, GENESIS_PREVIOUS_BLOCK_HASH},
     serialization::ZcashSerialize,
 };
-use zebra_network::{self as zn, PeerSetStatus, PeerSocketAddr};
+use zebra_network::{self as zn, PeerSetStatus, PeerSocketAddr, ShieldedPool};
 use zebra_state as zs;
 
 use super::{
     cache::BlockCache,
     convert::{
-        BlockPayload, CommitStage, ConvertError, IbdBlock, VerifyAndCommit, VerifyAndCommitError,
+        BlockPayload, CommitStage, ConvertError, IbdBlock, SuppliedTrees, VerifyAndCommit,
+        VerifyAndCommitError,
     },
     fetch::{
         self, BatchFetchResponse, BatchedFetch, FetchError, FetchFailureKind, FetchRequest,
         FetchedBlock, DEFAULT_SIZE_HINT,
     },
-    IbdOutcome, IBD_STALL_WARN_INTERVAL,
+    tree::{HeightTrees, TreeFetch, TreeLookahead, TREE_LOOKAHEAD_MAX},
+    IbdOutcome, IBD_STALL_WARN_INTERVAL, SNAPSHOT_FETCH_ATTEMPTS,
 };
 use crate::BoxError;
 
@@ -327,6 +329,40 @@ pub trait HashSource: Send + 'static {
     /// Drops source resources that only cover heights below `height`.
     fn release_below(&mut self, _height: block::Height) {}
 
+    /// Returns the heights in `[start, end]` (inclusive, absolute) that update a
+    /// note commitment tree, paired with the pool that updated, in ascending
+    /// `(height, pool)` order.
+    ///
+    /// Drives the tree-fetch lookahead (design doc
+    /// `p2p-snapshot-distribution.md` §3.2): trees update at only ~7% of heights,
+    /// and the engine schedules a fetch only at heights this method reports, so
+    /// non-updating heights cost nothing.
+    ///
+    /// The default is empty: a source with no per-height tree-root data (the
+    /// bundled `.bin` [`KnownHashList`], which folds notes the normal way) never
+    /// schedules tree fetches. Only the CF-backed snapshot-consume source
+    /// reports updates.
+    fn tree_updates_in(
+        &mut self,
+        _start: block::Height,
+        _end: block::Height,
+    ) -> Vec<super::tree::TreeFetch> {
+        Vec::new()
+    }
+
+    /// Returns the note commitment tree root recorded for `pool` as of
+    /// `height`, exactly at that height (not at-or-before), or `None` when the
+    /// height is not an updating height for that pool, or the covering chunk is
+    /// not resident.
+    ///
+    /// The tree-fetch lookahead verifies a downloaded tree's `.root()` against
+    /// this value before buffering it. The default is `None`: a source with no
+    /// per-height tree-root data never reports an updating height, so the
+    /// lookahead never asks.
+    fn tree_root(&mut self, _pool: zn::ShieldedPool, _height: block::Height) -> Option<[u8; 32]> {
+        None
+    }
+
     /// Appends discovered hashes immediately above the current
     /// [`max_height`](Self::max_height), growing the covered range.
     ///
@@ -394,6 +430,15 @@ pub type FetchOutcome = Result<FetchedBlock, FetchFailureKind>;
 /// design doc §4.3/§4.6 semantics.
 pub type CommitOutcome = Result<block::Hash, VerifyAndCommitError>;
 
+/// The result of a tree-fetch future (design doc
+/// `p2p-snapshot-distribution.md` §3.2): the verified tree bytes, or `None`
+/// when no peer served a verifying tree after the allowed attempts.
+///
+/// A tree failure is never fatal: the lookahead clears the in-flight marker and
+/// the block falls back to folding when it commits, so this is `Option`, not
+/// `Result` — the engine has no failure to map.
+pub type TreeOutcome = Option<Vec<u8>>;
+
 /// The completion payload of one per-block staged future.
 #[derive(Debug)]
 pub enum StageOutcome {
@@ -407,6 +452,14 @@ pub enum StageOutcome {
 
     /// A stage-2 verify-and-commit continuation completed.
     Commit(CommitOutcome),
+
+    /// A tree-fetch lookahead future completed (snapshot-consume mode).
+    Tree {
+        /// Which pool the tree was fetched for.
+        pool: ShieldedPool,
+        /// The verified tree bytes, or `None` on an unavailable tree.
+        outcome: TreeOutcome,
+    },
 
     /// The future was cancelled: it lost a hedge race or the engine is
     /// shutting down. The slot was already updated by the winner.
@@ -629,6 +682,22 @@ where
     /// hedged (`sync.known_hash_gap_hedge_secs`).
     gap_hedge_after: Duration,
 
+    /// The note-commitment-tree fetch lookahead: the bounded buffer of
+    /// fetched+verified trees keyed by height, and the set of in-flight tree
+    /// fetches (design doc `p2p-snapshot-distribution.md` §3.2).
+    ///
+    /// Empty and idle unless the [`HashSource`] reports tree updates (only the
+    /// CF-backed snapshot-consume source does); the bundled `.bin` list folds
+    /// notes the normal way and never schedules tree fetches.
+    tree_lookahead: TreeLookahead,
+
+    /// How many block heights ahead of the commit frontier the tree-fetch
+    /// lookahead schedules fetches (`sync.known_hash_tree_lookahead`), clamped
+    /// to [`TREE_LOOKAHEAD_MAX`]. Deeper than the block fetch-ahead so a
+    /// height's tree is already downloaded and verified by the time its block
+    /// commits.
+    tree_lookahead_margin: u32,
+
     /// The total number of blocks fetched into the window (memory or disk),
     /// reported in the completion log.
     fetched_blocks: u64,
@@ -678,6 +747,10 @@ where
     ///   `sync.known_hash_lookahead_bytes` / `known_hash_gap_hedge_secs`
     ///   config fields. A `gap_hedge_after` too large for the clock
     ///   (`Duration::MAX`) disables hedging.
+    /// - `tree_lookahead_margin`: the `sync.known_hash_tree_lookahead` config
+    ///   field — how many block heights ahead of the commit frontier to fetch
+    ///   note commitment trees (snapshot-consume mode only); clamped to
+    ///   [`TREE_LOOKAHEAD_MAX`].
     ///
     /// Must be called within a Tokio runtime (the batched fetch worker is
     /// spawned onto it).
@@ -696,6 +769,7 @@ where
         cache: BlockCache,
         lookahead_bytes: usize,
         gap_hedge_after: Duration,
+        tree_lookahead_margin: u32,
     ) -> Self {
         // Size the batch layer at the hard ceiling: its `max_concurrent_batches`
         // is fixed for the worker's lifetime, and the live per-peer limit is
@@ -729,6 +803,11 @@ where
             commit_failures: HashMap::new(),
             cache_evicted_through: base,
             gap_hedge_after,
+            tree_lookahead: TreeLookahead::new(),
+            // Clamp the configured margin to the hard ceiling so a
+            // misconfiguration can't make the per-loop scheduling scan or the
+            // in-flight tree-fetch count unbounded.
+            tree_lookahead_margin: tree_lookahead_margin.min(TREE_LOOKAHEAD_MAX),
             fetched_blocks: 0,
             fetch_watermark: base,
             frontier_progress_at: now,
@@ -791,6 +870,7 @@ where
             let mut next_wake: Option<Instant> = None;
 
             self.refill(end, now, &mut next_wake)?;
+            self.schedule_tree_fetches(end)?;
             self.hedge_frontier(now, &mut next_wake)?;
             self.update_gauges();
             self.track_stall(now, &mut next_wake);
@@ -1174,6 +1254,8 @@ where
             other => unreachable!("push_commit is only called on Fetched slots: {other:?}"),
         };
 
+        let supplied_trees = self.take_supplied_trees(height);
+
         self.spawn_commit(
             height,
             bytes,
@@ -1183,6 +1265,7 @@ where
                 prev_expected,
                 block: payload,
                 source,
+                supplied_trees,
             }),
         );
 
@@ -1230,6 +1313,8 @@ where
         // count against the RAM block buffer until their commit resolves.
         self.budget_used += u64::from(bytes);
 
+        let supplied_trees = self.take_supplied_trees(height);
+
         self.spawn_commit(
             height,
             bytes,
@@ -1242,6 +1327,7 @@ where
                     bytes: cached.bytes,
                 },
                 source: cached.source,
+                supplied_trees,
             }),
         );
 
@@ -1322,6 +1408,86 @@ where
         Ok(())
     }
 
+    /// Schedules note-commitment-tree fetches a configurable margin ahead of the
+    /// commit frontier (design doc `p2p-snapshot-distribution.md` §3.2).
+    ///
+    /// The lookahead window is `[base, min(base + margin, end)]` — deeper than
+    /// the block fetch-ahead in large-block eras, so a height's tree is already
+    /// downloaded and verified by the time its block reaches the commit stage.
+    /// Only the heights that actually update a tree are requested
+    /// ([`HashSource::tree_updates_in`]); for the bundled `.bin` list that list
+    /// is always empty, so this is a no-op outside snapshot-consume mode.
+    ///
+    /// The bounded buffer ([`TreeLookahead`]) refuses new fetches once its byte
+    /// or in-flight-count cap is reached, so the lookahead never fetches
+    /// unboundedly far ahead.
+    fn schedule_tree_fetches(&mut self, end: block::Height) -> Result<(), EngineError> {
+        // A zero margin (or a source with no tree-root data) disables the
+        // lookahead entirely.
+        if self.tree_lookahead_margin == 0 {
+            return Ok(());
+        }
+
+        // The window ahead of the frontier, capped at the configured margin and
+        // the end of the list. `base + margin` cannot overflow a real height
+        // (margin is clamped to TREE_LOOKAHEAD_MAX); saturate to fail safe.
+        let window_end =
+            block::Height(self.base.0.saturating_add(self.tree_lookahead_margin)).min(end);
+
+        let updates = self.list.tree_updates_in(self.base, window_end);
+        if updates.is_empty() {
+            return Ok(());
+        }
+
+        let to_fetch = self.tree_lookahead.schedule(updates);
+        for fetch in to_fetch {
+            // The recorded root the downloaded tree is verified against. If the
+            // source can't supply it (a chunk evicted between scheduling steps),
+            // skip the fetch and clear its in-flight marker so it can be retried.
+            let Some(expected_root) = self.list.tree_root(fetch.pool, fetch.height) else {
+                self.tree_lookahead.on_failed(fetch);
+                continue;
+            };
+
+            self.push_tree_fetch(fetch, expected_root);
+            metrics::counter!("ibd.tree.requested.count").increment(1);
+        }
+
+        Ok(())
+    }
+
+    /// Pushes a single tree-fetch future for `fetch` into the staged-future
+    /// collection.
+    ///
+    /// A single-request `NoteCommitmentTree` through the plain peer set gets
+    /// inventory-aware routing for free (like the gap hedge), tries
+    /// [`SNAPSHOT_FETCH_ATTEMPTS`] peers, and verifies each candidate's
+    /// `.root()` against `expected_root` before accepting it. A tree no peer can
+    /// serve resolves to `None`: never fatal, the block folds when it commits.
+    fn push_tree_fetch(&mut self, fetch: TreeFetch, expected_root: [u8; 32]) {
+        let peer_set = self.peer_set.clone();
+        let TreeFetch { height, pool } = fetch;
+
+        self.blocks.push(
+            async move {
+                let outcome = tree_fetch_stage(peer_set, pool, height, expected_root).await;
+                (height, StageOutcome::Tree { pool, outcome })
+            }
+            .boxed(),
+        );
+    }
+
+    /// Takes the buffered, verified trees for `height` (the "tree supplied by
+    /// download" path), or `None` to fall back to folding.
+    ///
+    /// Converts the lookahead's [`HeightTrees`] into the commit request's
+    /// [`SuppliedTrees`]; the two are kept as separate types so the lookahead
+    /// module does not depend on the convert module's request shape.
+    fn take_supplied_trees(&mut self, height: block::Height) -> Option<SuppliedTrees> {
+        let HeightTrees { sapling, orchard } = self.tree_lookahead.take(height)?;
+        Some(SuppliedTrees { sapling, orchard })
+    }
+
     /// Applies one completed staged future to its slot.
     fn on_stage_complete(
         &mut self,
@@ -1329,6 +1495,22 @@ where
         outcome: StageOutcome,
         now: Instant,
     ) -> Result<(), EngineError> {
+        // Tree-fetch completions are keyed only by height (independent of the
+        // ring-window slots): a late tree for an already-committed height is
+        // handled by the buffer (dropped below the frontier), so resolve them
+        // before the slot-based offset gating. An aborted future was already
+        // settled by its winner.
+        match &outcome {
+            StageOutcome::Tree { .. } => {
+                if let StageOutcome::Tree { pool, outcome } = outcome {
+                    self.on_tree_complete(height, pool, outcome);
+                }
+                return Ok(());
+            }
+            StageOutcome::Aborted => return Ok(()),
+            StageOutcome::Fetch { .. } | StageOutcome::Commit(_) => {}
+        }
+
         // Completions for heights the frontier already passed are stale
         // (only fetch futures can outlive their heights, via hedge races).
         let Some(offset) = height.0.checked_sub(self.base.0) else {
@@ -1359,8 +1541,33 @@ where
 
             StageOutcome::Commit(outcome) => self.on_commit_complete(offset, height, outcome, now),
 
-            // Aborted: the slot was already updated by the winning future.
-            StageOutcome::Aborted => Ok(()),
+            // Handled above, before the offset gating.
+            StageOutcome::Tree { .. } | StageOutcome::Aborted => Ok(()),
+        }
+    }
+
+    /// Records a completed tree-fetch lookahead future (snapshot-consume mode).
+    ///
+    /// A verified tree is buffered against its height (unless the frontier
+    /// already passed it); an unavailable tree just clears its in-flight marker,
+    /// so the scheduler may reissue it and the block folds if it commits first.
+    fn on_tree_complete(
+        &mut self,
+        height: block::Height,
+        pool: ShieldedPool,
+        outcome: TreeOutcome,
+    ) {
+        let fetch = TreeFetch { height, pool };
+
+        match outcome {
+            Some(bytes) => {
+                self.tree_lookahead.on_fetched(fetch, bytes, self.base);
+                metrics::counter!("ibd.tree.fetched.count").increment(1);
+            }
+            None => {
+                self.tree_lookahead.on_failed(fetch);
+                metrics::counter!("ibd.tree.unavailable.count").increment(1);
+            }
         }
     }
 
@@ -1823,6 +2030,11 @@ where
         self.commit_failures
             .retain(|height, _| *height >= self.base);
 
+        // Drop any buffered or in-flight trees the frontier passed without
+        // taking (a tree that arrived after its block had already folded), so
+        // the tree buffer stays bounded by the live window.
+        self.tree_lookahead.evict_below(self.base);
+
         // Lazily evict committed entries from the disk tier (§4.5), batched
         // so each round scans the cache index once. Synchronous unlinks of a
         // bounded batch, called directly from the loop like every cache
@@ -1928,4 +2140,55 @@ where
         }
         Err(error) => Err(FetchError::classify(&error)),
     }
+}
+
+/// The tree-fetch future body (design doc `p2p-snapshot-distribution.md` §3.2):
+/// fetches a `pool` note commitment tree as of `height` from a peer and
+/// verifies its deserialized `.root()` against `expected_root` (the root the
+/// known-hash chunk records for that height), trying [`SNAPSHOT_FETCH_ATTEMPTS`]
+/// peers.
+///
+/// A single-request `NoteCommitmentTree` through the plain peer set gets
+/// inventory-aware routing for free (like the gap hedge). Returns the verified
+/// bytes, ready to hand to the state's supplied-tree commit path, or `None` when
+/// no peer served a tree whose root matches: never fatal, the block folds.
+async fn tree_fetch_stage<ZN>(
+    peer_set: ZN,
+    pool: ShieldedPool,
+    height: block::Height,
+    expected_root: [u8; 32],
+) -> TreeOutcome
+where
+    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Clone,
+{
+    let zs_pool = match pool {
+        ShieldedPool::Sapling => zs::ShieldedPool::Sapling,
+        ShieldedPool::Orchard => zs::ShieldedPool::Orchard,
+    };
+
+    for _ in 0..SNAPSHOT_FETCH_ATTEMPTS {
+        let response = peer_set
+            .clone()
+            .oneshot(zn::Request::NoteCommitmentTree { pool, height })
+            .await;
+
+        let bytes = match response {
+            Ok(zn::Response::NoteCommitmentTree(bytes)) => bytes.to_vec(),
+            // The peer lacks the tree, answered unexpectedly, or the request
+            // failed: try another peer.
+            Ok(_) => continue,
+            Err(_error) => continue,
+        };
+
+        // Verify the downloaded tree's recomputed root against the chunk's
+        // recorded root before trusting it (content-addressed). A tree that
+        // doesn't deserialize, or whose root disagrees, is from a corrupt or
+        // adversarial peer: discard and try another.
+        match zs::note_commitment_tree_root_from_bytes(zs_pool, &bytes) {
+            Some(actual) if actual == expected_root => return Some(bytes),
+            _ => continue,
+        }
+    }
+
+    None
 }

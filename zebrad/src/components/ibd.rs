@@ -48,11 +48,12 @@ pub mod convert;
 pub mod engine;
 pub mod fetch;
 pub mod semantic;
+pub mod tree;
 
 /// The number of peers asked for a snapshot artifact (chunk, tree, or range)
 /// before giving up. Generous: deep-history artifacts are servable by any synced
 /// peer, and a transient miss should not abort the engine.
-const SNAPSHOT_FETCH_ATTEMPTS: u32 = 8;
+pub(crate) const SNAPSHOT_FETCH_ATTEMPTS: u32 = 8;
 
 #[cfg(test)]
 mod tests;
@@ -428,6 +429,7 @@ where
             cache::BlockCache::new(&cache_dir),
             config.known_hash_lookahead_bytes,
             Duration::from_secs(config.known_hash_gap_hedge_secs),
+            config.known_hash_tree_lookahead,
         );
 
         engine.run().await

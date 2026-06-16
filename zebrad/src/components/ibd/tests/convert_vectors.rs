@@ -230,6 +230,7 @@ async fn body_swapped_block_fails_bad_merkle_root_with_attribution() {
             prev_expected: genesis.hash(),
             block: tampered.into(),
             source: Some(peer),
+            supplied_trees: None,
         })
         .await;
 
@@ -328,6 +329,7 @@ async fn verify_and_commit_resolves_with_committed_hash() {
             prev_expected: genesis.hash(),
             block: block1.clone().into(),
             source: None,
+            supplied_trees: None,
         });
     let call = tokio::spawn(call);
 
@@ -376,6 +378,7 @@ async fn state_failure_surfaces_as_commit_error() {
             prev_expected: genesis.hash(),
             block: block1.clone().into(),
             source: None,
+            supplied_trees: None,
         });
     let call = tokio::spawn(call);
 
@@ -434,6 +437,7 @@ async fn eight_conversions_and_commits_overlap() {
             prev_expected: blocks[height - 1].hash(),
             block: blocks[height].clone().into(),
             source: None,
+            supplied_trees: None,
         };
 
         calls.push(
@@ -517,6 +521,7 @@ async fn raw_cached_bytes_verify_and_commit() {
                 body_offset: 0,
             },
             source: None,
+            supplied_trees: None,
         });
     let call = tokio::spawn(call);
 
@@ -564,6 +569,7 @@ async fn truncated_cached_bytes_fail_as_corrupt() {
                 body_offset: 0,
             },
             source: Some(PeerSocketAddr::from(([192, 168, 1, 1], 8233))),
+            supplied_trees: None,
         })
         .await
         .expect_err("truncated bytes must fail verification");
@@ -611,6 +617,7 @@ async fn hash_mismatched_cached_bytes_fail_as_corrupt() {
                 body_offset: 0,
             },
             source: None,
+            supplied_trees: None,
         })
         .await
         .expect_err("bytes hashing to a different block must fail the hash re-check");

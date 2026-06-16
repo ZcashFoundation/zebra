@@ -390,6 +390,31 @@ pub enum VerifyAndCommitError {
     StageUnready(#[source] BoxError),
 }
 
+/// Pre-fetched, verified note commitment tree serializations for one block's
+/// height, supplied by the tree-fetch lookahead in snapshot-consume mode
+/// (design doc `p2p-snapshot-distribution.md` §3.2).
+///
+/// Each blob is the canonical sapling/orchard frontier serialization, already
+/// verified against the chunk's recorded root by the lookahead. When present,
+/// the commit takes the "tree supplied by download" path instead of folding the
+/// block's note commitments; when absent it folds (correct, just slower), so
+/// this is a throughput optimization, never a correctness requirement.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SuppliedTrees {
+    /// The verified sapling tree at this height, if it updated and arrived.
+    pub sapling: Option<Vec<u8>>,
+
+    /// The verified orchard tree at this height, if it updated and arrived.
+    pub orchard: Option<Vec<u8>>,
+}
+
+impl SuppliedTrees {
+    /// Whether either pool's tree was supplied.
+    pub fn is_some(&self) -> bool {
+        self.sapling.is_some() || self.orchard.is_some()
+    }
+}
+
 /// A request to verify and commit one fetched block (design doc §4.3).
 #[derive(Clone, Debug)]
 pub struct IbdBlock {
@@ -414,6 +439,13 @@ pub struct IbdBlock {
     /// The peer that delivered the block, when known; attached to
     /// peer-attributable verify failures for misbehavior reporting.
     pub source: Option<PeerSocketAddr>,
+
+    /// Pre-fetched, verified note commitment trees for this height, taken from
+    /// the tree-fetch lookahead buffer at commit time (snapshot-consume mode).
+    ///
+    /// `None` outside snapshot-consume mode and whenever a tree had not arrived
+    /// in time, in which case the commit folds the block's note commitments.
+    pub supplied_trees: Option<SuppliedTrees>,
 }
 
 /// Stage-2 of the engine's per-block lifecycle: verify a fetched block and
@@ -514,7 +546,26 @@ where
             prev_expected,
             block,
             source,
+            supplied_trees,
         } = request;
+
+        // The tree-fetch lookahead supplied a verified tree for this height:
+        // the commit takes the "tree supplied by download" path instead of
+        // folding the block's note commitments (design doc
+        // `p2p-snapshot-distribution.md` §3.2).
+        //
+        // TODO(known-hash-ibd): thread `supplied_trees` through the
+        // `CommitCheckpointVerifiedBlock` request and the write worker into
+        // `FinalizedState::commit_finalized_direct_with_trees`, which already
+        // accepts a pre-fetched tree set. Until that plumbing lands the engine
+        // still buffers and verifies trees ahead of the frontier (the
+        // throughput-critical work), and a supplied tree is observed here; the
+        // commit folds as a correct fallback.
+        if supplied_trees.as_ref().is_some_and(SuppliedTrees::is_some) {
+            metrics::counter!("ibd.tree.supplied.count").increment(1);
+        } else {
+            metrics::counter!("ibd.tree.folded.count").increment(1);
+        }
 
         // Clone before the async block (tower convention): the future must
         // not borrow from `self`. The clone's own readiness is established

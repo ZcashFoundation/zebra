@@ -51,6 +51,7 @@ fn network_block(height: u32, block: Arc<Block>) -> IbdBlock {
         prev_expected: GENESIS_PREVIOUS_BLOCK_HASH,
         block: block.into(),
         source: None,
+        supplied_trees: None,
     }
 }
 
@@ -150,6 +151,7 @@ async fn corrupt_cached_bytes_fail_before_the_verifier() {
             body_offset: 0,
         },
         source: None,
+        supplied_trees: None,
     };
 
     let error = service

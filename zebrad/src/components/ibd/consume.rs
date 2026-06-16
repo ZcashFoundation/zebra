@@ -580,6 +580,106 @@ impl HashSource for CfHashSource {
             KnownHashList::release_below(fallback, height);
         }
     }
+
+    fn tree_updates_in(
+        &mut self,
+        start: block::Height,
+        end: block::Height,
+    ) -> Vec<crate::components::ibd::tree::TreeFetch> {
+        // Collect the updating heights from every resident chunk that overlaps
+        // `[start, end]`. A chunk that is not yet resident contributes nothing:
+        // the lookahead simply schedules nothing for its heights until it is
+        // primed (the bootstrap primes the active window's chunks first), which
+        // is safe — a missing tree just falls back to folding.
+        let first_index = chunk_index_for_height(start);
+        let last_index = chunk_index_for_height(end);
+
+        let mut updates = Vec::new();
+
+        for index in first_index..=last_index {
+            let Some(span_base) = chunk_span_base(index) else {
+                continue;
+            };
+            let Some(bytes) = self.chunks.get(&index) else {
+                continue;
+            };
+            // The bytes were verified before insertion, so the parse never
+            // fails; skipping on a parse error fails safe.
+            let Ok(parsed) = ParsedChunk::parse(bytes) else {
+                continue;
+            };
+
+            push_pool_updates(
+                &mut updates,
+                ShieldedPool::Sapling,
+                span_base,
+                start,
+                end,
+                parsed.sapling_roots(),
+            );
+            push_pool_updates(
+                &mut updates,
+                ShieldedPool::Orchard,
+                span_base,
+                start,
+                end,
+                parsed.orchard_roots(),
+            );
+        }
+
+        // The lookahead scheduler expects ascending `(height, pool)` order.
+        updates.sort_unstable();
+        updates
+    }
+
+    fn tree_root(&mut self, pool: ShieldedPool, height: block::Height) -> Option<[u8; 32]> {
+        let index = chunk_index_for_height(height);
+        let span_base = chunk_span_base(index)?;
+        let bytes = self.chunks.get(&index)?;
+        let parsed = ParsedChunk::parse(bytes).ok()?;
+
+        let rel = height.0.checked_sub(span_base)?;
+
+        // `tree_updates_in` only reports heights that update a pool's tree, so an
+        // exactly-recorded root exists for any `(pool, height)` the lookahead
+        // asks about. Confirm the recorded record is at this exact rel-height
+        // (not merely at-or-before it), so a non-updating height returns `None`
+        // rather than a stale earlier root.
+        let roots = match pool {
+            ShieldedPool::Sapling => parsed.sapling_roots(),
+            ShieldedPool::Orchard => parsed.orchard_roots(),
+        };
+        roots
+            .into_iter()
+            .find(|record| record.rel_height == rel)
+            .map(|record| record.root)
+    }
+}
+
+/// Appends the absolute updating heights for `pool` that fall inside the
+/// inclusive `[start, end]` window into `updates`.
+///
+/// `roots` are the chunk's sparse `(rel_height, root)` records (ascending);
+/// `span_base` is the chunk's first absolute height, so the absolute height is
+/// `span_base + rel_height`.
+fn push_pool_updates(
+    updates: &mut Vec<crate::components::ibd::tree::TreeFetch>,
+    pool: ShieldedPool,
+    span_base: u32,
+    start: block::Height,
+    end: block::Height,
+    roots: Vec<chunk_v2::TreeRoot>,
+) {
+    use crate::components::ibd::tree::TreeFetch;
+
+    for record in roots {
+        // `span_base + rel_height` cannot overflow a real height (the chunk's
+        // span is far below u32::MAX); saturate to fail safe regardless.
+        let height = block::Height(span_base.saturating_add(record.rel_height));
+        if height >= start && height <= end {
+            updates.push(TreeFetch { height, pool });
+        }
+    }
 }
 
 /// Fetches the `pool` note commitment tree as of `height` from a peer and

@@ -526,3 +526,124 @@ fn chunk_index_and_span_base_round_trip() {
     // A huge index overflows the span-base multiply and fails safe.
     assert_eq!(chunk_span_base(u32::MAX), None);
 }
+
+/// Primes a chunk into a `CfHashSource`'s cache from already-verified bytes, for
+/// the tree-lookahead source tests, without a network or state round-trip.
+async fn primed_source(chunk_bytes: Vec<u8>, max_height: u32) -> CfHashSource {
+    let spec = leak_spec_for(&chunk_bytes, max_height);
+    let mut source = CfHashSource::without_fallback(spec);
+
+    // Serve the chunk from the local "CF" so `ensure_chunk` caches it.
+    let stored = chunk_bytes.clone();
+    let state = service_fn(move |_req: zs::Request| {
+        let bytes = stored.clone();
+        ready(Ok::<_, BoxError>(zs::Response::KnownHashChunk(Some(bytes))))
+    });
+    let peer_set = service_fn(|_req: zn::Request| ready(Ok::<_, BoxError>(zn::Response::NotFound)));
+
+    source
+        .ensure_chunk(&peer_set, &state, 0, 1)
+        .await
+        .expect("the primed chunk is cached");
+    source
+}
+
+/// `tree_updates_in` maps the chunk's sparse `rel_height` records to absolute
+/// updating heights within the window, paired with their pool, ascending.
+#[tokio::test]
+async fn tree_updates_in_maps_sparse_records_to_absolute_heights() {
+    use crate::components::ibd::engine::HashSource;
+    use crate::components::ibd::tree::TreeFetch;
+
+    let _init = zebra_test::init();
+
+    // A chunk over 200 blocks: sapling updates at rel 10 and 120, orchard at
+    // rel 10 and 57. Chunk 0, so absolute height == rel height.
+    let chunk = build_chunk(
+        200,
+        &[
+            TreeRoot {
+                rel_height: 10,
+                root: [1u8; 32],
+            },
+            TreeRoot {
+                rel_height: 120,
+                root: [2u8; 32],
+            },
+        ],
+        &[
+            TreeRoot {
+                rel_height: 10,
+                root: [3u8; 32],
+            },
+            TreeRoot {
+                rel_height: 57,
+                root: [4u8; 32],
+            },
+        ],
+    );
+    let mut source = primed_source(chunk, 199).await;
+
+    // A window that includes 10 and 57 but excludes 120.
+    let updates = source.tree_updates_in(Height(0), Height(60));
+    assert_eq!(
+        updates,
+        vec![
+            TreeFetch {
+                height: Height(10),
+                pool: ShieldedPool::Sapling
+            },
+            TreeFetch {
+                height: Height(10),
+                pool: ShieldedPool::Orchard
+            },
+            TreeFetch {
+                height: Height(57),
+                pool: ShieldedPool::Orchard
+            },
+        ],
+        "only updating heights inside the window are reported, ascending",
+    );
+
+    // A narrow window past the last in-range update reports nothing.
+    assert!(
+        source.tree_updates_in(Height(58), Height(119)).is_empty(),
+        "no updating heights between 58 and 119",
+    );
+}
+
+/// `tree_root` returns the exact recorded root for an updating height, and
+/// `None` for a non-updating height (so the lookahead never verifies against a
+/// stale earlier root).
+#[tokio::test]
+async fn tree_root_returns_exact_recorded_root() {
+    use crate::components::ibd::engine::HashSource;
+
+    let _init = zebra_test::init();
+
+    let chunk = build_chunk(
+        200,
+        &[TreeRoot {
+            rel_height: 10,
+            root: [7u8; 32],
+        }],
+        &[],
+    );
+    let mut source = primed_source(chunk, 199).await;
+
+    assert_eq!(
+        source.tree_root(ShieldedPool::Sapling, Height(10)),
+        Some([7u8; 32]),
+        "the exact recorded root is returned for the updating height",
+    );
+    assert_eq!(
+        source.tree_root(ShieldedPool::Sapling, Height(11)),
+        None,
+        "a non-updating height returns None, not the earlier root",
+    );
+    assert_eq!(
+        source.tree_root(ShieldedPool::Orchard, Height(10)),
+        None,
+        "a pool with no record at the height returns None",
+    );
+}
