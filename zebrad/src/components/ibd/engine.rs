@@ -46,7 +46,9 @@ use zebra_state as zs;
 
 use super::{
     cache::BlockCache,
-    convert::{BlockPayload, ConvertError, IbdBlock, VerifyAndCommit, VerifyAndCommitError},
+    convert::{
+        BlockPayload, CommitStage, ConvertError, IbdBlock, VerifyAndCommit, VerifyAndCommitError,
+    },
     fetch::{
         self, BatchFetchResponse, BatchedFetch, FetchError, FetchFailureKind, FetchRequest,
         FetchedBlock, DEFAULT_SIZE_HINT,
@@ -490,7 +492,7 @@ enum RefillAction {
 
 /// The known-hash IBD engine: a ring window over the uncommitted height
 /// range, and one collection of per-block staged futures.
-pub struct Engine<ZN, ZS, L>
+pub struct Engine<ZN, C, L>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError>
         + Send
@@ -498,12 +500,8 @@ where
         + Clone
         + 'static,
     ZN::Future: Send,
-    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError>
-        + Send
-        + Sync
-        + Clone
-        + 'static,
-    ZS::Future: Send,
+    C: CommitStage,
+    C::Future: Send,
     L: HashList,
 {
     /// The ring window: slot `i` tracks height `base + i`.
@@ -528,9 +526,10 @@ where
     /// is the gap-hedge path (single-hash `BlocksByHash`, design doc §4.1).
     peer_set: ZN,
 
-    /// The verify-and-commit service over the buffered state (design doc
-    /// §4.3); one stage-2 future per block goes through it.
-    verify_and_commit: VerifyAndCommit<ZS>,
+    /// The stage-2 verify-and-commit service (design doc §4.3); one stage-2
+    /// future per block goes through it. [`VerifyAndCommit`] is the known-hash
+    /// implementation; the engine is generic over the [`CommitStage`] seam.
+    verify_and_commit: C,
 
     /// The pinned hash list; owned by the engine, queried synchronously from
     /// the refill step.
@@ -609,7 +608,11 @@ where
     last_stall_warn: Option<Instant>,
 }
 
-impl<ZN, ZS, L> Engine<ZN, ZS, L>
+/// The known-hash constructor: the engine is generic over the [`CommitStage`]
+/// seam, but production builds it with [`VerifyAndCommit`] over the Buffer'd
+/// state. Kept in its own `impl` so callers pass `network` + `state` rather
+/// than wiring the stage-2 service themselves.
+impl<ZN, ZS, L> Engine<ZN, VerifyAndCommit<ZS>, L>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError>
         + Send
@@ -696,7 +699,20 @@ where
             last_stall_warn: None,
         }
     }
+}
 
+impl<ZN, C, L> Engine<ZN, C, L>
+where
+    ZN: Service<zn::Request, Response = zn::Response, Error = BoxError>
+        + Send
+        + Sync
+        + Clone
+        + 'static,
+    ZN::Future: Send,
+    C: CommitStage,
+    C::Future: Send,
+    L: HashList,
+{
     /// Runs the engine until every height through the list's max height is
     /// committed, returning [`IbdOutcome::Completed`].
     ///

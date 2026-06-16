@@ -412,7 +412,38 @@ pub struct IbdBlock {
     pub source: Option<PeerSocketAddr>,
 }
 
-/// The verify-and-commit tower service over the Buffer'd state service.
+/// Stage-2 of the engine's per-block lifecycle: verify a fetched block and
+/// commit it to the state, resolving with the committed hash only after the
+/// state accepts the block.
+///
+/// [`Engine`](super::engine::Engine) is generic over this seam, so its window,
+/// weighted-fetch, gap-hedge, and commit-pipeline machinery drives any
+/// verification strategy unchanged. Today the only implementation is
+/// [`VerifyAndCommit`] (the known-hash checkpoint path); a later phase adds a
+/// full-validation implementation that wraps the semantic block verifier
+/// behind the same trait, and every engine "win" carries over verbatim.
+///
+/// It is exactly the `tower::Service<IbdBlock>` contract pinned to the
+/// engine's stage-2 response (`block::Hash`) and error
+/// ([`VerifyAndCommitError`]) types: both implementations are plain tower
+/// services the engine drives with `oneshot`, so the trait adds no methods of
+/// its own. It exists to name the seam and bound it in one place, via a
+/// blanket implementation over every conforming service.
+pub trait CommitStage:
+    Service<IbdBlock, Response = block::Hash, Error = VerifyAndCommitError> + Clone + Send + 'static
+{
+}
+
+impl<T> CommitStage for T where
+    T: Service<IbdBlock, Response = block::Hash, Error = VerifyAndCommitError>
+        + Clone
+        + Send
+        + 'static
+{
+}
+
+/// The verify-and-commit tower service over the Buffer'd state service: the
+/// known-hash checkpoint implementation of [`CommitStage`].
 ///
 /// One call per block: verify on the rayon pool through [`convert`], then
 /// commit through [`zs::Request::CommitCheckpointVerifiedBlock`]. The future
