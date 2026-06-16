@@ -408,6 +408,20 @@ pub enum ValidateContextError {
         tx_index_in_block: Option<usize>,
         transaction_hash: transaction::Hash,
     },
+
+    #[error(
+        "supplied snapshot-consume Sapling note commitment tree root {supplied:?} \
+         does not match the block header's hashFinalSaplingRoot {expected:?} at {height:?}"
+    )]
+    #[non_exhaustive]
+    SuppliedSaplingTreeRootMismatch {
+        /// The root computed from the supplied (downloaded) sapling tree.
+        supplied: [u8; 32],
+        /// The root pinned by the block header's `hashFinalSaplingRoot`.
+        expected: [u8; 32],
+        /// The block height.
+        height: block::Height,
+    },
 }
 
 impl From<sprout::tree::NoteCommitmentTreeError> for ValidateContextError {

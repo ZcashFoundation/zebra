@@ -218,6 +218,16 @@ fn spec_constant_block_matches_synthetic_sweep() -> Result<()> {
         constant_block.contains(&format!("\"{}\",", hex::encode(expected_chunk))),
         "{constant_block}"
     );
+    // The snapshot-set hashes are pinned separately, so the list emitter leaves
+    // them `None`.
+    assert!(
+        constant_block.contains("unspent_outputs_hash: None,"),
+        "{constant_block}"
+    );
+    assert!(
+        constant_block.contains("address_balances_hash: None,"),
+        "{constant_block}"
+    );
 
     Ok(())
 }

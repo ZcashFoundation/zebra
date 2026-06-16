@@ -161,6 +161,17 @@ identified as the bottleneck) is replaced by a "tree supplied by download" path.
 The block's `hashFinalSaplingRoot` (in the header the engine already hash-pins)
 is an additional check on the supplied sapling tree.
 
+**Tree lookahead.** Trees must be fetched *ahead of* the block download — a
+deeper lookahead window for the per-height tree requests than for blocks — so
+that by the time a block reaches the commit stage its tree is already downloaded
+and verified, and the state's "tree supplied by download" path is taken on the
+common path. If a tree has not arrived yet, the commit falls back to folding
+(correct, just slower), so the lookahead is a throughput optimization, not a
+correctness requirement. Only the *updating* heights need a tree (trees update
+at ~7% of heights); the lookahead scheduler keys tree requests off the chunk's
+sparse tree-root list (`*_root_at_or_before`), requesting the tree at each
+updating height a configurable margin ahead of the commit frontier.
+
 ### 3.3 Address balances + survivor UTXOs at `H_max`
 
 - **Address balances:** loaded once when the engine reaches `H_max` (or streamed

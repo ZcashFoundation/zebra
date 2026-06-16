@@ -517,8 +517,13 @@ impl ZebraDb {
                 .map(|(outpoint, _output_loc, utxo)| (*outpoint, utxo.clone()))
                 .collect();
 
+        // The map from spent outpoints to their output locations. Built
+        // unconditionally so the snapshot-consume (assumeUTXO) balance pass can
+        // test a spent output's survivor-set membership by its location, keeping
+        // the spend-debit and create-credit elision decisions consistent. The
+        // `indexer` feature also uses this map for its spent-output index.
+        //
         // TODO: Add `OutputLocation`s to the values in `spent_utxos_by_outpoint` to avoid creating a second hashmap with the same keys
-        #[cfg(feature = "indexer")]
         let out_loc_by_outpoint: HashMap<transparent::OutPoint, OutputLocation> = spent_utxos
             .iter()
             .map(|(outpoint, out_loc, _utxo)| (*outpoint, *out_loc))
@@ -583,7 +588,6 @@ impl ZebraDb {
             new_outputs_by_out_loc,
             spent_utxos_by_outpoint,
             spent_utxos_by_out_loc,
-            #[cfg(feature = "indexer")]
             out_loc_by_outpoint,
             address_balances,
             self.finalized_value_pool(),
@@ -648,10 +652,7 @@ impl DiskWriteBatch {
         new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
         spent_utxos_by_outpoint: HashMap<transparent::OutPoint, transparent::Utxo>,
         spent_utxos_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
-        #[cfg(feature = "indexer")] out_loc_by_outpoint: HashMap<
-            transparent::OutPoint,
-            OutputLocation,
-        >,
+        out_loc_by_outpoint: HashMap<transparent::OutPoint, OutputLocation>,
         address_balances: AddressBalanceLocationUpdates,
         value_pool: ValueBalance<NonNegative>,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
@@ -689,7 +690,6 @@ impl DiskWriteBatch {
                 &new_outputs_by_out_loc,
                 &spent_utxos_by_outpoint,
                 &spent_utxos_by_out_loc,
-                #[cfg(feature = "indexer")]
                 &out_loc_by_outpoint,
                 address_balances,
             );

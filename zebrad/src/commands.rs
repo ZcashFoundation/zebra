@@ -38,8 +38,9 @@ pub enum ZebradCmd {
     // TODO: hide this command from users in release builds (#3279)
     CopyState(CopyStateCmd),
 
-    /// The `emit-snapshot` subcommand, emits IBD state-snapshot artifacts from a
-    /// synced read-only state (expert users only)
+    /// The `emit-snapshot` subcommand: the release-time constants-updater that
+    /// regenerates the pinned IBD snapshot hashes from a synced read-only state
+    /// and edits the Zebra source constants in place (release maintainers only)
     EmitSnapshot(EmitSnapshotCmd),
 
     /// Generate a default `zebrad.toml` configuration

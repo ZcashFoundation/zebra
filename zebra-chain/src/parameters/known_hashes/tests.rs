@@ -42,6 +42,8 @@ fn synthetic_spec(
         // / `test-known-hashes` assets in the fallback search dir.
         file_prefix: "synthetic-known-hashes",
         chunk_hashes: Box::leak(Box::new([chunk_hash])),
+        unspent_outputs_hash: None,
+        address_balances_hash: None,
     }));
 
     std::fs::write(dir.join(spec.chunk_file_name(0)), bytes).expect("test dir is writable");

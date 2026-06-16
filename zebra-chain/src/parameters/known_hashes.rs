@@ -107,6 +107,23 @@ pub struct KnownHashListSpec {
     /// The chunk file name prefix, e.g. `main-known-hashes` for
     /// `main-known-hashes-00.bin`.
     pub file_prefix: &'static str,
+
+    /// SHA-256 of the full unspent-output-location set at `max_height`, as
+    /// lowercase hex, or `None` until the snapshot updater pins it.
+    ///
+    /// Used by snapshot-consume sync to content-address-verify the
+    /// unspent-output set assembled from peer range responses
+    /// (`docs/design/p2p-snapshot-distribution.md`). `None` means the snapshot
+    /// hash has not yet been reviewed into source, so snapshot-consume sync
+    /// cannot verify the set and must not run.
+    pub unspent_outputs_hash: Option<&'static str>,
+
+    /// SHA-256 of the full address-balance set at `max_height`, as lowercase
+    /// hex, or `None` until the snapshot updater pins it.
+    ///
+    /// Used like [`unspent_outputs_hash`](Self::unspent_outputs_hash) to verify
+    /// the address-balance set assembled from peer range responses.
+    pub address_balances_hash: Option<&'static str>,
 }
 
 /// The Mainnet every-block known-hash list: 3,373,207 hashes
@@ -140,6 +157,10 @@ pub const MAINNET_KNOWN_HASHES: KnownHashListSpec = KnownHashListSpec {
         "d444c2e1afdcd6635c8707e0d302a3064fc5dacb6a96e09c18a56969429b11e3",
         "651f6924710b43b9e161186ba81bdfddc12f2217d18f4c53eae9cdeb05c1a07a",
     ],
+    // Pinned by the snapshot constants-updater at release time; not yet
+    // reviewed into source (`docs/design/p2p-snapshot-distribution.md`).
+    unspent_outputs_hash: None,
+    address_balances_hash: None,
 };
 
 /// The Testnet every-block known-hash list: 4,057,201 hashes
@@ -178,6 +199,10 @@ pub const TESTNET_KNOWN_HASHES: KnownHashListSpec = KnownHashListSpec {
         "197b7242daa1abd7df1534ee009ec9bbd706fc791f135b3bfcdd0dd74de5529d",
         "9206a3a1653b3d1725c221139908b8fc34998b22b99d56316a7b3e81079969ba",
     ],
+    // Pinned by the snapshot constants-updater at release time; not yet
+    // reviewed into source (`docs/design/p2p-snapshot-distribution.md`).
+    unspent_outputs_hash: None,
+    address_balances_hash: None,
 };
 
 impl KnownHashListSpec {

@@ -176,6 +176,10 @@ semver = { workspace = true }
 serde = { workspace = true, features = ["serde_derive"] }
 toml = { workspace = true }
 
+# Hashing the regenerated snapshot artifacts in the `emit-snapshot` command.
+sha2 = { workspace = true }
+hex = { workspace = true }
+
 futures = { workspace = true }
 rayon = { workspace = true }
 tokio = { workspace = true, features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
@@ -261,6 +265,10 @@ tonic-prost-build = { workspace = true, optional = true }
 [dev-dependencies]
 abscissa_core = { workspace = true, features = ["testing"] }
 anyhow = { workspace = true }
+# Used by the snapshot-consume tree-root verification tests to serialize a note
+# commitment tree with the same `bincode::DefaultOptions` encoding zebra-state
+# uses on disk and over P2P.
+bincode = { workspace = true }
 hex = { workspace = true }
 hex-literal = { workspace = true }
 jsonrpsee-types = { workspace = true }

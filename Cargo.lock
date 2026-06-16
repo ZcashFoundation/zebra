@@ -7830,6 +7830,7 @@ version = "5.1.0"
 dependencies = [
  "abscissa_core",
  "anyhow",
+ "bincode",
  "bytes",
  "chrono",
  "clap 4.6.1",
@@ -7871,6 +7872,7 @@ dependencies = [
  "sentry",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "strum",
  "strum_macros",
  "tempfile",

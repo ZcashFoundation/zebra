@@ -40,11 +40,19 @@ use zebra_state as zs;
 
 use crate::{components::sync::Config, BoxError};
 
+use self::{consume::CfHashSource, engine::HashSource};
+
 pub mod cache;
+pub mod consume;
 pub mod convert;
 pub mod engine;
 pub mod fetch;
 pub mod semantic;
+
+/// The number of peers asked for a snapshot artifact (chunk, tree, or range)
+/// before giving up. Generous: deep-history artifacts are servable by any synced
+/// peer, and a transient miss should not abort the engine.
+const SNAPSHOT_FETCH_ATTEMPTS: u32 = 8;
 
 #[cfg(test)]
 mod tests;
@@ -313,24 +321,44 @@ where
                 ?next_commit,
                 list_max_height = ?list.max_height(),
                 restarts,
+                snapshot_consume = self.config.snapshot_consume_sync,
                 "starting the known-hash IBD engine",
             );
 
-            let mut engine = engine::Engine::new(
-                self.network.clone(),
-                self.peer_set.clone(),
-                self.state.clone(),
-                next_commit,
-                list,
-                self.peer_set_status.clone(),
-                // The cache index is rebuilt from disk by the engine's
-                // restore scan on every (re)start.
-                cache::BlockCache::new(&self.cache_dir),
-                self.config.known_hash_lookahead_bytes,
-                Duration::from_secs(self.config.known_hash_gap_hedge_secs),
-            );
+            // In snapshot-consume mode the engine reads hashes from the
+            // `known_hash_chunk` column family (fetching missing chunks from
+            // peers and verifying them against the pinned hashes), and bootstraps
+            // the downloaded snapshot sets before syncing. Otherwise it reads the
+            // bundled `.bin` list directly. Both paths run the same generic
+            // engine over a `HashSource`.
+            let run_result = if self.config.snapshot_consume_sync {
+                let source = CfHashSource::new(spec, list);
+                Self::bootstrap_and_run_engine(
+                    self.network.clone(),
+                    self.peer_set.clone(),
+                    self.state.clone(),
+                    self.peer_set_status.clone(),
+                    self.cache_dir.clone(),
+                    self.config.clone(),
+                    next_commit,
+                    source,
+                )
+                .await
+            } else {
+                Self::build_and_run_engine(
+                    self.network.clone(),
+                    self.peer_set.clone(),
+                    self.state.clone(),
+                    self.peer_set_status.clone(),
+                    self.cache_dir.clone(),
+                    self.config.clone(),
+                    next_commit,
+                    list,
+                )
+                .await
+            };
 
-            match engine.run().await {
+            match run_result {
                 Ok(outcome) => return Ok(outcome),
 
                 // Fatal diagnostics and shutdowns propagate: restarting
@@ -364,6 +392,114 @@ where
                 }
             }
         }
+    }
+
+    /// Builds the known-hash engine over `source` starting at `next_commit` and
+    /// runs it to completion.
+    ///
+    /// Generic over the [`HashSource`] so the same construction serves both the
+    /// bundled `.bin` list ([`KnownHashList`]) and the CF-backed
+    /// [`CfHashSource`] used in snapshot-consume mode. Takes owned service
+    /// clones rather than borrowing `self`, so the returned future stays `Send`
+    /// without bounding the chain-tip type as `Sync`.
+    #[allow(clippy::too_many_arguments)]
+    async fn build_and_run_engine<L>(
+        network: Network,
+        peer_set: ZN,
+        state: ZS,
+        peer_set_status: watch::Receiver<zn::PeerSetStatus>,
+        cache_dir: PathBuf,
+        config: Config,
+        next_commit: block::Height,
+        source: L,
+    ) -> Result<IbdOutcome, engine::EngineError>
+    where
+        L: HashSource,
+    {
+        let mut engine = engine::Engine::new(
+            network,
+            peer_set,
+            state,
+            next_commit,
+            source,
+            peer_set_status,
+            // The cache index is rebuilt from disk by the engine's restore scan
+            // on every (re)start.
+            cache::BlockCache::new(&cache_dir),
+            config.known_hash_lookahead_bytes,
+            Duration::from_secs(config.known_hash_gap_hedge_secs),
+        );
+
+        engine.run().await
+    }
+
+    /// Primes the snapshot-consume source and runs the engine.
+    ///
+    /// Before syncing, fetches and verifies the known-hash chunks covering the
+    /// active window (so the engine has hashes, size hints, and tree roots for
+    /// the heights it is about to fetch). Each chunk is content-addressed against
+    /// its pinned SHA-256 (design doc `p2p-snapshot-distribution.md`); a chunk
+    /// that no peer can serve, or that fails verification, surfaces as a
+    /// retryable error so the supervisor restarts the bootstrap.
+    ///
+    /// The unspent-output and address-balance set downloads (verified against
+    /// their pinned hashes and handed to the state's survivor filter and balance
+    /// loader) and the per-height tree fetch/inject are sequenced by the engine's
+    /// fetch rails; see the stage follow-ups. This priming step covers the chunk
+    /// hashes the engine needs to even issue its first block fetches.
+    ///
+    /// Takes owned service clones (like [`build_and_run_engine`]) so the future
+    /// is `Send`.
+    ///
+    /// [`build_and_run_engine`]: Self::build_and_run_engine
+    #[allow(clippy::too_many_arguments)]
+    async fn bootstrap_and_run_engine(
+        network: Network,
+        peer_set: ZN,
+        state: ZS,
+        peer_set_status: watch::Receiver<zn::PeerSetStatus>,
+        cache_dir: PathBuf,
+        config: Config,
+        next_commit: block::Height,
+        mut source: CfHashSource,
+    ) -> Result<IbdOutcome, engine::EngineError> {
+        // Prime the chunk covering the first uncommitted height, and the next
+        // one, so the engine's window (which spans at most two chunks, design doc
+        // §6.4) has hashes before any block fetch is issued.
+        let first_index = consume::chunk_index_for_height(next_commit);
+        // `chunk_hashes.len() >= 1` for a valid spec, so the cast and subtraction
+        // are safe; the count is far below u32::MAX.
+        let max_index = source.spec().chunk_hashes.len().saturating_sub(1) as u32;
+
+        for index in first_index..=max_index.min(first_index + 1) {
+            if let Err(error) = source
+                .ensure_chunk(&peer_set, &state, index, SNAPSHOT_FETCH_ATTEMPTS)
+                .await
+            {
+                // A chunk we cannot fetch or verify is retryable: a peer may
+                // serve it on a later restart, and the bundled `.bin` fallback
+                // still backs `hash`/`size_hint` for cold start.
+                warn!(
+                    %error,
+                    index,
+                    "failed to prime a known-hash chunk for snapshot-consume sync; \
+                     the engine will fall back to the bundled list for cold start",
+                );
+                return Err(engine::EngineError::List(Box::new(error)));
+            }
+        }
+
+        Self::build_and_run_engine(
+            network,
+            peer_set,
+            state,
+            peer_set_status,
+            cache_dir,
+            config,
+            next_commit,
+            source,
+        )
+        .await
     }
 }
 

@@ -31,6 +31,7 @@ mod error;
 mod request;
 mod response;
 mod service;
+pub mod snapshot_consume;
 
 #[cfg(test)]
 mod tests;
@@ -57,14 +58,20 @@ pub use response::{
     ReadResponse, Response,
 };
 pub use service::{
+    address_balances_range,
     chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip, TipAction},
     check,
     finalized_state::FinalizedState,
-    init, init_read_only,
+    init, init_read_only, known_hash_chunk_bytes,
     non_finalized_state::NonFinalizedState,
-    spawn_init_read_only,
+    note_commitment_tree_bytes, note_commitment_tree_root_from_bytes, spawn_init_read_only,
+    unspent_outputs_range,
     watch_receiver::WatchReceiver,
     OutputLocation, ReadState, State, TransactionIndex, TransactionLocation,
+    ADDRESS_BALANCE_RECORD_LEN, MAX_SNAPSHOT_RANGE_BYTES, UNSPENT_OUTPUT_RECORD_LEN,
+};
+pub use snapshot_consume::{
+    SnapshotConsumeConfig, SnapshotConsumeState, SurvivorSet, SurvivorSetError,
 };
 
 // Allow use in the scanner and external tests

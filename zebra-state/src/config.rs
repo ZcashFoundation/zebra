@@ -17,6 +17,7 @@ use zebra_chain::{common::default_cache_dir, parameters::Network};
 use crate::{
     constants::{DATABASE_FORMAT_VERSION_FILE_NAME, STATE_DATABASE_KIND},
     service::finalized_state::restorable_db_versions,
+    snapshot_consume::SnapshotConsumeConfig,
     state_database_format_version_in_code, BoxError,
 };
 
@@ -173,6 +174,22 @@ pub struct Config {
     /// roughly `blocks × 2 MB` in the worst case.
     pub checkpoint_sync_pipeline_capacity: usize,
 
+    /// Optional "snapshot consume" mode for the known-hash / checkpoint initial
+    /// block download (assumeUTXO sync).
+    ///
+    /// `None` by default (off): a normal sync derives all state from the blocks
+    /// it commits. When set, the finalized write path consumes a verified state
+    /// snapshot at the maximum checkpoint height instead of deriving it — it
+    /// writes downloaded note commitment trees directly, skips the per-block
+    /// address-balance derivation in favour of bulk-loading the final balances,
+    /// and skips the RPC address-index / balance writes for non-survivor
+    /// transparent outputs.
+    ///
+    /// See [`SnapshotConsumeConfig`] and `docs/design/utxo-elision.md` for the
+    /// crash-safety analysis. The unsafe `utxo_by_out_loc` byte elision stays
+    /// off unless explicitly enabled in [`SnapshotConsumeConfig`].
+    pub snapshot_consume: Option<SnapshotConsumeConfig>,
+
     // Debug configs
     //
     /// Commit blocks to the finalized state up to this height, then exit Zebra.
@@ -292,6 +309,7 @@ impl Default for Config {
             disable_wal_during_ibd: false,
             checkpoint_sync_retained_blocks: crate::constants::MAX_BLOCK_REORG_HEIGHT,
             checkpoint_sync_pipeline_capacity: crate::constants::MAX_BLOCK_REORG_HEIGHT as usize,
+            snapshot_consume: None,
             debug_stop_at_height: None,
             debug_validity_check_interval: None,
             debug_skip_non_finalized_state_backup_task: false,

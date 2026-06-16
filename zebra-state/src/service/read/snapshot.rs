@@ -16,9 +16,15 @@
 //! produces byte-identical output that hashes to the pinned SHA-256 constants in
 //! `zebra-chain`. See `docs/design/p2p-snapshot-distribution.md`.
 
-use zebra_chain::parameters::known_hashes::{
-    chunk_v2::{self, TreeRoot},
-    HASHES_PER_CHUNK,
+use bincode::Options;
+
+use zebra_chain::{
+    orchard,
+    parameters::known_hashes::{
+        chunk_v2::{self, TreeRoot},
+        HASHES_PER_CHUNK,
+    },
+    sapling,
 };
 
 use crate::{
@@ -181,6 +187,34 @@ pub fn note_commitment_tree_bytes(
         ShieldedPool::Orchard => db
             .orchard_tree_by_height(&height)
             .map(|tree| tree.as_bytes()),
+    }
+}
+
+/// Deserializes peer-supplied `pool` note-commitment-tree `bytes` and returns
+/// the tree's `.root()` as a 32-byte array, or `None` if the bytes do not
+/// deserialize.
+///
+/// This is the inverse of [`note_commitment_tree_bytes`] for the
+/// snapshot-consume path: the bytes come from an untrusted peer, so unlike the
+/// state's internal `FromDisk` (which `expect`s a self-produced encoding), this
+/// returns `None` on a malformed encoding rather than panicking. The caller
+/// checks the returned root against the root recorded in the relevant
+/// known-hash chunk before trusting the tree.
+///
+/// The encoding is the same `bincode::DefaultOptions` serialization that
+/// [`note_commitment_tree_bytes`] produces (`tree.as_bytes()`), so an honest
+/// peer's bytes round-trip to a tree with the recorded root.
+pub fn note_commitment_tree_root_from_bytes(pool: ShieldedPool, bytes: &[u8]) -> Option<[u8; 32]> {
+    let options = bincode::DefaultOptions::new();
+    match pool {
+        ShieldedPool::Sapling => {
+            let tree: sapling::tree::NoteCommitmentTree = options.deserialize(bytes).ok()?;
+            Some((&tree.root()).into())
+        }
+        ShieldedPool::Orchard => {
+            let tree: orchard::tree::NoteCommitmentTree = options.deserialize(bytes).ok()?;
+            Some((&tree.root()).into())
+        }
     }
 }
 
@@ -450,6 +484,69 @@ mod tests {
                 note_commitment_tree_bytes(db, pool, Height(1_000_000)),
                 None,
                 "an above-tip height returns None",
+            );
+        }
+    }
+
+    /// The served tree bytes deserialize back to a root matching the one the
+    /// state records in the known-hash chunk for the same height, so a consuming
+    /// node's `note_commitment_tree_root_from_bytes` check passes for an honest
+    /// peer's bytes and fails for garbage.
+    #[test]
+    fn served_tree_root_matches_chunk_record() {
+        let _init_guard = zebra_test::init();
+
+        let state = populated_mainnet_state();
+        let db = &state.db;
+
+        // The chunk records the tree root at each height that updates the tree.
+        let chunk_bytes = known_hash_chunk_bytes(db, 0).expect("chunk 0 is generated");
+        let parsed = ParsedChunk::parse(&chunk_bytes).expect("chunk parses");
+
+        for pool in [ShieldedPool::Sapling, ShieldedPool::Orchard] {
+            for rel in 0..3u32 {
+                let tree_bytes = note_commitment_tree_bytes(db, pool, Height(rel))
+                    .expect("tree exists at this height");
+
+                let served_root = note_commitment_tree_root_from_bytes(pool, &tree_bytes)
+                    .expect("served tree bytes deserialize");
+
+                // The chunk may not record a root at every height (only heights
+                // that change the tree). When it does, the served root must match.
+                let recorded = match pool {
+                    ShieldedPool::Sapling => parsed.sapling_root_at_or_before(rel),
+                    ShieldedPool::Orchard => parsed.orchard_root_at_or_before(rel),
+                };
+                if let Some(recorded) = recorded {
+                    // `*_root_at_or_before` returns the root at the largest
+                    // recorded height <= rel; for a height that records its own
+                    // root, that equals this height's tree root.
+                    let exact = match pool {
+                        ShieldedPool::Sapling => parsed
+                            .sapling_roots()
+                            .into_iter()
+                            .find(|r| r.rel_height == rel),
+                        ShieldedPool::Orchard => parsed
+                            .orchard_roots()
+                            .into_iter()
+                            .find(|r| r.rel_height == rel),
+                    };
+                    if let Some(record) = exact {
+                        assert_eq!(
+                            served_root, record.root,
+                            "served {pool:?} tree root at rel {rel} matches the chunk record",
+                        );
+                    }
+                    // `recorded` is used to confirm a root exists at or before rel.
+                    let _ = recorded;
+                }
+            }
+
+            // Garbage never deserializes to a root.
+            assert_eq!(
+                note_commitment_tree_root_from_bytes(pool, &[0xFF; 7]),
+                None,
+                "garbage tree bytes return None",
             );
         }
     }

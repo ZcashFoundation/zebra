@@ -276,6 +276,45 @@ impl FinalizedState {
         self.db.network()
     }
 
+    /// Verifies a supplied (downloaded) sapling note commitment tree against the
+    /// `block` header's `hashFinalSaplingRoot`, where the header commits to it
+    /// directly (the Sapling/Blossom era).
+    ///
+    /// For Heartwood-onward blocks, the header commitment is the chain-history
+    /// root rather than the bare sapling root, so the supplied sapling and
+    /// orchard trees are instead validated transitively by the existing
+    /// `block_commitment_is_valid_for_chain_history` check downstream (which is
+    /// computed from the supplied roots). This function only performs the direct
+    /// check when it applies, and is a no-op otherwise.
+    fn verify_supplied_sapling_tree(
+        block: &Arc<block::Block>,
+        supplied: &NoteCommitmentTrees,
+        network: &Network,
+    ) -> Result<(), CommitCheckpointVerifiedError> {
+        let height = block
+            .coinbase_height()
+            .expect("committed blocks always have a coinbase height");
+
+        // The header commitment only equals the bare sapling root in the
+        // Sapling/Blossom era; later eras fold it into the chain history tree,
+        // which is checked downstream against the supplied roots.
+        if let Ok(block::Commitment::FinalSaplingRoot(expected_root)) =
+            block.header.commitment(network, height)
+        {
+            let supplied_root = supplied.sapling.root();
+            if supplied_root != expected_root {
+                return Err(ValidateContextError::SuppliedSaplingTreeRootMismatch {
+                    supplied: supplied_root.into(),
+                    expected: expected_root.into(),
+                    height,
+                }
+                .into());
+            }
+        }
+
+        Ok(())
+    }
+
     /// Immediately commit a `finalized` block to the finalized state.
     ///
     /// This can be called either by the non-finalized state (when finalizing
@@ -296,6 +335,43 @@ impl FinalizedState {
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
         source: &str,
     ) -> Result<(block::Hash, NoteCommitmentTrees), CommitCheckpointVerifiedError> {
+        self.commit_finalized_direct_with_trees(
+            finalizable_block,
+            prev_note_commitment_trees,
+            None,
+            source,
+        )
+    }
+
+    /// Like [`Self::commit_finalized_direct`], but for a checkpoint-verified
+    /// block in snapshot-consume (assumeUTXO) mode, optionally accepts a
+    /// pre-fetched, verified note commitment tree set for the block's height.
+    ///
+    /// When `supplied_trees` is `Some`, the checkpoint commit **writes the
+    /// supplied trees directly** instead of folding the block's note commitments
+    /// (`update_trees_parallel`). The supplied sapling tree's `.root()` is
+    /// checked against the block header's `hashFinalSaplingRoot` before it is
+    /// accepted; a mismatch is a fatal commit error. The history tree is still
+    /// derived and the `hashBlockCommitments` check still runs against the
+    /// (supplied) sapling and orchard roots, so the auth-data binding is
+    /// unchanged.
+    ///
+    /// `supplied_trees` is ignored for contextual blocks (they always carry
+    /// their own treestate) and for genesis.
+    ///
+    /// # Errors
+    ///
+    /// As for [`Self::commit_finalized_direct`], plus a fatal error if a
+    /// supplied sapling tree's root does not match the block header's
+    /// `hashFinalSaplingRoot`.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn commit_finalized_direct_with_trees(
+        &mut self,
+        finalizable_block: FinalizableBlock,
+        prev_note_commitment_trees: Option<NoteCommitmentTrees>,
+        supplied_trees: Option<NoteCommitmentTrees>,
+        source: &str,
+    ) -> Result<(block::Hash, NoteCommitmentTrees), CommitCheckpointVerifiedError> {
         let (height, hash, finalized, spent_utxos, prev_note_commitment_trees) =
             match finalizable_block {
                 FinalizableBlock::Checkpoint {
@@ -312,11 +388,21 @@ impl FinalizedState {
                     let prev_note_commitment_trees = prev_note_commitment_trees
                         .unwrap_or_else(|| self.db.note_commitment_trees_for_tip());
 
-                    // Update the note commitment trees.
-                    let mut note_commitment_trees = prev_note_commitment_trees.clone();
-                    note_commitment_trees
-                        .update_trees_parallel(&block)
-                        .map_err(ValidateContextError::from)?;
+                    // Update the note commitment trees, or use the supplied trees
+                    // directly in snapshot-consume mode (verified below).
+                    let note_commitment_trees = match supplied_trees {
+                        Some(supplied) => {
+                            Self::verify_supplied_sapling_tree(&block, &supplied, &self.network())?;
+                            supplied
+                        }
+                        None => {
+                            let mut note_commitment_trees = prev_note_commitment_trees.clone();
+                            note_commitment_trees
+                                .update_trees_parallel(&block)
+                                .map_err(ValidateContextError::from)?;
+                            note_commitment_trees
+                        }
+                    };
 
                     // Check the block commitment if the history tree was not
                     // supplied by the non-finalized state. Note that we don't do

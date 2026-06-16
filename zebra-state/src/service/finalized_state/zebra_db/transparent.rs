@@ -235,6 +235,46 @@ impl ZebraDb {
         }
     }
 
+    /// Bulk-loads a verified address-balance set into
+    /// `balance_by_transparent_addr`, overwriting (inserting) each entry.
+    ///
+    /// Used by the snapshot-consume (assumeUTXO) sync to load the final
+    /// `H_max` balances directly, instead of deriving them per block (the
+    /// measured Thread 2 bottleneck). The caller is responsible for verifying
+    /// the set against its pinned hash before calling this.
+    ///
+    /// The balances are written with plain inserts (not merge operands), which
+    /// is correct because they are the authoritative final values, not
+    /// per-block deltas. Written in batches of up to `batch_size` entries to
+    /// bound peak memory.
+    pub fn bulk_load_address_balances(
+        &self,
+        balances: impl IntoIterator<Item = (transparent::Address, AddressBalanceLocation)>,
+        batch_size: usize,
+    ) -> Result<(), rocksdb::Error> {
+        let batch_size = batch_size.max(1);
+        let mut batch = DiskWriteBatch::new();
+        let mut pending = 0usize;
+
+        for (address, balance) in balances {
+            let balance_by_transparent_addr =
+                self.db.cf_handle(BALANCE_BY_TRANSPARENT_ADDR).unwrap();
+            batch.zs_insert(&balance_by_transparent_addr, address, balance);
+            pending += 1;
+
+            if pending >= batch_size {
+                self.write_batch(std::mem::take(&mut batch))?;
+                pending = 0;
+            }
+        }
+
+        if pending > 0 {
+            self.write_batch(batch)?;
+        }
+
+        Ok(())
+    }
+
     /// Returns the unspent transparent outputs for a [`transparent::Address`],
     /// if they are in the finalized state.
     pub fn address_utxos(
@@ -475,14 +515,21 @@ impl DiskWriteBatch {
         new_outputs_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
         spent_utxos_by_outpoint: &HashMap<transparent::OutPoint, transparent::Utxo>,
         spent_utxos_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
-        #[cfg(feature = "indexer")] out_loc_by_outpoint: &HashMap<
-            transparent::OutPoint,
-            OutputLocation,
-        >,
+        out_loc_by_outpoint: &HashMap<transparent::OutPoint, OutputLocation>,
         mut address_balances: AddressBalanceLocationUpdates,
     ) {
         let db = &zebra_db.db;
         let FinalizedBlock { block, height, .. } = finalized;
+
+        // In snapshot-consume (assumeUTXO) mode with a survivor set loaded, the
+        // RPC address-index and balance writes for non-survivor outputs are
+        // elided (always crash-safe: those CFs are never read by spend
+        // resolution or consensus). The spend-debit elision is keyed by the
+        // spent output's OutputLocation, exactly like the create-credit elision,
+        // so the two decisions agree by construction on the same OutputLocation.
+        //
+        // The genesis block has no address index, so it never reaches here.
+        let snapshot_consume = zebra_db.snapshot_consume();
 
         // Update the in-memory `address_balances` transaction-by-transaction, debiting inputs
         // before crediting outputs within each transaction. This ordering keeps every
@@ -494,7 +541,9 @@ impl DiskWriteBatch {
             *height,
             &block.transactions,
             spent_utxos_by_outpoint,
+            out_loc_by_outpoint,
             &mut address_balances,
+            snapshot_consume,
         );
 
         // Write the new and spent transparent output index entries. These passes no longer
@@ -504,12 +553,14 @@ impl DiskWriteBatch {
             network,
             new_outputs_by_out_loc,
             &address_balances,
+            snapshot_consume,
         );
         self.prepare_spent_transparent_outputs_batch(
             db,
             network,
             spent_utxos_by_out_loc,
             &address_balances,
+            snapshot_consume,
         );
 
         // Index the transparent addresses that spent in each transaction
@@ -522,9 +573,9 @@ impl DiskWriteBatch {
                 spending_tx_location,
                 transaction,
                 spent_utxos_by_outpoint,
-                #[cfg(feature = "indexer")]
                 out_loc_by_outpoint,
                 &address_balances,
+                snapshot_consume,
             );
         }
 
@@ -545,13 +596,35 @@ impl DiskWriteBatch {
     /// [`Self::prepare_new_transparent_outputs_batch`] and
     /// [`Self::prepare_spent_transparent_outputs_batch`], which read but no longer mutate
     /// `address_balances`.
+    ///
+    /// # Snapshot consume (assumeUTXO)
+    ///
+    /// When `snapshot_consume` has a survivor set loaded, the balance credit for
+    /// a created non-survivor output and the matching debit for its spend are
+    /// **both** skipped (keyed by the same [`OutputLocation`], so they agree by
+    /// construction). This keeps the per-block balance net-zero-consistent and
+    /// elides the same outputs as the address-index passes. The balance CF is
+    /// never read by spend resolution or consensus, so this is always
+    /// crash-safe; see [`crate::snapshot_consume`].
+    #[allow(clippy::too_many_arguments)]
     fn prepare_transparent_address_balance_updates(
         network: &Network,
         height: Height,
         transactions: &[Arc<Transaction>],
         spent_utxos_by_outpoint: &HashMap<transparent::OutPoint, transparent::Utxo>,
+        out_loc_by_outpoint: &HashMap<transparent::OutPoint, OutputLocation>,
         address_balances: &mut AddressBalanceLocationUpdates,
+        snapshot_consume: Option<&Arc<crate::snapshot_consume::SnapshotConsumeState>>,
     ) {
+        // Only elide when a survivor set is loaded. When absent, every output is
+        // treated as a survivor (no elision), matching a normal sync.
+        let elide = |loc: &OutputLocation| -> bool {
+            snapshot_consume
+                .map(|consume| consume.elide_address_index(&loc.as_bytes()))
+                .unwrap_or(false)
+        };
+
+        #[allow(clippy::too_many_arguments)]
         fn update_per_tx<
             C: Constraint + Copy + std::fmt::Debug,
             T: std::ops::DerefMut<Target = AddressBalanceLocationInner<C>>
@@ -562,11 +635,21 @@ impl DiskWriteBatch {
             height: Height,
             transactions: &[Arc<Transaction>],
             spent_utxos_by_outpoint: &HashMap<transparent::OutPoint, transparent::Utxo>,
+            out_loc_by_outpoint: &HashMap<transparent::OutPoint, OutputLocation>,
+            elide: &impl Fn(&OutputLocation) -> bool,
         ) {
             for (tx_index, transaction) in transactions.iter().enumerate() {
                 // Debit transparent inputs first. Coinbase inputs have no outpoint, so
                 // `filter_map(Input::outpoint)` skips them.
                 for spent_outpoint in transaction.inputs().iter().filter_map(Input::outpoint) {
+                    // Skip the debit iff the spent output's create-credit was
+                    // elided: same OutputLocation test as the create side.
+                    if let Some(spent_loc) = out_loc_by_outpoint.get(&spent_outpoint) {
+                        if elide(spent_loc) {
+                            continue;
+                        }
+                    }
+
                     let spent_utxo = spent_utxos_by_outpoint
                         .get(&spent_outpoint)
                         .expect("spent outpoint must already be resolved");
@@ -583,10 +666,15 @@ impl DiskWriteBatch {
 
                 // Then credit transparent outputs.
                 for (output_index, output) in transaction.outputs().iter().enumerate() {
-                    if let Some(receiving_address) = output.address(network) {
-                        let new_output_location =
-                            OutputLocation::from_usize(height, tx_index, output_index);
+                    let new_output_location =
+                        OutputLocation::from_usize(height, tx_index, output_index);
 
+                    // Skip the credit for an elided non-survivor output.
+                    if elide(&new_output_location) {
+                        continue;
+                    }
+
+                    if let Some(receiving_address) = output.address(network) {
                         let addr_loc = addr_locs.entry(receiving_address).or_insert_with(|| {
                             AddressBalanceLocationInner::new(new_output_location).into()
                         });
@@ -606,6 +694,8 @@ impl DiskWriteBatch {
                 height,
                 transactions,
                 spent_utxos_by_outpoint,
+                out_loc_by_outpoint,
+                &elide,
             ),
             AddressBalanceLocationUpdates::Insert(balances) => update_per_tx(
                 balances,
@@ -613,6 +703,8 @@ impl DiskWriteBatch {
                 height,
                 transactions,
                 spent_utxos_by_outpoint,
+                out_loc_by_outpoint,
+                &elide,
             ),
         }
     }
@@ -634,6 +726,17 @@ impl DiskWriteBatch {
     /// # Errors
     ///
     /// - This method doesn't currently return any errors, but it might in future
+    ///
+    /// # Snapshot consume (assumeUTXO)
+    ///
+    /// When `snapshot_consume` has a survivor set loaded, the RPC address-index
+    /// writes (`utxo_loc_by_transparent_addr_loc`,
+    /// `tx_loc_by_transparent_addr_loc`) for a created non-survivor output are
+    /// skipped — always crash-safe, since those CFs are never read by spend
+    /// resolution or consensus. The `utxo_by_out_loc` write itself is skipped
+    /// **only** when the unsafe [`crate::snapshot_consume::SnapshotConsumeConfig::elide_utxo_bytes`]
+    /// flag is set (default off): checkpoint spend resolution falls through to
+    /// this CF, so eliding it is not restart-safe. See [`crate::snapshot_consume`].
     #[allow(clippy::unwrap_in_result)]
     pub fn prepare_new_transparent_outputs_batch(
         &mut self,
@@ -641,6 +744,7 @@ impl DiskWriteBatch {
         network: &Network,
         new_outputs_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
         address_balances: &AddressBalanceLocationUpdates,
+        snapshot_consume: Option<&Arc<crate::snapshot_consume::SnapshotConsumeState>>,
     ) {
         let utxo_by_out_loc = db.cf_handle("utxo_by_out_loc").unwrap();
         let utxo_loc_by_transparent_addr_loc =
@@ -653,40 +757,65 @@ impl DiskWriteBatch {
             let unspent_output = &utxo.output;
             let receiving_address = unspent_output.address(network);
 
+            // Whether to skip the RPC address-index writes for this output
+            // (always crash-safe), and whether to skip the UTXO bytes (unsafe;
+            // only when the flag is set). Both use the same OutputLocation, so
+            // the create and spend passes agree by construction.
+            let elide_addr_index = snapshot_consume
+                .map(|consume| consume.elide_address_index(&new_output_location.as_bytes()))
+                .unwrap_or(false);
+            let elide_utxo_byte = snapshot_consume
+                .map(|consume| consume.elide_utxo_byte(&new_output_location.as_bytes()))
+                .unwrap_or(false);
+
             if let Some(receiving_address) = receiving_address {
-                let receiving_address_location = match address_balances {
-                    AddressBalanceLocationUpdates::Merge(balance_changes) => balance_changes
-                        .get(&receiving_address)
-                        .expect("address must be in address_balances after the balance update pass")
-                        .address_location(),
-                    AddressBalanceLocationUpdates::Insert(balances) => balances
-                        .get(&receiving_address)
-                        .expect("address must be in address_balances after the balance update pass")
-                        .address_location(),
-                };
+                // The balance pass skips the credit for an elided output, so its
+                // address may be absent from `address_balances`; skipping the
+                // address-index writes here keeps the two passes consistent.
+                if !elide_addr_index {
+                    let receiving_address_location = match address_balances {
+                        AddressBalanceLocationUpdates::Merge(balance_changes) => balance_changes
+                            .get(&receiving_address)
+                            .expect(
+                                "address must be in address_balances after the balance update pass",
+                            )
+                            .address_location(),
+                        AddressBalanceLocationUpdates::Insert(balances) => balances
+                            .get(&receiving_address)
+                            .expect(
+                                "address must be in address_balances after the balance update pass",
+                            )
+                            .address_location(),
+                    };
 
-                // Create a link from the AddressLocation to the new OutputLocation in the database.
-                let address_unspent_output =
-                    AddressUnspentOutput::new(receiving_address_location, *new_output_location);
-                self.zs_insert(
-                    &utxo_loc_by_transparent_addr_loc,
-                    address_unspent_output,
-                    (),
-                );
+                    // Create a link from the AddressLocation to the new OutputLocation in the database.
+                    let address_unspent_output =
+                        AddressUnspentOutput::new(receiving_address_location, *new_output_location);
+                    self.zs_insert(
+                        &utxo_loc_by_transparent_addr_loc,
+                        address_unspent_output,
+                        (),
+                    );
 
-                // Create a link from the AddressLocation to the new TransactionLocation in the database.
-                // Unlike the OutputLocation link, this will never be deleted.
-                let address_transaction = AddressTransaction::new(
-                    receiving_address_location,
-                    new_output_location.transaction_location(),
-                );
-                self.zs_insert(&tx_loc_by_transparent_addr_loc, address_transaction, ());
+                    // Create a link from the AddressLocation to the new TransactionLocation in the database.
+                    // Unlike the OutputLocation link, this will never be deleted.
+                    let address_transaction = AddressTransaction::new(
+                        receiving_address_location,
+                        new_output_location.transaction_location(),
+                    );
+                    self.zs_insert(&tx_loc_by_transparent_addr_loc, address_transaction, ());
+                }
             }
 
             // Use the OutputLocation to store a copy of the new Output in the database.
             // (For performance reasons, we don't want to deserialize the whole transaction
             // to get an output.)
-            self.zs_insert(&utxo_by_out_loc, new_output_location, unspent_output);
+            //
+            // Eliding the UTXO bytes is unsafe (default off): the checkpoint
+            // commit path's spend resolution reads this CF as its last resort.
+            if !elide_utxo_byte {
+                self.zs_insert(&utxo_by_out_loc, new_output_location, unspent_output);
+            }
         }
     }
 
@@ -703,6 +832,18 @@ impl DiskWriteBatch {
     /// [`Self::prepare_transparent_address_balance_updates`]); this function only reads
     /// `address_location()` from it.
     ///
+    /// # Snapshot consume (assumeUTXO)
+    ///
+    /// When `snapshot_consume` has a survivor set loaded, the address-index
+    /// delete for a spent non-survivor output is skipped — its create-side
+    /// insert was elided too, so the delete would be a no-op anyway. The
+    /// `utxo_by_out_loc` delete is skipped only when the unsafe
+    /// `elide_utxo_bytes` flag is set (its create was then never written, so the
+    /// delete is a no-op). With the flag off (default) the delete always runs,
+    /// keeping the UTXO set complete for spend resolution. The spend-side and
+    /// create-side decisions use the same survivor test on the same
+    /// [`OutputLocation`], so they agree by construction.
+    ///
     /// # Errors
     ///
     /// - This method doesn't currently return any errors, but it might in future
@@ -713,6 +854,7 @@ impl DiskWriteBatch {
         network: &Network,
         spent_utxos_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
         address_balances: &AddressBalanceLocationUpdates,
+        snapshot_consume: Option<&Arc<crate::snapshot_consume::SnapshotConsumeState>>,
     ) {
         let utxo_by_out_loc = db.cf_handle("utxo_by_out_loc").unwrap();
         let utxo_loc_by_transparent_addr_loc =
@@ -725,28 +867,44 @@ impl DiskWriteBatch {
             let spent_output = &utxo.output;
             let sending_address = spent_output.address(network);
 
+            let elide_addr_index = snapshot_consume
+                .map(|consume| consume.elide_address_index(&spent_output_location.as_bytes()))
+                .unwrap_or(false);
+            let elide_utxo_byte = snapshot_consume
+                .map(|consume| consume.elide_utxo_byte(&spent_output_location.as_bytes()))
+                .unwrap_or(false);
+
             // Fetch the link from the address to the AddressLocation, from memory.
+            // For an elided spend the address may be absent from
+            // `address_balances` (its create-credit was skipped), so skip the
+            // address-index delete too.
             if let Some(sending_address) = sending_address {
-                let address_location = match address_balances {
-                    AddressBalanceLocationUpdates::Merge(balance_changes) => balance_changes
-                        .get(&sending_address)
-                        .expect("spent outputs must already have an address balance")
-                        .address_location(),
-                    AddressBalanceLocationUpdates::Insert(balances) => balances
-                        .get(&sending_address)
-                        .expect("spent outputs must already have an address balance")
-                        .address_location(),
-                };
+                if !elide_addr_index {
+                    let address_location = match address_balances {
+                        AddressBalanceLocationUpdates::Merge(balance_changes) => balance_changes
+                            .get(&sending_address)
+                            .expect("spent outputs must already have an address balance")
+                            .address_location(),
+                        AddressBalanceLocationUpdates::Insert(balances) => balances
+                            .get(&sending_address)
+                            .expect("spent outputs must already have an address balance")
+                            .address_location(),
+                    };
 
-                // Delete the link from the AddressLocation to the spent OutputLocation in the database.
-                let address_spent_output =
-                    AddressUnspentOutput::new(address_location, *spent_output_location);
+                    // Delete the link from the AddressLocation to the spent OutputLocation in the database.
+                    let address_spent_output =
+                        AddressUnspentOutput::new(address_location, *spent_output_location);
 
-                self.zs_delete(&utxo_loc_by_transparent_addr_loc, address_spent_output);
+                    self.zs_delete(&utxo_loc_by_transparent_addr_loc, address_spent_output);
+                }
             }
 
             // Delete the OutputLocation, and the copy of the spent Output in the database.
-            self.zs_delete(&utxo_by_out_loc, spent_output_location);
+            // Skipped only when the create was elided (unsafe flag): the delete
+            // is then a no-op.
+            if !elide_utxo_byte {
+                self.zs_delete(&utxo_by_out_loc, spent_output_location);
+            }
         }
     }
 
@@ -757,6 +915,14 @@ impl DiskWriteBatch {
     ///   (this is different from the transaction that created the output),
     ///
     /// without actually writing anything.
+    ///
+    /// # Snapshot consume (assumeUTXO)
+    ///
+    /// When `snapshot_consume` has a survivor set loaded, the spending-address
+    /// index write for a spent non-survivor output is skipped (its address may
+    /// be absent from `address_balances` because its create-credit was elided).
+    /// This is an RPC index never read by consensus, so it is crash-safe; it
+    /// diverges permanently for elided spends (an accepted experiment caveat).
     ///
     /// # Errors
     ///
@@ -769,11 +935,9 @@ impl DiskWriteBatch {
         spending_tx_location: TransactionLocation,
         transaction: &Transaction,
         spent_utxos_by_outpoint: &HashMap<transparent::OutPoint, transparent::Utxo>,
-        #[cfg(feature = "indexer")] out_loc_by_outpoint: &HashMap<
-            transparent::OutPoint,
-            OutputLocation,
-        >,
+        out_loc_by_outpoint: &HashMap<transparent::OutPoint, OutputLocation>,
         address_balances: &AddressBalanceLocationUpdates,
+        snapshot_consume: Option<&Arc<crate::snapshot_consume::SnapshotConsumeState>>,
     ) {
         let db = &zebra_db.db;
         let tx_loc_by_transparent_addr_loc =
@@ -783,6 +947,18 @@ impl DiskWriteBatch {
         //
         // Coinbase inputs represent new coins, so there are no UTXOs to mark as spent.
         for spent_outpoint in transaction.inputs().iter().filter_map(Input::outpoint) {
+            // Skip the spending-address index for an elided non-survivor spend,
+            // keyed by the spent output's location (consistent with the other
+            // passes). Coinbase inputs have no output location, so they are
+            // never elided.
+            let elide_addr_index =
+                match (snapshot_consume, out_loc_by_outpoint.get(&spent_outpoint)) {
+                    (Some(consume), Some(spent_loc)) => {
+                        consume.elide_address_index(&spent_loc.as_bytes())
+                    }
+                    _ => false,
+                };
+
             let spent_utxo = spent_utxos_by_outpoint
                 .get(&spent_outpoint)
                 .expect("unexpected missing spent output");
@@ -790,25 +966,27 @@ impl DiskWriteBatch {
 
             // Fetch the balance, and the link from the address to the AddressLocation, from memory.
             if let Some(sending_address) = sending_address {
-                let sending_address_location = match address_balances {
-                    AddressBalanceLocationUpdates::Merge(balance_changes) => balance_changes
-                        .get(&sending_address)
-                        .expect("spent outputs must already have an address balance")
-                        .address_location(),
-                    AddressBalanceLocationUpdates::Insert(balances) => balances
-                        .get(&sending_address)
-                        .expect("spent outputs must already have an address balance")
-                        .address_location(),
-                };
+                if !elide_addr_index {
+                    let sending_address_location = match address_balances {
+                        AddressBalanceLocationUpdates::Merge(balance_changes) => balance_changes
+                            .get(&sending_address)
+                            .expect("spent outputs must already have an address balance")
+                            .address_location(),
+                        AddressBalanceLocationUpdates::Insert(balances) => balances
+                            .get(&sending_address)
+                            .expect("spent outputs must already have an address balance")
+                            .address_location(),
+                    };
 
-                // Create a link from the AddressLocation to the spent TransactionLocation in the database.
-                // Unlike the OutputLocation link, this will never be deleted.
-                //
-                // The value is the location of this transaction,
-                // not the transaction the spent output is from.
-                let address_transaction =
-                    AddressTransaction::new(sending_address_location, spending_tx_location);
-                self.zs_insert(&tx_loc_by_transparent_addr_loc, address_transaction, ());
+                    // Create a link from the AddressLocation to the spent TransactionLocation in the database.
+                    // Unlike the OutputLocation link, this will never be deleted.
+                    //
+                    // The value is the location of this transaction,
+                    // not the transaction the spent output is from.
+                    let address_transaction =
+                        AddressTransaction::new(sending_address_location, spending_tx_location);
+                    self.zs_insert(&tx_loc_by_transparent_addr_loc, address_transaction, ());
+                }
             }
 
             #[cfg(feature = "indexer")]

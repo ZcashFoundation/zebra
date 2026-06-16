@@ -26,6 +26,7 @@ use crate::{
             upgrade::{DbFormatChange, DbFormatChangeThreadHandle},
         },
     },
+    snapshot_consume::SnapshotConsumeState,
     write_database_format_version_to_disk, BoxError, Config,
 };
 
@@ -81,6 +82,16 @@ pub struct ZebraDb {
 
     /// The inner low-level database wrapper for the RocksDB database.
     db: DiskDb,
+
+    /// The optional snapshot-consume state for known-hash / checkpoint
+    /// assumeUTXO sync, loaded once at construction from
+    /// [`Config::snapshot_consume`].
+    ///
+    /// `None` for a normal sync. When `Some`, the finalized write path consumes
+    /// a verified state snapshot at `H_max` instead of deriving it (direct tree
+    /// writes, skipped per-block balances, and survivor-set elision). Shared by
+    /// all clones (read-only after construction).
+    snapshot_consume: Option<Arc<SnapshotConsumeState>>,
 }
 
 impl ZebraDb {
@@ -139,7 +150,12 @@ impl ZebraDb {
                 column_families_in_code,
                 read_only,
             ),
+            snapshot_consume: None,
         };
+
+        // Load the optional snapshot-consume state, if configured. This is done
+        // after the database is open so the fresh-DB guard can read the tip.
+        db.snapshot_consume = db.load_snapshot_consume(config, network);
 
         let zero_location_utxos =
             db.address_utxo_locations(AddressLocation::from_usize(Height(0), 0, 0));
@@ -195,6 +211,74 @@ impl ZebraDb {
     /// Returns config for this database.
     pub fn config(&self) -> &Config {
         &self.config
+    }
+
+    /// Returns the loaded snapshot-consume state, if assumeUTXO sync is
+    /// configured ([`Config::snapshot_consume`]).
+    ///
+    /// `None` for a normal sync. The write path consults this to decide whether
+    /// to consume a snapshot (direct tree writes, skip per-block balances,
+    /// survivor-set elision) instead of deriving state.
+    pub fn snapshot_consume(&self) -> Option<&Arc<SnapshotConsumeState>> {
+        self.snapshot_consume.as_ref()
+    }
+
+    /// Loads the optional snapshot-consume state from `config` for `network`.
+    ///
+    /// Returns `None` if snapshot-consume is not configured. Panics with an
+    /// actionable message if it is configured but can't be loaded or fails a
+    /// safety guard, so a misconfigured assumeUTXO sync fails fast at startup
+    /// rather than silently corrupting state.
+    ///
+    /// # Guards
+    ///
+    /// - **Network match.** The configured network must match this database's
+    ///   network.
+    /// - **Fresh DB only.** Survivor-set elision is only loaded against an
+    ///   empty database (a from-genesis sync). Loading it against a non-empty
+    ///   database could elide outputs the database already holds, or rely on an
+    ///   in-memory cache that is cold after a restart — both unsafe (see
+    ///   `docs/design/utxo-elision.md` §4.3). The other consume behaviours
+    ///   (direct tree writes, skipping per-block balances) carry no survivor
+    ///   set, so they are also only enabled on a fresh database for simplicity
+    ///   and to keep the snapshot's `H_max` meaningful.
+    fn load_snapshot_consume(
+        &self,
+        config: &Config,
+        network: &Network,
+    ) -> Option<Arc<SnapshotConsumeState>> {
+        let consume_config = config.snapshot_consume.as_ref()?;
+
+        // Fresh DB only: refuse to enable any snapshot-consume behaviour against
+        // a database that already holds blocks. A normal resync from genesis
+        // creates a fresh database, so this is the expected state for assumeUTXO
+        // sync; resuming an in-progress assumeUTXO sync is a recorded follow-up
+        // (it needs the deferred-durability machinery to be restart-safe).
+        if !self.is_empty() {
+            panic!(
+                "snapshot-consume (assumeUTXO) sync is configured, but the state database at \
+                 height {:?} is not empty. Snapshot consume must start from a fresh \
+                 database (a from-genesis sync); see docs/design/utxo-elision.md.",
+                self.finalized_tip_height(),
+            );
+        }
+
+        let consume_state =
+            SnapshotConsumeState::load(consume_config, network).unwrap_or_else(|error| {
+                panic!(
+                    "failed to load the configured snapshot-consume survivor set: {error}. \
+                     Check [state.snapshot_consume] survivor_set_path / h_max."
+                )
+            });
+
+        tracing::info!(
+            h_max = ?consume_state.h_max(),
+            survivors = consume_state.survivor_set().map(|s| s.len()),
+            elide_utxo_bytes = consume_state.elide_utxo_bytes(),
+            "loaded snapshot-consume (assumeUTXO) state",
+        );
+
+        Some(Arc::new(consume_state))
     }
 
     /// Returns the configured database kind for this database.

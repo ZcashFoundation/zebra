@@ -1,18 +1,35 @@
-//! `emit-snapshot` subcommand - emits IBD state-snapshot artifacts from a synced state.
+//! `emit-snapshot` subcommand - the release-time constants-updater for the
+//! P2P-distributed IBD snapshot artifacts.
 //!
-//! Reads a synced, read-only finalized state and writes assumeUTXO-style
-//! snapshot artifacts (design doc §16/§17), so a node can skip re-deriving state
-//! during checkpoint sync. It emits:
+//! Run against a synced, read-only finalized state, this command regenerates the
+//! three deterministic snapshot artifacts from the chain, hashes them, and edits
+//! the pinned Zebra source constants in place so a release ships an updated trust
+//! root (`docs/design/p2p-snapshot-distribution.md`). It writes **no asset
+//! files** by default — the artifacts themselves are served over P2P and
+//! verified against these constants. The artifacts are:
 //!
-//! - `unspent-output-locations.bin`: the set of unspent transparent output
-//!   locations at the finalized tip, so the engine can skip persisting outputs
-//!   that are spent before the snapshot height;
-//! - `sapling-tree-roots.bin` / `orchard-tree-roots.bin`: the note-commitment
-//!   tree root at every height that updates each tree, so trees can be fetched
-//!   by height and verified instead of recomputed by appending notes.
+//! - the **known-hash chunks**: for every 150,000-block span up to the finalized
+//!   tip, the deterministic `chunk_v2` bytes (block hashes, size hints, and the
+//!   sapling/orchard tree roots that update within the span), each SHA-256ed into
+//!   `MAINNET/TESTNET_KNOWN_HASHES.chunk_hashes`;
+//! - the **unspent-output set**: the sorted unspent transparent output locations
+//!   at the tip, SHA-256ed into `MAINNET/TESTNET_UNSPENT_OUTPUTS_HASH`;
+//! - the **address-balance set**: the sorted address-balance records at the tip,
+//!   SHA-256ed into `MAINNET/TESTNET_ADDRESS_BALANCES_HASH`.
 //!
-//! The snapshot height is the cached state's finalized tip: point this at a
-//! state synced to (or rolled back to) the height you want to snapshot.
+//! The chunk bytes are regenerated through the *same* read-service function the
+//! P2P serve path uses ([`zebra_state::known_hash_chunk_bytes`]), so the emitted
+//! hashes and the served bytes can never disagree.
+//!
+//! The command is **idempotent**: re-running it against a state whose constants
+//! are already current changes nothing and prints "already current". The
+//! snapshot height is the cached state's finalized tip, so point this at a state
+//! synced to the height you want to snapshot.
+//!
+//! The legacy `.bin` asset emit (unspent-output-locations / tree-roots) is kept
+//! behind the hidden `--emit-files` flag for debugging only.
+
+mod editor;
 
 use std::{
     fs::File,
@@ -23,47 +40,99 @@ use std::{
 use abscissa_core::{Application, Command, Runnable};
 use clap::Parser;
 use color_eyre::eyre::{eyre, Result};
+use sha2::{Digest, Sha256};
 
-use zebra_chain::parameters::Network;
+use zebra_chain::{
+    block::Height,
+    parameters::{known_hashes::HASHES_PER_CHUNK, Network},
+};
+use zebra_state::ZebraDb;
 
 use crate::prelude::APPLICATION;
 
-/// The name of the emitted unspent-transparent-output-location artifact.
+use editor::Change;
+
+/// The name of the emitted unspent-transparent-output-location artifact
+/// (only written under `--emit-files`).
 const UNSPENT_OUTPUTS_FILE: &str = "unspent-output-locations.bin";
 
-/// The name of the emitted Sapling note-commitment-tree-root artifact.
+/// The name of the emitted Sapling note-commitment-tree-root artifact
+/// (only written under `--emit-files`).
 const SAPLING_ROOTS_FILE: &str = "sapling-tree-roots.bin";
 
-/// The name of the emitted Orchard note-commitment-tree-root artifact.
+/// The name of the emitted Orchard note-commitment-tree-root artifact
+/// (only written under `--emit-files`).
 const ORCHARD_ROOTS_FILE: &str = "orchard-tree-roots.bin";
 
-/// Emit IBD state-snapshot artifacts from a synced read-only state (expert users only)
+/// The source file holding the known-hash list specs (chunk hashes + max height
+/// + the new snapshot-set hash constants), relative to the `zebrad` crate.
+const KNOWN_HASHES_SRC: &str = "../zebra-chain/src/parameters/known_hashes.rs";
+
+/// The source file holding the checkpoint max-height constants, relative to the
+/// `zebrad` crate.
+const CHECKPOINT_CONSTANTS_SRC: &str = "../zebra-chain/src/parameters/checkpoint/constants.rs";
+
+/// `emit-snapshot` regenerates the pinned IBD snapshot hashes and edits the
+/// Zebra source constants in place (release maintainers only)
 #[derive(Command, Debug, Default, Parser)]
 pub struct EmitSnapshotCmd {
     /// Path to Zebra's cached state directory.
     #[clap(long, short, help = "path to the directory with the Zebra chain state")]
     cache_dir: Option<PathBuf>,
 
-    /// The network of the cached state.
+    /// The network of the cached state. Only this network's constants are edited.
     #[clap(long, short, help = "the network of the chain to load")]
     network: Network,
 
-    /// Output directory for the emitted snapshot artifacts.
-    #[clap(long, short, help = "directory to write the snapshot artifacts into")]
-    out_dir: PathBuf,
+    /// The Zebra workspace root, used to locate the source files to edit.
+    /// Defaults to the `zebrad` crate's compile-time manifest directory, which
+    /// is correct for `cargo run` from a checkout.
+    #[clap(
+        long,
+        help = "the zebrad crate directory whose source constants to edit"
+    )]
+    src_root: Option<PathBuf>,
+
+    /// Debugging only: also write the raw `.bin` asset files into this directory.
+    /// The release pipeline does not need these; the artifacts are served over
+    /// P2P and verified against the edited constants.
+    #[clap(long, help = "ALSO write the raw .bin asset files (debugging only)")]
+    emit_files: bool,
+
+    /// Output directory for the `--emit-files` debugging artifacts.
+    #[clap(long, short, help = "directory for --emit-files .bin artifacts")]
+    out_dir: Option<PathBuf>,
 }
 
 impl Runnable for EmitSnapshotCmd {
     /// `emit-snapshot` sub-command entrypoint.
     fn run(&self) {
         if let Err(error) = self.emit() {
-            tracing::error!("failed to emit state snapshot: {error:?}");
+            tracing::error!("failed to update snapshot constants: {error:?}");
         }
     }
 }
 
+/// The fully-recomputed snapshot hashes for one network, ready to be edited into
+/// the source constants.
+struct ComputedHashes {
+    /// The finalized tip height (`H_max`).
+    tip_height: Height,
+    /// One lowercase-hex SHA-256 per known-hash chunk, in chunk order.
+    chunk_hashes: Vec<String>,
+    /// SHA-256 of the sorted unspent-output-location set, lowercase hex.
+    unspent_outputs_hash: String,
+    /// SHA-256 of the sorted address-balance set, lowercase hex.
+    address_balances_hash: String,
+    /// Total unspent output locations hashed (for the log).
+    unspent_outputs_count: u64,
+    /// Total address-balance records hashed (for the log).
+    address_balances_count: u64,
+}
+
 impl EmitSnapshotCmd {
-    /// Opens the cached state read-only and emits the configured artifacts.
+    /// Opens the cached state read-only, recomputes the snapshot hashes, and
+    /// edits the source constants for the selected network.
     #[allow(clippy::print_stdout)]
     fn emit(&self) -> Result<()> {
         let mut config = APPLICATION.config().state.clone();
@@ -72,92 +141,456 @@ impl EmitSnapshotCmd {
         }
 
         // `init_read_only` returns the read service, the finalized `ZebraDb`,
-        // and the non-finalized sender; the snapshot only needs the finalized DB.
+        // and the non-finalized sender; the updater only needs the finalized DB.
         let db = zebra_state::init_read_only(config, &self.network).1;
 
         let (tip_height, tip_hash) = db
             .tip()
             .ok_or_else(|| eyre!("the cached state has no chain tip block"))?;
 
-        std::fs::create_dir_all(&self.out_dir)?;
-
-        let unspent_outputs = self.emit_unspent_output_locations(&db)?;
-        let (sapling_roots, orchard_roots) = self.emit_tree_roots(&db)?;
+        let computed = self.compute_hashes(&db, tip_height)?;
 
         tracing::info!(
             ?tip_height,
             ?tip_hash,
-            unspent_outputs,
-            sapling_roots,
-            orchard_roots,
-            "emitted IBD state snapshot",
+            chunks = computed.chunk_hashes.len(),
+            unspent_outputs = computed.unspent_outputs_count,
+            address_balances = computed.address_balances_count,
+            "recomputed IBD snapshot hashes",
         );
-        println!(
-            "snapshot at tip height {} ({}):\n  \
-             {unspent_outputs} unspent transparent output locations -> {}\n  \
-             {sapling_roots} Sapling tree roots -> {}\n  \
-             {orchard_roots} Orchard tree roots -> {}",
-            tip_height.0,
-            tip_hash,
-            self.out_dir.join(UNSPENT_OUTPUTS_FILE).display(),
-            self.out_dir.join(SAPLING_ROOTS_FILE).display(),
-            self.out_dir.join(ORCHARD_ROOTS_FILE).display(),
+
+        let changes = self.apply_edits(&computed)?;
+
+        if changes.is_empty() {
+            println!(
+                "snapshot constants for {} at tip height {} ({}) are already current — no changes",
+                self.network, tip_height.0, tip_hash,
+            );
+        } else {
+            println!(
+                "updated {} snapshot constants for {} at tip height {} ({}):",
+                changes.len(),
+                self.network,
+                tip_height.0,
+                tip_hash,
+            );
+            for change in &changes {
+                println!("{change}");
+            }
+        }
+
+        if self.emit_files {
+            self.emit_debug_files(&db)?;
+        }
+
+        Ok(())
+    }
+
+    /// Recomputes every chunk hash and the two set hashes from the finalized
+    /// state, running the correctness gate against the bundled spec.
+    fn compute_hashes(&self, db: &ZebraDb, tip_height: Height) -> Result<ComputedHashes> {
+        // Number of 150,000-block chunks covering heights `0..=tip_height`.
+        let num_chunks = (u64::from(tip_height.0) + 1).div_ceil(u64::from(HASHES_PER_CHUNK));
+
+        let mut chunk_hashes = Vec::with_capacity(num_chunks as usize);
+        for index in 0..num_chunks {
+            // `num_chunks` is bounded by the tip height (a u32 block height) so
+            // the chunk index always fits a u32.
+            let index = index as u32;
+            let bytes = zebra_state::known_hash_chunk_bytes(db, index).ok_or_else(|| {
+                eyre!("chunk {index} could not be regenerated from the synced state")
+            })?;
+            chunk_hashes.push(hex::encode(Sha256::digest(&bytes)));
+        }
+
+        self.correctness_gate(db, &chunk_hashes, num_chunks)?;
+
+        let (unspent_outputs_hash, unspent_outputs_count) = hash_unspent_outputs(db);
+        let (address_balances_hash, address_balances_count) = hash_address_balances(db);
+
+        Ok(ComputedHashes {
+            tip_height,
+            chunk_hashes,
+            unspent_outputs_hash,
+            address_balances_hash,
+            unspent_outputs_count,
+            address_balances_count,
+        })
+    }
+
+    /// Sanity-checks the recomputed chunk hashes against the bundled spec for
+    /// every span the spec already covers *fully*: a fully-covered span's bytes
+    /// (and therefore its hash) are a deterministic function of the chain only,
+    /// so a mismatch means the local chain disagrees with the pinned list and
+    /// the run must abort rather than overwrite the trust root with bad data.
+    ///
+    /// Spans the spec does not yet cover, and the spec's last (partial) span if
+    /// the tip has grown, are *expected* to differ — those are exactly the
+    /// hashes this command updates — so they are skipped here.
+    fn correctness_gate(
+        &self,
+        _db: &ZebraDb,
+        recomputed: &[String],
+        num_chunks: u64,
+    ) -> Result<()> {
+        let Some(spec) =
+            zebra_chain::parameters::known_hashes::KnownHashListSpec::for_network(&self.network)
+        else {
+            tracing::warn!(
+                network = %self.network,
+                "no bundled known-hash spec for this network; skipping the correctness gate",
+            );
+            return Ok(());
+        };
+
+        // The spec's last span may be partial (the previous tip mid-chunk), so
+        // only compare spans strictly before the spec's last chunk, and only
+        // those we actually recomputed.
+        let comparable = spec
+            .chunk_hashes
+            .len()
+            .saturating_sub(1)
+            .min(num_chunks as usize);
+
+        let mut matched = 0usize;
+        for (index, (recomputed_hash, pinned_hash)) in recomputed
+            .iter()
+            .zip(spec.chunk_hashes.iter())
+            .take(comparable)
+            .enumerate()
+        {
+            if recomputed_hash != pinned_hash {
+                return Err(eyre!(
+                    "correctness gate failed for chunk {index}: the local chain regenerates \
+                     {recomputed_hash} but the bundled spec pins {pinned_hash} — the cached \
+                     state disagrees with the pinned known-hash list; refusing to overwrite \
+                     the constants",
+                ));
+            }
+            matched += 1;
+        }
+
+        tracing::info!(
+            matched,
+            total_recomputed = recomputed.len(),
+            "correctness gate passed: recomputed chunk hashes match the pinned spec for all \
+             fully-covered spans",
         );
 
         Ok(())
     }
 
-    /// Emits the Sapling and Orchard note-commitment-tree roots at every height
-    /// that updates each tree (the heights the state stores a tree for), in
-    /// ascending height order. Returns `(sapling_count, orchard_count)`.
-    ///
-    /// Each record is `height` (`u32` little-endian) followed by the 32-byte
-    /// tree root. A node can fetch the tree for any height by binary-searching
-    /// for the largest recorded height `<=` it, then verifying the fetched tree
-    /// against the recorded root — so trees are downloaded by height instead of
-    /// recomputed by appending notes (design doc §16/§17).
-    fn emit_tree_roots(&self, db: &zebra_state::ZebraDb) -> Result<(u64, u64)> {
-        let sapling = write_root_records(
-            &self.out_dir.join(SAPLING_ROOTS_FILE),
-            db.sapling_tree_by_height_range(..)
-                .map(|(height, tree)| (height.0, <[u8; 32]>::from(tree.root()))),
+    /// Edits the source constants for the selected network and returns the list
+    /// of changes made (empty when everything was already current).
+    fn apply_edits(&self, computed: &ComputedHashes) -> Result<Vec<Change>> {
+        let src_root = self
+            .src_root
+            .clone()
+            .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+
+        let net = NetworkConsts::for_network(&self.network)?;
+
+        let mut changes = Vec::new();
+
+        // 1. known_hashes.rs: chunk_hashes, max_height, and the two set-hash
+        //    constants for the selected network.
+        let known_hashes_path = src_root.join(KNOWN_HASHES_SRC);
+        let original = std::fs::read_to_string(&known_hashes_path)
+            .map_err(|error| eyre!("could not read {}: {error}", known_hashes_path.display()))?;
+        let mut source = original.clone();
+
+        let (s, change) =
+            editor::set_chunk_hashes(&source, net.spec_const, &computed.chunk_hashes)?;
+        source = s;
+        changes.extend(change);
+
+        let (s, change) =
+            editor::set_height_field(&source, net.spec_const, "max_height", computed.tip_height.0)?;
+        source = s;
+        changes.extend(change);
+
+        let (s, change) = editor::set_or_insert_str_const(
+            &source,
+            net.unspent_outputs_const,
+            &computed.unspent_outputs_hash,
+            &format!(
+                "SHA-256 of the sorted unspent-transparent-output-location set at the \
+                 {} finalized tip ({}), as lowercase hex.\n\
+                 \n\
+                 The trust root for the P2P-distributed unspent-output snapshot: a \
+                 downloading node fetches the set over P2P and verifies it against this \
+                 hash (see `docs/design/p2p-snapshot-distribution.md`). Regenerated by the \
+                 `emit-snapshot` command at every release.",
+                self.network, net.display,
+            ),
+            net.spec_const,
         )?;
+        source = s;
+        changes.extend(change);
 
-        let orchard = write_root_records(
-            &self.out_dir.join(ORCHARD_ROOTS_FILE),
-            db.orchard_tree_by_height_range(..)
-                .map(|(height, tree)| (height.0, <[u8; 32]>::from(tree.root()))),
+        let (s, change) = editor::set_or_insert_str_const(
+            &source,
+            net.address_balances_const,
+            &computed.address_balances_hash,
+            &format!(
+                "SHA-256 of the sorted address-balance set at the {} finalized tip ({}), \
+                 as lowercase hex.\n\
+                 \n\
+                 The trust root for the P2P-distributed address-balance snapshot, loaded at \
+                 `H_max` so balances are never recomputed during sync (see \
+                 `docs/design/p2p-snapshot-distribution.md`). Regenerated by the \
+                 `emit-snapshot` command at every release.",
+                self.network, net.display,
+            ),
+            net.spec_const,
         )?;
+        source = s;
+        changes.extend(change);
 
-        Ok((sapling, orchard))
-    }
-
-    /// Streams every unspent transparent output location (8 bytes each, in
-    /// ascending location order) to the artifact file. Returns the count.
-    fn emit_unspent_output_locations(&self, db: &zebra_state::ZebraDb) -> Result<u64> {
-        let path = self.out_dir.join(UNSPENT_OUTPUTS_FILE);
-        let mut writer = BufWriter::new(File::create(&path)?);
-
-        let mut count: u64 = 0;
-        let mut write_error = None;
-        db.for_each_unspent_output_location_bytes(|bytes| {
-            // Stop writing after the first error; surfaced after the stream ends.
-            if write_error.is_some() {
-                return;
-            }
-            match writer.write_all(bytes) {
-                Ok(()) => count += 1,
-                Err(error) => write_error = Some(error),
-            }
-        });
-
-        if let Some(error) = write_error {
-            return Err(error.into());
+        if source != original {
+            std::fs::write(&known_hashes_path, &source).map_err(|error| {
+                eyre!("could not write {}: {error}", known_hashes_path.display())
+            })?;
         }
 
-        writer.flush()?;
-        Ok(count)
+        // 2. checkpoint/constants.rs: only flag/handle if the known-hash max
+        //    height grew past the pinned checkpoint max height. The checkpoint
+        //    max-height constant must match the sparse `*-checkpoints.txt` list
+        //    (the `max_checkpoint_height_constants_match_lists` test), which this
+        //    command does NOT regenerate, so we never silently edit it.
+        self.handle_checkpoint_constant(&src_root, computed.tip_height, net, &mut changes)?;
+
+        Ok(changes)
     }
+
+    /// Handles the checkpoint max-height constant.
+    ///
+    /// The checkpoint constant is tied to the sparse `*-checkpoints.txt` list,
+    /// not the every-block known-hash list, and the
+    /// `max_checkpoint_height_constants_match_lists` test enforces that tie.
+    /// This command regenerates the known-hash list but not the `.txt`
+    /// checkpoint list, so it must not edit the checkpoint constant past the
+    /// `.txt` coverage. We therefore only edit the checkpoint constant when the
+    /// new tip is **less than or equal to** the current checkpoint constant (a
+    /// no-op or a safe lowering is never needed in practice), and otherwise emit
+    /// a loud, actionable warning telling the maintainer to extend the
+    /// `*-checkpoints.txt` list first.
+    fn handle_checkpoint_constant(
+        &self,
+        src_root: &Path,
+        tip_height: Height,
+        net: NetworkConsts,
+        changes: &mut Vec<Change>,
+    ) -> Result<()> {
+        let path = src_root.join(CHECKPOINT_CONSTANTS_SRC);
+        let source = std::fs::read_to_string(&path)
+            .map_err(|error| eyre!("could not read {}: {error}", path.display()))?;
+
+        // Parse the current checkpoint constant value to compare against the tip.
+        let current = read_standalone_height(&source, net.checkpoint_const)?;
+
+        if tip_height.0 > current {
+            tracing::warn!(
+                tip = tip_height.0,
+                checkpoint_max = current,
+                checkpoint_const = net.checkpoint_const,
+                "the synced tip is above the pinned checkpoint max height. The checkpoint \
+                 constant is tied to the sparse {} list (enforced by \
+                 max_checkpoint_height_constants_match_lists) and is NOT edited here. Extend \
+                 that .txt list (e.g. with `zebra-checkpoints`) and update the constant \
+                 separately before release.",
+                net.checkpoint_txt,
+            );
+            // Do not edit: leaving the constant consistent with the .txt list is
+            // safer than producing a source tree where the test fails.
+            return Ok(());
+        }
+
+        // tip <= current: nothing to grow; set_standalone_height is a no-op when
+        // they already match (the common already-current case).
+        let (edited, change) =
+            editor::set_standalone_height(&source, net.checkpoint_const, tip_height.0)?;
+        if let Some(change) = change {
+            std::fs::write(&path, &edited)
+                .map_err(|error| eyre!("could not write {}: {error}", path.display()))?;
+            changes.push(change);
+        }
+
+        Ok(())
+    }
+
+    /// Writes the legacy `.bin` debugging artifacts under `--emit-files`.
+    #[allow(clippy::print_stdout)]
+    fn emit_debug_files(&self, db: &ZebraDb) -> Result<()> {
+        let out_dir = self
+            .out_dir
+            .clone()
+            .ok_or_else(|| eyre!("--emit-files requires --out-dir"))?;
+        std::fs::create_dir_all(&out_dir)?;
+
+        let unspent_outputs = emit_unspent_output_locations(db, &out_dir)?;
+        let (sapling_roots, orchard_roots) = emit_tree_roots(db, &out_dir)?;
+
+        println!(
+            "wrote debugging .bin artifacts:\n  \
+             {unspent_outputs} unspent transparent output locations -> {}\n  \
+             {sapling_roots} Sapling tree roots -> {}\n  \
+             {orchard_roots} Orchard tree roots -> {}",
+            out_dir.join(UNSPENT_OUTPUTS_FILE).display(),
+            out_dir.join(SAPLING_ROOTS_FILE).display(),
+            out_dir.join(ORCHARD_ROOTS_FILE).display(),
+        );
+
+        Ok(())
+    }
+}
+
+/// The per-network constant names this command edits.
+#[derive(Copy, Clone, Debug)]
+struct NetworkConsts {
+    /// A human label for log/doc text, e.g. "Mainnet".
+    display: &'static str,
+    /// The known-hash spec const name, e.g. `MAINNET_KNOWN_HASHES`.
+    spec_const: &'static str,
+    /// The unspent-output-set hash const name.
+    unspent_outputs_const: &'static str,
+    /// The address-balance-set hash const name.
+    address_balances_const: &'static str,
+    /// The checkpoint max-height const name.
+    checkpoint_const: &'static str,
+    /// The sparse checkpoint list file name (for the warning text).
+    checkpoint_txt: &'static str,
+}
+
+impl NetworkConsts {
+    /// Returns the constant names for `network`, or an error for networks
+    /// without a bundled known-hash list (e.g. custom testnets, regtest).
+    fn for_network(network: &Network) -> Result<Self> {
+        match network {
+            Network::Mainnet => Ok(Self {
+                display: "Mainnet",
+                spec_const: "MAINNET_KNOWN_HASHES",
+                unspent_outputs_const: "MAINNET_UNSPENT_OUTPUTS_HASH",
+                address_balances_const: "MAINNET_ADDRESS_BALANCES_HASH",
+                checkpoint_const: "MAINNET_MAX_CHECKPOINT_HEIGHT",
+                checkpoint_txt: "main-checkpoints.txt",
+            }),
+            Network::Testnet(params) if params.is_default_testnet() => Ok(Self {
+                display: "Testnet",
+                spec_const: "TESTNET_KNOWN_HASHES",
+                unspent_outputs_const: "TESTNET_UNSPENT_OUTPUTS_HASH",
+                address_balances_const: "TESTNET_ADDRESS_BALANCES_HASH",
+                checkpoint_const: "TESTNET_MAX_CHECKPOINT_HEIGHT",
+                checkpoint_txt: "test-checkpoints.txt",
+            }),
+            _ => Err(eyre!(
+                "no bundled known-hash constants for {network}; emit-snapshot only updates \
+                 Mainnet and the default Testnet"
+            )),
+        }
+    }
+}
+
+/// Streams the sorted unspent-output-location set through a SHA-256 hasher,
+/// returning `(lowercase_hex_hash, record_count)`.
+///
+/// Uses the same byte source the P2P serve path ranges over
+/// ([`ZebraDb::for_each_unspent_output_location_bytes`]), so the hash covers the
+/// exact bytes peers serve.
+fn hash_unspent_outputs(db: &ZebraDb) -> (String, u64) {
+    let mut hasher = Sha256::new();
+    let mut count: u64 = 0;
+    db.for_each_unspent_output_location_bytes(|bytes| {
+        hasher.update(bytes);
+        count += 1;
+    });
+    (hex::encode(hasher.finalize()), count)
+}
+
+/// Streams the sorted address-balance set through a SHA-256 hasher, returning
+/// `(lowercase_hex_hash, record_count)`.
+///
+/// Concatenates each record's `(address_bytes, value_bytes)` exactly as the P2P
+/// serve path does ([`ZebraDb::for_each_address_balance_bytes`]).
+fn hash_address_balances(db: &ZebraDb) -> (String, u64) {
+    let mut hasher = Sha256::new();
+    let mut count: u64 = 0;
+    db.for_each_address_balance_bytes(|address_bytes, value_bytes| {
+        hasher.update(address_bytes);
+        hasher.update(value_bytes);
+        count += 1;
+    });
+    (hex::encode(hasher.finalize()), count)
+}
+
+/// Reads the integer argument of a standalone
+/// `pub const <name>: Height = Height(N);` declaration in `source`.
+fn read_standalone_height(source: &str, name: &str) -> Result<u32> {
+    let decl = format!("const {name}");
+    let decl_start = source
+        .find(&decl)
+        .ok_or_else(|| eyre!("could not find `const {name}` in the checkpoint constants"))?;
+    let marker = "Height(";
+    let start = source[decl_start..]
+        .find(marker)
+        .map(|rel| decl_start + rel + marker.len())
+        .ok_or_else(|| eyre!("could not find `Height(` for `const {name}`"))?;
+    let end = source[start..]
+        .find(')')
+        .map(|rel| start + rel)
+        .ok_or_else(|| eyre!("unterminated `Height(` for `const {name}`"))?;
+    let digits: String = source[start..end]
+        .chars()
+        .filter(|c| c.is_ascii_digit())
+        .collect();
+    digits
+        .parse()
+        .map_err(|_| eyre!("could not parse the height for `const {name}`"))
+}
+
+/// Emits the Sapling and Orchard note-commitment-tree roots at every updating
+/// height (debugging only, under `--emit-files`). Returns the two counts.
+fn emit_tree_roots(db: &ZebraDb, out_dir: &Path) -> Result<(u64, u64)> {
+    let sapling = write_root_records(
+        &out_dir.join(SAPLING_ROOTS_FILE),
+        db.sapling_tree_by_height_range(..)
+            .map(|(height, tree)| (height.0, <[u8; 32]>::from(tree.root()))),
+    )?;
+
+    let orchard = write_root_records(
+        &out_dir.join(ORCHARD_ROOTS_FILE),
+        db.orchard_tree_by_height_range(..)
+            .map(|(height, tree)| (height.0, <[u8; 32]>::from(tree.root()))),
+    )?;
+
+    Ok((sapling, orchard))
+}
+
+/// Streams every unspent transparent output location to the debugging artifact
+/// file. Returns the count.
+fn emit_unspent_output_locations(db: &ZebraDb, out_dir: &Path) -> Result<u64> {
+    let path = out_dir.join(UNSPENT_OUTPUTS_FILE);
+    let mut writer = BufWriter::new(File::create(&path)?);
+
+    let mut count: u64 = 0;
+    let mut write_error = None;
+    db.for_each_unspent_output_location_bytes(|bytes| {
+        // Stop writing after the first error; surfaced after the stream ends.
+        if write_error.is_some() {
+            return;
+        }
+        match writer.write_all(bytes) {
+            Ok(()) => count += 1,
+            Err(error) => write_error = Some(error),
+        }
+    });
+
+    if let Some(error) = write_error {
+        return Err(error.into());
+    }
+
+    writer.flush()?;
+    Ok(count)
 }
 
 /// Writes `(height, root)` records (4-byte little-endian height + 32-byte root)

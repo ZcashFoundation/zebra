@@ -329,6 +329,25 @@ pub struct Config {
     /// the `zebrad` binary, the platform data directory, or the development
     /// tree, in that order.
     pub known_hash_list_dir: Option<PathBuf>,
+
+    /// Enable snapshot-consume (assumeUTXO-style) initial sync.
+    ///
+    /// **Experimental; defaults to `false`, leaving normal sync unchanged.**
+    ///
+    /// When enabled together with [`known_hash_sync`](Self::known_hash_sync),
+    /// the engine fetches the known-hash chunks, per-height note commitment
+    /// trees, the unspent-output set, and the address-balance set over P2P and
+    /// hands the downloaded snapshot to the state instead of deriving it from
+    /// the blocks. The downloaded artifacts are content-addressed: each is
+    /// verified against a pinned SHA-256 constant before it is trusted. See
+    /// `docs/design/p2p-snapshot-distribution.md` and
+    /// `docs/design/utxo-elision.md`.
+    ///
+    /// The state-side consume behaviours (direct tree writes, bulk balance
+    /// loading, address-index elision) are configured separately under
+    /// `[state] snapshot_consume`; this flag enables the engine-side fetch and
+    /// verification of the snapshot artifacts.
+    pub snapshot_consume_sync: bool,
 }
 
 impl Default for Config {
@@ -369,6 +388,10 @@ impl Default for Config {
 
             // Use the layered asset search by default.
             known_hash_list_dir: None,
+
+            // Experimental snapshot-consume sync is off by default, so normal
+            // sync is completely unaffected.
+            snapshot_consume_sync: false,
         }
     }
 }

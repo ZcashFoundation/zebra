@@ -143,7 +143,17 @@ pub fn spec_constant_block(
             .expect("writing to a String never fails");
     }
 
-    writeln!(block, "    ],\n}};").expect("writing to a String never fails");
+    // The snapshot-set hashes are pinned separately by the snapshot
+    // constants-updater (`emit-snapshot`); this checkpoint-anchored list emitter
+    // leaves them `None` so the pasted const compiles.
+    writeln!(
+        block,
+        "    ],\n\
+         \x20   unspent_outputs_hash: None,\n\
+         \x20   address_balances_hash: None,\n\
+         }};"
+    )
+    .expect("writing to a String never fails");
 
     block
 }
