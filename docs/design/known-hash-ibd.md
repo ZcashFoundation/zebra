@@ -655,8 +655,9 @@ pub enum IbdOutcome {
 
 `run()` is a plain re-enterable function: every (re)start re-derives
 `next_commit` from `best_tip_height() + 1`, re-opens the list (reading and
-SHA-256-verifying the ~103 MB asset set on a `spawn_blocking` thread —
-restarts are rare enough that re-verifying beats holding a second copy),
+SHA-256-verifying the network's asset set — ~107 MB on Mainnet, ~128 MB on
+Testnet — on a `spawn_blocking` thread; restarts are rare enough that
+re-verifying beats holding a second copy),
 restores the disk tier (§4.5), and rebuilds the rest of the window empty;
 bounded loss ≤ the RAM-tier bytes. The tip is checked against the spec
 constant *before* opening the list, so a synced node never re-hashes the
@@ -711,7 +712,7 @@ separable follow-up may return accumulated blocks on timeout instead of
 discarding them — safe for #10679 because absence ≠ `Missing` — but the
 engine does not depend on it.)
 
-## 6. Asset strategy (the ~103 MB list + size hints)
+## 6. Asset strategy (the per-network lists + size hints)
 
 ### 6.1 The spec constant
 
@@ -720,7 +721,7 @@ Per network, a compile-time constant pins everything a consumer needs
 
 ```rust
 pub struct KnownHashListSpec {
-    /// The highest height covered by the list (3_358_431 on mainnet today).
+    /// The highest height covered by the list (3_373_206 on mainnet today).
     pub max_height: block::Height,
     /// The number of block hashes in each chunk file (except the last):
     /// HASHES_PER_CHUNK = 150,000, shared with the emitter.
@@ -773,7 +774,8 @@ the loader, so the two sides cannot disagree.
 - The `KnownHashListSpec` constants stay **in source** (the trust root never
   leaves review). Chunks live in `zebra-chain/src/parameters/known_hashes/`
   in git, but are **excluded from the published crate** (`Cargo.toml`
-  `exclude`; crates.io would reject a ~103 MB package).
+  `exclude`; crates.io would reject the ~234 MB of bundled chunks across both
+  networks).
 - Runtime resolution order (`KnownHashList::search_dirs`):
   (1) the `[sync] known_hash_list_dir` config override; (2)
   executable-adjacent (`./known-hashes/`, `../share/zebrad/known-hashes/` —
@@ -798,7 +800,7 @@ Disk reads are cheap — re-reading 100 MB even several times is fine;
 
 - **At open**: read every chunk once, verify all SHA-256s against the spec
   constant — then **drop the bytes** (fail fast on tampering without holding
-  103 MB). Opening runs on a blocking thread (§4.7).
+  the full ~107–128 MB list). Opening runs on a blocking thread (§4.7).
 - **During the engine phase**: hold at most **2 resident chunks** (the raw
   ~5 MB chunk bytes, indexed in place — hashes by offset, hints from the
   tail section), each re-verified against its pinned SHA-256 on load, evicted
@@ -1007,36 +1009,33 @@ guarantee the contents); the auth-data commitment check was *added* relative
 to the old path (§2). The exact same checks run on the exact same blocks — only
 threading, ordering tolerance, and failure handling changed.
 
-### 7.4 Testnet (pending — E2)
+### 7.4 Testnet
 
-The spaced testnet list cannot drive known-hash sync (intermediate hashes
-are unknown). Strategy: **assemble the testnet every-block list anchored
-against the existing spaced checkpoints** (a pure asset addition to the
-network-generic loader; ~3.1M blocks ≈ ~100 MB).
+The testnet every-block list is **shipped** the same way as mainnet (a pure
+asset addition to the network-generic loader): `TESTNET_KNOWN_HASHES` covers
+heights 0..=4,057,200 (= `TESTNET_MAX_CHECKPOINT_HEIGHT`) in 28 chunks with
+embedded size hints, and `for_network()` returns it for the **default public
+Testnet** — custom testnets have their own chain and fall through to legacy
+checkpoint sync.
 
-1. The `zebra-utils` `known-hashes` tool assembles every testnet block hash
-   and block size 0..tip from a synced local node (`getblockhash`/`getblock`
-   sweep).
-2. **Anchor verification**: every height present in the reviewed,
-   already-trusted spaced `test-checkpoints.txt` (10,144 entries, ≤400
-   apart) must match exactly — one mismatch fails the run. This roots the
-   assembled data in the same trust anchor the node ships today.
-3. Cross-checks: explorer spot-checks at sampled heights (a random sample
-   plus all network-upgrade activation heights). Disagreement anywhere fails
-   the run.
-4. The tool emits the chunked `.bin` format (hashes + embedded hints) and
-   prints the `KnownHashListSpec` constant block ready to paste; the
-   loader's genesis/alignment checks apply as on mainnet.
+How it was assembled (the `zebra-utils` `known-hashes` tool):
 
-Defense in depth for intermediate (non-anchor) heights: the engine requests
-each block by its pinned hash and checks `prev_hash == list[h-1]` linkage at
-convert time, and every ≤400-block run terminates in a
+1. Sweep every testnet block hash and size 0..tip from a synced local node
+   (`getblockhash`/`getblock`), or read them from a synced node's database.
+2. **Anchor verification**: every height in the reviewed, already-trusted
+   spaced `test-checkpoints.txt` (10,144 entries, ≤400 apart) must match
+   exactly — one mismatch fails the run. This roots the assembled data in the
+   same trust anchor the node ships today; all 10,144 anchors verified at emit.
+3. The tool emits the chunked `.bin` assets (hashes + embedded size hints) and
+   the `KnownHashListSpec` constant block; the loader's genesis/alignment
+   checks apply as on mainnet, and `testnet_assets_load_and_verify` exercises
+   the bundled assets in CI.
+
+Defense in depth for intermediate (non-anchor) heights is identical to mainnet:
+the engine requests each block by its pinned hash and checks `prev_hash ==
+list[h-1]` linkage at convert time, and every ≤400-block run terminates in a
 spaced-checkpoint-anchored hash — a wrong intermediate hash can only cause
 NotFound stalls (liveness), never acceptance of an off-chain block.
-
-Until the testnet list lands, testnet IBD from scratch is **broken by
-design** on this branch (the engine declines with `NoList` and the gate
-holds the mandatory floor): documented honestly rather than worked around.
 
 ## 8. Observability
 
@@ -1079,7 +1078,7 @@ harness is rebuilt at F4, deferred — §14.)
 | # | Commit | Status |
 |---|---|---|
 | B1 | `feat(chain): add KnownHashList with verified windowed chunk loader` | done — spec constant §6.1, layered search + residency §6.3–6.4, 23 mainnet chunks, `Cargo.toml` exclude |
-| B2 | `feat(chain): embed per-block size hints in known-hash chunks` | done — chunks 00–14 re-emitted with hints (§6.2); 15–22 pending the E2 sweep |
+| B2 | `feat(chain): embed per-block size hints in known-hash chunks` | done — all 23 mainnet chunks (00–22) carry per-block size hints (§6.2) |
 
 ### Phase C — zebra-network peer health and routing
 
@@ -1105,7 +1104,7 @@ harness is rebuilt at F4, deferred — §14.)
 | # | Commit | Status |
 |---|---|---|
 | E1 | `feat(zebrad)!: enable known-hash sync by default on mainnet` | done (validation gates §11 pending maintainer runs) |
-| E2 | `feat(chain): add testnet every-block known-hash list` | **pending** — needs a synced testnet node (§7.4); the assembly tool (`zebra-utils known-hashes`) is done |
+| E2 | `feat(chain): add testnet every-block known-hash list` | done — 28 chunks 0..=4,057,200, 10,144 anchors verified, `for_network` wired (§7.4) |
 | E3 | `refactor(consensus)!: remove checkpoint verifier and gate commits by height` | done (§7.1–7.3); the gate was subsequently folded into the semantic verifier and the router removed |
 
 ### Phase F — State write performance
@@ -1163,7 +1162,7 @@ and `parallel_cpu_threads` still drive the legacy tail and the rayon pool.
 
 1. **Tip-hash identity**: `getblockhash` equals a main-built node at heights
    {1, 10k, 100k, 419,200, 1,046,400, 1,687,104, 2,000,000, 3,000,000,
-   3,358,431}; identical committed tip after steady state.
+   3,373,206}; identical committed tip after steady state.
 2. **Zero stalls**: one full genesis→list-max mainnet run with zero fatal
    engine restarts; 24 h soak with induced peer churn (drop 50% randomly)
    always recovers.
@@ -1177,8 +1176,8 @@ and `parallel_cpu_threads` still drive the legacy tail and the rayon pool.
    compaction) → resumes from tip+1, DB healthy, cached blocks restored
    without refetch.
 6. **Testnet/regtest unaffected**: regtest suite green; flag-off mainnet
-   with an existing post-Canopy state syncs; (full testnet parity waits on
-   E2 — §7.4).
+   with an existing post-Canopy state syncs; testnet from-scratch sync drives
+   the bundled testnet known-hash list (§7.4).
 7. **Config compat**: a v5.1.0 zebrad.toml parses and runs.
 8. **No duplicate downloads**: `ibd.duplicate.download.count` stays 0 across
    the full run, the soak, graceful restarts, and induced commit-reset tests
@@ -1187,7 +1186,7 @@ and `parallel_cpu_threads` still drive the legacy tail and the rayon pool.
    convert or its commit-time auth-data check, i.e. never met the §4.5
    invariant condition — invariant-consistent, but counted for
    observability).
-9. *(E2 additionally)*: testnet list landed + gates 1–2 re-run on testnet;
+9. *(Testnet)*: the testnet known-hash list is landed and CI-verified (§7.4); gates 1–2 to be re-run on testnet;
    mid-IBD gossip/RPC injection is handled safely by the any-order write
    worker (§7.3) — it forks the in-flight chain and is reorged away if it
    loses; a backup-restore cycle behaves correctly with the new final height
@@ -1236,14 +1235,14 @@ runs.
 | Window OOM in 2 MB-block era | High | bytes-first budgets; arrival-time placement; frontier-only overshoot bounded to one block |
 | One-shot fallback regression (ibd-minimal defect) | High | re-enterable `run()`; the engine loops forever below the mandatory floor |
 | Installed-binary asset resolution breaks | High | layered loader (§6.3); hard actionable error, never silent |
-| Testnet IBD broken by deletion | High | documented (§7.4); E2 lands the list; gates re-run on testnet |
+| Testnet IBD relies on the bundled list | Med | resolved: the testnet known-hash list is shipped + CI-verified (§7.4); gates to be re-run on testnet |
 | Compaction/WAL toggle leaves DB degraded on crash | Med | RAII guard + re-enable-on-open + kill test (F2) |
 | Oversized getdata batches → silent 20 s stalls | Med | 16-item cap + 800 KB threshold derived from the serving limit; serve-after-one analysis (§4.2); crafted crossing-batch test |
 | Wrong/stale size hints mis-pack batches | Low | liveness-only (truncation → transport loss); hints pinned by the chunk hashes; `DEFAULT_SIZE_HINT` for unhinted chunks |
 | Eclipse/total stall looks like success | Med | frontier watchdog + 60 s warns + not-ready health status |
 | Cache poisoning / corrupt disk-tier entries accepted | High | cache is untrusted input: full `convert` re-verification on load (hash vs list, merkle, linkage); corrupt entries discarded + refetched |
 | Disk tier peaks large when state lags network | Low | bounded at 5× the RAM budget (§4.5); continuously evicted; dir removed at handoff |
-| Assembled testnet list wrong between anchors | Med | §7.4: spaced-checkpoint anchoring + explorer spot-checks; wrong intermediates can only stall (NotFound), never be accepted |
+| Assembled testnet list wrong between anchors | Low | shipped + emit-time anchor-verified against all 10,144 spaced checkpoints (§7.4); wrong intermediates can only stall (NotFound), never be accepted |
 | Forged peer heights poison routing | Med | live height raised only by *delivered, hash-matched* blocks; eviction requires a peer ahead; routing bias only, never data injection |
 
 ## 14. Explicitly deferred
