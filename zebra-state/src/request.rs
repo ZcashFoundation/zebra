@@ -568,6 +568,56 @@ impl ContextuallyVerifiedBlock {
             )?,
         })
     }
+
+    /// Creates a [`ContextuallyVerifiedBlock`] for a checkpoint-verified block in
+    /// snapshot-consume (assumeUTXO) mode, **without computing the chain value
+    /// pool change** from the block's spends.
+    ///
+    /// In snapshot-consume mode the spent outputs' values are not resolved (the
+    /// finalized set may have non-survivors elided, and per-block value pools are
+    /// loaded at `H_max` instead of derived). The resolved `spent_outputs` map
+    /// therefore may carry zero-value placeholders for finalized spends, so it
+    /// cannot be used to compute a meaningful value-pool change — and trying to
+    /// would understate the transparent input value and could underflow the
+    /// in-memory chain value pool. Instead this constructor sets
+    /// `chain_value_pool_change` to zero (only the deferred-pool contribution is
+    /// recorded), so the in-memory chain value pool stays consistent (it is not
+    /// authoritative during this phase; the verified final value pools are loaded
+    /// at `H_max`).
+    ///
+    /// `spent_outputs` must still contain an entry for **every** transparent
+    /// input the block spends (a placeholder is fine), so the chain's
+    /// transparent-input indexing does not panic on a missing output.
+    pub fn with_block_snapshot_consume(
+        semantically_verified: SemanticallyVerifiedBlock,
+        mut spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+        deferred_pool_balance_change: DeferredPoolBalanceChange,
+    ) -> Self {
+        let SemanticallyVerifiedBlock {
+            block,
+            hash,
+            height,
+            new_outputs,
+            transaction_hashes,
+        } = semantically_verified;
+
+        spent_outputs.extend(new_outputs.clone());
+
+        // Zero transparent/shielded change; only the deferred-pool contribution
+        // is recorded. The authoritative value pools are loaded at H_max.
+        let chain_value_pool_change = *ValueBalance::<NegativeAllowed>::zero()
+            .set_deferred_amount(deferred_pool_balance_change.value());
+
+        Self {
+            block,
+            hash,
+            height,
+            new_outputs,
+            spent_outputs,
+            transaction_hashes,
+            chain_value_pool_change,
+        }
+    }
 }
 
 impl CheckpointVerifiedBlock {

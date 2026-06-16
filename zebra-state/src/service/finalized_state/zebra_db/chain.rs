@@ -180,6 +180,31 @@ impl ZebraDb {
             .unwrap_or_else(ValueBalance::zero)
     }
 
+    /// Writes the verified final chain value pools directly into the
+    /// `chain_value_pools` column family, for snapshot-consume (assumeUTXO) sync.
+    ///
+    /// Used at `H_max` to load the authoritative final chain value pools instead
+    /// of deriving them per block (the per-block spent-value resolution is
+    /// skipped in snapshot-consume mode, so the deltas can't be derived). The
+    /// caller is responsible for verifying `value_pool` against its pinned hash
+    /// before calling this.
+    ///
+    /// The single `()`-keyed value pool entry is the consensus value-pool state
+    /// at the tip; writing the snapshot's final value here makes the finalized
+    /// state's chain value pools byte-identical to a normally-synced node at
+    /// `H_max`.
+    pub fn bulk_load_chain_value_pools(
+        &self,
+        value_pool: ValueBalance<NonNegative>,
+    ) -> Result<(), rocksdb::Error> {
+        let mut batch = DiskWriteBatch::new();
+        let _ = self
+            .chain_value_pools_cf()
+            .with_batch_for_writing(&mut batch)
+            .zs_insert(&(), &value_pool);
+        self.write_batch(batch)
+    }
+
     /// Returns the stored `BlockInfo` for the given block.
     pub fn block_info(&self, hash_or_height: HashOrHeight) -> Option<BlockInfo> {
         let height = hash_or_height.height_or_else(|hash| self.height(hash))?;

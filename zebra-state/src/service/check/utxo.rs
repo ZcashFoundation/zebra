@@ -9,10 +9,7 @@ use zebra_chain::{
 
 use crate::{
     constants::MIN_TRANSPARENT_COINBASE_MATURITY,
-    service::{
-        finalized_state::ZebraDb,
-        non_finalized_state::{PrunedChain, SpendingTransactionId},
-    },
+    service::{finalized_state::ZebraDb, non_finalized_state::SpendingTransactionId},
     SemanticallyVerifiedBlock,
     ValidateContextError::{
         self, DuplicateTransparentSpend, EarlyTransparentSpend, ImmatureTransparentCoinbaseSpend,
@@ -42,7 +39,6 @@ pub fn transparent_spend(
     semantically_verified: &SemanticallyVerifiedBlock,
     non_finalized_chain_unspent_utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     non_finalized_chain_spent_utxos: &HashMap<transparent::OutPoint, SpendingTransactionId>,
-    pruned_chain: Option<&PrunedChain>,
     finalized_state: &ZebraDb,
 ) -> Result<HashMap<transparent::OutPoint, transparent::OrderedUtxo>, ValidateContextError> {
     let mut block_spends = HashMap::new();
@@ -64,7 +60,6 @@ pub fn transparent_spend(
                 &semantically_verified.new_outputs,
                 non_finalized_chain_unspent_utxos,
                 non_finalized_chain_spent_utxos,
-                pruned_chain,
                 finalized_state,
             )?;
 
@@ -134,7 +129,6 @@ fn transparent_spend_chain_order(
     block_new_outputs: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     non_finalized_chain_unspent_utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     non_finalized_chain_spent_utxos: &HashMap<transparent::OutPoint, SpendingTransactionId>,
-    pruned_chain: Option<&PrunedChain>,
     finalized_state: &ZebraDb,
 ) -> Result<transparent::OrderedUtxo, ValidateContextError> {
     if let Some(output) = block_new_outputs.get(&spend) {
@@ -166,16 +160,6 @@ fn transparent_spend_chain_order(
     non_finalized_chain_unspent_utxos
         .get(&spend)
         .cloned()
-        // During the checkpoint sync, recently finalized outputs are served
-        // from the in-memory cache instead of a database point read; the
-        // metric makes the cache's hit rate observable on live syncs.
-        .or_else(|| {
-            let utxo = pruned_chain.and_then(|pruned_chain| pruned_chain.utxo(&spend));
-            if utxo.is_some() {
-                metrics::counter!("state.checkpoint.spend_cache.hit.count").increment(1);
-            }
-            utxo
-        })
         .or_else(|| finalized_state.utxo(&spend))
         // we don't keep spent UTXOs in the finalized state,
         // so all we can say is that it's missing from both
@@ -186,6 +170,115 @@ fn transparent_spend_chain_order(
             outpoint: spend,
             location: "the non-finalized and finalized chain",
         })
+}
+
+/// Resolves the transparent outputs spent by a checkpoint-verified block,
+/// **without validating the spends and without the crash-unsafe finalized-state
+/// fall-through** that [`transparent_spend`] performs.
+///
+/// Checkpoint-verified blocks are trusted by the pinned known-hash list (design
+/// doc `docs/design/known-hash-ibd.md`), so the double-spend, missing-spend,
+/// chain-order, coinbase-maturity, and remaining-value checks that
+/// [`transparent_spend`] runs for semantically-verified blocks are unnecessary
+/// here: the chain is already known-valid. This resolver therefore does the
+/// minimum the *write* path still needs — collecting the spent outputs' values
+/// so the in-memory chain can track UTXOs and (outside snapshot-consume mode)
+/// derive per-block value pools.
+///
+/// Resolution order is in-memory tiers only — the spending block's own new
+/// outputs, then the non-finalized parent chain's unspent outputs — followed by
+/// an **optional** finalized-state read controlled by `read_finalized`:
+///
+/// - In a **normal checkpoint sync** (`read_finalized` is `true`), a spend of a
+///   finalized output is read from the finalized `utxo_by_out_loc` set so the
+///   per-block value pool can be derived. This is a plain value read, **not** a
+///   validation: there is no `MissingTransparentOutput` error and no chain-order
+///   check (the known-hash list already guarantees both).
+/// - In **snapshot-consume (assumeUTXO) mode** (`read_finalized` is `false`),
+///   the finalized read is skipped entirely. The finalized `utxo_by_out_loc` set
+///   may have non-survivor outputs elided ([`crate::snapshot_consume`]), so
+///   reading it could miss a spent output and is also unnecessary: per-block
+///   value pools and balances are not derived in this mode, they are loaded at
+///   `H_max` from the verified snapshot. Skipping the read is what makes
+///   survivor-only UTXO elision **crash-safe** — the resolver can never reach
+///   the elided-output fall-through that previously crashed mid-sync.
+///
+/// When `read_finalized` is `true` (normal checkpoint sync) the returned map
+/// holds the fully-resolved spent outputs (in-memory plus finalized), so the
+/// per-block value pool can be derived. When `read_finalized` is `false`
+/// (snapshot-consume mode) it holds the in-memory-resolved spends plus a
+/// **zero-value placeholder** for every finalized spend that was not resolved in
+/// memory — so the map still covers every transparent input (the in-memory chain
+/// indexes every spend and must not panic on a missing one), while never reading
+/// a possibly-elided finalized value. The placeholders have an empty script
+/// (their `address()` is `None`, so the address index skips them) and are never
+/// used for value-pool math (the snapshot-consume commit path zeroes the
+/// per-block value pool and loads the verified final pools at `H_max`).
+pub fn checkpoint_transparent_spend(
+    semantically_verified: &SemanticallyVerifiedBlock,
+    non_finalized_chain_unspent_utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+    finalized_state: &ZebraDb,
+    read_finalized: bool,
+) -> HashMap<transparent::OutPoint, transparent::OrderedUtxo> {
+    let mut block_spends = HashMap::new();
+
+    for transaction in semantically_verified.block.transactions.iter() {
+        // Coinbase inputs represent new coins, so there are no UTXOs to spend.
+        let spends = transaction
+            .inputs()
+            .iter()
+            .filter_map(transparent::Input::outpoint);
+
+        for spend in spends {
+            // In-memory tiers only: the block's own earlier outputs, then the
+            // non-finalized parent chain's unspent outputs. No chain-order or
+            // double-spend check — the pinned chain guarantees validity.
+            let utxo = semantically_verified
+                .new_outputs
+                .get(&spend)
+                .cloned()
+                .or_else(|| non_finalized_chain_unspent_utxos.get(&spend).cloned());
+
+            let utxo = match utxo {
+                Some(utxo) => utxo,
+                None if read_finalized => {
+                    // Normal checkpoint sync: a value-only read of the finalized
+                    // set so the per-block value pool can be derived. The pinned
+                    // chain guarantees the output exists and the finalized set is
+                    // complete (no elision in this mode), so it always resolves;
+                    // if it somehow doesn't, omit it rather than erroring (the
+                    // pinned chain is trusted).
+                    match finalized_state.utxo(&spend) {
+                        Some(utxo) => utxo,
+                        None => continue,
+                    }
+                }
+                None => {
+                    // Snapshot-consume mode: do not read the (possibly-elided)
+                    // finalized value. Insert a zero-value placeholder so the
+                    // chain's transparent-input indexing has an entry for every
+                    // spend and never panics. The placeholder's empty script
+                    // makes its `address()` `None`, so the address index skips
+                    // it, and the value-pool math is bypassed entirely.
+                    transparent::OrderedUtxo::new(
+                        transparent::Output {
+                            value: amount::Amount::zero(),
+                            lock_script: transparent::Script::new(&[]),
+                        },
+                        // The height/tx-index are not consensus-load-bearing for
+                        // a placeholder (it is never written or value-summed);
+                        // use the spend height as a benign value.
+                        semantically_verified.height,
+                        0,
+                    )
+                }
+            };
+
+            block_spends.insert(spend, utxo);
+        }
+    }
+
+    block_spends
 }
 
 /// Check that `utxo` is spendable, based on the coinbase `spend_restriction`.

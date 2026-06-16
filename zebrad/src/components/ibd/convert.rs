@@ -550,17 +550,28 @@ where
         } = request;
 
         // The tree-fetch lookahead supplied a verified tree for this height:
-        // the commit takes the "tree supplied by download" path instead of
+        // the commit could take the "tree supplied by download" path instead of
         // folding the block's note commitments (design doc
         // `p2p-snapshot-distribution.md` §3.2).
         //
-        // TODO(known-hash-ibd): thread `supplied_trees` through the
-        // `CommitCheckpointVerifiedBlock` request and the write worker into
-        // `FinalizedState::commit_finalized_direct_with_trees`, which already
-        // accepts a pre-fetched tree set. Until that plumbing lands the engine
-        // still buffers and verifies trees ahead of the frontier (the
-        // throughput-critical work), and a supplied tree is observed here; the
-        // commit folds as a correct fallback.
+        // State-side support is complete and tested: the checkpoint arm of
+        // `FinalizedState::commit_finalized_direct_with_trees` writes a supplied
+        // `NoteCommitmentTrees` directly (verifying the supplied sapling root
+        // against the header's `hashFinalSaplingRoot`) instead of folding.
+        //
+        // The remaining gap is engine-coupled and intentionally deferred: the
+        // pipelined checkpoint worker commits each block to the in-memory
+        // non-finalized state first (`commit_checkpoint_block`), which folds the
+        // trees inside `Chain::push` and produces the `Contextual` finalizable
+        // block the disk writer commits — so the disk writer never reaches the
+        // supplied-tree checkpoint arm for pipelined blocks. Using a supplied
+        // tree there requires `commit_checkpoint_block` to accept it and bypass
+        // the in-memory fold (replacing `Chain::push`'s `update_trees_parallel`,
+        // including the sapling/orchard subtree tracking the frontier blob does
+        // not carry). That is a separate hot-path change, tracked as a follow-up;
+        // the engine does not populate `supplied_trees` yet, so today every block
+        // folds (correct, just not yet accelerated). The metric makes the
+        // supplied-vs-folded ratio observable once the engine wires it.
         if supplied_trees.as_ref().is_some_and(SuppliedTrees::is_some) {
             metrics::counter!("ibd.tree.supplied.count").increment(1);
         } else {

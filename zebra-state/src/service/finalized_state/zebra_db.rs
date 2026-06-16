@@ -223,6 +223,15 @@ impl ZebraDb {
         self.snapshot_consume.as_ref()
     }
 
+    /// Sets the snapshot-consume state directly, for tests.
+    ///
+    /// Bypasses loading from a survivor-set file so tests can drive the
+    /// snapshot-consume write path with a synthetic [`SnapshotConsumeState`].
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn set_snapshot_consume(&mut self, snapshot_consume: Option<Arc<SnapshotConsumeState>>) {
+        self.snapshot_consume = snapshot_consume;
+    }
+
     /// Loads the optional snapshot-consume state from `config` for `network`.
     ///
     /// Returns `None` if snapshot-consume is not configured. Panics with an

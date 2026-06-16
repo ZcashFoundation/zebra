@@ -119,6 +119,20 @@ impl ZebraDb {
         self.db.zs_get(&balance_by_transparent_addr, address)
     }
 
+    /// Returns every `(address, balance)` record in the address-balance column
+    /// family, for tests (e.g. to bulk-load a snapshot's final balances).
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn all_address_balances(&self) -> Vec<(transparent::Address, AddressBalanceLocation)> {
+        let balance_by_transparent_addr = self.address_balance_cf();
+
+        self.db
+            .zs_forward_range_iter::<_, transparent::Address, AddressBalanceLocation, _>(
+                &balance_by_transparent_addr,
+                ..,
+            )
+            .collect()
+    }
+
     /// Returns the balance and received balance for a [`transparent::Address`],
     /// if it is in the finalized state.
     pub fn address_balance(

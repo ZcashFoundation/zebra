@@ -105,25 +105,6 @@ impl WriteBlockWorker {
         fields(network = %self.non_finalized_state.network)
     )]
     pub(super) fn run(mut self) {
-        // The spendable-output cache retention window for the checkpoint
-        // bulk-write phase. Configured values below the minimum are raised.
-        let retained_blocks = {
-            let configured = self
-                .finalized_state
-                .db
-                .config()
-                .checkpoint_sync_retained_blocks;
-            if configured < MIN_CHECKPOINT_SYNC_RETAINED_BLOCKS {
-                warn!(
-                    configured,
-                    minimum = MIN_CHECKPOINT_SYNC_RETAINED_BLOCKS,
-                    "checkpoint_sync_retained_blocks is below the minimum, \
-                     using the minimum instead",
-                );
-            }
-            configured.max(MIN_CHECKPOINT_SYNC_RETAINED_BLOCKS)
-        };
-
         // How far the disk writes may lag the in-memory commits. Configured
         // values below the minimum are raised.
         let pipeline_capacity = {
@@ -183,13 +164,12 @@ impl WriteBlockWorker {
                 // still in the non-finalized state awaiting durability. Genesis
                 // and overflow roots are not recorded here.
                 inflight_disk: VecDeque::new(),
-                // Whether the bulk-write mode (PrunedChain cache + disk-writer
-                // guard) is active. Enabled lazily on the first checkpoint
+                // Whether the disk-writer bulk-write guard is active (compaction
+                // paused, WAL skipped). Enabled lazily on the first checkpoint
                 // commit, disabled at the bulk→semantic transition.
                 bulk_active: false,
                 // Errors propagated down to queued child blocks.
                 parent_error_map: IndexMap::new(),
-                retained_blocks,
                 disk_tip_height: &disk_tip_height,
                 disk_tx: &disk_tx,
             };
@@ -313,12 +293,11 @@ impl WriteBlockWorker {
             return false;
         }
 
-        // Lazily enter bulk-write mode on the first checkpoint commit: enable
-        // the recently-finalized cache. The disk-writer guard is created by the
-        // first bulk write below.
+        // Lazily enter bulk-write mode on the first checkpoint commit. The
+        // disk-writer bulk guard (paused compaction, skipped WAL) is created by
+        // the first bulk write below; this flag just tracks that an `EndBulk`
+        // must be sent at the bulk→semantic transition.
         if !loop_state.bulk_active {
-            self.non_finalized_state
-                .enable_pruned_chain(loop_state.retained_blocks);
             loop_state.bulk_active = true;
         }
 
@@ -681,14 +660,10 @@ impl WriteBlockWorker {
 
         // A semantic block has been committed, so the checkpoint bulk-write
         // phase is over for now: tell the disk writer to drop its bulk guard
-        // (resume compaction, flush WAL-skipped writes) and drop the
-        // recently-finalized cache. This is the flip's only surviving
-        // responsibility, now a reversible message: a later checkpoint block
-        // simply re-enables both (re-enabling the cache empty is always
-        // correct; lookups fall back to database reads).
+        // (resume compaction, flush WAL-skipped writes). This is a reversible
+        // message: a later checkpoint block simply re-enables the guard.
         if loop_state.bulk_active {
             let _ = loop_state.disk_tx.send(DiskRequest::EndBulk);
-            self.non_finalized_state.disable_pruned_chain();
             loop_state.bulk_active = false;
         }
 
@@ -878,12 +853,10 @@ struct WorkerLoopState<'scope> {
     /// Checkpoint-stream blocks handed to the disk writer, still in the NFS
     /// awaiting durability, in commit order.
     inflight_disk: VecDeque<(Height, block::Hash)>,
-    /// Whether bulk-write mode (PrunedChain cache + disk guard) is active.
+    /// Whether the disk-writer bulk-write guard is active.
     bulk_active: bool,
     /// Errors propagated down to queued child blocks.
     parent_error_map: IndexMap<block::Hash, ValidateContextError>,
-    /// The recently-finalized cache retention window.
-    retained_blocks: u32,
     /// The disk-writer tip height, published by the disk writer.
     disk_tip_height: &'scope AtomicU32,
     /// The channel to the disk writer.
@@ -908,11 +881,6 @@ struct WorkerLoopState<'scope> {
 /// restored-backup property structural: only `inflight_disk` entries are ever
 /// pruned, and those hold only worker-enqueued blocks, so restored blocks
 /// (never enqueued) can never be pruned.
-///
-/// While the recently-finalized cache is enabled, each pruned root leaves its
-/// still-spendable outputs behind in memory, so checkpoint-sync spend lookups
-/// avoid database point reads (see
-/// [`PrunedChain`](crate::service::non_finalized_state::PrunedChain)).
 ///
 /// # Correctness
 ///

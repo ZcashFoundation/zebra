@@ -134,30 +134,18 @@ pub struct Config {
     /// on blocks that are committed after the initial sync.
     pub disable_wal_during_ibd: bool,
 
-    /// The number of recently finalized blocks whose created transparent
-    /// outputs are kept in an in-memory cache (the non-finalized state's
-    /// `PrunedChain`) during the initial checkpoint sync, even though those
-    /// blocks are already in the finalized state.
+    /// Deprecated and unused: the size of a former in-memory cache of recently
+    /// finalized transparent outputs (`PrunedChain`) during the initial
+    /// checkpoint sync.
+    ///
+    /// The checkpoint commit path no longer resolves spent outputs against the
+    /// finalized state (checkpoint blocks are trusted by the pinned known-hash
+    /// list), so the cache that accelerated those lookups was removed. This
+    /// field is retained only for configuration backward-compatibility and has
+    /// no effect; it will be removed in a future database/config version.
     ///
     /// Set to [`MAX_BLOCK_REORG_HEIGHT`](crate::constants::MAX_BLOCK_REORG_HEIGHT)
-    /// (1000) by default — matching the minimum length of a non-finalized
-    /// chain during full validation. Configured values below half the reorg
-    /// height are raised to that minimum.
-    ///
-    /// # Tradeoff
-    ///
-    /// While a recently finalized block's outputs are cached, spends of
-    /// those outputs resolve from memory instead of database point reads.
-    /// Most outputs created during the 2022–2023 transaction spam are spent
-    /// within a few hundred blocks, so a window this size turns the bulk of
-    /// that era's spent-output lookups into memory hits. Only the spendable
-    /// outputs are cached (entries are dropped as soon as they are spent),
-    /// so memory use is proportional to the window's unspent outputs, not
-    /// to whole blocks.
-    ///
-    /// The cache is enabled while checkpoint-verified blocks are being
-    /// committed, and dropped once a semantically-verified block is committed
-    /// (it is re-enabled, empty, if checkpoint commits resume).
+    /// (1000) by default.
     pub checkpoint_sync_retained_blocks: u32,
 
     /// The capacity of the worker-to-disk-writer channel: how far the

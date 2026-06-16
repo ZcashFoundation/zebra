@@ -32,7 +32,6 @@ use crate::{
 
 mod backup;
 mod chain;
-mod pruned_chain;
 
 #[cfg(test)]
 pub(crate) use backup::MIN_DURATION_BETWEEN_BACKUP_UPDATES;
@@ -41,7 +40,6 @@ pub(crate) use backup::MIN_DURATION_BETWEEN_BACKUP_UPDATES;
 mod tests;
 
 pub(crate) use chain::{Chain, SpendingTransactionId};
-pub(crate) use pruned_chain::PrunedChain;
 
 /// The state of the chains in memory, including queued blocks.
 ///
@@ -63,13 +61,6 @@ pub struct NonFinalizedState {
     /// Blocks that have been invalidated in, and removed from, the non finalized
     /// state.
     invalidated_blocks: IndexMap<Height, Arc<Vec<ContextuallyVerifiedBlock>>>,
-
-    /// A cache of recently finalized spendable outputs, kept while the
-    /// checkpoint pipeline runs so spend lookups stay in memory (see
-    /// [`PrunedChain`]).
-    ///
-    /// `None` outside the checkpoint bulk-write phase.
-    pruned_chain: Option<PrunedChain>,
 
     // Configuration
     //
@@ -117,9 +108,6 @@ impl Clone for NonFinalizedState {
             chain_set: self.chain_set.clone(),
             network: self.network.clone(),
             invalidated_blocks: self.invalidated_blocks.clone(),
-            // The spend cache is local to the checkpoint pipeline's writer;
-            // clones are published snapshots that never serve its lookups.
-            pruned_chain: None,
             should_count_metrics: self.should_count_metrics,
             // Don't track progress in clones.
             #[cfg(feature = "progress-bar")]
@@ -137,7 +125,6 @@ impl NonFinalizedState {
             chain_set: Default::default(),
             network: network.clone(),
             invalidated_blocks: Default::default(),
-            pruned_chain: None,
             should_count_metrics: true,
             #[cfg(feature = "progress-bar")]
             chain_count_bar: None,
@@ -294,19 +281,6 @@ impl NonFinalizedState {
         self.insert_with(chain, |_ignored_chain| { /* no filter */ })
     }
 
-    /// Starts caching recently finalized spendable outputs in a
-    /// [`PrunedChain`] with the given retention window, for the checkpoint
-    /// bulk-write phase (see the [`pruned_chain`](pruned_chain) module docs).
-    pub fn enable_pruned_chain(&mut self, retained_blocks: u32) {
-        self.pruned_chain = Some(PrunedChain::new(retained_blocks));
-    }
-
-    /// Stops caching recently finalized outputs and drops the cache, at the
-    /// end of the checkpoint bulk-write phase.
-    pub fn disable_pruned_chain(&mut self) {
-        self.pruned_chain = None;
-    }
-
     /// Finalize the lowest height block in the non-finalized portion of the best
     /// chain and update all side-chains to match.
     ///
@@ -330,10 +304,6 @@ impl NonFinalizedState {
     /// Any chain whose root differs from the finalized block forked below it
     /// and can never finalize, so it is dropped whole (the existing
     /// side-chain-drop semantics, made hash-precise).
-    ///
-    /// While the recently-finalized cache is enabled, the finalized root's
-    /// still-spendable outputs are cached so checkpoint-sync spend lookups
-    /// stay in memory (see [`PrunedChain`]).
     ///
     /// # Panics
     ///
@@ -372,23 +342,6 @@ impl NonFinalizedState {
                 let mut chains = chains.into_iter();
                 chosen_chain = chains.next_back().expect("there's at least one chain");
                 other_chains = chains.collect();
-            }
-        }
-
-        // Cache the root's still-spendable outputs before popping it, so
-        // checkpoint-sync spend lookups stay in memory (see [`PrunedChain`]).
-        // The chain's precise spent-set is consulted *before* the pop, while
-        // it still includes the root's own within-block spends; the block's
-        // `spent_outputs` field can't be used here because it also contains
-        // every new output (see `with_block_and_spent_utxos`).
-        if let Some(pruned_chain) = self.pruned_chain.as_mut() {
-            if let Some((root_height, root)) = chosen_chain.blocks.first_key_value() {
-                pruned_chain.add_finalized_root(
-                    *root_height,
-                    root.new_outputs
-                        .iter()
-                        .filter(|(outpoint, _)| !chosen_chain.spent_utxos.contains_key(outpoint)),
-                );
             }
         }
 
@@ -520,52 +473,73 @@ impl NonFinalizedState {
             return Err(ValidateContextError::NotReadyToBeCommitted);
         }
 
-        // The chain context the checks below read from: the located parent
-        // chain, or empty maps and finalized-tip trees for a new chain. This
-        // fixes the previous single-best-chain assumption — a fork off a
-        // non-best chain reads its own parent's context.
-        let empty_created = HashMap::new();
-        let empty_spent = HashMap::new();
-        let (chain_created_utxos, chain_spent_utxos) = match &parent_chain {
-            Some(chain) => (&chain.created_utxos, &chain.spent_utxos),
-            None => (&empty_created, &empty_spent),
-        };
-
-        // The spent-UTXO lookup still runs so the chain tracks UTXOs
-        // correctly; anchor checks are skipped (the pinned hash chain
-        // guarantees the block's contents).
+        // Resolve the spent outputs **without** the full transparent-spend
+        // validation, and **without** the crash-unsafe finalized-state
+        // fall-through. Checkpoint-verified blocks are trusted by the pinned
+        // known-hash list, so the double-spend / missing-spend / chain-order /
+        // coinbase-maturity / remaining-value checks are unnecessary here. We
+        // only collect the spent values the chain still needs to track UTXOs
+        // and (outside snapshot-consume mode) derive per-block value pools.
         //
-        // Passing `created_utxos` without filtering out spent outputs is
-        // correct, because spends of already-spent outputs are rejected
-        // against `spent_utxos` before the created map is consulted;
-        // filtering would clone the whole map on every block.
-        let spent_utxos = check::utxo::transparent_spend(
+        // In snapshot-consume mode the finalized set may have non-survivor
+        // outputs elided, and value pools / balances are loaded at H_max
+        // instead of derived, so the finalized read is skipped — which is
+        // exactly what makes survivor-only UTXO elision crash-safe (the
+        // resolver can no longer reach the elided-output fall-through that
+        // previously crashed mid-sync; see `docs/design/utxo-elision.md` and
+        // `crate::snapshot_consume`).
+        //
+        // The non-finalized `unspent_utxos()` map (the located parent chain's
+        // created-minus-spent outputs, or empty for a new chain forked off the
+        // finalized tip) filters out already-spent outputs, so within-chain
+        // spends still resolve from memory.
+        let read_finalized_spends = finalized_state.snapshot_consume().is_none();
+        let chain_unspent_utxos = match &parent_chain {
+            Some(chain) => chain.unspent_utxos(),
+            None => HashMap::new(),
+        };
+        let spent_utxos = check::utxo::checkpoint_transparent_spend(
             &prepared,
-            chain_created_utxos,
-            chain_spent_utxos,
-            self.pruned_chain.as_ref(),
+            &chain_unspent_utxos,
             finalized_state,
-        )?;
+            read_finalized_spends,
+        );
 
         let transaction_count = prepared.block.transactions.len();
         let spent_utxo_count = spent_utxos.len();
-        let contextual = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
-            prepared,
-            spent_utxos.clone(),
+        let deferred_pool_balance_change =
             crate::service::finalized_state::calculate_deferred_pool_balance_change(
                 height,
                 &self.network,
-            ),
-        )
-        .map_err(|value_balance_error| {
-            ValidateContextError::CalculateBlockChainValueChange {
-                value_balance_error,
-                height,
-                block_hash: hash,
-                transaction_count,
-                spent_utxo_count,
-            }
-        })?;
+            );
+        let contextual = if read_finalized_spends {
+            // Normal checkpoint sync: spends are fully resolved (in-memory and
+            // finalized), so the per-block value pool can be derived.
+            ContextuallyVerifiedBlock::with_block_and_spent_utxos(
+                prepared,
+                spent_utxos.clone(),
+                deferred_pool_balance_change,
+            )
+            .map_err(|value_balance_error| {
+                ValidateContextError::CalculateBlockChainValueChange {
+                    value_balance_error,
+                    height,
+                    block_hash: hash,
+                    transaction_count,
+                    spent_utxo_count,
+                }
+            })?
+        } else {
+            // Snapshot-consume mode: spent values aren't resolved (placeholders
+            // stand in for finalized spends), so the per-block value pool is
+            // zeroed and the verified final pools are loaded at H_max. This can't
+            // fail.
+            ContextuallyVerifiedBlock::with_block_snapshot_consume(
+                prepared,
+                spent_utxos.clone(),
+                deferred_pool_balance_change,
+            )
+        };
 
         // The history tree the block commitment is checked against: the parent
         // chain's, or the finalized tip's for a new chain.
@@ -592,14 +566,6 @@ impl NonFinalizedState {
         )?;
 
         // Every fallible check has passed; from here on the state is mutated.
-
-        // The resolved spends can never be read again (the pinned chain has
-        // no double-spends), so drop them from the recently-finalized cache.
-        // This uses the precise spend map: the `spent_outputs` field on the
-        // contextual block also contains every new output.
-        if let Some(pruned_chain) = self.pruned_chain.as_mut() {
-            pruned_chain.remove_spent(spent_utxos.keys());
-        }
 
         // Take the parent chain out of the chain set (if it was in it): with
         // the set entry removed, the `Arc` is uniquely owned during pure
@@ -868,9 +834,6 @@ impl NonFinalizedState {
             &prepared,
             &new_chain.unspent_utxos(),
             &new_chain.spent_utxos,
-            // The recently-finalized cache only exists during the checkpoint
-            // bulk-write phase; full validation reads the database.
-            None,
             finalized_state,
         )?;
 

@@ -1,19 +1,33 @@
 //! Tests for the snapshot-consume (assumeUTXO) finalized write path.
 //!
-//! Covers the direct note-commitment-tree write: a checkpoint block committed
-//! with pre-fetched trees supplied writes those trees directly into the tree
-//! column families instead of folding them, and the on-disk result matches a
-//! normal folded commit.
+//! Covers:
+//! - the direct note-commitment-tree write: a checkpoint block committed with
+//!   pre-fetched trees supplied writes those trees directly into the tree column
+//!   families instead of folding them, and the on-disk result matches a normal
+//!   folded commit;
+//! - `H_max` parity: a small chain committed through the snapshot-consume write
+//!   path (survivor-only UTXO elision on, per-block balances/value-pools skipped
+//!   then bulk-loaded at `H_max`) has a byte-identical UTXO set, chain value
+//!   pools, and address balances to the same chain committed normally;
+//! - a zero-`MissingTransparentOutput` / no-panic anti-regression for checkpoint
+//!   commits with elision on (the spend-value reads that previously crashed are
+//!   gone).
 
 use std::sync::Arc;
 
 use zebra_chain::{
+    amount::NonNegative,
     block::{Block, Height},
     parameters::Network,
     serialization::ZcashDeserializeInto,
+    value_balance::ValueBalance,
 };
 
-use crate::{service::finalized_state::FinalizedState, CheckpointVerifiedBlock, Config};
+use crate::{
+    service::finalized_state::FinalizedState,
+    snapshot_consume::{SnapshotConsumeState, SurvivorSet},
+    CheckpointVerifiedBlock, Config,
+};
 
 /// Commits the mainnet genesis and block 1 to a fresh finalized state and
 /// returns it together with block 1.
@@ -118,4 +132,199 @@ fn supplied_tree_write_round_trips() {
         supplied_state.db.finalized_tip_hash(),
         "both commits reach the same tip",
     );
+}
+
+/// Collects the on-disk UTXO set (sorted 8-byte output locations), the chain
+/// value pools, and the address-balance set (sorted key||value bytes) of a
+/// finalized state, for byte-comparison.
+fn collect_state(
+    state: &FinalizedState,
+) -> (Vec<Vec<u8>>, ValueBalance<NonNegative>, Vec<Vec<u8>>) {
+    let mut utxo_set = Vec::new();
+    state
+        .db
+        .for_each_unspent_output_location_bytes(|loc| utxo_set.push(loc.to_vec()));
+
+    let value_pools = state.db.finalized_value_pool();
+
+    let mut balances = Vec::new();
+    state.db.for_each_address_balance_bytes(|key, value| {
+        let mut record = key.to_vec();
+        record.extend_from_slice(value);
+        balances.push(record);
+    });
+
+    (utxo_set, value_pools, balances)
+}
+
+/// Commits the mainnet genesis and blocks `1..=max_height` to a fresh finalized
+/// state normally (folding, deriving balances and value pools). Returns the
+/// state and the committed blocks.
+fn commit_blocks_normally(network: &Network, max_height: u32) -> (FinalizedState, Vec<Arc<Block>>) {
+    let mut state = FinalizedState::new_with_debug(
+        &Config::ephemeral(),
+        network,
+        true,
+        #[cfg(feature = "elasticsearch")]
+        false,
+        false,
+    );
+
+    let mut blocks = Vec::new();
+    for height in 0..=max_height {
+        let block: Arc<Block> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+            .get(&height)
+            .unwrap_or_else(|| panic!("continuous mainnet block {height} exists"))
+            .zcash_deserialize_into()
+            .expect("block deserializes");
+
+        state
+            .commit_finalized_direct(
+                CheckpointVerifiedBlock::from(block.clone()).into(),
+                None,
+                "normal commit",
+            )
+            .unwrap_or_else(|error| panic!("block {height} commits normally: {error:?}"));
+
+        blocks.push(block);
+    }
+
+    (state, blocks)
+}
+
+/// `H_max` parity: a chain committed through the snapshot-consume write path
+/// (survivor-only UTXO elision on, per-block balances and value pools skipped
+/// then bulk-loaded at `H_max`) has a UTXO set, chain value pools, and address
+/// balances byte-identical to the same chain committed normally.
+#[test]
+fn snapshot_consume_h_max_parity() {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let max_height = 10;
+
+    // Baseline: commit blocks 0..=10 normally, then read its H_max state.
+    let (baseline_state, blocks) = commit_blocks_normally(&network, max_height);
+    let (baseline_utxos, baseline_pools, baseline_balances) = collect_state(&baseline_state);
+
+    // The survivor set is exactly the baseline's H_max unspent output set, in
+    // sorted on-disk order — which is what the emitter produces. With elision
+    // on, every survivor's create is written and every non-survivor's is elided.
+    let survivor_bytes: Vec<u8> = baseline_utxos.iter().flatten().copied().collect();
+    let survivor_set = Arc::new(SurvivorSet::from_bytes(survivor_bytes).expect("survivors sorted"));
+
+    // Snapshot-consume: a fresh state with elision on, committing the same
+    // blocks. Per-block balances and value pools are skipped during the commits.
+    let mut consume_state = FinalizedState::new_with_debug(
+        &Config::ephemeral(),
+        &network,
+        true,
+        #[cfg(feature = "elasticsearch")]
+        false,
+        false,
+    );
+    consume_state
+        .db
+        .set_snapshot_consume(Some(Arc::new(SnapshotConsumeState::from_parts(
+            network.clone(),
+            Height(max_height),
+            // Elide UTXO bytes for non-survivors (the crash-safe default).
+            true,
+            Some(survivor_set),
+        ))));
+
+    for (height, block) in blocks.iter().enumerate() {
+        consume_state
+            .commit_finalized_direct(
+                CheckpointVerifiedBlock::from(block.clone()).into(),
+                None,
+                "snapshot-consume commit",
+            )
+            .unwrap_or_else(|error| {
+                panic!("block {height} commits in snapshot-consume mode: {error:?}")
+            });
+    }
+
+    // At H_max, load the verified final balances and value pools — exactly what
+    // the engine does after fetching and verifying them against pinned hashes.
+    let balances_to_load = baseline_state.db.all_address_balances();
+    consume_state
+        .db
+        .bulk_load_address_balances(balances_to_load, 1024)
+        .expect("bulk-load balances");
+    consume_state
+        .db
+        .bulk_load_chain_value_pools(baseline_pools)
+        .expect("bulk-load value pools");
+
+    // The snapshot-consume state at H_max must be byte-identical to the normal
+    // state for the consensus artifacts.
+    let (consume_utxos, consume_pools, consume_balances) = collect_state(&consume_state);
+
+    assert_eq!(
+        baseline_state.db.finalized_tip_hash(),
+        consume_state.db.finalized_tip_hash(),
+        "both states reach the same tip",
+    );
+    assert_eq!(
+        baseline_utxos, consume_utxos,
+        "UTXO set is byte-identical at H_max",
+    );
+    assert_eq!(
+        baseline_pools, consume_pools,
+        "chain value pools are byte-identical at H_max",
+    );
+    assert_eq!(
+        baseline_balances, consume_balances,
+        "address balances are byte-identical at H_max",
+    );
+}
+
+/// Anti-regression: committing checkpoint blocks through the snapshot-consume
+/// write path with UTXO elision on never produces a `MissingTransparentOutput`
+/// (or any other) error and never panics — the spend-value reads that used to
+/// crash on an elided output are gone.
+#[test]
+fn snapshot_consume_elision_never_misses_a_spend() {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::Mainnet;
+    let max_height = 10;
+
+    // The survivor set from a normal sync's H_max unspent set.
+    let (baseline_state, blocks) = commit_blocks_normally(&network, max_height);
+    let (baseline_utxos, _pools, _balances) = collect_state(&baseline_state);
+    let survivor_bytes: Vec<u8> = baseline_utxos.iter().flatten().copied().collect();
+    let survivor_set = Arc::new(SurvivorSet::from_bytes(survivor_bytes).expect("survivors sorted"));
+
+    let mut consume_state = FinalizedState::new_with_debug(
+        &Config::ephemeral(),
+        &network,
+        true,
+        #[cfg(feature = "elasticsearch")]
+        false,
+        false,
+    );
+    consume_state
+        .db
+        .set_snapshot_consume(Some(Arc::new(SnapshotConsumeState::from_parts(
+            network.clone(),
+            Height(max_height),
+            true,
+            Some(survivor_set),
+        ))));
+
+    // Every commit must succeed: the location-only spend resolution never reads
+    // a (possibly elided) spent value, so it can't miss.
+    for (height, block) in blocks.iter().enumerate() {
+        let result = consume_state.commit_finalized_direct(
+            CheckpointVerifiedBlock::from(block.clone()).into(),
+            None,
+            "elision anti-regression commit",
+        );
+        assert!(
+            result.is_ok(),
+            "block {height} must commit with elision on, got {result:?}",
+        );
+    }
 }

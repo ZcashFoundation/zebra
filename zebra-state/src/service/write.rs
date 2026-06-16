@@ -59,14 +59,13 @@ use crate::service::{
 /// We allow enough space for multiple concurrent chain forks with errors.
 pub(super) const PARENT_ERROR_MAP_LIMIT: usize = MAX_BLOCK_REORG_HEIGHT as usize * 2;
 
-/// The minimum value for the checkpoint-sync retention and pipeline
-/// configs: half the rollback window.
+/// The minimum value for the checkpoint-sync pipeline capacity: half the
+/// rollback window.
 ///
 /// See
-/// [`Config::checkpoint_sync_retained_blocks`](crate::Config::checkpoint_sync_retained_blocks)
-/// and
 /// [`Config::checkpoint_sync_pipeline_capacity`](crate::Config::checkpoint_sync_pipeline_capacity);
-/// configured values below this are raised to it.
+/// configured values below this are raised to it. (Named for the former
+/// retained-blocks config it also bounded, now deprecated.)
 pub(super) const MIN_CHECKPOINT_SYNC_RETAINED_BLOCKS: u32 = MAX_BLOCK_REORG_HEIGHT / 2;
 
 /// The disk-writer tip height value meaning nothing has been written to disk

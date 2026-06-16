@@ -1041,6 +1041,53 @@ fn commit_checkpoint_block_forks_at_parent_tip() -> Result<()> {
     Ok(())
 }
 
+/// In snapshot-consume (assumeUTXO) mode, `commit_checkpoint_block` resolves
+/// spends from memory only (no finalized read) and zeroes the per-block value
+/// pool, so a checkpoint block commits without ever reading a (possibly elided)
+/// finalized UTXO — the spend-resolution path that previously crashed.
+#[test]
+fn commit_checkpoint_block_snapshot_consume_skips_finalized_spend_read() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    for network in Network::iter() {
+        let (mut state, mut finalized_state, block1) = empty_checkpoint_test_states(&network);
+
+        // Enable snapshot-consume mode with an empty survivor set (every output
+        // is a non-survivor → maximal elision), and UTXO-byte elision on.
+        finalized_state.db.set_snapshot_consume(Some(Arc::new(
+            crate::snapshot_consume::SnapshotConsumeState::from_parts(
+                network.clone(),
+                Height(1_000_000),
+                true,
+                Some(Arc::new(
+                    crate::snapshot_consume::SurvivorSet::from_bytes(Vec::new())
+                        .expect("empty survivor set loads"),
+                )),
+            ),
+        )));
+
+        // A short pinned chain of checkpoint blocks commits cleanly: the
+        // in-memory commit never reads the finalized UTXO set, and the value-pool
+        // computation is bypassed (it can't error).
+        let (_tip, _finalizable) = state.commit_checkpoint_block(
+            CheckpointVerifiedBlock::from(block1.clone()),
+            &finalized_state.db,
+        )?;
+
+        let block2 = block1.make_fake_child().set_work(10);
+        let (tip_block, finalizable) = state.commit_checkpoint_block(
+            CheckpointVerifiedBlock::from(block2.clone()),
+            &finalized_state.db,
+        )?;
+
+        assert_eq!(tip_block.hash, block2.hash());
+        assert_eq!(finalizable.inner_block(), block2);
+        assert_eq!(state.chain_count(), 1, "the pinned chain extends cleanly");
+    }
+
+    Ok(())
+}
+
 /// A failed `commit_checkpoint_block` leaves the non-finalized state exactly
 /// as it was, so the write worker can treat the error as non-fatal.
 #[test]

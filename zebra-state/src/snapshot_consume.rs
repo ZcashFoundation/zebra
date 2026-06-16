@@ -19,40 +19,67 @@
 //!    transparent output locations that are still unspent at `H_max` (the
 //!    *survivor set*) marks which created outputs survive to the snapshot
 //!    height. Non-survivor outputs' RPC address-index and balance writes are
-//!    skipped (always crash-safe). The `utxo_by_out_loc` bytes themselves are
-//!    elided **only** if [`SnapshotConsumeConfig::elide_utxo_bytes`] is enabled,
-//!    which is **unsafe across restarts** and defaults off — see the crash
-//!    safety analysis below and `docs/design/utxo-elision.md`.
+//!    skipped, and the `utxo_by_out_loc` bytes for non-survivors are elided too
+//!    (controlled by [`SnapshotConsumeConfig::elide_utxo_bytes`], default `true`
+//!    in consume mode). Both are crash-safe because the checkpoint commit path
+//!    no longer reads the spent value from `utxo_by_out_loc` — see below.
 //!
 //! # Crash safety
 //!
-//! This is the riskiest part of the assumeUTXO sync, and it was re-verified
-//! against the *actual* commit path on this branch, not just the design doc.
+//! UTXO-byte elision was the riskiest part of the assumeUTXO sync, and the
+//! reason it is now crash-safe was re-verified against the *actual* commit path
+//! on this branch, not just the design doc.
 //!
-//! Checkpoint blocks resolve their transparent spends in
-//! [`crate::service::non_finalized_state::NonFinalizedState::commit_checkpoint_block`],
-//! which calls [`crate::service::check::utxo::transparent_spend`]. That resolver
-//! falls through to `finalized_state.utxo(&spend)` (the live `utxo_by_out_loc`
-//! set) as its last resort. So if a created output's `utxo_by_out_loc` bytes are
-//! elided and the output is later spent after it has aged out of the in-memory
-//! `PrunedChain` cache (or across a restart, where that cache is cold), the
-//! spend resolves to `None`, which becomes `MissingTransparentOutput`, a commit
-//! error, and a queue reset / crash loop. This is exactly the prior crash.
+//! The prior crash came from spend *resolution* reading the spent output's value
+//! from the live `utxo_by_out_loc` set: if a created output's bytes were elided
+//! and the output was later spent after it had aged out of memory (or across a
+//! restart, where the in-memory cache is cold), the spend resolved to `None`,
+//! which became `MissingTransparentOutput`, a commit error, and a queue reset /
+//! crash loop. Both checkpoint commit paths used to perform that read:
 //!
-//! Therefore:
+//! - the in-memory commit
+//!   ([`crate::service::non_finalized_state::NonFinalizedState::commit_checkpoint_block`])
+//!   resolved spends via `check::utxo::transparent_spend`, which fell through to
+//!   `finalized_state.utxo(&spend)`; and
+//! - the finalized commit
+//!   ([`crate::service::finalized_state::FinalizedState::commit_finalized_direct_with_trees`])
+//!   resolved spent values via `ZebraDb::lookup_spent_utxos`, which read
+//!   `utxo_by_out_loc` and panicked if the value was missing.
 //!
-//! - **Address-index and balance elision for non-survivors is unconditionally
-//!   crash-safe**: those column families
+//! **That value read is now removed for checkpoint blocks.** In snapshot-consume
+//! mode:
+//!
+//! - the in-memory commit uses
+//!   [`crate::service::check::utxo::checkpoint_transparent_spend`] with the
+//!   finalized read disabled — it resolves spends from in-memory tiers only and
+//!   never touches `utxo_by_out_loc`; and
+//! - the finalized commit uses
+//!   [`crate::service::finalized_state::ZebraDb::lookup_spent_output_locations_only`],
+//!   which resolves the spent [`OutputLocation`] (from the always-written
+//!   transaction-location index, never elided) for the `utxo_by_out_loc` delete,
+//!   and never reads the spent value.
+//!
+//! With no code path reading a spent output's value from the finalized set, an
+//! elided non-survivor output can never be dereferenced, so eliding its bytes
+//! can never `None`/panic — even across a restart with a cold cache. Per-block
+//! value pools and balances, which previously needed those values, are not
+//! derived in consume mode: the verified final value pools and balances are
+//! loaded at `H_max` instead.
+//!
+//! Two classes of elision, both now crash-safe in consume mode:
+//!
+//! - **Address-index and balance elision for non-survivors** is
+//!   unconditionally crash-safe: those column families
 //!   (`utxo_loc_by_transparent_addr_loc`, the create side of
 //!   `tx_loc_by_transparent_addr_loc`, and `balance_by_transparent_addr`) are
-//!   never read by spend resolution, the value pool, or the engine. A crash and
-//!   resume finds a fully consistent UTXO set; only the RPC indexes are sparser.
-//!   This is always applied in consume mode.
-//! - **`utxo_by_out_loc` byte elision is a known crash** and is gated behind
-//!   [`SnapshotConsumeConfig::elide_utxo_bytes`] (default `false`). The
-//!   restart-safe way to elide the UTXO bytes is the deferred-durability buffer
-//!   ("approach B") described in `docs/design/utxo-elision.md` §4.4; it is not
-//!   implemented here. Do not enable `elide_utxo_bytes` for a production sync.
+//!   never read by spend resolution, the value pool, or the engine.
+//! - **`utxo_by_out_loc` byte elision for non-survivors** is crash-safe because
+//!   the spend-value read that previously dereferenced it is gone (above). It is
+//!   controlled by [`SnapshotConsumeConfig::elide_utxo_bytes`], which defaults to
+//!   `true`. The final survivor set on disk at `H_max` is byte-identical to a
+//!   normally-synced node, because an elided output's create and delete net to
+//!   zero (a spent output is always a non-survivor, so its create was elided and
+//!   its delete is a no-op).
 
 use std::{
     fs::File,
@@ -77,7 +104,7 @@ pub const OUTPUT_LOCATION_DISK_BYTES: usize = 8;
 /// Defaults to off everywhere it is used as an `Option` (the
 /// [`Config::snapshot_consume`](crate::Config) field is `None` by default), so a
 /// normal sync is completely unaffected.
-#[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct SnapshotConsumeConfig {
     /// Path to the verified survivor-set artifact: the sorted, big-endian,
@@ -98,17 +125,34 @@ pub struct SnapshotConsumeConfig {
 
     /// Whether to elide the `utxo_by_out_loc` bytes for non-survivor outputs.
     ///
-    /// **Defaults to `false`, and should stay `false` for any real sync.**
+    /// **Defaults to `true`.** This is the survivor-only UTXO write: only
+    /// outputs that are unspent at `H_max` are written to `utxo_by_out_loc`,
+    /// which is the dominant write-volume win of assumeUTXO sync.
     ///
-    /// Eliding the UTXO bytes is **not crash-safe** with the current commit
-    /// path: checkpoint spend resolution falls through to the finalized
-    /// `utxo_by_out_loc` set, so an elided-then-spent output that has aged out
-    /// of the in-memory cache (always the case across a restart) resolves to
-    /// `None` and crashes the commit. See the module docs and
-    /// `docs/design/utxo-elision.md`. The address-index and balance elision
-    /// (always applied when a survivor set is loaded) captures most of the
-    /// write-volume win without this hazard.
+    /// This is crash-safe because the checkpoint commit path no longer reads a
+    /// spent output's value from `utxo_by_out_loc` (the in-memory commit resolves
+    /// spends from memory only, and the finalized commit resolves only the
+    /// [`OutputLocation`] for deletion). An elided non-survivor output can never
+    /// be dereferenced, so it can never `None`/panic, even across a restart. See
+    /// the module docs and `docs/design/utxo-elision.md`.
+    ///
+    /// Set to `false` to keep the full UTXO set on disk (e.g. for an RPC node
+    /// that needs complete intermediate-height UTXO queries during IBD); the
+    /// address-index and balance elision still applies.
     pub elide_utxo_bytes: bool,
+}
+
+impl Default for SnapshotConsumeConfig {
+    fn default() -> Self {
+        Self {
+            survivor_set_path: None,
+            h_max: 0,
+            // Survivor-only UTXO elision is on by default in consume mode: it is
+            // the main write-volume win and is now crash-safe (see the field and
+            // module docs).
+            elide_utxo_bytes: true,
+        }
+    }
 }
 
 /// A read-only set of the transparent output locations that survive unspent to
@@ -207,8 +251,8 @@ pub struct SnapshotConsumeState {
     /// The snapshot height `H_max`.
     h_max: Height,
 
-    /// Whether to elide `utxo_by_out_loc` bytes (unsafe; default off — see
-    /// [`SnapshotConsumeConfig::elide_utxo_bytes`]).
+    /// Whether to elide `utxo_by_out_loc` bytes for non-survivors (default on;
+    /// crash-safe — see [`SnapshotConsumeConfig::elide_utxo_bytes`]).
     elide_utxo_bytes: bool,
 
     /// The survivor set, if a path was configured.
@@ -268,7 +312,7 @@ impl SnapshotConsumeState {
         self.h_max
     }
 
-    /// Whether `utxo_by_out_loc` byte elision is enabled (unsafe; default off).
+    /// Whether `utxo_by_out_loc` byte elision is enabled (crash-safe; default on).
     pub fn elide_utxo_bytes(&self) -> bool {
         self.elide_utxo_bytes
     }
@@ -294,11 +338,12 @@ impl SnapshotConsumeState {
     /// Returns whether the `utxo_by_out_loc` **bytes** for the output at
     /// `loc_bytes` should be elided.
     ///
-    /// Returns `true` only when both a survivor set is loaded, the output is a
-    /// non-survivor, **and** the unsafe [`SnapshotConsumeConfig::elide_utxo_bytes`]
-    /// flag is set. With the flag off (the default) this is always `false`, so
-    /// the UTXO set on disk is always complete and the commit path's spend
-    /// resolution never sees a hole.
+    /// Returns `true` when a survivor set is loaded, the output is a
+    /// non-survivor, **and** [`SnapshotConsumeConfig::elide_utxo_bytes`] is set
+    /// (the default in consume mode). This is crash-safe because the checkpoint
+    /// commit path no longer reads a spent output's value from `utxo_by_out_loc`
+    /// (see [the module docs](crate::snapshot_consume)). With the flag off the
+    /// full UTXO set is kept on disk.
     pub fn elide_utxo_byte(&self, loc_bytes: &[u8; OUTPUT_LOCATION_DISK_BYTES]) -> bool {
         self.elide_utxo_bytes && self.elide_address_index(loc_bytes)
     }

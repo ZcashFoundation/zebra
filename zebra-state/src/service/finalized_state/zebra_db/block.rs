@@ -464,6 +464,69 @@ impl ZebraDb {
             .collect()
     }
 
+    /// Look up only the [`OutputLocation`]s spent by a checkpoint-verified block
+    /// in snapshot-consume (assumeUTXO) mode, **without reading the spent
+    /// outputs' values**.
+    ///
+    /// In snapshot-consume mode every output spent by a block is, by definition,
+    /// a non-survivor (it is not unspent at `H_max`), so all of its RPC
+    /// address-index and balance writes are elided
+    /// ([`crate::snapshot_consume`]). The only thing the finalized write path
+    /// still does for a spent output is delete it from `utxo_by_out_loc`, which
+    /// needs the [`OutputLocation`] only. Per-block value pools and balances are
+    /// not derived in this mode — they are loaded at `H_max` from the verified
+    /// snapshot — so the spent value is never needed.
+    ///
+    /// This avoids reading `utxo_by_out_loc` for the spent value, which is the
+    /// crash-unsafe access that would `None`/panic when the value was elided.
+    /// The [`OutputLocation`] is resolved from the spending output's *creating*
+    /// transaction location (`tx_loc_by_hash`, always written and never elided),
+    /// or from the block's own transactions for an in-block spend.
+    ///
+    /// The returned [`transparent::Utxo`] is a zero-value placeholder: it carries
+    /// the correct height and coinbase flag but a zero, empty-script output, and
+    /// is only used by elision-gated passes that skip it for non-survivors. It is
+    /// never written and never affects the value pool.
+    pub(in super::super) fn lookup_spent_output_locations_only(
+        &self,
+        finalized: &FinalizedBlock,
+    ) -> Vec<(transparent::OutPoint, OutputLocation, transparent::Utxo)> {
+        let tx_hash_indexes: HashMap<transaction::Hash, usize> = finalized
+            .transaction_hashes
+            .iter()
+            .enumerate()
+            .map(|(index, hash)| (*hash, index))
+            .collect();
+
+        finalized
+            .block
+            .transactions
+            .iter()
+            .flat_map(|tx| tx.inputs().iter())
+            .flat_map(|input| input.outpoint())
+            .map(|outpoint| {
+                let out_loc = self.output_location(&outpoint).unwrap_or_else(|| {
+                    lookup_out_loc(finalized.height, &outpoint, &tx_hash_indexes)
+                });
+
+                // A zero-value, empty-script placeholder. Its `address()` is
+                // `None`, so the elision-gated address passes skip it, and the
+                // only consumer that runs — the `utxo_by_out_loc` delete — uses
+                // `out_loc` alone.
+                let placeholder = transparent::Utxo {
+                    output: transparent::Output {
+                        value: zebra_chain::amount::Amount::zero(),
+                        lock_script: transparent::Script::new(&[]),
+                    },
+                    height: out_loc.height(),
+                    from_coinbase: false,
+                };
+
+                (outpoint, out_loc, placeholder)
+            })
+            .collect()
+    }
+
     /// Write `finalized` to the finalized state.
     ///
     /// `spent_utxos` must contain the output location and UTXO for every transparent
@@ -487,6 +550,7 @@ impl ZebraDb {
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
         network: &Network,
         source: &str,
+        skip_value_pool_derivation: bool,
     ) -> Result<block::Hash, CommitCheckpointVerifiedError> {
         let tx_hash_indexes: HashMap<transaction::Hash, usize> = finalized
             .transaction_hashes
@@ -592,6 +656,7 @@ impl ZebraDb {
             address_balances,
             self.finalized_value_pool(),
             prev_note_commitment_trees,
+            skip_value_pool_derivation,
         )?;
 
         // Track batch commit latency for observability
@@ -656,6 +721,7 @@ impl DiskWriteBatch {
         address_balances: AddressBalanceLocationUpdates,
         value_pool: ValueBalance<NonNegative>,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
+        skip_value_pool_derivation: bool,
     ) -> Result<(), CommitCheckpointVerifiedError> {
         let db = &zebra_db.db;
 
@@ -695,13 +761,18 @@ impl DiskWriteBatch {
             );
         }
 
-        // Commit UTXOs and value pools
-        self.prepare_chain_value_pools_batch(
-            zebra_db,
-            finalized,
-            spent_utxos_by_outpoint,
-            value_pool,
-        )?;
+        // Commit the chain value pools, unless snapshot-consume mode skips the
+        // per-block value-pool derivation (it loads the verified final value
+        // pools at H_max instead, and the spent values needed to derive them
+        // here were not resolved). See `crate::snapshot_consume`.
+        if !skip_value_pool_derivation {
+            self.prepare_chain_value_pools_batch(
+                zebra_db,
+                finalized,
+                spent_utxos_by_outpoint,
+                value_pool,
+            )?;
+        }
 
         // The block has passed contextual validation, so update the metrics
         block_precommit_metrics(&finalized.block, finalized.hash, finalized.height);

@@ -453,9 +453,23 @@ impl FinalizedState {
                     );
 
                     // Checkpoint-verified blocks don't carry resolved spent
-                    // UTXOs, so look them up from the database and the block
-                    // itself.
-                    let spent_utxos = self.db.lookup_spent_utxos(&finalized);
+                    // UTXOs, so resolve them here.
+                    //
+                    // In snapshot-consume (assumeUTXO) mode, resolve only the
+                    // spent OutputLocations (for the `utxo_by_out_loc` delete),
+                    // never the spent values: every spent output is a
+                    // non-survivor whose address-index/balance writes are elided,
+                    // and per-block value pools are loaded at H_max rather than
+                    // derived. This avoids reading the spent value from
+                    // `utxo_by_out_loc`, which may be elided — the access that
+                    // would otherwise crash. Outside snapshot-consume mode, the
+                    // full lookup (value + location) is used so per-block value
+                    // pools and balances derive normally.
+                    let spent_utxos = if self.db.snapshot_consume().is_some() {
+                        self.db.lookup_spent_output_locations_only(&finalized)
+                    } else {
+                        self.db.lookup_spent_utxos(&finalized)
+                    };
 
                     (
                         height,
@@ -551,12 +565,19 @@ impl FinalizedState {
         let finalized_inner_block = finalized.block.clone();
         let note_commitment_trees = finalized.treestate.note_commitment_trees.clone();
 
+        // In snapshot-consume (assumeUTXO) mode the per-block chain value pool is
+        // not derived from the block's spends (the spent values aren't resolved);
+        // the verified final value pools are loaded at H_max instead. Skip the
+        // value-pool batch so it never reads the unresolved/placeholder spends.
+        let skip_value_pool_derivation = self.db.snapshot_consume().is_some();
+
         let result = self.db.write_block(
             finalized,
             spent_utxos,
             prev_note_commitment_trees,
             &self.network(),
             source,
+            skip_value_pool_derivation,
         );
 
         if result.is_ok() {
