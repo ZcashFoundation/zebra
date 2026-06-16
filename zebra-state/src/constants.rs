@@ -13,17 +13,10 @@ use crate::{
 
 pub use zebra_chain::transparent::MIN_TRANSPARENT_COINBASE_MATURITY;
 
-/// The maximum chain reorganisation height.
-///
-/// This threshold determines the maximum length of the best non-finalized
-/// chain. Once the chain grows past this height, Zebra finalizes its oldest
-/// blocks; deeper reorganisations are outside Zebra's rollback window.
-///
-/// This is a local-only node policy; it is not part of consensus. The window is
-/// sized as a defence-in-depth measure against sustained consensus splits.
-//
-// TODO: change to HeightDiff
-pub const MAX_BLOCK_REORG_HEIGHT: u32 = 1000;
+/// The maximum chain reorganisation height; it bounds the length of the best
+/// non-finalized chain. The value lives in `zebra-chain` so tooling (e.g.
+/// `zebra-checkpoints`) can use it without depending on `zebra-state`.
+pub const MAX_BLOCK_REORG_HEIGHT: u32 = zebra_chain::parameters::constants::MAX_BLOCK_REORG_HEIGHT;
 
 /// The directory name used to distinguish the state database from Zebra's other databases or flat files.
 pub const STATE_DATABASE_KIND: &str = "state";
