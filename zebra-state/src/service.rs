@@ -119,6 +119,14 @@ pub(crate) struct StateService {
     /// even if they haven't been committed to the finalized state yet.
     full_verifier_utxo_lookahead: block::Height,
 
+    /// The maximum checkpoint height for this network.
+    ///
+    /// This is the height of the last block the checkpoint verifier commits to the finalized state.
+    /// Once the finalized tip reaches this height, the block write task can hand off from committing
+    /// checkpoint verified blocks to committing semantically verified blocks, without waiting for a
+    /// semantically verified block to arrive. See [`StateService::try_handoff_to_non_finalized_write`].
+    max_checkpoint_height: block::Height,
+
     // Queued Blocks
     //
     /// Queued blocks for the [`NonFinalizedState`] that arrived out of order.
@@ -414,6 +422,7 @@ impl StateService {
         let state = Self {
             network: network.clone(),
             full_verifier_utxo_lookahead,
+            max_checkpoint_height,
             non_finalized_state_queued_blocks,
             finalized_state_queued_blocks: HashMap::new(),
             block_write_sender,
@@ -695,6 +704,72 @@ impl StateService {
         std::mem::drop(finalized);
     }
 
+    /// Attempts to hand the block write task off from committing checkpoint verified blocks to the
+    /// finalized state to committing semantically verified blocks to the non-finalized state.
+    ///
+    /// We've finished sending checkpoint verified blocks once the last checkpoint block has been
+    /// durably written to disk, i.e. the finalized tip hash on disk matches the last finalized block
+    /// hash we sent, and either:
+    /// - the finalized tip has reached the maximum checkpoint height (the last block the checkpoint
+    ///   verifier commits to the finalized state), or
+    /// - a semantically verified child of the last block we sent is already queued.
+    ///
+    /// The height condition is the one that matters in production: the checkpoint verifier only
+    /// commits blocks up to `max_checkpoint_height`, so once the finalized tip reaches that height
+    /// the handoff happens immediately, **without** waiting for a semantically verified block to
+    /// arrive. The first semantically verified block then has a valid finalized parent the instant
+    /// it shows up, instead of the pipeline stalling at the checkpoint boundary.
+    ///
+    /// The queued-child condition is a fallback for configurations with no finite checkpoint height
+    /// (`max_checkpoint_height == Height::MAX`, e.g. full-verification test setups), where the
+    /// height condition can never be met.
+    ///
+    /// Returns `true` if the handoff was performed on this call.
+    ///
+    /// # Correctness & Performance
+    ///
+    /// This method must not block or perform CPU-intensive tasks, because it is called directly
+    /// from the tokio executor's Future threads, including from [`Service::poll_ready()`]. Once the
+    /// handoff has happened, `block_write_sender.finalized` is `None`, so the cheap first check
+    /// short-circuits and the database is not read again.
+    fn try_handoff_to_non_finalized_write(&mut self) -> bool {
+        // The database tip is only read while we are still committing checkpoint verified blocks, so
+        // the cheap `is_some()` check short-circuits this for the rest of the node's life.
+        if self.block_write_sender.finalized.is_some()
+            && self.read_service.db.finalized_tip_hash()
+                == self.finalized_block_write_last_sent_hash
+            && (self
+                .read_service
+                .db
+                .finalized_tip_height()
+                .is_some_and(|tip_height| tip_height >= self.max_checkpoint_height)
+                || self
+                    .non_finalized_state_queued_blocks
+                    .has_queued_children(self.finalized_block_write_last_sent_hash))
+        {
+            // Tell the block write task to stop committing checkpoint verified blocks to the
+            // finalized state, and move on to committing semantically verified blocks to the
+            // non-finalized state.
+            std::mem::drop(self.block_write_sender.finalized.take());
+            // Remove any checkpoint-verified block hashes from `non_finalized_block_write_sent_hashes`.
+            self.non_finalized_block_write_sent_hashes = SentHashes::default();
+            // Mark `SentHashes` as usable by the `can_fork_chain_at()` method.
+            self.non_finalized_block_write_sent_hashes
+                .can_fork_chain_at_hashes = true;
+            // Send blocks from non-finalized queue
+            self.send_ready_non_finalized_queued(self.finalized_block_write_last_sent_hash);
+            // We've finished committing checkpoint verified blocks to finalized state, so drop any repeated queued blocks.
+            self.clear_finalized_block_queue(CommitBlockError::new_duplicate(
+                None,
+                KnownBlock::Finalized,
+            ));
+
+            true
+        } else {
+            false
+        }
+    }
+
     /// Queue a semantically verified block for contextual verification and check if any queued
     /// blocks are ready to be verified and committed to the state.
     ///
@@ -766,36 +841,13 @@ impl StateService {
             rsp_rx
         };
 
-        // We've finished sending checkpoint verified blocks when:
-        // - we've sent the verified block for the last checkpoint, and
-        // - it has been successfully written to disk.
-        //
-        // We detect the last checkpoint by looking for non-finalized blocks
-        // that are a child of the last block we sent.
-        //
-        // TODO: configure the state with the last checkpoint hash instead?
-        if self.block_write_sender.finalized.is_some()
-            && self
-                .non_finalized_state_queued_blocks
-                .has_queued_children(self.finalized_block_write_last_sent_hash)
-            && self.read_service.db.finalized_tip_hash()
-                == self.finalized_block_write_last_sent_hash
-        {
-            // Tell the block write task to stop committing checkpoint verified blocks to the finalized state,
-            // and move on to committing semantically verified blocks to the non-finalized state.
-            std::mem::drop(self.block_write_sender.finalized.take());
-            // Remove any checkpoint-verified block hashes from `non_finalized_block_write_sent_hashes`.
-            self.non_finalized_block_write_sent_hashes = SentHashes::default();
-            // Mark `SentHashes` as usable by the `can_fork_chain_at()` method.
-            self.non_finalized_block_write_sent_hashes
-                .can_fork_chain_at_hashes = true;
-            // Send blocks from non-finalized queue
-            self.send_ready_non_finalized_queued(self.finalized_block_write_last_sent_hash);
-            // We've finished committing checkpoint verified blocks to finalized state, so drop any repeated queued blocks.
-            self.clear_finalized_block_queue(CommitBlockError::new_duplicate(
-                None,
-                KnownBlock::Finalized,
-            ));
+        // Attempt to hand off from committing checkpoint verified blocks to committing
+        // semantically verified blocks. This usually already happened in `poll_ready()` once the
+        // final checkpoint write became durable, but we also check here in case this block is what
+        // completes the handoff condition.
+        if self.try_handoff_to_non_finalized_write() {
+            // The handoff happened on this call: the queued children, including the block just
+            // queued above, were sent to the non-finalized write task.
         } else if !self.can_fork_chain_at(&parent_hash) {
             tracing::trace!("unready to verify, returning early");
         } else if self.block_write_sender.finalized.is_none() {
@@ -1006,6 +1058,10 @@ impl Service<Request> for StateService {
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         // Check for panics in the block write task
         let poll = self.read_service.poll_ready(cx);
+
+        // Hand off from finalized to non-finalized writes as soon as the final checkpoint block is
+        // durably written, without waiting for a semantically verified block to arrive.
+        self.try_handoff_to_non_finalized_write();
 
         // Prune outdated UTXO requests
         let now = Instant::now();

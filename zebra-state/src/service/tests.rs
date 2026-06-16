@@ -263,6 +263,180 @@ async fn empty_state_still_responds_to_requests() -> Result<()> {
     Ok(())
 }
 
+/// Regression test for the checkpoint-to-non-finalized sync handoff stall.
+///
+/// The block write task switches from committing checkpoint verified blocks (finalized state) to
+/// committing semantically verified blocks (non-finalized state) once the final checkpoint block is
+/// durably written to disk. That handoff used to also require a semantically verified child to be
+/// queued, so the pipeline could stall at the checkpoint boundary until the first fully-verified
+/// block arrived (or the syncer restarted).
+///
+/// This test sets the maximum checkpoint height to the last finalized block, commits the checkpoint
+/// blocks, and asserts that `poll_ready()` performs the handoff with an **empty** non-finalized
+/// queue — i.e. it no longer waits for a semantically verified block to arrive.
+///
+/// It deliberately does not commit a semantically verified block afterwards: the first two Mainnet
+/// blocks predate the Canopy checkpoint, and the non-finalized write path treats their transaction
+/// versions as `unreachable!()` (pre-Canopy blocks are only ever checkpoint verified). The handoff
+/// itself is what this test covers.
+#[tokio::test(flavor = "multi_thread")]
+async fn poll_ready_hands_off_at_max_checkpoint_height() -> Result<()> {
+    use std::task::{Context, Waker};
+
+    use tower::Service;
+
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    // Blocks 0 and 1 are committed as checkpoint verified (finalized) blocks.
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::MAINNET_BLOCKS
+        .range(0..=1)
+        .map(|(_, block_bytes)| block_bytes.zcash_deserialize_into::<Arc<Block>>().unwrap())
+        .collect();
+
+    // Set the maximum checkpoint height to block 1, so the checkpoint phase ends once block 1 is
+    // committed to the finalized state.
+    let max_checkpoint_height = blocks[1].coinbase_height().unwrap();
+    let (mut state_service, _read, _tip, _tip_change) =
+        StateService::new(Config::ephemeral(), &network, max_checkpoint_height, 0).await;
+
+    // Commit blocks 0 and 1 to the finalized state and wait for each write to land on disk, so the
+    // finalized tip catches up to the maximum checkpoint height and the last block hash we sent.
+    for block in &blocks[0..=1] {
+        let checkpoint = CheckpointVerifiedBlock::from(block.clone());
+        let result = state_service
+            .queue_and_commit_to_finalized_state(checkpoint)
+            .await;
+        assert!(
+            matches!(result, Ok(Ok(_))),
+            "checkpoint verified block should commit: {result:?}",
+        );
+    }
+
+    let last_finalized_hash = blocks[1].hash();
+    assert_eq!(
+        state_service.read_service.db.finalized_tip_height(),
+        Some(max_checkpoint_height),
+        "finalized tip should have reached the maximum checkpoint height",
+    );
+    assert_eq!(
+        state_service.read_service.db.finalized_tip_hash(),
+        last_finalized_hash,
+        "finalized tip on disk should have caught up to block 1",
+    );
+
+    // Preconditions: still in finalized-write mode, and crucially **no** semantically verified block
+    // is queued. The old behavior would not hand off in this state.
+    assert!(
+        state_service.block_write_sender.finalized.is_some(),
+        "write task should still be committing finalized blocks before the handoff",
+    );
+    assert!(
+        !state_service
+            .non_finalized_state_queued_blocks
+            .has_queued_children(last_finalized_hash),
+        "no semantically verified block should be queued before the handoff",
+    );
+
+    // Trigger the handoff. Nothing is queued, so this exercises the height-based path.
+    let mut cx = Context::from_waker(Waker::noop());
+    let _ = state_service.poll_ready(&mut cx);
+
+    // The handoff should have happened purely because the final checkpoint write is durable, with no
+    // semantically verified block queued. Before this fix, the finalized sender would still be open.
+    assert!(
+        state_service.block_write_sender.finalized.is_none(),
+        "poll_ready should have handed off to non-finalized writes at the max checkpoint height",
+    );
+
+    Ok(())
+}
+
+/// Micro-benchmark for the cost added to `poll_ready()` by the handoff trigger.
+///
+/// `poll_ready()` runs on essentially every state service readiness poll, so the added
+/// `try_handoff_to_non_finalized_write()` call must be cheap. This measures three regimes:
+///
+/// - Raw `finalized_tip_hash()` DB read — a RocksDB seek-to-last. During checkpoint sync the
+///   last-sent hash usually runs ahead of the on-disk tip, so the helper short-circuits after this
+///   single read; it is the dominant per-poll cost in that phase.
+/// - Full guard (still in finalized mode, on-disk tip matches the last-sent hash but below the max
+///   checkpoint height and with no queued child): the helper runs the whole condition — two tip
+///   reads plus a `HashMap::contains_key` — without transitioning. This is the most expensive
+///   non-transitioning path, hit only at the checkpoint boundary.
+/// - Steady state (after the handoff, `block_write_sender.finalized == None`): the call
+///   short-circuits on a single `Option::is_some()` check and never touches the database. This is
+///   what runs for the entire post-sync life of the node.
+///
+/// Run with:
+/// `cargo test -p zebra-state --release -- --ignored --nocapture handoff_trigger_microbench`
+#[ignore]
+#[allow(clippy::print_stdout)]
+#[tokio::test(flavor = "multi_thread")]
+async fn handoff_trigger_microbench() -> Result<()> {
+    use std::time::Instant;
+
+    let _init_guard = zebra_test::init();
+    let network = Network::Mainnet;
+
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::MAINNET_BLOCKS
+        .range(0..=1)
+        .map(|(_, block_bytes)| block_bytes.zcash_deserialize_into::<Arc<Block>>().unwrap())
+        .collect();
+
+    // Use `Height::MAX` so the height condition is never met: the helper runs its full guard but
+    // never transitions, which is exactly the non-transitioning path we want to measure.
+    let (mut state_service, _read, _tip, _tip_change) =
+        StateService::new(Config::ephemeral(), &network, Height::MAX, 0).await;
+
+    for block in &blocks[0..=1] {
+        let checkpoint = CheckpointVerifiedBlock::from(block.clone());
+        state_service
+            .queue_and_commit_to_finalized_state(checkpoint)
+            .await
+            .expect("commit channel open")
+            .expect("checkpoint block commits");
+    }
+
+    const ITERS: u32 = 1_000_000;
+
+    // Regime 1: raw `finalized_tip_hash()` DB read.
+    let start = Instant::now();
+    for _ in 0..ITERS {
+        std::hint::black_box(state_service.read_service.db.finalized_tip_hash());
+    }
+    let tip_ns = start.elapsed().as_nanos() as f64 / f64::from(ITERS);
+
+    // Regime 2: full guard cost. The on-disk tip equals the last-sent hash, the height condition is
+    // false (`Height::MAX`), and no child is queued, so the helper evaluates every condition but
+    // does not transition.
+    let start = Instant::now();
+    for _ in 0..ITERS {
+        std::hint::black_box(state_service.try_handoff_to_non_finalized_write());
+    }
+    let guard_ns = start.elapsed().as_nanos() as f64 / f64::from(ITERS);
+    assert!(
+        state_service.block_write_sender.finalized.is_some(),
+        "the benchmark must not transition: finalized sender should still be open",
+    );
+
+    // Regime 3: steady-state cost (post-handoff). Drop the finalized sender so the helper
+    // short-circuits immediately, exactly as it does for the rest of the node's life.
+    state_service.block_write_sender.finalized = None;
+    let start = Instant::now();
+    for _ in 0..ITERS {
+        std::hint::black_box(state_service.try_handoff_to_non_finalized_write());
+    }
+    let steady_ns = start.elapsed().as_nanos() as f64 / f64::from(ITERS);
+
+    println!("handoff trigger micro-benchmark ({ITERS} iters each):");
+    println!("  finalized_tip_hash() DB read : {tip_ns:>8.2} ns/call");
+    println!("  helper, full guard           : {guard_ns:>8.2} ns/call");
+    println!("  helper, steady state         : {steady_ns:>8.2} ns/call");
+
+    Ok(())
+}
+
 #[test]
 fn state_behaves_when_blocks_are_committed_in_order() -> Result<()> {
     let _init_guard = zebra_test::init();
