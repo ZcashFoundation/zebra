@@ -1429,3 +1429,108 @@ history) must still be written — only the UTXO column-family pair elides;
 interaction with the F2 compaction pause and the two-thread pipeline must be
 measured, not assumed; and any change here is behavior-sensitive on the
 finalized write path, so it ships as its own PR with its own review.
+
+## 16. State snapshot at H_max (assumeUTXO-style) — proposed next step
+
+Status: **proposed**, not implemented. This supersedes the within-batch /
+cross-batch UTXO elision sketch (§15.2): with a snapshot the node has *certain
+foreknowledge* of the end state, so there is no batch window and no crash-lag,
+and the entire `0..=H_max` range is skipped rather than replayed. It is pursued
+only after the current known-hash engine + lists are accepted.
+
+### 16.1 Idea
+
+Ship, as SHA-256-pinned release assets alongside the known-hash list, the
+checkpoint-range *result* at `H_max` (= the known-hash list max height — the
+height the node already trusts), and load it once, atomically, before the
+known-hash engine starts. The node then downloads block/tx data and validates
+normally *past* `H_max`, never re-deriving the chain state for `0..=H_max`. Two
+artifacts (two halves of one feature):
+
+- **Note commitment trees at `H_max`** — Sapling/Orchard/Sprout tip frontiers,
+  the complete historical anchor sets, subtree roots, the history tree, and the
+  complete nullifier sets. Loading these eliminates the irreducibly-sequential
+  Sinsemilla/Pedersen `update_trees_parallel` frontier appends — the dominant
+  CPU cost across the spam range.
+- **Survivor transparent outputs at `H_max`** — the outputs created at height
+  ≤ `H_max` and still unspent at `H_max`, as full `(OutputLocation → Output)`
+  entries, plus the final cumulative `tip_chain_value_pool`, `block_info[H_max]`,
+  and `balance_by_transparent_addr`. Identity is the `OutputLocation` (height,
+  tx-index, output-index) — 8 bytes, already the `utxo_by_out_loc` key, and the
+  survivor set *is* that column family's keyset at `H_max`. Loading these lets
+  the node track only survivors and skip the create-then-delete churn of every
+  transient dust output entirely.
+
+### 16.2 Why ship survivors (not a filter), and skip the range (not replay it)
+
+The §15.2 bloom/cuckoo filter only helps an approach that *replays* `0..=H_max`
+and elides within a window. The snapshot does not replay that range at all, so
+re-deriving `Output` bodies would re-introduce the very work being eliminated —
+ship full survivor entries and skip `0..=H_max`. The value-pool dependency that
+blocked elision (a block's value pool needs every spent output's value, which
+panics if a transient was never written) dissolves: no in-range block is
+committed, so the final value pool, `block_info`, and balances are shipped
+directly instead of derived.
+
+### 16.3 Trust and verification
+
+Same trust root as the known-hash list, content-addressed so mirrors/peers are
+untrusted:
+
+- **Chunks**: each snapshot chunk is SHA-256-pinned in a reviewed in-source
+  `SnapshotSpec` constant (mirrors `KnownHashListSpec`), verified at load.
+- **Trees**: the loaded `history_tree.hash()` / tip roots are checked against
+  the `hashFinalSaplingRoot` (pre-NU5) / `hashBlockCommitments` (NU5+) committed
+  in the trusted `H_max + 1` known-hash header, via the existing
+  `check::block_commitment_is_valid_for_chain_history` machinery.
+- **Transparent UTXO set**: Zcash commits no header field to the transparent
+  UTXO set, so ship one reviewed per-network UTXO-set hash and recompute it over
+  the loaded set at load.
+- **Optional background full-validation** (assumeUTXO-equivalent): replay
+  `0..=H_max` from the pinned blocks to confirm the loaded end state.
+
+### 16.4 Staged plan
+
+- **Stage 1 (minimal, measurable): shielded-only snapshot.** Load the
+  trees/anchors/subtrees/sprout/history/nullifiers at `H_max` in one atomic
+  batch before engine start; leave the transparent write path untouched
+  (`0..=H_max` still committed transparently). Smallest correctness surface (no
+  value-pool/survivor/address-index dependency), cleanest verification, and it
+  removes the dominant CPU bottleneck on its own.
+- **Stage 2**: `SnapshotSpec` + windowed verify-at-open loader in `zebra-chain`
+  (mirrors `known_hashes.rs`).
+- **Stage 3**: emitter — extend the `known-hashes` `zebra-utils` tool with a
+  snapshot-emit mode that opens a synced node's RocksDB **read-only** (RPC
+  cannot dump the UTXO/anchor/nullifier/sprout/history CFs) and writes sorted,
+  SHA-pinned chunks.
+- **Stage 4**: transparent survivor set + value pool + balances, via a
+  direct-batch bulk loader in `FinalizedState` (sibling to `write_block`, *not*
+  `commit_finalized_direct`).
+- **Stage 5**: wire a one-shot install into `IbdEngine::run` before engine
+  construction, gated on `known_hash_sync` + a verified snapshot + an
+  empty/below-`H_max` tip; atomic batch with compaction paused (the tip flips to
+  `H_max` only on full commit, so a crash mid-load leaves the prior tip).
+- **Stage 6 (deferred)**: background full-validation + lazy backfill of
+  `tx_loc_by_transparent_addr_loc` and sub-`H_max` historical-treestate RPC.
+
+### 16.5 Distribution over P2P (further future)
+
+Instead of (or besides) shipping the chunks as release assets, a node can
+**fetch them from other Zebra peers and verify them content-addressed** against
+the same SHA-pinned digests / header-committed roots — so the binary carries
+only the digests and the repo need not vendor the `.bin` weight. This needs a
+custom Zebra-to-Zebra wire message (the Zcash protocol has none), negotiated via
+a user-agent marker / reserved service bit so zcashd peers are unaffected (the
+codec already drops unknown commands), ranged into ≤1 MiB sub-chunks (the 2 MiB
+`MAX_PROTOCOL_MESSAGE_LEN` frame bound), rate-limited and DoS-bounded like all
+inbound requests, advertised + routed via the inventory registry, with a
+bundled-asset / download-URL fallback while few peers serve it. Verification is
+unchanged from §16.3; only the byte source moves to the network.
+
+### 16.6 Measurement plan
+
+The reason to build Stages 1 + 4 first is to **measure**: full-sync wall time
+*with* the snapshot (pre-prepared trees + survivor outputs at `H_max`) vs. the
+current known-hash engine baseline, on the same hardware, for both Mainnet and
+Testnet. Measurement artifacts are generated locally from a synced state rolled
+back / stopped at `H_max`; no P2P distribution is needed to measure.
