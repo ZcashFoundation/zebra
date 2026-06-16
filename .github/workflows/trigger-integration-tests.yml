@@ -55,6 +55,11 @@ jobs:
           SHA=$(echo "$DATA" | jq -r .headRefOid)
           BODY=$(echo "$DATA" | jq -r .body)
           TEST_SHA=$(echo "$BODY" | sed '/[^ ]ZIT-Revision/!d' | sed -E 's/.*ZIT-Revision: ([^\\]*)\\.*/\1/')
+          # PR body is contributor-controlled; only forward sha-like values.
+          if [[ -n "$TEST_SHA" ]] && ! [[ "$TEST_SHA" =~ ^[a-zA-Z0-9._/-]+$ ]]; then
+            echo "::warning::Ignoring invalid ZIT-Revision value"
+            TEST_SHA=""
+          fi
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
           echo "test_sha=$TEST_SHA" >> "$GITHUB_OUTPUT"
 
