@@ -185,6 +185,31 @@ impl ZebraDb {
         Some(utxo)
     }
 
+    /// Streams the 8-byte on-disk [`OutputLocation`] of every currently-unspent
+    /// transparent output to `f`, in ascending location (height, transaction
+    /// index, output index) order.
+    ///
+    /// The `utxo_by_out_loc` column family holds exactly the unspent set:
+    /// created outputs are inserted and spent outputs deleted on every block
+    /// commit, so its live keys are the unspent transparent output set at the
+    /// finalized tip. Used by the IBD state-snapshot emitter to record which
+    /// created outputs survive unspent to the snapshot height.
+    ///
+    /// Streams rather than collecting: the unspent set is millions of entries.
+    pub fn for_each_unspent_output_location_bytes(&self, mut f: impl FnMut(&[u8])) {
+        let utxo_by_out_loc = self.db.cf_handle("utxo_by_out_loc").unwrap();
+
+        for (output_location, _output) in self
+            .db
+            .zs_forward_range_iter::<_, OutputLocation, transparent::Output, _>(
+                &utxo_by_out_loc,
+                ..,
+            )
+        {
+            f(output_location.as_bytes().as_ref());
+        }
+    }
+
     /// Returns the unspent transparent outputs for a [`transparent::Address`],
     /// if they are in the finalized state.
     pub fn address_utxos(
