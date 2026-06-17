@@ -221,6 +221,58 @@ pub(crate) fn block_commitment_is_valid_for_chain_history(
     }
 }
 
+/// Returns whether a pre-fetched, verified note commitment tree set supplied by
+/// the known-hash IBD engine in snapshot-consume (assumeUTXO) mode is verifiable
+/// against `block`'s header, and may therefore be written directly instead of
+/// folding the block's note commitments
+/// (`docs/design/p2p-snapshot-distribution.md` §3.2).
+///
+/// Returns:
+/// - `Ok(true)` when the block header directly pins the supplied trees (the
+///   Sapling/Blossom era, where `hashFinalSaplingRoot` equals the bare Sapling
+///   root) **and** the supplied Sapling root matches it. The supplied trees are
+///   safe to use.
+/// - `Ok(false)` pre-Sapling (no Sapling root to pin, and no shielded outputs) and
+///   Heartwood-onward (the header commits to the *parent's* history tree root, not
+///   to this block's note commitment trees, so a supplied tree is unverifiable
+///   against the block alone). The caller folds the block's note commitments
+///   instead — the correctness fallback.
+/// - `Err(SuppliedSaplingTreeRootMismatch)` when the era pins the Sapling root but
+///   the supplied root disagrees: a malicious or corrupt peer supplied the wrong
+///   tree. A fatal commit error (the engine refetches the height).
+///
+/// Orchard does not activate until NU5 (after Blossom), so in the Sapling/Blossom
+/// era the supplied Orchard tree is necessarily the empty tree and is pinned
+/// together with the Sapling root by the exact header match. See finding #27 and
+/// the matching `FinalizedState::supplied_trees_are_verifiable`.
+pub(crate) fn supplied_trees_are_verifiable(
+    block: &Arc<Block>,
+    supplied: &zebra_chain::parallel::tree::NoteCommitmentTrees,
+    network: &Network,
+) -> Result<bool, ValidateContextError> {
+    let height = block
+        .coinbase_height()
+        .expect("committed blocks always have a coinbase height");
+
+    match block.commitment(network)? {
+        block::Commitment::FinalSaplingRoot(expected_root) => {
+            let supplied_root = supplied.sapling.root();
+            if supplied_root != expected_root {
+                return Err(ValidateContextError::SuppliedSaplingTreeRootMismatch {
+                    supplied: supplied_root.into(),
+                    expected: expected_root.into(),
+                    height,
+                });
+            }
+            Ok(true)
+        }
+        // Pre-Sapling there is no Sapling root to pin against (and no shielded
+        // outputs), and Heartwood-onward the header does not pin this block's
+        // trees: refuse the supplied trees and fold instead.
+        _ => Ok(false),
+    }
+}
+
 /// Returns `ValidateContextError::OrphanedBlock` if the height of the given
 /// block is less than or equal to the finalized tip height.
 fn block_is_not_orphaned(

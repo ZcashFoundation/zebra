@@ -176,7 +176,7 @@ fn intra_block_self_spend_chain_in_finalized_state() {
         transaction_hashes,
     };
     let finalized = FinalizedBlock::from_checkpoint_verified(
-        CheckpointVerifiedBlock(semantically_verified),
+        CheckpointVerifiedBlock(semantically_verified, None),
         Treestate::default(),
         DeferredPoolBalanceChange::zero(),
     );
@@ -312,7 +312,7 @@ fn build_block_batch_inputs(
         transaction_hashes,
     };
     let finalized = FinalizedBlock::from_checkpoint_verified(
-        CheckpointVerifiedBlock(semantically_verified),
+        CheckpointVerifiedBlock(semantically_verified, None),
         Treestate::default(),
         DeferredPoolBalanceChange::zero(),
     );

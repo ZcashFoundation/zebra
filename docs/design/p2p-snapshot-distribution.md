@@ -153,13 +153,18 @@ from asset files. Consequences:
 
 For a checkpoint block below `H_max`, the engine fetches the sapling/orchard
 tree **as of that height** from a peer, verifies its `.root()` against the
-chunk's recorded root for that height, and the finalized commit **writes the
-downloaded tree directly** into `sapling_note_commitment_tree` /
-`orchard_note_commitment_tree` instead of folding notes. Plug-in point: the NFS
-tree computation in the commit path (the worker-thread fold this branch
-identified as the bottleneck) is replaced by a "tree supplied by download" path.
-The block's `hashFinalSaplingRoot` (in the header the engine already hash-pins)
-is an additional check on the supplied sapling tree.
+chunk's recorded root for that height, and the commit **writes the downloaded
+tree directly** into `sapling_note_commitment_tree` /
+`orchard_note_commitment_tree` instead of folding notes. The plug-in point is the
+in-memory checkpoint commit's tree update (`Chain`'s
+`update_chain_tip_with_block_parallel`, the worker-thread fold this branch
+identified as the bottleneck), which now takes a "tree supplied by download" path
+that skips `update_trees_parallel`. The block's `hashFinalSaplingRoot` (in the
+header the engine already hash-pins) is re-verified against the supplied sapling
+tree before it is accepted; an unverifiable era, an absent/undeserializable tree,
+or a subtree-completing height all fall back to folding (correctness), and a
+contradicting Sapling root is a fatal commit error. See §8.2 item 1 for the
+subtree handling.
 
 **Tree lookahead.** Trees must be fetched *ahead of* the block download — a
 deeper lookahead window for the per-height tree requests than for blocks — so
@@ -267,18 +272,38 @@ set along the same rails.
   (default off).
 
 ### 8.2 Remaining work
-1. **Supplied-tree write-through (#10) — the throughput win is not yet active.**
-   Trees are fetched, verified, and buffered, but the pipelined checkpoint commit
-   folds the tree via `Chain::push` (in-memory non-finalized) *before* the disk
-   writer's supplied-tree arm, so downloaded trees are not actually used and the
-   state still folds. Wiring this correctly is architectural, not a one-liner,
-   because the in-memory fold also derives **note-commitment subtree** roots
-   (every 2^16 notes, served/checked) that the downloaded frontier blob does not
-   carry. Two viable designs: (a) also supply/serve subtree completions so the
-   injected tree is complete; or (b) commit checkpoint blocks **directly to the
-   finalized state** (the design's "straight to finalized"), bypassing the
-   in-memory fold entirely. Both touch the consensus-adjacent commit path and
-   want review before landing.
+1. **Supplied-tree write-through (#10) — DONE (the throughput win is active).**
+   Trees are fetched, verified, buffered, threaded to the commit, and now
+   **written through** instead of folded. The implementation took refined design
+   (a): the in-memory checkpoint commit
+   (`NonFinalizedState::commit_checkpoint_block` →
+   `Chain::push_with_supplied_trees` → `update_chain_tip_with_block_parallel`)
+   writes the supplied, verified sapling/orchard frontiers directly and skips the
+   per-note fold (`update_trees_parallel`), gated on snapshot-consume mode and on
+   the supplied trees verifying against the header (`hashFinalSaplingRoot`, the
+   Sapling/Blossom era where the header pins the bare Sapling root — the same
+   `service::check::supplied_trees_are_verifiable` check the finalized arm uses,
+   so the two layers never disagree). Sprout is still folded (the payload carries
+   only sapling/orchard; sprout has no subtree tracking and is cheap).
+
+   **Subtrees:** the downloaded end-of-block frontier blob *cannot* reproduce a
+   `2^16`-leaf subtree root that completes *mid-block* (once the frontier advances
+   past the boundary, the completed subtree's internal nodes are gone — verified
+   empirically against `incrementalmerkletree`'s `Frontier::root(Some(16))`).
+   Subtree roots are served + RPC-checked, so they must stay byte-identical to a
+   normally-synced node. The commit therefore detects a subtree completion cheaply
+   (a `subtree_index` comparison via `contains_new_subtree`, no hashing) and on the
+   rare height that completes one (≤ one per `2^16` notes per pool — a handful of
+   heights across the whole chain) **falls back to a full fold**, the canonical
+   path that produces the byte-identical subtree. This keeps the throughput win on
+   the overwhelming common case while never diverging on subtree roots. A
+   supplied-tree fetch that is absent, undeserializable, or unverifiable against
+   the header also folds (correctness fallback), and a supplied Sapling root that
+   *contradicts* the header pin is a fatal commit error (the engine refetches).
+   The behaviour is observable via the `state.checkpoint.tree.{supplied,folded}`
+   and `ibd.tree.{supplied,folded}` counters, and covered by H_max tree-parity,
+   fold-skip, subtree-fallback, gating, and reject-on-mismatch tests in
+   `zebra-state`.
 2. **v2 asset re-emission.** The pinned `chunk_hashes` are currently the v1
    SHA-256 of the bundled `.bin` files; a v2 chunk includes tree roots the v1
    files lack, so real re-emission from a synced node (`emit-snapshot`) is

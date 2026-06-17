@@ -457,6 +457,12 @@ impl NonFinalizedState {
         checkpoint_verified: crate::CheckpointVerifiedBlock,
         finalized_state: &ZebraDb,
     ) -> Result<(crate::service::ChainTipBlock, FinalizableBlock), ValidateContextError> {
+        // Take the pre-fetched, verified note commitment trees (if any) supplied
+        // by the known-hash IBD engine in snapshot-consume mode, before the
+        // `SemanticallyVerifiedBlock` conversion drops them. They are only used
+        // when the finalized state is in snapshot-consume mode (gated below at the
+        // push site), so a normal sync never sees them and always folds.
+        let supplied_trees = checkpoint_verified.supplied_trees().cloned();
         let prepared: SemanticallyVerifiedBlock = checkpoint_verified.into();
         let height = prepared.height;
         let hash = prepared.hash;
@@ -600,15 +606,51 @@ impl NonFinalizedState {
 
         // Push onto the chain, updating trees, nullifiers, and UTXOs.
         //
-        // The push can only fail by repeating one of the checks already run
-        // above against the same pinned, consistent context, so a failure
-        // here is an internal invariant violation, not a peer-influenceable
-        // error: the chain is consumed and lost, which is acceptable for a
-        // bug that can't happen.
-        let chain = Arc::new(chain.push(contextual).expect(
-            "checkpoint block push can't fail after its spend, value-balance, \
-             and commitment checks passed against the same chain context",
-        ));
+        // In snapshot-consume (assumeUTXO) mode, write the pre-fetched, verified
+        // note commitment trees directly instead of folding the block's note
+        // commitments — the throughput win of the snapshot path
+        // (`docs/design/p2p-snapshot-distribution.md` §3.2). The supplied trees
+        // are only consulted when the finalized state is in snapshot-consume mode
+        // (so a normal sync always folds), and `push_with_supplied_trees` itself
+        // falls back to folding whenever the trees are absent, unverifiable
+        // against the header, or the block completes a note-commitment subtree
+        // (which the supplied frontier blob does not carry) — so correctness never
+        // depends on a supplied tree being present.
+        //
+        // The supplied-tree write can fail with a fatal Sapling-root mismatch
+        // (`SuppliedSaplingTreeRootMismatch`): a peer supplied a wrong tree whose
+        // root contradicts the header pin. That is the one peer-influenceable
+        // failure here, handled like the auth-data check — validate-before-mutate
+        // means the chain is consumed and the worker resets to the parent for a
+        // refetch. The remaining (non-supplied) push checks can only fail by
+        // repeating a check already run above against the same pinned context, so
+        // those are internal invariant violations.
+        let supplied_trees =
+            if supplied_trees.is_some() && finalized_state.snapshot_consume().is_some() {
+                supplied_trees
+            } else {
+                None
+            };
+
+        let chain = match chain.push_with_supplied_trees(contextual, supplied_trees.as_ref()) {
+            Ok(chain) => Arc::new(chain),
+            Err(error @ ValidateContextError::SuppliedSaplingTreeRootMismatch { .. }) => {
+                // A peer-influenceable failure: the supplied tree's root
+                // contradicts the header pin. Validate-before-mutate leaves the
+                // non-finalized state untouched, so the worker resets to the
+                // parent and the refetched honest copy recommits.
+                return Err(error);
+            }
+            Err(error) => {
+                // Any other push error is an internal invariant violation: the
+                // checks above already passed against the same pinned, consistent
+                // context, so the push can only repeat one of them.
+                panic!(
+                    "checkpoint block push can't fail after its spend, value-balance, \
+                     and commitment checks passed against the same chain context: {error:?}"
+                );
+            }
+        };
 
         // Build the finalizable block from the freshly pushed tip, cloning the
         // data the chain just computed, before inserting the chain back.

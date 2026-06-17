@@ -748,7 +748,8 @@ where
         &mut self,
         start: block::Height,
         end: block::Height,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), BoxError>> + Send + '_>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), BoxError>> + Send + '_>>
+    {
         Box::pin(async move {
             CfHashSource::ensure_covers(self, start, end, SNAPSHOT_FETCH_ATTEMPTS)
                 .await

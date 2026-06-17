@@ -463,10 +463,9 @@ impl Handler {
             (Handler::SnapshotRange, Message::Snapshot { bytes }) => {
                 Handler::Finished(Ok(Response::SnapshotRange(Bytes::from(bytes))))
             }
-            (
-                Handler::NoteCommitmentTree | Handler::SnapshotRange,
-                Message::SnapshotNotFound,
-            ) => Handler::Finished(Ok(Response::NotFound)),
+            (Handler::NoteCommitmentTree | Handler::SnapshotRange, Message::SnapshotNotFound) => {
+                Handler::Finished(Ok(Response::NotFound))
+            }
 
             // By default, messages are not responses.
             (state, msg) => {

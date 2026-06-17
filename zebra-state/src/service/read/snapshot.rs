@@ -294,6 +294,50 @@ pub fn note_commitment_tree_root_from_bytes(pool: ShieldedPool, bytes: &[u8]) ->
     }
 }
 
+/// Deserializes the optional peer-supplied sapling and orchard note-commitment-tree
+/// frontier `bytes` into a [`NoteCommitmentTrees`] for the snapshot-consume
+/// "tree supplied by download" commit path
+/// (`docs/design/p2p-snapshot-distribution.md` §3.2).
+///
+/// Returns `None` when neither pool's bytes are supplied, or when any supplied
+/// bytes fail to deserialize (a corrupt or adversarial peer): the caller then
+/// falls back to folding. A missing pool keeps its default (empty) tree — the
+/// per-pool roots were already verified against the chunk's recorded roots by the
+/// IBD engine's tree-fetch lookahead before these bytes were buffered, and the
+/// commit re-verifies the supplied sapling root against the block header.
+///
+/// The sprout and subtree fields are left at their defaults: sprout is never
+/// supplied (the snapshot payload carries only sapling/orchard, and the commit
+/// folds sprout), and subtree completions are derived by the commit path because
+/// the frontier blob does not carry them.
+pub fn supplied_note_commitment_trees_from_bytes(
+    sapling_bytes: Option<&[u8]>,
+    orchard_bytes: Option<&[u8]>,
+) -> Option<zebra_chain::parallel::tree::NoteCommitmentTrees> {
+    if sapling_bytes.is_none() && orchard_bytes.is_none() {
+        return None;
+    }
+
+    let options = bincode::DefaultOptions::new();
+    let mut trees = zebra_chain::parallel::tree::NoteCommitmentTrees::default();
+
+    if let Some(bytes) = sapling_bytes {
+        let tree: sapling::tree::NoteCommitmentTree = options.deserialize(bytes).ok()?;
+        // Cache the root so the commit path's `.root()` reads are free and the
+        // header re-verification matches the engine's earlier check.
+        let _ = tree.root();
+        trees.sapling = std::sync::Arc::new(tree);
+    }
+
+    if let Some(bytes) = orchard_bytes {
+        let tree: orchard::tree::NoteCommitmentTree = options.deserialize(bytes).ok()?;
+        let _ = tree.root();
+        trees.orchard = std::sync::Arc::new(tree);
+    }
+
+    Some(trees)
+}
+
 /// Returns the requested byte range of the sorted unspent-output-location set at
 /// the finalized tip, or `None` if the request is malformed or out of bounds.
 ///

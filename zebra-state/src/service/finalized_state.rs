@@ -408,32 +408,12 @@ impl FinalizedState {
         supplied: &NoteCommitmentTrees,
         network: &Network,
     ) -> Result<bool, CommitCheckpointVerifiedError> {
-        let height = block
-            .coinbase_height()
-            .expect("committed blocks always have a coinbase height");
-
-        // The header commitment only equals the bare Sapling root in the
-        // Sapling/Blossom era. Orchard does not activate until NU5 (after
-        // Blossom), so in this era the supplied Orchard tree is necessarily empty
-        // and is pinned together with the Sapling root by an exact header match.
-        match block.header.commitment(network, height) {
-            Ok(block::Commitment::FinalSaplingRoot(expected_root)) => {
-                let supplied_root = supplied.sapling.root();
-                if supplied_root != expected_root {
-                    return Err(ValidateContextError::SuppliedSaplingTreeRootMismatch {
-                        supplied: supplied_root.into(),
-                        expected: expected_root.into(),
-                        height,
-                    }
-                    .into());
-                }
-                Ok(true)
-            }
-            // Pre-Sapling there is no Sapling root to pin against (and no shielded
-            // outputs), and Heartwood-onward the header does not pin this block's
-            // trees: refuse the supplied trees and fold instead.
-            _ => Ok(false),
-        }
+        // The single source of truth for this check lives in `service::check`, so
+        // the in-memory (non-finalized) and finalized commit paths can never
+        // disagree on which supplied trees are verifiable.
+        Ok(check::supplied_trees_are_verifiable(
+            block, supplied, network,
+        )?)
     }
 
     /// Immediately commit a `finalized` block to the finalized state.

@@ -518,12 +518,11 @@ impl KnownHashList {
             // v2: the parser validates the full structure; cross-check that the
             // declared span matches the spec's chunk length, so a truncated or
             // mis-sized v2 chunk is rejected just like a v1 one.
-            let parsed = chunk_v2::ParsedChunk::parse(&chunk).map_err(|error| {
-                KnownHashError::ChunkV2 {
+            let parsed =
+                chunk_v2::ParsedChunk::parse(&chunk).map_err(|error| KnownHashError::ChunkV2 {
                     path: path.clone(),
                     error,
-                }
-            })?;
+                })?;
             if u64::from(parsed.block_count()) != expected_blocks {
                 return Err(KnownHashError::ChunkLength {
                     path,
@@ -637,8 +636,8 @@ impl KnownHashList {
             // v2 was validated at load, so it re-parses infallibly. A hash-only
             // v2 chunk returns its DEFAULT_SIZE_HINT; map that back to `None` so
             // callers keep the v1 "no embedded hint" semantics.
-            let parsed = chunk_v2::ParsedChunk::parse(chunk)
-                .expect("v2 chunk was validated at load");
+            let parsed =
+                chunk_v2::ParsedChunk::parse(chunk).expect("v2 chunk was validated at load");
             if !parsed.has_hints() {
                 return Ok(None);
             }

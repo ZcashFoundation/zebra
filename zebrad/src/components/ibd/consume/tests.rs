@@ -611,7 +611,9 @@ async fn ensure_chunk_tolerates_transient_peer_failure() {
             panic!("expected a KnownHashChunkRange request, got {req:?}");
         };
         if n == 0 {
-            return ready(Err::<zn::Response, BoxError>("transient peer-set failure".into()));
+            return ready(Err::<zn::Response, BoxError>(
+                "transient peer-set failure".into(),
+            ));
         }
         let start = offset as usize;
         let end = (offset.saturating_add(u64::from(len)) as usize).min(served.len());

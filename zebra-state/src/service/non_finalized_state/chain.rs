@@ -336,6 +336,35 @@ impl Chain {
         Ok(self)
     }
 
+    /// Like [`Self::push`], but in snapshot-consume (assumeUTXO) mode optionally
+    /// uses a pre-fetched, verified note commitment tree set supplied by the
+    /// known-hash IBD engine instead of folding the block's note commitments
+    /// (`docs/design/p2p-snapshot-distribution.md` §3.2).
+    ///
+    /// The supplied frontiers are only used when they verify against the block
+    /// header (Sapling/Blossom era, where the header pins the Sapling root);
+    /// otherwise, and for `None`, this folds exactly like [`Self::push`]. The
+    /// supplied frontier blob does not carry the note-commitment subtree
+    /// completions, so when the block completes a subtree this falls back to a
+    /// full fold for that one block (a rare event — at most one completion per
+    /// `2^16` notes per pool) to keep the subtree column families byte-identical
+    /// to a normally-synced node. See
+    /// [`Self::update_chain_tip_with_block_parallel`].
+    #[instrument(level = "debug", skip(self, block, supplied_trees), fields(block = %block.block))]
+    pub fn push_with_supplied_trees(
+        mut self,
+        block: ContextuallyVerifiedBlock,
+        supplied_trees: Option<&NoteCommitmentTrees>,
+    ) -> Result<Chain, ValidateContextError> {
+        // update cumulative data members
+        self.update_chain_tip_with_block_parallel(&block, supplied_trees)?;
+
+        tracing::debug!(block = %block.block, "adding block to chain");
+        self.blocks.insert(block.height, block);
+
+        Ok(self)
+    }
+
     /// Pops the lowest height block of the non-finalized portion of a chain,
     /// and returns it with its associated treestate.
     #[instrument(level = "debug", skip(self))]
@@ -1450,15 +1479,119 @@ impl Chain {
             .collect()
     }
 
+    /// Tries to apply pre-fetched, verified `supplied` note commitment trees to
+    /// `nct` for `contextually_valid`'s commit, instead of folding the block's
+    /// note commitments (the snapshot-consume "tree supplied by download" path,
+    /// `docs/design/p2p-snapshot-distribution.md` §3.2).
+    ///
+    /// Returns `Ok(true)` when the supplied sapling/orchard frontiers were
+    /// written into `nct` and the caller may skip the fold, or `Ok(false)` when
+    /// the caller must fold the block's note commitments instead (the supplied
+    /// trees were unverifiable against the header, or the block completes a
+    /// note-commitment subtree the supplied frontier blob does not carry). Returns
+    /// `Err` only when the supplied Sapling root contradicts the header pin — a
+    /// fatal commit error.
+    ///
+    /// # Subtrees
+    ///
+    /// The downloaded frontier blob is the tree state at the *end* of the block;
+    /// it cannot reproduce a `2^16`-leaf subtree root that completed *mid-block*
+    /// (once the frontier advances past the boundary, the completed subtree's
+    /// internal nodes are no longer recoverable from it). Those subtree roots are
+    /// served and RPC-checked, so they must be byte-identical to a normally-synced
+    /// node. We therefore detect a subtree completion cheaply (an index comparison,
+    /// no hashing) via [`contains_new_subtree`], and on the rare height that
+    /// completes one we return `false` so the caller folds the whole block — the
+    /// canonical code path that produces the byte-identical subtree. Subtree
+    /// completions happen at most once per `2^16` notes per pool (a handful of
+    /// heights across the whole chain), so this preserves the throughput win on
+    /// the overwhelming common case while never diverging on subtree roots.
+    ///
+    /// [`contains_new_subtree`]: sapling::tree::NoteCommitmentTree::contains_new_subtree
+    #[allow(clippy::unwrap_in_result)]
+    fn apply_supplied_trees(
+        &self,
+        nct: &mut NoteCommitmentTrees,
+        contextually_valid: &ContextuallyVerifiedBlock,
+        supplied: &NoteCommitmentTrees,
+    ) -> Result<bool, ValidateContextError> {
+        // Only accept supplied trees the block header directly pins (Sapling/
+        // Blossom era). Outside that era — and on a Sapling-root mismatch (an
+        // `Err`) — fall back to folding. This is the same single-source check the
+        // finalized commit path uses, so the two layers never disagree (#27).
+        if !check::supplied_trees_are_verifiable(
+            &contextually_valid.block,
+            supplied,
+            &self.network,
+        )? {
+            metrics::counter!("state.checkpoint.tree.folded.count").increment(1);
+            return Ok(false);
+        }
+
+        // A block completes at most one level-16 subtree per pool. The supplied
+        // end-of-block frontier cannot reproduce a subtree root that completed
+        // mid-block, and subtree roots are served + RPC-checked, so they must stay
+        // byte-identical to a normally-synced node. Detect completion cheaply
+        // (index comparison, no hashing) against the current tip trees, and fold
+        // the whole block on the rare completion height so the canonical path
+        // produces the byte-identical subtree.
+        let completes_subtree = supplied.sapling.contains_new_subtree(&nct.sapling)
+            || supplied.orchard.contains_new_subtree(&nct.orchard);
+        if completes_subtree {
+            metrics::counter!("state.checkpoint.tree.folded.count", "reason" => "subtree")
+                .increment(1);
+            return Ok(false);
+        }
+
+        // The supplied trees are verified and complete no subtree: write the
+        // sapling/orchard frontiers directly and skip the per-note fold (the
+        // throughput win). Sprout is never supplied (the snapshot payload carries
+        // only sapling/orchard), so fold the block's sprout note commitments
+        // here — cheap, and `update_trees_parallel` will not run for this block.
+        let sprout_note_commitments: Vec<_> = contextually_valid
+            .block
+            .sprout_note_commitments()
+            .cloned()
+            .collect();
+        if !sprout_note_commitments.is_empty() {
+            nct.sprout = NoteCommitmentTrees::update_sprout_note_commitment_tree(
+                nct.sprout.clone(),
+                sprout_note_commitments,
+            )?;
+        }
+
+        nct.sapling = supplied.sapling.clone();
+        nct.orchard = supplied.orchard.clone();
+        // No subtree completed at this height (checked above), so leave the
+        // subtree slots untouched. The roots are precomputed and cached on the
+        // verified supplied trees, so reading `nct.*.root()` below is free.
+        nct.sapling_subtree = None;
+        nct.orchard_subtree = None;
+
+        metrics::counter!("state.checkpoint.tree.supplied.count").increment(1);
+
+        Ok(true)
+    }
+
     /// Update the chain tip with the `contextually_valid` block,
     /// running note commitment tree updates in parallel with other updates.
     ///
-    /// Used to implement `update_chain_tip_with::<ContextuallyVerifiedBlock>`.
-    #[instrument(skip(self, contextually_valid), fields(block = %contextually_valid.block))]
+    /// In snapshot-consume (assumeUTXO) mode, `supplied_trees` may carry a
+    /// pre-fetched, verified note commitment tree set from the known-hash IBD
+    /// engine (`docs/design/p2p-snapshot-distribution.md` §3.2). When present and
+    /// verifiable against the block header, the supplied sapling/orchard frontiers
+    /// are written directly instead of folding the block's note commitments — the
+    /// throughput win of the snapshot path. Outside snapshot-consume mode it is
+    /// `None` and this always folds, so the normal/semantic path is unchanged.
+    ///
+    /// Used to implement `update_chain_tip_with::<ContextuallyVerifiedBlock>` (which
+    /// always passes `None`) and [`Chain::push_with_supplied_trees`].
+    #[instrument(skip(self, contextually_valid, supplied_trees), fields(block = %contextually_valid.block))]
     #[allow(clippy::unwrap_in_result)]
     fn update_chain_tip_with_block_parallel(
         &mut self,
         contextually_valid: &ContextuallyVerifiedBlock,
+        supplied_trees: Option<&NoteCommitmentTrees>,
     ) -> Result<(), ValidateContextError> {
         let height = contextually_valid.height;
 
@@ -1471,29 +1604,34 @@ impl Chain {
             orchard_subtree: self.orchard_subtree_for_tip(),
         };
 
+        // The "tree supplied by download" path (snapshot-consume mode): if a
+        // verified tree was supplied and it is verifiable against this block's
+        // header, write the supplied sapling/orchard frontiers directly and skip
+        // the expensive per-note fold. The supplied frontier blob does not carry
+        // the note-commitment subtree completions, so a block that completes a
+        // subtree still folds (rare; see `apply_supplied_trees`). When the trees
+        // are absent or unverifiable, `use_supplied` is false and we fold below
+        // exactly as the normal path does (correctness fallback).
+        let use_supplied = match supplied_trees {
+            Some(supplied) => self.apply_supplied_trees(&mut nct, contextually_valid, supplied)?,
+            None => false,
+        };
+
         let mut tree_result = None;
         let mut partial_result = None;
-
-        // TODO(known-hash-ibd #10): in snapshot-consume (assumeUTXO) mode, accept
-        // a pre-fetched, verified note commitment tree set supplied by the IBD
-        // engine (`IbdBlock.supplied_trees`, threaded through
-        // `CommitCheckpointVerifiedBlock` → the write worker → here) and write it
-        // directly instead of folding via `update_trees_parallel`. This is the
-        // in-memory-commit half of the "tree supplied by download" path
-        // (`docs/design/p2p-snapshot-distribution.md` §3.2); the finalized-commit
-        // half already exists (`commit_finalized_direct_with_trees`). It must also
-        // reproduce the sapling/orchard subtree tracking this fold performs (the
-        // supplied tree blob does not carry it), with bit-identical roots and
-        // frontiers — deferred because it is a consensus-critical hot-path change,
-        // and the engine does not populate `supplied_trees` yet, so today every
-        // block folds (correct, just not accelerated).
 
         // Run 4 tasks in parallel:
         // - sprout, sapling, and orchard tree updates and root calculations
         // - the rest of the Chain updates
+        //
+        // When the supplied trees were used, `nct` already holds the correct
+        // sapling/orchard frontiers and subtrees, so only the non-tree chain
+        // updates run; the per-note fold is skipped (the whole point).
         rayon::in_place_scope_fifo(|scope| {
-            // Spawns a separate rayon task for each note commitment tree
-            tree_result = Some(nct.update_trees_parallel(&contextually_valid.block.clone()));
+            if !use_supplied {
+                // Spawns a separate rayon task for each note commitment tree
+                tree_result = Some(nct.update_trees_parallel(&contextually_valid.block.clone()));
+            }
 
             scope.spawn_fifo(|_scope| {
                 partial_result =
@@ -1501,7 +1639,9 @@ impl Chain {
             });
         });
 
-        tree_result.expect("scope has already finished")?;
+        if let Some(tree_result) = tree_result {
+            tree_result?;
+        }
         partial_result.expect("scope has already finished")?;
 
         // Update the note commitment trees in the chain.
@@ -1801,7 +1941,8 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
         &mut self,
         contextually_valid: &ContextuallyVerifiedBlock,
     ) -> Result<(), ValidateContextError> {
-        self.update_chain_tip_with_block_parallel(contextually_valid)
+        // The normal/semantic path never supplies trees: it always folds.
+        self.update_chain_tip_with_block_parallel(contextually_valid, None)
     }
 
     #[instrument(skip(self, contextually_valid), fields(block = %contextually_valid.block))]

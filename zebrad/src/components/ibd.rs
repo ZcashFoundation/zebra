@@ -339,8 +339,7 @@ where
                 // carries no per-height tree roots and could silently disagree
                 // with the v2 chunks).
                 let _ = list;
-                let source =
-                    CfHashSource::new(spec, self.peer_set.clone(), self.state.clone());
+                let source = CfHashSource::new(spec, self.peer_set.clone(), self.state.clone());
                 Self::bootstrap_and_run_engine(
                     self.network.clone(),
                     self.peer_set.clone(),

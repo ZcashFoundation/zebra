@@ -407,7 +407,7 @@ fn synthetic_block(
         transaction_hashes,
     };
     let finalized = FinalizedBlock::from_checkpoint_verified(
-        CheckpointVerifiedBlock(semantically_verified),
+        CheckpointVerifiedBlock(semantically_verified, None),
         Treestate::default(),
         DeferredPoolBalanceChange::zero(),
     );

@@ -65,7 +65,7 @@ pub use service::{
     init, init_read_only, known_hash_chunk_bytes,
     non_finalized_state::NonFinalizedState,
     note_commitment_tree_bytes, note_commitment_tree_root_from_bytes, spawn_init_read_only,
-    unspent_outputs_range,
+    supplied_note_commitment_trees_from_bytes, unspent_outputs_range,
     watch_receiver::WatchReceiver,
     OutputLocation, ReadState, State, TransactionIndex, TransactionLocation,
     ADDRESS_BALANCE_RECORD_LEN, MAX_SNAPSHOT_RANGE_BYTES, UNSPENT_OUTPUT_RECORD_LEN,

@@ -83,8 +83,9 @@ mod tests;
 pub use finalized_state::{OutputLocation, TransactionIndex, TransactionLocation};
 pub use read::snapshot::{
     address_balances_range, known_hash_chunk_bytes, note_commitment_tree_bytes,
-    note_commitment_tree_root_from_bytes, unspent_outputs_range, ADDRESS_BALANCE_RECORD_LEN,
-    MAX_SNAPSHOT_RANGE_BYTES, UNSPENT_OUTPUT_RECORD_LEN,
+    note_commitment_tree_root_from_bytes, supplied_note_commitment_trees_from_bytes,
+    unspent_outputs_range, ADDRESS_BALANCE_RECORD_LEN, MAX_SNAPSHOT_RANGE_BYTES,
+    UNSPENT_OUTPUT_RECORD_LEN,
 };
 use write::WriteMessage;
 

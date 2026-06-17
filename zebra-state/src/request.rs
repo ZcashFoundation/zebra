@@ -283,8 +283,22 @@ pub struct SemanticallyVerifiedBlock {
 /// Note: The difference between a `CheckpointVerifiedBlock` and a `ContextuallyVerifiedBlock` is
 /// that the `CheckpointVerifier` doesn't bind the transaction authorizing data to the
 /// `ChainHistoryBlockTxAuthCommitmentHash`, but the `NonFinalizedState` and `FinalizedState` do.
+///
+/// The second tuple field carries the optional pre-fetched, verified note
+/// commitment trees supplied by the known-hash IBD engine in snapshot-consume
+/// (assumeUTXO) mode (`docs/design/p2p-snapshot-distribution.md` §3.2). When
+/// present and verifiable against the block header, the commit writes the
+/// supplied frontier directly instead of folding the block's note commitments;
+/// it is `None` outside snapshot-consume mode (the normal/semantic path), so a
+/// normal sync is unaffected. The supplied frontier blob does not carry the
+/// note-commitment subtree completions, so the commit derives those by the
+/// canonical fold only on the rare heights that complete a subtree (see
+/// `NonFinalizedState::commit_checkpoint_block`).
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CheckpointVerifiedBlock(pub(crate) SemanticallyVerifiedBlock);
+pub struct CheckpointVerifiedBlock(
+    pub(crate) SemanticallyVerifiedBlock,
+    pub(crate) Option<NoteCommitmentTrees>,
+);
 
 // Some fields are pub(crate), so we can add whatever db-format-dependent
 // precomputation we want here without leaking internal details.
@@ -661,7 +675,26 @@ impl CheckpointVerifiedBlock {
     /// Note: a [`CheckpointVerifiedBlock`] isn't actually finalized
     /// until [`Request::CommitCheckpointVerifiedBlock`] returns success.
     pub fn with_hash(block: Arc<Block>, hash: block::Hash) -> Self {
-        Self(SemanticallyVerifiedBlock::with_hash(block, hash))
+        Self(SemanticallyVerifiedBlock::with_hash(block, hash), None)
+    }
+
+    /// Attaches pre-fetched, verified note commitment trees to this block, for
+    /// the snapshot-consume "tree supplied by download" commit path
+    /// (`docs/design/p2p-snapshot-distribution.md` §3.2).
+    ///
+    /// The supplied trees are only used when the finalized state is in
+    /// snapshot-consume mode and the trees are verifiable against the block
+    /// header (Sapling/Blossom era, where the header pins the Sapling root);
+    /// otherwise the commit folds the block's note commitments as usual.
+    pub fn with_supplied_trees(mut self, supplied_trees: Option<NoteCommitmentTrees>) -> Self {
+        self.1 = supplied_trees;
+        self
+    }
+
+    /// Returns the pre-fetched, verified note commitment trees supplied for the
+    /// snapshot-consume commit path, if any.
+    pub(crate) fn supplied_trees(&self) -> Option<&NoteCommitmentTrees> {
+        self.1.as_ref()
     }
 }
 
@@ -686,7 +719,7 @@ impl SemanticallyVerifiedBlock {
 
 impl From<Arc<Block>> for CheckpointVerifiedBlock {
     fn from(block: Arc<Block>) -> Self {
-        CheckpointVerifiedBlock(SemanticallyVerifiedBlock::from(block))
+        CheckpointVerifiedBlock(SemanticallyVerifiedBlock::from(block), None)
     }
 }
 
