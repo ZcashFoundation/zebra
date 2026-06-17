@@ -904,7 +904,7 @@ impl Service<Request> for Mempool {
                         }
                         let _ = tx_downloads.download_if_needed_and_verify(
                             Gossip::Id(txid),
-                            Some(source),
+                            Some(source.clone()),
                             None,
                         );
                     }

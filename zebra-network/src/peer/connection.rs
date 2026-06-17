@@ -1057,7 +1057,7 @@ where
                     .map(|()| Handler::Ping { nonce, ping_sent_at })
             }
 
-            (AwaitingRequest, BlocksByHash(hashes)) => {
+            (AwaitingRequest, BlocksByHash(hashes) | BlocksByHashFrom { hashes, .. }) => {
                 self
                     .peer_tx
                     .send(Message::GetData(
@@ -1071,7 +1071,7 @@ where
                          }
                     )
             }
-            (AwaitingRequest, TransactionsById(ids)) => {
+            (AwaitingRequest, TransactionsById(ids) | TransactionsByIdFrom { ids, .. }) => {
                 self
                     .peer_tx
                     .send(Message::GetData(
@@ -1218,6 +1218,10 @@ where
                 debug!(%msg, "got reject message unsolicited or from canceled request");
                 Unused
             }
+            Message::P2pV2Upgrade(_) => {
+                debug!(%msg, "got Zakura upgrade prelude outside the handshake");
+                Consumed
+            }
             Message::NotFound { .. } => {
                 debug!(%msg, "got notfound message unsolicited or from canceled request");
                 Unused
@@ -1281,7 +1285,10 @@ where
                 // so we ignore any advertisements of multiple blocks.
                 [InventoryHash::Block(hash)] => Request::AdvertiseBlock(
                     *hash,
-                    self.connection_info.connected_addr.get_transient_addr(),
+                    self.connection_info
+                        .connected_addr
+                        .get_transient_addr()
+                        .map(Into::into),
                 )
                 .into(),
 
@@ -1293,7 +1300,10 @@ where
                 tx_ids if tx_ids.iter().any(|item| item.unmined_tx_id().is_some()) => {
                     Request::AdvertiseTransactionIds(
                         transaction_ids(items).collect(),
-                        self.connection_info.connected_addr.get_transient_addr(),
+                        self.connection_info
+                            .connected_addr
+                            .get_transient_addr()
+                            .map(Into::into),
                     )
                     .into()
                 }

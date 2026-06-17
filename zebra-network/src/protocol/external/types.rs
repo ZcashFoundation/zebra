@@ -147,6 +147,11 @@ bitflags! {
         /// blocks, as opposed to a light client that makes network requests but
         /// does not provide network services.
         const NODE_NETWORK = 1;
+
+        /// NODE_P2P_V2 means that the node can speak the experimental Zakura P2P v2 stack.
+        ///
+        /// This bit is in the temporary experiment range until a permanent service bit is assigned.
+        const NODE_P2P_V2 = 1 << 24;
     }
 }
 
@@ -255,5 +260,16 @@ mod test {
                 );
             }
         }
+    }
+
+    #[test]
+    fn peer_services_p2p_v2_bit_and_unknown_bits_are_compatible() {
+        let _init_guard = zebra_test::init();
+
+        assert_eq!(PeerServices::NODE_P2P_V2.bits(), 1 << 24);
+
+        let decoded =
+            PeerServices::from_bits_truncate(PeerServices::NODE_NETWORK.bits() | (1 << 25));
+        assert_eq!(decoded, PeerServices::NODE_NETWORK);
     }
 }

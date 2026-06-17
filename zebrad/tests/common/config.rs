@@ -37,6 +37,10 @@ pub fn default_test_config(net: &Network) -> ZebradConfig {
         network: net.clone(),
         // The OS automatically chooses an unused port.
         listen_addr: "127.0.0.1:0".parse().unwrap(),
+        // Keep acceptance tests on legacy gossip until Zakura P2P v2 supports
+        // the inventory/block propagation those tests depend on.
+        v2_p2p: false,
+        legacy_p2p: true,
         crawl_new_peer_interval: TEST_DURATION,
         ..zebra_network::Config::default()
     };
@@ -134,7 +138,7 @@ pub fn rpc_port_config(
     parallel_cpu_threads: bool,
     network: &Network,
 ) -> Result<ZebradConfig> {
-    let listen_ip = "127.0.0.1".parse().expect("hard-coded IP is valid");
+    let listen_ip = "127.0.0.1".parse()?;
     let zebra_rpc_listener = SocketAddr::new(listen_ip, listen_port);
 
     // Write a configuration that has the rpc listen_addr option set

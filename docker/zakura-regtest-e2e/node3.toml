@@ -1,0 +1,33 @@
+# Zakura regtest e2e — node 3 (legacy-only: v2_p2p disabled).
+#
+# This is the backwards-compatibility peer: it speaks only the legacy Zcash TCP
+# protocol and must still coexist with the dual-stack nodes and receive blocks
+# over legacy gossip.
+
+[network]
+network = "Regtest"
+listen_addr = "127.0.0.1:18433"
+# Legacy stack only — no Zakura endpoint.
+v2_p2p = false
+legacy_p2p = true
+cache_dir = false
+initial_testnet_peers = ["127.0.0.1:18233"]
+# Host networking puts every node on 127.0.0.1; raise the per-IP cap above 1.
+max_connections_per_ip = 10
+
+[state]
+ephemeral = true
+
+[rpc]
+listen_addr = "127.0.0.1:18432"
+enable_cookie_auth = false
+
+[metrics]
+endpoint_addr = "127.0.0.1:19003"
+
+[mining]
+internal_miner = false
+miner_address = "tmJymvcUCn1ctbghvTJpXBwHiMEB8P6wxNV"
+
+[tracing]
+filter = "info,zebra_network::peer=debug,zebra_network::zakura=debug"

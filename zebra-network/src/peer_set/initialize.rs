@@ -111,7 +111,25 @@ where
     S::Future: Send + 'static,
     C: ChainTip + Clone + Send + Sync + 'static,
 {
-    let (tcp_listener, listen_addr) = open_listener(&config.clone()).await;
+    let (tcp_listener, listen_addr) = if config.legacy_p2p {
+        let (tcp_listener, listen_addr) = open_listener(&config.clone()).await;
+        (Some(tcp_listener), listen_addr)
+    } else {
+        info!("legacy P2P disabled; not opening Zcash protocol listener");
+        (None, config.listen_addr)
+    };
+    // Clone the inbound service for the Zakura legacy-gossip sink before the
+    // handshake builder consumes the original below. The factory only runs when
+    // `v2_p2p` is enabled; otherwise the endpoint is `None` and the clone drops.
+    let inbound_for_zakura_sink = inbound_service.clone();
+    let zakura_endpoint = crate::zakura::spawn_zakura_endpoint(&config, move |supervisor| {
+        Arc::new(crate::zakura::LegacyGossipSink::spawn(
+            inbound_for_zakura_sink,
+            supervisor,
+        )) as Arc<dyn crate::zakura::InboundSink>
+    })
+    .await
+    .expect("Zakura endpoint should start when P2P v2 is enabled");
 
     let (
         address_book,
@@ -179,7 +197,11 @@ where
     let (listen_handshaker, outbound_connector) = {
         use tower::timeout::TimeoutLayer;
         let hs_timeout = TimeoutLayer::new(constants::HANDSHAKE_TIMEOUT);
-        let hs = peer::Handshake::builder()
+        let zakura_handshake_connector = zakura_endpoint
+            .as_ref()
+            .map(|endpoint| endpoint.connector());
+
+        let mut hs_builder = peer::Handshake::builder()
             .with_config(config.clone())
             .with_inbound_service(inbound_service)
             .with_inventory_collector(inv_sender)
@@ -187,7 +209,13 @@ where
             .with_advertised_services(advertised_services)
             .with_user_agent(user_agent)
             .with_latest_chain_tip(latest_chain_tip.clone())
-            .want_transactions(true)
+            .want_transactions(true);
+
+        if let Some(zakura_handshake_connector) = zakura_handshake_connector {
+            hs_builder = hs_builder.with_zakura_handshake_connector(zakura_handshake_connector);
+        }
+
+        let hs = hs_builder
             .finish()
             .expect("configured all required parameters");
         (
@@ -230,85 +258,122 @@ where
     );
     let peer_set = Buffer::new(BoxService::new(peer_set), constants::PEERSET_BUFFER_SIZE);
 
-    // Connect peerset_tx to the 3 peer sources:
-    //
-    // 1. Incoming peer connections, via a listener.
-    let listen_fut = accept_inbound_connections(
-        config.clone(),
-        tcp_listener,
-        constants::MIN_INBOUND_PEER_CONNECTION_INTERVAL,
-        listen_handshaker,
-        peerset_tx.clone(),
-        bans_receiver,
-    );
-    let listen_guard = tokio::spawn(listen_fut.in_current_span());
-
-    // 2. Initial peers, specified in the config and cached on disk.
-    let initial_peers_fut = add_initial_peers(
-        config.clone(),
-        outbound_connector.clone(),
-        peerset_tx.clone(),
-        address_book_updater.clone(),
-    );
-    let initial_peers_join = tokio::spawn(initial_peers_fut.in_current_span());
-
-    // 3. Outgoing peers we connect to in response to load.
-    let mut candidates = CandidateSet::new(address_book.clone(), peer_set.clone());
-
-    // Wait for the initial seed peer count
-    let mut active_outbound_connections = initial_peers_join
-        .wait_for_panics()
-        .await
-        .expect("unexpected error connecting to initial peers");
-    let active_initial_peer_count = active_outbound_connections.update_count();
-
-    // We need to await candidates.update() here,
-    // because zcashd rate-limits `addr`/`addrv2` messages per connection,
-    // and if we only have one initial peer,
-    // we need to ensure that its `Response::Addr` is used by the crawler.
-    //
-    // TODO: this might not be needed after we added the Connection peer address cache,
-    //       try removing it in a future release?
-    info!(
-        ?active_initial_peer_count,
-        "sending initial request for peers"
-    );
-    let _ = candidates.update_initial(active_initial_peer_count).await;
-
-    // Compute remaining connections to open.
-    let demand_count = config
-        .peerset_initial_target_size
-        .saturating_sub(active_outbound_connections.update_count());
-
-    for _ in 0..demand_count {
-        let _ = demand_tx.try_send(MorePeers);
-    }
-
-    // Start the peer crawler
-    let crawl_fut = crawl_and_dial(
-        config.clone(),
-        demand_tx,
-        demand_rx,
-        candidates,
-        outbound_connector,
-        peerset_tx,
-        active_outbound_connections,
-        address_book_updater,
-    );
-    let crawl_guard = tokio::spawn(crawl_fut.in_current_span());
-
     // Start the peer disk cache updater
-    let peer_cache_updater_fut = peer_cache_updater(config, address_book.clone());
+    let peer_cache_updater_fut = peer_cache_updater(config.clone(), address_book.clone());
     let peer_cache_updater_guard = tokio::spawn(peer_cache_updater_fut.in_current_span());
 
-    handle_tx
-        .send(vec![
-            listen_guard,
-            crawl_guard,
-            address_book_updater_guard,
-            peer_cache_updater_guard,
-        ])
-        .unwrap();
+    let mut task_handles = vec![address_book_updater_guard, peer_cache_updater_guard];
+
+    if let Some(tcp_listener) = tcp_listener {
+        // Connect peerset_tx to the 3 peer sources:
+        //
+        // 1. Incoming peer connections, via a listener.
+        let listen_fut = accept_inbound_connections(
+            config.clone(),
+            tcp_listener,
+            constants::MIN_INBOUND_PEER_CONNECTION_INTERVAL,
+            listen_handshaker,
+            peerset_tx.clone(),
+            bans_receiver,
+        );
+        task_handles.push(tokio::spawn(listen_fut.in_current_span()));
+
+        // 2. Initial peers, specified in the config and cached on disk.
+        let initial_peers_fut = add_initial_peers(
+            config.clone(),
+            outbound_connector.clone(),
+            peerset_tx.clone(),
+            address_book_updater.clone(),
+        );
+        let initial_peers_join = tokio::spawn(initial_peers_fut.in_current_span());
+
+        // 3. Outgoing peers we connect to in response to load.
+        let mut candidates = CandidateSet::new(address_book.clone(), peer_set.clone());
+
+        // Wait for the initial seed peer count
+        let mut active_outbound_connections = initial_peers_join
+            .wait_for_panics()
+            .await
+            .expect("unexpected error connecting to initial peers");
+        let active_initial_peer_count = active_outbound_connections.update_count();
+
+        // We need to await candidates.update() here,
+        // because zcashd rate-limits `addr`/`addrv2` messages per connection,
+        // and if we only have one initial peer,
+        // we need to ensure that its `Response::Addr` is used by the crawler.
+        //
+        // TODO: this might not be needed after we added the Connection peer address cache,
+        //       try removing it in a future release?
+        info!(
+            ?active_initial_peer_count,
+            "sending initial request for peers"
+        );
+        let _ = candidates.update_initial(active_initial_peer_count).await;
+
+        // Compute remaining connections to open.
+        let demand_count = config
+            .peerset_initial_target_size
+            .saturating_sub(active_outbound_connections.update_count());
+
+        for _ in 0..demand_count {
+            let _ = demand_tx.try_send(MorePeers);
+        }
+
+        // Start the peer crawler
+        let crawl_fut = crawl_and_dial(
+            config.clone(),
+            demand_tx,
+            demand_rx,
+            candidates,
+            outbound_connector,
+            peerset_tx,
+            active_outbound_connections,
+            address_book_updater,
+        );
+        task_handles.push(tokio::spawn(crawl_fut.in_current_span()));
+    } else {
+        task_handles.push(tokio::spawn(
+            async move {
+                let _peerset_tx = peerset_tx;
+                let mut demand_rx = demand_rx;
+
+                while let Some(MorePeers) = demand_rx.next().await {
+                    debug!("ignoring legacy peer demand because legacy P2P is disabled");
+                }
+
+                future::pending::<Result<(), BoxError>>().await
+            }
+            .in_current_span(),
+        ));
+    }
+
+    // Capture the supervisor before the endpoint is moved into the keep-alive
+    // task, so we can back the dual-stack adapters with the same first-seen cache.
+    let zakura_supervisor = zakura_endpoint
+        .as_ref()
+        .map(|endpoint| endpoint.supervisor());
+
+    if let Some(zakura_endpoint) = zakura_endpoint {
+        task_handles.push(tokio::spawn(async move {
+            let _zakura_endpoint = zakura_endpoint;
+            future::pending::<Result<(), BoxError>>().await
+        }));
+    }
+
+    handle_tx.send(task_handles).unwrap();
+
+    // When the Zakura endpoint is active, wrap the legacy peer set so locally
+    // originated gossip and inventory fetches also flow over Zakura. The internal
+    // candidate set and crawler keep using the unwrapped legacy peer set above;
+    // only the service handed to the syncer/mempool/inbound becomes dual-stack.
+    let peer_set = match zakura_supervisor {
+        Some(supervisor) => {
+            let dual_stack =
+                crate::zakura::ZakuraDualStackService::new(peer_set, supervisor, config.legacy_p2p);
+            Buffer::new(BoxService::new(dual_stack), constants::PEERSET_BUFFER_SIZE)
+        }
+        None => peer_set,
+    };
 
     (peer_set, address_book, misbehavior_tx)
 }
@@ -1139,6 +1204,10 @@ where
         }
         // The connection was never opened, or it failed the handshake and was dropped.
         Err(error) => {
+            let neutral_disconnect = error
+                .downcast_ref::<peer::HandshakeError>()
+                .is_some_and(peer::HandshakeError::is_neutral_disconnect);
+
             // Silence verbose info logs in production, but keep logs if the number of connections is low.
             // Also silence them completely in tests.
             if outbound_connections <= MAX_CONNECTIONS_FOR_INFO_LOG && !cfg!(test) {
@@ -1146,7 +1215,10 @@ where
             } else {
                 debug!(?error, ?candidate.addr, "failed to make outbound connection to peer");
             }
-            report_failed(address_book_updater.clone(), candidate).await;
+
+            if !neutral_disconnect {
+                report_failed(address_book_updater.clone(), candidate).await;
+            }
 
             // The demand signal that was taken out of the queue to attempt to connect to the
             // failed candidate never turned into a connection, so add it back.

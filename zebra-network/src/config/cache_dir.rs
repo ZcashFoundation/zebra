@@ -65,6 +65,14 @@ impl CacheDir {
         )
     }
 
+    /// Returns the persistent Zakura iroh secret-key file path for `network`, if enabled.
+    pub fn zakura_node_secret_key_file_path(&self, network: &Network) -> Option<PathBuf> {
+        Some(self.cache_dir()?.join("network").join(format!(
+            "{}.zakura-iroh-secret-key",
+            network.lowercase_name()
+        )))
+    }
+
     /// Returns the `zebra-network` base cache directory, if enabled.
     pub fn cache_dir(&self) -> Option<PathBuf> {
         match self {

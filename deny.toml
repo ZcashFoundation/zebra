@@ -9,7 +9,7 @@
 [advisories]
 version = 2
 yanked = "deny"
-# Unmaintained crate advisories — all transitive via abscissa_core/structopt or direct.
+# Advisory ignores are for transitive dependencies with no immediate safe upgrade in this branch.
 # Remove each ignore entry as the dependency chain is upgraded.
 ignore = [
     "RUSTSEC-2021-0139", # ansi_term — transitive via abscissa_core -> structopt
@@ -18,6 +18,11 @@ ignore = [
     "RUSTSEC-2024-0370", # proc-macro-error — transitive via abscissa_core -> structopt
     "RUSTSEC-2025-0119", # number_prefix — transitive via indicatif
     "RUSTSEC-2025-0141", # bincode — direct dependency
+    "RUSTSEC-2026-0118", # hickory-proto — transitive via iroh
+    "RUSTSEC-2026-0119", # hickory-proto — transitive via iroh
+    "RUSTSEC-2024-0384", # instant — transitive via iroh
+    "RUSTSEC-2024-0436", # paste — transitive via iroh/netdev/stun-rs
+    "RUSTSEC-2023-0089", # atomic-polyfill — transitive via iroh-metrics/postcard
 ]
 
 # This section is considered when running `cargo deny check licenses`.
@@ -184,6 +189,20 @@ skip-tree = [
 
     # wait for hashlink/petgraph/metrics-util to update hashbrown and foldhash
     { name = "hashbrown", version = "0.15" },
+
+    # iroh uses a renamed Quinn stack and network-interface helper crates that
+    # are not yet unified with Zebra's existing reqwest/rustls dependency stack.
+    # Keep these narrow and remove them as the upstream crates converge.
+    { name = "cpufeatures", version = "=0.3.0" },
+    { name = "derive_more", version = "=1.0.0" },
+    { name = "derive_more", version = "=2.1.1" },
+    { name = "derive_more-impl", version = "=1.0.0" },
+    { name = "hmac", version = "=0.12.1" },
+    { name = "netdev", version = "=0.36.0" },
+    { name = "netwatch", version = "=0.9.0" },
+    { name = "socket2", version = "=0.5.10" },
+    { name = "spin", version = "=0.10.0" },
+    { name = "webpki-roots", version = "=0.26.11" },
 ]
 
 # This section is considered when running `cargo deny check sources`.

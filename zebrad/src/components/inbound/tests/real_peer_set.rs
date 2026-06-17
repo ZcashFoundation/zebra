@@ -62,7 +62,7 @@ async fn inbound_peers_empty_address_book() -> Result<(), crate::BoxError> {
         tx_gossip_task_handle,
         // real open socket addresses
         listen_addr,
-    ) = setup(None).await;
+    ) = setup(None, false).await;
 
     // yield and sleep until the address book lock is released.
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -126,6 +126,75 @@ async fn inbound_peers_empty_address_book() -> Result<(), crate::BoxError> {
     Ok(())
 }
 
+/// Dual-stack coexistence: a node running BOTH the legacy TCP stack and the
+/// Zakura P2P-v2 endpoint still interoperates with a legacy-only TCP peer.
+///
+/// This guards the backwards-compatibility property that enabling the new gossip
+/// stack (`v2_p2p`) does not break the old one: the legacy peer must still reach
+/// the node's inbound service over TCP (B -> A), and the dual-stack peer set (the
+/// `ZakuraDualStackService` composite that wraps the legacy peer set) must still
+/// route requests to that legacy peer (A -> B).
+#[tokio::test]
+async fn dual_stack_node_coexists_with_legacy_tcp_peer() -> Result<(), crate::BoxError> {
+    let (
+        // real services
+        connected_peer_service,
+        _inbound_service,
+        peer_set,
+        _mempool_service,
+        _state_service,
+        // mocked services
+        _mock_block_verifier,
+        _mock_tx_verifier,
+        // real tasks
+        block_gossip_task_handle,
+        tx_gossip_task_handle,
+        // real open socket addresses
+        listen_addr,
+    ) = setup(Some(Response::Peers(Vec::new())), true).await;
+
+    // yield and sleep until the address book lock is released.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    // B -> A over a real TCP connection: the v2-enabled node still answers a
+    // legacy peer's request with its own listener address.
+    let response = connected_peer_service.clone().oneshot(Request::Peers).await;
+    match response.as_ref() {
+        Ok(Response::Peers(single_peer)) if single_peer.len() == 1 => {
+            assert_eq!(
+                single_peer.first().unwrap().addr(),
+                canonical_peer_addr(listen_addr)
+            )
+        }
+        _ => unreachable!(
+            "a dual-stack node must answer a legacy peer's `Peers` request over TCP, \
+             actual result: {response:?}"
+        ),
+    };
+
+    // A -> B through the dual-stack peer set (the ZakuraDualStackService composite):
+    // a passthrough request must still route to the legacy TCP peer and return.
+    let response = peer_set.clone().oneshot(Request::Peers).await;
+    assert!(
+        matches!(response, Ok(Response::Peers(_))),
+        "the dual-stack peer set must route `Peers` to the legacy TCP peer, \
+         actual result: {response:?}"
+    );
+
+    // The gossip tasks broadcast through the dual-stack peer set; they must still
+    // be running (no error/panic) with the Zakura endpoint enabled.
+    assert!(
+        block_gossip_task_handle.now_or_never().is_none(),
+        "block gossip task should still be running",
+    );
+    assert!(
+        tx_gossip_task_handle.now_or_never().is_none(),
+        "transaction gossip task should still be running",
+    );
+
+    Ok(())
+}
+
 /// Check that a network stack with an empty state responds to block requests with `notfound`.
 ///
 /// Uses a real Zebra network stack, with an isolated Zebra inbound TCP connection.
@@ -146,7 +215,7 @@ async fn inbound_block_empty_state_notfound() -> Result<(), crate::BoxError> {
         tx_gossip_task_handle,
         // real open socket addresses
         _listen_addr,
-    ) = setup(None).await;
+    ) = setup(None, false).await;
 
     let test_block = block::Hash([0x11; 32]);
 
@@ -229,7 +298,7 @@ async fn inbound_tx_empty_state_notfound() -> Result<(), crate::BoxError> {
         tx_gossip_task_handle,
         // real open socket addresses
         _listen_addr,
-    ) = setup(None).await;
+    ) = setup(None, false).await;
 
     let test_tx = UnminedTxId::from_legacy_id(TxHash([0x22; 32]));
     let test_wtx: UnminedTxId = WtxId {
@@ -361,7 +430,7 @@ async fn outbound_tx_unrelated_response_notfound() -> Result<(), crate::BoxError
         tx_gossip_task_handle,
         // real open socket addresses
         _listen_addr,
-    ) = setup(Some(unrelated_response)).await;
+    ) = setup(Some(unrelated_response), false).await;
 
     let test_tx5 = UnminedTxId::from_legacy_id(TxHash([0x55; 32]));
     let test_wtx67: UnminedTxId = WtxId {
@@ -510,7 +579,7 @@ async fn outbound_tx_partial_response_notfound() -> Result<(), crate::BoxError> 
         tx_gossip_task_handle,
         // real open socket addresses
         _listen_addr,
-    ) = setup(Some(repeated_response)).await;
+    ) = setup(Some(repeated_response), false).await;
 
     let missing_tx_id = UnminedTxId::from_legacy_id(TxHash([0x22; 32]));
 
@@ -602,6 +671,7 @@ async fn outbound_tx_partial_response_notfound() -> Result<(), crate::BoxError> 
 /// Uses fake verifiers, and does not run a block syncer task.
 async fn setup(
     isolated_peer_response: Option<Response>,
+    enable_v2_p2p: bool,
 ) -> (
     // real services
     // connected peer which responds with isolated_peer_response
@@ -660,6 +730,10 @@ async fn setup(
         initial_mainnet_peers: IndexSet::new(),
         initial_testnet_peers: IndexSet::new(),
         cache_dir: CacheDir::disabled(),
+
+        // Optionally run the Zakura P2P-v2 endpoint alongside the legacy TCP
+        // stack so the dual-stack wiring is exercised (coexistence tests).
+        v2_p2p: enable_v2_p2p,
 
         ..NetworkConfig::default()
     };

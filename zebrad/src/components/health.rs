@@ -65,7 +65,11 @@ const METHOD_NOT_ALLOWED_MSG: &str = "method not allowed";
 const NOT_FOUND_MSG: &str = "not found";
 
 /// The maximum number of requests that will be handled in a given time interval before requests are dropped.
+#[cfg(not(test))]
 const MAX_RECENT_REQUESTS: usize = 10_000;
+#[cfg(test)]
+const MAX_RECENT_REQUESTS: usize = 10;
+
 const RECENT_REQUEST_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Clone)]

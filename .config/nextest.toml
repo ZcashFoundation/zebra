@@ -30,12 +30,17 @@ filter = "not test(=trusted_chain_sync_handles_forks_correctly) and not test(=de
 # TODO: We need a better test architecture to run all non-stateful
 [profile.all-tests]
 failure-output = "immediate"
-default-filter = "not test(check_no_git_dependencies) and not test(=fully_synced_rpc_z_getsubtreesbyindex_snapshot_test) and not test(=lwd_rpc_test) and not test(=lwd_rpc_send_tx) and not test(=lwd_grpc_wallet) and not test(=lwd_integration) and not test(=lwd_sync_full) and not test(=lwd_sync_update) and not test(=lightwalletd_test_suite) and not test(=rpc_get_block_template) and not test(=rpc_submit_block) and not test(=get_peer_info) and not test(~generate_checkpoints_) and not test(=sync_update_mainnet) and not test(=activate_mempool_mainnet)"
+default-filter = "not test(check_no_git_dependencies) and not test(=fully_synced_rpc_z_getsubtreesbyindex_snapshot_test) and not test(=lwd_rpc_test) and not test(=lwd_rpc_send_tx) and not test(=lwd_grpc_wallet) and not test(=lwd_integration) and not test(=lwd_sync_full) and not test(=lwd_sync_update) and not test(=lightwalletd_test_suite) and not test(=rpc_get_block_template) and not test(=rpc_submit_block) and not test(=get_peer_info) and not test(~generate_checkpoints_) and not test(=sync_update_mainnet) and not test(=activate_mempool_mainnet) and not test(=sync_large_checkpoints_mempool_mainnet) and not test(cluster_forms_native_two_node_mesh)"
 
 # --- Individual Test Profiles ---
 
 [profile.check-no-git-dependencies]
 default-filter = 'test(check_no_git_dependencies)'
+
+[profile.zakura-integration]
+retries = 2
+slow-timeout = { period = "15m", terminate-after = 1 }
+default-filter = 'package(zebra-network) and test(~zakura)'
 
 [profile.sync-large-checkpoints-empty]
 slow-timeout = { period = "60m", terminate-after = 2 }
@@ -130,27 +135,3 @@ default-filter = 'package(zebrad) and test(=lightwalletd_test_suite)'
 [profile.rpc-z-getsubtreesbyindex-snapshot]
 slow-timeout = { period = "30m", terminate-after = 2 }
 default-filter = 'package(zebrad) and test(=fully_synced_rpc_z_getsubtreesbyindex_snapshot_test)'
-
-[profile.zcashd-compat-integration]
-# Run zcashd-compat tests one at a time to avoid port conflicts and resource exhaustion.
-test-threads = 1
-slow-timeout = { period = "15m", terminate-after = 2 }
-failure-output = "immediate"
-default-filter = 'package(zebrad) and test(~zcashd_compat)'
-
-[profile.zcashd-compat-external]
-# External mode: connect to pre-running mainnet/testnet zebrad + zcashd.
-# Set TEST_ZCASHD_COMPAT_NETWORK, TEST_ZEBRAD_RPC_ADDR,
-# TEST_ZCASHD_RPC_ADDR, and auth env vars before running.
-# No block mining — 5 minutes per test is sufficient.
-test-threads = 1
-slow-timeout = { period = "5m", terminate-after = 2 }
-failure-output = "immediate"
-default-filter = 'package(zebrad) and test(~zcashd_compat)'
-
-[profile.zcashd-compat-soak]
-# Long-running local soak for the reorg churn stress test.
-test-threads = 1
-slow-timeout = { period = "4h", terminate-after = 1 }
-failure-output = "immediate"
-default-filter = 'package(zebrad) and test(=zcashd_compat_reorg_churn)'

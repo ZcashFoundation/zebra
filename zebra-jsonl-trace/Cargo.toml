@@ -12,6 +12,7 @@ description = "Shared non-blocking JSONL tracing support for Zebra"
 
 [dependencies]
 tokio = { workspace = true, features = ["fs", "io-util", "sync", "time", "rt", "macros"] }
+tokio-util = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]

@@ -39,9 +39,11 @@ progress-bar = [
 
 # Testing features that activate extra dependencies
 proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl"]
+zakura-testkit = []
 
 [dependencies]
 bitflags = { workspace = true }
+blake2b_simd = { workspace = true }
 byteorder = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true, features = ["clock", "std"] }
@@ -49,6 +51,7 @@ dirs = { workspace = true }
 hex = { workspace = true }
 humantime-serde = { workspace = true }
 indexmap = { workspace = true, features = ["serde"] }
+iroh = { workspace = true }
 itertools = { workspace = true }
 lazy_static = { workspace = true }
 num-integer = { workspace = true }
@@ -59,6 +62,7 @@ rayon = { workspace = true }
 regex = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true, features = ["serde_derive"] }
+serde_json = { workspace = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
 
@@ -86,10 +90,13 @@ proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
 
 zebra-chain = { path = "../zebra-chain", version = "9.0.0", features = ["async-error"] }
+zebra-jsonl-trace = { path = "../zebra-jsonl-trace" }
 
 [dev-dependencies]
+anyhow = { workspace = true }
 proptest = { workspace = true }
 proptest-derive = { workspace = true }
+criterion = { workspace = true }
 
 static_assertions = { workspace = true }
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
@@ -100,3 +107,11 @@ zebra-test = { path = "../zebra-test/" }
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "zakura_single_conn"
+harness = false
+
+[[bench]]
+name = "zakura_loadgen"
+harness = false

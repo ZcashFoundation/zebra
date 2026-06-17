@@ -6,10 +6,27 @@ use zebra_chain::{
 };
 
 use super::super::types::Nonce;
-use crate::PeerSocketAddr;
+use crate::{zakura::ZakuraPeerId, PeerSocketAddr};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
+
+/// Authenticated source for inventory advertised through Zebra's internal network API.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
+pub enum PeerSource {
+    /// A peer connected through the legacy TCP socket transport.
+    LegacySocket(PeerSocketAddr),
+
+    /// A peer authenticated by the Zakura P2P v2 transport.
+    Zakura(ZakuraPeerId),
+}
+
+impl From<PeerSocketAddr> for PeerSource {
+    fn from(peer_addr: PeerSocketAddr) -> Self {
+        Self::LegacySocket(peer_addr)
+    }
+}
 
 /// A network request, represented in internal format.
 ///
@@ -71,6 +88,21 @@ pub enum Request {
     /// Returns [`Response::Blocks`](super::Response::Blocks).
     BlocksByHash(HashSet<block::Hash>),
 
+    /// Request block data by block hashes from a known advertising peer.
+    ///
+    /// This is used by authenticated transports that can safely route a
+    /// gossiped-inventory download back to the peer that advertised it.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Response::Blocks`](super::Response::Blocks).
+    BlocksByHashFrom {
+        /// Requested block hashes.
+        hashes: HashSet<block::Hash>,
+        /// Peer that advertised the inventory.
+        source: PeerSource,
+    },
+
     /// Request transactions by their unmined transaction ID.
     ///
     /// v4 transactions use a legacy transaction ID, and
@@ -89,6 +121,19 @@ pub enum Request {
     ///
     /// Returns [`Response::Transactions`](super::Response::Transactions).
     TransactionsById(HashSet<UnminedTxId>),
+
+    /// Request transactions by their unmined transaction ID from a known
+    /// advertising peer.
+    ///
+    /// # Returns
+    ///
+    /// Returns [`Response::Transactions`](super::Response::Transactions).
+    TransactionsByIdFrom {
+        /// Requested transaction IDs.
+        ids: HashSet<UnminedTxId>,
+        /// Peer that advertised the inventory.
+        source: PeerSource,
+    },
 
     /// Request block hashes of subsequent blocks in the chain, given hashes of
     /// known blocks.
@@ -165,8 +210,8 @@ pub enum Request {
     /// The peer set routes this request specially, sending it to *half of*
     /// the available peers.
     ///
-    /// The second field is the address of the peer that sent us this `inv`:
-    /// `Some(addr)` when the advertisement was relayed from a remote peer,
+    /// The second field is the source peer that sent us this `inv`:
+    /// `Some(source)` when the advertisement was relayed from a remote peer,
     /// and `None` when Zebra originates the advertisement itself (e.g. the
     /// mempool gossip task). Used by the mempool downloader to enforce a
     /// per-peer queue cap. See `GHSA-4fc2-h7jh-287c`.
@@ -174,7 +219,7 @@ pub enum Request {
     /// # Returns
     ///
     /// Returns [`Response::Nil`](super::Response::Nil).
-    AdvertiseTransactionIds(HashSet<UnminedTxId>, Option<PeerSocketAddr>),
+    AdvertiseTransactionIds(HashSet<UnminedTxId>, Option<PeerSource>),
 
     /// Advertise a block to all peers.
     ///
@@ -188,16 +233,16 @@ pub enum Request {
     /// the available peers. See [`number_of_peers_to_broadcast()`](crate::PeerSet::number_of_peers_to_broadcast)
     /// for more details.
     ///
-    /// The second field is the address of the peer that sent us this `inv`:
-    /// `Some(addr)` when the advertisement was relayed from a remote peer,
+    /// The second field is the source peer that sent us this `inv`:
+    /// `Some(source)` when the advertisement was relayed from a remote peer,
     /// and `None` when Zebra originates the advertisement itself (for
-    /// example from the sync gossip task). Consumers use the address to
+    /// example from the sync gossip task). Consumers use the source to
     /// apply per-peer policies such as the inbound download per-IP cap.
     ///
     /// # Returns
     ///
     /// Returns [`Response::Nil`](super::Response::Nil).
-    AdvertiseBlock(block::Hash, Option<PeerSocketAddr>),
+    AdvertiseBlock(block::Hash, Option<PeerSource>),
 
     /// Advertise a block to all ready peers. This is equivalent to
     /// [`Request::AdvertiseBlock`] except that the peer set will route
@@ -222,7 +267,13 @@ impl fmt::Display for Request {
             Request::BlocksByHash(hashes) => {
                 format!("BlocksByHash({})", hashes.len())
             }
+            Request::BlocksByHashFrom { hashes, .. } => {
+                format!("BlocksByHashFrom({})", hashes.len())
+            }
             Request::TransactionsById(ids) => format!("TransactionsById({})", ids.len()),
+            Request::TransactionsByIdFrom { ids, .. } => {
+                format!("TransactionsByIdFrom({})", ids.len())
+            }
 
             Request::FindBlocks { known_blocks, stop } => format!(
                 "FindBlocks {{ known_blocks: {}, stop: {} }}",
@@ -254,8 +305,10 @@ impl Request {
             Request::Peers => "Peers",
             Request::Ping(_) => "Ping",
 
-            Request::BlocksByHash(_) => "BlocksByHash",
-            Request::TransactionsById(_) => "TransactionsById",
+            Request::BlocksByHash(_) | Request::BlocksByHashFrom { .. } => "BlocksByHash",
+            Request::TransactionsById(_) | Request::TransactionsByIdFrom { .. } => {
+                "TransactionsById"
+            }
 
             Request::FindBlocks { .. } => "FindBlocks",
             Request::FindHeaders { .. } => "FindHeaders",
@@ -272,25 +325,43 @@ impl Request {
     pub fn is_inventory_download(&self) -> bool {
         matches!(
             self,
-            Request::BlocksByHash(_) | Request::TransactionsById(_)
+            Request::BlocksByHash(_)
+                | Request::BlocksByHashFrom { .. }
+                | Request::TransactionsById(_)
+                | Request::TransactionsByIdFrom { .. }
         )
     }
 
     /// Returns the block hash inventory downloads from the request, if any.
     pub fn block_hash_inventory(&self) -> HashSet<block::Hash> {
-        if let Request::BlocksByHash(block_hashes) = self {
-            block_hashes.clone()
-        } else {
-            HashSet::new()
+        match self {
+            Request::BlocksByHash(block_hashes)
+            | Request::BlocksByHashFrom {
+                hashes: block_hashes,
+                ..
+            } => block_hashes.clone(),
+            _ => HashSet::new(),
         }
     }
 
     /// Returns the transaction ID inventory downloads from the request, if any.
     pub fn transaction_id_inventory(&self) -> HashSet<UnminedTxId> {
-        if let Request::TransactionsById(transaction_ids) = self {
-            transaction_ids.clone()
-        } else {
-            HashSet::new()
+        match self {
+            Request::TransactionsById(transaction_ids)
+            | Request::TransactionsByIdFrom {
+                ids: transaction_ids,
+                ..
+            } => transaction_ids.clone(),
+            _ => HashSet::new(),
+        }
+    }
+
+    /// Returns the source attached to a source-aware inventory request.
+    pub fn inventory_source(&self) -> Option<PeerSource> {
+        match self {
+            Request::BlocksByHashFrom { source, .. }
+            | Request::TransactionsByIdFrom { source, .. } => Some(source.clone()),
+            _ => None,
         }
     }
 }

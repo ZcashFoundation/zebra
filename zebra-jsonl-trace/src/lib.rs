@@ -11,8 +11,10 @@ use tokio::{
     io::AsyncWriteExt,
     runtime::Handle,
     sync::mpsc::{self, error::TryRecvError, error::TrySendError},
+    task::JoinHandle,
     time::{self, Instant, MissedTickBehavior},
 };
+use tokio_util::sync::CancellationToken;
 
 /// Default trace channel capacity.
 pub const DEFAULT_CHANNEL_CAPACITY: usize = 16_384;
@@ -106,6 +108,18 @@ enum TraceState {
     Enabled(TraceRuntime),
 }
 
+/// A spawned JSONL writer plus its tracer.
+///
+/// Dropping this guard leaves the writer's normal channel-close shutdown
+/// behavior in place. Calling [`JsonlTraceGuard::shutdown`] explicitly asks the
+/// writer to stop accepting new rows, drain queued rows, flush all open files,
+/// and exit.
+pub struct JsonlTraceGuard {
+    tracer: JsonlTracer,
+    shutdown: CancellationToken,
+    writer: Option<JoinHandle<()>>,
+}
+
 /// Reserve errors for the bounded JSONL trace queue.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum JsonlTraceReserveError {
@@ -169,25 +183,57 @@ impl JsonlTracer {
     /// If there is no current Tokio runtime, tracing is disabled and a no-op
     /// tracer is returned.
     pub fn spawn_with_config(trace_dir: PathBuf, config: JsonlTraceConfig) -> Self {
+        Self::spawn_guard_with_config(trace_dir, config).into_tracer()
+    }
+
+    /// Spawn a background writer and return a guard that can flush it
+    /// explicitly.
+    ///
+    /// If there is no current Tokio runtime, tracing is disabled and the guard
+    /// contains a no-op tracer.
+    pub fn spawn_guard(trace_dir: PathBuf) -> JsonlTraceGuard {
+        Self::spawn_guard_with_config(trace_dir, JsonlTraceConfig::default())
+    }
+
+    /// Spawn a guarded background writer using `config` on the current Tokio
+    /// runtime.
+    ///
+    /// If there is no current Tokio runtime, tracing is disabled and the guard
+    /// contains a no-op tracer.
+    pub fn spawn_guard_with_config(
+        trace_dir: PathBuf,
+        config: JsonlTraceConfig,
+    ) -> JsonlTraceGuard {
         let Ok(handle) = Handle::try_current() else {
             tracing::warn!(
                 ?trace_dir,
                 "JSONL tracing requested without an active Tokio runtime, disabling tracing"
             );
-            return Self::noop();
+            return JsonlTraceGuard::disabled();
         };
 
         let (tx, rx) = mpsc::channel(config.channel_capacity);
         let writer = TraceWriter::new(trace_dir.clone(), config);
-        handle.spawn(run_trace_writer(rx, writer));
+        let shutdown = CancellationToken::new();
+        let writer = handle.spawn(run_trace_writer(rx, writer, shutdown.clone()));
         tracing::info!(?trace_dir, "JSONL tracing enabled");
 
-        Self::new(tx)
+        JsonlTraceGuard {
+            tracer: Self::new(tx),
+            shutdown,
+            writer: Some(writer),
+        }
     }
 
     /// Returns `true` if this tracer will emit records.
+    ///
+    /// Reports `false` for a disabled tracer and also once the writer task has
+    /// closed the receiver, so callers stop building rows after writer death.
     pub fn is_enabled(&self) -> bool {
-        matches!(self.inner, TraceState::Enabled(_))
+        match &self.inner {
+            TraceState::Disabled => false,
+            TraceState::Enabled(runtime) => !runtime.tx.is_closed(),
+        }
     }
 
     /// Returns the remaining queue capacity.
@@ -226,6 +272,40 @@ impl JsonlTracer {
             TrySendError::Full(event) => JsonlTraceSendError::Full(event),
             TrySendError::Closed(event) => JsonlTraceSendError::Closed(event),
         })
+    }
+}
+
+impl JsonlTraceGuard {
+    fn disabled() -> Self {
+        Self {
+            tracer: JsonlTracer::noop(),
+            shutdown: CancellationToken::new(),
+            writer: None,
+        }
+    }
+
+    /// Return a cloneable tracer handle for this writer.
+    pub fn tracer(&self) -> JsonlTracer {
+        self.tracer.clone()
+    }
+
+    /// Consume the guard and return only its tracer handle.
+    ///
+    /// The writer keeps the original channel-close behavior: it flushes and
+    /// exits after all tracer clones have been dropped.
+    pub fn into_tracer(mut self) -> JsonlTracer {
+        self.writer.take();
+        self.tracer.clone()
+    }
+
+    /// Stop the writer, drain queued rows, flush all files, and wait for exit.
+    pub async fn shutdown(mut self) {
+        self.tracer = JsonlTracer::noop();
+        self.shutdown.cancel();
+
+        if let Some(writer) = self.writer.take() {
+            let _ = writer.await;
+        }
     }
 }
 
@@ -405,7 +485,11 @@ impl TraceWriter {
     }
 }
 
-async fn run_trace_writer(mut rx: mpsc::Receiver<JsonlWriteEvent>, mut writer: TraceWriter) {
+async fn run_trace_writer(
+    mut rx: mpsc::Receiver<JsonlWriteEvent>,
+    mut writer: TraceWriter,
+    shutdown: CancellationToken,
+) {
     let mut flush_tick = time::interval(writer.config.file_flush_interval);
     flush_tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
@@ -431,10 +515,17 @@ async fn run_trace_writer(mut rx: mpsc::Receiver<JsonlWriteEvent>, mut writer: T
 
                 continue;
             }
+            _ = shutdown.cancelled() => {
+                rx.close();
+                receiver_closed = true;
+            }
         }
 
         if receiver_closed {
-            writer.flush_all().await;
+            while let Ok(event) = rx.try_recv() {
+                batch.push(event);
+            }
+            writer.write_batch(batch, true).await;
             break;
         }
 
@@ -469,7 +560,18 @@ async fn run_trace_writer(mut rx: mpsc::Receiver<JsonlWriteEvent>, mut writer: T
                     force_flush = true;
                     break;
                 }
+                _ = shutdown.cancelled() => {
+                    rx.close();
+                    receiver_closed = true;
+                    break;
+                }
                 _ = &mut sleep => break,
+            }
+        }
+
+        if receiver_closed {
+            while let Ok(event) = rx.try_recv() {
+                batch.push(event);
             }
         }
 
@@ -500,7 +602,7 @@ mod tests {
 
         let (tx, rx) = mpsc::channel(16);
         let writer = TraceWriter::new(trace_dir.clone(), JsonlTraceConfig::default());
-        let handle = tokio::spawn(run_trace_writer(rx, writer));
+        let handle = tokio::spawn(run_trace_writer(rx, writer, CancellationToken::new()));
 
         tx.send(JsonlWriteEvent {
             table: "alpha",
@@ -546,7 +648,7 @@ mod tests {
 
         let (tx, rx) = mpsc::channel(16);
         let writer = TraceWriter::new(trace_dir.clone(), config);
-        let handle = tokio::spawn(run_trace_writer(rx, writer));
+        let handle = tokio::spawn(run_trace_writer(rx, writer, CancellationToken::new()));
 
         tx.send(JsonlWriteEvent {
             table: "alpha",
@@ -584,5 +686,109 @@ mod tests {
         });
 
         assert!(matches!(send_result, Err(JsonlTraceSendError::Disabled(_))));
+    }
+
+    #[tokio::test]
+    async fn guarded_shutdown_drains_queued_rows() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let trace_dir = dir.path().join("traces");
+
+        let config = JsonlTraceConfig {
+            batch_linger: Duration::from_secs(60),
+            file_flush_interval: Duration::from_secs(60),
+            ..JsonlTraceConfig::default()
+        };
+        let guard = JsonlTracer::spawn_guard_with_config(trace_dir.clone(), config);
+        let tracer = guard.tracer();
+
+        tracer
+            .try_send(JsonlWriteEvent {
+                table: "alpha",
+                file_name: "alpha.jsonl",
+                line: br#"{"value":1}"#.to_vec(),
+            })
+            .expect("queued row");
+
+        guard.shutdown().await;
+
+        let alpha = tokio::fs::read_to_string(trace_dir.join("alpha.jsonl"))
+            .await
+            .expect("alpha file");
+        assert_eq!(alpha.trim(), "{\"value\":1}");
+    }
+
+    #[test]
+    fn is_enabled_false_after_receiver_dropped() {
+        let (tx, rx) = mpsc::channel(1);
+        let tracer = JsonlTracer::new(tx);
+        assert!(
+            tracer.is_enabled(),
+            "tracer is enabled while the receiver lives"
+        );
+
+        drop(rx);
+        assert!(
+            !tracer.is_enabled(),
+            "tracer reports disabled once the receiver is dropped"
+        );
+
+        assert!(matches!(
+            tracer.try_reserve(),
+            Err(JsonlTraceReserveError::Closed)
+        ));
+    }
+
+    #[test]
+    fn tracer_drops_rows_when_queue_is_full() {
+        let (tx, _rx) = mpsc::channel(1);
+        let tracer = JsonlTracer::new(tx);
+
+        tracer
+            .try_send(JsonlWriteEvent {
+                table: "alpha",
+                file_name: "alpha.jsonl",
+                line: br#"{"value":1}"#.to_vec(),
+            })
+            .expect("first row fits");
+        let full = tracer.try_send(JsonlWriteEvent {
+            table: "alpha",
+            file_name: "alpha.jsonl",
+            line: br#"{"value":2}"#.to_vec(),
+        });
+
+        assert!(matches!(full, Err(JsonlTraceSendError::Full(_))));
+    }
+
+    #[test]
+    fn tracer_drops_flood_without_blocking() {
+        let (tx, _rx) = mpsc::channel(1);
+        let tracer = JsonlTracer::new(tx);
+
+        tracer
+            .try_send(JsonlWriteEvent {
+                table: "alpha",
+                file_name: "alpha.jsonl",
+                line: br#"{"value":0}"#.to_vec(),
+            })
+            .expect("first row fits");
+
+        let start = Instant::now();
+        let mut full = 0;
+        for value in 0..10_000 {
+            let result = tracer.try_send(JsonlWriteEvent {
+                table: "alpha",
+                file_name: "alpha.jsonl",
+                line: format!(r#"{{"value":{value}}}"#).into_bytes(),
+            });
+            if matches!(result, Err(JsonlTraceSendError::Full(_))) {
+                full += 1;
+            }
+        }
+
+        assert_eq!(full, 10_000);
+        assert!(
+            start.elapsed() < Duration::from_secs(1),
+            "full queue path should not block the emitter"
+        );
     }
 }

@@ -25,6 +25,25 @@ pub use self::{
     transaction_dependencies::TransactionDependencies,
 };
 
+/// A peer source for per-peer mempool download accounting.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub enum QueueSource {
+    /// A transaction advertisement from the legacy TCP transport.
+    LegacySocket(SocketAddr),
+
+    /// A transaction advertisement from an authenticated Zakura peer.
+    ///
+    /// Stored as the encoded Zakura peer id to keep this service-interface crate
+    /// independent from the `zebra-network` transport types.
+    Zakura(Vec<u8>),
+}
+
+impl From<SocketAddr> for QueueSource {
+    fn from(source: SocketAddr) -> Self {
+        Self::LegacySocket(source)
+    }
+}
+
 /// A mempool service request.
 ///
 /// Requests can query the current set of mempool transactions,
@@ -91,8 +110,8 @@ pub enum Request {
     QueueFromPeer {
         /// The transaction IDs advertised by the peer.
         txids: HashSet<UnminedTxId>,
-        /// The address of the peer that advertised them.
-        source: SocketAddr,
+        /// The peer that advertised them.
+        source: QueueSource,
     },
 
     /// Check for newly verified transactions.

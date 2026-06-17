@@ -39,6 +39,7 @@ fn connection_info_types_are_public() {
 
     let _connection_info = Arc::new(ConnectionInfo {
         connected_addr,
+        local: remote.clone(),
         remote,
         negotiated_version,
     });

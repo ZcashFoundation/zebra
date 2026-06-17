@@ -325,6 +325,7 @@ where
 
         let connection_info = Arc::new(ConnectionInfo {
             connected_addr: crate::peer::ConnectedAddr::Isolated,
+            local: remote.clone(),
             remote,
             negotiated_version,
         });

@@ -1,0 +1,77 @@
+# Lightweight Zakura dual-stack regtest e2e — a smoke test, deliberately small.
+#
+# Three zebrad nodes on a fresh Regtest chain. The key cost-saving choice: there
+# is NO in-container compilation. Each node runs the HOST-built `zebrad` binary
+# bind-mounted into a stock `debian:trixie-slim` (which already ships glibc 2.41,
+# libstdc++, and libgcc — everything the binary needs). The previous e2e did a
+# full `cargo build --release` per service, which is what exhausted disk/CPU.
+#
+# Build the binary once on the host, then bring the cluster up:
+#
+#   cargo build -p zebrad --bin zebrad          # debug is fine for regtest
+#   ZEBRAD_BIN=$(pwd)/target/debug/zebrad \
+#     docker compose -f docker/docker-compose.zakura-regtest-e2e.yml up -d
+#
+# Or just run docker/zakura-regtest-e2e/run.sh, which does all of the above and
+# asserts coexistence + propagation.
+#
+# Host networking is required: Regtest only accepts localhost initial peers
+# (zebra-network/src/config.rs: initial_peers filters to is_localhost), so the
+# nodes share 127.0.0.1 on distinct ports. State is ephemeral and traces/temp
+# live on tmpfs, so a run leaves nothing on disk. Per-node CPU/memory caps keep
+# the whole cluster well under the resources a single build would use.
+
+name: zakura-regtest-e2e
+
+x-zakura-node: &zakura-node
+  image: debian:trixie-slim
+  network_mode: host
+  restart: "no"
+  stop_grace_period: 5s
+  tmpfs:
+    - /tmp
+    - /traces
+  deploy:
+    resources:
+      limits:
+        cpus: "2"
+        memory: 1536m
+
+services:
+  zakura-node-1:
+    <<: *zakura-node
+    container_name: zakura-node-1
+    entrypoint: ["/usr/local/bin/zebrad", "--config", "/etc/zebrad/node1.toml", "start"]
+    volumes:
+      - ${ZEBRAD_BIN:-../target/debug/zebrad}:/usr/local/bin/zebrad:ro
+      - ./zakura-regtest-e2e/node1.toml:/etc/zebrad/node1.toml:ro
+
+  zakura-node-2:
+    <<: *zakura-node
+    container_name: zakura-node-2
+    depends_on:
+      - zakura-node-1
+    entrypoint: ["/usr/local/bin/zebrad", "--config", "/etc/zebrad/node2.toml", "start"]
+    volumes:
+      - ${ZEBRAD_BIN:-../target/debug/zebrad}:/usr/local/bin/zebrad:ro
+      - ./zakura-regtest-e2e/node2.toml:/etc/zebrad/node2.toml:ro
+
+  zakura-node-3:
+    <<: *zakura-node
+    container_name: zakura-node-3
+    depends_on:
+      - zakura-node-1
+    entrypoint: ["/usr/local/bin/zebrad", "--config", "/etc/zebrad/node3.toml", "start"]
+    volumes:
+      - ${ZEBRAD_BIN:-../target/debug/zebrad}:/usr/local/bin/zebrad:ro
+      - ./zakura-regtest-e2e/node3.toml:/etc/zebrad/node3.toml:ro
+
+  zakura-node-4:
+    <<: *zakura-node
+    container_name: zakura-node-4
+    depends_on:
+      - zakura-node-1
+    entrypoint: ["/usr/local/bin/zebrad", "--config", "/etc/zebrad/node4.toml", "start"]
+    volumes:
+      - ${ZEBRAD_BIN:-../target/debug/zebrad}:/usr/local/bin/zebrad:ro
+      - ./zakura-regtest-e2e/node4.toml:/etc/zebrad/node4.toml:ro

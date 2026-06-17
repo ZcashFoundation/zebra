@@ -86,6 +86,15 @@ type SemanticBlockVerifier = Buffer<
 type GossipedBlockDownloads =
     BlockDownloads<Timeout<BlockDownloadPeerSet>, Timeout<SemanticBlockVerifier>, State>;
 
+fn mempool_queue_source(source: zn::PeerSource) -> mempool::QueueSource {
+    match source {
+        zn::PeerSource::LegacySocket(addr) => mempool::QueueSource::LegacySocket(*addr),
+        zn::PeerSource::Zakura(peer_id) => {
+            mempool::QueueSource::Zakura(peer_id.as_bytes().to_vec())
+        }
+    }
+}
+
 /// The services used by the [`Inbound`] service.
 pub struct InboundSetupData {
     /// A shared list of peer addresses.
@@ -413,7 +422,7 @@ impl Service<zn::Request> for Inbound {
                     Ok(response)
                 }.boxed()
             }
-            zn::Request::BlocksByHash(hashes) => {
+            zn::Request::BlocksByHash(hashes) | zn::Request::BlocksByHashFrom { hashes, .. } => {
                 // We return an available or missing response to each inventory request,
                 // unless the request is empty, or it reaches a response limit.
                 if hashes.is_empty() {
@@ -463,7 +472,10 @@ impl Service<zn::Request> for Inbound {
                     Ok(zn::Response::Blocks(blocks))
                 }.boxed()
             }
-            zn::Request::TransactionsById(req_tx_ids) => {
+            zn::Request::TransactionsById(req_tx_ids)
+            | zn::Request::TransactionsByIdFrom {
+                ids: req_tx_ids, ..
+            } => {
                 // We return an available or missing response to each inventory request,
                 // unless the request is empty, or it reaches a response limit.
                 if req_tx_ids.is_empty() {
@@ -537,9 +549,9 @@ impl Service<zn::Request> for Inbound {
                 // mempool downloader can enforce a per-peer queue cap.
                 // See `GHSA-4fc2-h7jh-287c`.
                 let request = match advertiser {
-                    Some(peer_addr) => mempool::Request::QueueFromPeer {
+                    Some(source) => mempool::Request::QueueFromPeer {
                         txids: transactions,
-                        source: *peer_addr,
+                        source: mempool_queue_source(source),
                     },
                     None => mempool::Request::Queue(
                         transactions.into_iter().map(Into::into).collect(),

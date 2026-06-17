@@ -74,6 +74,7 @@ fn new_test_connection<A>() -> (
 
     let connection_info = ConnectionInfo {
         connected_addr: ConnectedAddr::Isolated,
+        local: remote.clone(),
         remote,
         negotiated_version: fake_version,
     };

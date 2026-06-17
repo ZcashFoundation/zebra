@@ -82,6 +82,169 @@ fn testnet_params_serialization_roundtrip() {
 }
 
 #[test]
+fn zakura_node_secret_key_is_redacted_from_debug_and_serialization() {
+    let _init_guard = zebra_test::init();
+
+    let secret = "not-a-real-iroh-secret-but-sensitive";
+    let config: Config = toml::from_str(&format!("zakura_node_secret_key = '{secret}'")).unwrap();
+
+    assert_eq!(
+        config
+            .zakura_node_secret_key
+            .as_ref()
+            .expect("test config should parse the Zakura secret key")
+            .expose_secret(),
+        secret
+    );
+
+    let debug = format!("{config:?}");
+    assert!(debug.contains("zakura_node_secret_key"));
+    assert!(debug.contains("[redacted]"));
+    assert!(!debug.contains(secret));
+
+    let serialized = toml::to_string(&config).unwrap();
+    assert!(!serialized.contains("zakura_node_secret_key"));
+    assert!(!serialized.contains(secret));
+}
+
+#[test]
+fn p2p_protocol_flags_default_on_and_roundtrip() {
+    let _init_guard = zebra_test::init();
+
+    assert!(Config::default().v2_p2p);
+    assert!(Config::default().legacy_p2p);
+    assert!(Config::default().zakura.bootstrap_peers.is_empty());
+
+    let config: Config = toml::from_str(
+        r#"
+        v2_p2p = false
+        legacy_p2p = false
+        "#,
+    )
+    .unwrap();
+    assert!(!config.v2_p2p);
+    assert!(!config.legacy_p2p);
+
+    let serialized = toml::to_string(&config).unwrap();
+    assert!(serialized.contains("v2_p2p = false"));
+    assert!(serialized.contains("legacy_p2p = false"));
+
+    let deserialized: Config = toml::from_str(&serialized).unwrap();
+    assert_eq!(config, deserialized);
+}
+
+#[test]
+fn p2p_v2_old_enable_config_alias_still_parses() {
+    let _init_guard = zebra_test::init();
+
+    let config: Config = toml::from_str("enable_p2p_v2 = false").unwrap();
+
+    assert!(!config.v2_p2p);
+    assert!(config.legacy_p2p);
+}
+
+#[test]
+fn p2p_v2_old_config_without_zakura_fields_uses_safe_defaults() {
+    let _init_guard = zebra_test::init();
+
+    let config: Config = toml::from_str(
+        r#"
+        listen_addr = "127.0.0.1:8233"
+        peerset_initial_target_size = 25
+        "#,
+    )
+    .unwrap();
+
+    assert_eq!(config.listen_addr.to_string(), "127.0.0.1:8233");
+    assert!(config.v2_p2p);
+    assert!(config.legacy_p2p);
+    assert!(config.zakura.bootstrap_peers.is_empty());
+    assert!(config.zakura.max_connections > 0);
+    assert!(config.zakura.max_pending_handshakes > 0);
+}
+
+#[test]
+fn p2p_v2_unknown_future_config_fields_are_rejected() {
+    let _init_guard = zebra_test::init();
+
+    let top_level = toml::from_str::<Config>("future_zakura_field = true")
+        .expect_err("deny_unknown_fields rejects unknown top-level fields");
+    assert!(
+        top_level.to_string().contains("unknown field"),
+        "unexpected error for unknown top-level field: {top_level}",
+    );
+
+    let nested = toml::from_str::<Config>(
+        r#"
+        [zakura]
+        future_field = true
+        "#,
+    )
+    .expect_err("deny_unknown_fields rejects unknown Zakura fields");
+    assert!(
+        nested.to_string().contains("unknown field"),
+        "unexpected error for unknown nested field: {nested}",
+    );
+}
+
+#[test]
+fn p2p_v2_config_roundtrip_keeps_dconfig_zakura_fields() {
+    let _init_guard = zebra_test::init();
+
+    let config: Config = toml::from_str(
+        r#"
+        v2_p2p = true
+        legacy_p2p = true
+
+        [zakura]
+        bootstrap_peers = ["ae58ff8833241ac82d6ff7611046ed67b5072d142c588d0063e942d9a75502b6@127.0.0.1:8233"]
+        max_connections = 7
+        max_pending_handshakes = 3
+        stream_open_rate_per_second = 11
+        message_rate_per_second = 13
+        trace_dir = "target/zakura-test-traces"
+        "#,
+    )
+    .unwrap();
+
+    let serialized = toml::to_string(&config).unwrap();
+    assert!(serialized.contains("v2_p2p = true"));
+    assert!(serialized.contains("legacy_p2p = true"));
+    assert!(serialized.contains("[zakura]"));
+    assert!(serialized.contains("bootstrap_peers"));
+    assert!(serialized.contains("max_connections = 7"));
+    assert!(serialized.contains("trace_dir = \"target/zakura-test-traces\""));
+    assert_eq!(toml::from_str::<Config>(&serialized).unwrap(), config);
+}
+
+#[test]
+fn zakura_bootstrap_peers_parse_in_nested_config() {
+    let _init_guard = zebra_test::init();
+
+    let config: Config = toml::from_str(
+        r#"
+        v2_p2p = true
+
+        [zakura]
+        bootstrap_peers = ["ae58ff8833241ac82d6ff7611046ed67b5072d142c588d0063e942d9a75502b6@127.0.0.1:8233"]
+        max_connections = 4
+        max_pending_handshakes = 2
+        stream_open_rate_per_second = 3
+        message_rate_per_second = 5
+        "#,
+    )
+    .unwrap();
+
+    assert!(config.v2_p2p);
+    assert!(config.legacy_p2p);
+    assert_eq!(config.zakura.bootstrap_peers.len(), 1);
+    assert_eq!(config.zakura.max_connections, 4);
+    assert_eq!(config.zakura.max_pending_handshakes, 2);
+    assert_eq!(config.zakura.stream_open_rate_per_second, 3);
+    assert_eq!(config.zakura.message_rate_per_second, 5);
+}
+
+#[test]
 fn default_config_uses_ipv6() {
     let _init_guard = zebra_test::init();
     let config = Config::default();

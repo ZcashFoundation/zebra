@@ -1398,6 +1398,7 @@ async fn add_initial_peers_deadlock() {
         nil_inbound_service,
         NoChainTip,
         "Test user agent".to_string(),
+        PeerServices::NODE_NETWORK,
     );
 
     tokio::time::timeout(TIME_LIMIT, init_future)
@@ -1427,6 +1428,7 @@ async fn local_listener_port_with(listen_addr: SocketAddr, network: Network) {
         inbound_service,
         NoChainTip,
         "Test user agent".to_string(),
+        PeerServices::NODE_NETWORK,
     )
     .await;
     let local_listener = address_book
@@ -1493,6 +1495,7 @@ where
         inbound_service,
         NoChainTip,
         "Test user agent".to_string(),
+        PeerServices::NODE_NETWORK,
     )
     .await;
 

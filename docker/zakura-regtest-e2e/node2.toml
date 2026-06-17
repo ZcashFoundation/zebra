@@ -1,0 +1,46 @@
+# Zakura regtest e2e — node 2 (PURE Zakura-only: no legacy TCP stack at all).
+#
+# This is the from-scratch zakura-only node. It has no legacy listener and no
+# legacy initial peers; it reaches the network solely by dialing node 1's Zakura
+# QUIC endpoint from `zakura.bootstrap_peers`. Block gossip and block fetches
+# therefore flow exclusively over the Zakura legacy-gossip adapter, so a block
+# reaching this node proves pure-Zakura propagation.
+
+[network]
+network = "Regtest"
+# Inert with legacy_p2p = false (no TCP listener is opened), but the field is
+# required, so keep it on a distinct loopback port for clarity.
+listen_addr = "127.0.0.1:18333"
+v2_p2p = true
+# No legacy stack: no TCP listener, no outbound crawler, no legacy peers.
+legacy_p2p = false
+cache_dir = false
+# Pure Zakura: discover nothing over legacy; only the Zakura bootstrap peer below.
+initial_testnet_peers = []
+# Host networking puts every node on 127.0.0.1; raise the per-IP cap above 1.
+max_connections_per_ip = 10
+
+[network.zakura]
+# Dial node 1's stable Zakura endpoint (its fixed node id @ its fixed QUIC port).
+# This is the only way this node joins the network.
+bootstrap_peers = [
+  "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c@127.0.0.1:18234",
+]
+trace_dir = "/traces/node2"
+
+[state]
+ephemeral = true
+
+[rpc]
+listen_addr = "127.0.0.1:18332"
+enable_cookie_auth = false
+
+[metrics]
+endpoint_addr = "127.0.0.1:19002"
+
+[mining]
+internal_miner = false
+miner_address = "tmJymvcUCn1ctbghvTJpXBwHiMEB8P6wxNV"
+
+[tracing]
+filter = "info,zebra_network::zakura=debug,zebrad::components::sync=debug,zebrad::components::inbound=debug"

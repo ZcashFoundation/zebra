@@ -1,0 +1,49 @@
+# Zakura regtest e2e — node 1 (bootstrap, dual-stack: legacy TCP + Zakura P2P-v2).
+#
+# Run with host networking so Regtest's localhost-only initial-peer filter
+# (zebra-network/src/config.rs: initial_peers) accepts 127.0.0.1 peers.
+
+[network]
+network = "Regtest"
+listen_addr = "127.0.0.1:18233"
+# Dual stack: legacy TCP listener AND the Zakura QUIC endpoint.
+v2_p2p = true
+legacy_p2p = true
+# No peer disk cache; this node is the bootstrap seed.
+cache_dir = false
+initial_testnet_peers = []
+# Host networking puts every node on 127.0.0.1, so the seed must accept more than
+# one connection per IP (default 1) to peer with all the other nodes.
+max_connections_per_ip = 10
+# Fixed iroh identity so the pure-Zakura node (node2) can list this seed in its
+# bootstrap_peers with a known node id. The matching node id for this key is
+# 8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c (regenerate by
+# printing SecretKey::from_str(key).public() if this key ever changes).
+zakura_node_secret_key = "0101010101010101010101010101010101010101010101010101010101010101"
+
+[network.zakura]
+# Stable Zakura QUIC port so node2 can dial this seed at a known address; without
+# it iroh picks an ephemeral port and bootstrap_peers cannot target this node.
+listen_addr = "127.0.0.1:18234"
+# JSONL traces let the e2e script assert that the legacy->Zakura upgrade ran.
+trace_dir = "/traces/node1"
+
+[state]
+# Fresh in-memory chain every run — no disk growth.
+ephemeral = true
+
+[rpc]
+listen_addr = "127.0.0.1:18232"
+# The e2e script calls RPC directly over loopback.
+enable_cookie_auth = false
+
+[metrics]
+endpoint_addr = "127.0.0.1:19001"
+
+[mining]
+internal_miner = false
+# Regtest uses testnet address encoding; needed so `generate` can build coinbases.
+miner_address = "tmJymvcUCn1ctbghvTJpXBwHiMEB8P6wxNV"
+
+[tracing]
+filter = "info,zebra_network::zakura=debug"

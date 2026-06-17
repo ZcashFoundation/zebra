@@ -1,0 +1,37 @@
+# Zakura regtest e2e — node 4 (dual-stack: legacy TCP + Zakura P2P-v2).
+#
+# Dials node 1 over legacy TCP; because both advertise the P2P-v2 service bit,
+# the connection is upgraded to Zakura and the legacy connection is dropped.
+# This node preserves coverage of the legacy->Zakura upgrade path now that node2
+# is pure Zakura-only and node3 is legacy-only. Block gossip to this node flows
+# over the Zakura legacy-gossip adapter after the upgrade.
+
+[network]
+network = "Regtest"
+listen_addr = "127.0.0.1:18533"
+v2_p2p = true
+legacy_p2p = true
+cache_dir = false
+initial_testnet_peers = ["127.0.0.1:18233"]
+# Host networking puts every node on 127.0.0.1; raise the per-IP cap above 1.
+max_connections_per_ip = 10
+
+[network.zakura]
+trace_dir = "/traces/node4"
+
+[state]
+ephemeral = true
+
+[rpc]
+listen_addr = "127.0.0.1:18532"
+enable_cookie_auth = false
+
+[metrics]
+endpoint_addr = "127.0.0.1:19004"
+
+[mining]
+internal_miner = false
+miner_address = "tmJymvcUCn1ctbghvTJpXBwHiMEB8P6wxNV"
+
+[tracing]
+filter = "info,zebra_network::zakura=debug,zebrad::components::sync=debug,zebrad::components::inbound=debug"

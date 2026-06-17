@@ -270,15 +270,18 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 #v1.16.1
         with:
           cache-on-failure: true
-      - name: Check ${{ matrix.checks }} with features ${{ matrix.features }}
-        uses: EmbarkStudios/cargo-deny-action@6c8f9facfa5047ec02d8485b6bf52b587b7777d1 #v2.0.18
+      # Install cargo-deny from a prebuilt binary instead of the EmbarkStudios
+      # Docker action: that action rebuilds a container from a Docker Hub base
+      # image on every run, which intermittently fails with registry timeouts.
+      - uses: taiki-e/install-action@65851e10cd6c377f11a60e600abc07cb08643468 #v2.79.3
         with:
-          # --all-features spuriously activates openssl, but we want to ban that dependency in
-          # all of zebrad's production features for security reasons. But the --all-features job is
-          # the only job that gives accurate "skip tree root was not found" warnings.
-          # In other jobs, we expect some of these warnings, due to disabled features.
-          command: check ${{ matrix.checks }} ${{ matrix.features == '--all-features' && '--allow banned' || '--allow unmatched-skip-root' }}
-          arguments: --workspace ${{ matrix.features }}
+          tool: cargo-deny@0.19.5
+      - name: Check ${{ matrix.checks }} with features ${{ matrix.features }}
+        # --all-features spuriously activates openssl, but we want to ban that dependency in
+        # all of zebrad's production features for security reasons. But the --all-features job is
+        # the only job that gives accurate "skip tree root was not found" warnings.
+        # In other jobs, we expect some of these warnings, due to disabled features.
+        run: cargo deny --workspace ${{ matrix.features }} check ${{ matrix.checks }} ${{ matrix.features == '--all-features' && '--allow banned' || '--allow unmatched-skip-root' }}
 
   vet:
     name: cargo-vet check

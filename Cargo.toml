@@ -86,6 +86,7 @@ humantime = "2.2"
 humantime-serde = "1.1"
 hyper = "1.6"
 hyper-util = "0.1.11"
+iroh = { version = "=0.92.0", default-features = false }
 indexmap = "2.8"
 indicatif = "0.17"
 inferno = { version = "0.12", default-features = false }

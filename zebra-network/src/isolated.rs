@@ -86,6 +86,7 @@ where
 {
     let config = Config {
         network: network.clone(),
+        v2_p2p: false,
         ..Config::default()
     };
 

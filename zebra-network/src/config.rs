@@ -2,6 +2,7 @@
 
 use std::{
     collections::HashSet,
+    fmt,
     io::{self, ErrorKind},
     net::{IpAddr, SocketAddr},
     sync::Arc,
@@ -9,7 +10,7 @@ use std::{
 };
 
 use indexmap::IndexSet;
-use serde::{de, Deserialize, Deserializer};
+use serde::{de, Deserialize, Deserializer, Serializer};
 use tokio::fs;
 
 use tracing::Span;
@@ -32,6 +33,7 @@ use crate::{
         MAX_PEER_DISK_CACHE_SIZE, OUTBOUND_PEER_LIMIT_MULTIPLIER,
     },
     protocol::external::{canonical_peer_addr, canonical_socket_addr},
+    zakura::ZakuraConfig,
     BoxError, PeerSocketAddr,
 };
 
@@ -41,6 +43,36 @@ mod cache_dir;
 mod tests;
 
 pub use cache_dir::CacheDir;
+
+/// A sensitive iroh secret-key override for Zakura P2P node identity.
+#[derive(Clone, Deserialize, Eq, PartialEq)]
+#[serde(transparent)]
+pub struct ZakuraNodeSecretKey(String);
+
+impl ZakuraNodeSecretKey {
+    /// Returns the secret-key override.
+    ///
+    /// Callers should only expose this value to iroh identity construction or
+    /// controlled persistence paths.
+    pub fn expose_secret(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for ZakuraNodeSecretKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("ZakuraNodeSecretKey([redacted])")
+    }
+}
+
+impl serde::Serialize for ZakuraNodeSecretKey {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str("[redacted]")
+    }
+}
 
 /// The number of times Zebra will retry each initial peer's DNS resolution,
 /// before checking if any other initial peers have returned addresses.
@@ -153,6 +185,39 @@ pub struct Config {
     /// Previous peer lists are automatically loaded at startup, and used to populate the
     /// initial peer set and address book.
     pub cache_dir: CacheDir,
+
+    /// An optional persistent iroh secret key for Zakura P2P identity.
+    ///
+    /// This is reserved for Zakura endpoint construction. If unset, a future Zakura endpoint
+    /// implementation will generate an ed25519 iroh [`SecretKey`](iroh::SecretKey) on first use
+    /// and persist it under [`cache_dir`](Self::cache_dir), beside the peer cache.
+    ///
+    /// This value is not used by the legacy TCP peer set.
+    pub zakura_node_secret_key: Option<ZakuraNodeSecretKey>,
+
+    /// Enable the experimental Zakura P2P v2 endpoint, capability advertisement, and upgrade hook.
+    ///
+    /// When enabled, Zebra starts a native Zakura endpoint, advertises the P2P v2 service bit during
+    /// the legacy Zcash handshake, and routes mutually capable peers to the Zakura upgrade hook
+    /// before constructing a legacy peer connection if [`legacy_p2p`](Self::legacy_p2p) is also
+    /// enabled.
+    ///
+    /// Until the Zakura supervisor and endpoint connector support legacy upgrades, mutually
+    /// capable peers continue on the legacy Zebra path after a temporary Zakura upgrade rejection.
+    pub v2_p2p: bool,
+
+    /// Enable the legacy TCP Zcash P2P listener, initial peer dialing, and peer crawler.
+    ///
+    /// This is enabled by default to keep the current Zebra networking behavior. Disable it to run
+    /// only the native Zakura P2P v2 endpoint when [`v2_p2p`](Self::v2_p2p) is enabled.
+    pub legacy_p2p: bool,
+
+    /// Native Zakura endpoint, connection, and bootstrap settings.
+    ///
+    /// When `v2_p2p` is false, these settings are parsed but no iroh endpoint is started. The total
+    /// intended connection budget is roughly `peerset_initial_target_size + zakura.max_connections`;
+    /// tune both together.
+    pub zakura: ZakuraConfig,
 
     /// The initial target size for the peer set.
     ///
@@ -572,6 +637,10 @@ impl Default for Config {
             initial_mainnet_peers: mainnet_peers,
             initial_testnet_peers: testnet_peers,
             cache_dir: CacheDir::default(),
+            zakura_node_secret_key: None,
+            v2_p2p: true,
+            legacy_p2p: true,
+            zakura: ZakuraConfig::default(),
             crawl_new_peer_interval: DEFAULT_CRAWL_NEW_PEER_INTERVAL,
 
             // # Security
@@ -648,6 +717,12 @@ struct DConfig {
     initial_mainnet_peers: IndexSet<String>,
     initial_testnet_peers: IndexSet<String>,
     cache_dir: CacheDir,
+    #[serde(default, skip_serializing)]
+    zakura_node_secret_key: Option<ZakuraNodeSecretKey>,
+    #[serde(alias = "enable_p2p_v2")]
+    v2_p2p: bool,
+    legacy_p2p: bool,
+    zakura: ZakuraConfig,
     peerset_initial_target_size: usize,
     #[serde(alias = "new_peer_interval", with = "humantime_serde")]
     crawl_new_peer_interval: Duration,
@@ -665,6 +740,10 @@ impl Default for DConfig {
             initial_mainnet_peers: config.initial_mainnet_peers,
             initial_testnet_peers: config.initial_testnet_peers,
             cache_dir: config.cache_dir,
+            zakura_node_secret_key: config.zakura_node_secret_key,
+            v2_p2p: config.v2_p2p,
+            legacy_p2p: config.legacy_p2p,
+            zakura: config.zakura,
             peerset_initial_target_size: config.peerset_initial_target_size,
             crawl_new_peer_interval: config.crawl_new_peer_interval,
             max_connections_per_ip: Some(config.max_connections_per_ip),
@@ -720,6 +799,10 @@ impl From<Config> for DConfig {
             initial_mainnet_peers,
             initial_testnet_peers,
             cache_dir,
+            zakura_node_secret_key,
+            v2_p2p,
+            legacy_p2p,
+            zakura,
             peerset_initial_target_size,
             crawl_new_peer_interval,
             max_connections_per_ip,
@@ -754,6 +837,10 @@ impl From<Config> for DConfig {
             initial_mainnet_peers,
             initial_testnet_peers,
             cache_dir,
+            zakura_node_secret_key,
+            v2_p2p,
+            legacy_p2p,
+            zakura,
             peerset_initial_target_size,
             crawl_new_peer_interval,
             max_connections_per_ip: Some(max_connections_per_ip),
@@ -774,6 +861,10 @@ impl<'de> Deserialize<'de> for Config {
             initial_mainnet_peers,
             initial_testnet_peers,
             cache_dir,
+            zakura_node_secret_key,
+            v2_p2p,
+            legacy_p2p,
+            zakura,
             peerset_initial_target_size,
             crawl_new_peer_interval,
             max_connections_per_ip,
@@ -849,6 +940,10 @@ impl<'de> Deserialize<'de> for Config {
             initial_mainnet_peers,
             initial_testnet_peers,
             cache_dir,
+            zakura_node_secret_key,
+            v2_p2p,
+            legacy_p2p,
+            zakura,
             peerset_initial_target_size,
             crawl_new_peer_interval,
             max_connections_per_ip,

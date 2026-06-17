@@ -157,6 +157,7 @@ impl Encoder<Message> for Codec {
             Ping { .. } => b"ping\0\0\0\0\0\0\0\0",
             Pong { .. } => b"pong\0\0\0\0\0\0\0\0",
             Reject { .. } => b"reject\0\0\0\0\0\0",
+            P2pV2Upgrade(_) => crate::zakura::P2P_V2_UPGRADE_COMMAND_BYTES,
             Addr { .. } => b"addr\0\0\0\0\0\0\0\0",
             GetAddr => b"getaddr\0\0\0\0\0",
             Block { .. } => b"block\0\0\0\0\0\0\0",
@@ -285,6 +286,14 @@ impl Codec {
                     writer.write_all(data)?;
                 }
             }
+            Message::P2pV2Upgrade(payload) => {
+                if payload.len() > crate::zakura::MAX_PRELUDE_PAYLOAD_BYTES {
+                    return Err(Error::Parse(
+                        "Zakura p2pv2up payload exceeds the hard prelude cap",
+                    ));
+                }
+                writer.write_all(payload)?;
+            }
             Message::Addr(addrs) => {
                 assert!(
                     addrs.len() <= constants::MAX_ADDRS_IN_MESSAGE,
@@ -410,6 +419,11 @@ impl Decoder for Codec {
                 if body_len > self.builder.max_len {
                     return Err(Parse("body length exceeded maximum size"));
                 }
+                if command == *crate::zakura::P2P_V2_UPGRADE_COMMAND_BYTES
+                    && body_len > crate::zakura::MAX_PRELUDE_PAYLOAD_BYTES
+                {
+                    return Err(Parse("Zakura p2pv2up payload exceeds the hard prelude cap"));
+                }
 
                 if let Some(label) = self.builder.metrics_addr_label.clone() {
                     metrics::counter!("zcash.net.in.bytes.total", "addr" =>  label)
@@ -458,6 +472,9 @@ impl Decoder for Codec {
                     b"ping\0\0\0\0\0\0\0\0" => self.read_ping(&mut body_reader),
                     b"pong\0\0\0\0\0\0\0\0" => self.read_pong(&mut body_reader),
                     b"reject\0\0\0\0\0\0" => self.read_reject(&mut body_reader),
+                    crate::zakura::P2P_V2_UPGRADE_COMMAND_BYTES => {
+                        self.read_p2p_v2_upgrade(&mut body_reader, body_len)
+                    }
                     b"addr\0\0\0\0\0\0\0\0" => self.read_addr(&mut body_reader),
                     b"addrv2\0\0\0\0\0\0" => self.read_addrv2(&mut body_reader),
                     b"getaddr\0\0\0\0\0" => self.read_getaddr(&mut body_reader),
@@ -624,6 +641,22 @@ impl Codec {
             // ignore any trailing bytes.)
             data: reader.read_32_bytes().ok(),
         })
+    }
+
+    fn read_p2p_v2_upgrade<R: Read>(
+        &self,
+        mut reader: R,
+        body_len: usize,
+    ) -> Result<Message, Error> {
+        if body_len > crate::zakura::MAX_PRELUDE_PAYLOAD_BYTES {
+            return Err(Error::Parse(
+                "Zakura p2pv2up payload exceeds the hard prelude cap",
+            ));
+        }
+
+        let mut payload = vec![0; body_len];
+        reader.read_exact(&mut payload)?;
+        Ok(Message::P2pV2Upgrade(payload))
     }
 
     /// Deserialize an `addr` (v1) message into a list of `MetaAddr`s.

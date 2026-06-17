@@ -5,6 +5,75 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Added `zebra_network::zakura`, a default-off iroh scaffold that exposes a
+  relay/discovery-off endpoint builder and reserves the persistent Zakura iroh
+  node secret-key path and config field.
+- Added `PeerServices::NODE_P2P_V2`, the default-on `v2_p2p` and `legacy_p2p`
+  network configs, and a neutral legacy-handshake upgrade hook for mutually
+  capable Zakura peers.
+- Added bounded Zakura P2P v2 upgrade prelude and control-handshake wire types,
+  including transcript binding, native-vs-upgraded control validation, and
+  duplicate-peer handling scaffolding.
+- Added the default-off Zakura iroh protocol handler, explicit QUIC transport
+  limits, native bootstrap peer config, and bounded admission/stream/message
+  limit enforcement.
+- Added the `zakura-testkit` feature with deterministic loopback Iroh endpoint
+  tooling, in-process Zakura node/cluster harnesses, a bounded inbound recorder,
+  and raw hostile-peer helpers for protocol tests.
+- Wired the legacy-gossip adapter into the running node: when `v2_p2p` is
+  enabled, `init` installs `LegacyGossipSink` on the Zakura endpoint (replacing
+  the drop sink) and wraps the returned peer set in `ZakuraDualStackService`, so
+  locally originated gossip and inventory fetches fan out across both the legacy
+  TCP peer set and Zakura. A v2-capable node now coexists with legacy-only peers
+  (legacy traffic over TCP, mutually capable peers also gossip over Zakura).
+- Implemented the legacy->Zakura upgrade: after a mutually `NODE_P2P_V2`-capable
+  legacy `version`/`verack`, the peers exchange a bounded `P2pV2Upgrade` prelude
+  over the legacy TCP stream to learn each other's iroh node address, and the
+  TCP initiator dials the responder over QUIC. The connection is then registered
+  with the supervisor (incrementing `zakura.p2p.handshake.upgraded`) and the
+  legacy stream is dropped, so mutually capable peers move their gossip and
+  inventory traffic onto Zakura with no configured bootstrap peers. Any neutral
+  problem (no live endpoint, malformed/rejected prelude) falls back to legacy.
+
+### Changed
+
+- `zakura::spawn_zakura_endpoint` now takes an inbound-sink factory
+  (`impl FnOnce(ZakuraSupervisorHandle) -> Arc<dyn InboundSink>`) so callers can
+  install a sink backed by the endpoint's supervisor. Pass a factory returning
+  `Arc::new(DropInboundSink)` to keep the previous drop-everything behavior.
+- `ZakuraHandshakeConnector` is now backed by the live `ZakuraEndpoint` (it reads
+  the local dial hints and dials the peer over QUIC) rather than carrying the
+  placeholder `ZakuraUpgradeRequest`/`upgrade_outcome` hook, which has been
+  removed now that the upgrade is implemented.
+- `ZakuraDualStackService` now routes every request the Zakura adapter can serve
+  — chain-sync discovery (`FindBlocks`/`FindHeaders`) and mempool data
+  (`MempoolTransactionIds`/`PushTransaction`), in addition to the existing
+  inventory fetches — through the legacy-first-then-Zakura fallback path. These
+  were previously passed through to the legacy peer set only, so a node whose
+  only peer was upgraded to Zakura could never obtain tips, fetch blocks, or push
+  transactions (its syncer requests timed out against the empty legacy peer set).
+- `ZakuraDualStackService` inventory fetches now bound the legacy attempt before
+  falling back to Zakura, so a node whose only peer is over Zakura (its legacy
+  peers were upgraded) no longer blocks every fetch on the empty legacy peer set.
+- Raised `DEFAULT_ZAKURA_QUIC_IDLE_TIMEOUT` from 30s to 150s. The 30s
+  application-idle reaper tore down healthy gossip connections between blocks
+  (which can be minutes apart) and forced constant re-dials.
+
+### Fixed
+
+- A peer upgraded from legacy TCP to Zakura is no longer re-dialed over legacy.
+  The upgrade drops the legacy connection, so nothing refreshed the peer's
+  `Responded` liveness; once it aged past `MIN_PEER_RECONNECTION_DELAY` the
+  outbound crawler reconnected to it, re-running the upgrade and churning the
+  QUIC connection. The handshake now keeps the upgraded peer's address-book
+  entry live (mirroring the legacy heartbeat) for as long as the Zakura
+  connection is registered with the supervisor, and stops once it deregisters so
+  a genuinely gone peer is reconnected normally.
+
 ## [8.0.0] - 2026-06-02
 
 ### Changed

@@ -7,7 +7,7 @@ use thiserror::Error;
 use tracing_error::TracedError;
 use zebra_chain::serialization::SerializationError;
 
-use crate::protocol::external::InventoryHash;
+use crate::{protocol::external::InventoryHash, zakura::ZakuraUpgradeError};
 
 /// A wrapper around `Arc<PeerError>` that implements `Error`.
 ///
@@ -305,6 +305,22 @@ pub enum HandshakeError {
     /// Sending or receiving a message timed out.
     #[error("Timeout when sending or receiving a message to peer")]
     Timeout,
+    /// A mutually P2P-v2-capable peer was routed to the Zakura upgrade path.
+    #[error("Zakura P2P v2 upgrade selected")]
+    ZakuraUpgradeSelected,
+    /// The Zakura upgrade hook returned an error.
+    #[error("Zakura P2P v2 upgrade failed: {0}")]
+    ZakuraUpgrade(#[from] ZakuraUpgradeError),
+}
+
+impl HandshakeError {
+    /// Returns true if this error is an intentional neutral disconnect rather than peer failure.
+    pub fn is_neutral_disconnect(&self) -> bool {
+        matches!(
+            self,
+            HandshakeError::ZakuraUpgradeSelected | HandshakeError::ZakuraUpgrade(_)
+        )
+    }
 }
 
 impl From<tokio::time::error::Elapsed> for HandshakeError {

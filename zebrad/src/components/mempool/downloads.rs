@@ -27,7 +27,6 @@
 //! [`Mempool::poll_ready`]: super::Mempool::poll_ready
 use std::{
     collections::{HashMap, HashSet},
-    net::SocketAddr,
     pin::Pin,
     task::{Context, Poll},
     time::Duration,
@@ -52,7 +51,7 @@ use zebra_chain::{
 };
 use zebra_consensus::transaction as tx;
 use zebra_network::{self as zn, PeerSocketAddr};
-use zebra_node_services::mempool::Gossip;
+use zebra_node_services::mempool::{Gossip, QueueSource};
 use zebra_state::{self as zs, CloneError};
 
 use crate::components::{
@@ -63,6 +62,15 @@ use crate::components::{
 use super::MempoolError;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
+
+fn peer_source_from_queue_source(source: &QueueSource) -> Option<zn::PeerSource> {
+    match source {
+        QueueSource::LegacySocket(_) => None,
+        QueueSource::Zakura(peer_id) => zn::zakura::ZakuraPeerId::new(peer_id.clone())
+            .ok()
+            .map(zn::PeerSource::Zakura),
+    }
+}
 
 /// Controls how long we wait for a transaction download request to complete.
 ///
@@ -194,7 +202,7 @@ where
         (
             oneshot::Sender<CancelDownloadAndVerify>,
             Gossip,
-            Option<SocketAddr>,
+            Option<QueueSource>,
         ),
     >,
 
@@ -203,7 +211,7 @@ where
     /// Invariant: a peer is present here iff some entry in [`Self::cancel_handles`]
     /// has it as the third tuple element. Enforces
     /// [`MAX_INBOUND_CONCURRENCY_PER_PEER`]. See `GHSA-4fc2-h7jh-287c`.
-    pending_per_peer: HashMap<SocketAddr, usize>,
+    pending_per_peer: HashMap<QueueSource, usize>,
 }
 
 impl<ZN, ZV, ZS> Stream for Downloads<ZN, ZV, ZS>
@@ -323,7 +331,7 @@ where
     pub fn download_if_needed_and_verify(
         &mut self,
         gossiped_tx: Gossip,
-        source: Option<SocketAddr>,
+        source: Option<QueueSource>,
         mut rsp_tx: Option<oneshot::Sender<Result<(), BoxError>>>,
     ) -> Result<(), MempoolError> {
         let txid = gossiped_tx.id();
@@ -356,8 +364,8 @@ where
 
         // Per-peer cap: a single advertising peer cannot saturate the queue
         // with attacker-supplied fake txids. See `GHSA-4fc2-h7jh-287c`.
-        if let Some(source) = source {
-            let count = self.pending_per_peer.get(&source).copied().unwrap_or(0);
+        if let Some(source) = &source {
+            let count = self.pending_per_peer.get(source).copied().unwrap_or(0);
             if count >= MAX_INBOUND_CONCURRENCY_PER_PEER {
                 debug!(
                     ?txid,
@@ -376,6 +384,7 @@ where
         let network = self.network.clone();
         let verifier = self.verifier.clone();
         let mut state = self.state.clone();
+        let download_source = source.as_ref().and_then(peer_source_from_queue_source);
 
         let gossiped_tx_req = gossiped_tx.clone();
 
@@ -400,7 +409,14 @@ where
 
             let (tx, advertiser_addr) = match gossiped_tx {
                 Gossip::Id(txid) => {
-                    let req = zn::Request::TransactionsById(std::iter::once(txid).collect());
+                    let request_ids = std::iter::once(txid).collect();
+                    let req = match download_source {
+                        Some(source) => zn::Request::TransactionsByIdFrom {
+                            ids: request_ids,
+                            source,
+                        },
+                        None => zn::Request::TransactionsById(request_ids),
+                    };
 
                     let tx = match network
                         .oneshot(req)
@@ -519,17 +535,17 @@ where
         });
 
         self.pending.push(task);
+        if let Some(source) = &source {
+            // The per-peer cap check above ensures this can't exceed
+            // `MAX_INBOUND_CONCURRENCY_PER_PEER`.
+            *self.pending_per_peer.entry(source.clone()).or_insert(0) += 1;
+        }
         assert!(
             self.cancel_handles
                 .insert(txid, (cancel_tx, gossiped_tx_req, source))
                 .is_none(),
             "transactions are only queued once"
         );
-        if let Some(source) = source {
-            // The per-peer cap check above ensures this can't exceed
-            // `MAX_INBOUND_CONCURRENCY_PER_PEER`.
-            *self.pending_per_peer.entry(source).or_insert(0) += 1;
-        }
 
         debug!(
             ?txid,
@@ -584,7 +600,7 @@ where
 
     /// Decrement the per-peer pending count for `source`, removing the entry
     /// when it reaches zero.
-    fn release_peer_slot(pending_per_peer: &mut HashMap<SocketAddr, usize>, source: SocketAddr) {
+    fn release_peer_slot(pending_per_peer: &mut HashMap<QueueSource, usize>, source: QueueSource) {
         if let Some(count) = pending_per_peer.get_mut(&source) {
             *count = count.saturating_sub(1);
             if *count == 0 {
@@ -643,5 +659,129 @@ where
         self.cancel_all();
 
         metrics::gauge!("mempool.currently.queued.transactions").set(0 as f64);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::StreamExt as _;
+    use std::future;
+    use tower::{service_fn, util::BoxCloneService};
+
+    type PendingNetwork = BoxCloneService<zn::Request, zn::Response, BoxError>;
+    type PendingVerifier = BoxCloneService<tx::Request, tx::Response, BoxError>;
+    type PendingState = BoxCloneService<zs::Request, zs::Response, BoxError>;
+
+    fn tx_id(index: u64) -> UnminedTxId {
+        let mut bytes = [0; 32];
+        bytes[..8].copy_from_slice(&index.to_le_bytes());
+        UnminedTxId::from_legacy_id(transaction::Hash(bytes))
+    }
+
+    fn pending_downloads() -> Downloads<PendingNetwork, PendingVerifier, PendingState> {
+        Downloads::new(
+            BoxCloneService::new(service_fn(|_request| {
+                future::pending::<Result<zn::Response, BoxError>>()
+            })),
+            BoxCloneService::new(service_fn(|_request| {
+                future::pending::<Result<tx::Response, BoxError>>()
+            })),
+            BoxCloneService::new(service_fn(|_request| {
+                future::pending::<Result<zs::Response, BoxError>>()
+            })),
+        )
+    }
+
+    #[tokio::test]
+    async fn zakura_queue_source_is_counted_by_per_peer_cap() {
+        let mut downloads = pending_downloads();
+        let zakura_source = QueueSource::Zakura(vec![7; 32]);
+
+        for index in 0..MAX_INBOUND_CONCURRENCY_PER_PEER {
+            downloads
+                .download_if_needed_and_verify(
+                    Gossip::Id(tx_id(u64::try_from(index).expect("test index fits u64"))),
+                    Some(zakura_source.clone()),
+                    None,
+                )
+                .expect("within per-peer cap");
+        }
+
+        assert!(matches!(
+            downloads.download_if_needed_and_verify(
+                Gossip::Id(tx_id(100)),
+                Some(zakura_source.clone()),
+                None,
+            ),
+            Err(MempoolError::FullQueue)
+        ));
+
+        downloads
+            .download_if_needed_and_verify(
+                Gossip::Id(tx_id(101)),
+                Some(QueueSource::Zakura(vec![8; 32])),
+                None,
+            )
+            .expect("different Zakura peer has a separate cap");
+        downloads
+            .download_if_needed_and_verify(
+                Gossip::Id(tx_id(102)),
+                Some(QueueSource::LegacySocket(([127, 0, 0, 1], 8233).into())),
+                None,
+            )
+            .expect("legacy socket has a separate cap");
+        downloads.cancel_all();
+    }
+
+    #[tokio::test]
+    async fn zakura_queue_source_is_sent_to_network_download_request() {
+        let txid = tx_id(7);
+        let peer_id = vec![7; 32];
+        let (network_tx, mut network_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut downloads = Downloads::new(
+            BoxCloneService::new(service_fn(move |request| {
+                let network_tx = network_tx.clone();
+                async move {
+                    network_tx.send(request)?;
+                    future::pending::<Result<zn::Response, BoxError>>().await
+                }
+            })),
+            BoxCloneService::new(service_fn(|_request| {
+                future::pending::<Result<tx::Response, BoxError>>()
+            })),
+            BoxCloneService::new(service_fn(|request| async move {
+                match request {
+                    zs::Request::Transaction(_) => Ok(zs::Response::Transaction(None)),
+                    zs::Request::Tip => Ok(zs::Response::Tip(None)),
+                    request => Err(format!("unexpected state request: {request:?}").into()),
+                }
+            })),
+        );
+
+        downloads
+            .download_if_needed_and_verify(
+                Gossip::Id(txid),
+                Some(QueueSource::Zakura(peer_id.clone())),
+                None,
+            )
+            .expect("download is queued");
+        let poll_task = tokio::spawn(async move {
+            let _ = downloads.next().await;
+        });
+        let request = tokio::time::timeout(Duration::from_secs(1), network_rx.recv())
+            .await
+            .expect("network request is sent")
+            .expect("network request channel is open");
+        assert_eq!(
+            request,
+            zn::Request::TransactionsByIdFrom {
+                ids: HashSet::from([txid]),
+                source: zn::PeerSource::Zakura(
+                    zn::zakura::ZakuraPeerId::new(peer_id).expect("test peer id is within bounds")
+                ),
+            }
+        );
+        poll_task.abort();
     }
 }

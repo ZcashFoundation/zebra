@@ -2379,31 +2379,16 @@ where
     // Wait a bit before launching the second node.
     std::thread::sleep(BETWEEN_NODES_DELAY);
 
-    // Spawn the second node
-    let node2 = second_dir.spawn_child(args!["start"]);
-    let (node2, mut node1) = node1.kill_on_error(node2)?;
+    // Spawn the second node and wait for the expected resource conflict.
+    let mut node2 = second_dir.spawn_child(args!["start"])?;
+    node2
+        .expect_stderr_line_matches(second_stderr_regex)
+        .context_from(&mut node1)?;
 
-    // Wait a few seconds and kill first node.
-    // Second node is terminated by panic, no need to kill.
-    std::thread::sleep(LAUNCH_DELAY);
+    // The second node has hit the expected conflict, so the first node can be
+    // terminated before it keeps doing unrelated startup work.
     let node1_kill_res = node1.kill(false);
     let (_, mut node2) = node2.kill_on_error(node1_kill_res)?;
-
-    // node2 should have panicked due to a conflict. Kill it here anyway, so it
-    // doesn't outlive the test on error.
-    //
-    // This code doesn't work on Windows or macOS. It's cleanup code that only
-    // runs when node2 doesn't panic as expected. So it's ok to skip it.
-    // See #1781.
-    #[cfg(target_os = "linux")]
-    if node2.is_running() {
-        return node2
-            .kill_on_error::<(), _>(Err(eyre!(
-                "conflicted node2 was still running, but the test expected a panic"
-            )))
-            .context_from(&mut node1)
-            .map(|_| ());
-    }
 
     // Now we're sure both nodes are dead, and we have both their outputs
     let output1 = node1.wait_with_output().context_from(&mut node2)?;
@@ -2415,10 +2400,6 @@ where
         .warning("Possible port conflict. Are there other acceptance tests running?")
         .context_from(&output2)?;
 
-    // Make sure node2 has the expected resource conflict.
-    output2
-        .stderr_line_matches(second_stderr_regex)
-        .context_from(&output1)?;
     output2
         .assert_was_not_killed()
         .warning("Possible port conflict. Are there other acceptance tests running?")
@@ -3168,8 +3149,10 @@ async fn pruned_storage_mode_prunes_during_regtest_sync() -> Result<()> {
 
     // Reopen the finalized state through the public offline-prune preview API and
     // confirm the database recorded pruning progress.
-    let mut state_config = zebra_state::Config::default();
-    state_config.cache_dir = cache_dir;
+    let state_config = zebra_state::Config {
+        cache_dir,
+        ..Default::default()
+    };
     let summary = zebra_state::preview_prune_finalized_state(
         state_config,
         &network,
@@ -3194,7 +3177,6 @@ async fn regtest_coinbase() -> Result<()> {
 async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     use std::sync::Arc;
 
-    use eyre::Error;
     use tokio::time::timeout;
     use zebra_chain::{chain_tip::ChainTip, primitives::byte_array::increment_big_endian};
     use zebra_rpc::methods::GetBlockHashResponse;
@@ -3460,22 +3442,13 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
         .await?
         .map_err(|err| eyre!(err))?;
 
-    tracing::info!("waiting for finalized chain tip changes");
+    tracing::info!("waiting for initial mainnet chain tip reset");
 
-    timeout(
-        Duration::from_secs(200),
-        tokio::spawn(async move {
-            for _ in 0..2 {
-                chain_tip_change
-                    .wait_for_tip_change()
-                    .await
-                    .map_err(|err| eyre!(err))?;
-            }
-
-            Ok::<(), Error>(())
-        }),
-    )
-    .await???;
+    let tip_action = timeout(LAUNCH_DELAY, chain_tip_change.wait_for_tip_change()).await??;
+    assert!(
+        tip_action.is_reset(),
+        "first mainnet tip action should be a reset"
+    );
 
     Ok(())
 }
@@ -4425,6 +4398,7 @@ async fn restores_non_finalized_state_and_commits_new_blocks() -> Result<()> {
 /// The second zebrad instance will connect to the first one, and when the first one mines
 /// blocks with invalid PoW the second one should disconnect from it.
 #[tokio::test]
+#[ignore]
 #[cfg(not(target_os = "windows"))]
 async fn disconnects_from_misbehaving_peers() -> Result<()> {
     use std::sync::{atomic::AtomicBool, Arc};

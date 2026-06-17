@@ -90,6 +90,13 @@ pub enum Message {
         data: Option<[u8; 32]>,
     },
 
+    /// A bounded Zakura P2P v2 legacy upgrade prelude payload.
+    ///
+    /// This command is only valid after both peers advertised `NODE_P2P_V2` and
+    /// completed `version`/`verack`. The inner payload is decoded by the Zakura
+    /// upgrade layer, keeping the legacy codec command-aware but protocol-neutral.
+    P2pV2Upgrade(Vec<u8>),
+
     /// A `getaddr` message.
     ///
     /// [Bitcoin reference](https://en.bitcoin.it/wiki/Protocol_documentation#getaddr)
@@ -488,6 +495,9 @@ impl fmt::Display for Message {
                 reason,
                 if data.is_some() { "Some" } else { "None" },
             ),
+            Message::P2pV2Upgrade(payload) => {
+                format!("p2pv2up {{ bytes: {} }}", payload.len())
+            }
 
             Message::GetAddr => "getaddr".to_string(),
             Message::Addr(addrs) => format!("addr {{ addrs: {} }}", addrs.len()),
@@ -537,6 +547,7 @@ impl Message {
             Message::Ping(_) => "ping",
             Message::Pong(_) => "pong",
             Message::Reject { .. } => "reject",
+            Message::P2pV2Upgrade(_) => "p2pv2up",
             Message::GetAddr => "getaddr",
             Message::Addr(_) => "addr",
             Message::GetBlocks { .. } => "getblocks",
