@@ -80,6 +80,11 @@ where
         }
     }
 
+    /// Returns a reference to the underlying chain tip.
+    pub fn chain_tip(&self) -> &C {
+        &self.chain_tip
+    }
+
     /// Return the current chain tip height.
     ///
     /// If it is not available return height zero.
