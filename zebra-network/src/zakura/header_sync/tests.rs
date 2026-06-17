@@ -1803,6 +1803,95 @@ async fn covered_hedged_outstanding_ranges_do_not_commit_twice() {
     assert_no_commit_or_misbehavior(&mut fixture.actions).await;
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn late_covered_response_does_not_reanchor_newer_outstanding_range() {
+    let network = regtest_network();
+    let mut fixture = spawn_test_reactor(startup_for(
+        network.clone(),
+        (block::Height(0), network.genesis_hash()),
+        None,
+    ));
+    let peer_id = peer(74);
+    let committed_hash = block::Hash([1; 32]);
+
+    connect_peer(&fixture, peer_id.clone()).await;
+    advertise_tip(
+        &fixture,
+        peer_id.clone(),
+        block::Height(0),
+        block::Height(2),
+        1,
+        1,
+    )
+    .await;
+    loop {
+        match next_non_query_action(&mut fixture.actions).await {
+            HeaderSyncAction::SendMessage {
+                peer,
+                msg:
+                    HeaderSyncMessage::GetHeaders {
+                        start_height: block::Height(1),
+                        count: 1,
+                    },
+            } if peer == peer_id => break,
+            _ => {}
+        }
+    }
+
+    fixture
+        .handle
+        .send(HeaderSyncEvent::HeaderRangeCommitted {
+            start_height: block::Height(1),
+            tip_height: block::Height(1),
+            tip_hash: committed_hash,
+        })
+        .await
+        .unwrap();
+    loop {
+        match next_non_query_action(&mut fixture.actions).await {
+            HeaderSyncAction::SendMessage {
+                peer,
+                msg:
+                    HeaderSyncMessage::GetHeaders {
+                        start_height: block::Height(2),
+                        count: 1,
+                    },
+            } if peer == peer_id => break,
+            _ => {}
+        }
+    }
+
+    while tokio::time::timeout(std::time::Duration::from_millis(10), fixture.actions.recv())
+        .await
+        .is_ok()
+    {}
+
+    fixture
+        .handle
+        .send(HeaderSyncEvent::WireMessage {
+            peer: peer_id,
+            msg: headers_message(vec![mainnet_header(&BLOCK_MAINNET_1_BYTES)]),
+        })
+        .await
+        .unwrap();
+
+    while let Ok(Some(action)) =
+        tokio::time::timeout(std::time::Duration::from_millis(50), fixture.actions.recv()).await
+    {
+        match action {
+            HeaderSyncAction::SendMessage {
+                msg: HeaderSyncMessage::GetHeaders { .. },
+                ..
+            }
+            | HeaderSyncAction::HeaderReanchored { .. }
+            | HeaderSyncAction::Misbehavior { .. } => {
+                panic!("late covered response must not trigger a new action: {action:?}")
+            }
+            _ => {}
+        }
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn local_commit_failure_retries_without_peer_misbehavior() {
     let checkpoint_hash = block::Hash::from(mainnet_header(&BLOCK_MAINNET_3_BYTES).as_ref());
@@ -2030,6 +2119,73 @@ async fn reconnect_resends_initial_status_after_session_reset() {
             msg: HeaderSyncMessage::Status(_),
             ..
         }
+    ));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn reconnect_clears_session_bound_outstanding_ranges() {
+    let network = regtest_network();
+    let mut fixture = spawn_test_reactor(startup_for(
+        network.clone(),
+        (block::Height(0), network.genesis_hash()),
+        None,
+    ));
+    let peer_id = peer(73);
+
+    connect_peer(&fixture, peer_id.clone()).await;
+    assert!(matches!(
+        next_non_query_action(&mut fixture.actions).await,
+        HeaderSyncAction::SendMessage {
+            msg: HeaderSyncMessage::Status(_),
+            ..
+        }
+    ));
+    advertise_tip(
+        &fixture,
+        peer_id.clone(),
+        block::Height(0),
+        block::Height(5),
+        1,
+        1,
+    )
+    .await;
+    assert!(matches!(
+        next_non_query_action(&mut fixture.actions).await,
+        HeaderSyncAction::SendMessage {
+            peer,
+            msg: HeaderSyncMessage::GetHeaders {
+                start_height: block::Height(1),
+                count: 1,
+            },
+        } if peer == peer_id
+    ));
+
+    connect_peer(&fixture, peer_id.clone()).await;
+    assert!(matches!(
+        next_non_query_action(&mut fixture.actions).await,
+        HeaderSyncAction::SendMessage {
+            msg: HeaderSyncMessage::Status(_),
+            ..
+        }
+    ));
+    advertise_tip(
+        &fixture,
+        peer_id.clone(),
+        block::Height(0),
+        block::Height(5),
+        1,
+        1,
+    )
+    .await;
+    assert!(matches!(
+        next_non_query_action(&mut fixture.actions).await,
+        HeaderSyncAction::SendMessage {
+            peer,
+            msg: HeaderSyncMessage::GetHeaders {
+                start_height: block::Height(1),
+                count: 1,
+            },
+        } if peer == peer_id
     ));
 }
 

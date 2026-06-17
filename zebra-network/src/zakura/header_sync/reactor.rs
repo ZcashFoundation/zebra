@@ -385,6 +385,8 @@ impl HeaderSyncReactor {
         }
 
         self.state.parked_peers.remove(&peer);
+        self.state.schedule.forget_peer(&peer);
+        let status_refresh_interval = self.startup.status_refresh_interval;
         self.state
             .peers
             .entry(peer.clone())
@@ -393,7 +395,19 @@ impl HeaderSyncReactor {
                 peer_state.direction = direction;
                 // A new transport replaces the old one; its remote has received
                 // no status yet, so the initial status below must always be sent.
+                // Outstanding requests and inbound serving counts are also
+                // session-local: responses for the old stream cannot satisfy
+                // work sent on this fresh stream.
+                peer_state.received_status = false;
                 peer_state.reset_sent_status();
+                peer_state.outstanding.clear();
+                peer_state.late_covered_responses = 0;
+                peer_state.served_headers_inflight = 0;
+                peer_state.meters = HeaderSyncPeerMeters::new(
+                    status_refresh_interval,
+                    DEFAULT_HS_INBOUND_STATUS_MIN_INTERVAL,
+                    DEFAULT_HS_INBOUND_NEW_BLOCK_MIN_INTERVAL,
+                );
             })
             .or_insert_with(|| {
                 PeerHeaderState::new(
@@ -720,6 +734,22 @@ impl HeaderSyncReactor {
         }
     }
 
+    fn restore_outstanding_after_late_covered_response(
+        &mut self,
+        peer: &ZakuraPeerId,
+        outstanding: OutstandingRange,
+    ) -> bool {
+        let Some(peer_state) = self.state.peers.get_mut(peer) else {
+            return false;
+        };
+        if !peer_state.take_late_covered_response() {
+            return false;
+        }
+        peer_state.restore_oldest_outstanding(outstanding);
+        metrics::counter!("sync.header.response.late_covered_dropped").increment(1);
+        true
+    }
+
     async fn handle_get_headers(
         &mut self,
         peer: ZakuraPeerId,
@@ -986,6 +1016,11 @@ impl HeaderSyncReactor {
                 "link",
                 header_sync_wire_error_kind(&error),
             );
+            if matches!(error, HeaderSyncWireError::FirstHeaderDoesNotLink)
+                && self.restore_outstanding_after_late_covered_response(&peer, outstanding)
+            {
+                return;
+            }
             if self
                 .handle_possible_stale_anchor_link_failure(&peer, outstanding.range, &error)
                 .await

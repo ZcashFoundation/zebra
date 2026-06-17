@@ -15,8 +15,9 @@ pub(crate) use block_sync_driver::drive_block_sync_actions;
 #[cfg(test)]
 pub(crate) use block_sync_driver::{
     apply_block_sync_body, block_apply_class, block_sync_misbehavior_is_hard,
-    block_sync_missing_body_window, block_sync_needed_blocks_from_state, commit_block_sync_body,
-    BlockApplyClass, ZAKURA_BLOCK_SYNC_CHECKPOINT_FRONTIER_REFRESH_INTERVAL,
+    block_sync_missing_body_window, block_sync_needed_blocks_from_state,
+    coalesce_stale_needed_block_queries, commit_block_sync_body, BlockApplyClass,
+    ZAKURA_BLOCK_SYNC_CHECKPOINT_FRONTIER_REFRESH_INTERVAL,
 };
 pub(crate) use frontier::{query_block_sync_frontiers, verified_block_tip_from_state};
 #[cfg(test)]

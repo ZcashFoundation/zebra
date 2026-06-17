@@ -4,7 +4,13 @@ use crate::zakura::{
     ZakuraBlockSyncCandidateState,
 };
 
-pub(super) const EFFECTIVE_BS_OUTBOUND_INFLIGHT_PER_PEER: usize = 8;
+/// Hard ceiling on outbound block-range requests kept in flight to one peer.
+///
+/// A safety bound only; the binding per-peer concurrency is the peer's advertised
+/// `max_inflight_requests` (config `max_inflight_requests`, clamped to
+/// [`DEFAULT_BS_MAX_INFLIGHT`]). Set well above the configured cap so the byte
+/// budget and per-peer byte cap, not this ceiling, govern in-flight depth.
+pub(super) const EFFECTIVE_BS_OUTBOUND_INFLIGHT_PER_PEER: usize = 64;
 
 /// Cached chain frontiers used by the block-sync reactor.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -185,6 +191,7 @@ pub(super) struct BlockSyncState {
     pub(super) best_header_hash: block::Hash,
     pub(super) peers: HashMap<ZakuraPeerId, PeerBlockState>,
     pub(super) parked_peers: HashSet<ZakuraPeerId>,
+    pub(super) disconnected_peers: HashSet<ZakuraPeerId>,
     pub(super) schedule: BlockRangeScheduler,
     pub(super) reorder: ReorderBuffer,
     pub(super) applying: BTreeMap<block::Height, ApplyingBlock>,
@@ -218,6 +225,7 @@ impl BlockSyncState {
             best_header_hash: startup.best_header_tip.1,
             peers: HashMap::new(),
             parked_peers: HashSet::new(),
+            disconnected_peers: HashSet::new(),
             schedule: BlockRangeScheduler::new(startup.config.fanout),
             reorder: ReorderBuffer::new(),
             applying: BTreeMap::new(),
@@ -359,6 +367,16 @@ impl OutstandingBlockRange {
         self.received.insert(height);
     }
 
+    pub(super) fn mark_received_through(&mut self, tip: block::Height) -> u64 {
+        self.request
+            .expected_bytes
+            .iter()
+            .filter_map(|(height, bytes)| {
+                (*height <= tip && self.received.insert(*height)).then_some(*bytes)
+            })
+            .sum()
+    }
+
     pub(super) fn is_complete(&self) -> bool {
         self.received.len() == self.request.expected_hashes.len()
     }
@@ -369,21 +387,6 @@ impl OutstandingBlockRange {
             .iter()
             .filter_map(|(height, _)| {
                 (!self.received.contains(height))
-                    .then(|| self.request.single_height_retry(*height))
-                    .flatten()
-            })
-            .collect()
-    }
-
-    pub(super) fn missing_retry_requests_after(
-        &self,
-        tip: block::Height,
-    ) -> Vec<BlockRangeRequest> {
-        self.request
-            .expected_hashes
-            .iter()
-            .filter_map(|(height, _)| {
-                (*height > tip && !self.received.contains(height))
                     .then(|| self.request.single_height_retry(*height))
                     .flatten()
             })

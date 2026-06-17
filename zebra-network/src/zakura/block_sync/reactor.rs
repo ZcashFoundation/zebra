@@ -281,6 +281,7 @@ impl BlockSyncReactor {
     async fn handle_peer_connected(&mut self, session: BlockSyncPeerSession) {
         let peer = session.peer_id().clone();
         let direction = session.direction();
+        self.state.disconnected_peers.remove(&peer);
         let decision = self.admission_decision_for(&peer, direction);
         if decision != ServiceAdmissionDecision::Admit {
             self.state.parked_peers.insert(peer);
@@ -313,6 +314,7 @@ impl BlockSyncReactor {
                     OutstandingRangeDisposition::RetryMissing,
                 );
             }
+            self.state.disconnected_peers.insert(peer.clone());
         }
         self.state.parked_peers.remove(&peer);
         self.state.schedule.forget_peer(&peer);
@@ -345,7 +347,7 @@ impl BlockSyncReactor {
                 .await;
                 self.handle_state_frontiers_changed(state_frontiers).await;
             }
-            FrontierChange::HeaderAdvanced | FrontierChange::HeaderReanchored => {
+            FrontierChange::HeaderAdvanced => {
                 self.handle_header_tip_changed(
                     frontier.best_header.height,
                     frontier.best_header.hash,
@@ -354,6 +356,11 @@ impl BlockSyncReactor {
                 if frontier.verified_body.height > self.state.verified_block_tip {
                     self.handle_state_frontiers_changed(state_frontiers).await;
                 }
+            }
+            FrontierChange::HeaderReanchored => {
+                self.state.best_header_tip = frontier.best_header.height;
+                self.state.best_header_hash = frontier.best_header.hash;
+                self.handle_chain_tip_reset(state_frontiers).await;
             }
             FrontierChange::VerifiedGrow => {
                 self.handle_state_frontiers_changed(state_frontiers).await;
@@ -515,8 +522,18 @@ impl BlockSyncReactor {
             .iter()
             .map(|block| (block.height, block.hash))
             .collect::<HashMap<_, _>>();
-        self.drop_ranges_not_in_needed(&needed_hashes);
-        self.state.schedule.retain_matching_needed(&needed_hashes);
+        // State queries are snapshots taken while peer responses are still in
+        // flight. A newer snapshot can omit heights from an active request
+        // because those bodies are already buffered, applying, verified, or the
+        // query simply raced with the response. Keep active ranges correlated
+        // unless state explicitly reports a different hash for one of their
+        // heights; otherwise valid late bodies become `UnsolicitedBlock` and
+        // cause avoidable peer churn.
+        let retention_hashes = self.needed_hashes_with_active_outstanding(&needed_hashes);
+        self.drop_ranges_not_in_needed(&retention_hashes);
+        self.state
+            .schedule
+            .retain_matching_needed(&retention_hashes);
         self.state.schedule.refresh_needed(needed);
         if self.should_pause_new_body_downloads() {
             self.pause_new_body_downloads();
@@ -553,31 +570,11 @@ impl BlockSyncReactor {
             || self.state.budget.available() == 0
     }
 
-    fn has_outstanding_requests(&self) -> bool {
-        self.state
-            .peers
-            .values()
-            .any(|peer| !peer.outstanding.is_empty())
-    }
-
     fn release_caught_up_block_sync_peers(&mut self) {
-        if self.state.verified_block_tip < self.state.best_header_tip
-            || self.has_outstanding_requests()
-            || self.state.reorder.has_buffered_body_needed_to_advance(
-                self.state.verified_block_tip,
-                self.state.best_header_tip,
-            )
-        {
-            return;
-        }
-
-        let peer_ids: Vec<_> = self.state.peers.keys().cloned().collect();
-        for peer in peer_ids {
-            if let Some(peer_state) = self.state.peers.get(&peer) {
-                peer_state.session.cancel_token().cancel();
-            }
-            self.handle_peer_disconnected(peer);
-        }
+        // Keep block-sync streams open even when this node is locally caught
+        // up. A synced node can still be the server a fresh peer needs for
+        // historical bodies, and closing the stream after every local catch-up
+        // starves fresh Zakura-only nodes between checkpoint windows.
     }
 
     async fn handle_wire_decode_failed(
@@ -655,6 +652,9 @@ impl BlockSyncReactor {
         };
 
         let Some(peer_state) = self.state.peers.get_mut(&peer) else {
+            if self.ignore_disconnected_peer_response(&peer, "body") {
+                return;
+            }
             if self
                 .ignore_stale_response(&peer, height, "body from inactive peer")
                 .await
@@ -667,6 +667,12 @@ impl BlockSyncReactor {
         };
         let Some(index) = peer_state.outstanding_index_for_height(height) else {
             if self.ignore_stale_response(&peer, height, "body").await {
+                return;
+            }
+            if self
+                .ignore_unmatched_needed_response(&peer, height, "body")
+                .await
+            {
                 return;
             }
             self.report_misbehavior(peer, BlockSyncMisbehavior::UnsolicitedBlock)
@@ -818,8 +824,8 @@ impl BlockSyncReactor {
         }
 
         if !peer_state.try_start_serving_blocks(local_inflight_cap) {
-            self.report_misbehavior(peer, BlockSyncMisbehavior::GetBlocksSpam)
-                .await;
+            let unavailable_count = count.min(inbound_get_blocks_count_limit(&self.startup.config));
+            self.send_range_unavailable(&peer, start_height, unavailable_count);
             return;
         }
 
@@ -889,6 +895,9 @@ impl BlockSyncReactor {
         _count: u32,
     ) {
         let Some(index) = self.outstanding_index_for_start(&peer, start_height) else {
+            if self.ignore_disconnected_peer_response(&peer, "unavailable range") {
+                return;
+            }
             if self
                 .ignore_stale_response(&peer, start_height, "unavailable range")
                 .await
@@ -896,15 +905,12 @@ impl BlockSyncReactor {
                 return;
             }
 
-            self.report_misbehavior(peer, BlockSyncMisbehavior::RangeUnavailable)
-                .await;
+            self.trace_range_unavailable(&peer, start_height);
             return;
         };
 
         self.trace_range_unavailable(&peer, start_height);
         self.finish_peer_outstanding_at(&peer, index, OutstandingRangeDisposition::RetryMissing);
-        self.report_misbehavior(peer, BlockSyncMisbehavior::RangeUnavailable)
-            .await;
         self.schedule().await;
         self.release_caught_up_block_sync_peers();
     }
@@ -921,7 +927,7 @@ impl BlockSyncReactor {
     }
 
     fn is_stale_response_height(&self, height: block::Height) -> bool {
-        height <= self.state.verified_block_tip
+        height <= self.state.body_download_floor
             || self.state.reorder.contains(height)
             || self.state.applying.contains_key(&height)
     }
@@ -948,8 +954,52 @@ impl BlockSyncReactor {
         true
     }
 
+    async fn ignore_unmatched_needed_response(
+        &mut self,
+        peer: &ZakuraPeerId,
+        height: block::Height,
+        response_kind: &'static str,
+    ) -> bool {
+        if self.state.needed_heights.binary_search(&height).is_err() {
+            return false;
+        }
+
+        metrics::counter!("sync.block.response.unmatched_needed_ignored").increment(1);
+        tracing::debug!(
+            ?peer,
+            ?height,
+            response_kind,
+            "ignoring unmatched block-sync response for currently needed height"
+        );
+        self.release_contiguous_blocks().await;
+        self.schedule().await;
+        self.release_caught_up_block_sync_peers();
+        true
+    }
+
+    fn ignore_disconnected_peer_response(
+        &self,
+        peer: &ZakuraPeerId,
+        response_kind: &'static str,
+    ) -> bool {
+        if !self.state.disconnected_peers.contains(peer) {
+            return false;
+        }
+
+        metrics::counter!("sync.block.response.disconnected_peer_ignored").increment(1);
+        tracing::debug!(
+            ?peer,
+            response_kind,
+            "ignoring late block-sync response from disconnected peer"
+        );
+        true
+    }
+
     async fn handle_blocks_done(&mut self, peer: ZakuraPeerId, start_height: block::Height) {
         if !self.state.peers.contains_key(&peer) {
+            if self.ignore_disconnected_peer_response(&peer, "terminator") {
+                return;
+            }
             if self
                 .ignore_stale_response(&peer, start_height, "terminator from inactive peer")
                 .await
@@ -965,6 +1015,12 @@ impl BlockSyncReactor {
         let Some(index) = self.outstanding_index_for_start(&peer, start_height) else {
             if self
                 .ignore_stale_response(&peer, start_height, "terminator")
+                .await
+            {
+                return;
+            }
+            if self
+                .ignore_unmatched_needed_response(&peer, start_height, "terminator")
                 .await
             {
                 return;
@@ -1166,26 +1222,43 @@ impl BlockSyncReactor {
         }
     }
 
+    fn needed_hashes_with_active_outstanding(
+        &self,
+        needed: &HashMap<block::Height, block::Hash>,
+    ) -> HashMap<block::Height, block::Hash> {
+        let mut retained = needed.clone();
+        for peer in self.state.peers.values() {
+            for outstanding in &peer.outstanding {
+                for (height, hash) in &outstanding.request.expected_hashes {
+                    retained.entry(*height).or_insert(*hash);
+                }
+            }
+        }
+        retained
+    }
+
     fn drop_outstanding_through(&mut self, tip: block::Height) {
-        let mut dropped = Vec::new();
+        let mut completed = Vec::new();
+        let mut released_bytes = 0;
         for peer in self.state.peers.values_mut() {
             let mut index = 0;
             while index < peer.outstanding.len() {
                 if peer.outstanding[index].request.start_height <= tip {
-                    dropped.push(peer.outstanding.remove(index));
+                    released_bytes += peer.outstanding[index].mark_received_through(tip);
+                    if peer.outstanding[index].is_complete() {
+                        completed.push(peer.outstanding.remove(index));
+                    } else {
+                        index += 1;
+                    }
                 } else {
                     index += 1;
                 }
             }
         }
 
-        for outstanding in dropped {
-            let retry = outstanding.missing_retry_requests_after(tip);
-            self.state.budget.release(outstanding.reserved_bytes());
-            self.state.schedule.clear_assignment(&outstanding.request);
-            for request in retry.into_iter().rev() {
-                self.state.schedule.retry(request);
-            }
+        self.state.budget.release(released_bytes);
+        for outstanding in completed {
+            self.finish_detached_outstanding(outstanding, OutstandingRangeDisposition::Satisfied);
         }
     }
 
@@ -1207,64 +1280,76 @@ impl BlockSyncReactor {
         let mut peer_ids: Vec<_> = self.state.peers.keys().cloned().collect();
         peer_ids.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
 
+        let per_peer_byte_cap = self.startup.config.per_peer_byte_cap();
+
         for peer_id in peer_ids {
-            let Some(peer) = self.state.peers.get(&peer_id) else {
-                continue;
-            };
-            if !peer.received_status || peer.available_slots() == 0 {
-                continue;
-            }
-            let Some(request) =
-                self.state
-                    .schedule
-                    .next_for_peer(&peer_id, peer, &mut self.state.budget)
-            else {
-                continue;
-            };
+            // Fill this peer's available slots in one pass, letting the byte
+            // budget (re-checked each iteration) be the congestion window. A
+            // raised slot cap is only useful if we can open the window promptly
+            // rather than one slot per scheduling event.
+            loop {
+                if self.should_pause_new_body_downloads() {
+                    return;
+                }
+                let Some(peer) = self.state.peers.get(&peer_id) else {
+                    break;
+                };
+                if !peer.received_status || peer.available_slots() == 0 {
+                    break;
+                }
+                let Some(request) = self.state.schedule.next_for_peer(
+                    &peer_id,
+                    peer,
+                    &mut self.state.budget,
+                    per_peer_byte_cap,
+                ) else {
+                    break;
+                };
 
-            let Some(peer) = self.state.peers.get(&peer_id) else {
-                continue;
-            };
-            if let Err(error) = peer
-                .session
-                .try_send_get_blocks(request.start_height, request.count)
-            {
-                tracing::debug!(
-                    peer = ?peer_id,
-                    start_height = ?request.start_height,
-                    count = request.count,
-                    ?error,
-                    "failed to queue Zakura block-sync GetBlocks"
+                let Some(peer) = self.state.peers.get(&peer_id) else {
+                    break;
+                };
+                if let Err(error) = peer
+                    .session
+                    .try_send_get_blocks(request.start_height, request.count)
+                {
+                    tracing::debug!(
+                        peer = ?peer_id,
+                        start_height = ?request.start_height,
+                        count = request.count,
+                        ?error,
+                        "failed to queue Zakura block-sync GetBlocks"
+                    );
+                    self.state.budget.release(request.estimated_bytes);
+                    self.state.schedule.retry(request);
+                    break;
+                }
+
+                metrics::counter!("sync.block.request.sent").increment(1);
+                self.trace_get_blocks_sent(
+                    &peer_id,
+                    request.start_height,
+                    request.count,
+                    request.estimated_bytes,
                 );
-                self.state.budget.release(request.estimated_bytes);
-                self.state.schedule.retry(request);
-                continue;
+                let deadline = Instant::now() + self.startup.config.request_timeout;
+                if let Some(peer) = self.state.peers.get_mut(&peer_id) {
+                    peer.outstanding.push(OutstandingBlockRange {
+                        request: request.clone(),
+                        deadline,
+                        received: HashSet::new(),
+                    });
+                }
+                let _ = self
+                    .dispatch_action(BlockSyncAction::SendMessage {
+                        peer: peer_id.clone(),
+                        msg: BlockSyncMessage::GetBlocks {
+                            start_height: request.start_height,
+                            count: request.count,
+                        },
+                    })
+                    .await;
             }
-
-            metrics::counter!("sync.block.request.sent").increment(1);
-            self.trace_get_blocks_sent(
-                &peer_id,
-                request.start_height,
-                request.count,
-                request.estimated_bytes,
-            );
-            let deadline = Instant::now() + self.startup.config.request_timeout;
-            if let Some(peer) = self.state.peers.get_mut(&peer_id) {
-                peer.outstanding.push(OutstandingBlockRange {
-                    request: request.clone(),
-                    deadline,
-                    received: HashSet::new(),
-                });
-            }
-            let _ = self
-                .dispatch_action(BlockSyncAction::SendMessage {
-                    peer: peer_id,
-                    msg: BlockSyncMessage::GetBlocks {
-                        start_height: request.start_height,
-                        count: request.count,
-                    },
-                })
-                .await;
         }
     }
 

@@ -155,6 +155,7 @@ impl RangeScheduler {
         for peers in self.assigned.values_mut() {
             peers.remove(peer);
         }
+        self.assigned.retain(|_, peers| !peers.is_empty());
     }
 
     pub(super) fn clear_assignment(&mut self, range: RangeRequest) {

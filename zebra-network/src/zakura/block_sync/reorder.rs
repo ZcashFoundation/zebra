@@ -26,15 +26,6 @@ impl ReorderBuffer {
         self.blocks.contains_key(&height)
     }
 
-    pub(super) fn has_buffered_body_needed_to_advance(
-        &self,
-        verified_block_tip: block::Height,
-        best_header_tip: block::Height,
-    ) -> bool {
-        next_height(verified_block_tip)
-            .is_some_and(|height| height <= best_header_tip && self.contains(height))
-    }
-
     pub(super) fn insert(
         &mut self,
         height: block::Height,

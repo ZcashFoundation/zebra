@@ -255,6 +255,10 @@ impl PeerHeaderState {
         (!self.outstanding.is_empty()).then(|| self.outstanding.remove(0))
     }
 
+    pub(super) fn restore_oldest_outstanding(&mut self, outstanding: OutstandingRange) {
+        self.outstanding.insert(0, outstanding);
+    }
+
     pub(super) fn take_late_covered_response(&mut self) -> bool {
         if self.late_covered_responses == 0 {
             return false;

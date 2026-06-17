@@ -103,7 +103,7 @@ impl BlockRangeScheduler {
             range.blocks.retain(|block| block.height > tip);
         }
         self.queue.retain(|range| !range.blocks.is_empty());
-        self.assigned.retain(|range, _| range.start > tip);
+        self.assigned.retain(|range, _| range.end > tip);
     }
 
     pub(super) fn next_for_peer(
@@ -111,20 +111,28 @@ impl BlockRangeScheduler {
         peer_id: &ZakuraPeerId,
         peer: &PeerBlockState,
         budget: &mut ByteBudget,
+        per_peer_byte_cap: u64,
     ) -> Option<BlockRangeRequest> {
+        self.prune_covered();
         let index = self.queue.iter().position(|range| {
             range.end_height() <= peer.servable_high
                 && range.start_height() >= peer.servable_low
-                && self
-                    .assigned
-                    .get(&range.key())
-                    .is_none_or(|peers| peers.len() < self.fanout && !peers.contains(peer_id))
+                && self.can_assign_peer_to_range(peer_id, range)
         })?;
 
         let range = self.queue[index].clone();
+        // Bound this peer's share of the global byte budget so one fast peer
+        // cannot reserve the whole window and starve the others.
+        let peer_reserved: u64 = peer
+            .outstanding
+            .iter()
+            .map(|outstanding| outstanding.reserved_bytes())
+            .sum();
+        let peer_headroom = per_peer_byte_cap.saturating_sub(peer_reserved);
         let max_bytes = budget
             .available()
-            .min(u64::from(peer.max_response_bytes.max(1)));
+            .min(u64::from(peer.max_response_bytes.max(1)))
+            .min(peer_headroom);
         let max_count = peer.max_blocks_per_response.max(1);
         let mut estimated_bytes = 0u64;
         let mut selected = Vec::new();
@@ -183,7 +191,7 @@ impl BlockRangeScheduler {
             return;
         }
         self.clear_assignment(&range);
-        self.queue.push_front(BlockRange {
+        let retry_range = BlockRange {
             blocks: (0..range.count)
                 .filter_map(|offset| {
                     range
@@ -201,7 +209,10 @@ impl BlockRangeScheduler {
                         })
                 })
                 .collect(),
-        });
+        };
+        for segment in self.uncovered_segments(retry_range).into_iter().rev() {
+            self.queue.push_front(segment);
+        }
     }
 
     #[cfg(test)]
@@ -293,17 +304,19 @@ impl BlockRangeScheduler {
     }
 
     fn ensure(&mut self, range: BlockRange) {
-        if range.blocks.is_empty() || self.is_covered(range.start_height(), range.end_height()) {
+        if range.blocks.is_empty() {
             return;
         }
-        if self.queue.iter().any(|queued| queued.overlaps(&range))
-            || self.assigned.keys().any(|assigned| {
-                assigned.start <= range.end_height() && assigned.end >= range.start_height()
-            })
-        {
-            return;
+        for range in self.uncovered_segments(range) {
+            if self.queue.iter().any(|queued| queued.overlaps(&range))
+                || self.assigned.keys().any(|assigned| {
+                    assigned.start <= range.end_height() && assigned.end >= range.start_height()
+                })
+            {
+                continue;
+            }
+            self.queue.push_back(range);
         }
-        self.queue.push_back(range);
     }
 
     fn estimate_bytes(&self, estimate: BlockSizeEstimate) -> u64 {
@@ -342,12 +355,12 @@ impl BlockRangeScheduler {
     }
 
     fn prune_covered(&mut self) {
-        let covered = self.covered.clone();
-        self.queue.retain(|range| {
-            !covered.iter().any(|covered| {
-                covered.start <= range.start_height() && covered.end >= range.end_height()
-            })
-        });
+        let mut queue = VecDeque::with_capacity(self.queue.len());
+        for range in self.queue.drain(..) {
+            queue.extend(Self::uncovered_segments_for(&self.covered, range));
+        }
+        self.queue = queue;
+        let covered = &self.covered;
         self.assigned.retain(|range, _| {
             !covered
                 .iter()
@@ -359,6 +372,43 @@ impl BlockRangeScheduler {
         self.covered
             .iter()
             .any(|covered| covered.start <= start && covered.end >= end)
+    }
+
+    fn can_assign_peer_to_range(&self, peer_id: &ZakuraPeerId, range: &BlockRange) -> bool {
+        let mut assigned_peers = HashSet::new();
+        for (assigned, peers) in &self.assigned {
+            if assigned.start <= range.end_height() && assigned.end >= range.start_height() {
+                assigned_peers.extend(peers.iter());
+            }
+        }
+
+        assigned_peers.len() < self.fanout && !assigned_peers.contains(peer_id)
+    }
+
+    fn uncovered_segments(&self, range: BlockRange) -> Vec<BlockRange> {
+        Self::uncovered_segments_for(&self.covered, range)
+    }
+
+    fn uncovered_segments_for(covered: &[CoveredRange], range: BlockRange) -> Vec<BlockRange> {
+        let mut segments = Vec::new();
+        let mut current = Vec::new();
+        for block in range.blocks {
+            let is_covered = covered
+                .iter()
+                .any(|covered| covered.start <= block.height && covered.end >= block.height);
+            if is_covered {
+                if !current.is_empty() {
+                    segments.push(BlockRange { blocks: current });
+                    current = Vec::new();
+                }
+            } else {
+                current.push(block);
+            }
+        }
+        if !current.is_empty() {
+            segments.push(BlockRange { blocks: current });
+        }
+        segments
     }
 }
 

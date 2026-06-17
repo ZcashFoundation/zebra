@@ -1924,9 +1924,10 @@ mod tests {
 mod zakura_header_sync_driver_tests {
     use super::*;
     use std::{
+        collections::VecDeque,
         future,
         sync::{
-            atomic::{AtomicUsize, Ordering},
+            atomic::{AtomicBool, AtomicUsize, Ordering},
             Arc, Mutex,
         },
         time::Duration,
@@ -1951,10 +1952,10 @@ mod zakura_header_sync_driver_tests {
         apply_block_sync_body, block_apply_class, block_sync_chain_tip_event,
         block_sync_misbehavior_is_hard, block_sync_missing_body_window,
         block_sync_needed_blocks_from_state, block_verify_error_is_duplicate,
-        body_sizes_for_served_header_range, commit_block_sync_body, drive_block_sync_actions,
-        drive_zakura_header_sync_actions, header_range_commit_failure_kind,
-        notify_block_sync_header_tip, query_block_sync_frontiers, verified_block_tip_from_state,
-        BlockApplyClass, ZakuraHeaderSyncDriverHandles,
+        body_sizes_for_served_header_range, coalesce_stale_needed_block_queries,
+        commit_block_sync_body, drive_block_sync_actions, drive_zakura_header_sync_actions,
+        header_range_commit_failure_kind, notify_block_sync_header_tip, query_block_sync_frontiers,
+        verified_block_tip_from_state, BlockApplyClass, ZakuraHeaderSyncDriverHandles,
         ZAKURA_BLOCK_SYNC_CHECKPOINT_FRONTIER_REFRESH_INTERVAL, ZAKURA_BLOCK_SYNC_DRIVER_TIMEOUT,
     };
 
@@ -2238,9 +2239,12 @@ mod zakura_header_sync_driver_tests {
 
     #[test]
     fn zakura_checkpoint_static_limits_cover_checkpoint_gap() {
-        assert!(
-            sync::MIN_CHECKPOINT_CONCURRENCY_LIMIT >= zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP
-        );
+        const {
+            assert!(
+                sync::MIN_CHECKPOINT_CONCURRENCY_LIMIT
+                    >= zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP
+            );
+        }
         assert!(
             usize::try_from(DEFAULT_HS_RANGE)
                 .expect("DEFAULT_HS_RANGE fits usize on supported targets")
@@ -2387,6 +2391,63 @@ mod zakura_header_sync_driver_tests {
         let _ = shutdown_tx.send(());
         driver.await.expect("driver task exits cleanly");
         endpoint.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn block_sync_driver_coalesces_stale_needed_queries() {
+        let (action_tx, mut action_rx) = mpsc::channel(8);
+        action_tx
+            .send(BlockSyncAction::QueryNeededBlocks {
+                verified_block_tip: block::Height(0),
+                best_header_tip: block::Height(1),
+            })
+            .await
+            .expect("first query queues");
+        action_tx
+            .send(BlockSyncAction::QueryNeededBlocks {
+                verified_block_tip: block::Height(0),
+                best_header_tip: block::Height(2),
+            })
+            .await
+            .expect("stale query queues");
+        let deferred_peer =
+            zebra_network::zakura::ZakuraPeerId::new(vec![7; 32]).expect("test peer id is valid");
+        action_tx
+            .send(BlockSyncAction::Misbehavior {
+                peer: deferred_peer.clone(),
+                reason: BlockSyncMisbehavior::StatusSpam,
+            })
+            .await
+            .expect("non-query action queues");
+        action_tx
+            .send(BlockSyncAction::QueryNeededBlocks {
+                verified_block_tip: block::Height(0),
+                best_header_tip: block::Height(8),
+            })
+            .await
+            .expect("latest query queues");
+
+        let first = action_rx.recv().await.expect("first action remains queued");
+        let mut deferred_actions = VecDeque::new();
+        let action =
+            coalesce_stale_needed_block_queries(first, &mut action_rx, &mut deferred_actions);
+
+        assert!(matches!(
+            action,
+            BlockSyncAction::QueryNeededBlocks {
+                verified_block_tip: block::Height(0),
+                best_header_tip: block::Height(8),
+            }
+        ));
+        assert!(matches!(
+            deferred_actions.pop_front(),
+            Some(BlockSyncAction::Misbehavior {
+                peer,
+                reason: BlockSyncMisbehavior::StatusSpam,
+            }) if peer == deferred_peer
+        ));
+        assert!(deferred_actions.is_empty());
+        assert!(action_rx.try_recv().is_err());
     }
 
     #[tokio::test]
@@ -3160,7 +3221,7 @@ mod zakura_header_sync_driver_tests {
             },
         ));
 
-        for token in 0..(zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP + 1) {
+        for token in 0..=zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP {
             action_tx
                 .send(BlockSyncAction::SubmitBlock {
                     token: u64::try_from(token).expect("test token fits in u64"),
@@ -3255,18 +3316,30 @@ mod zakura_header_sync_driver_tests {
             }
         });
 
-        apply_block_sync_body(
-            verifier,
-            latest_chain_tip,
+        let (action_tx, action_rx) = mpsc::channel(8);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let driver = tokio::spawn(drive_block_sync_actions(
+            action_rx,
+            zebra_network::zakura::ZakuraSupervisorHandle::new(1),
             None,
-            read_state,
             block_sync.clone(),
-            1,
-            block,
-            BlockApplyClass::Checkpoint,
+            latest_chain_tip,
+            read_state,
+            verifier,
+            block::Height::MAX,
+            sync::MIN_CHECKPOINT_CONCURRENCY_LIMIT,
+            sync::MIN_CONCURRENCY_LIMIT,
             zebra_network::zakura::ZakuraTrace::noop(),
-        )
-        .await;
+            async move {
+                let _ = shutdown_rx.await;
+            },
+        ));
+
+        action_tx
+            .send(BlockSyncAction::SubmitBlock { token: 1, block })
+            .await
+            .expect("driver action channel stays open");
+        tokio::task::yield_now().await;
 
         assert!(
             tokio::time::timeout(Duration::from_millis(1), reactor_actions.recv())
@@ -3300,6 +3373,141 @@ mod zakura_header_sync_driver_tests {
             "delayed checkpoint refresh must send the committed height once state catches up, got {action:?}"
         );
 
+        let _ = shutdown_tx.send(());
+        driver.await.expect("driver task exits cleanly");
+        reactor_task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn delayed_checkpoint_frontier_refresh_is_coalesced_across_commits() {
+        let block1 = mainnet_block(&BLOCK_MAINNET_1_BYTES);
+        let block2 = mainnet_block(&BLOCK_MAINNET_2_BYTES);
+        let block2_hash = block2.hash();
+        let (_tip_tx, tip_rx) =
+            tokio::sync::watch::channel((block::Height(10), block::Hash([10; 32])));
+        let startup = zebra_network::zakura::BlockSyncStartup::new(
+            BlockSyncFrontiers {
+                finalized_height: block::Height(0),
+                verified_block_tip: block::Height(0),
+                verified_block_hash: block::Hash([0; 32]),
+            },
+            (block::Height(10), block::Hash([10; 32])),
+            tip_rx,
+            zebra_network::zakura::ZakuraBlockSyncConfig::default(),
+        );
+        let (block_sync, mut reactor_actions, reactor_task) =
+            zebra_network::zakura::spawn_block_sync_reactor(startup);
+        let _startup_action = tokio::time::timeout(Duration::from_secs(1), reactor_actions.recv())
+            .await
+            .expect("reactor emits startup action")
+            .expect("reactor action channel remains open");
+
+        let mut capture = TraceCapture::for_test(
+            "delayed_checkpoint_frontier_refresh_is_coalesced_across_commits",
+        )
+        .unwrap();
+        let trace = zebra_network::zakura::ZakuraTrace::new(capture.tracer(), "01");
+        let visible = Arc::new(AtomicBool::new(false));
+        let visible_for_reads = visible.clone();
+        let read_count = Arc::new(AtomicUsize::new(0));
+        let read_count_for_service = read_count.clone();
+        let read_state = service_fn(move |request: zebra_state::ReadRequest| {
+            let visible = visible_for_reads.load(Ordering::SeqCst);
+            let read_count = read_count_for_service.clone();
+            async move {
+                read_count.fetch_add(1, Ordering::SeqCst);
+                let visible_tip = visible.then_some((block::Height(2), block2_hash));
+                match request {
+                    zebra_state::ReadRequest::FinalizedTip => Ok::<_, zebra_state::BoxError>(
+                        zebra_state::ReadResponse::FinalizedTip(visible_tip),
+                    ),
+                    zebra_state::ReadRequest::Tip => {
+                        Ok(zebra_state::ReadResponse::Tip(visible_tip))
+                    }
+                    request => panic!("unexpected read request: {request:?}"),
+                }
+            }
+        });
+        let verifier = service_fn(|request: zebra_consensus::Request| async move {
+            match request {
+                zebra_consensus::Request::Commit(block) => {
+                    Ok::<_, zebra_consensus::BoxError>(block.hash())
+                }
+                request => panic!("unexpected consensus request: {request:?}"),
+            }
+        });
+        let (action_tx, action_rx) = mpsc::channel(8);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let driver = tokio::spawn(drive_block_sync_actions(
+            action_rx,
+            zebra_network::zakura::ZakuraSupervisorHandle::new(1),
+            None,
+            block_sync.clone(),
+            zebra_chain::chain_tip::NoChainTip,
+            read_state,
+            verifier,
+            block::Height::MAX,
+            sync::MIN_CHECKPOINT_CONCURRENCY_LIMIT,
+            sync::MIN_CONCURRENCY_LIMIT,
+            trace,
+            async move {
+                let _ = shutdown_rx.await;
+            },
+        ));
+
+        action_tx
+            .send(BlockSyncAction::SubmitBlock {
+                token: 1,
+                block: block1,
+            })
+            .await
+            .expect("driver action channel stays open");
+        action_tx
+            .send(BlockSyncAction::SubmitBlock {
+                token: 2,
+                block: block2,
+            })
+            .await
+            .expect("driver action channel stays open");
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while read_count.load(Ordering::SeqCst) < 4 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("both immediate post-commit frontier reads complete");
+
+        visible.store(true, Ordering::SeqCst);
+        tokio::time::advance(ZAKURA_BLOCK_SYNC_CHECKPOINT_FRONTIER_REFRESH_INTERVAL).await;
+
+        let action = tokio::time::timeout(Duration::from_secs(1), reactor_actions.recv())
+            .await
+            .expect("reactor emits action after coalesced delayed checkpoint frontier")
+            .expect("reactor action channel remains open");
+        assert!(
+            matches!(
+                action,
+                BlockSyncAction::QueryNeededBlocks {
+                    verified_block_tip: block::Height(2),
+                    best_header_tip: block::Height(10),
+                }
+            ),
+            "coalesced delayed checkpoint refresh must send the committed height once state catches up, got {action:?}"
+        );
+
+        capture.flush().await;
+        let reader = capture.reader().unwrap();
+        let commit_state = reader.table(COMMIT_STATE_TABLE.table());
+        assert_eq!(
+            commit_state.count(cs_trace::CHECKPOINT_REFRESH_ATTEMPT),
+            1,
+            "multiple committed checkpoint bodies should share one delayed frontier refresh attempt"
+        );
+
+        let _ = shutdown_tx.send(());
+        driver.await.expect("driver task exits cleanly");
+        let _ = capture.finish().await.unwrap();
         reactor_task.abort();
     }
 

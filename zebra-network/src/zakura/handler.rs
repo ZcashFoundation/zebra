@@ -224,7 +224,6 @@ const ZAKURA_CLOSE_OVERSIZE: u32 = 4;
 /// from the malformed-prelude code so peers can tell a parse failure from an
 /// unsupported-but-well-formed stream.
 const ZAKURA_CLOSE_UNKNOWN_STREAM: u32 = 5;
-const NATIVE_TRANSCRIPT_HASH: [u8; TRANSCRIPT_HASH_BYTES] = [0; TRANSCRIPT_HASH_BYTES];
 
 /// Native Zakura endpoint and handler configuration.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -1155,6 +1154,7 @@ struct ConnectionServeContext {
     accepted_capabilities: u64,
     role: &'static str,
     direction: ServicePeerDirection,
+    transcript_hash: [u8; TRANSCRIPT_HASH_BYTES],
     conn: ZakuraConnTrace,
 }
 
@@ -1336,6 +1336,18 @@ fn inbound_remote_ip(endpoint: &Endpoint, node_id: NodeId) -> Option<IpAddr> {
     })
 }
 
+fn native_connection_transcript_hash(
+    direction: ServicePeerDirection,
+    local_node_id: &NodeId,
+    remote_node_id: &NodeId,
+) -> [u8; TRANSCRIPT_HASH_BYTES] {
+    let initiator = match direction {
+        ServicePeerDirection::Inbound => remote_node_id,
+        ServicePeerDirection::Outbound => local_node_id,
+    };
+    *initiator.as_bytes()
+}
+
 impl ZakuraProtocolHandler {
     /// Create a handler sharing the given supervisor.
     pub fn new(
@@ -1450,6 +1462,12 @@ impl ZakuraProtocolHandler {
             .endpoint
             .as_ref()
             .and_then(|endpoint| inbound_remote_ip(endpoint, remote_node_id));
+        let local_node_id = self
+            .endpoint
+            .as_ref()
+            .map(|endpoint| endpoint.node_id())
+            .unwrap_or(remote_node_id);
+        let direction = ServicePeerDirection::Inbound;
         self.register_and_serve(
             connection,
             remote_peer_id,
@@ -1458,7 +1476,12 @@ impl ZakuraProtocolHandler {
                 limits: conn_limits,
                 accepted_capabilities: negotiated.accepted_capabilities,
                 role: "responder",
-                direction: ServicePeerDirection::Inbound,
+                direction,
+                transcript_hash: native_connection_transcript_hash(
+                    direction,
+                    &local_node_id,
+                    &remote_node_id,
+                ),
                 conn,
             },
         )
@@ -2205,7 +2228,7 @@ impl ZakuraProtocolHandler {
             .register(
                 peer_id,
                 remote_ip,
-                NATIVE_TRANSCRIPT_HASH,
+                context.transcript_hash,
                 outbound_handle,
                 connection_token.clone(),
                 context.accepted_capabilities,
@@ -2594,6 +2617,7 @@ pub(crate) async fn serve_native_dial_connection(
         .await?
     };
     let conn_limits = limits.clamp(&negotiated.limits);
+    let direction = ServicePeerDirection::Outbound;
     endpoint
         .handler
         .register_and_serve(
@@ -2604,7 +2628,12 @@ pub(crate) async fn serve_native_dial_connection(
                 limits: conn_limits,
                 accepted_capabilities: negotiated.accepted_capabilities,
                 role: "initiator",
-                direction: ServicePeerDirection::Outbound,
+                direction,
+                transcript_hash: native_connection_transcript_hash(
+                    direction,
+                    &local_node_id,
+                    &remote_node_id,
+                ),
                 conn,
             },
         )
@@ -2778,12 +2807,7 @@ async fn persistent_stream_worker(
                     match admit_inbound_message(frame.payload.len(), &reader_context, stream_kind) {
                         InboundMessageAdmission::Admit => Ok(frame),
                         InboundMessageAdmission::Oversize => Err(ZakuraHandlerError::Oversize),
-                        // Never drop a solicited frame: on a reliable ordered
-                        // stream the peer will not resend, so a dropped block
-                        // body is a permanent gap that stalls the checkpoint.
-                        // Keep the throttle metric/trace from admission, but
-                        // defer enforcement and deliver the frame.
-                        InboundMessageAdmission::Throttled => Ok(frame),
+                        InboundMessageAdmission::Throttled => Err(ZakuraHandlerError::RateLimited),
                     }
                 }
                 Err(error) => {
@@ -2875,6 +2899,11 @@ async fn persistent_stream_worker(
                     // The reader signalled an oversize message: disconnect it.
                     Some(Err(ZakuraHandlerError::Oversize)) => {
                         let _ = send.reset(VarInt::from_u32(ZAKURA_CLOSE_OVERSIZE));
+                        context.connection_token.cancel();
+                        break;
+                    }
+                    Some(Err(ZakuraHandlerError::RateLimited)) => {
+                        let _ = send.reset(VarInt::from_u32(ZAKURA_CLOSE_RATE_LIMIT));
                         context.connection_token.cancel();
                         break;
                     }
@@ -4042,6 +4071,9 @@ pub enum ZakuraHandlerError {
     /// A local resource cap rejected the operation.
     #[error("Zakura resource limit exceeded: {0}")]
     ResourceLimit(&'static str),
+    /// The peer exceeded its per-kind inbound message rate.
+    #[error("Zakura message rate exceeded")]
+    RateLimited,
     /// Iroh connection error.
     #[error(transparent)]
     IrohConnection(#[from] iroh::endpoint::ConnectionError),
@@ -4240,6 +4272,57 @@ mod tests {
 
     fn test_peer(byte: u8) -> ZakuraPeerId {
         ZakuraPeerId::new(vec![byte; 32]).expect("32-byte node id is valid")
+    }
+
+    #[test]
+    fn native_duplicate_tie_breaker_converges_for_simultaneous_open() {
+        let node_a = LocalEndpointFactory::secret_key(1).public();
+        let node_b = LocalEndpointFactory::secret_key(2).public();
+        let a_outbound =
+            native_connection_transcript_hash(ServicePeerDirection::Outbound, &node_a, &node_b);
+        let a_inbound =
+            native_connection_transcript_hash(ServicePeerDirection::Inbound, &node_a, &node_b);
+        let b_outbound =
+            native_connection_transcript_hash(ServicePeerDirection::Outbound, &node_b, &node_a);
+        let b_inbound =
+            native_connection_transcript_hash(ServicePeerDirection::Inbound, &node_b, &node_a);
+
+        assert_eq!(a_outbound, b_inbound);
+        assert_eq!(a_inbound, b_outbound);
+        assert_ne!(a_outbound, a_inbound);
+
+        let winning_key = a_outbound.min(a_inbound);
+        let losing_key = a_outbound.max(a_inbound);
+        let peer = test_peer(7);
+        let mut supervisor_a = ZakuraPeerSupervisor::default();
+        let mut supervisor_b = ZakuraPeerSupervisor::default();
+        assert!(matches!(
+            supervisor_a.register_authenticated(peer.clone(), a_outbound),
+            ZakuraUpgradeOutcome::Upgraded { .. }
+        ));
+        let _ = supervisor_a.register_authenticated(peer.clone(), a_inbound);
+        assert!(matches!(
+            supervisor_b.register_authenticated(peer.clone(), b_inbound),
+            ZakuraUpgradeOutcome::Upgraded { .. }
+        ));
+        let _ = supervisor_b.register_authenticated(peer.clone(), b_outbound);
+
+        assert!(matches!(
+            supervisor_a.register_authenticated(peer.clone(), winning_key),
+            ZakuraUpgradeOutcome::Duplicate { .. }
+        ));
+        assert!(matches!(
+            supervisor_b.register_authenticated(peer.clone(), winning_key),
+            ZakuraUpgradeOutcome::Duplicate { .. }
+        ));
+        assert!(matches!(
+            supervisor_a.register_authenticated(peer.clone(), losing_key),
+            ZakuraUpgradeOutcome::Duplicate { .. }
+        ));
+        assert!(matches!(
+            supervisor_b.register_authenticated(peer, losing_key),
+            ZakuraUpgradeOutcome::Duplicate { .. }
+        ));
     }
 
     fn header_sync_test_session(

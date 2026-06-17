@@ -10,10 +10,10 @@ use futures::{
     stream::{FuturesUnordered, StreamExt},
     FutureExt,
 };
+use tokio::time::Instant as TokioInstant;
 use tokio::{pin, select, sync::mpsc};
 use tower::{Service, ServiceExt};
 use tracing::{debug, warn};
-use tracing_futures::Instrument;
 
 use zebra_chain::{block, chain_tip::ChainTip};
 use zebra_network::zakura::{
@@ -47,6 +47,48 @@ struct PendingBlockApply {
     block: Arc<block::Block>,
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub(crate) struct BlockApplyCompletion {
+    class: BlockApplyClass,
+    checkpoint_refresh_floor: Option<block::Height>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct CheckpointFrontierRefresh {
+    highest_sent: Option<block::Height>,
+    attempts_remaining: usize,
+    next_attempt_at: Option<TokioInstant>,
+}
+
+impl CheckpointFrontierRefresh {
+    fn observe_checkpoint_commit(&mut self, highest_observed_at_apply: block::Height) {
+        self.highest_sent = Some(
+            self.highest_sent
+                .map(|height| height.max(highest_observed_at_apply))
+                .unwrap_or(highest_observed_at_apply),
+        );
+        self.attempts_remaining = ZAKURA_BLOCK_SYNC_CHECKPOINT_FRONTIER_REFRESH_ATTEMPTS;
+        if self.next_attempt_at.is_none() {
+            self.next_attempt_at =
+                Some(TokioInstant::now() + ZAKURA_BLOCK_SYNC_CHECKPOINT_FRONTIER_REFRESH_INTERVAL);
+        }
+    }
+
+    fn next_attempt_at(&self) -> Option<TokioInstant> {
+        (self.attempts_remaining > 0)
+            .then_some(self.next_attempt_at)
+            .flatten()
+    }
+
+    fn finish_attempt(&mut self, highest_sent: block::Height) {
+        self.highest_sent = Some(highest_sent);
+        self.attempts_remaining = self.attempts_remaining.saturating_sub(1);
+        self.next_attempt_at = (self.attempts_remaining > 0).then_some(
+            TokioInstant::now() + ZAKURA_BLOCK_SYNC_CHECKPOINT_FRONTIER_REFRESH_INTERVAL,
+        );
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn drive_block_sync_actions<ReadState, BlockVerifier>(
     mut actions: mpsc::Receiver<BlockSyncAction>,
@@ -76,53 +118,88 @@ pub(crate) async fn drive_block_sync_actions<ReadState, BlockVerifier>(
     BlockVerifier::Future: Send + 'static,
 {
     pin!(shutdown);
-    let checkpoint_apply_limit = checkpoint_apply_limit
-        .max(sync::MIN_CHECKPOINT_CONCURRENCY_LIMIT)
-        .min(zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP);
+    const {
+        assert!(
+            sync::MIN_CHECKPOINT_CONCURRENCY_LIMIT <= zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP
+        );
+    }
+    let checkpoint_apply_limit = checkpoint_apply_limit.clamp(
+        sync::MIN_CHECKPOINT_CONCURRENCY_LIMIT,
+        zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP,
+    );
     let full_apply_limit = full_apply_limit.max(sync::MIN_CONCURRENCY_LIMIT);
     let mut pending_applies = VecDeque::new();
-    let mut in_flight_applies = FuturesUnordered::new();
+    let mut in_flight_applies: FuturesUnordered<BoxFuture<'static, BlockApplyCompletion>> =
+        FuturesUnordered::new();
     let mut checkpoint_in_flight = 0usize;
     let mut full_in_flight = 0usize;
+    let mut deferred_actions = VecDeque::new();
+    let mut checkpoint_frontier_refresh = CheckpointFrontierRefresh::default();
 
     loop {
-        let action = select! {
-            _ = &mut shutdown => return,
-            completed = in_flight_applies.next(), if !in_flight_applies.is_empty() => {
-                let Some(completed) = completed else {
+        let action = if let Some(action) = deferred_actions.pop_front() {
+            action
+        } else {
+            select! {
+                _ = &mut shutdown => return,
+                completed = in_flight_applies.next(), if !in_flight_applies.is_empty() => {
+                    let Some(completed) = completed else {
+                        continue;
+                    };
+                    match completed.class {
+                        BlockApplyClass::Checkpoint => {
+                            checkpoint_in_flight = checkpoint_in_flight.saturating_sub(1);
+                        }
+                        BlockApplyClass::Full => {
+                            full_in_flight = full_in_flight.saturating_sub(1);
+                        }
+                    }
+                    if let Some(highest_observed_at_apply) = completed.checkpoint_refresh_floor {
+                        checkpoint_frontier_refresh
+                            .observe_checkpoint_commit(highest_observed_at_apply);
+                    }
+                    drain_pending_block_applies(
+                        &mut pending_applies,
+                        &mut in_flight_applies,
+                        &mut checkpoint_in_flight,
+                        &mut full_in_flight,
+                        checkpoint_apply_limit,
+                        full_apply_limit,
+                        latest_chain_tip.clone(),
+                        endpoint.clone(),
+                        read_state.clone(),
+                        block_verifier.clone(),
+                        block_sync.clone(),
+                        trace.clone(),
+                    );
                     continue;
-                };
-                match completed {
-                    BlockApplyClass::Checkpoint => {
-                        checkpoint_in_flight = checkpoint_in_flight.saturating_sub(1);
-                    }
-                    BlockApplyClass::Full => {
-                        full_in_flight = full_in_flight.saturating_sub(1);
-                    }
                 }
-                drain_pending_block_applies(
-                    &mut pending_applies,
-                    &mut in_flight_applies,
-                    &mut checkpoint_in_flight,
-                    &mut full_in_flight,
-                    checkpoint_apply_limit,
-                    full_apply_limit,
-                    latest_chain_tip.clone(),
-                    endpoint.clone(),
-                    read_state.clone(),
-                    block_verifier.clone(),
-                    block_sync.clone(),
-                    trace.clone(),
-                );
-                continue;
-            }
-            action = actions.recv() => {
-                let Some(action) = action else {
-                    return;
-                };
-                action
+                _ = async {
+                    match checkpoint_frontier_refresh.next_attempt_at() {
+                        Some(deadline) => tokio::time::sleep_until(deadline).await,
+                        None => std::future::pending().await,
+                    }
+                }, if checkpoint_frontier_refresh.next_attempt_at().is_some() => {
+                    refresh_block_sync_frontiers_for_checkpoint_window(
+                        read_state.clone(),
+                        latest_chain_tip.clone(),
+                        endpoint.clone(),
+                        Some(block_sync.clone()),
+                        trace.clone(),
+                        &mut checkpoint_frontier_refresh,
+                    ).await;
+                    continue;
+                }
+                action = actions.recv() => {
+                    let Some(action) = action else {
+                        return;
+                    };
+                    action
+                }
             }
         };
+        let action =
+            coalesce_stale_needed_block_queries(action, &mut actions, &mut deferred_actions);
 
         trace_block_driver_action(&trace, &action);
         match action {
@@ -384,10 +461,48 @@ pub(crate) async fn drive_block_sync_actions<ReadState, BlockVerifier>(
     }
 }
 
+pub(crate) fn coalesce_stale_needed_block_queries(
+    action: BlockSyncAction,
+    actions: &mut mpsc::Receiver<BlockSyncAction>,
+    deferred_actions: &mut VecDeque<BlockSyncAction>,
+) -> BlockSyncAction {
+    let BlockSyncAction::QueryNeededBlocks {
+        mut verified_block_tip,
+        mut best_header_tip,
+    } = action
+    else {
+        return action;
+    };
+
+    let mut coalesced_count = 0u64;
+    while let Ok(action) = actions.try_recv() {
+        match action {
+            BlockSyncAction::QueryNeededBlocks {
+                verified_block_tip: latest_verified_block_tip,
+                best_header_tip: latest_best_header_tip,
+            } => {
+                verified_block_tip = latest_verified_block_tip;
+                best_header_tip = latest_best_header_tip;
+                coalesced_count = coalesced_count.saturating_add(1);
+            }
+            action => deferred_actions.push_back(action),
+        }
+    }
+
+    if coalesced_count > 0 {
+        metrics::counter!("sync.block.needed_query.coalesced").increment(coalesced_count);
+    }
+
+    BlockSyncAction::QueryNeededBlocks {
+        verified_block_tip,
+        best_header_tip,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn drain_pending_block_applies<ReadState, BlockVerifier>(
     pending_applies: &mut VecDeque<PendingBlockApply>,
-    in_flight_applies: &mut FuturesUnordered<BoxFuture<'static, BlockApplyClass>>,
+    in_flight_applies: &mut FuturesUnordered<BoxFuture<'static, BlockApplyCompletion>>,
     checkpoint_in_flight: &mut usize,
     full_in_flight: &mut usize,
     checkpoint_apply_limit: usize,
@@ -445,7 +560,6 @@ fn drain_pending_block_applies<ReadState, BlockVerifier>(
                 class,
                 trace.clone(),
             )
-            .map(move |_| class)
             .boxed(),
         );
     }
@@ -465,6 +579,7 @@ pub(crate) fn block_apply_class(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn apply_block_sync_body<BlockVerifier, ReadState>(
     block_verifier: BlockVerifier,
     latest_chain_tip: impl ChainTip + Clone + Send + Sync + 'static,
@@ -475,7 +590,8 @@ pub(crate) async fn apply_block_sync_body<BlockVerifier, ReadState>(
     block: Arc<block::Block>,
     class: BlockApplyClass,
     trace: ZakuraTrace,
-) where
+) -> BlockApplyCompletion
+where
     BlockVerifier:
         Service<zebra_consensus::Request, Response = block::Hash> + Clone + Send + 'static,
     BlockVerifier::Error: std::fmt::Debug + Send + Sync + 'static,
@@ -495,7 +611,10 @@ pub(crate) async fn apply_block_sync_body<BlockVerifier, ReadState>(
             ?expected_hash,
             "Zakura block sync cannot apply body without coinbase height"
         );
-        return;
+        return BlockApplyCompletion {
+            class,
+            checkpoint_refresh_floor: None,
+        };
     };
 
     emit_commit_state(&trace, cs_trace::COMMIT_START, "block_sync_driver", |row| {
@@ -587,20 +706,15 @@ pub(crate) async fn apply_block_sync_body<BlockVerifier, ReadState>(
         },
     );
 
-    if class == BlockApplyClass::Checkpoint && result == BlockApplyResult::Committed {
-        tokio::spawn(
-            refresh_block_sync_frontiers_for_checkpoint_window(
-                read_state,
-                latest_chain_tip,
-                endpoint,
-                Some(block_sync),
-                trace,
+    BlockApplyCompletion {
+        class,
+        checkpoint_refresh_floor: (class == BlockApplyClass::Checkpoint
+            && result == BlockApplyResult::Committed)
+            .then(|| {
                 local_frontier
                     .map(|frontiers| frontiers.verified_block_tip)
-                    .unwrap_or_else(|| height.previous().unwrap_or(height)),
-            )
-            .in_current_span(),
-        );
+                    .unwrap_or_else(|| height.previous().unwrap_or(height))
+            }),
     }
 }
 
@@ -766,7 +880,7 @@ async fn refresh_block_sync_frontiers_for_checkpoint_window<ReadState>(
     endpoint: Option<ZakuraEndpoint>,
     block_sync: Option<BlockSyncHandle>,
     trace: ZakuraTrace,
-    highest_observed_at_apply: block::Height,
+    refresh: &mut CheckpointFrontierRefresh,
 ) where
     ReadState: Service<
             zebra_state::ReadRequest,
@@ -777,45 +891,47 @@ async fn refresh_block_sync_frontiers_for_checkpoint_window<ReadState>(
         + 'static,
     ReadState::Future: Send + 'static,
 {
-    let mut highest_sent = highest_observed_at_apply;
-    for attempt in 0..ZAKURA_BLOCK_SYNC_CHECKPOINT_FRONTIER_REFRESH_ATTEMPTS {
-        tokio::time::sleep(ZAKURA_BLOCK_SYNC_CHECKPOINT_FRONTIER_REFRESH_INTERVAL).await;
+    let Some(mut highest_sent) = refresh.highest_sent else {
+        return;
+    };
 
-        emit_commit_state(
-            &trace,
-            cs_trace::CHECKPOINT_REFRESH_ATTEMPT,
-            "block_sync_driver",
-            |row| {
-                insert_cs_u64(row, "attempt", (attempt.saturating_add(1)) as u64);
-                insert_cs_height(row, cs_trace::VERIFIED_BLOCK_TIP, highest_sent);
-            },
-        );
-        let Some(frontiers) =
-            query_block_sync_frontiers(read_state.clone(), latest_chain_tip.clone()).await
-        else {
-            continue;
-        };
+    emit_commit_state(
+        &trace,
+        cs_trace::CHECKPOINT_REFRESH_ATTEMPT,
+        "block_sync_driver",
+        |row| {
+            insert_cs_u64(row, "attempts_remaining", refresh.attempts_remaining as u64);
+            insert_cs_height(row, cs_trace::VERIFIED_BLOCK_TIP, highest_sent);
+        },
+    );
+    let Some(frontiers) =
+        query_block_sync_frontiers(read_state.clone(), latest_chain_tip.clone()).await
+    else {
+        refresh.finish_attempt(highest_sent);
+        return;
+    };
 
-        if frontiers.verified_block_tip <= highest_sent {
-            continue;
-        }
-
-        highest_sent = frontiers.verified_block_tip;
-        publish_body_frontier(endpoint.as_ref(), frontiers, FrontierChange::VerifiedGrow);
-        if let Some(block_sync) = &block_sync {
-            let _ = block_sync
-                .send(BlockSyncEvent::ChainTipGrow(frontiers))
-                .await;
-        }
-        emit_commit_state(
-            &trace,
-            cs_trace::CHECKPOINT_REFRESH_SENT,
-            "block_sync_driver",
-            |row| {
-                insert_cs_frontiers(row, &frontiers);
-            },
-        );
+    if frontiers.verified_block_tip <= highest_sent {
+        refresh.finish_attempt(highest_sent);
+        return;
     }
+
+    highest_sent = frontiers.verified_block_tip;
+    publish_body_frontier(endpoint.as_ref(), frontiers, FrontierChange::VerifiedGrow);
+    if let Some(block_sync) = &block_sync {
+        let _ = block_sync
+            .send(BlockSyncEvent::ChainTipGrow(frontiers))
+            .await;
+    }
+    emit_commit_state(
+        &trace,
+        cs_trace::CHECKPOINT_REFRESH_SENT,
+        "block_sync_driver",
+        |row| {
+            insert_cs_frontiers(row, &frontiers);
+        },
+    );
+    refresh.finish_attempt(highest_sent);
 }
 
 fn publish_body_frontier(

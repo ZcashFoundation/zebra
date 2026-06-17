@@ -2051,9 +2051,8 @@ mod tests {
         let flooding =
             HostilePeer::connect_native_with_capabilities(&victim, 30, ZAKURA_CAP_DISCOVERY)
                 .await?;
-        // Exceeding the per-kind message rate is advisory at transport ingress:
-        // it is still traced, but frames are delivered so ordered streams do not
-        // lose solicited data.
+        // Exceeding the per-kind message rate is traced at transport ingress
+        // before the ordered stream is disconnected.
         flooding
             .flood_stream(ZAKURA_STREAM_DISCOVERY, 'd', 16)
             .await?;
@@ -2115,6 +2114,10 @@ mod tests {
         // floods past the budget is disconnected (we never drop a solicited
         // frame), so no more than ~one budget of frames is ever delivered.
         let _guard = zebra_test::init();
+        let mut capture = TraceCapture::for_test_with_keep_override(
+            "persistent_ordered_stream_uses_message_budget",
+            false,
+        )?;
 
         // Small, deterministic message budget so the aggregate cap is observable
         // without sending hundreds of frames.
@@ -2128,7 +2131,11 @@ mod tests {
         limits.stream_open_rate_per_second = 64;
         let message_budget = limits.message_rate_per_second as usize;
 
-        let victim = ZakuraTestNode::builder(5).limits(limits).spawn().await?;
+        let victim = ZakuraTestNode::builder(5)
+            .limits(limits)
+            .tracer(capture.tracer_for_node(5))
+            .spawn()
+            .await?;
         let recorder = victim.recorder();
         let hostile =
             HostilePeer::connect_native_with_capabilities(&victim, 6, ZAKURA_CAP_LEGACY_GOSSIP)
@@ -2150,7 +2157,19 @@ mod tests {
         // Wait until rate limiting has clearly engaged (more frames sent than one
         // budget, so the bucket must have emptied at least once).
         await_until("rate limiting engaged", Duration::from_secs(5), || {
-            recorder.len() + recorder.dropped_count() >= message_budget
+            capture.reader().is_ok_and(|reader| {
+                reader
+                    .node("05")
+                    .table("ratelimit")
+                    .rows()
+                    .iter()
+                    .any(|row| {
+                        row.get("event").and_then(serde_json::Value::as_str)
+                            == Some("message.throttled")
+                            && row.get("stream_kind").and_then(serde_json::Value::as_str)
+                                == Some("gossip")
+                    })
+            })
         })
         .await?;
         // Brief deterministic settle to let one refill window pass. A correct
@@ -2170,6 +2189,7 @@ mod tests {
 
         hostile.shutdown().await;
         victim.shutdown().await;
+        assert!(capture.finish().await?.is_none());
         Ok(())
     }
 
