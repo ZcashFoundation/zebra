@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `zebra-rpc` dependency bumped to `10.0.1`
+- `zebra-checkpoints` now backs off `MAX_BLOCK_REORG_HEIGHT` (1000) instead of the coinbase
+  maturity (100) when choosing the highest checkpoint.
 
 ## [8.0.0] - 2026-06-10
 
