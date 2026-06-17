@@ -143,7 +143,16 @@ jobs:
           cache-on-failure: true
       - uses: ./.github/actions/setup-zebra-build
       - name: Build zebrad (debug)
-        run: cargo build -p zebrad --bin zebrad
+        # The e2e bind-mounts this binary into a stock `debian:trixie-slim`
+        # container that has no RocksDB installed. `setup-zebra-build` exports
+        # `ROCKSDB_LIB_DIR`, which makes librocksdb-sys dynamically link the
+        # runner's `librocksdb.so`; that library is absent in the container, so
+        # every node crashes with "librocksdb.so.8.9: cannot open shared object
+        # file". Unset it here so RocksDB is vendored and statically linked,
+        # yielding a self-contained binary the slim image can run.
+        run: |
+          unset ROCKSDB_LIB_DIR
+          cargo build -p zebrad --bin zebrad
         env:
           CXXFLAGS: "-include cstdint"
       - name: Run Zakura regtest PR gate
@@ -195,7 +204,14 @@ jobs:
       # Compose, so no extra setup is needed. Build the binary up front so a compile
       # failure surfaces clearly and separately from the e2e run.
       - name: Build zebrad (debug)
-        run: cargo build -p zebrad --bin zebrad
+        # Unset `ROCKSDB_LIB_DIR` (exported by `setup-zebra-build`) so RocksDB is
+        # vendored and statically linked. The resulting self-contained binary is
+        # bind-mounted into a stock `debian:trixie-slim` container that has no
+        # system RocksDB; dynamically linking it crashes every node with
+        # "librocksdb.so.8.9: cannot open shared object file".
+        run: |
+          unset ROCKSDB_LIB_DIR
+          cargo build -p zebrad --bin zebrad
         env:
           CXXFLAGS: "-include cstdint"
       - name: Run Zakura regtest dual-stack e2e
